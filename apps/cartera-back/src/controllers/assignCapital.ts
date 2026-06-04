@@ -3,6 +3,7 @@ import {
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
+  compras_credito_inversionista,
   cuotas_credito,
   pagos_credito,
   inversionistas,
@@ -243,6 +244,22 @@ export async function getCreditCandidates(
   console.log(`   Créditos descartados por validaciones de pagos pendientes/inválidos: ${invalidosSet.size}`);
 
   // ──────────────────────────────────────────────────────────
+  // 2.5 Filtrar: créditos con compra pendiente de facturar
+  // ──────────────────────────────────────────────────────────
+  const pendienteFacturarRaw = await db
+    .selectDistinct({ credito_id: compras_credito_inversionista.credito_id })
+    .from(compras_credito_inversionista)
+    .where(
+      and(
+        inArray(compras_credito_inversionista.credito_id, creditoIds),
+        eq(compras_credito_inversionista.pendiente_facturar, true)
+      )
+    );
+
+  const pendienteFacturarSet = new Set(pendienteFacturarRaw.map((r) => r.credito_id));
+  console.log(`   Créditos descartados por compra pendiente de facturar: ${pendienteFacturarSet.size}`);
+
+  // ──────────────────────────────────────────────────────────
   // 3. Filtrar: espejo debe estar en 'completado'
   //    Significa que el ciclo anterior terminó y el capital está disponible
   //    para reinversión. Si tiene pendiente_* ya hay un proceso en curso.
@@ -430,6 +447,14 @@ export async function getCreditCandidates(
     if (invalidosSet.has(credito_id)) {
       console.log(
         `   ❌ [${numero_credito_sifco}] Descartado: tiene pagos sin validar (estado riesgoso)`
+      );
+      continue;
+    }
+
+    // Filtro: compra pendiente de facturar
+    if (pendienteFacturarSet.has(credito_id)) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: tiene compra pendiente de facturar`
       );
       continue;
     }

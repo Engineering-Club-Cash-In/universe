@@ -33,7 +33,6 @@ import {
   lt,
   gte,
   gt,
-  ne,
   isNull,
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
@@ -200,7 +199,14 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         and(
           eq(cuotas_credito.credito_id, creditoId),
           eq(cuotas_credito.pagado, false),
-          lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
+          lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10)),
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM cartera.pagos_credito p_pending
+            WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
+              AND p_pending.validation_status = 'pending'
+              AND p_pending.pagado = true
+          )`
         )
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
@@ -248,7 +254,12 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         and(
           eq(cuotas_credito.credito_id, creditoId),
           eq(cuotas_credito.pagado, false),
-          ne(pagos_credito.validationStatus, "pending")
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM cartera.pagos_credito p_pending
+            WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
+              AND p_pending.validation_status = 'pending'
+          )`
         )
       )
       .orderBy(cuotas_credito.numero_cuota);
@@ -600,7 +611,8 @@ export async function getCreditosWithUserByMesAnio(
   fecha_hasta?: string,
   numeros_credito_sifco?: string[],
   capital_min?: number,
-  capital_max?: number
+  capital_max?: number,
+  estados_credito?: string[]
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -645,7 +657,7 @@ export async function getCreditosWithUserByMesAnio(
       }
     }
 
-  if (estado && estado.length > 0) {
+    if (estado && estado.length > 0) {
       if (estado === "ACTIVO") {
         console.log(`🔎 Filtrando por estado: ACTIVO + MOROSO`);
         if (cuotas_atrasadas == 0 ) {
@@ -657,6 +669,11 @@ export async function getCreditosWithUserByMesAnio(
         console.log(`🔎 Filtrando por estado: ${estado}`);
         conditions.push(eq(creditos.statusCredit, estado));
       }
+    }
+
+    if (estados_credito && estados_credito.length > 0) {
+      console.log(`🔎 Filtrando por estados seleccionables: ${estados_credito.join(", ")}`);
+      conditions.push(inArray(creditos.statusCredit, estados_credito));
     }
 
     if (asesor_id) {

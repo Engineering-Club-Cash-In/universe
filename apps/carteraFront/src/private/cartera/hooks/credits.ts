@@ -199,6 +199,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     clearAsesorId,
     // 🔥 Exports para nombre usuario (actualizados)
     nombreUsuarioInput,        // 👈 Para el input
+    nombreUsuario,             // 👈 Filtro aplicado (para comparación en onBlur)
     setNombreUsuarioInput,     // 👈 Para actualizar el input
     handleSearchNombreUsuario, // 👈 Para ejecutar la búsqueda
     clearNombreUsuario,        // 👈 Para limpiar

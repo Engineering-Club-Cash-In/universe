@@ -44,6 +44,7 @@ import {
   type CuentaEmpresa,
   type Investor,
   type PagoDataInvestor,
+  type FacturaGeneradaItem,
 } from "../services/services";
 import { ModalInversionistas } from "./modalViewInvestor";
 import { useCatalogs } from "../hooks/catalogs";
@@ -64,6 +65,7 @@ import {
 import { useActualizarCuentaPago, useCuentasEmpresa } from "../hooks/account";
 import { useFacturarPagoCompleto } from "../hooks/cofidi";
 import { ModalFacturasPago } from "./modalFacts";
+import { ModalDesgloseFacturas } from "./ModalDesgloseFacturas";
 import { DatePickerMUI } from "./calendar";
 
 // --- utilidades ---
@@ -315,7 +317,9 @@ export function PaymentsTable() {
 
   // 🆕 Estados para modal de facturas generadas
   const [modalFacturasOpen, setModalFacturasOpen] = useState(false);
-  const [facturasGeneradas, setFacturasGeneradas] = useState<any[]>([]);
+  const [facturasGeneradas, setFacturasGeneradas] = useState<
+    FacturaGeneradaItem[]
+  >([]);
 
   // Handler para abrir modal de cuenta
   const handleAbrirModalCuenta = (pagoId: number, e?: React.MouseEvent) => {
@@ -838,6 +842,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
               <div>
                 <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Buscar</label>
                 <Combobox
+                  key={inversionistaId ?? "none"}
                   value={inversionistaId as unknown as number}
                   onChange={(value: any) => {
                     setInversionistaId(value === "" ? undefined : value);
@@ -1219,6 +1224,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                         >
                           <AlertCircle className="w-4 h-4" />
                           Compra cartera pendiente
+                        </span>
+                      )}
+                      {pago.pendienteFacturar && (
+                        <span
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-amber-100 text-amber-700"
+                          title="El crédito tiene una compra de cartera pendiente de facturar: el pago se facturará con el flujo prorrateado"
+                        >
+                          <Receipt className="w-4 h-4" />
+                          Pendiente de facturar
                         </span>
                       )}
                     </div>
@@ -1634,6 +1648,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             >
                               <AlertCircle className="w-4 h-4" />
                               Compra cartera pendiente
+                            </span>
+                          )}
+                          {pago.pendienteFacturar && (
+                            <span
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-amber-100 text-amber-700"
+                              title="El crédito tiene una compra de cartera pendiente de facturar: el pago se facturará con el flujo prorrateado"
+                            >
+                              <Receipt className="w-4 h-4" />
+                              Pendiente de facturar
                             </span>
                           )}
                         </div>
@@ -2440,85 +2463,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         </div>
       )}
 
-      {/* 🆕 MODAL DE FACTURAS GENERADAS */}
-      {modalFacturasOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-          onClick={() => {
-            setModalFacturasOpen(false);
-            setFacturasGeneradas([]);
-          }}
-        >
-          <div
-            className="bg-white rounded-xl p-6 max-w-2xl w-full shadow-2xl max-h-[80vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-2xl font-bold text-green-900 mb-2 flex items-center gap-2">
-              <Check className="w-7 h-7 text-green-600" />
-              Facturas Generadas Exitosamente
-            </h3>
-            <p className="text-sm text-gray-600 mb-6">
-              Se generaron {facturasGeneradas.length} factura(s) para este pago
-            </p>
-
-            <div className="space-y-4">
-              {facturasGeneradas.map((factura, index) => (
-                <div
-                  key={index}
-                  className="border-2 border-green-200 bg-green-50 rounded-lg p-4"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <p className="text-lg font-bold text-green-900">
-                        {factura.tipo}
-                        {factura.inversionista && ` - ${factura.inversionista}`}
-                      </p>
-                      <p className="text-sm text-gray-700 font-mono">
-                        Serie: {factura.serie} | Número: {factura.numero}
-                      </p>
-                      <p className="text-xs text-gray-600 font-mono mt-1">
-                        UUID: {factura.uuid}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xl font-bold text-green-800">
-                        {formatCurrency(factura.monto_total)}
-                      </p>
-                      <p className="text-xs text-gray-600">
-                        IVA: {formatCurrency(factura.monto_iva)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <a
-                      href={factura.pdfUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors"
-                    >
-                      <Download className="w-4 h-4" />
-                      Descargar PDF
-                    </a>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setModalFacturasOpen(false);
-                  setFacturasGeneradas([]);
-                }}
-                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition-colors"
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 🆕 MODAL DE DESGLOSE DE FACTURAS GENERADAS */}
+      <ModalDesgloseFacturas
+        open={modalFacturasOpen}
+        facturas={facturasGeneradas}
+        onClose={() => {
+          setModalFacturasOpen(false);
+          setFacturasGeneradas([]);
+        }}
+      />
       {/* 🆕 MODAL DE VER FACTURAS */}
       <ModalFacturasPago
         open={modalVerFacturasOpen}

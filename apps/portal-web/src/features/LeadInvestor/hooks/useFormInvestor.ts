@@ -69,7 +69,7 @@ const validationSchema = Yup.object({
     })
     .required("El número telefónico es requerido"),
   experiencia: Yup.string().required("Selecciona tu experiencia en inversión"),
-  proposedAmount: Yup.string().required("Selecciona un monto propuesto"),
+  proposedAmount: Yup.string().required("Selecciona un monto a invertir"),
   mensaje: Yup.string(),
 });
 

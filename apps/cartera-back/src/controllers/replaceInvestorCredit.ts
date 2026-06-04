@@ -501,25 +501,20 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
                 invP.fecha_inicio_participacion,
             });
           } else if (invP.inversionista_id === CUBE_INVESTMENT_ID) {
+            // CUBE siempre 100% cash_in / 0% inversión, sin importar lo
+            // que venga en la fuente (defensivo contra filas corruptas).
             arrayPadre.push({
               inversionista_id: invP.inversionista_id,
               monto_aportado: montoPadreActual.plus(monto_total_a_cube),
-              porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
-              porcentaje_inversion: new Big(
-                invP.porcentaje_participacion_inversionista,
-              ),
+              porcentaje_cash_in: new Big(100),
+              porcentaje_inversion: new Big(0),
               fecha_inicio_participacion: invP.fecha_inicio_participacion,
             });
             arrayEspejo.push({
               inversionista_id: invP.inversionista_id,
               monto_aportado: montoEspejoActual.plus(monto_total_a_cube),
-              porcentaje_cash_in: new Big(
-                invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
-              ),
-              porcentaje_inversion: new Big(
-                invE?.porcentaje_participacion_inversionista ??
-                  invP.porcentaje_participacion_inversionista,
-              ),
+              porcentaje_cash_in: new Big(100),
+              porcentaje_inversion: new Big(0),
               fecha_inicio_participacion:
                 invE?.fecha_inicio_participacion ??
                 invP.fecha_inicio_participacion,
@@ -553,13 +548,15 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
         }
 
         // ── Si CUBE no existía en alguna tabla, crearlo ──
+        // CUBE siempre es 100% cash_in / 0% inversión (es "la casa", se queda
+        // con el spread completo de su capital).
         const fechaCubeDefault = new Date().toISOString().split("T")[0];
         if (!arrayPadre.some((i) => i.inversionista_id === CUBE_INVESTMENT_ID)) {
           arrayPadre.push({
             inversionista_id: CUBE_INVESTMENT_ID,
             monto_aportado: monto_total_a_cube,
-            porcentaje_cash_in: new Big(0),
-            porcentaje_inversion: new Big(100),
+            porcentaje_cash_in: new Big(100),
+            porcentaje_inversion: new Big(0),
             fecha_inicio_participacion: fechaCubeDefault,
           });
         }
@@ -567,8 +564,8 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
           arrayEspejo.push({
             inversionista_id: CUBE_INVESTMENT_ID,
             monto_aportado: monto_total_a_cube,
-            porcentaje_cash_in: new Big(0),
-            porcentaje_inversion: new Big(100),
+            porcentaje_cash_in: new Big(100),
+            porcentaje_inversion: new Big(0),
             fecha_inicio_participacion: fechaCubeDefault,
           });
         }
@@ -1119,11 +1116,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
         // ── Si el inversionista no existía en el destino, agregarlo en
         //    ambas tablas con el mismo monto (no hay valor histórico previo). ──
-        const hoy = new Date();
-        const hoyStr = hoy.toISOString().split("T")[0];
-        const dosMesesAtras = new Date(hoy.getFullYear(), hoy.getMonth() - 2, hoy.getDate())
-          .toISOString()
-          .split("T")[0];
+        const hoyStr = new Date().toISOString().split("T")[0];
         if (
           !arrayDestinoPadre.some(
             (inv) => inv.inversionista_id === inversionista_id,
@@ -1134,7 +1127,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             monto_aportado: montoAsignar,
             porcentaje_cash_in: porcCashIn,
             porcentaje_inversion: porcInversion,
-            fecha_inicio_participacion: tipo_operacion === "reinversion" ? dosMesesAtras : hoyStr,
+            fecha_inicio_participacion: hoyStr,
           });
         }
         if (
@@ -1147,7 +1140,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             monto_aportado: montoAsignar,
             porcentaje_cash_in: porcCashIn,
             porcentaje_inversion: porcInversion,
-            fecha_inicio_participacion: tipo_operacion === "reinversion" ? dosMesesAtras : hoyStr,
+            fecha_inicio_participacion: hoyStr,
           });
         }
 
@@ -1227,7 +1220,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           monto_asignado: montoAsignar.toString(),
           inversionistas_padre: dataPadreDestino.length,
           inversionistas_espejo: dataEspejoDestinoFinal.length,
-          cube_eliminado: !nuevoArrayDestino.some(
+          cube_eliminado: !arrayDestinoPadre.some(
             (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
           ),
         });

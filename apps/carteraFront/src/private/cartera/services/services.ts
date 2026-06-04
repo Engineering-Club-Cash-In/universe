@@ -1,20 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import axios  from "axios";
+import api from "@/Provider/interceptor";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
 
 const API_URL = import.meta.env.VITE_BACK_URL  ||'https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site'; ;
-const api = axios.create({
-  baseURL: API_URL,
-});
-api.interceptors.request.use((config) => {
-const token = localStorage.getItem("accessToken");
-
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
 
 // Traer todos los inversionistas
 export const getInvestors = async () => {
@@ -463,6 +452,7 @@ export const getCreditosPaginados = async (params: {
   perPage?: number;
   numero_credito_sifco?: string;
   estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO";
+  estados_credito?: string;
   excel: boolean;
   asesor_id?: number;
   nombre_usuario?: string;
@@ -477,6 +467,9 @@ export const getCreditosPaginados = async (params: {
       page: params.page ?? 1,
       perPage: params.perPage ?? 10,
       estado: params.estado,
+      ...(params.estados_credito && {
+        estados_credito: params.estados_credito,
+      }),
       excel: params.excel,
       ...(params.numero_credito_sifco && {
         numero_credito_sifco: params.numero_credito_sifco,
@@ -753,10 +746,11 @@ export async function revalidatePaymentService({ pago_id, credito_id }: { pago_i
 }
 
 // Procesar inversionistas manualmente
-export async function processInvestorsService({ pago_id, credito_id }: { pago_id: number; credito_id: number }) {
+export async function processInvestorsService({ pago_id, credito_id, fecha_periodo }: { pago_id: number; credito_id: number; fecha_periodo?: string }) {
   const res = await api.post(`${API_URL}/processInvestors`, {
     pago_id,
     credito_id,
+    ...(fecha_periodo ? { fecha_periodo } : {}),
   });
   return res.data;
 }
@@ -956,22 +950,48 @@ export interface CalcularPagosEspejoResponse {
   message: string;
   inversionistaId: number;
   totalCreditosProcesados: number;
+  totalCreditosFallidos?: number;
   data: {
     creditoId: number;
     numeroCreditoSifco: string;
     cuotaProcesada: number;
     pagosRegistrados: number;
   }[];
+  fallidos?: {
+    creditoId: number;
+    numeroCreditoSifco: string;
+    mensaje: string;
+  }[];
 }
 
 export async function calcularPagosEspejoService(
-  inversionistaId: number
+  inversionistaId: number,
+  fecha_calculo?: string
 ): Promise<CalcularPagosEspejoResponse> {
   const res = await api.post<CalcularPagosEspejoResponse>(
     `${import.meta.env.VITE_BACK_URL}/calcularPagosEspejo`,
-    { inversionistaId }
+    { inversionistaId, ...(fecha_calculo ? { fecha_calculo } : {}) }
   );
   return res.data;
+}
+
+const ERROR_MESSAGES: Record<string, string> = {
+  MONTO_ESPEJO_INCONSISTENTE:
+    "El monto del crédito espejo no coincide con el histórico registrado. Revisa las compras de cartera o contacta soporte.",
+  CUOTA_NO_ENCONTRADA:
+    "No se encontró la cuota correspondiente para este crédito.",
+  CREDITO_LIQUIDADO:
+    "El crédito ya fue liquidado y no puede recibir nuevos pagos.",
+  CREDITO_INACTIVO:
+    "El crédito está inactivo.",
+};
+
+export function formatMensajeFallido(mensaje: string): string {
+  const match = mensaje.match(/^\[([A-Z_]+)\]/);
+  if (match) {
+    return ERROR_MESSAGES[match[1]] ?? "Error al procesar el crédito. Contacta soporte.";
+  }
+  return mensaje;
 }
 
 // ============================================================
@@ -1118,21 +1138,18 @@ export async function getPagosByMesAnio({
   return data;
 }
 
-// Request body
 export interface LiquidateByInvestorRequest {
-  inversionista_id: number;
-}
-
-// Response body (ajústalo según tu backend, aquí uso lo que mandas arriba)
-export interface LiquidateByInvestorRequest {
-  inversionista_id: number;
+  inversionista_id?: number;
+  fecha_liquidacion?: string;
 }
 
 // Response body (ajústalo según tu backend, aquí uso lo que mandas arriba)
 export interface LiquidateByInvestorResponse {
-  inversionista_id(arg0: string, inversionista_id: any): unknown;
   message: string;
   updatedCount: number;
+  liquidaciones_creadas?: number;
+  inversionistas_saltados?: number;
+  errores?: Array<{ inversionista_id: number; razon: string }>;
 }
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest
@@ -1762,6 +1779,11 @@ export interface PagoDataInvestor {
   // Cuando es true, cofidi redirige a CUBE los intereses del inversionista en ese status.
   banderaReinversion?: boolean;
 
+  // 🆕 true si el crédito tiene una compra de cartera pendiente de facturar.
+  // Mismo criterio que activa el flujo de facturación prorrateado en cofidi
+  // (/facturar-pago-completo). Indica que el crédito "aplica" al flujo nuevo.
+  pendienteFacturar?: boolean;
+
   // 🔄 Cancelación (solo presente en pagos reset)
   cancelacion?: CancelacionPago | null;
 }
@@ -1857,6 +1879,7 @@ export async function getPagosConInversionistasService(
       abono_seguro: Number(pago.abono_seguro ?? 0),
       abono_gps: Number(pago.abono_gps ?? 0),
       inversionistas: pago.inversionistas ?? [],
+      pendienteFacturar: pago.pendienteFacturar ?? false,
     })),
     // 💰 Incluir totales si vienen del backend (solo cuando NO es Excel)
     totales: data.totales
@@ -2745,6 +2768,56 @@ export interface FacturarPagoCompletoRequest {
   created_by?: number;
 }
 
+// 🆕 Tipos de factura que devuelve /facturar-pago-completo (uno por concepto).
+//    Los ERROR no traen datos de certificación (serie/numero/uuid/...).
+export type TipoFacturaGenerada =
+  | 'MORA'
+  | 'OTROS_SERVICIOS'
+  | 'OTROS'
+  | 'INTERESES'
+  | 'INTERESES_CUBE'
+  | 'ERROR';
+
+export interface FacturaGeneradaItem {
+  tipo: TipoFacturaGenerada;
+
+  // 🧑 Inversionista (en facturas de INTERESES)
+  inversionista?: string;
+  inversionista_id?: number;
+  emisor?: string;
+
+  // 📊 Desglose para el modal: % participación / cash_in del inversionista
+  porcentaje_participacion?: string | number | null;
+  porcentaje_cash_in?: string | number | null;
+
+  // 🆕 Flujo prorrateado: cómo se repartió el interés antes/después de la compra
+  flujo?: 'NUEVO_PRORRATEADO';
+  parte_antes?: string;
+  parte_despues?: string;
+
+  // 📄 Datos de certificación (presentes solo si la factura salió bien)
+  factura_id?: number;
+  idInterno?: string;
+  serie?: string;
+  numero?: number;
+  uuid?: string;
+  xmlCertificado?: string;
+  fechaEmision?: string;
+  pdfUrl?: string;
+  pdfFilename?: string;
+  monto_total?: number;
+  monto_iva?: number;
+  receptor?: {
+    nombre: string;
+    nit: string;
+  };
+
+  // ❌ Solo cuando tipo === 'ERROR'
+  concepto?: string;
+  error?: string;
+  descripcion?: string;
+}
+
 export interface FacturarPagoCompletoResponse {
   success: boolean;
   data?: {
@@ -2754,26 +2827,8 @@ export interface FacturarPagoCompletoResponse {
       nit: string;
     };
     total_facturas: number;
-    facturas: Array<{
-      tipo: 'SERVICIOS' | 'INTERESES';
-      inversionista?: string;
-      inversionista_id?: number;
-      factura_id: number;
-      idInterno: string;
-      serie: string;
-      numero: number;
-      uuid: string;
-      xmlCertificado: string;
-      fechaEmision: string;
-      pdfUrl: string;
-      pdfFilename: string;
-      monto_total: number;
-      monto_iva: number;
-      receptor: {
-        nombre: string;
-        nit: string;
-      };
-    }>;
+    facturas: FacturaGeneradaItem[];
+    errores?: FacturaGeneradaItem[];
   };
   mensaje?: string;
   error?: string;
@@ -2969,6 +3024,7 @@ export interface CreateBoletaDTO {
   monto_boleta?: string;
   notas?: string;
   subido_por?: number;
+  fecha_liquidacion?: string;
 }
 
 export interface GetBoletasFilters {
@@ -2995,7 +3051,7 @@ export const createBoleta = async (data: CreateBoletaDTO) => {
   try {
     console.log("📝 Creando boleta:", data);
 
-    const response = await axios.post<{
+    const response = await api.post<{
       success: boolean;
       message: string;
       data: Boleta;
@@ -3032,7 +3088,7 @@ export const getBoletas = async (filters?: GetBoletasFilters) => {
       params.append("offset", filters.offset.toString());
     }
 
-    const response = await axios.get<{
+    const response = await api.get<{
       success: boolean;
       data: BoletaConInversionista[];
       total: number;
@@ -3452,6 +3508,7 @@ export type TipoReinversionEspejo =
   | "reinversion_interes"
   | "reinversion_total"
   | "reinversion_variable"
+  | "reinversion_excedente"
   | "reinversion_combinada";
 
 export interface AsignarReinversionPayload {
@@ -3569,11 +3626,13 @@ export interface PagoPorVencimientoItem {
   gps_restante: string;
   membresias: string;
   monto_boleta: string;
+  monto_aplicado: string;
   interes_cube: string;
   iva_cube: string;
   total_pagos_del_mes: string;
   dias_mora: string;
   royalti: string;
+  mora: string;
 }
 
 export interface PagoPorVencimientoTotales {
@@ -3585,6 +3644,7 @@ export interface PagoPorVencimientoTotales {
   membresias: string;
   interes_cube: string;
   iva_cube: string;
+  mora: string;
 }
 
 export interface PagosPorVencimientoResponse {
@@ -3597,6 +3657,7 @@ export interface PagosPorVencimientoResponse {
     totalPages: number;
   };
   totales: PagoPorVencimientoTotales;
+  totalesAcumulado?: PagoPorVencimientoTotales;
   excelUrl?: string;
 }
 
@@ -3644,6 +3705,83 @@ export async function getPagosPorVencimiento(
   return res.data;
 }
 
+export interface AbonoDetalleItem {
+  pago_id: number;
+  cuota_id: number | null;
+  cuota: string;
+  abono_capital: string;
+  abono_interes: string;
+  abono_iva_12: string;
+  abono_seguro: string;
+  abono_gps: string;
+  membresias: string;
+  interes_cube: string;
+  iva_cube: string;
+  mora: string;
+  otros: string;
+  monto_boleta: string;
+  monto_aplicado: string;
+  fecha_boleta: string;
+  fecha_pago: string;
+  numero_boleta: string | null;
+}
+
+export async function getAbonosPorVencimientoDetalle(params: {
+  credito_id: number;
+  mes: number;
+  anio: number;
+}): Promise<{ success: boolean; data: AbonoDetalleItem[] }> {
+  const res = await api.get<{ success: boolean; data: AbonoDetalleItem[] }>(
+    `${API_URL}/pagos-por-vencimiento/abonos`,
+    {
+      params: {
+        credito_id: params.credito_id.toString(),
+        mes: params.mes,
+        anio: params.anio,
+      },
+    }
+  );
+  return res.data;
+}
+
+// ============================================================
+// Deuda acumulada por crédito
+// ============================================================
+export interface AcumuladoCuotaItem {
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  capital_restante: string;
+  interes_restante: string;
+  iva_12_restante: string;
+  seguro_restante: string;
+  gps_restante: string;
+  membresias: string;
+  total_restante: string;
+  interes_cube: string;
+  iva_cube: string;
+}
+
+export interface AcumuladoTotales {
+  capital: number;
+  interes: number;
+  iva: number;
+  seguro: number;
+  gps: number;
+  membresias: number;
+  interes_cube: number;
+  iva_cube: number;
+  total: number;
+}
+
+export async function getCreditoAcumulado(params: {
+  credito_id: number;
+}): Promise<{ success: boolean; cuotas: AcumuladoCuotaItem[]; totales: AcumuladoTotales }> {
+  const res = await api.get(`${API_URL}/pagos-por-vencimiento/acumulado`, {
+    params: { credito_id: params.credito_id.toString() },
+  });
+  return res.data;
+}
+
 // ============================================================
 // Créditos espejo pendientes (sesiones pendientes)
 // ============================================================
@@ -3661,6 +3799,11 @@ export interface CreditoEspejoPendiente {
   iva_cash_in: string;
   fecha_creacion: string;
   fecha_inicio_participacion: string;
+  aceptada_at: string | null;
+  compra_cartera_extendida_at: string | null;
+  expira_at: string | null;
+  dia_baja_at: string | null;
+  tiempo_restante_ms: number | null;
   status: "pendiente_reinversion" | "pendiente_compra_cartera" | "pendiente_revision" | string;
   tipo_reinversion: string | null;
   numero_credito_sifco: string;
@@ -3743,6 +3886,11 @@ export interface AgregarInversionistaCreditoPayload {
   inversionista_id: number;
   monto_aportado: number;
   tipo_operacion: "reinversion" | "compra_cartera";
+  tipo_reinversion?:
+    | "sin_reinversion"
+    | "reinversion_capital"
+    | "reinversion_interes"
+    | "reinversion_total";
   fecha_inicio_participacion?: string;
   porcentaje_cash_in?: number;
   porcentaje_inversion?: number;
@@ -3878,6 +4026,28 @@ export async function compraCarteraAceptadaService(
 ): Promise<CompraCarteraAceptadaResponse> {
   const res = await api.post<CompraCarteraAceptadaResponse>(
     `${API_URL}/compra-cartera-aceptada`,
+    payload
+  );
+  return res.data;
+}
+
+export interface ExtenderCompraCarteraPayload {
+  creditos: number[];
+  inversionista_id: number;
+}
+
+export interface ExtenderCompraCarteraResponse {
+  success: boolean;
+  message: string;
+  creditos_extendidos: number;
+  compra_cartera_extendida_at: string;
+}
+
+export async function extenderCompraCarteraService(
+  payload: ExtenderCompraCarteraPayload
+): Promise<ExtenderCompraCarteraResponse> {
+  const res = await api.post<ExtenderCompraCarteraResponse>(
+    `${API_URL}/compra-cartera-extender`,
     payload
   );
   return res.data;
@@ -4153,3 +4323,34 @@ export async function eliminarCuentaExtraService(
     };
   }
 }
+
+// ====================== Cierre Mensual de Cartera ======================
+
+export interface CierreMensualItem {
+  id: number;
+  periodo: string; // "YYYY-MM-DD" (primer día del mes cerrado)
+  status_credit: string;
+  cantidad_creditos: number;
+  capital_total: string;
+  creditos_con_mora: number;
+  capital_en_mora: string;
+  created_at: string;
+}
+
+// Trae las filas del cierre. Sin periodo -> todas; con periodo -> solo ese mes.
+export const getCierreMensual = async (
+  periodo?: string
+): Promise<CierreMensualItem[]> => {
+  const res = await api.get(`${API_URL}/cierre-mensual`, {
+    params: periodo ? { periodo } : undefined,
+  });
+  return res.data;
+};
+
+// Genera (o regenera) la foto. Sin periodo -> mes anterior a hoy.
+export const generarCierreMensual = async (
+  periodo?: string
+): Promise<{ ok: boolean; periodo: string; filas: number }> => {
+  const res = await api.post(`${API_URL}/cierre-mensual/generar`, periodo ? { periodo } : {});
+  return res.data;
+};

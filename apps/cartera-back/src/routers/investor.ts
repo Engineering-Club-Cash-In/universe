@@ -34,14 +34,255 @@ import {
   getCreditosEspejoPendientes,
   detectPagosHuerfanos,
 } from "../controllers/investor";
+import { ajustarPagosLiquidacion } from "../controllers/ajustarPagosLiquidacion";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
 import { authMiddleware } from "./midleware";
 import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
 import { requierePeriodoLiquidacion } from "../utils/investorLiquidationSummary";
+import ExcelJS from "exceljs";
+import { promises as fsp } from "node:fs";
+import path from "node:path";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
 
+
+// ──────────────────────────────────────────────
+// Helper: serializar resultados del bulk ajuste-pagos-liquidacion a CSV.
+// Una fila por item enviado, con la URL del reporte (si se generó) y los
+// deltas anterior/nuevo de cada total de la liquidación.
+// ──────────────────────────────────────────────
+function armarCsvBulkAjuste(
+  resultados: Array<{
+    index: number;
+    inversionista_id?: number;
+    liquidacion_id?: number;
+    success: boolean;
+    result?: any;
+    error?: string;
+  }>,
+): string {
+  const camposTotales = [
+    "total_pagos_liquidados",
+    "total_capital",
+    "total_interes",
+    "total_iva",
+    "total_isr",
+    "total_cuota",
+    "reinversion_capital",
+    "reinversion_interes",
+    "reinversion_total",
+  ] as const;
+
+  // Header: una columna anterior + nuevo por cada total
+  const headerBase = [
+    "index",
+    "inversionista_id",
+    "liquidacion_id",
+    "success",
+    "dry_run",
+    "reporte_url",
+    "creditos_excluidos",
+    "creditos_ajustados",
+    "compras_canceladas",
+    "totales_cambios_count",
+    "error",
+  ];
+  const headerTotales = camposTotales.flatMap((c) => [
+    `${c}_anterior`,
+    `${c}_nuevo`,
+    `${c}_diferencia`,
+  ]);
+  const header = [...headerBase, ...headerTotales];
+
+  // Escape simple para CSV (RFC 4180): si tiene coma, comilla doble o salto
+  // de línea, encerrar entre comillas y doblar las comillas internas.
+  const esc = (v: unknown): string => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    if (/[",\n\r]/.test(s)) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  const filas: string[] = [header.join(",")];
+
+  for (const r of resultados) {
+    const res = r.result ?? {};
+    const tu = res.totales_update ?? {};
+    const fila = [
+      esc(r.index),
+      esc(r.inversionista_id ?? ""),
+      esc(r.liquidacion_id ?? ""),
+      esc(r.success),
+      esc(res.dry_run ?? ""),
+      esc(res.reporte_url ?? ""),
+      esc(
+        Array.isArray(res.creditos_excluidos_reporte)
+          ? res.creditos_excluidos_reporte.join("|")
+          : "",
+      ),
+      esc(
+        Array.isArray(res.creditos_ajustados_reporte)
+          ? res.creditos_ajustados_reporte
+              .map(
+                (c: any) =>
+                  `${c.credito_id}:${c.monto_original}->${c.monto_ajustado}`,
+              )
+              .join("|")
+          : "",
+      ),
+      esc(
+        Array.isArray(res.compras_canceladas)
+          ? res.compras_canceladas
+              .map(
+                (c: any) =>
+                  `${c.credito_id}:espejo=${c.espejo_monto},compra=${c.compra_monto}`,
+              )
+              .join("|")
+          : "",
+      ),
+      esc(res.totales_cambios_count ?? ""),
+      esc(r.error ?? ""),
+    ];
+
+    for (const campo of camposTotales) {
+      const t = tu[campo];
+      if (t) {
+        fila.push(esc(t.anterior), esc(t.nuevo), esc(t.diferencia));
+      } else {
+        fila.push("", "", "");
+      }
+    }
+
+    filas.push(fila.join(","));
+  }
+
+  return filas.join("\n");
+}
+
+// ──────────────────────────────────────────────
+// Helper: serializar resultados del bulk a XLSX y dejarlo escrito en disco.
+// Mismas columnas y semántica que armarCsvBulkAjuste; columnas vacías cuando
+// el campo no cambió, para que destaquen los cambios visualmente.
+// Devuelve el path absoluto donde se escribió el archivo.
+// ──────────────────────────────────────────────
+async function armarYGuardarXlsxBulkAjuste(
+  resultados: Array<{
+    index: number;
+    inversionista_id?: number;
+    liquidacion_id?: number;
+    success: boolean;
+    result?: any;
+    error?: string;
+  }>,
+): Promise<string> {
+  const camposTotales = [
+    "total_pagos_liquidados",
+    "total_capital",
+    "total_interes",
+    "total_iva",
+    "total_isr",
+    "total_cuota",
+    "reinversion_capital",
+    "reinversion_interes",
+    "reinversion_total",
+  ] as const;
+
+  const headerBase = [
+    "index",
+    "inversionista_id",
+    "liquidacion_id",
+    "success",
+    "dry_run",
+    "reporte_url",
+    "creditos_excluidos",
+    "creditos_ajustados",
+    "compras_canceladas",
+    "totales_cambios_count",
+    "error",
+  ];
+  const headerTotales = camposTotales.flatMap((c) => [
+    `${c}_anterior`,
+    `${c}_nuevo`,
+    `${c}_diferencia`,
+  ]);
+  const header = [...headerBase, ...headerTotales];
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("bulk_ajuste");
+
+  // Header con negrita y freeze pane
+  ws.addRow(header);
+  ws.getRow(1).font = { bold: true };
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+
+  for (const r of resultados) {
+    const res = r.result ?? {};
+    const tu = res.totales_update ?? {};
+    const fila: (string | number | null)[] = [
+      r.index,
+      r.inversionista_id ?? "",
+      r.liquidacion_id ?? "",
+      r.success,
+      res.dry_run ?? "",
+      res.reporte_url ?? "",
+      Array.isArray(res.creditos_excluidos_reporte)
+        ? res.creditos_excluidos_reporte.join("|")
+        : "",
+      Array.isArray(res.creditos_ajustados_reporte)
+        ? res.creditos_ajustados_reporte
+            .map(
+              (c: any) =>
+                `${c.credito_id}:${c.monto_original}->${c.monto_ajustado}`,
+            )
+            .join("|")
+        : "",
+      Array.isArray(res.compras_canceladas)
+        ? res.compras_canceladas
+            .map(
+              (c: any) =>
+                `${c.credito_id}:espejo=${c.espejo_monto},compra=${c.compra_monto}`,
+            )
+            .join("|")
+        : "",
+      res.totales_cambios_count ?? "",
+      r.error ?? "",
+    ];
+
+    for (const campo of camposTotales) {
+      const t = tu[campo];
+      if (t) {
+        // Convertir a número cuando sea posible (Excel hace mejor pivote/sort)
+        const ant = isNaN(Number(t.anterior)) ? t.anterior : Number(t.anterior);
+        const nue = isNaN(Number(t.nuevo)) ? t.nuevo : Number(t.nuevo);
+        const dif = isNaN(Number(t.diferencia))
+          ? t.diferencia
+          : Number(t.diferencia);
+        fila.push(ant, nue, dif);
+      } else {
+        fila.push("", "", "");
+      }
+    }
+
+    ws.addRow(fila);
+  }
+
+  // Auto width básico (mín 12, máx 50, según el largo del header)
+  ws.columns.forEach((col, i) => {
+    const headerStr = String(header[i] ?? "");
+    col.width = Math.min(Math.max(headerStr.length + 2, 12), 50);
+  });
+
+  // Path: <cwd>/ajustarPagos/bulk_resultado.xlsx
+  // Cuando el back arranca desde apps/cartera-back/, cwd ya apunta ahí.
+  const outDir = path.join(process.cwd(), "ajustarPagos");
+  await fsp.mkdir(outDir, { recursive: true });
+  const outPath = path.join(outDir, "bulk_resultado.xlsx");
+  await wb.xlsx.writeFile(outPath);
+  return outPath;
+}
 
 export const inversionistasRouter = new Elysia()
   .use(authMiddleware)
@@ -319,27 +560,27 @@ export const inversionistasRouter = new Elysia()
           };
         }
 
-        const { inversionista_id } = parseResult.data;
+        const { inversionista_id, fecha_liquidacion } = parseResult.data;
+        const fechaLiquidacion = fecha_liquidacion ? new Date(fecha_liquidacion) : undefined;
 
         if (!inversionista_id) {
           console.warn("⚠️ ¡ALERTA! Se va a liquidar TODOS los pagos del sistema");
         }
 
-        // Lanzar liquidación en background y responder inmediatamente
-        // Si algo falla, los pagos quedan como NO_LIQUIDADO (pendientes)
-        liquidateByInvestorId(inversionista_id).then((result) => {
-          console.log(`[liquidate-inversionista-pagos] Background OK para inversionista ${inversionista_id}:`, result.message);
-        }).catch((err) => {
-          console.error(`[liquidate-inversionista-pagos] Background ERROR para inversionista ${inversionista_id}:`, err);
-        });
+        const result = await liquidateByInvestorId(inversionista_id, fechaLiquidacion);
 
-        set.status = 202;
-        return {
-          message: inversionista_id
-            ? `Liquidación iniciada para inversionista ${inversionista_id}. Se procesará en segundo plano.`
-            : "Liquidación masiva iniciada. Se procesará en segundo plano.",
-          inversionista_id: inversionista_id ?? "TODOS",
-        };
+        const hayErrores = result.errores && result.errores.length > 0;
+        const hayLiquidaciones = (result.liquidaciones_creadas ?? 0) > 0;
+
+        if (hayErrores && !hayLiquidaciones) {
+          set.status = 422;
+        } else if (hayErrores && hayLiquidaciones) {
+          set.status = 207;
+        } else {
+          set.status = 200;
+        }
+
+        return result;
       } catch (error) {
         console.error("[liquidate-inversionista-pagos] Error:", error);
         set.status = 500;
@@ -352,6 +593,7 @@ export const inversionistasRouter = new Elysia()
     {
       body: t.Optional(t.Object({
         inversionista_id: t.Optional(t.Number()),
+        fecha_liquidacion: t.Optional(t.String()),
       })),
       detail: {
         summary: "Liquida todos los pagos de un inversionista (async, responde inmediato)",
@@ -824,6 +1066,259 @@ export const inversionistasRouter = new Elysia()
     }
   })
   // ──────────────────────────────────────────────
+  // Ajustar pagos espejo + monto_aportado de un inversionista en una
+  // liquidación específica. Soporta dry-run cuando hay compras del mes
+  // que afectan el cálculo del monto_aportado.
+  //
+  // Body:
+  //   inversionista_id: number
+  //   liquidacion_id: number
+  //   cambios: [{ credito_id, abono_capital?, abono_interes?, iva?,
+  //               monto_aportado?, monto_aportado_forzado? }]
+  //   force?: boolean         (saltar dry-run y aplicar)
+  //   generar_reporte?: boolean (tras aplicar, generar Excel filtrado)
+  // ──────────────────────────────────────────────
+  .post("/investor/ajustar-pagos-liquidacion", async ({ body, set }) => {
+    const parsed = body as {
+      inversionista_id?: number;
+      liquidacion_id?: number;
+      cambios?: Array<{
+        credito_id?: number;
+        abono_capital?: number | null;
+        abono_interes?: number | null;
+        iva?: number | null;
+        monto_aportado?: number | null;
+        monto_aportado_forzado?: boolean;
+      }>;
+      force?: boolean;
+      generar_reporte?: boolean;
+    };
+
+    if (!parsed.inversionista_id || isNaN(Number(parsed.inversionista_id))) {
+      set.status = 400;
+      return { message: "El parámetro 'inversionista_id' es obligatorio y debe ser numérico." };
+    }
+    if (!parsed.liquidacion_id || isNaN(Number(parsed.liquidacion_id))) {
+      set.status = 400;
+      return { message: "El parámetro 'liquidacion_id' es obligatorio y debe ser numérico." };
+    }
+    if (!Array.isArray(parsed.cambios) || parsed.cambios.length === 0) {
+      set.status = 400;
+      return { message: "El parámetro 'cambios' debe ser un arreglo no vacío." };
+    }
+    for (const [i, c] of parsed.cambios.entries()) {
+      if (!c.credito_id || isNaN(Number(c.credito_id))) {
+        set.status = 400;
+        return { message: `cambios[${i}].credito_id es obligatorio y debe ser numérico.` };
+      }
+    }
+
+    try {
+      const result = await ajustarPagosLiquidacion({
+        inversionista_id: Number(parsed.inversionista_id),
+        liquidacion_id: Number(parsed.liquidacion_id),
+        cambios: parsed.cambios.map((c) => ({
+          credito_id: Number(c.credito_id),
+          abono_capital: c.abono_capital ?? null,
+          abono_interes: c.abono_interes ?? null,
+          iva: c.iva ?? null,
+          monto_aportado: c.monto_aportado ?? null,
+          monto_aportado_forzado: c.monto_aportado_forzado === true,
+        })),
+        force: parsed.force === true,
+        generar_reporte: parsed.generar_reporte === true,
+      });
+
+      const { status, ...payload } = result as any;
+      set.status = status ?? 200;
+      return payload;
+    } catch (error) {
+      console.error("[investor/ajustar-pagos-liquidacion] Error:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: "Error ajustando pagos de liquidación",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
+  // ──────────────────────────────────────────────
+  // BULK: ajustar-pagos-liquidacion en lote
+  //
+  // Recibe un array `items`, cada uno con la misma forma que el endpoint
+  // single. Se procesan SECUENCIALMENTE con try/catch por item — si uno
+  // falla, los demás siguen. Cada item maneja su propio dry-run y
+  // generar_reporte de manera independiente.
+  //
+  // Body:
+  //   items: [{
+  //     inversionista_id, liquidacion_id, cambios: [...],
+  //     force?, generar_reporte?
+  //   }]
+  //
+  // Response:
+  //   procesados: número total enviado
+  //   exitosos:   cuántos terminaron con success=true
+  //   fallidos:   cuántos lanzaron error
+  //   dry_runs:   cuántos quedaron en dry-run
+  //   resultados: [{ index, inversionista_id, liquidacion_id, result | error }]
+  // ──────────────────────────────────────────────
+  .post("/investor/ajustar-pagos-liquidacion/bulk", async ({ body, set }) => {
+    type BulkItem = {
+      inversionista_id?: number;
+      liquidacion_id?: number;
+      cambios?: Array<{
+        credito_id?: number;
+        abono_capital?: number | null;
+        abono_interes?: number | null;
+        iva?: number | null;
+        monto_aportado?: number | null;
+        monto_aportado_forzado?: boolean;
+      }>;
+      force?: boolean;
+      generar_reporte?: boolean;
+    };
+
+    // Aceptar tanto un array directo como `{ items: [...] }`.
+    const items: BulkItem[] = Array.isArray(body)
+      ? (body as BulkItem[])
+      : Array.isArray((body as any)?.items)
+        ? ((body as any).items as BulkItem[])
+        : [];
+    const parsed = { items };
+
+    if (parsed.items.length === 0) {
+      set.status = 400;
+      return {
+        message:
+          "El body debe ser un arreglo de items o `{ items: [...] }` no vacío.",
+      };
+    }
+
+    const resultados: Array<{
+      index: number;
+      inversionista_id?: number;
+      liquidacion_id?: number;
+      success: boolean;
+      result?: unknown;
+      error?: string;
+    }> = [];
+    let exitosos = 0;
+    let fallidos = 0;
+    let dry_runs = 0;
+
+    for (let i = 0; i < parsed.items.length; i++) {
+      const item = parsed.items[i];
+
+      // Validación liviana por item (no aborta el batch, marca el item como error)
+      if (!item.inversionista_id || isNaN(Number(item.inversionista_id))) {
+        resultados.push({
+          index: i,
+          success: false,
+          error: "inversionista_id es obligatorio y debe ser numérico.",
+        });
+        fallidos++;
+        continue;
+      }
+      if (!item.liquidacion_id || isNaN(Number(item.liquidacion_id))) {
+        resultados.push({
+          index: i,
+          inversionista_id: Number(item.inversionista_id),
+          success: false,
+          error: "liquidacion_id es obligatorio y debe ser numérico.",
+        });
+        fallidos++;
+        continue;
+      }
+      if (!Array.isArray(item.cambios) || item.cambios.length === 0) {
+        resultados.push({
+          index: i,
+          inversionista_id: Number(item.inversionista_id),
+          liquidacion_id: Number(item.liquidacion_id),
+          success: false,
+          error: "cambios debe ser un arreglo no vacío.",
+        });
+        fallidos++;
+        continue;
+      }
+
+      try {
+        const result = await ajustarPagosLiquidacion({
+          inversionista_id: Number(item.inversionista_id),
+          liquidacion_id: Number(item.liquidacion_id),
+          cambios: item.cambios.map((c) => ({
+            credito_id: Number(c.credito_id),
+            abono_capital: c.abono_capital ?? null,
+            abono_interes: c.abono_interes ?? null,
+            iva: c.iva ?? null,
+            monto_aportado: c.monto_aportado ?? null,
+            monto_aportado_forzado: c.monto_aportado_forzado === true,
+          })),
+          force: item.force === true,
+          generar_reporte: item.generar_reporte === true,
+        });
+
+        // El controller devuelve `status` con el código HTTP que correspondería
+        // si fuera single. Lo usamos para clasificar pero no lo propagamos al
+        // status del response del bulk (que siempre es 200 OK del batch).
+        const { status, ...payload } = result as any;
+        const ok = (payload as any).success === true;
+        const isDry = (payload as any).dry_run === true;
+
+        resultados.push({
+          index: i,
+          inversionista_id: Number(item.inversionista_id),
+          liquidacion_id: Number(item.liquidacion_id),
+          success: ok,
+          result: payload,
+        });
+
+        if (ok) {
+          exitosos++;
+          if (isDry) dry_runs++;
+        } else {
+          fallidos++;
+        }
+      } catch (error) {
+        console.error(
+          `[investor/ajustar-pagos-liquidacion/bulk] Item ${i} (inv=${item.inversionista_id}, liq=${item.liquidacion_id}) falló:`,
+          error,
+        );
+        resultados.push({
+          index: i,
+          inversionista_id: Number(item.inversionista_id),
+          liquidacion_id: Number(item.liquidacion_id),
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        fallidos++;
+      }
+    }
+
+    // Generar Excel y guardarlo en disco (best-effort: si falla, no rompe la respuesta).
+    let xlsx_path: string | null = null;
+    let xlsx_error: string | undefined;
+    try {
+      xlsx_path = await armarYGuardarXlsxBulkAjuste(resultados);
+    } catch (err) {
+      console.error("[investor/ajustar-pagos-liquidacion/bulk] Error generando XLSX:", err);
+      xlsx_error = err instanceof Error ? err.message : String(err);
+    }
+
+    set.status = 200;
+    return {
+      success: fallidos === 0,
+      procesados: parsed.items.length,
+      exitosos,
+      fallidos,
+      dry_runs,
+      resultados,
+      csv: armarCsvBulkAjuste(resultados),
+      xlsx_path,
+      ...(xlsx_error ? { xlsx_error } : {}),
+    };
+  })
+  // ──────────────────────────────────────────────
   // Revertir una liquidación completa por liquidacion_id
   // Deshace: pagos espejo, monto_aportado, cuotas, boleta, reinversión y liquidación
   // Todo dentro de una transacción
@@ -1204,6 +1699,7 @@ export const inversionistasRouter = new Elysia()
         monto_boleta: t.Optional(t.String()),
         notas: t.Optional(t.String()),
         subido_por: t.Optional(t.Number()),
+        fecha_liquidacion: t.Optional(t.String()),
       }),
       detail: {
         summary: "Crear nueva boleta de pago",
@@ -1509,13 +2005,14 @@ export const inversionistasRouter = new Elysia()
     "/calcularPagosEspejo",
     async ({ body, set }) => {
       try {
-        const { inversionistaId } = body;
+        const { inversionistaId, fecha_calculo } = body;
 
         console.log(
-          `\n🚀 POST /calcularPagosEspejo → inversionistaId: ${inversionistaId}`
+          `\n🚀 POST /calcularPagosEspejo → inversionistaId: ${inversionistaId}, fecha_calculo: ${fecha_calculo ?? "no enviada"}`
         );
 
-        const resultado = await calcularYRegistrarPagosEspejo(inversionistaId);
+        const fechaCalculoDate = fecha_calculo ? new Date(fecha_calculo) : undefined;
+        const resultado = await calcularYRegistrarPagosEspejo(inversionistaId, fechaCalculoDate);
 
         if (!resultado.success) {
           set.status = 500;
@@ -1531,7 +2028,9 @@ export const inversionistasRouter = new Elysia()
           message: `✅ Pagos espejo calculados y registrados correctamente`,
           inversionistaId: resultado.inversionistaId ?? inversionistaId,
           totalCreditosProcesados: resultado.totalCreditosProcesados ?? 0,
+          totalCreditosFallidos: (resultado as any).totalCreditosFallidos ?? 0,
           data: resultado.data,
+          fallidos: (resultado as any).fallidos ?? [],
         };
       } catch (error: any) {
         console.error("❌ Error en POST /calcularPagosEspejo:", error);
@@ -1555,6 +2054,9 @@ export const inversionistasRouter = new Elysia()
           description: "ID del inversionista a procesar",
           minimum: 1,
         }),
+        fecha_calculo: t.Optional(t.String({
+          description: "Fecha ISO del período de cálculo (YYYY-MM-DD). Determina periodoMes/periodoAnio para la validación del histórico.",
+        })),
       }),
       response: {
         200: t.Object({
@@ -1562,7 +2064,13 @@ export const inversionistasRouter = new Elysia()
           message: t.String(),
           inversionistaId: t.Number(),
           totalCreditosProcesados: t.Number(),
+          totalCreditosFallidos: t.Number(),
           data: t.Array(t.Any()),
+          fallidos: t.Array(t.Object({
+            creditoId: t.Number(),
+            numeroCreditoSifco: t.String(),
+            mensaje: t.String(),
+          })),
         }),
         500: t.Object({
           success: t.Literal(false),

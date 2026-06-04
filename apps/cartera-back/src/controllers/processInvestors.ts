@@ -7,6 +7,7 @@ import { insertPagosCreditoInversionistasV2 } from "./payments";
 export const processInvestorsSchema = z.object({
   credito_id: z.number().int().positive(),
   pago_id: z.number().int().positive(),
+  fecha_periodo: z.string().datetime().optional(),
 });
 
 // ============================================================================
@@ -25,13 +26,15 @@ export const processInvestors = async ({ body, set }: any) => {
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
-    const { credito_id, pago_id } = parseResult.data;
+    const { credito_id, pago_id, fecha_periodo } = parseResult.data;
+    const fechaPeriodo = fecha_periodo ? new Date(fecha_periodo) : undefined;
     console.log(`📋 Crédito ID: ${credito_id}`);
     console.log(`🧾 Pago ID: ${pago_id}`);
+    console.log(`📅 Fecha período: ${fechaPeriodo ?? "no especificada (usa fecha_vencimiento del pago)"}`);
 
     // 2️⃣ EJECUTAR INVERSIONISTAS
     console.log("\n💼 ========== PROCESANDO INVERSIONISTAS ==========");
-    await insertPagosCreditoInversionistasV2(pago_id, credito_id);
+    await insertPagosCreditoInversionistasV2(pago_id, credito_id, fechaPeriodo);
     console.log("✅ Pagos a inversionistas procesados correctamente");
 
     set.status = 200;

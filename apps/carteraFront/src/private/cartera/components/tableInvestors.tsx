@@ -31,6 +31,7 @@ import { useCatalogs } from "../hooks/catalogs";
 import {
   inversionistasService,
   notificarContabilidadBoletas,
+  formatMensajeFallido,
   type Investor,
   type InvestorPayload,
 } from "../services/services";
@@ -56,6 +57,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Combobox, Transition } from "@headlessui/react";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConfirmationModal } from "@/components/ui/confirmation-modal";
@@ -94,6 +102,11 @@ export function TableInvestors() {
   const [showRevertirModal, setShowRevertirModal] = useState(false);
   const [showSuccessRevertModal, setShowSuccessRevertModal] = useState(false);
   const [inversionistaARevertir, setInversionistaARevertir] = useState<number | null>(null);
+
+  // Modal calcular pagos — igual al de liquidar pero con fecha de cálculo
+  const [calcularModalTarget, setCalcularModalTarget] = useState<number | undefined>(undefined);
+  const showCalcularModal = calcularModalTarget !== undefined;
+  const [fechaCalculo, setFechaCalculo] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
   // 🆕 Hook para calcular pagos espejo
   const { mutate: calcularPagosEspejo, isPending: isCalculando } =
@@ -180,12 +193,12 @@ export function TableInvestors() {
   const handleConfirmarGenerarPagos = async () => {
     if (!selectedInversionista) return;
 
-    calcularPagosEspejo(selectedInversionista, {
+    calcularPagosEspejo({ inversionistaId: selectedInversionista, fecha_calculo: fechaCalculo }, {
       onSuccess: (data) => {
         if (data.success) {
           setShowGenerarPagosModal(false);
           setSelectedInversionista(null);
-          setIsDraft(true);   // ← activar modo borrador
+          setIsDraft(true);
           refetch();
           refetchTotales();
         }
@@ -196,25 +209,43 @@ export function TableInvestors() {
     });
   };
 
-  // 🚀 Cálculo directo sin modal (Nuevo flujo)
+  // Abre modal de confirmación con fecha para calcular pagos
   const handleCalcularPagosDirecto = (inversionistaId: number) => {
-    console.log("🚀 Calculando pagos espejo para:", inversionistaId);
-    setSelectedInversionista(inversionistaId); // Para que el spinner se muestre en el row correcto
+    setCalcularModalTarget(inversionistaId);
+  };
 
-    calcularPagosEspejo(inversionistaId, {
+  // Ejecuta el cálculo tras confirmar fecha en el modal
+  const handleConfirmarCalcularPagos = () => {
+    if (calcularModalTarget === undefined) return;
+    const inversionistaId = calcularModalTarget;
+    setSelectedInversionista(inversionistaId);
+
+    calcularPagosEspejo({ inversionistaId, fecha_calculo: fechaCalculo }, {
       onSuccess: (data) => {
         if (data.success) {
-          console.log("✅ Pagos calculados correctamente");
+          setCalcularModalTarget(undefined);
           setIsDraft(true);
-          setDraftInvestorId(inversionistaId); // 📍 Guardamos el ID
+          setDraftInvestorId(inversionistaId);
           refetch();
           refetchTotales();
           setSelectedInversionista(null);
+
+          const fallidos = data.fallidos ?? [];
+          if (fallidos.length > 0) {
+            const lista = fallidos
+              .map((f) => `• ${f.numeroCreditoSifco}: ${formatMensajeFallido(f.mensaje)}`)
+              .join("\n");
+            toast.warning(
+              `${fallidos.length} crédito${fallidos.length !== 1 ? "s" : ""} no se procesaron`,
+              { description: lista, duration: 10000 }
+            );
+          }
         }
       },
       onError: (error) => {
         console.error("❌ Error al calcular pagos:", error);
         alert(`Error al calcular pagos: ${error.message}`);
+        setCalcularModalTarget(undefined);
         setSelectedInversionista(null);
       },
     });
@@ -226,26 +257,44 @@ export function TableInvestors() {
     setSelectedInversionista(null);
   };
 
-  // 🆕 Cancelar liquidación
-  const [showLiquidarTodosModal, setShowLiquidarTodosModal] = useState(false);
-  const handleConfirmarLiquidarTodos = () => {
+  const handleConfirmarLiquidar = () => {
     liquidateMutation.mutate(
-      undefined, // Sin inversionista_id = liquida TODOS
+      {
+        ...(liquidarModalTarget != null ? { inversionista_id: liquidarModalTarget } : {}),
+        fecha_liquidacion: new Date(fechaLiquidacion).toISOString(),
+      },
       {
         onSuccess: (data) => {
-          setShowLiquidarTodosModal(false);
+          if (data.errores && data.errores.length > 0) {
+            const lista = data.errores.map((e) => `• ${e.razon}`).join("\n");
+            if ((data.liquidaciones_creadas ?? 0) > 0) {
+              toast.warning(
+                `Liquidación parcial. ${data.liquidaciones_creadas} liquidado(s). Créditos con inconsistencia:\n${lista}`,
+                { duration: 12000 }
+              );
+            } else {
+              toast.error(
+                `No se pudo liquidar. Créditos con inconsistencia:\n${lista}`,
+                { duration: 12000 }
+              );
+            }
+          } else {
+            toast.success(data.message ?? "Liquidación completada");
+          }
+          setLiquidarModalTarget(undefined);
           refetch();
           refetchTotales();
-          alert(`✅ ${data.message}\n${data.updatedCount} pagos liquidados`);
         },
-        onError: (error) => {
-          alert(`❌ Error: ${error.message}`);
+        onError: (error: any) => {
+          const detalle =
+            error?.response?.data?.error ||
+            error?.response?.data?.message ||
+            error?.message ||
+            "Error desconocido";
+          toast.error(`❌ Error al liquidar: ${detalle}`, { duration: 15000 });
         },
       }
     );
-  };
-  const handleCancelarLiquidarTodos = () => {
-    setShowLiquidarTodosModal(false);
   };
   const [searchParams] = useSearchParams();
   const initialInvestorIdFromUrl = (() => {
@@ -288,10 +337,25 @@ export function TableInvestors() {
   const [compraCarteraFecha, setCompraCarteraFecha] = useState("");
   const [compraCarteraPctInv, setCompraCarteraPctInv] = useState("70");
   const [compraCarteraPctCashIn, setCompraCarteraPctCashIn] = useState("30");
+  const [compraCarteraTipoReinversion, setCompraCarteraTipoReinversion] =
+    useState<
+      | "sin_reinversion"
+      | "reinversion_capital"
+      | "reinversion_total"
+    >("sin_reinversion");
+  const [compraCarteraTipoOperacion, setCompraCarteraTipoOperacion] = useState<
+    "compra_cartera" | "reinversion"
+  >("compra_cartera");
+  // Fecha por defecto bloqueada (diciembre 2025).
+  const FECHA_INICIO_DEFAULT = "2025-12-01";
   const agregarInvCredito = useAgregarInversionistaCredito();
 
   const [incluirLiquidados, setIncluirLiquidados] = useState(false);
   const [numeroCuota, setNumeroCuota] = useState<number | undefined>(undefined);
+  const [fechaLiquidacion, setFechaLiquidacion] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  // Modal unificado de liquidación: null = todos, number = inversionista_id específico
+  const [liquidarModalTarget, setLiquidarModalTarget] = useState<number | null | undefined>(undefined);
+  const showLiquidarModal = liquidarModalTarget !== undefined;
   // Consulta con paginación y filtro por id
   // 🔥 NUEVO: Siempre consultar tablas ESPEJO
   const { data, isLoading, isError, isFetching, refetch } = useGetInvestors({
@@ -396,12 +460,6 @@ export function TableInvestors() {
       (inv.creditos ?? []).some((cred) => (cred.pagos ?? []).length > 0)
     ) ?? false;
 
-  console.log(
-    "[DEBUG] ¿Algún inversionista tiene pagos pendientes?:",
-    tienePagosPendientes
-  );
-
-
   // 🆕 Efecto para activar Modo Borrador automático (Optimizado)
   // Se reducen las dependencias para evitar renders infinitos.
   useEffect(() => {
@@ -423,13 +481,11 @@ export function TableInvestors() {
 
     if (algunCreditoConPagos && tienePagoNoLiquidado) {
       if (!isDraft || draftInvestorId !== currentInv.inversionista_id) {
-        console.log("🛠️ Auto-Draft: ON (Al menos un crédito con pagos) para", currentInv.nombre_inversionista);
         setIsDraft(true);
         setDraftInvestorId(currentInv.inversionista_id);
       }
     } else {
       if (isDraft) {
-        console.log("🍃 Auto-Draft: OFF (No hay créditos con pagos o no hay pendientes)");
         setIsDraft(false);
         setDraftInvestorId(null);
       }
@@ -482,7 +538,6 @@ export function TableInvestors() {
 
   const handleEditInvestor = (inv: any) => {
     setModalMode("update");
-    console.log(inv);
     setSelectedInvestorData({
       inversionista_id: inv.inversionista_id,
       nombre: inv.nombre_inversionista,
@@ -500,6 +555,63 @@ export function TableInvestors() {
     });
     setModalOpen(true);
   };
+
+  // Abre el modal de Compra de Cartera para un inversionista (reutilizable: tarjeta y header)
+  const handleAbrirCompraCartera = (inv: any) => {
+    setCompraCarteraInvId(inv.inversionista_id);
+    setCompraCarteraMonto("");
+    // Default compra_cartera → fecha de hoy (editable)
+    setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
+    setCompraCarteraTipoReinversion("sin_reinversion");
+    setCompraCarteraTipoOperacion("compra_cartera");
+    // Calcular moda del porcentaje de participación desde créditos existentes
+    const creditos = inv.creditos ?? [];
+    if (creditos.length > 0) {
+      const freq = new Map<string, number>();
+      for (const c of creditos) {
+        const pct = String(Math.round(Number(c.porcentaje_inversionista ?? 0)));
+        freq.set(pct, (freq.get(pct) ?? 0) + 1);
+      }
+      let modaPct = "70";
+      let maxCount = 0;
+      for (const [pct, count] of freq) {
+        if (count > maxCount) { modaPct = pct; maxCount = count; }
+      }
+      setCompraCarteraPctInv(modaPct);
+      setCompraCarteraPctCashIn(String(100 - Number(modaPct)));
+    } else {
+      setCompraCarteraPctInv("70");
+      setCompraCarteraPctCashIn("30");
+    }
+    setCompraCarteraOpen(true);
+  };
+
+  // Inversionista objetivo para los botones del header: el de la lista filtrada (currentInv)
+  // o, si no tiene créditos y no aparece en la lista, el del catálogo (para igual permitir editar/comprar)
+  const headerInv = useMemo(() => {
+    if (currentInv) return currentInv;
+    if (selectedInvestor === "" || selectedInvestor === undefined) return null;
+    const cat: any = investors.find(
+      (i: any) => i.inversionista_id === Number(selectedInvestor)
+    );
+    if (!cat) return null;
+    return {
+      inversionista_id: cat.inversionista_id,
+      nombre_inversionista: cat.nombre,
+      emite_factura: cat.emite_factura,
+      reinversion: cat.reinversion,
+      banco_id: cat.banco,
+      tipo_cuenta: cat.tipo_cuenta,
+      numero_cuenta: cat.numero_cuenta,
+      re_inversion: cat.tipo_reinversion,
+      moneda: cat.moneda,
+      dpi: cat.dpi ?? "",
+      tipo_reinversion: cat.tipo_reinversion,
+      monto_reinversion: cat.monto_reinversion ?? 0,
+      email: cat.email,
+      creditos: cat.creditos ?? [],
+    };
+  }, [currentInv, selectedInvestor, investors]);
 
   // Dentro del componente, agregar estados
   const [modalBoletaOpen, setModalBoletaOpen] = useState(false);
@@ -770,6 +882,32 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
             >
               <RefreshCw className={`w-5 h-5 ${isFetching ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">Recargar</span>
+            </button>
+          )}
+
+          {/* Editar Inversionista - visible cuando hay inversionista seleccionado (aunque no tenga créditos) */}
+          {selectedInvestor !== "" && headerInv && (
+            <button
+              onClick={() => handleEditInvestor(headerInv)}
+              className="px-4 py-2 rounded-lg bg-amber-500 text-white font-bold hover:bg-amber-600 active:scale-95 transition-all flex items-center gap-2 justify-center shadow-sm"
+              title="Editar el inversionista seleccionado"
+            >
+              <Edit className="w-5 h-5" />
+              <span className="hidden sm:inline">Editar Inversionista</span>
+              <span className="sm:hidden">Editar</span>
+            </button>
+          )}
+
+          {/* Compra de Cartera - visible cuando hay inversionista seleccionado (aunque no tenga créditos) */}
+          {selectedInvestor !== "" && headerInv && (
+            <button
+              onClick={() => handleAbrirCompraCartera(headerInv)}
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 active:scale-95 transition-all flex items-center gap-2 justify-center shadow-sm"
+              title="Registrar compra de cartera / reinversión para el inversionista seleccionado"
+            >
+              <ShoppingCart className="w-5 h-5" />
+              <span className="hidden sm:inline">Compra de Cartera</span>
+              <span className="sm:hidden">Compra</span>
             </button>
           )}
 
@@ -1125,7 +1263,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </button>
               </DropdownMenuTrigger>
 
-              <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-lg border border-gray-200 p-1">
+              <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-lg border border-gray-200 p-1 bg-white">
                 {/* Descargar PDF */}
                 <DropdownMenuItem
                   onClick={(e) => {
@@ -1195,10 +1333,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       toast.error("No se puede liquidar: falta boleta y cuota con reinversión no es 0");
                       return;
                     }
-                    liquidateMutation.mutate(
-                      { inversionista_id: inv.inversionista_id },
-                      { onSuccess: () => { refetch(); refetchTotales(); } }
-                    );
+                    setLiquidarModalTarget(inv.inversionista_id);
                   }}
                   disabled={liquidateMutation.isPending || (!reinversionEnCero && !tieneBoletaPendiente)}
                   className={`cursor-pointer rounded-lg px-3 py-2.5 focus:bg-green-50 ${(!reinversionEnCero && !tieneBoletaPendiente) ? 'opacity-40' : ''}`}
@@ -1241,29 +1376,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCompraCarteraInvId(inv.inversionista_id);
-                    setCompraCarteraMonto("");
-                    setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
-                    // Calcular moda del porcentaje de participación desde créditos existentes
-                    const creditos = inv.creditos ?? [];
-                    if (creditos.length > 0) {
-                      const freq = new Map<string, number>();
-                      for (const c of creditos) {
-                        const pct = String(Math.round(Number(c.porcentaje_inversionista ?? 0)));
-                        freq.set(pct, (freq.get(pct) ?? 0) + 1);
-                      }
-                      let modaPct = "70";
-                      let maxCount = 0;
-                      for (const [pct, count] of freq) {
-                        if (count > maxCount) { modaPct = pct; maxCount = count; }
-                      }
-                      setCompraCarteraPctInv(modaPct);
-                      setCompraCarteraPctCashIn(String(100 - Number(modaPct)));
-                    } else {
-                      setCompraCarteraPctInv("70");
-                      setCompraCarteraPctCashIn("30");
-                    }
-                    setCompraCarteraOpen(true);
+                    handleAbrirCompraCartera(inv);
                   }}
                   className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-emerald-50"
                 >
@@ -1866,10 +1979,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               toast.error("No se puede liquidar: falta boleta y cuota con reinversión no es 0");
               return;
             }
-            liquidateMutation.mutate(
-              { inversionista_id: inv.inversionista_id },
-              { onSuccess: () => { refetch(); refetchTotales(); } }
-            );
+            setLiquidarModalTarget(inv.inversionista_id);
           }}
         >
           {liquidateMutation.isPending ? (
@@ -2243,26 +2353,23 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           <DialogContent className="bg-white dark:bg-gray-900">
             <DialogHeader>
               <DialogTitle className="text-blue-700 dark:text-blue-400 text-xl font-bold">
-                ¿Generar pagos falsos?
+                ¿Generar pagos?
               </DialogTitle>
               <DialogDescription className="space-y-3 pt-4">
-                <p className="text-gray-900 dark:text-gray-100 text-base">
-                  Esta acción generará los{" "}
-                  <strong className="text-blue-700 dark:text-blue-400">
-                    pagos falsos pendientes
-                  </strong>{" "}
-                  para este inversionista.
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 text-sm">
-                  • Se distribuirán todos los pagos pendientes entre
-                  inversionistas
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 text-sm">
-                  • Los registros se crearán en pagos_credito_inversionistas
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 text-sm">
-                  • Esta acción puede tardar unos segundos
-                </p>
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">
+                    Fecha del período de cálculo
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaCalculo}
+                    onChange={(e) => setFechaCalculo(e.target.value)}
+                    className="w-full border border-blue-300 rounded-lg px-3 py-2 bg-blue-50 text-blue-900 focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Esta fecha determina el período al que pertenece el cálculo de pagos.
+                  </p>
+                </div>
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="gap-2 sm:gap-0 pt-4">
@@ -2293,81 +2400,109 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        {/* Modal confirmar cálculo de pagos */}
         <Dialog
-          open={showLiquidarTodosModal}
-          onOpenChange={setShowLiquidarTodosModal}
+          open={showCalcularModal}
+          onOpenChange={(open) => { if (!open) setCalcularModalTarget(undefined); }}
         >
           <DialogContent className="bg-white dark:bg-gray-900 max-w-md">
             <DialogHeader>
-              <DialogTitle className="text-red-700 dark:text-red-400 text-xl font-bold flex items-center gap-2">
-                <span className="text-2xl">⚠️</span>
-                ¿Liquidar TODOS los pagos?
+              <DialogTitle className="text-purple-700 dark:text-purple-400 text-xl font-bold flex items-center gap-2">
+                <FileSpreadsheet className="h-5 w-5" />
+                Confirmar cálculo de pagos
               </DialogTitle>
               <DialogDescription className="space-y-4 pt-4">
-                <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-lg p-4">
-                  <p className="text-red-900 dark:text-red-100 text-base font-bold mb-2">
-                    ⚠️ ACCIÓN MASIVA - USAR CON PRECAUCIÓN
-                  </p>
-                  <p className="text-red-800 dark:text-red-200 text-sm">
-                    Esta acción liquidará{" "}
-                    <strong>TODOS los pagos NO liquidados</strong> de{" "}
-                    <strong>TODOS los inversionistas</strong> en el sistema.
-                  </p>
-                </div>
-
-                <div className="space-y-2 text-sm">
-                  <p className="text-gray-700 dark:text-gray-300">
-                    📋 Se cambiarán todos los estados de "NO_LIQUIDADO" a
-                    "LIQUIDADO"
-                  </p>
-                  <p className="text-gray-700 dark:text-gray-300">
-                    💰 Esto afectará a todos los inversionistas con pagos
-                    pendientes
-                  </p>
-                  <p className="text-gray-700 dark:text-gray-300">
-                    ⏰ Esta acción puede tardar varios segundos dependiendo del
-                    volumen
-                  </p>
-                  <p className="text-red-600 dark:text-red-400 font-bold">
-                    ⚠️ Esta acción NO se puede deshacer
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">
+                    Fecha del período de cálculo
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaCalculo}
+                    onChange={(e) => setFechaCalculo(e.target.value)}
+                    className="w-full border border-purple-300 rounded-lg px-3 py-2 bg-purple-50 text-purple-900 focus:ring-2 focus:ring-purple-400 focus:outline-none"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Esta fecha determina el período al que pertenece el cálculo de pagos espejo.
                   </p>
                 </div>
-
-                {tienePagosPendientes && (
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700 rounded-lg p-3">
-                    <p className="text-blue-900 dark:text-blue-100 text-sm">
-                      ℹ️ Actualmente hay pagos pendientes en el sistema que
-                      serán liquidados.
-                    </p>
-                  </div>
-                )}
               </DialogDescription>
             </DialogHeader>
-
             <DialogFooter className="gap-2 sm:gap-0 pt-4">
               <button
                 className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium transition-colors disabled:opacity-50"
-                onClick={handleCancelarLiquidarTodos}
+                onClick={() => setCalcularModalTarget(undefined)}
+                disabled={isCalculando}
+              >
+                Cancelar
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                onClick={handleConfirmarCalcularPagos}
+                disabled={isCalculando}
+              >
+                {isCalculando ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /><span>Calculando...</span></>
+                ) : (
+                  <><FileSpreadsheet className="h-4 w-4" /><span>Confirmar</span></>
+                )}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal unificado de liquidación — individual o todos */}
+        <Dialog
+          open={showLiquidarModal}
+          onOpenChange={(open) => { if (!open) setLiquidarModalTarget(undefined); }}
+        >
+          <DialogContent className="bg-white dark:bg-gray-900 max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-green-700 dark:text-green-400 text-xl font-bold flex items-center gap-2">
+                <CheckCircle className="h-5 w-5" />
+                {liquidarModalTarget != null ? "Confirmar liquidación" : "Liquidar TODOS los pagos"}
+              </DialogTitle>
+              <DialogDescription className="space-y-4 pt-4">
+                {liquidarModalTarget == null && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-lg p-4">
+                    <p className="text-red-900 dark:text-red-100 text-sm font-bold">
+                      ⚠️ ACCIÓN MASIVA — afectará a TODOS los inversionistas con pagos pendientes.
+                    </p>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">
+                    Fecha del período de liquidación
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaLiquidacion}
+                    onChange={(e) => setFechaLiquidacion(e.target.value)}
+                    className="w-full border border-blue-300 rounded-lg px-3 py-2 bg-blue-50 text-blue-900 focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Esta fecha determina el período al que pertenece la liquidación.
+                  </p>
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0 pt-4">
+              <button
+                className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium transition-colors disabled:opacity-50"
+                onClick={() => setLiquidarModalTarget(undefined)}
                 disabled={liquidateMutation.isPending}
               >
                 Cancelar
               </button>
-
               <button
-                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
-                onClick={handleConfirmarLiquidarTodos}
+                className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                onClick={handleConfirmarLiquidar}
                 disabled={liquidateMutation.isPending}
               >
                 {liquidateMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Liquidando TODOS...</span>
-                  </>
+                  <><Loader2 className="h-4 w-4 animate-spin" /><span>Liquidando...</span></>
                 ) : (
-                  <>
-                    <CheckCircle className="h-4 w-4" />
-                    <span>Sí, liquidar TODOS</span>
-                  </>
+                  <><CheckCircle className="h-4 w-4" /><span>Confirmar</span></>
                 )}
               </button>
             </DialogFooter>
@@ -2383,6 +2518,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
     refetchTotales();
   }}
   inversionistaPredeterminado={inversionistaParaBoleta}
+  fechaLiquidacion={fechaLiquidacion}
 />
 
       <InvestorDocumentsModal
@@ -2453,16 +2589,78 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           }
         }}
       >
-        <DialogContent className="!bg-[#1e293b] sm:max-w-md z-[60] border border-slate-600/40 shadow-2xl rounded-2xl">
+        <DialogContent className="!bg-white sm:max-w-md z-[60] border border-gray-200 shadow-2xl rounded-2xl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold text-white">Compra de Cartera</DialogTitle>
-            <DialogDescription className="text-slate-400 text-sm">
+            <DialogTitle className="text-lg font-bold text-gray-900">
+              {compraCarteraTipoOperacion === "reinversion"
+                ? "Reinversión"
+                : "Compra de Cartera"}
+            </DialogTitle>
+            <DialogDescription className="text-gray-500 text-sm">
               Ingresa el monto, porcentajes y la fecha de inicio de participación
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setCompraCarteraTipoOperacion("compra_cartera");
+                  setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
+                }}
+                className={`px-3 py-2 text-sm font-medium rounded-lg transition-all ${
+                  compraCarteraTipoOperacion === "compra_cartera"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Compra de Cartera
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCompraCarteraTipoOperacion("reinversion");
+                  setCompraCarteraFecha(FECHA_INICIO_DEFAULT);
+                }}
+                className={`px-3 py-2 text-sm font-medium rounded-lg transition-all ${
+                  compraCarteraTipoOperacion === "reinversion"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Reinversión
+              </button>
+            </div>
             <div>
-              <label htmlFor="compra-monto" className="text-sm font-medium text-slate-300">
+              <label htmlFor="compra-modalidad" className="text-sm font-medium text-gray-700">
+                Modelo de Inversión
+              </label>
+              <Select
+                value={compraCarteraTipoReinversion}
+                onValueChange={(v) =>
+                  setCompraCarteraTipoReinversion(
+                    v as
+                      | "sin_reinversion"
+                      | "reinversion_capital"
+                      | "reinversion_total",
+                  )
+                }
+              >
+                <SelectTrigger
+                  id="compra-modalidad"
+                  className="mt-1 w-full !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="!bg-white !border-gray-200 !text-gray-900 z-[70]">
+                  <SelectItem value="sin_reinversion">Tradicional</SelectItem>
+                  <SelectItem value="reinversion_capital">Reinversión Capital</SelectItem>
+                  <SelectItem value="reinversion_total">Interés Compuesto</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label htmlFor="compra-monto" className="text-sm font-medium text-gray-700">
                 Monto aportado
               </label>
               <Input
@@ -2473,12 +2671,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 placeholder="0.00"
                 value={compraCarteraMonto}
                 onChange={(e) => setCompraCarteraMonto(e.target.value)}
-                className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
+                className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="compra-pct-inv" className="text-sm font-medium text-slate-300">
+                <label htmlFor="compra-pct-inv" className="text-sm font-medium text-gray-700">
                   % Inversionista
                 </label>
                 <Input
@@ -2496,11 +2694,11 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       setCompraCarteraPctCashIn(String(100 - num));
                     }
                   }}
-                  className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
+                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
                 />
               </div>
               <div>
-                <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-slate-300">
+                <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-gray-700">
                   % Cash In
                 </label>
                 <Input
@@ -2518,12 +2716,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       setCompraCarteraPctInv(String(100 - num));
                     }
                   }}
-                  className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
+                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
                 />
               </div>
             </div>
             <div>
-              <label htmlFor="compra-fecha" className="text-sm font-medium text-slate-300">
+              <label htmlFor="compra-fecha" className="text-sm font-medium text-gray-700">
                 Fecha inicio participación
               </label>
               <Input
@@ -2531,7 +2729,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 type="date"
                 value={compraCarteraFecha}
                 onChange={(e) => setCompraCarteraFecha(e.target.value)}
-                className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white focus:!border-emerald-400 focus:!ring-emerald-400/30 [color-scheme:dark]"
+                disabled={compraCarteraTipoOperacion === "reinversion"}
+                readOnly={compraCarteraTipoOperacion === "reinversion"}
+                className={
+                  compraCarteraTipoOperacion === "reinversion"
+                    ? "mt-1 !bg-gray-100 !border-gray-300 !text-gray-700 cursor-not-allowed focus:!border-gray-300 focus:!ring-0"
+                    : "mt-1 !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                }
               />
             </div>
           </div>
@@ -2542,7 +2746,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 setCompraCarteraOpen(false);
                 setCompraCarteraInvId(null);
               }}
-              className="px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700/60 border border-slate-500/40 rounded-lg hover:bg-slate-600/60 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               Cancelar
             </button>
@@ -2551,30 +2755,42 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               disabled={agregarInvCredito.isPending || !compraCarteraMonto || Number(compraCarteraMonto) <= 0}
               onClick={() => {
                 if (!compraCarteraInvId || !compraCarteraMonto) return;
+                const esReinversion =
+                  compraCarteraTipoOperacion === "reinversion";
                 agregarInvCredito.mutate(
                   {
                     inversionista_id: compraCarteraInvId,
                     monto_aportado: Number(compraCarteraMonto),
-                    tipo_operacion: "compra_cartera",
+                    tipo_operacion: compraCarteraTipoOperacion,
+                    tipo_reinversion: compraCarteraTipoReinversion,
                     porcentaje_inversion: Number(compraCarteraPctInv),
                     porcentaje_cash_in: Number(compraCarteraPctCashIn),
                     fecha_inicio_participacion: compraCarteraFecha || undefined,
                   },
                   {
                     onSuccess: () => {
-                      toast.success("Compra de cartera registrada correctamente");
+                      toast.success(
+                        esReinversion
+                          ? "Reinversión registrada correctamente"
+                          : "Compra de cartera registrada correctamente",
+                      );
                       setCompraCarteraOpen(false);
                       setCompraCarteraInvId(null);
                       refetch();
                       refetchTotales();
                     },
                     onError: (err) => {
-                      toast.error(err?.message || "Error al registrar compra de cartera");
+                      toast.error(
+                        err?.message ||
+                          (esReinversion
+                            ? "Error al registrar reinversión"
+                            : "Error al registrar compra de cartera"),
+                      );
                     },
                   }
                 );
               }}
-              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors"
             >
               {agregarInvCredito.isPending ? "Guardando…" : "Confirmar"}
             </button>

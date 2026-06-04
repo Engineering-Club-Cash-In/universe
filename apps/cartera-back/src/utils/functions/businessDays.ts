@@ -48,6 +48,11 @@ export function addBusinessDaysGT(from: Date, days: number): Date {
 	return d;
 }
 
+export function startOfDayGT(from: Date): Date {
+	const { y, m, day } = gtYMD(from);
+	return new Date(Date.UTC(y, m - 1, day, 6, 0, 0));
+}
+
 /**
  * Resumen de expiración para la compra de cartera.
  * - `expira`: último día hábil de vigencia (fromDate + 3 hábiles).
@@ -57,9 +62,24 @@ export function addBusinessDaysGT(from: Date, days: number): Date {
 export function calcularExpiracionCompraCartera(fromDate: Date): {
 	expira: Date;
 	diaBaja: Date;
+};
+export function calcularExpiracionCompraCartera(
+	fromDate: Date,
+	extendida: boolean,
+): {
+	expira: Date;
+	diaBaja: Date;
+};
+export function calcularExpiracionCompraCartera(
+	fromDate: Date,
+	extendida = false,
+): {
+	expira: Date;
+	diaBaja: Date;
 } {
 	const expira = addBusinessDaysGT(fromDate, 3);
-	const diaBaja = addBusinessDaysGT(expira, 1);
+	const diaBajaBase = addBusinessDaysGT(expira, 1);
+	const diaBaja = extendida ? addBusinessDaysGT(diaBajaBase, 1) : diaBajaBase;
 	return { expira, diaBaja };
 }
 

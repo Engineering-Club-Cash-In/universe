@@ -20,6 +20,10 @@ import { processAndReplaceCreditInvestors } from "./investor";
 import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
+import {
+  applyCapitalPaymentAndBuildResponse,
+  getCuotaIdForPaymentInsert,
+} from "./registerPaymentPolicy";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -310,29 +314,36 @@ const obtenerInfoCompletaCredito = async (
           and(
             eq(cuotas_credito.credito_id, credito_id),
             eq(cuotas_credito.pagado, false),
-            ne(pagos_credito.validationStatus, "pending"),
+            // Permitir reportar/aplicar pagos adicionales aunque la cuota
+            // ya tenga otro pago pendiente de validación. Contabilidad puede
+            // validar después y el cálculo usa los restantes del pago previo.
             gte(cuotas_credito.numero_cuota, cuotaApagar)
           )
         )
         .orderBy(cuotas_credito.numero_cuota),
     ]);
     console.log(cuotaApagar,"cuota a pagar");
-const numerosCuotas = cuotasPendientes.map((item) => item.cuotas_credito.numero_cuota);
-console.log("Números de cuotas pendientes:", numerosCuotas);
+    const cuotasPendientesUnicas = Array.from(
+      new Map(
+        cuotasPendientes.map((item) => [item.cuotas_credito.cuota_id, item])
+      ).values()
+    );
+    const numerosCuotas = cuotasPendientesUnicas.map((item) => item.cuotas_credito.numero_cuota);
+    console.log("Números de cuotas pendientes:", numerosCuotas);
 
-// 🎯 O si quieres más info:
-console.log("Cuotas pendientes:", cuotasPendientes.map(item => ({
-  numero_cuota: item.cuotas_credito.numero_cuota,
-  fecha_vencimiento: item.cuotas_credito.fecha_vencimiento,
-  cuota_id: item.cuotas_credito.cuota_id
-})));
+    // 🎯 O si quieres más info:
+    console.log("Cuotas pendientes:", cuotasPendientesUnicas.map(item => ({
+      numero_cuota: item.cuotas_credito.numero_cuota,
+      fecha_vencimiento: item.cuotas_credito.fecha_vencimiento,
+      cuota_id: item.cuotas_credito.cuota_id
+    })));
     // ✅ Retornar todo estructurado
     return {
       // 📋 Crédito completo
       credito: info.credito,
 
       // 📊 Cuotas pendientes (array ordenado)
-      cuotasPendientes,
+      cuotasPendientes: cuotasPendientesUnicas,
 
       // 👥 Inversionistas (array)
       inversionistas,
@@ -359,7 +370,7 @@ console.log("Cuotas pendientes:", cuotasPendientes.map(item => ({
 
       // 📈 Stats útiles
       stats: {
-        totalCuotasPendientes: cuotasPendientes.length,
+        totalCuotasPendientes: cuotasPendientesUnicas.length,
         totalInversionistas: inversionistas.length,
 
         // 🚨 Indicador de mora
@@ -535,6 +546,11 @@ export const insertPayment = async ({ body, set }: any) => {
       }
     // 4. Calcular disponible
     const montoBoleta = new Big(monto_boleta);
+
+    // Antes se bloqueaba la cuota si ya tenía un pago `pending`. Ahora se
+    // permite registrar otro pago sobre la misma cuota para no depender de
+    // validación contable antes de reportar el abono complementario.
+
     // 1. Obtener toda la info del crédito UNA SOLA VEZ
     const creditoData = await obtenerInfoCompletaCredito(
       credito_id,
@@ -758,32 +774,97 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           .where(
             and(
               eq(
-                cuotas_credito.numero_cuota,
-                cuota.cuotas_credito.numero_cuota
+                pagos_credito.cuota_id,
+                cuota.cuotas_credito.cuota_id
               ),
-              eq(pagos_credito.pagado, false),
-              eq(pagos_credito.credito_id, credito.credito_id)
+              eq(pagos_credito.credito_id, credito.credito_id),
+              or(
+                ne(pagos_credito.validationStatus, "pending"),
+                and(
+                  eq(pagos_credito.validationStatus, "pending"),
+                  eq(pagos_credito.pagado, false),
+                  eq(pagos_credito.paymentFalse, false)
+                )
+              )
             )
           )
           .orderBy(asc(pagos_credito.pago_id));
 
-        // Priorizar el pago original (no_required) sobre cualquier otro
-        const existingPago = allExistingPagos.find(
+        // Último pago PARCIAL aún `pending` de esta cuota (todavía no pasó por
+        // /aplicar-pago). El query de arriba excluye los `pending`, pero para
+        // el SALDO VIGENTE sí los necesitamos: si entran dos pagos a la misma
+        // cuota antes de validar el primero, el segundo debe partir del saldo
+        // que dejó el primero y NO re-aplicar los mismos rubros
+        // (interés/IVA/seguro/membresías). Ref: crédito 197, cuota 6.
+        const [ultimoParcialPendiente] = await db
+          .select({ pago: pagos_credito })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+              eq(pagos_credito.credito_id, credito.credito_id),
+              eq(pagos_credito.validationStatus, "pending"),
+              eq(pagos_credito.paymentFalse, false)
+            )
+          )
+          .orderBy(desc(pagos_credito.pago_id))
+          .limit(1);
+
+        const pagoOriginal = allExistingPagos.find(
           (p) => p.pago.validationStatus === "no_required"
-        ) ?? allExistingPagos[0];
+        );
+        const tieneRestante = (pago: typeof pagos_credito.$inferSelect) =>
+          new Big(pago.interes_restante ?? 0)
+            .plus(pago.iva_12_restante ?? 0)
+            .plus(pago.seguro_restante ?? 0)
+            .plus(pago.gps_restante ?? 0)
+            .plus(pago.membresias ?? 0)
+            .plus(pago.capital_restante ?? 0)
+            .gt(0);
+        const esPagoSaldoElegible = (pago: typeof pagos_credito.$inferSelect) =>
+          pago.validationStatus === "validated" ||
+          (pago.validationStatus === "pending" &&
+            pago.pagado === false &&
+            pago.paymentFalse === false);
+        const ultimoPagoParcialConRestante = [...allExistingPagos]
+          .reverse()
+          .find(
+            ({ pago }) =>
+              esPagoSaldoElegible(pago) &&
+              tieneRestante(pago)
+          );
+        const tienePagosValidados = allExistingPagos.some(
+          ({ pago }) => pago.validationStatus === "validated"
+        );
+        // El pago original es la fila destino. Para el SALDO VIGENTE tomamos el
+        // abono parcial MÁS RECIENTE con restante —sea `validated` o `pending`—
+        // quedándonos con el de pago_id más alto. Así un 2.º pago a la misma
+        // cuota parte de lo que abonó el 1.º aunque aún no se haya validado, y
+        // no duplica interés/IVA/seguro/membresías.
+        const existingPago = pagoOriginal ?? allExistingPagos[0];
+        const candidatosSaldo = [
+          ultimoPagoParcialConRestante,
+          ultimoParcialPendiente && tieneRestante(ultimoParcialPendiente.pago)
+            ? ultimoParcialPendiente
+            : undefined,
+        ].filter(Boolean) as { pago: typeof pagos_credito.$inferSelect }[];
+        const saldoMasReciente = candidatosSaldo.sort(
+          (a, b) => b.pago.pago_id - a.pago.pago_id
+        )[0];
+        const pagoSaldoVigente = saldoMasReciente ?? existingPago;
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
         const interes_restante = new Big(
-          existingPago?.pago.interes_restante ?? 0
+          pagoSaldoVigente?.pago.interes_restante ?? 0
         );
-        const iva_restante = new Big(existingPago?.pago.iva_12_restante ?? 0);
+        const iva_restante = new Big(pagoSaldoVigente?.pago.iva_12_restante ?? 0);
         const seguro_restante = new Big(
-          existingPago?.pago.seguro_restante ?? 0
+          pagoSaldoVigente?.pago.seguro_restante ?? 0
         );
-        const gps_restante = new Big(existingPago?.pago.gps_restante ?? 0);
-        const membresias_restante = new Big(existingPago?.pago.membresias ?? 0);
+        const gps_restante = new Big(pagoSaldoVigente?.pago.gps_restante ?? 0);
+        const membresias_restante = new Big(pagoSaldoVigente?.pago.membresias ?? 0);
         const capital_restante_pago = new Big(
-          existingPago?.pago.capital_restante ?? 0
+          pagoSaldoVigente?.pago.capital_restante ?? 0
         );
 
         // Reiniciar todos los abonos
@@ -985,15 +1066,43 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           nuevo_gps_restante.eq(0) &&
           nuevo_membresias_restante.eq(0) &&
           nuevo_capital_restante.eq(0);
-        // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
-        // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        const cuota_pagada = todosRestantesEnCero && !!existingPago;
-        const totalPagado = abono_capital
+        let totalPagado = abono_capital
           .plus(abono_interes)
           .plus(abono_iva_12)
           .plus(abono_seguro)
           .plus(abono_gps)
           .plus(abono_membresias);
+        const esCuotaSeleccionadaInicial =
+          cuota.cuotas_credito.numero_cuota === cuotaApagar &&
+          cuotas_completas === 0 &&
+          cuotas_parciales === 0;
+        const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
+        const faltanteContraCuota = montoCuota.minus(totalPagado);
+
+        if (
+          !!existingPago &&
+          esCuotaSeleccionadaInicial &&
+          pagoExactoDeUnaCuota &&
+          !tienePagosValidados &&
+          !ultimoPagoParcialConRestante &&
+          todosRestantesEnCero &&
+          faltanteContraCuota.gt(0) &&
+          disponible_restante.gte(faltanteContraCuota)
+        ) {
+          console.log(
+            "⚠️ Restantes de cuota subestimados; reteniendo ajuste neutro en la cuota seleccionada:",
+            {
+              cuota: cuota.cuotas_credito.numero_cuota,
+              faltanteContraCuota: faltanteContraCuota.toString(),
+              disponibleRestante: disponible_restante.toString(),
+            }
+          );
+          totalPagado = totalPagado.plus(faltanteContraCuota);
+          disponible_restante = disponible_restante.minus(faltanteContraCuota);
+        }
+        // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
+        // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
+        const cuota_pagada = todosRestantesEnCero && !!existingPago;
         // Preparar datos del pago
         const currentDate = new Date();
         const months = [
@@ -1109,8 +1218,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 .where(
                   and(
                     eq(
-                      cuotas_credito.numero_cuota,
-                      cuota.cuotas_credito.numero_cuota
+                      cuotas_credito.cuota_id,
+                      cuota.cuotas_credito.cuota_id
                     ),
                     eq(pagos_credito.pago_id, existingPago.pago.pago_id),
                     eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
@@ -1141,28 +1250,6 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
-              await db
-                .update(pagos_credito)
-                .set({
-                  capital_restante: nuevo_capital_restante.toString(),
-                  interes_restante: nuevo_interes_restante.toString(),
-                  iva_12_restante: nuevo_iva_restante.toString(),
-                  seguro_restante: nuevo_seguro_restante.toString(),
-                  gps_restante: nuevo_gps_restante.toString(),
-                  membresias: nuevo_membresias_restante.toString(),
-                })
-                .from(cuotas_credito)
-                .where(
-                  and(
-                    eq(
-                      cuotas_credito.numero_cuota,
-                      cuota.cuotas_credito.numero_cuota
-                    ),
-                    eq(pagos_credito.pago_id, existingPago.pago.pago_id),
-                    eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-                  )
-                )
-                .returning();
 
               cuotas_parciales++;
               const guatemalaTimeString = new Date().toLocaleString("en-US", {
@@ -1352,15 +1439,15 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       const monthPaymentsBig = new Big(
         (await getPagosDelMesActual(credito_id)) ?? 0
       ).plus(abonoCapital);
-      const newCuota = await db
-        .insert(cuotas_credito)
-        .values({
-          credito_id: credito_id,
-          numero_cuota: ultimaCuotaPagada?.numero_cuota ?? cuotasPendientes[0]?.cuotas_credito?.numero_cuota ?? 0,
-          fecha_vencimiento: ultimaCuotaPagada?.fecha_vencimiento ?? cuotasPendientes[0]?.cuotas_credito?.fecha_vencimiento ?? new Date().toISOString().slice(0, 10),
-          pagado: true,
-        })
-        .returning();
+      const cuotaReferencia =
+        ultimaCuotaPagada ?? cuotasPendientes[0]?.cuotas_credito;
+
+      if (!cuotaReferencia?.cuota_id) {
+        throw new Error(
+          "No se encontró una cuota existente para enlazar el abono directo a capital"
+        );
+      }
+
       const guatemalaTimeString = new Date().toLocaleString("en-US", {
         timeZone: "America/Guatemala",
         year: "numeric",
@@ -1401,7 +1488,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         gps_restante: "0",
         total_restante: "0",
 
-        cuota_id: newCuota[0].cuota_id,
+        cuota_id: cuotaReferencia.cuota_id,
         numero_cuota: 0,
         llamada: llamada ?? "",
         fecha_pago: fechaGuatemala,
@@ -1670,7 +1757,7 @@ export async function insertarPago({
     .insert(pagos_credito)
     .values({
       credito_id: creditData.credito_id,
-      cuota_id: creditData.cuota_id ?? 0,
+      cuota_id: getCuotaIdForPaymentInsert(creditData.cuota_id),
       cuota: creditData.cuota?.toString() ?? "0",
       cuota_interes: creditData.cuota_interes?.toString() ?? "0",
 
@@ -1753,21 +1840,11 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       throw new Error(`Pago ${pago_id} no encontrado`);
     }
     if (pago.validationStatus === "capital") {
-      if (pago.credito_id === null) {
-        throw new Error("No se puede aplicar el abono: credito_id es null");
-      }
-      aplicarAbonoCapitalInversionistas(
-        pago.credito_id,
-        pago.abono_capital ?? "0",
-        pago_id
+      return applyCapitalPaymentAndBuildResponse(
+        pago,
+        pago_id,
+        aplicarAbonoCapitalInversionistas
       );
-      console.log("⚠️ El pago es un abono directo a capital");
-      return {
-        success: true,
-        applied: false,
-        message:
-          "Pago validado como abono a capital , se abonó a inversionistas correctamente",
-      };
     }
     if (pago.validationStatus === "reset") {
       if (pago.credito_id === null) {

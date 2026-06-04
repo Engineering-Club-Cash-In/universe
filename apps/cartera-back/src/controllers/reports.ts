@@ -7,6 +7,7 @@ import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import { db } from "../database";
 import { sql } from "drizzle-orm";
+import Big from "big.js";
 
 const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
@@ -1547,10 +1548,10 @@ export async function getPagosByVencimiento({
     }
   }
   if (rango_mora) {
-    if (rango_mora === "0-30") filters.push(sql`m.cuotas_atrasadas = 1 AND m.activa = true AND p.pagado = false`);
-    else if (rango_mora === "31-60") filters.push(sql`m.cuotas_atrasadas = 2 AND m.activa = true AND p.pagado = false`);
-    else if (rango_mora === "61-90") filters.push(sql`m.cuotas_atrasadas = 3 AND m.activa = true AND p.pagado = false`);
-    else if (rango_mora === "+90") filters.push(sql`m.cuotas_atrasadas >= 4 AND m.activa = true AND p.pagado = false`);
+    if (rango_mora === "0-30") filters.push(sql`mora_real.cuotas_atrasadas = 1`);
+    else if (rango_mora === "31-60") filters.push(sql`mora_real.cuotas_atrasadas = 2`);
+    else if (rango_mora === "61-90") filters.push(sql`mora_real.cuotas_atrasadas = 3`);
+    else if (rango_mora === "+90") filters.push(sql`mora_real.cuotas_atrasadas >= 4`);
   }
   const whereClause = sql.join(filters, sql` AND `);
 
@@ -1585,103 +1586,252 @@ export async function getPagosByVencimiento({
     ) cube_data ON true
   `;
 
-  // SQL para calcular el total por fila (Suma de restantes + Suma de abonos)
+  // Pre-agrega pagos_credito a 1 fila por (credito_id, cuota_id) para evitar doble conteo
+  // cuando una cuota tiene múltiples filas de pagos parciales. Cada fila original guarda un
+  // "snapshot" del saldo restante → SUM(X_restante + abono_X) infla los valores 2x-4x.
+  // Fórmula correcta: SUM(abono_X) + MIN(X_restante) = total pagado + saldo pendiente = obligación original.
+  // UNION ALL para cuota_id IS NULL: GROUP BY fusionaría NULLs incorrectamente.
+  const pagosDeduped = sql`
+    (
+      SELECT
+        pc.credito_id,
+        pc.cuota_id,
+        MIN(COALESCE(pc.capital_restante::numeric, 0))  + SUM(COALESCE(pc.abono_capital::numeric, 0))   AS capital_restante,
+        MIN(COALESCE(pc.interes_restante::numeric, 0))  + SUM(COALESCE(pc.abono_interes::numeric, 0))   AS interes_restante,
+        MIN(COALESCE(pc.iva_12_restante::numeric, 0))   + SUM(COALESCE(pc.abono_iva_12::numeric, 0))    AS iva_12_restante,
+        MIN(COALESCE(pc.seguro_restante::numeric, 0))   + SUM(COALESCE(pc.abono_seguro::numeric, 0))    AS seguro_restante,
+        MIN(COALESCE(pc.gps_restante::numeric, 0))      + SUM(COALESCE(pc.abono_gps::numeric, 0))       AS gps_restante,
+        MIN(COALESCE(pc.membresias::numeric, 0))        + SUM(COALESCE(pc.membresias_pago::numeric, 0)) AS membresias,
+        SUM(COALESCE(pc.monto_boleta::numeric, 0)) AS monto_boleta,
+        SUM(COALESCE(pc.monto_aplicado::numeric, 0)) AS monto_aplicado,
+        MIN(pc.fecha_vencimiento) AS fecha_vencimiento,
+        BOOL_OR(pc.pagado) AS pagado
+      FROM cartera.pagos_credito pc
+      WHERE pc.cuota_id IS NOT NULL
+        AND pc.cuota_id IN (
+          SELECT cuota_id 
+          FROM cartera.cuotas_credito 
+          WHERE fecha_vencimiento::date >= ${fechaInicio}::date 
+            AND fecha_vencimiento::date <= ${fechaFin}::date
+        )
+      GROUP BY pc.credito_id, pc.cuota_id
+
+      UNION ALL
+
+      SELECT
+        pc.credito_id,
+        pc.cuota_id,
+        COALESCE(pc.capital_restante::numeric, 0)  + COALESCE(pc.abono_capital::numeric, 0)   AS capital_restante,
+        COALESCE(pc.interes_restante::numeric, 0)  + COALESCE(pc.abono_interes::numeric, 0)   AS interes_restante,
+        COALESCE(pc.iva_12_restante::numeric, 0)   + COALESCE(pc.abono_iva_12::numeric, 0)    AS iva_12_restante,
+        COALESCE(pc.seguro_restante::numeric, 0)   + COALESCE(pc.abono_seguro::numeric, 0)    AS seguro_restante,
+        COALESCE(pc.gps_restante::numeric, 0)      + COALESCE(pc.abono_gps::numeric, 0)       AS gps_restante,
+        COALESCE(pc.membresias::numeric, 0)        + COALESCE(pc.membresias_pago::numeric, 0) AS membresias,
+        COALESCE(pc.monto_boleta::numeric, 0) AS monto_boleta,
+        COALESCE(pc.monto_aplicado::numeric, 0) AS monto_aplicado,
+        pc.fecha_vencimiento,
+        pc.pagado
+      FROM cartera.pagos_credito pc
+      WHERE pc.cuota_id IS NULL
+        AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
+        AND pc.fecha_vencimiento::date <= ${fechaFin}::date
+    ) p
+  `;
+
+  // Cada campo pre-agregado ya = MIN(restante) + SUM(abono) = obligación total de la cuota.
+  // No sumar abono_* por separado — están incluidos.
   const totalFilaSql = sql`(
-    COALESCE(p.capital_restante, 0)::numeric + 
-    COALESCE(p.interes_restante, 0)::numeric + 
-    COALESCE(p.iva_12_restante, 0)::numeric + 
-    COALESCE(p.seguro_restante, 0)::numeric + 
-    COALESCE(p.gps_restante, 0)::numeric + 
-    COALESCE(p.membresias, 0)::numeric + 
-    COALESCE(p.membresias_pago, 0)::numeric + 
-    COALESCE(p.abono_capital, 0)::numeric + 
-    COALESCE(p.abono_interes, 0)::numeric + 
-    COALESCE(p.abono_iva_12, 0)::numeric + 
-    COALESCE(p.abono_seguro, 0)::numeric + 
-    COALESCE(p.abono_gps, 0)::numeric
+    COALESCE(p.capital_restante, 0)::numeric +
+    COALESCE(p.interes_restante, 0)::numeric +
+    COALESCE(p.iva_12_restante, 0)::numeric +
+    COALESCE(p.seguro_restante, 0)::numeric +
+    COALESCE(p.gps_restante, 0)::numeric +
+    COALESCE(p.membresias, 0)::numeric +
+    COALESCE(p.monto_boleta, 0)::numeric
   )`;
 
-  // 1. Totales globales y conteo de créditos únicos
-  const totalesResult = await db.execute<any>(sql`
-    SELECT
-      COUNT(DISTINCT c.credito_id)::int AS total_count,
-      COALESCE(SUM(p.capital_restante::numeric + COALESCE(p.abono_capital, 0)::numeric), 0) AS total_capital_restante,
-      COALESCE(SUM(p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric), 0) AS total_interes_restante,
-      COALESCE(SUM(p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric), 0) AS total_iva_12_restante,
-      COALESCE(SUM(p.seguro_restante::numeric + COALESCE(p.abono_seguro, 0)::numeric), 0) AS total_seguro_restante,
-      COALESCE(SUM(p.gps_restante::numeric + COALESCE(p.abono_gps, 0)::numeric), 0) AS total_gps_restante,
-      COALESCE(SUM(p.membresias::numeric + COALESCE(p.membresias_pago, 0)::numeric), 0) AS total_membresias,
-      COALESCE(SUM((p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric) * COALESCE(cube_data.cash_in_pct, 0)), 0) AS total_interes_cube,
-      COALESCE(SUM((p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric) * COALESCE(cube_data.cash_in_pct, 0)), 0) AS total_iva_cube
-    FROM cartera.pagos_credito p
+  // Fragmentos SQL reutilizables entre query paginada y query de totales
+  const lateralCapAnterior = sql`
+    LEFT JOIN LATERAL (
+      SELECT pc_a.total_restante::numeric AS total_restante
+      FROM cartera.pagos_credito pc_a
+      LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
+      WHERE pc_a.credito_id = c.credito_id
+        AND pc_a."paymentFalse" = false
+        AND pc_a.total_restante IS NOT NULL
+        AND pc_a.total_restante::numeric > 0
+        AND COALESCE(qcc_a.fecha_vencimiento::date,
+              GREATEST(
+                COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
+                COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+              )
+            ) < ${fechaInicio}::date
+      ORDER BY COALESCE(qcc_a.fecha_vencimiento::date,
+                 GREATEST(
+                   COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
+                   COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+                 )
+               ) DESC, pc_a.pago_id DESC
+      LIMIT 1
+    ) cap_anterior ON true
+  `;
+
+  const commonFromJoins = sql`
+    FROM ${pagosDeduped}
     INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
     INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
     LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
     LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS cuotas_atrasadas
+      FROM cartera.cuotas_credito qc_mora
+      WHERE qc_mora.credito_id = c.credito_id
+        AND qc_mora.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+        AND qc_mora.pagado = false
+        AND NOT EXISTS (
+          SELECT 1
+          FROM cartera.pagos_credito pc_mora
+          WHERE pc_mora.cuota_id = qc_mora.cuota_id
+            AND pc_mora."paymentFalse" = false
+            AND pc_mora.pagado = true
+            AND pc_mora.validation_status IN ('validated', 'no_required')
+        )
+    ) mora_real ON true
     ${cubeSubquery}
+    ${lateralCapAnterior}
     WHERE ${whereClause}
-      AND ${totalFilaSql} <> 0
-  `);
+  `;
 
-  const totalesRow = totalesResult.rows[0];
-  const total = Number(totalesRow?.total_count ?? 0);
-  const offset = (page - 1) * pageSize;
+  const commonGroupHaving = sql`
+    GROUP BY
+      c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti,
+      c.capital, c.porcentaje_interes, c.cuota, c.seguro_10_cuotas, c.gps, c.membresias_pago,
+      cap_anterior.total_restante, mora_real.cuotas_atrasadas
+    HAVING SUM(${totalFilaSql}) <> 0
+  `;
 
-  // 2. Pagos agrupados por crédito
-  const pagosResult = await db.execute<any>(sql`
+  const pagosSelectFields = sql`
     SELECT
       c.credito_id,
       c.numero_credito_sifco,
       u.nombre AS nombre_usuario,
       a.nombre AS asesor,
       c.royalti,
+      c.porcentaje_interes,
+      c.cuota AS cuota_credito,
+      c.seguro_10_cuotas,
+      c.gps,
+      c.membresias_pago,
+      COALESCE(cap_anterior.total_restante, c.capital::numeric) AS capital_mes_anterior,
+      AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_in_pct,
       MIN(q.numero_cuota) AS cuota_min,
       MAX(q.numero_cuota) AS cuota_max,
-      COALESCE(SUM(p.capital_restante::numeric + COALESCE(p.abono_capital, 0)::numeric), 0) AS capital_restante,
-      COALESCE(SUM(p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric), 0) AS interes_restante,
-      COALESCE(SUM(p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric), 0) AS iva_12_restante,
-      COALESCE(SUM(p.seguro_restante::numeric + COALESCE(p.abono_seguro, 0)::numeric), 0) AS seguro_restante,
-      COALESCE(SUM(p.gps_restante::numeric + COALESCE(p.abono_gps, 0)::numeric), 0) AS gps_restante,
-      COALESCE(SUM(p.membresias::numeric + COALESCE(p.membresias_pago, 0)::numeric), 0) AS membresias,
       COALESCE(SUM(p.monto_boleta::numeric), 0) AS monto_boleta,
-      COALESCE(SUM((p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric) * COALESCE(cube_data.cash_in_pct, 0)), 0) AS interes_cube,
-      COALESCE(SUM((p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric) * COALESCE(cube_data.cash_in_pct, 0)), 0) AS iva_cube,
-      COALESCE(SUM(${totalFilaSql}), 0) AS total_pagos_del_mes,
+      COALESCE(SUM(p.monto_aplicado::numeric), 0) AS monto_aplicado,
       CASE
-        WHEN MAX(m.cuotas_atrasadas) = 1 THEN 'Mora 30'
-        WHEN MAX(m.cuotas_atrasadas) = 2 THEN 'Mora 60'
-        WHEN MAX(m.cuotas_atrasadas) = 3 THEN 'Mora 90'
-        WHEN MAX(m.cuotas_atrasadas) >= 4 THEN 'Mora 120+'
+        WHEN MAX(mora_real.cuotas_atrasadas) > 0 THEN COALESCE(MAX(m.monto_mora::numeric), 0)
+        ELSE 0
+      END AS monto_mora,
+      CASE
+        WHEN MAX(mora_real.cuotas_atrasadas) = 1 THEN 'Mora 30'
+        WHEN MAX(mora_real.cuotas_atrasadas) = 2 THEN 'Mora 60'
+        WHEN MAX(mora_real.cuotas_atrasadas) = 3 THEN 'Mora 90'
+        WHEN MAX(mora_real.cuotas_atrasadas) >= 4 THEN 'Mora 120+'
         ELSE 'Al día'
       END AS dias_mora
-    FROM cartera.pagos_credito p
-    INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
-    INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
-    INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
-    LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
-    LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
-    ${cubeSubquery}
-    WHERE ${whereClause}
-    GROUP BY c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti
-    HAVING SUM(${totalFilaSql}) <> 0
-    ORDER BY c.numero_credito_sifco
-    ${excel ? sql`` : sql`LIMIT ${pageSize} OFFSET ${offset}`}
-  `);
+  `;
 
-  const pagos = pagosResult.rows;
+  const recalcRow = (row: any) => {
+    const capitalAnterior = new Big(row.capital_mes_anterior || 0);
+    const porcentajeInteres = new Big(row.porcentaje_interes || 0).div(100);
+    const interesCalculado = capitalAnterior.times(porcentajeInteres).round(2);
+    const ivaCalculado = interesCalculado.times(0.12).round(2);
+    const seguro = new Big(row.seguro_10_cuotas || 0);
+    const gps = new Big(row.gps || 0);
+    const membresia = new Big(row.membresias_pago || 0);
+    const mora = new Big(row.monto_mora || 0);
+    const cuotaCredito = new Big(row.cuota_credito || 0);
+    let abonoCapitalCalculado = cuotaCredito.minus(interesCalculado).minus(ivaCalculado).minus(seguro).minus(gps).minus(membresia);
+    if (abonoCapitalCalculado.lt(0)) abonoCapitalCalculado = new Big(0);
+    if (abonoCapitalCalculado.gt(capitalAnterior)) abonoCapitalCalculado = capitalAnterior;
+    const cashInPct = new Big(row.cash_in_pct || 0);
+    const interesCube = interesCalculado.times(cashInPct).round(2);
+    const ivaCube = interesCube.times(0.12).round(2);
+    const totalPagosDelMes = abonoCapitalCalculado.plus(interesCalculado).plus(ivaCalculado).plus(seguro).plus(gps).plus(membresia);
+    return {
+      credito_id: row.credito_id,
+      numero_credito_sifco: row.numero_credito_sifco,
+      nombre_usuario: row.nombre_usuario,
+      asesor: row.asesor,
+      royalti: row.royalti,
+      cuota_min: row.cuota_min,
+      cuota_max: row.cuota_max,
+      dias_mora: row.dias_mora,
+      monto_boleta: Number(row.monto_boleta).toFixed(2),
+      monto_aplicado: Number(row.monto_aplicado).toFixed(2),
+      capital_restante: abonoCapitalCalculado.toFixed(2),
+      interes_restante: interesCalculado.toFixed(2),
+      iva_12_restante: ivaCalculado.toFixed(2),
+      seguro_restante: seguro.toFixed(2),
+      gps_restante: gps.toFixed(2),
+      membresias: membresia.toFixed(2),
+      mora: mora.toFixed(2),
+      interes_cube: interesCube.toFixed(2),
+      iva_cube: ivaCube.toFixed(2),
+      total_pagos_del_mes: totalPagosDelMes.toFixed(2),
+    };
+  };
 
+  // Excel: query completa sin LIMIT, totales en JS
   if (excel) {
+    const pagosResult = await db.execute<any>(sql`
+      ${pagosSelectFields}
+      ${commonFromJoins}
+      ${commonGroupHaving}
+      ORDER BY c.numero_credito_sifco
+    `);
+    const allPagosRecalculated = pagosResult.rows.map(recalcRow);
+
+    // Totales para fila resumen del Excel (JS, sobre todos los registros)
+    let totalCapitalRecalc = new Big(0);
+    let totalInteresRecalc = new Big(0);
+    let totalIvaRecalc = new Big(0);
+    let totalSeguroRecalc = new Big(0);
+    let totalGpsRecalc = new Big(0);
+    let totalMembresiasRecalc = new Big(0);
+    let totalInteresCubeRecalc = new Big(0);
+    let totalIvaCubeRecalc = new Big(0);
+    let totalMoraRecalc = new Big(0);
+    let totalMontoAplicadoRecalc = new Big(0);
+    let totalPagosDelMesRecalc = new Big(0);
+
+    allPagosRecalculated.forEach((p: any) => {
+      totalCapitalRecalc = totalCapitalRecalc.plus(p.capital_restante);
+      totalInteresRecalc = totalInteresRecalc.plus(p.interes_restante);
+      totalIvaRecalc = totalIvaRecalc.plus(p.iva_12_restante);
+      totalSeguroRecalc = totalSeguroRecalc.plus(p.seguro_restante);
+      totalGpsRecalc = totalGpsRecalc.plus(p.gps_restante);
+      totalMembresiasRecalc = totalMembresiasRecalc.plus(p.membresias);
+      totalInteresCubeRecalc = totalInteresCubeRecalc.plus(p.interes_cube);
+      totalIvaCubeRecalc = totalIvaCubeRecalc.plus(p.iva_cube);
+      totalMoraRecalc = totalMoraRecalc.plus(p.mora);
+      totalMontoAplicadoRecalc = totalMontoAplicadoRecalc.plus(p.monto_aplicado);
+      totalPagosDelMesRecalc = totalPagosDelMesRecalc.plus(p.total_pagos_del_mes);
+    });
+
+    {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet("Pagos por Vencimiento");
 
     const columns = [
-      { header: "No. SIFCO", key: "numero_credito_sifco", width: 15 },
-      { header: "Cliente", key: "nombre_usuario", width: 35 },
+      { header: "No. SIFCO", key: "numero_credito_sifco", width: 18 },
+      { header: "Cliente / Fecha Boleta", key: "nombre_usuario", width: 35 },
       { header: "Asesor", key: "asesor", width: 25 },
       { header: "Cuotas", key: "cuotas", width: 12 },
       { header: "Etapa Mora", key: "dias_mora", width: 15 },
-      { header: "Capital", key: "capital_restante", width: 15 },
+      { header: "Boletas Totales", key: "monto_aplicado", width: 16 },
+      { header: "Abono Capital", key: "capital_restante", width: 15 },
       { header: "Interés", key: "interes_restante", width: 15 },
       { header: "IVA 12%", key: "iva_12_restante", width: 15 },
       { header: "Seguro", key: "seguro_restante", width: 15 },
@@ -1690,6 +1840,7 @@ export async function getPagosByVencimiento({
       { header: "Int. CUBE", key: "interes_cube", width: 15 },
       { header: "IVA CUBE", key: "iva_cube", width: 15 },
       { header: "Royalty", key: "royalti", width: 15 },
+      { header: "Mora", key: "mora", width: 15 },
       { header: "Total Mes", key: "total_pagos_del_mes", width: 18 },
     ];
 
@@ -1719,11 +1870,88 @@ export async function getPagosByVencimiento({
       right: { style: "thin" as const, color: { argb: "D9D9D9" } },
     };
 
-    pagos.forEach((item: any, idx: number) => {
+    // Fila de totales
+    const totalesRowData = {
+      numero_credito_sifco: "TOTALES",
+      nombre_usuario: "",
+      asesor: "",
+      cuotas: "",
+      dias_mora: "",
+      monto_aplicado: Number(totalMontoAplicadoRecalc.toFixed(2)),
+      capital_restante: Number(totalCapitalRecalc.toFixed(2)),
+      interes_restante: Number(totalInteresRecalc.toFixed(2)),
+      iva_12_restante: Number(totalIvaRecalc.toFixed(2)),
+      seguro_restante: Number(totalSeguroRecalc.toFixed(2)),
+      gps_restante: Number(totalGpsRecalc.toFixed(2)),
+      membresias: Number(totalMembresiasRecalc.toFixed(2)),
+      interes_cube: Number(totalInteresCubeRecalc.toFixed(2)),
+      iva_cube: Number(totalIvaCubeRecalc.toFixed(2)),
+      royalti: "",
+      mora: Number(totalMoraRecalc.toFixed(2)),
+      total_pagos_del_mes: Number(totalPagosDelMesRecalc.toFixed(2)),
+    };
+    const totalesRow = sheet.addRow(totalesRowData);
+    totalesRow.font = { bold: true, size: 10 };
+    totalesRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "E2EFDA" } };
+    totalesRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.border = thinBorder;
+      cell.alignment = { vertical: "middle", horizontal: "right" };
+    });
+    totalesRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+
+    // Query bulk: todos los pagos detalle de todos los créditos en una sola llamada
+    const creditoIds = allPagosRecalculated.map((p: any) => Number(p.credito_id));
+    const abonosMap = new Map<number, any[]>();
+    if (creditoIds.length > 0) {
+      const abonosBulkResult = await db.execute<any>(sql`
+        SELECT
+          credito_id,
+          pago_id,
+          cuota_id,
+          cuota,
+          COALESCE(abono_capital, 0) AS abono_capital,
+          COALESCE(abono_interes, 0) AS abono_interes,
+          COALESCE(abono_iva_12, 0) AS abono_iva_12,
+          COALESCE(abono_seguro, 0) AS abono_seguro,
+          COALESCE(abono_gps, 0) AS abono_gps,
+          COALESCE(membresias_pago, 0) AS membresias,
+          COALESCE(abono_interes_ci, 0) AS interes_cube,
+          COALESCE(abono_iva_ci, 0) AS iva_cube,
+          COALESCE(mora, 0) AS mora,
+          COALESCE(monto_boleta, 0) AS monto_boleta,
+          COALESCE(monto_aplicado, 0) AS monto_aplicado,
+          TO_CHAR(fecha_boleta, 'YYYY-MM-DD') AS fecha_boleta,
+          TO_CHAR(fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
+          numeroautorizacion AS numero_boleta
+        FROM cartera.pagos_credito
+        WHERE credito_id = ANY(ARRAY[${sql.raw(creditoIds.join(","))}]::int[])
+          AND validation_status = 'validated'
+          AND "paymentFalse" = false
+          AND (
+            (cuota_id IS NOT NULL AND cuota_id IN (
+              SELECT cuota_id FROM cartera.cuotas_credito
+              WHERE fecha_vencimiento::date >= ${fechaInicio}::date
+                AND fecha_vencimiento::date <= ${fechaFin}::date
+            ))
+            OR (cuota_id IS NULL
+                AND fecha_vencimiento::date >= ${fechaInicio}::date
+                AND fecha_vencimiento::date <= ${fechaFin}::date)
+          )
+        ORDER BY credito_id ASC, fecha_boleta ASC, fecha_pago ASC
+      `);
+      for (const abono of abonosBulkResult.rows) {
+        const list = abonosMap.get(Number(abono.credito_id)) ?? [];
+        list.push(abono);
+        abonosMap.set(Number(abono.credito_id), list);
+      }
+    }
+
+    for (const [idx, item] of allPagosRecalculated.entries()) {
       const rowData = {
         ...item,
         cuotas: item.cuota_min === item.cuota_max ? item.cuota_min : `${item.cuota_min}-${item.cuota_max}`,
         royalti: item.cuota_min === 0 ? Number(item.royalti) : "--",
+        monto_aplicado: Number(item.monto_aplicado),
         capital_restante: Number(item.capital_restante),
         interes_restante: Number(item.interes_restante),
         iva_12_restante: Number(item.iva_12_restante),
@@ -1732,11 +1960,13 @@ export async function getPagosByVencimiento({
         membresias: Number(item.membresias),
         interes_cube: Number(item.interes_cube),
         iva_cube: Number(item.iva_cube),
+        mora: Number(item.mora),
         total_pagos_del_mes: Number(item.total_pagos_del_mes),
       };
 
       const r = sheet.addRow(rowData);
       const isEven = idx % 2 === 0;
+      r.font = { bold: true, size: 10 };
       r.eachCell({ includeEmpty: true }, (cell) => {
         cell.border = thinBorder;
         cell.alignment = { vertical: "middle", horizontal: "right" };
@@ -1744,13 +1974,47 @@ export async function getPagosByVencimiento({
           cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F5F9FF" } };
         }
       });
-      // Alinear texto a la izquierda para las primeras columnas
       r.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
       r.getCell(2).alignment = { horizontal: "left", vertical: "middle" };
       r.getCell(3).alignment = { horizontal: "left", vertical: "middle" };
       r.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
       r.getCell(5).alignment = { horizontal: "center", vertical: "middle" };
-    });
+
+      // Filas detalle (pagos individuales del crédito)
+      const abonos = abonosMap.get(Number(item.credito_id)) ?? [];
+      for (const abono of abonos) {
+        const fechaLabel = abono.fecha_boleta
+          ? `  └ ${abono.fecha_boleta}${abono.numero_boleta ? ` (${abono.numero_boleta})` : ""}`
+          : `  └ ${(abono.fecha_pago ?? "").slice(0, 10)}`;
+        const detalleRowData = {
+          numero_credito_sifco: "",
+          nombre_usuario: fechaLabel,
+          asesor: "",
+          cuotas: "",
+          dias_mora: "",
+          monto_aplicado: Number(abono.monto_aplicado || 0),
+          capital_restante: Number(abono.abono_capital || 0),
+          interes_restante: Number(abono.abono_interes || 0),
+          iva_12_restante: Number(abono.abono_iva_12 || 0),
+          seguro_restante: Number(abono.abono_seguro || 0),
+          gps_restante: Number(abono.abono_gps || 0),
+          membresias: Number(abono.membresias || 0),
+          interes_cube: Number(abono.interes_cube || 0),
+          iva_cube: Number(abono.iva_cube || 0),
+          royalti: "--",
+          mora: Number(abono.mora || 0),
+          total_pagos_del_mes: Number(abono.monto_aplicado || 0),
+        };
+        const dr = sheet.addRow(detalleRowData);
+        dr.font = { italic: true, size: 9, color: { argb: "555555" } };
+        dr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F8F8F8" } };
+        dr.eachCell({ includeEmpty: true }, (cell) => {
+          cell.border = thinBorder;
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+        });
+        dr.getCell(2).alignment = { horizontal: "left", vertical: "middle" };
+      }
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
     const filename = `reportes/pagos_vencimiento_${mes}_${anio}_${Date.now()}.xlsx`;
@@ -1775,7 +2039,132 @@ export async function getPagosByVencimiento({
 
     const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
     return { success: true, excelUrl: url };
-  }
+    } // close inner excel workbook block
+  } // close if (excel)
+
+  // Non-excel: 2 queries en paralelo — datos paginados (SQL LIMIT/OFFSET) + totales SQL (CTE)
+  const offset = (page - 1) * pageSize;
+  const [pagosPageResult, totalesResult] = await Promise.all([
+    db.execute<any>(sql`
+      ${pagosSelectFields}
+      ${commonFromJoins}
+      ${commonGroupHaving}
+      ORDER BY c.numero_credito_sifco
+      LIMIT ${pageSize} OFFSET ${offset}
+    `),
+    db.execute<any>(sql`
+      WITH per_credito AS (
+        SELECT
+          c.credito_id AS credito_id,
+          COALESCE(cap_anterior.total_restante, c.capital::numeric) AS cap_ant,
+          c.porcentaje_interes::numeric / 100 AS tasa,
+          c.cuota::numeric AS cuota_c,
+          COALESCE(c.seguro_10_cuotas::numeric, 0) AS seguro,
+          COALESCE(c.gps::numeric, 0) AS gps,
+          COALESCE(c.membresias_pago::numeric, 0) AS mem,
+          AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_pct,
+          MAX(mora_real.cuotas_atrasadas) AS cuotas_atrasadas,
+          CASE
+            WHEN MAX(mora_real.cuotas_atrasadas) > 0 THEN COALESCE(MAX(m.monto_mora::numeric), 0)
+            ELSE 0
+          END AS mora,
+          COALESCE(SUM(p.monto_aplicado::numeric), 0) AS monto_apl
+        ${commonFromJoins}
+        ${commonGroupHaving}
+      ),
+      calc AS (
+        SELECT *,
+          ROUND(cap_ant * tasa, 2) AS interes,
+          ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2) AS iva
+        FROM per_credito
+      ),
+      -- Por cada crédito: valor esperado del mes + deuda acumulada (cuotas vencidas no pagadas).
+      -- La deuda acumulada solo se calcula para créditos en mora (cuotas_atrasadas > 0).
+      calc_acum AS (
+        SELECT
+          calc.*,
+          LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant) AS exp_capital,
+          acum.acum_capital,
+          acum.acum_interes,
+          acum.acum_iva,
+          acum.acum_seguro,
+          acum.acum_gps,
+          acum.acum_mem
+        FROM calc
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(SUM(a.capital_restante), 0) AS acum_capital,
+            COALESCE(SUM(a.interes_restante), 0) AS acum_interes,
+            COALESCE(SUM(a.iva_12_restante), 0)  AS acum_iva,
+            COALESCE(SUM(a.seguro_restante), 0)  AS acum_seguro,
+            COALESCE(SUM(a.gps_restante), 0)     AS acum_gps,
+            COALESCE(SUM(a.membresias), 0)       AS acum_mem
+          FROM (
+            SELECT
+              COALESCE(MIN(pc_a.capital_restante::numeric), 0) AS capital_restante,
+              COALESCE(MIN(pc_a.interes_restante::numeric), 0) AS interes_restante,
+              COALESCE(MIN(pc_a.iva_12_restante::numeric),  0) AS iva_12_restante,
+              COALESCE(MIN(pc_a.seguro_restante::numeric),  0) AS seguro_restante,
+              COALESCE(MIN(pc_a.gps_restante::numeric),     0) AS gps_restante,
+              COALESCE(MIN(pc_a.membresias::numeric),       0) AS membresias
+            FROM cartera.cuotas_credito q_a
+            LEFT JOIN cartera.pagos_credito pc_a
+              ON pc_a.cuota_id = q_a.cuota_id
+              AND pc_a."paymentFalse" = false
+            WHERE q_a.credito_id = calc.credito_id
+              AND q_a.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+              AND q_a.pagado = false
+              AND NOT EXISTS (
+                SELECT 1 FROM cartera.pagos_credito pc2
+                WHERE pc2.cuota_id = q_a.cuota_id
+                  AND pc2."paymentFalse" = false
+                  AND pc2.pagado = true
+                  AND pc2.validation_status IN ('validated', 'no_required')
+              )
+            GROUP BY q_a.cuota_id
+            HAVING (
+                COALESCE(MIN(pc_a.capital_restante::numeric), 0)
+              + COALESCE(MIN(pc_a.interes_restante::numeric), 0)
+              + COALESCE(MIN(pc_a.iva_12_restante::numeric),  0)
+              + COALESCE(MIN(pc_a.seguro_restante::numeric),  0)
+              + COALESCE(MIN(pc_a.gps_restante::numeric),     0)
+              + COALESCE(MIN(pc_a.membresias::numeric),       0)
+            ) > 0
+            OR COUNT(pc_a.pago_id) = 0
+            OR MIN(pc_a.capital_restante) IS NULL
+          ) a
+        ) acum ON calc.cuotas_atrasadas > 0
+      )
+      SELECT
+        COUNT(*) AS total_count,
+        -- Totales esperados del mes (sin cambios)
+        COALESCE(SUM(exp_capital), 0) AS total_capital,
+        COALESCE(SUM(interes), 0) AS total_interes,
+        COALESCE(SUM(iva), 0) AS total_iva,
+        COALESCE(SUM(seguro), 0) AS total_seguro,
+        COALESCE(SUM(gps), 0) AS total_gps,
+        COALESCE(SUM(mem), 0) AS total_membresias,
+        COALESCE(SUM(ROUND(interes * cash_pct, 2)), 0) AS total_interes_cube,
+        COALESCE(SUM(ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2)), 0) AS total_iva_cube,
+        COALESCE(SUM(mora), 0) AS total_mora,
+        COALESCE(SUM(monto_apl), 0) AS total_monto_aplicado,
+        -- Totales acumulados: morosos => deuda acumulada, al día => esperado del mes
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_capital, 0) ELSE exp_capital END), 0) AS acum_total_capital,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_interes, 0) ELSE interes END), 0) AS acum_total_interes,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_iva, 0) ELSE iva END), 0) AS acum_total_iva,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_seguro, 0) ELSE seguro END), 0) AS acum_total_seguro,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_gps, 0) ELSE gps END), 0) AS acum_total_gps,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_mem, 0) ELSE mem END), 0) AS acum_total_membresias,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) ELSE ROUND(interes * cash_pct, 2) END), 0) AS acum_total_interes_cube,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN ROUND(ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) * 0.12, 2) ELSE ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2) END), 0) AS acum_total_iva_cube,
+        COALESCE(SUM(mora), 0) AS acum_total_mora
+      FROM calc_acum
+    `),
+  ]);
+
+  const pagos = pagosPageResult.rows.map(recalcRow);
+  const totRow = totalesResult.rows[0];
+  const total = Number(totRow?.total_count ?? 0);
 
   return {
     data: pagos,
@@ -1786,14 +2175,170 @@ export async function getPagosByVencimiento({
       totalPages: Math.ceil(total / pageSize),
     },
     totales: {
-      capital_restante: Number(totalesRow?.total_capital_restante ?? 0).toFixed(2),
-      interes_restante: Number(totalesRow?.total_interes_restante ?? 0).toFixed(2),
-      iva_12_restante: Number(totalesRow?.total_iva_12_restante ?? 0).toFixed(2),
-      seguro_restante: Number(totalesRow?.total_seguro_restante ?? 0).toFixed(2),
-      gps_restante: Number(totalesRow?.total_gps_restante ?? 0).toFixed(2),
-      membresias: Number(totalesRow?.total_membresias ?? 0).toFixed(2),
-      interes_cube: Number(totalesRow?.total_interes_cube ?? 0).toFixed(2),
-      iva_cube: Number(totalesRow?.total_iva_cube ?? 0).toFixed(2),
+      capital_restante: Number(totRow?.total_capital ?? 0).toFixed(2),
+      interes_restante: Number(totRow?.total_interes ?? 0).toFixed(2),
+      iva_12_restante: Number(totRow?.total_iva ?? 0).toFixed(2),
+      seguro_restante: Number(totRow?.total_seguro ?? 0).toFixed(2),
+      gps_restante: Number(totRow?.total_gps ?? 0).toFixed(2),
+      membresias: Number(totRow?.total_membresias ?? 0).toFixed(2),
+      interes_cube: Number(totRow?.total_interes_cube ?? 0).toFixed(2),
+      iva_cube: Number(totRow?.total_iva_cube ?? 0).toFixed(2),
+      mora: Number(totRow?.total_mora ?? 0).toFixed(2),
+    },
+    totalesAcumulado: {
+      capital_restante: Number(totRow?.acum_total_capital ?? 0).toFixed(2),
+      interes_restante: Number(totRow?.acum_total_interes ?? 0).toFixed(2),
+      iva_12_restante: Number(totRow?.acum_total_iva ?? 0).toFixed(2),
+      seguro_restante: Number(totRow?.acum_total_seguro ?? 0).toFixed(2),
+      gps_restante: Number(totRow?.acum_total_gps ?? 0).toFixed(2),
+      membresias: Number(totRow?.acum_total_membresias ?? 0).toFixed(2),
+      interes_cube: Number(totRow?.acum_total_interes_cube ?? 0).toFixed(2),
+      iva_cube: Number(totRow?.acum_total_iva_cube ?? 0).toFixed(2),
+      mora: Number(totRow?.acum_total_mora ?? 0).toFixed(2),
     },
   };
+}
+
+export async function getAbonosDelMesPorCredito({
+  credito_id,
+  mes,
+  anio,
+}: {
+  credito_id: number;
+  mes: number;
+  anio: number;
+}) {
+  const fechaInicio = `${anio}-${String(mes).padStart(2, "0")}-01`;
+  const fechaFinDate = new Date(anio, mes, 0);
+  const fechaFin = `${anio}-${String(mes).padStart(2, "0")}-${String(fechaFinDate.getDate()).padStart(2, "0")}`;
+
+  const result = await db.execute<any>(sql`
+    SELECT 
+      pago_id,
+      cuota_id,
+      cuota,
+      COALESCE(abono_capital, 0) AS abono_capital,
+      COALESCE(abono_interes, 0) AS abono_interes,
+      COALESCE(abono_iva_12, 0) AS abono_iva_12,
+      COALESCE(abono_seguro, 0) AS abono_seguro,
+      COALESCE(abono_gps, 0) AS abono_gps,
+      COALESCE(membresias_pago, 0) AS membresias,
+      COALESCE(abono_interes_ci, 0) AS interes_cube,
+      COALESCE(abono_iva_ci, 0) AS iva_cube,
+      COALESCE(mora, 0) AS mora,
+      COALESCE(otros, '0') AS otros,
+      COALESCE(monto_boleta, 0) AS monto_boleta,
+      COALESCE(monto_aplicado, 0) AS monto_aplicado,
+      TO_CHAR(fecha_boleta, 'YYYY-MM-DD') AS fecha_boleta,
+      TO_CHAR(fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
+      numeroautorizacion AS numero_boleta
+    FROM cartera.pagos_credito
+    WHERE credito_id = ${credito_id}
+      AND validation_status = 'validated'
+      AND "paymentFalse" = false
+      AND (
+        (cuota_id IS NOT NULL AND cuota_id IN (
+          SELECT cuota_id FROM cartera.cuotas_credito
+          WHERE fecha_vencimiento::date >= ${fechaInicio}::date
+            AND fecha_vencimiento::date <= ${fechaFin}::date
+        ))
+        OR (cuota_id IS NULL
+            AND fecha_vencimiento::date >= ${fechaInicio}::date
+            AND fecha_vencimiento::date <= ${fechaFin}::date)
+      )
+    ORDER BY fecha_boleta ASC, fecha_pago ASC
+  `);
+
+  return result.rows;
+}
+
+export async function getAcumuladoPorCredito({ credito_id }: { credito_id: number }) {
+  const result = await db.execute<any>(sql`
+    SELECT
+      q.numero_cuota,
+      TO_CHAR(q.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento,
+      COALESCE(MIN(pc.capital_restante::numeric),  0) AS capital_restante,
+      COALESCE(MIN(pc.interes_restante::numeric),  0) AS interes_restante,
+      COALESCE(MIN(pc.iva_12_restante::numeric),   0) AS iva_12_restante,
+      COALESCE(MIN(pc.seguro_restante::numeric),   0) AS seguro_restante,
+      COALESCE(MIN(pc.gps_restante::numeric),      0) AS gps_restante,
+      COALESCE(MIN(pc.membresias::numeric),        0) AS membresias,
+      COALESCE(MIN(pc.capital_restante::numeric),  0)
+        + COALESCE(MIN(pc.interes_restante::numeric),  0)
+        + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
+        + COALESCE(MIN(pc.seguro_restante::numeric),   0)
+        + COALESCE(MIN(pc.gps_restante::numeric),      0)
+        + COALESCE(MIN(pc.membresias::numeric),        0) AS total_restante,
+      ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) AS interes_cube,
+      ROUND(ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) * 0.12, 2) AS iva_cube
+    FROM cartera.cuotas_credito q
+    INNER JOIN cartera.creditos c ON c.credito_id = q.credito_id
+    LEFT JOIN cartera.pagos_credito pc
+      ON pc.cuota_id = q.cuota_id
+      AND pc."paymentFalse" = false
+    LEFT JOIN LATERAL (
+      SELECT
+        COALESCE((
+          SELECT
+            CASE
+              WHEN COALESCE(SUM(ci_all.monto_aportado::numeric), 0) > 0 OR c.capital::numeric > 0 THEN
+                (COALESCE(SUM(
+                  ci_all.monto_aportado::numeric *
+                  CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
+                       ELSE ci_all.porcentaje_cash_in::numeric
+                  END
+                ), 0) / 100.0
+                + GREATEST(0, c.capital::numeric - COALESCE(SUM(ci_all.monto_aportado::numeric), 0)))
+                / NULLIF(GREATEST(c.capital::numeric, COALESCE(SUM(ci_all.monto_aportado::numeric), 0)), 0)
+              WHEN COUNT(*) > 0 THEN
+                AVG(CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
+                         ELSE ci_all.porcentaje_cash_in::numeric END) / 100.0
+              ELSE 0
+            END
+          FROM cartera.creditos_inversionistas ci_all
+          WHERE ci_all.credito_id = q.credito_id
+        ), 0) AS cash_in_pct
+    ) cube_data ON true
+    WHERE q.credito_id = ${credito_id}
+      AND q.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+      AND q.pagado = false
+      AND NOT EXISTS (
+        SELECT 1 FROM cartera.pagos_credito pc2
+        WHERE pc2.cuota_id = q.cuota_id
+          AND pc2."paymentFalse" = false
+          AND pc2.pagado = true
+          AND pc2.validation_status IN ('validated', 'no_required')
+      )
+    GROUP BY q.cuota_id, q.numero_cuota, q.fecha_vencimiento
+    HAVING (
+        COALESCE(MIN(pc.capital_restante::numeric),  0)
+        + COALESCE(MIN(pc.interes_restante::numeric),  0)
+        + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
+        + COALESCE(MIN(pc.seguro_restante::numeric),   0)
+        + COALESCE(MIN(pc.gps_restante::numeric),      0)
+        + COALESCE(MIN(pc.membresias::numeric),        0)
+      ) > 0
+      OR COUNT(pc.pago_id) = 0
+      OR MIN(pc.capital_restante) IS NULL
+    ORDER BY q.fecha_vencimiento ASC
+  `);
+
+  const cuotas = result.rows;
+
+  const totales = cuotas.reduce(
+    (acc: any, row: any) => ({
+      capital:      acc.capital      + Number(row.capital_restante),
+      interes:      acc.interes      + Number(row.interes_restante),
+      iva:          acc.iva          + Number(row.iva_12_restante),
+      seguro:       acc.seguro       + Number(row.seguro_restante),
+      gps:          acc.gps          + Number(row.gps_restante),
+      membresias:   acc.membresias   + Number(row.membresias),
+      interes_cube: acc.interes_cube + Number(row.interes_cube),
+      iva_cube:     acc.iva_cube     + Number(row.iva_cube),
+      total:        acc.total        + Number(row.total_restante),
+    }),
+    { capital: 0, interes: 0, iva: 0, seguro: 0, gps: 0, membresias: 0, interes_cube: 0, iva_cube: 0, total: 0 }
+  );
+
+  return { cuotas, totales };
 }

@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { db } from "../database";
 import {
@@ -37,6 +37,13 @@ const compraCarteraAceptadaSchema = z.object({
     .array(z.number().int().positive())
     .min(1, "Debe enviar al menos un crédito"),
   notas_adicionales: z.string().optional(),
+});
+
+const extenderCompraCarteraSchema = z.object({
+  creditos: z
+    .array(z.number().int().positive())
+    .min(1, "Debe enviar al menos un crédito"),
+  inversionista_id: z.number().int().positive(),
 });
 
 // ================================================================
@@ -264,6 +271,7 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         | "reinversion_interes"
         | "reinversion_total"
         | "reinversion_variable"
+        | "reinversion_excedente"
         | "reinversion_combinada"
         | null,
       rows: (rowsPorCredito.get(c.credito_id) ?? [])
@@ -368,6 +376,7 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
           reinversion_interes: "Reinversión de Interés",
           reinversion_total: "Reinversión Total",
           reinversion_variable: "Reinversión Variable",
+          reinversion_excedente: "Reinversión Excedente",
           reinversion_combinada: "Reinversión Combinada",
         };
 
@@ -432,6 +441,70 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
     return {
       success: false,
       message: "Error al notificar la aceptación de compra de cartera",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+export const extenderCompraCartera = async ({ body, set }: any) => {
+  try {
+    const parseResult = extenderCompraCarteraSchema.safeParse(body);
+    if (!parseResult.success) {
+      set.status = 400;
+      return {
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+
+    const { creditos: creditoIds, inversionista_id } = parseResult.data;
+    const ahora = nowGT();
+
+    const updateRes = await db
+      .update(creditos_inversionistas_espejo)
+      .set({
+        compra_cartera_extendida_at: ahora,
+        updated_at: ahora,
+      })
+      .where(
+        and(
+          inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
+          eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id),
+          eq(creditos_inversionistas_espejo.status, "pendiente_revision"),
+          isNotNull(creditos_inversionistas_espejo.aceptada_at),
+          isNull(creditos_inversionistas_espejo.compra_cartera_extendida_at),
+        ),
+      )
+      .returning({
+        credito_id: creditos_inversionistas_espejo.credito_id,
+        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+        compra_cartera_extendida_at:
+          creditos_inversionistas_espejo.compra_cartera_extendida_at,
+      });
+
+    if (updateRes.length === 0) {
+      set.status = 409;
+      return {
+        success: false,
+        message:
+          "La compra no se pudo extender. Puede que ya haya sido extendida, no esté aceptada o ya no esté pendiente.",
+      };
+    }
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Compra de cartera extendida 24 horas correctamente.",
+      creditos_extendidos: updateRes.length,
+      compra_cartera_extendida_at: ahora,
+    };
+  } catch (error) {
+    console.error("[extenderCompraCartera] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al extender la compra de cartera",
       error: error instanceof Error ? error.message : String(error),
     };
   }

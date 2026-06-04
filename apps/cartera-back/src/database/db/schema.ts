@@ -38,6 +38,7 @@
     "reinversion_interes",
     "reinversion_total",
     "reinversion_variable",
+    "reinversion_excedente",
     "reinversion_combinada"
   ]);
 
@@ -218,6 +219,36 @@
 
     createdAt: timestamp("createdat").defaultNow(),
   });
+  // 📊 Cierre mensual de cartera — foto del estado por cada statusCredit.
+  //    El job corre el día 5 de cada mes y `periodo` apunta al mes anterior (el que se cierra).
+  //    `capital_total` = suma del campo capital (monto colocado) de los créditos en ese estado.
+  //    Las columnas de mora reflejan el atraso ACTUAL al momento de generar la foto.
+  export const cierre_mensual = customSchema.table(
+    "cierre_mensual",
+    {
+      id: serial("id").primaryKey(),
+      periodo: date("periodo").notNull(), // Primer día del mes cerrado, ej. 2026-05-01 = cierre de mayo
+      status_credit: text("status_credit").notNull(),
+      cantidad_creditos: integer("cantidad_creditos").notNull().default(0),
+      capital_total: numeric("capital_total", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      creditos_con_mora: integer("creditos_con_mora").notNull().default(0),
+      capital_en_mora: numeric("capital_en_mora", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+    },
+    (table) => ({
+      uqPeriodoStatus: uniqueIndex("uq_cierre_mensual_periodo_status").on(
+        table.periodo,
+        table.status_credit
+      ),
+    })
+  );
+
   export const moras_credito = customSchema.table("moras_credito", {
     mora_id: serial("mora_id").primaryKey(),
     credito_id: integer("credito_id")
@@ -443,6 +474,7 @@
       status: statusCreditoInversionistaEspejoEnum("status").notNull().default("completado"),
       aceptada_at: timestamp("aceptada_at", { withTimezone: true }),
       aceptada_por: text("aceptada_por"),
+      compra_cartera_extendida_at: timestamp("compra_cartera_extendida_at", { withTimezone: true }),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
@@ -471,6 +503,8 @@
       tipo_operacion: varchar("tipo_operacion", { length: 30 }).notNull(),
       tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
       status: statusCreditoInversionistaEspejoEnum("status").notNull(),
+      pendiente_facturar: boolean("pendiente_facturar").notNull().default(false),
+      fecha_completada: timestamp("fecha_completada", { withTimezone: true }),
       fecha: timestamp("fecha", { withTimezone: true }).notNull().$default(() => new Date()),
       created_at: timestamp("created_at", { withTimezone: true }).notNull().$default(() => new Date()),
       updated_at: timestamp("updated_at", { withTimezone: true }),
@@ -644,6 +678,27 @@
         .notNull()
         .default("NO_LIQUIDADO"),
       cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
+
+      // Desglose del interés/IVA cuando hay compras en el mes anterior.
+      // _sin_compras: parte que el inversionista ya tenía → interés mensual completo.
+      // _con_compras: parte aportada por compras del mes → interés proporcional.
+      // abono_interes / abono_iva_12 siguen siendo la suma de ambos.
+      abono_interes_sin_compras: numeric("abono_interes_sin_compras", {
+        precision: 18,
+        scale: 10,
+      }),
+      abono_interes_con_compras: numeric("abono_interes_con_compras", {
+        precision: 18,
+        scale: 10,
+      }),
+      abono_iva_12_sin_compras: numeric("abono_iva_12_sin_compras", {
+        precision: 18,
+        scale: 2,
+      }),
+      abono_iva_12_con_compras: numeric("abono_iva_12_con_compras", {
+        precision: 18,
+        scale: 2,
+      }),
 
       // FK al abono a capital asociado (nullable)
       abono_capital_id: integer("abono_capital_id").references(
@@ -1023,6 +1078,53 @@
     created_by: integer("created_by").references(() => platform_users.id),
   });
 
+  // ============================================
+  // 🆕 TABLA: facturas_fallidas_sat
+  //    Registro de facturas que están ACTIVA en BD pero NO se
+  //    encontraron en SAT al verificarlas con obtenerPorUUID.
+  // ============================================
+  export const facturas_fallidas_sat = customSchema.table("facturas_fallidas_sat", {
+    id: serial("id").primaryKey(),
+
+    // Una fila por factura (UNIQUE para upsert / no duplicar)
+    factura_id: integer("factura_id")
+      .notNull()
+      .unique()
+      .references(() => facturas_electronicas.factura_id),
+
+    // Datos de la factura (copiados para el reporte)
+    uuid: varchar("uuid", { length: 255 }).notNull(),
+    serie: varchar("serie", { length: 50 }).notNull(),
+    numero: varchar("numero", { length: 100 }).notNull(),
+    emisor_nit: varchar("emisor_nit", { length: 30 }),
+    emisor_nombre: varchar("emisor_nombre", { length: 200 }),
+    receptor_nit: varchar("receptor_nit", { length: 30 }),
+    receptor_nombre: varchar("receptor_nombre", { length: 200 }),
+    monto_total: numeric("monto_total", { precision: 18, scale: 2 }),
+    fecha_certificacion: timestamp("fecha_certificacion"),
+
+    // Resultado de la verificación
+    mensaje_sat: text("mensaje_sat"),
+    intentos: integer("intentos").notNull().default(1),
+    status: varchar("status", { length: 20 }).notNull().default("PENDIENTE"), // PENDIENTE | RESUELTA
+
+    // Metadata
+    detectada_at: timestamp("detectada_at").defaultNow().notNull(),
+    resuelta_at: timestamp("resuelta_at"),
+    updated_at: timestamp("updated_at").defaultNow().notNull(),
+  });
+
+  // ============================================
+  // 🆕 TABLA: job_checkpoints
+  //    Cursor genérico para jobs incrementales (arrancar desde
+  //    donde se quedó). Ej: verificar_facturas_sat.
+  // ============================================
+  export const job_checkpoints = customSchema.table("job_checkpoints", {
+    job_name: varchar("job_name", { length: 100 }).primaryKey(),
+    last_factura_id: integer("last_factura_id").notNull().default(0),
+    updated_at: timestamp("updated_at").defaultNow().notNull(),
+  });
+
 
   // 🆕 TABLA: liquidaciones
   // ============================================
@@ -1226,6 +1328,28 @@
     updated_at: timestamp("updated_at").defaultNow(),
   });
 
+  export const historico_liquidaciones_espejo = customSchema.table(
+    "historico_liquidaciones_espejo",
+    {
+      id: serial("id").primaryKey(),
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
+      fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+      inversionista_id: integer("inversionista_id")
+        .notNull()
+        .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      liquidacion_id: integer("liquidacion_id")
+        .references(() => liquidaciones.liquidacion_id, { onDelete: "set null" }),
+    },
+    (t) => ({
+      ixInvCred: index("ix_historico_liq_inv_cred").on(t.inversionista_id, t.credito_id),
+      ixFecha: index("ix_historico_liq_fecha").on(t.fecha),
+      ixLiquidacion: index("ix_historico_liq_liquidacion_id").on(t.liquidacion_id),
+    })
+  );
+
   // ── Recibos genéricos (sin FK a créditos) ──
   export const recibos_genericos = customSchema.table("recibos_genericos", {
     id: serial("id").primaryKey(),
@@ -1247,6 +1371,29 @@
     concepto: varchar("concepto", { length: 300 }).notNull(),
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
   });
+
+  // ── Historial de cambios de monto_aportado en creditos_inversionistas_espejo ──
+  export const historico_monto_aportado_espejo = customSchema.table(
+    "historico_monto_aportado_espejo",
+    {
+      id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+      txid: bigint("txid", { mode: "number" }).notNull(),
+      operacion: text("operacion").notNull(),
+      credito_id: integer("credito_id").notNull().references(() => creditos.credito_id, { onDelete: "cascade" }),
+      inversionista_id: integer("inversionista_id").notNull().references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+      monto_anterior: numeric("monto_anterior", { precision: 18, scale: 8 }),
+      monto_nuevo: numeric("monto_nuevo", { precision: 18, scale: 8 }),
+      platform_user_id: integer("platform_user_id").references(() => platform_users.id, { onDelete: "set null" }),
+      user_email: varchar("user_email", { length: 200 }),
+      source: text("source").notNull().default("unknown"),
+      fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => ({
+      ixTxid:   index("ix_hist_mont_txid").on(t.txid),
+      ixCred:   index("ix_hist_mont_cred").on(t.credito_id, t.inversionista_id),
+      ixFecha:  index("ix_hist_mont_fecha").on(t.fecha),
+    })
+  );
 
   // ── Audit logs ──
   export const audit_logs = customSchema.table("audit_logs", {

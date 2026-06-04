@@ -138,6 +138,7 @@ export const creditRouter = new Elysia()
     fecha_hasta,
     capital_min,
     capital_max,
+    estados_credito,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -244,6 +245,12 @@ export const creditRouter = new Elysia()
 
   const capitalMinParam = capital_min !== undefined ? Number(capital_min) : undefined;
   const capitalMaxParam = capital_max !== undefined ? Number(capital_max) : undefined;
+  const estadosCreditoArray = estados_credito
+    ? String(estados_credito)
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+    : undefined;
 
   if (capitalMinParam !== undefined && isNaN(capitalMinParam)) {
     set.status = 400;
@@ -297,7 +304,8 @@ export const creditRouter = new Elysia()
         fechaHastaParam,
         numerosCreditoSifcoArray,
         capitalMinParam,
-        capitalMaxParam
+        capitalMaxParam,
+        estadosCreditoArray
       );
       set.status = 200;
       return result;
@@ -340,6 +348,7 @@ export const creditRouter = new Elysia()
         fecha_hasta,
         capital_min,
         capital_max,
+        estados_credito,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -352,6 +361,9 @@ export const creditRouter = new Elysia()
       }
 
       const sifcosLimpios = (numeros_credito_sifco as string[] | undefined)
+        ?.map((s: string) => s.trim())
+        .filter((s: string) => s.length > 0);
+      const estadosCreditoLimpios = (estados_credito as string[] | undefined)
         ?.map((s: string) => s.trim())
         .filter((s: string) => s.length > 0);
 
@@ -396,7 +408,8 @@ export const creditRouter = new Elysia()
           fecha_hasta ?? undefined,
           sifcosLimpios,
           capital_min,
-          capital_max
+          capital_max,
+          estadosCreditoLimpios
         );
         set.status = 200;
         return result;
@@ -442,6 +455,7 @@ export const creditRouter = new Elysia()
         fecha_hasta: t.Optional(t.String()),
         capital_min: t.Optional(t.Number()),
         capital_max: t.Optional(t.Number()),
+        estados_credito: t.Optional(t.Array(t.String())),
       }),
     }
   )

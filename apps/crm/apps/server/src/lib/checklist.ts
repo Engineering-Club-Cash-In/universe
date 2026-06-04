@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db";
-import { analysisChecklists, opportunities } from "../db/schema";
+import { analysisChecklists, opportunities, opportunityDocuments } from "../db/schema";
 
 /**
  * Updates the analysis checklist when a client document is uploaded
@@ -27,6 +27,16 @@ export async function updateChecklistForClientDocument(
 		console.log("Existing checklist found:", existing.id);
 
 		const checklistData = existing.checklistData as any;
+		const currentDocuments = await db
+			.select({
+				id: opportunityDocuments.id,
+				documentType: opportunityDocuments.documentType,
+			})
+			.from(opportunityDocuments)
+			.where(eq(opportunityDocuments.opportunityId, opportunityId));
+		const currentDocumentsByType = new Map(
+			currentDocuments.map((doc) => [doc.documentType, doc.id]),
+		);
 
 		// Find the document item in the documentos section
 		const docItem = checklistData.sections.documentos.items.find(
@@ -52,9 +62,12 @@ export async function updateChecklistForClientDocument(
 			return; // Document type not in checklist, that's OK
 		}
 
-		// Mark as uploaded and add the documentId
-		docItem.uploaded = true;
-		docItem.documentId = documentId;
+		// Rebuild client document upload state from the source of truth in DB.
+		for (const item of checklistData.sections.documentos.items) {
+			const currentDocumentId = currentDocumentsByType.get(item.documentType);
+			item.uploaded = !!currentDocumentId;
+			item.documentId = currentDocumentId;
+		}
 
 		// Recalculate documentos section completion
 		checklistData.sections.documentos.completed =

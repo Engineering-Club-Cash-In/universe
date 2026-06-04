@@ -31,9 +31,9 @@ export const morasRouter = new Elysia()
   /**
    * Actualizar una mora (incremento o decremento)
    */
-  .post("/mora/update", async ({ body, set }) => {
+  .post("/mora/update", async ({ body, user, set }: any) => {
     try {
-      const result = await updateMora(body);
+      const result = await updateMora({ ...body, usuario_email: user?.email });
       set.status = result.success ? 200 : 400;
       return result;
     } catch (err) {
@@ -67,9 +67,13 @@ export const morasRouter = new Elysia()
   /**
    * Condonar mora de un crédito
    */
-  .post("/mora/condonar", async ({ body, set }) => {
+  .post("/mora/condonar", async ({ body, user, set }: any) => {
     try {
-      const result = await condonarMora(body);
+      const result = await condonarMora({
+        credito_id: body.credito_id,
+        motivo: body.motivo,
+        usuario_email: user?.email ?? body.usuario_email,
+      });
       set.status = result.success ? 200 : 400;
       return result;
     } catch (err) {
@@ -80,7 +84,7 @@ export const morasRouter = new Elysia()
     body: t.Object({
       credito_id: t.Number(),
       motivo: t.String(),
-      usuario_email: t.String(),
+      usuario_email: t.Optional(t.String()),
     })
   })
 

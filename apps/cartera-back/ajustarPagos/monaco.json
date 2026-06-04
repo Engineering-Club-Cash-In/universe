@@ -1,0 +1,20 @@
+  {
+    "inversionista_id": 127,
+    "inversionista_nombre": "Selvyn",
+    "liquidacion_id": 447,
+    "cambios": [
+      {
+        "credito_id": 8707,
+        "abono_interes": 8.85,
+        "iva": 1.06,
+        "abono_capital": 4.64,
+        "monto_aportado": 838.39
+      },
+       {
+        "credito_id": 8700,
+        "monto_aportado": 49445.11
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  }

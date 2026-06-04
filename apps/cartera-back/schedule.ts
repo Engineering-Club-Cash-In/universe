@@ -2,6 +2,11 @@ import schedule from 'node-schedule';
 import { procesarMoras } from './src/controllers/latefee';
 import { upsertEfectividadAsesores } from './src/controllers/paymentsByAdvisor';
 import { expirarCompraCarteraVencidas } from './src/controllers/expirarCompraCartera';
+import { generarCierreMensual } from './src/controllers/cierreMensual';
+import {
+  verificarFacturasSat,
+  reportarFacturasFallidasSat,
+} from './src/controllers/verificarFacturasSat';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -52,6 +57,44 @@ export function iniciarTareasProgramadas() {
       );
     } catch (error) {
       console.error('❌ Error al ejecutar expirarCompraCarteraVencidas:', error);
+    }
+  });
+
+  // 📊 Cierre mensual de cartera - día 5 de cada mes a las 00:00 hora Guatemala.
+  //    Genera la foto del mes ANTERIOR (el que se cierra): conteo y capital por estado,
+  //    más el detalle de mora actual al momento de correr.
+  schedule.scheduleJob({ rule: '0 0 5 * *', tz: TZ_GUATEMALA }, async () => {
+    console.log('🗓️ Ejecutando generarCierreMensual (día 5, 00:00 Guatemala)...');
+    try {
+      const res = await generarCierreMensual();
+      console.log(`✅ cierreMensual: periodo=${res.periodo}, filas=${res.filas}`);
+    } catch (error) {
+      console.error('❌ Error al ejecutar generarCierreMensual:', error);
+    }
+  });
+
+  // 🧾 Verificación de facturas en SAT - cada 15 min, 8:00–19:00 hora Guatemala.
+  //    Revisa las facturas ACTIVA nuevas (desde el último cursor) y registra en
+  //    cartera.facturas_fallidas_sat las que NO se encuentran en SAT.
+  schedule.scheduleJob({ rule: '*/15 8-19 * * *', tz: TZ_GUATEMALA }, async () => {
+    console.log('🧾 Ejecutando verificarFacturasSat...');
+    try {
+      const res = await verificarFacturasSat();
+      console.log(`✅ verificarFacturasSat: revisadas=${res.revisadas}, fallidas=${res.fallidas}`);
+    } catch (error) {
+      console.error('❌ Error al ejecutar verificarFacturasSat:', error);
+    }
+  });
+
+  // 📧 Reporte por correo de facturas fallidas - cada hora, 8:00–19:00 hora Guatemala.
+  //    Envía todas las fallidas PENDIENTE; si no hay, no envía correo.
+  schedule.scheduleJob({ rule: '0 8-19 * * *', tz: TZ_GUATEMALA }, async () => {
+    console.log('📧 Ejecutando reportarFacturasFallidasSat...');
+    try {
+      const res = await reportarFacturasFallidasSat();
+      console.log(`✅ reportarFacturasFallidasSat: enviadas=${res.enviadas}`);
+    } catch (error) {
+      console.error('❌ Error al ejecutar reportarFacturasFallidasSat:', error);
     }
   });
 

@@ -6,6 +6,7 @@ import {
   getCreditCandidatesService,
   devolverPendientesACubeService,
   compraCarteraAceptadaService,
+  extenderCompraCarteraService,
   type CompletarEspejoPayload,
   type CompletarEspejoResponse,
   type ReemplazarInversionistaCreditoPayload,
@@ -16,6 +17,8 @@ import {
   type DevolverPendientesACubeResponse,
   type CompraCarteraAceptadaPayload,
   type CompraCarteraAceptadaResponse,
+  type ExtenderCompraCarteraPayload,
+  type ExtenderCompraCarteraResponse,
 } from "../services/services";
 
 export const sesionesPendientesKeys = {
@@ -108,3 +111,17 @@ export function useCompraCarteraAceptada() {
   });
 }
 
+export function useExtenderCompraCartera() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    ExtenderCompraCarteraResponse,
+    Error,
+    ExtenderCompraCarteraPayload
+  >({
+    mutationFn: (payload) => extenderCompraCarteraService(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
+    },
+  });
+}

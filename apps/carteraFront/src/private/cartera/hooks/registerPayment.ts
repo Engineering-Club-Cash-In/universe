@@ -275,10 +275,9 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         ...(result.cuotasAtrasadas ?? []),
         ...(result.cuotasPendientes ?? []),
       ]
-        .filter(
-          (c: any) =>
-            c.validationStatus !== "pending" && c.validationStatus !== "validated"
-        )
+        // Los pagos `pending` también son seleccionables para poder reportar
+        // abonos complementarios antes de que contabilidad valide el anterior.
+        .filter((c: any) => c.validationStatus !== "validated")
         .sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
 
       setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);
@@ -538,6 +537,7 @@ const handleAbonoCapitalDirecto = () => {
   formik.values.abono_directo_capital = montoBoleta;
   formik.values.cuotaApagar = cuotaSeleccionada;
 
+  setModalExcesoOpen(false);
   formik.handleSubmit();
 };
 const handleAbonoSiguienteCuota = () => {
@@ -712,8 +712,9 @@ const handleAbonoOtros = () => {
   }
 
   // Handler:
-  function handleProcessInvestors(pago_id: number, credito_id: number) {
-    processInvestors.mutate({ pago_id, credito_id }, {});
+  function handleProcessInvestors(pago_id: number, credito_id: number, fechaVencimiento?: string) {
+    const fecha_periodo = fechaVencimiento ? new Date(fechaVencimiento).toISOString() : undefined;
+    processInvestors.mutate({ pago_id, credito_id, fecha_periodo }, {});
   }
 
 async function handleResetCredito() {

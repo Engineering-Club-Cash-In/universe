@@ -49,6 +49,7 @@ mock.module("@cci/email", () => ({
   sendPlainEmail: mock(() => Promise.resolve()),
   sendSimpleEmail: mock(() => Promise.resolve()),
   sendInvestorAddedToCreditsNotification: mock(() => Promise.resolve()),
+  sendNewCreditNotification: mock(() => Promise.resolve()),
 }));
 
 mock.module("./addInvestorToCredit", () => ({

@@ -1136,10 +1136,11 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         // cobrado 2 veces, +Q668.52). Preferimos TRONAR el pago a corromper
         // el saldo: la suma aplicada a una cuota nunca puede superar su monto.
         //
-        // Comparamos Σ(monto_aplicado) de los pagos hermanos ya contabilizados
-        // (validated, o pending sin pagar) + lo que aplicaría ESTE pago contra
-        // el monto de la cuota. Excluimos la fila en vuelo (la que se va a
-        // actualizar) y los paymentFalse.
+        // Comparamos Σ(monto_aplicado) de los pagos hermanos vivos (validated
+        // o pending —incluidos los pending+pagado=true que cierran la cuota
+        // pero aún no se validan) + lo que aplicaría ESTE pago contra el monto
+        // de la cuota. Excluimos la fila en vuelo (la que se va a actualizar) y
+        // los paymentFalse.
         // ─────────────────────────────────────────────────────────────────
         const TOLERANCIA_CENTAVO = new Big(0.01);
         const pagoIdEnVuelo = existingPago?.pago.pago_id ?? -1;
@@ -1155,12 +1156,16 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
               eq(pagos_credito.credito_id, credito.credito_id),
               eq(pagos_credito.paymentFalse, false),
               ne(pagos_credito.pago_id, pagoIdEnVuelo),
+              // Contar TODOS los hermanos vivos: validated o pending, sin
+              // importar `pagado`. Un pago que cierra la cuota se guarda como
+              // pending + pagado=true hasta que contabilidad lo valida; si lo
+              // excluyéramos (como hacía la condición pending && pagado=false),
+              // un segundo pago a la misma cuota no lo contaría y volvería a
+              // aplicar interés/IVA/capital sin ser rechazado. `paymentFalse` y
+              // la fila en vuelo ya se filtran arriba.
               or(
                 eq(pagos_credito.validationStatus, "validated"),
-                and(
-                  eq(pagos_credito.validationStatus, "pending"),
-                  eq(pagos_credito.pagado, false)
-                )
+                eq(pagos_credito.validationStatus, "pending")
               )
             )
           );

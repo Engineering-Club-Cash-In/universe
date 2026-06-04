@@ -1309,15 +1309,20 @@ function InvestorCard({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          const ids = investor.creditosPendientes
-                            .filter(c => c.status === "pendiente_reinversion")
-                            .map(c => c.credito_id);
-                          setIdsToCancel(ids);
-                          setCancelLabelOverride("Cancelar Reinversión");
-                          setConfirmingCancel(true);
+                          const creditos = investor.creditosPendientes.filter(c => selectedReinversionIds.has(c.credito_id));
+                          if (creditos.length === 0) return;
+                          setPendingAction({
+                            tipo: "cancelar",
+                            creditos,
+                            handler: () => {
+                              setIdsToCancel(creditos.map(c => c.credito_id));
+                              setCancelLabelOverride("Cancelar Reinversión");
+                              setConfirmingCancel(true);
+                            },
+                          });
                         }}
-                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
-                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                        disabled={selectedReinversionIds.size === 0 || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 disabled:opacity-50"
                       >
                         <Ban className="w-3 h-3" aria-hidden="true" />
                         Cancelar Reinversión

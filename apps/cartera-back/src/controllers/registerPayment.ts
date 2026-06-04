@@ -1,6 +1,6 @@
 import Big from "big.js";
 import z from "zod";
-import { db } from "../database";
+import { db, client } from "../database";
 import {
   creditos,
   usuarios,
@@ -24,6 +24,13 @@ import {
   applyCapitalPaymentAndBuildResponse,
   getCuotaIdForPaymentInsert,
 } from "./registerPaymentPolicy";
+
+// Tipo de conexión del pool (pg no expone tipos; lo derivamos de client.connect)
+type PoolConn = Awaited<ReturnType<typeof client.connect>>;
+
+// Namespace para advisory locks de pagos (evita colisión con otros locks).
+// pg_advisory_lock(ns, credito_id) serializa pagos concurrentes del mismo crédito.
+const PAGO_LOCK_NS = 8765;
 
 // ========================================
 // TIPOS E INTERFACES
@@ -488,6 +495,9 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 // ========================================
 
 export const insertPayment = async ({ body, set }: any) => {
+  // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
+  let lockConn: PoolConn | undefined;
+  let lockedCreditoId: number | undefined;
   try {
     // 1. Validar schema
     const parseResult = pagoSchema.safeParse(body);
@@ -500,7 +510,7 @@ export const insertPayment = async ({ body, set }: any) => {
     }
 
     const {
-      credito_id, 
+      credito_id,
       monto_boleta,
       fecha_pago,
       llamada,
@@ -516,6 +526,21 @@ export const insertPayment = async ({ body, set }: any) => {
       fecha_boleta,
       origen_pago,
     } = parseResult.data;
+
+    // 🔒 LOCK PESIMISTA POR CRÉDITO
+    // Serializa los pagos concurrentes del MISMO crédito. Sin esto, dos pagos
+    // a la misma cuota que entran casi al mismo tiempo (doble clic, reintento,
+    // dos cajeros) leen el mismo saldo vigente ANTES de que el otro escriba
+    // (TOCTOU) y ambos re-aplican interés/IVA/etc → interés duplicado. La
+    // validación anti-sobreaplicación no los detiene porque ambos leen el
+    // estado previo. El lock obliga a que el segundo espere a que el primero
+    // termine y vea el saldo ya actualizado.
+    lockConn = await client.connect();
+    lockedCreditoId = credito_id;
+    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+      PAGO_LOCK_NS,
+      credito_id,
+    ]);
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
@@ -1366,6 +1391,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   iva_12_restante: pagoData.iva_12_restante,
                   seguro_restante: pagoData.seguro_restante,
                   gps_restante: pagoData.gps_restante,
+                  // total_restante: hereda el del hermano (saldo vigente de la
+                  // cuota). Fallback a credito.capital para no propagar NULL si
+                  // el hermano vino vacío. El parcial no mueve capital, así que
+                  // este es el saldo del crédito vigente al momento del pago.
+                  total_restante:
+                    pagoSaldoVigente?.pago.total_restante ??
+                    credito.capital ??
+                    "0",
 
                   // Membresías
                   membresias: pagoData.membresias,
@@ -1662,6 +1695,22 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       message: "Internal server error",
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    // 🔓 Liberar el advisory lock y devolver la conexión al pool, pase lo que pase.
+    if (lockConn) {
+      try {
+        if (lockedCreditoId !== undefined) {
+          await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+            PAGO_LOCK_NS,
+            lockedCreditoId,
+          ]);
+        }
+      } catch (unlockError) {
+        console.error("[insertPayment] Error liberando lock:", unlockError);
+      } finally {
+        lockConn.release();
+      }
+    }
   }
 };
 export async function getPagosDelMesActual(credito_id: number) {

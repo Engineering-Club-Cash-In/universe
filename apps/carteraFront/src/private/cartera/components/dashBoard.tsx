@@ -236,6 +236,13 @@ const menuSections: MenuSection[] = [
         path: "/cierre-cartera",
         roles: ["ADMIN"],
       },
+      {
+        key: "capital-inversionistas",
+        label: "Capital Inversionistas",
+        icon: <TrendingUp className="h-4 w-4" />,
+        path: "/capital-inversionistas",
+        roles: ["ADMIN"],
+      },
     ],
   },
 ];

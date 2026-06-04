@@ -12,7 +12,7 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito } from "../controllers/reports";
+import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
@@ -1464,5 +1464,35 @@ export const paymentRouter = new Elysia()
       tags: ["Pagos"],
       summary: "Aplicar un monto adicional a los restantes de un pago existente",
     },
+  }
+)
+.get(
+  "/capital-inversionistas",
+  async ({ query, set }) => {
+    try {
+      const result = await getCapitalInversionistas({
+        fecha_desde: query.fecha_desde,
+        fecha_hasta: query.fecha_hasta,
+        excel: query.excel,
+      });
+      set.status = 200;
+      return { success: true, ...result };
+    } catch (error: any) {
+      console.error("Error en /capital-inversionistas:", error);
+      set.status = 500;
+      return { success: false, error: error.message || "Error obteniendo capital de inversionistas" };
+    }
+  },
+  {
+    detail: {
+      summary: "Reporte de capital por inversionista",
+      description: "Retorna el capital aportado, tasa promedio, modalidad y fecha de inicio de participación por inversionista.",
+      tags: ["Reportes", "Inversionistas"],
+    },
+    query: t.Object({
+      fecha_desde: t.Optional(t.String()),
+      fecha_hasta: t.Optional(t.String()),
+      excel: t.Optional(t.Boolean({ default: false })),
+    }),
   }
 )

@@ -24,6 +24,7 @@ import { FallenCredits } from "./private/cartera/components/FallenCredits";
 import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
 import { DevolucionCube } from "./private/cartera/components/DevolucionCube";
 import { CierreCartera } from "./private/cartera/components/CierreCartera";
+import { CapitalInversionistas } from "./private/cartera/components/CapitalInversionistas";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -267,6 +268,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <CierreCartera />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="capital-inversionistas"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <CapitalInversionistas />
             </RoleRoute>
           }
         />

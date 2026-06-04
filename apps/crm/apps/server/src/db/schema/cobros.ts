@@ -18,6 +18,7 @@ import { vehicles } from "./vehicles";
 // Enums para cobros
 export const estadoMoraEnum = pgEnum("estado_mora", [
 	"al_dia", // Pagos al día
+	"en_convenio", // Crédito con convenio de pago activo
 	"mora_30", // 1-30 días de retraso
 	"mora_60", // 31-60 días de retraso
 	"mora_90", // 61-90 días de retraso

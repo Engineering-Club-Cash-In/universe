@@ -471,6 +471,7 @@ function RouteComponent() {
 
 	const getEstadoBadge = (estado: string | null | undefined) => {
 		const colors: Record<string, string> = {
+			en_convenio: "bg-green-100 text-green-800",
 			mora_30: "bg-yellow-100 text-yellow-800",
 			mora_60: "bg-orange-100 text-orange-800",
 			mora_90: "bg-red-100 text-red-800",
@@ -581,7 +582,18 @@ function RouteComponent() {
 										<CalendarClock className="h-4 w-4 text-muted-foreground" />
 										<span className="font-medium">Días de Mora:</span>
 									</div>
-									<p>{caso.diasMoraMaximo} días</p>
+									<p>
+										{caso.estadoMora === "mora_30"
+											? "30"
+											: caso.estadoMora === "mora_60"
+												? "60"
+												: caso.estadoMora === "mora_90"
+													? "90"
+													: caso.estadoMora === "mora_120"
+														? "120+"
+														: "0"}{" "}
+										días
+									</p>
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
@@ -596,6 +608,21 @@ function RouteComponent() {
 										})}
 									</p>
 								</div>
+								{caso.cuotaConvenio != null && (
+									<div className="space-y-2">
+										<div className="flex items-center gap-2 text-sm">
+											<Banknote className="h-4 w-4 text-muted-foreground" />
+											<span className="font-medium">Cuota Convenio:</span>
+										</div>
+										<p className="font-bold text-green-600 text-lg">
+											Q
+											{Number(caso.cuotaConvenio ?? 0).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
+										</p>
+									</div>
+								)}
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
 										<Banknote className="h-4 w-4 text-muted-foreground" />
@@ -615,7 +642,9 @@ function RouteComponent() {
 										<span className="font-medium">
 											Total a Pagar{" "}
 											<span className="text-muted-foreground text-xs">
-												(Mora + Cuota)
+												{caso.cuotaConvenio != null
+													? "(Convenio + Cuota)"
+													: "(Mora + Cuota)"}
 											</span>
 											:
 										</span>
@@ -623,7 +652,9 @@ function RouteComponent() {
 									<p className="font-bold text-lg text-orange-600">
 										Q
 										{(
-											Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)
+											caso.cuotaConvenio != null
+												? Number(caso.cuotaConvenio) + Number(caso.cuotaMensual || 0)
+												: Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)
 										).toLocaleString()}
 									</p>
 								</div>
@@ -706,7 +737,49 @@ function RouteComponent() {
 									</div>
 								</div>
 							)}
-							{/* Strip visual: Total a Cobrar */}
+							{/* Strip visual: Total a Cobrar - Convenio */}
+							{caso.cuotaConvenio != null && (
+								<div className="mt-2 rounded-lg border border-green-200 bg-green-50 p-4">
+									<div className="flex items-center justify-between">
+										<div>
+											<p className="font-semibold text-green-900 text-sm">
+												Total a Cobrar (Convenio + Cuota)
+											</p>
+											<div className="mt-1 flex items-center gap-3 text-green-700 text-xs">
+												<span>
+													Convenio:{" "}
+													<strong>
+														Q
+														{Number(caso.cuotaConvenio ?? 0).toLocaleString("es-GT", {
+															minimumFractionDigits: 2,
+															maximumFractionDigits: 2,
+														})}
+													</strong>
+												</span>
+												<span>+</span>
+												<span>
+													Cuota:{" "}
+													<strong>
+														Q
+														{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+															minimumFractionDigits: 2,
+															maximumFractionDigits: 2,
+														})}
+													</strong>
+												</span>
+											</div>
+										</div>
+										<p className="font-extrabold text-2xl text-green-700">
+											Q
+											{(
+												Number(caso.cuotaConvenio ?? 0) +
+												Number(caso.cuotaMensual || 0)
+											).toLocaleString()}
+										</p>
+									</div>
+								</div>
+							)}
+							{/* Strip visual: Total a Cobrar - Mora */}
 							{Number(caso.montoEnMora) > 0 && (
 								<div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 p-4">
 									<div className="flex items-center justify-between">

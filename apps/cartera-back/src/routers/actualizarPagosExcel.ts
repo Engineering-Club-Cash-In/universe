@@ -197,7 +197,7 @@ export const actualizarPagosExcelRouter = new Elysia()
         force_refresh = false,
         dry_run = true,
         orden_cronologico = [],
-        omitir_sin_match = false,
+        omitir_sin_match = true,
       } = body ?? {};
 
       if (!Array.isArray(lista) || lista.length === 0) {

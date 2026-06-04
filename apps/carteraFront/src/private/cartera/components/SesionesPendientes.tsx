@@ -23,11 +23,120 @@ import {
   AlertCircle,
   Clock,
   Plus,
+  CheckCircle2,
+  Circle,
+  MinusCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
+
+type AccionTipo = "aceptar" | "confirmar" | "confirmar_reinversion" | "extender" | "cancelar";
+
+const ACCION_CONFIG: Record<AccionTipo, {
+  titulo: string; subtitulo: string;
+  headerText: string; borderColor: string;
+  btnClass: string; btnLabel: string;
+}> = {
+  aceptar: {
+    titulo: "Aceptar compra de cartera",
+    subtitulo: "Se aceptarán y notificarán los siguientes créditos:",
+    headerText: "text-amber-600", borderColor: "#f59e0b",
+    btnClass: "bg-amber-500 hover:bg-amber-600 text-white border-none",
+    btnLabel: "Sí, aceptar",
+  },
+  confirmar: {
+    titulo: "Confirmar compra de cartera",
+    subtitulo: "Se marcarán como completados los siguientes créditos:",
+    headerText: "text-amber-700", borderColor: "#d97706",
+    btnClass: "bg-amber-600 hover:bg-amber-700 text-white border-none",
+    btnLabel: "Sí, confirmar",
+  },
+  extender: {
+    titulo: "Extender 24 horas",
+    subtitulo: "Se extenderá el plazo de los siguientes créditos:",
+    headerText: "text-blue-600", borderColor: "#2563eb",
+    btnClass: "bg-blue-600 hover:bg-blue-700 text-white border-none",
+    btnLabel: "Sí, extender",
+  },
+  confirmar_reinversion: {
+    titulo: "Confirmar reinversión",
+    subtitulo: "Se marcarán como completadas las siguientes reinversiones:",
+    headerText: "text-blue-700", borderColor: "#2563eb",
+    btnClass: "bg-blue-600 hover:bg-blue-700 text-white border-none",
+    btnLabel: "Sí, confirmar",
+  },
+  cancelar: {
+    titulo: "Cancelar compra de cartera",
+    subtitulo: "Los siguientes créditos se devolverán a CUBE. Esta acción no se puede deshacer.",
+    headerText: "text-red-600", borderColor: "#dc2626",
+    btnClass: "bg-red-600 hover:bg-red-700 text-white border-none",
+    btnLabel: "Sí, cancelar",
+  },
+};
+
+function ModalConfirmAccion({
+  open, onClose, onConfirm, tipo, creditos, isPending,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  tipo: AccionTipo;
+  creditos: CreditoEspejoPendiente[];
+  isPending: boolean;
+}) {
+  const cfg = ACCION_CONFIG[tipo];
+  const totalMonto = creditos.reduce((s, c) => s + Number(c.monto_aportado_nuevo ?? c.monto_aportado), 0);
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent
+        className="rounded-2xl shadow-2xl max-w-md bg-white px-6 py-5 gap-0"
+        style={{ border: `2px solid ${cfg.borderColor}` }}
+      >
+        <DialogTitle className="sr-only">{cfg.titulo}</DialogTitle>
+        <DialogDescription className="sr-only">{cfg.subtitulo}</DialogDescription>
+        {/* Título */}
+        <div className="flex items-center gap-2.5 mb-1">
+          <AlertCircle className={`w-5 h-5 shrink-0 ${cfg.headerText}`} />
+          <h2 className="text-base font-bold text-gray-900">{cfg.titulo}</h2>
+        </div>
+        <p className="text-xs text-gray-500 mb-4 ml-7">{cfg.subtitulo}</p>
+
+        {/* Lista */}
+        <div className="space-y-1.5 max-h-52 overflow-y-auto mb-5">
+          {creditos.map(c => (
+            <div key={c.credito_id} className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-mono text-gray-400 truncate">{c.numero_credito_sifco}</p>
+                <p className="text-xs font-semibold text-gray-800 truncate">{c.nombre_usuario}</p>
+              </div>
+              <span className="text-xs font-bold text-gray-600 shrink-0">{formatQ(c.monto_aportado_nuevo ?? c.monto_aportado)}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Acciones */}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-gray-400">
+            {creditos.length} crédito{creditos.length !== 1 ? "s" : ""} · <span className="font-semibold text-gray-600">{formatQ(totalMonto)}</span>
+          </span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={onClose} disabled={isPending} className="h-8 text-xs px-4 border-gray-300 text-gray-700 hover:bg-gray-100">
+              No
+            </Button>
+            <Button size="sm" className={`h-8 text-xs px-4 gap-1.5 ${cfg.btnClass}`} onClick={onConfirm} disabled={isPending}>
+              {isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+              {cfg.btnLabel}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function formatQ(v: number | string | null | undefined): string {
   const num = Number(v ?? 0);
@@ -418,13 +527,16 @@ function CreditRow({
     >
       <div className="flex items-center gap-3 px-3 py-2.5">
         {onToggleSelection && (
-          <input
-            type="checkbox"
-            className={`w-4 h-4 cursor-pointer shrink-0 ${credito.status === "pendiente_reinversion" ? "accent-blue-500" : "accent-amber-500"}`}
-            checked={!!checked}
-            onChange={() => onToggleSelection(credito.credito_id)}
-            onClick={e => e.stopPropagation()}
-          />
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onToggleSelection(credito.credito_id); }}
+            className="shrink-0 focus:outline-none opacity-60 hover:opacity-100 transition-opacity"
+          >
+            {checked
+              ? <CheckCircle2 className={`w-4 h-4 ${credito.status === "pendiente_reinversion" ? "text-blue-400" : "text-amber-400"}`} />
+              : <Circle className="w-4 h-4 text-gray-300" />
+            }
+          </button>
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -639,6 +751,7 @@ function InvestorCard({
   const [idsToCancel, setIdsToCancel] = useState<number[] | null>(null);
   const [cancelLabelOverride, setCancelLabelOverride] = useState<string>("");
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{ tipo: AccionTipo; creditos: CreditoEspejoPendiente[]; handler: () => void } | null>(null);
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
   const devolverPendientes = useDevolverPendientesACube();
@@ -915,12 +1028,14 @@ function InvestorCard({
     return tiempos.length > 0 ? Math.min(...tiempos) : null;
   }, [compraRevisionCreditos]);
 
-  const compraYaExtendida = compraRevisionCreditos.length > 0
-    && compraRevisionCreditos.every((c) => Boolean(c.compra_cartera_extendida_at));
+  const compraYaExtendida = selectedConfirmarIds.length > 0
+    && investor.creditosPendientes
+        .filter(c => selectedConfirmarIds.includes(c.credito_id))
+        .every((c) => Boolean(c.compra_cartera_extendida_at));
 
   const handleExtenderCompraCartera = useCallback(() => {
-    const ids = compraRevisionCreditos
-      .filter((c) => !c.compra_cartera_extendida_at)
+    const ids = investor.creditosPendientes
+      .filter((c) => selectedConfirmarIds.includes(c.credito_id) && !c.compra_cartera_extendida_at)
       .map((c) => c.credito_id);
     if (ids.length === 0) return;
 
@@ -939,7 +1054,7 @@ function InvestorCard({
         },
       }
     );
-  }, [compraRevisionCreditos, extenderCompra, investor.inversionista_id, recalculateSession]);
+  }, [selectedConfirmarIds, investor.creditosPendientes, extenderCompra, investor.inversionista_id, recalculateSession]);
 
   const totalCompra = useMemo(() => {
     return investor.creditosPendientes
@@ -1004,16 +1119,15 @@ function InvestorCard({
                 <div className="flex items-center gap-2 px-1">
                   <div className="h-px flex-1 bg-amber-100" />
                   <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        className="w-3.5 h-3.5 accent-amber-500 cursor-pointer"
-                        checked={allCompraSelected}
-                        ref={el => { if (el) el.indeterminate = someCompraSelected && !allCompraSelected; }}
-                        onChange={handleToggleAllCompra}
-                      />
+                    <button type="button" onClick={handleToggleAllCompra} className="flex items-center gap-1.5 focus:outline-none group">
+                      {allCompraSelected
+                        ? <CheckCircle2 className="w-3 h-3 text-amber-400" />
+                        : someCompraSelected
+                          ? <MinusCircle className="w-3 h-3 text-amber-300" />
+                          : <Circle className="w-3 h-3 text-amber-200 group-hover:text-amber-300 transition-colors" />
+                      }
                       <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Compra de Cartera</span>
-                    </label>
+                    </button>
                     {compraRevisionCreditos.length > 0 && (
                       <Badge variant="outline" className="gap-1 text-[10px] border-blue-200 text-blue-700 bg-blue-50 font-semibold">
                         <Clock className="w-3 h-3" aria-hidden="true" />
@@ -1061,15 +1175,20 @@ function InvestorCard({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          const ids = investor.creditosPendientes
-                            .filter(c => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
-                            .map(c => c.credito_id);
-                          setIdsToCancel(ids);
-                          setCancelLabelOverride("Cancelar Compra");
-                          setConfirmingCancel(true);
+                          const creditos = investor.creditosPendientes.filter(c => selectedCompraIds.has(c.credito_id));
+                          if (creditos.length === 0) return;
+                          setPendingAction({
+                            tipo: "cancelar",
+                            creditos,
+                            handler: () => {
+                              setIdsToCancel(creditos.map(c => c.credito_id));
+                              setCancelLabelOverride("Cancelar Compra");
+                              setConfirmingCancel(true);
+                            },
+                          });
                         }}
-                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
-                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                        disabled={selectedCompraIds.size === 0 || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
+                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 disabled:opacity-50"
                       >
                       <Ban className="w-3 h-3" aria-hidden="true" />
                       Cancelar Compra
@@ -1077,7 +1196,11 @@ function InvestorCard({
                     {showAceptar && (
                       <Button
                         size="sm"
-                        onClick={handleAceptarCompraCartera}
+                        onClick={() => setPendingAction({
+                          tipo: "aceptar",
+                          creditos: investor.creditosPendientes.filter(c => selectedAceptarIds.includes(c.credito_id)),
+                          handler: handleAceptarCompraCartera,
+                        })}
                         disabled={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || extenderCompra.isPending}
                         className="gap-1 text-[11px] h-7 bg-amber-500 text-white hover:bg-amber-600 border-none"
                       >
@@ -1092,8 +1215,12 @@ function InvestorCard({
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={handleExtenderCompraCartera}
-                        disabled={compraYaExtendida || extenderCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                        onClick={() => setPendingAction({
+                          tipo: "extender",
+                          creditos: investor.creditosPendientes.filter(c => selectedConfirmarIds.includes(c.credito_id) && !c.compra_cartera_extendida_at),
+                          handler: handleExtenderCompraCartera,
+                        })}
+                        disabled={selectedConfirmarIds.length === 0 || compraYaExtendida || extenderCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
                         className="gap-1 text-[11px] h-7 border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-60"
                       >
                         {extenderCompra.isPending
@@ -1106,7 +1233,11 @@ function InvestorCard({
                     {showConfirmar && (
                       <Button
                         size="sm"
-                        onClick={handleConfirmCompraCartera}
+                        onClick={() => setPendingAction({
+                          tipo: "confirmar",
+                          creditos: investor.creditosPendientes.filter(c => selectedConfirmarIds.includes(c.credito_id)),
+                          handler: handleConfirmCompraCartera,
+                        })}
                         disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
                         className="gap-1 text-[11px] h-7 bg-amber-600 text-white hover:bg-amber-700"
                       >
@@ -1128,16 +1259,15 @@ function InvestorCard({
                 <div className="flex items-center gap-2 px-1">
                   <div className="h-px flex-1 bg-blue-100" />
                   <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        className="w-3.5 h-3.5 accent-blue-500 cursor-pointer"
-                        checked={allReinversionSelected}
-                        ref={el => { if (el) el.indeterminate = someReinversionSelected && !allReinversionSelected; }}
-                        onChange={handleToggleAllReinversion}
-                      />
+                    <button type="button" onClick={handleToggleAllReinversion} className="flex items-center gap-1.5 focus:outline-none group">
+                      {allReinversionSelected
+                        ? <CheckCircle2 className="w-3 h-3 text-blue-400" />
+                        : someReinversionSelected
+                          ? <MinusCircle className="w-3 h-3 text-blue-300" />
+                          : <Circle className="w-3 h-3 text-blue-200 group-hover:text-blue-300 transition-colors" />
+                      }
                       <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Reinversiones</span>
-                    </label>
+                    </button>
                     <Badge variant="outline" className="text-[10px] border-blue-200 text-blue-700 bg-blue-50 font-bold">
                       {formatQ(totalReinversion)}
                     </Badge>
@@ -1194,7 +1324,11 @@ function InvestorCard({
                       </Button>
                     <Button
                       size="sm"
-                      onClick={handleConfirmReinversion}
+                      onClick={() => setPendingAction({
+                        tipo: "confirmar_reinversion",
+                        creditos: investor.creditosPendientes.filter(c => selectedReinversionIds.has(c.credito_id)),
+                        handler: handleConfirmReinversion,
+                      })}
                       disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || selectedReinversionIds.size === 0}
                       className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
                     >
@@ -1258,6 +1392,15 @@ function InvestorCard({
           )}
         </div>
       )}
+
+      <ModalConfirmAccion
+        open={!!pendingAction}
+        onClose={() => setPendingAction(null)}
+        onConfirm={() => { pendingAction?.handler(); setPendingAction(null); }}
+        tipo={pendingAction?.tipo ?? "aceptar"}
+        creditos={pendingAction?.creditos ?? []}
+        isPending={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || extenderCompra.isPending}
+      />
     </div>
   );
 }

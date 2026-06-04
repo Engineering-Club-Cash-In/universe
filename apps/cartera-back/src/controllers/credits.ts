@@ -1501,11 +1501,20 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       const capitalIncobrable = new Big(monto_cancelacion!);
 
       // c) Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
-      //    paymentFalse=true). Las queries de saldo/reportes filtran paymentFalse=false, así
-      //    que quedan fuera de las vistas activas sin romper FKs de inversionistas/boletas.
+      //    paymentFalse=true). Además se ponen los *_restante en 0 para que las queries de
+      //    cuotas pendientes/atrasadas que NO filtran paymentFalse no muestren deuda fantasma.
       const pagosNoPagados = await tx
         .update(pagos_credito)
-        .set({ paymentFalse: true })
+        .set({
+          paymentFalse: true,
+          capital_restante: "0",
+          interes_restante: "0",
+          iva_12_restante: "0",
+          seguro_restante: "0",
+          gps_restante: "0",
+          total_restante: "0",
+          mora: "0",
+        })
         .where(
           and(
             eq(pagos_credito.credito_id, creditId),
@@ -1886,11 +1895,21 @@ export async function resetCredit({
       .returning();
 
     // 11. Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
-    //     paymentFalse=true; todas las queries de saldo/reportes filtran paymentFalse=false,
-    //     así que quedan fuera de las vistas activas sin romper FKs de inversionistas/boletas).
+    //     paymentFalse=true). Además se ponen los *_restante en 0: algunas queries de
+    //     cuotas pendientes/atrasadas (getCreditoByNumero, reportes) NO filtran paymentFalse,
+    //     así que sin esto mostrarían "deuda fantasma" con los restantes viejos.
     await db
       .update(pagos_credito)
-      .set({ paymentFalse: true })
+      .set({
+        paymentFalse: true,
+        capital_restante: "0",
+        interes_restante: "0",
+        iva_12_restante: "0",
+        seguro_restante: "0",
+        gps_restante: "0",
+        total_restante: "0",
+        mora: "0",
+      })
       .where(
         and(
           eq(pagos_credito.credito_id, credito.credito_id),

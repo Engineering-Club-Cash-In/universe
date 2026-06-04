@@ -2,7 +2,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube, useCompraCarteraAceptada, useExtenderCompraCartera } from "../hooks/useSesionesPendientes";
-import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
+import type { CreditoEspejoPendiente, InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
   Search,
@@ -27,7 +27,113 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
+
+type AccionTipo = "aceptar" | "confirmar" | "confirmar_reinversion" | "extender" | "cancelar";
+
+const ACCION_CONFIG: Record<AccionTipo, {
+  titulo: string; subtitulo: string;
+  headerText: string; borderColor: string;
+  btnClass: string; btnLabel: string;
+}> = {
+  aceptar: {
+    titulo: "Aceptar compra de cartera",
+    subtitulo: "Se aceptarán y notificarán los siguientes créditos:",
+    headerText: "text-amber-600", borderColor: "#f59e0b",
+    btnClass: "bg-amber-500 hover:bg-amber-600 text-white border-none",
+    btnLabel: "Sí, aceptar",
+  },
+  confirmar: {
+    titulo: "Confirmar compra de cartera",
+    subtitulo: "Se marcarán como completados los siguientes créditos:",
+    headerText: "text-amber-700", borderColor: "#d97706",
+    btnClass: "bg-amber-600 hover:bg-amber-700 text-white border-none",
+    btnLabel: "Sí, confirmar",
+  },
+  extender: {
+    titulo: "Extender 24 horas",
+    subtitulo: "Se extenderá el plazo de los siguientes créditos:",
+    headerText: "text-blue-600", borderColor: "#2563eb",
+    btnClass: "bg-blue-600 hover:bg-blue-700 text-white border-none",
+    btnLabel: "Sí, extender",
+  },
+  confirmar_reinversion: {
+    titulo: "Confirmar reinversión",
+    subtitulo: "Se marcarán como completadas las siguientes reinversiones:",
+    headerText: "text-blue-700", borderColor: "#2563eb",
+    btnClass: "bg-blue-600 hover:bg-blue-700 text-white border-none",
+    btnLabel: "Sí, confirmar",
+  },
+  cancelar: {
+    titulo: "Cancelar compra de cartera",
+    subtitulo: "Los siguientes créditos se devolverán a CUBE. Esta acción no se puede deshacer.",
+    headerText: "text-red-600", borderColor: "#dc2626",
+    btnClass: "bg-red-600 hover:bg-red-700 text-white border-none",
+    btnLabel: "Sí, cancelar",
+  },
+};
+
+function ModalConfirmAccion({
+  open, onClose, onConfirm, tipo, creditos, isPending,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  tipo: AccionTipo;
+  creditos: CreditoEspejoPendiente[];
+  isPending: boolean;
+}) {
+  const cfg = ACCION_CONFIG[tipo];
+  const totalMonto = creditos.reduce((s, c) => s + Number(c.monto_aportado_nuevo ?? c.monto_aportado), 0);
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent
+        className="rounded-2xl shadow-2xl max-w-md bg-white px-6 py-5 gap-0"
+        style={{ border: `2px solid ${cfg.borderColor}` }}
+      >
+        <DialogTitle className="sr-only">{cfg.titulo}</DialogTitle>
+        <DialogDescription className="sr-only">{cfg.subtitulo}</DialogDescription>
+        {/* Título */}
+        <div className="flex items-center gap-2.5 mb-1">
+          <AlertCircle className={`w-5 h-5 shrink-0 ${cfg.headerText}`} />
+          <h2 className="text-base font-bold text-gray-900">{cfg.titulo}</h2>
+        </div>
+        <p className="text-xs text-gray-500 mb-4 ml-7">{cfg.subtitulo}</p>
+
+        {/* Lista */}
+        <div className="space-y-1.5 max-h-52 overflow-y-auto mb-5">
+          {creditos.map(c => (
+            <div key={c.credito_id} className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-mono text-gray-400 truncate">{c.numero_credito_sifco}</p>
+                <p className="text-xs font-semibold text-gray-800 truncate">{c.nombre_usuario}</p>
+              </div>
+              <span className="text-xs font-bold text-gray-600 shrink-0">{formatQ(c.monto_aportado_nuevo ?? c.monto_aportado)}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Acciones */}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-gray-400">
+            {creditos.length} crédito{creditos.length !== 1 ? "s" : ""} · <span className="font-semibold text-gray-600">{formatQ(totalMonto)}</span>
+          </span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={onClose} disabled={isPending} className="h-8 text-xs px-4 border-gray-300 text-gray-700 hover:bg-gray-100">
+              No
+            </Button>
+            <Button size="sm" className={`h-8 text-xs px-4 gap-1.5 ${cfg.btnClass}`} onClick={onConfirm} disabled={isPending}>
+              {isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+              {cfg.btnLabel}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function formatQ(v: number | string | null | undefined): string {
   const num = Number(v ?? 0);
@@ -360,11 +466,11 @@ export function SesionesPendientes() {
 // ============================================
 // Subcomponente para cada fila de crédito
 // ============================================
-function CreditRow({ 
-  credito, 
-  editingCreditId, 
-  isEditing, 
-  onStartEdit, 
+function CreditRow({
+  credito,
+  editingCreditId,
+  isEditing,
+  onStartEdit,
   onCancelEdit,
   distribucion,
   isBalanced,
@@ -374,8 +480,27 @@ function CreditRow({
   selectedDestinoIds,
   onToggleDestino,
   onSave,
-  reemplazarIsPending
-}: any) {
+  reemplazarIsPending,
+  checked,
+  onToggleSelection,
+}: {
+  credito: CreditoEspejoPendiente;
+  editingCreditId: number | null;
+  isEditing: boolean;
+  onStartEdit: (id: number) => void;
+  onCancelEdit: () => void;
+  distribucion: Map<number, number>;
+  isBalanced: boolean;
+  montoAportado: number;
+  isLoadingCandidates: boolean;
+  destinos: any[];
+  selectedDestinoIds: Set<number>;
+  onToggleDestino: (id: number) => void;
+  onSave: () => void;
+  reemplazarIsPending: boolean;
+  checked?: boolean;
+  onToggleSelection?: (creditoId: number) => void;
+}) {
   const isCreditEditing = editingCreditId === credito.id;
   const values = Array.from(distribucion.values() as IterableIterator<number>);
   const totalAsig = values.reduce((a, b) => a + b, 0);
@@ -398,6 +523,20 @@ function CreditRow({
       }`}
     >
       <div className="flex items-center gap-3 px-3 py-2.5">
+        {onToggleSelection && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onToggleSelection(credito.credito_id); }}
+            className="shrink-0 focus:outline-none opacity-60 hover:opacity-100 transition-opacity"
+          >
+            {checked
+              ? <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${credito.status === "pendiente_reinversion" ? "border-blue-500 bg-blue-500" : "border-amber-500 bg-amber-500"}`}>
+                  <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
+                </div>
+              : <div className="w-3.5 h-3.5 rounded-sm border border-gray-300 bg-white" />
+            }
+          </button>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-xs font-bold text-gray-900">{credito.numero_credito_sifco}</span>
@@ -598,9 +737,20 @@ function InvestorCard({
   const [expanded, setExpanded] = useState(true);
   const [editingCreditId, setEditingCreditId] = useState<number | null>(null);
   const [selectedDestinoIds, setSelectedDestinoIds] = useState<Set<number>>(new Set());
+  const [selectedCompraIds, setSelectedCompraIds] = useState<Set<number>>(() =>
+    new Set(investor.creditosPendientes
+      .filter(c => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
+      .map(c => c.credito_id))
+  );
+  const [selectedReinversionIds, setSelectedReinversionIds] = useState<Set<number>>(() =>
+    new Set(investor.creditosPendientes
+      .filter(c => c.status === "pendiente_reinversion")
+      .map(c => c.credito_id))
+  );
   const [idsToCancel, setIdsToCancel] = useState<number[] | null>(null);
   const [cancelLabelOverride, setCancelLabelOverride] = useState<string>("");
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{ tipo: AccionTipo; creditos: CreditoEspejoPendiente[]; handler: () => void } | null>(null);
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
   const devolverPendientes = useDevolverPendientesACube();
@@ -687,9 +837,7 @@ function InvestorCard({
   }, [editingCreditId, isBalanced, editingCredit, distribucion, investor, reemplazar, recalculateSession]);
 
   const handleConfirmReinversion = useCallback(() => {
-    const ids = investor.creditosPendientes
-      .filter((c) => c.status === "pendiente_reinversion")
-      .map((c) => c.credito_id);
+    const ids = Array.from(selectedReinversionIds);
     if (ids.length === 0) return;
 
     completarEspejo.mutate(
@@ -700,6 +848,7 @@ function InvestorCard({
       {
         onSuccess: () => {
           toast.success("Reinversión confirmada correctamente.");
+          setSelectedReinversionIds(new Set());
           recalculateSession();
         },
         onError: (err) => {
@@ -707,22 +856,107 @@ function InvestorCard({
         },
       }
     );
-  }, [completarEspejo, investor, recalculateSession]);
+  }, [completarEspejo, selectedReinversionIds, investor.inversionista_id, recalculateSession]);
+
+  const selectedAceptarIds = useMemo(() =>
+    investor.creditosPendientes
+      .filter(c => selectedCompraIds.has(c.credito_id) && c.status === "pendiente_compra_cartera")
+      .map(c => c.credito_id),
+    [selectedCompraIds, investor.creditosPendientes]
+  );
+
+  const selectedConfirmarIds = useMemo(() =>
+    investor.creditosPendientes
+      .filter(c => selectedCompraIds.has(c.credito_id) && c.status === "pendiente_revision")
+      .map(c => c.credito_id),
+    [selectedCompraIds, investor.creditosPendientes]
+  );
+
+  const showAceptar = selectedAceptarIds.length > 0;
+  const showConfirmar = selectedConfirmarIds.length > 0;
+
+  const allCompraIds = useMemo(() =>
+    investor.creditosPendientes
+      .filter(c => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
+      .map(c => c.credito_id),
+    [investor.creditosPendientes]
+  );
+  const allCompraSelected = allCompraIds.length > 0 && allCompraIds.every(id => selectedCompraIds.has(id));
+  const someCompraSelected = allCompraIds.some(id => selectedCompraIds.has(id));
+
+  const handleToggleAllCompra = useCallback(() => {
+    if (allCompraSelected) {
+      setSelectedCompraIds(new Set());
+    } else {
+      setSelectedCompraIds(new Set(allCompraIds));
+    }
+  }, [allCompraSelected, allCompraIds]);
+
+  const handleToggleCompraId = useCallback((creditoId: number) => {
+    setSelectedCompraIds(prev => {
+      const next = new Set(prev);
+      if (next.has(creditoId)) next.delete(creditoId);
+      else next.add(creditoId);
+      return next;
+    });
+  }, []);
+
+  const allCompraKey = allCompraIds.join(',');
+  useEffect(() => {
+    const valid = new Set(allCompraIds);
+    setSelectedCompraIds(prev => {
+      const pruned = new Set([...prev].filter(id => valid.has(id)));
+      return pruned.size === prev.size ? prev : pruned;
+    });
+  }, [allCompraKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const allReinversionIds = useMemo(() =>
+    investor.creditosPendientes
+      .filter(c => c.status === "pendiente_reinversion")
+      .map(c => c.credito_id),
+    [investor.creditosPendientes]
+  );
+  const allReinversionSelected = allReinversionIds.length > 0 && allReinversionIds.every(id => selectedReinversionIds.has(id));
+  const someReinversionSelected = allReinversionIds.some(id => selectedReinversionIds.has(id));
+
+  const handleToggleAllReinversion = useCallback(() => {
+    if (allReinversionSelected) {
+      setSelectedReinversionIds(new Set());
+    } else {
+      setSelectedReinversionIds(new Set(allReinversionIds));
+    }
+  }, [allReinversionSelected, allReinversionIds]);
+
+  const handleToggleReinversionId = useCallback((creditoId: number) => {
+    setSelectedReinversionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(creditoId)) next.delete(creditoId);
+      else next.add(creditoId);
+      return next;
+    });
+  }, []);
+
+  const allReinversionKey = allReinversionIds.join(',');
+  useEffect(() => {
+    const valid = new Set(allReinversionIds);
+    setSelectedReinversionIds(prev => {
+      const pruned = new Set([...prev].filter(id => valid.has(id)));
+      return pruned.size === prev.size ? prev : pruned;
+    });
+  }, [allReinversionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConfirmCompraCartera = useCallback(() => {
-    const ids = investor.creditosPendientes
-      .filter((c) => c.status === "pendiente_revision")
-      .map((c) => c.credito_id);
-    if (ids.length === 0) return;
+    if (selectedConfirmarIds.length === 0) return;
 
     completarEspejo.mutate(
       {
-        creditos: ids,
+        creditos: selectedConfirmarIds,
         inversionista_id: investor.inversionista_id,
       },
       {
         onSuccess: () => {
           toast.success("Compra de cartera confirmada correctamente.");
+          setSelectedCompraIds(new Set());
           recalculateSession();
         },
         onError: (err) => {
@@ -730,7 +964,7 @@ function InvestorCard({
         },
       }
     );
-  }, [completarEspejo, investor, recalculateSession]);
+  }, [completarEspejo, selectedConfirmarIds, investor.inversionista_id, recalculateSession]);
 
   const tieneCompraCartera = investor.creditosPendientes.some(
     (c) => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision"
@@ -765,17 +999,14 @@ function InvestorCard({
 
 
   const handleAceptarCompraCartera = useCallback(() => {
-    const creditoIds = investor.creditosPendientes
-      .filter((c) => c.status === "pendiente_compra_cartera")
-      .map((c) => c.credito_id);
-
-    if (creditoIds.length === 0) return;
+    if (selectedAceptarIds.length === 0) return;
 
     aceptarCompra.mutate(
-      { creditos: creditoIds },
+      { creditos: selectedAceptarIds },
       {
         onSuccess: (res) => {
           toast.success(res.message || "Compra de cartera aceptada y notificada.");
+          setSelectedCompraIds(new Set());
           recalculateSession();
         },
         onError: (err) => {
@@ -783,7 +1014,7 @@ function InvestorCard({
         },
       }
     );
-  }, [aceptarCompra, investor, recalculateSession]);
+  }, [aceptarCompra, selectedAceptarIds, recalculateSession]);
 
   const compraRevisionCreditos = useMemo(() => {
     return investor.creditosPendientes.filter((c) => c.status === "pendiente_revision");
@@ -796,12 +1027,14 @@ function InvestorCard({
     return tiempos.length > 0 ? Math.min(...tiempos) : null;
   }, [compraRevisionCreditos]);
 
-  const compraYaExtendida = compraRevisionCreditos.length > 0
-    && compraRevisionCreditos.every((c) => Boolean(c.compra_cartera_extendida_at));
+  const compraYaExtendida = selectedConfirmarIds.length > 0
+    && investor.creditosPendientes
+        .filter(c => selectedConfirmarIds.includes(c.credito_id))
+        .every((c) => Boolean(c.compra_cartera_extendida_at));
 
   const handleExtenderCompraCartera = useCallback(() => {
-    const ids = compraRevisionCreditos
-      .filter((c) => !c.compra_cartera_extendida_at)
+    const ids = investor.creditosPendientes
+      .filter((c) => selectedConfirmarIds.includes(c.credito_id) && !c.compra_cartera_extendida_at)
       .map((c) => c.credito_id);
     if (ids.length === 0) return;
 
@@ -820,7 +1053,7 @@ function InvestorCard({
         },
       }
     );
-  }, [compraRevisionCreditos, extenderCompra, investor.inversionista_id, recalculateSession]);
+  }, [selectedConfirmarIds, investor.creditosPendientes, extenderCompra, investor.inversionista_id, recalculateSession]);
 
   const totalCompra = useMemo(() => {
     return investor.creditosPendientes
@@ -885,7 +1118,19 @@ function InvestorCard({
                 <div className="flex items-center gap-2 px-1">
                   <div className="h-px flex-1 bg-amber-100" />
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Compra de Cartera</span>
+                    <button type="button" onClick={handleToggleAllCompra} className="flex items-center gap-1.5 focus:outline-none group">
+                      {allCompraSelected
+                        ? <div className="w-3 h-3 rounded-sm border border-amber-500 bg-amber-500 flex items-center justify-center">
+                            <Check className="w-2 h-2 text-white stroke-[3]" />
+                          </div>
+                        : someCompraSelected
+                          ? <div className="w-3 h-3 rounded-sm border border-amber-400 bg-amber-100 flex items-center justify-center">
+                              <div className="w-1.5 h-px bg-amber-500" />
+                            </div>
+                          : <div className="w-3 h-3 rounded-sm border border-amber-200 bg-white group-hover:border-amber-400 transition-colors" />
+                      }
+                      <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Compra de Cartera</span>
+                    </button>
                     {compraRevisionCreditos.length > 0 && (
                       <Badge variant="outline" className="gap-1 text-[10px] border-blue-200 text-blue-700 bg-blue-50 font-semibold">
                         <Clock className="w-3 h-3" aria-hidden="true" />
@@ -903,10 +1148,10 @@ function InvestorCard({
                   {investor.creditosPendientes
                     .filter(c => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
                     .map((credito) => (
-                      <CreditRow 
-                        key={credito.id} 
-                        credito={credito} 
-                        editingCreditId={editingCreditId} 
+                      <CreditRow
+                        key={credito.id}
+                        credito={credito}
+                        editingCreditId={editingCreditId}
                         isEditing={isEditing}
                         onStartEdit={handleStartEdit}
                         onCancelEdit={handleCancelEdit}
@@ -919,6 +1164,8 @@ function InvestorCard({
                         onToggleDestino={handleToggleDestino}
                         onSave={handleSave}
                         reemplazarIsPending={reemplazar.isPending}
+                        checked={selectedCompraIds.has(credito.credito_id)}
+                        onToggleSelection={handleToggleCompraId}
                       />
                     ))
                   }
@@ -931,23 +1178,32 @@ function InvestorCard({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          const ids = investor.creditosPendientes
-                            .filter(c => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
-                            .map(c => c.credito_id);
-                          setIdsToCancel(ids);
-                          setCancelLabelOverride("Cancelar Compra");
-                          setConfirmingCancel(true);
+                          const creditos = investor.creditosPendientes.filter(c => selectedCompraIds.has(c.credito_id));
+                          if (creditos.length === 0) return;
+                          setPendingAction({
+                            tipo: "cancelar",
+                            creditos,
+                            handler: () => {
+                              setIdsToCancel(creditos.map(c => c.credito_id));
+                              setCancelLabelOverride("Cancelar Compra");
+                              setConfirmingCancel(true);
+                            },
+                          });
                         }}
-                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
-                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                        disabled={selectedCompraIds.size === 0 || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
+                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 disabled:opacity-50"
                       >
                       <Ban className="w-3 h-3" aria-hidden="true" />
                       Cancelar Compra
                     </Button>
-                    {investor.creditosPendientes.some(c => c.status === "pendiente_compra_cartera") && (
+                    {showAceptar && (
                       <Button
                         size="sm"
-                        onClick={handleAceptarCompraCartera}
+                        onClick={() => setPendingAction({
+                          tipo: "aceptar",
+                          creditos: investor.creditosPendientes.filter(c => selectedAceptarIds.includes(c.credito_id)),
+                          handler: handleAceptarCompraCartera,
+                        })}
                         disabled={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || extenderCompra.isPending}
                         className="gap-1 text-[11px] h-7 bg-amber-500 text-white hover:bg-amber-600 border-none"
                       >
@@ -962,8 +1218,12 @@ function InvestorCard({
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={handleExtenderCompraCartera}
-                        disabled={compraYaExtendida || extenderCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                        onClick={() => setPendingAction({
+                          tipo: "extender",
+                          creditos: investor.creditosPendientes.filter(c => selectedConfirmarIds.includes(c.credito_id) && !c.compra_cartera_extendida_at),
+                          handler: handleExtenderCompraCartera,
+                        })}
+                        disabled={selectedConfirmarIds.length === 0 || compraYaExtendida || extenderCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
                         className="gap-1 text-[11px] h-7 border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-60"
                       >
                         {extenderCompra.isPending
@@ -973,20 +1233,24 @@ function InvestorCard({
                         {compraYaExtendida ? "Extendido 24h" : "Extender 24h"}
                       </Button>
                     )}
-                    <Button
-                      size="sm"
-                      onClick={handleConfirmCompraCartera}
-                      disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
-                      className={`gap-1 text-[11px] h-7 bg-amber-600 text-white hover:bg-amber-700 ${
-                        !investor.creditosPendientes.some(c => c.status === "pendiente_revision") ? "hidden" : ""
-                      }`}
-                    >
-                      {completarEspejo.isPending
-                        ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                        : <Check className="w-3 h-3" aria-hidden="true" />
-                      }
-                      Confirmar Compra
-                    </Button>
+                    {showConfirmar && (
+                      <Button
+                        size="sm"
+                        onClick={() => setPendingAction({
+                          tipo: "confirmar",
+                          creditos: investor.creditosPendientes.filter(c => selectedConfirmarIds.includes(c.credito_id)),
+                          handler: handleConfirmCompraCartera,
+                        })}
+                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
+                        className="gap-1 text-[11px] h-7 bg-amber-600 text-white hover:bg-amber-700"
+                      >
+                        {completarEspejo.isPending
+                          ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                          : <Check className="w-3 h-3" aria-hidden="true" />
+                        }
+                        Confirmar Compra
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -998,7 +1262,19 @@ function InvestorCard({
                 <div className="flex items-center gap-2 px-1">
                   <div className="h-px flex-1 bg-blue-100" />
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Reinversiones</span>
+                    <button type="button" onClick={handleToggleAllReinversion} className="flex items-center gap-1.5 focus:outline-none group">
+                      {allReinversionSelected
+                        ? <div className="w-3 h-3 rounded-sm border border-blue-500 bg-blue-500 flex items-center justify-center">
+                            <Check className="w-2 h-2 text-white stroke-[3]" />
+                          </div>
+                        : someReinversionSelected
+                          ? <div className="w-3 h-3 rounded-sm border border-blue-400 bg-blue-100 flex items-center justify-center">
+                              <div className="w-1.5 h-px bg-blue-500" />
+                            </div>
+                          : <div className="w-3 h-3 rounded-sm border border-blue-200 bg-white group-hover:border-blue-400 transition-colors" />
+                      }
+                      <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Reinversiones</span>
+                    </button>
                     <Badge variant="outline" className="text-[10px] border-blue-200 text-blue-700 bg-blue-50 font-bold">
                       {formatQ(totalReinversion)}
                     </Badge>
@@ -1010,10 +1286,10 @@ function InvestorCard({
                   {investor.creditosPendientes
                     .filter(c => c.status === "pendiente_reinversion")
                     .map((credito) => (
-                      <CreditRow 
-                        key={credito.id} 
-                        credito={credito} 
-                        editingCreditId={editingCreditId} 
+                      <CreditRow
+                        key={credito.id}
+                        credito={credito}
+                        editingCreditId={editingCreditId}
                         isEditing={isEditing}
                         onStartEdit={handleStartEdit}
                         onCancelEdit={handleCancelEdit}
@@ -1026,6 +1302,8 @@ function InvestorCard({
                         onToggleDestino={handleToggleDestino}
                         onSave={handleSave}
                         reemplazarIsPending={reemplazar.isPending}
+                        checked={selectedReinversionIds.has(credito.credito_id)}
+                        onToggleSelection={handleToggleReinversionId}
                       />
                     ))
                   }
@@ -1038,23 +1316,32 @@ function InvestorCard({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          const ids = investor.creditosPendientes
-                            .filter(c => c.status === "pendiente_reinversion")
-                            .map(c => c.credito_id);
-                          setIdsToCancel(ids);
-                          setCancelLabelOverride("Cancelar Reinversión");
-                          setConfirmingCancel(true);
+                          const creditos = investor.creditosPendientes.filter(c => selectedReinversionIds.has(c.credito_id));
+                          if (creditos.length === 0) return;
+                          setPendingAction({
+                            tipo: "cancelar",
+                            creditos,
+                            handler: () => {
+                              setIdsToCancel(creditos.map(c => c.credito_id));
+                              setCancelLabelOverride("Cancelar Reinversión");
+                              setConfirmingCancel(true);
+                            },
+                          });
                         }}
-                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
-                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                        disabled={selectedReinversionIds.size === 0 || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 disabled:opacity-50"
                       >
                         <Ban className="w-3 h-3" aria-hidden="true" />
                         Cancelar Reinversión
                       </Button>
                     <Button
                       size="sm"
-                      onClick={handleConfirmReinversion}
-                      disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                      onClick={() => setPendingAction({
+                        tipo: "confirmar_reinversion",
+                        creditos: investor.creditosPendientes.filter(c => selectedReinversionIds.has(c.credito_id)),
+                        handler: handleConfirmReinversion,
+                      })}
+                      disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || selectedReinversionIds.size === 0}
                       className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
                     >
                       {completarEspejo.isPending
@@ -1117,6 +1404,15 @@ function InvestorCard({
           )}
         </div>
       )}
+
+      <ModalConfirmAccion
+        open={!!pendingAction}
+        onClose={() => setPendingAction(null)}
+        onConfirm={() => { pendingAction?.handler(); setPendingAction(null); }}
+        tipo={pendingAction?.tipo ?? "aceptar"}
+        creditos={pendingAction?.creditos ?? []}
+        isPending={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || extenderCompra.isPending}
+      />
     </div>
   );
 }

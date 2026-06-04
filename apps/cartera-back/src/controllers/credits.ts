@@ -16,7 +16,6 @@ import {
   montos_adicionales,
   moras_credito,
   pagos_credito,
-  pagos_credito_inversionistas,
   platform_users,
   usuarios,
 } from "../database/db/schema";
@@ -1501,44 +1500,28 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       // b) Capital = monto_incobrable, plazo = 1, cuota = capital completo
       const capitalIncobrable = new Big(monto_cancelacion!);
 
-      // c) Borrar solo pagos no pagados (para no romper FKs del espejo)
+      // c) Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
+      //    paymentFalse=true). Las queries de saldo/reportes filtran paymentFalse=false, así
+      //    que quedan fuera de las vistas activas sin romper FKs de inversionistas/boletas.
       const pagosNoPagados = await tx
-        .select({ pago_id: pagos_credito.pago_id })
-        .from(pagos_credito)
+        .update(pagos_credito)
+        .set({ paymentFalse: true })
         .where(
           and(
             eq(pagos_credito.credito_id, creditId),
             eq(pagos_credito.pagado, false)
           )
-        );
+        )
+        .returning({ pago_id: pagos_credito.pago_id });
 
       const pagoIds = pagosNoPagados.map(p => p.pago_id);
 
       if (pagoIds.length > 0) {
-        await tx
-          .delete(boletas)
-          .where(inArray(boletas.pago_id, pagoIds));
-
-        await tx
-          .delete(pagos_credito_inversionistas)
-          .where(inArray(pagos_credito_inversionistas.pago_id, pagoIds));
-
-        await tx
-          .delete(pagos_credito)
-          .where(inArray(pagos_credito.pago_id, pagoIds));
-
-        console.log(`🗑️ Eliminados ${pagoIds.length} pagos no pagados del crédito #${creditId}`);
+        console.log(`🚫 Anulados (paymentFalse) ${pagoIds.length} pagos no pagados del crédito #${creditId}`);
       }
 
-      // d) Borrar SOLO cuotas no pagadas (las pagadas se conservan como histórico)
-      await tx
-        .delete(cuotas_credito)
-        .where(
-          and(
-            eq(cuotas_credito.credito_id, creditId),
-            eq(cuotas_credito.pagado, false)
-          )
-        );
+      // d) Las cuotas no pagadas NO se borran: se conservan como histórico. Sus pagos quedaron
+      //    anulados arriba, así que no aportan saldo en las vistas activas.
 
       // Crear cuota correlativa para el saldo incobrable
       const [maxCuotaRowDirect] = await tx
@@ -1623,7 +1606,7 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
 
       return {
         ok: true,
-        message: `Crédito #${creditId} marcado como incobrable. Capital: Q${capitalIncobrable.toString()}, Plazo: 1, Cuota: Q${capitalIncobrable.toString()}, ${pagoIds.length} pagos eliminados.`,
+        message: `Crédito #${creditId} marcado como incobrable. Capital: Q${capitalIncobrable.toString()}, Plazo: 1, Cuota: Q${capitalIncobrable.toString()}, ${pagoIds.length} pagos anulados.`,
       };
     });
 
@@ -1902,9 +1885,12 @@ export async function resetCredit({
       })
       .returning();
 
-    // 11. Eliminar pagos no pagados (los pagados se conservan como histórico)
+    // 11. Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
+    //     paymentFalse=true; todas las queries de saldo/reportes filtran paymentFalse=false,
+    //     así que quedan fuera de las vistas activas sin romper FKs de inversionistas/boletas).
     await db
-      .delete(pagos_credito)
+      .update(pagos_credito)
+      .set({ paymentFalse: true })
       .where(
         and(
           eq(pagos_credito.credito_id, credito.credito_id),
@@ -1930,9 +1916,8 @@ export async function resetCredit({
       })
       .returning();
 
-    // 12.2 Enlazar el pago de cierre a la cuota recién creada ANTES de borrar cuotas no pagadas,
-    // de lo contrario el DELETE viola el FK pagos_credito.cuota_id cuando `cuotaId` apuntaba a
-    // una cuota no pagada (escenario reset/cancelación contra cuota vigente).
+    // 12.2 Enlazar el pago de cierre a la cuota recién creada (cuota correlativa "pagada"),
+    // para que el cierre quede asociado a una cuota limpia y no a una cuota vigente del plan.
     if (nuevoPago?.pago_id && cuotaCierre?.cuota_id) {
       await db
         .update(pagos_credito)
@@ -1940,15 +1925,8 @@ export async function resetCredit({
         .where(eq(pagos_credito.pago_id, nuevoPago.pago_id));
     }
 
-    // 12. Eliminar SOLO las cuotas no pagadas (las pagadas se conservan como histórico)
-    await db
-      .delete(cuotas_credito)
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credito.credito_id),
-          eq(cuotas_credito.pagado, false)
-        )
-      );
+    // 12. Las cuotas no pagadas NO se borran: se conservan como histórico. Sus pagos quedaron
+    //     anulados (paymentFalse=true) en el paso 11, así que no aportan saldo en las vistas activas.
 
     // 12.5 Distribuir abono a capital en tabla espejo (CANCELACION)
     try {
@@ -1958,12 +1936,18 @@ export async function resetCredit({
       console.error("⚠️ Error al distribuir abono en espejo (reset):", err);
     }
 
-    // 13. Distribuir pago entre inversionistas (ANTES de reiniciar, necesita monto_aportado)
+    // 13. Distribuir pago entre inversionistas (ANTES de reiniciar, necesita monto_aportado).
+    //     Si la suma de aportes es 0 (p.ej. crédito ya reseteado antes) la distribución lanza
+    //     excepción; la atrapamos para no abortar el cierre del crédito.
     if (nuevoPago?.pago_id) {
-      await insertPagosCreditoInversionistasV2(
-        nuevoPago.pago_id,
-        credito.credito_id
-      );
+      try {
+        await insertPagosCreditoInversionistasV2(
+          nuevoPago.pago_id,
+          credito.credito_id
+        );
+      } catch (err) {
+        console.error("⚠️ Error al distribuir pago entre inversionistas (reset):", err);
+      }
     }
 
     // 14. Reiniciar creditos_inversionistas (no espejo)

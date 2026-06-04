@@ -23,9 +23,6 @@ import {
   AlertCircle,
   Clock,
   Plus,
-  CheckCircle2,
-  Circle,
-  MinusCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -533,8 +530,10 @@ function CreditRow({
             className="shrink-0 focus:outline-none opacity-60 hover:opacity-100 transition-opacity"
           >
             {checked
-              ? <CheckCircle2 className={`w-4 h-4 ${credito.status === "pendiente_reinversion" ? "text-blue-400" : "text-amber-400"}`} />
-              : <Circle className="w-4 h-4 text-gray-300" />
+              ? <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${credito.status === "pendiente_reinversion" ? "border-blue-500 bg-blue-500" : "border-amber-500 bg-amber-500"}`}>
+                  <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
+                </div>
+              : <div className="w-3.5 h-3.5 rounded-sm border border-gray-300 bg-white" />
             }
           </button>
         )}
@@ -1121,10 +1120,14 @@ function InvestorCard({
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={handleToggleAllCompra} className="flex items-center gap-1.5 focus:outline-none group">
                       {allCompraSelected
-                        ? <CheckCircle2 className="w-3 h-3 text-amber-400" />
+                        ? <div className="w-3 h-3 rounded-sm border border-amber-500 bg-amber-500 flex items-center justify-center">
+                            <Check className="w-2 h-2 text-white stroke-[3]" />
+                          </div>
                         : someCompraSelected
-                          ? <MinusCircle className="w-3 h-3 text-amber-300" />
-                          : <Circle className="w-3 h-3 text-amber-200 group-hover:text-amber-300 transition-colors" />
+                          ? <div className="w-3 h-3 rounded-sm border border-amber-400 bg-amber-100 flex items-center justify-center">
+                              <div className="w-1.5 h-px bg-amber-500" />
+                            </div>
+                          : <div className="w-3 h-3 rounded-sm border border-amber-200 bg-white group-hover:border-amber-400 transition-colors" />
                       }
                       <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Compra de Cartera</span>
                     </button>
@@ -1261,10 +1264,14 @@ function InvestorCard({
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={handleToggleAllReinversion} className="flex items-center gap-1.5 focus:outline-none group">
                       {allReinversionSelected
-                        ? <CheckCircle2 className="w-3 h-3 text-blue-400" />
+                        ? <div className="w-3 h-3 rounded-sm border border-blue-500 bg-blue-500 flex items-center justify-center">
+                            <Check className="w-2 h-2 text-white stroke-[3]" />
+                          </div>
                         : someReinversionSelected
-                          ? <MinusCircle className="w-3 h-3 text-blue-300" />
-                          : <Circle className="w-3 h-3 text-blue-200 group-hover:text-blue-300 transition-colors" />
+                          ? <div className="w-3 h-3 rounded-sm border border-blue-400 bg-blue-100 flex items-center justify-center">
+                              <div className="w-1.5 h-px bg-blue-500" />
+                            </div>
+                          : <div className="w-3 h-3 rounded-sm border border-blue-200 bg-white group-hover:border-blue-400 transition-colors" />
                       }
                       <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Reinversiones</span>
                     </button>

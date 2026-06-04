@@ -1100,6 +1100,68 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           totalPagado = totalPagado.plus(faltanteContraCuota);
           disponible_restante = disponible_restante.minus(faltanteContraCuota);
         }
+
+        // ─────────────────────────────────────────────────────────────────
+        // 🛡️ VALIDACIÓN ANTI-SOBREAPLICACIÓN (interés/abonos duplicados)
+        //
+        // Los `*_restante` se guardan por fila y NO quedan netos entre pagos
+        // hermanos de la misma cuota. Si un pago previo ya cubrió un rubro y
+        // este pago lo vuelve a aplicar, la cuota termina recibiendo MÁS que
+        // su monto (ej: crédito 01010202113400 / Nelson, cuota 17: interés
+        // cobrado 2 veces, +Q668.52). Preferimos TRONAR el pago a corromper
+        // el saldo: la suma aplicada a una cuota nunca puede superar su monto.
+        //
+        // Comparamos Σ(monto_aplicado) de los pagos hermanos ya contabilizados
+        // (validated, o pending sin pagar) + lo que aplicaría ESTE pago contra
+        // el monto de la cuota. Excluimos la fila en vuelo (la que se va a
+        // actualizar) y los paymentFalse.
+        // ─────────────────────────────────────────────────────────────────
+        const TOLERANCIA_CENTAVO = new Big(0.01);
+        const pagoIdEnVuelo = existingPago?.pago.pago_id ?? -1;
+        const pagosHermanos = await db
+          .select({
+            monto_aplicado: pagos_credito.monto_aplicado,
+            abono_interes: pagos_credito.abono_interes,
+          })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+              eq(pagos_credito.credito_id, credito.credito_id),
+              eq(pagos_credito.paymentFalse, false),
+              ne(pagos_credito.pago_id, pagoIdEnVuelo),
+              or(
+                eq(pagos_credito.validationStatus, "validated"),
+                and(
+                  eq(pagos_credito.validationStatus, "pending"),
+                  eq(pagos_credito.pagado, false)
+                )
+              )
+            )
+          );
+
+        const aplicadoPrevioCuota = pagosHermanos.reduce(
+          (acc, p) => acc.plus(new Big(p.monto_aplicado ?? 0)),
+          new Big(0)
+        );
+        const interesPrevioCuota = pagosHermanos.reduce(
+          (acc, p) => acc.plus(new Big(p.abono_interes ?? 0)),
+          new Big(0)
+        );
+        const totalProyectadoCuota = aplicadoPrevioCuota.plus(totalPagado);
+
+        if (totalProyectadoCuota.gt(montoCuota.plus(TOLERANCIA_CENTAVO))) {
+          throw new Error(
+            `Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} quedaría ` +
+              `sobre-aplicada (${totalProyectadoCuota.toFixed(2)} > monto de cuota ` +
+              `${montoCuota.toFixed(2)}). Ya aplicado por otros pagos: ` +
+              `${aplicadoPrevioCuota.toFixed(2)} (de los cuales interés ` +
+              `${interesPrevioCuota.toFixed(2)}); este pago intentaría aplicar ` +
+              `${totalPagado.toFixed(2)} más. Revisar los pagos previos de la cuota ` +
+              `antes de registrar.`
+          );
+        }
+
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
         // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
         const cuota_pagada = todosRestantesEnCero && !!existingPago;

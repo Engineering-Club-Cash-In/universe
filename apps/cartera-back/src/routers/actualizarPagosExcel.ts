@@ -26,7 +26,7 @@
  * está OK, se aplican todos los updates en UNA sola transacción.
  */
 import { Elysia, t } from "elysia";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
@@ -247,7 +247,14 @@ export const actualizarPagosExcelRouter = new Elysia()
           .select()
           .from(pagos_credito)
           .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
-          .where(eq(pagos_credito.credito_id, credito.credito_id))
+          .where(
+            and(
+              eq(pagos_credito.credito_id, credito.credito_id),
+              // Excluye pagos falsos y pendientes (no se sincronizan desde el Excel).
+              eq(pagos_credito.paymentFalse, false),
+              ne(pagos_credito.validationStatus, "pending"),
+            ),
+          )
           .orderBy(asc(cuotas_credito.numero_cuota), asc(pagos_credito.pago_id));
 
         const porCuota = new Map<number, CuotaInfo>();

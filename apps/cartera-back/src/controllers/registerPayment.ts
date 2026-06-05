@@ -22,6 +22,7 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
 import {
   applyCapitalPaymentAndBuildResponse,
+  calcularSaldoNetoCuota,
   getCuotaIdForPaymentInsert,
 } from "./registerPaymentPolicy";
 
@@ -883,14 +884,103 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           pagoSaldoVigente?.pago.interes_restante ?? 0
         );
         const iva_restante = new Big(pagoSaldoVigente?.pago.iva_12_restante ?? 0);
-        const seguro_restante = new Big(
+        let seguro_restante = new Big(
           pagoSaldoVigente?.pago.seguro_restante ?? 0
         );
-        const gps_restante = new Big(pagoSaldoVigente?.pago.gps_restante ?? 0);
-        const membresias_restante = new Big(pagoSaldoVigente?.pago.membresias ?? 0);
-        const capital_restante_pago = new Big(
+        let gps_restante = new Big(pagoSaldoVigente?.pago.gps_restante ?? 0);
+        let membresias_restante = new Big(pagoSaldoVigente?.pago.membresias ?? 0);
+        let capital_restante_pago = new Big(
           pagoSaldoVigente?.pago.capital_restante ?? 0
         );
+
+        // ── Saldo NETO de la cuota (anti re-aplicación de rubros) ──────────
+        // Los `*_restante` viven por fila y se desincronizan entre pagos
+        // hermanos: un rubro ya cubierto por un pago previo puede seguir
+        // mostrando saldo en otra fila (caso crédito 1086 / cuota 48: seguro
+        // y GPS ya pagados pero con `*_restante` lleno y capital inflado). Si
+        // distribuyéramos sobre esos saldos re-aplicaríamos rubros ya pagados
+        // y la cuota se pasaría de su monto. Recalculamos el saldo de cada
+        // rubro NETO de lo que ya abonaron los hermanos vivos y topamos el
+        // capital al faltante real de la cuota (monto_cuota − Σ monto_aplicado
+        // hermanos). El sobrante rebalsa a la siguiente cuota por el flujo
+        // normal del loop. `aplicadoPrevioCuota`/`interesPrevioCuota` los
+        // reusa la red de seguridad de más abajo.
+        const TOLERANCIA_CENTAVO = new Big(0.01);
+        const pagoIdEnVuelo = existingPago?.pago.pago_id ?? -1;
+        const pagosHermanos = await db
+          .select({
+            pago_id: pagos_credito.pago_id,
+            monto_aplicado: pagos_credito.monto_aplicado,
+            abono_interes: pagos_credito.abono_interes,
+            abono_iva_12: pagos_credito.abono_iva_12,
+            abono_seguro: pagos_credito.abono_seguro,
+            abono_gps: pagos_credito.abono_gps,
+            membresias_pago: pagos_credito.membresias_pago,
+          })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+              eq(pagos_credito.credito_id, credito.credito_id),
+              eq(pagos_credito.paymentFalse, false),
+              ne(pagos_credito.pago_id, pagoIdEnVuelo),
+              // Hermanos vivos: validated o pending (sin importar `pagado`).
+              // Un pago que cierra la cuota se guarda como pending+pagado=true
+              // hasta que contabilidad lo valida; debe contarse igual para no
+              // re-aplicar sus rubros.
+              or(
+                eq(pagos_credito.validationStatus, "validated"),
+                eq(pagos_credito.validationStatus, "pending")
+              )
+            )
+          );
+        const sumaHermanos = (sel: (p: any) => any) =>
+          pagosHermanos.reduce(
+            (acc, p) => acc.plus(new Big(sel(p) ?? 0)),
+            new Big(0)
+          );
+        const aplicadoPrevioCuota = sumaHermanos((p) => p.monto_aplicado);
+        const interesPrevioCuota = sumaHermanos((p) => p.abono_interes);
+        const seguroPrevioCuota = sumaHermanos((p) => p.abono_seguro);
+        const gpsPrevioCuota = sumaHermanos((p) => p.abono_gps);
+        const membresiasPrevioCuota = sumaHermanos((p) => p.membresias_pago);
+        // Interés/IVA: sumar SOLO los hermanos distintos a la fila vigente. La
+        // fila ya refleja su propia aplicación; netear contra los OTROS evita
+        // re-aplicar interés/IVA si la fila quedó stale, sin sub-cobrar lo que
+        // la propia fila ya descontó.
+        const pagoSaldoVigenteId = pagoSaldoVigente?.pago.pago_id ?? -1;
+        const sumaHermanosOtros = (sel: (p: any) => any) =>
+          pagosHermanos.reduce(
+            (acc, p) =>
+              p.pago_id === pagoSaldoVigenteId
+                ? acc
+                : acc.plus(new Big(sel(p) ?? 0)),
+            new Big(0)
+          );
+        const interesOtrosHermanos = sumaHermanosOtros((p) => p.abono_interes);
+        const ivaOtrosHermanos = sumaHermanosOtros((p) => p.abono_iva_12);
+        const saldoNeto = calcularSaldoNetoCuota({
+          montoCuota,
+          aplicadoPrevioCuota,
+          filaInteresRestante: interes_restante,
+          filaIvaRestante: iva_restante,
+          filaSeguroRestante: seguro_restante,
+          filaGpsRestante: gps_restante,
+          filaMembresiasRestante: membresias_restante,
+          filaCapitalRestante: capital_restante_pago,
+          objetivoSeguro: credito.seguro_10_cuotas ?? 0,
+          objetivoGps: credito.gps ?? 0,
+          objetivoMembresias: credito.membresias_pago ?? 0,
+          hermanosSeguro: seguroPrevioCuota,
+          hermanosGps: gpsPrevioCuota,
+          hermanosMembresias: membresiasPrevioCuota,
+          hermanosInteres: interesOtrosHermanos,
+          hermanosIva: ivaOtrosHermanos,
+        });
+        seguro_restante = saldoNeto.seguroRestante;
+        gps_restante = saldoNeto.gpsRestante;
+        membresias_restante = saldoNeto.membresiasRestante;
+        capital_restante_pago = saldoNeto.capitalRestante;
 
         // Reiniciar todos los abonos
         let abono_interes = new Big(0);
@@ -1127,57 +1217,15 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         }
 
         // ─────────────────────────────────────────────────────────────────
-        // 🛡️ VALIDACIÓN ANTI-SOBREAPLICACIÓN (interés/abonos duplicados)
+        // 🛡️ RED DE SEGURIDAD ANTI-SOBREAPLICACIÓN
         //
-        // Los `*_restante` se guardan por fila y NO quedan netos entre pagos
-        // hermanos de la misma cuota. Si un pago previo ya cubrió un rubro y
-        // este pago lo vuelve a aplicar, la cuota termina recibiendo MÁS que
-        // su monto (ej: crédito 01010202113400 / Nelson, cuota 17: interés
-        // cobrado 2 veces, +Q668.52). Preferimos TRONAR el pago a corromper
-        // el saldo: la suma aplicada a una cuota nunca puede superar su monto.
-        //
-        // Comparamos Σ(monto_aplicado) de los pagos hermanos vivos (validated
-        // o pending —incluidos los pending+pagado=true que cierran la cuota
-        // pero aún no se validan) + lo que aplicaría ESTE pago contra el monto
-        // de la cuota. Excluimos la fila en vuelo (la que se va a actualizar) y
-        // los paymentFalse.
+        // Tras el clamp por saldo NETO de arriba (que netea rubros contra los
+        // pagos hermanos y topa el capital al faltante real), esto ya no
+        // debería dispararse en operación normal. Se mantiene como aserción
+        // dura: la suma aplicada a una cuota nunca puede superar su monto.
+        // Reusa `aplicadoPrevioCuota`/`interesPrevioCuota`/`TOLERANCIA_CENTAVO`
+        // calculados antes de distribuir (netos de los hermanos vivos).
         // ─────────────────────────────────────────────────────────────────
-        const TOLERANCIA_CENTAVO = new Big(0.01);
-        const pagoIdEnVuelo = existingPago?.pago.pago_id ?? -1;
-        const pagosHermanos = await db
-          .select({
-            monto_aplicado: pagos_credito.monto_aplicado,
-            abono_interes: pagos_credito.abono_interes,
-          })
-          .from(pagos_credito)
-          .where(
-            and(
-              eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
-              eq(pagos_credito.credito_id, credito.credito_id),
-              eq(pagos_credito.paymentFalse, false),
-              ne(pagos_credito.pago_id, pagoIdEnVuelo),
-              // Contar TODOS los hermanos vivos: validated o pending, sin
-              // importar `pagado`. Un pago que cierra la cuota se guarda como
-              // pending + pagado=true hasta que contabilidad lo valida; si lo
-              // excluyéramos (como hacía la condición pending && pagado=false),
-              // un segundo pago a la misma cuota no lo contaría y volvería a
-              // aplicar interés/IVA/capital sin ser rechazado. `paymentFalse` y
-              // la fila en vuelo ya se filtran arriba.
-              or(
-                eq(pagos_credito.validationStatus, "validated"),
-                eq(pagos_credito.validationStatus, "pending")
-              )
-            )
-          );
-
-        const aplicadoPrevioCuota = pagosHermanos.reduce(
-          (acc, p) => acc.plus(new Big(p.monto_aplicado ?? 0)),
-          new Big(0)
-        );
-        const interesPrevioCuota = pagosHermanos.reduce(
-          (acc, p) => acc.plus(new Big(p.abono_interes ?? 0)),
-          new Big(0)
-        );
         const totalProyectadoCuota = aplicadoPrevioCuota.plus(totalPagado);
 
         if (totalProyectadoCuota.gt(montoCuota.plus(TOLERANCIA_CENTAVO))) {

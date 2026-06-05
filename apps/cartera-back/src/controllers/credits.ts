@@ -1965,7 +1965,18 @@ export async function resetCredit({
           credito.credito_id
         );
       } catch (err) {
-        console.error("⚠️ Error al distribuir pago entre inversionistas (reset):", err);
+        // Solo silenciamos el caso conocido y benigno: crédito SIN aportes (suma = 0),
+        // típico de un crédito ya reseteado antes. Cualquier otro fallo (inversionistas o
+        // pagos faltantes, error de DB, distribución a medias) SÍ se re-lanza: dejar el
+        // cierre sin liquidación de inversionistas e irreintentable sería peor.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("suma de montos aportados es 0")) {
+          console.warn(
+            `⚠️ Distribución a inversionistas omitida (crédito ${credito.credito_id} sin aportes).`
+          );
+        } else {
+          throw err;
+        }
       }
     }
 

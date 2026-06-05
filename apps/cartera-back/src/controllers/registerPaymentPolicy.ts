@@ -22,10 +22,20 @@ export type SaldoCuotaInput = {
   objetivoSeguro: BigInput;
   objetivoGps: BigInput;
   objetivoMembresias: BigInput;
-  // Ya abonado por los pagos hermanos vivos en cada rubro plano.
+  // Ya abonado por los pagos hermanos vivos en cada rubro plano. Para
+  // seguro/GPS/membresías son TODOS los hermanos (se netea contra el objetivo
+  // plano del crédito).
   hermanosSeguro: BigInput;
   hermanosGps: BigInput;
   hermanosMembresias: BigInput;
+  // Interés/IVA ya abonado por hermanos DISTINTOS a la fila vigente. El interés
+  // por cuota no tiene un objetivo plano confiable (el real difiere del nominal
+  // `credito.cuota_interes`), así que no se puede netear contra el crédito sin
+  // sub-cobrar en cuotas frescas. En su lugar se netea la fila menos lo que
+  // aplicaron los OTROS hermanos: la fila ya refleja su propia aplicación, y lo
+  // de los demás hermanos es lo que la fila stale podría re-aplicar.
+  hermanosInteres: BigInput;
+  hermanosIva: BigInput;
 };
 
 export type SaldoCuotaNeto = {
@@ -46,11 +56,15 @@ export type SaldoCuotaNeto = {
  * - Rubros planos (seguro/GPS/membresías) = mín(saldo de la fila, objetivo −
  *   ya abonado por hermanos), nunca negativo. Así un rubro ya cubierto por un
  *   pago previo no se vuelve a aplicar aunque la fila vigente lo muestre lleno.
+ * - Interés/IVA = máx(0, saldo de la fila − ya abonado por hermanos DISTINTOS a
+ *   la fila vigente). No hay objetivo plano confiable para estos rubros, así
+ *   que se restan los abonos de los otros hermanos (lo que una fila stale
+ *   re-aplicaría) sin tocar lo que la propia fila ya refleja.
  * - El capital absorbe el faltante real restante tras los demás rubros, sin
  *   exceder lo que indica la fila vigente.
  *
  * En una cuota fresca (sin hermanos) es no-op: objetivo − 0 == lo que ya trae
- * la fila, y capital == su saldo de fila.
+ * la fila, interés/IVA − 0 == la fila, y capital == su saldo de fila.
  */
 export const calcularSaldoNetoCuota = (
   i: SaldoCuotaInput
@@ -64,8 +78,12 @@ export const calcularSaldoNetoCuota = (
   const montoCuota = new Big(i.montoCuota);
   const saldoRealCuota = noNeg(montoCuota.minus(i.aplicadoPrevioCuota));
 
-  const interesRestante = new Big(i.filaInteresRestante);
-  const ivaRestante = new Big(i.filaIvaRestante);
+  // Interés/IVA: la fila ya refleja su propia aplicación; restamos lo que
+  // aplicaron los OTROS hermanos para no re-aplicarlo si la fila quedó stale.
+  const interesRestante = noNeg(
+    new Big(i.filaInteresRestante).minus(i.hermanosInteres)
+  );
+  const ivaRestante = noNeg(new Big(i.filaIvaRestante).minus(i.hermanosIva));
   const seguroRestante = saldoRubro(
     new Big(i.filaSeguroRestante),
     new Big(i.objetivoSeguro).minus(i.hermanosSeguro)

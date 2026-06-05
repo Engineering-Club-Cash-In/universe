@@ -909,8 +909,10 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         const pagoIdEnVuelo = existingPago?.pago.pago_id ?? -1;
         const pagosHermanos = await db
           .select({
+            pago_id: pagos_credito.pago_id,
             monto_aplicado: pagos_credito.monto_aplicado,
             abono_interes: pagos_credito.abono_interes,
+            abono_iva_12: pagos_credito.abono_iva_12,
             abono_seguro: pagos_credito.abono_seguro,
             abono_gps: pagos_credito.abono_gps,
             membresias_pago: pagos_credito.membresias_pago,
@@ -942,6 +944,21 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         const seguroPrevioCuota = sumaHermanos((p) => p.abono_seguro);
         const gpsPrevioCuota = sumaHermanos((p) => p.abono_gps);
         const membresiasPrevioCuota = sumaHermanos((p) => p.membresias_pago);
+        // Interés/IVA: sumar SOLO los hermanos distintos a la fila vigente. La
+        // fila ya refleja su propia aplicación; netear contra los OTROS evita
+        // re-aplicar interés/IVA si la fila quedó stale, sin sub-cobrar lo que
+        // la propia fila ya descontó.
+        const pagoSaldoVigenteId = pagoSaldoVigente?.pago.pago_id ?? -1;
+        const sumaHermanosOtros = (sel: (p: any) => any) =>
+          pagosHermanos.reduce(
+            (acc, p) =>
+              p.pago_id === pagoSaldoVigenteId
+                ? acc
+                : acc.plus(new Big(sel(p) ?? 0)),
+            new Big(0)
+          );
+        const interesOtrosHermanos = sumaHermanosOtros((p) => p.abono_interes);
+        const ivaOtrosHermanos = sumaHermanosOtros((p) => p.abono_iva_12);
         const saldoNeto = calcularSaldoNetoCuota({
           montoCuota,
           aplicadoPrevioCuota,
@@ -957,6 +974,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           hermanosSeguro: seguroPrevioCuota,
           hermanosGps: gpsPrevioCuota,
           hermanosMembresias: membresiasPrevioCuota,
+          hermanosInteres: interesOtrosHermanos,
+          hermanosIva: ivaOtrosHermanos,
         });
         seguro_restante = saldoNeto.seguroRestante;
         gps_restante = saldoNeto.gpsRestante;

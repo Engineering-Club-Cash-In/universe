@@ -2342,3 +2342,176 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
 
   return { cuotas, totales };
 }
+
+export async function getCapitalInversionistas({
+  fecha_desde,
+  fecha_hasta,
+  excel = false,
+}: {
+  fecha_desde?: string;
+  fecha_hasta?: string;
+  excel?: boolean;
+}) {
+  const filters: any[] = [];
+
+  if (fecha_desde) {
+    filters.push(sql`e.fecha_inicio_participacion >= ${fecha_desde}::date`);
+  }
+  if (fecha_hasta) {
+    filters.push(sql`e.fecha_inicio_participacion <= ${fecha_hasta}::date`);
+  }
+
+  const whereClause =
+    filters.length > 0
+      ? sql`WHERE ${sql.join(filters, sql` AND `)}`
+      : sql``;
+
+  const result = await db.execute(sql`
+    SELECT
+      i.inversionista_id,
+      i.nombre AS inversionista,
+      SUM(e.monto_aportado) AS capital,
+      ROUND(SUM(e.porcentaje_participacion_inversionista * e.monto_aportado) / NULLIF(SUM(e.monto_aportado), 0), 2) AS tasa_inversionista,
+      i.tipo_reinversion AS modalidad,
+      MIN(e.fecha_inicio_participacion) AS fecha_inicio_participacion,
+      CASE
+        WHEN bool_or(e.status <> 'completado') THEN 'compra de cartera pendiente'
+        ELSE ''
+      END AS comentario
+    FROM cartera.creditos_inversionistas_espejo e
+    JOIN cartera.inversionistas i
+      ON i.inversionista_id = e.inversionista_id
+    ${whereClause}
+    GROUP BY i.inversionista_id, i.nombre, i.tipo_reinversion
+    HAVING SUM(e.monto_aportado) <> 0
+    ORDER BY SUM(e.monto_aportado) DESC
+  `);
+
+  const data = result.rows as {
+    inversionista_id: number;
+    inversionista: string;
+    capital: string;
+    tasa_inversionista: string;
+    modalidad: string | null;
+    fecha_inicio_participacion: string | null;
+    comentario: string;
+  }[];
+
+  if (!excel) {
+    return { data };
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Capital Inversionistas");
+
+  sheet.columns = [
+    { header: "No.", key: "no", width: 6 },
+    { header: "Inversionista", key: "inversionista", width: 30 },
+    { header: "Capital (Q)", key: "capital", width: 18 },
+    { header: "Tasa (%)", key: "tasa_inversionista", width: 12 },
+    { header: "Modalidad", key: "modalidad", width: 20 },
+    { header: "Fecha Inicio Participación", key: "fecha_inicio_participacion", width: 26 },
+    { header: "Comentario", key: "comentario", width: 35 },
+  ];
+
+  const headerRow = sheet.getRow(1);
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.border = {
+      top: { style: "thin" },
+      left: { style: "thin" },
+      bottom: { style: "thin" },
+      right: { style: "thin" },
+    };
+  });
+  headerRow.height = 20;
+
+  data.forEach((row, idx) => {
+    const r = sheet.addRow({
+      no: idx + 1,
+      inversionista: row.inversionista,
+      capital: Number(row.capital),
+      tasa_inversionista: Number(row.tasa_inversionista),
+      modalidad: row.modalidad ? row.modalidad.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "",
+      fecha_inicio_participacion: row.fecha_inicio_participacion
+        ? row.fecha_inicio_participacion.slice(0, 10).split("-").reverse().join("/")
+        : "",
+      comentario: row.comentario,
+    });
+
+    const isEven = idx % 2 === 0;
+    r.eachCell((cell) => {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: isEven ? "FFF5F7FA" : "FFFFFFFF" },
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFD1D5DB" } },
+        left: { style: "thin", color: { argb: "FFD1D5DB" } },
+        bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+        right: { style: "thin", color: { argb: "FFD1D5DB" } },
+      };
+    });
+
+    const capitalCell = r.getCell("capital");
+    capitalCell.numFmt = '"Q"#,##0.00';
+    capitalCell.alignment = { horizontal: "right" };
+
+    const tasaCell = r.getCell("tasa_inversionista");
+    tasaCell.numFmt = '0.00"%"';
+    tasaCell.alignment = { horizontal: "right" };
+  });
+
+  const totalCapital = data.reduce((acc, row) => acc + Number(row.capital ?? 0), 0);
+  const totalRow = sheet.addRow([]);
+  totalRow.getCell(1).value = null;
+  totalRow.getCell(2).value = "TOTAL";
+  totalRow.getCell(3).value = totalCapital;
+  totalRow.getCell(4).value = null;
+  totalRow.getCell(5).value = null;
+  totalRow.getCell(6).value = null;
+  totalRow.getCell(7).value = null;
+
+  for (let col = 1; col <= 7; col++) {
+    const cell = totalRow.getCell(col);
+    cell.font = { bold: true, color: { argb: "FF1E3A5F" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1E8FF" } };
+    cell.border = {
+      top: { style: "medium", color: { argb: "FF1E3A5F" } },
+      left: { style: "thin", color: { argb: "FFD1D5DB" } },
+      bottom: { style: "medium", color: { argb: "FF1E3A5F" } },
+      right: { style: "thin", color: { argb: "FFD1D5DB" } },
+    };
+  }
+  const totalCapitalCell = totalRow.getCell(3);
+  totalCapitalCell.numFmt = '"Q"#,##0.00';
+  totalCapitalCell.alignment = { horizontal: "right" };
+  totalRow.getCell(2).alignment = { horizontal: "left" };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const filename = `reportes/capital_inversionistas_${Date.now()}.xlsx`;
+
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: Buffer.from(buffer),
+      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  const excelUrl = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+  return { data, excelUrl };
+}

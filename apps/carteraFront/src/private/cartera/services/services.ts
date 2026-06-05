@@ -4354,3 +4354,41 @@ export const generarCierreMensual = async (
   const res = await api.post(`${API_URL}/cierre-mensual/generar`, periodo ? { periodo } : {});
   return res.data;
 };
+
+export interface CapitalInversionistaItem {
+  inversionista_id: number;
+  inversionista: string;
+  capital: string;
+  tasa_inversionista: string;
+  modalidad: string | null;
+  fecha_inicio_participacion: string | null;
+  comentario: string;
+}
+
+export interface CapitalInversionistasParams {
+  fecha_desde?: string;
+  fecha_hasta?: string;
+  excel?: boolean;
+}
+
+export interface CapitalInversionistasResponse {
+  success: boolean;
+  data: CapitalInversionistaItem[];
+  excelUrl?: string;
+}
+
+export async function getCapitalInversionistas(
+  params: CapitalInversionistasParams
+): Promise<CapitalInversionistasResponse> {
+  const res = await api.get<CapitalInversionistasResponse>(
+    `${API_URL}/capital-inversionistas`,
+    {
+      params: {
+        ...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
+        ...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
+        excel: params.excel,
+      },
+    }
+  );
+  return res.data;
+}

@@ -122,7 +122,7 @@ export function CapitalInversionistas() {
     queryEnabled
   );
 
-  const rows: CapitalInversionistaItem[] = data?.data ?? [];
+  const rows: CapitalInversionistaItem[] = queryEnabled ? (data?.data ?? []) : [];
 
   const totalCapital = rows.reduce((acc, r) => acc + Number(r.capital ?? 0), 0);
 

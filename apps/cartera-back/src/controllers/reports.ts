@@ -2371,7 +2371,7 @@ export async function getCapitalInversionistas({
       i.inversionista_id,
       i.nombre AS inversionista,
       SUM(e.monto_aportado) AS capital,
-      ROUND(AVG(e.porcentaje_participacion_inversionista), 2) AS tasa_inversionista,
+      ROUND(SUM(e.porcentaje_participacion_inversionista * e.monto_aportado) / NULLIF(SUM(e.monto_aportado), 0), 2) AS tasa_inversionista,
       i.tipo_reinversion AS modalidad,
       MIN(e.fecha_inicio_participacion) AS fecha_inicio_participacion,
       CASE
@@ -2384,7 +2384,7 @@ export async function getCapitalInversionistas({
     ${whereClause}
     GROUP BY i.inversionista_id, i.nombre, i.tipo_reinversion
     HAVING SUM(e.monto_aportado) <> 0
-    ORDER BY i.inversionista_id, SUM(e.monto_aportado) DESC
+    ORDER BY SUM(e.monto_aportado) DESC
   `);
 
   const data = result.rows as {
@@ -2436,7 +2436,7 @@ export async function getCapitalInversionistas({
       tasa_inversionista: Number(row.tasa_inversionista),
       modalidad: row.modalidad ?? "",
       fecha_inicio_participacion: row.fecha_inicio_participacion
-        ? new Date(row.fecha_inicio_participacion).toLocaleDateString("es-GT")
+        ? row.fecha_inicio_participacion.slice(0, 10).split("-").reverse().join("/")
         : "",
       comentario: row.comentario,
     });

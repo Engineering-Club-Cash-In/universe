@@ -1468,7 +1468,11 @@ export const paymentRouter = new Elysia()
 )
 .get(
   "/capital-inversionistas",
-  async ({ query, set }) => {
+  async ({ query, set, user }: any) => {
+    if (user?.role !== "ADMIN") {
+      set.status = 403;
+      return { success: false, error: "No autorizado" };
+    }
     try {
       const result = await getCapitalInversionistas({
         fecha_desde: query.fecha_desde,

@@ -28,6 +28,11 @@ function formatFecha(val: string | null | undefined): string {
   return `${day}/${month}/${year}`;
 }
 
+function formatModalidad(val: string | null | undefined): string {
+  if (!val) return "-";
+  return val.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function toDateString(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -94,13 +99,13 @@ function DatePickerField({
 export function CapitalInversionistas() {
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
-  const [queryEnabled, setQueryEnabled] = useState(true);
+  const [queryEnabled, setQueryEnabled] = useState(false);
   const [appliedDesde, setAppliedDesde] = useState("");
   const [appliedHasta, setAppliedHasta] = useState("");
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const { data, isLoading, isError, refetch } = useCapitalInversionistas(
+  const { data, isLoading, isError } = useCapitalInversionistas(
     { fecha_desde: appliedDesde || undefined, fecha_hasta: appliedHasta || undefined },
     queryEnabled
   );
@@ -113,7 +118,6 @@ export function CapitalInversionistas() {
     setAppliedDesde(fechaDesde);
     setAppliedHasta(fechaHasta);
     setQueryEnabled(true);
-    refetch();
   };
 
   const handleExcel = async () => {
@@ -227,7 +231,7 @@ export function CapitalInversionistas() {
                       </div>
                       <div>
                         <span className="text-slate-400 uppercase tracking-wide">Modalidad</span>
-                        <p className="text-slate-600">{row.modalidad ?? "-"}</p>
+                        <p className="text-slate-600">{formatModalidad(row.modalidad)}</p>
                       </div>
                       <div>
                         <span className="text-slate-400 uppercase tracking-wide">Fecha Inicio</span>
@@ -293,7 +297,7 @@ export function CapitalInversionistas() {
                           <TableCell className="font-medium text-slate-800 truncate">{row.inversionista}</TableCell>
                           <TableCell className="text-right font-mono text-slate-700">{formatQ(row.capital)}</TableCell>
                           <TableCell className="text-right text-slate-700">{row.tasa_inversionista}%</TableCell>
-                          <TableCell className="text-slate-600 truncate">{row.modalidad ?? "-"}</TableCell>
+                          <TableCell className="text-slate-600 truncate">{formatModalidad(row.modalidad)}</TableCell>
                           <TableCell className="text-slate-600">{formatFecha(row.fecha_inicio_participacion)}</TableCell>
                           <TableCell className="text-slate-500 italic whitespace-normal break-words">{row.comentario || "-"}</TableCell>
                         </TableRow>

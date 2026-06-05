@@ -1,6 +1,6 @@
 import Big from "big.js";
 import z from "zod";
-import { db } from "../database";
+import { db, client } from "../database";
 import {
   creditos,
   usuarios,
@@ -24,6 +24,13 @@ import {
   applyCapitalPaymentAndBuildResponse,
   getCuotaIdForPaymentInsert,
 } from "./registerPaymentPolicy";
+
+// Tipo de conexión del pool (pg no expone tipos; lo derivamos de client.connect)
+type PoolConn = Awaited<ReturnType<typeof client.connect>>;
+
+// Namespace para advisory locks de pagos (evita colisión con otros locks).
+// pg_advisory_lock(ns, credito_id) serializa pagos concurrentes del mismo crédito.
+const PAGO_LOCK_NS = 8765;
 
 // ========================================
 // TIPOS E INTERFACES
@@ -488,6 +495,9 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 // ========================================
 
 export const insertPayment = async ({ body, set }: any) => {
+  // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
+  let lockConn: PoolConn | undefined;
+  let lockedCreditoId: number | undefined;
   try {
     // 1. Validar schema
     const parseResult = pagoSchema.safeParse(body);
@@ -500,7 +510,7 @@ export const insertPayment = async ({ body, set }: any) => {
     }
 
     const {
-      credito_id, 
+      credito_id,
       monto_boleta,
       fecha_pago,
       llamada,
@@ -516,6 +526,21 @@ export const insertPayment = async ({ body, set }: any) => {
       fecha_boleta,
       origen_pago,
     } = parseResult.data;
+
+    // 🔒 LOCK PESIMISTA POR CRÉDITO
+    // Serializa los pagos concurrentes del MISMO crédito. Sin esto, dos pagos
+    // a la misma cuota que entran casi al mismo tiempo (doble clic, reintento,
+    // dos cajeros) leen el mismo saldo vigente ANTES de que el otro escriba
+    // (TOCTOU) y ambos re-aplican interés/IVA/etc → interés duplicado. La
+    // validación anti-sobreaplicación no los detiene porque ambos leen el
+    // estado previo. El lock obliga a que el segundo espere a que el primero
+    // termine y vea el saldo ya actualizado.
+    lockConn = await client.connect();
+    lockedCreditoId = credito_id;
+    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+      PAGO_LOCK_NS,
+      credito_id,
+    ]);
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
@@ -1100,6 +1125,73 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           totalPagado = totalPagado.plus(faltanteContraCuota);
           disponible_restante = disponible_restante.minus(faltanteContraCuota);
         }
+
+        // ─────────────────────────────────────────────────────────────────
+        // 🛡️ VALIDACIÓN ANTI-SOBREAPLICACIÓN (interés/abonos duplicados)
+        //
+        // Los `*_restante` se guardan por fila y NO quedan netos entre pagos
+        // hermanos de la misma cuota. Si un pago previo ya cubrió un rubro y
+        // este pago lo vuelve a aplicar, la cuota termina recibiendo MÁS que
+        // su monto (ej: crédito 01010202113400 / Nelson, cuota 17: interés
+        // cobrado 2 veces, +Q668.52). Preferimos TRONAR el pago a corromper
+        // el saldo: la suma aplicada a una cuota nunca puede superar su monto.
+        //
+        // Comparamos Σ(monto_aplicado) de los pagos hermanos vivos (validated
+        // o pending —incluidos los pending+pagado=true que cierran la cuota
+        // pero aún no se validan) + lo que aplicaría ESTE pago contra el monto
+        // de la cuota. Excluimos la fila en vuelo (la que se va a actualizar) y
+        // los paymentFalse.
+        // ─────────────────────────────────────────────────────────────────
+        const TOLERANCIA_CENTAVO = new Big(0.01);
+        const pagoIdEnVuelo = existingPago?.pago.pago_id ?? -1;
+        const pagosHermanos = await db
+          .select({
+            monto_aplicado: pagos_credito.monto_aplicado,
+            abono_interes: pagos_credito.abono_interes,
+          })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+              eq(pagos_credito.credito_id, credito.credito_id),
+              eq(pagos_credito.paymentFalse, false),
+              ne(pagos_credito.pago_id, pagoIdEnVuelo),
+              // Contar TODOS los hermanos vivos: validated o pending, sin
+              // importar `pagado`. Un pago que cierra la cuota se guarda como
+              // pending + pagado=true hasta que contabilidad lo valida; si lo
+              // excluyéramos (como hacía la condición pending && pagado=false),
+              // un segundo pago a la misma cuota no lo contaría y volvería a
+              // aplicar interés/IVA/capital sin ser rechazado. `paymentFalse` y
+              // la fila en vuelo ya se filtran arriba.
+              or(
+                eq(pagos_credito.validationStatus, "validated"),
+                eq(pagos_credito.validationStatus, "pending")
+              )
+            )
+          );
+
+        const aplicadoPrevioCuota = pagosHermanos.reduce(
+          (acc, p) => acc.plus(new Big(p.monto_aplicado ?? 0)),
+          new Big(0)
+        );
+        const interesPrevioCuota = pagosHermanos.reduce(
+          (acc, p) => acc.plus(new Big(p.abono_interes ?? 0)),
+          new Big(0)
+        );
+        const totalProyectadoCuota = aplicadoPrevioCuota.plus(totalPagado);
+
+        if (totalProyectadoCuota.gt(montoCuota.plus(TOLERANCIA_CENTAVO))) {
+          throw new Error(
+            `Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} quedaría ` +
+              `sobre-aplicada (${totalProyectadoCuota.toFixed(2)} > monto de cuota ` +
+              `${montoCuota.toFixed(2)}). Ya aplicado por otros pagos: ` +
+              `${aplicadoPrevioCuota.toFixed(2)} (de los cuales interés ` +
+              `${interesPrevioCuota.toFixed(2)}); este pago intentaría aplicar ` +
+              `${totalPagado.toFixed(2)} más. Revisar los pagos previos de la cuota ` +
+              `antes de registrar.`
+          );
+        }
+
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
         // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
         const cuota_pagada = todosRestantesEnCero && !!existingPago;
@@ -1304,6 +1396,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   iva_12_restante: pagoData.iva_12_restante,
                   seguro_restante: pagoData.seguro_restante,
                   gps_restante: pagoData.gps_restante,
+                  // total_restante: hereda el del hermano (saldo vigente de la
+                  // cuota). Fallback a credito.capital para no propagar NULL si
+                  // el hermano vino vacío. El parcial no mueve capital, así que
+                  // este es el saldo del crédito vigente al momento del pago.
+                  total_restante:
+                    pagoSaldoVigente?.pago.total_restante ??
+                    credito.capital ??
+                    "0",
 
                   // Membresías
                   membresias: pagoData.membresias,
@@ -1600,6 +1700,22 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       message: "Internal server error",
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    // 🔓 Liberar el advisory lock y devolver la conexión al pool, pase lo que pase.
+    if (lockConn) {
+      try {
+        if (lockedCreditoId !== undefined) {
+          await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+            PAGO_LOCK_NS,
+            lockedCreditoId,
+          ]);
+        }
+      } catch (unlockError) {
+        console.error("[insertPayment] Error liberando lock:", unlockError);
+      } finally {
+        lockConn.release();
+      }
+    }
   }
 };
 export async function getPagosDelMesActual(credito_id: number) {

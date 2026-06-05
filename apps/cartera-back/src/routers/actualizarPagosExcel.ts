@@ -178,7 +178,7 @@ function construirUpdatesCuota(
         // capital/total restante = saldo del crédito (igual en toda la cuota).
         capital_restante: totalRestante,
         total_restante: totalRestante,
-        pagado: esUltimo,
+        pagado: true,
       },
     });
   });

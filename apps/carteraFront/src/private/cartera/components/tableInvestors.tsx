@@ -443,7 +443,6 @@ export function TableInvestors() {
 
 
   const liquidateMutation = useLiquidateByInvestor();
-  const reinversionEnCero = Number(subtotales.total_cuota_con_reinversion) === 0;
   const downloadPDF = useDownloadInvestorPDF();
   const downloadNoLiquidados = useDownloadReporteNoLiquidados();
   const [query, setQuery] = useState("");
@@ -1325,18 +1324,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   </span>
                 </DropdownMenuItem>
 
-                {/* Paso 3: Liquidar - permite si reinversión es 0 O tiene boleta */}
+                {/* Paso 3: Liquidar - habilitado una vez calculados los pagos (no depende de la boleta) */}
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!reinversionEnCero && !tieneBoletaPendiente) {
-                      toast.error("No se puede liquidar: falta boleta y cuota con reinversión no es 0");
+                    if (!tienePagosGenerados) {
+                      toast.error("No se puede liquidar: primero debes calcular los pagos");
                       return;
                     }
                     setLiquidarModalTarget(inv.inversionista_id);
                   }}
-                  disabled={liquidateMutation.isPending || (!reinversionEnCero && !tieneBoletaPendiente)}
-                  className={`cursor-pointer rounded-lg px-3 py-2.5 focus:bg-green-50 ${(!reinversionEnCero && !tieneBoletaPendiente) ? 'opacity-40' : ''}`}
+                  disabled={liquidateMutation.isPending || !tienePagosGenerados}
+                  className={`cursor-pointer rounded-lg px-3 py-2.5 focus:bg-green-50 ${!tienePagosGenerados ? 'opacity-40' : ''}`}
                 >
                   {liquidateMutation.isPending ? (
                     <><Loader2 className="mr-2.5 h-4 w-4 animate-spin text-green-500" /><span className="text-sm font-medium text-green-600">Liquidando…</span></>
@@ -1968,15 +1967,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           <span>{tienePagosGenerados ? '2️⃣ Boleta' : '🔒 Boleta'}</span>
         </button>
 
-        {/* 🔥 PASO 3: Liquidar - permite si reinversión es 0 O tiene boleta */}
+        {/* 🔥 PASO 3: Liquidar - habilitado una vez calculados los pagos (no depende de la boleta) */}
         <button
           className={`px-3 py-2 rounded-lg text-white text-xs font-semibold active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm ${
-            (reinversionEnCero || tieneBoletaPendiente) ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400'
+            tienePagosGenerados ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400'
           }`}
-          disabled={liquidateMutation.isPending || (!reinversionEnCero && !tieneBoletaPendiente)}
+          disabled={liquidateMutation.isPending || !tienePagosGenerados}
           onClick={() => {
-            if (!reinversionEnCero && !tieneBoletaPendiente) {
-              toast.error("No se puede liquidar: falta boleta y cuota con reinversión no es 0");
+            if (!tienePagosGenerados) {
+              toast.error("No se puede liquidar: primero debes calcular los pagos");
               return;
             }
             setLiquidarModalTarget(inv.inversionista_id);
@@ -1990,7 +1989,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           ) : (
             <>
               <CheckCircle className="w-4 h-4" />
-              <span>{tieneBoletaPendiente ? '3️⃣ Liquidar' : '🔒 Liquidar'}</span>
+              <span>{tienePagosGenerados ? '3️⃣ Liquidar' : '🔒 Liquidar'}</span>
             </>
           )}
         </button>

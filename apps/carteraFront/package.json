@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "tailwind:init": "tailwindcss init -p",
-    "push": "bash ./deploy.sh"
+    "push": "bash ./deploy.sh",
+    "push:dev": "bash ./deploy-dev.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

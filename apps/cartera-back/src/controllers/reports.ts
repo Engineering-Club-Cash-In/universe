@@ -2434,7 +2434,7 @@ export async function getCapitalInversionistas({
       inversionista: row.inversionista,
       capital: Number(row.capital),
       tasa_inversionista: Number(row.tasa_inversionista),
-      modalidad: row.modalidad ?? "",
+      modalidad: row.modalidad ? row.modalidad.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "",
       fecha_inicio_participacion: row.fecha_inicio_participacion
         ? row.fecha_inicio_participacion.slice(0, 10).split("-").reverse().join("/")
         : "",

@@ -1066,16 +1066,12 @@ export async function buildInversionistaWorkbook(
           reinvCap_cap = reinvCap_cap.plus(cap);
         } else if (tipo === "reinversion_total") {
           reinvTot_cap = reinvTot_cap.plus(cap);
-          
-          const isrReinv = inv.emite_factura ? new Big(0) : abonoGeneralInteres.times(0.07);
-          const netInteresForReinv = abonoGeneralInteres.minus(isrReinv);
-          
-          reinvTot_int = reinvTot_int.plus(netInteresForReinv);
+          // `abonoGeneralInteres` YA es el interés neto (NO factura: int - isr; factura: int + iva).
+          // No re-aplicar el 7% de ISR aquí: causaba doble descuento (483.47 → 449.63).
+          reinvTot_int = reinvTot_int.plus(abonoGeneralInteres);
         } else if (tipo === "reinversion_interes") {
-          const isrReinv = inv.emite_factura ? new Big(0) : abonoGeneralInteres.times(0.07);
-          const netInteresForReinv = abonoGeneralInteres.minus(isrReinv);
-          
-          reinvInt_int = reinvInt_int.plus(netInteresForReinv);
+          // `abonoGeneralInteres` YA es el interés neto; no re-descontar ISR.
+          reinvInt_int = reinvInt_int.plus(abonoGeneralInteres);
         }
       }
     }

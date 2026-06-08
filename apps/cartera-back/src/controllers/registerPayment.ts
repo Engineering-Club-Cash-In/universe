@@ -1197,7 +1197,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             isFirstProcessedInstallment: esPrimeraCuotaProcesada,
             isExactSingleInstallmentPayment: pagoExactoDeUnaCuota,
             hasValidatedPayments: tienePagosValidados,
-            hasLastPartialPaymentWithRemaining: ultimoPagoParcialConRestante,
+            hasLastPartialPaymentWithRemaining: !!ultimoPagoParcialConRestante,
             allRemainingZero: todosRestantesEnCero,
             missingAgainstInstallment: faltanteContraCuota,
             availableRemaining: disponible_restante,

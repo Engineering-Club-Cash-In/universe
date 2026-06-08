@@ -44,6 +44,7 @@ import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, update
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
+import { StatusCredit } from "../database/db/schema";
 
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
@@ -305,7 +306,7 @@ export const creditRouter = new Elysia()
         numerosCreditoSifcoArray,
         capitalMinParam,
         capitalMaxParam,
-        estadosCreditoArray
+        estadosCreditoArray as StatusCredit[] | undefined
       );
       set.status = 200;
       return result;
@@ -409,7 +410,7 @@ export const creditRouter = new Elysia()
           sifcosLimpios,
           capital_min,
           capital_max,
-          estadosCreditoLimpios
+          estadosCreditoLimpios as StatusCredit[] | undefined
         );
         set.status = 200;
         return result;

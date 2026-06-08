@@ -30,8 +30,10 @@ import {
   shouldMarkInstallmentPaymentPaid,
 } from "./registerPaymentPolicy";
 
-// Tipo de conexión del pool (pg no expone tipos; lo derivamos de client.connect)
-type PoolConn = Awaited<ReturnType<typeof client.connect>>;
+type LockConn = {
+  query: (text: string, values?: unknown[]) => Promise<unknown>;
+  release: () => void;
+};
 
 // Namespace para advisory locks de pagos (evita colisión con otros locks).
 // pg_advisory_lock(ns, credito_id) serializa pagos concurrentes del mismo crédito.
@@ -501,7 +503,7 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 
 export const insertPayment = async ({ body, set }: any) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
-  let lockConn: PoolConn | undefined;
+  let lockConn: LockConn | undefined;
   let lockedCreditoId: number | undefined;
   try {
     // 1. Validar schema

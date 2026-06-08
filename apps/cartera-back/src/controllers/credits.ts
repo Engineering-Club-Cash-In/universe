@@ -17,6 +17,7 @@ import {
   moras_credito,
   pagos_credito,
   platform_users,
+  StatusCredit,
   usuarios,
 } from "../database/db/schema";
 import { z } from "zod";
@@ -611,7 +612,7 @@ export async function getCreditosWithUserByMesAnio(
   numeros_credito_sifco?: string[],
   capital_min?: number,
   capital_max?: number,
-  estados_credito?: string[]
+  estados_credito?: StatusCredit[]
 ): Promise<{
   data: CreditoConInfo[];
   page: number;

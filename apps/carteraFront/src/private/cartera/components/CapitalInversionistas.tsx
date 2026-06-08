@@ -107,7 +107,7 @@ export function CapitalInversionistas() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const hasActiveFilters = fechaDesde !== "" || fechaHasta !== "" || appliedDesde !== "" || appliedHasta !== "";
+  const hasActiveFilters = fechaDesde !== "" || fechaHasta !== "" || appliedDesde !== "" || appliedHasta !== "" || queryEnabled;
 
   const clearFilters = () => {
     setFechaDesde("");
@@ -115,6 +115,7 @@ export function CapitalInversionistas() {
     setAppliedDesde("");
     setAppliedHasta("");
     setQueryEnabled(false);
+    setExportError(null);
   };
 
   const { data, isLoading, isError } = useCapitalInversionistas(
@@ -207,7 +208,7 @@ export function CapitalInversionistas() {
                   className="flex-1 sm:flex-none text-gray-600 border-gray-300 hover:bg-gray-100"
                 >
                   <X className="h-4 w-4 mr-2" />
-                  Limpiar filtros
+                  Limpiar
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
                     {[fechaDesde !== "" || appliedDesde !== "", fechaHasta !== "" || appliedHasta !== ""].filter(Boolean).length}
                   </Badge>

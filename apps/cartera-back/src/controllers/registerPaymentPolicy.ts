@@ -61,6 +61,12 @@ export const getSpecialPaymentCuotaId = ({
   )?.cuotaId ??
   pendingInstallments[0]?.cuotaId ??
   0;
+
+export const getSpecialPaymentInstallmentFields = () => ({
+  montoAplicado: 0,
+  pagado: false,
+});
+
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;

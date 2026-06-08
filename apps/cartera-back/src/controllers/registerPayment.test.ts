@@ -5,6 +5,7 @@ import {
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
   getSpecialPaymentCuotaId,
+  getSpecialPaymentInstallmentFields,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldMarkInstallmentPaymentPaid,
 } from "./registerPaymentPolicy";
@@ -102,6 +103,13 @@ describe("register payment", () => {
         ],
       })
     ).toBe(100);
+  });
+
+  it("no cuenta pagos solo mora u otros como abono a cuota", () => {
+    expect(getSpecialPaymentInstallmentFields()).toEqual({
+      montoAplicado: 0,
+      pagado: false,
+    });
   });
 });
 

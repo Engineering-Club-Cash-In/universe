@@ -25,6 +25,7 @@ import {
   calcularSaldoNetoCuota,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
+  getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldMarkInstallmentPaymentPaid,
@@ -604,6 +605,7 @@ export const insertPayment = async ({ body, set }: any) => {
         cuotaId: cuota.cuotas_credito.cuota_id,
       })),
     });
+    const pagoEspecialCuota = getSpecialPaymentInstallmentFields();
 
     // 3. Preparar creditoInfo con las variables destructuradas
     const creditoInfo = {
@@ -630,12 +632,12 @@ export const insertPayment = async ({ body, set }: any) => {
         mora: 0,
         boleta: montoBoleta.toNumber(),
         urlBoletas: urlCompletas ?? [],
-        pagado: true,
+        pagado: pagoEspecialCuota.pagado,
         banco_id: banco_id ?? 0,
         numeroAutorizacion: numeroAutorizacion ?? "",
         registerBy: registerBy ?? "",
         fecha_boleta,
-        monto_aplicado: otrosBig.toNumber(),
+        monto_aplicado: pagoEspecialCuota.montoAplicado,
       });
     }
 
@@ -713,12 +715,12 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             mora: resultadoMora.montoAplicadoMora,
             boleta: montoBoleta.toNumber(),
             urlBoletas: urlCompletas ?? [],
-            pagado: true,
+            pagado: pagoEspecialCuota.pagado,
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
             fecha_boleta,
-            monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
+            monto_aplicado: pagoEspecialCuota.montoAplicado,
           });
         }
         console.log(
@@ -735,12 +737,12 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             mora: resultadoMora.montoAplicadoMora,
             boleta: montoBoleta.toNumber(),
             urlBoletas: urlCompletas ?? [],
-            pagado: true,
+            pagado: pagoEspecialCuota.pagado,
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
             fecha_boleta,
-            monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
+            monto_aplicado: pagoEspecialCuota.montoAplicado,
           });
         }
         return {
@@ -761,12 +763,12 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           mora: resultadoMora.montoAplicadoMora,
           boleta: montoBoleta.toNumber(),
           urlBoletas: urlCompletas ?? [],
-          pagado: true,
+          pagado: pagoEspecialCuota.pagado,
           banco_id: banco_id ?? 0,
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
           fecha_boleta,
-          monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
+          monto_aplicado: pagoEspecialCuota.montoAplicado,
         });
       }
       return {

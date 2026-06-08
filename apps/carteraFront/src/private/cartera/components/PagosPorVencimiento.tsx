@@ -677,7 +677,9 @@ export function PagosPorVencimiento() {
                             {/* 15. Royalty */}
                             <TableCell className="text-right text-gray-400 border-r border-b border-red-300 text-[11px]">--</TableCell>
                             {/* 16. Mora */}
-                            <TableCell className="border-r border-b border-red-300" />
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(item.mora)}
+                            </TableCell>
                             {/* 17. Total */}
                             <TableCell className="text-right font-bold text-red-800 bg-red-100/30 border-b border-red-300 text-[11px]">
                               {formatQ(String(acumuladoTotales.total.toFixed(2)))}

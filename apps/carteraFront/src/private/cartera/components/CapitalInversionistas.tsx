@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon, Download, Loader2, Search } from "lucide-react";
+import { CalendarIcon, Download, Loader2, Search, X } from "lucide-react";
 import {
   TableBody,
   TableCell,
@@ -97,20 +99,31 @@ function DatePickerField({
 }
 
 export function CapitalInversionistas() {
-  const [fechaDesde, setFechaDesde] = useState("");
-  const [fechaHasta, setFechaHasta] = useState("");
-  const [queryEnabled, setQueryEnabled] = useState(false);
-  const [appliedDesde, setAppliedDesde] = useState("");
-  const [appliedHasta, setAppliedHasta] = useState("");
+  const [fechaDesde, setFechaDesde] = usePersistedState<string>("cartera/capitalInversionistas/fechaDesde", "");
+  const [fechaHasta, setFechaHasta] = usePersistedState<string>("cartera/capitalInversionistas/fechaHasta", "");
+  const [queryEnabled, setQueryEnabled] = usePersistedState<boolean>("cartera/capitalInversionistas/queryEnabled", false);
+  const [appliedDesde, setAppliedDesde] = usePersistedState<string>("cartera/capitalInversionistas/appliedDesde", "");
+  const [appliedHasta, setAppliedHasta] = usePersistedState<string>("cartera/capitalInversionistas/appliedHasta", "");
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  const hasActiveFilters = fechaDesde !== "" || fechaHasta !== "" || appliedDesde !== "" || appliedHasta !== "" || queryEnabled;
+
+  const clearFilters = () => {
+    setFechaDesde("");
+    setFechaHasta("");
+    setAppliedDesde("");
+    setAppliedHasta("");
+    setQueryEnabled(false);
+    setExportError(null);
+  };
 
   const { data, isLoading, isError } = useCapitalInversionistas(
     { fecha_desde: appliedDesde || undefined, fecha_hasta: appliedHasta || undefined },
     queryEnabled
   );
 
-  const rows: CapitalInversionistaItem[] = data?.data ?? [];
+  const rows: CapitalInversionistaItem[] = queryEnabled ? (data?.data ?? []) : [];
 
   const totalCapital = rows.reduce((acc, r) => acc + Number(r.capital ?? 0), 0);
 
@@ -188,6 +201,19 @@ export function CapitalInversionistas() {
                 )}
                 Exportar Excel
               </Button>
+              {hasActiveFilters && (
+                <Button
+                  variant="outline"
+                  onClick={clearFilters}
+                  className="flex-1 sm:flex-none text-gray-600 border-gray-300 hover:bg-gray-100"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Limpiar
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+                    {[fechaDesde !== "" || appliedDesde !== "", fechaHasta !== "" || appliedHasta !== ""].filter(Boolean).length}
+                  </Badge>
+                </Button>
+              )}
             </div>
           </div>
           {exportError && (

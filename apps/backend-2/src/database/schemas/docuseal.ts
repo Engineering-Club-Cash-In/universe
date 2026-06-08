@@ -7,6 +7,7 @@ export const docusealSchema = pgSchema("docuseal");
 export const documentCategoriaEnum = docusealSchema.enum("document_categoria_enum", [
   "ventas",
   "inversiones",
+  "inversiones_sociedad",
   "carta_poder"
 ]);
 

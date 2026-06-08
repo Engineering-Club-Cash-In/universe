@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
 	Activity,
 	AlertTriangle,
+	CalendarDays,
 	Download,
 	FileText,
 	TrendingDown,
@@ -45,6 +46,13 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { PERMISSIONS } from "@/lib/roles";
@@ -65,6 +73,39 @@ const COLORS = {
 	incobrable: "#7f1d1d",
 };
 
+type MontoACobrarRow = {
+	bucket: string;
+	cuotas_count: number;
+	total_cuota: string;
+	total_interes: string;
+	total_iva: string;
+	total_seguro: string;
+	total_gps: string;
+	total_membresias: string;
+	total_royalti: string;
+	mora_promedio: string;
+};
+
+const MONTO_COBRAR_COLORS = {
+	total_cuota: "#3b82f6",
+	total_interes: "#10b981",
+	total_iva: "#eab308",
+	total_seguro: "#f97316",
+	total_gps: "#8b5cf6",
+	total_membresias: "#ec4899",
+	total_royalti: "#14b8a6",
+} as const;
+
+const MONTO_COBRAR_LABELS: Record<keyof typeof MONTO_COBRAR_COLORS, string> = {
+	total_cuota: "Capital",
+	total_interes: "Interés",
+	total_iva: "IVA",
+	total_seguro: "Seguro",
+	total_gps: "GPS",
+	total_membresias: "Membresías",
+	total_royalti: "Royalti",
+};
+
 const GUATEMALA_TIME_ZONE = "America/Guatemala";
 
 function formatDateInput(date: Date) {
@@ -78,6 +119,31 @@ function formatDateInput(date: Date) {
 
 function dateFromInput(value: string) {
 	return new Date(`${value}T12:00:00`);
+}
+
+function getDefaultMontoCobrarRange(): { fechaInicio: string; fechaFin: string } {
+	const today = formatDateInput(new Date());
+	const fin = new Date();
+	fin.setFullYear(fin.getFullYear() + 1);
+	return { fechaInicio: today, fechaFin: formatDateInput(fin) };
+}
+
+function formatBucket(bucket: string, periodo: string): string {
+	const date = new Date(bucket);
+	if (periodo === "dia") {
+		return new Intl.DateTimeFormat("es-GT", { day: "2-digit", month: "short" }).format(date);
+	}
+	if (periodo === "semana") {
+		return `Sem ${new Intl.DateTimeFormat("es-GT", { day: "2-digit", month: "short" }).format(date)}`;
+	}
+	if (periodo === "trimestre") {
+		const q = Math.ceil((date.getMonth() + 1) / 3);
+		return `T${q} ${date.getFullYear()}`;
+	}
+	if (periodo === "anio") {
+		return String(date.getFullYear());
+	}
+	return new Intl.DateTimeFormat("es-GT", { month: "short", year: "numeric" }).format(date);
 }
 
 function getDefaultClosedCreditsRange(): DateRange {
@@ -127,6 +193,10 @@ function RouteComponent() {
 	const [closedCreditsRange, setClosedCreditsRange] = useState<
 		DateRange | undefined
 	>(getDefaultClosedCreditsRange);
+	const [montoCobrarPeriodo, setMontoCobrarPeriodo] = useState<
+		"anio" | "trimestre" | "mes" | "semana" | "dia"
+	>("mes");
+	const [montoCobrarRange, setMontoCobrarRange] = useState(getDefaultMontoCobrarRange);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const userRole = userProfile.data?.role;
@@ -153,6 +223,20 @@ function RouteComponent() {
 		}),
 		enabled: canAccessClosedCreditsReport && !!closedCreditsInput,
 	});
+
+	const montoCobrarQuery = useQuery({
+		...orpc.getMontoACobrar.queryOptions({
+			input: {
+				periodo: montoCobrarPeriodo,
+				fechaInicio: montoCobrarRange.fechaInicio,
+				fechaFin: montoCobrarRange.fechaFin,
+			},
+		}),
+		enabled: isAdmin,
+	});
+	const montoCobrarData = montoCobrarQuery.data as
+		| { data: MontoACobrarRow[] }
+		| undefined;
 
 	useEffect(() => {
 		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
@@ -617,6 +701,202 @@ function RouteComponent() {
 									</div>
 								))}
 							</div>
+						</CardContent>
+					</Card>
+
+					{/* Reporte: Monto a Cobrarse por Período */}
+					<Card>
+						<CardHeader>
+							<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+								<div className="flex items-center gap-2">
+									<CalendarDays className="h-5 w-5 text-blue-500" />
+									<div>
+										<CardTitle>Monto a Cobrarse por Período</CardTitle>
+										<CardDescription>
+											Cuotas pendientes desglosadas por rubro (capital, interés, seguro, etc.)
+										</CardDescription>
+									</div>
+								</div>
+								<div className="flex flex-wrap items-center gap-2">
+									<Select
+										value={montoCobrarPeriodo}
+										onValueChange={(v) =>
+											setMontoCobrarPeriodo(
+												v as "anio" | "trimestre" | "mes" | "semana" | "dia",
+											)
+										}
+									>
+										<SelectTrigger className="w-[140px]">
+											<SelectValue placeholder="Período" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="dia">Día</SelectItem>
+											<SelectItem value="semana">Semana</SelectItem>
+											<SelectItem value="mes">Mes</SelectItem>
+											<SelectItem value="trimestre">Trimestre</SelectItem>
+											<SelectItem value="anio">Año</SelectItem>
+										</SelectContent>
+									</Select>
+									<DateRangeFilter
+										dateRange={
+											montoCobrarRange.fechaInicio && montoCobrarRange.fechaFin
+												? {
+														from: dateFromInput(montoCobrarRange.fechaInicio),
+														to: dateFromInput(montoCobrarRange.fechaFin),
+													}
+												: undefined
+										}
+										onDateRangeChange={(range) => {
+											if (range?.from && range?.to) {
+												setMontoCobrarRange({
+													fechaInicio: formatDateInput(range.from),
+													fechaFin: formatDateInput(range.to),
+												});
+											}
+										}}
+									/>
+								</div>
+							</div>
+						</CardHeader>
+						<CardContent className="space-y-6">
+							{montoCobrarQuery.isPending && <p>Cargando reporte...</p>}
+							{montoCobrarQuery.isError && (
+								<p className="text-destructive">
+									Error al cargar el reporte de monto a cobrarse.
+								</p>
+							)}
+							{montoCobrarData && montoCobrarData.data.length === 0 && (
+								<p className="text-muted-foreground">
+									No hay cuotas pendientes para el rango seleccionado.
+								</p>
+							)}
+							{!!montoCobrarData?.data.length && (
+								<>
+									{/* Gráfica de barras apiladas */}
+									<ResponsiveContainer width="100%" height={350}>
+										<BarChart
+											data={montoCobrarData.data.map((row: MontoACobrarRow) => ({
+												bucket: formatBucket(row.bucket, montoCobrarPeriodo),
+												total_cuota: Number.parseFloat(row.total_cuota),
+												total_interes: Number.parseFloat(row.total_interes),
+												total_iva: Number.parseFloat(row.total_iva),
+												total_seguro: Number.parseFloat(row.total_seguro),
+												total_gps: Number.parseFloat(row.total_gps),
+												total_membresias: Number.parseFloat(row.total_membresias),
+												total_royalti: Number.parseFloat(row.total_royalti),
+											}))}
+										>
+											<CartesianGrid strokeDasharray="3 3" />
+											<XAxis dataKey="bucket" angle={-30} textAnchor="end" height={60} />
+											<YAxis tickFormatter={(v) => `Q${(Number(v) / 1000).toFixed(0)}k`} />
+											<Tooltip
+												formatter={(value, name) => [
+													formatCurrency(Number(value)),
+													MONTO_COBRAR_LABELS[name as keyof typeof MONTO_COBRAR_LABELS] ?? name,
+												]}
+											/>
+											<Legend
+												formatter={(value) =>
+													MONTO_COBRAR_LABELS[value as keyof typeof MONTO_COBRAR_LABELS] ?? value
+												}
+											/>
+											{(
+												Object.keys(MONTO_COBRAR_COLORS) as (keyof typeof MONTO_COBRAR_COLORS)[]
+											).map((key) => (
+												<Bar
+													key={key}
+													dataKey={key}
+													stackId="a"
+													fill={MONTO_COBRAR_COLORS[key]}
+												/>
+											))}
+										</BarChart>
+									</ResponsiveContainer>
+
+									{/* Tabla detallada */}
+									<div className="overflow-x-auto">
+										<Table>
+											<TableHeader>
+												<TableRow>
+													<TableHead>Período</TableHead>
+													<TableHead className="text-right">Cuotas</TableHead>
+													<TableHead className="text-right">Capital</TableHead>
+													<TableHead className="text-right">Interés</TableHead>
+													<TableHead className="text-right">IVA</TableHead>
+													<TableHead className="text-right">Seguro</TableHead>
+													<TableHead className="text-right">GPS</TableHead>
+													<TableHead className="text-right">Membresías</TableHead>
+													<TableHead className="text-right">Royalti</TableHead>
+													<TableHead className="text-right">Mora Prom.</TableHead>
+													<TableHead className="text-right font-bold">Total</TableHead>
+												</TableRow>
+											</TableHeader>
+											<TableBody>
+												{montoCobrarData.data.map((row: MontoACobrarRow) => {
+													const total =
+														Number.parseFloat(row.total_cuota) +
+														Number.parseFloat(row.total_interes) +
+														Number.parseFloat(row.total_iva) +
+														Number.parseFloat(row.total_seguro) +
+														Number.parseFloat(row.total_gps) +
+														Number.parseFloat(row.total_membresias) +
+														Number.parseFloat(row.total_royalti);
+													return (
+														<TableRow key={row.bucket}>
+															<TableCell>{formatBucket(row.bucket, montoCobrarPeriodo)}</TableCell>
+															<TableCell className="text-right">{row.cuotas_count}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.total_cuota)}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.total_interes)}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.total_iva)}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.total_seguro)}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.total_gps)}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.total_membresias)}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.total_royalti)}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.mora_promedio)}</TableCell>
+															<TableCell className="text-right font-bold">{formatCurrency(total)}</TableCell>
+														</TableRow>
+													);
+												})}
+												{/* Fila de totales */}
+												{(() => {
+													const rows = montoCobrarData.data as MontoACobrarRow[];
+													const sum = (key: keyof MontoACobrarRow) =>
+														rows.reduce(
+															(acc: number, r: MontoACobrarRow) =>
+																acc + Number.parseFloat((r[key] as string) || "0"),
+															0,
+														);
+													const grandTotal =
+														sum("total_cuota") +
+														sum("total_interes") +
+														sum("total_iva") +
+														sum("total_seguro") +
+														sum("total_gps") +
+														sum("total_membresias") +
+														sum("total_royalti");
+													return (
+														<TableRow className="border-t-2 bg-muted/50 font-bold">
+															<TableCell>Total</TableCell>
+															<TableCell className="text-right">
+																{rows.reduce((acc, r) => acc + r.cuotas_count, 0)}
+															</TableCell>
+															<TableCell className="text-right">{formatCurrency(sum("total_cuota"))}</TableCell>
+															<TableCell className="text-right">{formatCurrency(sum("total_interes"))}</TableCell>
+															<TableCell className="text-right">{formatCurrency(sum("total_iva"))}</TableCell>
+															<TableCell className="text-right">{formatCurrency(sum("total_seguro"))}</TableCell>
+															<TableCell className="text-right">{formatCurrency(sum("total_gps"))}</TableCell>
+															<TableCell className="text-right">{formatCurrency(sum("total_membresias"))}</TableCell>
+															<TableCell className="text-right">{formatCurrency(sum("total_royalti"))}</TableCell>
+															<TableCell className="text-right">—</TableCell>
+															<TableCell className="text-right">{formatCurrency(grandTotal)}</TableCell>
+														</TableRow>
+													);
+												})()}
+											</TableBody>
+										</Table>
+									</div>
+								</>
+							)}
 						</CardContent>
 					</Card>
 				</>

@@ -330,6 +330,7 @@ export const reportsAppRouter = {
 	// Reportes unificados (cartera-back + CRM)
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
+	getMontoACobrar: reportesCarteraRouter.getMontoACobrar,
 
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,

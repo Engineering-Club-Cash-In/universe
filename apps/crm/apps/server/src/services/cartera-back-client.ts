@@ -180,6 +180,23 @@ class SimpleCache {
 }
 
 // ============================================================================
+// TYPES
+// ============================================================================
+
+export type MontoACobrarRow = {
+	bucket: string;
+	cuotas_count: number;
+	total_cuota: string;
+	total_interes: string;
+	total_iva: string;
+	total_seguro: string;
+	total_gps: string;
+	total_membresias: string;
+	total_royalti: string;
+	mora_promedio: string;
+};
+
+// ============================================================================
 // HTTP CLIENT
 // ============================================================================
 
@@ -1136,6 +1153,30 @@ export class CarteraBackClient {
 			body: JSON.stringify(input),
 		});
 		return response;
+	}
+
+	// ========================================================================
+	// REPORTES
+	// ========================================================================
+
+	async getMontoACobrar(params: {
+		periodo: string;
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<MontoACobrarRow[]> {
+		const queryParams = new URLSearchParams({
+			periodo: params.periodo,
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+
+		const response = await this.request<{ data: MontoACobrarRow[] }>(
+			`/reportes/monto-cobrar?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+
+		return response.data ?? [];
 	}
 
 	// ========================================================================

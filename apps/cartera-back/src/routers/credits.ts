@@ -80,6 +80,20 @@ const RouterBodySchema = z.object({
   otros: z.number().optional(),
   cuotas_atrasadas: z.number().int().min(0).optional(),
 });
+
+const STATUS_CREDIT_VALUES = new Set<string>(Object.values(StatusCredit));
+
+const isStatusCredit = (value: string): value is StatusCredit =>
+  STATUS_CREDIT_VALUES.has(value);
+
+const parseStatusCreditList = (values: string[] | undefined) => {
+  if (!values) return undefined;
+  const invalid = values.find((value) => !isStatusCredit(value));
+  if (invalid) {
+    return { invalid };
+  }
+  return { values: values.filter(isStatusCredit) };
+};
 export const creditRouter = new Elysia()
  
 .use(authMiddleware)
@@ -252,6 +266,7 @@ export const creditRouter = new Elysia()
         .map((s) => s.trim())
         .filter((s) => s.length > 0)
     : undefined;
+  const estadosCreditoParsed = parseStatusCreditList(estadosCreditoArray);
 
   if (capitalMinParam !== undefined && isNaN(capitalMinParam)) {
     set.status = 400;
@@ -260,6 +275,10 @@ export const creditRouter = new Elysia()
   if (capitalMaxParam !== undefined && isNaN(capitalMaxParam)) {
     set.status = 400;
     return { message: "Parámetro 'capital_max' debe ser un número válido." };
+  }
+  if (estadosCreditoParsed && "invalid" in estadosCreditoParsed) {
+    set.status = 400;
+    return { message: `Estado de crédito inválido: ${estadosCreditoParsed.invalid}` };
   }
 
   // Llamar servicio
@@ -306,7 +325,7 @@ export const creditRouter = new Elysia()
         numerosCreditoSifcoArray,
         capitalMinParam,
         capitalMaxParam,
-        estadosCreditoArray as StatusCredit[] | undefined
+        estadosCreditoParsed?.values
       );
       set.status = 200;
       return result;
@@ -367,6 +386,11 @@ export const creditRouter = new Elysia()
       const estadosCreditoLimpios = (estados_credito as string[] | undefined)
         ?.map((s: string) => s.trim())
         .filter((s: string) => s.length > 0);
+      const estadosCreditoParsed = parseStatusCreditList(estadosCreditoLimpios);
+      if (estadosCreditoParsed && "invalid" in estadosCreditoParsed) {
+        set.status = 400;
+        return { message: `Estado de crédito inválido: ${estadosCreditoParsed.invalid}` };
+      }
 
       try {
         if (excel) {
@@ -410,7 +434,7 @@ export const creditRouter = new Elysia()
           sifcosLimpios,
           capital_min,
           capital_max,
-          estadosCreditoLimpios as StatusCredit[] | undefined
+          estadosCreditoParsed?.values
         );
         set.status = 200;
         return result;

@@ -3,7 +3,7 @@ import { fetchWithRetry } from './fetchWithRetry';
 import { ValidationError, ServerError } from './errors';
 
 // Types
-export type DocumentCategoria = "ventas" | "inversiones" | "carta_poder"
+export type DocumentCategoria = "ventas" | "inversiones" | "inversiones_sociedad" | "carta_poder"
 
 export interface DocumentType {
   enum: string

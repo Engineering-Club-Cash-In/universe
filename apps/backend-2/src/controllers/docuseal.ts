@@ -18,7 +18,7 @@ function formatDocumentName(name: string): string {
     .join(" ");
 }
 
-export type DocumentCategoria = "ventas" | "inversiones" | "carta_poder";
+export type DocumentCategoria = "ventas" | "inversiones" | "inversiones_sociedad" | "carta_poder";
 
 /**
  * 🎯 Controller: Fetch unique document names with both enum and formatted label.

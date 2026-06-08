@@ -105,10 +105,10 @@ describe("register payment", () => {
     ).toBe(100);
   });
 
-  it("no cuenta pagos solo mora u otros como abono a cuota", () => {
+  it("no cuenta pagos solo mora u otros como abono a cuota pero conserva el pago liquidado", () => {
     expect(getSpecialPaymentInstallmentFields()).toEqual({
       montoAplicado: 0,
-      pagado: false,
+      pagado: true,
     });
   });
 });

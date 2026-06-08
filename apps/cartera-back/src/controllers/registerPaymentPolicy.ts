@@ -64,7 +64,7 @@ export const getSpecialPaymentCuotaId = ({
 
 export const getSpecialPaymentInstallmentFields = () => ({
   montoAplicado: 0,
-  pagado: false,
+  pagado: true,
 });
 
 export type SaldoCuotaInput = {

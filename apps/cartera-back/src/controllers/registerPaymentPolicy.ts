@@ -1,11 +1,66 @@
 import Big from "big.js";
 
+type BigInput = number | string | Big;
+
 export const getCuotaIdForPaymentInsert = (
   cuotaId: number | null | undefined
 ) => cuotaId ?? null;
 
-type BigInput = number | string | Big;
+export const getRequestedInstallmentFloor = (_requestedInstallment: number) => 1;
 
+export const shouldMarkInstallmentPaymentPaid = ({
+  allRemainingZero,
+  hasExistingInstallmentPayment,
+  installmentAmountApplied,
+}: {
+  allRemainingZero: boolean;
+  hasExistingInstallmentPayment: boolean;
+  installmentAmountApplied: number | string;
+}) =>
+  allRemainingZero &&
+  hasExistingInstallmentPayment &&
+  Number(installmentAmountApplied) > 0;
+
+export const shouldApplyStaleZeroRestanteAdjustment = ({
+  hasExistingPayment,
+  isFirstProcessedInstallment,
+  isExactSingleInstallmentPayment,
+  hasValidatedPayments,
+  hasLastPartialPaymentWithRemaining,
+  allRemainingZero,
+  missingAgainstInstallment,
+  availableRemaining,
+}: {
+  hasExistingPayment: boolean;
+  isFirstProcessedInstallment: boolean;
+  isExactSingleInstallmentPayment: boolean;
+  hasValidatedPayments: boolean;
+  hasLastPartialPaymentWithRemaining: boolean;
+  allRemainingZero: boolean;
+  missingAgainstInstallment: BigInput;
+  availableRemaining: BigInput;
+}) =>
+  hasExistingPayment &&
+  isFirstProcessedInstallment &&
+  isExactSingleInstallmentPayment &&
+  !hasValidatedPayments &&
+  !hasLastPartialPaymentWithRemaining &&
+  allRemainingZero &&
+  new Big(missingAgainstInstallment).gt(0) &&
+  new Big(availableRemaining).gte(missingAgainstInstallment);
+
+export const getSpecialPaymentCuotaId = ({
+  requestedInstallment,
+  pendingInstallments,
+}: {
+  requestedInstallment: number;
+  pendingInstallments: { numeroCuota: number; cuotaId: number }[];
+}) =>
+  pendingInstallments.find(
+    (installment) => installment.numeroCuota === requestedInstallment
+  )?.cuotaId ??
+  pendingInstallments[0]?.cuotaId ??
+  0;
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;

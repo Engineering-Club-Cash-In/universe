@@ -13,7 +13,7 @@ import {
   pagos_credito_inversionistas,
   cuentasEmpresa,
 } from "../database/db";
-import { eq, and, lte, asc, desc, sql, gt, gte, or, ne, inArray } from "drizzle-orm";
+import { eq, and, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
@@ -24,6 +24,10 @@ import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
   getCuotaIdForPaymentInsert,
+  getRequestedInstallmentFloor,
+  getSpecialPaymentCuotaId,
+  shouldApplyStaleZeroRestanteAdjustment,
+  shouldMarkInstallmentPaymentPaid,
 } from "./registerPaymentPolicy";
 
 // Tipo de conexión del pool (pg no expone tipos; lo derivamos de client.connect)
@@ -325,7 +329,7 @@ const obtenerInfoCompletaCredito = async (
             // Permitir reportar/aplicar pagos adicionales aunque la cuota
             // ya tenga otro pago pendiente de validación. Contabilidad puede
             // validar después y el cálculo usa los restantes del pago previo.
-            gte(cuotas_credito.numero_cuota, cuotaApagar)
+            sql`${cuotas_credito.numero_cuota} >= ${getRequestedInstallmentFloor(cuotaApagar)}`
           )
         )
         .orderBy(cuotas_credito.numero_cuota),
@@ -593,6 +597,13 @@ export const insertPayment = async ({ body, set }: any) => {
       stats,
       usuario_id,
     } = creditoData;
+    const cuotaIdPagoEspecial = getSpecialPaymentCuotaId({
+      requestedInstallment: cuotaApagar,
+      pendingInstallments: cuotasPendientes.map((cuota) => ({
+        numeroCuota: cuota.cuotas_credito.numero_cuota,
+        cuotaId: cuota.cuotas_credito.cuota_id,
+      })),
+    });
 
     // 3. Preparar creditoInfo con las variables destructuradas
     const creditoInfo = {
@@ -614,10 +625,7 @@ export const insertPayment = async ({ body, set }: any) => {
       await insertarPago({
         numero_credito_sifco: credito.numero_credito_sifco,
         numero_cuota: cuotaApagar,
-        cuotaId:
-          cuotasPendientes.length > 0
-            ? cuotasPendientes[0].cuotas_credito.cuota_id
-            : 0,
+        cuotaId: cuotaIdPagoEspecial,
         otros: otrosBig.toNumber(),
         mora: 0,
         boleta: montoBoleta.toNumber(),
@@ -700,10 +708,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
-            cuotaId:
-              cuotasPendientes.length > 0
-                ? cuotasPendientes[0].cuotas_credito.cuota_id
-                : 0,
+            cuotaId: cuotaIdPagoEspecial,
             otros: otrosBig.toNumber(),
             mora: resultadoMora.montoAplicadoMora,
             boleta: montoBoleta.toNumber(),
@@ -725,10 +730,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
-            cuotaId:
-              cuotasPendientes.length > 0
-                ? cuotasPendientes[0].cuotas_credito.cuota_id
-                : 0,
+            cuotaId: cuotaIdPagoEspecial,
             otros: otrosBig.toNumber(),
             mora: resultadoMora.montoAplicadoMora,
             boleta: montoBoleta.toNumber(),
@@ -754,10 +756,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
-          cuotaId:
-            cuotasPendientes.length > 0
-              ? cuotasPendientes[0].cuotas_credito.cuota_id
-              : 0,
+          cuotaId: cuotaIdPagoEspecial,
           otros: otrosBig.toNumber(),
           mora: resultadoMora.montoAplicadoMora,
           boleta: montoBoleta.toNumber(),
@@ -1187,22 +1186,22 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           .plus(abono_seguro)
           .plus(abono_gps)
           .plus(abono_membresias);
-        const esCuotaSeleccionadaInicial =
-          cuota.cuotas_credito.numero_cuota === cuotaApagar &&
-          cuotas_completas === 0 &&
-          cuotas_parciales === 0;
+        const esPrimeraCuotaProcesada =
+          cuotas_completas === 0 && cuotas_parciales === 0;
         const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
         const faltanteContraCuota = montoCuota.minus(totalPagado);
 
         if (
-          !!existingPago &&
-          esCuotaSeleccionadaInicial &&
-          pagoExactoDeUnaCuota &&
-          !tienePagosValidados &&
-          !ultimoPagoParcialConRestante &&
-          todosRestantesEnCero &&
-          faltanteContraCuota.gt(0) &&
-          disponible_restante.gte(faltanteContraCuota)
+          shouldApplyStaleZeroRestanteAdjustment({
+            hasExistingPayment: !!existingPago,
+            isFirstProcessedInstallment: esPrimeraCuotaProcesada,
+            isExactSingleInstallmentPayment: pagoExactoDeUnaCuota,
+            hasValidatedPayments: tienePagosValidados,
+            hasLastPartialPaymentWithRemaining: !!ultimoPagoParcialConRestante,
+            allRemainingZero: todosRestantesEnCero,
+            missingAgainstInstallment: faltanteContraCuota,
+            availableRemaining: disponible_restante,
+          })
         ) {
           console.log(
             "⚠️ Restantes de cuota subestimados; reteniendo ajuste neutro en la cuota seleccionada:",
@@ -1242,7 +1241,11 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
 
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
         // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        const cuota_pagada = todosRestantesEnCero && !!existingPago;
+        const cuota_pagada = shouldMarkInstallmentPaymentPaid({
+          allRemainingZero: todosRestantesEnCero,
+          hasExistingInstallmentPayment: !!existingPago,
+          installmentAmountApplied: totalPagado.toString(),
+        });
         // Preparar datos del pago
         const currentDate = new Date();
         const months = [

@@ -1906,7 +1906,7 @@ function DetallesCredito({
           { label: "Seguro 10 Cuotas", value: item.creditos.seguro_10_cuotas, isMoney: true },
           { label: "GPS", value: item.creditos.gps, isMoney: true },
           { label: "Membresías", value: item.creditos.membresias, isMoney: true },
-          { label: "Royalti", value: item.creditos.royalti, isMoney: true },
+          { label: "Royalty", value: item.creditos.royalti, isMoney: true },
           { label: "Plazo", value: `${item.creditos.plazo} meses` },
           { label: "Formato Crédito", value: item.creditos.formato_credito },
           ...(item.fecha_inicio ? [{ label: "Fecha Primera Cuota", value: new Date(item.fecha_inicio + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }), isDate: true }] : []),

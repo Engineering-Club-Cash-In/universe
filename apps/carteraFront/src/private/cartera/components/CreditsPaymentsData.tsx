@@ -346,7 +346,7 @@ export function ListaCreditosPagos() {
             ref={inputRef}
             className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
             type="text"
-            placeholder="# Crédito SIFCO"
+            placeholder="No. Crédito SIFCO"
             defaultValue={creditoSifco}
             onChange={(e) => {
               if (e.target.value === "") handleSifco("");
@@ -1304,7 +1304,13 @@ function MobileView({
                     ? "En Convenio"
                     : item.creditos.statusCredit === "CAIDO"
                       ? "Caído"
-                      : item.creditos.statusCredit}
+                      : item.creditos.statusCredit === "ACTIVO"
+                        ? "Activo"
+                        : item.creditos.statusCredit === "CANCELADO"
+                          ? "Cancelado"
+                          : item.creditos.statusCredit === "MOROSO"
+                            ? "En Mora"
+                            : item.creditos.statusCredit}
             </span>
           </p>
 

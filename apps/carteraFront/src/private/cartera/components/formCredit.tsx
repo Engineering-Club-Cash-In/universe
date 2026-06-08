@@ -60,7 +60,7 @@ const fields = [
   },
   {
     name: "numero_credito_sifco",
-    label: "Número crédito SIFCO",
+    label: "No. Crédito SIFCO",
     type: "text",
     icon: <CreditCard className="text-blue-500 mr-2 w-5 h-5" />,
   },

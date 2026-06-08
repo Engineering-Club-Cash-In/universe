@@ -13,7 +13,7 @@ import {
   pagos_credito_inversionistas,
   cuentasEmpresa,
 } from "../database/db";
-import { eq, and, lte, asc, desc, sql, gt, gte, or, ne, inArray } from "drizzle-orm";
+import { eq, and, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
@@ -23,6 +23,8 @@ import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
 import {
   applyCapitalPaymentAndBuildResponse,
   getCuotaIdForPaymentInsert,
+  getRequestedInstallmentFloor,
+  shouldMarkInstallmentPaymentPaid,
 } from "./registerPaymentPolicy";
 
 // ========================================
@@ -317,7 +319,7 @@ const obtenerInfoCompletaCredito = async (
             // Permitir reportar/aplicar pagos adicionales aunque la cuota
             // ya tenga otro pago pendiente de validación. Contabilidad puede
             // validar después y el cálculo usa los restantes del pago previo.
-            gte(cuotas_credito.numero_cuota, cuotaApagar)
+            sql`${cuotas_credito.numero_cuota} >= ${getRequestedInstallmentFloor(cuotaApagar)}`
           )
         )
         .orderBy(cuotas_credito.numero_cuota),
@@ -1102,7 +1104,11 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         }
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
         // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        const cuota_pagada = todosRestantesEnCero && !!existingPago;
+        const cuota_pagada = shouldMarkInstallmentPaymentPaid({
+          allRemainingZero: todosRestantesEnCero,
+          hasExistingInstallmentPayment: !!existingPago,
+          installmentAmountApplied: totalPagado.toString(),
+        });
         // Preparar datos del pago
         const currentDate = new Date();
         const months = [

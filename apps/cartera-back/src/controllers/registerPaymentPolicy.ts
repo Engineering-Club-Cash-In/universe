@@ -2,6 +2,21 @@ export const getCuotaIdForPaymentInsert = (
   cuotaId: number | null | undefined
 ) => cuotaId ?? null;
 
+export const getRequestedInstallmentFloor = (_requestedInstallment: number) => 1;
+
+export const shouldMarkInstallmentPaymentPaid = ({
+  allRemainingZero,
+  hasExistingInstallmentPayment,
+  installmentAmountApplied,
+}: {
+  allRemainingZero: boolean;
+  hasExistingInstallmentPayment: boolean;
+  installmentAmountApplied: number | string;
+}) =>
+  allRemainingZero &&
+  hasExistingInstallmentPayment &&
+  Number(installmentAmountApplied) > 0;
+
 export const applyCapitalPaymentAndBuildResponse = async (
   pago: { credito_id: number | null; abono_capital?: number | string | null },
   pagoId: number,

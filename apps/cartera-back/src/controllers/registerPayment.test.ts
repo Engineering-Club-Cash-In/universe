@@ -2,6 +2,8 @@ import { describe, expect, it } from "bun:test";
 import {
   applyCapitalPaymentAndBuildResponse,
   getCuotaIdForPaymentInsert,
+  getRequestedInstallmentFloor,
+  shouldMarkInstallmentPaymentPaid,
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
@@ -34,5 +36,28 @@ describe("register payment", () => {
 
     resolveAbono?.();
     await expect(resultPromise).resolves.toMatchObject({ success: true });
+  });
+
+  it("no salta cuotas pendientes anteriores aunque el request venga adelantado", () => {
+    expect(getRequestedInstallmentFloor(11)).toBe(1);
+    expect(getRequestedInstallmentFloor(1)).toBe(1);
+  });
+
+  it("no marca como pagado un pago que solo cubre mora", () => {
+    expect(
+      shouldMarkInstallmentPaymentPaid({
+        allRemainingZero: true,
+        hasExistingInstallmentPayment: true,
+        installmentAmountApplied: 0,
+      })
+    ).toBe(false);
+
+    expect(
+      shouldMarkInstallmentPaymentPaid({
+        allRemainingZero: true,
+        hasExistingInstallmentPayment: true,
+        installmentAmountApplied: 100,
+      })
+    ).toBe(true);
   });
 });

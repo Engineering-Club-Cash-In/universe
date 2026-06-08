@@ -25,6 +25,8 @@ import {
   calcularSaldoNetoCuota,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
+  getSpecialPaymentCuotaId,
+  shouldApplyStaleZeroRestanteAdjustment,
   shouldMarkInstallmentPaymentPaid,
 } from "./registerPaymentPolicy";
 
@@ -595,6 +597,13 @@ export const insertPayment = async ({ body, set }: any) => {
       stats,
       usuario_id,
     } = creditoData;
+    const cuotaIdPagoEspecial = getSpecialPaymentCuotaId({
+      requestedInstallment: cuotaApagar,
+      pendingInstallments: cuotasPendientes.map((cuota) => ({
+        numeroCuota: cuota.cuotas_credito.numero_cuota,
+        cuotaId: cuota.cuotas_credito.cuota_id,
+      })),
+    });
 
     // 3. Preparar creditoInfo con las variables destructuradas
     const creditoInfo = {
@@ -616,10 +625,7 @@ export const insertPayment = async ({ body, set }: any) => {
       await insertarPago({
         numero_credito_sifco: credito.numero_credito_sifco,
         numero_cuota: cuotaApagar,
-        cuotaId:
-          cuotasPendientes.length > 0
-            ? cuotasPendientes[0].cuotas_credito.cuota_id
-            : 0,
+        cuotaId: cuotaIdPagoEspecial,
         otros: otrosBig.toNumber(),
         mora: 0,
         boleta: montoBoleta.toNumber(),
@@ -702,10 +708,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
-            cuotaId:
-              cuotasPendientes.length > 0
-                ? cuotasPendientes[0].cuotas_credito.cuota_id
-                : 0,
+            cuotaId: cuotaIdPagoEspecial,
             otros: otrosBig.toNumber(),
             mora: resultadoMora.montoAplicadoMora,
             boleta: montoBoleta.toNumber(),
@@ -727,10 +730,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
-            cuotaId:
-              cuotasPendientes.length > 0
-                ? cuotasPendientes[0].cuotas_credito.cuota_id
-                : 0,
+            cuotaId: cuotaIdPagoEspecial,
             otros: otrosBig.toNumber(),
             mora: resultadoMora.montoAplicadoMora,
             boleta: montoBoleta.toNumber(),
@@ -756,10 +756,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
-          cuotaId:
-            cuotasPendientes.length > 0
-              ? cuotasPendientes[0].cuotas_credito.cuota_id
-              : 0,
+          cuotaId: cuotaIdPagoEspecial,
           otros: otrosBig.toNumber(),
           mora: resultadoMora.montoAplicadoMora,
           boleta: montoBoleta.toNumber(),
@@ -1189,22 +1186,22 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           .plus(abono_seguro)
           .plus(abono_gps)
           .plus(abono_membresias);
-        const esCuotaSeleccionadaInicial =
-          cuota.cuotas_credito.numero_cuota === cuotaApagar &&
-          cuotas_completas === 0 &&
-          cuotas_parciales === 0;
+        const esPrimeraCuotaProcesada =
+          cuotas_completas === 0 && cuotas_parciales === 0;
         const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
         const faltanteContraCuota = montoCuota.minus(totalPagado);
 
         if (
-          !!existingPago &&
-          esCuotaSeleccionadaInicial &&
-          pagoExactoDeUnaCuota &&
-          !tienePagosValidados &&
-          !ultimoPagoParcialConRestante &&
-          todosRestantesEnCero &&
-          faltanteContraCuota.gt(0) &&
-          disponible_restante.gte(faltanteContraCuota)
+          shouldApplyStaleZeroRestanteAdjustment({
+            hasExistingPayment: !!existingPago,
+            isFirstProcessedInstallment: esPrimeraCuotaProcesada,
+            isExactSingleInstallmentPayment: pagoExactoDeUnaCuota,
+            hasValidatedPayments: tienePagosValidados,
+            hasLastPartialPaymentWithRemaining: ultimoPagoParcialConRestante,
+            allRemainingZero: todosRestantesEnCero,
+            missingAgainstInstallment: faltanteContraCuota,
+            availableRemaining: disponible_restante,
+          })
         ) {
           console.log(
             "⚠️ Restantes de cuota subestimados; reteniendo ajuste neutro en la cuota seleccionada:",

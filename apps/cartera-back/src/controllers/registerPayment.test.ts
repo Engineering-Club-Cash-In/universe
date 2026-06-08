@@ -4,6 +4,8 @@ import {
   calcularSaldoNetoCuota,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
+  getSpecialPaymentCuotaId,
+  shouldApplyStaleZeroRestanteAdjustment,
   shouldMarkInstallmentPaymentPaid,
 } from "./registerPaymentPolicy";
 
@@ -60,6 +62,46 @@ describe("register payment", () => {
         installmentAmountApplied: 100,
       })
     ).toBe(true);
+  });
+
+  it("aplica el ajuste de restantes en cero a la primera cuota procesada aunque el request venga adelantado", () => {
+    expect(
+      shouldApplyStaleZeroRestanteAdjustment({
+        hasExistingPayment: true,
+        isFirstProcessedInstallment: true,
+        isExactSingleInstallmentPayment: true,
+        hasValidatedPayments: false,
+        hasLastPartialPaymentWithRemaining: false,
+        allRemainingZero: true,
+        missingAgainstInstallment: "1443.25",
+        availableRemaining: "1443.25",
+      })
+    ).toBe(true);
+  });
+
+  it("asocia pagos solo mora u otros a la cuota solicitada cuando existe entre las pendientes", () => {
+    expect(
+      getSpecialPaymentCuotaId({
+        requestedInstallment: 11,
+        pendingInstallments: [
+          { numeroCuota: 10, cuotaId: 100 },
+          { numeroCuota: 11, cuotaId: 110 },
+          { numeroCuota: 12, cuotaId: 120 },
+        ],
+      })
+    ).toBe(110);
+  });
+
+  it("conserva el fallback anterior para pagos especiales si la cuota solicitada no está pendiente", () => {
+    expect(
+      getSpecialPaymentCuotaId({
+        requestedInstallment: 11,
+        pendingInstallments: [
+          { numeroCuota: 10, cuotaId: 100 },
+          { numeroCuota: 12, cuotaId: 120 },
+        ],
+      })
+    ).toBe(100);
   });
 });
 

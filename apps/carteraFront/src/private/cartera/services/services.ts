@@ -1779,6 +1779,11 @@ export interface PagoDataInvestor {
   // Cuando es true, cofidi redirige a CUBE los intereses del inversionista en ese status.
   banderaReinversion?: boolean;
 
+  // 🆕 true si el crédito tiene una compra de cartera pendiente de facturar.
+  // Mismo criterio que activa el flujo de facturación prorrateado en cofidi
+  // (/facturar-pago-completo). Indica que el crédito "aplica" al flujo nuevo.
+  pendienteFacturar?: boolean;
+
   // 🔄 Cancelación (solo presente en pagos reset)
   cancelacion?: CancelacionPago | null;
 }
@@ -1874,6 +1879,7 @@ export async function getPagosConInversionistasService(
       abono_seguro: Number(pago.abono_seguro ?? 0),
       abono_gps: Number(pago.abono_gps ?? 0),
       inversionistas: pago.inversionistas ?? [],
+      pendienteFacturar: pago.pendienteFacturar ?? false,
     })),
     // 💰 Incluir totales si vienen del backend (solo cuando NO es Excel)
     totales: data.totales
@@ -2762,6 +2768,56 @@ export interface FacturarPagoCompletoRequest {
   created_by?: number;
 }
 
+// 🆕 Tipos de factura que devuelve /facturar-pago-completo (uno por concepto).
+//    Los ERROR no traen datos de certificación (serie/numero/uuid/...).
+export type TipoFacturaGenerada =
+  | 'MORA'
+  | 'OTROS_SERVICIOS'
+  | 'OTROS'
+  | 'INTERESES'
+  | 'INTERESES_CUBE'
+  | 'ERROR';
+
+export interface FacturaGeneradaItem {
+  tipo: TipoFacturaGenerada;
+
+  // 🧑 Inversionista (en facturas de INTERESES)
+  inversionista?: string;
+  inversionista_id?: number;
+  emisor?: string;
+
+  // 📊 Desglose para el modal: % participación / cash_in del inversionista
+  porcentaje_participacion?: string | number | null;
+  porcentaje_cash_in?: string | number | null;
+
+  // 🆕 Flujo prorrateado: cómo se repartió el interés antes/después de la compra
+  flujo?: 'NUEVO_PRORRATEADO';
+  parte_antes?: string;
+  parte_despues?: string;
+
+  // 📄 Datos de certificación (presentes solo si la factura salió bien)
+  factura_id?: number;
+  idInterno?: string;
+  serie?: string;
+  numero?: number;
+  uuid?: string;
+  xmlCertificado?: string;
+  fechaEmision?: string;
+  pdfUrl?: string;
+  pdfFilename?: string;
+  monto_total?: number;
+  monto_iva?: number;
+  receptor?: {
+    nombre: string;
+    nit: string;
+  };
+
+  // ❌ Solo cuando tipo === 'ERROR'
+  concepto?: string;
+  error?: string;
+  descripcion?: string;
+}
+
 export interface FacturarPagoCompletoResponse {
   success: boolean;
   data?: {
@@ -2771,26 +2827,8 @@ export interface FacturarPagoCompletoResponse {
       nit: string;
     };
     total_facturas: number;
-    facturas: Array<{
-      tipo: 'SERVICIOS' | 'INTERESES';
-      inversionista?: string;
-      inversionista_id?: number;
-      factura_id: number;
-      idInterno: string;
-      serie: string;
-      numero: number;
-      uuid: string;
-      xmlCertificado: string;
-      fechaEmision: string;
-      pdfUrl: string;
-      pdfFilename: string;
-      monto_total: number;
-      monto_iva: number;
-      receptor: {
-        nombre: string;
-        nit: string;
-      };
-    }>;
+    facturas: FacturaGeneradaItem[];
+    errores?: FacturaGeneradaItem[];
   };
   mensaje?: string;
   error?: string;
@@ -3619,6 +3657,7 @@ export interface PagosPorVencimientoResponse {
     totalPages: number;
   };
   totales: PagoPorVencimientoTotales;
+  totalesAcumulado?: PagoPorVencimientoTotales;
   excelUrl?: string;
 }
 
@@ -4315,3 +4354,41 @@ export const generarCierreMensual = async (
   const res = await api.post(`${API_URL}/cierre-mensual/generar`, periodo ? { periodo } : {});
   return res.data;
 };
+
+export interface CapitalInversionistaItem {
+  inversionista_id: number;
+  inversionista: string;
+  capital: string;
+  tasa_inversionista: string;
+  modalidad: string | null;
+  fecha_inicio_participacion: string | null;
+  comentario: string;
+}
+
+export interface CapitalInversionistasParams {
+  fecha_desde?: string;
+  fecha_hasta?: string;
+  excel?: boolean;
+}
+
+export interface CapitalInversionistasResponse {
+  success: boolean;
+  data: CapitalInversionistaItem[];
+  excelUrl?: string;
+}
+
+export async function getCapitalInversionistas(
+  params: CapitalInversionistasParams
+): Promise<CapitalInversionistasResponse> {
+  const res = await api.get<CapitalInversionistasResponse>(
+    `${API_URL}/capital-inversionistas`,
+    {
+      params: {
+        ...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
+        ...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
+        excel: params.excel,
+      },
+    }
+  );
+  return res.data;
+}

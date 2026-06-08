@@ -7,7 +7,8 @@
     "devStart": "RUST_LOG=error NODE_ENV=DEV bun run src/index.ts",
     "generate": "bunx drizzle-kit generate",
     "migrate": "NODE_ENV=LOCAL bunx drizzle-kit push",
-    "push": "bash ./deploy.sh"
+    "push": "bash ./deploy.sh",
+    "push:dev": "bash ./deploy-dev.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.896.0",

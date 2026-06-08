@@ -174,6 +174,7 @@ export function PagosPorVencimiento() {
   const items: PagoPorVencimientoItem[] = data?.data ?? [];
   const pagination = data?.pagination;
   const totales = data?.totales;
+  const totalesAcumulado = data?.totalesAcumulado;
 
   const meses = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -414,6 +415,36 @@ export function PagosPorVencimiento() {
         </div>
       )}
 
+      {/* Totales acumulados (morosos => deuda acumulada, al día => esperado) */}
+      {totalesAcumulado && (
+        <div className="bg-white/80 backdrop-blur rounded-2xl shadow-lg border border-red-100 p-5 mb-6">
+          <h2 className="text-sm font-bold text-red-800 mb-1 uppercase tracking-wide">
+            Totales acumulados — {meses[mes - 1]} {anio}
+          </h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Para créditos en mora se suma su deuda acumulada; los créditos al día suman lo esperado del mes.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-3">
+              {[
+                { label: "Abono Capital", value: totalesAcumulado.capital_restante },
+                { label: "Interés", value: totalesAcumulado.interes_restante },
+              { label: "IVA 12%", value: totalesAcumulado.iva_12_restante },
+              { label: "Seguro", value: totalesAcumulado.seguro_restante },
+              { label: "GPS", value: totalesAcumulado.gps_restante },
+              { label: "Membresías", value: totalesAcumulado.membresias },
+              { label: "Interés CUBE", value: totalesAcumulado.interes_cube },
+              { label: "IVA CUBE", value: totalesAcumulado.iva_cube },
+              { label: "Mora", value: totalesAcumulado.mora },
+            ].map((t) => (
+              <div key={t.label} className="text-center">
+                <p className="text-xs text-gray-500 font-medium">{t.label}</p>
+                <p className="text-sm font-bold text-red-700">{formatQ(t.value)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Contenido */}
       {isLoading ? (
         <div className="text-center py-16 text-blue-400 font-semibold text-lg">Cargando...</div>
@@ -646,7 +677,9 @@ export function PagosPorVencimiento() {
                             {/* 15. Royalty */}
                             <TableCell className="text-right text-gray-400 border-r border-b border-red-300 text-[11px]">--</TableCell>
                             {/* 16. Mora */}
-                            <TableCell className="border-r border-b border-red-300" />
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(item.mora)}
+                            </TableCell>
                             {/* 17. Total */}
                             <TableCell className="text-right font-bold text-red-800 bg-red-100/30 border-b border-red-300 text-[11px]">
                               {formatQ(String(acumuladoTotales.total.toFixed(2)))}

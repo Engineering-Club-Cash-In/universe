@@ -1573,14 +1573,14 @@ export async function resumeInvestor(
               const pagoNetoReal = abono_capital.plus(netIntParaMiso);
               total_cuota_sin_reinversion = total_cuota_sin_reinversion.plus(pagoNetoReal);
 
-              // 🔑 Reinversión Neta (Interés - ISR proporcional)
-              const isrReinv = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
-              const totalReinvNeta = reinvCapital.plus(reinvInteres).minus(isrReinv);
-              const netReinvInt = reinvInteres.minus(isrReinv);
+              // 🔑 Reinversión Neta: `reinvInteres` YA viene neto (NO factura: int - isr;
+              // factura: int + iva), igual que en getInvestorTotalsGlobales. No re-aplicar
+              // el 7% de ISR aquí (causaba doble descuento: 483.47 → 449.63).
+              const totalReinvNeta = reinvCapital.plus(reinvInteres);
 
               total_reinversion_neta_global = total_reinversion_neta_global.plus(totalReinvNeta);
               total_reinversion_capital = total_reinversion_capital.plus(reinvCapital);
-              total_reinversion_interes = total_reinversion_interes.plus(netReinvInt);
+              total_reinversion_interes = total_reinversion_interes.plus(reinvInteres);
 
               if (reinversionActual === "reinversion_capital") total_reinv_tipo_capital = total_reinv_tipo_capital.plus(totalReinvNeta);
               else if (reinversionActual === "reinversion_interes") total_reinv_tipo_interes = total_reinv_tipo_interes.plus(totalReinvNeta);

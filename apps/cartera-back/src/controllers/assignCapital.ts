@@ -260,6 +260,26 @@ export async function getCreditCandidates(
   console.log(`   Créditos descartados por compra pendiente de facturar: ${pendienteFacturarSet.size}`);
 
   // ──────────────────────────────────────────────────────────
+  // 2.6 Filtrar: cuotas vencidas sin pagar (moroso de facto)
+  //    Captura créditos cuyo statusCredit aún no fue actualizado a MOROSO
+  //    pero ya tienen cuotas con fecha_vencimiento < hoy y pagado = false
+  // ──────────────────────────────────────────────────────────
+  const cuotasVencidasRaw = await db
+    .selectDistinct({ credito_id: cuotas_credito.credito_id })
+    .from(cuotas_credito)
+    .where(
+      and(
+        inArray(cuotas_credito.credito_id, creditoIds),
+        gt(cuotas_credito.numero_cuota, 0),
+        eq(cuotas_credito.pagado, false),
+        lt(cuotas_credito.fecha_vencimiento, sql`CURRENT_DATE`)
+      )
+    );
+
+  const cuotasVencidasSet = new Set(cuotasVencidasRaw.map((r) => r.credito_id));
+  console.log(`   Créditos descartados por cuotas vencidas sin pagar: ${cuotasVencidasSet.size}`);
+
+  // ──────────────────────────────────────────────────────────
   // 3. Filtrar: espejo debe estar en 'completado'
   //    Significa que el ciclo anterior terminó y el capital está disponible
   //    para reinversión. Si tiene pendiente_* ya hay un proceso en curso.
@@ -455,6 +475,14 @@ export async function getCreditCandidates(
     if (pendienteFacturarSet.has(credito_id)) {
       console.log(
         `   ❌ [${numero_credito_sifco}] Descartado: tiene compra pendiente de facturar`
+      );
+      continue;
+    }
+
+    // Filtro: cuotas vencidas sin pagar (moroso de facto aunque statusCredit siga ACTIVO)
+    if (cuotasVencidasSet.has(credito_id)) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: tiene cuotas vencidas sin pagar`
       );
       continue;
     }

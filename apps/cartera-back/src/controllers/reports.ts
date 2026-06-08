@@ -2055,6 +2055,7 @@ export async function getPagosByVencimiento({
     db.execute<any>(sql`
       WITH per_credito AS (
         SELECT
+          c.credito_id AS credito_id,
           COALESCE(cap_anterior.total_restante, c.capital::numeric) AS cap_ant,
           c.porcentaje_interes::numeric / 100 AS tasa,
           c.cuota::numeric AS cuota_c,
@@ -2062,6 +2063,7 @@ export async function getPagosByVencimiento({
           COALESCE(c.gps::numeric, 0) AS gps,
           COALESCE(c.membresias_pago::numeric, 0) AS mem,
           AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_pct,
+          MAX(mora_real.cuotas_atrasadas) AS cuotas_atrasadas,
           CASE
             WHEN MAX(mora_real.cuotas_atrasadas) > 0 THEN COALESCE(MAX(m.monto_mora::numeric), 0)
             ELSE 0
@@ -2075,10 +2077,68 @@ export async function getPagosByVencimiento({
           ROUND(cap_ant * tasa, 2) AS interes,
           ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2) AS iva
         FROM per_credito
+      ),
+      -- Por cada crédito: valor esperado del mes + deuda acumulada (cuotas vencidas no pagadas).
+      -- La deuda acumulada solo se calcula para créditos en mora (cuotas_atrasadas > 0).
+      calc_acum AS (
+        SELECT
+          calc.*,
+          LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant) AS exp_capital,
+          acum.acum_capital,
+          acum.acum_interes,
+          acum.acum_iva,
+          acum.acum_seguro,
+          acum.acum_gps,
+          acum.acum_mem
+        FROM calc
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(SUM(a.capital_restante), 0) AS acum_capital,
+            COALESCE(SUM(a.interes_restante), 0) AS acum_interes,
+            COALESCE(SUM(a.iva_12_restante), 0)  AS acum_iva,
+            COALESCE(SUM(a.seguro_restante), 0)  AS acum_seguro,
+            COALESCE(SUM(a.gps_restante), 0)     AS acum_gps,
+            COALESCE(SUM(a.membresias), 0)       AS acum_mem
+          FROM (
+            SELECT
+              COALESCE(MIN(pc_a.capital_restante::numeric), 0) AS capital_restante,
+              COALESCE(MIN(pc_a.interes_restante::numeric), 0) AS interes_restante,
+              COALESCE(MIN(pc_a.iva_12_restante::numeric),  0) AS iva_12_restante,
+              COALESCE(MIN(pc_a.seguro_restante::numeric),  0) AS seguro_restante,
+              COALESCE(MIN(pc_a.gps_restante::numeric),     0) AS gps_restante,
+              COALESCE(MIN(pc_a.membresias::numeric),       0) AS membresias
+            FROM cartera.cuotas_credito q_a
+            LEFT JOIN cartera.pagos_credito pc_a
+              ON pc_a.cuota_id = q_a.cuota_id
+              AND pc_a."paymentFalse" = false
+            WHERE q_a.credito_id = calc.credito_id
+              AND q_a.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+              AND q_a.pagado = false
+              AND NOT EXISTS (
+                SELECT 1 FROM cartera.pagos_credito pc2
+                WHERE pc2.cuota_id = q_a.cuota_id
+                  AND pc2."paymentFalse" = false
+                  AND pc2.pagado = true
+                  AND pc2.validation_status IN ('validated', 'no_required')
+              )
+            GROUP BY q_a.cuota_id
+            HAVING (
+                COALESCE(MIN(pc_a.capital_restante::numeric), 0)
+              + COALESCE(MIN(pc_a.interes_restante::numeric), 0)
+              + COALESCE(MIN(pc_a.iva_12_restante::numeric),  0)
+              + COALESCE(MIN(pc_a.seguro_restante::numeric),  0)
+              + COALESCE(MIN(pc_a.gps_restante::numeric),     0)
+              + COALESCE(MIN(pc_a.membresias::numeric),       0)
+            ) > 0
+            OR COUNT(pc_a.pago_id) = 0
+            OR MIN(pc_a.capital_restante) IS NULL
+          ) a
+        ) acum ON calc.cuotas_atrasadas > 0
       )
       SELECT
         COUNT(*) AS total_count,
-        COALESCE(SUM(LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant)), 0) AS total_capital,
+        -- Totales esperados del mes (sin cambios)
+        COALESCE(SUM(exp_capital), 0) AS total_capital,
         COALESCE(SUM(interes), 0) AS total_interes,
         COALESCE(SUM(iva), 0) AS total_iva,
         COALESCE(SUM(seguro), 0) AS total_seguro,
@@ -2087,8 +2147,18 @@ export async function getPagosByVencimiento({
         COALESCE(SUM(ROUND(interes * cash_pct, 2)), 0) AS total_interes_cube,
         COALESCE(SUM(ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2)), 0) AS total_iva_cube,
         COALESCE(SUM(mora), 0) AS total_mora,
-        COALESCE(SUM(monto_apl), 0) AS total_monto_aplicado
-      FROM calc
+        COALESCE(SUM(monto_apl), 0) AS total_monto_aplicado,
+        -- Totales acumulados: morosos => deuda acumulada, al día => esperado del mes
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_capital, 0) ELSE exp_capital END), 0) AS acum_total_capital,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_interes, 0) ELSE interes END), 0) AS acum_total_interes,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_iva, 0) ELSE iva END), 0) AS acum_total_iva,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_seguro, 0) ELSE seguro END), 0) AS acum_total_seguro,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_gps, 0) ELSE gps END), 0) AS acum_total_gps,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_mem, 0) ELSE mem END), 0) AS acum_total_membresias,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) ELSE ROUND(interes * cash_pct, 2) END), 0) AS acum_total_interes_cube,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN ROUND(ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) * 0.12, 2) ELSE ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2) END), 0) AS acum_total_iva_cube,
+        COALESCE(SUM(mora), 0) AS acum_total_mora
+      FROM calc_acum
     `),
   ]);
 
@@ -2114,6 +2184,17 @@ export async function getPagosByVencimiento({
       interes_cube: Number(totRow?.total_interes_cube ?? 0).toFixed(2),
       iva_cube: Number(totRow?.total_iva_cube ?? 0).toFixed(2),
       mora: Number(totRow?.total_mora ?? 0).toFixed(2),
+    },
+    totalesAcumulado: {
+      capital_restante: Number(totRow?.acum_total_capital ?? 0).toFixed(2),
+      interes_restante: Number(totRow?.acum_total_interes ?? 0).toFixed(2),
+      iva_12_restante: Number(totRow?.acum_total_iva ?? 0).toFixed(2),
+      seguro_restante: Number(totRow?.acum_total_seguro ?? 0).toFixed(2),
+      gps_restante: Number(totRow?.acum_total_gps ?? 0).toFixed(2),
+      membresias: Number(totRow?.acum_total_membresias ?? 0).toFixed(2),
+      interes_cube: Number(totRow?.acum_total_interes_cube ?? 0).toFixed(2),
+      iva_cube: Number(totRow?.acum_total_iva_cube ?? 0).toFixed(2),
+      mora: Number(totRow?.acum_total_mora ?? 0).toFixed(2),
     },
   };
 }
@@ -2260,4 +2341,177 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
   );
 
   return { cuotas, totales };
+}
+
+export async function getCapitalInversionistas({
+  fecha_desde,
+  fecha_hasta,
+  excel = false,
+}: {
+  fecha_desde?: string;
+  fecha_hasta?: string;
+  excel?: boolean;
+}) {
+  const filters: any[] = [];
+
+  if (fecha_desde) {
+    filters.push(sql`e.fecha_inicio_participacion >= ${fecha_desde}::date`);
+  }
+  if (fecha_hasta) {
+    filters.push(sql`e.fecha_inicio_participacion <= ${fecha_hasta}::date`);
+  }
+
+  const whereClause =
+    filters.length > 0
+      ? sql`WHERE ${sql.join(filters, sql` AND `)}`
+      : sql``;
+
+  const result = await db.execute(sql`
+    SELECT
+      i.inversionista_id,
+      i.nombre AS inversionista,
+      SUM(e.monto_aportado) AS capital,
+      ROUND(SUM(e.porcentaje_participacion_inversionista * e.monto_aportado) / NULLIF(SUM(e.monto_aportado), 0), 2) AS tasa_inversionista,
+      i.tipo_reinversion AS modalidad,
+      MIN(e.fecha_inicio_participacion) AS fecha_inicio_participacion,
+      CASE
+        WHEN bool_or(e.status <> 'completado') THEN 'compra de cartera pendiente'
+        ELSE ''
+      END AS comentario
+    FROM cartera.creditos_inversionistas_espejo e
+    JOIN cartera.inversionistas i
+      ON i.inversionista_id = e.inversionista_id
+    ${whereClause}
+    GROUP BY i.inversionista_id, i.nombre, i.tipo_reinversion
+    HAVING SUM(e.monto_aportado) <> 0
+    ORDER BY SUM(e.monto_aportado) DESC
+  `);
+
+  const data = result.rows as {
+    inversionista_id: number;
+    inversionista: string;
+    capital: string;
+    tasa_inversionista: string;
+    modalidad: string | null;
+    fecha_inicio_participacion: string | null;
+    comentario: string;
+  }[];
+
+  if (!excel) {
+    return { data };
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Capital Inversionistas");
+
+  sheet.columns = [
+    { header: "No.", key: "no", width: 6 },
+    { header: "Inversionista", key: "inversionista", width: 30 },
+    { header: "Capital (Q)", key: "capital", width: 18 },
+    { header: "Tasa (%)", key: "tasa_inversionista", width: 12 },
+    { header: "Modalidad", key: "modalidad", width: 20 },
+    { header: "Fecha Inicio Participación", key: "fecha_inicio_participacion", width: 26 },
+    { header: "Comentario", key: "comentario", width: 35 },
+  ];
+
+  const headerRow = sheet.getRow(1);
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.border = {
+      top: { style: "thin" },
+      left: { style: "thin" },
+      bottom: { style: "thin" },
+      right: { style: "thin" },
+    };
+  });
+  headerRow.height = 20;
+
+  data.forEach((row, idx) => {
+    const r = sheet.addRow({
+      no: idx + 1,
+      inversionista: row.inversionista,
+      capital: Number(row.capital),
+      tasa_inversionista: Number(row.tasa_inversionista),
+      modalidad: row.modalidad ? row.modalidad.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "",
+      fecha_inicio_participacion: row.fecha_inicio_participacion
+        ? row.fecha_inicio_participacion.slice(0, 10).split("-").reverse().join("/")
+        : "",
+      comentario: row.comentario,
+    });
+
+    const isEven = idx % 2 === 0;
+    r.eachCell((cell) => {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: isEven ? "FFF5F7FA" : "FFFFFFFF" },
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFD1D5DB" } },
+        left: { style: "thin", color: { argb: "FFD1D5DB" } },
+        bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+        right: { style: "thin", color: { argb: "FFD1D5DB" } },
+      };
+    });
+
+    const capitalCell = r.getCell("capital");
+    capitalCell.numFmt = '"Q"#,##0.00';
+    capitalCell.alignment = { horizontal: "right" };
+
+    const tasaCell = r.getCell("tasa_inversionista");
+    tasaCell.numFmt = '0.00"%"';
+    tasaCell.alignment = { horizontal: "right" };
+  });
+
+  const totalCapital = data.reduce((acc, row) => acc + Number(row.capital ?? 0), 0);
+  const totalRow = sheet.addRow([]);
+  totalRow.getCell(1).value = null;
+  totalRow.getCell(2).value = "TOTAL";
+  totalRow.getCell(3).value = totalCapital;
+  totalRow.getCell(4).value = null;
+  totalRow.getCell(5).value = null;
+  totalRow.getCell(6).value = null;
+  totalRow.getCell(7).value = null;
+
+  for (let col = 1; col <= 7; col++) {
+    const cell = totalRow.getCell(col);
+    cell.font = { bold: true, color: { argb: "FF1E3A5F" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1E8FF" } };
+    cell.border = {
+      top: { style: "medium", color: { argb: "FF1E3A5F" } },
+      left: { style: "thin", color: { argb: "FFD1D5DB" } },
+      bottom: { style: "medium", color: { argb: "FF1E3A5F" } },
+      right: { style: "thin", color: { argb: "FFD1D5DB" } },
+    };
+  }
+  const totalCapitalCell = totalRow.getCell(3);
+  totalCapitalCell.numFmt = '"Q"#,##0.00';
+  totalCapitalCell.alignment = { horizontal: "right" };
+  totalRow.getCell(2).alignment = { horizontal: "left" };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const filename = `reportes/capital_inversionistas_${Date.now()}.xlsx`;
+
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: Buffer.from(buffer),
+      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  const excelUrl = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+  return { data, excelUrl };
 }

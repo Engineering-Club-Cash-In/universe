@@ -26,11 +26,11 @@ export async function getMontoACobrar({
     SELECT
       DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp) AS bucket,
       COUNT(c.cuota_id)::int AS cuotas_count,
-      COALESCE(SUM(cr.cuota::numeric), 0) AS total_cuota,
+      COALESCE(SUM(cr.cuota::numeric - cr.cuota_interes::numeric - cr.iva_12::numeric - cr.seguro_10_cuotas::numeric - cr.gps::numeric - cr.membresias_pago::numeric), 0) AS total_cuota,
       COALESCE(SUM(cr.cuota_interes::numeric), 0) AS total_interes,
       COALESCE(SUM(cr.iva_12::numeric), 0) AS total_iva,
-      COALESCE(SUM(cr.seguro_10_cuotas::numeric / NULLIF(cr.plazo::numeric, 0)), 0) AS total_seguro,
-      COALESCE(SUM(cr.gps::numeric / NULLIF(cr.plazo::numeric, 0)), 0) AS total_gps,
+      COALESCE(SUM(cr.seguro_10_cuotas::numeric), 0) AS total_seguro,
+      COALESCE(SUM(cr.gps::numeric), 0) AS total_gps,
       COALESCE(SUM(cr.membresias_pago::numeric), 0) AS total_membresias,
       COALESCE(SUM(cr.royalti::numeric / NULLIF(cr.plazo::numeric, 0)), 0) AS total_royalti,
       COALESCE(AVG(m.monto_mora::numeric), 0) AS mora_promedio
@@ -90,7 +90,7 @@ export async function getEsperadoDelMes({
 }) {
   const result = await db.execute(sql`
     SELECT
-      COALESCE(SUM(cr.cuota::numeric), 0) AS esperado_capital,
+      COALESCE(SUM(cr.cuota::numeric - cr.cuota_interes::numeric - cr.iva_12::numeric - cr.seguro_10_cuotas::numeric - cr.gps::numeric - cr.membresias_pago::numeric), 0) AS esperado_capital,
       COALESCE(SUM(cr.cuota_interes::numeric), 0) AS esperado_interes,
       COALESCE(SUM(cr.iva_12::numeric), 0) AS esperado_iva,
       COALESCE(SUM(cr.seguro_10_cuotas::numeric), 0) AS esperado_seguro,

@@ -21,7 +21,7 @@ mock.module("@cci/email", () => ({
   sendInvestorAddedToCreditsNotification: mock(() => Promise.resolve()),
 }));
 
-const { buildEstadoCuentaTableHeader, renderEstadoCuentaPaymentRow } = await import("./reports");
+const { buildEstadoCuentaTableHeader, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment } = await import("./reports");
 
 describe("estado de cuenta PDF", () => {
   it("incluye la columna de fecha de aplicacion del pago", () => {
@@ -75,5 +75,51 @@ describe("estado de cuenta PDF", () => {
     );
 
     expect(row).toContain("<td>-</td>");
+  });
+
+  it("incluye abonos a capital validados aunque no cierren cuota", () => {
+    expect(
+      shouldIncludeEstadoCuentaPayment({
+        pagado: false,
+        paymentFalse: false,
+        validationStatus: "validated",
+        abono_capital: "75000.00",
+        monto_aplicado: "75000.00",
+      }),
+    ).toBe(true);
+  });
+
+  it("mantiene incluidos los pagos parciales que ya estan marcados como pagados", () => {
+    expect(
+      shouldIncludeEstadoCuentaPayment({
+        pagado: true,
+        paymentFalse: false,
+        validationStatus: "pending",
+        abono_capital: "0.00",
+        abono_interes: "147.78",
+        abono_iva_12: "0.00",
+        abono_seguro: "0.00",
+        abono_gps: "0.00",
+        membresias_pago: "0.00",
+        monto_aplicado: "147.78",
+      }),
+    ).toBe(true);
+  });
+
+  it("no incluye cuotas futuras sincronizadas aunque esten validadas", () => {
+    expect(
+      shouldIncludeEstadoCuentaPayment({
+        pagado: false,
+        paymentFalse: false,
+        validationStatus: "validated",
+        abono_capital: "73.68",
+        abono_interes: "1060.69",
+        abono_iva_12: "127.28",
+        abono_seguro: "260.93",
+        abono_gps: "0.00",
+        membresias_pago: "399.73",
+        monto_aplicado: "1922.31",
+      }),
+    ).toBe(false);
   });
 });

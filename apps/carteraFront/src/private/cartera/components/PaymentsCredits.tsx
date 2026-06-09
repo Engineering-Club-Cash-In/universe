@@ -831,7 +831,7 @@ const handleDownloadExcel = async () => {
                                             Monto Aportado
                                           </TableHead>
                                           <TableHead className="font-bold text-blue-700">
-                                            IVA inversionista
+                                            IVA Inversionista
                                           </TableHead>
                                           <TableHead className="font-bold text-blue-700">
                                             Detalles
@@ -918,7 +918,7 @@ const handleDownloadExcel = async () => {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Cuota Interes Inversionista:{" "}
+                                                          Cuota Interés Inversionista:{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(
@@ -928,7 +928,7 @@ const handleDownloadExcel = async () => {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Cuota Interes Cash In:{" "}
+                                                          Cuota Interés Cash In:{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(

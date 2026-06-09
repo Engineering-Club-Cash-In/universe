@@ -598,7 +598,7 @@ export function InvestorsList({
                 }`}>
                   <Wallet className={`w-4 h-4 shrink-0 ${saldo > 0 ? "text-emerald-600" : "text-gray-400"}`} />
                   <span className={`text-sm font-semibold ${saldo > 0 ? "text-emerald-800" : "text-gray-500"}`}>
-                    Saldo de reinversion:
+                    Saldo de Reinversión:
                   </span>
                   <span className={`text-sm font-bold ${saldo > 0 ? "text-emerald-900" : "text-gray-600"}`}>
                     Q{saldo.toFixed(2)}

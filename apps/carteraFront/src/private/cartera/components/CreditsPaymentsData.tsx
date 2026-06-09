@@ -346,7 +346,7 @@ export function ListaCreditosPagos() {
             ref={inputRef}
             className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
             type="text"
-            placeholder="# Crédito SIFCO"
+            placeholder="No. Crédito SIFCO"
             defaultValue={creditoSifco}
             onChange={(e) => {
               if (e.target.value === "") handleSifco("");
@@ -1304,7 +1304,13 @@ function MobileView({
                     ? "En Convenio"
                     : item.creditos.statusCredit === "CAIDO"
                       ? "Caído"
-                      : item.creditos.statusCredit}
+                      : item.creditos.statusCredit === "ACTIVO"
+                        ? "Activo"
+                        : item.creditos.statusCredit === "CANCELADO"
+                          ? "Cancelado"
+                          : item.creditos.statusCredit === "MOROSO"
+                            ? "En Mora"
+                            : item.creditos.statusCredit}
             </span>
           </p>
 
@@ -1906,7 +1912,7 @@ function DetallesCredito({
           { label: "Seguro 10 Cuotas", value: item.creditos.seguro_10_cuotas, isMoney: true },
           { label: "GPS", value: item.creditos.gps, isMoney: true },
           { label: "Membresías", value: item.creditos.membresias, isMoney: true },
-          { label: "Royalti", value: item.creditos.royalti, isMoney: true },
+          { label: "Royalty", value: item.creditos.royalti, isMoney: true },
           { label: "Plazo", value: `${item.creditos.plazo} meses` },
           { label: "Formato Crédito", value: item.creditos.formato_credito },
           ...(item.fecha_inicio ? [{ label: "Fecha Primera Cuota", value: new Date(item.fecha_inicio + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }), isDate: true }] : []),

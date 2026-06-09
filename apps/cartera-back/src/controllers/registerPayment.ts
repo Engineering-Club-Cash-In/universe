@@ -1506,6 +1506,37 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
               
             }
           }
+
+          // ── Sincronizar `*_restante` en TODAS las filas vivas de la cuota ──
+          // Antes los `*_restante` se guardaban por fila (snapshot del momento)
+          // y se desincronizaban entre pagos hermanos: la fila `no_required` y
+          // las intermedias quedaban con saldos viejos, así que el front (que
+          // puede leer cualquier fila, ej. la `no_required`) mostraba restantes
+          // que NO reflejaban los parciales ya aplicados. Replicamos el saldo
+          // VIVO recién calculado (`nuevo_*_restante`) a todas las filas de la
+          // cuota → `*_restante` pasa a ser un valor consistente por cuota,
+          // leíble desde cualquier fila. No cambia la distribución: interés/IVA
+          // se distribuyen con la fila vigente (la última, que ya trae el saldo
+          // correcto) y los rubros planos se netean contra objetivos+Σmonto_
+          // aplicado, no contra estos saldos.
+          await db
+            .update(pagos_credito)
+            .set({
+              capital_restante: nuevo_capital_restante.toString(),
+              interes_restante: nuevo_interes_restante.toString(),
+              iva_12_restante: nuevo_iva_restante.toString(),
+              seguro_restante: nuevo_seguro_restante.toString(),
+              gps_restante: nuevo_gps_restante.toString(),
+              membresias: nuevo_membresias_restante.toString(),
+            })
+            .where(
+              and(
+                eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+                eq(pagos_credito.credito_id, credito.credito_id),
+                eq(pagos_credito.paymentFalse, false)
+              )
+            );
+
           if (disponible_restante.lte(0)) {
             break;
           }

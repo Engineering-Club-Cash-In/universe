@@ -204,13 +204,21 @@ export const recalculateQuota = async ({ body, set }: any) => {
     const capital = Number(credito.capital);
     const monthlyRate = Number(credito.porcentaje_interes);
 
+    // Contamos cuotas DISTINTAS por numero_cuota: una misma cuota puede tener
+    // varias filas (p. ej. un abono extraordinario que crea otra fila con el
+    // mismo numero_cuota). count(distinct numero_cuota) evita inflar el plazo.
+    // Excluimos numero_cuota 0: la numeración real arranca en 1, la 0 es una
+    // fila fantasma que no representa una cuota del plan.
     const [{ cuotasPagadas }] = await db
-      .select({ cuotasPagadas: sql<number>`count(*)::int` })
+      .select({
+        cuotasPagadas: sql<number>`count(distinct ${cuotas_credito.numero_cuota})::int`,
+      })
       .from(cuotas_credito)
       .where(
         and(
           eq(cuotas_credito.credito_id, credito.credito_id),
           eq(cuotas_credito.pagado, true),
+          gt(cuotas_credito.numero_cuota, 0),
         ),
       );
 

@@ -183,6 +183,20 @@ class SimpleCache {
 // TYPES
 // ============================================================================
 
+export type FacturacionMesRubro = {
+	capital: string;
+	interes: string;
+	iva: string;
+	seguro: string;
+	gps: string;
+	membresias: string;
+};
+
+export type FacturacionMesResponse = {
+	cobrado: FacturacionMesRubro;
+	esperado: FacturacionMesRubro;
+};
+
 export type MontoACobrarRow = {
 	bucket: string;
 	cuotas_count: number;
@@ -1177,6 +1191,55 @@ export class CarteraBackClient {
 		);
 
 		return response.data ?? [];
+	}
+
+	async getFacturacionMes(params: {
+		mes: number;
+		anio: number;
+	}): Promise<FacturacionMesResponse> {
+		const qp = new URLSearchParams({
+			mes: String(params.mes),
+			anio: String(params.anio),
+		});
+
+		const [cobradoResult, esperadoResult] = await Promise.all([
+			this.request<{
+				cobrado_capital?: string;
+				cobrado_interes?: string;
+				cobrado_iva?: string;
+				cobrado_seguro?: string;
+				cobrado_gps?: string;
+				cobrado_membresias?: string;
+			}>(`/reportes/facturacion-mes-cobrado?${qp}`, { method: "GET" }, true),
+			this.request<{
+				esperado_capital?: string;
+				esperado_interes?: string;
+				esperado_iva?: string;
+				esperado_seguro?: string;
+				esperado_gps?: string;
+				esperado_membresias?: string;
+			}>(`/reportes/facturacion-mes-esperado?${qp}`, { method: "GET" }, true),
+		]);
+
+		const cobrado: FacturacionMesRubro = {
+			capital: cobradoResult.cobrado_capital ?? "0",
+			interes: cobradoResult.cobrado_interes ?? "0",
+			iva: cobradoResult.cobrado_iva ?? "0",
+			seguro: cobradoResult.cobrado_seguro ?? "0",
+			gps: cobradoResult.cobrado_gps ?? "0",
+			membresias: cobradoResult.cobrado_membresias ?? "0",
+		};
+
+		const esperado: FacturacionMesRubro = {
+			capital: esperadoResult.esperado_capital ?? "0",
+			interes: esperadoResult.esperado_interes ?? "0",
+			iva: esperadoResult.esperado_iva ?? "0",
+			seguro: esperadoResult.esperado_seguro ?? "0",
+			gps: esperadoResult.esperado_gps ?? "0",
+			membresias: esperadoResult.esperado_membresias ?? "0",
+		};
+
+		return { cobrado, esperado };
 	}
 
 	// ========================================================================

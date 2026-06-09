@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { getMontoACobrar } from "../controllers/reportes";
+import { getCobradoDelMes, getEsperadoDelMes, getMontoACobrar } from "../controllers/reportes";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -30,6 +30,44 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return { data };
     } catch (error) {
       console.error("[/reportes/monto-cobrar]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/facturacion-mes-cobrado", async ({ query, set }) => {
+    try {
+      const { mes, anio } = query as Record<string, string>;
+      const m = Number(mes);
+      const a = Number(anio);
+      if (!m || !a || m < 1 || m > 12 || a < 2020) {
+        set.status = 400;
+        return { error: "mes y anio son requeridos y deben ser válidos" };
+      }
+      const data = await getCobradoDelMes({ mes: m, anio: a });
+      set.status = 200;
+      return data;
+    } catch (error) {
+      console.error("[/reportes/facturacion-mes-cobrado]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/facturacion-mes-esperado", async ({ query, set }) => {
+    try {
+      const { mes, anio } = query as Record<string, string>;
+      const m = Number(mes);
+      const a = Number(anio);
+      if (!m || !a || m < 1 || m > 12 || a < 2020) {
+        set.status = 400;
+        return { error: "mes y anio son requeridos y deben ser válidos" };
+      }
+      const data = await getEsperadoDelMes({ mes: m, anio: a });
+      set.status = 200;
+      return data;
+    } catch (error) {
+      console.error("[/reportes/facturacion-mes-esperado]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

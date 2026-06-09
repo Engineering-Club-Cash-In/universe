@@ -53,6 +53,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { PERMISSIONS } from "@/lib/roles";
@@ -85,6 +86,29 @@ type MontoACobrarRow = {
 	total_royalti: string;
 	mora_promedio: string;
 };
+
+type FacturacionMesRubro = {
+	capital: string;
+	interes: string;
+	iva: string;
+	seguro: string;
+	gps: string;
+	membresias: string;
+};
+
+type FacturacionMesResponse = {
+	cobrado: FacturacionMesRubro;
+	esperado: FacturacionMesRubro;
+};
+
+const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] = [
+	{ key: "capital", label: "Capital" },
+	{ key: "interes", label: "Interés" },
+	{ key: "iva", label: "IVA 12%" },
+	{ key: "seguro", label: "Seguro" },
+	{ key: "gps", label: "GPS" },
+	{ key: "membresias", label: "Membresías" },
+];
 
 const MONTO_COBRAR_COLORS = {
 	total_cuota: "#3b82f6",
@@ -170,7 +194,7 @@ function escapeCsvValue(value: string | number | null | undefined) {
 }
 
 function downloadCsv(filename: string, rows: (string | number | null)[][]) {
-	const csv = `\uFEFF${rows
+	const csv = `﻿${rows
 		.map((row) => row.map((value) => escapeCsvValue(value)).join(","))
 		.join("\n")}`;
 	const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -180,6 +204,22 @@ function downloadCsv(filename: string, rows: (string | number | null)[][]) {
 	link.download = filename;
 	link.click();
 	URL.revokeObjectURL(url);
+}
+
+function ProgressBar({ value, max }: { value: number; max: number }) {
+	const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+	const color = pct >= 100 ? "#22c55e" : pct >= 80 ? "#eab308" : "#ef4444";
+	return (
+		<div className="flex items-center gap-2">
+			<div className="h-2 flex-1 overflow-hidden rounded-full bg-primary/20">
+				<div
+					className="h-full rounded-full transition-all"
+					style={{ width: `${pct}%`, backgroundColor: color }}
+				/>
+			</div>
+			<span className="w-10 text-right text-xs">{pct.toFixed(0)}%</span>
+		</div>
+	);
 }
 
 function RouteComponent() {
@@ -197,6 +237,10 @@ function RouteComponent() {
 		"anio" | "trimestre" | "mes" | "semana" | "dia"
 	>("mes");
 	const [montoCobrarRange, setMontoCobrarRange] = useState(getDefaultMontoCobrarRange);
+	const [facturacionMes, setFacturacionMes] = useState(() => ({
+		mes: new Date().getMonth() + 1,
+		anio: new Date().getFullYear(),
+	}));
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const userRole = userProfile.data?.role;
@@ -236,6 +280,16 @@ function RouteComponent() {
 	});
 	const montoCobrarData = montoCobrarQuery.data as
 		| { data: MontoACobrarRow[] }
+		| undefined;
+
+	const facturacionMesQuery = useQuery({
+		...orpc.getFacturacionMes.queryOptions({
+			input: { mes: facturacionMes.mes, anio: facturacionMes.anio },
+		}),
+		enabled: isAdmin,
+	});
+	const facturacionMesData = facturacionMesQuery.data as
+		| FacturacionMesResponse
 		| undefined;
 
 	useEffect(() => {
@@ -897,6 +951,124 @@ function RouteComponent() {
 									</div>
 								</>
 							)}
+						</CardContent>
+					</Card>
+
+					{/* Reporte: Facturado del Mes vs Esperado */}
+					<Card>
+						<CardHeader>
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div>
+									<CardTitle className="flex items-center gap-2">
+										<CalendarDays className="h-5 w-5" />
+										Facturado del Mes vs Esperado
+									</CardTitle>
+									<CardDescription>
+										Compara lo cobrado en el mes contra lo esperado según fecha de vencimiento
+									</CardDescription>
+								</div>
+								<div className="flex items-center gap-2">
+									<Select
+										value={String(facturacionMes.mes)}
+										onValueChange={(v) =>
+											setFacturacionMes((prev) => ({ ...prev, mes: Number(v) }))
+										}
+									>
+										<SelectTrigger className="w-36">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{[
+												"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+												"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+											].map((label, i) => (
+												<SelectItem key={i + 1} value={String(i + 1)}>
+													{label}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+									<Input
+										type="number"
+										className="w-24"
+										value={facturacionMes.anio}
+										min={2020}
+										max={2100}
+										onChange={(e) =>
+											setFacturacionMes((prev) => ({
+												...prev,
+												anio: Number(e.target.value),
+											}))
+										}
+									/>
+								</div>
+							</div>
+						</CardHeader>
+						<CardContent>
+							{facturacionMesQuery.isPending && (
+								<div className="text-muted-foreground py-4 text-center text-sm">
+									Cargando...
+								</div>
+							)}
+							{facturacionMesQuery.isError && (
+								<div className="text-destructive py-4 text-center text-sm">
+									Error al cargar datos
+								</div>
+							)}
+							{facturacionMesData && (() => {
+								const { cobrado, esperado } = facturacionMesData;
+								const totalCobrado = FACTURACION_RUBROS.reduce(
+									(acc, r) => acc + Number(cobrado[r.key] || 0),
+									0,
+								);
+								const totalEsperado = FACTURACION_RUBROS.reduce(
+									(acc, r) => acc + Number(esperado[r.key] || 0),
+									0,
+								);
+								return (
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Rubro</TableHead>
+												<TableHead className="text-right">Cobrado</TableHead>
+												<TableHead className="text-right">Esperado</TableHead>
+												<TableHead className="w-48">Progreso</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{FACTURACION_RUBROS.map(({ key, label }) => (
+												<TableRow key={key}>
+													<TableCell>{label}</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(Number(cobrado[key] || 0))}
+													</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(Number(esperado[key] || 0))}
+													</TableCell>
+													<TableCell>
+														<ProgressBar
+															value={Number(cobrado[key] || 0)}
+															max={Number(esperado[key] || 0)}
+														/>
+													</TableCell>
+												</TableRow>
+											))}
+											<TableRow className="border-t-2 bg-muted/50 font-bold">
+												<TableCell>Total</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(totalCobrado)}
+												</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(totalEsperado)}
+												</TableCell>
+												<TableCell>
+													<ProgressBar value={totalCobrado} max={totalEsperado} />
+												</TableCell>
+											</TableRow>
+										</TableBody>
+									</Table>
+								);
+							})()}
 						</CardContent>
 					</Card>
 				</>

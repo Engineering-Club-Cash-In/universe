@@ -331,6 +331,7 @@ export const reportsAppRouter = {
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
 	getMontoACobrar: reportesCarteraRouter.getMontoACobrar,
+	getFacturacionMes: reportesCarteraRouter.getFacturacionMes,
 
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,

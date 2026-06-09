@@ -89,7 +89,6 @@ export async function generarCierreMensual(periodoOverride?: string) {
         cantidad_creditos: 0,
         capital_total: new Big(0),
         creditos_con_mora: new Set<number>(),
-        cuotas_atrasadas: 0,
         capital_en_mora: new Big(0),
       };
     }

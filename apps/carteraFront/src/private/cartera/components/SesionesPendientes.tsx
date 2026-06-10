@@ -761,7 +761,8 @@ function InvestorCard({
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
 
   const montoParaCandidatos = editingCredit ? Number(editingCredit.monto_aportado) : null;
-  const { data: candidates, isLoading: isLoadingCandidates } = useCreditCandidates(montoParaCandidatos, investor.inversionista_id);
+  const porcentajeParaCandidatos = editingCredit ? (Number(editingCredit.porcentaje_participacion_inversionista) || undefined) : undefined;
+  const { data: candidates, isLoading: isLoadingCandidates } = useCreditCandidates(montoParaCandidatos, investor.inversionista_id, porcentajeParaCandidatos);
 
   const destinos = useMemo(() => {
     if (!editingCreditId || !candidates) return [];

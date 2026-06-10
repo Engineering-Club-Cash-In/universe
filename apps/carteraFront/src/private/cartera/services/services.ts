@@ -3927,10 +3927,10 @@ export interface CandidatesResponse {
   candidates: OtroCreditoDisponible[];
 }
 
-export async function getCreditCandidatesService(params?: { monto?: number; minimo?: number; inversionista_id?: number }): Promise<OtroCreditoDisponible[]> {
+export async function getCreditCandidatesService(params?: { monto?: number; minimo?: number; inversionista_id?: number; porcentaje?: number }): Promise<OtroCreditoDisponible[]> {
   const res = await api.get<CandidatesResponse>(
     `${API_URL}/assign-capital/candidates`,
-    { params: { monto: params?.monto, minimo: params?.minimo ?? 10, inversionista_id: params?.inversionista_id } }
+    { params: { monto: params?.monto, minimo: params?.minimo ?? 10, inversionista_id: params?.inversionista_id, porcentaje: params?.porcentaje } }
   );
   return res.data.candidates;
 }

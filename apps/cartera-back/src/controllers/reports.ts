@@ -13,6 +13,9 @@ const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db9
 
 type EstadoCuentaPagoRow = {
   pago_id?: number | string | null;
+  pagado?: boolean | null;
+  paymentFalse?: boolean | null;
+  validationStatus?: string | null;
   numero_cuota?: number | string | null;
   cuota?: number | string | null;
   abono_capital?: number | string | null;
@@ -25,8 +28,82 @@ type EstadoCuentaPagoRow = {
   monto_aplicado?: number | string | null;
   total_restante?: number | string | null;
   fecha_vencimiento?: Date | string | null;
+  fecha_pago?: Date | string | null;
   fecha_aplicado?: Date | string | null;
 };
+
+const toEstadoCuentaTime = (fecha?: Date | string | null) => {
+  if (!fecha) return Number.MAX_SAFE_INTEGER;
+  const time = new Date(fecha).getTime();
+  return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
+};
+
+const getEstadoCuentaOtrosRubros = (pago: EstadoCuentaPagoRow) =>
+  Number(pago.abono_interes || 0) +
+  Number(pago.abono_iva_12 || 0) +
+  Number(pago.abono_seguro || 0) +
+  Number(pago.abono_gps || 0) +
+  Number(pago.membresias_pago || 0);
+
+export function shouldIncludeEstadoCuentaPayment(pago: EstadoCuentaPagoRow) {
+  if (pago.paymentFalse === true) return false;
+  if (pago.pagado === true) return true;
+
+  const abonoCapital = Number(pago.abono_capital || 0);
+  const montoAplicado = Number(pago.monto_aplicado || 0);
+  const fechaPago = pago.fecha_pago ? new Date(pago.fecha_pago) : null;
+  const pagoNoEsFuturo = fechaPago ? fechaPago <= new Date() : false;
+  const totalOtrosRubros = getEstadoCuentaOtrosRubros(pago);
+  const esAbonoCapitalPuro = totalOtrosRubros === 0;
+  const fueAplicado =
+    pago.fecha_aplicado !== null && pago.fecha_aplicado !== undefined;
+
+  return (
+    pago.validationStatus === "validated" &&
+    abonoCapital > 0 &&
+    montoAplicado > 0 &&
+    (esAbonoCapitalPuro || (fueAplicado && pagoNoEsFuturo))
+  );
+}
+
+export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T[]) {
+  return [...pagos].sort((a, b) => {
+    const cuotaDiff = Number(a.numero_cuota ?? 0) - Number(b.numero_cuota ?? 0);
+    if (cuotaDiff !== 0) return cuotaDiff;
+
+    const fechaDiff = toEstadoCuentaTime(a.fecha_pago) - toEstadoCuentaTime(b.fecha_pago);
+    if (fechaDiff !== 0) return fechaDiff;
+
+    return Number(a.pago_id ?? 0) - Number(b.pago_id ?? 0);
+  });
+}
+
+export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(pagos: T[]) {
+  let capitalRestante: Big | null = null;
+
+  return pagos.map((pago) => {
+    const abonoCapital = new Big(pago.abono_capital || 0);
+    const totalRestanteFila = new Big(pago.total_restante || 0);
+    const tieneRubrosDeCuota = getEstadoCuentaOtrosRubros(pago) > 0;
+    const snapshotConfiable =
+      pago.pagado === true && tieneRubrosDeCuota && totalRestanteFila.gt(0);
+
+    if (capitalRestante === null) {
+      capitalRestante = snapshotConfiable
+        ? totalRestanteFila
+        : totalRestanteFila.plus(abonoCapital);
+    }
+
+    capitalRestante = snapshotConfiable
+      ? totalRestanteFila
+      : capitalRestante.minus(abonoCapital);
+
+    return {
+      ...pago,
+      total_restante: capitalRestante.toFixed(2),
+    };
+  });
+}
 
 const formatEstadoCuentaMoney = (n: number) =>
   `Q${n.toLocaleString("es-GT", {
@@ -382,9 +459,9 @@ export async function exportPagosToExcel(credito_sifco: string) {
     throw new Error(`No hay pagos para el crédito ${credito_sifco}`);
   }
 
-  // Filtrar solo pagos pagados
-  const pagosFiltrados = pagosData.filter(
-    ({ pago }) => pago.pagado === true
+  // Incluye cuotas pagadas y abonos a capital ya validados aunque no cierren cuota.
+  const pagosFiltrados = pagosData.filter(({ pago }) =>
+    shouldIncludeEstadoCuentaPayment(pago)
   );
 
   if (!pagosFiltrados.length) {
@@ -405,7 +482,11 @@ export async function exportPagosToExcel(credito_sifco: string) {
   let totalCapital = 0;
   let totalInteres = 0;
 
-  const tableRows = pagosFiltrados.map(({ pago }, index) => {
+  const pagosOrdenados = applyEstadoCuentaRunningCapital(
+    sortEstadoCuentaPayments(pagosFiltrados.map(({ pago }) => pago))
+  );
+
+  const tableRows = pagosOrdenados.map((pago, index) => {
     const montoAplicado = Number(pago.monto_aplicado || 0);
     const capitalPago = Number(pago.abono_capital || 0);
     const interesPago = Number(pago.abono_interes || 0);
@@ -538,7 +619,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
     <div class="summary">
       <div class="summary-card">
         <div class="label">Total Pagos</div>
-        <div class="value">${pagosFiltrados.length}</div>
+        <div class="value">${pagosOrdenados.length}</div>
       </div>
       <div class="summary-card">
         <div class="label">Capital Abonado</div>

@@ -237,6 +237,13 @@ const menuSections: MenuSection[] = [
         roles: ["ADMIN"],
       },
       {
+        key: "facturacion-diaria",
+        label: "Facturación Diaria",
+        icon: <FileText className="h-4 w-4" />,
+        path: "/facturacion-diaria",
+        roles: ["ADMIN", "CONTA"],
+      },
+      {
         key: "capital-inversionistas",
         label: "Capital Inversionistas",
         icon: <TrendingUp className="h-4 w-4" />,

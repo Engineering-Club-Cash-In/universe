@@ -32,6 +32,10 @@ import { cuentasExtraInversionistaRouter } from "./cuentasExtraInversionista";
 import { cierreMensualRouter } from "./cierreMensual";
 import { actualizarPagosExcelRouter } from "./actualizarPagosExcel";
 import { reportesRouter } from "./reportes";
+import { gastosAdministrativosRouter } from "./gastosAdministrativos";
+import { metasFacturacionRouter } from "./metasFacturacion";
+import { facturacionSnapshotRouter } from "./facturacionSnapshot";
+import { ingresosCarrosRouter } from "./ingresosCarros";
 export {
-    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter,investorDocumentsRouter,abonosCapitalRouter,recibosGenericosRouter,fallenCreditsRouter,sifcoSyncRouter,assignCapitalRouter,addInvestorToCreditRouter,completeEspejoRouter,replaceInvestorCreditRouter,compraCarteraAceptadaRouter,devolucionRouter,creditosNuevosConAbonosRouter,cuentasExtraInversionistaRouter,cierreMensualRouter,actualizarPagosExcelRouter,reportesRouter
+    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter,investorDocumentsRouter,abonosCapitalRouter,recibosGenericosRouter,fallenCreditsRouter,sifcoSyncRouter,assignCapitalRouter,addInvestorToCreditRouter,completeEspejoRouter,replaceInvestorCreditRouter,compraCarteraAceptadaRouter,devolucionRouter,creditosNuevosConAbonosRouter,cuentasExtraInversionistaRouter,cierreMensualRouter,actualizarPagosExcelRouter,reportesRouter,gastosAdministrativosRouter,metasFacturacionRouter,facturacionSnapshotRouter,ingresosCarrosRouter
 }

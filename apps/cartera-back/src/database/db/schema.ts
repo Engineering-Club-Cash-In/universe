@@ -187,6 +187,9 @@
     estado_devolucion: estadoDevolucionEnum("estado_devolucion").notNull().default("NO_APLICA"),
     is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In
     bandera_reinversion: boolean("bandera_reinversion").notNull().default(false),
+    // true = crédito solo-interés: la cuota cubre interés + IVA + seguro + GPS +
+    // membresía, sin amortizar capital. El capital se paga vía abonos/pago final.
+    no_amortiza_capital: boolean("no_amortiza_capital").notNull().default(false),
   });
   export const historial_devolucion_credito = customSchema.table("historial_devolucion_credito", {
     id: serial("id").primaryKey(),

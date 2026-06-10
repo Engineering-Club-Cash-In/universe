@@ -163,13 +163,23 @@ function calculateMonthlyPayment(
   insuranceCost: number,
   gpsCost: number,
   membresiasCost: number,
+  noAmortizaCapital: boolean = false,
 ): number {
   const r = (monthlyRate / 100) * 1.12;
-  if (r === 0)
-    return principal / termMonths + insuranceCost + gpsCost + membresiasCost;
+  const cargosFijos = insuranceCost + gpsCost + membresiasCost;
+
+  // Crédito solo-interés: la cuota cubre interés + IVA + cargos fijos y NO
+  // amortiza capital (abono a capital = 0 cada mes). El capital se paga vía
+  // abonos extraordinarios o pago final. Como no hay amortización, la cuota no
+  // depende del plazo: es simplemente principal * r (interés + IVA) + fijos.
+  if (noAmortizaCapital) {
+    return principal * r + cargosFijos;
+  }
+
+  if (r === 0) return principal / termMonths + cargosFijos;
   const factor = (1 + r) ** termMonths;
   const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
-  return baseMonthlyPayment + insuranceCost + gpsCost + membresiasCost;
+  return baseMonthlyPayment + cargosFijos;
 }
 
 const recalculateQuotaSchema = z.object({
@@ -236,7 +246,10 @@ export const recalculateQuota = async ({ body, set }: any) => {
     const gpsCost = Number(credito.gps ?? 0);
     const membresiasCost = Number(credito.membresias_pago ?? 0);
 
-    // 2. Calcular nueva cuota con PMT
+    // 2. Calcular nueva cuota.
+    // Si el crédito es solo-interés (no_amortiza_capital), la cuota cubre solo
+    // interés + IVA + cargos fijos; si no, se amortiza capital con PMT.
+    const noAmortizaCapital = Boolean(credito.no_amortiza_capital);
     const nuevaCuota = Number(
       new Big(
         calculateMonthlyPayment(
@@ -246,6 +259,7 @@ export const recalculateQuota = async ({ body, set }: any) => {
           insuranceCost,
           gpsCost,
           membresiasCost,
+          noAmortizaCapital,
         ),
       ).round(2),
     );
@@ -435,6 +449,7 @@ const creditUpdateSchema = z.object({
   // Formato de crédito manual
   formato_credito: z.string().max(50).optional(),
   permite_abono_capital: z.boolean().optional(),
+  no_amortiza_capital: z.boolean().optional(),
   estado_devolucion: z.enum(['NO_APLICA', 'PENDIENTE_AUTORIZACION', 'VERIFICADO', 'RECHAZADO']).optional(),
   motivo_devolucion: z.string().optional(),
   bandera_reinversion: z.boolean().optional(),
@@ -988,6 +1003,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       saldo_a_favor,
       formato_credito,
       permite_abono_capital,
+      no_amortiza_capital,
       estado_devolucion,
       motivo_devolucion,
       bandera_reinversion,
@@ -1079,6 +1095,9 @@ export const updateCredit = async ({ body, set, request }: any) => {
     }
     if (permite_abono_capital !== undefined) {
       updateFields.permite_abono_capital = permite_abono_capital;
+    }
+    if (no_amortiza_capital !== undefined) {
+      updateFields.no_amortiza_capital = no_amortiza_capital;
     }
     if (estado_devolucion !== undefined) {
       if (estado_devolucion !== current.estado_devolucion) {

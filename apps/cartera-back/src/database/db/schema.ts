@@ -54,6 +54,17 @@
     "VERIFICADO",
     "RECHAZADO"
   ]);
+
+  // 🧾 Rubros del desglose de facturación (lo que factura CUBE) para el reporte diario.
+  export const rubroFacturacionEnum = customSchema.enum("rubro_facturacion", [
+    "CAPITAL",
+    "INTERES",
+    "MEMBRESIA",
+    "SEGURO",
+    "GPS",
+    "MORA",
+    "OTROS",
+  ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),
     nombre: varchar("nombre", { length: 150 }).notNull(),
@@ -1077,6 +1088,231 @@
     created_at: timestamp("created_at").defaultNow().notNull(),
     created_by: integer("created_by").references(() => platform_users.id),
   });
+
+  // ============================================
+  // 🧾 TABLA: facturacion_desglose
+  //    Desglose por rubro de LO QUE FACTURA CUBE en cada pago, para el
+  //    reporte diario de facturación (matriz categoría × rubro × día).
+  //    - 1 fila por (pago_id, rubro).
+  //    - INTERES = residuo CUBE CON IVA (totalCube de /facturar-pago-completo).
+  //    - CAPITAL no se factura → factura_id NULL, monto_iva 0.
+  //    - monto_total incluye IVA (misma convención que facturas_electronicas).
+  //    - fecha_aplicado_gt = fecha_aplicado del pago en zona America/Guatemala.
+  //    - La categoría NO se guarda: sale por JOIN pago→crédito→usuario.
+  // ============================================
+  export const facturacion_desglose = customSchema.table(
+    "facturacion_desglose",
+    {
+      id: serial("id").primaryKey(),
+      pago_id: integer("pago_id")
+        .notNull()
+        .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      factura_id: integer("factura_id").references(
+        () => facturas_electronicas.factura_id,
+        { onDelete: "set null" }
+      ),
+      rubro: rubroFacturacionEnum("rubro").notNull(),
+      monto_total: numeric("monto_total", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"), // con IVA incluido
+      monto_iva: numeric("monto_iva", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      fecha_aplicado_gt: date("fecha_aplicado_gt"),
+      created_at: timestamp("created_at").defaultNow().notNull(),
+    },
+    (table) => ({
+      uqPagoRubro: uniqueIndex("uq_facturacion_desglose_pago_rubro").on(
+        table.pago_id,
+        table.rubro
+      ),
+      idxFecha: index("idx_facturacion_desglose_fecha").on(
+        table.fecha_aplicado_gt
+      ),
+    })
+  );
+
+  // ============================================
+  // 🧾 TABLA: gastos_administrativos
+  //    Gastos administrativos manuales para el reporte diario de facturación.
+  //    Itemizados por día (concepto + monto). El reporte suma por día.
+  //    En el Excel: "Otros cobros" = Otros ingresos − SUM(gastos del día).
+  // ============================================
+  export const gastos_administrativos = customSchema.table(
+    "gastos_administrativos",
+    {
+      id: serial("id").primaryKey(),
+      fecha: date("fecha").notNull(), // fecha del gasto (America/Guatemala)
+      concepto: varchar("concepto", { length: 200 }).notNull(),
+      monto: numeric("monto", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      created_at: timestamp("created_at").defaultNow().notNull(),
+      created_by: integer("created_by"),
+    },
+    (table) => ({
+      idxFecha: index("idx_gastos_admin_fecha").on(table.fecha),
+    })
+  );
+
+  // ============================================
+  // 🚗 TABLA: ingresos_carros
+  //    Ingresos por carros manuales para el reporte diario (columna "Ingreso
+  //    Carros" del Excel). Itemizados por día. El snapshot suma por día.
+  // ============================================
+  export const ingresos_carros = customSchema.table(
+    "ingresos_carros",
+    {
+      id: serial("id").primaryKey(),
+      fecha: date("fecha").notNull(), // America/Guatemala
+      concepto: varchar("concepto", { length: 200 }).notNull(),
+      monto: numeric("monto", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      created_at: timestamp("created_at").defaultNow().notNull(),
+      created_by: integer("created_by"),
+    },
+    (table) => ({
+      idxFecha: index("idx_ingresos_carros_fecha").on(table.fecha),
+    })
+  );
+
+  // ============================================
+  // 🎯 TABLA: metas_facturacion
+  //    Metas financieras manuales por (año, mes). Globales (no por categoría).
+  //    - meta_mensual/semanal/diaria se capturan por separado.
+  //    - meta_diaria aplica a cada día del mes.
+  //    - deuda_* opcionales (mismo bloque del Excel).
+  // ============================================
+  export const metas_facturacion = customSchema.table(
+    "metas_facturacion",
+    {
+      id: serial("id").primaryKey(),
+      anio: integer("anio").notNull(),
+      mes: integer("mes").notNull(), // 1-12
+      meta_mensual: numeric("meta_mensual", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      meta_semanal: numeric("meta_semanal", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      meta_diaria: numeric("meta_diaria", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      deuda_mensual: numeric("deuda_mensual", { precision: 18, scale: 2 }),
+      deuda_semanal: numeric("deuda_semanal", { precision: 18, scale: 2 }),
+      deuda_diaria: numeric("deuda_diaria", { precision: 18, scale: 2 }),
+      created_at: timestamp("created_at").defaultNow().notNull(),
+      updated_at: timestamp("updated_at").defaultNow().notNull(),
+    },
+    (table) => ({
+      uqAnioMes: uniqueIndex("uq_metas_facturacion_anio_mes").on(
+        table.anio,
+        table.mes
+      ),
+    })
+  );
+
+  // ============================================
+  // 📸 TABLA: facturacion_snapshot_diario
+  //    Snapshot diario tipo Excel "Reuniones diarias" → hoja Facturación.
+  //    1 fila por día (columnas A→BK del Excel), congeladas.
+  //    Se llena con endpoint manual + job de respaldo si el día no se guardó.
+  //    Money = numeric(18,2). Sufijos de producto = categoría del crédito.
+  // ============================================
+  export const facturacion_snapshot_diario = customSchema.table(
+    "facturacion_snapshot_diario",
+    {
+      id: serial("id").primaryKey(),
+      fecha: date("fecha").notNull(), // A — día (America/Guatemala)
+      anio: integer("anio"), // helper
+      mes: integer("mes"), // helper
+
+      // 💰 Capital (B–H)
+      cap_autocompras: numeric("cap_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      cap_sobre_vehiculo: numeric("cap_sobre_vehiculo", { precision: 18, scale: 2 }).notNull().default("0"),
+      nuevo_cap_autocompras: numeric("nuevo_cap_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      cap_hipotecario: numeric("cap_hipotecario", { precision: 18, scale: 2 }).notNull().default("0"),
+      cap_extra_financiamiento: numeric("cap_extra_financiamiento", { precision: 18, scale: 2 }).notNull().default("0"),
+      cap_reestructura: numeric("cap_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
+      capital_total: numeric("capital_total", { precision: 18, scale: 2 }).notNull().default("0"),
+
+      // 💵 Interés (I–O)
+      int_autocompras: numeric("int_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      int_sobre_vehiculo: numeric("int_sobre_vehiculo", { precision: 18, scale: 2 }).notNull().default("0"),
+      nuevo_int_autocompras: numeric("nuevo_int_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      int_hipotecario: numeric("int_hipotecario", { precision: 18, scale: 2 }).notNull().default("0"),
+      int_extra_financiamiento: numeric("int_extra_financiamiento", { precision: 18, scale: 2 }).notNull().default("0"),
+      int_reestructura: numeric("int_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
+      interes_cube: numeric("interes_cube", { precision: 18, scale: 2 }).notNull().default("0"),
+
+      // 🎟️ Membresía (P–V)
+      mem_autocompras: numeric("mem_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      mem_sobre_vehiculo: numeric("mem_sobre_vehiculo", { precision: 18, scale: 2 }).notNull().default("0"),
+      nuevo_mem_autocompras: numeric("nuevo_mem_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      mem_hipotecario: numeric("mem_hipotecario", { precision: 18, scale: 2 }).notNull().default("0"),
+      mem_extra_financiamiento: numeric("mem_extra_financiamiento", { precision: 18, scale: 2 }).notNull().default("0"),
+      mem_reestructura: numeric("mem_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
+      membresia: numeric("membresia", { precision: 18, scale: 2 }).notNull().default("0"),
+
+      // 📦 Otros ingresos (W–AE)
+      oi_autocompras: numeric("oi_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      oi_sobre_vehiculo: numeric("oi_sobre_vehiculo", { precision: 18, scale: 2 }).notNull().default("0"),
+      nuevo_oi_autocompras: numeric("nuevo_oi_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      oi_hipotecario: numeric("oi_hipotecario", { precision: 18, scale: 2 }).notNull().default("0"),
+      oi_extra_financiamiento: numeric("oi_extra_financiamiento", { precision: 18, scale: 2 }).notNull().default("0"),
+      oi_reestructura: numeric("oi_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
+      otros_ingresos: numeric("otros_ingresos", { precision: 18, scale: 2 }).notNull().default("0"),
+      administrativos: numeric("administrativos", { precision: 18, scale: 2 }).notNull().default("0"),
+      otros_cobros: numeric("otros_cobros", { precision: 18, scale: 2 }).notNull().default("0"),
+
+      // ⚠️ Mora (AF–AL)
+      mora_autocompras: numeric("mora_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      mora_sobre_vehiculo: numeric("mora_sobre_vehiculo", { precision: 18, scale: 2 }).notNull().default("0"),
+      nuevo_mora_autocompras: numeric("nuevo_mora_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      mora_hipotecario: numeric("mora_hipotecario", { precision: 18, scale: 2 }).notNull().default("0"),
+      mora_extra_financiamiento: numeric("mora_extra_financiamiento", { precision: 18, scale: 2 }).notNull().default("0"),
+      mora_reestructura: numeric("mora_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
+      mora_cube: numeric("mora_cube", { precision: 18, scale: 2 }).notNull().default("0"),
+
+      // 👑 Royalty (AM–AS)
+      roy_autocompras: numeric("roy_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      roy_sobre_vehiculo: numeric("roy_sobre_vehiculo", { precision: 18, scale: 2 }).notNull().default("0"),
+      nuevo_roy_autocompras: numeric("nuevo_roy_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      roy_hipotecario: numeric("roy_hipotecario", { precision: 18, scale: 2 }).notNull().default("0"),
+      roy_extra_financiamiento: numeric("roy_extra_financiamiento", { precision: 18, scale: 2 }).notNull().default("0"),
+      roy_reestructura: numeric("roy_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
+      royalty: numeric("royalty", { precision: 18, scale: 2 }).notNull().default("0"),
+
+      // 📊 Totales / acumulados (AT–BE)
+      facturacion: numeric("facturacion", { precision: 18, scale: 2 }).notNull().default("0"),
+      facturacion_acumulado: numeric("facturacion_acumulado", { precision: 18, scale: 2 }).notNull().default("0"),
+      servicios_seguro_gps: numeric("servicios_seguro_gps", { precision: 18, scale: 2 }).notNull().default("0"),
+      acum_servicios_seguro_gps: numeric("acum_servicios_seguro_gps", { precision: 18, scale: 2 }).notNull().default("0"),
+      facturacion_mas_servicios: numeric("facturacion_mas_servicios", { precision: 18, scale: 2 }).notNull().default("0"),
+      acumulado_total: numeric("acumulado_total", { precision: 18, scale: 2 }).notNull().default("0"),
+      facturacion_inversionistas: numeric("facturacion_inversionistas", { precision: 18, scale: 2 }).notNull().default("0"),
+      acumulado_inversionistas: numeric("acumulado_inversionistas", { precision: 18, scale: 2 }).notNull().default("0"),
+      tendencia_fin_mes: numeric("tendencia_fin_mes", { precision: 18, scale: 2 }).notNull().default("0"),
+      tendencia_semanal: numeric("tendencia_semanal", { precision: 18, scale: 2 }).notNull().default("0"),
+      ingreso_carros: numeric("ingreso_carros", { precision: 18, scale: 2 }).notNull().default("0"),
+      reserva_acumulada: numeric("reserva_acumulada", { precision: 18, scale: 2 }).notNull().default("0"),
+      semana: integer("semana"), // BF
+
+      // 🎯 Metas (BG–BK)
+      meta_facturacion_mensual: numeric("meta_facturacion_mensual", { precision: 18, scale: 2 }).notNull().default("0"),
+      meta_facturacion_semanal: numeric("meta_facturacion_semanal", { precision: 18, scale: 2 }).notNull().default("0"),
+      meta_facturacion_diaria: numeric("meta_facturacion_diaria", { precision: 18, scale: 2 }).notNull().default("0"),
+      porcentaje_meta_mensual: numeric("porcentaje_meta_mensual", { precision: 9, scale: 4 }).notNull().default("0"),
+      meta_diaria: numeric("meta_diaria", { precision: 18, scale: 2 }).notNull().default("0"),
+
+      created_at: timestamp("created_at").defaultNow().notNull(),
+      updated_at: timestamp("updated_at").defaultNow().notNull(),
+    },
+    (table) => ({
+      uqFecha: uniqueIndex("uq_facturacion_snapshot_diario_fecha").on(table.fecha),
+    })
+  );
 
   // ============================================
   // 🆕 TABLA: facturas_fallidas_sat

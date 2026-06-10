@@ -9,6 +9,7 @@ import {
 	Calculator,
 	Car,
 	ChevronDown,
+	Clock,
 	Database,
 	FileText,
 	Gavel,
@@ -149,6 +150,21 @@ export default function Header() {
 											</DropdownMenuItem>
 										</>
 									)}
+									{userRole &&
+										PERMISSIONS.canAccessTiempoCierreReport(userRole) && (
+											<>
+												<DropdownMenuSeparator />
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/reportes/tiempo-cierre"
+														className="cursor-pointer"
+													>
+														<Clock className="mr-2 h-4 w-4" />
+														Tiempo Cierre Crédito
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}

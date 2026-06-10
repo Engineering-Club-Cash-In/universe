@@ -13,6 +13,9 @@ const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db9
 
 type EstadoCuentaPagoRow = {
   pago_id?: number | string | null;
+  pagado?: boolean | null;
+  paymentFalse?: boolean | null;
+  validationStatus?: string | null;
   numero_cuota?: number | string | null;
   cuota?: number | string | null;
   abono_capital?: number | string | null;
@@ -27,6 +30,27 @@ type EstadoCuentaPagoRow = {
   fecha_vencimiento?: Date | string | null;
   fecha_aplicado?: Date | string | null;
 };
+
+export function shouldIncludeEstadoCuentaPayment(pago: EstadoCuentaPagoRow) {
+  if (pago.paymentFalse === true) return false;
+  if (pago.pagado === true) return true;
+
+  const abonoCapital = Number(pago.abono_capital || 0);
+  const montoAplicado = Number(pago.monto_aplicado || 0);
+  const totalOtrosRubros =
+    Number(pago.abono_interes || 0) +
+    Number(pago.abono_iva_12 || 0) +
+    Number(pago.abono_seguro || 0) +
+    Number(pago.abono_gps || 0) +
+    Number(pago.membresias_pago || 0);
+
+  return (
+    pago.validationStatus === "validated" &&
+    abonoCapital > 0 &&
+    montoAplicado > 0 &&
+    totalOtrosRubros === 0
+  );
+}
 
 const formatEstadoCuentaMoney = (n: number) =>
   `Q${n.toLocaleString("es-GT", {
@@ -382,9 +406,9 @@ export async function exportPagosToExcel(credito_sifco: string) {
     throw new Error(`No hay pagos para el crédito ${credito_sifco}`);
   }
 
-  // Filtrar solo pagos pagados
-  const pagosFiltrados = pagosData.filter(
-    ({ pago }) => pago.pagado === true
+  // Incluye cuotas pagadas y abonos a capital ya validados aunque no cierren cuota.
+  const pagosFiltrados = pagosData.filter(({ pago }) =>
+    shouldIncludeEstadoCuentaPayment(pago)
   );
 
   if (!pagosFiltrados.length) {

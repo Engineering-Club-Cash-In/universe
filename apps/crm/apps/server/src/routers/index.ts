@@ -327,6 +327,8 @@ export const reportsAppRouter = {
 	getReporteCreditosCerrados: reportsRouter.getReporteCreditosCerrados,
 	getReporteInventario: reportsRouter.getReporteInventario,
 	getReporteSubastas: reportsRouter.getReporteSubastas,
+	getReportePorcentajeEfectividad:
+		reportsRouter.getReportePorcentajeEfectividad,
 	// Reportes unificados (cartera-back + CRM)
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,

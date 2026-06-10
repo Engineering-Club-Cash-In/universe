@@ -134,6 +134,9 @@ export const PERMISSIONS = {
 	canAccessClosedCreditsReport: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
+	canAccessPorcentajeEfectividadReport: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
+
 	// Credit Detail Approval (40% → 50%)
 	canApproveCreditDetail: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,

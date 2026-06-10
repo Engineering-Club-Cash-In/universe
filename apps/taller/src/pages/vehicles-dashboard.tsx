@@ -635,7 +635,12 @@ export default function VehiclesDashboard() {
 
     setIsSaving(true);
     try {
-      const vehicleStatus = editForm.status === "approved" ? "available" : editForm.status;
+      const vehicleStatus =
+        editForm.status === "approved"
+          ? "available"
+          : editForm.status === "rejected"
+            ? "maintenance"
+            : editForm.status;
 
       await vehiclesApi.update(selectedVehicle.id, {
         status: vehicleStatus as "pending" | "available" | "sold" | "maintenance" | "auction",
@@ -2001,7 +2006,24 @@ export default function VehiclesDashboard() {
                           return (
                             <button
                               key={inspection.id}
-                              onClick={() => setSelectedInspectionIndex(idx)}
+                              onClick={() => {
+                                setSelectedInspectionIndex(idx);
+                                if (!selectedVehicle) return;
+                                const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle.id);
+                                if (rawVehicle) {
+                                  const transformed = transformVehicleData(rawVehicle, idx);
+                                  setSelectedVehicle(transformed);
+                                  setEditForm({
+                                    vehicleRating: transformed.vehicleRating,
+                                    status: transformed.status,
+                                    marketValue: transformed.marketValue,
+                                    suggestedCommercialValue: transformed.suggestedCommercialValue,
+                                    currentConditionValue: transformed.currentConditionValue,
+                                    testDrive: transformed.testDrive,
+                                    inspectionResult: transformed.inspectionResult,
+                                  });
+                                }
+                              }}
                               className={cn(
                                 "w-full text-left rounded-lg border p-3 transition-all",
                                 isSelected

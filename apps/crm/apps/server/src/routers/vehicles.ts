@@ -862,7 +862,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Update inspection
-	updateInspection: protectedProcedure
+	updateInspection: tallerOrCrmProcedure
 		.input(
 			z.object({
 				id: z.string(),

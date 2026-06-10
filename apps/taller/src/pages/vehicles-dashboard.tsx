@@ -681,7 +681,8 @@ export default function VehiclesDashboard() {
       setActiveTab("details");
     } catch (error) {
       console.error("Error saving changes:", error);
-      toast.error("Error al guardar los cambios");
+      const message = error instanceof Error ? error.message : "Error al guardar los cambios";
+      toast.error(message);
     } finally {
       setIsSaving(false);
     }

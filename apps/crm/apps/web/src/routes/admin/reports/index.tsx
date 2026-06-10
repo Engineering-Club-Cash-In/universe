@@ -194,7 +194,7 @@ function escapeCsvValue(value: string | number | null | undefined) {
 }
 
 function downloadCsv(filename: string, rows: (string | number | null)[][]) {
-	const csv = `﻿${rows
+	const csv = `\uFEFF${rows
 		.map((row) => row.map((value) => escapeCsvValue(value)).join(","))
 		.join("\n")}`;
 	const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -893,8 +893,7 @@ function RouteComponent() {
 														Number.parseFloat(row.total_iva) +
 														Number.parseFloat(row.total_seguro) +
 														Number.parseFloat(row.total_gps) +
-														Number.parseFloat(row.total_membresias) +
-														Number.parseFloat(row.total_royalti);
+														Number.parseFloat(row.total_membresias);
 													return (
 														<TableRow key={row.bucket}>
 															<TableCell>{formatBucket(row.bucket, montoCobrarPeriodo)}</TableCell>
@@ -926,8 +925,7 @@ function RouteComponent() {
 														sum("total_iva") +
 														sum("total_seguro") +
 														sum("total_gps") +
-														sum("total_membresias") +
-														sum("total_royalti");
+														sum("total_membresias");
 													return (
 														<TableRow className="border-t-2 bg-muted/50 font-bold">
 															<TableCell>Total</TableCell>

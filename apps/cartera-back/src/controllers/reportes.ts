@@ -23,6 +23,25 @@ export async function getMontoACobrar({
   const pg = sql.raw(toPostgresPeriod[periodo]);
 
   const result = await db.execute(sql`
+    WITH bucket_creditos AS (
+      SELECT DISTINCT
+        DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp) AS bucket,
+        cr.credito_id
+      FROM cartera.cuotas_credito c
+      JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+      WHERE c.pagado = false
+        AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+        AND c.fecha_vencimiento >= ${fechaInicio}::date
+        AND c.fecha_vencimiento <= ${fechaFin}::date
+    ),
+    mora_por_bucket AS (
+      SELECT
+        bc.bucket,
+        AVG(COALESCE(m.monto_mora::numeric, 0)) AS mora_promedio
+      FROM bucket_creditos bc
+      LEFT JOIN cartera.moras_credito m ON m.credito_id = bc.credito_id AND m.activa = true
+      GROUP BY bc.bucket
+    )
     SELECT
       DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp) AS bucket,
       COUNT(c.cuota_id)::int AS cuotas_count,
@@ -33,15 +52,15 @@ export async function getMontoACobrar({
       COALESCE(SUM(cr.gps::numeric), 0) AS total_gps,
       COALESCE(SUM(cr.membresias_pago::numeric), 0) AS total_membresias,
       COALESCE(SUM(cr.royalti::numeric / NULLIF(cr.plazo::numeric, 0)), 0) AS total_royalti,
-      COALESCE(AVG(m.monto_mora::numeric), 0) AS mora_promedio
+      COALESCE(mpb.mora_promedio, 0) AS mora_promedio
     FROM cartera.cuotas_credito c
     JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
-    LEFT JOIN cartera.moras_credito m ON m.credito_id = cr.credito_id AND m.activa = true
+    JOIN mora_por_bucket mpb ON mpb.bucket = DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp)
     WHERE c.pagado = false
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
       AND c.fecha_vencimiento >= ${fechaInicio}::date
       AND c.fecha_vencimiento <= ${fechaFin}::date
-    GROUP BY DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp)
+    GROUP BY DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp), mpb.mora_promedio
     ORDER BY bucket ASC
   `);
 
@@ -55,6 +74,9 @@ export async function getCobradoDelMes({
   mes: number;
   anio: number;
 }) {
+  // Guatemala is UTC-6 (no DST). Midnight GT = 06:00 UTC.
+  const inicioMesUtc = new Date(Date.UTC(anio, mes - 1, 1, 6, 0, 0));
+  const inicioMesSiguienteUtc = new Date(Date.UTC(anio, mes, 1, 6, 0, 0));
   const result = await db.execute(sql`
     SELECT
       COALESCE(SUM(p.abono_capital::numeric), 0) AS cobrado_capital,
@@ -65,8 +87,8 @@ export async function getCobradoDelMes({
       COALESCE(SUM(p.membresias_pago::numeric), 0) AS cobrado_membresias
     FROM cartera.pagos_credito p
     JOIN cartera.creditos cr ON p.credito_id = cr.credito_id
-    WHERE DATE_PART('month', (p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date) = ${mes}
-      AND DATE_PART('year', (p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date) = ${anio}
+    WHERE p.fecha_pago >= ${inicioMesUtc.toISOString()}::timestamptz
+      AND p.fecha_pago < ${inicioMesSiguienteUtc.toISOString()}::timestamptz
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO', 'CANCELADO')
   `);
 
@@ -88,6 +110,11 @@ export async function getEsperadoDelMes({
   mes: number;
   anio: number;
 }) {
+  // fecha_vencimiento is a DATE column — use date range, no timezone needed.
+  const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
+  const nextMonth = mes === 12 ? 1 : mes + 1;
+  const nextYear = mes === 12 ? anio + 1 : anio;
+  const inicioMesSiguiente = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
   const result = await db.execute(sql`
     SELECT
       COALESCE(SUM(cr.cuota::numeric - cr.cuota_interes::numeric - cr.iva_12::numeric - cr.seguro_10_cuotas::numeric - cr.gps::numeric - cr.membresias_pago::numeric), 0) AS esperado_capital,
@@ -98,8 +125,8 @@ export async function getEsperadoDelMes({
       COALESCE(SUM(cr.membresias_pago::numeric), 0) AS esperado_membresias
     FROM cartera.cuotas_credito c
     JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
-    WHERE DATE_PART('month', c.fecha_vencimiento::date) = ${mes}
-      AND DATE_PART('year', c.fecha_vencimiento::date) = ${anio}
+    WHERE c.fecha_vencimiento >= ${inicioMes}::date
+      AND c.fecha_vencimiento < ${inicioMesSiguiente}::date
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
   `);
 

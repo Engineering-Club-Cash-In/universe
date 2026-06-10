@@ -190,7 +190,7 @@ export function PagoForm() {
     <DialogHeader>
       <DialogTitle className={`text-2xl font-bold flex items-center gap-2 ${creditoCanceladoInfo ? "text-red-700" : "text-blue-700"}`}>
         <CheckCircle2 className="w-7 h-7" />
-        {creditoCanceladoInfo ? "Confirmar Cancelacion de Credito" : "Confirmar Registro de Pago"}
+        {creditoCanceladoInfo ? "Confirmar Cancelación de Crédito" : "Confirmar Registro de Pago"}
       </DialogTitle>
     </DialogHeader>
 
@@ -207,12 +207,12 @@ export function PagoForm() {
             <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-5 border-2 border-red-200">
               <h3 className="font-bold text-lg text-red-900 mb-4 flex items-center gap-2">
                 <FileText className="w-5 h-5" />
-                Resumen de Cancelacion
+                Resumen de Cancelación
               </h3>
 
               <div className="space-y-3">
                 <div className="flex justify-between items-center py-2 px-3 border-b border-red-200">
-                  <span className="text-gray-700 font-medium">Monto de Cancelacion:</span>
+                  <span className="text-gray-700 font-medium">Monto de Cancelación:</span>
                   <span className="font-bold text-red-700 text-lg">Q{montoCancelacion.toFixed(2)}</span>
                 </div>
 
@@ -454,7 +454,7 @@ export function PagoForm() {
         disabled={formik.isSubmitting}
         className={`px-8 py-2.5 text-base font-bold shadow-md transition-all ${creditoCanceladoInfo ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
       >
-        {formik.isSubmitting ? "Procesando..." : creditoCanceladoInfo ? "Confirmar Cancelacion" : "Confirmar Pago"}
+        {formik.isSubmitting ? "Procesando..." : creditoCanceladoInfo ? "Confirmar Cancelación" : "Confirmar Pago"}
       </Button>
     </DialogFooter>
   </DialogContent>

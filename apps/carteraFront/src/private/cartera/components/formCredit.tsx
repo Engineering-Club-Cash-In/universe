@@ -60,7 +60,7 @@ const fields = [
   },
   {
     name: "numero_credito_sifco",
-    label: "Número crédito SIFCO",
+    label: "No. Crédito SIFCO",
     type: "text",
     icon: <CreditCard className="text-blue-500 mr-2 w-5 h-5" />,
   },
@@ -79,7 +79,7 @@ const fields = [
 
   {
     name: "seguro_10_cuotas",
-    label: "Seguro ",
+    label: "Seguro",
     type: "number",
     icon: <FileText className="text-blue-500 mr-2 w-5 h-5" />,
   },
@@ -140,13 +140,13 @@ const fields = [
   },
   {
     name: "royalti",
-    label: "Royalti",
+    label: "Royalty",
     type: "number",
     icon: <CreditCard className="text-blue-500 mr-2 w-5 h-5" />,
   },
   {
     name: "porcentaje_royalti",
-    label: "Porcentaje Royalti",
+    label: "Porcentaje Royalty",
     type: "number",
     icon: <Percent className="text-blue-500 mr-2 w-5 h-5" />,
   },

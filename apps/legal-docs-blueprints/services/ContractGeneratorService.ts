@@ -288,6 +288,80 @@ export class ContractGeneratorService {
       requiredFields: []
     });
 
+    // ===== INVERSIONES SOCIEDAD =====
+    this.registerTemplate({
+      type: ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/acuerdo_inversion/acuerdo_inversion_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/acuerdo_inversion/acuerdo_inversion_mujer.docx',
+      description: 'Acuerdo de Inversión Cash In (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo1/carta_confirmacion_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo1/carta_confirmacion_mujer.docx',
+      description: 'Anexo 1 - Carta de Confirmación de Inversión Inicial (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo2/carta_eleccion_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo2/carta_eleccion_hombre.docx',
+      description: 'Anexo 2 - Carta de Elección de Modalidad de Pago y Reinversión (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo3/carta_instruccion_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo3/carta_instruccion_mujer.docx',
+      description: 'Anexo 3 - Carta de Instrucción para Inversión en Cartera Activa (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INCREMENTO_INVERSION_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo4/carta_incremento_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo4/carta_incremento_mujer.docx',
+      description: 'Anexo 4 - Carta de Incremento de Inversión (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo6/carta_instruccion_pago_anticipado_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo6/carta_instruccion_pago_anticipado_mujer.docx',
+      description: 'Anexo 6 - Carta de Instrucción por Pago Anticipado (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CESION_CREDITOS_SOCIEDAD,
+      // Nota: ambos archivos tienen typo en el nombre (cestion en vez de cesion)
+      templateFilename: 'inversiones_Sociedad/cesion_creditos/cestion_creditos_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/cesion_creditos/cestion_creditos_mujer.docx',
+      description: 'Cesión de Créditos (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/contrato_servicio_cashin/inversor_general_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/contrato_servicio_cashin/inversor_general_mujer.docx',
+      description: 'Contrato de Servicios Cash In - Inversor General (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo7/designacion_beneficiarios.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo7/designacion_beneficiarios.docx',
+      description: 'Anexo 7 - Designación de Beneficiarios (Sociedad)',
+      requiredFields: []
+    });
+
     // ===== CARTA PODER =====
     this.registerTemplate({
       type: ContractType.CARTA_CUBE_ANDRES,

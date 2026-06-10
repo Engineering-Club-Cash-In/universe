@@ -322,9 +322,10 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     console.log(` - monto: ${monto_aportado}`);
     console.log(` - limit (minimo): ${minimo ?? "Sin límite"}`);
     console.log(` - inversionista_id: ${inversionista_id}`);
+    console.log(` - porcentaje_inversion: ${porcentaje_inversion}`);
     console.log("================================================================");
 
-    let candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id);
+    let candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentaje_inversion);
 
     console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
     candidatos.forEach((c, i) => {

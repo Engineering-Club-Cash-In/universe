@@ -160,10 +160,15 @@ export async function getFlujoCuotasInversiones({
       if (!cashParcialPorTipo[tipo]) cashParcialPorTipo[tipo] = { capital: 0, interes: 0, iva: 0, monto_cash: 0 };
       const totalCuota = capital + interes + iva;
       const montoReinvInv = Number(row.monto_reinversion_inv ?? 0);
-      if (tipo === "reinversion_variable" || tipo === "reinversion_excedente") {
+      if (tipo === "reinversion_variable") {
         const reinvertido = Math.min(montoReinvInv, totalCuota);
         reinvPorTipo[tipo].monto_reinvertido += reinvertido;
         cashParcialPorTipo[tipo].monto_cash += Math.max(0, totalCuota - reinvertido);
+      } else if (tipo === "reinversion_excedente") {
+        // monto_reinversion = monto fijo que RECIBE en cash; el sobrante se reinvierte
+        const recibe = Math.min(montoReinvInv, totalCuota);
+        cashParcialPorTipo[tipo].monto_cash += recibe;
+        reinvPorTipo[tipo].monto_reinvertido += Math.max(0, totalCuota - recibe);
       } else if (tipo === "reinversion_capital") {
         reinvPorTipo[tipo].capital += capital;
         cashParcialPorTipo[tipo].interes += interes;

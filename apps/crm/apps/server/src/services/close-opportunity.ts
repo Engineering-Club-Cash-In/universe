@@ -706,19 +706,41 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 					// la de royalty) y solo cuando la factura se generó correctamente.
 					// Es best-effort: si falla, se loguea pero NO rompe la facturación.
 					if (invoice.kind !== "royalty") {
-						try {
-							// Monto facturado de esta factura = suma de sus rubros.
-							const montoFacturado = invoice.items.reduce(
-								(sum, item) => sum + item.monto,
-								0,
-							);
+						const gastoStart = Date.now();
+						// Monto facturado de esta factura = suma de sus rubros.
+						const montoFacturado = invoice.items.reduce(
+							(sum, item) => sum + item.monto,
+							0,
+						);
+						// Payload del gasto (se reusa en la llamada y en el log).
+						const gastoBody = {
+							fecha: fechaGuatemala,
+							concepto: `${invoice.name} (oportunidad ${opportunityId})`,
+							monto: montoFacturado,
+						};
+						const gastoEntityId = `${opportunityId}-${invoice.name}-gasto`;
 
-							await carteraBackClient.crearGastoAdministrativo({
-								fecha: fechaGuatemala,
-								concepto: `${invoice.name} (oportunidad ${opportunityId})`,
-								monto: montoFacturado,
-							});
+						try {
+							const gastoResp =
+								await carteraBackClient.crearGastoAdministrativo(gastoBody);
 							gastosRegistrados++;
+
+							// 📝 Log persistente en cartera_back_sync_log (por cualquier
+							// cosa): deja traza en BD de cada gasto registrado, no solo en
+							// consola. logInvoiceSyncOperation ya atrapa sus propios errores.
+							await logInvoiceSyncOperation({
+								operation: "register_gasto_administrativo",
+								entityType: "gasto",
+								entityId: gastoEntityId,
+								status: "success",
+								requestPayload: JSON.stringify(gastoBody),
+								responsePayload: JSON.stringify(gastoResp),
+								startedAt: new Date(gastoStart),
+								completedAt: new Date(),
+								durationMs: Date.now() - gastoStart,
+								userId,
+								source: "crm",
+							});
 
 							console.log(
 								`[CloseOpportunity] ✓ Gasto administrativo registrado: "${invoice.name}" = ${montoFacturado}`,
@@ -728,6 +750,22 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 								gastoError instanceof Error
 									? gastoError.message
 									: String(gastoError);
+
+							// 📝 Log persistente del fallo (por cualquier cosa).
+							await logInvoiceSyncOperation({
+								operation: "register_gasto_administrativo",
+								entityType: "gasto",
+								entityId: gastoEntityId,
+								status: "error",
+								errorMessage: gastoMsg,
+								requestPayload: JSON.stringify(gastoBody),
+								startedAt: new Date(gastoStart),
+								completedAt: new Date(),
+								durationMs: Date.now() - gastoStart,
+								userId,
+								source: "crm",
+							});
+
 							console.error(
 								`[CloseOpportunity] ✗ No se pudo registrar el gasto administrativo "${invoice.name}": ${gastoMsg}`,
 							);

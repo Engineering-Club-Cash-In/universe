@@ -7,6 +7,7 @@ import {
   verificarFacturasSat,
   reportarFacturasFallidasSat,
 } from './src/controllers/verificarFacturasSat';
+import { asegurarSnapshotDiario } from './src/controllers/facturacionSnapshot';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -18,6 +19,17 @@ function getFechaGuatemala() {
     mes: guate.getMonth() + 1,
     anio: guate.getFullYear(),
   };
+}
+
+// "YYYY-MM-DD" en hora Guatemala, con offset de días (ej. -1 = ayer).
+function getFechaGuatemalaISO(offsetDays = 0) {
+  const now = new Date();
+  const guate = new Date(now.toLocaleString('en-US', { timeZone: TZ_GUATEMALA }));
+  guate.setDate(guate.getDate() + offsetDays);
+  const y = guate.getFullYear();
+  const m = String(guate.getMonth() + 1).padStart(2, '0');
+  const d = String(guate.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 export function iniciarTareasProgramadas() {
@@ -95,6 +107,21 @@ export function iniciarTareasProgramadas() {
       console.log(`✅ reportarFacturasFallidasSat: enviadas=${res.enviadas}`);
     } catch (error) {
       console.error('❌ Error al ejecutar reportarFacturasFallidasSat:', error);
+    }
+  });
+
+  // 📸 Snapshot diario de facturación - 01:00 hora Guatemala (respaldo).
+  //    Genera el snapshot del DÍA ANTERIOR SOLO si no se guardó ya manualmente.
+  schedule.scheduleJob({ rule: '0 1 * * *', tz: TZ_GUATEMALA }, async () => {
+    const fecha = getFechaGuatemalaISO(-1); // ayer en GT
+    console.log(`📸 Ejecutando asegurarSnapshotDiario para ${fecha} (01:00 Guatemala)...`);
+    try {
+      const res = await asegurarSnapshotDiario(fecha);
+      console.log(
+        `✅ snapshotDiario ${fecha}: ${res.created ? 'generado' : 'ya existía'}`,
+      );
+    } catch (error) {
+      console.error('❌ Error al ejecutar asegurarSnapshotDiario:', error);
     }
   });
 

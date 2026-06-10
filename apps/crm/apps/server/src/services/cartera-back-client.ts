@@ -862,6 +862,32 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	/**
+	 * Registra un gasto administrativo en cartera-back.
+	 *
+	 * Se usa al cerrar una oportunidad: por cada factura de servicio generada
+	 * (todas menos la de royalty) guarda el monto facturado en la tabla
+	 * cartera.gastos_administrativos, para que aparezca en el reporte diario.
+	 * El token Bearer y los reintentos los maneja request() automáticamente.
+	 *
+	 * @param input - fecha ("YYYY-MM-DD" en hora Guatemala), concepto y monto
+	 * @returns Resultado de la operación ({ success, data })
+	 */
+	async crearGastoAdministrativo(input: {
+		fecha: string;
+		concepto: string;
+		monto: number;
+	}): Promise<{ success: boolean; data?: unknown }> {
+		const response = await this.request<{ success: boolean; data?: unknown }>(
+			"/api/gastos-administrativos",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
+		return response;
+	}
+
 	// ========================================================================
 	// RESUMEN GLOBAL INVERSIONISTAS
 	// ========================================================================

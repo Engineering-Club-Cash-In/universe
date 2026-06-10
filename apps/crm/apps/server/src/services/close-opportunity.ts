@@ -195,6 +195,12 @@ interface GenerateInvoicesParams {
 /** Representa una factura individual a generar */
 interface InvoiceToGenerate {
 	name: string; // Nombre descriptivo de la factura para logs
+	/**
+	 * Tipo de factura. Sirve para diferenciar la de royalty del resto:
+	 * el gasto administrativo en cartera se registra SOLO para las de
+	 * servicio (todas menos royalty). Ver generateInvoicesInBackground().
+	 */
+	kind: "royalty" | "servicio";
 	items: FacturaItem[];
 }
 
@@ -436,10 +442,16 @@ function buildInvoices(
 ): InvoiceToGenerate[] {
 	const invoices: InvoiceToGenerate[] = [];
 
+	// Cada factura se etiqueta con `kind`: "royalty" para la de royalty y
+	// "servicio" para el resto. Aguas abajo, generateInvoicesInBackground()
+	// usa ese kind para registrar el gasto administrativo en cartera SOLO en
+	// las de servicio (la de royalty se excluye a propósito).
+
 	// 1. ROYALTY - Siempre se factura si existe (1 factura, 1 rubro)
 	if (royalti && royalti > 0) {
 		invoices.push({
 			name: "Royalty",
+			kind: "royalty",
 			items: [
 				{
 					monto: royalti,
@@ -463,6 +475,7 @@ function buildInvoices(
 	if (vehicleTransferCost > 0) {
 		invoices.push({
 			name: "Traspaso",
+			kind: "servicio",
 			items: [
 				{
 					monto: FACTURACION_TRASPASO_COSTO,
@@ -479,6 +492,7 @@ function buildInvoices(
 	if (leasingContractCost > 0) {
 		invoices.push({
 			name: "Contrato Abogado",
+			kind: "servicio",
 			items: [
 				{
 					monto: leasingContractCost,
@@ -495,6 +509,7 @@ function buildInvoices(
 	if (mobileGuaranteeCost > 0) {
 		invoices.push({
 			name: "Garantía Mobiliaria",
+			kind: "servicio",
 			items: [
 				{
 					monto: FACTURACION_GARANTIA_MOBILIARIA_COSTO,
@@ -529,6 +544,7 @@ function buildInvoices(
 		if (cuota0Items.length > 0) {
 			invoices.push({
 				name: "Cuota 0",
+				kind: "servicio",
 				items: cuota0Items,
 			});
 		}
@@ -541,6 +557,7 @@ function buildInvoices(
 	if (appointmentCost > 0) {
 		invoices.push({
 			name: "Nombramiento",
+			kind: "servicio",
 			items: [
 				{
 					monto: FACTURACION_NOMBRAMIENTO_COSTO,
@@ -557,6 +574,7 @@ function buildInvoices(
 	if (keyCopyDiffCost > 0) {
 		invoices.push({
 			name: "Copia de Llave",
+			kind: "servicio",
 			items: [
 				{
 					monto: keyCopyDiffCost,
@@ -591,6 +609,7 @@ function buildInvoices(
 		if (seguroGastosItems.length > 0) {
 			invoices.push({
 				name: "Seguro y Gastos Administrativos",
+				kind: "servicio",
 				items: seguroGastosItems,
 			});
 		}
@@ -672,6 +691,42 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 					console.log(
 						`[CloseOpportunity] ✓ Invoice "${invoice.name}" generated successfully`,
 					);
+
+					// 🧾 Registrar el gasto administrativo en cartera con el monto
+					// facturado. Aplica a TODAS las facturas de servicio (todas menos
+					// la de royalty) y solo cuando la factura se generó correctamente.
+					// Es best-effort: si falla, se loguea pero NO rompe la facturación.
+					if (invoice.kind !== "royalty") {
+						try {
+							// Monto facturado de esta factura = suma de sus rubros.
+							const montoFacturado = invoice.items.reduce(
+								(sum, item) => sum + item.monto,
+								0,
+							);
+							// Fecha del gasto en hora de Guatemala (YYYY-MM-DD).
+							const fechaGuatemala = new Date().toLocaleDateString("en-CA", {
+								timeZone: "America/Guatemala",
+							});
+
+							await carteraBackClient.crearGastoAdministrativo({
+								fecha: fechaGuatemala,
+								concepto: `${invoice.name} (oportunidad ${opportunityId})`,
+								monto: montoFacturado,
+							});
+
+							console.log(
+								`[CloseOpportunity] ✓ Gasto administrativo registrado: "${invoice.name}" = ${montoFacturado}`,
+							);
+						} catch (gastoError) {
+							const gastoMsg =
+								gastoError instanceof Error
+									? gastoError.message
+									: String(gastoError);
+							console.error(
+								`[CloseOpportunity] ✗ No se pudo registrar el gasto administrativo "${invoice.name}": ${gastoMsg}`,
+							);
+						}
+					}
 				} catch (error) {
 					const errorMessage =
 						error instanceof Error ? error.message : String(error);

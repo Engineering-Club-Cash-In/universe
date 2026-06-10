@@ -11,7 +11,11 @@ import { carteraBackReferences } from "../db/schema/cartera-back";
 import { casosCobros } from "../db/schema/cobros";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import { adminProcedure } from "../lib/orpc";
-import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	carteraBackClient,
+	type FacturacionMesResponse,
+	type MontoACobrarRow,
+} from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 
 export const reportesCarteraRouter = {
@@ -391,5 +395,59 @@ export const reportesCarteraRouter = {
 					),
 				},
 			};
+		}),
+
+	// ========================================================================
+	// REPORTE: MONTO A COBRARSE POR PERÍODO
+	// ========================================================================
+
+	getMontoACobrar: adminProcedure
+		.input(
+			z.object({
+				periodo: z
+					.enum(["anio", "trimestre", "mes", "semana", "dia"])
+					.default("mes"),
+				fechaInicio: z.string(),
+				fechaFin: z.string(),
+			}),
+		)
+		.handler(async ({ input }): Promise<{ data: MontoACobrarRow[] }> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			const data = await carteraBackClient.getMontoACobrar({
+				periodo: input.periodo,
+				fechaInicio: input.fechaInicio,
+				fechaFin: input.fechaFin,
+			});
+
+			return { data };
+		}),
+
+	// ========================================================================
+	// REPORTE: FACTURADO DEL MES VS ESPERADO
+	// ========================================================================
+
+	getFacturacionMes: adminProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2020),
+			}),
+		)
+		.handler(async ({ input }): Promise<FacturacionMesResponse> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getFacturacionMes({
+				mes: input.mes,
+				anio: input.anio,
+			});
 		}),
 };

@@ -21,7 +21,7 @@ mock.module("@cci/email", () => ({
   sendInvestorAddedToCreditsNotification: mock(() => Promise.resolve()),
 }));
 
-const { buildEstadoCuentaTableHeader, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment } = await import("./reports");
+const { applyEstadoCuentaRunningCapital, buildEstadoCuentaTableHeader, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments } = await import("./reports");
 
 describe("estado de cuenta PDF", () => {
   it("incluye la columna de fecha de aplicacion del pago", () => {
@@ -106,6 +106,25 @@ describe("estado de cuenta PDF", () => {
     ).toBe(true);
   });
 
+  it("incluye reducciones de capital mixtas cuando ya fueron aplicadas", () => {
+    expect(
+      shouldIncludeEstadoCuentaPayment({
+        pagado: false,
+        paymentFalse: false,
+        validationStatus: "validated",
+        abono_capital: "456.39",
+        abono_interes: "0.00",
+        abono_iva_12: "0.00",
+        abono_seguro: "934.54",
+        abono_gps: "0.00",
+        membresias_pago: "484.07",
+        monto_aplicado: "1875.00",
+        fecha_pago: new Date("2026-06-08T22:31:28.000Z"),
+        fecha_aplicado: new Date("2026-06-09T21:44:42.260Z"),
+      }),
+    ).toBe(true);
+  });
+
   it("no incluye cuotas futuras sincronizadas aunque esten validadas", () => {
     expect(
       shouldIncludeEstadoCuentaPayment({
@@ -119,7 +138,67 @@ describe("estado de cuenta PDF", () => {
         abono_gps: "0.00",
         membresias_pago: "399.73",
         monto_aplicado: "1922.31",
+        fecha_pago: new Date("2030-12-30T06:00:00.000Z"),
+        fecha_aplicado: new Date("2030-12-30T06:00:00.000Z"),
       }),
     ).toBe(false);
+  });
+
+  it("ordena pagos de la misma cuota por fecha de pago", () => {
+    const sorted = sortEstadoCuentaPayments([
+      {
+        pago_id: 134345,
+        numero_cuota: 7,
+        fecha_pago: new Date("2026-06-01T22:03:29.000Z"),
+      },
+      {
+        pago_id: 17420,
+        numero_cuota: 7,
+        fecha_pago: new Date("2026-05-29T21:11:16.000Z"),
+      },
+      {
+        pago_id: 127060,
+        numero_cuota: 7,
+        fecha_pago: new Date("2026-05-09T02:31:31.111Z"),
+      },
+    ]);
+
+    expect(sorted.map((p) => p.pago_id)).toEqual([127060, 17420, 134345]);
+  });
+
+  it("calcula capital restante corrido para parciales y abonos a capital", () => {
+    const rows = applyEstadoCuentaRunningCapital([
+      {
+        pago_id: 17419,
+        pagado: true,
+        abono_capital: "1319.93",
+        abono_interes: "1767.89",
+        total_restante: "116539.07",
+      },
+      {
+        pago_id: 127060,
+        abono_capital: "0.00",
+        total_restante: "0.00",
+      },
+      {
+        pago_id: 17420,
+        pagado: true,
+        abono_capital: "1342.11",
+        abono_interes: "1748.09",
+        total_restante: "115196.94",
+      },
+      {
+        pago_id: 134345,
+        abono_capital: "75000.00",
+        total_restante: "39720.74",
+      },
+    ]);
+
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "116539.07",
+      "116539.07",
+      "115196.94",
+      "40196.94",
+    ]);
   });
 });

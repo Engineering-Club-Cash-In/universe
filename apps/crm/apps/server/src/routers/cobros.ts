@@ -3503,9 +3503,21 @@ export const cobrosRouter = {
 					? input.cuerpoEditado
 					: plantilla.cuerpo;
 
+				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
+				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
+				// criterio que usa el detalle individual de este router, y la única
+				// fuente del día de pago que vive en cartera. Sin esto el masivo
+				// dejaba "{fechaPago}" vacío ("Su día de pago es el .").
+				const diaPago = credito.proxima_cuota?.fecha_vencimiento
+					? Number.parseInt(
+							credito.proxima_cuota.fecha_vencimiento.substring(8, 10),
+							10,
+						) || null
+					: null;
+
 				const mensaje = interpolarPlantilla(cuerpoBase, {
 					clienteNombre: credito.usuarios.nombre ?? "",
-					fechaPago: "",
+					fechaPago: diaPago ? String(diaPago) : "",
 					cuotaMensual: String(cuota),
 					placa: info?.placa ?? "",
 					marcaLineaModelo,

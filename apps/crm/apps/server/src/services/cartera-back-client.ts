@@ -888,6 +888,22 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	/**
+	 * Refresca (aplica los registros manuales de) el snapshot diario de
+	 * facturación para una fecha. Es necesario DESPUÉS de insertar gastos
+	 * administrativos: el reporte diario lee de facturacion_snapshot_diario,
+	 * y este endpoint copia el SUM de gastos del día a las columnas
+	 * administrativos/otros_cobros (el mismo paso que hace la UI manual).
+	 *
+	 * @param fecha - "YYYY-MM-DD" (hora Guatemala)
+	 */
+	async aplicarManualesDia(fecha: string): Promise<unknown> {
+		return this.request("/api/facturacion-snapshot/aplicar-manuales-dia", {
+			method: "POST",
+			body: JSON.stringify({ fecha }),
+		});
+	}
+
 	// ========================================================================
 	// RESUMEN GLOBAL INVERSIONISTAS
 	// ========================================================================

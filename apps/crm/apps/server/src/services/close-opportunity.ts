@@ -647,9 +647,18 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 				`[CloseOpportunity] Generating ${invoices.length} invoices for NIT: ${nit}`,
 			);
 
+			// Fecha de hoy en hora de Guatemala (YYYY-MM-DD). Se calcula una sola
+			// vez y se reutiliza para todos los gastos administrativos del cierre.
+			const fechaGuatemala = new Date().toLocaleDateString("en-CA", {
+				timeZone: "America/Guatemala",
+			});
+
 			// Procesar cada factura secuencialmente
 			let successCount = 0;
 			let errorCount = 0;
+			// Cuántos gastos administrativos se registraron (para refrescar el
+			// snapshot del día una sola vez al final, si hubo al menos uno).
+			let gastosRegistrados = 0;
 
 			for (const invoice of invoices) {
 				const startTime = Date.now();
@@ -703,16 +712,13 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 								(sum, item) => sum + item.monto,
 								0,
 							);
-							// Fecha del gasto en hora de Guatemala (YYYY-MM-DD).
-							const fechaGuatemala = new Date().toLocaleDateString("en-CA", {
-								timeZone: "America/Guatemala",
-							});
 
 							await carteraBackClient.crearGastoAdministrativo({
 								fecha: fechaGuatemala,
 								concepto: `${invoice.name} (oportunidad ${opportunityId})`,
 								monto: montoFacturado,
 							});
+							gastosRegistrados++;
 
 							console.log(
 								`[CloseOpportunity] ✓ Gasto administrativo registrado: "${invoice.name}" = ${montoFacturado}`,
@@ -763,6 +769,28 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 
 				// Pequeña pausa entre facturas para no saturar el servidor
 				await new Promise((resolve) => setTimeout(resolve, 100));
+			}
+
+			// 🔄 Refrescar el snapshot del día UNA sola vez. El reporte diario lee
+			// de facturacion_snapshot_diario (no de gastos_administrativos), así que
+			// tras insertar los gastos hay que aplicar los manuales del día para que
+			// queden en las columnas administrativos/otros_cobros (mismo paso que
+			// hace la UI manual). Best-effort: si falla, se loguea y sigue.
+			if (gastosRegistrados > 0) {
+				try {
+					await carteraBackClient.aplicarManualesDia(fechaGuatemala);
+					console.log(
+						`[CloseOpportunity] ✓ Snapshot del día ${fechaGuatemala} refrescado (${gastosRegistrados} gasto(s))`,
+					);
+				} catch (snapshotError) {
+					const snapshotMsg =
+						snapshotError instanceof Error
+							? snapshotError.message
+							: String(snapshotError);
+					console.error(
+						`[CloseOpportunity] ✗ No se pudo refrescar el snapshot del día ${fechaGuatemala}: ${snapshotMsg}`,
+					);
+				}
 			}
 
 			console.log(

@@ -181,20 +181,19 @@ export const vehiclesRouter = {
 				category === "alerts" ||
 				isInspectionStatus;
 
+			// Always LEFT JOIN for ordering by latest inspection date
 			const idsQueryBase = db
-				.selectDistinct({ id: vehicles.id, createdAt: vehicles.createdAt })
-				.from(vehicles);
+				.select({ id: vehicles.id, createdAt: vehicles.createdAt })
+				.from(vehicles)
+				.leftJoin(vehicleInspections, eq(vehicles.id, vehicleInspections.vehicleId))
+				.groupBy(vehicles.id, vehicles.createdAt);
 
 			const countQueryBase = db
 				.select({ count: sql<number>`count(distinct ${vehicles.id})` })
 				.from(vehicles);
 
-			const idsQuery = needsJoin
-				? idsQueryBase.innerJoin(
-						vehicleInspections,
-						eq(vehicles.id, vehicleInspections.vehicleId),
-					)
-				: idsQueryBase;
+			// idsQuery always has the leftJoin; countQuery only joins when needed for filters
+			const idsQuery = idsQueryBase;
 
 			const countQuery = needsJoin
 				? countQueryBase.innerJoin(
@@ -211,7 +210,10 @@ export const vehiclesRouter = {
 
 			const paginatedIds = await idsQuery
 				.where(whereClause)
-				.orderBy(desc(vehicles.createdAt))
+				.orderBy(
+				sql`CASE WHEN MAX(${vehicleInspections.inspectionDate}) IS NULL THEN 1 ELSE 0 END ASC`,
+				sql`COALESCE(MAX(${vehicleInspections.inspectionDate}), ${vehicles.createdAt}) DESC`,
+			)
 				.limit(limit)
 				.offset(offset);
 
@@ -235,7 +237,7 @@ export const vehiclesRouter = {
 					eq(vehicles.id, vehicleInspections.vehicleId),
 				)
 				.where(or(...vehicleIdsArray.map((id) => eq(vehicles.id, id))))
-				.orderBy(desc(vehicles.createdAt));
+				.orderBy(desc(vehicleInspections.inspectionDate), desc(vehicles.createdAt));
 
 			// Get photos only for these vehicles
 			const allPhotos = await db

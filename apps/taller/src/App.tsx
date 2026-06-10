@@ -1,10 +1,29 @@
 import { Link } from '@tanstack/react-router'
-import { Car, FileText } from 'lucide-react'
+import { Car, FileText, LogOut } from 'lucide-react'
+import { Button } from './components/ui/button'
+import { authClient } from './lib/auth-client'
 
 function App() {
+  const { data: session } = authClient.useSession()
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8">
+        <div className="mb-6 flex justify-end">
+          {session ? (
+            <div className="flex items-center gap-3 text-sm text-gray-600">
+              <span>{session.user.email}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => authClient.signOut()}
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Cerrar sesión
+              </Button>
+            </div>
+          ) : null}
+        </div>
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
             Sistema de Gestión de Taller

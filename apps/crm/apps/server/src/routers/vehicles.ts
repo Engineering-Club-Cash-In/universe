@@ -34,7 +34,7 @@ import {
 	publicProcedure,
 	tallerOrCrmProcedure,
 } from "../lib/orpc";
-import { ROLES } from "../lib/roles";
+import { PERMISSIONS, ROLES } from "../lib/roles";
 import {
 	buildUploadPrefix,
 	deleteFileFromR2,
@@ -550,8 +550,18 @@ export const vehiclesRouter = {
 				}),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			try {
+				if (
+					input.data.status &&
+					!PERMISSIONS.canManageTallerVehicleStatus(context.userRole) &&
+					!PERMISSIONS.canAccessCRM(context.userRole)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para cambiar el estado del vehículo",
+					});
+				}
+
 				const [updated] = await db
 					.update(vehicles)
 					.set({
@@ -890,7 +900,16 @@ export const vehiclesRouter = {
 				}),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			if (
+				!PERMISSIONS.canManageTallerInspections(context.userRole) &&
+				!PERMISSIONS.canAccessCRM(context.userRole)
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para actualizar inspecciones",
+				});
+			}
+
 			const [updated] = await db
 				.update(vehicleInspections)
 				.set({

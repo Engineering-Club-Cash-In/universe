@@ -32,6 +32,7 @@ export interface InspectionData {
   inspectionResult: string;
   vehicleRating: 'Comercial' | 'No comercial';
   marketValue?: string;
+  suggestedCommercialValue?: string;
   currentConditionValue: string;
   vehicleEquipment: string;
   importantConsiderations?: string;
@@ -165,6 +166,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     inspectionResult: formData.inspectionResult,
     vehicleRating: formData.vehicleRating,
     marketValue: formData.marketValue || undefined,
+    suggestedCommercialValue: formData.suggestedCommercialValue || undefined,
     currentConditionValue: formData.currentConditionValue,
     vehicleEquipment: formData.vehicleEquipment,
     importantConsiderations: formData.importantConsiderations,

@@ -635,13 +635,22 @@ export default function VehiclesDashboard() {
 
     setIsSaving(true);
     try {
+      const vehicleStatus = editForm.status === "approved" ? "available" : editForm.status;
+
       await vehiclesApi.update(selectedVehicle.id, {
-        status: editForm.status as "pending" | "available" | "sold" | "maintenance" | "auction",
+        status: vehicleStatus as "pending" | "available" | "sold" | "maintenance" | "auction",
       });
 
       // Get the raw vehicle to update its inspection
       const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle.id);
-      const inspectionId = rawVehicle?.inspections?.[0]?.id;
+      const sortedInspections = rawVehicle?.inspections
+        ? [...rawVehicle.inspections].sort((a, b) => {
+            const dateA = a.inspectionDate ? new Date(a.inspectionDate).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+            const dateB = b.inspectionDate ? new Date(b.inspectionDate).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+            return dateB - dateA;
+          })
+        : [];
+      const inspectionId = sortedInspections[selectedInspectionIndex]?.id;
 
       if (inspectionId) {
         // Update the inspection data via the API

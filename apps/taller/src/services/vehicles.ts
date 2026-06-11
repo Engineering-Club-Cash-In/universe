@@ -97,6 +97,31 @@ export interface Inspection360Item {
   metadata?: Record<string, any>;
 }
 
+export type VehicleStatus = "pending" | "available" | "sold" | "maintenance" | "auction";
+
+export const getVehicleStatusUpdate = (
+  inspectionStatus: string,
+  currentVehicleStatus?: string | null,
+  canManageVehicleStatus = true,
+): VehicleStatus | undefined => {
+  if (!canManageVehicleStatus) {
+    return undefined;
+  }
+
+  const vehicleStatus =
+    inspectionStatus === "approved"
+      ? "available"
+      : inspectionStatus === "rejected"
+        ? "maintenance"
+        : inspectionStatus;
+
+  if (vehicleStatus === currentVehicleStatus) {
+    return undefined;
+  }
+
+  return vehicleStatus as VehicleStatus;
+};
+
 // Main function to create a full vehicle inspection
 export const createFullInspection = async (
   vehicleData: VehicleData,

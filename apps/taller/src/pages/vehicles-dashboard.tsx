@@ -27,8 +27,9 @@ import {
   Hash,
   ExternalLink,
 } from "lucide-react";
-import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
+import { getVehicleStatusUpdate, getVehicleStatistics, getVehicleById } from "../services/vehicles";
 import { generateInspectionPdf } from "../lib/generate-inspection-pdf";
+import { authClient } from "../lib/auth-client";
 import { vehiclesApi, client } from "../utils/orpc";
 import { toast } from "sonner";
 import { INSPECTION_AREAS } from "../lib/inspection-data";
@@ -375,6 +376,9 @@ const VehiclePhoto = ({ photo, index }: { photo: any; index: number }) => {
 };
 
 export default function VehiclesDashboard() {
+  const { data: session } = authClient.useSession();
+  const userRole = (session?.user as { role?: string } | undefined)?.role;
+  const canManageVehicleStatus = userRole === "admin" || userRole === "service_center_manager";
   const [vehicles, setVehicles] = useState<DashboardVehicle[]>([]);
   const [rawVehiclesData, setRawVehiclesData] = useState<VehicleWithRelations[]>([]);
   const [statistics, setStatistics] = useState<any>(null);
@@ -635,19 +639,16 @@ export default function VehiclesDashboard() {
 
     setIsSaving(true);
     try {
-      const vehicleStatus =
-        editForm.status === "approved"
-          ? "available"
-          : editForm.status === "rejected"
-            ? "maintenance"
-            : editForm.status;
-
-      await vehiclesApi.update(selectedVehicle.id, {
-        status: vehicleStatus as "pending" | "available" | "sold" | "maintenance" | "auction",
-      });
-
-      // Get the raw vehicle to update its inspection
+      // Get the raw vehicle to compare vehicle status and update its inspection
       const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle.id);
+      const vehicleStatus = getVehicleStatusUpdate(editForm.status, rawVehicle?.status, canManageVehicleStatus);
+
+      if (vehicleStatus) {
+        await vehiclesApi.update(selectedVehicle.id, {
+          status: vehicleStatus,
+        });
+      }
+
       const sortedInspections = rawVehicle?.inspections
         ? [...rawVehicle.inspections].sort((a, b) => {
             const dateA = a.inspectionDate ? new Date(a.inspectionDate).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);

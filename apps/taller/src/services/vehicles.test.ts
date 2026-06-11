@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getVehicleStatusUpdate } from "./vehicles";
 import { prepareInspectionData } from "./vehicles";
 
 describe("prepareInspectionData", () => {
@@ -32,5 +33,19 @@ describe("prepareInspectionData", () => {
     });
 
     expect(inspectionData.suggestedCommercialValue).toBe("85000");
+  });
+});
+
+describe("getVehicleStatusUpdate", () => {
+  it("skips vehicle status update when mapped inspection status is unchanged", () => {
+    expect(getVehicleStatusUpdate("approved", "available")).toBeUndefined();
+  });
+
+  it("returns mapped vehicle status when inspection status changed the vehicle state", () => {
+    expect(getVehicleStatusUpdate("rejected", "available")).toBe("maintenance");
+  });
+
+  it("skips vehicle status update when user cannot manage vehicle status", () => {
+    expect(getVehicleStatusUpdate("rejected", "available", false)).toBeUndefined();
   });
 });

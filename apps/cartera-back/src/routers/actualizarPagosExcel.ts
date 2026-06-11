@@ -178,7 +178,9 @@ function construirUpdatesCuota(
         // capital/total restante = saldo del crédito (igual en toda la cuota).
         capital_restante: totalRestante,
         total_restante: totalRestante,
-        pagado: esUltimo,
+        // Todos los pagos de la cuota quedan pagados (no solo el último): la
+        // cuota se reconstruye completa desde el Excel. Ver commit 0dc646a6.
+        pagado: true,
       },
     });
   });

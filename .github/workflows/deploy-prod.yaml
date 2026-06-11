@@ -1,0 +1,169 @@
+name: Deploy producción
+
+# Construye y empuja las imágenes de producción al ECR público y dispara el
+# redeploy en Coolify. Corre en pushes a main que toquen cada app, o a mano
+# (Run workflow) eligiendo una app o todas.
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "apps/cartera-back/**"
+      - "apps/carteraFront/**"
+      - "apps/crm/**"
+      - "apps/portal-web/**"
+      - "apps/auth-google/**"
+      - "packages/**"
+      - "package.json"
+      - "bun.lock"
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "App a deployar"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - cartera-back
+          - cartera-front
+          - crm-api
+          - crm-web
+          - portal-web
+          - auth-google
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: public.ecr.aws/a6w8m2u2
+
+permissions:
+  contents: read
+
+jobs:
+  # 1) Decide qué apps construir: por diff en pushes, por input en dispatch
+  changes:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.pick.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+      - uses: dorny/paths-filter@v3
+        if: github.event_name == 'push'
+        id: filter
+        with:
+          # Comparar contra el commit anterior de esta misma rama (ver
+          # deploy-cartera-dev.yaml para el porqué).
+          base: ${{ github.ref }}
+          filters: |
+            cartera-back:
+              - 'apps/cartera-back/**'
+              - 'packages/email/**'
+              - 'package.json'
+              - 'bun.lock'
+            cartera-front:
+              - 'apps/carteraFront/**'
+            crm-api:
+              - 'apps/crm/apps/server/**'
+              - 'apps/crm/package.json'
+              - 'apps/crm/bun.lock'
+              - 'packages/infornet/**'
+              - 'packages/sms/**'
+              - 'packages/simpletech/**'
+              - 'packages/email/**'
+            crm-web:
+              - 'apps/crm/**'
+              - 'packages/infornet/**'
+              - 'packages/sms/**'
+              - 'packages/simpletech/**'
+              - 'packages/email/**'
+            portal-web:
+              - 'apps/portal-web/**'
+            auth-google:
+              - 'apps/auth-google/**'
+              - 'packages/email/**'
+              - 'package.json'
+      - id: pick
+        run: |
+          ALL='["cartera-back","cartera-front","crm-api","crm-web","portal-web","auth-google"]'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.app }}" = "all" ]; then
+              echo "apps=$ALL" >> "$GITHUB_OUTPUT"
+            else
+              echo 'apps=["${{ inputs.app }}"]' >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo 'apps=${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
+          fi
+
+  # 2) Un build por app cambiada, en paralelo
+  build:
+    name: ${{ matrix.app }}
+    needs: changes
+    if: needs.changes.outputs.apps != '[]' && needs.changes.outputs.apps != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
+    # Pushes consecutivos que tocan la misma app cancelan el run viejo y
+    # deployan solo el último (por app, no global — ver deploy-cartera-dev.yaml).
+    concurrency:
+      group: deploy-prod-${{ matrix.app }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login a ECR Public (podman)
+        run: |
+          aws ecr-public get-login-password --region $AWS_REGION \
+            | podman login --username AWS --password-stdin public.ecr.aws
+
+      - name: Build & push
+        run: |
+          # Contexto, Dockerfile e imagen por app (espejo de los deploy.sh)
+          case "${{ matrix.app }}" in
+            cartera-back)    CTX=.                    FILE=apps/cartera-back/Dockerfile        IMAGE=cartera-back ;;
+            cartera-front)   CTX=apps/carteraFront    FILE=apps/carteraFront/Dockerfile        IMAGE=cartera-front ;;
+            crm-api)         CTX=.                    FILE=apps/crm/apps/server/Dockerfile     IMAGE=cci/crm-api ;;
+            crm-web)         CTX=.                    FILE=apps/crm/Dockerfile                 IMAGE=cci/crm-web ;;
+            portal-web)      CTX=apps/portal-web      FILE=apps/portal-web/Dockerfile          IMAGE=cci/portal-web ;;
+            auth-google)     CTX=.                    FILE=apps/auth-google/Dockerfile         IMAGE=cci/better-auth-api ;;
+            *) echo "App desconocida"; exit 1 ;;
+          esac
+          podman build -f "$FILE" "$CTX" \
+            -t "$ECR_REGISTRY/$IMAGE:latest" \
+            -t "$ECR_REGISTRY/$IMAGE:${{ github.sha }}"
+          podman push "$ECR_REGISTRY/$IMAGE:latest"
+          podman push "$ECR_REGISTRY/$IMAGE:${{ github.sha }}"
+
+      - name: Redeploy en Coolify
+        env:
+          WH_CARTERA_BACK: ${{ secrets.COOLIFY_WEBHOOK_CARTERA_BACK_PROD }}
+          WH_CARTERA_FRONT: ${{ secrets.COOLIFY_WEBHOOK_CARTERA_FRONT_PROD }}
+          WH_CRM_API: ${{ secrets.COOLIFY_WEBHOOK_CRM_API_PROD }}
+          WH_CRM_WEB: ${{ secrets.COOLIFY_WEBHOOK_CRM_WEB_PROD }}
+          WH_PORTAL_WEB: ${{ secrets.COOLIFY_WEBHOOK_PORTAL_WEB_PROD }}
+          WH_AUTH_GOOGLE: ${{ secrets.COOLIFY_WEBHOOK_AUTH_GOOGLE_PROD }}
+        run: |
+          case "${{ matrix.app }}" in
+            cartera-back)    WEBHOOK="$WH_CARTERA_BACK" ;;
+            cartera-front)   WEBHOOK="$WH_CARTERA_FRONT" ;;
+            crm-api)         WEBHOOK="$WH_CRM_API" ;;
+            crm-web)         WEBHOOK="$WH_CRM_WEB" ;;
+            portal-web)      WEBHOOK="$WH_PORTAL_WEB" ;;
+            auth-google)     WEBHOOK="$WH_AUTH_GOOGLE" ;;
+          esac
+          if [ -z "$WEBHOOK" ]; then
+            echo "::notice::Sin webhook configurado para ${{ matrix.app }}; imagen pusheada pero sin redeploy automático."
+            exit 0
+          fi
+          curl --fail-with-body --request GET "$WEBHOOK" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"

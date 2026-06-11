@@ -1,4 +1,4 @@
-import { Navigate } from "@tanstack/react-router";
+import { Navigate, useLocation } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { authClient } from "../../lib/auth-client";
@@ -9,6 +9,7 @@ type RequireAuthProps = {
 
 export function RequireAuth({ children }: RequireAuthProps) {
   const { data: session, isPending } = authClient.useSession();
+  const location = useLocation();
 
   if (isPending) {
     return (
@@ -20,7 +21,7 @@ export function RequireAuth({ children }: RequireAuthProps) {
   }
 
   if (!session) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/login" search={{ redirect: location.pathname }} />;
   }
 
   return <>{children}</>;

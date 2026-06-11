@@ -136,6 +136,10 @@ export const auth = betterAuth({
 		process.env.FRONT_URL,
 		process.env.TALLER_URL,
 	].filter((origin): origin is string => Boolean(origin && origin !== "*")),
+	advanced: {
+		useSecureCookies: true,
+		defaultCookieAttributes: { sameSite: "none" as const, secure: true },
+	},
 	emailAndPassword: {
 		enabled: true,
 		requireEmailVerification: false,

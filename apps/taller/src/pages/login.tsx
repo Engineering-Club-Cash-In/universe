@@ -1,7 +1,7 @@
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -10,9 +10,17 @@ import { authClient } from "../lib/auth-client";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const search = useSearch({ strict: false }) as { redirect?: string };
+  const { data: session } = authClient.useSession();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (session) {
+      navigate({ to: search.redirect || "/" });
+    }
+  }, [session]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -31,7 +39,7 @@ export function LoginPage() {
       return;
     }
 
-    await navigate({ to: "/" });
+    navigate({ to: search.redirect || "/" });
   };
 
   return (

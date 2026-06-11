@@ -92,9 +92,14 @@ app.use(
 				return origin;
 			}
 
-			// En producción, usar el CORS_ORIGIN específico
-			const productionOrigin = process.env.CORS_ORIGIN;
-			if (productionOrigin && origin === productionOrigin) {
+			// En producción, usar los origin específicos configurados
+			const allowedOrigins = [
+				process.env.CORS_ORIGIN,
+				process.env.FRONT_URL,
+				process.env.TALLER_URL,
+			].filter((o): o is string => Boolean(o && o !== "*"));
+
+			if (origin && allowedOrigins.includes(origin)) {
 				return origin;
 			}
 

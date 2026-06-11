@@ -24,7 +24,6 @@ import {
 } from "../lib/orpc";
 
 const SECONDS_PER_DAY = 60 * 60 * 24;
-const CLOSED_STAGE_THRESHOLD = 90;
 
 // Schema para filtros de fecha
 const dateRangeSchema = z.object({
@@ -486,7 +485,7 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 				.where(baseWhere),
 			db
 				.select({
-					source: opportunities.source,
+					source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
 					totalCreditos: count(),
 					avgDias: diasDesdeCreacion("AVG"),
 					minDias: diasDesdeCreacion("MIN"),
@@ -499,7 +498,7 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 				)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.where(baseWhere)
-				.groupBy(opportunities.source)
+				.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
 				.orderBy(desc(count())),
 		]);
 
@@ -511,8 +510,7 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 				maxDias: totalRows[0]?.maxDias ?? 0,
 			},
 			porFuente: porFuente.map((row) => ({
-				// "other" es el valor por defecto del enum leadSource (consistente con leads.source)
-				source: row.source ?? "other",
+				source: row.source,
 				totalCreditos: row.totalCreditos,
 				avgDias: row.avgDias ?? 0,
 				minDias: row.minDias ?? 0,

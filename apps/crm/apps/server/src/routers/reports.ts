@@ -478,7 +478,7 @@ export const getReportePorcentajeEfectividad =
 
 				db
 					.select({
-						source: opportunities.source,
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
 						totalOportunidades: count(opportunities.id),
 						totalCerradas,
 						porcentaje,
@@ -486,14 +486,14 @@ export const getReportePorcentajeEfectividad =
 					.from(opportunities)
 					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
 					.where(baseWhere)
-					.groupBy(opportunities.source)
+					.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
 					.orderBy(desc(count(opportunities.id))),
 
 				db
 					.select({
 						id: opportunities.id,
 						createdAt: opportunities.createdAt,
-						source: opportunities.source,
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
 						nombre: sql<string | null>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
 						etapaNombre: salesStages.name,
 						etapaPorcentaje: salesStages.closurePercentage,
@@ -522,7 +522,7 @@ export const getReportePorcentajeEfectividad =
 					porcentaje: totalRows[0]?.porcentaje ?? 0,
 				},
 				porFuente: porFuente.map((row) => ({
-					source: row.source ?? "other",
+					source: row.source,
 					totalOportunidades: row.totalOportunidades,
 					totalCerradas: row.totalCerradas ?? 0,
 					porcentaje: row.porcentaje ?? 0,
@@ -530,7 +530,7 @@ export const getReportePorcentajeEfectividad =
 				registros: registrosRaw.map((row) => ({
 					id: row.id,
 					createdAt: row.createdAt,
-					source: row.source ?? "other",
+					source: row.source,
 					nombre: row.nombre,
 					etapaNombre: row.etapaNombre,
 					etapaPorcentaje: row.etapaPorcentaje,

@@ -493,8 +493,14 @@ export const reportesCarteraRouter = {
 					facturacion: string | null;
 					cartera_activa: string | null;
 					creditos_activos: number | null;
-					capital_en_mora: string | null;
-					creditos_mora: number | null;
+					mora_30: string | null;
+					mora_60: string | null;
+					mora_90: string | null;
+					mora_120: string | null;
+					creditos_30: number | null;
+					creditos_60: number | null;
+					creditos_90: number | null;
+					creditos_120: number | null;
 				}[];
 			}> => {
 				if (!isCarteraBackEnabled()) {
@@ -560,12 +566,25 @@ export const reportesCarteraRouter = {
 					});
 				}
 
-				const cierreMap = new Map<number, { capital: string; creditos: number }>();
-				for (const row of carteraData.cierres) {
-					cierreMap.set(mesDeDate(row.periodo), {
-						capital: Number(row.capital_en_mora).toFixed(2),
-						creditos: row.creditos_mora,
-					});
+				type AgingBuckets = { mora_30: string | null; mora_60: string | null; mora_90: string | null; mora_120: string | null; creditos_30: number | null; creditos_60: number | null; creditos_90: number | null; creditos_120: number | null };
+
+				// Aging histórico por mes
+				const agingHistMap = new Map<number, AgingBuckets>();
+				for (const row of carteraData.agingHistorico) {
+					const m = mesDeDate(row.periodo);
+					if (!agingHistMap.has(m)) agingHistMap.set(m, { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null });
+					const entry = agingHistMap.get(m)!;
+					const key = `mora_${row.bucket}` as keyof AgingBuckets;
+					const cKey = `creditos_${row.bucket}` as keyof AgingBuckets;
+					(entry as Record<string, string | number | null>)[key] = Number(row.monto_mora).toFixed(2);
+					(entry as Record<string, string | number | null>)[cKey] = row.cantidad_creditos;
+				}
+
+				// Aging mes actual desde moraActual
+				const agingActual: AgingBuckets = { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null };
+				for (const row of carteraData.moraActual) {
+					(agingActual as Record<string, string | number | null>)[`mora_${row.bucket}`] = Number(row.monto_mora).toFixed(2);
+					(agingActual as Record<string, string | number | null>)[`creditos_${row.bucket}`] = row.cantidad_creditos;
 				}
 
 				const ahoraGt = new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -579,34 +598,15 @@ export const reportesCarteraRouter = {
 						(input.anio === anioActual && mes > mesActual);
 					const esMesActual = input.anio === anioActual && mes === mesActual;
 
+					const nullAging: AgingBuckets = { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null };
+
 					if (esFuturo) {
-						return {
-							mes,
-							colocacion_monto: null,
-							colocacion_creditos: null,
-							facturacion: null,
-							cartera_activa: null,
-							creditos_activos: null,
-							capital_en_mora: null,
-							creditos_mora: null,
-						};
+						return { mes, colocacion_monto: null, colocacion_creditos: null, facturacion: null, cartera_activa: null, creditos_activos: null, ...nullAging };
 					}
 
 					const coloc = colocacionMap.get(mes);
 					const cart = carteraMap.get(mes);
-
-					let capitalEnMora: string | null = null;
-					let creditosMora: number | null = null;
-					if (esMesActual) {
-						capitalEnMora = Number(carteraData.moraActual.capital_en_mora).toFixed(2);
-						creditosMora = carteraData.moraActual.creditos_mora;
-					} else {
-						const cierre = cierreMap.get(mes);
-						if (cierre) {
-							capitalEnMora = cierre.capital;
-							creditosMora = cierre.creditos;
-						}
-					}
+					const aging = esMesActual ? agingActual : (agingHistMap.get(mes) ?? nullAging);
 
 					return {
 						mes,
@@ -615,8 +615,7 @@ export const reportesCarteraRouter = {
 						facturacion: cobradoMap.get(mes) ?? null,
 						cartera_activa: cart?.capital ?? null,
 						creditos_activos: cart?.creditos ?? null,
-						capital_en_mora: capitalEnMora,
-						creditos_mora: creditosMora,
+						...aging,
 					};
 				});
 

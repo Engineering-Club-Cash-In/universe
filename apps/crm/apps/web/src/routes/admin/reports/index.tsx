@@ -136,8 +136,14 @@ type ComparativoHistoricoRow = {
 	facturacion: string | null;
 	cartera_activa: string | null;
 	creditos_activos: number | null;
-	capital_en_mora: string | null;
-	creditos_mora: number | null;
+	mora_30: string | null;
+	mora_60: string | null;
+	mora_90: string | null;
+	mora_120: string | null;
+	creditos_30: number | null;
+	creditos_60: number | null;
+	creditos_90: number | null;
+	creditos_120: number | null;
 };
 
 const MESES = [
@@ -1420,12 +1426,14 @@ function RouteComponent() {
 											<TableRow>
 												<TableHead>Mes</TableHead>
 												<TableHead className="text-right">Colocación (Q)</TableHead>
-												<TableHead className="text-right"># Créditos Col.</TableHead>
+												<TableHead className="text-right"># Col.</TableHead>
 												<TableHead className="text-right">Facturación (Q)</TableHead>
 												<TableHead className="text-right">Cartera Activa (Q)</TableHead>
 												<TableHead className="text-right"># Activos</TableHead>
-												<TableHead className="text-right">Capital en Mora (Q)</TableHead>
-												<TableHead className="text-right"># Mora</TableHead>
+												<TableHead className="text-right">Mora 30 (Q)</TableHead>
+												<TableHead className="text-right">Mora 60 (Q)</TableHead>
+												<TableHead className="text-right">Mora 90 (Q)</TableHead>
+												<TableHead className="text-right">Mora 120+ (Q)</TableHead>
 											</TableRow>
 										</TableHeader>
 										<TableBody>
@@ -1464,12 +1472,16 @@ function RouteComponent() {
 															{row.creditos_activos ?? "—"}
 														</TableCell>
 														<TableCell className="text-right">
-															{row.capital_en_mora
-																? formatCurrency(Number(row.capital_en_mora))
-																: "—"}
+															{row.mora_30 ? formatCurrency(Number(row.mora_30)) : "—"}
 														</TableCell>
 														<TableCell className="text-right">
-															{row.creditos_mora ?? "—"}
+															{row.mora_60 ? formatCurrency(Number(row.mora_60)) : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_90 ? formatCurrency(Number(row.mora_90)) : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_120 ? formatCurrency(Number(row.mora_120)) : "—"}
 														</TableCell>
 													</TableRow>
 												);
@@ -1487,6 +1499,8 @@ function RouteComponent() {
 												<TableCell className="text-right">
 													{formatCurrency(sumFacturacion)}
 												</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
 												<TableCell className="text-right">—</TableCell>
 												<TableCell className="text-right">—</TableCell>
 												<TableCell className="text-right">—</TableCell>

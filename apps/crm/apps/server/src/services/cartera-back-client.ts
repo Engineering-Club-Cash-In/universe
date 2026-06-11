@@ -240,11 +240,17 @@ export type ColocacionPeriodoRow = {
 	total_colocacion: string;
 };
 
+export type MoraAgingBucket = {
+	bucket: "30" | "60" | "90" | "120";
+	cantidad_creditos: number;
+	monto_mora: string;
+};
+
 export type ComparativoHistoricoResponse = {
 	cobrado: { mes: number; cobrado: string }[];
 	cartera: { mes: string; creditos_activos: number; cartera_activa: string }[];
-	moraActual: { creditos_mora: number; capital_en_mora: string };
-	cierres: { periodo: string; creditos_mora: number; capital_en_mora: string }[];
+	moraActual: MoraAgingBucket[];
+	agingHistorico: ({ periodo: string } & MoraAgingBucket)[];
 };
 
 // ============================================================================

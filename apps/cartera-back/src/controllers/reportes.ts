@@ -340,36 +340,39 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
     ORDER BY periodo
   `);
 
-  // c) Capital en mora HOY (misma definición que el snapshot de cierre_mensual:
-  //    capital de créditos con mora activa, contado una vez por crédito).
+  // c) Mora actual por bucket (mes corriente): moras_credito agrupada por cuotas_atrasadas.
   const moraActual = await db.execute(sql`
     SELECT
-      COUNT(cr.credito_id)::int AS creditos_mora,
-      COALESCE(SUM(cr.capital::numeric), 0) AS capital_en_mora
-    FROM cartera.creditos cr
-    WHERE EXISTS (
-      SELECT 1 FROM cartera.moras_credito m
-      WHERE m.credito_id = cr.credito_id AND m.activa = true
-    )
+      CASE
+        WHEN m.cuotas_atrasadas >= 4 THEN '120'
+        WHEN m.cuotas_atrasadas = 3  THEN '90'
+        WHEN m.cuotas_atrasadas = 2  THEN '60'
+        ELSE '30'
+      END AS bucket,
+      COUNT(DISTINCT m.credito_id)::int AS cantidad_creditos,
+      COALESCE(SUM(m.monto_mora::numeric), 0) AS monto_mora
+    FROM cartera.moras_credito m
+    WHERE m.activa = true
+    GROUP BY 1
   `);
 
-  // d) Snapshots históricos de mora desde cierre_mensual (suma de todos los status).
-  const cierres = await db.execute(sql`
+  // d) Aging histórico desde cierre_mora_aging.
+  const agingHistorico = await db.execute(sql`
     SELECT
       periodo,
-      COALESCE(SUM(creditos_con_mora), 0)::int AS creditos_mora,
-      COALESCE(SUM(capital_en_mora::numeric), 0) AS capital_en_mora
-    FROM cartera.cierre_mensual
+      bucket,
+      cantidad_creditos,
+      monto_mora
+    FROM cartera.cierre_mora_aging
     WHERE periodo >= make_date(${anio}, 1, 1)
       AND periodo < make_date(${anio + 1}, 1, 1)
-    GROUP BY periodo
-    ORDER BY periodo
+    ORDER BY periodo, bucket
   `);
 
   return {
     cobrado: cobrado.rows,
     cartera: cartera.rows,
-    moraActual: moraActual.rows[0] ?? { creditos_mora: 0, capital_en_mora: "0" },
-    cierres: cierres.rows,
+    moraActual: moraActual.rows,
+    agingHistorico: agingHistorico.rows,
   };
 }

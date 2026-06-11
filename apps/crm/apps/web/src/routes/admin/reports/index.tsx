@@ -101,6 +101,32 @@ type FacturacionMesResponse = {
 	esperado: FacturacionMesRubro;
 };
 
+type FlujoCuotasRubro = { capital: string; interes: string; iva: string };
+type FlujoCuotasInversionista = FlujoCuotasRubro & { inversionista_id: number; nombre: string };
+type FlujoCuotasInversionesResponse = {
+	reinversionPorTipo: (FlujoCuotasRubro & { tipo: string; monto_reinvertido?: string })[];
+	cashParcialPorTipo: (FlujoCuotasRubro & { tipo: string; monto_cash?: string })[];
+	sinReinversion: { totales: FlujoCuotasRubro; porInversionista: FlujoCuotasInversionista[] };
+	pagosExtras: { abonos_capital: string; cancelaciones: string };
+};
+
+const FLUJO_RUBROS: { key: keyof FlujoCuotasRubro; label: string }[] = [
+	{ key: "capital", label: "Capital" },
+	{ key: "interes", label: "Interés" },
+	{ key: "iva", label: "IVA 12%" },
+];
+
+function getDefaultFlujoCuotasRange(): { fechaInicio: string; fechaFin: string } {
+	const todayGt = formatDateInput(new Date());
+	const [year, month] = todayGt.split("-").map(Number);
+	const fechaInicio = `${year}-${String(month).padStart(2, "0")}-01`;
+	const nextM = month === 12 ? 1 : month + 1;
+	const nextY = month === 12 ? year + 1 : year;
+	const lastDay = new Date(`${nextY}-${String(nextM).padStart(2, "0")}-01T12:00:00`);
+	lastDay.setDate(lastDay.getDate() - 1);
+	return { fechaInicio, fechaFin: formatDateInput(lastDay) };
+}
+
 const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] = [
 	{ key: "capital", label: "Capital" },
 	{ key: "interes", label: "Interés" },
@@ -241,6 +267,7 @@ function RouteComponent() {
 		mes: new Date().getMonth() + 1,
 		anio: new Date().getFullYear(),
 	}));
+	const [flujoCuotasRange, setFlujoCuotasRange] = useState(getDefaultFlujoCuotasRange);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const userRole = userProfile.data?.role;
@@ -291,6 +318,15 @@ function RouteComponent() {
 	const facturacionMesData = facturacionMesQuery.data as
 		| FacturacionMesResponse
 		| undefined;
+
+	const flujoCuotasQuery = useQuery({
+		...orpc.getFlujoCuotasInversiones.queryOptions({
+			input: { fechaInicio: flujoCuotasRange.fechaInicio, fechaFin: flujoCuotasRange.fechaFin },
+		}),
+		enabled: isAdmin,
+	});
+	const flujoCuotasData = flujoCuotasQuery.data as FlujoCuotasInversionesResponse | undefined;
+
 
 	useEffect(() => {
 		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
@@ -1069,8 +1105,225 @@ function RouteComponent() {
 							})()}
 						</CardContent>
 					</Card>
+
+					{/* Reporte: Flujo de Cuotas de Inversiones */}
+					<Card>
+						<CardHeader>
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div>
+									<CardTitle className="flex items-center gap-2">
+										<TrendingUp className="h-5 w-5" />
+										Flujo de Cuotas de Inversiones
+									</CardTitle>
+									<CardDescription>
+										Cuotas esperadas hacia reinversión y hacia pago en efectivo, por período
+									</CardDescription>
+								</div>
+								<div className="flex items-center gap-2">
+									<Input
+										type="date"
+										aria-label="Fecha inicio"
+										className="w-40"
+										value={flujoCuotasRange.fechaInicio}
+										onChange={(e) =>
+											setFlujoCuotasRange((prev) => ({ ...prev, fechaInicio: e.target.value }))
+										}
+									/>
+									<span className="text-muted-foreground text-sm">–</span>
+									<Input
+										type="date"
+										aria-label="Fecha fin"
+										className="w-40"
+										value={flujoCuotasRange.fechaFin}
+										onChange={(e) =>
+											setFlujoCuotasRange((prev) => ({ ...prev, fechaFin: e.target.value }))
+										}
+									/>
+								</div>
+							</div>
+						</CardHeader>
+						<CardContent className="space-y-6">
+							{flujoCuotasQuery.isPending && (
+								<div className="text-muted-foreground py-4 text-center text-sm">
+									Cargando...
+								</div>
+							)}
+							{flujoCuotasQuery.isError && (
+								<div className="text-destructive py-4 text-center text-sm">
+									Error al cargar datos
+								</div>
+							)}
+							{flujoCuotasData && (() => {
+								const { reinversionPorTipo, cashParcialPorTipo, sinReinversion, pagosExtras } = flujoCuotasData;
+								const TIPO_LABELS: Record<string, string> = {
+									reinversion_capital: "Reinversión Capital",
+									reinversion_interes: "Reinversión Interés",
+									reinversion_total: "Reinversión Total",
+									reinversion_variable: "Reinversión Variable",
+									reinversion_excedente: "Reinversión Excedente",
+								};
+								type ReinvertidoResult =
+									| { esTotal: true; total: number }
+									| { esTotal: false; capital: number; interes: number; iva: number };
+								function getReinvertido(tipo: string, t: FlujoCuotasRubro & { monto_reinvertido?: string }): ReinvertidoResult {
+									if (tipo === "reinversion_variable" || tipo === "reinversion_excedente")
+										return { esTotal: true, total: Number(t.monto_reinvertido ?? 0) };
+									if (tipo === "reinversion_capital")
+										return { esTotal: false, capital: Number(t.capital), interes: 0, iva: 0 };
+									if (tipo === "reinversion_interes")
+										return { esTotal: false, capital: 0, interes: Number(t.interes), iva: Number(t.iva) };
+									return { esTotal: false, capital: Number(t.capital), interes: Number(t.interes), iva: Number(t.iva) };
+								}
+								const totalesReinv = reinversionPorTipo.reduce(
+									(a, t) => {
+										const r = getReinvertido(t.tipo, t);
+										const tot = r.esTotal ? r.total : r.capital + r.interes + r.iva;
+										return {
+											total: a.total + tot,
+											capital: a.capital + (r.esTotal ? 0 : r.capital),
+											interes: a.interes + (r.esTotal ? 0 : r.interes),
+											iva: a.iva + (r.esTotal ? 0 : r.iva),
+										};
+									},
+									{ total: 0, capital: 0, interes: 0, iva: 0 },
+								);
+								const totalReinv = totalesReinv.total;
+								const cashParcialTotal = cashParcialPorTipo.reduce(
+									(a, t) => a + (t.monto_cash ? Number(t.monto_cash) : Number(t.capital) + Number(t.interes) + Number(t.iva)),
+									0,
+								);
+								const totalSinReinv = FLUJO_RUBROS.reduce((a, r) => a + Number(sinReinversion.totales[r.key] || 0), 0);
+								const totalExtras = Number(pagosExtras.abonos_capital) + Number(pagosExtras.cancelaciones);
+								return (
+									<>
+										{/* Sección 1: Hacia Reinversión por tipo */}
+										<div>
+											<p className="mb-2 text-sm font-semibold">Cuotas → Reinversión</p>
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>Tipo de Reinversión</TableHead>
+														<TableHead className="text-right">Capital</TableHead>
+														<TableHead className="text-right">Interés</TableHead>
+														<TableHead className="text-right">IVA 12%</TableHead>
+														<TableHead className="text-right">Total</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													{reinversionPorTipo.filter((t) => {
+														const r = getReinvertido(t.tipo, t);
+														const tot = r.esTotal ? r.total : r.capital + r.interes + r.iva;
+														return tot > 0;
+													}).map((t) => {
+														const r = getReinvertido(t.tipo, t);
+														const rowTotal = r.esTotal ? r.total : r.capital + r.interes + r.iva;
+														return (
+															<TableRow key={t.tipo}>
+																<TableCell>{TIPO_LABELS[t.tipo] ?? t.tipo}</TableCell>
+																<TableCell className="text-right text-muted-foreground">
+																	{r.esTotal ? "—" : formatCurrency(r.capital)}
+																</TableCell>
+																<TableCell className="text-right text-muted-foreground">
+																	{r.esTotal ? "—" : formatCurrency(r.interes)}
+																</TableCell>
+																<TableCell className="text-right text-muted-foreground">
+																	{r.esTotal ? "—" : formatCurrency(r.iva)}
+																</TableCell>
+																<TableCell className="text-right">{formatCurrency(rowTotal)}</TableCell>
+															</TableRow>
+														);
+													})}
+													<TableRow className="border-t-2 bg-muted/50 font-bold">
+														<TableCell>Total</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totalesReinv.capital)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totalesReinv.interes)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totalesReinv.iva)}
+														</TableCell>
+														<TableCell className="text-right">{formatCurrency(totalReinv)}</TableCell>
+													</TableRow>
+												</TableBody>
+											</Table>
+										</div>
+
+										{/* Sección 2: Cash (sin reinversión + porciones cash de reinversión parcial) */}
+										<div>
+											<p className="mb-2 text-sm font-semibold">Cuotas → Cash</p>
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>Origen</TableHead>
+														<TableHead className="text-right">Capital</TableHead>
+														<TableHead className="text-right">Interés</TableHead>
+														<TableHead className="text-right">IVA 12%</TableHead>
+														<TableHead className="text-right">Total</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													{/* Inversionistas sin reinversión */}
+													<TableRow>
+														<TableCell>Sin Reinversión</TableCell>
+														<TableCell className="text-right">{formatCurrency(Number(sinReinversion.totales.capital))}</TableCell>
+														<TableCell className="text-right">{formatCurrency(Number(sinReinversion.totales.interes))}</TableCell>
+														<TableCell className="text-right">{formatCurrency(Number(sinReinversion.totales.iva))}</TableCell>
+														<TableCell className="text-right">{formatCurrency(totalSinReinv)}</TableCell>
+													</TableRow>
+													{/* Porciones cash de inversionistas con reinversión parcial — combinado */}
+													{cashParcialPorTipo.length > 0 && (
+														<TableRow>
+															<TableCell>Intereses y excedentes pagados a inversionistas</TableCell>
+															<TableCell colSpan={3} className="text-muted-foreground text-right text-sm">capital/interés/IVA según tipo</TableCell>
+															<TableCell className="text-right">{formatCurrency(cashParcialTotal)}</TableCell>
+														</TableRow>
+													)}
+													{/* Total general cash */}
+													<TableRow className="border-t-2 bg-muted/50 font-bold">
+														<TableCell>Total Cash</TableCell>
+														<TableCell colSpan={3} />
+														<TableCell className="text-right">{formatCurrency(totalSinReinv + cashParcialTotal)}</TableCell>
+													</TableRow>
+												</TableBody>
+											</Table>
+										</div>
+
+										{/* Sección 3: Pagos Extras Recibidos */}
+										<div>
+											<p className="mb-2 text-sm font-semibold">Pagos Extras Recibidos</p>
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>Tipo</TableHead>
+														<TableHead className="text-right">Monto</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													<TableRow>
+														<TableCell>Abonos Extra a Capital</TableCell>
+														<TableCell className="text-right">{formatCurrency(Number(pagosExtras.abonos_capital))}</TableCell>
+													</TableRow>
+													<TableRow>
+														<TableCell>Cancelaciones</TableCell>
+														<TableCell className="text-right">{formatCurrency(Number(pagosExtras.cancelaciones))}</TableCell>
+													</TableRow>
+													<TableRow className="border-t-2 bg-muted/50 font-bold">
+														<TableCell>Total</TableCell>
+														<TableCell className="text-right">{formatCurrency(totalExtras)}</TableCell>
+													</TableRow>
+												</TableBody>
+											</Table>
+										</div>
+									</>
+								);
+							})()}
+						</CardContent>
+					</Card>
 				</>
 			)}
+
 		</div>
 	);
 }

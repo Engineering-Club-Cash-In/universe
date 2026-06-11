@@ -103,6 +103,148 @@ export async function getCobradoDelMes({
   };
 }
 
+export async function getFlujoCuotasInversiones({
+  fechaInicio,
+  fechaFin,
+}: {
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const rows = await db.execute(sql`
+    SELECT
+      CASE
+        WHEN i.tipo_reinversion = 'reinversion_combinada'
+        THEN COALESCE(ce.tipo_reinversion::text, 'sin_reinversion')
+        ELSE i.tipo_reinversion::text
+      END AS tipo_reinv_efectivo,
+      i.inversionista_id,
+      i.nombre,
+      COALESCE(SUM(ci.cuota_inversionista::numeric), 0) AS total_capital,
+      COALESCE(SUM(ci.monto_inversionista::numeric), 0) AS total_interes,
+      COALESCE(SUM(ci.iva_inversionista::numeric), 0)   AS total_iva,
+      MAX(i.monto_reinversion::numeric)                  AS monto_reinversion_inv
+    FROM cartera.cuotas_credito c
+    JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+    JOIN cartera.creditos_inversionistas ci ON cr.credito_id = ci.credito_id
+    JOIN cartera.inversionistas i ON ci.inversionista_id = i.inversionista_id
+    LEFT JOIN cartera.creditos_inversionistas_espejo ce
+      ON cr.credito_id = ce.credito_id AND ci.inversionista_id = ce.inversionista_id
+    WHERE c.pagado = false
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      AND c.fecha_vencimiento >= ${fechaInicio}::date
+      AND c.fecha_vencimiento <= ${fechaFin}::date
+    GROUP BY tipo_reinv_efectivo, i.inversionista_id, i.nombre
+    ORDER BY tipo_reinv_efectivo, i.nombre
+  `);
+
+  const extrasRows = await db.execute(sql`
+    SELECT tipo, COALESCE(SUM(monto::numeric), 0) AS total
+    FROM cartera.abonos_capital
+    WHERE created_at::date >= ${fechaInicio}::date
+      AND created_at::date <= ${fechaFin}::date
+    GROUP BY tipo
+  `);
+
+  const reinvPorTipo: Record<string, { capital: number; interes: number; iva: number; monto_reinvertido: number }> = {};
+  const cashParcialPorTipo: Record<string, { capital: number; interes: number; iva: number; monto_cash: number }> = {};
+  const sinReinvTotals = { capital: 0, interes: 0, iva: 0 };
+  const porInversionista: Record<number, { inversionista_id: number; nombre: string; capital: number; interes: number; iva: number }> = {};
+
+  for (const row of rows.rows as Record<string, unknown>[]) {
+    const capital = Number(row.total_capital);
+    const interes = Number(row.total_interes);
+    const iva = Number(row.total_iva);
+    const tipo = String(row.tipo_reinv_efectivo);
+    if (tipo !== "sin_reinversion") {
+      if (!reinvPorTipo[tipo]) reinvPorTipo[tipo] = { capital: 0, interes: 0, iva: 0, monto_reinvertido: 0 };
+      if (!cashParcialPorTipo[tipo]) cashParcialPorTipo[tipo] = { capital: 0, interes: 0, iva: 0, monto_cash: 0 };
+      const totalCuota = capital + interes + iva;
+      const montoReinvInv = Number(row.monto_reinversion_inv ?? 0);
+      if (tipo === "reinversion_variable") {
+        const reinvertido = Math.min(montoReinvInv, totalCuota);
+        reinvPorTipo[tipo].monto_reinvertido += reinvertido;
+        cashParcialPorTipo[tipo].monto_cash += Math.max(0, totalCuota - reinvertido);
+      } else if (tipo === "reinversion_excedente") {
+        // monto_reinversion = monto fijo que RECIBE en cash; el sobrante se reinvierte
+        const recibe = Math.min(montoReinvInv, totalCuota);
+        cashParcialPorTipo[tipo].monto_cash += recibe;
+        reinvPorTipo[tipo].monto_reinvertido += Math.max(0, totalCuota - recibe);
+      } else if (tipo === "reinversion_capital") {
+        reinvPorTipo[tipo].capital += capital;
+        cashParcialPorTipo[tipo].interes += interes;
+        cashParcialPorTipo[tipo].iva += iva;
+      } else if (tipo === "reinversion_interes") {
+        reinvPorTipo[tipo].interes += interes;
+        reinvPorTipo[tipo].iva += iva;
+        cashParcialPorTipo[tipo].capital += capital;
+      } else {
+        // reinversion_total: nada va a cash
+        reinvPorTipo[tipo].capital += capital;
+        reinvPorTipo[tipo].interes += interes;
+        reinvPorTipo[tipo].iva += iva;
+      }
+    } else {
+      sinReinvTotals.capital += capital;
+      sinReinvTotals.interes += interes;
+      sinReinvTotals.iva += iva;
+      const id = Number(row.inversionista_id);
+      if (!porInversionista[id]) {
+        porInversionista[id] = { inversionista_id: id, nombre: String(row.nombre), capital: 0, interes: 0, iva: 0 };
+      }
+      porInversionista[id].capital += capital;
+      porInversionista[id].interes += interes;
+      porInversionista[id].iva += iva;
+    }
+  }
+
+  let abonosCapital = 0;
+  let cancelaciones = 0;
+  for (const row of extrasRows.rows as Record<string, unknown>[]) {
+    if (row.tipo === "CAPITAL") abonosCapital = Number(row.total);
+    if (row.tipo === "CANCELACION") cancelaciones = Number(row.total);
+  }
+
+  const fmt = (n: number) => n.toFixed(2);
+
+  return {
+    reinversionPorTipo: Object.entries(reinvPorTipo).map(([tipo, v]) => ({
+      tipo,
+      capital: fmt(v.capital),
+      interes: fmt(v.interes),
+      iva: fmt(v.iva),
+      monto_reinvertido: v.monto_reinvertido > 0 ? fmt(v.monto_reinvertido) : undefined,
+    })),
+    cashParcialPorTipo: Object.entries(cashParcialPorTipo)
+      .filter(([, v]) => v.capital + v.interes + v.iva + v.monto_cash > 0)
+      .map(([tipo, v]) => ({
+        tipo,
+        capital: fmt(v.capital),
+        interes: fmt(v.interes),
+        iva: fmt(v.iva),
+        monto_cash: v.monto_cash > 0 ? fmt(v.monto_cash) : undefined,
+      })),
+    sinReinversion: {
+      totales: {
+        capital: fmt(sinReinvTotals.capital),
+        interes: fmt(sinReinvTotals.interes),
+        iva: fmt(sinReinvTotals.iva),
+      },
+      porInversionista: Object.values(porInversionista).map((inv) => ({
+        inversionista_id: inv.inversionista_id,
+        nombre: inv.nombre,
+        capital: fmt(inv.capital),
+        interes: fmt(inv.interes),
+        iva: fmt(inv.iva),
+      })),
+    },
+    pagosExtras: {
+      abonos_capital: fmt(abonosCapital),
+      cancelaciones: fmt(cancelaciones),
+    },
+  };
+}
+
+
 export async function getEsperadoDelMes({
   mes,
   anio,

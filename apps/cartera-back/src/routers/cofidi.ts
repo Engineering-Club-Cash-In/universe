@@ -3343,14 +3343,15 @@ if (facturasExistentes.length > 0) {
           conditions.push(eq(facturas_electronicas.receptor_nit, nit));
         }
 
-        // "YYYY-MM-DD" sin hora se parsea como medianoche UTC (= 18:00 del día
-        // anterior en Guatemala); con hora explícita se interpreta en hora local.
+        // Offset explícito de Guatemala (UTC-6 fijo, sin horario de verano):
+        // sin él, "YYYY-MM-DD" se interpreta en la zona horaria del proceso
+        // (UTC en el contenedor) y el rango se corre 6 horas.
         if (fecha_inicio) {
-          conditions.push(gte(facturas_electronicas.fecha_emision, new Date(`${fecha_inicio}T00:00:00`)));
+          conditions.push(gte(facturas_electronicas.fecha_emision, new Date(`${fecha_inicio}T00:00:00-06:00`)));
         }
 
         if (fecha_fin) {
-          conditions.push(lte(facturas_electronicas.fecha_emision, new Date(`${fecha_fin}T23:59:59.999`)));
+          conditions.push(lte(facturas_electronicas.fecha_emision, new Date(`${fecha_fin}T23:59:59.999-06:00`)));
         }
 
         if (tipo === "pago") {

@@ -50,7 +50,9 @@ jobs:
   backend:
     name: Backend (dev)
     needs: changes
-    if: needs.changes.outputs.back == 'true'
+    # En dispatch manual no hay diff que filtrar: construir siempre, para
+    # poder forzar un redeploy tras un run fallido.
+    if: needs.changes.outputs.back == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # Si llega un push nuevo que también reconstruye el back, cancela este run
     # y deploya solo el último. Por job (no global) para que un push solo-front
@@ -91,7 +93,7 @@ jobs:
   frontend:
     name: Frontend (dev)
     needs: changes
-    if: needs.changes.outputs.front == 'true'
+    if: needs.changes.outputs.front == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-cartera-front-dev

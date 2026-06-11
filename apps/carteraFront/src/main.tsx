@@ -1,3 +1,4 @@
+// Entry point de carteraFront (comentario trivial para probar el pipeline de CI).
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'

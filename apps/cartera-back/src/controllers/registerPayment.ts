@@ -29,6 +29,7 @@ import {
   getSpecialPaymentCuotaId,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldMarkInstallmentPaymentPaid,
+  sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
 
 type LockConn = {
@@ -914,6 +915,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           .select({
             pago_id: pagos_credito.pago_id,
             monto_aplicado: pagos_credito.monto_aplicado,
+            abono_capital: pagos_credito.abono_capital,
             abono_interes: pagos_credito.abono_interes,
             abono_iva_12: pagos_credito.abono_iva_12,
             abono_seguro: pagos_credito.abono_seguro,
@@ -942,7 +944,13 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             (acc, p) => acc.plus(new Big(sel(p) ?? 0)),
             new Big(0)
           );
-        const aplicadoPrevioCuota = sumaHermanos((p) => p.monto_aplicado);
+        // Lo aplicado a la CUOTA por los hermanos = Σ de sus rubros de cuota
+        // (capital+interés+IVA+seguro+GPS+membresías), NO `monto_aplicado`.
+        // `monto_aplicado` legacy carga mora/otros (filas de sólo mora traen
+        // rubros en 0) y abonos directos a capital; contarlos inflaba el
+        // faltante de la cuota → colapsaba `saldoRealCuota` a 0 y disparaba el
+        // rechazo falso de "sobre-aplicación". Ver `sumarAplicadoACuota`.
+        const aplicadoPrevioCuota = sumarAplicadoACuota(pagosHermanos);
         const interesPrevioCuota = sumaHermanos((p) => p.abono_interes);
         const seguroPrevioCuota = sumaHermanos((p) => p.abono_seguro);
         const gpsPrevioCuota = sumaHermanos((p) => p.abono_gps);

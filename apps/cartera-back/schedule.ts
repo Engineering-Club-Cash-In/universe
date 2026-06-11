@@ -2,7 +2,7 @@ import schedule from 'node-schedule';
 import { procesarMoras } from './src/controllers/latefee';
 import { upsertEfectividadAsesores } from './src/controllers/paymentsByAdvisor';
 import { expirarCompraCarteraVencidas } from './src/controllers/expirarCompraCartera';
-import { generarCierreMensual } from './src/controllers/cierreMensual';
+import { generarCierreMensual, periodoObjetivo } from './src/controllers/cierreMensual';
 import {
   verificarFacturasSat,
   reportarFacturasFallidasSat,
@@ -72,13 +72,14 @@ export function iniciarTareasProgramadas() {
     }
   });
 
-  // 📊 Cierre mensual de cartera - día 5 de cada mes a las 00:00 hora Guatemala.
-  //    Genera la foto del mes ANTERIOR (el que se cierra): conteo y capital por estado,
-  //    más el detalle de mora actual al momento de correr.
-  schedule.scheduleJob({ rule: '0 0 5 * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🗓️ Ejecutando generarCierreMensual (día 5, 00:00 Guatemala)...');
+  // 📊 Cierre mensual de cartera - DIARIO a las 02:00 hora Guatemala (después de procesarMoras).
+  //    Mantiene UN registro por mes (upsert): hasta el día 5 sigue cerrando el mes anterior
+  //    (gracia para que asiente la data), del 6 en adelante refresca el mes actual.
+  //    Genera conteo/capital por estado + el aging de mora (buckets por cuotas atrasadas).
+  schedule.scheduleJob({ rule: '0 2 * * *', tz: TZ_GUATEMALA }, async () => {
+    console.log('🗓️ Ejecutando generarCierreMensual (diario, 02:00 Guatemala)...');
     try {
-      const res = await generarCierreMensual();
+      const res = await generarCierreMensual(periodoObjetivo(new Date()));
       console.log(`✅ cierreMensual: periodo=${res.periodo}, filas=${res.filas}`);
     } catch (error) {
       console.error('❌ Error al ejecutar generarCierreMensual:', error);

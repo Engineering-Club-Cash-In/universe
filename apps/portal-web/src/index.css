@@ -36,21 +36,25 @@
 /* Configuración de tema */
 @theme {
   --font-hero: "Hero", sans-serif;
+  --font-inter: "Inter", system-ui
   --font-plus-jakarta: "PlusJakarta", sans-serif;
-  --color-primary: rgba(148, 153, 236, 1);
-  --color-secondary: #D4AF37;
-  --color-gray: #BFBFBF;
+  --color-primary: #D8E54A;
+  --color-secondary: #4E57EA;
+  --color-gray: #bfbfbf;
   --color-blue: rgb(79, 87, 247);
   --color-dark: #0f0f0f;
   --color-light: #ffffff;
+
+  --text-xxs: 10px;
+  --text-mini: 8px;
 
   --text-header-1: 72px;
   --text-header-1--font-weight: 700;
   --text-header-1--line-height: 1.2;
 
-  --text-header-2: 60px;
-  --text-header-2--font-weight: 400;
-  --text-header-2--line-height: 1.2;
+  --text-header-2: 55px;
+  --text-header-2--font-weight: 600;
+  --text-header-2--line-height: 60px;
 
   --text-header-3: 48px;
   --text-header-3--font-weight: 700;
@@ -72,6 +76,8 @@
 /* Clases personalizadas */
 @layer base {
   body {
-    font-family: var(--font-hero);
+    font-family: var(--font-inter);
   }
+
+
 }

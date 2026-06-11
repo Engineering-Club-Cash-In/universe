@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v4 as uuidv4 } from "uuid";
 
 export const s3 = new S3Client({
@@ -10,35 +11,89 @@ export const s3 = new S3Client({
   },
 });
 
-export async function uploadFileController({ request, set }: any) {
-  const form = await request.formData();
-  const file = form.get("file");
+export async function uploadFileController({ body, set }: any) {
+  try {
+    // Elysia ya parseó el multipart. El archivo llega en `body.file` como un
+    // File/Blob. NO usar `request.formData()` acá: el body ya fue consumido
+    // por el parser interno de Elysia y tirar "ERR_BODY_ALREADY_USED".
+    const file = body?.file;
+    console.log("Received file:", file);
 
-  if (!file || !(file instanceof Blob)) {
-    set.status = 400;
-    return { error: "No file uploaded" };
+    if (!file || !(file instanceof Blob)) {
+      set.status = 400;
+      return { error: "No file uploaded" };
+    }
+
+    // Obtener extensión
+    let ext = "";
+    if ("name" in file) {
+      const parts = (file as any).name.split(".");
+      if (parts.length > 1) ext = "." + parts.pop();
+    }
+    const filename = `${uuidv4()}${ext}`;
+
+    // Convertir Blob a Buffer
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: filename,
+        Body: buffer,
+        ContentType: file.type || "application/octet-stream",
+      })
+    );
+
+    const url = `${filename}`;
+    return { success: true, url, filename };
+  } catch (error) {
+    console.error("Error uploading file:", error);
+    set.status = 500;
+    return { error: "Error uploading file" };
   }
+}
 
-  // Obtener extensión
+const SIGNED_URL_EXPIRY = 3600; // 1 hora
+
+export async function uploadDocumentoInversionista(
+  file: Blob & { name?: string },
+  inversionistaId: number
+): Promise<string> {
   let ext = "";
-  if ("name" in file) {
-    const parts = (file as any).name.split(".");
+  if ("name" in file && file.name) {
+    const parts = file.name.split(".");
     if (parts.length > 1) ext = "." + parts.pop();
   }
   const filename = `${uuidv4()}${ext}`;
+  const key = `documentos-inversionista/${inversionistaId}/${filename}`;
 
-  // Convertir Blob a Buffer
   const buffer = Buffer.from(await file.arrayBuffer());
 
   await s3.send(
     new PutObjectCommand({
       Bucket: process.env.R2_BUCKET,
-      Key: filename,
+      Key: key,
       Body: buffer,
       ContentType: file.type || "application/octet-stream",
     })
   );
 
-  const url = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/${filename}`;
-  return { success: true, url, filename };
+  return key;
+}
+
+export async function getSignedDocumentUrl(key: string): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: process.env.R2_BUCKET,
+    Key: key,
+  });
+  return getSignedUrl(s3, command, { expiresIn: SIGNED_URL_EXPIRY });
+}
+
+export async function deleteDocumentoFromR2(key: string): Promise<void> {
+  await s3.send(
+    new DeleteObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+    })
+  );
 }

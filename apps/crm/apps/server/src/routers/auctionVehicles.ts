@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import z from "zod";
 import { db } from "../db";
@@ -38,7 +39,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehicle not found");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			// 2. Get latest inspection to fetch marketValue
@@ -50,7 +51,9 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!latestInspection) {
-				throw new Error("No inspection found for this vehicle");
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró inspección para este vehículo",
+				});
 			}
 
 			const marketValue = latestInspection.marketValue;
@@ -139,7 +142,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehicle not found");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			// 2. Get auction record
@@ -150,7 +153,9 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!auction) {
-				throw new Error("Auction entry not found for this vehicle");
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró entrada de subasta para este vehículo",
+				});
 			}
 
 			// 3. Get latest inspection to fetch marketValue
@@ -162,7 +167,9 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!latestInspection) {
-				throw new Error("No inspection found for this vehicle");
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró inspección para este vehículo",
+				});
 			}
 
 			const marketValue = Number.parseFloat(
@@ -311,84 +318,10 @@ export const auctionRouter = {
 				.offset(offset);
 
 			// Group rows into nested structure
-			type AuctionRow = (typeof auctions)[number];
-			type GroupedAuction = {
-				auctionId: AuctionRow['auctionId'];
-				description: AuctionRow['description'];
-				auctionStatus: AuctionRow['auctionStatus'];
-				auctionPrice: AuctionRow['auctionPrice'];
-				lossValue: AuctionRow['lossValue'];
-				vehicle: {
-					id: AuctionRow['vehicleId'];
-					make: AuctionRow['make'];
-					model: AuctionRow['model'];
-					year: AuctionRow['year'];
-					licensePlate: AuctionRow['licensePlate'];
-					vinNumber: AuctionRow['vinNumber'];
-					color: AuctionRow['color'];
-					vehicleType: AuctionRow['vehicleType'];
-					kmMileage: AuctionRow['kmMileage'];
-					milesMileage: AuctionRow['milesMileage'];
-					origin: AuctionRow['origin'];
-					cylinders: AuctionRow['cylinders'];
-					engineCC: AuctionRow['engineCC'];
-					fuelType: AuctionRow['fuelType'];
-					transmission: AuctionRow['transmission'];
-					seguroVigente: AuctionRow['seguroVigente'];
-					numeroPoliza: AuctionRow['numeroPoliza'];
-					companiaSeguro: AuctionRow['companiaSeguro'];
-					fechaInicioSeguro: AuctionRow['fechaInicioSeguro'];
-					fechaVencimientoSeguro: AuctionRow['fechaVencimientoSeguro'];
-					montoAsegurado: AuctionRow['montoAsegurado'];
-					deducible: AuctionRow['deducible'];
-					tipoCobertura: AuctionRow['tipoCobertura'];
-					gpsActivo: AuctionRow['gpsActivo'];
-					dispositivoGPS: AuctionRow['dispositivoGPS'];
-					imeiGPS: AuctionRow['imeiGPS'];
-					ubicacionActualGPS: AuctionRow['ubicacionActualGPS'];
-					ultimaSeñalGPS: AuctionRow['ultimaSeñalGPS'];
-					status: AuctionRow['vehicleStatus'];
-				};
-				inspections: Array<{
-					id: string;
-					date: AuctionRow['inspectionDate'];
-					result: AuctionRow['inspectionResult'];
-					technicianName: AuctionRow['technicianName'];
-					rating: AuctionRow['vehicleRating'];
-					marketValue: AuctionRow['marketValue'];
-					bankValue: AuctionRow['bankValue'];
-					suggestedCommercialValue: AuctionRow['suggestedCommercialValue'];
-					currentConditionValue: AuctionRow['currentConditionValue'];
-					vehicleEquipment: AuctionRow['vehicleEquipment'];
-					importantConsiderations: AuctionRow['importantConsiderations'];
-					scannerUsed: AuctionRow['scannerUsed'];
-					scannerResultUrl: AuctionRow['scannerResultUrl'];
-					airbagWarning: AuctionRow['airbagWarning'];
-					missingAirbag: AuctionRow['missingAirbag'];
-					testDrive: AuctionRow['testDrive'];
-					noTestDriveReason: AuctionRow['noTestDriveReason'];
-					status: AuctionRow['inspectionStatus'];
-					alerts: AuctionRow['alerts'];
-				}>;
-				photos: Array<{
-					id: AuctionRow['photoId'];
-					url: AuctionRow['photoUrl'];
-					title: AuctionRow['photoTitle'];
-					category: AuctionRow['photoCategory'];
-					description: AuctionRow['photoDescription'];
-					type: AuctionRow['photoType'];
-					valuatorComment: AuctionRow['valuatorComment'];
-					noCommentsChecked: AuctionRow['noCommentsChecked'];
-				}>;
-				expenses: Array<{
-					id: string;
-					description: AuctionRow['expenseDescription'];
-					amount: AuctionRow['expenseAmount'];
-				}>;
-			};
-
-			const grouped = auctions.reduce((acc: GroupedAuction[], row) => {
-				let auction = acc.find((a) => a.auctionId === row.auctionId);
+			const grouped = auctions.reduce((acc, row) => {
+				let auction = acc.find(
+					(a: { auctionId: string }) => a.auctionId === row.auctionId,
+				);
 				if (!auction) {
 					auction = {
 						auctionId: row.auctionId,
@@ -441,7 +374,7 @@ export const auctionRouter = {
 				if (
 					row.inspectionId &&
 					!auction.inspections.find(
-						(i) => i.id === row.inspectionId,
+						(i: { id: string }) => i.id === row.inspectionId,
 					)
 				) {
 					auction.inspections.push({
@@ -470,9 +403,7 @@ export const auctionRouter = {
 				// Agrupar fotos
 				if (
 					row.photoId &&
-					!auction.photos.find(
-						(p) => p.id === row.photoId,
-					)
+					!auction.photos.find((p: { id: string }) => p.id === row.photoId)
 				) {
 					auction.photos.push({
 						id: row.photoId,
@@ -489,7 +420,7 @@ export const auctionRouter = {
 				// Agrupar gastos
 				if (
 					row.expenseId &&
-					!auction.expenses.find((e) => e.id === row.expenseId)
+					!auction.expenses.find((e: { id: string }) => e.id === row.expenseId)
 				) {
 					auction.expenses.push({
 						id: row.expenseId,
@@ -532,7 +463,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehicle not found");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			// 2. Validate auction entry exists
@@ -543,7 +474,9 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!auction) {
-				throw new Error("Auction entry not found for this vehicle");
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró entrada de subasta para este vehículo",
+				});
 			}
 
 			// 3. Delete auction record

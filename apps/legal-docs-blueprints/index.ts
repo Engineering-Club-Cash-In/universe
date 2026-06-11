@@ -2,6 +2,10 @@ import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { contractGenerator } from './services/ContractGeneratorService';
 import { ContractType, GenerateContractRequest } from './types/contract';
+import { WeeTrustService } from './services/WeeTrustService';
+
+// Inicializar WeeTrust
+const weeTrustService = new WeeTrustService();
 
 const PORT = Number(process.env.PORT) || 4000;
 
@@ -14,13 +18,67 @@ const app = new Elysia()
    * GET /health - Health check
    */
   .get('/health', async () => {
-  const gotenbergHealth = await contractGenerator.checkGotenbergHealth();
+    // Health check con timeout independiente para no bloquear si Gotenberg está colgado
+    const gotenbergHealthPromise = contractGenerator.checkGotenbergHealth();
+    const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000));
+
+    const gotenbergHealth = await Promise.race([gotenbergHealthPromise, timeoutPromise]);
+
+    // Verificar memoria disponible (en MB)
+    const memoryUsage = process.memoryUsage();
+    const heapUsedMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+    const heapTotalMB = Math.round(memoryUsage.heapTotal / 1024 / 1024);
+    const rssMB = Math.round(memoryUsage.rss / 1024 / 1024);
 
     return {
       status: 'ok',
       service: 'Contract Generator API',
       timestamp: new Date().toISOString(),
-      gotenberg: gotenbergHealth ? 'available' : 'unavailable'
+      gotenberg: gotenbergHealth ? 'available' : 'unavailable',
+      memory: {
+        heapUsedMB,
+        heapTotalMB,
+        rssMB
+      }
+    };
+  })
+
+  /**
+   * GET /metrics - Endpoint de métricas detalladas para diagnóstico
+   */
+  .get('/metrics', async () => {
+    const memoryUsage = process.memoryUsage();
+    const uptime = process.uptime();
+
+    // Verificar Gotenberg con timeout
+    const gotenbergStart = Date.now();
+    const gotenbergHealthPromise = contractGenerator.checkGotenbergHealth();
+    const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000));
+    const gotenbergHealth = await Promise.race([gotenbergHealthPromise, timeoutPromise]);
+    const gotenbergLatency = Date.now() - gotenbergStart;
+
+    return {
+      timestamp: new Date().toISOString(),
+      uptime: {
+        seconds: Math.round(uptime),
+        formatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.round(uptime % 60)}s`
+      },
+      memory: {
+        heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+        heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+        rss: Math.round(memoryUsage.rss / 1024 / 1024),
+        external: Math.round(memoryUsage.external / 1024 / 1024),
+        unit: 'MB'
+      },
+      gotenberg: {
+        status: gotenbergHealth ? 'healthy' : 'unhealthy',
+        latencyMs: gotenbergLatency,
+        timedOut: gotenbergLatency >= 5000
+      },
+      process: {
+        pid: process.pid,
+        nodeVersion: process.version
+      }
     };
   })
 
@@ -273,7 +331,12 @@ const app = new Elysia()
       listContracts: 'GET /contracts/types',
       generateContract: 'POST /generatecontrato',
       generateBatch: 'POST /contracts/batch',
-      generateByType: 'POST /contracts/:type'
+      generateByType: 'POST /contracts/:type',
+      webhooks: {
+        receive: 'POST /webhooks/weetrust/:secret',
+        status: 'GET /webhooks/weetrust/status',
+        register: 'POST /webhooks/weetrust/register'
+      }
     },
     examples: {
       generateContract: {
@@ -304,6 +367,158 @@ const app = new Elysia()
     }
   };
 })
+
+  // ===== WEBHOOKS =====
+
+  /**
+   * POST /webhooks/weetrust/:secret - Recibe notificaciones de WeeTrust
+   *
+   * Tipos de eventos:
+   * - sendDocument: Documento enviado a firma
+   * - signDocument: Un firmante firmó
+   * - completedDocument: Todos los firmantes completaron
+   *
+   * Security: Secret token validated via URL path parameter
+   * Register webhook with: https://your-domain.com/webhooks/weetrust/{WEETRUST_WEBHOOK_SECRET}
+   */
+  .post('/webhooks/weetrust/:secret', async ({ params, body, set }) => {
+    try {
+      // Validate webhook secret from URL
+      const expectedSecret = process.env.WEETRUST_WEBHOOK_SECRET;
+
+      if (!expectedSecret) {
+        console.error('[WeeTrust Webhook] WEETRUST_WEBHOOK_SECRET not configured');
+        set.status = 500;
+        return { success: false, error: 'Webhook not configured' };
+      }
+
+      if (params.secret !== expectedSecret) {
+        console.warn('[WeeTrust Webhook] Invalid webhook secret');
+        set.status = 401;
+        return { success: false, error: 'Unauthorized' };
+      }
+
+      const payload = body as {
+        event?: string;
+        type?: string;
+        documentID?: string;
+        document?: {
+          documentID: string;
+          status: string;
+        };
+        signatory?: {
+          emailID: string;
+          name: string;
+          isSigned: number;
+        };
+        timestamp?: string;
+      };
+
+      // Log event without sensitive data
+      console.log(`\n📥 [WeeTrust Webhook] Event: ${payload.event || payload.type}, DocumentID: ${payload.documentID || payload.document?.documentID}`);
+
+      // Determinar tipo de evento
+      const eventType = payload.event || payload.type || 'unknown';
+      const documentId = payload.documentID || payload.document?.documentID;
+
+      if (!documentId) {
+        console.warn('[WeeTrust Webhook] Payload sin documentID');
+        set.status = 400;
+        return { success: false, error: 'Missing documentID' };
+      }
+
+      // Procesar según tipo de evento
+      switch (eventType) {
+        case 'sendDocument':
+          console.log(`[WeeTrust Webhook] Documento ${documentId} enviado a firma`);
+          break;
+
+        case 'signDocument':
+          console.log(`[WeeTrust Webhook] Documento ${documentId} - Firmante firmó:`, payload.signatory?.emailID);
+          // TODO: Notificar a CRM que un firmante firmó
+          break;
+
+        case 'completedDocument':
+          console.log(`[WeeTrust Webhook] Documento ${documentId} - COMPLETADO (todos firmaron)`);
+          // TODO: Notificar a CRM que el documento está completo
+          // await notifyCrmDocumentCompleted(documentId);
+          break;
+
+        default:
+          console.log(`[WeeTrust Webhook] Evento desconocido: ${eventType}`);
+      }
+
+      // Responder éxito a WeeTrust
+      set.status = 200;
+      return {
+        success: true,
+        message: 'Webhook received',
+        event: eventType,
+        documentId
+      };
+
+    } catch (error: any) {
+      console.error('[WeeTrust Webhook] Error:', error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * GET /webhooks/weetrust/status - Ver webhooks registrados
+   */
+  .get('/webhooks/weetrust/status', async ({ set }) => {
+    try {
+      const webhooks = await weeTrustService.listWebhooks();
+      return {
+        success: true,
+        count: webhooks.length,
+        webhooks
+      };
+    } catch (error: any) {
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * POST /webhooks/weetrust/register - Registrar webhook en WeeTrust
+   * Body: { url: string, type: 'sendDocument' | 'signDocument' | 'completedDocument' }
+   */
+  .post('/webhooks/weetrust/register', async ({ body, set }) => {
+    try {
+      const { url, type } = body as { url: string; type: string };
+
+      if (!url || !type) {
+        set.status = 400;
+        return { success: false, error: 'Missing url or type' };
+      }
+
+      const validTypes = ['sendDocument', 'signDocument', 'completedDocument'];
+      if (!validTypes.includes(type)) {
+        set.status = 400;
+        return {
+          success: false,
+          error: `Invalid type. Valid types: ${validTypes.join(', ')}`
+        };
+      }
+
+      const result = await weeTrustService.addWebhook(
+        url,
+        type as 'sendDocument' | 'signDocument' | 'completedDocument'
+      );
+
+      return {
+        success: true,
+        message: 'Webhook registered',
+        webhook: result
+      };
+    } catch (error: any) {
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  })
+
   .listen({
     port: PORT,
     hostname: '0.0.0.0'
@@ -320,6 +535,11 @@ console.log(`
 ║  • POST /generatecontrato      - Genera contrato          ║
 ║  • POST /contracts/batch       - Genera múltiples         ║
 ║  • POST /contracts/:type       - Genera por tipo          ║
+║                                                           ║
+║  Webhooks:                                                ║
+║  • POST /webhooks/weetrust/:secret  - Recibe eventos      ║
+║  • GET  /webhooks/weetrust/status   - Ver registrados     ║
+║  • POST /webhooks/weetrust/register - Registrar webhook   ║
 ╚═══════════════════════════════════════════════════════════╝
 `);
 

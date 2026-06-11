@@ -1,53 +1,18 @@
-# Imagen base de Bun
-FROM oven/bun AS base
+FROM docker.io/oven/bun:latest
+
 WORKDIR /usr/src/app
 
-# =========================
-# Etapa: instalar dependencias
-# =========================
-FROM base AS install
-RUN mkdir -p /temp/prod
+# Copiar archivos de configuración de la raíz para que Bun reconozca el monorepo
+COPY package.json bun.lock* ./
 
-# Copiamos package.json (y lock si existe) para instalar dependencias
-COPY package.json /temp/prod/
-# Si tienes bun.lockb, descomenta esta línea:
-# COPY bun.lockb /temp/prod/
+# Copiar la app (backend-2 no depende de paquetes compartidos del workspace)
+COPY apps/backend-2 ./apps/backend-2
 
-# Copiamos el resto del código
-COPY . /temp/prod/
+# Instalar dependencias desde la raíz (resuelve workspaces)
+RUN bun install --frozen-lockfile || bun install
 
-# Instalamos dependencias
-RUN cd /temp/prod && bun install
-
-# =========================
-# Etapa: compilar la app
-# =========================
-FROM base AS builder
-WORKDIR /usr/src/app
-
-# Traemos node_modules del stage install
-COPY --from=install /temp/prod/node_modules ./node_modules
-
-# Traemos el código fuente
-COPY . .
-
-# Compilamos la app
-RUN bun build \
-    --compile \
-    --minify-whitespace \
-    --minify-syntax \
-    --target bun \
-    --outfile server \
-    src/index.ts
-
-# =========================
-# Etapa: runner final
-# =========================
-FROM base AS runner
-WORKDIR /usr/src/app
-
-# Copiamos solo el binario generado
-COPY --from=builder /usr/src/app/server .
+# Trabajar dentro de la app
+WORKDIR /usr/src/app/apps/backend-2
 
 EXPOSE 9000
-ENTRYPOINT ["./server"]
+CMD ["bun", "run", "src/index.ts"]

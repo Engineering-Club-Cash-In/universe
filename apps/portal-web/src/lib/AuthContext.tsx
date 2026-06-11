@@ -1,25 +1,31 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { authService } from "@features/Login/services/authService";
-import type { User } from "@/lib/auth";
+import { authClient, type User } from "@/lib/auth";
 import { AuthContext } from "./useAuth";
+import { setAuthToken } from "./api/apiAuth";
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
 
   // Query para verificar autenticación
   const { data, isLoading } = useQuery({
-    queryKey: ["currentUser"],
-    queryFn: authService.getCurrentUser,
-    retry: false,
-    staleTime: 1000 * 60 * 5, // 5 minutos
+    queryKey: ["auth", "session"],
+    queryFn: () => authClient.getSession().then((res) => res.data),
+    staleTime: 1 * 60 * 1000, // 1 minuto - refetch más frecuente
+    refetchOnWindowFocus: true, // Refetch cuando la ventana recupera el foco
+    refetchOnMount: true, // Refetch cuando el componente se monta
   });
 
   useEffect(() => {
     if (data) {
+      // eslint-disable-next-line 
+      // @ts-ignore
       setUser(data.user);
+      // Sincronizar token con el cliente API
+      setAuthToken(data.session?.token || null);
     } else {
       setUser(null);
+      setAuthToken(null);
     }
   }, [data]);
 
@@ -29,11 +35,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         user,
         isAuthenticated: !!user,
         isLoading,
+        token: data?.session?.token || null,
       }}
     >
       {children}
     </AuthContext.Provider>
   );
 };
-
-

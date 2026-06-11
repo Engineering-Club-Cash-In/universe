@@ -2,20 +2,31 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	AlertTriangle,
 	Building,
+	ChevronLeft,
+	ChevronRight,
+	ChevronsLeft,
+	ChevronsRight,
 	Filter,
+	Loader2,
 	Mail,
 	MoreHorizontal,
+	Pencil,
 	Phone,
 	Plus,
 	Search,
 	Users,
+	X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { PERMISSIONS } from "server/src/types/roles";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { DateRange } from "react-day-picker";
+import type { LeadSource } from "server/src/lib/lead-sources";
 import { toast } from "sonner";
 import { z } from "zod";
+import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
 import { NotesTimeline } from "@/components/notes-timeline";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +41,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
+	DialogDescription,
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
@@ -60,30 +72,49 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
-	getLoanPurposeLabel,
+	formatGuatemalaDateTime,
+	getLeadSourceBadgeClass,
 	getMaritalStatusLabel,
 	getOccupationLabel,
 	getSourceLabel,
 	getStatusLabel,
 	getWorkTimeLabel,
+	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
+import { getLeadNameAutocomplete } from "@/lib/lead-name-autocomplete";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
+
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
 
 export const Route = createFileRoute("/crm/leads")({
 	component: RouteComponent,
 	validateSearch: z.object({
 		companyId: z.string().optional(),
+		leadId: z.string().optional(),
 	}).parse,
 });
 
 // Type aliases for better type safety
 type CreateLeadInput = Parameters<typeof client.createLead>[0];
 type UpdateLeadInput = Parameters<typeof client.updateLead>[0];
-type Lead = Awaited<ReturnType<typeof client.getLeads>>[0] & {
+type Lead = Awaited<ReturnType<typeof client.getLeads>>["data"][0] & {
 	score?: string | null;
 	fit?: boolean | null;
 	scoredAt?: Date | null;
@@ -93,7 +124,11 @@ type CreditAnalysis = Awaited<
 >;
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const search = Route.useSearch();
 	const queryClient = useQueryClient();
@@ -101,19 +136,114 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 	const [editingLead, setEditingLead] = useState<Lead | null>(null);
-	const [searchTerm, setSearchTerm] = useState("");
-	const [statusFilter, setStatusFilter] = useState<string>("all");
+	const [searchTerm, setSearchTerm] = usePersistedState("crm/leads/searchTerm", "");
+	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
+	const [dateRange, setDateRange] = usePersistedDateRange("crm/leads/dateRange");
+	const [statusFilter, setStatusFilter] = usePersistedState<string>("crm/leads/statusFilter", "all");
+	const [sourceFilter, setSourceFilter] = usePersistedState<string>("crm/leads/sourceFilter", "all");
+	const [page, setPage] = usePersistedState<number>("crm/leads/page", 0);
+
+	const hasActiveFilters = searchTerm !== "" || dateRange !== undefined || statusFilter !== "all" || sourceFilter !== "all";
+	const resetFilters = () => {
+		setSearchTerm("");
+		setDebouncedSearch("");
+		setDateRange(undefined);
+		setStatusFilter("all");
+		setSourceFilter("all");
+		setPage(0);
+	};
+
+	const [isEditingCreditAnalysis, setIsEditingCreditAnalysis] = useState(false);
+	const [isConvertDialogOpen, setIsConvertDialogOpen] = useState(false);
+	const [leadToConvert, setLeadToConvert] = useState<Lead | null>(null);
+	const [convertForm, setConvertForm] = useState({
+		title: "",
+		creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
+	});
+	const [duplicateWarning, setDuplicateWarning] = useState<{
+		show: boolean;
+		message: string;
+		pendingData: {
+			title: string;
+			leadId: string;
+			creditType: "autocompra" | "sobre_vehiculo";
+			stageId: string;
+		} | null;
+	}>({ show: false, message: "", pendingData: null });
+	const [creditAnalysisForm, setCreditAnalysisForm] = useState({
+		monthlyFixedIncome: "",
+		monthlyVariableIncome: "",
+		monthlyFixedExpenses: "",
+		monthlyVariableExpenses: "",
+		economicAvailability: "",
+		maxPayment: "",
+		maxCreditAmount: "",
+	});
+	const pageSize = 20;
+	const [selectedDepartamento, setSelectedDepartamento] = useState<string>("");
 	const processedCompanyIdRef = useRef<string | null>(null);
+	const processedLeadIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
+	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
+	const isTransitioningToEditRef = useRef(false);
+
+	// Debounce search input
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSearch(searchTerm);
+			setPage(0); // Reset to first page on search
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [searchTerm]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+
 	const leadsQuery = useQuery({
-		...orpc.getLeads.queryOptions(),
+		...orpc.getLeads.queryOptions({
+			input: {
+				limit: pageSize,
+				offset: page * pageSize,
+				search: debouncedSearch || undefined,
+				status:
+					statusFilter !== "all"
+						? (statusFilter as
+								| "new"
+								| "contacted"
+								| "qualified"
+								| "converted"
+								| "unqualified")
+						: undefined,
+				source:
+					sourceFilter !== "all" ? (sourceFilter as LeadSource) : undefined,
+				dateFrom: dateRange?.from?.toISOString(),
+				dateTo: dateRange?.to?.toISOString(),
+			},
+		}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+		queryKey: [
+			"getLeads",
+			session?.user?.id,
+			userProfile.data?.role,
+			page,
+			pageSize,
+			debouncedSearch,
+			statusFilter,
+			sourceFilter,
+			dateRange?.from?.toISOString(),
+			dateRange?.to?.toISOString(),
+		],
+	});
+
+	const leadsStatsQuery = useQuery({
+		...orpc.getLeadsStats.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getLeadsStats", session?.user?.id, userProfile.data?.role],
 	});
 	const companiesQuery = useQuery({
 		...orpc.getCompanies.queryOptions(),
@@ -123,6 +253,28 @@ function RouteComponent() {
 			!!session?.user?.id,
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
+
+	// Query para obtener departamentos de Guatemala
+	const departamentosQuery = useQuery<string[]>({
+		...orpc.getDepartamentos.queryOptions(),
+		queryKey: ["getDepartamentos"],
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role),
+	});
+
+	// Query para obtener municipios del departamento seleccionado
+	const municipiosQuery = useQuery<string[]>({
+		queryKey: ["getMunicipiosByDepartamento", selectedDepartamento],
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		queryFn: () =>
+			(client as any).getMunicipiosByDepartamento({
+				departamento: selectedDepartamento,
+			}),
+		enabled: !!selectedDepartamento,
+	});
+
 	const creditAnalysisQuery = useQuery({
 		queryKey: ["getCreditAnalysisByLeadId", selectedLead?.id],
 		queryFn: selectedLead?.id
@@ -131,14 +283,52 @@ function RouteComponent() {
 		enabled: !!selectedLead?.id && isDetailsDialogOpen,
 	});
 
+	// Query para obtener las oportunidades del lead
+	const leadOpportunitiesQuery = useQuery({
+		queryKey: ["getOpportunitiesByLeadId", selectedLead?.id],
+		queryFn: selectedLead?.id
+			? () => client.getOpportunities({ leadId: selectedLead.id })
+			: () => Promise.resolve([]),
+		enabled: !!selectedLead?.id && isDetailsDialogOpen,
+	});
+
+	// Query para obtener un lead específico por ID (desde URL)
+	const specificLeadQuery = useQuery({
+		queryKey: ["getLeadById", search.leadId],
+		queryFn: search.leadId
+			? () => client.getLeads({ id: search.leadId })
+			: () => Promise.resolve(null),
+		enabled:
+			!!search.leadId &&
+			!processedLeadIdRef.current &&
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role),
+	});
+
+	// Query para obtener las etapas de ventas (para convertir lead a oportunidad)
+	const salesStagesQuery = useQuery({
+		...orpc.getSalesStages.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role),
+		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
+	});
+
 	const createLeadForm = useForm({
 		defaultValues: {
 			firstName: "",
+			middleName: "",
 			lastName: "",
+			secondLastName: "",
 			email: "",
 			phone: "",
 			age: "",
 			dpi: "",
+			nit: "",
+			direccion: "",
+			departamento: "",
+			municipio: "",
+			zona: "",
 			clientType: "individual" as "individual" | "comerciante" | "empresa",
 			maritalStatus: "single" as "single" | "married" | "divorced" | "widowed",
 			dependents: "0",
@@ -146,22 +336,20 @@ function RouteComponent() {
 			loanAmount: "",
 			occupation: "employee" as "owner" | "employee",
 			workTime: "1_to_5" as "less_than_1" | "1_to_5" | "5_to_10" | "10_plus",
-			loanPurpose: "personal" as "personal" | "business",
 			ownsHome: false,
 			ownsVehicle: false,
 			hasCreditCard: false,
 			jobTitle: "",
 			companyId: "none",
-			source: "website" as
-				| "website"
-				| "referral"
-				| "cold_call"
-				| "email"
-				| "social_media"
-				| "event"
-				| "other",
+			source: "website" as LeadSource,
 			assignedTo: "",
 			notes: "",
+			score: "",
+			fit: false,
+			// Campos para contratos legales
+			birthDate: "" as string,
+			gender: "" as "male" | "female" | "",
+			nationality: "",
 		},
 		validators: {
 			onSubmit: ({ value }) => {
@@ -175,9 +363,10 @@ function RouteComponent() {
 					errors.lastName = "El apellido es requerido";
 				}
 
-				if (!value.email.trim()) {
-					errors.email = "El correo electrónico es requerido";
-				} else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) {
+				if (
+					value.email.trim() &&
+					!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)
+				) {
 					errors.email = "El correo electrónico no es válido";
 				}
 
@@ -195,6 +384,9 @@ function RouteComponent() {
 		onSubmit: async ({ value }) => {
 			const leadData = {
 				...value,
+				...(value.email
+					? { email: value.email }
+					: { email: undefined as string | undefined }),
 				age: value.age ? Number.parseInt(value.age) : undefined,
 				dependents: Number.parseInt(value.dependents),
 				monthlyIncome: value.monthlyIncome
@@ -207,8 +399,14 @@ function RouteComponent() {
 				maritalStatus: value.maritalStatus || undefined,
 				occupation: value.occupation || undefined,
 				workTime: value.workTime || undefined,
-				loanPurpose: value.loanPurpose || undefined,
 				dpi: value.dpi || undefined,
+				nit: value.nit || undefined,
+				middleName: value.middleName || undefined,
+				secondLastName: value.secondLastName || undefined,
+				direccion: value.direccion || undefined,
+				departamento: value.departamento || undefined,
+				municipio: value.municipio || undefined,
+				zona: value.zona || undefined,
 				source: value.source,
 				companyId:
 					value.companyId && value.companyId !== "none"
@@ -217,6 +415,12 @@ function RouteComponent() {
 				assignedTo: value.assignedTo || undefined,
 				jobTitle: value.jobTitle || undefined,
 				notes: value.notes || undefined,
+				score: value.score ? Number.parseFloat(value.score) : undefined,
+				fit: value.fit,
+				// Campos para contratos legales
+				birthDate: value.birthDate ? new Date(value.birthDate) : undefined,
+				gender: value.gender || undefined,
+				nationality: value.nationality || undefined,
 			};
 
 			if (editingLead) {
@@ -234,7 +438,9 @@ function RouteComponent() {
 		mutationFn: (input: CreateLeadInput) => client.createLead(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
-				queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+				predicate: (query) =>
+					query.queryKey[0] === "getLeads" ||
+					query.queryKey[0] === "getLeadsStats",
 			});
 			toast.success("Lead creado exitosamente");
 			setIsCreateDialogOpen(false);
@@ -246,24 +452,175 @@ function RouteComponent() {
 		},
 	});
 
-	const updateLeadMutation = useMutation({
-		mutationFn: (input: UpdateLeadInput) => client.updateLead(input),
+	const upsertCreditAnalysisMutation = useMutation({
+		mutationFn: (input: {
+			leadId: string;
+			monthlyFixedIncome?: number;
+			monthlyVariableIncome?: number;
+			monthlyFixedExpenses?: number;
+			monthlyVariableExpenses?: number;
+			economicAvailability?: number;
+			maxPayment?: number;
+			maxCreditAmount?: number;
+		}) => client.upsertCreditAnalysis(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
-				queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+				queryKey: ["getCreditAnalysisByLeadId", selectedLead?.id],
 			});
-			toast.success("Lead actualizado exitosamente");
-			setIsCreateDialogOpen(false);
-			setEditingLead(null);
-			createLeadForm.reset();
+			toast.success("Análisis crediticio actualizado exitosamente");
+			setIsEditingCreditAnalysis(false);
+		},
+		onError: (error: any) => {
+			toast.error(
+				error.message || "Error al actualizar el análisis crediticio",
+			);
+		},
+	});
+
+	const updateLeadMutation = useMutation({
+		mutationFn: (input: UpdateLeadInput) => client.updateLead(input),
+		onSuccess: async (_data, variables) => {
+			queryClient.invalidateQueries({
+				predicate: (query) =>
+					query.queryKey[0] === "getLeads" ||
+					query.queryKey[0] === "getLeadsStats" ||
+					query.queryKey[0] === "getLeadById",
+			});
+
+			// Solo mostrar toast y cerrar dialogs si NO es una conversión
+			if (variables.status !== "converted") {
+				toast.success("Lead actualizado exitosamente");
+				setIsCreateDialogOpen(false);
+				setEditingLead(null);
+				createLeadForm.reset();
+			}
+
+			// Refrescar el lead seleccionado para que el modal muestre los datos actualizados.
+			// Va al final y aislado en try/catch: la mutación ya tuvo éxito en el servidor,
+			// un fallo aquí (p. ej. red) no debe revertir el flujo de éxito de la UI.
+			if (selectedLead?.id === variables.id) {
+				try {
+					const freshResult = await client.getLeads({ id: variables.id });
+					const freshLead = (freshResult?.data as Lead[] | undefined)?.[0];
+					if (freshLead) {
+						setSelectedLead(freshLead);
+					}
+				} catch {
+					// Silenciar: la invalidación ya marcó las queries como stale
+					// y se refrescarán en el próximo re-fetch.
+				}
+			}
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al actualizar el lead");
 		},
 	});
 
+	// Mutación para crear oportunidad (conversión de lead)
+	const createOpportunityMutation = useMutation({
+		mutationFn: (input: {
+			title: string;
+			leadId: string;
+			creditType: "autocompra" | "sobre_vehiculo";
+			stageId: string;
+			force?: boolean;
+		}) => client.createOpportunity(input),
+		onSuccess: (data) => {
+			// Check if backend returned a warning about duplicate
+			if (data.warning === true && "message" in data) {
+				// Show confirmation dialog
+				const initialStage = salesStagesQuery.data?.find(
+					(s) => s.closurePercentage === 1,
+				);
+				setDuplicateWarning({
+					show: true,
+					message: data.message,
+					pendingData: {
+						title: convertForm.title,
+						leadId: leadToConvert!.id,
+						creditType: convertForm.creditType,
+						stageId: initialStage!.id,
+					},
+				});
+				return;
+			}
+
+			// Actualizar el lead a "converted"
+			if (leadToConvert) {
+				updateLeadMutation.mutate({
+					id: leadToConvert.id,
+					status: "converted",
+				});
+			}
+			queryClient.invalidateQueries({
+				predicate: (query) =>
+					query.queryKey[0] === "getLeads" ||
+					query.queryKey[0] === "getLeadsStats" ||
+					query.queryKey[0] === "getOpportunities",
+			});
+			toast.success("Oportunidad creada exitosamente");
+			setIsConvertDialogOpen(false);
+			setLeadToConvert(null);
+			setConvertForm({ title: "", creditType: "autocompra" });
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "Error al crear la oportunidad");
+		},
+	});
+
+	// Mapa de campos a español para scoring
+	const scoringFieldLabels: Record<string, string> = {
+		age: "Edad",
+		monthlyIncome: "Ingreso Mensual",
+		loanAmount: "Monto del Préstamo",
+		workTime: "Tiempo Laboral",
+		occupation: "Ocupación",
+		maritalStatus: "Estado Civil",
+	};
+
+	// Mutación para calcular score crediticio
+	const scoreLeadMutation = useMutation({
+		mutationFn: (leadId: string) => client.scoreLead({ leadId }),
+		onSuccess: (data) => {
+			if (data.missingFields && data.missingFields.length > 0) {
+				const fieldNames = data.missingFields
+					.map((f: string) => scoringFieldLabels[f] || f)
+					.join(", ");
+				toast.warning(
+					`No se puede calcular el score. Faltan campos: ${fieldNames}`,
+				);
+				return;
+			}
+			toast.success("Score crediticio calculado exitosamente");
+			queryClient.invalidateQueries({
+				predicate: (query) => query.queryKey[0] === "getLeads",
+			});
+		},
+		onError: () => {
+			toast.error("Error al calcular el score");
+		},
+	});
+
+	// Handler para confirmar creación de oportunidad duplicada
+	const handleConfirmDuplicate = () => {
+		if (duplicateWarning.pendingData) {
+			createOpportunityMutation.mutate({
+				...duplicateWarning.pendingData,
+				force: true,
+			});
+		}
+		setDuplicateWarning({ show: false, message: "", pendingData: null });
+	};
+
+	const handleCancelDuplicate = () => {
+		setDuplicateWarning({ show: false, message: "", pendingData: null });
+		setIsConvertDialogOpen(false);
+		setLeadToConvert(null);
+		setConvertForm({ title: "", creditType: "autocompra" });
+	};
+
 	useEffect(() => {
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (
 			session &&
@@ -273,7 +630,7 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
-	}, [session, isPending, userProfile.data?.role]);
+	}, [session, sessionError, isPending, userProfile.data?.role, navigate]);
 
 	// Handle opening create modal with pre-filled company
 	useEffect(() => {
@@ -296,7 +653,24 @@ function RouteComponent() {
 		}
 	}, [search.companyId, companiesQuery.data]);
 
-	// Clear search param when modal closes (only on transition from open to closed)
+	// Handle opening details modal from URL param (leadId)
+	useEffect(() => {
+		if (
+			search.leadId &&
+			specificLeadQuery.data &&
+			processedLeadIdRef.current !== search.leadId
+		) {
+			const leadsData = specificLeadQuery.data.data as Lead[] | undefined;
+			const lead = leadsData?.find((l) => l.id === search.leadId);
+			if (lead) {
+				setSelectedLead(lead);
+				setIsDetailsDialogOpen(true);
+				processedLeadIdRef.current = search.leadId;
+			}
+		}
+	}, [search.leadId, specificLeadQuery.data]);
+
+	// Clear search param when create modal closes (only on transition from open to closed)
 	useEffect(() => {
 		const wasOpen = prevOpenRef.current;
 		prevOpenRef.current = isCreateDialogOpen;
@@ -310,11 +684,39 @@ function RouteComponent() {
 		}
 	}, [isCreateDialogOpen, navigate, search.companyId]);
 
+	// Clear search param when details modal closes (unless transitioning to edit)
+	useEffect(() => {
+		const wasOpen = prevDetailsOpenRef.current;
+		prevDetailsOpenRef.current = isDetailsDialogOpen;
+
+		if (wasOpen && !isDetailsDialogOpen) {
+			// Skip cleanup if transitioning to edit modal
+			if (isTransitioningToEditRef.current) {
+				isTransitioningToEditRef.current = false;
+				return;
+			}
+			if (processedLeadIdRef.current) {
+				processedLeadIdRef.current = null;
+				if (search.leadId) {
+					navigate({ to: "/crm/leads", search: {}, replace: true });
+				}
+			}
+		}
+	}, [isDetailsDialogOpen, navigate, search.leadId]);
+
 	// Populate form when editing a lead
 	useEffect(() => {
 		if (editingLead) {
 			createLeadForm.setFieldValue("firstName", editingLead.firstName || "");
+			createLeadForm.setFieldValue(
+				"middleName",
+				(editingLead as any).middleName || "",
+			);
 			createLeadForm.setFieldValue("lastName", editingLead.lastName || "");
+			createLeadForm.setFieldValue(
+				"secondLastName",
+				(editingLead as any).secondLastName || "",
+			);
 			createLeadForm.setFieldValue("email", editingLead.email || "");
 			createLeadForm.setFieldValue("phone", editingLead.phone || "");
 			createLeadForm.setFieldValue(
@@ -322,7 +724,11 @@ function RouteComponent() {
 				editingLead.age ? String(editingLead.age) : "",
 			);
 			createLeadForm.setFieldValue("dpi", editingLead.dpi || "");
-			createLeadForm.setFieldValue("clientType", "individual");
+			createLeadForm.setFieldValue("nit", (editingLead as any).nit || "");
+			createLeadForm.setFieldValue(
+				"clientType",
+				(editingLead as any).clientType || "individual",
+			);
 			createLeadForm.setFieldValue(
 				"maritalStatus",
 				editingLead.maritalStatus || "single",
@@ -347,10 +753,6 @@ function RouteComponent() {
 				"workTime",
 				editingLead.workTime || "1_to_5",
 			);
-			createLeadForm.setFieldValue(
-				"loanPurpose",
-				editingLead.loanPurpose || "personal",
-			);
 			createLeadForm.setFieldValue("ownsHome", editingLead.ownsHome || false);
 			createLeadForm.setFieldValue(
 				"ownsVehicle",
@@ -368,6 +770,35 @@ function RouteComponent() {
 			createLeadForm.setFieldValue("source", editingLead.source || "website");
 			createLeadForm.setFieldValue("assignedTo", editingLead.assignedTo || "");
 			createLeadForm.setFieldValue("notes", editingLead.notes || "");
+			createLeadForm.setFieldValue(
+				"score",
+				editingLead.score ? String(editingLead.score) : "",
+			);
+			createLeadForm.setFieldValue("fit", editingLead.fit || false);
+			// Campos de dirección
+			createLeadForm.setFieldValue(
+				"direccion",
+				(editingLead as any).direccion || "",
+			);
+			const departamento = (editingLead as any).departamento || "";
+			createLeadForm.setFieldValue("departamento", departamento);
+			setSelectedDepartamento(departamento);
+			createLeadForm.setFieldValue(
+				"municipio",
+				(editingLead as any).municipio || "",
+			);
+			createLeadForm.setFieldValue("zona", (editingLead as any).zona || "");
+			// Campos para contratos legales
+			const birthDate = (editingLead as any).birthDate;
+			createLeadForm.setFieldValue(
+				"birthDate",
+				birthDate ? new Date(birthDate).toISOString().split("T")[0] : "",
+			);
+			createLeadForm.setFieldValue("gender", (editingLead as any).gender || "");
+			createLeadForm.setFieldValue(
+				"nationality",
+				(editingLead as any).nationality || "",
+			);
 		}
 	}, [editingLead]);
 
@@ -399,25 +830,6 @@ function RouteComponent() {
 		}
 	};
 
-	const getSourceBadgeColor = (source: string) => {
-		switch (source) {
-			case "website":
-				return "bg-indigo-100 text-indigo-800";
-			case "referral":
-				return "bg-green-100 text-green-800";
-			case "cold_call":
-				return "bg-orange-100 text-orange-800";
-			case "email":
-				return "bg-blue-100 text-blue-800";
-			case "social_media":
-				return "bg-pink-100 text-pink-800";
-			case "event":
-				return "bg-purple-100 text-purple-800";
-			default:
-				return "bg-gray-100 text-gray-800";
-		}
-	};
-
 	const handleStatusChange = (leadId: string, newStatus: string) => {
 		updateLeadMutation.mutate({
 			id: leadId,
@@ -435,22 +847,10 @@ function RouteComponent() {
 		setIsDetailsDialogOpen(true);
 	};
 
-	// Filter leads based on search and status
-	const filteredLeads =
-		(leadsQuery.data as Lead[] | undefined)?.filter((lead) => {
-			const matchesSearch =
-				searchTerm === "" ||
-				`${lead.firstName} ${lead.lastName}`
-					.toLowerCase()
-					.includes(searchTerm.toLowerCase()) ||
-				lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				lead.company?.name?.toLowerCase().includes(searchTerm.toLowerCase());
-
-			const matchesStatus =
-				statusFilter === "all" || lead.status === statusFilter;
-
-			return matchesSearch && matchesStatus;
-		}) || [];
+	// Data now comes pre-filtered from server
+	const leads = (leadsQuery.data?.data as Lead[] | undefined) || [];
+	const totalLeads = leadsQuery.data?.total ?? 0;
+	const totalPages = Math.ceil(totalLeads / pageSize);
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -474,7 +874,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{leadsQuery.data?.length || 0}
+							{leadsStatsQuery.data?.total || 0}
 						</div>
 					</CardContent>
 				</Card>
@@ -485,7 +885,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{leadsQuery.data?.filter((l) => l.status === "new").length || 0}
+							{leadsStatsQuery.data?.new || 0}
 						</div>
 					</CardContent>
 				</Card>
@@ -496,8 +896,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{leadsQuery.data?.filter((l) => l.status === "qualified")
-								.length || 0}
+							{leadsStatsQuery.data?.qualified || 0}
 						</div>
 					</CardContent>
 				</Card>
@@ -508,8 +907,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{leadsQuery.data?.filter((l) => l.status === "converted")
-								.length || 0}
+							{leadsStatsQuery.data?.converted || 0}
 						</div>
 					</CardContent>
 				</Card>
@@ -534,12 +932,15 @@ function RouteComponent() {
 								}
 							}}
 						>
-							<DialogTrigger asChild>
-								<Button>
-									<Plus className="mr-2 h-4 w-4" />
-									Agregar Lead
-								</Button>
-							</DialogTrigger>
+							{userProfile.data?.role &&
+								PERMISSIONS.canCreateLeads(userProfile.data.role) && (
+									<DialogTrigger asChild>
+										<Button>
+											<Plus className="mr-2 h-4 w-4" />
+											Agregar Lead
+										</Button>
+									</DialogTrigger>
+								)}
 							<DialogContent className="max-h-[90vh] min-w-[800px] max-w-4xl overflow-y-auto">
 								<DialogHeader>
 									<DialogTitle>
@@ -552,9 +953,10 @@ function RouteComponent() {
 										e.stopPropagation();
 										void createLeadForm.handleSubmit();
 									}}
+									autoComplete="off"
 									className="space-y-4"
 								>
-									<div className="grid grid-cols-2 gap-4">
+									<div className="grid grid-cols-4 gap-4">
 										<div>
 											<createLeadForm.Field
 												name="firstName"
@@ -576,11 +978,15 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Nombre <span className="text-red-500">*</span>
+															Primer Nombre{" "}
+															<span className="text-red-500">*</span>
 														</Label>
 														<Input
 															id={field.name}
 															name={field.name}
+															autoComplete={getLeadNameAutocomplete(
+																"firstName",
+															)}
 															value={field.state.value}
 															onBlur={field.handleBlur}
 															onChange={(e) =>
@@ -597,6 +1003,27 @@ function RouteComponent() {
 																{String(error)}
 															</p>
 														))}
+													</div>
+												)}
+											</createLeadForm.Field>
+										</div>
+										<div>
+											<createLeadForm.Field name="middleName">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>Segundo Nombre</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															autoComplete={getLeadNameAutocomplete(
+																"middleName",
+															)}
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+														/>
 													</div>
 												)}
 											</createLeadForm.Field>
@@ -622,11 +1049,13 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Apellido <span className="text-red-500">*</span>
+															Primer Apellido{" "}
+															<span className="text-red-500">*</span>
 														</Label>
 														<Input
 															id={field.name}
 															name={field.name}
+															autoComplete={getLeadNameAutocomplete("lastName")}
 															value={field.state.value}
 															onBlur={field.handleBlur}
 															onChange={(e) =>
@@ -647,6 +1076,27 @@ function RouteComponent() {
 												)}
 											</createLeadForm.Field>
 										</div>
+										<div>
+											<createLeadForm.Field name="secondLastName">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>Segundo Apellido</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															autoComplete={getLeadNameAutocomplete(
+																"secondLastName",
+															)}
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+														/>
+													</div>
+												)}
+											</createLeadForm.Field>
+										</div>
 									</div>
 
 									<div className="grid grid-cols-2 gap-4">
@@ -655,19 +1105,19 @@ function RouteComponent() {
 												name="email"
 												validators={{
 													onChange: ({ value }) => {
-														if (!value.trim()) {
-															return "El correo electrónico es requerido";
-														}
-														if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+														if (
+															value.trim() &&
+															!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+														) {
 															return "El correo electrónico no es válido";
 														}
 														return undefined;
 													},
 													onBlur: ({ value }) => {
-														if (!value.trim()) {
-															return "El correo electrónico es requerido";
-														}
-														if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+														if (
+															value.trim() &&
+															!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+														) {
 															return "El correo electrónico no es válido";
 														}
 														return undefined;
@@ -677,8 +1127,7 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Correo Electrónico{" "}
-															<span className="text-red-500">*</span>
+															Correo Electrónico
 														</Label>
 														<Input
 															id={field.name}
@@ -823,16 +1272,7 @@ function RouteComponent() {
 													<Select
 														value={field.state.value}
 														onValueChange={(value) =>
-															field.handleChange(
-																value as
-																	| "website"
-																	| "referral"
-																	| "cold_call"
-																	| "email"
-																	| "social_media"
-																	| "event"
-																	| "other",
-															)
+															field.handleChange(value as LeadSource)
 														}
 													>
 														<SelectTrigger
@@ -845,21 +1285,14 @@ function RouteComponent() {
 															<SelectValue placeholder="Seleccionar fuente" />
 														</SelectTrigger>
 														<SelectContent>
-															<SelectItem value="website">Sitio Web</SelectItem>
-															<SelectItem value="referral">
-																Referencia
-															</SelectItem>
-															<SelectItem value="cold_call">
-																Llamada en Frío
-															</SelectItem>
-															<SelectItem value="email">
-																Correo Electrónico
-															</SelectItem>
-															<SelectItem value="social_media">
-																Redes Sociales
-															</SelectItem>
-															<SelectItem value="event">Evento</SelectItem>
-															<SelectItem value="other">Otro</SelectItem>
+															{LEAD_SOURCE_OPTIONS.map((option) => (
+																<SelectItem
+																	key={option.value}
+																	value={option.value}
+																>
+																	{option.label}
+																</SelectItem>
+															))}
 														</SelectContent>
 													</Select>
 													{field.state.meta.errors.map((error) => (
@@ -912,10 +1345,44 @@ function RouteComponent() {
 																name={field.name}
 																value={field.state.value}
 																onBlur={field.handleBlur}
+																onChange={(e) => {
+																	const val = e.target.value
+																		.replace(/\D/g, "")
+																		.slice(0, 13);
+																	field.handleChange(val);
+																}}
+																placeholder="1234567890101"
+																maxLength={13}
+																inputMode="numeric"
+															/>
+															{field.state.value &&
+																field.state.value.length > 0 &&
+																field.state.value.length !== 13 && (
+																	<p className="text-destructive text-xs">
+																		El DPI debe tener 13 dígitos (
+																		{field.state.value.length}/13)
+																	</p>
+																)}
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<createLeadForm.Field name="nit">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>NIT</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
 																onChange={(e) =>
 																	field.handleChange(e.target.value)
 																}
-																placeholder="0000 00000 0000"
+																placeholder="0000000-0"
 															/>
 														</div>
 													)}
@@ -1018,6 +1485,198 @@ function RouteComponent() {
 																}
 																min="0"
 																max="20"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
+									</div>
+
+									{/* Datos para Contratos Legales */}
+									<div className="space-y-4">
+										<h3 className="font-semibold text-lg">
+											Datos para Contratos
+											<span className="ml-2 font-normal text-muted-foreground text-sm">
+												(requeridos para generar documentos legales)
+											</span>
+										</h3>
+										<div className="grid grid-cols-3 gap-4">
+											<div>
+												<createLeadForm.Field name="birthDate">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Fecha de Nacimiento
+															</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																type="date"
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="gender">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Género</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) =>
+																	field.handleChange(
+																		value as "male" | "female" | "",
+																	)
+																}
+															>
+																<SelectTrigger>
+																	<SelectValue placeholder="Seleccionar género" />
+																</SelectTrigger>
+																<SelectContent>
+																	<SelectItem value="male">
+																		Masculino
+																	</SelectItem>
+																	<SelectItem value="female">
+																		Femenino
+																	</SelectItem>
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="nationality">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Nacionalidad</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Ej: guatemalteco"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
+									</div>
+
+									{/* Dirección */}
+									<div className="space-y-4">
+										<h3 className="font-semibold text-lg">Dirección</h3>
+										<div className="grid grid-cols-1 gap-4">
+											<div>
+												<createLeadForm.Field name="direccion">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Dirección Completa
+															</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Ej: 4ta Calle 5-67, Zona 1"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
+										<div className="grid grid-cols-3 gap-4">
+											<div>
+												<createLeadForm.Field name="departamento">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Departamento</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) => {
+																	field.handleChange(value);
+																	setSelectedDepartamento(value);
+																	// Reset municipio when departamento changes
+																	createLeadForm.setFieldValue("municipio", "");
+																}}
+															>
+																<SelectTrigger>
+																	<SelectValue placeholder="Seleccionar departamento" />
+																</SelectTrigger>
+																<SelectContent>
+																	{departamentosQuery.data?.map((dep) => (
+																		<SelectItem key={dep} value={dep}>
+																			{dep}
+																		</SelectItem>
+																	))}
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="municipio">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Municipio</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) =>
+																	field.handleChange(value)
+																}
+																disabled={!selectedDepartamento}
+															>
+																<SelectTrigger>
+																	<SelectValue
+																		placeholder={
+																			selectedDepartamento
+																				? "Seleccionar municipio"
+																				: "Primero seleccione departamento"
+																		}
+																	/>
+																</SelectTrigger>
+																<SelectContent>
+																	{municipiosQuery.data?.map((mun) => (
+																		<SelectItem key={mun} value={mun}>
+																			{mun}
+																		</SelectItem>
+																	))}
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="zona">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Zona</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Ej: 1, 10, etc."
 															/>
 														</div>
 													)}
@@ -1151,37 +1810,6 @@ function RouteComponent() {
 												</createLeadForm.Field>
 											</div>
 										</div>
-										<div>
-											<createLeadForm.Field name="loanPurpose">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Propósito del Préstamo
-														</Label>
-														<Select
-															value={field.state.value}
-															onValueChange={(value) =>
-																field.handleChange(
-																	value as "personal" | "business",
-																)
-															}
-														>
-															<SelectTrigger>
-																<SelectValue placeholder="Seleccionar propósito" />
-															</SelectTrigger>
-															<SelectContent>
-																<SelectItem value="personal">
-																	Personal
-																</SelectItem>
-																<SelectItem value="business">
-																	Negocio
-																</SelectItem>
-															</SelectContent>
-														</Select>
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
 									</div>
 
 									{/* Assets */}
@@ -1258,6 +1886,67 @@ function RouteComponent() {
 										</createLeadForm.Field>
 									</div>
 
+									{/* Score y Capacidad de Pago - Solo visible al editar */}
+									{editingLead && (
+										<div className="grid grid-cols-2 gap-4 rounded-lg border bg-muted/30 p-4">
+											<createLeadForm.Field name="score">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>
+															Score Crediticio (0-1)
+														</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															type="number"
+															min="0"
+															max="1"
+															step="0.01"
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+															placeholder="Ej: 0.75"
+														/>
+														<p className="text-muted-foreground text-xs">
+															Puntaje de 0 a 1 (1 = excelente)
+														</p>
+													</div>
+												)}
+											</createLeadForm.Field>
+
+											<createLeadForm.Field name="fit">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>
+															Capacidad de Pago
+														</Label>
+														<div className="flex items-center space-x-2 pt-2">
+															<Checkbox
+																id={field.name}
+																checked={field.state.value}
+																onCheckedChange={(checked) =>
+																	field.handleChange(checked === true)
+																}
+															/>
+															<label
+																htmlFor={field.name}
+																className="cursor-pointer text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+															>
+																Pre-aprobado (tiene capacidad de pago)
+															</label>
+														</div>
+														<p className="text-muted-foreground text-xs">
+															Indica si el lead cumple con la capacidad de pago
+															requerida
+														</p>
+													</div>
+												)}
+											</createLeadForm.Field>
+										</div>
+									)}
+
 									<createLeadForm.Subscribe>
 										{(state) => (
 											<Button
@@ -1270,8 +1959,10 @@ function RouteComponent() {
 												}
 											>
 												{state.isSubmitting || createLeadMutation.isPending
-													? "Creando..."
-													: "Crear Lead"}
+													? "Cargando..."
+													: editingLead
+														? "Editar Lead"
+														: "Crear Lead"}
 											</Button>
 										)}
 									</createLeadForm.Subscribe>
@@ -1282,7 +1973,7 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent>
 					{/* Filters */}
-					<div className="mb-6 flex gap-4">
+					<div className="mb-6 flex flex-wrap gap-4">
 						<div className="flex-1">
 							<div className="relative">
 								<Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
@@ -1294,7 +1985,20 @@ function RouteComponent() {
 								/>
 							</div>
 						</div>
-						<Select value={statusFilter} onValueChange={setStatusFilter}>
+						<DateRangeFilter
+							dateRange={dateRange}
+							onDateRangeChange={(range) => {
+								setDateRange(range);
+								setPage(0);
+							}}
+						/>
+						<Select
+							value={statusFilter}
+							onValueChange={(value) => {
+								setStatusFilter(value);
+								setPage(0);
+							}}
+						>
 							<SelectTrigger className="w-[180px]">
 								<Filter className="mr-2 h-4 w-4" />
 								<SelectValue placeholder="Filtrar por estado" />
@@ -1308,6 +2012,35 @@ function RouteComponent() {
 								<SelectItem value="converted">Convertido</SelectItem>
 							</SelectContent>
 						</Select>
+						<Select
+							value={sourceFilter}
+							onValueChange={(value) => {
+								setSourceFilter(value);
+								setPage(0);
+							}}
+						>
+							<SelectTrigger className="w-[190px]">
+								<Filter className="mr-2 h-4 w-4" />
+								<SelectValue placeholder="Filtrar por fuente" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">Todas las Fuentes</SelectItem>
+								{LEAD_SOURCE_OPTIONS.map((source) => (
+									<SelectItem key={source.value} value={source.value}>
+										{source.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						{hasActiveFilters && (
+							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+								<X className="mr-1 h-3 w-3" />
+								Limpiar filtros
+								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+									{[searchTerm !== "", dateRange !== undefined, statusFilter !== "all", sourceFilter !== "all"].filter(Boolean).length}
+								</Badge>
+							</Button>
+						)}
 					</div>
 
 					{leadsQuery.isPending ? (
@@ -1320,7 +2053,7 @@ function RouteComponent() {
 						<Table>
 							<TableHeader>
 								<TableRow>
-									<TableHead>Nombre</TableHead>
+									<TableHead className="w-48">Nombre</TableHead>
 									<TableHead>Contacto</TableHead>
 									<TableHead>Empresa</TableHead>
 									<TableHead>Fuente</TableHead>
@@ -1332,13 +2065,21 @@ function RouteComponent() {
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{filteredLeads.map((lead) => (
+								{leads.map((lead) => (
 									<TableRow key={lead.id}>
 										<TableCell>
 											<div>
 												<div
 													className="cursor-pointer font-medium text-primary hover:underline"
+													role="button"
+													tabIndex={0}
 													onClick={() => handleLeadClick(lead)}
+													onKeyDown={(e) => {
+														if (e.key === "Enter" || e.key === " ") {
+															e.preventDefault();
+															handleLeadClick(lead);
+														}
+													}}
 												>
 													{lead.firstName} {lead.lastName}
 												</div>
@@ -1351,10 +2092,12 @@ function RouteComponent() {
 										</TableCell>
 										<TableCell>
 											<div className="space-y-1">
-												<div className="flex items-center gap-1 text-sm">
-													<Mail className="h-3 w-3" />
-													{lead.email}
-												</div>
+												{lead.email && (
+													<div className="flex items-center gap-1 text-sm">
+														<Mail className="h-3 w-3" />
+														{lead.email}
+													</div>
+												)}
 												{lead.phone && (
 													<div className="flex items-center gap-1 text-muted-foreground text-sm">
 														<Phone className="h-3 w-3" />
@@ -1377,7 +2120,7 @@ function RouteComponent() {
 										</TableCell>
 										<TableCell>
 											<Badge
-												className={getSourceBadgeColor(lead.source)}
+												className={getLeadSourceBadgeClass(lead.source)}
 												variant="outline"
 											>
 												{getSourceLabel(lead.source)}
@@ -1423,7 +2166,9 @@ function RouteComponent() {
 												<span className="text-muted-foreground">-</span>
 											)}
 										</TableCell>
-										<TableCell>{formatGuatemalaDate(lead.createdAt)}</TableCell>
+										<TableCell>
+											{formatGuatemalaDateTime(lead.createdAt)}
+										</TableCell>
 										<TableCell className="text-right">
 											<DropdownMenu>
 												<DropdownMenuTrigger asChild>
@@ -1461,9 +2206,14 @@ function RouteComponent() {
 													</DropdownMenuItem>
 													<DropdownMenuSeparator />
 													<DropdownMenuItem
-														onClick={() =>
-															handleStatusChange(lead.id, "converted")
-														}
+														onClick={() => {
+															setLeadToConvert(lead);
+															setConvertForm({
+																title: `Oportunidad - ${lead.firstName} ${lead.lastName}`,
+																creditType: "autocompra",
+															});
+															setIsConvertDialogOpen(true);
+														}}
 														disabled={lead.status === "converted"}
 													>
 														Convertir a Oportunidad
@@ -1475,6 +2225,56 @@ function RouteComponent() {
 								))}
 							</TableBody>
 						</Table>
+					)}
+
+					{/* Pagination Controls */}
+					{totalPages > 0 && (
+						<div className="flex items-center justify-between border-t pt-4">
+							<div className="text-muted-foreground text-sm">
+								Mostrando {page * pageSize + 1} -{" "}
+								{Math.min((page + 1) * pageSize, totalLeads)} de {totalLeads}{" "}
+								leads
+							</div>
+							<div className="flex items-center gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setPage(0)}
+									disabled={page === 0}
+								>
+									<ChevronsLeft className="h-4 w-4" />
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setPage((p) => Math.max(0, p - 1))}
+									disabled={page === 0}
+								>
+									<ChevronLeft className="h-4 w-4" />
+								</Button>
+								<span className="px-2 text-sm">
+									Página {page + 1} de {totalPages}
+								</span>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() =>
+										setPage((p) => Math.min(totalPages - 1, p + 1))
+									}
+									disabled={page >= totalPages - 1}
+								>
+									<ChevronRight className="h-4 w-4" />
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setPage(() => totalPages - 1)}
+									disabled={page >= totalPages - 1}
+								>
+									<ChevronsRight className="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
 					)}
 				</CardContent>
 			</Card>
@@ -1491,11 +2291,13 @@ function RouteComponent() {
 							<div className="flex items-start justify-between">
 								<div>
 									<h3 className="font-semibold text-lg">
-										{selectedLead.firstName} {selectedLead.lastName}
+										{formatLeadFullName(selectedLead)}
 									</h3>
-									<p className="text-muted-foreground text-sm">
-										{selectedLead.email}
-									</p>
+									{selectedLead.email && (
+										<p className="text-muted-foreground text-sm">
+											{selectedLead.email}
+										</p>
+									)}
 								</div>
 								<div className="flex flex-col gap-2">
 									<Badge
@@ -1590,7 +2392,9 @@ function RouteComponent() {
 											</Label>
 											<div className="flex items-center gap-2">
 												<Mail className="h-4 w-4 text-muted-foreground" />
-												<p className="text-sm">{selectedLead.email}</p>
+												<p className="text-sm">
+													{selectedLead.email || "No especificado"}
+												</p>
 											</div>
 										</div>
 										<div>
@@ -1644,16 +2448,6 @@ function RouteComponent() {
 											<p className="font-medium text-sm">
 												{selectedLead.loanAmount
 													? formatCurrency(selectedLead.loanAmount)
-													: "No especificado"}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Propósito del Préstamo
-											</Label>
-											<p className="text-sm">
-												{selectedLead.loanPurpose
-													? getLoanPurposeLabel(selectedLead.loanPurpose)
 													: "No especificado"}
 											</p>
 										</div>
@@ -1731,7 +2525,7 @@ function RouteComponent() {
 												Fuente
 											</Label>
 											<Badge
-												className={getSourceBadgeColor(selectedLead.source)}
+												className={getLeadSourceBadgeClass(selectedLead.source)}
 												variant="outline"
 											>
 												{getSourceLabel(selectedLead.source)}
@@ -1778,11 +2572,24 @@ function RouteComponent() {
 							</div>
 
 							{/* Scoring Section */}
-							{selectedLead.score && (
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+								<div className="flex items-center justify-between">
 									<h3 className="font-semibold text-base">
 										Análisis de Riesgo
 									</h3>
+									<Button
+										size="sm"
+										variant="outline"
+										disabled={scoreLeadMutation.isPending}
+										onClick={() => scoreLeadMutation.mutate(selectedLead.id)}
+									>
+										{scoreLeadMutation.isPending && (
+											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										)}
+										{selectedLead.score ? "Recalcular Score" : "Calcular Score"}
+									</Button>
+								</div>
+								{selectedLead.score ? (
 									<div className="grid grid-cols-3 gap-4">
 										<div className="space-y-2">
 											<Label className="font-medium text-muted-foreground text-sm">
@@ -1834,208 +2641,468 @@ function RouteComponent() {
 											</p>
 										</div>
 									</div>
-								</div>
-							)}
+								) : (
+									<p className="text-muted-foreground text-sm">
+										Sin análisis de riesgo aún
+									</p>
+								)}
+							</div>
 
 							{/* Credit Analysis Section - Análisis de Capacidad de Pago */}
-							{creditAnalysisQuery.data && (
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+								<div className="flex items-center justify-between">
 									<h3 className="font-semibold text-base">
 										Análisis de Capacidad de Pago
 									</h3>
+									{!isEditingCreditAnalysis ? (
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => {
+												const data = creditAnalysisQuery.data;
+												setCreditAnalysisForm({
+													monthlyFixedIncome:
+														data?.monthlyFixedIncome?.toString() || "",
+													monthlyVariableIncome:
+														data?.monthlyVariableIncome?.toString() || "",
+													monthlyFixedExpenses:
+														data?.monthlyFixedExpenses?.toString() || "",
+													monthlyVariableExpenses:
+														data?.monthlyVariableExpenses?.toString() || "",
+													economicAvailability:
+														data?.economicAvailability?.toString() || "",
+													maxPayment: data?.maxPayment?.toString() || "",
+													maxCreditAmount:
+														data?.maxCreditAmount?.toString() || "",
+												});
+												setIsEditingCreditAnalysis(true);
+											}}
+										>
+											<Pencil className="mr-2 h-4 w-4" />
+											Editar
+										</Button>
+									) : (
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={() => setIsEditingCreditAnalysis(false)}
+										>
+											<X className="mr-2 h-4 w-4" />
+											Cancelar
+										</Button>
+									)}
+								</div>
 
-									{/* Income and Expenses Summary */}
-									<div className="grid grid-cols-2 gap-6">
-										<div className="space-y-4">
-											<h4 className="font-medium text-base">
-												Ingresos Mensuales
-											</h4>
-											<div className="space-y-3 rounded-lg bg-green-50 p-4">
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Ingresos Fijos:
-													</span>
-													<span className="font-medium">
-														{creditAnalysisQuery.data.monthlyFixedIncome
-															? formatCurrency(
-																	creditAnalysisQuery.data.monthlyFixedIncome,
-																)
-															: "-"}
-													</span>
+								{/* Análisis automático con IA */}
+								{selectedLead?.id && (
+									<BankStatementAnalysis
+										leadId={selectedLead.id}
+										onAnalysisComplete={() => creditAnalysisQuery.refetch()}
+									/>
+								)}
+
+								{isEditingCreditAnalysis ? (
+									<form
+										onSubmit={(e) => {
+											e.preventDefault();
+											if (!selectedLead) return;
+											upsertCreditAnalysisMutation.mutate({
+												leadId: selectedLead.id,
+												monthlyFixedIncome:
+													creditAnalysisForm.monthlyFixedIncome
+														? Number(creditAnalysisForm.monthlyFixedIncome)
+														: undefined,
+												monthlyVariableIncome:
+													creditAnalysisForm.monthlyVariableIncome
+														? Number(creditAnalysisForm.monthlyVariableIncome)
+														: undefined,
+												monthlyFixedExpenses:
+													creditAnalysisForm.monthlyFixedExpenses
+														? Number(creditAnalysisForm.monthlyFixedExpenses)
+														: undefined,
+												monthlyVariableExpenses:
+													creditAnalysisForm.monthlyVariableExpenses
+														? Number(creditAnalysisForm.monthlyVariableExpenses)
+														: undefined,
+												economicAvailability:
+													creditAnalysisForm.economicAvailability
+														? Number(creditAnalysisForm.economicAvailability)
+														: undefined,
+												maxPayment: creditAnalysisForm.maxPayment
+													? Number(creditAnalysisForm.maxPayment)
+													: undefined,
+												maxCreditAmount: creditAnalysisForm.maxCreditAmount
+													? Number(creditAnalysisForm.maxCreditAmount)
+													: undefined,
+											});
+										}}
+										className="space-y-4"
+									>
+										{/* Income and Expenses Form */}
+										<div className="grid grid-cols-2 gap-6">
+											<div className="space-y-4">
+												<h4 className="font-medium text-base">
+													Ingresos Mensuales
+												</h4>
+												<div className="space-y-3 rounded-lg bg-green-50 p-4 dark:bg-green-900/20">
+													<div className="space-y-2">
+														<Label className="text-sm">Ingresos Fijos</Label>
+														<Input
+															type="number"
+															step="0.01"
+															min="0"
+															placeholder="0.00"
+															value={creditAnalysisForm.monthlyFixedIncome}
+															onChange={(e) =>
+																setCreditAnalysisForm((prev) => ({
+																	...prev,
+																	monthlyFixedIncome: e.target.value,
+																}))
+															}
+														/>
+													</div>
+													<div className="space-y-2">
+														<Label className="text-sm">
+															Ingresos Variables
+														</Label>
+														<Input
+															type="number"
+															step="0.01"
+															min="0"
+															placeholder="0.00"
+															value={creditAnalysisForm.monthlyVariableIncome}
+															onChange={(e) =>
+																setCreditAnalysisForm((prev) => ({
+																	...prev,
+																	monthlyVariableIncome: e.target.value,
+																}))
+															}
+														/>
+													</div>
 												</div>
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Ingresos Variables:
-													</span>
-													<span className="font-medium">
-														{creditAnalysisQuery.data.monthlyVariableIncome
-															? formatCurrency(
-																	creditAnalysisQuery.data
-																		.monthlyVariableIncome,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="border-t pt-2">
-													<div className="flex justify-between">
-														<span className="font-medium">Total Ingresos:</span>
-														<span className="font-bold text-green-600">
-															{creditAnalysisQuery.data.monthlyFixedIncome &&
-															creditAnalysisQuery.data.monthlyVariableIncome
-																? formatCurrency(
-																		Number(
-																			creditAnalysisQuery.data
-																				.monthlyFixedIncome,
-																		) +
-																			Number(
-																				creditAnalysisQuery.data
-																					.monthlyVariableIncome,
-																			),
-																	)
-																: "-"}
-														</span>
+											</div>
+
+											<div className="space-y-4">
+												<h4 className="font-medium text-base">
+													Gastos Mensuales
+												</h4>
+												<div className="space-y-3 rounded-lg bg-red-50 p-4 dark:bg-red-900/20">
+													<div className="space-y-2">
+														<Label className="text-sm">Gastos Fijos</Label>
+														<Input
+															type="number"
+															step="0.01"
+															min="0"
+															placeholder="0.00"
+															value={creditAnalysisForm.monthlyFixedExpenses}
+															onChange={(e) =>
+																setCreditAnalysisForm((prev) => ({
+																	...prev,
+																	monthlyFixedExpenses: e.target.value,
+																}))
+															}
+														/>
+													</div>
+													<div className="space-y-2">
+														<Label className="text-sm">Gastos Variables</Label>
+														<Input
+															type="number"
+															step="0.01"
+															min="0"
+															placeholder="0.00"
+															value={creditAnalysisForm.monthlyVariableExpenses}
+															onChange={(e) =>
+																setCreditAnalysisForm((prev) => ({
+																	...prev,
+																	monthlyVariableExpenses: e.target.value,
+																}))
+															}
+														/>
 													</div>
 												</div>
 											</div>
 										</div>
 
-										<div className="space-y-4">
-											<h4 className="font-medium text-base">
-												Gastos Mensuales
-											</h4>
-											<div className="space-y-3 rounded-lg bg-red-50 p-4">
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Gastos Fijos:
-													</span>
-													<span className="font-medium">
-														{creditAnalysisQuery.data.monthlyFixedExpenses
-															? formatCurrency(
-																	creditAnalysisQuery.data.monthlyFixedExpenses,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Gastos Variables:
-													</span>
-													<span className="font-medium">
-														{creditAnalysisQuery.data.monthlyVariableExpenses
-															? formatCurrency(
-																	creditAnalysisQuery.data
-																		.monthlyVariableExpenses,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="border-t pt-2">
-													<div className="flex justify-between">
-														<span className="font-medium">Total Gastos:</span>
-														<span className="font-bold text-red-600">
-															{creditAnalysisQuery.data.monthlyFixedExpenses &&
-															creditAnalysisQuery.data.monthlyVariableExpenses
-																? formatCurrency(
-																		Number(
-																			creditAnalysisQuery.data
-																				.monthlyFixedExpenses,
-																		) +
-																			Number(
-																				creditAnalysisQuery.data
-																					.monthlyVariableExpenses,
-																			),
-																	)
-																: "-"}
-														</span>
-													</div>
-												</div>
-											</div>
-										</div>
-									</div>
-
-									{/* Economic Availability */}
-									<div className="rounded-lg bg-blue-50 p-4">
-										<div className="flex items-center justify-between">
-											<div>
-												<Label className="font-medium text-muted-foreground text-sm">
+										{/* Economic Availability */}
+										<div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
+											<div className="space-y-2">
+												<Label className="font-medium text-sm">
 													Disponibilidad Económica
 												</Label>
-												<p className="text-muted-foreground text-sm">
-													Capacidad de ahorro mensual
-												</p>
-											</div>
-											<span className="font-bold text-2xl text-blue-600">
-												{creditAnalysisQuery.data.economicAvailability
-													? formatCurrency(
-															creditAnalysisQuery.data.economicAvailability,
-														)
-													: "-"}
-											</span>
-										</div>
-									</div>
-
-									{/* Payment Capacity */}
-									<div className="space-y-4">
-										<h4 className="font-medium text-base">Capacidad de Pago</h4>
-										<div className="grid grid-cols-4 gap-4">
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Mínimo
-												</Label>
-												<p className="mt-1 font-bold text-lg text-orange-600">
-													{creditAnalysisQuery.data.minPayment
-														? formatCurrency(
-																creditAnalysisQuery.data.minPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Ajustado
-												</Label>
-												<p className="mt-1 font-bold text-blue-600 text-lg">
-													{creditAnalysisQuery.data.adjustedPayment
-														? formatCurrency(
-																creditAnalysisQuery.data.adjustedPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Máximo
-												</Label>
-												<p className="mt-1 font-bold text-green-600 text-lg">
-													{creditAnalysisQuery.data.maxPayment
-														? formatCurrency(
-																creditAnalysisQuery.data.maxPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border bg-primary/5 p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Crédito Máximo
-												</Label>
-												<p className="mt-1 font-bold text-lg text-primary">
-													{creditAnalysisQuery.data.maxCreditAmount
-														? formatCurrency(
-																creditAnalysisQuery.data.maxCreditAmount,
-															)
-														: "-"}
-												</p>
+												<Input
+													type="number"
+													step="0.01"
+													placeholder="0.00"
+													value={creditAnalysisForm.economicAvailability}
+													onChange={(e) =>
+														setCreditAnalysisForm((prev) => ({
+															...prev,
+															economicAvailability: e.target.value,
+														}))
+													}
+												/>
 											</div>
 										</div>
-									</div>
 
-									{/* Analysis Date */}
-									<div className="text-right text-muted-foreground text-sm">
-										Análisis realizado:{" "}
-										{formatGuatemalaDate(creditAnalysisQuery.data.analyzedAt)}
-									</div>
-								</div>
-							)}
+										{/* Payment Capacity Form */}
+										<div className="space-y-4">
+											<h4 className="font-medium text-base">
+												Capacidad de Pago
+											</h4>
+											<div className="grid grid-cols-2 gap-4">
+												<div className="space-y-2">
+													<Label className="text-xs">Pago Máximo</Label>
+													<Input
+														type="number"
+														step="0.01"
+														min="0"
+														placeholder="0.00"
+														value={creditAnalysisForm.maxPayment}
+														onChange={(e) =>
+															setCreditAnalysisForm((prev) => ({
+																...prev,
+																maxPayment: e.target.value,
+															}))
+														}
+													/>
+												</div>
+												<div className="space-y-2">
+													<Label className="text-xs">Crédito Máximo</Label>
+													<Input
+														type="number"
+														step="0.01"
+														min="0"
+														placeholder="0.00"
+														value={creditAnalysisForm.maxCreditAmount}
+														onChange={(e) =>
+															setCreditAnalysisForm((prev) => ({
+																...prev,
+																maxCreditAmount: e.target.value,
+															}))
+														}
+													/>
+												</div>
+											</div>
+										</div>
+
+										<div className="flex justify-end gap-2">
+											<Button
+												type="button"
+												variant="outline"
+												onClick={() => setIsEditingCreditAnalysis(false)}
+											>
+												Cancelar
+											</Button>
+											<Button
+												type="submit"
+												disabled={upsertCreditAnalysisMutation.isPending}
+											>
+												{upsertCreditAnalysisMutation.isPending
+													? "Guardando..."
+													: "Guardar Análisis"}
+											</Button>
+										</div>
+									</form>
+								) : creditAnalysisQuery.data?.analyzedAt ? (
+									<>
+										{/* Income and Expenses Summary */}
+										<div className="grid grid-cols-2 gap-6">
+											<div className="space-y-4">
+												<h4 className="font-medium text-base">
+													Ingresos Mensuales
+												</h4>
+												<div className="space-y-3 rounded-lg bg-green-50 p-4 dark:bg-green-900/20">
+													<div className="flex justify-between">
+														<span className="text-muted-foreground text-sm">
+															Ingresos Fijos:
+														</span>
+														<span className="font-medium">
+															{creditAnalysisQuery.data.monthlyFixedIncome
+																? formatCurrency(
+																		creditAnalysisQuery.data.monthlyFixedIncome,
+																	)
+																: "-"}
+														</span>
+													</div>
+													<div className="flex justify-between">
+														<span className="text-muted-foreground text-sm">
+															Ingresos Variables:
+														</span>
+														<span className="font-medium">
+															{creditAnalysisQuery.data.monthlyVariableIncome
+																? formatCurrency(
+																		creditAnalysisQuery.data
+																			.monthlyVariableIncome,
+																	)
+																: "-"}
+														</span>
+													</div>
+													<div className="border-t pt-2">
+														<div className="flex justify-between">
+															<span className="font-medium">
+																Total Ingresos:
+															</span>
+															<span className="font-bold text-green-600">
+																{creditAnalysisQuery.data.monthlyFixedIncome ||
+																creditAnalysisQuery.data.monthlyVariableIncome
+																	? formatCurrency(
+																			Number(
+																				creditAnalysisQuery.data
+																					.monthlyFixedIncome || 0,
+																			) +
+																				Number(
+																					creditAnalysisQuery.data
+																						.monthlyVariableIncome || 0,
+																				),
+																		)
+																	: "-"}
+															</span>
+														</div>
+													</div>
+												</div>
+											</div>
+
+											<div className="space-y-4">
+												<h4 className="font-medium text-base">
+													Gastos Mensuales
+												</h4>
+												<div className="space-y-3 rounded-lg bg-red-50 p-4 dark:bg-red-900/20">
+													<div className="flex justify-between">
+														<span className="text-muted-foreground text-sm">
+															Gastos Fijos:
+														</span>
+														<span className="font-medium">
+															{creditAnalysisQuery.data.monthlyFixedExpenses
+																? formatCurrency(
+																		creditAnalysisQuery.data
+																			.monthlyFixedExpenses,
+																	)
+																: "-"}
+														</span>
+													</div>
+													<div className="flex justify-between">
+														<span className="text-muted-foreground text-sm">
+															Gastos Variables:
+														</span>
+														<span className="font-medium">
+															{creditAnalysisQuery.data.monthlyVariableExpenses
+																? formatCurrency(
+																		creditAnalysisQuery.data
+																			.monthlyVariableExpenses,
+																	)
+																: "-"}
+														</span>
+													</div>
+													<div className="border-t pt-2">
+														<div className="flex justify-between">
+															<span className="font-medium">Total Gastos:</span>
+															<span className="font-bold text-red-600">
+																{creditAnalysisQuery.data
+																	.monthlyFixedExpenses ||
+																creditAnalysisQuery.data.monthlyVariableExpenses
+																	? formatCurrency(
+																			Number(
+																				creditAnalysisQuery.data
+																					.monthlyFixedExpenses || 0,
+																			) +
+																				Number(
+																					creditAnalysisQuery.data
+																						.monthlyVariableExpenses || 0,
+																				),
+																		)
+																	: "-"}
+															</span>
+														</div>
+													</div>
+												</div>
+											</div>
+										</div>
+
+										{/* Economic Availability */}
+										<div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
+											<div className="flex items-center justify-between">
+												<div>
+													<Label className="font-medium text-muted-foreground text-sm">
+														Disponibilidad Económica
+													</Label>
+													<p className="text-muted-foreground text-sm">
+														Capacidad de ahorro mensual
+													</p>
+												</div>
+												<span className="font-bold text-2xl text-blue-600">
+													{creditAnalysisQuery.data.economicAvailability
+														? formatCurrency(
+																creditAnalysisQuery.data.economicAvailability,
+															)
+														: "-"}
+												</span>
+											</div>
+										</div>
+
+										{/* Payment Capacity */}
+										<div className="space-y-4">
+											<h4 className="font-medium text-base">
+												Capacidad de Pago
+											</h4>
+											<div className="grid grid-cols-2 gap-4">
+												<div className="rounded-lg border p-4 text-center">
+													<Label className="text-muted-foreground text-xs">
+														Pago Máximo
+													</Label>
+													<p className="mt-1 font-bold text-green-600 text-lg">
+														{creditAnalysisQuery.data.maxPayment
+															? formatCurrency(
+																	creditAnalysisQuery.data.maxPayment,
+																)
+															: "-"}
+													</p>
+												</div>
+												<div className="rounded-lg border bg-primary/5 p-4 text-center">
+													<Label className="text-muted-foreground text-xs">
+														Crédito Máximo
+													</Label>
+													<p className="mt-1 font-bold text-lg text-primary">
+														{creditAnalysisQuery.data.maxCreditAmount
+															? formatCurrency(
+																	creditAnalysisQuery.data.maxCreditAmount,
+																)
+															: "-"}
+													</p>
+												</div>
+											</div>
+										</div>
+
+										{/* Analysis Date */}
+										<div className="text-right text-muted-foreground text-sm">
+											Análisis realizado:{" "}
+											{formatGuatemalaDate(creditAnalysisQuery.data.analyzedAt)}
+										</div>
+									</>
+								) : (
+									<p className="py-4 text-center text-muted-foreground">
+										No hay análisis de capacidad de pago registrado.
+										<br />
+										<Button
+											variant="link"
+											className="mt-2"
+											onClick={() => {
+												setCreditAnalysisForm({
+													monthlyFixedIncome: "",
+													monthlyVariableIncome: "",
+													monthlyFixedExpenses: "",
+													monthlyVariableExpenses: "",
+													economicAvailability: "",
+													maxPayment: "",
+													maxCreditAmount: "",
+												});
+												setIsEditingCreditAnalysis(true);
+											}}
+										>
+											Agregar análisis
+										</Button>
+									</p>
+								)}
+							</div>
 
 							{/* Acciones */}
 							<div className="flex gap-3 border-t pt-6">
@@ -2044,8 +3111,12 @@ function RouteComponent() {
 									className="flex-1"
 									onClick={() => {
 										setEditingLead(selectedLead);
+										isTransitioningToEditRef.current = true;
 										setIsDetailsDialogOpen(false);
-										setIsCreateDialogOpen(true);
+										// Delay opening second modal to allow first to fully close
+										setTimeout(() => {
+											setIsCreateDialogOpen(true);
+										}, 150);
 									}}
 								>
 									Editar Lead
@@ -2064,6 +3135,94 @@ function RouteComponent() {
 								</div>
 							)}
 
+							{/* Oportunidades del Lead */}
+							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+								<h3 className="font-semibold text-base">Oportunidades</h3>
+								{leadOpportunitiesQuery.isLoading ? (
+									<p className="text-muted-foreground text-sm">
+										Cargando oportunidades...
+									</p>
+								) : leadOpportunitiesQuery.data &&
+									leadOpportunitiesQuery.data.length > 0 ? (
+									<div className="space-y-2">
+										{leadOpportunitiesQuery.data.map((opp) => (
+											<div
+												key={opp.id}
+												className="flex items-center justify-between rounded-md border bg-background p-3"
+											>
+												<div className="flex flex-col gap-1">
+													<span
+														className="cursor-pointer font-medium text-primary hover:underline"
+														role="button"
+														tabIndex={0}
+														onClick={() => {
+															setIsDetailsDialogOpen(false);
+															navigate({
+																to: "/crm/opportunities",
+																search: { opportunityId: opp.id },
+															});
+														}}
+														onKeyDown={(e) => {
+															if (e.key === "Enter" || e.key === " ") {
+																e.preventDefault();
+																setIsDetailsDialogOpen(false);
+																navigate({
+																	to: "/crm/opportunities",
+																	search: { opportunityId: opp.id },
+																});
+															}
+														}}
+													>
+														{opp.title}
+													</span>
+													<div className="flex items-center gap-2 text-muted-foreground text-xs">
+														{opp.stage && (
+															<Badge
+																variant="outline"
+																style={{
+																	borderColor: opp.stage.color || undefined,
+																	color: opp.stage.color || undefined,
+																}}
+															>
+																{opp.stage.name}
+															</Badge>
+														)}
+														{opp.value && (
+															<span>
+																Q
+																{Number(opp.value).toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
+															</span>
+														)}
+													</div>
+												</div>
+												<Badge
+													variant={
+														opp.status === "won"
+															? "default"
+															: opp.status === "lost"
+																? "destructive"
+																: "secondary"
+													}
+												>
+													{opp.status === "open"
+														? "Abierta"
+														: opp.status === "won"
+															? "Ganada"
+															: "Perdida"}
+												</Badge>
+											</div>
+										))}
+									</div>
+								) : (
+									<p className="text-muted-foreground text-sm">
+										No hay oportunidades asociadas a este lead.
+									</p>
+								)}
+							</div>
+
 							{/* Notes Timeline */}
 							<NotesTimeline
 								entityType="lead"
@@ -2072,6 +3231,137 @@ function RouteComponent() {
 							/>
 						</div>
 					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Modal de Conversión a Oportunidad */}
+			<Dialog open={isConvertDialogOpen} onOpenChange={setIsConvertDialogOpen}>
+				<DialogContent className="max-h-[90vh] max-w-md overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle>Convertir Lead a Oportunidad</DialogTitle>
+					</DialogHeader>
+					{leadToConvert && (
+						<div className="space-y-4">
+							<div className="rounded-md bg-muted/50 p-3">
+								<p className="font-medium">
+									{leadToConvert.firstName} {leadToConvert.lastName}
+								</p>
+								<p className="text-muted-foreground text-sm">
+									{leadToConvert.email || leadToConvert.phone || "Sin contacto"}
+								</p>
+							</div>
+
+							<div className="space-y-2">
+								<Label htmlFor="convert-title">Título de la Oportunidad</Label>
+								<Input
+									id="convert-title"
+									value={convertForm.title}
+									onChange={(e) =>
+										setConvertForm({ ...convertForm, title: e.target.value })
+									}
+									placeholder="Ej: Crédito vehicular - Juan Pérez"
+								/>
+							</div>
+
+							<div className="space-y-2">
+								<Label htmlFor="convert-creditType">Tipo de Crédito</Label>
+								<Select
+									value={convertForm.creditType}
+									onValueChange={(value) =>
+										setConvertForm({
+											...convertForm,
+											creditType: value as "autocompra" | "sobre_vehiculo",
+										})
+									}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Seleccionar tipo" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="autocompra">Autocompra</SelectItem>
+										<SelectItem value="sobre_vehiculo">
+											Sobre Vehículo
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+
+							<div className="flex justify-end gap-2 pt-4">
+								<Button
+									variant="outline"
+									onClick={() => {
+										setIsConvertDialogOpen(false);
+										setLeadToConvert(null);
+									}}
+								>
+									Cancelar
+								</Button>
+								<Button
+									onClick={() => {
+										if (!convertForm.title.trim()) {
+											toast.error("El título es requerido");
+											return;
+										}
+										const initialStage = salesStagesQuery.data?.find(
+											(s) => s.closurePercentage === 1,
+										);
+										if (!initialStage) {
+											toast.error(
+												"No se encontró la etapa inicial. Contacte al administrador.",
+											);
+											return;
+										}
+										createOpportunityMutation.mutate({
+											title: convertForm.title,
+											leadId: leadToConvert.id,
+											creditType: convertForm.creditType,
+											stageId: initialStage.id,
+										});
+									}}
+									disabled={createOpportunityMutation.isPending}
+								>
+									{createOpportunityMutation.isPending
+										? "Creando..."
+										: "Crear Oportunidad"}
+								</Button>
+							</div>
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Dialog de advertencia por oportunidad duplicada */}
+			<Dialog
+				open={duplicateWarning.show}
+				onOpenChange={(open) => {
+					if (!open) handleCancelDuplicate();
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2 text-amber-600">
+							<AlertTriangle className="h-5 w-5" />
+							Oportunidad Existente
+						</DialogTitle>
+						<DialogDescription>{duplicateWarning.message}</DialogDescription>
+					</DialogHeader>
+					<p className="text-muted-foreground text-sm">
+						¿Desea crear otra oportunidad de todos modos?
+					</p>
+					<div className="flex justify-end gap-2">
+						<Button variant="outline" onClick={handleCancelDuplicate}>
+							Cancelar
+						</Button>
+						<Button
+							variant="destructive"
+							onClick={handleConfirmDuplicate}
+							disabled={createOpportunityMutation.isPending}
+						>
+							{createOpportunityMutation.isPending
+								? "Creando..."
+								: "Crear de Todos Modos"}
+						</Button>
+					</div>
 				</DialogContent>
 			</Dialog>
 		</div>

@@ -7,6 +7,7 @@ export interface VehicleData {
   year: number;
   licensePlate: string;
   vinNumber: string;
+  motorNumber: string;
   color: string;
   vehicleType: string;
   milesMileage: number | null;
@@ -17,6 +18,12 @@ export interface VehicleData {
   fuelType: 'Gasolina' | 'Diesel' | 'Eléctrico' | 'Híbrido';
   transmission: 'Automático' | 'Manual';
   companyId?: string | null;
+  trim?: string;
+  traction?: string;
+  id?: string;
+  seats?: number | null;
+  vehicleUse?: string | null;
+  isOwned?: boolean;
 }
 
 export interface InspectionData {
@@ -24,9 +31,8 @@ export interface InspectionData {
   inspectionDate: Date;
   inspectionResult: string;
   vehicleRating: 'Comercial' | 'No comercial';
-  marketValue: string;
-  suggestedCommercialValue: string;
-  bankValue: string;
+  marketValue?: string;
+  suggestedCommercialValue?: string;
   currentConditionValue: string;
   vehicleEquipment: string;
   importantConsiderations?: string;
@@ -36,6 +42,28 @@ export interface InspectionData {
   missingAirbag?: string;
   testDrive: boolean;
   noTestDriveReason?: string;
+  sectionTimes?: Record<string, number>;
+  rejectionEvidenceUrl?: string;
+  status?: 'pending' | 'approved' | 'rejected' | 'auction';
+  tiresCondition?: number;
+  tireConditionFrontLeft?: number;
+  tireConditionFrontRight?: number;
+  tireConditionRearLeft?: number;
+  tireConditionRearRight?: number;
+  hasSpareTire?: boolean;
+  tireConditionSpare?: number;
+  paintCondition?: number;
+  hasAgencyHistory?: boolean;
+  aiValuation?: {
+    suggestedValue: number;
+    baseMarketValue?: number;
+    reasoning: string;
+    marketAnalysis: string;
+    depreciationFactors: string[];
+    confidence: string;
+    commercialClassification: string;
+    commercialClassificationReasoning: string;
+  };
 }
 
 export interface ChecklistItem {
@@ -43,6 +71,12 @@ export interface ChecklistItem {
   item: string;
   checked: boolean;
   severity?: string;
+  notes?: string;
+  evidence?: Array<{
+    url: string;
+    mimeType: string;
+    originalName: string;
+  }>;
 }
 
 export interface PhotoData {
@@ -51,23 +85,67 @@ export interface PhotoData {
   title: string;
   description?: string;
   url: string;
+  valuatorComment?: string;
+  noCommentsChecked?: boolean;
 }
+
+export interface Inspection360Item {
+  category: string;
+  item: string;
+  status: 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD';
+  notes?: string;
+  metadata?: Record<string, any>;
+}
+
+export type VehicleStatus = "pending" | "available" | "sold" | "maintenance" | "auction";
+
+export const getVehicleStatusUpdate = (
+  inspectionStatus: string,
+  currentVehicleStatus?: string | null,
+  canManageVehicleStatus = true,
+): VehicleStatus | undefined => {
+  if (!canManageVehicleStatus) {
+    return undefined;
+  }
+
+  const vehicleStatus =
+    inspectionStatus === "approved"
+      ? "available"
+      : inspectionStatus === "rejected"
+        ? "maintenance"
+        : inspectionStatus;
+
+  if (vehicleStatus === currentVehicleStatus) {
+    return undefined;
+  }
+
+  return vehicleStatus as VehicleStatus;
+};
 
 // Main function to create a full vehicle inspection
 export const createFullInspection = async (
   vehicleData: VehicleData,
   inspectionData: InspectionData,
   checklistItems: ChecklistItem[],
-  photos?: PhotoData[]
+  photos?: PhotoData[],
+  items360?: Inspection360Item[]
 ) => {
   try {
     const response = await client.createFullVehicleInspection({
       vehicle: vehicleData,
       inspection: inspectionData,
       checklistItems,
-      photos
+      photos,
+      inspection360Items: items360?.map(item => ({
+        area: item.category,
+        checkpoint: item.item,
+        status: item.status as 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD',
+        comment: item.notes,
+        metadata: item.metadata
+      })),
+      aiValuation: inspectionData.aiValuation,
     });
-    
+
     return {
       success: true,
       data: response
@@ -82,13 +160,14 @@ export const createFullInspection = async (
 };
 
 // Helper function to convert form data to API format
-export const prepareInspectionData = (formData: any) => {
+export const prepareInspectionData = (formData: any, sectionTimes?: Record<string, number>, rejectionEvidenceUrl?: string, aiValuation?: any) => {
   const vehicleData: VehicleData = {
     make: formData.vehicleMake,
     model: formData.vehicleModel,
     year: parseInt(formData.vehicleYear),
     licensePlate: formData.licensePlate,
     vinNumber: formData.vinNumber,
+    motorNumber: formData.motorNumber,
     color: formData.color,
     vehicleType: formData.vehicleType,
     milesMileage: formData.milesMileage ? parseInt(formData.milesMileage) : null,
@@ -98,6 +177,12 @@ export const prepareInspectionData = (formData: any) => {
     engineCC: formData.engineCC,
     fuelType: formData.fuelType,
     transmission: formData.transmission,
+    trim: formData.trim,
+    traction: formData.traction,
+    id: formData.vehicleId,
+    seats: formData.seats ? parseInt(formData.seats) : null,
+    vehicleUse: formData.vehicleUse || null,
+    isOwned: formData.isCashInOwned || false,
   };
 
   const inspectionData: InspectionData = {
@@ -105,9 +190,8 @@ export const prepareInspectionData = (formData: any) => {
     inspectionDate: formData.inspectionDate,
     inspectionResult: formData.inspectionResult,
     vehicleRating: formData.vehicleRating,
-    marketValue: formData.marketValue,
-    suggestedCommercialValue: formData.suggestedCommercialValue,
-    bankValue: formData.bankValue,
+    marketValue: formData.marketValue || undefined,
+    suggestedCommercialValue: formData.suggestedCommercialValue || undefined,
     currentConditionValue: formData.currentConditionValue,
     vehicleEquipment: formData.vehicleEquipment,
     importantConsiderations: formData.importantConsiderations,
@@ -117,6 +201,27 @@ export const prepareInspectionData = (formData: any) => {
     missingAirbag: formData.missingAirbag,
     testDrive: formData.testDrive === 'Sí',
     noTestDriveReason: formData.noTestDriveReason,
+    sectionTimes: sectionTimes || {},
+    rejectionEvidenceUrl: rejectionEvidenceUrl,
+    tiresCondition: formData.tiresCondition ? parseInt(formData.tiresCondition) : (
+      formData.tireConditionFrontLeft || formData.tireConditionFrontRight || formData.tireConditionRearLeft || formData.tireConditionRearRight ? 
+      Math.round((
+        parseInt(formData.tireConditionFrontLeft || "0") + 
+        parseInt(formData.tireConditionFrontRight || "0") + 
+        parseInt(formData.tireConditionRearLeft || "0") + 
+        parseInt(formData.tireConditionRearRight || "0")
+      ) / 4) : undefined
+    ),
+    tireConditionFrontLeft: formData.tireConditionFrontLeft ? parseInt(formData.tireConditionFrontLeft) : undefined,
+    tireConditionFrontRight: formData.tireConditionFrontRight ? parseInt(formData.tireConditionFrontRight) : undefined,
+    tireConditionRearLeft: formData.tireConditionRearLeft ? parseInt(formData.tireConditionRearLeft) : undefined,
+    tireConditionRearRight: formData.tireConditionRearRight ? parseInt(formData.tireConditionRearRight) : undefined,
+    hasSpareTire: formData.hasSpareTire === 'Sí',
+    tireConditionSpare: formData.hasSpareTire === 'Sí' && formData.tireConditionSpare ? parseInt(formData.tireConditionSpare) : undefined,
+    paintCondition: formData.paintCondition ? parseInt(formData.paintCondition) : undefined,
+    hasAgencyHistory: formData.hasAgencyHistory === 'Sí' ? true : (formData.hasAgencyHistory === 'No' ? false : undefined),
+    aiValuation: aiValuation,
+    status: formData.status,
   };
 
   return { vehicleData, inspectionData };
@@ -156,15 +261,10 @@ export const getVehicleById = async (id: string) => {
   }
 };
 
-// Search vehicles
-export const searchVehicles = async (
-  query?: string,
-  status?: "pending" | "available" | "sold" | "maintenance" | "auction",
-  vehicleType?: string,
-  fuelType?: string
-) => {
+// Search only vehicles with previous inspections
+export const searchInspectedVehicles = async (query?: string, status?: "pending" | "available" | "sold" | "maintenance" | "auction", vehicleType?: string, fuelType?: string) => {
   try {
-    const vehicles = await client.searchVehicles({
+    const vehicles = await client.searchInspectedVehicles({
       query,
       status,
       vehicleType,
@@ -175,7 +275,7 @@ export const searchVehicles = async (
       data: vehicles
     };
   } catch (error) {
-    console.error('Error searching vehicles:', error);
+    console.error('Error searching inspected vehicles:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Error desconocido'
@@ -193,6 +293,26 @@ export const getVehicleStatistics = async () => {
     };
   } catch (error) {
     console.error('Error fetching statistics:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido'
+    };
+  }
+};
+// Validate vehicle plate uniqueness
+export const validateVehiclePlate = async (licensePlate: string, vinNumber?: string, id?: string) => {
+  try {
+    const result = await client.validateLicensePlate({
+      licensePlate,
+      vinNumber,
+      id
+    });
+    return {
+      success: true,
+      data: result
+    };
+  } catch (error) {
+    console.error('Error validating license plate:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Error desconocido'

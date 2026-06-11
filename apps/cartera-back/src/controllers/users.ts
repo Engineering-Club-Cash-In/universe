@@ -2,6 +2,9 @@ import { z } from "zod";
 import { creditos, usuarios } from "../database/db/schema";
 import { db } from "../database";
 import { eq, inArray, and } from "drizzle-orm"; // Import eq for query conditions
+
+type DbExecutor = Pick<typeof db, "select" | "insert">;
+
 export enum CategoriaUsuario {
   CV_VEHICULO_NUEVO = "CV Vehículo nuevo",
   VEHICULO = "Vehículo",
@@ -55,11 +58,18 @@ export const findOrCreateUserByName = async (
   nombre: string,
   categoria: string | null,
   nit: string | null,
-  como_se_entero: string | null
+  como_se_entero: string | null,
+  // Nuevos parámetros opcionales para dirección
+  direccion?: string | null,
+  municipio?: string | null,
+  departamento?: string | null,
+  codigo_postal?: string | null,
+  pais?: string | null,
+  executor: DbExecutor = db
 ) => {
   try {
     // Buscar usuario por nombre exacto
-    const existingUser = await db
+    const existingUser = await executor
       .select()
       .from(usuarios)
       .where(eq(usuarios.nombre, nombre))
@@ -69,8 +79,8 @@ export const findOrCreateUserByName = async (
       return existingUser[0];
     }
 
-    // Si no existe, crear usuario
-    const [newUser] = await db
+    // Si no existe, crear usuario con todos los campos
+    const [newUser] = await executor
       .insert(usuarios)
       .values({
         nombre,
@@ -78,6 +88,12 @@ export const findOrCreateUserByName = async (
         nit,
         como_se_entero,
         saldo_a_favor: "0",
+        // Campos opcionales de dirección
+        direccion: direccion || null,
+        municipio: municipio || null,
+        departamento: departamento || null,
+        codigo_postal: codigo_postal || "01001", // Default si no viene
+        pais: pais || "GT", // Default si no viene
       })
       .returning();
 
@@ -90,7 +106,6 @@ export const findOrCreateUserByName = async (
     throw error;
   }
 };
-
 export interface UsuarioConCreditosSifco {
   usuario_id: number;
   nombre: string;
@@ -111,7 +126,7 @@ export async function getUsersWithSifco(user?: any): Promise<UsuarioConCreditosS
 
     // 📌 Construir condiciones dinámicas
     const conditions: any[] = [
-      inArray(creditos.statusCredit, ["ACTIVO", "PENDIENTE_CANCELACION", "MOROSO","EN_CONVENIO"]), // Solo créditos SIFCO vigentes
+      inArray(creditos.statusCredit, ["ACTIVO", "PENDIENTE_CANCELACION", "MOROSO", "EN_CONVENIO", "INCOBRABLE"]), // Solo créditos SIFCO vigentes
     ];
     console.log(asesorId)
     // 🔒 Si NO es admin y tiene asesor_id, filtrar solo sus créditos

@@ -1,8 +1,5 @@
 import Map from "./assets/Map.png";
 import {
-  InvestorsLogo as Investors,
-  Tranki,
-  Listo,
   Facebook,
   Instagram,
   Linkedin,
@@ -10,32 +7,26 @@ import {
   Whatsapp,
 } from "./icons";
 import { Link } from "@components/ui";
+import { useIsMobile } from "@/hooks";
+import { IconCCI } from "@/components/IconCCI";
 
 // Navigation sections configuration
 const FOOTER_SECTIONS = [
   {
-    title: "Acerca de nosotros",
-    links: [
-      { label: "Preguntas frecuentes", href: "/faq" },
-      { label: "News Letter", href: "/newsletter" },
-    ],
-  },
-  {
     title: "Autos",
     links: [
-      { label: "Encuentra tu auto", href: "/faq" },
-      { label: "Obtén tu financiamiento", href: "/newsletter" },
-      { label: "Compramos tu auto", href: "/newsletter" },
+      { label: "Obtén tu financiamiento", href: "/credit", disabled: false },
     ],
   },
   {
     title: "Investors",
-    links: [{ label: "Quiero invertir", href: "/faq" }],
+    links: [{ label: "Quiero invertir", href: "/invest", disabled: false }],
   },
 ];
 
 // Social media and contact information
-const SOCIAL_CONTACTS = [
+// eslint-disable-next-line react-refresh/only-export-components
+export const SOCIAL_CONTACTS = [
   {
     icon: Instagram,
     label: "@clubcashin",
@@ -43,30 +34,38 @@ const SOCIAL_CONTACTS = [
   },
   {
     icon: Whatsapp,
-    label: "+502 2234-1368",
-    href: "https://wa.me/50222341368",
+    lead: false,
+    label: "+502 3484-9518",
+    href: "https://wa.me/50234849518",
   },
   {
     icon: Facebook,
-    label: "Clubcashin",
+    label: "ClubCashIn",
     href: "https://facebook.com/clubcashin",
   },
   {
     icon: Linkedin,
-    label: "clubcashin-com",
-    href: "https://linkedin.com/company/clubcashin-com",
+    label: "Clubcashin.com",
+    href: "https://linkedin.com/company/clubcashin",
+  },
+  {
+    icon: Location,
+    lead: false,
+    label: "Km 6.8 Antigua carretera a Muxbal, Complejo Pradera, Ofibodegas, Bodega 2",
+    className: "max-w-[420px] text-center",
+    href: "https://www.google.com/maps/search/Km+6.8+Antigua+carretera+a+Muxbal+Complejo+Pradera+Ofibodegas",
   },
 ];
 
-const LOCATION_INFO = {
-  icon: Location,
-  address: '3a avenida "A" 13-78, Colonia Lomas de Pamplona zona 13',
-  href: "https://maps.google.com",
-};
+interface FooterProps {
+  notShowRedirects?: boolean;
+}
 
-export const Footer: React.FC = () => {
+export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
+  const isMobile = useIsMobile();
+
   return (
-    <footer className="relative bg-[#0F0F0F] lg:h-[550px] h-full">
+    <footer className="relative bg-[#0F0F0F] lg:h-[550px] h-full ">
       {/* Gradient shadow at the top - always visible */}
       <div
         style={{
@@ -80,7 +79,7 @@ export const Footer: React.FC = () => {
       <div
         style={{
           backgroundImage: `url(${Map})`,
-          backgroundSize: "100% auto",
+          backgroundSize: isMobile ? "400% auto" : "100% auto",
           backgroundPosition: "center",
           backgroundRepeat: "no-repeat",
           opacity: 0.3,
@@ -89,40 +88,57 @@ export const Footer: React.FC = () => {
       />
 
       {/* Content */}
-      <div className="flex justify-end flex-col gap-6 h-full px-40 py-6 lg:py-20 z-10 relative">
+      <div className="flex justify-end flex-col gap-6 h-full p-8 lg:px-40 lg:py-20 z-10 relative">
         {/* Logo section */}
-        <div className="flex gap-10 items-center">
-          <h1 className="text-header-3">Cashin</h1>
-          <Investors />
-          <Tranki />
-          <Listo />
+        <div className="flex flex-col lg:flex-row gap-6 lg:gap-10 lg:items-center">
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8">
+              <IconCCI />
+            </div>
+            <h1 className="text-3xl lg:text-header-3">CashIn</h1>
+          </Link>
         </div>
 
         <div className="border-t border-white border-2"></div>
 
         {/* Main content grid */}
-        <div className="grid grid-cols-5 gap-6 lg:gap-0 w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-5 gap-6 w-full">
           {/* Navigation links */}
-          <div className="w-full col-span-3 lg:col-span-2 flex gap-14">
-            {FOOTER_SECTIONS.map((section) => (
-              <div key={section.title} className="flex flex-col gap-6">
-                <div className="text-[20px] font-bold">{section.title}</div>
-                {section.links.map((link) => (
-                  <Link
-                    key={link.label}
-                    href={link.href}
-                    className="transition-colors hover:text-gray-300"
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-              </div>
-            ))}
-          </div>
+          {!notShowRedirects && (
+            <div className="order-2 lg:order-1  w-full col-span-3 lg:col-span-1 xl:col-span-2 flex flex-col xl:flex-row gap-10 xl:gap-14">
+              {FOOTER_SECTIONS.map((section) => (
+                <div key={section.title} className="flex flex-col gap-6">
+                  <div className="text-[20px] font-bold">{section.title}</div>
+                  {section.links.map((link) =>
+                    link.disabled ? (
+                      <span
+                        key={link.label}
+                        className="text-gray-600 cursor-not-allowed"
+                        aria-disabled="true"
+                        role="link"
+                      >
+                        {link.label}
+                      </span>
+                    ) : (
+                      <Link
+                        key={link.label}
+                        href={link.href}
+                        className="transition-colors hover:text-gray-300"
+                      >
+                        {link.label}
+                      </Link>
+                    )
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Social media and contact */}
-          <div className="w-full col-span-2 lg:col-span-3 flex flex-col lg:flex-row justify-end gap-8 lg:pr-14">
-            {SOCIAL_CONTACTS.map((contact) => {
+          <div
+            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-2 xl:col-span-3 flex ${notShowRedirects ? "" : "lg:justify-end xl:pr-14"} gap-4 lg:gap-8 `}
+          >
+            {SOCIAL_CONTACTS.filter(contact => notShowRedirects ? contact.lead !== false : true).map((contact) => {
               const IconComponent = contact.icon;
               return (
                 <a
@@ -130,22 +146,13 @@ export const Footer: React.FC = () => {
                   href={contact.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-1 text-[14px] font-normal transition-all hover:scale-110 hover:text-gray-300 cursor-pointer"
+                  className={`flex flex-col items-center gap-1 text-[14px] font-normal transition-all hover:scale-110 hover:text-gray-300 cursor-pointer ${contact.className || ""}`}
                 >
                   <IconComponent />
-                  {contact.label}
+                  <div className={`hidden lg:block text-[14px] ${contact.className ? "" : "whitespace-nowrap"}`}>{contact.label}</div>
                 </a>
               );
             })}
-            <a
-              href={LOCATION_INFO.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col items-center gap-1 text-[14px] font-normal max-w-[280px] text-center transition-all hover:scale-105 hover:text-gray-300 cursor-pointer"
-            >
-              <Location />
-              {LOCATION_INFO.address}
-            </a>
           </div>
         </div>
       </div>

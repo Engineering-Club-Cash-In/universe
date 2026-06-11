@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import {
 	Card,
@@ -12,6 +11,8 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/whatsapp")({
@@ -19,7 +20,11 @@ export const Route = createFileRoute("/crm/whatsapp")({
 });
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const [iframeLoading, setIframeLoading] = useState(true);
 
@@ -31,7 +36,7 @@ function RouteComponent() {
 	const userRole = userProfile.data?.role;
 
 	useEffect(() => {
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (
 			session &&
@@ -43,7 +48,7 @@ function RouteComponent() {
 				"Acceso denegado: esta sección es solo para ventas y administradores",
 			);
 		}
-	}, [session, isPending, userRole, navigate]);
+	}, [session, sessionError, isPending, userRole, navigate]);
 
 	const handleIframeLoad = () => {
 		setIframeLoading(false);

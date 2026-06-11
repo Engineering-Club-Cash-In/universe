@@ -1,16 +1,114 @@
 // routes/sifco.ts
 import { Elysia, t } from "elysia";
-import { fillPagosInversionistas, mapPagosPorCreditos, syncClienteConPrestamos } from "../migration/migration";
+import { fillPagosInversionistas, fillPagosInversionistasV2, mapPagosPorCreditos, syncClienteConPrestamos } from "../migration/migration";
  
 import path from "path";
 import { leerCreditoPorNumeroSIFCO } from "../services/excel";
 import { authMiddleware } from "./midleware";
-import { listarCreditosConDetalle } from "../migration/migrationCredits";
+import { listarCreditosConDetalle, procesarCreditoIndividual } from "../migration/migrationCredits";
 import z from "zod";
 import { procesarCreditosMora } from "../migration/migrationLateFee";
+import { liquidarCuotasBatchInteligente, marcarLiquidadoInversionistasPorNombre } from "../controllers/liquidateInvestor";
+import { procesarInversionistasSoloExcel } from "../controllers/migrateInvestor";
+import { procesarCreditoDesdeExcelFull, CreditoAgrupadoExcel } from "../controllers/processFromExcelFull";
+
+const LiquidacionBatchItemSchema = t.Object({
+  nombre_usuario: t.String({ minLength: 1 }),
+  cuota_mes: t.String({ minLength: 1 }),
+  capital: t.Number({ minimum: 0 }),
+  meses_en_credito: t.Optional(t.Union([t.Number(), t.Null()])),  // 🔥 NUEVO CAMPO OPCIONAL
+  porcentaje_inversor: t.Optional(t.Number())  // 🔥 NUEVO CAMPO OPCIONAL
+});
+
+const LiquidacionBatchSchema = t.Object({
+  nombre_inversionista: t.String({ minLength: 1 }),
+  liquidaciones: t.Array(LiquidacionBatchItemSchema, { minItems: 1 })
+});
 // ✅ Schema para sync de pagos desde SIFCO (param opcional)
 const syncCreditPaymentsSchema = z.object({
   numero_credito_sifco: z.string().min(1).optional(),
+});
+const ExcelCreditoRowSchema = t.Object({
+  Fecha: t.String(),
+  CreditoSIFCO: t.String(),
+  Numero: t.Number(),
+  Nombre: t.String(),
+  Capital: t.String(),
+  porcentaje: t.String(),
+  Cuotas: t.String(),
+  DeudaQ: t.String(),
+  IVA12: t.String(),
+  PorcentajeCashIn: t.String(),
+  PorcentajeInversionista: t.String(),
+  CuotaCashIn: t.String(),
+  IVACashIn: t.String(),
+  CuotaInversionista: t.String(),
+  IVAInversionista: t.String(),
+  Seguro10Cuotas: t.String(),
+  GPS: t.String(),
+  AbonoCapital: t.String(),
+  AbonoInteres: t.String(),
+  AbonoIVA12: t.String(),
+  AbonoInteresCI: t.String(),
+  AbonoIVACI: t.String(),
+  AbonoSeguro: t.String(),
+  AbonoGPS: t.String(),
+  PagoDelMes: t.String(),
+  CapitalRestante: t.String(),
+  InteresRestante: t.String(),
+  IVA12Restante: t.String(),
+  SeguroRestante: t.String(),
+  GPSRestante: t.String(),
+  TotalRestante: t.String(),
+  Llamada: t.String(),
+  Pago: t.String(),
+  NIT: t.String(),
+  Categoria: t.String(),
+  Inversionista: t.String(),
+  Observaciones: t.String(),
+  Cuota: t.String(),
+  MontoBoleta: t.String(),
+  FechaFiltro: t.String(),
+  NumeroPoliza: t.String(),
+  ComisionVenta: t.String(),
+  AcumuladoComisionVenta: t.String(),
+  ComisionesMesCashIn: t.String(),
+  ComisionesCobradasMesCashIn: t.String(),
+  AcumuladoComisionesCashIn: t.String(),
+  AcumuladoComisionesCobradasCashIn: t.String(),
+  RenuevoONuevo: t.String(),
+  CapitalNuevosCreditos: t.String(),
+  PorcentajeRoyalty: t.String(),
+  Royalty: t.String(),
+  USRoyalty: t.String(),
+  Membresias: t.String(),
+  MembresiasPago: t.String(),
+  GastosMes: t.String(),
+  UtilidadMes: t.String(),
+  UtilidadAcumulada: t.String(),
+  ComoSeEntero: t.String(),
+  MembresiasDelMes: t.String(),
+  MembresiasDelMesCobradas: t.String(),
+  MembresiasAcumulado: t.String(),
+  Asesor: t.String(),
+  Otros: t.String(),
+  Mora: t.String(),
+  MontoBoletaCuota: t.String(),
+  Plazo: t.String(),
+  Seguro: t.String(),
+  FormatoCredito: t.String(),
+  Pagado: t.String(),
+  Facturacion: t.String(),
+  MesPagado: t.String(),
+  SeguroFacturado: t.String(),
+  GPSFacturado: t.String(),
+  Reserva: t.String(),
+});
+
+const CreditoAgrupadoSchema = t.Object({
+  creditoBase: t.String(),
+  cliente: t.String(),
+  filas: t.Array(ExcelCreditoRowSchema),
 });
 /**
  * 📂 Ruta absoluta del Excel en tu máquina
@@ -23,7 +121,8 @@ const csvMoraPath = path.resolve(
   "C:/Users/Kelvin Palacios/Documents/analis de datos/moraGeneral.csv"
 );
 export const sifcoRouter = new Elysia()
- 
+  .use(authMiddleware)
+
   /**
    * 🔄 Sincronizar cliente(s) con préstamos desde SIFCO
    */
@@ -263,4 +362,424 @@ export const sifcoRouter = new Elysia()
     },
   }
 )
+ .post(
+  "/pagos-inversionistas/v2",
+  async ({ body }) => {
+    const { numeroCredito, inversionistasData } = body;
 
+    type InversionistaPagoInput = {
+      inversionista: string;
+      capital: string | number;
+      porcentajeCashIn: string | number;
+      porcentajeInversionista: string | number;
+      porcentaje: string | number;
+      cuota?: string | number;
+      cuotaInversionista?: string | number;
+    };
+
+    // Transform inversionistasData to match expected type
+    const inversionistasDataTyped = inversionistasData.map((inv: InversionistaPagoInput) => ({
+      inversionista: inv.inversionista,
+      capital: inv.capital,
+      porcentajeCashIn: inv.porcentajeCashIn,
+      porcentajeInversionista: inv.porcentajeInversionista,
+      porcentaje: inv.porcentaje,
+      cuota: inv.cuota !== undefined ? inv.cuota as string | number : undefined,
+      cuotaInversionista: inv.cuotaInversionista !== undefined ? inv.cuotaInversionista as string | number : undefined,
+    }));
+
+    const resultado = await fillPagosInversionistasV2(
+      numeroCredito,
+      inversionistasDataTyped
+    );
+
+    return resultado;
+  },
+  {
+    body: t.Object({
+      numeroCredito: t.String({
+        description: "Número del crédito SIFCO",
+        examples: ["01010214116560"]
+      }),
+      inversionistasData: t.Array(
+        t.Object({
+          inversionista: t.String({
+            description: "Nombre del inversionista",
+            examples: ["Pedro Piox Piox", "Cube Investments S.A.", "Adriana Bahaia"]
+          }),
+          capital: t.Union([t.String(), t.Number()], {
+            description: "Capital aportado por el inversionista",
+            examples: ["269354.80", 269354.80]
+          }),
+          porcentajeCashIn: t.Union([t.String(), t.Number()], {
+            description: "Porcentaje de participación de Cash-In (0.0 a 1.0)",
+            examples: ["1.00", 1.0, "0.30", 0.3]
+          }),
+          porcentajeInversionista: t.Union([t.String(), t.Number()], {
+            description: "Porcentaje de participación del inversionista (0.0 a 1.0)",
+            examples: ["0.00", 0.0, "0.70", 0.7]
+          }),
+          porcentaje: t.Union([t.String(), t.Number()], {
+            description: "Porcentaje de interés (tasa) aplicable",
+            examples: ["0.015", 0.015, "1.50%"]
+          }),
+          cuota: t.Optional(t.Union([t.String(), t.Number()], {
+            description: "Cuota total calculada (opcional)",
+            examples: ["8132.48", 8132.48]
+          })),
+          cuotaInversionista: t.Optional(t.Union([t.String(), t.Number()], {
+            description: "Cuota específica del inversionista (opcional)",
+            examples: ["0", 0, "5692.74"]
+          })),
+        }),
+        {
+          description: "Array de inversionistas con sus datos de participación",
+          minItems: 1
+        }
+      ),
+    }),
+    detail: {
+      summary: "Procesar pagos de inversionistas",
+      tags: ["Pagos Inversionistas"],
+      description: `
+        Procesa y registra los pagos/participaciones de inversionistas para un crédito específico.
+        
+        **Características:**
+        - Búsqueda permisiva de inversionistas (normaliza nombres, quita acentos, ignora mayúsculas)
+        - Cálculo automático de montos e IVA
+        - Upsert: actualiza si ya existe, crea si es nuevo
+        - Logs detallados para debugging
+        
+        **Notas:**
+        - Los porcentajes deben sumar 1.0 (100%) entre porcentajeCashIn y porcentajeInversionista
+        - El sistema normalizará automáticamente nombres como "S.A.", "C.A.", espacios, acentos, etc.
+      `
+    }
+  }
+)
+  .post(
+    "/processUniqueCredit",
+    async ({ body, set }) => {
+      try {
+        console.log(`📥 Recibiendo crédito: ${body.credito.creditoBase}`);
+        
+        const resultado = await procesarCreditoIndividual(body.credito);
+        
+        if (!resultado.success) {
+          set.status = 400;
+          return resultado;
+        }
+        
+        return resultado;
+        
+      } catch (error: any) {
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error interno del servidor",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        credito: CreditoAgrupadoSchema,
+      }),
+      detail: {
+        summary: "Procesar un crédito individual",
+        description: "Recibe un objeto CreditoAgrupado y lo procesa: consulta SIFCO, mapea y guarda en DB",
+        tags: ["Créditos"],
+      },
+    }
+  ).post(
+  "/processInvestorsOnly",
+  async ({ body, set }) => {
+    try {
+      console.log(`\n📥 ========== RECIBIENDO SOLICITUD ==========`);
+      console.log(`📋 Crédito: ${body.credito.creditoBase}`);
+      console.log(`👥 Filas: ${body.credito.filas.length}`);
+      
+      // 🔥 NUEVO: Detectar modo interactivo
+      const modoInteractivo = body.modo_interactivo ?? false;
+      const umbralSimilitud = body.umbral_similitud ?? 70;
+      const decisionesUsuario = body.decisiones_usuario ?? [];
+      
+      if (modoInteractivo) {
+        console.log(`🎯 Modo interactivo activado (umbral: ${umbralSimilitud}%)`);
+      }
+      
+      if (decisionesUsuario.length > 0) {
+        console.log(`👤 Decisiones del usuario recibidas: ${decisionesUsuario.length}`);
+        decisionesUsuario.forEach((d: any) => {
+          console.log(`   - ${d.nombre_excel} → ID ${d.decision}`);
+        });
+      }
+
+      const resultado = await procesarInversionistasSoloExcel(body.credito, {
+        modo_interactivo: modoInteractivo,
+        umbral_similitud: umbralSimilitud,
+      });
+
+      // 🔥 Si requiere input del usuario, retornar 200 con requires_user_input
+      if ((resultado as any).requires_user_input) {
+        console.log(`\n❓ Esperando decisiones del usuario...`);
+        return resultado;
+      }
+
+      if (!resultado.success) {
+        set.status = 400;
+        return resultado;
+      }
+
+      return resultado;
+
+    } catch (error: any) {
+      console.error("❌ Error en endpoint:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error.message || "Error interno del servidor",
+      };
+    }
+  },
+  {
+    body: t.Object({
+      credito: t.Object({
+        creditoBase: t.String(),
+        cliente: t.String(),
+        filas: t.Array(t.Any()),
+      }),
+      // 🔥 NUEVOS CAMPOS OPCIONALES
+      modo_interactivo: t.Optional(t.Boolean()),
+      umbral_similitud: t.Optional(t.Number()),
+      decisiones_usuario: t.Optional(t.Array(t.Object({
+        nombre_excel: t.String(),
+        credito_sifco: t.String(),
+        decision: t.Number(), // inversionista_id o -1 para crear nuevo
+      }))),
+    }),
+    detail: {
+      summary: "Procesar inversionistas desde Excel (con modo interactivo)",
+      description: `
+        Recibe datos de Excel, busca el crédito en BD, borra inversionistas viejos e inserta los nuevos.
+        
+        **Modo Interactivo:**
+        - Si modo_interactivo = true, matches con similitud < umbral_similitud retornarán consultas_interactivas
+        - El cliente debe responder con decisiones_usuario en un segundo request
+        - Las decisiones se aplicarán automáticamente
+        
+        **Flujo:**
+        1. Primer request: { credito: {...}, modo_interactivo: true, umbral_similitud: 70 }
+        2. Si hay dudas, respuesta: { requires_user_input: true, consultas_interactivas: [...] }
+        3. Usuario elige opciones en Python
+        4. Segundo request: { credito: {...}, decisiones_usuario: [{nombre_excel, credito_sifco, decision}] }
+        5. Respuesta final: { success: true, inversionistas_procesados: X }
+      `,
+      tags: ["Inversionistas"],
+    },
+  }
+).post(
+  "/processFromExcelFull",
+  async ({ body, set }) => {
+    try {
+      console.log(`\n📥 ========== /processFromExcelFull ==========`);
+      console.log(`📋 Crédito: ${body.credito.creditoBase}`);
+      console.log(`📌 Hasta cuota: ${body.hasta_cuota ?? "no especificado"}`);
+
+      const resultado = await procesarCreditoDesdeExcelFull(
+        body.credito as CreditoAgrupadoExcel,
+        body.hasta_cuota
+      );
+
+      if (!resultado.success) {
+        set.status = 400;
+        return resultado;
+      }
+
+      return resultado;
+    } catch (error: any) {
+      console.error("❌ Error en /processFromExcelFull:", error);
+      set.status = 500;
+      return { success: false, error: error.message || "Error interno" };
+    }
+  },
+  {
+    body: t.Object({
+      credito: t.Object({
+        creditoBase: t.String(),
+        cliente: t.String(),
+        filas: t.Array(t.Any()),
+      }),
+      hasta_cuota: t.Optional(t.Number()),
+    }),
+    detail: {
+      summary: "Crear/actualizar crédito desde Excel con pagos y cuotas",
+      description: `
+        Lee un CreditoAgrupado del Excel, hace upsert del crédito, crea inversionistas
+        (SIN espejo), genera cuotas y pagos con amortización (igual que createCredit),
+        marca las cuotas pagadas hasta hasta_cuota y recalcula.
+
+        Las fechas se calculan automáticamente:
+        - Si hasta_cuota = 2 y Fecha del Excel = Feb-2026
+          → cuota 0 = Dic-2025, cuota 1 = Ene-2026, cuota 2 = Feb-2026 ✓
+      `,
+      tags: ["Créditos", "Migración"],
+    },
+  }
+).post(
+  "/liquidar-cuotas-batch-inteligente",
+  async ({ body, set }) => {
+    try {
+      console.log("🔥 ========== REQUEST RECIBIDO ==========");
+      console.log(`👤 Inversionista: ${body.nombre_inversionista}`);
+      console.log(`📊 Total liquidaciones: ${body.liquidaciones.length}`);
+
+      if (!body.liquidaciones || body.liquidaciones.length === 0) {
+        set.status = 400;
+        return {
+          success: false,
+          error: "Debe proporcionar al menos una liquidación",
+          exitosos: 0,
+          fallidos: 0,
+          agregados: 0,
+          actualizados: 0,
+          eliminados: 0
+        };
+      }
+
+      const resultado = await liquidarCuotasBatchInteligente(body);
+
+      if (!resultado.success) {
+        set.status = 400;
+        return resultado;
+      }
+
+      return resultado;
+
+    } catch (error) {
+      console.error("❌ Error en endpoint batch inteligente:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Error desconocido",
+        exitosos: 0,
+        fallidos: 0,
+        agregados: 0,
+        actualizados: 0,
+        eliminados: 0
+      };
+    }
+  },
+  {
+    body: t.Object({
+      nombre_inversionista: t.String(),
+      liquidaciones: t.Array(
+        t.Object({
+          nombre_usuario: t.String(),
+          cuota_mes: t.String(),
+          capital: t.Number(),
+          meses_en_credito: t.Optional(t.Union([t.Number(), t.Null()])),
+          porcentaje_inversor: t.Optional(t.Number()), // 🔥 NUEVO
+        })
+      ),
+    }),
+    detail: {
+      tags: ["Liquidaciones"],
+      summary: "Liquidar cuotas en batch inteligente con sync",
+      description: `
+        Procesa múltiples liquidaciones para un inversionista específico.
+        
+        **Características:**
+        - Crea relaciones nuevas automáticamente si no existen
+        - Actualiza relaciones existentes con el nuevo capital
+        - Elimina relaciones huérfanas (que ya no están en el Excel)
+        - Procesa TODOS los créditos sin importar el mes
+        
+        **Campos opcionales:**
+        - meses_en_credito: Número de meses que lleva el crédito (informativo)
+        - porcentaje_inversor: % de participación del inversionista (ej: 1.20 para 1.20%)
+          - Si se proporciona, se usa ese porcentaje
+          - Si no se proporciona, usa default 72% inversor / 28% cash-in
+          - El restante se calcula automáticamente para cash-in
+        
+        **Ejemplo de uso:**
+        \`\`\`json
+        {
+          "nombre_inversionista": "Juan Pérez",
+          "liquidaciones": [
+            {
+              "nombre_usuario": "María García",
+              "cuota_mes": "nov. 25",
+              "capital": 50000.00,
+              "meses_en_credito": 3,
+              "porcentaje_inversor": 1.20
+            }
+          ]
+        }
+        \`\`\`
+      `,
+    }
+  }
+).post(
+  "/marcar-liquidado-inversionistas",
+  async ({ body, set }) => {
+    try {
+      console.log("🔥 ========== MARCAR LIQUIDADO INVERSIONISTAS ==========");
+      console.log(`   👤 Inversionista: ${body.nombre_inversionista}`);
+      console.log(`   🧑  Cliente:       ${body.nombre_usuario}`);
+      console.log(`   📅 Cuota mes:     ${body.cuota_mes}`);
+
+      const resultado = await marcarLiquidadoInversionistasPorNombre({
+        nombre_inversionista: body.nombre_inversionista,
+        nombre_usuario: body.nombre_usuario,
+        cuota_mes: body.cuota_mes,
+      });
+
+      if (!resultado.success) {
+        set.status = 400;
+        return resultado;
+      }
+
+      set.status = 200;
+      return resultado;
+    } catch (error) {
+      console.error("❌ Error en /marcar-liquidado-inversionistas:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: "Error interno del servidor",
+        error: error instanceof Error ? error.message : "Error desconocido",
+      };
+    }
+  },
+  {
+    body: t.Object({
+      nombre_inversionista: t.String({ minLength: 1, description: "Nombre del inversionista (búsqueda permisiva)" }),
+      nombre_usuario: t.String({ minLength: 1, description: "Nombre del cliente/deudor (búsqueda permisiva)" }),
+      cuota_mes: t.String({
+        minLength: 4,
+        description: "Mes de corte: 'mes. AA', ej: 'dic. 25'. Cuotas hasta ese mes → true; cuotas después → false.",
+      }),
+    }),
+    detail: {
+      tags: ["Liquidaciones"],
+      summary: "Marcar liquidado_inversionistas por nombre de inversionista y cliente",
+      description: `
+        Dado el nombre del inversionista, el nombre del cliente y el mes de corte (\'cuota_mes\'),
+        localiza el crédito y actualiza el campo \`liquidado_inversionistas\` en \`cuotas_credito\`:
+
+        - \`fecha_vencimiento\` **≤ último día del mes de corte** → \`liquidado_inversionistas = true\`
+        - \`fecha_vencimiento\` **> último día del mes de corte** → \`liquidado_inversionistas = false\`
+
+        **Ejemplo:** \`cuota_mes = "dic. 25"\` → cuotas hasta el 31-dic-2025 quedan en **true**.
+
+        \`\`\`json
+        {
+          "nombre_inversionista": "Juan Pérez",
+          "nombre_usuario": "María García",
+          "cuota_mes": "dic. 25"
+        }
+        \`\`\`
+      `,
+    },
+  }
+);

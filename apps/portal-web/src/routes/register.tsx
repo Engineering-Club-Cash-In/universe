@@ -1,12 +1,35 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Page } from "@/components";
 import { Register } from "@/features/Login/Register";
+import { authClient } from "@/lib/auth";
+import { useSEO } from "@/lib/seo";
+
+// Verificar si ya tiene sesión activa
+const checkIfLoggedIn = async () => {
+  const sessionData = await authClient.getSession();
+  
+  if (sessionData?.data?.user) {
+    // Si ya tiene sesión, redirigir a profile
+    throw redirect({
+      to: "/profile",
+    });
+  }
+};
 
 export const Route = createFileRoute("/register")({
+  beforeLoad: async () => {
+    await checkIfLoggedIn();
+  },
   component: RouteComponent,
 });
 
 function RouteComponent() {
+  useSEO({
+    title: "Registro",
+    description: "Crea tu cuenta en Club CashIn.",
+    noindex: true,
+  });
+
   return (
     <Page>
       <Register />

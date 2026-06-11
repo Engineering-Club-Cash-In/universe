@@ -38,3 +38,7 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+*.xlsx
+
+.venv/

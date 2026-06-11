@@ -1,5 +1,4 @@
 import { NavBar } from "@components/ui";
-import { Footer } from "@features/footer";
 import { FormLogin } from "./components";
 
 export const Login = () => {
@@ -9,7 +8,6 @@ export const Login = () => {
         <NavBar />
         <FormLogin />
       </div>
-      <Footer />
     </div>
   );
 };

@@ -12,7 +12,8 @@ export type StatusCreditEnum =
 	| "CANCELADO"
 	| "INCOBRABLE"
 	| "PENDIENTE_CANCELACION"
-	| "MOROSO";
+	| "MOROSO"
+	| "EN_CONVENIO";
 
 export type EstadoLiquidacionEnum =
 	| "NO_LIQUIDADO"
@@ -94,13 +95,15 @@ export interface CarteraCredito {
 }
 
 export interface CreateCreditoInput {
-	usuario_id: number;
+	//usuario_id?: number;
+	usuario?: string;
 	numero_credito_sifco: string;
 	capital: number;
 	porcentaje_interes: number;
 	plazo: number;
 	cuota: number;
-	asesor_id?: number;
+	// asesor_id?: number;
+	asesor?: any;
 	tipoCredito?: string;
 	iva_12?: number;
 	seguro_10_cuotas?: number;
@@ -108,8 +111,82 @@ export interface CreateCreditoInput {
 	fecha_creacion?: string;
 	observaciones?: string;
 	no_poliza?: string;
+	como_se_entero?: string;
+	dia_pago_mensual?: 15 | 30;
+	membresias_pago?: number;
+	categoria?: string;
+	nit?: string;
+	royalti?: number;
+	porcentaje_royalti?: number;
+	otros?: number;
+	reserva?: number;
+	is_vehiculo_propio?: boolean;
+	// campos para la facturacion
+	direccion?: string;
+	municipio?: string;
+	departamento?: string;
+	codigo_postal?: string;
+	pais?: string;
+	// Nuevos campos para el correo de notificación
+	vehiculo_marca?: string;
+	vehiculo_linea?: string;
+	vehiculo_modelo?: string;
+	vehiculo_placa?: string;
+	vehiculo_vin?: string;
+	monto_asegurado?: number;
+	opportunity_id?: string;
+	inversionistas?: Array<{
+		inversionista_id: number;
+		porcentaje_participacion: number;
+		cuota_inversionista: number;
+		monto_aportado: number;
+		porcentaje_cash_in: number;
+		porcentaje_inversion: number;
+	}>;
+	rubros?: Array<{
+		nombre_rubro: string;
+		monto: number;
+	}>;
 }
 
+/**
+ * Estructura REAL devuelta por el endpoint /getAllCredits
+ * Los datos vienen anidados, no como un objeto plano
+ */
+export interface CreditoDetailResponse {
+	creditos: CarteraCredito;
+	usuarios: CarteraUsuario;
+	asesores: CarteraAsesorCredito | null;
+	inversionistas: Array<{
+		credito_id: number;
+		inversionista_id: number;
+		nombre: string;
+		emite_factura: boolean;
+		monto_aportado: string;
+		monto_cash_in: string;
+		monto_inversionista: string;
+		iva_cash_in: string;
+		iva_inversionista: string;
+		porcentaje_participacion_inversionista: string;
+		porcentaje_cash_in: string;
+		cuota_inversionista: string;
+	}>;
+	resumen: {
+		total_cash_in_monto: number;
+		total_cash_in_iva: number;
+		total_inversion_monto: number;
+		total_inversion_iva: number;
+	};
+	rubros: unknown[];
+	mora: CarteraMoraCredito | null;
+	deuda_total_con_mora: string;
+	proxima_cuota?: CarteraCuotaCredito | null;
+}
+
+/**
+ * @deprecated Usar CreditoDetailResponse en su lugar
+ * Este tipo representa una estructura que NO coincide con la API real
+ */
 export interface CreditoConInversionistas extends CarteraCredito {
 	usuario: CarteraUsuario;
 	asesor: {
@@ -132,6 +209,55 @@ export interface CreditoConInversionistas extends CarteraCredito {
 	cuotas_atrasadas?: number;
 	ultimo_pago?: CarteraPagoCredito;
 	proxima_cuota?: CarteraCuotaCredito;
+}
+
+/**
+ * Asesor tal como lo devuelve el endpoint /credito (campos crudos de la tabla `asesores`).
+ * Difiere de CarteraAsesor (que se enriquece con datos de platform_users en /advisor).
+ */
+export interface CarteraAsesorCredito {
+	asesor_id: number;
+	nombre: string;
+	telefono: string | null;
+	activo: boolean | null;
+	emailCashIn: string | null;
+}
+
+/**
+ * Estructura real devuelta por el endpoint /credito?numero_credito_sifco=XXX
+ * Retorna los datos del crédito con las cuotas separadas por estado
+ */
+export interface CarteraConvenio {
+	convenio_id: number;
+	credito_id: number;
+	monto_total_convenio: string;
+	numero_meses: number;
+	cuota_mensual: string;
+	activo: boolean;
+	completado: boolean;
+	created_at?: string | null;
+	updated_at?: string | null;
+	fecha_convenio?: string | null;
+	monto_pagado?: string | null;
+	monto_pendiente?: string | null;
+	pagos_realizados?: number | null;
+	pagos_pendientes?: number | null;
+	motivo?: string | null;
+	observaciones?: string | null;
+	created_by?: number | null;
+	cuotaConvenioAPagar?: string | null;
+}
+
+export interface CreditoDirectoResponse {
+	credito: CarteraCredito;
+	usuario: CarteraUsuario;
+	asesor: CarteraAsesorCredito | null;
+	cuotasPagadas: CarteraCuotaCredito[];
+	cuotasPendientes: CarteraCuotaCredito[];
+	cuotasAtrasadas: CarteraCuotaCredito[];
+	moraActual: string; // decimal viene como string
+	mora?: CarteraMoraCredito | null;
+	convenioActivo?: CarteraConvenio | null;
 }
 
 export interface UpdateCreditoInput {
@@ -169,6 +295,25 @@ export interface CarteraCuotaCredito {
 	pagado: boolean;
 	createdAt: string; // timestamp
 	pago?: CarteraPagoCredito;
+	// Campos adicionales de pago (opcionales)
+	pago_id?: number;
+	monto_boleta?: string; // decimal
+	abono_capital?: string; // decimal
+	abono_interes?: string; // decimal
+	abono_iva_12?: string; // decimal
+	abono_interes_ci?: string; // decimal
+	abono_iva_ci?: string; // decimal
+	abono_seguro?: string; // decimal
+	abono_gps?: string; // decimal
+	abono_membresias?: string; // decimal
+	capital_restante?: string; // decimal
+	interes_restante?: string; // decimal
+	iva_12_restante?: string; // decimal
+	seguro_restante?: string; // decimal
+	gps_restante?: string; // decimal
+	membresias_restante?: string; // decimal
+	pago_mora?: string; // decimal
+	pago_otros?: string; // decimal
 }
 
 // ============================================================================
@@ -246,11 +391,17 @@ export interface CarteraBoleta {
 export interface CarteraInversionista {
 	inversionista_id: number;
 	nombre: string;
+	dpi: number | null;
+	email: string | null;
 	emite_factura: boolean;
 	reinversion: boolean;
+	tipo_reinversion: string;
 	banco: BancoEnum | null;
+	banco_id: number | null;
 	tipo_cuenta: TipoCuentaEnum | null;
 	numero_cuenta: string | null;
+	moneda: "quetzales" | "dolares";
+	celular: string | null;
 }
 
 export interface CreateInversionistaInput {
@@ -329,6 +480,8 @@ export interface CarteraAsesor {
 	asesor_id: number;
 	nombre: string;
 	activo: boolean;
+	email: string;
+	is_active: boolean;
 }
 
 export interface CreateAsesorInput {
@@ -400,6 +553,7 @@ export interface PaginatedResponse<T> {
 	total: number;
 	page: number;
 	perPage: number;
+	totalCount?: number;
 	totalPages: number;
 }
 
@@ -410,7 +564,16 @@ export interface GetAllCreditsParams {
 	page?: number;
 	perPage?: number;
 	numero_credito_sifco?: string;
+	numeros_credito_sifco?: string[];
 	excel?: boolean;
+	cuotas_atrasadas?: number;
+	nombre_usuario?: string;
+	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
+	email_cobrador?: string;
+	fecha_desde?: string;
+	fecha_hasta?: string;
+	capital_min?: number;
+	capital_max?: number;
 }
 
 export interface GetPaymentsParams {
@@ -422,6 +585,12 @@ export interface GetPaymentsParams {
 }
 
 export interface GetInvestorsParams {
+	id?: number;
+	page?: number;
+	perPage?: number;
+}
+
+export interface GetAdvisorsParams {
 	page?: number;
 	perPage?: number;
 }
@@ -462,6 +631,57 @@ export interface PagoDetalle {
 }
 
 // ============================================================================
+// STATS (ESTADÍSTICAS)
+// ============================================================================
+
+export interface CarteraStatsBucket {
+	cantidad: number;
+	porcentaje: string;
+	sumaCapital: string;
+	sumaMora: string;
+}
+
+export interface CarteraStatsResponse {
+	totalCreditos: number;
+	efectividad: string;
+	porCuotasAtrasadas: {
+		[key: string]: CarteraStatsBucket; // "0", "1", "2", "3", "4"+
+	};
+	porEstado: {
+		cancelado?: CarteraStatsBucket;
+		incobrable?: CarteraStatsBucket;
+	};
+}
+
+export interface GetStatsParams {
+	email?: string; // Email del asesor para filtrar
+}
+
+// ============================================================================
+// FACTURACIÓN
+// ============================================================================
+
+/** Item de factura genérica */
+export interface FacturaItem {
+	monto: number;
+	rubro: string;
+}
+
+/** Input para facturación genérica */
+export interface FacturarGenericoInput {
+	nit: string;
+	items: FacturaItem[];
+	created_by: number;
+}
+
+/** Respuesta de facturación genérica */
+export interface FacturarGenericoResponse {
+	success: boolean;
+	message?: string;
+	factura_id?: number;
+}
+
+// ============================================================================
 // ERROR TYPES
 // ============================================================================
 
@@ -475,6 +695,55 @@ export class CarteraBackError extends Error {
 		this.name = "CarteraBackError";
 	}
 }
+
+// ============================================================================
+// RESUMEN GLOBAL INVERSIONISTAS
+// ============================================================================
+
+export interface BoletaPagoInversionista {
+	boleta_id: number;
+	inversionista_id: number;
+	boleta_url: string;
+	estado: string;
+	notas: string | null;
+	monto_boleta: string;
+	fecha_subida: string;
+}
+
+export interface CreateBoletaInput {
+	inversionista_id: number;
+	boleta_url: string;
+	monto_boleta?: string;
+	notas?: string;
+	subido_por?: number;
+}
+
+export interface ResumenGlobalInversionista {
+	inversionista_id: number;
+	nombre: string;
+	moneda: "quetzales" | "dolares";
+	currencySymbol: string;
+	emite_factura: boolean;
+	reinversion: string;
+	banco: string | null;
+	tipo_cuenta: string | null;
+	numero_cuenta: string | null;
+	total_abono_capital: string;
+	total_abono_interes: string;
+	total_abono_iva: string;
+	total_isr: string;
+	total_cuota?: string;
+	total_a_recibir_sin_reinversion: string;
+	total_reinversion: string;
+	total_a_recibir_con_reinversion: string;
+	boleta_pendiente: BoletaPagoInversionista | null;
+	boleta_liquidacion?: BoletaPagoInversionista | null;
+	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
+}
+
+// ============================================================================
+// ERRORS
+// ============================================================================
 
 export class CarteraBackConnectionError extends CarteraBackError {
 	constructor(message: string) {

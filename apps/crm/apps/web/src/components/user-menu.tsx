@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { Shield, User } from "lucide-react";
 import {
 	DropdownMenu,
@@ -10,6 +10,8 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { authClient } from "@/lib/auth-client";
+import { logAuthDiagnostic } from "@/lib/auth-session";
+import { getRoleColor, getRoleLabel } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
@@ -17,7 +19,6 @@ import { Button } from "./ui/button";
 import { Skeleton } from "./ui/skeleton";
 
 export default function UserMenu() {
-	const navigate = useNavigate();
 	const { data: session, isPending } = authClient.useSession();
 	const userProfile = useQuery({
 		...orpc.getUserProfile.queryOptions(),
@@ -37,11 +38,6 @@ export default function UserMenu() {
 	}
 
 	const userRole = userProfile.data?.role;
-	const getRoleBadgeColor = (role: string) => {
-		return role === "admin"
-			? "bg-red-100 text-red-800"
-			: "bg-blue-100 text-blue-800";
-	};
 
 	const getInitials = (name: string) => {
 		return name
@@ -80,32 +76,26 @@ export default function UserMenu() {
 					</p>
 
 					{userRole && (
-						<Badge className={getRoleBadgeColor(userRole)} variant="outline">
+						<Badge className={getRoleColor(userRole)}>
 							{userRole === "admin" ? (
-								<>
-									<Shield className="mr-1 h-3 w-3" /> Admin
-								</>
+								<Shield className="mr-1 h-3 w-3" />
 							) : (
-								<>
-									<User className="mr-1 h-3 w-3" /> Ventas
-								</>
+								<User className="mr-1 h-3 w-3" />
 							)}
+							{getRoleLabel(userRole)}
 						</Badge>
 					)}
 
 					<Button
 						variant="outline"
 						className="w-full"
-						onClick={() => {
-							authClient.signOut({
-								fetchOptions: {
-									onSuccess: () => {
-										navigate({
-											to: "/",
-										});
-									},
-								},
+						onClick={async () => {
+							logAuthDiagnostic({
+								detail: { userId: session.user.id },
+								reason: "user-clicked-sign-out",
 							});
+							await authClient.signOut();
+							window.location.href = "/";
 						}}
 					>
 						Cerrar Sesión

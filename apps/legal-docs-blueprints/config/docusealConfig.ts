@@ -120,6 +120,163 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
       { role: 'Cliente', required: true },
     ],
   },
+
+  // ===== INVERSIONES =====
+  [ContractType.ACUERDO_INVERSION_CASH_IN]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CESION_CREDITOS]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cedente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_INCREMENTO_INVERSION]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.DESIGNACION_BENEFICIARIO]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  // ===== INVERSIONES SOCIEDAD =====
+  [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_INCREMENTO_INVERSION_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CESION_CREDITOS_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cedente', required: true },
+    ],
+  },
+
+  [ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  // ===== CARTA PODER =====
+  [ContractType.CARTA_CUBE_ANDRES]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_CUBE_DON_ALEX]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_RDBE_DON_ALEX]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_RDBE_RICHARD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
 };
 
 /**

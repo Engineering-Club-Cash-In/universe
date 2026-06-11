@@ -21,9 +21,11 @@ export function OpportunitySelector({
 	disabled = false,
 	onAssignSuccess,
 }: OpportunitySelectorProps) {
-	const [selectedOpportunityId, setSelectedOpportunityId] = useState<
-		string | null
-	>(currentOpportunityId);
+	const [optimisticId, setOptimisticId] = useState<string | null>(null);
+	const [isOptimistic, setIsOptimistic] = useState(false);
+	const selectedOpportunityId = isOptimistic
+		? optimisticId
+		: currentOpportunityId;
 
 	// Obtener oportunidades del lead
 	const { data: opportunities, isLoading: isLoadingOpportunities } = useQuery({
@@ -39,19 +41,20 @@ export function OpportunitySelector({
 			return await client.assignOpportunityToContract(values);
 		},
 		onSuccess: () => {
+			setIsOptimistic(false);
 			toast.success("Oportunidad asignada correctamente");
 			onAssignSuccess?.();
 		},
 		onError: (error: Error) => {
+			setIsOptimistic(false);
 			toast.error(`Error al asignar oportunidad: ${error.message}`);
-			// Revertir el cambio en caso de error
-			setSelectedOpportunityId(currentOpportunityId);
 		},
 	});
 
 	const handleAssignOpportunity = (opportunityId: string) => {
 		const newOpportunityId = opportunityId || null;
-		setSelectedOpportunityId(newOpportunityId);
+		setOptimisticId(newOpportunityId);
+		setIsOptimistic(true);
 
 		assignMutation.mutate({
 			contractId,
@@ -60,7 +63,8 @@ export function OpportunitySelector({
 	};
 
 	const handleClearOpportunity = () => {
-		setSelectedOpportunityId(null);
+		setOptimisticId(null);
+		setIsOptimistic(true);
 		assignMutation.mutate({
 			contractId,
 			opportunityId: null,

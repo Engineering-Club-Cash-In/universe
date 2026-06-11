@@ -1,7 +1,7 @@
 // controllers/advisors.ts
 import { db } from '../database/index';
-import { asesores, creditos, moras_credito, platform_users } from '../database/db/schema';
-import { and, eq, like, sql } from 'drizzle-orm';
+import { asesores, creditos, moras_credito, platform_users, usuarios } from '../database/db/schema';
+import { and, eq, like, or, sql } from 'drizzle-orm';
 import bcrypt from "bcrypt";
 import Big from 'big.js';
 export const insertAdvisor = async ({ body, set }: any) => {
@@ -30,8 +30,9 @@ export const insertAdvisor = async ({ body, set }: any) => {
     const insertedAdvisors = await db
       .insert(asesores)
       .values(
-        asesoresToInsert.map(({ nombre, activo }) => ({
+        asesoresToInsert.map(({ nombre, activo, telefono }) => ({ // 🔥 Agregado telefono
           nombre,
+          telefono: telefono?.trim() || null, // 🔥 NUEVO: Limpia o pone null
           activo: typeof activo !== "undefined" ? activo : true,
         }))
       )
@@ -59,7 +60,6 @@ export const insertAdvisor = async ({ body, set }: any) => {
     return { message: "Error inserting advisors", error: String(error) };
   }
 };
-
 /**
  * Busca un asesor por nombre. Si no existe, lo crea.
  * @param nombre Nombre del asesor
@@ -139,9 +139,10 @@ export const getAdvisors = async ({ query, set }: any) => {
         .select({
           asesor_id: asesores.asesor_id,
           nombre: asesores.nombre,
+          telefono: asesores.telefono, // 🔥 NUEVO
           activo: asesores.activo,
-          email: platform_users.email,     // 👈 solo correo
-          is_active: platform_users.is_active, // 👈 solo estado activo
+          email: platform_users.email,
+          is_active: platform_users.is_active,
         })
         .from(asesores)
         .leftJoin(
@@ -160,6 +161,7 @@ export const getAdvisors = async ({ query, set }: any) => {
         .select({
           asesor_id: asesores.asesor_id,
           nombre: asesores.nombre,
+          telefono: asesores.telefono, // 🔥 NUEVO
           activo: asesores.activo,
           email: platform_users.email,
           is_active: platform_users.is_active,
@@ -180,6 +182,7 @@ export const getAdvisors = async ({ query, set }: any) => {
       .select({
         asesor_id: asesores.asesor_id,
         nombre: asesores.nombre,
+        telefono: asesores.telefono, // 🔥 NUEVO
         activo: asesores.activo,
         email: platform_users.email,
         is_active: platform_users.is_active,
@@ -199,7 +202,7 @@ export const getAdvisors = async ({ query, set }: any) => {
 };
 export const updateAdvisor = async ({ query, body, set }: any) => {
   try {
-    const { id } = query; // id de platform_users
+    const { id } = query;
 
     if (!id) {
       set.status = 400;
@@ -211,7 +214,7 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
       return { message: "Debe proporcionar campos para actualizar." };
     }
 
-    const { nombre, apellido, telefono, activo, email, password } = body;
+    const { nombre, telefono, activo, email, password } = body; // ✅ Ya tiene telefono
 
     // 1. Buscar el usuario en platform_users
     const [user] = await db
@@ -234,7 +237,7 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
       .update(asesores)
       .set({
         ...(nombre !== undefined ? { nombre } : {}), 
-        ...(telefono !== undefined ? { telefono } : {}),
+        ...(telefono !== undefined ? { telefono } : {}), // ✅ Ya tiene telefono
         ...(activo !== undefined ? { activo } : {}),
       })
       .where(eq(asesores.asesor_id, user.asesor_id))
@@ -284,79 +287,310 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
  * Supports optional filtering by "numero_credito_sifco".
  * Uses Big.js for precise decimal operations.
  */
-export async function getCreditosPorAsesorController(numero_credito_sifco?: string) {
-  // 1️⃣ Fetch all active advisors
-  const listaAsesores = await db
-    .select()
-    .from(asesores)
-    .where(eq(asesores.activo, true));
+export async function getCreditosPorAsesorController(
+  numero_credito_sifco?: string,
+  email_asesor?: string  
+) {
+  try {
+    console.log(`🚀 Fetching créditos por asesor | numero_credito_sifco: ${numero_credito_sifco}, email_asesor: ${email_asesor}`);
 
-  // 2️⃣ Procesar cada asesor
-  const resultados = await Promise.all(
-    listaAsesores.map(async (asesor) => {
-      // Condiciones dinámicas
-      const condiciones = [eq(creditos.asesor_id, asesor.asesor_id)];
-      if (numero_credito_sifco) {
-        condiciones.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
-      }
+    // 1️⃣ Fetch all active advisors con su email
+    const condicionesAsesor = [eq(asesores.activo, true)];
+    
+    // 🔥 Filtrar por email si se proporciona
+    if (email_asesor && email_asesor.length > 0) {
+      console.log(`🔎 Filtrando por email de asesor: ${email_asesor}`);
+      condicionesAsesor.push(sql`${platform_users.email} ILIKE ${`%${email_asesor}%`}`);
+    }
 
-      // 3️⃣ Traer créditos con JOIN a moras activas
-      const listaCreditos = await db
-        .select({
-          credito_id: creditos.credito_id,
-          numero_credito_sifco: creditos.numero_credito_sifco,
-          capital: creditos.capital,
-          deudatotal: creditos.deudatotal,
-          statusCredit: creditos.statusCredit,
-          monto_mora: moras_credito.monto_mora,
-          cuotas_atrasadas: moras_credito.cuotas_atrasadas,
-        })
-        .from(creditos)
-        .leftJoin(moras_credito, and(
-          eq(moras_credito.credito_id, creditos.credito_id),
-          eq(moras_credito.activa, true)
-        ))
-        .where(and(...condiciones));
+    const listaAsesores = await db
+      .select({
+        asesor_id: asesores.asesor_id,
+        nombre: asesores.nombre,
+        telefono: asesores.telefono,
+        activo: asesores.activo,
+        email: platform_users.email, // 🔥 EMAIL DEL ASESOR
+      })
+      .from(asesores)
+      .leftJoin(
+        platform_users,
+        eq(asesores.asesor_id, platform_users.asesor_id)
+      )
+      .where(and(...condicionesAsesor));
 
-      // 4️⃣ Acumuladores globales
-      let totalCapital = new Big(0);
-      let totalDeuda = new Big(0);
-      let totalMora = new Big(0);
-      let totalCuotasAtrasadas = 0;
-      let creditosAlDia = 0;
-      let creditosMorosos = 0;
+    console.log(`👥 Asesores encontrados: ${listaAsesores.length}`);
 
-      // 5️⃣ Iterar créditos
-      for (const c of listaCreditos) {
-        const capital = new Big(c.capital || 0);
-        const deuda = new Big(c.deudatotal || 0);
-        const mora = new Big(c.monto_mora || 0);
-        const cuotas = c.cuotas_atrasadas || 0;
+    // 2️⃣ Procesar cada asesor
+    const resultados = await Promise.all(
+      listaAsesores.map(async (asesor) => {
+        try {
+          // Condiciones dinámicas para créditos
+          const condiciones = [eq(creditos.asesor_id, asesor.asesor_id)];
+          if (numero_credito_sifco) {
+            condiciones.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
+          }
 
-        totalCapital = totalCapital.plus(capital);
-        totalDeuda = totalDeuda.plus(deuda);
-        totalMora = totalMora.plus(mora);
-        totalCuotasAtrasadas += cuotas;
+          // 3️⃣ Traer créditos con JOIN a moras activas
+          const listaCreditos = await db
+            .select({
+              credito_id: creditos.credito_id,
+              numero_credito_sifco: creditos.numero_credito_sifco,
+              capital: creditos.capital,
+              deudatotal: creditos.deudatotal,
+              statusCredit: creditos.statusCredit,
+              monto_mora: moras_credito.monto_mora,
+              cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+            })
+            .from(creditos)
+            .leftJoin(moras_credito, and(
+              eq(moras_credito.credito_id, creditos.credito_id),
+              eq(moras_credito.activa, true)
+            ))
+            .where(and(...condiciones));
 
-        if (c.statusCredit === "ACTIVO") creditosAlDia++;
-        if (c.statusCredit === "MOROSO") creditosMorosos++;
-      }
+          console.log(`📊 Créditos para asesor ${asesor.nombre}: ${listaCreditos.length}`);
 
-      // 6️⃣ Retornar resumen por asesor
-      return {
-        asesor_id: asesor.asesor_id,
-        asesor: asesor.nombre,
-        total_creditos: listaCreditos.length,
-        total_capital: totalCapital.toFixed(2),
-        total_deuda: totalDeuda.toFixed(2),
-        total_mora: totalMora.toFixed(2),
-        total_cuotas_atrasadas: totalCuotasAtrasadas,
-        creditos_al_dia: creditosAlDia,
-        creditos_morosos: creditosMorosos,
-        creditos: listaCreditos,
-      };
-    })
-  );
+          // 4️⃣ Acumuladores globales
+          let totalCapital = new Big(0);
+          let totalDeuda = new Big(0);
+          let totalMora = new Big(0);
+          let totalCuotasAtrasadas = 0;
+          let creditosAlDia = 0;
+          let creditosMorosos = 0;
 
-  return resultados;
+          // 5️⃣ Iterar créditos
+          for (const c of listaCreditos) {
+            const capital = new Big(c.capital || 0);
+            const deuda = new Big(c.deudatotal || 0);
+            const mora = new Big(c.monto_mora || 0);
+            const cuotas = c.cuotas_atrasadas || 0;
+
+            totalCapital = totalCapital.plus(capital);
+            totalDeuda = totalDeuda.plus(deuda);
+            totalMora = totalMora.plus(mora);
+            totalCuotasAtrasadas += cuotas;
+
+            if (c.statusCredit === "ACTIVO") creditosAlDia++;
+            if (c.statusCredit === "MOROSO") creditosMorosos++;
+          }
+
+          // 6️⃣ Retornar resumen por asesor
+          return {
+            asesor_id: asesor.asesor_id,
+            asesor: asesor.nombre,
+            email: asesor.email || "N/A", // 🔥 EMAIL DEL ASESOR
+            total_creditos: listaCreditos.length,
+            total_capital: totalCapital.toFixed(2),
+            total_deuda: totalDeuda.toFixed(2),
+            total_mora: totalMora.toFixed(2),
+            total_cuotas_atrasadas: totalCuotasAtrasadas,
+            creditos_al_dia: creditosAlDia,
+            creditos_morosos: creditosMorosos,
+            creditos: listaCreditos,
+          };
+        } catch (asesorError) {
+          console.error(`❌ Error procesando asesor ${asesor.nombre}:`, asesorError);
+          // 🔥 Retornar datos vacíos si falla un asesor específico
+          return {
+            asesor_id: asesor.asesor_id,
+            asesor: asesor.nombre,
+            email: asesor.email || "N/A",
+            total_creditos: 0,
+            total_capital: "0.00",
+            total_deuda: "0.00",
+            total_mora: "0.00",
+            total_cuotas_atrasadas: 0,
+            creditos_al_dia: 0,
+            creditos_morosos: 0,
+            creditos: [],
+            error: `Error procesando asesor: ${asesorError}`,
+          };
+        }
+      })
+    );
+
+    console.log(`✅ Resultados generados para ${resultados.length} asesores`);
+    return resultados;
+
+  } catch (error) {
+    console.error("❌ Error general en getCreditosPorAsesorController:", error);
+    throw new Error(`Error obteniendo créditos por asesor: ${error}`);
+  }
 }
+
+
+
+interface AsesorConCarga {
+  asesor_id: number;
+  nombre: string; 
+  total_creditos: number;
+  capital_total: string;
+}
+
+export async function getAsesorConMenorCarga(): Promise<number> {
+  try {
+    console.log("🔍 Buscando asesor con menor carga de capital...");
+
+    // 1️⃣ Obtener todos los asesores activos
+    const asesoresActivos = await db
+      .select({
+        asesor_id: asesores.asesor_id,
+        nombre: asesores.nombre,
+      })
+      .from(asesores)
+      .where(
+        and(
+          eq(asesores.activo, true),
+          sql`${asesores.nombre} != 'Gerencia'`
+        )
+      );
+
+    if (asesoresActivos.length === 0) {
+      throw new Error("No hay asesores activos disponibles");
+    }
+
+    console.log(`👥 Asesores activos encontrados: ${asesoresActivos.length}`);
+
+    // 2️⃣ Calcular carga de capital por cada asesor
+    const asesoresConCarga: AsesorConCarga[] = await Promise.all(
+      asesoresActivos.map(async (asesor) => {
+        // Obtener todos los créditos ACTIVOS del asesor
+         const creditosAsesor = await db
+          .select({
+            capital: creditos.capital,
+            statusCredit: creditos.statusCredit,
+          })
+          .from(creditos)
+          .where(
+            and(
+              eq(creditos.asesor_id, asesor.asesor_id),
+              or(
+                eq(creditos.statusCredit, "ACTIVO"),
+                eq(creditos.statusCredit, "MOROSO")
+              )
+            )
+          );
+
+
+        // Sumar el capital total
+        let capitalTotal = new Big(0);
+        creditosAsesor.forEach((c) => {
+          capitalTotal = capitalTotal.plus(c.capital || 0);
+        });
+
+        return {
+          asesor_id: asesor.asesor_id,
+          nombre: asesor.nombre,
+          total_creditos: creditosAsesor.length,
+          capital_total: capitalTotal.toFixed(2),
+        };
+      })
+    );
+
+    // 3️⃣ Ordenar por capital total (menor a mayor)
+    asesoresConCarga.sort((a, b) => {
+      return new Big(a.capital_total).cmp(new Big(b.capital_total));
+    });
+
+    console.log("📊 Carga de asesores:");
+    asesoresConCarga.forEach((a) => {
+      console.log(
+        `   - ${a.nombre}: ${a.total_creditos} créditos, Capital: Q${a.capital_total}`
+      );
+    });
+
+    // 4️⃣ Retornar el ID del asesor con menor carga
+    const asesorSeleccionado = asesoresConCarga[0];
+    console.log(
+      `✅ Asesor seleccionado: ${asesorSeleccionado.nombre} (ID: ${asesorSeleccionado.asesor_id})`
+    );
+
+    return asesorSeleccionado.asesor_id;
+  } catch (error) {
+    console.error("❌ Error obteniendo asesor con menor carga:", error);
+    throw new Error(`Error en load balancing de asesores: ${error}`);
+  }
+}
+
+export const getCreditosCRM = async ({ set }: any) => {
+  try {
+    const resultado = await db
+      .select({
+        credito_id: creditos.credito_id,
+        numero_credito_sifco: creditos.numero_credito_sifco,
+        nombre_cliente: usuarios.nombre,
+        asesor_id: creditos.asesor_id,
+        asesor_nombre: asesores.nombre,
+      })
+      .from(creditos)
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+      .where(
+        and(
+          like(creditos.numero_credito_sifco, "%CRM%"),
+          eq(asesores.nombre, "Gerencia"),
+          or(
+            eq(creditos.statusCredit, "ACTIVO"),
+            eq(creditos.statusCredit, "MOROSO"),
+            eq(creditos.statusCredit, "PENDIENTE_CANCELACION"),
+            eq(creditos.statusCredit, "EN_CONVENIO")
+          )
+        )
+      );
+
+    set.status = 200;
+    return {
+      success: true,
+      total: resultado.length,
+      data: resultado,
+    };
+  } catch (error) {
+    console.error("❌ Error getCreditosCRM:", error);
+    set.status = 500;
+    return { success: false, message: "Error obteniendo créditos CRM", error: String(error) };
+  }
+};
+
+export const updateCreditAdvisor = async ({ body, set }: any) => {
+  try {
+    const { credito_id, nombre_asesor } = body;
+
+    if (!credito_id || !nombre_asesor) {
+      set.status = 400;
+      return { success: false, message: "credito_id y nombre_asesor son requeridos" };
+    }
+
+    const asesor = await findOrCreateAdvisorByName(nombre_asesor);
+    if (!asesor) {
+      set.status = 404;
+      return { success: false, message: `No se pudo encontrar/crear asesor: ${nombre_asesor}` };
+    }
+
+    const updated = await db
+      .update(creditos)
+      .set({ asesor_id: asesor.asesor_id })
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          like(creditos.numero_credito_sifco, "%CRM%")
+        )
+      )
+      .returning({ credito_id: creditos.credito_id, asesor_id: creditos.asesor_id });
+
+    if (updated.length === 0) {
+      set.status = 404;
+      return { success: false, message: `Crédito ${credito_id} no encontrado o no es CRM` };
+    }
+
+    set.status = 200;
+    return {
+      success: true,
+      message: `Asesor actualizado a "${asesor.nombre}" para crédito ${credito_id}`,
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error("❌ Error updateCreditAdvisor:", error);
+    set.status = 500;
+    return { success: false, message: "Error actualizando asesor", error: String(error) };
+  }
+};

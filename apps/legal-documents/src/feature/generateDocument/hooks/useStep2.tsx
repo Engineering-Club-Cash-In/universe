@@ -36,6 +36,13 @@ export interface Document {
   count_doble_line: number;
 }
 
+export type FieldType = "text" | "select" | "list";
+
+export interface FieldOption {
+  value: string;
+  label: string;
+}
+
 export interface Field {
   name: string;
   key: string;
@@ -46,6 +53,8 @@ export interface Field {
   description: string | null;
   default: string | null;
   is_double_line: boolean;
+  type?: FieldType;
+  options?: FieldOption[] | null;
 }
 
 interface DocumentByDpiResponse {

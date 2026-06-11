@@ -5,12 +5,18 @@ import {
   cancelCredit,
   getCreditoByNumero,
   getCreditosIncobrables,
-  getCreditosWithUserByMesAnio, 
-  resetCredit, 
+  getCreditosWithUserByMesAnio,
+  mergeCreditosAndUpdate,
+  resetCredit,
+  getCreditStats,
+  toggleCancelacionActivo,
+  actualizarNitCredito,
 } from "../controllers/credits";
+import { getCuotasPorDiaYAsesor, upsertEfectividadAsesores, getEfectividadAsesores } from "../controllers/paymentsByAdvisor";
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
 import puppeteer from "puppeteer";
+import { promises as fs } from "fs";
 import {
   GetObjectCommand,
   PutObjectCommand,
@@ -33,12 +39,28 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import { updateAllInstallments, updateCredit } from "../controllers/updateCredit";
+import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
+import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
+import { creditos, cuotas_credito } from "../database/db";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "../database"; 
+import { StatusCredit } from "../database/db/schema";
+
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
   monto: z.number({ invalid_type_error: "monto debe ser numérico" }),
 });
 
+const mergeCreditSchema = t.Object({
+  numero_credito_origen: t.String({
+    minLength: 1,
+    description: "Número de crédito SIFCO que será absorbido (se cancela)"
+  }),
+  numero_credito_destino: t.String({
+    minLength: 1,
+    description: "Número de crédito SIFCO que quedará activo"
+  })
+});
 const RouterBodySchema = z.object({
   creditId: z.coerce.number().int().positive(),
   motivo: z.string().optional(),
@@ -53,19 +75,38 @@ const RouterBodySchema = z.object({
     "MOROSO"
   ]),
   montosAdicionales: z.array(MontoAdicionalSchema).optional(),
+  traspaso: z.number().optional(),
+  garantia_mobiliaria: z.number().optional(),
+  otros: z.number().optional(),
+  cuotas_atrasadas: z.number().int().min(0).optional(),
 });
+
+const STATUS_CREDIT_VALUES = new Set<string>(Object.values(StatusCredit));
+
+const isStatusCredit = (value: string): value is StatusCredit =>
+  STATUS_CREDIT_VALUES.has(value);
+
+const parseStatusCreditList = (values: string[] | undefined) => {
+  if (!values) return undefined;
+  const invalid = values.find((value) => !isStatusCredit(value));
+  if (invalid) {
+    return { invalid };
+  }
+  return { values: values.filter(isStatusCredit) };
+};
 export const creditRouter = new Elysia()
  
-//.use(authMiddleware)
+.use(authMiddleware)
   // Crear nuevo crédito
-  .post("/newCredit", async ({ body, set }) => {
-    const result = await insertCredit(body, set);
-    if (result && typeof result === 'object' && 'status' in result) {
-      set.status = result.status as number;
-    }
-    return result;
-  })
+.post("/newCredit", async ({ body, set }) => {
+  const result = await insertCredit({ body, set });
+  if (result && typeof result === 'object' && 'status' in result) {
+    set.status = result.status as number;
+  }
+  return result;
+})
   .post("/updateCredit", updateCredit)
+  .post("/calculate-investor-quotas", calculateInvestorQuotas)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {
     const { numero_credito_sifco } = query;
@@ -98,16 +139,27 @@ export const creditRouter = new Elysia()
     page = "1",
     perPage = "10",
     numero_credito_sifco,
-    estado,           // 👈 obligatorio
-    excel,            // 👈 para generar Excel
-    asesor_id,        // 👈 NUEVO
-    nombre_usuario,   // 👈 NUEVO
+    numeros_credito_sifco,
+    estado,
+    excel,
+    asesor_id,
+    nombre_usuario,
+    email_asesor,        // 🆕 NUEVO
+    cuotas_atrasadas,    // 🆕 NUEVO
+    proximidad_pago,     // 🆕 NUEVO
+    is_vehiculo_propio,
+    inversionista_ids,
+    fecha_desde,
+    fecha_hasta,
+    capital_min,
+    capital_max,
+    estados_credito,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
-  if (!mes || !anio || !estado) {
+  if (!mes || !anio) {
     set.status = 400;
-    return { message: "Faltan parámetros 'mes', 'anio' y/o 'estado'." };
+    return { message: "Faltan parámetros 'mes' y/o 'anio'." };
   }
 
   // Convertir a número (ya que query params vienen como string)
@@ -118,21 +170,51 @@ export const creditRouter = new Elysia()
   const numeroCreditoSifco = numero_credito_sifco
     ? String(numero_credito_sifco)
     : undefined;
-  const estadoParam = String(estado) as
-    | "ACTIVO"
-    | "CANCELADO"
-    | "INCOBRABLE"
-    | "PENDIENTE_CANCELACION"
-    | "EN_CONVENIO"
-    | "MOROSO"
-    |"EN_CONVENIO"
+  // Lista opcional de números SIFCO separados por coma. Tiene prioridad
+  // sobre numero_credito_sifco cuando trae al menos un valor válido.
+  const numerosCreditoSifcoArray = numeros_credito_sifco
+    ? String(numeros_credito_sifco)
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+    : undefined;
+  const estadoParam = estado
+    ? (String(estado) as
+        | "ACTIVO"
+        | "CANCELADO"
+        | "INCOBRABLE"
+        | "PENDIENTE_CANCELACION"
+        | "EN_CONVENIO"
+        | "MOROSO"
+        | "CAIDO")
+    : undefined;
   
-  // 🆕 Convertir asesor_id a número si existe
+  // Convertir asesor_id a número si existe
   const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
   
-  // 🆕 Nombre de usuario (string)
+  // Nombre de usuario (string)
   const nombreUsuarioParam = nombre_usuario ? String(nombre_usuario) : undefined;
 
+  // 🆕 Email del asesor (string)
+  const emailAsesorParam = email_asesor ? String(email_asesor) : undefined;
+
+  // 🆕 Cuotas atrasadas (número)
+  const cuotasAtrasadasNum = cuotas_atrasadas ? Number(cuotas_atrasadas) : undefined;
+
+  // 🆕 Proximidad de pago (enum)
+  const proximidadPagoParam = proximidad_pago
+    ? (String(proximidad_pago) as "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH")
+    : undefined;
+
+  // Filtro vehiculo propio
+  const isVehiculoPropioParam = is_vehiculo_propio === "true" ? true : undefined;
+
+  // Array de inversionistas (viene como "1,2,3")
+  const inversionistaIdsArray = inversionista_ids
+    ? inversionista_ids.split(",").map(Number).filter((n) => !isNaN(n))
+    : undefined;
+
+  // Validaciones
   if (
     isNaN(mesNum) ||
     mesNum < 0 ||
@@ -144,10 +226,59 @@ export const creditRouter = new Elysia()
     return { message: "Parámetros 'mes' y/o 'anio' inválidos." };
   }
 
-  // 🆕 Validar asesor_id si se envía
+  // Validar asesor_id si se envía
   if (asesor_id && isNaN(asesorIdNum!)) {
     set.status = 400;
     return { message: "Parámetro 'asesor_id' debe ser un número válido." };
+  }
+
+  // 🆕 Validar cuotas_atrasadas si se envía
+  if (cuotas_atrasadas && isNaN(cuotasAtrasadasNum!)) {
+    set.status = 400;
+    return { message: "Parámetro 'cuotas_atrasadas' debe ser un número válido." };
+  }
+
+  // 🆕 Validar proximidad_pago si se envía
+  if (proximidad_pago && !["TODAY", "WEEK", "TWO_WEEKS", "MONTH", "DUEMONTH"].includes(proximidad_pago)) {
+    set.status = 400;
+    return {
+      message: "Parámetro 'proximidad_pago' debe ser: TODAY, WEEK, TWO_WEEKS, MONTH o DUEMONTH"
+    };
+  }
+
+  // Validar fechas si se envían
+  if (fecha_desde && isNaN(Date.parse(fecha_desde))) {
+    set.status = 400;
+    return { message: "Parámetro 'fecha_desde' debe ser una fecha válida (YYYY-MM-DD)" };
+  }
+  if (fecha_hasta && isNaN(Date.parse(fecha_hasta))) {
+    set.status = 400;
+    return { message: "Parámetro 'fecha_hasta' debe ser una fecha válida (YYYY-MM-DD)" };
+  }
+  const fechaDesdeParam = fecha_desde ?? undefined;
+  const fechaHastaParam = fecha_hasta ?? undefined;
+
+  const capitalMinParam = capital_min !== undefined ? Number(capital_min) : undefined;
+  const capitalMaxParam = capital_max !== undefined ? Number(capital_max) : undefined;
+  const estadosCreditoArray = estados_credito
+    ? String(estados_credito)
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+    : undefined;
+  const estadosCreditoParsed = parseStatusCreditList(estadosCreditoArray);
+
+  if (capitalMinParam !== undefined && isNaN(capitalMinParam)) {
+    set.status = 400;
+    return { message: "Parámetro 'capital_min' debe ser un número válido." };
+  }
+  if (capitalMaxParam !== undefined && isNaN(capitalMaxParam)) {
+    set.status = 400;
+    return { message: "Parámetro 'capital_max' debe ser un número válido." };
+  }
+  if (estadosCreditoParsed && "invalid" in estadosCreditoParsed) {
+    set.status = 400;
+    return { message: `Estado de crédito inválido: ${estadosCreditoParsed.invalid}` };
   }
 
   // Llamar servicio
@@ -160,9 +291,15 @@ export const creditRouter = new Elysia()
         page: pageNum,
         perPage: perPageNum,
         numero_credito_sifco: numeroCreditoSifco,
+        numeros_credito_sifco: numerosCreditoSifcoArray,
         estado: estadoParam,
-        asesor_id: asesorIdNum,           // 👈 NUEVO
-        nombre_usuario: nombreUsuarioParam, // 👈 NUEVO
+        asesor_id: asesorIdNum,
+        nombre_usuario: nombreUsuarioParam,
+        email_asesor: emailAsesorParam,
+        cuotas_atrasadas: cuotasAtrasadasNum,
+        proximidad_pago: proximidadPagoParam,
+        is_vehiculo_propio: isVehiculoPropioParam,
+        inversionista_ids: inversionistaIdsArray,
         excel: true,
       });
       set.status = 200;
@@ -175,10 +312,20 @@ export const creditRouter = new Elysia()
         pageNum,
         perPageNum,
         numeroCreditoSifco,
-        estadoParam,  
-        asesorIdNum,           // 👈 NUEVO
-        nombreUsuarioParam,    // 👈 NUEVO
-        
+        estadoParam,
+        asesorIdNum,
+        nombreUsuarioParam,
+        emailAsesorParam,
+        cuotasAtrasadasNum,
+        proximidadPagoParam,
+        isVehiculoPropioParam,
+        inversionistaIdsArray,
+        fechaDesdeParam,
+        fechaHastaParam,
+        numerosCreditoSifcoArray,
+        capitalMinParam,
+        capitalMaxParam,
+        estadosCreditoParsed?.values
       );
       set.status = 200;
       return result;
@@ -188,6 +335,155 @@ export const creditRouter = new Elysia()
     return { message: "Error obteniendo créditos", error: String(error) };
   }
 })
+
+  /**
+   * Variante POST de /getAllCredits.
+   *
+   * Mismos parámetros y misma lógica que el GET — internamente llama al mismo
+   * controller — pero los recibe en el body. Pensado para casos donde la lista
+   * `numeros_credito_sifco` es demasiado grande para entrar en una URL (filtros
+   * por etiqueta que resuelven cientos/miles de SIFCOs disparaban 414 URI Too
+   * Long en proxies).
+   */
+  .post(
+    "/getAllCredits",
+    async ({ body, set }) => {
+      const {
+        mes,
+        anio,
+        page = 1,
+        perPage = 10,
+        numero_credito_sifco,
+        numeros_credito_sifco,
+        estado,
+        excel,
+        asesor_id,
+        nombre_usuario,
+        email_asesor,
+        cuotas_atrasadas,
+        proximidad_pago,
+        is_vehiculo_propio,
+        inversionista_ids,
+        fecha_desde,
+        fecha_hasta,
+        capital_min,
+        capital_max,
+        estados_credito,
+      } = body;
+
+      if (mes === undefined || anio === undefined || !estado) {
+        set.status = 400;
+        return { message: "Faltan parámetros 'mes', 'anio' y/o 'estado'." };
+      }
+      if (mes < 0 || mes > 12 || anio < 0) {
+        set.status = 400;
+        return { message: "Parámetros 'mes' y/o 'anio' inválidos." };
+      }
+
+      const sifcosLimpios = (numeros_credito_sifco as string[] | undefined)
+        ?.map((s: string) => s.trim())
+        .filter((s: string) => s.length > 0);
+      const estadosCreditoLimpios = (estados_credito as string[] | undefined)
+        ?.map((s: string) => s.trim())
+        .filter((s: string) => s.length > 0);
+      const estadosCreditoParsed = parseStatusCreditList(estadosCreditoLimpios);
+      if (estadosCreditoParsed && "invalid" in estadosCreditoParsed) {
+        set.status = 400;
+        return { message: `Estado de crédito inválido: ${estadosCreditoParsed.invalid}` };
+      }
+
+      try {
+        if (excel) {
+          const result = await getCreditosWithUserByMesAnioExcel({
+            mes,
+            anio,
+            page,
+            perPage,
+            numero_credito_sifco,
+            numeros_credito_sifco: sifcosLimpios,
+            estado,
+            asesor_id,
+            nombre_usuario,
+            email_asesor,
+            cuotas_atrasadas,
+            proximidad_pago,
+            is_vehiculo_propio,
+            inversionista_ids,
+            excel: true,
+          });
+          set.status = 200;
+          return result;
+        }
+
+        const result = await getCreditosWithUserByMesAnio(
+          mes,
+          anio,
+          page,
+          perPage,
+          numero_credito_sifco,
+          estado,
+          asesor_id,
+          nombre_usuario,
+          email_asesor,
+          cuotas_atrasadas,
+          proximidad_pago,
+          is_vehiculo_propio,
+          inversionista_ids,
+          fecha_desde ?? undefined,
+          fecha_hasta ?? undefined,
+          sifcosLimpios,
+          capital_min,
+          capital_max,
+          estadosCreditoParsed?.values
+        );
+        set.status = 200;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { message: "Error obteniendo créditos", error: String(error) };
+      }
+    },
+    {
+      body: t.Object({
+        mes: t.Number(),
+        anio: t.Number(),
+        page: t.Optional(t.Number()),
+        perPage: t.Optional(t.Number()),
+        numero_credito_sifco: t.Optional(t.String()),
+        numeros_credito_sifco: t.Optional(t.Array(t.String())),
+        estado: t.Union([
+          t.Literal("ACTIVO"),
+          t.Literal("CANCELADO"),
+          t.Literal("INCOBRABLE"),
+          t.Literal("PENDIENTE_CANCELACION"),
+          t.Literal("EN_CONVENIO"),
+          t.Literal("MOROSO"),
+          t.Literal("CAIDO"),
+        ]),
+        excel: t.Optional(t.Boolean()),
+        asesor_id: t.Optional(t.Number()),
+        nombre_usuario: t.Optional(t.String()),
+        email_asesor: t.Optional(t.String()),
+        cuotas_atrasadas: t.Optional(t.Number()),
+        proximidad_pago: t.Optional(
+          t.Union([
+            t.Literal("TODAY"),
+            t.Literal("WEEK"),
+            t.Literal("TWO_WEEKS"),
+            t.Literal("MONTH"),
+            t.Literal("DUEMONTH"),
+          ])
+        ),
+        is_vehiculo_propio: t.Optional(t.Boolean()),
+        inversionista_ids: t.Optional(t.Array(t.Number())),
+        fecha_desde: t.Optional(t.String()),
+        fecha_hasta: t.Optional(t.String()),
+        capital_min: t.Optional(t.Number()),
+        capital_max: t.Optional(t.Number()),
+        estados_credito: t.Optional(t.Array(t.String())),
+      }),
+    }
+  )
 
   .post("/cancelCredit", async ({ body, set }) => {
     // Validar que venga el creditId en el body
@@ -212,6 +508,32 @@ export const creditRouter = new Elysia()
       return { message: "Error cancelando crédito", error: String(error) };
     }
   })
+
+  // 🔥 Toggle estado activo de cancelación
+  .post(
+    "/cancelacion/toggle-activo",
+    async ({ body, set }) => {
+      const { creditId, activo } = body;
+      try {
+        const result = await toggleCancelacionActivo({ creditId, activo });
+        if (!result.success) {
+          set.status = 400;
+          return result;
+        }
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { message: "Error actualizando estado de cancelación", error: String(error) };
+      }
+    },
+    {
+      body: t.Object({
+        creditId: t.Number(),
+        activo: t.Boolean(),
+      }),
+    }
+  )
+
   .post("/creditAction", async ({ body, set }) => {
     // 1) Validación de body
     const parse = RouterBodySchema.safeParse(body);
@@ -230,6 +552,10 @@ export const creditRouter = new Elysia()
       monto_cancelacion,
       accion,
       montosAdicionales,
+      traspaso,
+      garantia_mobiliaria,
+      otros,
+      cuotas_atrasadas,
     } = parse.data;
 
     // 2) Reglas de negocio: acciones que requieren motivo + monto
@@ -259,6 +585,10 @@ export const creditRouter = new Elysia()
         accion,
         // Nuevo: pasar montos adicionales (opcional)
         montosAdicionales,
+        traspaso,
+        garantia_mobiliaria,
+        otros,
+        cuotas_atrasadas,
       });
 
       if (!result.ok) set.status = 400; // error del servicio
@@ -309,13 +639,15 @@ export const creditRouter = new Elysia()
   })
   .post("/resetCredit", async ({ body, set }) => {
     // Valida los parámetros
-    const { creditId, montoIncobrable, montoBoleta, url_boletas, cuota } =
+    const { creditId, montoIncobrable, montoBoleta, url_boletas, cuota, banco_id, numeroAutorizacion } =
       body as {
         creditId?: number;
         montoIncobrable?: number;
         montoBoleta?: number | string;
         url_boletas?: string[];
         cuota?: number;
+        banco_id?: number;
+        numeroAutorizacion?: string;
       };
 
     // Validaciones mínimas
@@ -326,7 +658,9 @@ export const creditRouter = new Elysia()
       isNaN(Number(montoBoleta)) ||
       !Array.isArray(url_boletas) ||
       cuota === undefined ||
-      isNaN(Number(cuota))
+      isNaN(Number(cuota)) ||
+      !banco_id ||
+      isNaN(Number(banco_id))
     ) {
       set.status = 400;
       return { message: "Faltan o son inválidos los parámetros requeridos." };
@@ -340,6 +674,8 @@ export const creditRouter = new Elysia()
         montoBoleta: montoBoleta,
         url_boletas: url_boletas,
         cuota: Number(cuota),
+        banco_id: Number(banco_id),
+        numeroAutorizacion,
       });
       set.status = 200;
       return result;
@@ -692,4 +1028,599 @@ export const creditRouter = new Elysia()
   body: t.Object({
     numero_credito_sifco: t.Optional(t.String())
   })
-});
+})
+.post(
+    "/merge",
+    async ({ body, set }) => {
+      try {
+        console.log("📨 Solicitud de fusión recibida:");
+        console.log(`   Origen: ${body.numero_credito_origen}`);
+        console.log(`   Destino: ${body.numero_credito_destino}`);
+        console.log("");
+
+        // Validar que no sean el mismo crédito
+        if (body.numero_credito_origen === body.numero_credito_destino) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "El crédito origen y destino no pueden ser el mismo",
+            error: "SAME_CREDIT"
+          };
+        }
+
+        // Ejecutar la fusión
+        const resultado = await mergeCreditosAndUpdate({
+          numero_credito_origen: body.numero_credito_origen,
+          numero_credito_destino: body.numero_credito_destino
+        });
+
+        set.status = 200;
+        return resultado;
+
+      } catch (error: any) {
+        console.error("❌ Error en el endpoint de fusión:", error);
+
+        // Manejar errores específicos
+        if (error.message?.includes("no encontrado")) {
+          set.status = 404;
+          return {
+            success: false,
+            message: error.message,
+            error: "CREDIT_NOT_FOUND"
+          };
+        }
+
+        // Error genérico
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al fusionar créditos",
+          error: error.message || "Unknown error"
+        };
+      }
+    },
+    {
+      body: mergeCreditSchema,
+      detail: {
+        summary: "Fusionar dos créditos",
+        description: `
+          Fusiona dos créditos Pool en uno solo.
+          
+          **Proceso:**
+          1. Suma los capitales de ambos créditos
+          2. Recalcula intereses, IVA y deuda total
+          3. Traslada inversionistas del crédito origen al destino
+          4. Marca el crédito origen como CANCELADO
+          5. Actualiza las cuotas del crédito destino
+          
+          **Nota:** El crédito DESTINO es el que quedará activo con todos los valores consolidados.
+        `,
+        tags: ["Créditos"]
+      },
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          nueva_cuota: t.Number(),
+          creditoFinal: t.Object({
+            numero_credito: t.String(),
+            credito_id: t.Number(),
+            capital_total: t.String(),
+            cuota: t.String(),
+            deuda_total: t.String(),
+            total_inversionistas: t.Number(),
+            credito_cancelado: t.String()
+          })
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        }),
+        404: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        }),
+        500: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        })
+      }
+    }
+  )
+  .get("/ultima-cuota-pagada", async ({ query, set }) => {
+  const { numero_credito_sifco } = query;
+  
+  if (!numero_credito_sifco) {
+    set.status = 400;
+    return { message: "Falta el parámetro 'numero_credito_sifco'" };
+  }
+
+  try {
+    // 1️⃣ Buscar el crédito
+    const creditoData = await db
+      .select()
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+      .limit(1);
+
+    if (creditoData.length === 0) {
+      set.status = 404;
+      return { 
+        message: "Crédito no encontrado",
+        numero_credito_sifco 
+      };
+    }
+
+    const creditoId = creditoData[0].credito_id;
+
+    // 2️⃣ Buscar la última cuota pagada (pagado = true)
+    const ultimaCuotaPagada = await db
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,  
+      })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, creditoId),
+          eq(cuotas_credito.pagado, true)
+        )
+      )
+      .orderBy(desc(cuotas_credito.numero_cuota)) // 👈 De mayor a menor
+      .limit(1);
+
+    // 3️⃣ Si no hay cuotas pagadas
+    if (ultimaCuotaPagada.length === 0) {
+      return {
+        numero_credito_sifco,
+        credito_id: creditoId,
+        ultima_cuota_pagada: null,
+        mensaje: "No hay cuotas pagadas aún"
+      };
+    }
+
+    // 4️⃣ Retornar la info
+    return {
+      numero_credito_sifco,
+      credito_id: creditoId,
+      ultima_cuota_pagada: ultimaCuotaPagada[0].numero_cuota,
+      info_cuota: ultimaCuotaPagada[0]
+    };
+
+  } catch (error) {
+    console.error("[ultima-cuota-pagada] Error:", error);
+    set.status = 500;
+    return { 
+      message: "Error consultando crédito", 
+      error: String(error) 
+    };
+  }
+})  // 🔥 Endpoint simple: ruta quemada, solo llamar
+
+  // ========================================
+  // ENDPOINT: ESTADÍSTICAS DE CRÉDITOS
+  // ========================================
+  .get("/stats", async ({ query }) => {
+    const { email } = query;
+    const stats = await getCreditStats(email);
+    return stats;
+  }, {
+    query: t.Object({
+      email: t.Optional(t.String({ description: "Email del asesor para filtrar solo sus créditos" })),
+    }),
+    detail: {
+      summary: "Obtener estadísticas de créditos",
+      description: `
+        Obtiene estadísticas agregadas de los créditos, incluyendo:
+        
+        **Campos generales:**
+        - totalCreditos: Total de créditos activos/morosos/en convenio
+        - efectividad: Porcentaje de créditos SIN cuotas atrasadas
+        
+        **Por cuotas atrasadas (0, 1, 2, 3, 4):**
+        - Cantidad de créditos
+        - Porcentaje respecto al total
+        - Suma del capital
+        - Suma de mora
+        
+        **Por estado (Cancelado, Incobrable):**
+        - Cantidad de créditos
+        - Porcentaje respecto al total de cancelados+incobrables
+        - Suma del capital
+        - Suma de mora (si aplica)
+        
+        **Filtro opcional:**
+        Si se proporciona el email del asesor, solo se muestran los créditos asignados a ese asesor.
+        Si no se proporciona, se muestran todos los créditos.
+      `,
+      tags: ["Créditos", "Estadísticas"],
+    },
+    response: {
+      200: t.Object({
+        totalCreditos: t.Number(),
+        efectividad: t.String(),
+        porCuotasAtrasadas: t.Object({
+          "0": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          "1": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          "2": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          "3": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          "4": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+        }),
+        porEstado: t.Object({
+          cancelado: t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          incobrable: t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+        }),
+      }),
+    },
+  })
+  // ========================================
+  // ENDPOINT: ACTUALIZAR FECHAS DE VENCIMIENTO
+  // ========================================
+  .post("/update-due-dates", async ({ body, set }) =>
+    updateDueDates({ body, set: set as { status: number } }),
+  {
+    body: t.Object({
+      creditos: t.Array(
+        t.Object({
+          numero_credito_sifco: t.String({ minLength: 1 }),
+          dia_pago: t.Number({ minimum: 1, maximum: 31 }),
+        })
+      ),
+    }),
+    detail: {
+      summary: "Actualizar fechas de vencimiento (batch)",
+      description: `
+        Actualiza el día de vencimiento de las cuotas NO PAGADAS para múltiples créditos.
+
+        **Proceso:**
+        1. Recibe un array de {numero_credito_sifco, dia_pago}
+        2. Por cada crédito, busca las cuotas donde pagado = false
+        3. Actualiza fecha_vencimiento cambiando solo el día
+        4. Si el día excede los días del mes, usa el último día del mes
+
+        **Ejemplo de body:**
+        \`\`\`json
+        {
+          "creditos": [
+            {"numero_credito_sifco": "01010214113080", "dia_pago": 15},
+            {"numero_credito_sifco": "01010214104860", "dia_pago": 30}
+          ]
+        }
+        \`\`\`
+      `,
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  .post("/update-single-due-date", async ({ body, set }) =>
+    updateSingleDueDate({ body, set: set as { status: number } }),
+  {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      dia_pago: t.Number({ minimum: 1, maximum: 31 }),
+    }),
+    detail: {
+      summary: "Actualizar fecha de vencimiento (individual)",
+      description: "Actualiza el día de vencimiento para un solo crédito",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  .post("/recalculate-quota", recalculateQuota, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+    }),
+    detail: {
+      summary: "Recalcular cuota mensual con fórmula PMT",
+      description: "Recalcula la cuota mensual usando la fórmula PMT de Excel basándose en el capital actual, tasa de interés, plazo, seguro, GPS y membresías del crédito. Actualiza el crédito y todas las cuotas pendientes.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: RECALCULAR PAGOS DESDE CUOTA
+  // ========================================
+  .post("/recalcular-pagos", async ({ body, set }: any) => {
+    try {
+      const { numero_credito_sifco, numero_cuota } = body;
+      await recalcularPagosCredito({ numero_credito_sifco, numero_cuota });
+      set.status = 200;
+      return { success: true, message: `Pagos recalculados para ${numero_credito_sifco}` };
+    } catch (error: any) {
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  }, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      numero_cuota: t.Optional(t.Number()),
+    }),
+    detail: {
+      summary: "Recalcular pagos desde una cuota",
+      description: "Recalcula abonos y restantes de los pagos. Si se pasa numero_cuota, procesa desde esa cuota (pagadas y no pagadas). Si no, solo procesa las no pagadas.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: REPARAR pagos históricos de un crédito
+  // ========================================
+  .post("/reparar-total-restante", async ({ body, set }: any) => {
+    try {
+      const { numero_credito_sifco, capital_inicial, dry_run } = body;
+      const result = await repararTotalRestante({
+        numero_credito_sifco,
+        capital_inicial,
+        dry_run,
+      });
+      set.status = 200;
+      return { success: true, ...result };
+    } catch (error: any) {
+      console.error("❌ Error en /reparar-total-restante:", error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  }, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      capital_inicial: t.Optional(t.Union([t.Number(), t.String()])),
+      dry_run: t.Optional(t.Boolean()),
+    }),
+    detail: {
+      summary: "Reparar pagos históricos de un crédito (abonos + restantes)",
+      description:
+        "Recalcula y reescribe los pagos desde la cuota 0 hasta la última cuota pagada, amortizando desde capital_inicial y distribuyendo monto_aplicado en orden: interés → IVA → seguro → GPS → membresías → capital. Para la cuota 0 solo escribe total_restante = capital_inicial. Capital_inicial: param > total_restante de cuota 0 en DB > SIFCO (trx 2001). Si dry_run=true, devuelve la previsualización de cambios sin escribir nada.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: ARREGLAR CRÉDITOS SIN FEBRERO
+  // ========================================
+  .post("/fix-february", async ({ query, set }) => {
+    const anio = query.anio ? Number(query.anio) : 2026;
+    return fixCreditosWithoutFebruary({ anio, set });
+  }, {
+    query: t.Object({
+      anio: t.Optional(t.String()),
+    }),
+    detail: {
+      summary: "Arreglar créditos sin cuota en febrero",
+      description: "Busca créditos activos/morosos/en_convenio que no tienen cuota en febrero del año especificado y recalcula sus fechas de vencimiento basándose en la última cuota pagada.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: ACTUALIZAR FECHAS DESDE JSON
+  // ========================================
+  .post("/update-due-dates-from-json", async ({ set }) => {
+    return updateDueDatesFromJson({ set });
+  }, {
+    detail: {
+      summary: "Actualizar fechas de vencimiento desde JSON",
+      description: "Lee resultado_ultimos_pagos.json, extrae el día del campo 'pago' y actualiza fecha_vencimiento de TODAS las cuotas. También actualiza fecha_pago solo si ya tiene valor.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: CUOTAS POR DÍA Y ASESOR
+  // ========================================
+  .get("/cuotas-por-dia", async ({ query, set }) => {
+    const { dia, mes, anio, asesor_id } = query as Record<string, string>;
+
+    if (!dia || !mes || !anio) {
+      set.status = 400;
+      return { message: "Faltan parámetros requeridos: 'dia', 'mes', 'anio'" };
+    }
+
+    const diaNum = Number(dia);
+    const mesNum = Number(mes);
+    const anioNum = Number(anio);
+
+    if (isNaN(diaNum) || diaNum < 1 || diaNum > 31) {
+      set.status = 400;
+      return { message: "El parámetro 'dia' debe ser un número entre 1 y 31" };
+    }
+    if (isNaN(mesNum) || mesNum < 1 || mesNum > 12) {
+      set.status = 400;
+      return { message: "El parámetro 'mes' debe ser un número entre 1 y 12" };
+    }
+    if (isNaN(anioNum) || anioNum < 2000) {
+      set.status = 400;
+      return { message: "El parámetro 'anio' debe ser un año válido" };
+    }
+
+    const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
+    if (asesor_id && isNaN(asesorIdNum!)) {
+      set.status = 400;
+      return { message: "El parámetro 'asesor_id' debe ser un número válido" };
+    }
+
+    try {
+      const result = await getCuotasPorDiaYAsesor(diaNum, mesNum, anioNum, asesorIdNum);
+      if (!result.ok) set.status = 500;
+      return result;
+    } catch (error) {
+      set.status = 500;
+      return { message: "Error obteniendo cuotas por día", error: String(error) };
+    }
+  })
+  // ========================================
+  // ENDPOINT: UPSERT EFECTIVIDAD ASESORES
+  // ========================================
+  .get("/efectividad-asesores", async ({ query, set }) => {
+    const { dia, mes, anio } = query as Record<string, string>;
+
+    if (!dia || !mes || !anio) {
+      set.status = 400;
+      return { message: "Faltan parámetros requeridos: 'dia', 'mes', 'anio'" };
+    }
+
+    const diaNum = Number(dia);
+    const mesNum = Number(mes);
+    const anioNum = Number(anio);
+
+    if (isNaN(diaNum) || diaNum < 1 || diaNum > 31) {
+      set.status = 400;
+      return { message: "El parámetro 'dia' debe ser un número entre 1 y 31" };
+    }
+    if (isNaN(mesNum) || mesNum < 1 || mesNum > 12) {
+      set.status = 400;
+      return { message: "El parámetro 'mes' debe ser un número entre 1 y 12" };
+    }
+    if (isNaN(anioNum) || anioNum < 2000) {
+      set.status = 400;
+      return { message: "El parámetro 'anio' debe ser un año válido" };
+    }
+
+    try {
+      const result = await upsertEfectividadAsesores(diaNum, mesNum, anioNum);
+      if (!result.ok) set.status = 500;
+      return result;
+    } catch (error) {
+      set.status = 500;
+      return { message: "Error actualizando efectividad", error: String(error) };
+    }
+  })
+  // ========================================
+  // ENDPOINT: CONSULTAR EFECTIVIDAD ASESORES
+  // ========================================
+  .get("/efectividad-asesores/consulta", async ({ query, set }) => {
+    const { dia, mes, anio, asesor_id } = query as Record<string, string>;
+
+    if (!mes || !anio) {
+      set.status = 400;
+      return { message: "Faltan parámetros requeridos: 'mes', 'anio'" };
+    }
+
+    const mesNum = Number(mes);
+    const anioNum = Number(anio);
+    const diaNum = dia ? Number(dia) : undefined;
+
+    if (dia && (isNaN(diaNum!) || diaNum! < 1 || diaNum! > 31)) {
+      set.status = 400;
+      return { message: "El parámetro 'dia' debe ser un número entre 1 y 31" };
+    }
+    if (isNaN(mesNum) || mesNum < 1 || mesNum > 12) {
+      set.status = 400;
+      return { message: "El parámetro 'mes' debe ser un número entre 1 y 12" };
+    }
+    if (isNaN(anioNum) || anioNum < 2000) {
+      set.status = 400;
+      return { message: "El parámetro 'anio' debe ser un año válido" };
+    }
+
+    const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
+    if (asesor_id && isNaN(asesorIdNum!)) {
+      set.status = 400;
+      return { message: "El parámetro 'asesor_id' debe ser un número válido" };
+    }
+
+    try {
+      const result = await getEfectividadAsesores(mesNum, anioNum, asesorIdNum, diaNum);
+      if (!result.ok) set.status = 500;
+      return result;
+    } catch (error) {
+      set.status = 500;
+      return { message: "Error consultando efectividad", error: String(error) };
+    }
+  })
+  .post(
+    "/actualizar-nit",
+    async ({ body, set }) => {
+      try {
+        const result = await actualizarNitCredito(body);
+        if (!result.success) set.status = 404;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { success: false, message: "Error actualizando NIT", error: String(error) };
+      }
+    },
+    {
+      body: t.Object({
+        numero_credito_sifco: t.String(),
+        nit: t.String(),
+      }),
+      detail: {
+        tags: ["Créditos"],
+        summary: "Actualizar NIT del usuario de un crédito",
+      },
+    }
+  )
+  // ========================================
+  // ENDPOINT: CAMBIAR FECHA DE INICIO
+  // ========================================
+  .post(
+    "/cambiar-fecha-inicio",
+    async ({ body, set }) => {
+      return cambiarFechaInicio({ body, set });
+    },
+    {
+      body: t.Object({
+        numero_credito_sifco: t.String(),
+        nueva_fecha_inicio: t.String(),
+        changed_by: t.String(),
+        razon: t.String(),
+      }),
+      detail: {
+        tags: ["Créditos"],
+        summary: "Cambiar fecha de inicio de un crédito",
+        description:
+          "Cambia la fecha de inicio (cuota 0) y recalcula fecha_vencimiento de todas las cuotas. No modifica montos ni abonos. Guarda historial del cambio.",
+      },
+    }
+  )
+  // ========================================
+  // ENDPOINT: HISTORIAL CAMBIO FECHA
+  // ========================================
+  .get(
+    "/historial-cambio-fecha/:numero_credito_sifco",
+    async ({ params, set }) => {
+      return getHistorialCambioFecha({
+        numero_credito_sifco: params.numero_credito_sifco,
+        set,
+      });
+    },
+    {
+      detail: {
+        tags: ["Créditos"],
+        summary: "Obtener historial de cambios de fecha de inicio",
+      },
+    }
+  )

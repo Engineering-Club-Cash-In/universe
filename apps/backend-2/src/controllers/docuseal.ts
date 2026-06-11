@@ -1,7 +1,7 @@
-import { asc, desc, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { detail_document_field, docusealDocuments, field } from "../database/schemas/docuseal";
 import { db } from "../database";
-import { and, eq } from "drizzle-orm";
+import { getRenapData } from "./renap";
 
 /**
  * 🔤 Converts snake_case names into a clean readable format
@@ -18,41 +18,33 @@ function formatDocumentName(name: string): string {
     .join(" ");
 }
 
-/**
- * 🎯 Controller: Fetch unique document names with both enum and formatted label
- */
-export async function getDocusealDocumentsController() {
-  try {
-    // 🧩 Enum literal array (const assertion)
-    const documentEnumValues = [
-      "solicitud_compra_vehiculo_tercero",
-      "carta_aceptacion_instalacion_gps",
-      "carta_traspaso_vehiculo_rdbe",
-      "descargo_responsabilidades",
-      "cobertura_inrexsa",
-      "reconocimiento_deuda_feb_2025",
-      "carta_carro_nuevo",
-      "contrato_privado_uso_carro_nuevo",
-      "pagare_unico_libre_protesto",
-      "carta_emision_cheques",
-      "garantia_mobiliaria",
-      "declaracion_vendedor",
-      "contrato_privado_uso_carro_usado"
-    ] as const;
+export type DocumentCategoria = "ventas" | "inversiones" | "inversiones_sociedad" | "carta_poder";
 
-    // 🧠 Query optimized: only select distinct document names
+/**
+ * 🎯 Controller: Fetch unique document names with both enum and formatted label.
+ * Optionally filters by categoria.
+ */
+export async function getDocusealDocumentsController(
+  categoria?: DocumentCategoria
+) {
+  try {
+    // Default a "ventas" para no afectar a llamadas existentes
+    const categoriaFiltro: DocumentCategoria = categoria ?? "ventas";
+
     const result = await db
       .select({
         nombre_documento: docusealDocuments.nombre_documento,
+        categoria: docusealDocuments.categoria,
       })
       .from(docusealDocuments)
-      .where(
-        inArray(docusealDocuments.nombre_documento, [...documentEnumValues])
+      .where(eq(docusealDocuments.categoria, categoriaFiltro))
+      .groupBy(
+        docusealDocuments.nombre_documento,
+        docusealDocuments.categoria
       )
-      .groupBy(docusealDocuments.nombre_documento)
       .orderBy(sql`${docusealDocuments.nombre_documento} ASC`);
 
-    // 🧹 Map to { enum, label } and ensure unique names
+    // 🧹 Map to { enum, label, categoria } and ensure unique names
     const formatted = Array.from(
       new Map(
         result.map((doc) => [
@@ -60,6 +52,7 @@ export async function getDocusealDocumentsController() {
           {
             enum: doc.nombre_documento,
             label: formatDocumentName(doc.nombre_documento),
+            categoria: doc.categoria,
           },
         ])
       ).values()
@@ -81,27 +74,16 @@ export async function getDocusealDocumentsController() {
 }
 
 /**
- * 🌎 Fetch RENAP info from external API
+ * 🌎 Fetch RENAP info using direct Centinela API
  */
 async function fetchRenapInfo(dpi: string) {
-  const url = `https://crmapi.s3.devteamatcci.site/info/renap-only`;
+  const response = await getRenapData(dpi);
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dpi }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`RENAP API failed with status ${response.status}`);
+  if (!response.success) {
+    throw new Error(`RENAP API error: ${response.message || "unknown error"}`);
   }
 
-  const data = await response.json();
-  if (!data.success) {
-    throw new Error(`RENAP API error: ${data.message || "unknown error"}`);
-  }
-
-  return data;
+  return response;
 }
 
 /**
@@ -124,36 +106,11 @@ export async function getDocumentsByDpiController(
     const gender = renapData.gender.toLowerCase();
     const genero = gender.startsWith("m") ? "hombre" : "mujer";
 
-    // 3️⃣ Validate enum names
-    const validEnums = [
-      "solicitud_compra_vehiculo_tercero",
-      "carta_aceptacion_instalacion_gps",
-      "carta_traspaso_vehiculo_rdbe",
-      "descargo_responsabilidades",
-      "cobertura_inrexsa",
-      "reconocimiento_deuda_feb_2025",
-      "carta_carro_nuevo",
-      "contrato_privado_uso_carro_nuevo",
-      "pagare_unico_libre_protesto",
-      "carta_emision_cheques",
-      "garantia_mobiliaria",
-      "declaracion_vendedor",
-      "contrato_privado_uso_carro_usado"
-    ] as const;
-
-    // Validar todos los nombres
-    const invalidNames = documentNames.filter(name => !validEnums.includes(name as any));
-    if (invalidNames.length > 0) {
-      return { 
-        success: false, 
-        message: `Invalid document names: ${invalidNames.join(", ")}` 
-      };
-    }
-
     const documentosEncontrados = [];
     const camposMap = new Map<number, any>();
+    const notFound: string[] = [];
 
-    // 4️⃣ Procesar cada documento
+    // 3️⃣ Procesar cada documento (sin lista hardcodeada: cualquier nombre vale)
     for (const documentName of documentNames) {
       // 🔍 Busca por género
       let document = await db
@@ -163,14 +120,14 @@ export async function getDocumentsByDpiController(
           and(
             eq(
               docusealDocuments.nombre_documento,
-              documentName as (typeof validEnums)[number]
+              documentName as any
             ),
             eq(docusealDocuments.genero, genero)
           )
         )
         .limit(1);
 
-      // 5️⃣ Si no hay documento por género, intenta con UNISEX
+      // 4️⃣ Si no hay documento por género, intenta con UNISEX
       if (!document.length) {
         document = await db
           .select()
@@ -179,7 +136,7 @@ export async function getDocumentsByDpiController(
             and(
               eq(
                 docusealDocuments.nombre_documento,
-                documentName as (typeof validEnums)[number]
+                documentName as any
               ),
               eq(docusealDocuments.genero, "unisex")
             )
@@ -187,9 +144,10 @@ export async function getDocumentsByDpiController(
           .limit(1);
       }
 
-      // 6️⃣ Si no se encuentra el documento, continuar con el siguiente
+      // 5️⃣ Si no se encuentra el documento, continuar con el siguiente
       if (!document.length) {
         console.warn(`Document '${documentName}' not found for gender '${genero}' or unisex`);
+        notFound.push(documentName);
         continue;
       }
 
@@ -205,7 +163,7 @@ export async function getDocumentsByDpiController(
         count_doble_line: doc.count_double_line
       });
 
-      // 7️⃣ 🔥 Traer los campos del documento
+      // 6️⃣ 🔥 Traer los campos del documento
       const documentFields = await db
         .select({
           id: field.id,
@@ -217,14 +175,15 @@ export async function getDocumentsByDpiController(
           description: field.description,
           default: field.default,
           is_double_line: field.is_double_line,
-          
+          type: field.type,
+          options: field.options,
         })
         .from(detail_document_field)
         .innerJoin(field, eq(detail_document_field.idField, field.id))
         .where(eq(detail_document_field.idDocument, Number(doc.id_docuseal)))
         .orderBy(asc(field.id));
 
-      // 8️⃣ Agrupar campos por ID y acumular documentos
+      // 7️⃣ Agrupar campos por ID y acumular documentos
       for (const f of documentFields) {
         if (camposMap.has(f.id)) {
           // Si el campo ya existe, agregar el documento al array
@@ -245,28 +204,34 @@ export async function getDocumentsByDpiController(
             description: f.description,
             default: f.default,
             is_double_line: f.is_double_line,
-            
+            type: f.type,
+            options: f.options,
           });
         }
       }
     }
 
-    // 9️⃣ Convertir el Map a array
+    // 8️⃣ Convertir el Map a array
     const camposArray = Array.from(camposMap.values());
 
-    // 🔟 Success response
+    // 9️⃣ Success response
     return {
       success: true,
       message: `Found ${documentosEncontrados.length} document(s)`,
       renapData,
       documents: documentosEncontrados,
       campos: camposArray,
+      notFound,
     };
   } catch (error: any) {
     console.error("[ERROR] getDocumentsByDpiController:", error);
+
+    const isRenapError = error.message?.includes("RENAP");
     return {
       success: false,
-      message: "Internal server error while fetching documents by DPI",
+      message: isRenapError
+        ? `No se pudo validar el DPI en RENAP. Verifique que el número de DPI sea correcto.`
+        : "Error interno al obtener documentos por DPI",
       error: error.message,
     };
   }

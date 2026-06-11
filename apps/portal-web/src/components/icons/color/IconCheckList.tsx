@@ -8,7 +8,7 @@ export const IconCheckList = () => (
   >
     <path
       d="M16.6667 5L7.50004 14.1667L3.33337 10"
-      stroke="#9A9FF5"
+      stroke="currentColor"
       stroke-width="2"
       stroke-linecap="round"
       stroke-linejoin="round"

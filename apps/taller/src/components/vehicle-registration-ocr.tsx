@@ -28,6 +28,7 @@ export default function VehicleRegistrationOCR({
   const [preview, setPreview] = useState<string>('');
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<OCRResult | null>(null);
+  const [attemptCount, setAttemptCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -49,6 +50,7 @@ export default function VehicleRegistrationOCR({
 
     setSelectedFile(file);
     setResult(null);
+    setAttemptCount(0);
 
     // Create preview for images
     if (file.type.startsWith('image/')) {
@@ -77,6 +79,7 @@ export default function VehicleRegistrationOCR({
 
     setProcessing(true);
     setResult(null);
+    setAttemptCount(prev => prev + 1);
 
     try {
       // Convert file to base64
@@ -135,6 +138,7 @@ export default function VehicleRegistrationOCR({
     setSelectedFile(null);
     setPreview('');
     setResult(null);
+    setAttemptCount(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
@@ -239,7 +243,7 @@ export default function VehicleRegistrationOCR({
             <Button
               type="button"
               onClick={processOCR}
-              disabled={processing || isProcessing}
+              disabled={processing || isProcessing || result?.success || attemptCount >= 2}
               className="w-full"
             >
               {processing ? (
@@ -250,10 +254,15 @@ export default function VehicleRegistrationOCR({
               ) : (
                 <>
                   <Camera className="h-4 w-4 mr-2" />
-                  Extraer Información
+                  {attemptCount > 0 && !result?.success ? 'Reintentar Extracción' : 'Extraer Información'}
                 </>
               )}
             </Button>
+            {attemptCount >= 2 && !result?.success && (
+              <p className="text-xs text-muted-foreground text-center">
+                Se alcanzó el límite de intentos. Complete los campos manualmente.
+              </p>
+            )}
           </div>
         )}
 
@@ -304,6 +313,15 @@ export default function VehicleRegistrationOCR({
                   )}
                   {result.ocrData.vin && (
                     <div><strong>VIN:</strong> {result.ocrData.vin}</div>
+                  )}
+                  {result.ocrData.motor && (
+                    <div><strong>No. Motor:</strong> {result.ocrData.motor}</div>
+                  )}
+                  {result.ocrData.use && (
+                    <div><strong>Uso:</strong> {result.ocrData.use}</div>
+                  )}
+                  {result.ocrData.seats && (
+                    <div><strong>Asientos:</strong> {result.ocrData.seats}</div>
                   )}
                 </div>
               </div>

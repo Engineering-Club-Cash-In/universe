@@ -1,10 +1,11 @@
-export const IconCar = () => (
+export const IconCar =  ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="50"
     height="23"
     viewBox="0 0 50 23"
     fill="none"
+    {...props}
   >
     <g opacity="0.99">
       <g opacity="0.99">
@@ -29,8 +30,8 @@ export const IconCar = () => (
         y2="18.4006"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint1_linear_2384_11728"
@@ -40,8 +41,8 @@ export const IconCar = () => (
         y2="23"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
     </defs>
   </svg>

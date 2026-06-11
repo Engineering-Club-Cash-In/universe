@@ -5,6 +5,7 @@ import {
   type Contracts,
   type DocumentSubmission,
   type GenerateDocumentsResponse,
+  type DocumentCategoria,
 } from "@/services/documents";
 import {
   NetworkError,
@@ -13,15 +14,20 @@ import {
   TimeoutError,
 } from "@/services/errors";
 
+// Clave para guardar datos en localStorage
+const STORAGE_KEY = "legal-documents-wizard-state";
+
 interface DocumentData {
-  // Step 1
+  // Step 1 (categoría)
+  category?: DocumentCategoria;
+  // Step 2 (selección de documentos)
   documentTypes?: string[];
-  // Step 2
+  // Step 3 (firmante)
   dpi?: string;
   renapData?: RenapData;
   documents?: Document[];
   fields?: Field[];
-  // Step 3
+  // Step 4 (configuración)
   fieldValues?: Record<string, string>;
   selectedDocuments?: number[];
   documentDescription?: string;
@@ -33,9 +39,47 @@ interface DocumentData {
   additionalClauses?: string;
 }
 
+// Función para cargar estado desde localStorage
+const loadStateFromStorage = (): { step: number; data: DocumentData } | null => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return null;
+    
+    const parsed = JSON.parse(stored);
+    console.log("📂 Estado cargado desde localStorage:", parsed);
+    return parsed;
+  } catch (error) {
+    console.error("❌ Error cargando estado desde localStorage:", error);
+    return null;
+  }
+};
+
+// Función para guardar estado en localStorage
+const saveStateToStorage = (step: number, data: DocumentData) => {
+  try {
+    const state = { step, data };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    console.log("💾 Estado guardado en localStorage:", state);
+  } catch (error) {
+    console.error("❌ Error guardando estado en localStorage:", error);
+  }
+};
+
+// Función para limpiar localStorage
+const clearStorage = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    console.log("🗑️ Estado limpiado de localStorage");
+  } catch (error) {
+    console.error("❌ Error limpiando localStorage:", error);
+  }
+};
+
 export function useGenerateComponent() {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [formData, setFormData] = useState<DocumentData>({});
+  // Inicializar desde localStorage si existe
+  const [initialState] = useState(() => loadStateFromStorage());
+  const [currentStep, setCurrentStep] = useState(initialState?.step || 1);
+  const [formData, setFormData] = useState<DocumentData>(initialState?.data || {});
   const [isLoading, setIsLoading] = useState(false);
   const [step3Valid, setStep3Valid] = useState(false);
   const [shouldValidateStep3, setShouldValidateStep3] = useState(false);
@@ -46,6 +90,14 @@ export function useGenerateComponent() {
   useEffect(() => {
     console.log(`🔄 step3Valid changed to:`, step3Valid);
   }, [step3Valid]);
+
+  // Guardar en localStorage cuando cambian los datos o el paso (excepto en paso 4)
+  useEffect(() => {
+    // No guardar en el paso 5 (documentos generados)
+    if (currentStep === 5) return;
+    
+    saveStateToStorage(currentStep, formData);
+  }, [formData, currentStep]);
 
   const handleDataChange = useCallback(
     (field: string, value: string | boolean | string[] | object | null) => {
@@ -76,15 +128,17 @@ export function useGenerateComponent() {
       const result = (() => {
         switch (step) {
           case 1:
+            return !!formData.category;
+          case 2:
             return !!(
               formData.documentTypes && formData.documentTypes.length > 0
             );
-          case 2:
-            return !!(formData.renapData && formData.dpi);
           case 3:
-            return true;
+            return !!(formData.renapData && formData.dpi);
           case 4:
-            return true; // El step 4 es solo visualización
+            return true;
+          case 5:
+            return true; // El step 5 es solo visualización
           default:
             return false;
         }
@@ -93,7 +147,13 @@ export function useGenerateComponent() {
       console.log(`🔍 ValidateStep ${step}:`, { result, step3Valid });
       return result;
     },
-    [formData.documentTypes, formData.renapData, formData.dpi, step3Valid]
+    [
+      formData.category,
+      formData.documentTypes,
+      formData.renapData,
+      formData.dpi,
+      step3Valid,
+    ]
   );
 
   const generateDocuments = useCallback(async () => {
@@ -104,9 +164,16 @@ export function useGenerateComponent() {
     );
 
     try {
-      // Obtener el email del campo "correo"
+      // Obtener el email del campo "correo".
+      // Solo en ventas el correo es obligatorio. Para el resto de categorías
+      // (inversiones, carta_poder) usamos un correo de referencia como placeholder
+      // para que la API lo acepte.
+      const FALLBACK_EMAIL = "correo@clubcashin.com";
+      const isVentas = formData.category === "ventas";
       const email =
-        formData.fieldValues?.correo || formData.fieldValues?.email || "";
+        formData.fieldValues?.correo ||
+        formData.fieldValues?.email ||
+        (isVentas ? "" : FALLBACK_EMAIL);
 
       if (!email) {
         // si no aparece el campo que contacte a soporte
@@ -128,34 +195,41 @@ export function useGenerateComponent() {
 
           // Construir los campos con sus valores
           const fields = documentFields.map((field) => {
-            const value = formData.fieldValues?.[field.key] || "";
-
-            /*  if (field.is_double_line) {
-              // para cada documento se requiere diferente mínimo de caracteres para el doble renglón
-              const minCharacters = document.count_doble_line ?? 160;
-              const currentLength = value.length;
-              // contar cuantas mayúsculas hay en el texto, cada mayúscula cuenta como 1.25 caracteres
-              const uppercaseCount = (value.match(/[A-ZÁÉÍÓÚÑ]/g) || []).length;
-              // redondear hacia arriba la cantidad de caracteres que aportan las mayúsculas
-              const length = currentLength + Math.ceil(uppercaseCount / 4);
-              if (length < minCharacters) {
-                const underscoresNeeded = minCharacters - length;
-                const underscores = "-".repeat(underscoresNeeded);
-                value += " " + underscores;
-                console.log(
-                  `➕ Agregando ${underscoresNeeded} guiones al campo ${field.name} (${currentLength} → ${minCharacters} caracteres)`
-                );
+            const raw = formData.fieldValues?.[field.key] || "";
+            // Las listas se guardan como JSON string en fieldValues; convertir a array
+            if (field.type === "list") {
+              try {
+                const parsed = raw ? JSON.parse(raw) : [];
+                return { [field.key]: Array.isArray(parsed) ? parsed : [] };
+              } catch {
+                return { [field.key]: [] };
               }
-            }*/
-
-            return { [field.key]: value };
+            }
+            // Para selects: además del value, mandar una flag por opción (☒ / ☐)
+            // para que el template pueda marcar el checkbox correspondiente.
+            if (field.type === "select" && Array.isArray(field.options)) {
+              const flags: Record<string, string> = {};
+              for (const opt of field.options) {
+                flags[`${field.key}_${opt.value}`] = raw === opt.value ? "☒" : "☐";
+              }
+              return { [field.key]: raw, ...flags };
+            }
+            return { [field.key]: raw };
           });
+
+          // Determinar el género: para "declaracion_vendedor" usar genderVendedor, sino usar el del cliente
+          const isVendedorDoc = document.nombre_documento === "declaracion_vendedor";
+          const vendedorGender = formData.fieldValues?.genderVendedor;
+          const genderSource = isVendedorDoc && vendedorGender ? vendedorGender : formData.renapData?.gender;
+          const gender = genderSource === "M" ? "male" : "female";
+
+          const name = formData.fieldValues?.nombreCompleto || "" + "_";
 
           return {
             options: {
               generatePdf: true,
-              gender: formData.renapData?.gender === "M" ? "male" : "female",
-              filenamePrefix: document.nombre_documento + "_" + Date.now(),
+              gender,
+              filenamePrefix: name + document.nombre_documento + "_" + Date.now(),
             },
             // convertir el array de fields a un objeto key-value, incluyendo el DPI
             data: Object.assign({}, ...fields, { dpi: formData.dpi }),
@@ -175,9 +249,13 @@ export function useGenerateComponent() {
       const result = await documentsService.generateDocuments(contracts);
       console.log("Respuesta del servidor:", result);
 
-      // Guardar la respuesta y avanzar al Step 4
+      // Guardar la respuesta y avanzar al Step 5 (visualización)
       setDocumentsResponse(result);
-      setCurrentStep(4);
+      setCurrentStep(5);
+      
+      // Limpiar localStorage después de generar exitosamente
+      clearStorage();
+      console.log("✅ Documentos generados exitosamente - localStorage limpiado");
     } catch (error) {
       console.error("Error generando documentos:", error);
 
@@ -238,7 +316,7 @@ export function useGenerateComponent() {
   }, [formData.fieldValues, formData.documents, formData.fields]);
 
   const handleNext = useCallback(async () => {
-    if (currentStep === 3) {
+    if (currentStep === 4) {
       // Activar validación antes de generar documento
       setShouldValidateStep3(true);
       // Dar tiempo para que la validación se procese
@@ -250,8 +328,8 @@ export function useGenerateComponent() {
 
       // Generar documentos
       await generateDocuments();
-    } else if (currentStep < 4) {
-      // Máximo 4 pasos
+    } else if (currentStep < 5) {
+      // Máximo 5 pasos
       setCurrentStep((prev) => prev + 1);
     }
 
@@ -259,26 +337,44 @@ export function useGenerateComponent() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [currentStep, step3Valid, generateDocuments]);
 
+  const resetDocumentSelection = useCallback(() => {
+    console.log("🔄 Reseteando selección de documentos");
+    setFormData((prev) => ({
+      ...prev,
+      documentTypes: undefined,
+    }));
+  }, []);
+
   const handlePrevious = useCallback(() => {
     const newStep = Math.max(1, currentStep - 1);
 
-    // Si regresa del paso 2 al 1, resetear datos del RENAP
-    if (currentStep === 2 && newStep === 1) {
+    // Volver desde el paso 3 (firmante) al 2 → reset RENAP
+    if (currentStep === 3 && newStep === 2) {
       resetRenapData();
+    }
+
+    // Volver desde el paso 2 (selección) al 1 (categoría) → reset selección
+    if (currentStep === 2 && newStep === 1) {
+      resetDocumentSelection();
     }
 
     setCurrentStep(newStep);
     // Scroll hasta arriba al retroceder
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [currentStep, resetRenapData]);
+  }, [currentStep, resetRenapData, resetDocumentSelection]);
 
   const handleStepClick = useCallback(
     (stepId: number) => {
       // Solo permitir navegar a pasos anteriores o al actual
       if (stepId <= currentStep) {
-        // Si hace clic en el paso 1 desde el paso 2 o superior, resetear datos del RENAP
-        if (stepId === 1 && currentStep >= 2) {
+        // Si vuelve a pasos previos a firmante, limpiar RENAP
+        if (stepId <= 2 && currentStep >= 3) {
           resetRenapData();
+        }
+
+        // Si vuelve al paso 1 (categoría) desde el 2 o superior, limpiar selección
+        if (stepId === 1 && currentStep >= 2) {
+          resetDocumentSelection();
         }
 
         setCurrentStep(stepId);
@@ -286,12 +382,24 @@ export function useGenerateComponent() {
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
     },
-    [currentStep, resetRenapData]
+    [currentStep, resetRenapData, resetDocumentSelection]
   );
 
   const setStep3ValidWrapper = useCallback((valid: boolean) => {
     console.log(`📤 Step3 setting validation to:`, valid);
     setStep3Valid(valid);
+  }, []);
+
+  const resetWizard = useCallback(() => {
+    console.log("🔄 Reiniciando wizard completo");
+    setCurrentStep(1);
+    setFormData({});
+    setStep3Valid(false);
+    setShouldValidateStep3(false);
+    setDocumentsResponse(null);
+    clearStorage();
+    // Scroll hasta arriba
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
   return {
@@ -311,5 +419,6 @@ export function useGenerateComponent() {
     handleStepClick,
     setStep3ValidWrapper,
     resetRenapData,
+    resetWizard,
   };
 }

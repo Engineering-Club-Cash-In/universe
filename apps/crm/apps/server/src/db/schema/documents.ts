@@ -11,6 +11,24 @@ import {
 import { user } from "./auth";
 import { clientTypeEnum, creditTypeEnum, opportunities } from "./crm";
 
+// Tipos de documentos que pertenecen al vehículo
+// Usado para validar si un documento debe sincronizarse con vehicleDocuments
+export const VEHICLE_DOCUMENT_TYPES = [
+	"tarjeta_circulacion",
+	"titulo_propiedad",
+	"dpi_dueno",
+	"patente_comercio_vehiculo",
+	"representacion_legal_vehiculo",
+	"dpi_representante_legal_vehiculo",
+	"pago_impuesto_circulacion",
+	"consulta_sat",
+	"consulta_garantias_mobiliarias",
+	"datos_vehiculo_nuevo",
+	"cotizacion_vehiculo_nuevo",
+] as const;
+
+export type VehicleDocumentType = (typeof VEHICLE_DOCUMENT_TYPES)[number];
+
 export const documentTypeEnum = pgEnum("document_type", [
 	// Documentos específicos para análisis (Individual y Comerciante)
 	"dpi", // DPI vigente
@@ -46,6 +64,37 @@ export const documentTypeEnum = pgEnum("document_type", [
 	"pago_impuesto_circulacion", // Comprobante de pago de impuesto de circulación
 	"consulta_sat", // Captura de pantalla de consulta SAT
 	"consulta_garantias_mobiliarias", // Certificación de garantías mobiliarias (RGM)
+	"datos_vehiculo_nuevo", // Documentos del vehículo nuevo (factura, contrato, etc.)
+	"cotizacion_vehiculo_nuevo", // Cotización del vehículo nuevo
+
+	// === VERIFICACIONES DE CLIENTE ===
+	"usuario_sat_cliente", // Usuario de SAT (Cliente)
+	"rtu_cliente", // RTU (Cliente)
+	"omisos_incumplimientos_cliente", // Omisos e Incumplimientos (Cliente)
+	"infornet", // Infornet (PEP, No pago mora, Sin demandas, Si cumple)
+	"confirmacion_referencias", // Confirmación de Referencias (Laborales - Personales)
+	"visita_domiciliar", // Visita Domiciliar
+	"redes_sociales_internet", // Redes Sociales - Internet
+	"enganche", // Comprobante de enganche
+
+	// === VERIFICACIONES DE VEHÍCULO / PROPIETARIO ===
+	"usuario_sat_propietario", // Usuario de SAT (Propietario del vehículo)
+	"rtu_propietario", // RTU (Propietario del Vehículo)
+	"omisos_incumplimientos_propietario", // Omisos e Incumplimientos (Propietario del Vehículo)
+	"garantia_mobiliaria_sat", // Garantía Mobiliaria desde SAT
+	"garantia_mobiliaria_dpi", // Garantía Mobiliaria con DPI del Propietario (desde el Registro)
+	"garantia_mobiliaria_nit", // Garantía Mobiliaria con NIT del Propietario (desde el Registro)
+	"garantia_mobiliaria_serie", // Garantía Mobiliaria con SERIE (desde el Registro)
+	"multas_vehiculo", // Multas del vehículo
+
+	// === DOCUMENTOS ETAPA 90% (CIERRE) ===
+	"seguro_vehiculo", // Asegurar el Vehículo
+	"inscripcion_garantia_mobiliaria", // Inscripción de Garantía Mobiliaria
+	"traspaso", // Traspaso
+	"documentos_firmados_vendedor", // Documentos que firma el vendedor
+	"copia_llave", // Copia de llave
+	"confirmacion_enganche", // Confirmación de Enganche
+	"desembolso", // Desembolso
 
 	// Categorías generales (legacy - mantener por compatibilidad)
 	"identification", // DPI, pasaporte
@@ -56,6 +105,9 @@ export const documentTypeEnum = pgEnum("document_type", [
 	"vehicle_title", // Tarjeta de circulación
 	"credit_report", // Reporte crediticio
 	"other", // Otros documentos
+
+	// Documento de detalle de análisis (requerido para pasar de 40% a 50%)
+	"detalle_analisis", // Archivo Excel con detalle del crédito
 ]);
 
 export const opportunityDocuments = pgTable("opportunity_documents", {
@@ -139,6 +191,46 @@ export const analysisChecklists = pgTable("analysis_checklists", {
 		.references(() => opportunities.id, { onDelete: "cascade" }),
 	// JSON con estructura completa del checklist
 	checklistData: jsonb("checklist_data").notNull(),
+	// Metadata
+	completedBy: text("completed_by").references(() => user.id),
+	completedAt: timestamp("completed_at"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Disbursement Verification Type enum - Tipos de verificaciones para desembolso (90% → 100%)
+export const disbursementVerificationTypeEnum = pgEnum(
+	"disbursement_verification_type",
+	[
+		"traspaso_realizado", // Traspaso del vehículo realizado
+		"documentos_enviados_asesor", // Documentos enviados al asesor para firmas del vendedor
+		"documentos_firmados_recibidos", // Documentos firmados recibidos
+		"copia_llave_recibida", // Copia de llave recibida
+		"enganche_validado", // Enganche completo validado
+		"listo_desembolsar", // Listo para desembolsar
+	],
+);
+
+// Disbursement Checklists - Estado completo del checklist de desembolso (90% → 100%)
+export const disbursementChecklists = pgTable("disbursement_checklists", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	opportunityId: uuid("opportunity_id")
+		.notNull()
+		.unique()
+		.references(() => opportunities.id, { onDelete: "cascade" }),
+	// Items del checklist
+	traspasoRealizado: boolean("traspaso_realizado").default(false),
+	documentosEnviadosAsesor: boolean("documentos_enviados_asesor").default(
+		false,
+	),
+	documentosFirmadosRecibidos: boolean("documentos_firmados_recibidos").default(
+		false,
+	),
+	copiaLlaveRecibida: boolean("copia_llave_recibida").default(false),
+	engancheValidado: boolean("enganche_validado").default(false),
+	listoDesembolsar: boolean("listo_desembolsar").default(false),
+	// Notas opcionales
+	notes: text("notes"),
 	// Metadata
 	completedBy: text("completed_by").references(() => user.id),
 	completedAt: timestamp("completed_at"),

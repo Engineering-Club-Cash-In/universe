@@ -6,6 +6,10 @@ import {
 	Car,
 	CheckCircle,
 	Eye,
+	FileText,
+	Info,
+	Sparkles,
+	Wrench,
 	XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -37,6 +41,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { renderInspectionStatusBadge } from "@/lib/vehicle-utils";
 import { orpc } from "@/utils/orpc";
 
@@ -51,6 +56,11 @@ function AuctionsDashboard() {
 	const [isPhotosOpen, setIsPhotosOpen] = useState(false);
 	const [photosVehicle, setPhotosVehicle] = useState<any>(null);
 	const queryClient = useQueryClient();
+
+	// Evidence modal state
+	const [selectedEvidence, setSelectedEvidence] = useState<any[]>([]);
+	const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+	const [evidenceItemName, setEvidenceItemName] = useState("");
 
 	// Fetch auctions
 	const { data: auctions, isLoading } = useQuery(
@@ -171,7 +181,7 @@ function AuctionsDashboard() {
 															Q
 															{Number(
 																latestInspection.marketValue,
-															).toLocaleString("es-GT")}
+															).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 														</>
 													) : (
 														<span className="text-gray-400">N/A</span>
@@ -179,10 +189,10 @@ function AuctionsDashboard() {
 												</TableCell>
 												<TableCell>
 													Q
-													{Number(auction.auctionPrice).toLocaleString("es-GT")}
+													{Number(auction.auctionPrice).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 												</TableCell>
 												<TableCell className="font-medium text-red-600">
-													Q{Number(auction.lossValue).toLocaleString("es-GT")}
+													Q{Number(auction.lossValue).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 												</TableCell>
 												<TableCell>
 													{renderAuctionStatus(auction.auctionStatus)}
@@ -230,7 +240,7 @@ function AuctionsDashboard() {
 
 			{/* Modal de detalles */}
 			<Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-				<DialogContent className="max-w-3xl">
+				<DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Detalles del Remate</DialogTitle>
 						<DialogDescription>
@@ -260,21 +270,19 @@ function AuctionsDashboard() {
 									<p className="font-medium text-green-600">
 										<strong>Precio Final de Venta:</strong> Q
 										{Number(selectedAuction.auctionPrice).toLocaleString(
-											"es-GT",
+											"es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }
 										)}
 									</p>
 								) : (
-									<>
-										<label className="mb-1 block font-medium">
-											Precio Final de Venta
-										</label>
+									<label className="mb-1 block font-medium">
+										Precio Final de Venta
 										<Input
 											type="number"
 											placeholder="Ingrese el precio final"
 											value={finalPrice ?? ""}
 											onChange={(e) => setFinalPrice(Number(e.target.value))}
 										/>
-									</>
+									</label>
 								)}
 							</div>
 						</div>
@@ -393,33 +401,260 @@ function AuctionsDashboard() {
 															: "N/A"}
 													</DialogDescription>
 												</CardHeader>
-												<CardContent>
-													<div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
-														<p>
-															<strong>Valor mercado:</strong> Q
-															{Number(inspection.marketValue).toLocaleString(
-																"es-GT",
+												<CardContent className="space-y-6">
+													<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+														<div className="space-y-4">
+															<div className="grid grid-cols-2 gap-2 text-sm">
+																<p>
+																	<strong>Valor mercado:</strong> Q
+																	{Number(
+																		inspection.marketValue,
+																	).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																</p>
+																<p>
+																	<strong>Valor comercial:</strong> Q
+																	{Number(
+																		inspection.suggestedCommercialValue,
+																	).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																</p>
+																<p>
+																	<strong>Valor bancario:</strong> Q
+																	{Number(inspection.bankValue).toLocaleString(
+																		"es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+																	)}
+																</p>
+																<p>
+																	<strong>Calificación:</strong>{" "}
+																	{inspection.rating ||
+																		inspection.vehicleRating}
+																</p>
+															</div>
+
+															{inspection.aiSuggestedValue && (
+																<div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+																	<div className="mb-1 flex items-center gap-2 text-blue-700">
+																		<Sparkles className="h-3.5 w-3.5" />
+																		<h4 className="font-semibold text-xs">
+																			Valoración por IA
+																		</h4>
+																	</div>
+																	<div className="space-y-2 text-[13px]">
+																		<div>
+																			<p className="font-medium text-blue-900 leading-tight">
+																				Sugerencia:
+																			</p>
+																			<p className="font-bold text-blue-800">
+																				Q
+																				{Number(
+																					inspection.aiSuggestedValue,
+																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																			</p>
+																		</div>
+																		{inspection.aiReasoning && (
+																			<p className="line-clamp-2 text-[11px] text-blue-800 italic leading-tight">
+																				{inspection.aiReasoning}
+																			</p>
+																		)}
+																	</div>
+																</div>
 															)}
-														</p>
-														<p>
-															<strong>Valor comercial:</strong> Q
-															{Number(
-																inspection.suggestedCommercialValue,
-															).toLocaleString("es-GT")}
-														</p>
-														<p>
-															<strong>Valor bancario:</strong> Q
-															{Number(inspection.bankValue).toLocaleString(
-																"es-GT",
-															)}
-														</p>
-														<p>
-															<strong>Calificación:</strong> {inspection.rating}
-														</p>
-														<p>
-															<strong>Resultado:</strong> {inspection.result}
-														</p>
+
+															<div>
+																<h4 className="mb-2 border-b pb-1 font-semibold text-xs">
+																	Condición y Diagnóstico
+																</h4>
+																<div className="grid grid-cols-2 gap-y-1 text-xs">
+																	<span className="text-muted-foreground">
+																		Pintura:
+																	</span>
+																	<span>
+																		{inspection.paintCondition
+																			? `${inspection.paintCondition}%`
+																			: "N/A"}
+																	</span>
+																	<span className="text-muted-foreground">
+																		Historial Agencia:
+																	</span>
+																	<span>
+																		{inspection.hasAgencyHistory === true
+																			? "Sí"
+																			: "No"}
+																	</span>
+																	<span className="whitespace-nowrap text-muted-foreground">
+																		Llantas F (I/D):
+																	</span>
+																	<span>
+																		{inspection.tireConditionFrontLeft || 0}% /{" "}
+																		{inspection.tireConditionFrontRight || 0}%
+																	</span>
+																	<span className="whitespace-nowrap text-muted-foreground">
+																		Llantas T (I/D):
+																	</span>
+																	<span>
+																		{inspection.tireConditionRearLeft || 0}% /{" "}
+																		{inspection.tireConditionRearRight || 0}%
+																	</span>
+																	<span className="text-muted-foreground">
+																		Reporte Escáner:
+																	</span>
+																	<span className="flex items-center gap-6">
+																		{inspection.scannerUsed ? "Sí" : "No"}
+																		{inspection.scannerResultUrl && (
+																			<Button
+																				variant="outline"
+																				size="sm"
+																				className="h-6 px-2.5 text-[10px]"
+																				onClick={() => window.open(inspection.scannerResultUrl, "_blank")}
+																			>
+																				<FileText className="mr-1.5 h-3 w-3" /> Abrir PDF
+																			</Button>
+																		)}
+																	</span>
+																</div>
+															</div>
+														</div>
+
+														<div className="space-y-4">
+															<div>
+																<h4 className="mb-1 flex items-center gap-1 font-semibold text-xs">
+																	<FileText className="h-3 w-3" /> Resultado
+																</h4>
+																<p className="rounded bg-muted/30 p-2 text-xs italic">
+																	{inspection.result ||
+																		inspection.inspectionResult}
+																</p>
+															</div>
+															{inspection.alerts &&
+																inspection.alerts.length > 0 && (
+																	<div>
+																		<h4 className="mb-1 flex items-center gap-1 font-semibold text-red-600 text-xs">
+																			<AlertTriangle className="h-3 w-3" />{" "}
+																			Alertas
+																		</h4>
+																		<div className="flex flex-wrap gap-1">
+																			{inspection.alerts.map(
+																				(alert: string, idx: number) => (
+																					<Badge
+																						key={idx}
+																						variant="destructive"
+																						className="px-1 py-0 font-normal text-[9px]"
+																					>
+																						{alert}
+																					</Badge>
+																				),
+																			)}
+																		</div>
+																	</div>
+																)}
+														</div>
 													</div>
+
+													{/* Inspection 360 Section */}
+													{inspection.inspection360Items &&
+														inspection.inspection360Items.length > 0 && (
+															<div className="mt-4 border-t pt-4">
+																<div className="mb-3 flex items-center gap-2">
+																	<Wrench className="h-4 w-4 text-primary" />
+																	<h4 className="font-bold text-sm">
+																		Inspección Técnica 360°
+																	</h4>
+																</div>
+																<Inspection360View
+																	items={inspection.inspection360Items}
+																/>
+															</div>
+														)}
+
+													{/* Checklist Section */}
+													{inspection.checklistItems &&
+														inspection.checklistItems.length > 0 && (
+															<div className="mt-6 border-t pt-6">
+																<div className="mb-3 flex items-center gap-2">
+																	<CheckCircle className="h-4 w-4 text-green-600" />
+																	<h4 className="font-bold text-sm">
+																		Evaluación de Criterios (Checklist)
+																	</h4>
+																</div>
+																<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+																	{Object.entries(
+																		inspection.checklistItems.reduce(
+																			(acc: any, item: any) => {
+																				if (!acc[item.category])
+																					acc[item.category] = [];
+																				acc[item.category].push(item);
+																				return acc;
+																			},
+																			{},
+																		),
+																	).map(([category, items]: [string, any]) => (
+																		<div
+																			key={category}
+																			className="space-y-2 rounded-md border bg-muted/5 p-3"
+																		>
+																			<h5 className="font-bold text-[10px] text-primary uppercase tracking-wider">
+																				{category.replace(/_/g, " ")}
+																			</h5>
+																			<div className="space-y-1.5">
+																				{items.map((item: any, idx: number) => (
+																					<div
+																						key={idx}
+																						className="flex items-start justify-between gap-3 border-muted/50 border-b py-1 last:border-0"
+																					>
+																						<div className="space-y-0.5">
+																							<p className="font-medium text-[13px] leading-tight">
+																								{item.item}
+																							</p>
+																							{item.notes && (
+																								<p className="text-[11px] text-muted-foreground italic">
+																									{item.notes}
+																								</p>
+																							)}
+																						</div>
+																						<div className="flex items-center gap-1.5">
+																							{item.evidence &&
+																								item.evidence.length > 0 && (
+																									<Button
+																										variant="outline"
+																										size="icon"
+																										className="h-6 w-6 border-blue-200 text-blue-600 hover:bg-blue-50"
+																										onClick={() => {
+																											setSelectedEvidence(
+																												item.evidence,
+																											);
+																											setEvidenceItemName(
+																												item.item,
+																											);
+																											setIsEvidenceOpen(true);
+																										}}
+																									>
+																										<Camera className="h-3 w-3" />
+																									</Button>
+																								)}
+																							<Badge
+																								variant={
+																									!item.checked
+																										? "default"
+																										: item.checked &&
+																												item.severity ===
+																													"critical"
+																											? "destructive"
+																											: "secondary"
+																								}
+																								className="h-4.5 shrink-0 px-1 text-[9px]"
+																							>
+																								{!item.checked
+																									? "Cumple"
+																									: "No cumple"}
+																							</Badge>
+																						</div>
+																					</div>
+																				))}
+																			</div>
+																		</div>
+																	))}
+																</div>
+															</div>
+														)}
 												</CardContent>
 											</Card>
 										),
@@ -441,6 +676,54 @@ function AuctionsDashboard() {
 						<Button variant="outline" onClick={() => setIsPhotosOpen(false)}>
 							Cerrar
 						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Evidence Photos Modal */}
+			<Dialog open={isEvidenceOpen} onOpenChange={setIsEvidenceOpen}>
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2 font-bold text-xl">
+							<Camera className="h-5 w-5 text-blue-600" />
+							Evidencia: {evidenceItemName}
+						</DialogTitle>
+						<DialogDescription>
+							Fotografías adjuntas a este punto de inspección
+						</DialogDescription>
+					</DialogHeader>
+					<div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+						{selectedEvidence.map((ev, idx) => (
+							<div key={idx} className="group space-y-2">
+								<div className="relative aspect-video overflow-hidden rounded-lg border bg-muted">
+									<img
+										src={ev.url}
+										alt={`Evidencia ${idx + 1}`}
+										className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+									/>
+									<a
+										href={ev.url}
+										target="_blank"
+										rel="noreferrer"
+										className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100"
+									>
+										<Button variant="secondary" size="sm">
+											<Eye className="mr-2 h-4 w-4" />
+											Ver original
+										</Button>
+									</a>
+								</div>
+								<div className="flex items-center justify-between rounded bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground">
+									<span className="max-w-[150px] truncate">
+										{ev.originalName}
+									</span>
+									<span className="uppercase">{ev.mimeType.split("/")[1]}</span>
+								</div>
+							</div>
+						))}
+					</div>
+					<DialogFooter className="mt-6 border-t pt-4">
+						<Button onClick={() => setIsEvidenceOpen(false)}>Cerrar</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>

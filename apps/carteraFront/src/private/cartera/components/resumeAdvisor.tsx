@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import {
   Card,
   CardContent,
@@ -7,6 +8,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -14,17 +16,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { useCreditosPorAsesor } from "../hooks/resumeAdvisor";
 
 export default function CreditosPorAsesorManager() {
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = usePersistedState<string>("cartera/resumeAdvisor/search", "");
   const [openAsesor, setOpenAsesor] = useState<number | null>(null);
   const [openCredito, setOpenCredito] = useState<number | null>(null);
   const { data, isLoading, error, refetch } = useCreditosPorAsesor(search);
 
-  return (
-    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8 text-gray-900">
+  const hasActiveFilters = search !== "";
+
+  return (  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
       <h2 className="text-2xl font-bold text-blue-700 mb-4 text-center">
         Créditos por Asesor
       </h2>
@@ -38,6 +42,16 @@ export default function CreditosPorAsesorManager() {
           className="max-w-md border-gray-400 text-gray-900"
         />
         <Button onClick={() => refetch()}>Buscar</Button>
+        {hasActiveFilters && (
+          <Button
+            variant="outline"
+            onClick={() => setSearch("")}
+            className="text-gray-600 border-gray-300 hover:bg-gray-100"
+          >
+            <X className="w-4 h-4 mr-1" /> Limpiar filtros
+            <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">1</Badge>
+          </Button>
+        )}
       </div>
 
       {isLoading && <p className="text-center text-blue-600">Cargando datos...</p>}

@@ -8,14 +8,15 @@
 		"skipLibCheck": true,
 		"baseUrl": "./",
 		"paths": {
-			"@/*": ["./src/*"]
+			"@/*": ["./src/*"],
+			"@repo/infornet": ["../../../../packages/infornet/dist"]
 		},
 		"outDir": "./dist",
 		"types": ["bun"],
 		"composite": true,
-		"jsx": "react-jsx",
-		"jsxImportSource": "hono/jsx"
+		"jsx": "react-jsx"
 	},
+	"include": ["src/**/*"],
 	"tsc-alias": {
 		"resolveFullPaths": true
 	}

@@ -3,7 +3,13 @@
  * Type-safe HTTP client with retry logic, circuit breaker, and caching
  */
 
+import {
+	getCarteraAccessToken,
+	invalidateAndReauth,
+} from "./cartera-auth.service";
 import type {
+	BoletaPagoInversionista,
+	CarteraAsesor,
 	CarteraBackApiResponse,
 	CarteraBackAuthError,
 	CarteraBackConnectionError,
@@ -12,12 +18,18 @@ import type {
 	CarteraCredito,
 	CarteraInversionista,
 	CarteraPagoCredito,
+	CarteraStatsResponse,
 	CarteraUsuario,
+	CreateBoletaInput,
 	CreateCreditoInput,
 	CreatePagoInput,
 	CreateUsuarioInput,
 	CreditActionInput,
-	CreditoConInversionistas,
+	CreditoDetailResponse,
+	CreditoDirectoResponse,
+	FacturarGenericoInput,
+	FacturarGenericoResponse,
+	GetAdvisorsParams,
 	GetAllCreditsParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
@@ -25,6 +37,7 @@ import type {
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
 	PaginatedResponse,
+	ResumenGlobalInversionista,
 	ReversePagoInput,
 	UpdateCreditoInput,
 } from "../types/cartera-back";
@@ -35,7 +48,6 @@ import type {
 
 interface CarteraBackClientConfig {
 	baseUrl: string;
-	apiKey?: string;
 	timeout: number;
 	retryAttempts: number;
 	retryDelay: number;
@@ -45,9 +57,15 @@ interface CarteraBackClientConfig {
 	cacheTtl: number;
 }
 
+export interface ResumenGlobalInversionistasFilters {
+	inversionistaId?: string | number;
+	estado?: "pending" | "uploaded" | "liquidated" | "all";
+	mes?: number;
+	anio?: number;
+}
+
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	baseUrl: process.env.CARTERA_BACK_URL || "http://localhost:7000",
-	apiKey: process.env.CARTERA_BACK_API_KEY,
 	timeout: Number.parseInt(process.env.CARTERA_BACK_TIMEOUT || "30000"),
 	retryAttempts: Number.parseInt(
 		process.env.CARTERA_BACK_RETRY_ATTEMPTS || "3",
@@ -162,6 +180,61 @@ class SimpleCache {
 }
 
 // ============================================================================
+// TYPES
+// ============================================================================
+
+export type FacturacionMesRubro = {
+	capital: string;
+	interes: string;
+	iva: string;
+	seguro: string;
+	gps: string;
+	membresias: string;
+};
+
+export type FacturacionMesResponse = {
+	cobrado: FacturacionMesRubro;
+	esperado: FacturacionMesRubro;
+};
+
+export type MontoACobrarRow = {
+	bucket: string;
+	cuotas_count: number;
+	total_cuota: string;
+	total_interes: string;
+	total_iva: string;
+	total_seguro: string;
+	total_gps: string;
+	total_membresias: string;
+	total_royalti: string;
+	mora_promedio: string;
+};
+
+export type FlujoCuotasRubro = {
+	capital: string;
+	interes: string;
+	iva: string;
+};
+
+export type FlujoCuotasInversionista = FlujoCuotasRubro & {
+	inversionista_id: number;
+	nombre: string;
+};
+
+export type FlujoCuotasInversionesResponse = {
+	reinversionPorTipo: (FlujoCuotasRubro & { tipo: string; monto_reinvertido?: string })[];
+	cashParcialPorTipo: (FlujoCuotasRubro & { tipo: string; monto_cash?: string })[];
+	sinReinversion: {
+		totales: FlujoCuotasRubro;
+		porInversionista: FlujoCuotasInversionista[];
+	};
+	pagosExtras: {
+		abonos_capital: string;
+		cancelaciones: string;
+	};
+};
+
+// ============================================================================
 // HTTP CLIENT
 // ============================================================================
 
@@ -200,23 +273,30 @@ export class CarteraBackClient {
 			}
 		}
 
-		const requestOptions: RequestInit = {
-			...options,
-			headers: {
-				"Content-Type": "application/json",
-				...(this.config.apiKey && {
-					Authorization: `Bearer ${this.config.apiKey}`,
-				}),
-				...options.headers,
-			},
-			signal: AbortSignal.timeout(this.config.timeout),
+		const buildRequestOptions = async (
+			forceRefresh = false,
+		): Promise<RequestInit> => {
+			const token = forceRefresh
+				? await invalidateAndReauth()
+				: await getCarteraAccessToken();
+			return {
+				...options,
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+					...options.headers,
+				},
+				signal: AbortSignal.timeout(this.config.timeout),
+			};
 		};
 
 		let lastError: Error | null = null;
+		let didReauth = false;
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
 				const response = await this.circuitBreaker.execute(async () => {
+					const requestOptions = await buildRequestOptions();
 					const res = await fetch(url, requestOptions);
 
 					if (!res.ok) {
@@ -230,6 +310,22 @@ export class CarteraBackClient {
 						}
 
 						if (res.status === 401 || res.status === 403) {
+							if (!didReauth) {
+								didReauth = true;
+								const retryOptions = await buildRequestOptions(true);
+								const retryRes = await fetch(url, retryOptions);
+								if (retryRes.ok) return retryRes;
+								const retryText = await retryRes.text();
+								let retryData: { error?: string; message?: string } = {};
+								try {
+									retryData = JSON.parse(retryText);
+								} catch {
+									retryData = { error: retryText };
+								}
+								throw new Error(
+									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+								);
+							}
 							throw new Error(
 								`Authentication failed: ${errorData.error || errorData.message}`,
 							);
@@ -360,15 +456,12 @@ export class CarteraBackClient {
 
 	async createCredito(input: CreateCreditoInput): Promise<CarteraCredito> {
 		this.cache.invalidate("creditos");
-		const response = await this.request<CarteraBackApiResponse<CarteraCredito>>(
-			"/newCredit",
-			{
-				method: "POST",
-				body: JSON.stringify(input),
-			},
-		);
-		if (!response.data) throw new Error("No data returned from createCredito");
-		return response.data;
+		// El endpoint /newCredit retorna directamente el objeto CarteraCredito, no envuelto en { data: ... }
+		const response = await this.request<CarteraCredito>("/newCredit", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		return response;
 	}
 
 	async updateCredito(input: UpdateCreditoInput): Promise<CarteraCredito> {
@@ -384,43 +477,127 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
-	async getCredito(numeroSifco: string): Promise<CreditoConInversionistas> {
-		const response = await this.request<
-			CarteraBackApiResponse<CreditoConInversionistas>
-		>(
+	async getCredito(numeroSifco: string): Promise<CreditoDirectoResponse> {
+		// El endpoint /credito NO usa el wrapper CarteraBackApiResponse
+		// Retorna los datos directamente
+		const response = await this.request<CreditoDirectoResponse>(
 			`/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
 			{ method: "GET" },
 			true, // use cache
 		);
-		if (!response.data) throw new Error(`Crédito ${numeroSifco} not found`);
-		return response.data;
+		console.log(
+			`[CarteraBackClient] getCredito response for ${numeroSifco}:`,
+			JSON.stringify(response, null, 2),
+		);
+		if (!response) throw new Error(`Crédito ${numeroSifco} not found`);
+		return response;
 	}
 
 	async getAllCreditos(
 		params: GetAllCreditsParams,
-	): Promise<PaginatedResponse<CarteraCredito>> {
-		const queryParams = new URLSearchParams({
-			mes: params.mes.toString(),
-			anio: params.anio.toString(),
-			...(params.estado && { estado: params.estado }),
-			...(params.page && { page: params.page.toString() }),
-			...(params.perPage && { perPage: params.perPage.toString() }),
-			...(params.numero_credito_sifco && {
-				numero_credito_sifco: params.numero_credito_sifco,
-			}),
-			excel: "false",
-		});
+	): Promise<PaginatedResponse<CreditoDetailResponse>> {
+		// Si la lista de SIFCOs es grande, usar POST para evitar URL too long
+		// (414). Threshold conservador: ~50 SIFCOs * 15 chars ≈ 750 bytes, muy
+		// por debajo de cualquier límite. Por arriba de eso, body en POST.
+		const SIFCO_LIST_POST_THRESHOLD = 50;
+		const useBulkPost =
+			!!params.numeros_credito_sifco &&
+			params.numeros_credito_sifco.length > SIFCO_LIST_POST_THRESHOLD;
 
-		const response = await this.request<
-			CarteraBackApiResponse<PaginatedResponse<CarteraCredito>>
-		>(
-			`/getAllCredits?${queryParams}`,
-			{ method: "GET" },
-			true, // use cache
+		let response: PaginatedResponse<CreditoDetailResponse>;
+
+		if (useBulkPost) {
+			console.log(
+				`[CarteraBackClient] getAllCreditos: usando POST (${params.numeros_credito_sifco?.length} SIFCOs en lista)`,
+			);
+			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
+				`/getAllCredits`,
+				{
+					method: "POST",
+					body: JSON.stringify({
+						mes: params.mes,
+						anio: params.anio,
+						estado: params.estado,
+						...(params.page !== undefined && { page: params.page }),
+						...(params.perPage !== undefined && { perPage: params.perPage }),
+						...(params.cuotas_atrasadas !== undefined && {
+							cuotas_atrasadas: params.cuotas_atrasadas,
+						}),
+						...(params.time && { proximidad_pago: params.time }),
+						...(params.nombre_usuario && {
+							nombre_usuario: params.nombre_usuario,
+						}),
+						...(params.numero_credito_sifco && {
+							numero_credito_sifco: params.numero_credito_sifco,
+						}),
+						...(params.numeros_credito_sifco && {
+							numeros_credito_sifco: params.numeros_credito_sifco,
+						}),
+						...(params.email_cobrador && {
+							email_asesor: params.email_cobrador,
+						}),
+						...(params.capital_min !== undefined && { capital_min: params.capital_min }),
+						...(params.capital_max !== undefined && { capital_max: params.capital_max }),
+						excel: false,
+					}),
+				},
+			);
+		} else {
+			const queryParams = new URLSearchParams({
+				mes: params.mes.toString(),
+				anio: params.anio.toString(),
+				...(params.estado && { estado: params.estado }),
+				...(params.page && { page: params.page.toString() }),
+				...(params.perPage && { perPage: params.perPage.toString() }),
+				...(params.cuotas_atrasadas !== undefined && {
+					cuotas_atrasadas: params.cuotas_atrasadas.toString(),
+				}),
+				...(params.time && { proximidad_pago: params.time }),
+				...(params.nombre_usuario && {
+					nombre_usuario: params.nombre_usuario,
+				}),
+				...(params.numero_credito_sifco && {
+					numero_credito_sifco: params.numero_credito_sifco,
+				}),
+				...(params.numeros_credito_sifco &&
+					params.numeros_credito_sifco.length > 0 && {
+						numeros_credito_sifco: params.numeros_credito_sifco.join(","),
+					}),
+				...(params.email_cobrador && { email_asesor: params.email_cobrador }),
+				...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
+				...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
+				...(params.capital_min !== undefined && { capital_min: params.capital_min.toString() }),
+				...(params.capital_max !== undefined && { capital_max: params.capital_max.toString() }),
+				excel: "false",
+			});
+
+			console.log(
+				`[CarteraBackClient] getAllCreditos query: ${queryParams.toString()}`,
+			);
+			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
+				`/getAllCredits?${queryParams}`,
+				{ method: "GET" },
+				true, // use cache (solo GET)
+			);
+		}
+
+		// Validar que la respuesta tenga la estructura de PaginatedResponse
+		if (!response.data || !Array.isArray(response.data)) {
+			console.error(
+				"[CarteraBackClient] Invalid PaginatedResponse structure:",
+				response,
+			);
+			throw new Error(
+				"Invalid response structure: expected PaginatedResponse with data array",
+			);
+		}
+
+		// Log resumido en lugar de imprimir todo
+		console.log(
+			`[CarteraBackClient] getAllCreditos: ${response.data.length} créditos obtenidos (página ${response.page}/${response.totalPages})`,
 		);
 
-		if (!response.data) throw new Error("No data returned from getAllCreditos");
-		return response.data;
+		return response;
 	}
 
 	async creditAction(
@@ -513,6 +690,30 @@ export class CarteraBackClient {
 	}
 
 	// ========================================================================
+	// NIT VALIDATION
+	// ========================================================================
+
+	async consultarNit(
+		nit: string,
+	): Promise<{ success: boolean; data?: { nit: string; nombre: string | null }; mensaje: string }> {
+		return this.request("/api/dte/consultarNit", {
+			method: "POST",
+			body: JSON.stringify({ nit }),
+		});
+	}
+
+	// ========================================================================
+	// BANCOS (BANKS)
+	// ========================================================================
+
+	async getBancos(): Promise<{ banco_id: number; nombre: string }[]> {
+		const response = await this.request<{
+			data: { banco_id: number; nombre: string }[];
+		}>("/bancos", { method: "GET" }, true);
+		return response.data ?? [];
+	}
+
+	// ========================================================================
 	// INVERSIONISTAS (INVESTORS)
 	// ========================================================================
 
@@ -520,16 +721,52 @@ export class CarteraBackClient {
 		params: GetInvestorsParams = {},
 	): Promise<PaginatedResponse<CarteraInversionista>> {
 		const queryParams = new URLSearchParams({
+			...(params.id && { id: params.id.toString() }),
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
 		});
+		// El endpoint /investor retorna directamente un array, no un objeto con { data: [...] }
+		const response = await this.request<CarteraInversionista[]>(
+			`/investor?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+		// Transformar la respuesta al formato PaginatedResponse esperado
+		return {
+			data: response,
+			page: params.page || 1,
+			perPage: params.perPage || 20,
+			total: response.length,
+			totalPages: 1,
+		};
+	}
 
-		const response = await this.request<
-			CarteraBackApiResponse<PaginatedResponse<CarteraInversionista>>
-		>(`/investor?${queryParams}`, { method: "GET" }, true);
-
-		if (!response.data) throw new Error("No data returned from getInvestors");
-		return response.data;
+	async getInvestorRendimiento(
+		email: string,
+	): Promise<{
+		success: boolean;
+		data: {
+			inversionista_id: number;
+			nombre: string;
+			dpi: string;
+			capital_total_aportado: number;
+			cantidad_inversiones: number;
+			rendimiento_estimado: number;
+		};
+	}> {
+		const queryParams = new URLSearchParams({ email });
+		const response = await this.request<{
+			success: boolean;
+			data: {
+				inversionista_id: number;
+				nombre: string;
+				dpi: string;
+				capital_total_aportado: number;
+				cantidad_inversiones: number;
+				rendimiento_estimado: number;
+			};
+		}>(`/inversionistas/rendimiento?${queryParams}`, { method: "GET" }, true);
+		return response;
 	}
 
 	async getInvestorReport(
@@ -552,6 +789,538 @@ export class CarteraBackClient {
 		if (!response.data)
 			throw new Error("No data returned from getInvestorReport");
 		return response.data;
+	}
+
+	// ========================================================================
+	// ASESORES (ADVISORS)
+	// ========================================================================
+
+	async getAdvisors(
+		params: GetAdvisorsParams = {},
+	): Promise<PaginatedResponse<CarteraAsesor>> {
+		console.log("[CarteraBackClient.getAdvisors] Called with params:", params);
+
+		const queryParams = new URLSearchParams({
+			...(params.page && { page: params.page.toString() }),
+			...(params.perPage && { perPage: params.perPage.toString() }),
+		});
+
+		console.log(
+			"[CarteraBackClient.getAdvisors] Query params:",
+			queryParams.toString(),
+		);
+		console.log(
+			"[CarteraBackClient.getAdvisors] URL:",
+			`/advisor?${queryParams}`,
+		);
+
+		// El endpoint /advisor retorna directamente un array, no un objeto con { data: [...] }
+		const response = await this.request<CarteraAsesor[]>(
+			`/advisor?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+
+		console.log(
+			"[CarteraBackClient.getAdvisors] Response received:",
+			JSON.stringify(response, null, 2),
+		);
+
+		// Transformar la respuesta al formato PaginatedResponse esperado
+		return {
+			data: response,
+			page: params.page || 1,
+			perPage: params.perPage || 20,
+			total: response.length,
+			totalPages: 1,
+		};
+	}
+
+	// ========================================================================
+	// STATS (ESTADÍSTICAS)
+	// ========================================================================
+
+	async getStats(
+		params: { email?: string } = {},
+	): Promise<CarteraStatsResponse> {
+		const queryParams = new URLSearchParams({
+			...(params.email && { email: params.email }),
+		});
+
+		const url = params.email ? `/stats?${queryParams}` : "/stats";
+
+		// Este endpoint retorna directamente el objeto de stats
+		const response = await this.request<CarteraStatsResponse>(
+			url,
+			{ method: "GET" },
+			true,
+		);
+
+		console.log(
+			"[CarteraBackClient] getStats raw response:",
+			JSON.stringify(response, null, 2),
+		);
+
+		return response;
+	}
+
+	// ========================================================================
+	// FACTURACIÓN
+	// ========================================================================
+
+	/**
+	 * Genera una factura genérica en cartera-back
+	 * @param input - Datos de la factura a generar
+	 * @returns Resultado de la operación
+	 */
+	async facturarGenerico(
+		input: FacturarGenericoInput,
+	): Promise<FacturarGenericoResponse> {
+		const response = await this.request<FacturarGenericoResponse>(
+			"/api/dte/facturar-generico",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
+		return response;
+	}
+
+	/**
+	 * Registra un gasto administrativo en cartera-back.
+	 *
+	 * Se usa al cerrar una oportunidad: por cada factura de servicio generada
+	 * (todas menos la de royalty) guarda el monto facturado en la tabla
+	 * cartera.gastos_administrativos, para que aparezca en el reporte diario.
+	 * El token Bearer y los reintentos los maneja request() automáticamente.
+	 *
+	 * @param input - fecha ("YYYY-MM-DD" en hora Guatemala), concepto y monto
+	 * @returns Resultado de la operación ({ success, data })
+	 */
+	async crearGastoAdministrativo(input: {
+		fecha: string;
+		concepto: string;
+		monto: number;
+	}): Promise<{ success: boolean; data?: unknown }> {
+		const response = await this.request<{ success: boolean; data?: unknown }>(
+			"/api/gastos-administrativos",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
+		return response;
+	}
+
+	/**
+	 * Refresca (aplica los registros manuales de) el snapshot diario de
+	 * facturación para una fecha. Es necesario DESPUÉS de insertar gastos
+	 * administrativos: el reporte diario lee de facturacion_snapshot_diario,
+	 * y este endpoint copia el SUM de gastos del día a las columnas
+	 * administrativos/otros_cobros (el mismo paso que hace la UI manual).
+	 *
+	 * @param fecha - "YYYY-MM-DD" (hora Guatemala)
+	 */
+	async aplicarManualesDia(fecha: string): Promise<unknown> {
+		return this.request("/api/facturacion-snapshot/aplicar-manuales-dia", {
+			method: "POST",
+			body: JSON.stringify({ fecha }),
+		});
+	}
+
+	// ========================================================================
+	// RESUMEN GLOBAL INVERSIONISTAS
+	// ========================================================================
+
+	async getResumenGlobalInversionistas(
+		filters: ResumenGlobalInversionistasFilters = {},
+	): Promise<ResumenGlobalInversionista[]> {
+		const queryParams = new URLSearchParams();
+
+		if (filters.inversionistaId !== undefined) {
+			queryParams.set("inversionistaId", String(filters.inversionistaId));
+		}
+		queryParams.set("estado", filters.estado ?? "pending");
+		if (filters.mes !== undefined) {
+			queryParams.set("mes", String(filters.mes));
+		}
+		if (filters.anio !== undefined) {
+			queryParams.set("anio", String(filters.anio));
+		}
+
+		const response = await this.request<ResumenGlobalInversionista[]>(
+			`/resumen-global-liquidaciones?${queryParams.toString()}`,
+			{ method: "GET" },
+			true,
+		);
+		return response;
+	}
+
+	async getResumenGlobalExcel(
+		filters: ResumenGlobalInversionistasFilters = {},
+	): Promise<{ success: boolean; url: string }> {
+		const queryParams = new URLSearchParams();
+
+		if (filters.inversionistaId !== undefined) {
+			queryParams.set("inversionistaId", String(filters.inversionistaId));
+		}
+		queryParams.set("estado", filters.estado ?? "pending");
+		if (filters.mes !== undefined) {
+			queryParams.set("mes", String(filters.mes));
+		}
+		if (filters.anio !== undefined) {
+			queryParams.set("anio", String(filters.anio));
+		}
+		queryParams.set("excel", "true");
+
+		const response = await this.request<{ success: boolean; url: string }>(
+			`/resumen-global-liquidaciones?${queryParams.toString()}`,
+			{ method: "GET" },
+			false,
+		);
+		return response;
+	}
+
+	async getResumenTransferenciasExcel(filters: {
+		mes: number;
+		anio: number;
+		ach: boolean;
+		moneda?: "quetzales" | "dolar";
+	}): Promise<{ success: boolean; url: string; filename: string }> {
+		const queryParams = new URLSearchParams();
+		queryParams.set("mes", String(filters.mes));
+		queryParams.set("anio", String(filters.anio));
+		queryParams.set("ach", filters.ach ? "true" : "false");
+		if (filters.moneda) {
+			queryParams.set("moneda", filters.moneda);
+		}
+
+		const response = await this.request<{
+			success: boolean;
+			url: string;
+			filename: string;
+		}>(
+			`/resumen-transferencias?${queryParams.toString()}`,
+			{ method: "GET" },
+			false,
+		);
+		return response;
+	}
+
+	async uploadFile(
+		file: File | Blob,
+		filename: string,
+	): Promise<{ url: string; filename: string }> {
+		const url = `${this.config.baseUrl}/upload`;
+		const formData = new FormData();
+		formData.append("file", file, filename);
+
+		const token = await getCarteraAccessToken();
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(this.config.timeout),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Upload failed: ${errorText}`);
+		}
+
+		return response.json();
+	}
+
+	async createBoleta(
+		input: CreateBoletaInput,
+	): Promise<BoletaPagoInversionista> {
+		const response = await this.request<BoletaPagoInversionista>("/boletas", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		this.cache.invalidate("resumen-global-liquidaciones");
+		return response;
+	}
+
+	async liquidateInversionista(
+		inversionista_id: number,
+	): Promise<Record<string, any>> {
+		const response = await this.request<Record<string, any>>(
+			"/liquidate-inversionista-pagos",
+			{
+				method: "POST",
+				body: JSON.stringify({ inversionista_id }),
+			},
+		);
+		this.cache.invalidate("resumen-global-liquidaciones");
+		return response;
+	}
+
+	// ========================================================================
+	// INVESTOR DOCUMENTS (DOCUMENTOS DE INVERSIONISTA)
+	// ========================================================================
+
+	async createInvestorDocument(input: {
+		file: File | Blob;
+		inversionista_id: number;
+		nombre: string;
+		descripcion?: string;
+		visible?: boolean;
+		created_by?: string;
+	}): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const url = `${this.config.baseUrl}/investor-documents`;
+		const formData = new FormData();
+		formData.append("file", input.file, input.nombre);
+		formData.append("inversionista_id", String(input.inversionista_id));
+		formData.append("nombre", input.nombre);
+		if (input.descripcion) formData.append("descripcion", input.descripcion);
+		if (input.visible !== undefined)
+			formData.append("visible", String(input.visible));
+		if (input.created_by) formData.append("created_by", input.created_by);
+
+		const token = await getCarteraAccessToken();
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(this.config.timeout),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Error al crear documento: ${errorText}`);
+		}
+
+		this.cache.invalidate("investor-documents");
+		return response.json();
+	}
+
+	async getInvestorDocumentsAdmin(
+		inversionistaId: number,
+	): Promise<{ success: boolean; data: Record<string, any>[] }> {
+		const response = await this.request<{
+			success: boolean;
+			data: Record<string, any>[];
+		}>(`/investor-documents/admin/${inversionistaId}`, { method: "GET" }, true);
+		return response;
+	}
+
+	async toggleInvestorDocumentVisibility(
+		documentoId: number,
+		visible: boolean,
+	): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+			data?: Record<string, any>;
+		}>(`/investor-documents/${documentoId}/visibility`, {
+			method: "PUT",
+			body: JSON.stringify({ visible }),
+		});
+		this.cache.invalidate("investor-documents");
+		return response;
+	}
+
+	async deleteInvestorDocument(
+		documentoId: number,
+	): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+			data?: Record<string, any>;
+		}>(`/investor-documents/${documentoId}/delete`, {
+			method: "PATCH",
+		});
+		this.cache.invalidate("investor-documents");
+		return response;
+	}
+
+	// ========================================================================
+	// CREAR INVERSIONISTA
+	// ========================================================================
+
+	async createInvestor(input: {
+		inversionista_id?: number;
+		operation?: "CREATE";
+		nombre: string;
+		dpi?: number | null;
+		email?: string | null;
+		emite_factura?: boolean;
+		banco?: number | null;
+		tipo_cuenta?: string | null;
+		numero_cuenta?: string | null;
+		tipo_reinversion?: string | null;
+		monto_reinversion?: number | null;
+		moneda?: string;
+	}): Promise<{ message: string; data: { inversionista_id: number; nombre: string; [key: string]: any }[] }> {
+		const response = await this.request<{
+			message: string;
+			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		}>("/investor", {
+			method: "POST",
+			body: JSON.stringify({
+				...(input.inversionista_id && { inversionista_id: input.inversionista_id }),
+				...(input.operation && { operation: input.operation }),
+				nombre: input.nombre,
+				dpi: input.dpi ?? null,
+				email: input.email ?? null,
+				emite_factura: input.emite_factura ?? false,
+				banco: input.banco ?? null,
+				tipo_cuenta: input.tipo_cuenta ?? null,
+				numero_cuenta: input.numero_cuenta ?? null,
+				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
+				monto_reinversion: input.monto_reinversion ?? null,
+				moneda: input.moneda ?? "quetzales",
+			}),
+		});
+		this.cache.invalidate("investor");
+		return response;
+	}
+
+	// ========================================================================
+	// CAMBIAR STATUS INVERSIONISTA
+	// ========================================================================
+
+	async setInvestorStatus(input: {
+		inversionista_id: number;
+		status: "activo" | "inactivo" | "pendiente_devolucion";
+	}): Promise<{ success?: boolean; message?: string; data?: any }> {
+		const response = await this.request<{
+			success?: boolean;
+			message?: string;
+			data?: any;
+		}>("/investor/status", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		this.cache.invalidate("investor");
+		return response;
+	}
+
+	// ========================================================================
+	// COMPRA DE CARTERA
+	// ========================================================================
+
+	async compraCartera(input: {
+		inversionista_id: number;
+		monto_aportado: number;
+		tipo_operacion: "compra_cartera";
+		tipo_reinversion?:
+			| "sin_reinversion"
+			| "reinversion_capital"
+			| "reinversion_total";
+		porcentaje_inversion?: number;
+		porcentaje_cash_in?: number;
+		fecha_inicio_participacion?: string;
+	}): Promise<{ success: boolean; message: string }> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+		}>("/agregar-inversionista-credito", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		return response;
+	}
+
+	// ========================================================================
+	// REPORTES
+	// ========================================================================
+
+	async getMontoACobrar(params: {
+		periodo: string;
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<MontoACobrarRow[]> {
+		const queryParams = new URLSearchParams({
+			periodo: params.periodo,
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+
+		const response = await this.request<{ data: MontoACobrarRow[] }>(
+			`/reportes/monto-cobrar?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+
+		return response.data ?? [];
+	}
+
+	async getFacturacionMes(params: {
+		mes: number;
+		anio: number;
+	}): Promise<FacturacionMesResponse> {
+		const qp = new URLSearchParams({
+			mes: String(params.mes),
+			anio: String(params.anio),
+		});
+
+		const [cobradoResult, esperadoResult] = await Promise.all([
+			this.request<{
+				cobrado_capital?: string;
+				cobrado_interes?: string;
+				cobrado_iva?: string;
+				cobrado_seguro?: string;
+				cobrado_gps?: string;
+				cobrado_membresias?: string;
+			}>(`/reportes/facturacion-mes-cobrado?${qp}`, { method: "GET" }, true),
+			this.request<{
+				esperado_capital?: string;
+				esperado_interes?: string;
+				esperado_iva?: string;
+				esperado_seguro?: string;
+				esperado_gps?: string;
+				esperado_membresias?: string;
+			}>(`/reportes/facturacion-mes-esperado?${qp}`, { method: "GET" }, true),
+		]);
+
+		const cobrado: FacturacionMesRubro = {
+			capital: cobradoResult.cobrado_capital ?? "0",
+			interes: cobradoResult.cobrado_interes ?? "0",
+			iva: cobradoResult.cobrado_iva ?? "0",
+			seguro: cobradoResult.cobrado_seguro ?? "0",
+			gps: cobradoResult.cobrado_gps ?? "0",
+			membresias: cobradoResult.cobrado_membresias ?? "0",
+		};
+
+		const esperado: FacturacionMesRubro = {
+			capital: esperadoResult.esperado_capital ?? "0",
+			interes: esperadoResult.esperado_interes ?? "0",
+			iva: esperadoResult.esperado_iva ?? "0",
+			seguro: esperadoResult.esperado_seguro ?? "0",
+			gps: esperadoResult.esperado_gps ?? "0",
+			membresias: esperadoResult.esperado_membresias ?? "0",
+		};
+
+		return { cobrado, esperado };
+	}
+
+	async getFlujoCuotasInversiones(params: {
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<FlujoCuotasInversionesResponse> {
+		const qp = new URLSearchParams({
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+		return this.request<FlujoCuotasInversionesResponse>(
+			`/reportes/flujo-cuotas-inversiones?${qp}`,
+			{ method: "GET" },
+			true,
+		);
 	}
 
 	// ========================================================================

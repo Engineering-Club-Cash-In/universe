@@ -9,8 +9,11 @@ import { liquidateByInvestorService, type LiquidateByInvestorRequest, type Liqui
  * Devuelve el método mutate y los estados del proceso.
  */
 export function useLiquidateByInvestor() {
-  return useMutation<LiquidateByInvestorResponse, Error, LiquidateByInvestorRequest>({
+  return useMutation<
+    LiquidateByInvestorResponse,
+    Error,
+    LiquidateByInvestorRequest
+  >({
     mutationFn: (data) => liquidateByInvestorService(data),
-    // Puedes agregar onSuccess, onError, etc. aquí si lo deseas globalmente
   });
 }

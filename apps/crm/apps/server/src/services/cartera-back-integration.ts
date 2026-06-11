@@ -8,7 +8,6 @@ import { db } from "../db";
 import {
 	carteraBackReferences,
 	carteraBackSyncLog,
-	type NewCarteraBackReference,
 	type NewCarteraBackSyncLog,
 	type NewPagoReference,
 	pagoReferences,
@@ -121,7 +120,7 @@ export interface CreateCreditoParams {
 	userId: string;
 
 	// Cartera-back data
-	usuario_id: number;
+	usuario_id: string;
 	numero_credito_sifco: string;
 	capital: number;
 	porcentaje_interes: number;
@@ -135,6 +134,31 @@ export interface CreateCreditoParams {
 	fecha_creacion?: string;
 	observaciones?: string;
 	no_poliza?: string;
+	// Nuevos campos adicionales
+	categoria?: string;
+	nit?: string;
+	royalti?: number;
+	porcentaje_royalti?: number;
+	membresias_pago?: number;
+	reserva?: number;
+	inversionistas?: any[];
+	is_vehiculo_propio?: boolean;
+	// campos para la facturacion
+	direccion?: string;
+	rubros?: any[];
+	otros?: number;
+	municipio?: string | null;
+	departamento?: string | null;
+	codigo_postal?: string | null;
+	pais?: string | null;
+	dia_pago_mensual?: 15 | 30;
+	// Campos para el correo de notificación
+	vehiculo_marca?: string;
+	vehiculo_linea?: string;
+	vehiculo_modelo?: string;
+	vehiculo_placa?: string;
+	vehiculo_vin?: string;
+	monto_asegurado?: number;
 }
 
 export interface CreateCreditoResult {
@@ -160,36 +184,56 @@ export async function createCreditoInCarteraBack(
 	try {
 		// Create credit in cartera-back
 		const creditoInput: CreateCreditoInput = {
-			usuario_id: params.usuario_id,
+			usuario: String(params.usuario_id),
 			numero_credito_sifco: params.numero_credito_sifco,
 			capital: params.capital,
 			porcentaje_interes: params.porcentaje_interes,
 			plazo: params.plazo,
 			cuota: params.cuota,
-			asesor_id: params.asesor_id,
-			tipoCredito: params.tipoCredito,
-			iva_12: params.iva_12,
+			// asesor: params.asesor_id,
 			seguro_10_cuotas: params.seguro_10_cuotas,
-			gps: params.gps,
-			fecha_creacion: params.fecha_creacion,
+			gps: params.gps ?? 0,
 			observaciones: params.observaciones,
-			no_poliza: params.no_poliza,
+			no_poliza: params.no_poliza || "",
+			direccion: params.direccion || "",
+			// Nuevos campos adicionales
+			categoria: params.categoria,
+			nit: params.nit,
+			dia_pago_mensual: params.dia_pago_mensual,
+			royalti: params.royalti ?? 0,
+			porcentaje_royalti: params.porcentaje_royalti ?? 0,
+			inversionistas: params.inversionistas,
+			rubros: params.rubros,
+			membresias_pago: params.membresias_pago ?? 0,
+			como_se_entero: "",
+			otros: params.otros ?? 0,
+			reserva: params.reserva ?? 0,
+			is_vehiculo_propio: params.is_vehiculo_propio ?? false,
+			municipio: params.municipio || "",
+			departamento: params.departamento || "",
+			codigo_postal: params.codigo_postal || "",
+			pais: params.pais || "",
+			// Campos para el correo de notificación
+			vehiculo_marca: params.vehiculo_marca,
+			vehiculo_linea: params.vehiculo_linea,
+			vehiculo_modelo: params.vehiculo_modelo,
+			vehiculo_placa: params.vehiculo_placa,
+			vehiculo_vin: params.vehiculo_vin,
+			monto_asegurado: params.monto_asegurado,
+			opportunity_id: params.opportunityId,
 		};
+
+		console.log(
+			"[CarteraBackSync] Creating credit with data:",
+			JSON.stringify(creditoInput, null, 2),
+		);
 
 		const credito = await carteraBackClient.createCredito(creditoInput);
 
-		// Store reference in CRM
-		const referenceData: NewCarteraBackReference = {
-			opportunityId: params.opportunityId,
-			contratoFinanciamientoId: params.contratoFinanciamientoId || null,
-			carteraCreditoId: credito.credito_id,
-			numeroCreditoSifco: credito.numero_credito_sifco,
-			syncedAt: new Date(),
-			lastSyncStatus: "success",
-			createdBy: params.userId,
-		};
-
-		await db.insert(carteraBackReferences).values(referenceData);
+		console.log(
+			"[CarteraBackSync] Credit created successfully:",
+			JSON.stringify(credito, null, 2),
+		);
 
 		// Log success
 		await logSyncOperation({

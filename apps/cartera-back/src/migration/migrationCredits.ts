@@ -162,10 +162,22 @@ export async function mapExcelToCredito(
     0
   );
   const otros = toBigExcel(cleanNumericValue(excelRow?.Otros), 0);
-  const membresias_pago = toBigExcel(
-    cleanNumericValue(excelRow?.MembresiasPago),
-    0
-  );
+const obtenerMembresias = (row: any): string => {
+  const membresias = cleanNumericValue(row?.Membresias);  // 👈 PRIMERO esta
+  const membresiasPago = cleanNumericValue(row?.MembresiasPago);  // 👈 FALLBACK
+  
+  // Si Membresias tiene valor > 0, usala
+  if (membresias !== "0" && Number(membresias) > 0) {
+    return membresias;
+  }
+  
+  // Si no, usar MembresiasPago
+  return membresiasPago;
+};
+
+// Luego en tu código:
+const membresias_pago = toBigExcel(obtenerMembresias(excelRow), 0);
+  
 
   const cuota_interes = capital.times(porcentaje_interes).round(2);
   const iva_12 = cuota_interes.times(0.12).round(2);
@@ -194,6 +206,9 @@ export async function mapExcelToCredito(
   );
 
   const advisor = await findOrCreateAdvisorByName(excelRow?.Asesor || "", true);
+  if (!advisor) {
+    throw new Error(`No se pudo encontrar o crear asesor: ${excelRow?.Asesor || ""}`);
+  }
 
   const realPorcentaje = porcentaje_interes.mul(100).toFixed(2);
 
@@ -318,13 +333,28 @@ export async function mapExcelToCredito(
       };
     });
 
-    // ✅ Insertar inversionistas nuevos
+    // ✅ Insertar/actualizar inversionistas (upsert)
     if (creditosInversionistasData.length > 0) {
-      await db
-        .insert(creditos_inversionistas)
-        .values(creditosInversionistasData);
+      for (const invData of creditosInversionistasData) {
+        await db
+          .insert(creditos_inversionistas)
+          .values(invData)
+          .onConflictDoUpdate({
+            target: [creditos_inversionistas.credito_id, creditos_inversionistas.inversionista_id],
+            set: {
+              monto_aportado: invData.monto_aportado,
+              porcentaje_cash_in: invData.porcentaje_cash_in,
+              porcentaje_participacion_inversionista: invData.porcentaje_participacion_inversionista,
+              monto_inversionista: invData.monto_inversionista,
+              monto_cash_in: invData.monto_cash_in,
+              iva_inversionista: invData.iva_inversionista,
+              iva_cash_in: invData.iva_cash_in,
+              cuota_inversionista: invData.cuota_inversionista,
+            },
+          });
+      }
       console.log(
-        `✅ ${creditosInversionistasData.length} inversionistas insertados`
+        `✅ ${creditosInversionistasData.length} inversionistas insertados/actualizados`
       );
     }
 
@@ -332,5 +362,101 @@ export async function mapExcelToCredito(
   } catch (error) {
     console.error("❌ Error al insertar crédito desde Excel:", error);
     throw error;
+  }
+}
+
+
+// 🎯 NUEVO CONTROLLER - Recibe el objeto CreditoAgrupado directo
+export async function procesarCreditoIndividual(credito: CreditoAgrupado) {
+  try {
+    console.log(`🔎 Procesando crédito ${credito.creditoBase}...`);
+    
+    // 🔥 Obtener todos los CreditoSIFCO únicos de las filas
+    const creditosUnicos = [...new Set(
+      credito.filas.map(f => f.CreditoSIFCO)
+    )];
+    
+    console.log(`📋 Variaciones detectadas: ${creditosUnicos.length}`);
+    creditosUnicos.forEach(c => console.log(`   • ${c}`));
+    
+    const resultados = [];
+    
+    // 🔥 Procesar CADA variación por separado
+    for (const creditoSifco of creditosUnicos) {
+      console.log(`\n🔎 Consultando SIFCO: ${creditoSifco}`);
+      
+      const detalle = await consultarPrestamoDetalle(creditoSifco);
+      
+      if (!detalle) {
+        console.warn(`⏭️ ${creditoSifco} - no disponible en SIFCO`);
+        resultados.push({
+          success: false,
+          creditoSifco,
+          status: "no_encontrado"
+        });
+        continue;
+      }
+      
+      // Filtrar filas que corresponden a ESTA variación
+      const filasDeEstaVariacion = credito.filas.filter(
+        f => f.CreditoSIFCO === creditoSifco
+      );
+      
+      console.log(`👥 Inversionistas para ${creditoSifco}: ${filasDeEstaVariacion.length}`);
+      
+      // Crear un "sub-grupo" para esta variación
+      const subGrupo: CreditoAgrupado = {
+        creditoBase: creditoSifco,  // 🔥 Usar la variación, no el base
+        cliente: credito.cliente,
+        filas: filasDeEstaVariacion
+      };
+      
+      try {
+        const dbRow = await mapExcelToCredito(detalle, subGrupo);
+        const status = 
+          new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
+            ? "insertado"
+            : "actualizado";
+        
+        console.log(`✅ Crédito ${creditoSifco} ${status} (ID: ${dbRow.credito_id})`);
+        
+        resultados.push({
+          success: true,
+          creditoSifco,
+          status,
+          credito_id: dbRow.credito_id
+        });
+        
+      } catch (err: any) {
+        console.error(`❌ Error al insertar ${creditoSifco}:`, err.message);
+        resultados.push({
+          success: false,
+          creditoSifco,
+          status: "fallido",
+          error: err.message
+        });
+      }
+    }
+    
+    // Resumen final
+    const exitosos = resultados.filter(r => r.success).length;
+    
+    return {
+      success: exitosos > 0,
+      creditoBase: credito.creditoBase,
+      cliente: credito.cliente,
+      variaciones_procesadas: creditosUnicos.length,
+      exitosos,
+      fallidos: resultados.length - exitosos,
+      detalles: resultados
+    };
+    
+  } catch (err: any) {
+    console.error(`❌ Error general:`, err.message);
+    return {
+      success: false,
+      creditoBase: credito.creditoBase,
+      error: err.message
+    };
   }
 }

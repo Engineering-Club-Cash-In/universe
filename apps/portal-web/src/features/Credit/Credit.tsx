@@ -1,6 +1,6 @@
 import { NavBar } from "@/components";
 import { Header, BuyCar, GetMoney, Choose, StartToday } from "./Sections";
-import { Footer } from "../footer";
+import { CalculatorCredit } from "@/features/Marketplace/Sections/CalculatorCredit";
 
 export const Credit = () => {
   return (
@@ -8,10 +8,10 @@ export const Credit = () => {
       <NavBar />
       <Header />
       <BuyCar />
-      <GetMoney />
-      <Choose />
+      <CalculatorCredit />
+      <GetMoney key="getmoney" />
+      <Choose key="choose" />
       <StartToday />
-      <Footer />
     </div>
   );
 };

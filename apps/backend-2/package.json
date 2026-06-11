@@ -3,7 +3,8 @@
   "version": "1.0.50",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts"
+    "dev": "bun run --watch src/index.ts",
+    "deploy": "bash deploy.sh"
   },
   "dependencies": {
     "@eajr/elylog": "^1.0.1",

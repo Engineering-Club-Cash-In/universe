@@ -174,8 +174,8 @@ export interface PrestamoDetalle {
   PreUsuMod: string;
   PreFecPCap: string;
   PreFecPInt: string;
-  PreFecUCap: string;
-  PreFecUInt: string;
+    PreFecUCap: string;
+    PreFecUInt: string;
   PreMarDesembolsar: string;
   PreSusInts: string;
   PreFecSuspension: string;
@@ -222,6 +222,10 @@ export interface PrestamoDetalle {
   PrestamosInversionistasPromotorPorcentaje: string;
   PrestamosInversionistasAgentePorcentaje: string;
   PrestamosInversionistasContratoFlexible: boolean;
+  PreDivisionDestino: string;
+  PreDivisionOrigen: string;
+  PreDivisionEsOriginado: boolean;
+  PreDivisionEsOriginador: boolean;
   gx_md5_hash: string;
 }
 

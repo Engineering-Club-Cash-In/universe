@@ -9,16 +9,38 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ThanksRouteImport } from './routes/thanks'
+import { Route as TermsChar38conditionsRouteImport } from './routes/terms&conditions'
 import { Route as StylesRouteImport } from './routes/styles'
 import { Route as SellRouteImport } from './routes/sell'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as LoansRouteImport } from './routes/loans'
+import { Route as LeadsRouteImport } from './routes/leads'
+import { Route as LeadInvestorRouteImport } from './routes/leadInvestor'
+import { Route as InvestmentsRouteImport } from './routes/investments'
 import { Route as InvestRouteImport } from './routes/invest'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as CreditRouteImport } from './routes/credit'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as MarketplaceIndexRouteImport } from './routes/marketplace/index'
+import { Route as MarketplaceSearchIndexRouteImport } from './routes/marketplace/search/index'
+import { Route as MarketplaceSearchIdRouteImport } from './routes/marketplace/search/$id'
 
+const ThanksRoute = ThanksRouteImport.update({
+  id: '/thanks',
+  path: '/thanks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsChar38conditionsRoute = TermsChar38conditionsRouteImport.update({
+  id: '/terms&conditions',
+  path: '/terms&conditions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StylesRoute = StylesRouteImport.update({
   id: '/styles',
   path: '/styles',
@@ -27,6 +49,11 @@ const StylesRoute = StylesRouteImport.update({
 const SellRoute = SellRouteImport.update({
   id: '/sell',
   path: '/sell',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegisterRoute = RegisterRouteImport.update({
@@ -44,9 +71,39 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoansRoute = LoansRouteImport.update({
+  id: '/loans',
+  path: '/loans',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeadsRoute = LeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeadInvestorRoute = LeadInvestorRouteImport.update({
+  id: '/leadInvestor',
+  path: '/leadInvestor',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvestmentsRoute = InvestmentsRouteImport.update({
+  id: '/investments',
+  path: '/investments',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InvestRoute = InvestRouteImport.update({
   id: '/invest',
   path: '/invest',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocumentsRoute = DocumentsRouteImport.update({
+  id: '/documents',
+  path: '/documents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CreditRoute = CreditRouteImport.update({
@@ -64,40 +121,91 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MarketplaceIndexRoute = MarketplaceIndexRouteImport.update({
+  id: '/marketplace/',
+  path: '/marketplace/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MarketplaceSearchIndexRoute = MarketplaceSearchIndexRouteImport.update({
+  id: '/marketplace/search/',
+  path: '/marketplace/search/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MarketplaceSearchIdRoute = MarketplaceSearchIdRouteImport.update({
+  id: '/marketplace/search/$id',
+  path: '/marketplace/search/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/credit': typeof CreditRoute
+  '/documents': typeof DocumentsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/invest': typeof InvestRoute
+  '/investments': typeof InvestmentsRoute
+  '/leadInvestor': typeof LeadInvestorRoute
+  '/leads': typeof LeadsRoute
+  '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
+  '/terms&conditions': typeof TermsChar38conditionsRoute
+  '/thanks': typeof ThanksRoute
+  '/marketplace/': typeof MarketplaceIndexRoute
+  '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
+  '/marketplace/search/': typeof MarketplaceSearchIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/credit': typeof CreditRoute
+  '/documents': typeof DocumentsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/invest': typeof InvestRoute
+  '/investments': typeof InvestmentsRoute
+  '/leadInvestor': typeof LeadInvestorRoute
+  '/leads': typeof LeadsRoute
+  '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
+  '/terms&conditions': typeof TermsChar38conditionsRoute
+  '/thanks': typeof ThanksRoute
+  '/marketplace': typeof MarketplaceIndexRoute
+  '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
+  '/marketplace/search': typeof MarketplaceSearchIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/credit': typeof CreditRoute
+  '/documents': typeof DocumentsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/invest': typeof InvestRoute
+  '/investments': typeof InvestmentsRoute
+  '/leadInvestor': typeof LeadInvestorRoute
+  '/leads': typeof LeadsRoute
+  '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
+  '/terms&conditions': typeof TermsChar38conditionsRoute
+  '/thanks': typeof ThanksRoute
+  '/marketplace/': typeof MarketplaceIndexRoute
+  '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
+  '/marketplace/search/': typeof MarketplaceSearchIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -105,50 +213,112 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/credit'
+    | '/documents'
+    | '/forgot-password'
     | '/invest'
+    | '/investments'
+    | '/leadInvestor'
+    | '/leads'
+    | '/loans'
     | '/login'
     | '/profile'
     | '/register'
+    | '/reset-password'
     | '/sell'
     | '/styles'
+    | '/terms&conditions'
+    | '/thanks'
+    | '/marketplace/'
+    | '/marketplace/search/$id'
+    | '/marketplace/search/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/about'
     | '/credit'
+    | '/documents'
+    | '/forgot-password'
     | '/invest'
+    | '/investments'
+    | '/leadInvestor'
+    | '/leads'
+    | '/loans'
     | '/login'
     | '/profile'
     | '/register'
+    | '/reset-password'
     | '/sell'
     | '/styles'
+    | '/terms&conditions'
+    | '/thanks'
+    | '/marketplace'
+    | '/marketplace/search/$id'
+    | '/marketplace/search'
   id:
     | '__root__'
     | '/'
     | '/about'
     | '/credit'
+    | '/documents'
+    | '/forgot-password'
     | '/invest'
+    | '/investments'
+    | '/leadInvestor'
+    | '/leads'
+    | '/loans'
     | '/login'
     | '/profile'
     | '/register'
+    | '/reset-password'
     | '/sell'
     | '/styles'
+    | '/terms&conditions'
+    | '/thanks'
+    | '/marketplace/'
+    | '/marketplace/search/$id'
+    | '/marketplace/search/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   CreditRoute: typeof CreditRoute
+  DocumentsRoute: typeof DocumentsRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   InvestRoute: typeof InvestRoute
+  InvestmentsRoute: typeof InvestmentsRoute
+  LeadInvestorRoute: typeof LeadInvestorRoute
+  LeadsRoute: typeof LeadsRoute
+  LoansRoute: typeof LoansRoute
   LoginRoute: typeof LoginRoute
   ProfileRoute: typeof ProfileRoute
   RegisterRoute: typeof RegisterRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SellRoute: typeof SellRoute
   StylesRoute: typeof StylesRoute
+  TermsChar38conditionsRoute: typeof TermsChar38conditionsRoute
+  ThanksRoute: typeof ThanksRoute
+  MarketplaceIndexRoute: typeof MarketplaceIndexRoute
+  MarketplaceSearchIdRoute: typeof MarketplaceSearchIdRoute
+  MarketplaceSearchIndexRoute: typeof MarketplaceSearchIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/thanks': {
+      id: '/thanks'
+      path: '/thanks'
+      fullPath: '/thanks'
+      preLoaderRoute: typeof ThanksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms&conditions': {
+      id: '/terms&conditions'
+      path: '/terms&conditions'
+      fullPath: '/terms&conditions'
+      preLoaderRoute: typeof TermsChar38conditionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/styles': {
       id: '/styles'
       path: '/styles'
@@ -161,6 +331,13 @@ declare module '@tanstack/react-router' {
       path: '/sell'
       fullPath: '/sell'
       preLoaderRoute: typeof SellRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/register': {
@@ -184,11 +361,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/loans': {
+      id: '/loans'
+      path: '/loans'
+      fullPath: '/loans'
+      preLoaderRoute: typeof LoansRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leads': {
+      id: '/leads'
+      path: '/leads'
+      fullPath: '/leads'
+      preLoaderRoute: typeof LeadsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leadInvestor': {
+      id: '/leadInvestor'
+      path: '/leadInvestor'
+      fullPath: '/leadInvestor'
+      preLoaderRoute: typeof LeadInvestorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/investments': {
+      id: '/investments'
+      path: '/investments'
+      fullPath: '/investments'
+      preLoaderRoute: typeof InvestmentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/invest': {
       id: '/invest'
       path: '/invest'
       fullPath: '/invest'
       preLoaderRoute: typeof InvestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/documents': {
+      id: '/documents'
+      path: '/documents'
+      fullPath: '/documents'
+      preLoaderRoute: typeof DocumentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/credit': {
@@ -212,6 +431,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/marketplace/': {
+      id: '/marketplace/'
+      path: '/marketplace'
+      fullPath: '/marketplace/'
+      preLoaderRoute: typeof MarketplaceIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/marketplace/search/': {
+      id: '/marketplace/search/'
+      path: '/marketplace/search'
+      fullPath: '/marketplace/search/'
+      preLoaderRoute: typeof MarketplaceSearchIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/marketplace/search/$id': {
+      id: '/marketplace/search/$id'
+      path: '/marketplace/search/$id'
+      fullPath: '/marketplace/search/$id'
+      preLoaderRoute: typeof MarketplaceSearchIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -219,12 +459,24 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   CreditRoute: CreditRoute,
+  DocumentsRoute: DocumentsRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   InvestRoute: InvestRoute,
+  InvestmentsRoute: InvestmentsRoute,
+  LeadInvestorRoute: LeadInvestorRoute,
+  LeadsRoute: LeadsRoute,
+  LoansRoute: LoansRoute,
   LoginRoute: LoginRoute,
   ProfileRoute: ProfileRoute,
   RegisterRoute: RegisterRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SellRoute: SellRoute,
   StylesRoute: StylesRoute,
+  TermsChar38conditionsRoute: TermsChar38conditionsRoute,
+  ThanksRoute: ThanksRoute,
+  MarketplaceIndexRoute: MarketplaceIndexRoute,
+  MarketplaceSearchIdRoute: MarketplaceSearchIdRoute,
+  MarketplaceSearchIndexRoute: MarketplaceSearchIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

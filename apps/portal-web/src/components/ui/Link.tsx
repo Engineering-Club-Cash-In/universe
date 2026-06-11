@@ -105,12 +105,13 @@ export const Link: React.FC<LinkProps> = ({
   };
 
   return (
-    <RouterLink 
-      to={href} 
-      className={combinedClasses} 
+    <RouterLink
+      to={href}
+      className={combinedClasses}
       aria-label={ariaLabel}
       onClick={handleInternalClick}
     >
+      {/* @ts-ignore React 19 ReactNode vs TanStack Router type mismatch */}
       {children}
     </RouterLink>
   );

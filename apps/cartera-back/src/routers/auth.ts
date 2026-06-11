@@ -81,49 +81,53 @@ export const authRouter = new Elysia()
   /**
    * ✅ Verificar token JWT
    */
-  .get(
-    "/auth/verify",
-    async ({ query, set }) => {
-      try {
-        const { token } = query as Record<string, string | undefined>;
+ .get(
+  "/auth/verify",
+  async ({ query, set }) => {
+    try {
+      const { token } = query as Record<string, string | undefined>;
 
-        if (!token) {
-          set.status = 400;
-          return { success: false, error: "El token es obligatorio." };
-        }
-
-        const result = verifyTokenService(token);
-
-        if (!result.valid) {
-          set.status = 401;
-          return { success: false, error: result.error };
-        }
-
-        set.status = 200;
-        return {
-          success: true,
-          message: "Token válido",
-          data: result.decoded,
-        };
-      } catch (error: any) {
-        console.error("❌ Error en /auth/verify:", error);
-        set.status = 500;
-        return {
-          success: false,
-          error: error.message || "Error verificando token",
-        };
+      if (!token) {
+        set.status = 400;
+        return { success: false, error: "El token es obligatorio." };
       }
-    },
-    {
-      detail: {
-        summary: "Verifica si un token JWT es válido",
-        tags: ["Auth"],
-      },
-      query: t.Object({
-        token: t.String(),
-      }),
+
+      const result = verifyTokenService(token);
+
+      if (!result.success) {
+        set.status = 401;
+        return { success: false, error: result.error };
+      }
+
+      // Aquí usamos result.data y result.accessToken
+      set.status = 200;
+      return {
+        success: true,
+        message: "Token válido",
+        data: result.data,             // ← Usuario decodificado
+        accessToken: result.accessToken, // ← Token renovado
+      };
+    } catch (error: any) {
+      console.error("❌ Error en /auth/verify:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error.message || "Error verificando token",
+      };
     }
-  ).post(
+  },
+  {
+    detail: {
+      summary: "Verifica si un token JWT es válido",
+      tags: ["Auth"],
+    },
+    query: t.Object({
+      token: t.String(),
+    }),
+  }
+)
+
+.post(
     "/auth/refresh",
     async ({ body, set }) => {
       try {
@@ -142,16 +146,24 @@ export const authRouter = new Elysia()
           return { success: false, error: "Refresh token inválido o expirado" };
         }
 
+        const tokenPayload = {
+          id: decoded.id,
+          email: decoded.email,
+          role: decoded.role,
+          admin_id: decoded.admin_id,
+          asesor_id: decoded.asesor_id,
+        };
+
         // ✅ Generar un nuevo access token
         const newAccessToken = jwt.sign(
-          { id: decoded.id, role: decoded.role },
+          tokenPayload,
           JWT_SECRET,
           { expiresIn: "30m" } // Access token válido por 30 minutos
         );
 
         // Opcional: generar también un nuevo refresh token
         const newRefreshToken = jwt.sign(
-          { id: decoded.id, role: decoded.role },
+          tokenPayload,
           JWT_REFRESH_SECRET,
           { expiresIn: "7d" } // Refresh válido por 7 días
         );

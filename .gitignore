@@ -132,3 +132,19 @@ dist
 
 # Playwright MCP temporary files
 .playwright-mcp/
+
+# Codex local state
+.codex
+
+# Git worktrees
+.worktrees/
+
+# Monorepo docs folders
+**/docs/
+
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# DB dumps / backups (data sensible de prod, nunca commitear)
+apps/cartera-back/backups/

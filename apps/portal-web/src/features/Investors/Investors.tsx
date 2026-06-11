@@ -1,14 +1,16 @@
 import { NavBar } from "@/components";
-import { HeaderInvestor, HowFunction } from "./Sections";
-import { Footer } from "../footer";
+import { HeaderInvestor, HowFunction, WhyInvest, FAQ, Now } from "./Sections";
 
 export const Investors = () => {
+
   return (
     <div>
       <NavBar />
       <HeaderInvestor />
       <HowFunction />
-      <Footer />  
+      <WhyInvest />
+      <FAQ />
+      <Now />
     </div>
   );
 };

@@ -1,7 +1,15 @@
-import { pgSchema, pgEnum, pgTable, varchar, text, uniqueIndex, serial, boolean, integer, primaryKey } from "drizzle-orm/pg-core";
+import { pgSchema, varchar, text, uniqueIndex, serial, boolean, integer, primaryKey, jsonb } from "drizzle-orm/pg-core";
 
 // 🧱 Schema principal
 export const docusealSchema = pgSchema("docuseal");
+
+// 📘 ENUM de categorías de documento
+export const documentCategoriaEnum = docusealSchema.enum("document_categoria_enum", [
+  "ventas",
+  "inversiones",
+  "inversiones_sociedad",
+  "carta_poder"
+]);
 
 // 📘 ENUM de nombres de documentos
 export const documentNameEnum = docusealSchema.enum("document_name_enum", [
@@ -17,33 +25,58 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "carta_emision_cheques",
   "garantia_mobiliaria",
   "declaracion_vendedor",
-  "contrato_privado_uso_carro_usado"
+  "contrato_privado_uso_carro_usado",
+  "acuerdo_inversion_cash_in",
+  "carta_confirmacion_inversion_inicial",
+  "carta_eleccion_modalidad_pago_reinversion",
+  "carta_instruccion_inversion_cartera_activa",
+  "carta_incremento_inversion",
+  "carta_instruccion_pago_anticipado",
+  "cesion_creditos",
+  "contrato_servicios_cash_in_inversor_general",
+  "designacion_beneficiario",
+  // ===== INVERSIONES SOCIEDAD =====
+  "acuerdo_inversion_cash_in_sociedad",
+  "carta_confirmacion_inversion_inicial_sociedad",
+  "carta_eleccion_modalidad_pago_reinversion_sociedad",
+  "carta_instruccion_inversion_cartera_activa_sociedad",
+  "carta_incremento_inversion_sociedad",
+  "carta_instruccion_pago_anticipado_sociedad",
+  "cesion_creditos_sociedad",
+  "contrato_servicios_cash_in_inversor_general_sociedad",
+  "designacion_beneficiario_sociedad",
+  "carta_cube_andres",
+  "carta_cube_don_alex",
+  "carta_rdbe_don_alex",
+  "carta_rdbe_richard"
 ]);
 
 // 📗 Tabla principal
 export const docusealDocuments = docusealSchema.table(
   "documents",
-  { 
-
+  {
     nombre_documento: documentNameEnum("nombre_documento").notNull(),
+    categoria: documentCategoriaEnum("categoria").notNull().default("ventas"),
     id_docuseal: integer("id_docuseal").notNull().primaryKey(),
     genero: varchar("genero", { length: 10 }).notNull(),
     descripcion: text("descripcion"),
     serialid: varchar("serialid", { length: 255 }).notNull(),
     url_insercion: text("url_insercion").notNull(),
     large_spacing: boolean("large_spacing").default(false),
-    count_double_line:integer("count_double_line").default(0)
+    count_double_line: integer("count_double_line").default(0),
   },
   (table) => ({
     // 🚫 Evita duplicados
     uniqueDocusealId: uniqueIndex("unique_docuseal_id").on(table.id_docuseal),
- 
     uniqueCombo: uniqueIndex("unique_document_combo").on(
       table.nombre_documento,
       table.id_docuseal
     ),
   })
 );
+
+
+
 // Tabla de detalles (relación many-to-many)
 export const detail_document_field = docusealSchema.table('detail_document_field', {
   idField: integer('id_field').notNull().references(() => field.id, { onDelete: 'cascade' }),
@@ -51,6 +84,9 @@ export const detail_document_field = docusealSchema.table('detail_document_field
 }, (table) => ({
   pk: primaryKey({ columns: [table.idField, table.idDocument] }),
 }));
+
+
+
 export const field = docusealSchema.table('field', {
   id: serial('id').primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
@@ -61,5 +97,7 @@ export const field = docusealSchema.table('field', {
   default: text('default'),
   required: boolean('required').default(false),
   relation: varchar('relation', { length: 100 }),
+  type: varchar('type', { length: 20 }).notNull().default('text'),
+  options: jsonb('options').$type<{ value: string; label: string }[]>(),
 });
 

@@ -3,9 +3,15 @@ import config from "./config";
 import * as routers from "./routers";
 import { cors } from "@elysiajs/cors";
 import { iniciarTareasProgramadas } from "../schedule";
- 
+import { auditLogMiddleware } from "./middleware/auditLog";
+
 const app = new Elysia()
-  .use(cors())
+  .use(cors({
+    origin: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }))
+  .use(auditLogMiddleware)
   .use(routers.defaultRouter)
   .use(routers.inversionistasRouter)
   .use(routers.advisorRouter)
@@ -17,7 +23,33 @@ const app = new Elysia()
   .use(routers.authRouter)
   .use(routers.morasRouter)
   .use(routers.bancosRouter)
-  .use(routers.cuentasRoutes);
+  .use(routers.cuentasRoutes)
+  .use(routers.dteController)
+  .use(routers.paymentAgreementsRouter)
+  .use(routers.recalculateFromJsonRouter)
+  .use(routers.mirrorInvestorRouter)
+  .use(routers.notificationsRouter)
+  .use(routers.reconcileEspejoRouter)
+  .use(routers.investorDocumentsRouter)
+  .use(routers.abonosCapitalRouter)
+  .use(routers.recibosGenericosRouter)
+  .use(routers.fallenCreditsRouter)
+  .use(routers.sifcoSyncRouter)
+  .use(routers.assignCapitalRouter)
+  .use(routers.addInvestorToCreditRouter)
+  .use(routers.completeEspejoRouter)
+  .use(routers.replaceInvestorCreditRouter)
+  .use(routers.compraCarteraAceptadaRouter)
+  .use(routers.devolucionRouter)
+  .use(routers.creditosNuevosConAbonosRouter)
+  .use(routers.cuentasExtraInversionistaRouter)
+  .use(routers.cierreMensualRouter)
+  .use(routers.actualizarPagosExcelRouter)
+  .use(routers.reportesRouter)
+  .use(routers.gastosAdministrativosRouter)
+  .use(routers.metasFacturacionRouter)
+  .use(routers.facturacionSnapshotRouter)
+  .use(routers.ingresosCarrosRouter);
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor
 iniciarTareasProgramadas();

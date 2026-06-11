@@ -26,6 +26,12 @@ export const salesRole = ac.newRole({
 	report: ["read"],
 });
 
+export const salesSupervisorRole = ac.newRole({
+	user: ["read", "update"],
+	lead: ["create", "read", "update", "delete"],
+	report: ["read", "export"],
+});
+
 export const analystRole = ac.newRole({
 	user: ["read"],
 	lead: ["read"],
@@ -38,7 +44,49 @@ export const cobrosRole = ac.newRole({
 	report: ["read"],
 });
 
+export const cobrosSupervisorRole = ac.newRole({
+	user: ["read", "update"],
+	lead: ["read"],
+	report: ["read", "export"],
+});
+
 export const juridicoRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
+export const accountRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
+export const investmentAdvisorJrRole = ac.newRole({
+	user: ["read"],
+	lead: ["create", "read", "update"],
+	report: ["read"],
+});
+
+export const investmentAdvisorSrRole = ac.newRole({
+	user: ["read"],
+	lead: ["create", "read", "update"],
+	report: ["read", "export"],
+});
+
+export const investmentManagerRole = ac.newRole({
+	user: ["read", "update"],
+	lead: ["create", "read", "update", "delete"],
+	report: ["read", "export"],
+});
+
+export const serviceCenterManagerRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
+export const vehicleVerifierRole = ac.newRole({
 	user: ["read"],
 	lead: ["read"],
 	report: ["read"],
@@ -55,9 +103,17 @@ export const auth = betterAuth({
 			roles: {
 				admin: adminRole,
 				sales: salesRole,
+				sales_supervisor: salesSupervisorRole,
 				analyst: analystRole,
 				cobros: cobrosRole,
+				cobros_supervisor: cobrosSupervisorRole,
 				juridico: juridicoRole,
+				accounting: accountRole,
+				investment_advisor_jr: investmentAdvisorJrRole,
+				investment_advisor_sr: investmentAdvisorSrRole,
+				investment_manager: investmentManagerRole,
+				service_center_manager: serviceCenterManagerRole,
+				vehicle_verifier: vehicleVerifierRole,
 			},
 			schema: {
 				user: {
@@ -75,7 +131,15 @@ export const auth = betterAuth({
 			},
 		}),
 	],
-	trustedOrigins: [process.env.CORS_ORIGIN || ""],
+	trustedOrigins: [
+		process.env.CORS_ORIGIN,
+		process.env.FRONT_URL,
+		process.env.TALLER_URL,
+	].filter((origin): origin is string => Boolean(origin && origin !== "*")),
+	advanced: {
+		useSecureCookies: true,
+		defaultCookieAttributes: { sameSite: "none" as const, secure: true },
+	},
 	emailAndPassword: {
 		enabled: true,
 		requireEmailVerification: false,

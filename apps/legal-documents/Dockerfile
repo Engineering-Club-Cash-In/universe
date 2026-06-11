@@ -1,5 +1,5 @@
 # Build stage
-FROM oven/bun:latest AS builder
+FROM docker.io/oven/bun:latest AS builder
 
 # Set working directory
 WORKDIR /app
@@ -9,6 +9,9 @@ COPY package.json bun.lock* ./
 
 # Install dependencies
 RUN bun install --frozen-lockfile
+
+# Add node_modules/.bin to PATH for tsc and other local binaries
+ENV PATH="/app/node_modules/.bin:$PATH"
 
 # Copy source code
 COPY . .
@@ -23,7 +26,7 @@ ENV VITE_API_URL_DOCUMENTS=${VITE_API_URL_DOCUMENTS}
 RUN bun run build
 
 # Production stage
-FROM nginx:alpine
+FROM docker.io/nginx:alpine
 
 # Copy built assets from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html

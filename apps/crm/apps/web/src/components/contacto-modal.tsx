@@ -1,10 +1,22 @@
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CalendarIcon, Mail, MessageCircle, Phone } from "lucide-react";
-import { useState } from "react";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+import {
+	CalendarIcon,
+	ChevronDown,
+	Loader2,
+	Mail,
+	MessageCircle,
+	MessageSquare,
+	Phone,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogClose,
@@ -18,6 +30,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
 	Select,
 	SelectContent,
 	SelectItem,
@@ -25,24 +48,139 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+	interpolar,
+	PLANTILLAS_MENSAJES,
+	sugerirPlantilla,
+	type VariablesPlantilla,
+} from "@/lib/cobros/plantillas-mensajes";
+import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
 
 interface ContactoModalProps {
 	casoCobroId: string;
 	clienteNombre: string;
 	telefonoPrincipal: string;
+	telefonoAlternativo?: string;
+	emailCliente?: string;
 	metodoInicial: "llamada" | "whatsapp" | "email";
-	children: React.ReactNode;
+	children?: React.ReactNode;
+	// Modo controlado opcional (cuando el padre maneja el estado open)
+	open?: boolean;
+	onOpenChange?: (open: boolean) => void;
+	// Variables para plantillas de mensaje
+	fechaPago?: string;
+	cuotaMensual?: string;
+	placa?: string;
+	marcaLineaModelo?: string;
+	montoAdeudado?: string;
+	cuotasAtraso?: number;
+	estadoMora?: string;
+	fechaInicio?: string | null;
+	nombreAsesor?: string;
+	telefonoAsesor?: string;
 }
 
 export function ContactoModal({
 	casoCobroId,
 	clienteNombre,
 	telefonoPrincipal,
+	telefonoAlternativo,
+	emailCliente,
 	metodoInicial,
 	children,
+	open,
+	onOpenChange,
+	fechaPago = "",
+	cuotaMensual = "",
+	placa = "",
+	marcaLineaModelo = "",
+	montoAdeudado = "",
+	cuotasAtraso = 0,
+	estadoMora,
+	fechaInicio,
+	nombreAsesor = "",
+	telefonoAsesor = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
+
+	const telefonos = useMemo(() => {
+		const lista: string[] = [];
+		// telefonoPrincipal puede traer varios números separados por coma
+		if (telefonoPrincipal) {
+			for (const t of telefonoPrincipal.split(",")) {
+				const limpio = t.trim();
+				if (limpio) lista.push(limpio);
+			}
+		}
+		if (telefonoAlternativo) {
+			for (const t of telefonoAlternativo.split(",")) {
+				const limpio = t.trim();
+				if (limpio && !lista.includes(limpio)) lista.push(limpio);
+			}
+		}
+		return lista;
+	}, [telefonoPrincipal, telefonoAlternativo]);
+
+	const [telefonoSeleccionado, setTelefonoSeleccionado] = useState(
+		() => telefonos[0] || telefonoPrincipal,
+	);
+
+	const [plantillaId, setPlantillaId] = useState<string>("");
+	const [mensajeEditado, setMensajeEditado] = useState("");
+	const [mensajeWhatsappEditado, setMensajeWhatsappEditado] = useState("");
+	const [asuntoEditado, setAsuntoEditado] = useState("");
+
+	const variables: VariablesPlantilla = useMemo(
+		() => ({
+			clienteNombre,
+			fechaPago,
+			cuotaMensual,
+			placa,
+			marcaLineaModelo,
+			montoAdeudado,
+			cuotasAtraso,
+			telefonoAsesor,
+			nombreAsesor,
+		}),
+		[
+			clienteNombre,
+			fechaPago,
+			cuotaMensual,
+			placa,
+			marcaLineaModelo,
+			montoAdeudado,
+			cuotasAtraso,
+			telefonoAsesor,
+			nombreAsesor,
+		],
+	);
+
+	// Pre-seleccionar plantilla sugerida al abrir
+	useEffect(() => {
+		const sugerida = sugerirPlantilla(estadoMora, fechaInicio);
+		setPlantillaId(sugerida);
+		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
+		if (plantilla) {
+			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setMensajeWhatsappEditado(
+				interpolar(plantilla.cuerpoWhastapp || plantilla.cuerpo, variables),
+			);
+			setAsuntoEditado(interpolar(plantilla.asunto, variables));
+		}
+	}, [estadoMora, fechaInicio, variables]);
+
+	const handlePlantillaChange = (id: string) => {
+		setPlantillaId(id);
+		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === id);
+		if (plantilla) {
+			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setMensajeWhatsappEditado(
+				interpolar(plantilla.cuerpoWhastapp || plantilla.cuerpo, variables),
+			);
+			setAsuntoEditado(interpolar(plantilla.asunto, variables));
+		}
+	};
 
 	const form = useForm({
 		defaultValues: {
@@ -52,6 +190,7 @@ export function ContactoModal({
 			acuerdosAlcanzados: "",
 			compromisosPago: "",
 			requiereSeguimiento: false,
+			fechaProximoContacto: undefined as Date | undefined,
 			duracionLlamada: undefined as number | undefined,
 		},
 		onSubmit: async ({ value }) => {
@@ -67,10 +206,18 @@ export function ContactoModal({
 			}),
 		onSuccess: () => {
 			toast.success("Contacto registrado correctamente");
-			queryClient.invalidateQueries({ queryKey: ["getCasosCobros"] });
-			queryClient.invalidateQueries({ queryKey: ["getHistorialContactos"] });
+			queryClient.invalidateQueries(
+				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
+			);
+			queryClient.invalidateQueries({
+				predicate: (query) =>
+					query.queryKey.some(
+						(k) =>
+							typeof k === "string" &&
+							k.includes("getDetallesCreditoCarteraBack"),
+					),
+			});
 			form.reset();
-			// Cerrar el dialogo
 			document
 				.querySelector<HTMLButtonElement>("[data-radix-dialog-close]")
 				?.click();
@@ -93,27 +240,145 @@ export function ContactoModal({
 		}
 	};
 
-	const ejecutarAccion = (metodo: "llamada" | "whatsapp" | "email") => {
+	type AccionContacto =
+		| "llamada"
+		| "whatsapp-link"
+		| "whatsapp-api"
+		| "email-link"
+		| "email-api"
+		| "sms-api";
+
+	const whatsappApiMutation = useMutation({
+		mutationFn: (vars: { telefono: string; mensaje: string }) =>
+			client.enviarWhatsappCobros({
+				...vars,
+				casoCobroId,
+				plantillaId: plantillaId || undefined,
+			}),
+		onSuccess: (res) => {
+			if (res.success) toast.success("WhatsApp enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando WhatsApp"),
+	});
+
+	const emailApiMutation = useMutation({
+		mutationFn: (vars: {
+			destinatario: string;
+			asunto: string;
+			mensaje: string;
+		}) =>
+			client.enviarEmailCobros({
+				...vars,
+				casoCobroId,
+				plantillaId: plantillaId || undefined,
+			}),
+		onSuccess: (res) => {
+			if (res.success) toast.success("Email enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando email"),
+	});
+
+	const smsApiMutation = useMutation({
+		mutationFn: (vars: { telefono: string; mensaje: string }) =>
+			client.enviarSmsCobros({
+				...vars,
+				casoCobroId,
+				plantillaId: plantillaId || undefined,
+			}),
+		onSuccess: (res) => {
+			if (res.success) toast.success("SMS enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando SMS"),
+	});
+
+	const envioEnCurso =
+		whatsappApiMutation.isPending ||
+		emailApiMutation.isPending ||
+		smsApiMutation.isPending;
+
+	const ejecutarAccion = (metodo: AccionContacto) => {
+		const tel = telefonoSeleccionado || telefonoPrincipal;
+		const telLimpio = tel.replace(/[^0-9]/g, "");
+		const mensajeWhatsapp = mensajeWhatsappEditado || mensajeEditado;
 		switch (metodo) {
 			case "llamada":
-				window.open(`tel:${telefonoPrincipal}`);
+				window.open(`tel:${tel}`);
 				break;
-			case "whatsapp":
-				window.open(
-					`https://wa.me/${telefonoPrincipal.replace(/[^0-9]/g, "")}`,
-				);
+			case "whatsapp-link": {
+				const url = mensajeEditado
+					? `https://wa.me/${telLimpio}?text=${encodeURIComponent(mensajeEditado)}`
+					: `https://wa.me/${telLimpio}`;
+				window.open(url);
 				break;
-			case "email":
-				// El email se obtendría del caso, por ahora placeholder
-				window.open("mailto:cliente@email.com");
+			}
+			case "whatsapp-api":
+				if (!telLimpio) {
+					toast.error("No hay teléfono para enviar WhatsApp");
+					return;
+				}
+				if (!mensajeWhatsapp.trim()) {
+					toast.error("No hay mensaje para enviar");
+					return;
+				}
+				whatsappApiMutation.mutate({
+					telefono: telLimpio,
+					mensaje: mensajeWhatsapp,
+				});
+				break;
+			case "email-link": {
+				const params = new URLSearchParams();
+				if (asuntoEditado) params.set("subject", asuntoEditado);
+				if (mensajeEditado) params.set("body", mensajeEditado);
+				const query = params.toString();
+				window.open(`mailto:${emailCliente || ""}${query ? `?${query}` : ""}`);
+				break;
+			}
+			case "email-api":
+				if (!emailCliente) {
+					toast.error("No hay email de destino");
+					return;
+				}
+				if (!asuntoEditado.trim()) {
+					toast.error("El asunto es requerido");
+					return;
+				}
+				if (!mensajeEditado.trim()) {
+					toast.error("El mensaje es requerido");
+					return;
+				}
+				emailApiMutation.mutate({
+					destinatario: emailCliente,
+					asunto: asuntoEditado,
+					mensaje: mensajeEditado,
+				});
+				break;
+			case "sms-api":
+				if (!telLimpio) {
+					toast.error("No hay teléfono para enviar SMS");
+					return;
+				}
+				if (!mensajeEditado.trim()) {
+					toast.error("No hay mensaje para enviar");
+					return;
+				}
+				smsApiMutation.mutate({
+					telefono: telLimpio,
+					mensaje: mensajeEditado,
+				});
 				break;
 		}
 	};
 
+	const mostrarPlantillas =
+		metodoInicial === "whatsapp" || metodoInicial === "email";
+
 	return (
-		<Dialog>
-			<DialogTrigger asChild>{children}</DialogTrigger>
-			<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			{children && <DialogTrigger asChild>{children}</DialogTrigger>}
+			<DialogContent className="max-h-[90vh] min-w-3xl max-w-4xl overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
 						{getIconoMetodo(metodoInicial)}
@@ -138,14 +403,16 @@ export function ContactoModal({
 						<h3 className="font-medium text-lg">Información del Contacto</h3>
 
 						<div className="grid grid-cols-2 gap-4">
-							<form.Field
-								name="metodoContacto"
-								children={(field) => (
+							<form.Field name="metodoContacto">
+								{(field) => (
 									<div className="space-y-2">
 										<Label>Método de Contacto</Label>
 										<Select
 											onValueChange={(value) =>
-												form.setFieldValue(field.name, value)
+												form.setFieldValue(
+													field.name,
+													value as typeof field.state.value,
+												)
 											}
 											defaultValue={field.state.value}
 										>
@@ -166,16 +433,18 @@ export function ContactoModal({
 										</Select>
 									</div>
 								)}
-							/>
+							</form.Field>
 
-							<form.Field
-								name="estadoContacto"
-								children={(field) => (
+							<form.Field name="estadoContacto">
+								{(field) => (
 									<div className="space-y-2">
 										<Label>Estado del Contacto</Label>
 										<Select
 											onValueChange={(value) =>
-												form.setFieldValue(field.name, value)
+												form.setFieldValue(
+													field.name,
+													value as typeof field.state.value,
+												)
 											}
 											defaultValue={field.state.value}
 										>
@@ -205,50 +474,176 @@ export function ContactoModal({
 										</Select>
 									</div>
 								)}
-							/>
+							</form.Field>
 						</div>
 
-						{/* Botón para ejecutar acción */}
-						<div className="flex gap-2">
+						{/* Selector de plantilla para WhatsApp y Email */}
+						{mostrarPlantillas && (
+							<div className="space-y-3 rounded-md border p-3">
+								<div className="space-y-2">
+									<Label>Plantilla de mensaje</Label>
+									<Select
+										value={plantillaId}
+										onValueChange={handlePlantillaChange}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar plantilla..." />
+										</SelectTrigger>
+										<SelectContent>
+											{PLANTILLAS_MENSAJES.map((p) => (
+												<SelectItem key={p.id} value={p.id}>
+													{p.nombre}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+
+								{plantillaId && metodoInicial === "email" && (
+									<div className="space-y-2">
+										<Label>Asunto</Label>
+										<Input
+											value={asuntoEditado}
+											onChange={(e) => setAsuntoEditado(e.target.value)}
+										/>
+									</div>
+								)}
+
+								{plantillaId && (
+									<div className="space-y-2">
+										<Label>Mensaje (editable)</Label>
+										<Textarea
+											className="min-h-[150px] text-sm"
+											value={mensajeEditado}
+											onChange={(e) => setMensajeEditado(e.target.value)}
+										/>
+									</div>
+								)}
+							</div>
+						)}
+
+						{/* Selector de teléfono cuando hay múltiples */}
+						{telefonos.length > 1 && (
+							<div className="space-y-2">
+								<Label>Teléfono a contactar</Label>
+								<Select
+									value={telefonoSeleccionado}
+									onValueChange={setTelefonoSeleccionado}
+								>
+									<SelectTrigger>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{telefonos.map((t) => (
+											<SelectItem key={t} value={t}>
+												{t}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+						)}
+
+						{/* Botones para ejecutar acción */}
+						<div className="flex flex-wrap gap-2">
 							<Button
 								type="button"
 								variant="outline"
 								size="sm"
 								onClick={() => ejecutarAccion("llamada")}
+								disabled={envioEnCurso}
 								className="flex items-center gap-2"
 							>
 								<Phone className="h-4 w-4" />
-								Llamar {telefonoPrincipal}
+								Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
 							</Button>
+
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										disabled={envioEnCurso}
+										className="flex items-center gap-2"
+									>
+										{whatsappApiMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<MessageCircle className="h-4 w-4" />
+										)}
+										WhatsApp
+										{whatsappApiMutation.isPending ? null : (
+											<ChevronDown className="h-3 w-3" />
+										)}
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start">
+									<DropdownMenuItem
+										onClick={() => ejecutarAccion("whatsapp-api")}
+									>
+										Enviar Directo (Automático)
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										onClick={() => ejecutarAccion("whatsapp-link")}
+									>
+										Abrir WhatsApp Web (Manual)
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										disabled={envioEnCurso}
+										className="flex items-center gap-2"
+									>
+										{emailApiMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<Mail className="h-4 w-4" />
+										)}
+										Email
+										{emailApiMutation.isPending ? null : (
+											<ChevronDown className="h-3 w-3" />
+										)}
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start">
+									<DropdownMenuItem onClick={() => ejecutarAccion("email-api")}>
+										Enviar Directo (Automático)
+									</DropdownMenuItem>
+									<DropdownMenuItem onClick={() => ejecutarAccion("email-link")}>
+										Abrir cliente de correo (Manual)
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+
 							<Button
 								type="button"
 								variant="outline"
 								size="sm"
-								onClick={() => ejecutarAccion("whatsapp")}
+								onClick={() => ejecutarAccion("sms-api")}
+								disabled={envioEnCurso}
 								className="flex items-center gap-2"
 							>
-								<MessageCircle className="h-4 w-4" />
-								WhatsApp
-							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={() => ejecutarAccion("email")}
-								className="flex items-center gap-2"
-							>
-								<Mail className="h-4 w-4" />
-								Email
+								{smsApiMutation.isPending ? (
+									<Loader2 className="h-4 w-4 animate-spin" />
+								) : (
+									<MessageSquare className="h-4 w-4" />
+								)}
+								{smsApiMutation.isPending ? "Enviando SMS..." : "SMS"}
 							</Button>
 						</div>
 
-						<form.Field
-							name="metodoContacto"
-							children={(metodoField) =>
+						<form.Field name="metodoContacto">
+							{(metodoField) =>
 								metodoField.state.value === "llamada" && (
-									<form.Field
-										name="duracionLlamada"
-										children={(field) => (
+									<form.Field name="duracionLlamada">
+										{(field) => (
 											<div className="space-y-2">
 												<Label>Duración de la Llamada (segundos)</Label>
 												<Input
@@ -261,10 +656,10 @@ export function ContactoModal({
 												/>
 											</div>
 										)}
-									/>
+									</form.Field>
 								)
 							}
-						/>
+						</form.Field>
 					</div>
 
 					{/* Sección: Detalles de la Conversación */}
@@ -277,7 +672,8 @@ export function ContactoModal({
 								onChange: ({ value }) =>
 									!value ? "Los comentarios son requeridos" : undefined,
 							}}
-							children={(field) => (
+						>
+							{(field) => (
 								<div className="space-y-2">
 									<Label>Comentarios *</Label>
 									<Textarea
@@ -294,12 +690,11 @@ export function ContactoModal({
 										)}
 								</div>
 							)}
-						/>
+						</form.Field>
 
 						<div className="grid grid-cols-2 gap-4">
-							<form.Field
-								name="acuerdosAlcanzados"
-								children={(field) => (
+							<form.Field name="acuerdosAlcanzados">
+								{(field) => (
 									<div className="space-y-2">
 										<Label>Acuerdos Alcanzados</Label>
 										<Textarea
@@ -309,16 +704,16 @@ export function ContactoModal({
 										/>
 									</div>
 								)}
-							/>
+							</form.Field>
 
-							<form.Field
-								name="estadoContacto"
-								children={(estadoField) => (
+							<form.Field name="estadoContacto">
+								{(estadoField) => (
 									<form.Field
 										name="compromisosPago"
 										validators={{
 											onChange: ({ value, fieldApi }) => {
-												const estadoContacto = form.getFieldValue("estadoContacto");
+												const estadoContacto =
+													form.getFieldValue("estadoContacto");
 												const estadosExitosos = [
 													"contactado",
 													"promesa_pago",
@@ -335,14 +730,17 @@ export function ContactoModal({
 												return undefined;
 											},
 										}}
-										children={(field) => {
-											const estadoContacto = form.getFieldValue("estadoContacto");
+									>
+										{(field) => {
+											const estadoContacto =
+												form.getFieldValue("estadoContacto");
 											const estadosExitosos = [
 												"contactado",
 												"promesa_pago",
 												"acuerdo_parcial",
 											];
-											const esRequerido = estadosExitosos.includes(estadoContacto);
+											const esRequerido =
+												estadosExitosos.includes(estadoContacto);
 
 											return (
 												<div className="space-y-2">
@@ -369,9 +767,9 @@ export function ContactoModal({
 												</div>
 											);
 										}}
-									/>
+									</form.Field>
 								)}
-							/>
+							</form.Field>
 						</div>
 					</div>
 
@@ -379,19 +777,69 @@ export function ContactoModal({
 					<div className="space-y-4">
 						<h3 className="font-medium text-lg">Próximo Seguimiento</h3>
 
-						<form.Field
-							name="requiereSeguimiento"
-							children={(field) => (
+						<form.Field name="requiereSeguimiento">
+							{(field) => (
 								<div className="flex items-center space-x-2">
-									<input
-										type="checkbox"
+									<Checkbox
+										id="requiereSeguimiento"
 										checked={field.state.value}
-										onChange={(e) => field.handleChange(e.target.checked)}
+										onCheckedChange={(checked) => {
+											field.handleChange(!!checked);
+											if (!checked) {
+												form.setFieldValue("fechaProximoContacto", undefined);
+											}
+										}}
 									/>
-									<Label>Requiere seguimiento programado</Label>
+									<Label htmlFor="requiereSeguimiento">
+										Requiere seguimiento programado
+									</Label>
 								</div>
 							)}
-						/>
+						</form.Field>
+
+						<form.Field name="requiereSeguimiento">
+							{(seguimientoField) =>
+								seguimientoField.state.value && (
+									<form.Field name="fechaProximoContacto">
+										{(field) => (
+											<div className="space-y-2">
+												<Label>Fecha de próximo contacto *</Label>
+												<Popover>
+													<PopoverTrigger asChild>
+														<Button
+															type="button"
+															variant="outline"
+															className={cn(
+																"w-full justify-start text-left font-normal",
+																!field.state.value && "text-muted-foreground",
+															)}
+														>
+															<CalendarIcon className="mr-2 h-4 w-4" />
+															{field.state.value
+																? format(field.state.value, "dd MMM, yyyy", {
+																		locale: es,
+																	})
+																: "Seleccionar fecha"}
+														</Button>
+													</PopoverTrigger>
+													<PopoverContent className="w-auto p-0" align="start">
+														<Calendar
+															mode="single"
+															selected={field.state.value}
+															onSelect={(date) => field.handleChange(date)}
+															disabled={(date) =>
+																date < new Date(new Date().setHours(0, 0, 0, 0))
+															}
+															locale={es}
+														/>
+													</PopoverContent>
+												</Popover>
+											</div>
+										)}
+									</form.Field>
+								)
+							}
+						</form.Field>
 					</div>
 
 					<DialogFooter>
@@ -406,7 +854,8 @@ export function ContactoModal({
 						</DialogClose>
 						<form.Subscribe
 							selector={(state) => [state.canSubmit, state.isSubmitting]}
-							children={([canSubmit, isSubmitting]) => (
+						>
+							{([canSubmit, isSubmitting]) => (
 								<Button
 									type="submit"
 									disabled={!canSubmit || createContactoMutation.isPending}
@@ -416,7 +865,7 @@ export function ContactoModal({
 										: "Registrar Contacto"}
 								</Button>
 							)}
-						/>
+						</form.Subscribe>
 					</DialogFooter>
 				</form>
 			</DialogContent>

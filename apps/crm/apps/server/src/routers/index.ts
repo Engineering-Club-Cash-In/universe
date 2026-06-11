@@ -1,35 +1,37 @@
 import { publicProcedure } from "../lib/orpc";
+import { accountingRouter } from "./accounting";
 import { adminRouter } from "./admin";
+import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
-import { auctionRouter } from "./auctionVehicles"; // Import the auction router
+import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
+import { bankAnalysisRouter } from "./bank-analysis";
+import { checksRouter } from "./checks";
+import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
+import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
+import { investorDocumentsRouter } from "./investor-documents";
+import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
+import { locationsRouter } from "./locations";
+import { messagingRouter } from "./messaging";
 import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
+import { notificationsRouter } from "./notifications";
 import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
+import { seguimientosRouter } from "./seguimientos";
+import { uploadRouter } from "./upload";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
-export const appRouter = {
-	healthCheck: publicProcedure.handler(() => {
-		return "OK";
-	}),
 
-	// Auth routes
-	...authRouter,
-
-	// Admin routes (prefixed for clarity)
-	adminOnlyData: adminRouter.getStats,
-	getAllUsers: adminRouter.getAllUsers,
-	updateUserRole: adminRouter.updateUserRole,
-	toggleUserSuspension: adminRouter.toggleUserSuspension,
-	deleteUser: adminRouter.deleteUser,
-	createUser: adminRouter.createUser,
-
+/**
+ * CRM specific routes
+ */
+export const crmAppRouter = {
 	// CRM routes
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
@@ -37,14 +39,23 @@ export const appRouter = {
 	createCompany: crmRouter.createCompany,
 	updateCompany: crmRouter.updateCompany,
 	getLeads: crmRouter.getLeads,
+	getLeadById: crmRouter.getLeadById,
+	getLeadsStats: crmRouter.getLeadsStats,
 	createLead: crmRouter.createLead,
 	updateLead: crmRouter.updateLead,
 	getCreditAnalysisByLeadId: crmRouter.getCreditAnalysisByLeadId,
+	upsertCreditAnalysis: crmRouter.upsertCreditAnalysis,
+	resetCreditAnalysis: crmRouter.resetCreditAnalysis,
 	getOpportunities: crmRouter.getOpportunities,
 	createOpportunity: crmRouter.createOpportunity,
 	updateOpportunity: crmRouter.updateOpportunity,
+	reassignOpportunityAndLead: crmRouter.reassignOpportunityAndLead,
+	deleteOpportunity: crmRouter.deleteOpportunity,
 	getOpportunitiesForAnalysis: crmRouter.getOpportunitiesForAnalysis,
 	approveOpportunityAnalysis: crmRouter.approveOpportunityAnalysis,
+	approveCreditDetail: crmRouter.approveCreditDetail,
+	revokeCreditDetailApproval: crmRouter.revokeCreditDetailApproval,
+	getCreditDetailApprovalStatus: crmRouter.getCreditDetailApprovalStatus,
 	getOpportunityHistory: crmRouter.getOpportunityHistory,
 	validateOpportunityDocuments: crmRouter.validateOpportunityDocuments,
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
@@ -57,23 +68,53 @@ export const appRouter = {
 		crmRouter.updateAnalysisChecklistVerification,
 	updateAnalysisChecklistVehicleVerification:
 		crmRouter.updateAnalysisChecklistVehicleVerification,
+	// Disbursement checklist (90% → 100%)
+	getDisbursementNotes: crmRouter.getDisbursementNotes,
+	getDisbursementChecklist: crmRouter.getDisbursementChecklist,
+	updateDisbursementChecklistItem: crmRouter.updateDisbursementChecklistItem,
+	updateDisbursementChecklistNotes: crmRouter.updateDisbursementChecklistNotes,
+	approveDisbursement: crmRouter.approveDisbursement,
+	getOpportunitiesForDisbursement: crmRouter.getOpportunitiesForDisbursement,
+	// Investment assignment (50% → 80%)
+	getOpportunitiesForInvestment: crmRouter.getOpportunitiesForInvestment,
+	assignInvestorAndAdvance: crmRouter.assignInvestorAndAdvance,
+	updateOpportunityInvestors: crmRouter.updateOpportunityInvestors,
 	getClients: crmRouter.getClients,
+	getClientsStats: crmRouter.getClientsStats,
+	getLeadsAsClients: crmRouter.getLeadsAsClients,
+	getLeadsAsClientsStats: crmRouter.getLeadsAsClientsStats,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,
+	getDashboardChartData: crmRouter.getDashboardChartData,
+	scoreLead: crmRouter.scoreLead,
+	// Co-debtors (Co-firmantes)
+	getCoDebtorsByOpportunity: crmRouter.getCoDebtorsByOpportunity,
+	createCoDebtor: crmRouter.createCoDebtor,
+	updateCoDebtor: crmRouter.updateCoDebtor,
+	deleteCoDebtor: crmRouter.deleteCoDebtor,
+	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+};
 
+/**
+ * Vehicles specific routes
+ */
+export const vehicleAppRouter = {
 	// Vehicles routes
 	getVehicles: vehiclesRouter.getAll,
 	getVehicleById: vehiclesRouter.getById,
 	createVehicle: vehiclesRouter.create,
+	createNewVehicle: vehiclesRouter.createNewVehicle,
 	updateVehicle: vehiclesRouter.update,
 	deleteVehicle: vehiclesRouter.delete,
 	searchVehicles: vehiclesRouter.search,
+	searchInspectedVehicles: vehiclesRouter.searchWithInspections,
 	createVehicleInspection: vehiclesRouter.createInspection,
 	updateVehicleInspection: vehiclesRouter.updateInspection,
 	uploadVehiclePhoto: vehiclesRouter.uploadPhoto,
 	deleteVehiclePhoto: vehiclesRouter.deletePhoto,
 	getVehicleInspectionById: vehiclesRouter.getInspectionById,
+	getLatestInspectionByVehicleId: vehiclesRouter.getLatestInspectionByVehicleId,
 	getVehicleStatistics: vehiclesRouter.getStatistics,
 	createFullVehicleInspection: vehiclesRouter.createFullInspection,
 	processVehicleRegistrationOCR: vehiclesRouter.processVehicleRegistrationOCR,
@@ -81,7 +122,13 @@ export const appRouter = {
 	getVehicleDocuments: vehiclesRouter.getVehicleDocuments,
 	uploadVehicleDocument: vehiclesRouter.uploadVehicleDocument,
 	deleteVehicleDocument: vehiclesRouter.deleteVehicleDocument,
+	validateLicensePlate: vehiclesRouter.validateLicensePlate,
+};
 
+/**
+ * Cobros specific routes
+ */
+export const cobrosAppRouter = {
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,
@@ -94,8 +141,9 @@ export const appRouter = {
 	getUsuariosCobros: cobrosRouter.getUsuariosCobros,
 	getHistorialPagos: cobrosRouter.getHistorialPagos,
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
-	getTodosLosContratos: cobrosRouter.getTodosLosContratos,
+	getTodosLosCreditos: cobrosRouter.getTodosLosCreditos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
+	getDetallesCreditoCarteraBack: cobrosRouter.getDetallesCreditoCarteraBack,
 	// Cartera-back integration endpoints
 	registrarPago: cobrosRouter.registrarPago,
 	getHistorialPagosCarteraBack: cobrosRouter.getHistorialPagosCarteraBack,
@@ -105,9 +153,72 @@ export const appRouter = {
 	getInversionistas: cobrosRouter.getInversionistas,
 	getDetalleInversionista: cobrosRouter.getDetalleInversionista,
 	getInversionistasDelCredito: cobrosRouter.getInversionistasDelCredito,
+	getAsesores: cobrosRouter.getAsesores,
+	updateContactInfoCobros: cobrosRouter.updateContactInfoCobros,
+	updateEtiquetasCobros: cobrosRouter.updateEtiquetasCobros,
+	enviarSmsCobros: cobrosRouter.enviarSmsCobros,
+	enviarEmailCobros: cobrosRouter.enviarEmailCobros,
+	enviarWhatsappCobros: cobrosRouter.enviarWhatsappCobros,
+	enviarWhatsappMasivoCobros: cobrosRouter.enviarWhatsappMasivoCobros,
+	getReferencias: cobrosRouter.getReferencias,
+	createReferencia: cobrosRouter.createReferencia,
+	updateReferencia: cobrosRouter.updateReferencia,
+	deleteReferencia: cobrosRouter.deleteReferencia,
+	// Metas de mora
+	getMetasMora: cobrosRouter.getMetasMora,
+	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
+	upsertMetasMora: cobrosRouter.upsertMetasMora,
 
+	// Seguimientos programados
+	createSeguimiento: seguimientosRouter.createSeguimiento,
+	getSeguimientosActivos: seguimientosRouter.getSeguimientosActivos,
+	updateSeguimiento: seguimientosRouter.updateSeguimiento,
+	deleteSeguimiento: seguimientosRouter.deleteSeguimiento,
+	runSeguimientosJob: seguimientosRouter.runSeguimientosJob,
+};
+
+/**
+ * Admin specific routes
+ */
+export const adminAppRouter = {
+	// Admin routes
+	adminOnlyData: adminRouter.getStats,
+	getAllUsers: adminRouter.getAllUsers,
+	updateUserRole: adminRouter.updateUserRole,
+	toggleUserSuspension: adminRouter.toggleUserSuspension,
+	deleteUser: adminRouter.deleteUser,
+	createUser: adminRouter.createUser,
+
+	// Admin Import routes
+	setupImportacion: adminImportRouter.setupImportacion,
+	analizarImportacionCreditos: adminImportRouter.analizarImportacionCreditos,
+};
+
+/**
+ * Client Forms and Bank Analysis routes
+ */
+export const formsAppRouter = {
+	// Client Forms routes (Formularios del cliente - link público)
+	generateFormToken: clientFormsRouter.generateFormToken,
+	validateFormToken: clientFormsRouter.validateFormToken,
+	submitCreditApplication: clientFormsRouter.submitCreditApplication,
+	signCreditApplication: clientFormsRouter.signCreditApplication,
+	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
+	getClientFormData: clientFormsRouter.getClientFormData,
+	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,
+
+	// Bank Analysis routes (Análisis de estados de cuenta)
+	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
+};
+
+/**
+ * Legal and Contract Generation routes
+ */
+export const legalAppRouter = {
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
+	updateLegalContract: legalContractsRouter.updateLegalContract,
+	deleteLegalContract: legalContractsRouter.deleteLegalContract,
 	listLegalContractsByLead: legalContractsRouter.listLegalContractsByLead,
 	listLegalContractsByOpportunity:
 		legalContractsRouter.listLegalContractsByOpportunity,
@@ -118,10 +229,35 @@ export const appRouter = {
 	getOpportunitiesByLead: legalContractsRouter.getOpportunitiesByLead,
 	getUserPermissions: legalContractsRouter.getUserPermissions,
 	getLeadsWithContracts: legalContractsRouter.getLeadsWithContracts,
+	getOpportunitiesForContracts:
+		legalContractsRouter.getOpportunitiesForContracts,
+	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
+	confirmContractsSigned: legalContractsRouter.confirmContractsSigned,
 
+	// Contract Generation routes (Generación automática de contratos)
+	getContractTypes: contractGenerationRouter.getContractTypes,
+	getDocumentsByDpi: contractGenerationRouter.getDocumentsByDpi,
+	getContractPreviewData: contractGenerationRouter.getContractPreviewData,
+	validateForContractGeneration:
+		contractGenerationRouter.validateForContractGeneration,
+	enrichLeadFromRenap: contractGenerationRouter.enrichLeadFromRenap,
+	generateContracts: contractGenerationRouter.generateContracts,
+	generateContractsDirect: contractGenerationRouter.generateContractsDirect,
+	linkContractsToOpportunity:
+		contractGenerationRouter.linkContractsToOpportunity,
+	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
+	getGenerationSnapshot: contractGenerationRouter.getGenerationSnapshot,
+	regenerateContracts: contractGenerationRouter.regenerateContracts,
+};
+
+/**
+ * Miscellaneous routes (Vendors, Notes, Notifications, etc.)
+ */
+export const miscAppRouter = {
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
 	getVendorById: vendorsRouter.getById,
+	getVendorByVehicleId: vendorsRouter.getByVehicleId,
 	createVendor: vendorsRouter.create,
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
@@ -134,32 +270,72 @@ export const appRouter = {
 	togglePinNote: notesRouter.togglePinNote,
 	deleteNote: notesRouter.deleteNote,
 
+	// Notifications routes
+	getUnreadNotificationCount: notificationsRouter.getUnreadNotificationCount,
+	getAllNotifications: notificationsRouter.getAllNotifications,
+	getNotificationsByRole: notificationsRouter.getNotificationsByRole,
+	getNotificationsByAssign: notificationsRouter.getNotificationsByAssign,
+	getNotificationsByRoles: notificationsRouter.getNotificationsByRoles,
+	changeNotificationStatus: notificationsRouter.changeNotificationStatus,
+	getNotificationDocuments: notificationsRouter.getNotificationDocuments,
+	addDocumentToNotification: notificationsRouter.addDocumentToNotification,
+	getAccountDocumentsByOpportunities:
+		notificationsRouter.getAccountDocumentsByOpportunities,
+	markAllNotificationsAsRead: notificationsRouter.markAllNotificationsAsRead,
+
 	// Quotations routes
 	createQuotation: quotationsRouter.createQuotation,
 	getQuotations: quotationsRouter.getQuotations,
 	getQuotationById: quotationsRouter.getQuotationById,
 	updateQuotation: quotationsRouter.updateQuotation,
 	deleteQuotation: quotationsRouter.deleteQuotation,
+	listQuotationsByOpportunity: quotationsRouter.listQuotationsByOpportunity,
+
+	// Credit Checks routes (Emisión de Cheques)
+	createCheck: checksRouter.createCheck,
+	getChecksByOpportunity: checksRouter.getChecksByOpportunity,
+	getChecksByQuotation: checksRouter.getChecksByQuotation,
+	updateCheck: checksRouter.updateCheck,
+	deleteCheck: checksRouter.deleteCheck,
+	getChecksSummary: checksRouter.getChecksSummary,
+
+	// Guatemala Locations routes (Catálogo de ubicaciones)
+	getDepartamentos: locationsRouter.getDepartamentos,
+	getMunicipiosByDepartamento: locationsRouter.getMunicipiosByDepartamento,
+	getAllLocations: locationsRouter.getAllLocations,
+	seedLocations: locationsRouter.seedLocations,
 
 	// Insurance routes
 	getInsuranceCost: insuranceRouter.getInsuranceCost,
 
-	// Auction routes (subastas 🚗💸)
+	// Auction routes
 	createAuction: auctionRouter.createAuction,
 	closeAuction: auctionRouter.closeAuction,
 	getAuctions: auctionRouter.getAuctions,
 	addAuctionExpense: auctionRouter.addAuctionExpense,
 	cancelAuction: auctionRouter.cancelAuction,
+};
 
-	// Reports routes (reportes 📊)
+/**
+ * Reports and Accounting routes
+ */
+export const reportsAppRouter = {
+	// Reports routes
 	getDashboardExecutivo: reportsRouter.getDashboardExecutivo,
 	getReporteCobranza: reportsRouter.getReporteCobranza,
 	getReporteCartera: reportsRouter.getReporteCartera,
+	getReporteCreditosCerrados: reportsRouter.getReporteCreditosCerrados,
 	getReporteInventario: reportsRouter.getReporteInventario,
 	getReporteSubastas: reportsRouter.getReporteSubastas,
+	getReporteTiempoCierre: reportsRouter.getReporteTiempoCierre,
+	getReportePorcentajeEfectividad:
+		reportsRouter.getReportePorcentajeEfectividad,
 	// Reportes unificados (cartera-back + CRM)
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
+	getMontoACobrar: reportesCarteraRouter.getMontoACobrar,
+	getFacturacionMes: reportesCarteraRouter.getFacturacionMes,
+	getFlujoCuotasInversiones: reportesCarteraRouter.getFlujoCuotasInversiones,
 
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,
@@ -169,6 +345,85 @@ export const appRouter = {
 	adminSetMiniAgentCredentials: adminMiniagentRouter.setMiniAgentCredentials,
 	adminDeleteMiniAgentCredentials:
 		adminMiniagentRouter.deleteMiniAgentCredentials,
+
+	// Investor Documents routes (Documentos de inversionista)
+	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
+	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
+	createInvestorDocument: investorDocumentsRouter.createInvestorDocument,
+	toggleInvestorDocumentVisibility:
+		investorDocumentsRouter.toggleInvestorDocumentVisibility,
+	deleteInvestorDocument: investorDocumentsRouter.deleteInvestorDocument,
+	getInvestorActivityLog: investorDocumentsRouter.getInvestorActivityLog,
+	getBancosCartera: investorDocumentsRouter.getBancosCartera,
+	compraCartera: investorDocumentsRouter.compraCartera,
+	crearInversionista: investorDocumentsRouter.crearInversionista,
+	editarInversionista: investorDocumentsRouter.editarInversionista,
+	cambiarStatusInversionista:
+		investorDocumentsRouter.cambiarStatusInversionista,
+
+	// Accounting routes (Contabilidad)
+	getResumenGlobalInversionistas:
+		accountingRouter.getResumenGlobalInversionistas,
+	createBoleta: accountingRouter.createBoleta,
+	liquidateInversionista: accountingRouter.liquidateInversionista,
 };
 
-export type AppRouter = typeof appRouter;
+const healthRouter = {
+	healthCheck: publicProcedure.handler(() => {
+		return "OK";
+	}),
+};
+
+/**
+ * Main application router
+ * We use Object.assign to combine parts to avoid TS7056: "type of this node exceeds the maximum length"
+ */
+export const appRouter = Object.assign(
+	healthRouter,
+	authRouter,
+	crmAppRouter,
+	vehicleAppRouter,
+	cobrosAppRouter,
+	adminAppRouter,
+	formsAppRouter,
+	legalAppRouter,
+	miscAppRouter,
+	reportsAppRouter,
+);
+
+// Disbursement routes exported separately to avoid TS7056 with declaration emit.
+export const disbursementRouter = {
+	getDisbursementForOpportunity:
+		notificationsRouter.getDisbursementForOpportunity,
+	deleteNotificationDocument: notificationsRouter.deleteNotificationDocument,
+	notifyDisbursementCompleted: notificationsRouter.notifyDisbursementCompleted,
+
+	// Upload (presigned URLs) — placed here to avoid TS7056 in appRouter
+	getUploadPresignedUrl: uploadRouter.getUploadPresignedUrl,
+
+	// Messaging routes (WhatsApp via SimpleTech) — separado para evitar TS7056
+	sendWhatsAppMessage: messagingRouter.sendWhatsAppMessage,
+	getContractLinksMessage: messagingRouter.getContractLinksMessage,
+	getWhatsappLog: messagingRouter.getWhatsappLog,
+	updateWhatsappLog: messagingRouter.updateWhatsappLog,
+
+	// Dashboard jurídico manual
+	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,
+	updateJuridicoDashboardSnapshot: juridicoDashboardRouter.updateSnapshot,
+};
+
+export const manualVehicleRouter = {
+	upsertManualVehicleValuation: vehiclesRouter.upsertManualValuation,
+};
+
+// Merged AppRouter type to avoid serialization limit
+export type AppRouter = typeof healthRouter &
+	typeof authRouter &
+	typeof crmAppRouter &
+	typeof vehicleAppRouter &
+	typeof cobrosAppRouter &
+	typeof adminAppRouter &
+	typeof formsAppRouter &
+	typeof legalAppRouter &
+	typeof miscAppRouter &
+	typeof reportsAppRouter;

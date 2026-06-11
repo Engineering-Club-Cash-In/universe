@@ -1,4 +1,5 @@
 import { Wizard, type WizardStep } from "@/components/wizard/Wizard";
+import { StepCategory } from "./components/StepCategory";
 import { Step1 } from "./components/Step1";
 import { Step2 } from "./components/Step2";
 import { Step3 } from "./components/Step3";
@@ -18,23 +19,30 @@ export function GenerateComponent() {
     handlePrevious,
     handleStepClick,
     setStep3ValidWrapper,
+    resetWizard,
   } = useGenerateComponent();
 
   const steps: WizardStep[] = [
     {
       id: 1,
+      title: "Categoría de Documentos",
+      description: "Elige el tipo de categoría que necesitas",
+      component: <StepCategory data={formData} onChange={handleDataChange} />,
+    },
+    {
+      id: 2,
       title: "Seleccionar Documentos",
       description: "Elige los tipos de documentos legales que necesitas",
       component: <Step1 data={formData} onChange={handleDataChange} />,
     },
     {
-      id: 2,
+      id: 3,
       title: "Información del Firmante",
       description: "Consulta los datos del DPI de quien firmará los documentos",
       component: <Step2 data={formData} onChange={handleDataChange} />,
     },
     {
-      id: 3,
+      id: 4,
       title: "Configuración de Documentos",
       description: "Completa la información requerida para generar los documentos",
       component: (
@@ -47,7 +55,7 @@ export function GenerateComponent() {
       ),
     },
     {
-      id: 4,
+      id: 5,
       title: "Documentos Generados",
       description: "Vista previa de los documentos creados",
       component: (
@@ -77,9 +85,10 @@ export function GenerateComponent() {
           onNext={handleNext}
           onPrevious={handlePrevious}
           onStepClick={handleStepClick}
+          onReset={resetWizard}
           canGoNext={validateStep(currentStep)}
           isLoading={isLoading}
-          finishLabel={currentStep === 3 ? "Generar Documentos" : "Finalizar"}
+          finishLabel={currentStep === 4 ? "Generar Documentos" : "Finalizar"}
           nextLabel="Continuar"
           previousLabel="Volver"
         />

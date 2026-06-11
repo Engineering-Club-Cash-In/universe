@@ -7,6 +7,7 @@ type OpcionesExcesoModalProps = {
   mode: "excedente" | "pagada";
   onClose: () => void;
   onAbonoCapital?: () => void;
+  abonoCapitalLabel?: string;
   onAbonoSiguienteCuota?: () => void;
   onAbonoOtros?: () => void;
   excedente?: number;
@@ -18,6 +19,7 @@ export function OpcionesExcesoModal({
   mode,
   onClose,
   onAbonoCapital,
+  abonoCapitalLabel = "Abonar a capital",
   onAbonoSiguienteCuota,
   onAbonoOtros,
   excedente = 0,
@@ -79,7 +81,7 @@ export function OpcionesExcesoModal({
                   onClick={onAbonoCapital}
                   className="w-full bg-green-600 hover:bg-green-700 text-lg font-bold shadow"
                 >
-                  Abonar a capital
+                  {abonoCapitalLabel}
                 </Button>
               )}
               {(rangoMedio || rangoAlto) && onAbonoSiguienteCuota && (
@@ -144,7 +146,7 @@ export function OpcionesExcesoModal({
                     onClick={onAbonoCapital}
                     className="w-full bg-green-600 hover:bg-green-700 text-lg font-bold shadow"
                   >
-                    Abonar a capital
+                    {abonoCapitalLabel}
                   </Button>
                 )}
                 {onAbonoSiguienteCuota && (

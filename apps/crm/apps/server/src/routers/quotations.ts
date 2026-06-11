@@ -1,8 +1,10 @@
+import { ORPCError } from "@orpc/server";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { quotations, vehicles } from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
+import { canManageAnyQuotation, canManageQuotations } from "../lib/quotation-permissions";
 import { ROLES } from "../lib/roles";
 
 /**
@@ -26,7 +28,7 @@ function calculateMonthlyPayment(
 	const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
 
 	// Agregar seguro y GPS a la cuota mensual
-	return baseMonthlyPayment + insuranceCost + gpsCost;
+	return Math.round((baseMonthlyPayment + insuranceCost + gpsCost) * 100) / 100;
 }
 
 /**
@@ -44,6 +46,8 @@ function generateAmortizationTable(
 	totalFinanced: number,
 	monthlyRate: number,
 	termMonths: number,
+	_insuranceCost: number,
+	_gpsCost: number,
 ): AmortizationRow[] {
 	const table: AmortizationRow[] = [];
 	let balance = totalFinanced;
@@ -108,8 +112,14 @@ export const quotationsRouter = {
 						"panel",
 						"camion",
 						"microbus",
+						"microbus_20",
+						"microbus_35",
+						"microbus_36plus",
 					])
 					.default("particular"),
+				creditType: z
+					.enum(["autocompra", "sobre_vehiculo"])
+					.default("autocompra"),
 				vehicleValue: z.number().positive(),
 				insuredAmount: z.number().positive(),
 				downPayment: z.number().positive(),
@@ -120,14 +130,44 @@ export const quotationsRouter = {
 				transferCost: z.number().default(0),
 				adminCost: z.number().default(0),
 				membershipCost: z.number().default(0),
+				// Gastos adicionales para detalle de crédito
+				freelanceCost: z.number().default(0),
+				freelancePercentage: z.number().optional(),
+				royalty: z.number().default(0),
+				royaltyPercentage: z.number().default(4.0),
+				inspectionCost: z.number().default(0),
+				finesCost: z.number().default(0),
+				keyCopyCost: z.number().default(0),
+				keyCopyDiffCost: z.number().default(0),
+				circulationTaxCost: z.number().default(0),
+				mobileGuaranteeCost: z.number().default(0),
+				licensePlatesCost: z.number().default(0),
+				leasingContractCost: z.number().default(0),
+				collectionAuthCost: z.number().default(0),
+				legalCost: z.number().default(0),
+				// Gastos específicos de Autocompras
+				appointmentCost: z.number().default(0),
+				addressVerificationCost: z.number().default(0),
+				// Gastos extra para detalle de crédito (descuentos iniciales)
+				extraGpsCost: z.number().default(0),
+				extraInsuranceCost: z.number().default(0),
+				extraMembershipCost: z.number().default(0),
+				extraAdminCost: z.number().default(600),
+				interestCost: z.number().default(0),
+				rcdpCost: z.number().default(0),
+				vehicleTransferCost: z.number().default(0),
+				isInterno: z.boolean().default(false),
 				notes: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Validar que el usuario sea sales o admin
+			// Validar acceso a cotizaciones
 			const userRole = context.userRole;
-			if (userRole !== ROLES.SALES && userRole !== ROLES.ADMIN) {
-				throw new Error("Solo usuarios de ventas pueden crear cotizaciones");
+			if (!canManageQuotations(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"Solo ventas, supervisión de ventas y administración pueden crear cotizaciones",
+				});
 			}
 
 			// Si se proporciona vehicleId, obtener datos del vehículo
@@ -154,13 +194,28 @@ export const quotationsRouter = {
 			}
 
 			// Calcular valores
-			const downPaymentPercentage =
-				(input.downPayment / input.vehicleValue) * 100;
-			const amountToFinance = input.vehicleValue - input.downPayment;
+			const isSobreVehiculo = input.creditType === "sobre_vehiculo";
+			const downPaymentPercentage = isSobreVehiculo
+				? 0
+				: (input.downPayment / input.vehicleValue) * 100;
+			// En sobre vehículo: downPayment = monto solicitado (es el principal directo)
+			// En autocompra: monto a financiar = valor del vehículo - enganche
+			const amountToFinance = isSobreVehiculo
+				? input.downPayment
+				: input.vehicleValue - input.downPayment;
 
-			// Costos que se financian (NO incluyen seguro ni GPS)
-			const financedCosts =
-				input.transferCost + input.adminCost + input.membershipCost;
+			// Calcular royalty si no se proporcionó: 4% del total financiado
+			const royalty =
+				input.royalty > 0
+					? input.royalty
+					: amountToFinance * (input.royaltyPercentage / 100);
+
+			// En sobre vehículo: total financiado = monto solicitado directo
+			// (los gastos se descuentan del desembolso al cliente, no se suman al financiamiento)
+			// En autocompra: se suman los costos financiados al monto a financiar
+			const financedCosts = isSobreVehiculo
+				? 0
+				: input.transferCost + input.adminCost;
 
 			const totalFinanced = amountToFinance + financedCosts;
 
@@ -187,7 +242,7 @@ export const quotationsRouter = {
 					vehicleValue: input.vehicleValue.toString(),
 					insuredAmount: input.insuredAmount.toString(),
 					downPayment: input.downPayment.toString(),
-					downPaymentPercentage: downPaymentPercentage.toFixed(2),
+					downPaymentPercentage: downPaymentPercentage.toString(),
 					termMonths: input.termMonths,
 					interestRate: input.interestRate.toString(),
 					insuranceCost: input.insuranceCost.toString(),
@@ -195,6 +250,33 @@ export const quotationsRouter = {
 					transferCost: input.transferCost.toString(),
 					adminCost: input.adminCost.toString(),
 					membershipCost: input.membershipCost.toString(),
+					// Gastos adicionales para detalle de crédito
+					freelanceCost: input.freelanceCost.toString(),
+					freelancePercentage: input.freelancePercentage?.toString() ?? null,
+					royalty: royalty.toString(),
+					royaltyPercentage: input.royaltyPercentage.toString(),
+					inspectionCost: input.inspectionCost.toString(),
+					finesCost: input.finesCost.toString(),
+					keyCopyCost: input.keyCopyCost.toString(),
+					keyCopyDiffCost: input.keyCopyDiffCost.toString(),
+					circulationTaxCost: input.circulationTaxCost.toString(),
+					mobileGuaranteeCost: input.mobileGuaranteeCost.toString(),
+					licensePlatesCost: input.licensePlatesCost.toString(),
+					leasingContractCost: input.leasingContractCost.toString(),
+					collectionAuthCost: input.collectionAuthCost.toString(),
+					legalCost: input.legalCost.toString(),
+					// Gastos específicos de Autocompras
+					appointmentCost: input.appointmentCost.toString(),
+					addressVerificationCost: input.addressVerificationCost.toString(),
+					// Gastos extra para detalle de crédito (descuentos iniciales)
+					extraGpsCost: input.extraGpsCost.toString(),
+					extraInsuranceCost: input.extraInsuranceCost.toString(),
+					extraMembershipCost: input.extraMembershipCost.toString(),
+					extraAdminCost: input.extraAdminCost.toString(),
+					interestCost: input.interestCost.toString(),
+					rcdpCost: input.rcdpCost.toString(),
+					vehicleTransferCost: input.vehicleTransferCost.toString(),
+					isInterno: input.isInterno,
 					amountToFinance: amountToFinance.toString(),
 					totalFinanced: totalFinanced.toString(),
 					monthlyPayment: monthlyPayment.toFixed(2),
@@ -209,8 +291,8 @@ export const quotationsRouter = {
 	getQuotations: crmProcedure.handler(async ({ context }) => {
 		const userRole = context.userRole;
 
-		// Admin ve todas, sales solo las suyas
-		if (userRole === ROLES.ADMIN) {
+		// Admin y supervisión ven todas; ventas solo las suyas
+		if (canManageAnyQuotation(userRole)) {
 			const result = await db
 				.select()
 				.from(quotations)
@@ -238,16 +320,17 @@ export const quotationsRouter = {
 				.limit(1);
 
 			if (!quotation) {
-				throw new Error("Cotización no encontrada");
+				throw new ORPCError("NOT_FOUND", {
+					message: "Cotización no encontrada",
+				});
 			}
 
 			// Validar acceso
 			const userRole = context.userRole;
-			if (
-				userRole !== ROLES.ADMIN &&
-				quotation.salesUserId !== context.userId
-			) {
-				throw new Error("No tienes permiso para ver esta cotización");
+			if (!canManageAnyQuotation(userRole) && quotation.salesUserId !== context.userId) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ver esta cotización",
+				});
 			}
 
 			// Generar tabla de amortización
@@ -255,6 +338,8 @@ export const quotationsRouter = {
 				Number(quotation.totalFinanced),
 				Number(quotation.interestRate),
 				quotation.termMonths,
+				Number(quotation.insuranceCost),
+				Number(quotation.gpsCost),
 			);
 
 			return {
@@ -281,12 +366,19 @@ export const quotationsRouter = {
 				.limit(1);
 
 			if (!existing) {
-				throw new Error("Cotización no encontrada");
+				throw new ORPCError("NOT_FOUND", {
+					message: "Cotización no encontrada",
+				});
 			}
 
 			const userRole = context.userRole;
-			if (userRole !== ROLES.ADMIN && existing.salesUserId !== context.userId) {
-				throw new Error("No tienes permiso para editar esta cotización");
+			if (
+				!canManageAnyQuotation(userRole) &&
+				existing.salesUserId !== context.userId
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para editar esta cotización",
+				});
 			}
 
 			// Actualizar
@@ -303,6 +395,19 @@ export const quotationsRouter = {
 			return updated;
 		}),
 
+	// Listar cotizaciones por oportunidad
+	listQuotationsByOpportunity: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const result = await db
+				.select()
+				.from(quotations)
+				.where(eq(quotations.opportunityId, input.opportunityId))
+				.orderBy(desc(quotations.createdAt));
+
+			return result;
+		}),
+
 	// Eliminar cotización
 	deleteQuotation: crmProcedure
 		.input(z.object({ quotationId: z.string().uuid() }))
@@ -315,12 +420,19 @@ export const quotationsRouter = {
 				.limit(1);
 
 			if (!existing) {
-				throw new Error("Cotización no encontrada");
+				throw new ORPCError("NOT_FOUND", {
+					message: "Cotización no encontrada",
+				});
 			}
 
 			const userRole = context.userRole;
-			if (userRole !== ROLES.ADMIN && existing.salesUserId !== context.userId) {
-				throw new Error("No tienes permiso para eliminar esta cotización");
+			if (
+				!canManageAnyQuotation(userRole) &&
+				existing.salesUserId !== context.userId
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para eliminar esta cotización",
+				});
 			}
 
 			await db.delete(quotations).where(eq(quotations.id, input.quotationId));

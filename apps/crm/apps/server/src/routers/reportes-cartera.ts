@@ -3,13 +3,20 @@
  * Combina datos de CRM y cartera-back para reportes completos
  */
 
+import { ORPCError } from "@orpc/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import { casosCobros } from "../db/schema/cobros";
+import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import { adminProcedure } from "../lib/orpc";
-import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	carteraBackClient,
+	type FacturacionMesResponse,
+	type FlujoCuotasInversionesResponse,
+	type MontoACobrarRow,
+} from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 
 export const reportesCarteraRouter = {
@@ -33,7 +40,9 @@ export const reportesCarteraRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackEnabled()) {
-				throw new Error("Integración con cartera-back no está habilitada");
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
 			}
 
 			const startTime = Date.now();
@@ -59,7 +68,7 @@ export const reportesCarteraRouter = {
 								.where(
 									eq(
 										carteraBackReferences.numeroCreditoSifco,
-										credito.numero_credito_sifco,
+										credito.creditos.numero_credito_sifco,
 									),
 								)
 								.limit(1);
@@ -153,31 +162,33 @@ export const reportesCarteraRouter = {
 
 							// Obtener detalles completos desde cartera-back
 							const creditoCompleto = await carteraBackClient.getCredito(
-								credito.numero_credito_sifco,
+								credito.creditos.numero_credito_sifco,
 							);
 
 							return {
 								// Datos financieros de cartera-back
-								creditoId: credito.credito_id,
-								numeroSifco: credito.numero_credito_sifco,
-								capital: credito.capital,
-								porcentajeInteres: credito.porcentaje_interes,
-								cuota: credito.cuota,
-								plazo: credito.plazo,
-								statusCredit: credito.statusCredit,
-								deudaTotal: credito.deudatotal,
-								diasMora: creditoCompleto.dias_mora || 0,
-								montoMora: creditoCompleto.monto_mora ?? "0",
-								cuotasAtrasadas: creditoCompleto.cuotas_atrasadas ?? 0,
-								cuotasPagadas: creditoCompleto.cuotas_pagadas ?? 0,
-								cuotasPendientes: creditoCompleto.cuotas_pendientes ?? 0,
-								capitalRestante: creditoCompleto.capital_restante ?? "0",
-								totalRestante: creditoCompleto.total_restante ?? "0",
+								creditoId: credito.creditos.credito_id,
+								numeroSifco: credito.creditos.numero_credito_sifco,
+								capital: credito.creditos.capital,
+								porcentajeInteres: credito.creditos.porcentaje_interes,
+								cuota: credito.creditos.cuota,
+								plazo: credito.creditos.plazo,
+								statusCredit: credito.creditos.statusCredit,
+								deudaTotal: credito.creditos.deudatotal,
+								diasMora: calcularDiasMoraExactos(
+									creditoCompleto.cuotasAtrasadas || [],
+								),
+								montoMora: creditoCompleto.moraActual ?? "0",
+								cuotasAtrasadas: creditoCompleto.cuotasAtrasadas?.length || 0,
+								cuotasPagadas: creditoCompleto.cuotasPagadas?.length || 0,
+								cuotasPendientes: creditoCompleto.cuotasPendientes?.length || 0,
+								capitalRestante: "0", // No disponible
+								totalRestante: "0", // No disponible
 								// Cliente
 								clienteNombre: creditoCompleto.usuario.nombre,
 								clienteNit: creditoCompleto.usuario.nit,
 								// Asesor
-								asesorNombre: creditoCompleto.asesor?.nombre || null,
+								asesorNombre: null, // No disponible
 								// Datos CRM
 								agenteCobranza: casoCobros[0]?.responsableCobros || null,
 								numeroContactos,
@@ -185,14 +196,11 @@ export const reportesCarteraRouter = {
 								tieneConvenio,
 								tieneRecuperacion,
 								// Inversionistas
-								tieneInversionistas:
-									(creditoCompleto.creditos_inversionistas?.length || 0) > 0,
-								numeroInversionistas:
-									creditoCompleto.creditos_inversionistas?.length || 0,
+								tieneInversionistas: false,
 							};
 						} catch (error) {
 							console.error(
-								`Error procesando crédito ${credito.numero_credito_sifco}:`,
+								`Error procesando crédito ${credito.creditos.numero_credito_sifco}:`,
 								error,
 							);
 							return {
@@ -210,10 +218,12 @@ export const reportesCarteraRouter = {
 					(acc, credito) => {
 						if ("error" in credito && credito.error) return acc;
 
-						const capital = Number.parseFloat(credito.capital) || 0;
+						const capital =
+							Number.parseFloat((credito as any).capital ?? "0") || 0;
 						const capitalRestante =
-							Number.parseFloat(credito.capitalRestante ?? "0") || 0;
-						const montoMora = Number.parseFloat(credito.montoMora ?? "0") || 0;
+							Number.parseFloat((credito as any).capitalRestante ?? "0") || 0;
+						const montoMora =
+							Number.parseFloat((credito as any).montoMora ?? "0") || 0;
 
 						acc.montoDesembolsado += capital;
 						acc.montoRecuperado += capital - capitalRestante;
@@ -298,9 +308,9 @@ export const reportesCarteraRouter = {
 					},
 				};
 			} catch (error) {
-				throw new Error(
-					`Error generando reporte de cartera: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error generando reporte de cartera: ${error instanceof Error ? error.message : String(error)}`,
+				});
 			}
 		}),
 
@@ -387,4 +397,81 @@ export const reportesCarteraRouter = {
 				},
 			};
 		}),
+
+	// ========================================================================
+	// REPORTE: MONTO A COBRARSE POR PERÍODO
+	// ========================================================================
+
+	getMontoACobrar: adminProcedure
+		.input(
+			z.object({
+				periodo: z
+					.enum(["anio", "trimestre", "mes", "semana", "dia"])
+					.default("mes"),
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+			}),
+		)
+		.handler(async ({ input }): Promise<{ data: MontoACobrarRow[] }> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			const data = await carteraBackClient.getMontoACobrar({
+				periodo: input.periodo,
+				fechaInicio: input.fechaInicio,
+				fechaFin: input.fechaFin,
+			});
+
+			return { data };
+		}),
+
+	// ========================================================================
+	// REPORTE: FACTURADO DEL MES VS ESPERADO
+	// ========================================================================
+
+	getFacturacionMes: adminProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2020),
+			}),
+		)
+		.handler(async ({ input }): Promise<FacturacionMesResponse> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getFacturacionMes({
+				mes: input.mes,
+				anio: input.anio,
+			});
+		}),
+
+	getFlujoCuotasInversiones: adminProcedure
+		.input(
+			z.object({
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+			}),
+		)
+		.handler(
+			async ({ input }): Promise<FlujoCuotasInversionesResponse> => {
+				if (!isCarteraBackEnabled()) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Integración con cartera-back no está habilitada",
+					});
+				}
+
+				return carteraBackClient.getFlujoCuotasInversiones({
+					fechaInicio: input.fechaInicio,
+					fechaFin: input.fechaFin,
+				});
+			},
+		),
+
 };

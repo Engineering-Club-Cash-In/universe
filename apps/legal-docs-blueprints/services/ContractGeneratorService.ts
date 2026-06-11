@@ -13,8 +13,25 @@ import {
 } from '../types/contract';
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
+import { WeeTrustService } from './WeeTrustService';
 import { getRequiredEmailCount } from '../config/docusealConfig';
 import { crmApiService } from './CrmApiService';
+import { uploadPdfToR2 } from './R2Service';
+
+// Instancia de WeeTrust (servicio principal de firma)
+// Si WEETRUST_DISABLED=true o faltan credenciales, queda como null y se usa Documenso directo.
+const weeTrustService: WeeTrustService | null = (() => {
+  if (process.env.WEETRUST_DISABLED === 'true') {
+    console.log('[WeeTrust] Deshabilitado por WEETRUST_DISABLED=true. Usando Documenso.');
+    return null;
+  }
+  try {
+    return new WeeTrustService();
+  } catch (err) {
+    console.warn('[WeeTrust] No inicializado (faltan credenciales). Se usará Documenso:', err);
+    return null;
+  }
+})();
 
 /**
  * Servicio genérico para generación de contratos desde templates DOCX
@@ -25,6 +42,11 @@ export class ContractGeneratorService {
   private templatesDir: string;
   private outputDir: string;
   private templateRegistry: Map<ContractType, ContractTemplateConfig>;
+
+  // Control de concurrencia para Gotenberg
+  private pdfConversionQueue: Array<() => void> = [];
+  private activePdfConversions = 0;
+  private readonly maxConcurrentPdfConversions = 3; // Máximo 3 conversiones simultáneas
 
   constructor(options: ContractGeneratorOptions = {}) {
     this.gotenbergUrl = options.gotenbergUrl || 'http://localhost:3000';
@@ -45,7 +67,9 @@ export class ContractGeneratorService {
       {
         type: ContractType.USO_CARRO_USADO,
         templateFilename: "contrato_uso_carro_usado/contrato_uso_carro_usado.docx",
-        templateFilenameFemale: "contrato_uso_carro_usado/contrato_uso_carro_usado-mujer.docx", 
+        templateFilenameFemale: "contrato_uso_carro_usado/contrato_uso_carro_usado-mujer.docx",
+        templateFilenamePlural: "contrato_uso_carro_usado/contrato_uso_carro_usado-plural.docx",
+        templateFilenameFemalePlural: "contrato_uso_carro_usado/contrato_uso_carro_usado-mujer-plural.docx",
         description: "Contrato privado de uso de bien mueble (vehículo usado)",
         requiredFields: [
           "nombreCompleto",
@@ -57,6 +81,8 @@ export class ContractGeneratorService {
       type: ContractType.RECONOCIMIENTO_DEUDA,
       templateFilename: 'reconocimiento_deuda/reconocimiento_deuda_template.docx',
       templateFilenameFemale: 'reconocimiento_deuda/reconocimiento_deuda_template-mujer.docx',
+      templateFilenamePlural: 'reconocimiento_deuda/reconocimiento_deuda_template-plural.docx',
+      templateFilenameFemalePlural: 'reconocimiento_deuda/reconocimiento_deuda_template-mujer-plural.docx',
       description: 'Contrato de reconocimiento de deuda',
       requiredFields: ['nombreCompleto']
     });
@@ -66,6 +92,8 @@ export class ContractGeneratorService {
       type: ContractType.GARANTIA_MOBILIARIA,
       templateFilename: 'garantia_mobiliaria/garantia_mobiliaria.docx',
       templateFilenameFemale: 'garantia_mobiliaria/garantia_mobiliaria-mujer.docx',
+      templateFilenamePlural: 'garantia_mobiliaria/garantia_mobiliaria-plural.docx',
+      templateFilenameFemalePlural: 'garantia_mobiliaria/garantia_mobiliaria-mujer-plural.docx',
       description: 'Contrato de garantía mobiliaria con vehículo',
       requiredFields: [
         'nombreCompleto',
@@ -77,6 +105,8 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_EMISION_CHEQUES,
       templateFilename: 'carta_emision_cheques/carta_emision_cheques.docx',
       templateFilenameFemale: 'carta_emision_cheques/carta_emision_cheques-mujer.docx',
+      templateFilenamePlural: 'carta_emision_cheques/carta_emision_cheques-plural.docx',
+      templateFilenameFemalePlural: 'carta_emision_cheques/carta_emision_cheques-mujer-plural.docx',
       description: 'Carta de emisión de cheques / Solicitud de desembolso',
       requiredFields: [
         'nombreCompleto',
@@ -88,18 +118,22 @@ export class ContractGeneratorService {
       type: ContractType.DESCARGO_RESPONSABILIDADES,
       templateFilename: 'descargo_responsabilidades/descargo_responsabilidades.docx',
       templateFilenameFemale: 'descargo_responsabilidades/descargo_responsabilidades-mujer.docx',
+      templateFilenamePlural: 'descargo_responsabilidades/descargo_responsabilidades-plural.docx',
+      templateFilenameFemalePlural: 'descargo_responsabilidades/descargo_responsabilidades-mujer-plural.docx',
       description: 'Descargo de responsabilidades de vehículo',
       requiredFields: [
         'nombreCompleto',
       ]
     });
 
-    // Registrar cobertura INREXSA
+    // Registrar cobertura INREXSA (no tiene género, solo singular y plural)
     this.registerTemplate({
       type: ContractType.COBERTURA_INREXSA,
-      templateFilename: 'cobertura_inrexsa.docx',
-      templateFilenameFemale: 'cobertura_inrexsa.docx',
-      description: 'Carta de cobertura INREXSA',
+      templateFilename: 'cobertura_inrexsa/cobertura_cci.docx',
+      templateFilenameFemale: 'cobertura_inrexsa/cobertura_cci.docx',
+      templateFilenamePlural: 'cobertura_inrexsa/cobertura_cci-plural.docx',
+      templateFilenameFemalePlural: 'cobertura_inrexsa/cobertura_cci-plural.docx',
+      description: 'Carta de cobertura CCI',
       requiredFields: [
         'nombreCompleto',
       ]
@@ -110,6 +144,8 @@ export class ContractGeneratorService {
       type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,
       templateFilename: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto.docx',
       templateFilenameFemale: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto-mujer.docx',
+      templateFilenamePlural: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto-plural.docx',
+      templateFilenameFemalePlural: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto-mujer-plural.docx',
       description: 'Pagaré único libre de protesto',
       requiredFields: [
         'nombreCompleto',
@@ -119,6 +155,8 @@ export class ContractGeneratorService {
     // Registrar declaración de vendedor
     this.registerTemplate({
       type: ContractType.DECLARACION_DE_VENDEDOR,
+      templateFilenamePlural: 'declaracion_vendedor/declaracion_de_vendedor.docx',
+      templateFilenameFemalePlural: 'declaracion_vendedor/declaracion_de_vendedor-mujer.docx',
       templateFilename: 'declaracion_vendedor/declaracion_de_vendedor.docx',
       templateFilenameFemale: 'declaracion_vendedor/declaracion_de_vendedor-mujer.docx',
       description: 'Declaración de vendedor de vehículo',
@@ -130,6 +168,8 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_CARRO_NUEVO,
       templateFilename: 'carta_carro_nuevo/carta_carro_nuevo.docx',
       templateFilenameFemale: 'carta_carro_nuevo/carta_carro_nuevo-mujer.docx',
+      templateFilenamePlural: 'carta_carro_nuevo/carta_carro_nuevo-plural.docx',
+      templateFilenameFemalePlural: 'carta_carro_nuevo/carta_carro_nuevo-mujer-plural.docx',
       description: 'Carta de conformidad para adquisición de carro nuevo',
       requiredFields: []
     });
@@ -138,6 +178,8 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_ACEPTACION_INSTALACION_GPS,
       templateFilename: 'carta_aceptacion_gps/carta_aceptacion_gps.docx',
       templateFilenameFemale: 'carta_aceptacion_gps/carta_aceptacion_gps-mujer.docx',
+      templateFilenamePlural: 'carta_aceptacion_gps/carta_aceptacion_gps-plural.docx',
+      templateFilenameFemalePlural: 'carta_aceptacion_gps/carta_aceptacion_gps-mujer-plural.docx',
       description: 'Carta de aceptación para instalación de GPS en vehículo',
       requiredFields: []
     }); 
@@ -146,6 +188,8 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO,
       templateFilename: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo.docx',
       templateFilenameFemale: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo-mujer.docx',
+      templateFilenamePlural: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo-plural.docx',
+      templateFilenameFemalePlural: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo-mujer-plural.docx',
       description: 'Carta de solicitud de traspaso de vehículo',
       requiredFields: []
     });
@@ -154,6 +198,8 @@ export class ContractGeneratorService {
       type: ContractType.CONTRATO_PRIVADO_USO,
       templateFilename: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo.docx',
       templateFilenameFemale: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo-mujer.docx',
+      templateFilenamePlural: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo-plural.docx',
+      templateFilenameFemalePlural: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo-mujer-plural.docx',
       description: 'Contrato privado de uso de bien mueble',
       requiredFields: []
     });
@@ -162,7 +208,190 @@ export class ContractGeneratorService {
       type: ContractType.SOLICITUD_COMPRA_VEHICULO,
       templateFilename: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo.docx',
       templateFilenameFemale: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-mujer.docx',
+      templateFilenamePlural: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-plural.docx',
+      templateFilenameFemalePlural: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-mujer-plural.docx',
       description: 'Carta de solicitud de compra de vehículo',
+      requiredFields: []
+    });
+
+    // ===== INVERSIONES =====
+    this.registerTemplate({
+      type: ContractType.ACUERDO_INVERSION_CASH_IN,
+      templateFilename: 'inversiones/acuerdo_inversion/acuerdo_inversion_hombre.docx',
+      templateFilenameFemale: 'inversiones/acuerdo_inversion/acuerdo_inversion_mujer.docx',
+      description: 'Acuerdo de Inversión Cash In',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL,
+      templateFilename: 'inversiones/anexo1/carta_confirmacion_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo1/carta_confirmacion_mujer.docx',
+      description: 'Anexo 1 - Carta de Confirmación de Inversión Inicial',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION,
+      templateFilename: 'inversiones/anexo2/carta_eleccion_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo2/carta_eleccion_hombre.docx',
+      description: 'Anexo 2 - Carta de Elección de Modalidad de Pago y Reinversión',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CESION_CREDITOS,
+      // Nota: ambos archivos tienen typo en el nombre (cestion en vez de cesion)
+      templateFilename: 'inversiones/cesion_creditos/cestion_creditos_hombre.docx',
+      templateFilenameFemale: 'inversiones/cesion_creditos/cestion_creditos_mujer.docx',
+      description: 'Cesión de Créditos',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA,
+      templateFilename: 'inversiones/anexo3/carta_instruccion_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo3/carta_instruccion_mujer.docx',
+      description: 'Anexo 3 - Carta de Instrucción para Inversión en Cartera Activa',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INCREMENTO_INVERSION,
+      templateFilename: 'inversiones/anexo4/carta_incremento_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo4/carta_incremento_mujer.docx',
+      description: 'Anexo 4 - Carta de Incremento de Inversión',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO,
+      templateFilename: 'inversiones/anexo6/carta_instruccion_pago_anticipado_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo6/carta_instruccion_pago_anticipado_mujer.docx',
+      description: 'Anexo 6 - Carta de Instrucción por Pago Anticipado',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL,
+      templateFilename: 'inversiones/contrato_servicio_cashin/inversor_general_hombre.docx',
+      templateFilenameFemale: 'inversiones/contrato_servicio_cashin/inversor_general_mujer.docx',
+      description: 'Contrato de Servicios Cash In - Inversor General',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.DESIGNACION_BENEFICIARIO,
+      templateFilename: 'inversiones/anexo7/designacion_beneficiarios.docx',
+      templateFilenameFemale: 'inversiones/anexo7/designacion_beneficiarios.docx',
+      description: 'Anexo 7 - Designación de Beneficiarios',
+      requiredFields: []
+    });
+
+    // ===== INVERSIONES SOCIEDAD =====
+    this.registerTemplate({
+      type: ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/acuerdo_inversion/acuerdo_inversion_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/acuerdo_inversion/acuerdo_inversion_mujer.docx',
+      description: 'Acuerdo de Inversión Cash In (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo1/carta_confirmacion_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo1/carta_confirmacion_mujer.docx',
+      description: 'Anexo 1 - Carta de Confirmación de Inversión Inicial (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo2/carta_eleccion_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo2/carta_eleccion_hombre.docx',
+      description: 'Anexo 2 - Carta de Elección de Modalidad de Pago y Reinversión (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo3/carta_instruccion_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo3/carta_instruccion_mujer.docx',
+      description: 'Anexo 3 - Carta de Instrucción para Inversión en Cartera Activa (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INCREMENTO_INVERSION_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo4/carta_incremento_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo4/carta_incremento_mujer.docx',
+      description: 'Anexo 4 - Carta de Incremento de Inversión (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo6/carta_instruccion_pago_anticipado_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo6/carta_instruccion_pago_anticipado_mujer.docx',
+      description: 'Anexo 6 - Carta de Instrucción por Pago Anticipado (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CESION_CREDITOS_SOCIEDAD,
+      // Nota: ambos archivos tienen typo en el nombre (cestion en vez de cesion)
+      templateFilename: 'inversiones_Sociedad/cesion_creditos/cestion_creditos_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/cesion_creditos/cestion_creditos_mujer.docx',
+      description: 'Cesión de Créditos (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/contrato_servicio_cashin/inversor_general_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/contrato_servicio_cashin/inversor_general_mujer.docx',
+      description: 'Contrato de Servicios Cash In - Inversor General (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo7/designacion_beneficiarios.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo7/designacion_beneficiarios.docx',
+      description: 'Anexo 7 - Designación de Beneficiarios (Sociedad)',
+      requiredFields: []
+    });
+
+    // ===== CARTA PODER =====
+    this.registerTemplate({
+      type: ContractType.CARTA_CUBE_ANDRES,
+      templateFilename: 'carta_poder/CARTA-CUBE-ANDRES-HOMBRE.docx',
+      templateFilenameFemale: 'carta_poder/CARTA-CUBE-ANDRES-MUJER.docx',
+      description: 'Carta poder CUBE - Andrés',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_CUBE_DON_ALEX,
+      templateFilename: 'carta_poder/CARTA-CUBE-DON ALEX-HOMBRE.docx',
+      templateFilenameFemale: 'carta_poder/CARTA-CUBE-DON ALEX-MUJER.docx',
+      description: 'Carta poder CUBE - Don Alex',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_RDBE_DON_ALEX,
+      templateFilename: 'carta_poder/CARTA-RDBE-DON ALEX-HOMBRE.docx',
+      templateFilenameFemale: 'carta_poder/CARTA-RDBE-DON ALEX-MUJER.docx',
+      description: 'Carta poder RDBE - Don Alex',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_RDBE_RICHARD,
+      templateFilename: 'carta_poder/CARTA-RDBE-RICHARD-HOMBRE.docx',
+      templateFilenameFemale: 'carta_poder/CARTA-RDBE-RICHARD-MUJER.docx',
+      description: 'Carta poder RDBE - Richard',
       requiredFields: []
     });
 
@@ -307,7 +536,7 @@ export class ContractGeneratorService {
       contractType: ContractType;
       data: Record<string, any>;
       emails?: string[];
-      options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female" };
+      options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female"; isPlural?: boolean };
     }>
   ): Promise<{
     success: boolean;
@@ -330,6 +559,7 @@ export class ContractGeneratorService {
       const { contractType, data, emails, options } = contracts[i];
 
       console.log(`[${i + 1}/${contracts.length}] Procesando contrato: ${contractType}`);
+      console.log(`  Options recibidas:`, JSON.stringify(options));
 
       try {
         const result = await this.generateContract(contractType, data, { ...options, emails });
@@ -391,12 +621,12 @@ export class ContractGeneratorService {
   public async generateContract(
     contractType: ContractType,
     data: Record<string, any>,
-    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string; emails?: string[] } = { gender: "male" }
+    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string; emails?: string[]; isPlural?: boolean } = { gender: "male" }
   ): Promise<ContractGenerationResponse> {
     try {
       // 1. Obtener configuración del template
       const config = this.getTemplateConfig(contractType);
-      console.log(`📄 Generando contrato: ${config.description}`);
+      console.log(`📄 Generando contrato: ${config.description}${options.isPlural ? ' (PLURAL)' : ''}`);
 
       // 2. Validar campos requeridos
       const validation = this.validateRequiredFields(data, config.requiredFields);
@@ -409,20 +639,89 @@ export class ContractGeneratorService {
         };
       }
 
-      // 3. Cargar template
-      const templatePath = path.join(this.templatesDir, options.gender === "female" ? config.templateFilenameFemale : config.templateFilename);
+      // 3. Seleccionar template según género y plural
+      let templateFilename: string;
+      if (options.isPlural) {
+        // Template plural
+        if (options.gender === "female") {
+          templateFilename = config.templateFilenameFemalePlural || config.templateFilenameFemale;
+        } else {
+          templateFilename = config.templateFilenamePlural || config.templateFilename;
+        }
+      } else {
+        // Template singular
+        templateFilename = options.gender === "female" ? config.templateFilenameFemale : config.templateFilename;
+      }
+
+      // 4. Cargar template
+      console.log(`  → Template seleccionado: ${templateFilename}`);
+      const templatePath = path.join(this.templatesDir, templateFilename);
       const templateContent = await fs.readFile(templatePath, 'binary');
       const zip = new PizZip(templateContent);
 
-      // 4. Crear instancia de docxtemplater
+      // 5. Crear instancia de docxtemplater
       const doc = new Docxtemplater(zip, {
         paragraphLoop: true,
         linebreaks: true,
-        nullGetter: () => '', // Reemplazar nulls con string vacío
-      });
+        nullGetter: () => '-', // Reemplazar nulls con '-'
+        parser: (tag: string) => {
+          // remplazar cadenas vacías por guion
+          return {
+            get: (scope: any) => {
+              const value = scope[tag];
+              if (value === null || value === undefined || value === '') {
+                return '- ';
+              }
+              return value;
+            }
+          };
+        }
+      })
 
-      // 6. Renderizar con los datos
-      doc.render(data);
+      // 6. Preparar datos para renderizado
+      let renderData = { ...data };
+
+      // Si es plural, crear array de firmantes (deudor 1 + deudores adicionales)
+      if (options.isPlural) {
+        const deudor1 = {
+          nombreCompleto: data.nombreCompleto,
+          dpiTexto: data.dpiTexto,
+          dpi: data.dpi
+        };
+
+        const deudoresAdicionales = data.deudoresAdicionales || [];
+
+        // Array de firmantes = deudor 1 + deudores adicionales
+        const firmantes = [deudor1, ...deudoresAdicionales];
+
+        // Agrupar firmantes en filas de 2 columnas (aplanar datos para evitar problemas con parser)
+        const firmantesFilas: Array<{
+          col1nombreCompleto: string;
+          col1dpi: string;
+          col2nombreCompleto?: string;
+          col2dpi?: string;
+          tieneCol2: boolean;
+        }> = [];
+
+        for (let i = 0; i < firmantes.length; i += 2) {
+          const f1 = firmantes[i];
+          const f2 = firmantes[i + 1];
+          firmantesFilas.push({
+            col1nombreCompleto: f1.nombreCompleto,
+            col1dpi: f1.dpi,
+            col2nombreCompleto: f2?.nombreCompleto,
+            col2dpi: f2?.dpi,
+            tieneCol2: !!f2
+          });
+        }
+
+        renderData.firmantesFilas = firmantesFilas;
+        console.log(`✓ Plural: ${firmantes.length} firmante(s) en ${firmantesFilas.length} fila(s)`);
+        console.log(`  firmantesFilas:`, JSON.stringify(firmantesFilas, null, 2));
+      }
+
+      // 7. Renderizar con los datos
+      doc.render(renderData);
 
       // 7. Generar buffer del DOCX
       const docxBuffer = doc.getZip().generate({
@@ -461,40 +760,80 @@ export class ContractGeneratorService {
         }
       }
 
-      // 12. Integración con Documenso (si se proporcionaron emails y se generó PDF)
+      // 11.5. Subir PDF a R2 siempre (garantiza r2Key independiente de firma)
+      let r2KeyDirect: string | undefined;
+      if (pdfBuffer) {
+        const result = await uploadPdfToR2(pdfBuffer, baseFilename);
+        r2KeyDirect = result.r2Key;
+      }
+
+      // 12. Integración con firma electrónica (WeeTrust principal, Documenso fallback)
+      let signing: {
+        signs: string[];
+        linkDocument: string;
+        r2Key?: string;
+       } | undefined;
       let signingLinks: string[] | undefined;
       let shouldCleanupFiles = false;
+      let signingProvider: 'weetrust' | 'documenso' | undefined;
 
       if (options.emails && options.emails.length > 0 && pdfBuffer) {
-        try {
-          console.log(`🔗 Creando documento en Documenso para firma...`);
+        // Validar número de emails
+        const requiredEmails = getRequiredEmailCount(contractType);
+        if (options.emails.length !== requiredEmails) {
+          console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
+        }
 
-          // Validar número de emails
-          const requiredEmails = getRequiredEmailCount(contractType);
-          if (options.emails.length !== requiredEmails) {
-            console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
+        // Intentar primero con WeeTrust (si está habilitado)
+        try {
+          if (!weeTrustService) {
+            throw new Error('WeeTrust deshabilitado o no inicializado');
           }
 
-          // Crear documento y obtener links de firma (detección automática de posiciones)
-          signingLinks = await documensoService.createDocumentAndGetSigningLinks(
+          console.log(`🔗 Creando documento en WeeTrust para firma...`);
+
+          signing = await weeTrustService.createDocumentForSigning(
             baseFilename,
             pdfBuffer,
             contractType,
             options.emails
           );
 
-          console.log(`✓ ${signingLinks.length} link(s) de firma generados`);
+          signingLinks = signing.signs ?? [];
+          signingProvider = 'weetrust';
 
-          // Marcar para limpieza: archivo subido exitosamente a Documenso/R2
+          console.log(`✓ WeeTrust: ${signingLinks.length} link(s) de firma generados`);
           shouldCleanupFiles = true;
-        } catch (documensoError) {
-          console.error('⚠ Error al crear documento en Documenso:', documensoError);
-          // No fallar si Documenso falla, los archivos ya están generados
+
+        } catch (weeTrustError) {
+          console.error('⚠ Error con WeeTrust, intentando Documenso como fallback:', weeTrustError);
+
+          // Fallback a Documenso
+          try {
+            console.log(`🔗 Creando documento en Documenso (fallback)...`);
+
+            signing = await documensoService.createDocumentAndGetSigningLinks(
+              baseFilename,
+              pdfBuffer,
+              contractType,
+              options.emails
+            );
+
+            signingLinks = signing.signs ?? [];
+            signingProvider = 'documenso';
+
+            console.log(`✓ Documenso: ${signingLinks.length} link(s) de firma generados`);
+            shouldCleanupFiles = true;
+
+          } catch (documensoError) {
+            console.error('⚠ Error al crear documento en Documenso:', documensoError);
+            // No fallar si ambos servicios fallan, los archivos ya están generados
+          }
         }
       }
 
       // 13. Limpiar archivos locales si se subieron exitosamente a R2
-      if (shouldCleanupFiles) {
+      if (shouldCleanupFiles || r2KeyDirect) {
         try {
           await this.cleanupLocalFiles(docxPath, pdfPath);
           console.log(`🗑️  Archivos locales eliminados (ya están en R2)`);
@@ -550,6 +889,8 @@ export class ContractGeneratorService {
           nameDocument: [{ enum: contractType, label: config.description }],
           data: submissionData,
           signing_links: signingLinks,
+          linkDocument: signing?.linkDocument || '',
+          signingProvider,
           contractType,
           docx_path: docxPath,
           pdf_path: pdfPath,
@@ -557,25 +898,17 @@ export class ContractGeneratorService {
           generatedAt: new Date().toISOString()
         };
 
-        // Llamar al CRM de manera no-bloqueante
-        crmApiService.saveContractSilently({
-          dpi: data.dpi,
-          contractType,
-          contractName: config.description,
-          signingLinks,
-          templateId,
-          apiResponse: fullApiResponse,
-        }).catch(err => {
-          console.error('[ContractGeneratorService] Error al guardar en CRM:', err);
-          // No bloquear la respuesta si falla el guardado en CRM
-        });
-      } else {
-        if (!data.dpi) {
-          console.warn('[ContractGeneratorService] No se guardará en CRM: falta DPI en los datos');
-        }
-        if (!signingLinks || signingLinks.length === 0) {
-          console.warn('[ContractGeneratorService] No se guardará en CRM: no hay signing links');
-        }
+        // NOTA: Llamada al CRM deshabilitada temporalmente para agilizar el proceso
+        // crmApiService.saveContractSilently({
+        //   dpi: data.dpi,
+        //   contractType,
+        //   contractName: config.description,
+        //   signingLinks,
+        //   templateId,
+        //   apiResponse: fullApiResponse,
+        // }).catch(err => {
+        //   console.error('[ContractGeneratorService] Error al guardar en CRM:', err);
+        // });
       }
 
       return {
@@ -584,6 +917,9 @@ export class ContractGeneratorService {
         nameDocument: [{ enum: contractType, label: config.description }],
         data: submissionData,
         signing_links: signingLinks,
+        linkDocument: signing?.linkDocument || '',
+        signingProvider,
+        r2Key: r2KeyDirect || signing?.r2Key,
         // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,
@@ -600,6 +936,7 @@ export class ContractGeneratorService {
         success: false,
         nameDocument: [{ enum: contractType, label: contractType }],
         data: [],
+        linkDocument: '',
         signing_links: undefined,
         contractType,
         message: 'Error al generar contrato',
@@ -611,28 +948,78 @@ export class ContractGeneratorService {
   /**
    * Convierte un buffer DOCX a PDF usando Gotenberg
    */
-  private async convertToPdf(docxBuffer: Buffer): Promise<Buffer> {
-    const form = new FormData();
-    form.append('file', docxBuffer, {
-      filename: 'contract.docx',
-      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  /**
+   * Espera a que haya un slot disponible para conversión PDF
+   */
+  private async acquirePdfSlot(): Promise<void> {
+    if (this.activePdfConversions < this.maxConcurrentPdfConversions) {
+      this.activePdfConversions++;
+      return;
+    }
+
+    // Esperar a que se libere un slot
+    return new Promise<void>((resolve) => {
+      this.pdfConversionQueue.push(() => {
+        this.activePdfConversions++;
+        resolve();
+      });
     });
+  }
 
-    const response = await axios.post(
-      `${this.gotenbergUrl}/forms/libreoffice/convert`,
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-        },
-        responseType: 'arraybuffer',
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-        timeout: 30000 // 30 segundos timeout
+  /**
+   * Libera un slot de conversión PDF
+   */
+  private releasePdfSlot(): void {
+    this.activePdfConversions--;
+    const next = this.pdfConversionQueue.shift();
+    if (next) {
+      next();
+    }
+  }
+
+  private async convertToPdf(docxBuffer: Buffer): Promise<Buffer> {
+    // Esperar a que haya un slot disponible (máximo 3 conversiones simultáneas)
+    await this.acquirePdfSlot();
+
+    try {
+      const form = new FormData();
+      form.append('file', docxBuffer, {
+        filename: 'contract.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      });
+
+      const response = await axios.post(
+        `${this.gotenbergUrl}/forms/libreoffice/convert`,
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+          },
+          responseType: 'arraybuffer',
+          // Límites razonables para evitar memory leaks
+          maxBodyLength: 50 * 1024 * 1024, // 50MB máximo
+          maxContentLength: 50 * 1024 * 1024, // 50MB máximo
+          timeout: 60000 // 60 segundos timeout (LibreOffice puede ser lento)
+        }
+      );
+
+      return Buffer.from(response.data);
+    } catch (error: any) {
+      // Mejorar el mensaje de error para diagnóstico
+      if (error.code === 'ECONNREFUSED') {
+        throw new Error('Gotenberg no está disponible. El servicio puede estar caído o reiniciándose.');
       }
-    );
-
-    return Buffer.from(response.data);
+      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        throw new Error('Timeout al conectar con Gotenberg. El servicio puede estar sobrecargado.');
+      }
+      if (error.response?.status === 503) {
+        throw new Error('Gotenberg está sobrecargado (503). Intente nuevamente en unos segundos.');
+      }
+      throw new Error(`Error al convertir a PDF: ${error.message}`);
+    } finally {
+      // SIEMPRE liberar el slot, incluso si hay error
+      this.releasePdfSlot();
+    }
   }
 
   /**

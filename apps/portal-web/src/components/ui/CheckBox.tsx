@@ -9,6 +9,7 @@ interface CheckBoxProps {
   className?: string;
   isLabelLink?: boolean;
   labelHref?: string;
+  onLabelClick?: () => void;
 }
 
 export const CheckBox: React.FC<CheckBoxProps> = ({
@@ -18,11 +19,20 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
   className = "",
   isLabelLink = false,
   labelHref,
+  onLabelClick,
 }) => {
+  
+  const handleToggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log("Toggle clicked, current checked:", checked, "new value:", !checked);
+    onChange(!checked);
+  };
+
   return (
     <label className={`flex items-center gap-3 cursor-pointer ${className}`}>
       <motion.div
-        onClick={() => onChange(!checked)}
+        onClick={handleToggle}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         transition={{
@@ -30,13 +40,13 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
           stiffness: 400,
           damping: 17,
         }}
-        className="relative w-[18px] h-[18px] flex items-center justify-center"
+        className="relative w-[18px] h-[18px] flex items-center justify-center cursor-pointer"
       >
         <motion.div
           initial={{ scale: 0, opacity: 0 }}
           animate={{ scale: checked ? 1 : 0, opacity: checked ? 1 : 0 }}
           transition={{ duration: 0.2 }}
-          className={`absolute inset-0 ${checked ? "[&>svg>path]:fill-primary" : ""}`}
+          className={`absolute inset-0 ${checked ? "[&>svg>path]:fill-secondary" : ""}`}
         >
           <IconCheck />
         </motion.div>
@@ -44,25 +54,56 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
       </motion.div>
       {label && (
         <>
-          {isLabelLink && labelHref ? (
+          {isLabelLink && onLabelClick ? (
+            <span
+              className="font-[Hero] text-[16px] select-none underline cursor-pointer hover:text-white/80 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onLabelClick();
+              }}
+            >
+              {label}
+            </span>
+          ) : isLabelLink && labelHref ? (
             <a
               href={labelHref}
               target="_blank"
               rel="noopener noreferrer"
               className="font-[Hero] text-[16px] select-none underline hover:text-white/80 transition-colors"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(true);
+              }}
             >
               {label}
             </a>
+          ) : isLabelLink ? (
+            <span
+              className="font-[Hero] text-[16px] select-none underline cursor-pointer hover:text-white/80 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                // Si no hay href, solo actúa como texto decorativo
+              }}
+            >
+              {label}
+            </span>
           ) : (
-            <span className="font-[Hero] text-sm select-none">{label}</span>
+            <span
+              className="font-[Hero] text-sm select-none cursor-pointer"
+              onClick={handleToggle}
+            >
+              {label}
+            </span>
           )}
         </>
       )}
       <input
         type="checkbox"
         checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
+        onChange={(e) => {
+          console.log("Input onChange triggered:", e.target.checked);
+          onChange(e.target.checked);
+        }}
         className="sr-only"
       />
     </label>

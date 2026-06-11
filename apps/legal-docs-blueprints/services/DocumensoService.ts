@@ -254,11 +254,13 @@ function generateFallbackFields(
 export class DocumensoService {
   private client: Documenso;
   private baseUrl: string;
+  private team: string;
 
   constructor(apiUrl?: string, apiToken?: string) {
     // API v2-beta es requerida para el SDK
     const apiV1Url = apiUrl || process.env.DOCUMENSO_API_URL || 'https://documenso.s2.devteamatcci.site/api/v1';
     this.baseUrl = apiV1Url.replace('/api/v1', '/api/v2-beta');
+    this.team = process.env.DOCUMENSO_TEAM || 'engineering';
 
     const token = apiToken || process.env.DOCUMENSO_API_TOKEN || '';
 
@@ -311,16 +313,26 @@ export class DocumensoService {
         },
       });
 
+      // @ts-ignore - SDK types are outdated
       console.log(`✓ Documento creado con ID: ${response.createDocumentV0Response?.documentId}`);
 
       // Extraer uploadUrl de la respuesta
-      const uploadUrl = (response.createDocumentV0Response as any)?.uploadUrl;
+      // @ts-ignore - SDK types are outdated
+      const uploadUrl = response.createDocumentV0Response?.uploadUrl;
 
       if (!uploadUrl) {
         throw new Error('No se recibió uploadUrl de Documenso');
       }
 
+      // Extraer la key del archivo desde la URL pre-firmada
+      const urlObj = new URL(uploadUrl);
+      const r2Key = urlObj.pathname.replace(/^\//, ''); // Remover slash inicial
+      const r2Bucket = urlObj.hostname.split('.')[0]; // Primer segmento del hostname
+      
       console.log(`📤 Subiendo PDF a R2...`);
+      console.log(`   → Bucket: ${r2Bucket}`);
+      console.log(`   → Key: ${r2Key}`);
+      console.log(`   → URL: ${uploadUrl.substring(0, 100)}...`);
 
       // Paso 2: Subir el PDF a la URL pre-firmada de R2
       const uploadResponse = await fetch(uploadUrl, {
@@ -332,10 +344,16 @@ export class DocumensoService {
       });
 
       if (!uploadResponse.ok) {
-        throw new Error(`Upload falló con status: ${uploadResponse.status}`);
+        const errorText = await uploadResponse.text();
+        throw new Error(`Upload falló con status: ${uploadResponse.status} - ${errorText}`);
       }
 
+      // R2 devuelve ETag en headers que confirma el upload
+      const etag = uploadResponse.headers.get('etag');
       console.log(`✓ PDF subido exitosamente a R2`);
+      console.log(`   → Key: ${r2Key}`);
+      console.log(`   → ETag: ${etag || 'N/A'}`);
+      console.log(`   → Status: ${uploadResponse.status}`);
 
       // Paso 3: Distribuir el documento para activar los links de firma
       // ⚠️ COMENTADO en desarrollo para evitar envío automático de emails
@@ -353,7 +371,11 @@ export class DocumensoService {
 
       console.log(`ℹ️ Documento creado pero NO distribuido (emails no enviados en desarrollo)`);
 
-      return response.createDocumentV0Response;
+      // @ts-ignore - SDK types are outdated
+      return {
+        ...response.createDocumentV0Response,
+        r2Key,
+      };
     } catch (error: any) {
       // Si el error es de validación pero contiene los datos en rawValue, usarlos
       if (error.name === 'ResponseValidationError' && error.rawValue) {
@@ -362,9 +384,17 @@ export class DocumensoService {
 
         // Extraer uploadUrl de rawValue
         const uploadUrl = error.rawValue.uploadUrl;
+        let r2Key: string | undefined;
 
         if (uploadUrl) {
+          // Extraer la key del archivo desde la URL pre-firmada
+          const urlObj = new URL(uploadUrl);
+          r2Key = urlObj.pathname.replace(/^\//, '');
+          const r2Bucket = urlObj.hostname.split('.')[0];
+          
           console.log(`📤 Subiendo PDF a R2...`);
+          console.log(`   → Bucket: ${r2Bucket}`);
+          console.log(`   → Key: ${r2Key}`);
 
           // Subir el PDF a la URL pre-firmada
           const uploadResponse = await fetch(uploadUrl, {
@@ -376,10 +406,14 @@ export class DocumensoService {
           });
 
           if (!uploadResponse.ok) {
-            throw new Error(`Upload falló con status: ${uploadResponse.status}`);
+            const errorText = await uploadResponse.text();
+            throw new Error(`Upload falló con status: ${uploadResponse.status} - ${errorText}`);
           }
 
+          const etag = uploadResponse.headers.get('etag');
           console.log(`✓ PDF subido exitosamente a R2`);
+          console.log(`   → Key: ${r2Key}`);
+          console.log(`   → ETag: ${etag || 'N/A'}`);
         }
 
         // Paso 3: Distribuir el documento para activar los links de firma
@@ -389,13 +423,17 @@ export class DocumensoService {
           try {
             await this.client.documents.distribute({ documentId });
             console.log(`✓ Documento distribuido exitosamente`);
-          } catch (distributeError) {
-            console.warn(`⚠️ Error al distribuir documento:`, distributeError);
+          } catch (distributeError: any) {
+            // Ignorar error de validación del SDK - el documento se distribuye correctamente (status 200)
+            console.warn(`⚠️ Error de validación del SDK al distribuir (ignorado)`);
           }
         }
 
         // Devolver los datos crudos que sí funcionan
-        return error.rawValue.document;
+        return {
+          ...error.rawValue.document,
+          r2Key,
+        };
       }
 
       console.error('❌ Error creando documento en Documenso:', error.message);
@@ -456,7 +494,11 @@ export class DocumensoService {
     pdfBuffer: Buffer,
     contractType: ContractType,
     emails: string[]
-  ): Promise<string[]> {
+  ): Promise<{
+    signs: string[];
+    linkDocument: string;
+    r2Key?: string;
+  }> {
     try {
       console.log(`\n🔄 Iniciando flujo completo en Documenso para: ${title}`);
 
@@ -512,7 +554,14 @@ export class DocumensoService {
       console.log(`✅ ${signingLinks.length} link(s) de firma generados`);
       console.log(`📋 Links:`, signingLinks);
 
-      return signingLinks;
+      const idDocument = documentResponse?.documentId || documentResponse?.id || '';
+      const r2Key = documentResponse?.r2Key;
+
+      return {
+        signs: signingLinks,
+        linkDocument: `${baseUrl}/t/${this.team}/documents/${idDocument}`,
+        r2Key,
+      };
     } catch (error: any) {
       console.error('❌ Error en flujo completo de Documenso:', error.message);
       throw error;
@@ -525,6 +574,7 @@ export class DocumensoService {
   async checkHealth(): Promise<boolean> {
     try {
       // Intentamos listar documentos para verificar conectividad usando el SDK
+      // @ts-ignore - SDK types are outdated
       await this.client.documents.list({
         page: 1,
         perPage: 1,
@@ -534,6 +584,71 @@ export class DocumensoService {
     } catch (error) {
       console.error('❌ Documenso no está disponible:', error);
       return false;
+    }
+  }
+
+  /**
+   * Verifica el estado de firma de un documento usando el token del recipient
+   * @param signingToken - El token extraído de la URL de firma (ej: akyMR7PGgJuzddsu0dHsq)
+   * @returns Información sobre el estado de la firma
+   */
+  async checkSigningStatus(signingToken: string): Promise<{
+    isSigned: boolean;
+    recipientEmail?: string;
+    recipientName?: string;
+    documentTitle?: string;
+    signedAt?: string;
+    status: 'PENDING' | 'COMPLETED' | 'ERROR';
+    message: string;
+  }> {
+    try {
+      console.log(`🔍 Verificando estado de firma para token: ${signingToken.substring(0, 10)}...`);
+
+      const signingUrl = `${this.baseUrl.replace('/api/v2-beta', '')}/sign/${signingToken}`;
+      
+      // Verificar si la URL redirige a /complete (indica firma completada)
+      console.log(`🔗 Verificando: ${signingUrl}`);
+      
+      const response = await fetch(signingUrl, {
+        method: 'HEAD',
+        redirect: 'manual',
+      });
+
+      // Si hay redirect a /complete, el documento está firmado
+      if (response.status === 302 || response.status === 301) {
+        const location = response.headers.get('location');
+        if (location?.includes('/complete')) {
+          console.log(`✅ Documento firmado - Redirige a: ${location}`);
+          return {
+            isSigned: true,
+            status: 'COMPLETED',
+            message: '✅ Documento firmado exitosamente',
+          };
+        }
+      }
+
+      // Si retorna 200, está pendiente de firma
+      if (response.status === 200) {
+        return {
+          isSigned: false,
+          status: 'PENDING',
+          message: '⏳ Documento pendiente de firma',
+        };
+      }
+
+      // Cualquier otro status es un error
+      return {
+        isSigned: false,
+        status: 'ERROR',
+        message: 'Token de firma no encontrado o inválido',
+      };
+    } catch (error: any) {
+      console.error('❌ Error al verificar estado de firma:', error.message);
+      return {
+        isSigned: false,
+        status: 'ERROR',
+        message: `Error al verificar: ${error.message}`,
+      };
     }
   }
 }

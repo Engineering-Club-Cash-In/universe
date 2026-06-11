@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getPagosByCredito } from "../services/services";
+import { getPagosByCredito, getHistorialCambioFecha, type HistorialCambioFecha } from "../services/services";
 import {
   Table,
   TableBody,
@@ -30,10 +30,12 @@ import {
   Percent,
   Landmark,
   User,
+  MoreVertical,
+  RefreshCw,
 } from "lucide-react";
 import { usePagoForm } from "../hooks/registerPayment";
 import { Button } from "@/components/ui/button";
-import { useFalsePayment } from "../hooks/falsePayments";
+import { useReciboPago } from "../hooks/useReciboPago";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,6 +43,12 @@ import {
   DropdownMenuTrigger,
 } from "@radix-ui/react-dropdown-menu";
 import { useAuth } from "@/Provider/authProvider";
+import { editPaymentService, type EditPaymentParams } from "../services/services";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DollarSign, Pencil } from "lucide-react";
+import { toast } from "sonner";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -62,6 +70,14 @@ const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   monto_boleta: {
     icon: <BadgeDollarSign className="w-4 h-4 text-green-600" />,
     color: "text-green-800",
+  },
+  monto_aplicado: {
+    icon: <BadgeDollarSign className="w-4 h-4 text-green-500" />,
+    color: "text-green-700",
+  },
+  fecha_aplicado: {
+    icon: <CalendarDays className="w-4 h-4 text-green-600" />,
+    color: "text-green-700",
   },
   cuota: {
     icon: <BadgeDollarSign className="w-4 h-4 text-indigo-700" />,
@@ -113,42 +129,267 @@ function formatDate(d: string) {
   const [year, month, day] = d.split("-");
   return `${parseInt(day, 10)}/${parseInt(month, 10)}/${year}`;
 }
-const Campo = ({
-  label,
-  valor,
-  field,
-}: {
+function formatDateTime(d: string) {
+  if (!d) return "--";
+  const date = new Date(d);
+  const day = date.getDate();
+  const month = date.getMonth() + 1;
+  const year = date.getFullYear();
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+// --- Hook para editar pago ---
+function useEditPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pagoId, params }: { pagoId: number; params: EditPaymentParams }) =>
+      editPaymentService(pagoId, params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pagosByCredito"] });
+    },
+  });
+}
+
+// --- Configuración de campos editables ---
+interface EditField {
+  key: string;
   label: string;
-  valor: any;
-  field: string;
-}) => {
-  const { icon, color } = iconMap[field] ?? {
-    icon: <Info className="w-4 h-4 text-blue-300" />,
-    color: "text-blue-800",
+  group: "abonos" | "restantes" | "general";
+}
+
+const EDIT_FIELDS: EditField[] = [
+  { key: "abono_capital", label: "Abono Capital", group: "abonos" },
+  { key: "abono_interes", label: "Abono Interés", group: "abonos" },
+  { key: "abono_iva_12", label: "Abono IVA 12%", group: "abonos" },
+  { key: "abono_seguro", label: "Abono Seguro", group: "abonos" },
+  { key: "abono_gps", label: "Abono GPS", group: "abonos" },
+  { key: "membresias_pago", label: "Membresías Pago", group: "abonos" },
+  { key: "membresias_mes", label: "Membresías Mes", group: "abonos" },
+  { key: "capital_restante", label: "Capital Restante", group: "restantes" },
+  { key: "interes_restante", label: "Interés Restante", group: "restantes" },
+  { key: "iva_12_restante", label: "IVA 12% Restante", group: "restantes" },
+  { key: "seguro_restante", label: "Seguro Restante", group: "restantes" },
+  { key: "gps_restante", label: "GPS Restante", group: "restantes" },
+  { key: "membresias", label: "Membresías Restante", group: "restantes" },
+  { key: "monto_boleta", label: "Monto Boleta", group: "general" },
+  { key: "monto_aplicado", label: "Monto Aplicado", group: "general" },
+  { key: "mora", label: "Mora", group: "general" },
+  { key: "otros", label: "Otros", group: "general" },
+  { key: "observaciones", label: "Observaciones", group: "general" },
+];
+
+// --- Modal de edición de pago ---
+function EditPaymentModal({
+  pago,
+  open,
+  onClose,
+  onSuccess,
+}: {
+  pago: any;
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const editPayment = useEditPayment();
+
+  const buildInitial = () => {
+    const vals: Record<string, string> = {};
+    for (const f of EDIT_FIELDS) {
+      vals[f.key] = pago[f.key] != null ? String(pago[f.key]) : "";
+    }
+    return vals;
   };
-  return (
-    <div className="flex flex-col items-start border rounded-lg px-3 py-2 bg-white shadow-sm max-w-[220px] min-h-[64px]">
-      <div className="flex items-center gap-2 mb-1">
-        {icon}
-        <span className={`font-bold capitalize ${color} text-base`}>
-          {label.replace(/_/g, " ")}:
-        </span>
+
+  const [formValues, setFormValues] = React.useState<Record<string, string>>(buildInitial);
+
+  React.useEffect(() => {
+    if (open) setFormValues(buildInitial());
+  }, [open, pago?.pago_id]);
+
+  const handleChange = (key: string, value: string) => {
+    setFormValues((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSave = () => {
+    // Mandar todos los campos que tengan valor (el backend acepta parcial)
+    const payload: Record<string, string> = {};
+    for (const f of EDIT_FIELDS) {
+      const val = formValues[f.key];
+      if (val !== undefined && val !== "") {
+        payload[f.key] = val;
+      }
+    }
+
+    if (Object.keys(payload).length === 0) {
+      toast.info("No hay campos con valor para guardar");
+      return;
+    }
+
+    editPayment.mutate(
+      { pagoId: pago.pago_id, params: payload },
+      {
+        onSuccess: () => {
+          onClose();
+          toast.success("Pago actualizado correctamente");
+          onSuccess();
+        },
+        onError: (error: any) => {
+          toast.error(error?.response?.data?.message || "Error al actualizar pago");
+        },
+      },
+    );
+  };
+
+  const renderGroup = (group: string, title: string, icon: React.ReactNode) => {
+    const fields = EDIT_FIELDS.filter((f) => f.group === group);
+    return (
+      <div>
+        <h4 className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-3 border-b border-blue-100 pb-2">
+          {icon}
+          {title}
+        </h4>
+        <div className="grid grid-cols-2 gap-3">
+          {fields.map((field) => (
+            <div key={field.key} className="space-y-1">
+              <Label className="text-xs font-semibold text-gray-700">{field.label}</Label>
+              <Input
+                type={field.key === "observaciones" ? "text" : "number"}
+                step="0.01"
+                value={formValues[field.key] ?? ""}
+                onChange={(e) => handleChange(field.key, e.target.value)}
+                className="h-9 text-sm border-gray-300 focus:border-blue-500"
+              />
+            </div>
+          ))}
+        </div>
       </div>
-      <span
-        className="font-semibold text-blue-900 break-all w-full text-lg"
-        style={{
-          overflowWrap: "break-word",
-          wordBreak: "break-all",
-          whiteSpace: "normal",
-          textAlign: "left",
-          minHeight: "1.5em",
-        }}
-      >
-        {valor ?? "--"}
-      </span>
-    </div>
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="bg-white text-gray-900 shadow-2xl rounded-xl border border-blue-200 max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-blue-900 flex items-center gap-2">
+            <Pencil className="w-5 h-5" />
+            Editar Pago — Cuota #{pago?.numero_cuota} (ID {pago?.pago_id})
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-5 mt-2">
+          {renderGroup("abonos", "Abonos", <DollarSign className="w-4 h-4 text-green-600" />)}
+          {renderGroup("restantes", "Restantes", <DollarSign className="w-4 h-4 text-blue-600" />)}
+          {renderGroup("general", "General", <FileText className="w-4 h-4 text-violet-600" />)}
+        </div>
+
+        <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-200">
+          <Button
+            variant="outline"
+            onClick={onClose}
+            className="border-gray-300"
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={editPayment.isPending}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+          >
+            {editPayment.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            ) : (
+              <Pencil className="w-4 h-4 mr-2" />
+            )}
+            {editPayment.isPending ? "Guardando..." : "Guardar Cambios"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  pago_id: "ID Pago", numero_cuota: "# Cuota", pagado: "Estado",
+  cuota_pagada: "Cuota pagada",
+  liquidacion_inversionistas: "Liquidación", validationStatus: "Estado Validación",
+  monto_boleta: "Monto Boleta", monto_aplicado: "Monto Aplicado", cuota: "Cuota",
+  fecha_pago: "Fecha Pago", fecha_aplicado: "Fecha Aplicado", fecha_vencimiento: "Fecha Vencimiento",
+  abono_capital: "Capital", abono_interes: "Interés", abono_iva_12: "IVA 12%", abono_seguro: "Seguro", abono_gps: "GPS",
+  capital_restante: "Capital", interes_restante: "Interés", iva_12_restante: "IVA 12%",
+  seguro_restante: "Seguro", gps_restante: "GPS", total_restante: "Total",
+  membresias: "Membresías", membresias_pago: "Membresías Pago", membresias_mes: "Membresías Mes",
+  mora: "Mora", otros: "Otros", reserva: "Reserva", observaciones: "Observaciones",
 };
+
+const DETAIL_SECTIONS = [
+  { title: "Información General", icon: <Info className="w-4 h-4" />, color: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200",
+    fields: ["pago_id", "numero_cuota", "pagado", "cuota_pagada", "liquidacion_inversionistas", "validationStatus"] },
+  { title: "Montos", icon: <BadgeDollarSign className="w-4 h-4" />, color: "text-green-700", bg: "bg-green-50", border: "border-green-200",
+    fields: ["monto_boleta", "monto_aplicado", "cuota"] },
+  { title: "Fechas", icon: <CalendarDays className="w-4 h-4" />, color: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200",
+    fields: ["fecha_pago", "fecha_aplicado", "fecha_vencimiento"] },
+  { title: "Abonos", icon: <BadgeDollarSign className="w-4 h-4" />, color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200",
+    fields: ["abono_capital", "abono_interes", "abono_iva_12", "abono_seguro", "abono_gps"] },
+  { title: "Restantes", icon: <Landmark className="w-4 h-4" />, color: "text-orange-700", bg: "bg-orange-50", border: "border-orange-200",
+    fields: ["capital_restante", "interes_restante", "iva_12_restante", "seguro_restante", "gps_restante", "total_restante"] },
+  { title: "Membresías", icon: <Percent className="w-4 h-4" />, color: "text-purple-700", bg: "bg-purple-50", border: "border-purple-200",
+    fields: ["membresias", "membresias_pago", "membresias_mes"] },
+  { title: "Mora, Otros y Observaciones", icon: <FileText className="w-4 h-4" />, color: "text-red-700", bg: "bg-red-50", border: "border-red-200",
+    fields: ["mora", "otros", "reserva", "observaciones"] },
+];
+
+function formatFieldValue(key: string, value: any): string {
+  if (value === null || value === undefined) return "--";
+  if (key === "pagado" || key === "liquidacion_inversionistas" || key === "cuota_pagada")
+    return value === true ? "Sí" : value === false ? "No" : String(value).replace(/_/g, " ");
+  if (typeof value === "boolean") return value ? "Sí" : "No";
+  if (key.startsWith("monto") || key.startsWith("cuota") || key.startsWith("abono") || key.endsWith("_restante") || key === "membresias" || key === "membresias_pago" || key === "membresias_mes" || key === "mora" || key === "otros" || key === "reserva")
+    return formatCurrency(value);
+  if (key.startsWith("fecha") && typeof value === "string" && value.includes("-"))
+    return key === "fecha_aplicado" ? formatDateTime(value) : formatDate(value);
+  return String(value);
+}
+
+const DetailSections = ({ pago }: { pago: any }) => (
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+    {DETAIL_SECTIONS.map((section) => {
+      const hasData = section.fields.some((f) => pago[f] !== undefined);
+      if (!hasData) return null;
+      return (
+        <div key={section.title} className={`rounded-xl border ${section.border} ${section.bg} overflow-hidden`}>
+          <div className={`flex items-center gap-2 px-3 py-2 ${section.color} font-bold text-sm border-b ${section.border}`}>
+            {section.icon}
+            {section.title}
+          </div>
+          <div className="px-3 py-2 space-y-1.5">
+            {section.fields.map((field) => {
+              if (pago[field] === undefined) return null;
+              return (
+                <div key={field} className="flex items-center justify-between text-sm gap-1">
+                  <span className="text-gray-500 font-medium flex items-center gap-1">
+                    {FIELD_LABELS[field] || field.replace(/_/g, " ")}
+                    {field === "abono_capital" && pago.abono_capital_detalle && (
+                      <>
+                        <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                          {pago.abono_capital_detalle.tipo}
+                        </span>
+                        <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+                          +{formatCurrency(pago.abono_capital_detalle.monto)}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  <span className="font-bold text-gray-900 text-right">{formatFieldValue(field, pago[field])}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    })}
+  </div>
+);
 
 function colorEstado(estado: string) {
   if (estado === "LIQUIDADO")
@@ -163,9 +404,9 @@ export function PaymentsCredits() {
   const [collapseInv, setCollapseInv] = useState<{ [key: number]: boolean }>(
     {}
   );
-  const falsePayment = useFalsePayment();
+  const reciboPago = useReciboPago();
   const { user } = useAuth(); 
-  const { liquidandoId, handleLiquidar, handleReverse, reversePago } =
+  const { liquidandoId, handleLiquidar, handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors, recalcularPagos, handleRecalcularPagos } =
     usePagoForm();
   const [mesFiltro, setMesFiltro] = useState<string>("");
   const [anioFiltro, setAnioFiltro] = useState<string>("");
@@ -175,6 +416,23 @@ export function PaymentsCredits() {
   }>();
   const navigate = useNavigate();
   const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [pagoParaEditar, setPagoParaEditar] = useState<any | null>(null);
+  const [historialFecha, setHistorialFecha] = useState<HistorialCambioFecha[]>([]);
+
+  React.useEffect(() => {
+    if (!numero_credito_sifco) return;
+    console.log("Cargando historial de cambio de fecha para crédito:", numero_credito_sifco);
+    getHistorialCambioFecha(numero_credito_sifco)
+      .then((res) => {
+        console.log("Historial respuesta:", res);
+        setHistorialFecha(Array.isArray(res) ? res : []);
+      })
+      .catch((err) => {
+        console.error("Error al cargar historial:", err);
+        setHistorialFecha([]);
+      });
+  }, [numero_credito_sifco]);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["pagosByCredito", numero_credito_sifco],
@@ -235,11 +493,8 @@ const handleDownloadExcel = async () => {
           .includes(search.toLowerCase())
     )
     : [];
-  const handleFalsePayment = (pago_id: number, credito_id: number) => {
-    falsePayment.mutate({ pago_id, credito_id });
-  };
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+    <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <div className="w-full max-w-6xl mx-auto">
         <button
           className="mb-6 px-6 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg font-bold text-blue-700 shadow"
@@ -247,7 +502,7 @@ const handleDownloadExcel = async () => {
         >
           ← Volver
         </button>
-        <Label className="block text-3xl md:text-4xl font-extrabold mb-2 text-blue-700 text-center drop-shadow">
+        <Label className="block text-3xl md:text-4xl font-extrabold mb-2 text-blue-700 text-center">
           Historial de Pagos del Crédito
         </Label>
         <Label className="block text-xl md:text-2xl font-bold mb-8 text-blue-600 text-center">
@@ -302,8 +557,25 @@ const handleDownloadExcel = async () => {
             Descargar Excel
           </button>
         </div>
+
         </div>
 
+          {historialFecha.length > 0 && (
+            <div className="flex items-center gap-3 bg-blue-50 border-2 border-blue-200 rounded-xl px-4 py-2 shadow-md flex-wrap w-fit mx-auto mt-3">
+              <Calendar className="w-4 h-4 text-blue-500 shrink-0" />
+              <span className="text-blue-800 font-semibold text-sm shrink-0">Cambios fecha inicio:</span>
+              {historialFecha.map((h) => (
+                <span key={h.id} className="inline-flex items-center gap-1.5 bg-white border border-blue-200 rounded-lg px-3 py-1.5 text-sm">
+                  <span className="text-gray-400 line-through">{h.fecha_inicio_anterior}</span>
+                  <span className="text-gray-400">&rarr;</span>
+                  <span className="font-semibold text-blue-700">{h.fecha_inicio_nueva}</span>
+                  <span className="text-gray-400 text-xs ml-1">({new Date(h.created_at).toLocaleDateString("es-GT")})</span>
+                </span>
+              ))}
+            </div>
+          )}
+
+        <div className="mt-6" />
         {isLoading ? (
           <div className="text-blue-500 text-center py-16 text-xl font-bold">
             Cargando pagos...
@@ -329,7 +601,13 @@ const handleDownloadExcel = async () => {
                     Monto Boleta
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
+                    Monto Aplicado
+                  </TableHead>
+                  <TableHead className="font-bold text-blue-700">
                     Fecha de Pago
+                  </TableHead>
+                  <TableHead className="font-bold text-blue-700">
+                    Fecha Aplicado
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
                     Cuota
@@ -337,7 +615,7 @@ const handleDownloadExcel = async () => {
                   <TableHead className="font-bold text-blue-700">
                     Pagado
                   </TableHead>
-                  <TableHead className="w-40 text-center font-bold text-blue-700">
+                  <TableHead className="w-16 text-center font-bold text-blue-700">
                     Acciones
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
@@ -366,8 +644,14 @@ const handleDownloadExcel = async () => {
                       <TableCell className="text-center text-blue-900 font-bold">
                         {formatCurrency(item.pago.monto_boleta)}
                       </TableCell>
+                      <TableCell className="text-center text-green-700 font-bold">
+                        {formatCurrency(item.pago.monto_aplicado)}
+                      </TableCell>
                       <TableCell className="text-center font-semibold">
                         {formatDate(item.pago.fecha_pago)}
+                      </TableCell>
+                      <TableCell className="text-center font-semibold text-green-700">
+                        {formatDateTime(item.pago.fecha_aplicado)}
                       </TableCell>
                       <TableCell className="text-center text-blue-700 font-semibold">
                         {formatCurrency(item.pago.cuota)}
@@ -385,58 +669,72 @@ const handleDownloadExcel = async () => {
                       </TableCell>
              <TableCell className="text-center">
               {user?.role === "ADMIN" ? (
-                <div className="flex gap-2 justify-center">
-                  {/* Botón Revertir Pago */}
-                  <Button
-                    className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow"
-                    onClick={() =>
-                      handleReverse(item.pago.pago_id, item.pago.credito_id)
-                    }
-                    disabled={
-                      item.pago.pagado === false ||
-                      item.pago.paymentFalse === true
-                    }
-                  >
-                    {reversePago.isPending ? (
-                      <>
-                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Revirtiendo...
-                      </>
-                    ) : (
-                      "Revertir Pago"
-                    )}
-                  </Button>
-
-                  {/* Botón Pago Falso */}
-                  <Button
-                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold shadow"
-                    onClick={() => {
-                      handleFalsePayment(
-                        item.pago.pago_id,
-                        item.pago.credito_id
-                      );
-                      refetch();
-                    }}
-                    disabled={
-                      falsePayment.isPending ||
-                      item.pago.pagado === true ||
-                      item.pago.paymentFalse === true
-                    }
-                  >
-                    {falsePayment.isPending ? (
-                      <>
-                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Marcando falso...
-                      </>
-                    ) : (
-                      "Pago Falso"
-                    )}
-                  </Button>
-                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="inline-flex items-center justify-center w-9 h-9 rounded-lg hover:bg-blue-100 transition">
+                      <MoreVertical className="w-5 h-5 text-blue-700" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="bg-white border border-blue-200 shadow-xl rounded-xl p-1 min-w-[200px] z-50">
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-50 text-yellow-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleReverse(item.pago.pago_id, item.pago.credito_id, true); }}
+                        disabled={item.pago.paymentFalse === true}>
+                        {reversePago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Pago
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-orange-50 text-orange-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleRevertToPending(item.pago.pago_id, item.pago.credito_id); }}
+                        disabled={item.pago.paymentFalse === true || revertPaymentToPending.isPending}>
+                        {revertPaymentToPending.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Especial
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-50 text-indigo-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleProcessInvestors(item.pago.pago_id, item.pago.credito_id, item.pago.fecha_vencimiento); }}
+                        disabled={processInvestors.isPending}>
+                        {processInvestors.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Proc. Inversionistas
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-purple-50 text-purple-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleRevalidatePayment(item.pago.pago_id, item.pago.credito_id); }}
+                        disabled={item.pago.pagado === true || item.pago.paymentFalse === true || revalidatePayment.isPending}>
+                        {revalidatePayment.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revalidar Pago
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-50 text-cyan-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleRecalcularPagos(item.pago.numero_credito_sifco, item.pago.numero_cuota); }}
+                        disabled={recalcularPagos.isPending}>
+                        {recalcularPagos.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />} Recalcular Pagos
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-50 text-emerald-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); reciboPago.mutate(item.pago.pago_id); }}
+                        disabled={reciboPago.isPending}>
+                        {reciboPago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <FileText className="w-4 h-4" />} Recibo de Pago
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-amber-50 text-amber-700 transition"
+                        onClick={(e) => { e.stopPropagation(); setPagoParaEditar(item.pago); setEditModalOpen(true); }}>
+                        <Pencil className="w-4 h-4" /> Editar Pago
+                      </button>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : user?.role === "ASESOR" ? (
+                <button
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={(e) => { e.stopPropagation(); reciboPago.mutate(item.pago.pago_id); }}
+                  disabled={reciboPago.isPending}>
+                  {reciboPago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <FileText className="w-4 h-4" />} Recibo
+                </button>
               ) : (
-                <span className="text-gray-400 font-semibold italic">
-                  No tienes permitido realizar acciones aquí
-                </span>
+                <span className="text-gray-400 font-semibold italic text-xs">Sin permisos</span>
               )}
             </TableCell>
 
@@ -478,37 +776,12 @@ const handleDownloadExcel = async () => {
                     {openIdx === idx && (
                       <TableRow>
                         <TableCell
-                          colSpan={7}
+                          colSpan={9}
                           className="bg-blue-50 p-0 rounded-b-2xl"
                         >
                           <div className="p-6 space-y-6">
                             {/* Detalle de pago con iconos */}
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                              {Object.entries(item.pago)
-                                .filter(([key]) => key !== "boletas") // ⬅️ Aquí excluyes "boletas"
-                                .map(([key, value]) => (
-                                  <Campo
-                                    key={key}
-                                    label={
-                                      key === "paymentFalse"
-                                        ? "Pago falso"
-                                        : key
-                                    }
-                                    valor={
-                                      key === "paymentFalse"
-                                        ? value
-                                          ? "Sí"
-                                          : "No"
-                                        : typeof value === "boolean"
-                                        ? value
-                                          ? "Sí"
-                                          : "No"
-                                        : value ?? "--"
-                                    }
-                                    field={key}
-                                  />
-                                ))}
-                            </div>
+                            <DetailSections pago={item.pago} />
                             {user?.role === "ADMIN" && (
   <>
                             {/* INVERSIONISTAS DETALLE */}
@@ -558,7 +831,7 @@ const handleDownloadExcel = async () => {
                                             Monto Aportado
                                           </TableHead>
                                           <TableHead className="font-bold text-blue-700">
-                                            IVA inversionista
+                                            IVA Inversionista
                                           </TableHead>
                                           <TableHead className="font-bold text-blue-700">
                                             Detalles
@@ -621,7 +894,7 @@ const handleDownloadExcel = async () => {
                                               </TableRow>
                                               {collapseInv[index] && (
                                                 <TableRow className="bg-blue-50">
-                                                  <TableCell colSpan={8}>
+                                                  <TableCell colSpan={9}>
                                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-2 text-[11px] md:text-xs">
                                                       <div>
                                                         <span className="font-bold text-blue-700">
@@ -645,7 +918,7 @@ const handleDownloadExcel = async () => {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Cuota Interes Inversionista:{" "}
+                                                          Cuota Interés Inversionista:{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(
@@ -655,7 +928,7 @@ const handleDownloadExcel = async () => {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Cuota Interes Cash In:{" "}
+                                                          Cuota Interés Cash In:{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(
@@ -744,6 +1017,16 @@ const handleDownloadExcel = async () => {
                                                       pagoInv.abono_capital
                                                     )}
                                                   </span>
+                                                  {pagoInv.abono_capital_detalle && (
+                                                    <>
+                                                      <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                                                        {pagoInv.abono_capital_detalle.tipo}
+                                                      </span>
+                                                      <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+                                                        +{formatCurrency(pagoInv.abono_capital_detalle.monto)}
+                                                      </span>
+                                                    </>
+                                                  )}
                                                 </div>
                                               </TableCell>
                                               <TableCell className="border px-2 py-1 font-semibold">
@@ -850,6 +1133,19 @@ const handleDownloadExcel = async () => {
           </div>
         )}
       </div>
+
+      {/* Modal de edición de pago */}
+      {pagoParaEditar && (
+        <EditPaymentModal
+          pago={pagoParaEditar}
+          open={editModalOpen}
+          onClose={() => {
+            setEditModalOpen(false);
+            setPagoParaEditar(null);
+          }}
+          onSuccess={() => refetch()}
+        />
+      )}
     </div>
   );
 }

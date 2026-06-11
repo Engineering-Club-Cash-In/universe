@@ -1,54 +1,61 @@
-import { InvestorsLogo } from "@/features/footer/icons";
-import { IconArrow, IconInfo } from "@/components";
+import { InvestorsLogoTemp } from "../components/InvestorsLogoTemp";
+import { IconArrow } from "@/components";
 import { motion } from "framer-motion";
+import { useIsMobile } from "@/hooks";
+import { useNavigate } from "@tanstack/react-router";
 
 const imgUrl = import.meta.env.VITE_IMAGE_URL + "/investors.jpg";
 
 export const HeaderInvestor = () => {
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
+
   return (
-    <section className="px-20 mt-32">
+    <section className="px-8 lg:px-20 mt-10 lg:mt-32">
       <div className="flex gap-20">
-        <div className="flex flex-col gap-12 w-full lg:w-3/5">
-          <div>
-            <InvestorsLogo width={"320px"} height={"128px"} />
+        <div className="flex flex-col items-center lg:items-start gap-6 lg:gap-8 xl:gap-12 w-full lg:w-3/5">
+          <div className="lg:-ml-8">
+            <InvestorsLogoTemp
+              width={isMobile ? "220px" : "420px"}
+              height={isMobile ? "120px" : "200px"}
+            />
           </div>
-          <p className="text-header-3 pr-30">
+          <p className="text-xl text-center lg:text-start lg:text-header-3 lg:pr-30">
             Multiplica tu <span className="text-secondary">patrimonio</span> con
             inversiones inteligentes
           </p>
-          <p className="text-gray text-2xl">
+          <div className="lg:hidden w-full">
+            <img
+              src={imgUrl}
+              alt="Inversiones"
+              className="w-full h-full object-cover rounded-xl"
+            />
+          </div>
+          <p className="text-sm text-gray lg:text-2xl leading-8 lg:leading-6 text-center lg:text-start">
             Accede a oportunidades exclusivas de inversión con rendimientos
             superiores al mercado. Seguridad, transparencia y asesoría
             personalizada para alcanzar tus metas financieras.
           </p>
 
           {/* Botones */}
-          <div className="flex gap-6 mt-4 h-24 w-full lg:w-3/5">
+          <div className="flex gap-6 mt-4 w-full xl:w-1/3">
             <motion.button
-              className="flex items-center justify-center gap-4 w-full text-secondary  rounded-[10.115px] border border-secondary/50 hover:bg-secondary/10 transition-colors"
+              className="flex items-center p-4 justify-center gap-4 w-full text-secondary  rounded-xl border border-secondary/50 hover:bg-secondary/10 transition-colors"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
+              onClick={() =>
+                navigate({ to: "/leadInvestor", search: { amount: undefined, term: undefined, type: undefined } })
+              }
             >
               <div>
-                <IconArrow width="24" height="24" />
+                <IconArrow
+                  width={isMobile ? 16 : 24}
+                  height={isMobile ? 16 : 24}
+                />
               </div>
-              <span className="text-lg font-semibold">
+              <span className="text-xs lg:text-lg font-semibold">
                 Quiero invertir ahora
-              </span>
-            </motion.button>
-
-            <motion.button
-              className="flex items-center justify-center text-secondary gap-4 w-full  rounded-[10.115px] border border-secondary/50 hover:bg-secondary/10 transition-colors"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              transition={{ type: "spring", stiffness: 400, damping: 17 }}
-            >
-              <div>
-                <IconInfo width="24" height="24" />
-              </div>
-              <span className="text-lg font-semibold">
-                Conoce cómo funciona
               </span>
             </motion.button>
           </div>

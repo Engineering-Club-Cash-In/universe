@@ -2,6 +2,7 @@
 "use client";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,12 +68,12 @@ export default function MorasManager() {
 
   const confirmCondonacionMasiva = () => {
     if (!motivoMasivo) {
-      alert("[ERROR] Debes ingresar un motivo para la condonación masiva.");
+      toast.error("Debes ingresar un motivo para la condonación masiva");
       return;
     }
 
     if (!user?.email) {
-      alert("[ERROR] No se pudo obtener el email del usuario.");
+      toast.error("No se pudo obtener el email del usuario");
       return;
     }
 
@@ -92,12 +93,12 @@ export default function MorasManager() {
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: ["moras"] });
-          alert("[SUCCESS] Moras condonadas masivamente");
+          toast.success("Moras condonadas masivamente");
         },
         onError: (err: any) => {
-          alert(
-            `[ERROR] No se pudo condonar moras\n\n${JSON.stringify(err, null, 2)}`
-          );
+          toast.error("No se pudo condonar moras", {
+            description: err?.message || "Error desconocido",
+          });
         },
       }
     );
@@ -122,21 +123,18 @@ export default function MorasManager() {
           usuario_email: user.email,
         },
         {
-          onSuccess: (res: any) =>
-            alert(
-              `[SUCCESS] Mora condonada\n\n${JSON.stringify(res, null, 2)}`
-            ),
+          onSuccess: () => toast.success("Mora condonada exitosamente"),
           onError: (err: any) =>
-            alert(
-              `[ERROR] No se pudo condonar mora\n\n${JSON.stringify(err, null, 2)}`
-            ),
+            toast.error("No se pudo condonar mora", {
+              description: err?.message || "Error desconocido",
+            }),
         }
       );
       setOpenModalCondonacion(false);
       setMotivo("");
       setMontoMoraSeleccionada(null);
     } else {
-      alert("[ERROR] Completa todos los campos antes de condonar.");
+      toast.error("Completa todos los campos antes de condonar");
     }
   };
 
@@ -156,7 +154,7 @@ export default function MorasManager() {
 
   const confirmGuardarMora = () => {
     if (!nuevoMonto || !nuevasCuotas) {
-      alert("[ERROR] Debes ingresar monto y cuotas.");
+      toast.error("Debes ingresar monto y cuotas");
       return;
     }
 
@@ -169,14 +167,11 @@ export default function MorasManager() {
           cuotas_atrasadas: nuevasCuotas,
         },
         {
-          onSuccess: (res: any) =>
-            alert(
-              `[SUCCESS] Mora actualizada\n\n${JSON.stringify(res, null, 2)}`
-            ),
+          onSuccess: () => toast.success("Mora actualizada exitosamente"),
           onError: (err: any) =>
-            alert(
-              `[ERROR] No se pudo actualizar mora\n\n${JSON.stringify(err, null, 2)}`
-            ),
+            toast.error("No se pudo actualizar mora", {
+              description: err?.message || "Error desconocido",
+            }),
         }
       );
     }
@@ -187,8 +182,8 @@ export default function MorasManager() {
     setEditCreditoId(null);
   };
 
-  return (
-    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+  return (  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
       {/* Title */}
       <h2 className="text-2xl font-bold text-blue-600 mb-4">
         Gestión de Moras

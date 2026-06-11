@@ -1,10 +1,11 @@
-export const IconCalendar = () => (
+export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="48"
     height="48"
     viewBox="0 0 48 48"
     fill="none"
+    {...props}
   >
     <path
       d="M28.2 46.2004H19.1333C10.5852 46.2004 6.31114 46.2004 3.65556 43.5448C1 40.8894 1 36.6151 1 28.0671V23.5337C1 14.9856 1 10.7115 3.65556 8.05595C6.31114 5.40039 10.5852 5.40039 19.1333 5.40039H28.2C36.7481 5.40039 41.0223 5.40039 43.6777 8.05595C46.3333 10.7115 46.3333 14.9856 46.3333 23.5337V28.0671C46.3333 36.6151 46.3333 40.8894 43.6777 43.5448C42.1971 45.0254 40.2136 45.6804 37.2667 45.9703"
@@ -57,8 +58,8 @@ export const IconCalendar = () => (
         y2="46.2004"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint1_linear_2377_14168"
@@ -68,8 +69,8 @@ export const IconCalendar = () => (
         y2="5.4"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint2_linear_2377_14168"
@@ -79,8 +80,8 @@ export const IconCalendar = () => (
         y2="5.4"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint3_linear_2377_14168"
@@ -90,8 +91,8 @@ export const IconCalendar = () => (
         y2="37.1329"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint4_linear_2377_14168"
@@ -101,8 +102,8 @@ export const IconCalendar = () => (
         y2="28.0665"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint5_linear_2377_14168"
@@ -112,8 +113,8 @@ export const IconCalendar = () => (
         y2="37.1329"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint6_linear_2377_14168"
@@ -123,8 +124,8 @@ export const IconCalendar = () => (
         y2="28.0665"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint7_linear_2377_14168"
@@ -134,8 +135,8 @@ export const IconCalendar = () => (
         y2="37.1329"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint8_linear_2377_14168"
@@ -145,8 +146,8 @@ export const IconCalendar = () => (
         y2="28.0665"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
     </defs>
   </svg>

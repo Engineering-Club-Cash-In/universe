@@ -3,6 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "../db/connection";
 import * as schema from "../db/schema";
 import { env } from "../config/env";
+import { sendPasswordResetEmail } from "../services/email.service";
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -19,6 +20,37 @@ export const auth = betterAuth({
     requireEmailVerification: false, // Cambiar a true si quieres verificación
     minPasswordLength: 8,
     maxPasswordLength: 128,
+    sendResetPassword: async ({ user, url }) => {
+      // Log para debug - ver estructura de la URL
+      console.log("🔗 Reset password URL from Better Auth:", url);
+      
+      // Better Auth envía la URL completa del backend, extraemos el token
+      // La URL viene como: http://localhost:3000/api/auth/reset-password/TOKEN
+      // O puede venir con query params
+      let token: string | null = null;
+      
+      try {
+        const urlObj = new URL(url);
+        // Primero intentar obtener de query params
+        token = urlObj.searchParams.get("token");
+        
+        // Si no hay token en query params, puede estar en el path
+        if (!token) {
+          const pathParts = urlObj.pathname.split("/");
+          token = pathParts[pathParts.length - 1];
+        }
+      } catch {
+        // Si la URL no es válida, usar directamente
+        token = url;
+      }
+      
+      console.log("🎫 Extracted token:", token);
+      
+      const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${token}`;
+      console.log("📧 Final reset URL:", resetUrl);
+      
+      await sendPasswordResetEmail(user.email, resetUrl);
+    },
   },
   user: {
     additionalFields: {
@@ -26,7 +58,12 @@ export const auth = betterAuth({
         type: "string",
         required: false,
         defaultValue: "CLIENT",
-        input: false, // No permitir que el usuario lo establezca directamente
+        input: true, // Permitir que se envíe desde el cliente
+      },
+      dpi: {
+        type: "string",
+        required: false,
+        input: true, // Permitir que se envíe desde el cliente
       },
     },
   },
@@ -54,7 +91,7 @@ export const auth = betterAuth({
     },
     useSecureCookies: env.NODE_ENV === "production",
     cookies: {
-      sameSite: env.NODE_ENV === "production" ? "strict" : "lax",
+      sameSite: env.NODE_ENV === "production" ? "none" : "lax" as const,
     },
   },
   secret: env.BETTER_AUTH_SECRET,

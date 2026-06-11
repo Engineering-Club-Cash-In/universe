@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	CheckCircle2,
-	Circle,
 	FileText,
+	MinusCircle,
 	ShieldCheck,
 	Truck,
 } from "lucide-react";
@@ -63,10 +63,21 @@ interface Checklist {
 	};
 }
 
+// Helper function to format document type labels
+const getDocumentTypeLabel = (documentType: string): string => {
+	if (documentType === "consulta_sat") {
+		return "Usuario SAT (Propietario)";
+	}
+	return documentType
+		.replace(/_/g, " ")
+		.replace(/\b\w/g, (l: string) => l.toUpperCase());
+};
+
 export function AnalysisChecklistView({
 	opportunityId,
 	onUpdate,
 }: AnalysisChecklistViewProps) {
+	const queryClient = useQueryClient();
 	const [openSections, setOpenSections] = useState({
 		documentos: true,
 		verificaciones: true,
@@ -98,15 +109,35 @@ export function AnalysisChecklistView({
 		verificationType: string,
 		completed: boolean,
 	) => {
+		const queryKey = ["getAnalysisChecklist", opportunityId];
+		const previousData = queryClient.getQueryData<Checklist>(queryKey);
+
+		// Optimistic update
+		queryClient.setQueryData<Checklist>(queryKey, (old) => {
+			if (!old) return old;
+			return {
+				...old,
+				sections: {
+					...old.sections,
+					verificaciones: {
+						...old.sections.verificaciones,
+						items: old.sections.verificaciones.items?.map((item) =>
+							item.type === verificationType ? { ...item, completed } : item,
+						),
+					},
+				},
+			};
+		});
+
 		try {
 			await client.updateAnalysisChecklistVerification({
 				opportunityId,
 				verificationType,
 				completed,
 			});
-			await refetch();
-			onUpdate?.();
 		} catch (error) {
+			// Revert on error
+			queryClient.setQueryData(queryKey, previousData);
 			console.error("Error updating verification:", error);
 		}
 	};
@@ -115,15 +146,41 @@ export function AnalysisChecklistView({
 		verificationType: string,
 		completed: boolean,
 	) => {
+		const queryKey = ["getAnalysisChecklist", opportunityId];
+		const previousData = queryClient.getQueryData<Checklist>(queryKey);
+
+		// Optimistic update
+		queryClient.setQueryData<Checklist>(queryKey, (old) => {
+			if (!old?.sections?.vehiculo?.verificaciones) return old;
+			return {
+				...old,
+				sections: {
+					...old.sections,
+					vehiculo: {
+						...old.sections.vehiculo,
+						verificaciones: {
+							completed: old.sections.vehiculo.verificaciones.completed,
+							items: old.sections.vehiculo.verificaciones.items?.map(
+								(item: ChecklistItem) =>
+									item.type === verificationType
+										? { ...item, completed }
+										: item,
+							),
+						},
+					},
+				},
+			};
+		});
+
 		try {
 			await client.updateAnalysisChecklistVehicleVerification({
 				opportunityId,
 				verificationType,
 				completed,
 			});
-			await refetch();
-			onUpdate?.();
 		} catch (error) {
+			// Revert on error
+			queryClient.setQueryData(queryKey, previousData);
 			console.error("Error updating vehicle verification:", error);
 		}
 	};
@@ -187,7 +244,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.documentos.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-										<Circle className="h-5 w-5 text-muted-foreground" />
+										<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge variant="outline">
 										{checklist.sections.documentos.items?.filter(
@@ -212,7 +269,7 @@ export function AnalysisChecklistView({
 												{item.uploaded ? (
 													<CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-600" />
 												) : (
-													<Circle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+													<MinusCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
 												)}
 												<div>
 													<p className="font-medium text-sm">
@@ -256,7 +313,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.verificaciones.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-										<Circle className="h-5 w-5 text-muted-foreground" />
+										<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge variant="outline">
 										{checklist.sections.verificaciones.items?.filter(
@@ -289,7 +346,7 @@ export function AnalysisChecklistView({
 													)
 												}
 												disabled={!item.required}
-												className="mt-1"
+												className="mt-1 cursor-pointer"
 											/>
 											<div className="flex-1">
 												<p className="font-medium text-sm">{item.name}</p>
@@ -336,7 +393,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.vehiculo.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-										<Circle className="h-5 w-5 text-muted-foreground" />
+										<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge
 										variant={
@@ -364,7 +421,7 @@ export function AnalysisChecklistView({
 											{checklist.sections.vehiculo.inspected ? (
 												<CheckCircle2 className="h-4 w-4 text-green-600" />
 											) : (
-												<Circle className="h-4 w-4 text-muted-foreground" />
+												<MinusCircle className="h-4 w-4 text-muted-foreground" />
 											)}
 											<span className="text-muted-foreground text-sm">
 												{checklist.sections.vehiculo.inspected
@@ -380,7 +437,7 @@ export function AnalysisChecklistView({
 												asChild
 											>
 												<a
-													href={`/crm/vehicles?inspectionId=${checklist.sections.vehiculo.inspectionId}`}
+													href={`/vehicles?inspectionId=${checklist.sections.vehiculo.inspectionId}`}
 													target="_blank"
 													rel="noopener noreferrer"
 												>
@@ -418,15 +475,11 @@ export function AnalysisChecklistView({
 																	{item.uploaded ? (
 																		<CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-600" />
 																	) : (
-																		<Circle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+																		<MinusCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
 																	)}
 																	<div>
 																		<p className="font-medium text-sm">
-																			{item.documentType
-																				.replace(/_/g, " ")
-																				.replace(/\b\w/g, (l: string) =>
-																					l.toUpperCase(),
-																				)}
+																			{getDocumentTypeLabel(item.documentType)}
 																		</p>
 																		{item.required && (
 																			<span className="text-muted-foreground text-xs">
@@ -484,7 +537,7 @@ export function AnalysisChecklistView({
 																		)
 																	}
 																	disabled={!item.required}
-																	className="mt-1"
+																	className="mt-1 cursor-pointer"
 																/>
 																<div className="flex-1">
 																	<p className="font-medium text-sm">

@@ -20,6 +20,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
 interface VehicleDocumentUploadProps {
@@ -36,7 +37,7 @@ const documentTypeLabels: Record<string, string> = {
 	representacion_legal_vehiculo: "Representación Legal",
 	dpi_representante_legal_vehiculo: "DPI del Representante Legal",
 	pago_impuesto_circulacion: "Comprobante de Pago Impuesto de Circulación",
-	consulta_sat: "Captura de Pantalla Consulta SAT",
+	consulta_sat: "Captura de Pantalla de Usuario de SAT",
 	consulta_garantias_mobiliarias:
 		"Certificación de Garantías Mobiliarias (RGM)",
 };
@@ -67,15 +68,9 @@ export function VehicleDocumentUpload({
 			documentType: string;
 			description?: string;
 		}) => {
-			const base64 = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onloadend = () => {
-					const result = reader.result as string;
-					const base64Data = result.split(",")[1];
-					resolve(base64Data);
-				};
-				reader.onerror = reject;
-				reader.readAsDataURL(data.file);
+			const { key } = await uploadFileToR2WithRetry(data.file, {
+				resourceType: "vehicle_document",
+				resourceId: vehicleId,
 			});
 
 			return await client.uploadVehicleDocument({
@@ -86,7 +81,7 @@ export function VehicleDocumentUpload({
 					name: data.file.name,
 					type: data.file.type,
 					size: data.file.size,
-					data: base64,
+					key,
 				},
 			});
 		},
@@ -161,7 +156,7 @@ export function VehicleDocumentUpload({
 						Subir Documento
 					</Button>
 				</DialogTrigger>
-				<DialogContent>
+				<DialogContent className="max-h-[90vh] overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Subir Documento del Vehículo</DialogTitle>
 						<DialogDescription>

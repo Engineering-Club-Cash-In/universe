@@ -3,7 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
  
 import { toast } from "sonner";
-import { type GetPaymentAgreementsFilters, getPaymentAgreements, type CreatePaymentAgreementInput, createPaymentAgreement, getCreditoByNumero } from "../services/services";
+import { 
+  type GetPaymentAgreementsFilters, 
+  getPaymentAgreements, 
+  type CreatePaymentAgreementInput, 
+  createPaymentAgreement, 
+  getCreditoByNumero,
+  togglePaymentAgreementStatus  // 🆕 Agregamos el import
+} from "../services/services";
 
 // 🎯 UN SOLO HOOK para todos los GET con filtros opcionales
 export const usePaymentAgreements = (
@@ -30,7 +37,7 @@ export const useCreatePaymentAgreement = () => {
   return useMutation({
     mutationFn: (input: CreatePaymentAgreementInput) =>
       createPaymentAgreement(input),
-    onSuccess: ( ) => {
+    onSuccess: () => {
       // Invalidar todas las queries de payment-agreements
       queryClient.invalidateQueries({ queryKey: ["payment-agreements"] });
       
@@ -41,6 +48,30 @@ export const useCreatePaymentAgreement = () => {
     },
   });
 }; 
+
+// 🆕 Hook para activar/desactivar convenio
+export const useTogglePaymentAgreementStatus = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ convenio_id, activo }: { convenio_id: number; activo: boolean }) =>
+      togglePaymentAgreementStatus(convenio_id, activo),
+    onSuccess: (_, variables) => {
+      // Invalidar todas las queries de payment-agreements
+      queryClient.invalidateQueries({ queryKey: ["payment-agreements"] });
+      
+      const mensaje = variables.activo 
+        ? "Convenio activado exitosamente" 
+        : "Convenio desactivado exitosamente";
+      
+      toast.success(mensaje);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Error al actualizar el estado del convenio");
+    },
+  });
+};
+
 export const useCreditoBySifco = (numero_credito_sifco: string) => {
   return useQuery({
     queryKey: ["credito", numero_credito_sifco],

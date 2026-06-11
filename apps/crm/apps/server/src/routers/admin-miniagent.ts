@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -24,7 +25,9 @@ export const adminMiniagentRouter = {
 		.handler(async ({ context }) => {
 			// Solo admin puede acceder
 			if (context.session.user.role !== "admin") {
-				throw new Error("No autorizado");
+				throw new ORPCError("FORBIDDEN", {
+					message: "No autorizado",
+				});
 			}
 
 			// Obtener todos los usuarios con acceso a WhatsApp (admin y sales)
@@ -66,7 +69,9 @@ export const adminMiniagentRouter = {
 		.handler(async ({ input, context }) => {
 			// Solo admin puede acceder
 			if (context.session.user.role !== "admin") {
-				throw new Error("No autorizado");
+				throw new ORPCError("FORBIDDEN", {
+					message: "No autorizado",
+				});
 			}
 
 			// Cifrar credenciales
@@ -111,7 +116,9 @@ export const adminMiniagentRouter = {
 		.handler(async ({ input, context }) => {
 			// Solo admin puede acceder
 			if (context.session.user.role !== "admin") {
-				throw new Error("No autorizado");
+				throw new ORPCError("FORBIDDEN", {
+					message: "No autorizado",
+				});
 			}
 
 			await db

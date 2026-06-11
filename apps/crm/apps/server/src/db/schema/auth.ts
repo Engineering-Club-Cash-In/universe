@@ -3,9 +3,17 @@ import { boolean, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 export const userRoleEnum = pgEnum("user_role", [
 	"admin",
 	"sales",
+	"sales_supervisor",
 	"analyst",
 	"cobros",
+	"cobros_supervisor",
 	"juridico",
+	"accounting",
+	"investment_advisor_jr",
+	"investment_advisor_sr",
+	"investment_manager",
+	"service_center_manager",
+	"vehicle_verifier",
 ]);
 
 export const user = pgTable("user", {
@@ -15,6 +23,7 @@ export const user = pgTable("user", {
 	emailVerified: boolean("email_verified").notNull(),
 	image: text("image"),
 	role: userRoleEnum("role").notNull().default("sales"),
+	assignLeads: boolean("assign_leads").notNull().default(true),
 	banned: boolean("banned").default(false),
 	banReason: text("ban_reason"),
 	banExpires: timestamp("ban_expires"),

@@ -1,24 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
 	Banknote,
 	BarChart3,
+	Bell,
 	Briefcase,
 	Building2,
 	Calculator,
 	Car,
 	ChevronDown,
+	Clock,
+	Database,
 	FileText,
 	Gavel,
 	Key,
+	Landmark,
 	LayoutDashboard,
 	MessageSquare,
+	Percent,
 	Scale,
 	Settings,
+	Target,
 	TrendingUp,
 	UserCircle,
 	Users,
 } from "lucide-react";
+import { logo } from "@/assets";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
@@ -56,9 +63,7 @@ export default function Header() {
 						to="/"
 						className="flex items-center gap-2 transition-opacity hover:opacity-80"
 					>
-						<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-							<TrendingUp className="h-5 w-5" />
-						</div>
+						<img src={logo} alt="CCI Logo" className="h-9 w-auto" />
 						<span className="hidden font-bold text-lg sm:inline-block">
 							CCI CRM
 						</span>
@@ -93,16 +98,12 @@ export default function Header() {
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
 									<Button
-										variant={
-											isActive("/crm") || isActive("/vehicles")
-												? "secondary"
-												: "ghost"
-										}
+										variant={isActive("/crm") ? "secondary" : "ghost"}
 										size="sm"
 										className="gap-1"
 									>
 										<Briefcase className="h-4 w-4" />
-										CRM
+										Ventas
 										<ChevronDown className="h-3 w-3 opacity-50" />
 									</Button>
 								</DropdownMenuTrigger>
@@ -119,12 +120,7 @@ export default function Header() {
 											Oportunidades
 										</Link>
 									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/crm/clients" className="cursor-pointer">
-											<Users className="mr-2 h-4 w-4" />
-											Clientes
-										</Link>
-									</DropdownMenuItem>
+
 									<DropdownMenuItem asChild>
 										<Link to="/crm/companies" className="cursor-pointer">
 											<Building2 className="mr-2 h-4 w-4" />
@@ -144,20 +140,94 @@ export default function Header() {
 											Cotizador
 										</Link>
 									</DropdownMenuItem>
-									<DropdownMenuSeparator />
 									{userRole && PERMISSIONS.canAccessWhatsApp(userRole) && (
-										<DropdownMenuItem asChild>
-											<Link to="/crm/whatsapp" className="cursor-pointer">
-												<MessageSquare className="mr-2 h-4 w-4" />
-												WhatsApp
-											</Link>
-										</DropdownMenuItem>
+										<>
+											<DropdownMenuSeparator />
+											<DropdownMenuItem asChild>
+												<Link to="/crm/whatsapp" className="cursor-pointer">
+													<MessageSquare className="mr-2 h-4 w-4" />
+													WhatsApp
+												</Link>
+											</DropdownMenuItem>
+										</>
 									)}
-									<DropdownMenuSeparator />
+									{userRole &&
+										PERMISSIONS.canAccessTiempoCierreReport(userRole) && (
+											<>
+												<DropdownMenuSeparator />
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/reportes/tiempo-cierre"
+														className="cursor-pointer"
+													>
+														<Clock className="mr-2 h-4 w-4" />
+														Tiempo Cierre Crédito
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
+                  {userRole &&
+										PERMISSIONS.canAccessPorcentajeEfectividadReport(
+											userRole,
+										) && (
+                    <>
+												<DropdownMenuSeparator />
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/reportes/porcentaje-efectividad"
+														className="cursor-pointer"
+													>
+														<Percent className="mr-2 h-4 w-4" />
+														Porcentaje Efectividad
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
+								</DropdownMenuContent>
+							</DropdownMenu>
+						)}
+
+						{/* Clientes */}
+						{session && userRole && PERMISSIONS.canAccessClients(userRole) && (
+							<Button
+								variant={isActive("/crm/clients") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/crm/clients">
+									<Users className="mr-2 h-4 w-4" />
+									Clientes
+								</Link>
+							</Button>
+						)}
+
+						{/* Vehículos Dropdown - Visible para todos los roles */}
+						{session && userRole && PERMISSIONS.canAccessVehicles(userRole) && (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/vehicles") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<Car className="h-4 w-4" />
+										Vehículos
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-48">
 									<DropdownMenuItem asChild>
-										<Link to="/vehicles" className="cursor-pointer">
+										<Link
+											to="/vehicles"
+											search={{
+												vehicleId: undefined,
+												inspectionId: undefined,
+												tab: undefined,
+											}}
+											className="cursor-pointer"
+										>
 											<Car className="mr-2 h-4 w-4" />
-											Vehículos
+											Inventario
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>
@@ -173,18 +243,37 @@ export default function Header() {
 							</DropdownMenu>
 						)}
 
-						{/* Cobros */}
+						{/* Cobros Dropdown */}
 						{session && userRole && PERMISSIONS.canAccessCobros(userRole) && (
-							<Button
-								variant={isActive("/cobros") ? "secondary" : "ghost"}
-								size="sm"
-								asChild
-							>
-								<Link to="/cobros">
-									<Banknote className="mr-2 h-4 w-4" />
-									Cobros
-								</Link>
-							</Button>
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/cobros") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<Banknote className="h-4 w-4" />
+										Cobros
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-48">
+									<DropdownMenuItem asChild>
+										<Link to="/cobros" className="cursor-pointer">
+											<Banknote className="mr-2 h-4 w-4" />
+											Dashboard
+										</Link>
+									</DropdownMenuItem>
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/metas" className="cursor-pointer">
+												<Target className="mr-2 h-4 w-4" />
+												Metas de Mora
+											</Link>
+										</DropdownMenuItem>
+									)}
+								</DropdownMenuContent>
+							</DropdownMenu>
 						)}
 
 						{/* Análisis */}
@@ -203,69 +292,207 @@ export default function Header() {
 
 						{/* Jurídico */}
 						{session && userRole && PERMISSIONS.canAccessJuridico(userRole) && (
-							<Button
-								variant={isActive("/juridico") ? "secondary" : "ghost"}
-								size="sm"
-								asChild
-							>
-								<Link to="/juridico">
-									<Scale className="mr-2 h-4 w-4" />
-									Jurídico
-								</Link>
-							</Button>
-						)}
-
-						{/* Admin Dropdown */}
-						{session && userRole && PERMISSIONS.canAccessAdmin(userRole) && (
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
 									<Button
-										variant={isActive("/admin") ? "secondary" : "ghost"}
+										variant={isActive("/juridico") ? "secondary" : "ghost"}
 										size="sm"
 										className="gap-1"
 									>
-										<Settings className="h-4 w-4" />
-										Admin
+										<Scale className="h-4 w-4" />
+										Jurídico
 										<ChevronDown className="h-3 w-3 opacity-50" />
 									</Button>
 								</DropdownMenuTrigger>
-								<DropdownMenuContent align="start" className="w-48">
+								<DropdownMenuContent align="start" className="w-56">
 									<DropdownMenuItem asChild>
-										<Link to="/admin/users" className="cursor-pointer">
-											<Users className="mr-2 h-4 w-4" />
-											Usuarios
+										<Link to="/juridico" className="cursor-pointer">
+											<Scale className="mr-2 h-4 w-4" />
+											Gestión jurídica
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>
-										<Link to="/crm/admin/miniagent" className="cursor-pointer">
-											<Key className="mr-2 h-4 w-4" />
-											MiniAgent
+										<Link to="/juridico/dashboard" className="cursor-pointer">
+											<LayoutDashboard className="mr-2 h-4 w-4" />
+											Dashboard
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>
-										<Link to="/admin/settings" className="cursor-pointer">
-											<Settings className="mr-2 h-4 w-4" />
-											Configuración
-										</Link>
-									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/admin/reports" className="cursor-pointer">
-											<FileText className="mr-2 h-4 w-4" />
-											Reportes
+										<Link
+											to="/juridico/dashboard-data"
+											className="cursor-pointer"
+										>
+											<Database className="mr-2 h-4 w-4" />
+											Carga de datos
 										</Link>
 									</DropdownMenuItem>
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}
+
+						{/* Inversiones */}
+						{session &&
+							userRole &&
+							PERMISSIONS.canAccessInvestments(userRole) && (
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant={isActive("/inversiones") ? "secondary" : "ghost"}
+											size="sm"
+											className="gap-1"
+										>
+											<TrendingUp className="h-4 w-4" />
+											Inversiones
+											<ChevronDown className="h-3 w-3 opacity-50" />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start" className="w-56">
+										<DropdownMenuItem asChild>
+											<Link to="/inversiones" className="cursor-pointer">
+												<Target className="mr-2 h-4 w-4" />
+												Leads
+											</Link>
+										</DropdownMenuItem>
+										<DropdownMenuItem asChild>
+											<Link
+												to="/inversiones/liquidaciones"
+												className="cursor-pointer"
+											>
+												<Landmark className="mr-2 h-4 w-4" />
+												Inversionistas
+											</Link>
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							)}
+
+						{/* Contabilidad Dropdown */}
+						{session &&
+							userRole &&
+							PERMISSIONS.canAccessAccounting(userRole) && (
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant={isActive("/accounting") ? "secondary" : "ghost"}
+											size="sm"
+											className="gap-1"
+										>
+											<Calculator className="h-4 w-4" />
+											Contabilidad
+											<ChevronDown className="h-3 w-3 opacity-50" />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start" className="w-56">
+										<DropdownMenuItem asChild>
+											<Link
+												to="/accounting/pay-investors"
+												className="cursor-pointer"
+											>
+												<Banknote className="mr-2 h-4 w-4" />
+												Pagar Inversionistas
+											</Link>
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							)}
+
+						{/* Admin Dropdown */}
+						{session &&
+							userRole &&
+							(PERMISSIONS.canAccessAdmin(userRole) ||
+								PERMISSIONS.canAccessClosedCreditsReport(userRole)) && (
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant={isActive("/admin") ? "secondary" : "ghost"}
+											size="sm"
+											className="gap-1"
+										>
+											<Settings className="h-4 w-4" />
+											Admin
+											<ChevronDown className="h-3 w-3 opacity-50" />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start" className="w-48">
+										{PERMISSIONS.canAccessAdmin(userRole) && (
+											<>
+												<DropdownMenuItem asChild>
+													<Link to="/admin/users" className="cursor-pointer">
+														<Users className="mr-2 h-4 w-4" />
+														Usuarios
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/admin/import" className="cursor-pointer">
+														<Database className="mr-2 h-4 w-4" />
+														Importación
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/admin/miniagent"
+														className="cursor-pointer"
+													>
+														<Key className="mr-2 h-4 w-4" />
+														MiniAgent
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/admin/settings" className="cursor-pointer">
+														<Settings className="mr-2 h-4 w-4" />
+														Configuración
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
+										<DropdownMenuItem asChild>
+											<Link to="/admin/reports" className="cursor-pointer">
+												<FileText className="mr-2 h-4 w-4" />
+												Reportes
+											</Link>
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							)}
 					</nav>
 				</div>
 
 				{/* Right side */}
 				<div className="ml-auto flex items-center gap-2">
+					{session && <NotificationBell />}
 					<ModeToggle />
 					<UserMenu />
 				</div>
 			</div>
 		</div>
+	);
+}
+
+function NotificationBell() {
+	const navigate = useNavigate();
+	const { data } = useQuery({
+		...orpc.getUnreadNotificationCount.queryOptions(),
+		refetchInterval: (query) => {
+			const count = query.state.data?.count ?? 0;
+			return count > 0 ? false : 40000;
+		},
+	});
+
+	const count = data?.count ?? 0;
+
+	return (
+		<Button
+			variant="ghost"
+			size="icon"
+			className="relative"
+			onClick={() => navigate({ to: "/notifications" })}
+		>
+			<Bell className="h-5 w-5" />
+			{count > 0 && (
+				<span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 font-bold text-[10px] text-white">
+					{count > 99 ? "99+" : count}
+				</span>
+			)}
+		</Button>
 	);
 }

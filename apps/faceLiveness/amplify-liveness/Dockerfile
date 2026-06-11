@@ -1,0 +1,27 @@
+# Etapa 1: Build con dependencias completas
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+RUN npm install -g bun@latest
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY . .
+RUN bun run build
+
+# Etapa 2: Servir con Nginx
+FROM nginx:alpine
+
+# Elimina default index.html
+RUN rm -rf /usr/share/nginx/html/*
+
+# Copia tu build generado
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Copia tu config de nginx (si la tienes)
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

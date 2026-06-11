@@ -238,6 +238,73 @@ describe("Investment Calculations", () => {
       // Should be around Q50,000
       expect(capital).toBeCloseTo(50000, 100);
     });
+
+    it("should support the 45/55 investor split across monthly and final payment projections", () => {
+      const fortyFiveSplitParams = {
+        ...baseParams,
+        investorPercentage: 45,
+      };
+
+      const interestOnlySchedule =
+        generateInterestOnlySchedule(fortyFiveSplitParams);
+      const monthlyProjection = interestOnlySchedule[0].payment;
+      const finalProjection =
+        interestOnlySchedule[interestOnlySchedule.length - 1].payment;
+
+      expect(monthlyProjection).toBeCloseTo(378, 2);
+      expect(finalProjection).toBeCloseTo(50378, 2);
+
+      const requiredCapitalForMonthly = calculateRequiredCapitalForMonthly(
+        monthlyProjection,
+        fortyFiveSplitParams.interestRate,
+        fortyFiveSplitParams.investorPercentage,
+        fortyFiveSplitParams.vatRate,
+      );
+
+      const requiredCapitalForFinalPayment =
+        calculateRequiredCapitalForInterestOnly(
+          finalProjection,
+          fortyFiveSplitParams.interestRate,
+          fortyFiveSplitParams.investorPercentage,
+          fortyFiveSplitParams.vatRate,
+        );
+
+      expect(requiredCapitalForMonthly).toBeCloseTo(
+        fortyFiveSplitParams.principal,
+        2,
+      );
+      expect(requiredCapitalForFinalPayment).toBeCloseTo(
+        fortyFiveSplitParams.principal,
+        100,
+      );
+    });
+
+    it("should support manual 80/20 investor split projections", () => {
+      const eightySplitParams = {
+        ...baseParams,
+        investorPercentage: 80,
+      };
+
+      const interestOnlySchedule = generateInterestOnlySchedule(eightySplitParams);
+      const monthlyProjection = interestOnlySchedule[0].payment;
+      const finalProjection =
+        interestOnlySchedule[interestOnlySchedule.length - 1].payment;
+
+      expect(monthlyProjection).toBeCloseTo(672, 2);
+      expect(finalProjection).toBeCloseTo(50672, 2);
+
+      const requiredCapitalForMonthly = calculateRequiredCapitalForMonthly(
+        monthlyProjection,
+        eightySplitParams.interestRate,
+        eightySplitParams.investorPercentage,
+        eightySplitParams.vatRate,
+      );
+
+      expect(requiredCapitalForMonthly).toBeCloseTo(
+        eightySplitParams.principal,
+        2,
+      );
+    });
   });
 
   describe("Edge Cases", () => {

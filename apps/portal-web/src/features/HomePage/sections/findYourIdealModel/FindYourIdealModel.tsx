@@ -5,16 +5,8 @@ import BMW from "./assets/BMW.svg";
 import Mercedes from "./assets/Mercedes.svg";
 import Volkswagen from "./assets/Volkswagen.svg";
 import Ford from "./assets/Ford.svg";
-import { Button } from "@components/ui";
 import { IconLeftArrow, IconRightArrow } from "@components/icons";
-
-const carBrands = [
-  { name: "Audi", image: Audi, width: 300, height: 175 },
-  { name: "BMW", image: BMW, width: 175, height: 175 },
-  { name: "Mercedes", image: Mercedes, width: 275, height: 175 },
-  { name: "Volkswagen", image: Volkswagen, width: 175, height: 175 },
-  { name: "Ford", image: Ford, width: 500, height: 175 },
-];
+import { useIsMobile } from "@/hooks";
 
 export const FindYourIdealModel: React.FC = () => {
   const [currentIndex, setCurrentIndex] = React.useState(0);
@@ -24,6 +16,15 @@ export const FindYourIdealModel: React.FC = () => {
   const pauseTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  const isMobile = useIsMobile();
+
+  const carBrands = [
+    { name: "Audi", image: Audi, width: 300, height: 175 },
+    { name: "BMW", image: BMW, width: 175, height: 175 },
+    { name: "Mercedes", image: Mercedes, width: 275, height: 175 },
+    { name: "Volkswagen", image: Volkswagen, width: 175, height: 175 },
+    { name: "Ford", image: Ford, width: 500, height: 175 },
+  ];
 
   // Función para avanzar automáticamente
   const autoAdvance = React.useCallback(() => {
@@ -88,12 +89,14 @@ export const FindYourIdealModel: React.FC = () => {
   }, []);
 
   return (
-    <section className="text-center w-full mt-44 overflow-hidden py-2">
+    <section className="text-center w-full mt-10 lg:mt-26 overflow-hidden py-2 px-6 xl:px-0  lg:max-w-360 lg:mx-auto">
       <div>
-        <h2 className="text-header-2 mb-24">Encuentra tu modelo ideal</h2>
+        <h2 className="text-2xl lg:text-header-2  lg:mb-24">
+          Encuentra la marca ideal
+        </h2>
       </div>
 
-      <div className="relative w-full mt-16">
+      <div className="relative w-full  lg:mt-16">
         {/* Carousel Container */}
         <div className="relative w-full flex items-center justify-center overflow-visible">
           <div className="grid grid-cols-3 w-full gap-8 ">
@@ -164,7 +167,7 @@ export const FindYourIdealModel: React.FC = () => {
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
             aria-label="Previous brand"
           >
-            <IconLeftArrow />
+            <IconLeftArrow {...(isMobile ? { width: 12, height: 16 } : {})} />
           </motion.button>
 
           {/* Right Arrow - Over right image */}
@@ -176,13 +179,9 @@ export const FindYourIdealModel: React.FC = () => {
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
             aria-label="Next brand"
           >
-            <IconRightArrow />
+            <IconRightArrow {...(isMobile ? { width: 12, height: 16 } : {})} />
           </motion.button>
         </div>
-      </div>
-
-      <div className="mt-24 flex justify-center">
-        <Button size="lg">Ver Marketplace</Button>
       </div>
     </section>
   );

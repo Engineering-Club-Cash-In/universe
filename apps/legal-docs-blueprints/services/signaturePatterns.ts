@@ -113,6 +113,142 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     pattern: 'F)_______________________________________',
     signerCount: 1,
     signers: ['Cliente']
+  },
+
+  [ContractType.ACUERDO_INVERSION_CASH_IN]: {
+    pattern: 'F_________________________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL]: {
+    pattern: 'Firma: ____________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION]: {
+    pattern: 'Firma: __________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CESION_CREDITOS]: {
+    pattern: '________________________________',
+    signerCount: 1,
+    signers: ['Cedente']
+  },
+
+  [ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA]: {
+    pattern: 'Firma: _________________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_INCREMENTO_INVERSION]: {
+    pattern: 'Firma: __________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO]: {
+    pattern: 'Firma: ____________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL]: {
+    pattern: 'f) __________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.DESIGNACION_BENEFICIARIO]: {
+    pattern: 'Firma: __________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  // ===== INVERSIONES SOCIEDAD =====
+  // Mismos patrones de firma que sus equivalentes de inversiones individuales
+  [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {
+    pattern: 'F_________________________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD]: {
+    pattern: 'Firma: ____________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD]: {
+    pattern: 'Firma: __________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD]: {
+    pattern: 'Firma: _________________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_INCREMENTO_INVERSION_SOCIEDAD]: {
+    pattern: 'Firma: __________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD]: {
+    pattern: 'Firma: ____________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CESION_CREDITOS_SOCIEDAD]: {
+    pattern: '________________________________',
+    signerCount: 1,
+    signers: ['Cedente']
+  },
+
+  [ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD]: {
+    pattern: 'f) __________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD]: {
+    pattern: 'Firma: __________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  // ===== CARTA PODER =====
+  // Todas las cartas de poder usan el mismo patrón: F.___________________________ (29 underscores)
+  [ContractType.CARTA_CUBE_ANDRES]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_CUBE_DON_ALEX]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_RDBE_DON_ALEX]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_RDBE_RICHARD]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
   }
 };
 

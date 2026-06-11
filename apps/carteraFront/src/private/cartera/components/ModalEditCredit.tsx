@@ -7,32 +7,41 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFormik } from "formik";
-import { Plus, Trash2 } from "lucide-react";
+import { Fragment, useRef, useState, useMemo } from "react";
+import { Combobox, Transition } from "@headlessui/react";
+import { ChevronsUpDown, Check } from "lucide-react";
+import { toast } from "sonner";
 import { useUpdateCredit } from "../hooks/updateCredit";
+import { useRecalculateQuota } from "../hooks/recalculateQuota";
 import type {
   InversionistaPayload,
   UpdateCreditBody,
 } from "../services/services";
+import { updateSaldoReinversionService } from "../services/services";
+import { InvestorsList } from "./InvestorsList";
 
 // Tipos locales
 interface InvestorItem extends InversionistaPayload {}
 interface InvestorOption {
   inversionista_id: number;
   nombre: string;
+  saldo_reinversion?: string | null;
 }
 
 interface ModalEditCreditProps {
   open: boolean;
   onClose: () => void;
-  initialValues: Omit<UpdateCreditBody, "inversionistas">;
+  initialValues: Omit<UpdateCreditBody, "inversionistas"> | null;
   investorsInitial?: InvestorItem[];
+  investorsMirrorInitial?: InvestorItem[]; // 🆕 Nueva prop para datos iniciales espejo
   onSuccess: () => void;
   investorsOptions: InvestorOption[];
-  advisorsOptions: { asesor_id: number; nombre: string }[]; // ✅ NUEVO
+  advisorsOptions: { asesor_id: number; nombre: string }[];
 }
 
 const creditFields = [
@@ -44,9 +53,10 @@ const creditFields = [
   "asesor_id",
   "cuota",
   "numero_credito_sifco",
-  "otros", // nuevo campo
-  "seguro_10_cuotas", // nuevo campo
-  "membresias_pago", // nuevo campo
+  "otros",
+  "seguro_10_cuotas",
+  "membresias_pago",
+  "formato_credito",
 ] as const;
 
 type CreditField = (typeof creditFields)[number];
@@ -62,54 +72,156 @@ const fieldLabels: Record<CreditField, string> = {
   seguro_10_cuotas: "Seguro 10 cuotas",
   membresias_pago: "Membresías pago",
   asesor_id: "Asesor",
+  formato_credito: "Formato Crédito",
 };
+
+const userFields = [
+  "nombre",
+  "nit",
+  "direccion",
+  "saldo_a_favor",
+] as const;
+
+type UserField = (typeof userFields)[number];
+const userFieldLabels: Record<UserField, string> = {
+  nombre: "Nombre",
+  nit: "NIT",
+  direccion: "Dirección",
+  saldo_a_favor: "Saldo a Favor (Q)",
+};
+
 export function ModalEditCredit({
   open,
   onClose,
   initialValues,
   investorsInitial,
+  investorsMirrorInitial,
   onSuccess,
   investorsOptions,
-  advisorsOptions
-
+  advisorsOptions,
 }: ModalEditCreditProps) {
   const { mutate: updateCredit, isPending } = useUpdateCredit();
+  const { mutate: recalculateQuota, isPending: isRecalculating } =
+    useRecalculateQuota();
 
-  // Preparamos los valores iniciales de inversionistas asegurando que siempre tienen todos los campos necesarios
-  const parsedInvestors =
-    investorsInitial?.map((inv) => ({
+  // Ref para acumular los cambios de saldo reinversion desde InvestorsList
+  const saldoChangesRef = useRef<Record<number, number>>({});
+  const [nuevaCuota, setNuevaCuota] = useState<number | null>(null);
+  const [nuevasCuotasInvestors, setNuevasCuotasInvestors] = useState<Record<number, number>>({});
+  const [nuevasCuotasInvestorsMirror, setNuevasCuotasInvestorsMirror] = useState<Record<number, number>>({});
+  const [asesorQuery, setAsesorQuery] = useState("");
+
+  const filteredAdvisors = useMemo(
+    () =>
+      asesorQuery === ""
+        ? advisorsOptions
+        : advisorsOptions.filter((a) =>
+            a.nombre.toLowerCase().includes(asesorQuery.toLowerCase())
+          ),
+    [advisorsOptions, asesorQuery]
+  );
+
+  const parseParticipantDate = (dateString?: string | Date | null) => {
+    return dateString ? new Date(dateString).toISOString().split('T')[0] : "2025-12-01";
+  };
+
+  // Preparamos los valores iniciales
+  const parseInvestors = (list?: InvestorItem[]) =>
+    list?.map((inv) => ({
       inversionista_id: Number(inv.inversionista_id),
       monto_aportado: Number(inv.monto_aportado),
       porcentaje_cash_in: Number(inv.porcentaje_cash_in),
       porcentaje_inversion: Number(inv.porcentaje_inversion),
-      cuota_inversionista: Number(inv.cuota_inversionista ?? 0), // NUEVO
+      fecha_inicio_participacion: parseParticipantDate(inv.fecha_inicio_participacion),
+      cuota_inversionista: Number(inv.cuota_inversionista || 0),
     })) || [];
+
+  const safeInitialValues =
+    (initialValues ?? {}) as Omit<UpdateCreditBody, "inversionistas">;
+
+  const parsedInvestors = parseInvestors(investorsInitial);
+  // 🔥 Sincronización Real (Por ID de Inversionista)
+  // Buscamos explícitamente el espejo que corresponda al mismo ID de inversionista.
+  const parsedInvestorsMirror = parsedInvestors.map((inv) => {
+    const mirrorItem = investorsMirrorInitial?.find(
+      (m) => Number(m.inversionista_id) === Number(inv.inversionista_id)
+    );
+
+    if (mirrorItem) {
+      // El espejo está sincronizado con el padre: usar los valores ACTUALES del principal
+      // para monto_aportado, cuota y porcentajes. Solo confirmamos que el espejo existe.
+      return {
+        inversionista_id: Number(mirrorItem.inversionista_id),
+        monto_aportado: Number(mirrorItem.monto_aportado),
+        porcentaje_cash_in: Number(mirrorItem.porcentaje_cash_in),
+        porcentaje_inversion: Number(mirrorItem.porcentaje_inversion),
+        fecha_inicio_participacion: parseParticipantDate(mirrorItem.fecha_inicio_participacion),
+        cuota_inversionista: Number(mirrorItem.cuota_inversionista || 0),
+      };
+    }
+    // Si no hay espejo para ese inversionista en DB, sincronizar desde el principal
+    return {
+      inversionista_id: inv.inversionista_id,
+      monto_aportado: inv.monto_aportado,
+      porcentaje_cash_in: inv.porcentaje_cash_in,
+      porcentaje_inversion: inv.porcentaje_inversion,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
+      cuota_inversionista: inv.cuota_inversionista,
+    };
+  });
 
   const formik = useFormik({
     initialValues: {
-      ...initialValues,
+      ...safeInitialValues,
+      estado_devolucion: safeInitialValues.estado_devolucion ?? "NO_APLICA",
+      motivo_devolucion: "",
       investors: parsedInvestors,
+      investorsMirror: parsedInvestorsMirror, // 🆕 Campo para espejo
     },
     enableReinitialize: true,
+    // validate: (values) => {
+    //   const errors: any = {};
+    //   const capital = Number(values.capital || 0);
+
+    //   // 🔥 VALIDACIÓN 1: Inversionistas Principales
+    //   if (values.investors.length > 0) {
+    //     const sumaMontos = values.investors.reduce(
+    //       (sum, inv) => sum + Number(inv.monto_aportado || 0),
+    //       0
+    //     );
+
+    //     if (Math.abs(sumaMontos - capital) > 0.01) {
+    //       errors.investors = `La suma de montos aportados (Q${sumaMontos.toFixed(
+    //         2
+    //       )}) debe ser igual al capital (Q${capital.toFixed(2)})`;
+    //     }
+    //   }
+
+    //   return errors;
+    // },
     onSubmit: (values) => {
       if (Object.keys(formik.errors).length > 0) {
-        window.alert(
-          "Por favor corrige los siguientes errores:\n\n" +
-            Object.entries(formik.errors)
-              .map(([field, error]) =>
-                Array.isArray(error)
-                  ? error.map((e) => `- ${field}: ${e}`).join("\n")
-                  : `- ${field}: ${error}`
-              )
-              .join("\n")
-        );
+        Object.entries(formik.errors).forEach(([, error]) => {
+          if (Array.isArray(error)) {
+            error.forEach((e) => toast.error(String(e)));
+          } else {
+            toast.error(String(error));
+          }
+        });
         return;
       }
+
+      // Filtrar espejo vacíos antes de enviar
+      const espejoFinal = values.investorsMirror.filter(
+        (inv) => Number(inv.monto_aportado) > 0 || Number(inv.inversionista_id) > 0
+      );
+
       const payload: UpdateCreditBody = {
         // Asegúrate que cada campo numérico va como Number:
         capital: Number(values.capital),
         porcentaje_interes: Number(values.porcentaje_interes),
         plazo: Number(values.plazo),
+        asesor_id: Number(values.asesor_id) || undefined,
 
         observaciones: values.observaciones ?? "",
         mora: Number(values.mora ?? 0),
@@ -124,16 +236,68 @@ export function ModalEditCredit({
         seguro_10_cuotas: Number(values.seguro_10_cuotas ?? 0),
         membresias_pago: Number(values.membresias_pago ?? 0),
 
+        // Campos de usuario
+        nombre: values.nombre ?? undefined,
+        nit: values.nit ?? undefined,
+        direccion: values.direccion ?? undefined,
+        saldo_a_favor:
+          values.saldo_a_favor !== undefined && values.saldo_a_favor !== null
+            ? Number(values.saldo_a_favor)
+            : undefined,
+
+        // Formato de crédito
+        formato_credito: values.formato_credito ?? undefined,
+
+        // Abono capital
+        permite_abono_capital: !!values.permite_abono_capital,
+        // Crédito solo-interés (no amortiza capital en la cuota)
+        no_amortiza_capital: !!values.no_amortiza_capital,
+        estado_devolucion: values.estado_devolucion,
+        motivo_devolucion:
+          values.estado_devolucion === "PENDIENTE_AUTORIZACION"
+            ? values.motivo_devolucion?.trim() || ""
+            : undefined,
+
+        // Lista Principal
         inversionistas: values.investors.map((i: InvestorItem) => ({
           inversionista_id: Number(i.inversionista_id),
           monto_aportado: Number(i.monto_aportado),
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
-          cuota_inversionista: Number(i.cuota_inversionista ?? 0),
+          fecha_inicio_participacion: i.fecha_inicio_participacion,
+          cuota_inversionista: Number(i.cuota_inversionista || 0),
+        })),
+
+        // Lista Espejo
+        inversionistas_espejo: espejoFinal.map((i: InvestorItem) => ({
+          inversionista_id: Number(i.inversionista_id),
+          monto_aportado: Number(i.monto_aportado),
+          porcentaje_cash_in: Number(i.porcentaje_cash_in),
+          porcentaje_inversion: Number(i.porcentaje_inversion),
+          fecha_inicio_participacion: i.fecha_inicio_participacion,
+          cuota_inversionista: Number(i.cuota_inversionista || 0),
         })),
       };
       updateCredit(payload, {
-        onSuccess: () => {
+        onSuccess: async () => {
+          // Persistir cambios de saldo reinversion
+          const changes = saldoChangesRef.current;
+          const ids = Object.keys(changes);
+          if (ids.length > 0) {
+            try {
+              await Promise.all(
+                ids.map((id) =>
+                  updateSaldoReinversionService({
+                    inversionista_id: Number(id),
+                    saldo_reinversion: changes[Number(id)],
+                  })
+                )
+              );
+              toast.success("Saldos de reinversion actualizados");
+            } catch {
+              toast.error("Error actualizando saldos de reinversion");
+            }
+          }
           onSuccess();
           onClose();
         },
@@ -141,33 +305,16 @@ export function ModalEditCredit({
           const mensaje =
             error?.response?.data?.message ||
             "Ocurrió un error inesperado al guardar los cambios.";
-          window.alert("Error en el guardado:\n\n" + mensaje);
+          toast.error(mensaje);
         },
       });
     },
   });
 
-  const addInvestor = () => {
-    formik.setFieldValue("investors", [
-      ...formik.values.investors,
-      {
-        inversionista_id: 0,
-        monto_aportado: 0,
-        porcentaje_cash_in: 0,
-        porcentaje_inversion: 0,
-      },
-    ]);
-  };
-
-  const removeInvestor = (index: number) => {
-    const updated = [...formik.values.investors];
-    updated.splice(index, 1);
-    formik.setFieldValue("investors", updated);
-  };
-
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
+        onInteractOutside={(e) => e.preventDefault()}
         className="max-w-3xl w-full bg-white text-gray-800 shadow-2xl border border-blue-100 p-0"
         style={{
           maxHeight: "94vh",
@@ -176,17 +323,89 @@ export function ModalEditCredit({
         }}
       >
         {/* Cabecera */}
-        <DialogHeader className="sticky top-0 bg-white z-10 px-6 pt-6 pb-2 border-b border-blue-100">
+        <DialogHeader className="sticky top-0 bg-white z-10 px-6 pt-6 pb-2 border-b border-blue-100 flex flex-row items-center justify-between">
           <DialogTitle className="text-blue-700 font-bold text-xl">
             Editar Crédito e Inversionistas
           </DialogTitle>
         </DialogHeader>
 
-        {/* Scrollable content */}
+        {/* Scrollable content container */}
         <div
           className="flex-1 overflow-y-auto px-6 pb-4"
-          style={{ maxHeight: "66vh", minHeight: 0 }}
+          style={{ maxHeight: "75vh" }}
         >
+          <Button
+            type="button"
+            disabled={
+              isRecalculating || !initialValues?.numero_credito_sifco
+            }
+            className="w-full my-4 bg-green-600 text-white font-bold hover:bg-green-700"
+            onClick={() => {
+              const sifco = String(
+                initialValues?.numero_credito_sifco ?? ""
+              );
+              if (!sifco) return;
+              recalculateQuota(
+                { numero_credito_sifco: sifco },
+                {
+                  onSuccess: (data: any) => {
+                    console.log("Recalculate response:", data);
+                    const payload = data?.data ?? data?.result ?? data;
+                    const raw = payload?.cuota ?? payload?.nueva_cuota ?? payload?.newQuota;
+                    const cuotaRecalculada = Number(Number(raw || 0).toFixed(2));
+                    if (cuotaRecalculada > 0) {
+                      setNuevaCuota(cuotaRecalculada);
+                      formik.setFieldValue("cuota", cuotaRecalculada);
+                    } else {
+                      const currentCuota = Number(formik.values.cuota || 0);
+                      if (currentCuota > 0) {
+                        setNuevaCuota(currentCuota);
+                      }
+                    }
+
+                    const mergeCuota = (
+                      list: typeof formik.values.investors,
+                      incoming: any[] | undefined
+                    ) => {
+                      const highlights: Record<number, number> = {};
+                      const merged = list.map((inv) => {
+                        const match = incoming?.find(
+                          (i) => Number(i.inversionista_id) === Number(inv.inversionista_id)
+                        );
+                        if (!match) return inv;
+                        const nueva = Number(Number(match.cuota_inversionista || 0).toFixed(2));
+                        if (Math.abs(nueva - Number(inv.cuota_inversionista || 0)) > 0.005) {
+                          highlights[Number(inv.inversionista_id)] = nueva;
+                        }
+                        return { ...inv, cuota_inversionista: nueva };
+                      });
+                      return { merged, highlights };
+                    };
+
+                    if (Array.isArray(payload?.inversionistas)) {
+                      const { merged, highlights } = mergeCuota(
+                        formik.values.investors,
+                        payload.inversionistas
+                      );
+                      formik.setFieldValue("investors", merged);
+                      setNuevasCuotasInvestors(highlights);
+                    }
+                    if (Array.isArray(payload?.inversionistas_espejo)) {
+                      const { merged, highlights } = mergeCuota(
+                        formik.values.investorsMirror,
+                        payload.inversionistas_espejo
+                      );
+                      formik.setFieldValue("investorsMirror", merged);
+                      setNuevasCuotasInvestorsMirror(highlights);
+                    }
+                  },
+                }
+              );
+            }}
+          >
+            {isRecalculating ? "Recalculando..." : "Recalcular Cuota"}
+          </Button>
+
           <form
             onSubmit={formik.handleSubmit}
             className="flex flex-col"
@@ -199,187 +418,352 @@ export function ModalEditCredit({
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {creditFields.map((name) => {
-  // ✅ Renderizado especial para asesor_id como select
-  if (name === "asesor_id") {
-    return (
-      <div key={name} className="flex flex-col gap-1">
-        <Label className="text-gray-700 font-medium">
-          {fieldLabels[name]}
-        </Label>
-        <select
-          name={name}
-          value={formik.values[name] ?? ""}
-          onChange={formik.handleChange}
-          className="w-full border rounded-lg px-3 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10"
-        >
-          <option value="">Seleccione un asesor</option>
-          {advisorsOptions.map((adv) => (
-            <option key={adv.asesor_id} value={adv.asesor_id}>
-              {adv.nombre}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  }
+                  if (name === "asesor_id") {
+                    return (
+                      <div key={name} className="flex flex-col gap-1">
+                        <Label className="text-gray-700 font-medium">
+                          {fieldLabels[name]}
+                        </Label>
+                        <Combobox
+                          value={formik.values[name] as any ?? ""}
+                          onChange={(value: any) => {
+                            formik.setFieldValue(name, Number(value));
+                            setAsesorQuery("");
+                          }}
+                        >
+                          <div className="relative">
+                            <div className="relative w-full">
+                              <Combobox.Input
+                                className="w-full border rounded-lg pl-3 pr-10 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10 font-medium focus:ring-2 focus:ring-blue-400 focus:border-blue-500 focus:outline-none placeholder:text-gray-400 transition-all"
+                                displayValue={(id: any) =>
+                                  id === ""
+                                    ? ""
+                                    : advisorsOptions.find((a) => a.asesor_id === Number(id))?.nombre || ""
+                                }
+                                onChange={(e) => setAsesorQuery(e.target.value)}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="Buscar asesor..."
+                              />
+                              <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-3">
+                                <ChevronsUpDown className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors" />
+                              </Combobox.Button>
+                            </div>
+                            <Transition
+                              as={Fragment as any}
+                              leave="transition ease-in duration-100"
+                              leaveFrom="opacity-100"
+                              leaveTo="opacity-0"
+                              afterLeave={() => setAsesorQuery("")}
+                            >
+                              <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
+                                {filteredAdvisors.length === 0 && asesorQuery !== "" ? (
+                                  <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
+                                    No se encontró asesor
+                                  </div>
+                                ) : (
+                                  filteredAdvisors.map((adv) => (
+                                    <Combobox.Option
+                                      key={adv.asesor_id}
+                                      value={adv.asesor_id}
+                                      className={({ active, selected }) =>
+                                        `relative cursor-pointer select-none py-2.5 pl-10 pr-4 transition-colors ${
+                                          active
+                                            ? "bg-blue-50 text-blue-900"
+                                            : selected
+                                              ? "bg-blue-50 text-blue-900"
+                                              : "bg-white text-gray-700 hover:bg-gray-50"
+                                        }`
+                                      }
+                                    >
+                                      {({ selected }) => (
+                                        <>
+                                          <span className={`block truncate ${selected ? "font-bold" : "font-medium"}`}>
+                                            {adv.nombre}
+                                          </span>
+                                          {selected && (
+                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
+                                              <Check className="h-5 w-5" />
+                                            </span>
+                                          )}
+                                        </>
+                                      )}
+                                    </Combobox.Option>
+                                  ))
+                                )}
+                              </Combobox.Options>
+                            </Transition>
+                          </div>
+                        </Combobox>
+                      </div>
+                    );
+                  }
 
-  // ✅ Renderizado normal para los demás campos
-  return (
-    <div key={name} className="flex flex-col gap-1">
-      <Label className="text-gray-700 font-medium">
-        {fieldLabels[name]}
-      </Label>
-      <Input
-        type={
-          [
-            "observaciones",
-            "no_poliza",
-            "numero_credito_sifco",
-          ].includes(name)
-            ? "text"
-            : "number"
-        }
-        name={name}
-        value={formik.values[name] ?? ""}
-        onChange={formik.handleChange}
-        className="bg-blue-50 border-blue-200 text-gray-800"
-        min={
-          [
-            "observaciones",
-            "no_poliza",
-            "numero_credito_sifco",
-          ].includes(name)
-            ? undefined
-            : 0
-        }
-        step="any"
-      />
-    </div>
-  );
-})}
+                  if (name === "formato_credito") {
+                    return (
+                      <div key={name} className="flex flex-col gap-1">
+                        <Label className="text-gray-700 font-medium">
+                          {fieldLabels[name]}
+                        </Label>
+                        <select
+                          name={name}
+                          value={formik.values[name] ?? ""}
+                          onChange={formik.handleChange}
+                          className="w-full border rounded-lg px-3 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10"
+                        >
+                          <option value="">Seleccione formato</option>
+                          <option value="Pool">Pool</option>
+                          <option value="Individual">Individual</option>
+                        </select>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={name} className="flex flex-col gap-1">
+                      <Label className="text-gray-700 font-medium">
+                        {fieldLabels[name]}
+                      </Label>
+                      <Input
+                        type={
+                          [
+                            "observaciones",
+                            "no_poliza",
+                            "numero_credito_sifco",
+                            "formato_credito",
+                          ].includes(name)
+                            ? "text"
+                            : "number"
+                        }
+                        name={name}
+                        value={formik.values[name] ?? ""}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => { formik.handleChange(e); if (name === "cuota") setNuevaCuota(null); }}
+                        onBlur={(e) => {
+                          formik.handleBlur(e);
+                          if (!["observaciones", "no_poliza", "numero_credito_sifco", "formato_credito"].includes(name)) {
+                            const val = Number(e.target.value);
+                            formik.setFieldValue(name, Number(val.toFixed(2)));
+                          }
+                        }}
+                        className={`border-blue-200 text-gray-800 ${name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
+                        min={
+                          [
+                            "observaciones",
+                            "no_poliza",
+                            "numero_credito_sifco",
+                            "formato_credito",
+                          ].includes(name)
+                            ? undefined
+                            : 0
+                        }
+                        step="any"
+                      />
+                      {name === "cuota" && nuevaCuota !== null && (
+                        <span className="text-xs font-semibold text-green-600 mt-1 flex items-center gap-1">
+                          Nueva cuota recalculada: Q{nuevaCuota.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Inversionistas con scroll interno */}
-            <div className="space-y-4 mt-4">
-              <h3 className="text-lg font-bold text-blue-800 mb-2">
-                Inversionistas Asociados
-              </h3>
-              {formik.values.investors.length === 0 && (
-                <div className="text-sm text-gray-500 mb-2">
-                  No hay inversionistas agregados.
+            {/* Opciones del crédito */}
+            <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Permite Abono a Capital
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Si está activo, el cliente puede abonar a capital aunque tenga cuotas atrasadas
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!formik.values.permite_abono_capital}
+                  onClick={() =>
+                    formik.setFieldValue(
+                      "permite_abono_capital",
+                      !formik.values.permite_abono_capital
+                    )
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.permite_abono_capital
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.permite_abono_capital
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Crédito solo interés (no amortiza capital)
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Si está activo, la cuota cubre solo interés, IVA, seguro, GPS y membresía. El capital se paga por abonos o pago final.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!formik.values.no_amortiza_capital}
+                  onClick={() =>
+                    formik.setFieldValue(
+                      "no_amortiza_capital",
+                      !formik.values.no_amortiza_capital
+                    )
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.no_amortiza_capital
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.no_amortiza_capital
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Solicitar devolución de crédito
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Activar para solicitar devolución del crédito a Cube Investments. Requiere motivo.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'}
+                  onClick={() => {
+                    if (formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION') {
+                      formik.setFieldValue('estado_devolucion', 'NO_APLICA');
+                      formik.setFieldValue('motivo_devolucion', '');
+                    } else {
+                      formik.setFieldValue('estado_devolucion', 'PENDIENTE_AUTORIZACION');
+                    }
+                  }}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+              {formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION' && (
+                <div className="mt-2">
+                  <Label className="text-gray-700 font-medium">Motivo de devolución *</Label>
+                  <Input
+                    type="text"
+                    name="motivo_devolucion"
+                    value={formik.values.motivo_devolucion || ''}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    placeholder="Explique el motivo de la solicitud de devolución"
+                    className={formik.touched.motivo_devolucion && formik.errors.motivo_devolucion ? 'border-red-500' : ''}
+                    required
+                  />
+                  {formik.touched.motivo_devolucion && formik.errors.motivo_devolucion && (
+                    <p className="text-red-500 text-xs mt-1">{formik.errors.motivo_devolucion}</p>
+                  )}
                 </div>
               )}
-              {formik.values.investors.map((inv, index) => (
-                <div
-                  key={index}
-                  className="border rounded-xl p-4 bg-blue-50 flex flex-col gap-2"
-                >
-                  <div className="flex flex-wrap gap-4 items-center">
-                    <div className="flex-1 min-w-[160px]">
-                      <Label>Inversionista</Label>
-                      <select
-                        name={`investors.${index}.inversionista_id`}
-                        value={inv.inversionista_id}
-                        onChange={formik.handleChange}
-                        className="w-full border rounded px-3 py-2 bg-white"
-                      >
-                        <option value={0}>Seleccione un inversionista</option>
-                        {investorsOptions.map((opt) => (
-                          <option
-                            key={opt.inversionista_id}
-                            value={opt.inversionista_id}
-                          >
-                            {opt.nombre}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="w-36 min-w-[120px]">
-                      <Label>Monto Aportado</Label>
-                      <Input
-                        type="number"
-                        name={`investors.${index}.monto_aportado`}
-                        value={inv.monto_aportado}
-                        onChange={formik.handleChange}
-                      />
-                    </div>
-                    <div className="w-36 min-w-[120px]">
-                      <Label>Cash In (%)</Label>
-                      <Input
-                        type="number"
-                        name={`investors.${index}.porcentaje_cash_in`}
-                        value={inv.porcentaje_cash_in}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          formik.setFieldValue(
-                            `investors.${index}.porcentaje_cash_in`,
-                            val
-                          );
-                          formik.setFieldValue(
-                            `investors.${index}.porcentaje_inversion`,
-                            100 - val
-                          );
-                        }}
-                        min={0}
-                        max={100}
-                      />
-                    </div>
-                    <div className="w-36 min-w-[120px]">
-                      <Label>Inversión (%)</Label>
-                      <Input
-                        type="number"
-                        name={`investors.${index}.porcentaje_inversion`}
-                        value={inv.porcentaje_inversion}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          formik.setFieldValue(
-                            `investors.${index}.porcentaje_inversion`,
-                            val
-                          );
-                          formik.setFieldValue(
-                            `investors.${index}.porcentaje_cash_in`,
-                            100 - val
-                          );
-                        }}
-                        min={0}
-                        max={100}
-                      />
-                    </div>
-                    <div className="w-36 min-w-[120px]">
-                      <Label>Cuota Inversionista</Label>
-                      <Input
-                        type="number"
-                        name={`investors.${index}.cuota_inversionista`}
-                        value={inv.cuota_inversionista ?? ""}
-                        onChange={formik.handleChange}
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-10 mt-6 border-red-500 text-red-600 hover:bg-red-50"
-                      onClick={() => removeInvestor(index)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              <Button
-                type="button"
-                onClick={addInvestor}
-                variant="outline"
-                className="w-full border-blue-500 text-blue-700 hover:bg-blue-50 flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Agregar Inversionista
-              </Button>
             </div>
+
+            {/* Datos del usuario */}
+            <div className="space-y-4 mt-4">
+              <h3 className="text-lg font-bold text-blue-800 mb-2">
+                Datos del Usuario
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {userFields.map((name) => (
+                  <div key={name} className="flex flex-col gap-1">
+                    <Label className="text-gray-700 font-medium">
+                      {userFieldLabels[name]}
+                    </Label>
+                    <Input
+                      type={name === "saldo_a_favor" ? "number" : "text"}
+                      name={name}
+                      value={formik.values[name] ?? ""}
+                      onFocus={(e) => e.target.select()}
+                      onChange={formik.handleChange}
+                      onBlur={(e) => {
+                        formik.handleBlur(e);
+                        if (name === "saldo_a_favor") {
+                          const val = Number(e.target.value);
+                          formik.setFieldValue(name, Number(val.toFixed(2)));
+                        }
+                      }}
+                      className="bg-blue-50 border-blue-200 text-gray-800"
+                      min={name === "saldo_a_favor" ? 0 : undefined}
+                      step="any"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 🔥 LISTA UNIFICADA DE INVERSIONISTAS (CON ESPEJO INTEGRADO) */}
+            <InvestorsList
+              investors={formik.values.investors}
+              investorsMirror={formik.values.investorsMirror} // Pasamos los espejos
+              investorsOptions={investorsOptions}
+              formik={formik}
+              fieldName="investors" // Base name, el componente manejará el espejo internamente
+              labelTitle="Inversionistas Asociados"
+              errorMessage={formik.errors.investors as string}
+              errorMessageMirror={formik.errors.investorsMirror as string}
+              onSaldoChanges={(changes) => { saldoChangesRef.current = changes; }}
+              recalculatedQuotas={nuevasCuotasInvestors}
+              recalculatedQuotasMirror={nuevasCuotasInvestorsMirror}
+              onClearRecalculatedQuota={(invId, isMirror) => {
+                if (isMirror) {
+                  setNuevasCuotasInvestorsMirror((prev) => {
+                    const next = { ...prev };
+                    delete next[invId];
+                    return next;
+                  });
+                } else {
+                  setNuevasCuotasInvestors((prev) => {
+                    const next = { ...prev };
+                    delete next[invId];
+                    return next;
+                  });
+                }
+              }}
+            />
           </form>
         </div>
+
         {/* FOOTER FIJO */}
-        <DialogFooter className="mt-auto px-6 pt-2 pb-4 flex gap-4 justify-between border-t border-blue-100">
+        <DialogFooter className="mt-auto px-6 pt-2 pb-4 flex gap-4 justify-between border-t border-blue-100 bg-white">
           <Button
             variant="outline"
             type="button"

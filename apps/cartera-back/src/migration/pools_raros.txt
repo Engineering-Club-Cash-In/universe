@@ -1,0 +1,154 @@
+======================================================================
+🔥 POOLS RAROS PUROS DETECTADOS
+======================================================================
+Hoja: Noviembre 2025
+Total clientes: 14
+======================================================================
+
+CRITERIOS:
+1. Formato crédito = 'Pool'
+2. Mismo cliente
+3. 2+ créditos base DIFERENTES (sin _2, _3)
+4. NINGUNO de los créditos base tiene variación _2
+======================================================================
+
+👥 Cliente: Brenda Liseth Vasquez Tista de Calvillo
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214113070
+      💰 Inversionista: Carlos René Estuardo Matheu González
+   2. 01010214113080
+      💰 Inversionista: Ana Lucia Salvatierra Mayen
+
+======================================================================
+
+👥 Cliente: Ivan Alexander Aquino Enriquez
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214108540
+      💰 Inversionista: SCIMMIA Investment S.A. (Fernando Ramírez)
+   2. 01010214108280
+      💰 Inversionista: Cube Investments S.A.
+
+======================================================================
+
+👥 Cliente: Juan Ramiro Morales Pineda
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010202119900
+      💰 Inversionista: Richard Kachler Ortega
+   2. 01010202119900:2
+      💰 Inversionista: Cube Investments S.A.
+
+======================================================================
+
+👥 Cliente: Jorge Humberto Estrada Morales
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214110150
+      💰 Inversionista: Cube Investments S.A.
+   2. 01010214110160
+      💰 Inversionista: Anna Lisseth Lorenzo Rodas
+
+======================================================================
+
+👥 Cliente: Lindsey Pamela Sanchez Moreno
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214109380
+      💰 Inversionista: Cube Investments S.A.
+   2. 01010214109390
+      💰 Inversionista: Diego Alejandro Mendieta Avila (Rodrigo Mendieta)
+
+======================================================================
+
+👥 Cliente: William Alejandro Pinzon Reyes
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214112950
+      💰 Inversionista: Post Net Guatemala S.A.
+   2. 01010214112940
+      💰 Inversionista: Diana Lowenthal
+
+======================================================================
+
+👥 Cliente: Leonardo Jose Carrasco Aguilera
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214111280
+      💰 Inversionista: Cube Investments S.A.
+   2. 01010214111240
+      💰 Inversionista: Anna Lisseth Lorenzo Rodas
+
+======================================================================
+
+👥 Cliente: Jhony Alfredo Carrillo Corado / Mayra Elizabeth Rosales / Pablo Roberto Batz Gudiel
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214108810
+      💰 Inversionista: Javier Arzu Perez
+   2. 01010214115390
+      💰 Inversionista: Cube Investments S.A.
+
+======================================================================
+
+👥 Cliente: Roberto Estuardo Folgar Alvarez
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214108780
+      💰 Inversionista: Cube Investments S.A.
+   2. 01010214108880
+      💰 Inversionista: Manuel Carrera Mayen
+
+======================================================================
+
+👥 Cliente: Oliver Rodolfo Barrientos Ricco / Lisbeth Alejandra Hernandez Lopez
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214110980
+      💰 Inversionista: Javier Arzu Perez
+   2. 01010214111110
+      💰 Inversionista: Cube Investments S.A.
+
+======================================================================
+
+👥 Cliente: Carlos Roberto Sandoval / Bruno Roberto Hahmman Sandoval
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214104850
+      💰 Inversionista: Javier Arzu Perez
+   2. 01010214104860
+      💰 Inversionista: Josue Mente
+
+======================================================================
+
+👥 Cliente: Carlos Ramiro Diaz de Leon
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214115120
+      💰 Inversionista: Juan José Luna Duraes
+   2. 01010214115130
+      💰 Inversionista: Central de Carga S.A.
+
+======================================================================
+
+👥 Cliente: Ruth Eunice Guerra Lopez
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010214108470
+      💰 Inversionista: Cube Investments S.A.
+   2. 01010214108500
+      💰 Inversionista: Diego Arturo Bracamonte Mendez
+
+======================================================================
+
+👥 Cliente: Textiles Pralin S.A.
+   Total créditos base: 2
+   ------------------------------------------------------------------
+   1. 01010202109080
+      💰 Inversionista: Cube Investments S.A.
+   2. 01010202109070
+      💰 Inversionista: Aura Floridalma Rodriguez Mejicanos de Garavito
+
+======================================================================
+

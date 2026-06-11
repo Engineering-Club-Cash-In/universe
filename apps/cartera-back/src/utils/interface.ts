@@ -15,6 +15,7 @@ export interface PagoDetalle {
   abonoGeneralInteres: number;
   tasaInteresInvesor: number;
   cuota: number;
+  estado_liquidacion?: "LIQUIDADO" | "NO_LIQUIDADO";
 }
 
 export interface CreditoData {
@@ -38,17 +39,28 @@ export interface CreditoData {
   total_abono_iva: number;       // 👈 number
   total_isr: number;             // 👈 number
   total_cuota: number;           // 👈 number
+  tipo_reinversion?: string | null; // Solo aplica cuando el inversionista tiene reinversion_combinada
 }
 
 
 export interface Subtotal {
-  total_abono_capital: number;   // 👈 number
-  total_abono_interes: number;   // 👈 number
-  total_abono_iva: number;       // 👈 number
-  total_isr: number;             // 👈 number
-  total_cuota: number;           // 👈 number
-  total_monto_aportado: number; // 👈 number
-  total_abono_general_interes: number; // 👈 number
+  total_abono_capital: number;
+  total_abono_interes: number;
+  total_abono_iva: number;
+  total_isr: number;
+  total_cuota: number;
+  total_cuota_sin_reinversion: number;
+  total_cuota_con_reinversion: number;
+  total_monto_aportado: number;
+  total_abono_general_interes: number;
+  total_reinversion_capital: number;
+  total_reinversion_interes: number;
+  total_reinversion: number;
+  total_capital_creditos: number;
+  total_capital_actual: number;
+  total_reinv_tipo_capital?: number;
+  total_reinv_tipo_interes?: number;
+  total_reinv_tipo_total?: number;
 }
 
 export interface InversionistaReporte {
@@ -56,10 +68,13 @@ export interface InversionistaReporte {
   inversionista: string;
   emite_factura: boolean;
   nombre_inversionista: string;
-  reinversion: boolean;
+  email: string | null;
+  reinversion: string;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
+  moneda: string;
+  currencySymbol: string;
   creditos: CreditoData[];
   subtotal: Subtotal;
 }
@@ -112,7 +127,10 @@ export type ClosureInfo =
       motivo: string;
       observaciones: string | null;
       fecha: Date | string | null;
-      monto: string; // numeric de PG -> string
+      monto: string;
+      traspaso: string;
+      garantia_mobiliaria: string;
+      otros: string;
     }
   | {
       kind: "INCOBRABLE";
@@ -120,7 +138,7 @@ export type ClosureInfo =
       motivo: string;
       observaciones: string | null;
       fecha: Date | string | null;
-      monto: string; // numeric de PG -> string
+      monto: string;
     }
   | null;
 
@@ -134,6 +152,9 @@ export type CuotaExcelRow = {
   capital_pendiente: string; // numeric -> string
   total_cancelar: string; // numeric -> string
   fecha_vencimiento: string; // YYYY-MM-DD
+  seguro: string;
+  gps: string;
+  membresias: string;
 };
 
 // DTO principal
@@ -142,13 +163,23 @@ export interface GetCreditDTO {
     usuario: string;
     numero_credito_sifco: string;
     moneda: "Quetzal";
+    saldo_total: string;
+    extras_total: string;
+    saldo_total_con_extras: string;
     tipo_credito: string;
-    observaciones: string;
-    saldo_total: string; // numeric -> string
-    extras_total: string; // NUEVO
-    saldo_total_con_extras: string; // NUEVO
+    observaciones: string | null;
   };
   closure: ClosureInfo;
+  totales?: {
+    total_interes: string;
+    total_seguro: string;
+    total_membresias: string;
+    total_mora: string;
+    total_otros: string;
+    total_gps: string;
+    total_cuotas_atrasadas: string;
+    gran_total: string;
+  };
   cuotas_atrasadas: {
     total: number;
     items: CuotaExcelRow[];

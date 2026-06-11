@@ -14,14 +14,6 @@ import {
 	UserCheck,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { UserRole } from "server/src/types/roles";
-import {
-	ALL_ROLES,
-	getRoleColor,
-	getRoleLabel,
-	ROLE_CONFIG,
-	ROLES,
-} from "server/src/types/roles";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
@@ -76,6 +68,15 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
+import {
+	ALL_ROLES,
+	getRoleColor,
+	getRoleLabel,
+	ROLE_CONFIG,
+	ROLES,
+	type UserRole,
+} from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/admin/users")({
@@ -83,7 +84,11 @@ export const Route = createFileRoute("/admin/users")({
 });
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -93,7 +98,7 @@ function RouteComponent() {
 		id: string;
 		name: string;
 		email: string;
-		role: "admin" | "sales" | "analyst" | "cobros" | "juridico";
+		role: UserRole;
 		banned: boolean | null;
 		emailVerified: boolean;
 		createdAt: Date;
@@ -156,7 +161,7 @@ function RouteComponent() {
 	// *fix #13
 	useEffect(() => {
 		console.log("Session:", userProfile.data);
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (
 			session &&
@@ -166,7 +171,7 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Access denied: Admin role required");
 		}
-	}, [session, isPending, userProfile.data]);
+	}, [session, sessionError, isPending, userProfile.data, navigate]);
 
 	const handleToggleSuspend = (
 		userId: string,
@@ -242,7 +247,7 @@ function RouteComponent() {
 									Crear usuario
 								</Button>
 							</DialogTrigger>
-							<DialogContent>
+							<DialogContent className="max-h-[90vh] overflow-y-auto">
 								<DialogHeader>
 									<DialogTitle>Crear nuevo usuario</DialogTitle>
 								</DialogHeader>
@@ -540,7 +545,7 @@ function RouteComponent() {
 
 			{/* Modal de detalles del usuario */}
 			<Dialog open={!!selectedUser} onOpenChange={() => setSelectedUser(null)}>
-				<DialogContent className="max-w-2xl">
+				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Detalles del Usuario</DialogTitle>
 					</DialogHeader>

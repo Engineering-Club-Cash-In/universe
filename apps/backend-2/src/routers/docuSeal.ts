@@ -794,20 +794,34 @@ const docuSealRouter = new Elysia({
     }),
   }
 )
- .get("/documents", async () => {
-    try {
-      // 🎯 Call the controller that retrieves all documents
-      const response = await getDocusealDocumentsController();
-      return response;
-    } catch (error: any) {
-      console.error("[ERROR] /docuseal/documents route:", error);
-      return {
-        success: false,
-        message: "Internal server error while fetching DocuSeal documents",
-        error: error.message,
-      };
+ .get(
+    "/documents",
+    async ({ query }) => {
+      try {
+        const response = await getDocusealDocumentsController(query.categoria);
+        return response;
+      } catch (error: any) {
+        console.error("[ERROR] /docuseal/documents route:", error);
+        return {
+          success: false,
+          message: "Internal server error while fetching DocuSeal documents",
+          error: error.message,
+        };
+      }
+    },
+    {
+      query: t.Object({
+        categoria: t.Optional(
+          t.Union([
+            t.Literal("ventas"),
+            t.Literal("inversiones"),
+            t.Literal("inversiones_sociedad"),
+            t.Literal("carta_poder"),
+          ])
+        ),
+      }),
     }
-  })
+  )
 .post(
   "/document-by-dpi",
   async ({ body }) => {

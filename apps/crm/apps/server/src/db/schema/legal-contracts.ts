@@ -37,6 +37,7 @@ export const generatedLegalContracts = pgTable("generated_legal_contracts", {
 	clientSigningLink: text("client_signing_link"), // Link del cliente
 	representativeSigningLink: text("representative_signing_link"), // Link del representante
 	additionalSigningLinks: text("additional_signing_links").array(), // Links adicionales si aplica
+	pdfLink: text("pdf_link"), // Link del PDF subido a R2 (opcional)
 
 	// Metadata de generación
 	templateId: integer("template_id"),
@@ -54,3 +55,28 @@ export const generatedLegalContracts = pgTable("generated_legal_contracts", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// Tabla para guardar snapshots de generación de contratos (para regenerar con nueva fecha)
+export const contractGenerationSnapshots = pgTable(
+	"contract_generation_snapshots",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+
+		// Relación con oportunidad
+		opportunityId: uuid("opportunity_id")
+			.notNull()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+
+		// Fecha del contrato usada en la generación
+		contractDate: timestamp("contract_date").notNull(),
+
+		// Data de generación (input.contracts del endpoint generateContractsDirect)
+		data: jsonb("data").notNull(),
+
+		// Auditoría
+		createdBy: text("created_by")
+			.notNull()
+			.references(() => user.id),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+);

@@ -211,6 +211,25 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                               </p>
                             </div>
                           </div>
+                          {/* Botón Abrir Documento */}
+                          <a
+                            href={result.linkDocument || "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                              result.linkDocument
+                                ? "bg-purple-600 text-white hover:bg-purple-700"
+                                : "bg-gray-300 text-gray-500 cursor-not-allowed pointer-events-none"
+                            }`}
+                            onClick={(e) => {
+                              if (!result.linkDocument) {
+                                e.preventDefault();
+                              }
+                            }}
+                          >
+                            <FileText className="h-4 w-4" />
+                            Abrir Documento
+                          </a>
                         </div>
 
                         {/* Enlaces disponibles */}

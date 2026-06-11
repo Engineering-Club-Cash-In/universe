@@ -1,3 +1,4 @@
+import { redirect } from "@tanstack/react-router";
 import { createAuthClient } from "better-auth/client";
 
 export const authClient = createAuthClient({
@@ -7,6 +8,28 @@ export const authClient = createAuthClient({
   },
 });
 
+// Función para verificar autenticación con better-auth
+export const checkAuth = async () => {
+  try {
+    const sessionData = await authClient.getSession();
+    console.log("checkAuth - Respuesta de getSession:", sessionData);
+    
+    if (sessionData?.data?.user) {
+      return; // Sesión válida
+    }
+    
+    // Si no hay sesión, redirigir al login
+    throw redirect({
+      to: "/login",
+    });
+  } catch (error) {
+    console.error("checkAuth - Error:", error);
+    throw redirect({
+      to: "/login",
+    });
+  }
+};
+
 // Tipos para la autenticación
 export interface LoginCredentials {
   email: string;
@@ -14,13 +37,17 @@ export interface LoginCredentials {
   rememberMe?: boolean;
 }
 
+export type UserType = "CLIENT" | "INVESTOR";
+
 export interface RegisterCredentials {
   fullName: string;
   phone: string;
+  dpi: string;
   email: string;
   password: string;
   confirmPassword: string;
   acceptTerms: boolean;
+  userType: UserType;
 }
 
 export interface User {
@@ -28,6 +55,9 @@ export interface User {
   email: string;
   name?: string;
   phone?: string;
+  dpi?: string;
+  image?: string;
+  role: UserType;
 }
 
 export interface AuthResponse {

@@ -1,0 +1,511 @@
+import Big from "big.js";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import jwt from "jsonwebtoken";
+import { db } from "../database";
+import {
+  admins,
+  asesores,
+  compras_credito_inversionista,
+  creditos,
+  creditos_inversionistas,
+  creditos_inversionistas_espejo,
+  inversionistas,
+  platform_users,
+  usuarios,
+  pagos_credito,
+} from "../database/db";
+import z from "zod";
+import { sendCompraCarteraAcceptedNotification } from "@cci/email";
+import { getVehicleDetailsBySifco } from "../services/crm.service";
+import {
+  calcularExpiracionCompraCartera,
+  formatFechaLargaGT,
+  nowGT,
+} from "../utils/functions/businessDays";
+import { COMPRA_CARTERA_RECIPIENTS } from "../utils/functions/compraCarteraRecipients";
+
+const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
+
+// ID fijo de CUBE INVESTMENTS S.A. (siempre va primero en el pool)
+const CUBE_INVESTMENT_ID = 86;
+
+// Destinatarios fijos (compartidos con el correo de expiración): ver
+// src/utils/functions/compraCarteraRecipients.ts
+
+const compraCarteraAceptadaSchema = z.object({
+  creditos: z
+    .array(z.number().int().positive())
+    .min(1, "Debe enviar al menos un crédito"),
+  notas_adicionales: z.string().optional(),
+});
+
+const extenderCompraCarteraSchema = z.object({
+  creditos: z
+    .array(z.number().int().positive())
+    .min(1, "Debe enviar al menos un crédito"),
+  inversionista_id: z.number().int().positive(),
+});
+
+// ================================================================
+// COMPRA DE CARTERA ACEPTADA
+// Endpoint para notificar que la compra de cartera fue aceptada.
+// Recibe uno o varios credito_id, arma el resumen (cliente, capital,
+// observaciones y composición del pool) y manda el correo.
+// NO modifica nada en la base de datos.
+// ================================================================
+export const compraCarteraAceptada = async ({ body, set, request }: any) => {
+  try {
+    // ── 1. Validar body ──
+    const parseResult = compraCarteraAceptadaSchema.safeParse(body);
+    if (!parseResult.success) {
+      set.status = 400;
+      return {
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+    const { creditos: creditoIds, notas_adicionales } = parseResult.data;
+
+    // ── 2. Traer datos de los créditos + cliente ──
+    const creditosRows = await db
+      .select({
+        credito_id: creditos.credito_id,
+        numero_credito_sifco: creditos.numero_credito_sifco,
+        capital: creditos.capital,
+        observaciones: creditos.observaciones,
+        cliente_nombre: usuarios.nombre,
+      })
+      .from(creditos)
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .where(inArray(creditos.credito_id, creditoIds));
+
+    if (creditosRows.length === 0) {
+      set.status = 404;
+      return {
+        success: false,
+        message: "No se encontraron los créditos solicitados",
+      };
+    }
+
+    // ── 3. Traer la composición del pool POR CRÉDITO ──
+    const inversionistasRows = await db
+      .select({
+        credito_id: creditos_inversionistas.credito_id,
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        inversionista_nombre: inversionistas.nombre,
+        monto_aportado: creditos_inversionistas.monto_aportado,
+        porcentaje_participacion_inversionista:
+          creditos_inversionistas.porcentaje_participacion_inversionista,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(
+        inversionistas,
+        eq(
+          creditos_inversionistas.inversionista_id,
+          inversionistas.inversionista_id,
+        ),
+      )
+      .where(inArray(creditos_inversionistas.credito_id, creditoIds));
+
+    // Index rápido para pool por crédito: Map<credito_id, rows[]>
+    const rowsPorCredito = new Map<
+      number,
+      Array<{
+        inversionista_id: number;
+        inversionista_nombre: string;
+        monto: Big;
+        porcentajeInversion: Big;
+      }>
+    >();
+    for (const row of inversionistasRows) {
+      const list = rowsPorCredito.get(row.credito_id) ?? [];
+      list.push({
+        inversionista_id: row.inversionista_id,
+        inversionista_nombre: row.inversionista_nombre,
+        monto: new Big(row.monto_aportado),
+        porcentajeInversion: new Big(
+          row.porcentaje_participacion_inversionista,
+        ),
+      });
+      rowsPorCredito.set(row.credito_id, list);
+    }
+
+    // ── 4. Resolver quién aceptó (JWT, opcional) ──
+    let usuarioEmail: string | undefined;
+    let usuarioNombre: string | undefined;
+
+    try {
+      const authHeader = request?.headers?.get?.("Authorization");
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.replace("Bearer ", "").trim();
+        const decoded = jwt.verify(token, JWT_SECRET) as any;
+        usuarioEmail = decoded.email ?? decoded.correo ?? undefined;
+
+        if (usuarioEmail) {
+          const [pu] = await db
+            .select({
+              admin_id: platform_users.admin_id,
+              asesor_id: platform_users.asesor_id,
+            })
+            .from(platform_users)
+            .where(eq(platform_users.email, usuarioEmail));
+
+          if (pu?.admin_id) {
+            const [a] = await db
+              .select({ nombre: admins.nombre, apellido: admins.apellido })
+              .from(admins)
+              .where(eq(admins.admin_id, pu.admin_id));
+            if (a) usuarioNombre = `${a.nombre} ${a.apellido}`.trim();
+          } else if (pu?.asesor_id) {
+            const [s] = await db
+              .select({ nombre: asesores.nombre })
+              .from(asesores)
+              .where(eq(asesores.asesor_id, pu.asesor_id));
+            if (s) usuarioNombre = s.nombre;
+          }
+        }
+      }
+    } catch (jwtErr) {
+      console.warn(
+        "[compraCarteraAceptada] No se pudo resolver el usuario desde el JWT:",
+        jwtErr,
+      );
+    }
+
+
+    // ── 4.4. Leer los montos NUEVOS de la operación pendiente ──
+    // compras_credito_inversionista guarda el delta de cada operación
+    // (no la posición acumulada del inversionista en el crédito). Para
+    // el correo necesitamos el monto que entró en ESTA compra, no la
+    // suma con lo que el inversionista ya tenía antes.
+    // Si el mismo (credito_id, inversionista_id) tiene varios registros
+    // en pendiente (porque hubo varias operaciones sin aceptar todavía),
+    // los sumamos: ese es el monto total que falta por aceptar.
+    const comprasPendientes = await db
+      .select({
+        credito_id: compras_credito_inversionista.credito_id,
+        inversionista_id: compras_credito_inversionista.inversionista_id,
+        monto_aportado: compras_credito_inversionista.monto_aportado,
+      })
+      .from(compras_credito_inversionista)
+      .where(
+        and(
+          inArray(compras_credito_inversionista.credito_id, creditoIds),
+          eq(
+            compras_credito_inversionista.status,
+            "pendiente_compra_cartera",
+          ),
+        ),
+      );
+
+    // Map (credito_id-inversionista_id) → monto nuevo (Big), sumado si
+    // hay varios registros pendientes para el mismo par.
+    const montoNuevoPorPar = new Map<string, Big>();
+    for (const row of comprasPendientes) {
+      const key = `${row.credito_id}-${row.inversionista_id}`;
+      const prev = montoNuevoPorPar.get(key) ?? new Big(0);
+      montoNuevoPorPar.set(key, prev.plus(new Big(row.monto_aportado)));
+    }
+
+    // ── 4.5. Marcar el espejo como aceptado ──
+    // Pasamos a "pendiente_revision" todos los rows de los créditos que estén
+    // actualmente en "pendiente_compra_cartera". Registramos cuándo y quién.
+    const ahora = nowGT();
+    const updateRes = await db
+      .update(creditos_inversionistas_espejo)
+      .set({
+        status: "pendiente_revision",
+        updated_at: ahora,
+        aceptada_at: ahora,
+        aceptada_por: usuarioEmail ?? null,
+      })
+      .where(
+        and(
+          inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
+          eq(creditos_inversionistas_espejo.status, "pendiente_compra_cartera"),
+        ),
+      )
+      .returning({
+        credito_id: creditos_inversionistas_espejo.credito_id,
+        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+        tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+      });
+
+    // ── 4.5.bis. Marcar las compras pendientes como aceptadas ──
+    // Mismo cambio que el espejo, sobre compras_credito_inversionista.
+    // Así los próximos accept/queries ya no traen estos registros (el
+    // correo ya se mandó con esos montos).
+    await db
+      .update(compras_credito_inversionista)
+      .set({ status: "pendiente_revision", updated_at: ahora })
+      .where(
+        and(
+          inArray(compras_credito_inversionista.credito_id, creditoIds),
+          eq(
+            compras_credito_inversionista.status,
+            "pendiente_compra_cartera",
+          ),
+        ),
+      );
+
+    // ── Mapa credito_id → tipo_reinversion del target ──
+    // El update filtró por status "pendiente_compra_cartera", y esa es la
+    // fila del inversionista nuevo (el resto está en "completado"), así
+    // que cada credito_id aquí apunta al tipo_reinversion que quedó
+    // estampado para ese crédito en el espejo.
+    const tipoReinvPorCredito = new Map<number, string | null>(
+      updateRes.map((r) => [r.credito_id, r.tipo_reinversion ?? null]),
+    );
+
+    // Pool por crédito en el orden que vinieron los créditos en creditosRows.
+    // Dentro de cada pool, CUBE va primero. Incluimos la modalidad
+    // (tipo_reinversion del target en el espejo) para mostrarla en el
+    // header de cada bloque del correo.
+    const pool = creditosRows.map((c) => ({
+      numero_credito_sifco: c.numero_credito_sifco,
+      cliente_nombre: c.cliente_nombre,
+      tipo_reinversion: (tipoReinvPorCredito.get(c.credito_id) ?? null) as
+        | "sin_reinversion"
+        | "reinversion_capital"
+        | "reinversion_interes"
+        | "reinversion_total"
+        | "reinversion_variable"
+        | "reinversion_excedente"
+        | "reinversion_combinada"
+        | null,
+      rows: (rowsPorCredito.get(c.credito_id) ?? [])
+        .sort((a, b) => {
+          if (a.inversionista_id === CUBE_INVESTMENT_ID) return -1;
+          if (b.inversionista_id === CUBE_INVESTMENT_ID) return 1;
+          return 0;
+        })
+        .map((r) => {
+          // Para el inversionista nuevo de la cesión mostramos el delta
+          // (monto que entró en ESTA operación, desde compras_credito_inversionista).
+          // Para inversionistas que no participaron en la cesión (ej. CUBE que
+          // ya estaba) caemos al acumulado del espejo/padre.
+          const montoCesion =
+            montoNuevoPorPar.get(`${c.credito_id}-${r.inversionista_id}`) ??
+            r.monto;
+          return {
+            inversionista_nombre: r.inversionista_nombre,
+            capital: montoCesion.toFixed(2),
+          };
+        }),
+    }));
+
+    // ── 4.5.1 Apagar bandera_reinversion de los créditos aceptados ──
+    // Ya no hay que redirigir intereses a CUBE: el espejo pasó a
+    // pendiente_revision y el nuevo inversionista empieza a cobrar.
+    if (updateRes.length > 0) {
+      const creditosAfectados = Array.from(
+        new Set(updateRes.map((r) => r.credito_id)),
+      );
+      await db
+        .update(creditos)
+        .set({ bandera_reinversion: false })
+        .where(inArray(creditos.credito_id, creditosAfectados));
+    }
+
+    // ── 4.6. Armar el header "VENTA DE CARTERA" a partir del inversionista
+    //         que acaba de pasar de pendiente_revision → completado.
+    //         Si hay exactamente 1 target, mostramos su Modalidad, Factura
+    //         y Repartición. Si hay 0 o más de 1, omitimos el header. ──
+    const targetIds = Array.from(
+      new Set(
+        updateRes
+          .map((r) => r.inversionista_id)
+          .filter((id) => id !== CUBE_INVESTMENT_ID),
+      ),
+    );
+
+    let operacionInfo:
+      | {
+          inversionistaNombre: string;
+          monto: string;
+          modalidad: string;
+          factura: string;
+          porcentajeInversionista: string;
+          porcentajeCube: string;
+        }
+      | undefined;
+
+    if (targetIds.length === 1) {
+      const targetId = targetIds[0];
+      const [targetInv] = await db
+        .select({
+          nombre: inversionistas.nombre,
+          tipo_reinversion: inversionistas.tipo_reinversion,
+          emite_factura: inversionistas.emite_factura,
+        })
+        .from(inversionistas)
+        .where(eq(inversionistas.inversionista_id, targetId));
+
+      // Sumamos el monto total del target entre todos los créditos
+      // y calculamos su % de inversión ponderado por monto.
+      //
+      // OJO: usamos el monto NUEVO (delta de la operación) que viene de
+      // compras_credito_inversionista, NO el acumulado del espejo/padre.
+      // El acumulado incluiría lo que el inversionista ya tenía antes en
+      // el crédito, inflando el "Monto" del header del correo.
+      // Fallback al monto acumulado solo si no hay registro de compra
+      // (operaciones viejas previas a esta tabla).
+      let targetMontoTotal = new Big(0);
+      let targetInversionPonderada = new Big(0);
+      for (const [creditoId, rows] of rowsPorCredito.entries()) {
+        for (const r of rows) {
+          if (r.inversionista_id === targetId) {
+            const montoNuevo =
+              montoNuevoPorPar.get(`${creditoId}-${targetId}`) ?? r.monto;
+            targetMontoTotal = targetMontoTotal.plus(montoNuevo);
+            targetInversionPonderada = targetInversionPonderada.plus(
+              r.porcentajeInversion.times(montoNuevo),
+            );
+          }
+        }
+      }
+
+      if (targetInv && targetMontoTotal.gt(0)) {
+        const porcInv = targetInversionPonderada.div(targetMontoTotal);
+        const porcCube = new Big(100).minus(porcInv);
+
+        const modalidadMap: Record<string, string> = {
+          sin_reinversion: "Sin Reinversión",
+          reinversion_capital: "Reinversión de Capital",
+          reinversion_interes: "Reinversión de Interés",
+          reinversion_total: "Reinversión Total",
+          reinversion_variable: "Reinversión Variable",
+          reinversion_excedente: "Reinversión Excedente",
+          reinversion_combinada: "Reinversión Combinada",
+        };
+
+        operacionInfo = {
+          inversionistaNombre: targetInv.nombre,
+          monto: targetMontoTotal.toFixed(2),
+          modalidad:
+            modalidadMap[targetInv.tipo_reinversion] ??
+            targetInv.tipo_reinversion,
+          factura: targetInv.emite_factura ? "Propia" : "No emite",
+          porcentajeInversionista: porcInv.toFixed(2),
+          porcentajeCube: porcCube.toFixed(2),
+        };
+      }
+    }
+
+    // ── 5. Mandar el correo (destinatarios fijos por negocio) ──
+    const creditosParaEmail = await Promise.all(
+      creditosRows.map(async (c) => {
+        const vehicleRes = await getVehicleDetailsBySifco(c.numero_credito_sifco);
+        console.log(vehicleRes.data);
+        return {
+          numero_credito_sifco: c.numero_credito_sifco,
+          cliente_nombre: c.cliente_nombre,
+          capital: new Big(c.capital).toFixed(2),
+          observaciones: vehicleRes.data?.vehicle
+            ? `${vehicleRes.data.vehicle.model}\n${vehicleRes.data.vehicle.year} | ${vehicleRes.data.vehicle.make} | ${vehicleRes.data.vehicle.licensePlate} `
+            : c.observaciones,
+        };
+      }),
+    );
+
+    const { expira, diaBaja } = calcularExpiracionCompraCartera(ahora);
+
+    const mailRes = await sendCompraCarteraAcceptedNotification({
+      to: COMPRA_CARTERA_RECIPIENTS.to,
+      cc: COMPRA_CARTERA_RECIPIENTS.cc,
+      creditos: creditosParaEmail,
+      pool,
+      operacionInfo,
+      notasAdicionales: notas_adicionales,
+      usuarioNombre,
+      usuarioEmail,
+      expiracion: {
+        fechaExpiraLabel: formatFechaLargaGT(expira),
+        fechaBajaLabel: formatFechaLargaGT(diaBaja),
+      },
+    });
+
+    set.status = 200;
+    return {
+      success: true,
+      message: `Notificación enviada a ${COMPRA_CARTERA_RECIPIENTS.to.length} destinatario(s) + ${COMPRA_CARTERA_RECIPIENTS.cc.length} en CC`,
+      creditos_notificados: creditosRows.length,
+      pool_size: pool.length,
+      espejo_actualizados: updateRes.length,
+      email: mailRes,
+    };
+  } catch (error) {
+    console.error("[compraCarteraAceptada] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al notificar la aceptación de compra de cartera",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+export const extenderCompraCartera = async ({ body, set }: any) => {
+  try {
+    const parseResult = extenderCompraCarteraSchema.safeParse(body);
+    if (!parseResult.success) {
+      set.status = 400;
+      return {
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+
+    const { creditos: creditoIds, inversionista_id } = parseResult.data;
+    const ahora = nowGT();
+
+    const updateRes = await db
+      .update(creditos_inversionistas_espejo)
+      .set({
+        compra_cartera_extendida_at: ahora,
+        updated_at: ahora,
+      })
+      .where(
+        and(
+          inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
+          eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id),
+          eq(creditos_inversionistas_espejo.status, "pendiente_revision"),
+          isNotNull(creditos_inversionistas_espejo.aceptada_at),
+          isNull(creditos_inversionistas_espejo.compra_cartera_extendida_at),
+        ),
+      )
+      .returning({
+        credito_id: creditos_inversionistas_espejo.credito_id,
+        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+        compra_cartera_extendida_at:
+          creditos_inversionistas_espejo.compra_cartera_extendida_at,
+      });
+
+    if (updateRes.length === 0) {
+      set.status = 409;
+      return {
+        success: false,
+        message:
+          "La compra no se pudo extender. Puede que ya haya sido extendida, no esté aceptada o ya no esté pendiente.",
+      };
+    }
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Compra de cartera extendida 24 horas correctamente.",
+      creditos_extendidos: updateRes.length,
+      compra_cartera_extendida_at: ahora,
+    };
+  } catch (error) {
+    console.error("[extenderCompraCartera] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al extender la compra de cartera",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};

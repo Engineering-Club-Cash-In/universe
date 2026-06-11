@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -7,16 +7,21 @@ import {
   Camera,
   CheckCircle,
   DollarSign,
+  Activity,
+  Trash2,
+  AlertTriangle
 } from "lucide-react";
 import { useInspection } from "../contexts/InspectionContext";
 import { prepareInspectionData, createFullInspection } from "../services/vehicles";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import VehicleInspectionForm from "./vehicle-inspection";
+import VehicleInspectionForm, { type VehicleInspectionFormRef } from "./vehicle-inspection";
 import InspectionChecklist from "../components/inspection-checklist";
 import VehiclePictures from "./vehicle-pictures";
 import VehicleValuation from "../components/vehicle-valuation";
+import Inspection360Step from "../components/inspection-360-step";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -28,9 +33,15 @@ const STEPS = [
     icon: Car,
   },
   {
+    id: "inspection-360",
+    title: "Inspección 360°",
+    description: "Revisión técnica detallada",
+    icon: Activity,
+  },
+  {
     id: "checklist",
-    title: "Criterios Críticos",
-    description: "Evaluación de puntos de rechazo",
+    title: "Checklist",
+    description: "Evaluación del vehículo",
     icon: ClipboardCheck,
   },
   {
@@ -48,29 +59,47 @@ const STEPS = [
 ];
 
 export default function VehicleInspectionWizard() {
-  const { formData, checklistItems, photos, resetInspection } = useInspection();
-  const [currentStep, setCurrentStep] = useState(0);
+  const { formData, checklistItems, photos, sectionTimes, resetInspection, currentStep, setCurrentStep, items360, rejectionEvidenceUrl } = useInspection();
+  const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
+  const [inspection360Completed, setInspection360Completed] = useState(false);
+  const vehicleFormRef = useRef<VehicleInspectionFormRef>(null);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
   const [valuationCompleted, setValuationCompleted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [savedPhotos, setSavedPhotos] = useState<any[]>([]);
+
+  // Detectar si hay un borrador pendiente al montar
+  const hasDraft = Object.keys(formData).length > 0 || items360.length > 0 || checklistItems.length > 0 || photos.length > 0;
+  const [showDraftDialog, setShowDraftDialog] = useState(hasDraft);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     // Validar que el paso actual esté completo antes de avanzar
     if (currentStep === 0 && !basicInfoCompleted) {
-      toast.error("Por favor complete la información básica antes de continuar");
+      // Triggear validación del formulario para mostrar errores en campos
+      if (vehicleFormRef.current) {
+        const isValid = await vehicleFormRef.current.triggerValidation();
+        if (!isValid) {
+          return;
+        }
+      } else {
+        toast.error("Por favor complete la información básica antes de continuar");
+        return;
+      }
+    }
+
+    // Paso 1: 360 (Validación explícita)
+    if (currentStep === 1 && !inspection360Completed) {
+      toast.error("Por favor confirme la inspección 360 antes de continuar");
       return;
     }
-    if (currentStep === 1 && !checklistCompleted) {
+
+    if (currentStep === 2 && !checklistCompleted) {
       toast.error("Por favor complete la evaluación de criterios antes de continuar");
       return;
     }
-    // Nota: El paso 2 (fotos) y paso 3 (valoración) no muestran el botón "Siguiente"
-    // Estos pasos manejan su propia navegación con botones internos
 
     if (currentStep < STEPS.length - 1) {
       setCurrentStep(currentStep + 1);
@@ -85,14 +114,15 @@ export default function VehicleInspectionWizard() {
     }
   };
 
-  const handleCompleteInspection = async (photosFromPictures?: any[], completeFormData?: any) => {
+  const handleCompleteInspection = async (photosFromPictures?: any[], dataOverride?: any, aiValuation?: any) => {
     // Usar las fotos pasadas directamente o las del contexto
     const photosToUse = photosFromPictures || photos;
-    // Usar los datos completos pasados o los del contexto
-    const dataToUse = completeFormData || formData;
+    // Use dataOverride if provided (from valuation step), otherwise use formData from context
+    const dataToUse = dataOverride || formData;
 
-    // Verificar que las fotos estén disponibles
-    if (!photosToUse || photosToUse.length === 0) {
+    // Verificar que las fotos estén disponibles (a menos que sea rechazo explícito)
+    const isRejected = (dataToUse?.status === 'rejected');
+    if (!isRejected && (!photosToUse || photosToUse.length === 0)) {
       console.error("No hay fotos disponibles");
       toast.error("Error: Las fotos no se cargaron correctamente. Intente nuevamente.");
       return;
@@ -103,22 +133,29 @@ export default function VehicleInspectionWizard() {
 
     try {
       // Prepare data for submission
-      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse);
-      
+      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse, sectionTimes, rejectionEvidenceUrl, aiValuation);
+
+      // Map items360 to match API service interface (the backend expects uppercase enums: 'GOOD', 'BAD', etc)
+      const apiItems360 = items360.map(item => ({
+        ...item,
+        status: item.status as 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD'
+      }));
+
       // Call the API to create the full inspection
       const result = await createFullInspection(
         vehicleData,
         inspectionData,
         checklistItems,
-        photosToUse
+        photosToUse,
+        apiItems360
       );
-      
+
       if (result.success) {
         toast.success("¡Inspección completada exitosamente!");
-        
+
         // Reset the inspection context
         resetInspection();
-        
+
         // Redirect to dashboard after a brief delay
         setTimeout(() => {
           window.location.href = "/vehicles";
@@ -140,98 +177,181 @@ export default function VehicleInspectionWizard() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Toaster />
-      
+
+      {/* Diálogo de borrador pendiente */}
+      <Dialog open={showDraftDialog} onOpenChange={(open) => { if (!open) setShowDraftDialog(false); }}>
+        <DialogContent className="max-w-sm" onInteractOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-6 w-6 text-amber-500 flex-shrink-0" />
+              <DialogTitle>Inspección pendiente</DialogTitle>
+            </div>
+            <DialogDescription>
+              Tiene una inspección sin terminar
+              {formData?.licensePlate && (
+                <> del vehículo <strong>{formData.licensePlate}</strong></>
+              )}
+              . ¿Desea continuar donde se quedó o empezar una nueva?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-row gap-3">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                resetInspection();
+                setShowDraftDialog(false);
+              }}
+            >
+              Nueva
+            </Button>
+            <Button
+              className="flex-1"
+              onClick={() => setShowDraftDialog(false)}
+            >
+              Continuar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Header */}
-      <div className="bg-white border-b">
-        <div className="container mx-auto px-2 sm:px-4 py-1">
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold">Nueva Inspección de Vehículo</h1>
-            <p className="text-sm sm:text-base text-muted-foreground mt-1">
+      <div className="bg-white border-b sticky top-0 z-50 w-full">
+        <div className="w-full px-2 sm:px-4 py-2 flex items-center justify-between gap-3 overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <h1 className="text-lg sm:text-2xl md:text-3xl font-bold truncate">Nueva Inspección</h1>
+            <p className="text-[10px] sm:text-sm text-muted-foreground mt-0.5 truncate sm:whitespace-normal">
               Complete todos los pasos para registrar la inspección
             </p>
           </div>
+          <div className="flex-shrink-0">
+          {/* Icon-only on mobile, full button on desktop */}
+          <Button
+            variant="destructive"
+            size="icon"
+            onClick={() => {
+              if (window.confirm('¿Está seguro de querer limpiar toda la inspección y empezar de 0?')) {
+                resetInspection();
+              }
+            }}
+            className="sm:hidden h-8 w-8"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => {
+              if (window.confirm('¿Está seguro de querer limpiar toda la inspección y empezar de 0?')) {
+                resetInspection();
+              }
+            }}
+            className="hidden sm:flex"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Reiniciar
+          </Button>
         </div>
       </div>
+      </div>
 
-      {/* Progress Bar */}
-      <div className="bg-white border-b">
-        <div className="container mx-auto px-2 sm:px-4 py-1 sm:py-2">
+      {/* Progress Bar & Stepper Area */}
+      <div className="bg-white border-b overflow-hidden w-full max-w-full">
+        <div className="w-full px-2 sm:px-4 py-1 sm:py-2">
           <div className="space-y-4">
-            <Progress value={progress} className="h-2" />
-            
-            {/* Steps Indicator */}
-            <div className="flex justify-between">
-              {STEPS.map((step, index) => {
-                const StepIconComponent = step.icon;
-                const isActive = index === currentStep;
-                const isCompleted = 
-                  (index === 0 && basicInfoCompleted) ||
-                  (index === 1 && checklistCompleted) ||
-                  (index === 2 && photosCompleted) ||
-                  (index === 3 && valuationCompleted);
-                const isPast = index < currentStep;
+            <Progress value={progress} className="h-1.5 sm:h-2" />
 
-                return (
-                  <div
-                    key={step.id}
-                    className={cn(
-                      "flex flex-col items-center gap-2 flex-1",
-                      isActive && "text-primary",
-                      !isActive && !isPast && "text-muted-foreground"
-                    )}
-                  >
+            {/* Steps Indicator - Scrollable on mobile */}
+            <div className="overflow-x-auto scrollbar-hide py-1 -mx-2 px-2 sm:mx-0 sm:px-0">
+              <div className="flex justify-between min-w-max sm:min-w-0 sm:w-full gap-4 sm:gap-0">
+                {STEPS.map((step, index) => {
+                  const StepIconComponent = step.icon;
+                  const isActive = index === currentStep;
+
+                  // Lógica de completado actualizada para 5 pasos
+                  const isCompleted =
+                    (index === 0 && basicInfoCompleted) ||
+                    (index === 1 && inspection360Completed) ||
+                    (index === 2 && checklistCompleted) ||
+                    (index === 3 && photosCompleted) ||
+                    (index === 4 && valuationCompleted);
+
+                  const isPast = index < currentStep;
+
+                  return (
                     <div
+                      key={step.id}
                       className={cn(
-                        "relative flex items-center justify-center w-10 h-10 rounded-full border-2",
-                        isActive && "border-primary bg-primary/10",
-                        isCompleted && "border-green-500 bg-green-50",
-                        !isActive && !isCompleted && "border-gray-300 bg-white"
+                        "flex flex-col items-center gap-2 px-2 sm:px-0 sm:flex-1 min-w-[75px] sm:min-w-0 transition-all duration-300",
+                        isActive && "text-primary scale-105 sm:scale-100",
+                        !isActive && !isPast && "text-muted-foreground"
                       )}
                     >
-                      {isCompleted ? (
-                        <CheckCircle className="h-5 w-5 text-green-500" />
-                      ) : (
-                        <StepIconComponent
-                          className={cn(
-                            "h-5 w-5",
-                            isActive && "text-primary",
-                            !isActive && "text-gray-400"
-                          )}
-                        />
-                      )}
-                    </div>
-                    <div className="text-center">
-                      <div className={cn(
-                        "text-sm font-medium",
-                        !isActive && !isPast && "text-gray-400"
-                      )}>
-                        {step.title}
+                      <div
+                        className={cn(
+                          "relative flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 transition-all",
+                          isActive && "border-primary bg-primary/10 shadow-sm",
+                          isCompleted && "border-green-500 bg-green-50",
+                          !isActive && !isCompleted && "border-gray-300 bg-white"
+                        )}
+                      >
+                        {isCompleted ? (
+                          <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 text-green-500" />
+                        ) : (
+                          <StepIconComponent
+                            className={cn(
+                              "h-4 w-4 sm:h-5 sm:w-5",
+                              isActive && "text-primary",
+                              !isActive && "text-gray-400"
+                            )}
+                          />
+                        )}
                       </div>
-                      <div className="text-xs text-muted-foreground hidden sm:block">
-                        {step.description}
+                      <div className="text-center max-w-[80px] sm:max-w-none">
+                        <div className={cn(
+                          "text-[9px] sm:text-xs md:text-sm font-medium leading-tight line-clamp-2 sm:line-clamp-1",
+                          isActive ? "text-primary font-bold" : "text-gray-500",
+                          !isActive && !isPast && "text-gray-400"
+                        )}>
+                          {step.title}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground hidden lg:block mt-0.5">
+                          {step.description}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Step Content */}
-      <div className="container mx-auto px-2 sm:px-4 py-3 sm:py-6">
-        <div className="bg-white rounded-lg shadow-sm">
+      <div className="w-full px-1 sm:px-4 py-3 sm:py-6 overflow-hidden max-w-full">
+        <div className="max-w-7xl mx-auto bg-white rounded-lg shadow-sm border overflow-hidden">
           {/* Step Header */}
           <div className="border-b px-3 sm:px-6 py-1 sm:py-2">
             <div className="flex items-center gap-2 sm:gap-3">
               <StepIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-              <div>
-                <h2 className="text-xl sm:text-2xl font-semibold">{currentStepData.title}</h2>
-                <p className="text-sm sm:text-base text-muted-foreground">
-                  {currentStepData.description}
-                </p>
-              </div>
+              {currentStep === 3 ? (
+                <div className="flex flex-col space-y-2 min-w-0 overflow-hidden">
+                  <h1 className="text-xl sm:text-3xl font-bold truncate">
+                    Fotos de Inspección
+                  </h1>
+                  <p className="text-xs sm:text-base text-muted-foreground truncate sm:whitespace-normal">
+                    Capture imágenes claras de cada área requerida.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-semibold">{currentStepData.title}</h2>
+                  <p className="text-sm sm:text-base text-muted-foreground">
+                    {currentStepData.description}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -239,7 +359,8 @@ export default function VehicleInspectionWizard() {
           <div className="p-3 sm:p-5">
             {currentStep === 0 && (
               <div>
-                <VehicleInspectionForm 
+                <VehicleInspectionForm
+                  ref={vehicleFormRef}
                   onComplete={() => {
                     setBasicInfoCompleted(true);
                     // Avanzar automáticamente al siguiente paso
@@ -253,40 +374,52 @@ export default function VehicleInspectionWizard() {
               </div>
             )}
 
+            {/* Step 1: Inspección 360 (NUEVO) */}
             {currentStep === 1 && (
-              <div>
-                <InspectionChecklist 
+              <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+                <Inspection360Step
                   onComplete={() => {
-                    setChecklistCompleted(true);
-                    // Avanzar automáticamente al siguiente paso
-                    if (currentStep < STEPS.length - 1) {
-                      setCurrentStep(currentStep + 1);
-                      // Usar setTimeout para asegurar que el DOM se actualice primero
-                      setTimeout(() => {
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }, 100);
-                    }
+                    setInspection360Completed(true);
+                    setCurrentStep(2);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
-                  isWizardMode={true}
                 />
               </div>
             )}
 
             {currentStep === 2 && (
               <div>
-                <VehiclePictures
-                  onComplete={(photosFromComponent) => {
-                    console.log("=== CALLBACK onComplete del wizard ===");
-                    console.log("Fotos recibidas:", photosFromComponent);
-                    console.log("Cantidad:", photosFromComponent?.length || 0);
-
-                    setPhotosCompleted(true);
-                    setSavedPhotos(photosFromComponent);
-
-                    // No mostrar toast aquí, VehiclePictures ya lo hace
-                    // toast.success("Fotos guardadas. Continúa con la valoración.");
-
-                    handleNextStep();
+                <InspectionChecklist
+                  onComplete={() => {
+                    setChecklistCompleted(true);
+                    // Avanzar automáticamente
+                    if (currentStep < STEPS.length - 1) {
+                      setCurrentStep(currentStep + 1);
+                      setTimeout(() => {
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }, 100);
+                    }
+                  }}
+                  onReject={() => {
+                    if (window.confirm("¿Está seguro de querer rechazar el vehículo y finalizar la inspección ahora? Esto guardará el registro como RECHAZADO y lo enviará al dashboard.")) {
+                      const reason = window.prompt("Por favor, ingrese un breve dictamen o motivo de rechazo (opcional):");
+                      setChecklistCompleted(true);
+                      
+                      // Preparar datos mínimos requeridos para una inspección rechazada
+                      const rejectionData = {
+                        ...formData,
+                        vehicleRating: "No comercial",
+                        currentConditionValue: "0",
+                        vehicleEquipment: "Inspección finalizada por rechazo técnico.",
+                        scannerUsed: "No",
+                        airbagWarning: "No",
+                        testDrive: "No",
+                        inspectionResult: reason || formData.inspectionResult || "VEHÍCULO RECHAZADO: Se detectaron criterios críticos de rechazo durante la evaluación.",
+                        status: "rejected"
+                      };
+                      
+                      handleCompleteInspection([], rejectionData);
+                    }
                   }}
                   isWizardMode={true}
                 />
@@ -295,15 +428,27 @@ export default function VehicleInspectionWizard() {
 
             {currentStep === 3 && (
               <div>
+                <VehiclePictures
+                  onComplete={() => {
+                    setPhotosCompleted(true);
+                    // Avanzar al paso de valuación
+                    setCurrentStep(4);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  isWizardMode={true}
+                />
+              </div>
+            )}
+
+            {currentStep === 4 && (
+              <div>
                 <VehicleValuation
                   vehicleData={formData}
-                  onComplete={(valuationData) => {
+                  onComplete={(valuationData, aiValuation) => {
                     setValuationCompleted(true);
-                    // Merge valuation data with existing form data
-                    const completeData = { ...formData, ...valuationData };
-                    console.log("Fotos guardadas del paso 2:", savedPhotos);
-                    console.log("Cantidad de fotos:", savedPhotos?.length || 0);
-                    handleCompleteInspection(savedPhotos, completeData);
+                    // Merge valuation data with existing form data and set approved status
+                    const completeData = { ...formData, ...valuationData, status: 'approved' };
+                    handleCompleteInspection(photos, completeData, aiValuation);
                   }}
                   isWizardMode={true}
                   isSubmitting={isSubmitting}
@@ -331,9 +476,8 @@ export default function VehicleInspectionWizard() {
                 Paso {currentStep + 1} de {STEPS.length}
               </div>
 
-              {currentStep === 2 || currentStep === STEPS.length - 1 ? (
-                // No mostrar botón "Siguiente" en el paso de fotos (2) ni en valoración (3)
-                // Estos pasos manejan su propia navegación con sus botones internos
+              {(currentStep === 3 || currentStep === 4) ? (
+                // No mostrar botón "Siguiente" en fotos (3) ni valuación (4)
                 null
               ) : (
                 <Button

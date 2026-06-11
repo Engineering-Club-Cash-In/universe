@@ -1,0 +1,318 @@
+{
+    "omitidos": [
+    {
+      // MANUAL
+      "cliente": "Adan Gabriel del Cid Valenzuela",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"ALEXANDER KACHLER SIMONS\" y cliente \"Adan Gabriel del Cid Valenzuela\"."
+    },
+    {
+      "cliente": "Jose Angel Peralta Soma",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"AURA FLORIDALMA RODRIGUEZ \" y cliente \"Jose Angel Peralta Soma\"."
+    },
+     {
+      "cliente": "Rolando José Cedeño Morales",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Werner Oswaldo Osoy Trejo\" y cliente \"Rolando José Cedeño Morales\"."
+    },
+     {
+      "cliente": "Kevin Antonio García Véliz",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Rodrigo Rodas Sanchez\" y cliente \"Kevin Antonio García Véliz\"."
+    },
+    {
+      "cliente": "Lindsey Pamela Sanchez Moreno",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"RODRIGO ALFONSO MENDIETA AVILA\" y cliente \"Lindsey Pamela Sanchez Moreno\"."
+    },
+    {
+      "cliente": "Juan Carlos Quiroa Torres",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"RODRIGO ALFONSO MENDIETA AVILA\" y cliente \"Juan Carlos Quiroa Torres\"."
+    },
+    {
+      "cliente": "Cristián Ademar Villatoro Lozoj / Andremabeth, S.A.",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"RODRIGO ALFONSO MENDIETA AVILA\" y cliente \"Cristián Ademar Villatoro Lozoj / Andremabeth, S.A.\"."
+    },
+    {
+      "cliente": "Dora Maria Raguay Godinez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Richard Kachler Ortega\" y cliente \"Dora Maria Raguay Godinez\"."
+    },
+    {
+      "cliente": "Guillermo Gutierrez Alfonzo",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Richard Kachler Ortega\" y cliente \"Guillermo Gutierrez Alfonzo\"."
+    },
+
+    {
+      "cliente": "Maria Jose Pineda Galicia",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Maria Jose Pineda Galicia\"."
+    },
+    {
+      "cliente": "Jose Alfredo Jimenez Orozco",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Jose Alfredo Jimenez Orozco\"."
+    },
+    {
+      "cliente": "Jonathan René Sajché Valenzuela",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Jonathan René Sajché Valenzuela\"."
+    },
+    {
+      "cliente": "Cesar Armando Portillo Lo / Luis Eduardo Moran Castellanos",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Cesar Armando Portillo Lo / Luis Eduardo Moran Castellanos\"."
+    },
+    {
+      "cliente": "Walter Eduardo Castro",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Walter Eduardo Castro\"."
+    },
+    {
+      "cliente": "Stephanee Alejandra Villatoro Alvarado",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Stephanee Alejandra Villatoro Alvarado\"."
+    },
+    {
+      "cliente": "Emilce Yessenia Arana",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Emilce Yessenia Arana\"."
+    },
+    {
+      "cliente": "María Xiomara Aguilar Meza de Meléndez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"María Xiomara Aguilar Meza de Meléndez\"."
+    },
+    {
+      "cliente": "Marcos Rene Reyes Hernandez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Marcos Rene Reyes Hernandez\"."
+    },
+    {
+      "cliente": "Kelvin Ilde Alexander Lara Vásquez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Kelvin Ilde Alexander Lara Vásquez\"."
+    },
+    {
+      "cliente": "Laura Yessenia cuevas yol",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Laura Yessenia cuevas yol\"."
+    },
+    {
+      "cliente": "Estefany Yissel Chiviliu Tepen",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Estefany Yissel Chiviliu Tepen\"."
+    },
+    {
+      "cliente": "Alberto Hernández Muñoz",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Alberto Hernández Muñoz\"."
+    },
+    {
+      "cliente": "Mario Josué Revolorio Paz",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Mario Josué Revolorio Paz\"."
+    },
+    {
+      "cliente": "Diego Andres Giron Pereda",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Diego Andres Giron Pereda\"."
+    },
+    {
+      "cliente": "Angela Maria Jose Cifuentes Bran",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Angela Maria Jose Cifuentes Bran\"."
+    },
+    {
+      "cliente": "Maria Jose Palma Sochon",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Maria Jose Palma Sochon\"."
+    },
+    {
+      "cliente": "Sergio Iván Ramírez Letona",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Sergio Iván Ramírez Letona\"."
+    },
+    {
+      "cliente": "Ana Elisa Alvarez Zuñiga",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Ana Elisa Alvarez Zuñiga\"."
+    },
+    {
+      "cliente": "Meyra Damaris Boche Chavez de Diaz / Hansony Emanuel Boche Chavez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Meyra Damaris Boche Chavez de Diaz / Hansony Emanuel Boche Chavez\"."
+    },
+    {
+      "cliente": "Carlos Enrique Yoc Barillas",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Carlos Enrique Yoc Barillas\"."
+    },
+    {
+      "cliente": "Ronald Estuardo Mendez Siles / Yenifer Lourdes Rodriguez Lux",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Ronald Estuardo Mendez Siles / Yenifer Lourdes Rodriguez Lux\"."
+    },
+    {
+      "cliente": "Shirley Walesca Marroquín Urízar De Montenegro / Elías Noé Montenegro Ramírez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Shirley Walesca Marroquín Urízar De Montenegro / Elías Noé Montenegro Ramírez\"."
+    },
+    {
+      "cliente": "Cyntia Paola Rodas Marcos",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Cyntia Paola Rodas Marcos\"."
+    },
+    {
+      "cliente": "Tiendas Virtuales, Sociedad Anónima",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Tiendas Virtuales, Sociedad Anónima\"."
+    },
+    {
+      "cliente": "Ruth Eunice Guerra Lopez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Ruth Eunice Guerra Lopez\"."
+    },
+    {
+      "cliente": "Jhonathan Gustavo Najera Mayorga",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Jhonathan Gustavo Najera Mayorga\"."
+    },
+    {
+      "cliente": "Rodrigo Antonio Rangel Guillermo",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Rodrigo Antonio Rangel Guillermo\"."
+    },
+    {
+      "cliente": "Diego Alejandro Palma Sochon",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Diego Alejandro Palma Sochon\"."
+    },
+    {
+      "cliente": "Carlos Rene Contreras Chiyoque",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Carlos Rene Contreras Chiyoque\"."
+    },
+    {
+      "cliente": "Bryan Javier Arriaza Guitron",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Bryan Javier Arriaza Guitron\"."
+    },
+    {
+      "cliente": "Herlin Veronica Lemus Estrada",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Herlin Veronica Lemus Estrada\"."
+    },
+    {
+      "cliente": "Carlos Andres Florian Solares",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Carlos Andres Florian Solares\"."
+    },
+    {
+      "cliente": "Gladys Elizabeth Ramirez Agustin / Raul Antonio Alarcon Peña",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Gladys Elizabeth Ramirez Agustin / Raul Antonio Alarcon Peña\"."
+    },
+    {
+      "cliente": "Wendy Eugenia Gonzalez Quej de Linares / Rolando Antonio Linares Guzman",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Wendy Eugenia Gonzalez Quej de Linares / Rolando Antonio Linares Guzman\"."
+    },
+    {
+      "cliente": "Javier Alexander Hernandez Cordero",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Javier Alexander Hernandez Cordero\"."
+    },
+    {
+      "cliente": "Francisco Alberto Santos Carreto",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Francisco Alberto Santos Carreto\"."
+    },
+    {
+      "cliente": "Edgar Giovanni Juarez Alvarez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Edgar Giovanni Juarez Alvarez\"."
+    },
+    {
+      "cliente": "Pedro Ivan Gudiel Tobar",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Pedro Ivan Gudiel Tobar\"."
+    },
+    {
+      "cliente": "Cesar Samuel Mota Velasquez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Cesar Samuel Mota Velasquez\"."
+    },
+    {
+      "cliente": "Cristel Maria Marroquin Solorzano",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Cristel Maria Marroquin Solorzano\"."
+    },
+    {
+      "cliente": "MARIO JULIAN DE PAZ LÓPEZ / YORLENNY MARICELA DE LEÓN",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"MARIO JULIAN DE PAZ LÓPEZ / YORLENNY MARICELA DE LEÓN\"."
+    },
+    {
+      "cliente": "Pedro José Cabrera Navarro",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Pedro José Cabrera Navarro\"."
+    },
+    {
+      "cliente": "Pablo Samuel Morales Tejeda",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Pablo Samuel Morales Tejeda\"."
+    },
+    {
+      "cliente": "Jonathan Mishell Quiroa Hernández",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Jonathan Mishell Quiroa Hernández\"."
+    },
+    {
+      "cliente": "Yener Josué García Cano",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Yener Josué García Cano\"."
+    },
+    {
+      "cliente": "Mariano Adolfo Garcia Galvez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Mariano Adolfo Garcia Galvez\"."
+    },
+    {
+      "cliente": "Mauricio Enrique de Guisse Morataya",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Mauricio Enrique de Guisse Morataya\"."
+    },
+    {
+      "cliente": "Hector Francisco de Leon Lopez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Hector Francisco de Leon Lopez\"."
+    },
+    {
+      "cliente": "Manuel Francisco Urrutia Gaitan",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Manuel Francisco Urrutia Gaitan\"."
+    },
+    {
+      "cliente": "Abner Alexander Santizo Cifuentes",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Abner Alexander Santizo Cifuentes\"."
+    },
+    {
+      "cliente": "Luis Axel Jafet Gramajo Corzantes",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Luis Axel Jafet Gramajo Corzantes\"."
+    },
+    {
+      "cliente": "Jairo Fernando Herrera Juarez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Jairo Fernando Herrera Juarez\"."
+    },
+    {
+      "cliente": "Cesar Daniel Contreras Garcia / Leslie Priscilla de Contreras",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Cesar Daniel Contreras Garcia / Leslie Priscilla de Contreras\"."
+    },
+    {
+      "cliente": "Diego Jose David Loarca de Leon",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Diego Jose David Loarca de Leon\"."
+    },
+    {
+      "cliente": "Dorty Nature SPA S.A. / Pablo Rene Ardon Lepe",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Dorty Nature SPA S.A. / Pablo Rene Ardon Lepe\"."
+    },
+    {
+      "cliente": "Juan Antonio Carranza Ramirez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Juan Antonio Carranza Ramirez\"."
+    },
+    {
+      "cliente": "Jharim Elizabeth Lopez Palma",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Jharim Elizabeth Lopez Palma\"."
+    },
+    {
+      "cliente": "Josue Israel Puac Chay",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Josue Israel Puac Chay\"."
+    },
+    {
+      "cliente": "Ervin Ernesto Telon Polanco",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Ervin Ernesto Telon Polanco\"."
+    },
+    {
+      "cliente": "Pedro Rosales Lopez 2",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Pedro Rosales Lopez 2\"."
+    },
+    {
+      "cliente": "Santos Nicolas Mejia Itzep",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Santos Nicolas Mejia Itzep\"."
+    },
+    {
+      "cliente": "Missael Antonio Rayo Sandoval",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Missael Antonio Rayo Sandoval\"."
+    },
+    {
+      "cliente": "Diego Armando Padilla Lopez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Flujocapital\" y cliente \"Diego Armando Padilla Lopez\"."
+    },
+      {
+      "cliente": "William Alejandro Pinzon Reyes",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"JOSÉ ANDRÉS ASENSIO HERNÁNDEZ\" y cliente \"William Alejandro Pinzon Reyes\"."
+    },
+    {
+      "cliente": "ENGIR",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"JOSÉ ANDRÉS ASENSIO HERNÁNDEZ\" y cliente \"ENGIR\"."
+    },
+    {
+      "cliente": "Yarol Antonio Cur Perez / Miriam Lucia Roldan Azurdia",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"JAVIER ARZÚ PÉREZ\" y cliente \"Yarol Antonio Cur Perez\"."
+    },
+    {
+      "cliente": "Wilder Alexsander Sian Arrecis",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"JAVIER ARZÚ PÉREZ\" y cliente \"Wilder Alexsander Sian Arrecis\"."
+    },
+    {
+      "cliente": "Industria de Bebida Vida Sociedad Anónima",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Felipe Gonzalez\" y cliente \"Industria de Bebida Vida Sociedad Anónima\"."
+    }
+  ]
+}

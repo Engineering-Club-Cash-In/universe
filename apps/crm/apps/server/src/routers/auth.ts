@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -7,7 +8,9 @@ export const authRouter = {
 	getUserProfile: protectedProcedure.handler(async ({ context }) => {
 		const userId = context.session?.user?.id;
 		if (!userId) {
-			throw new Error("User not found");
+			throw new ORPCError("NOT_FOUND", {
+				message: "Usuario no encontrado",
+			});
 		}
 
 		const userData = await db

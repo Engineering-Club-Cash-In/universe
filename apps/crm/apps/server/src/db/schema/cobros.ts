@@ -1,6 +1,8 @@
 import {
 	boolean,
+	check,
 	decimal,
+	index,
 	integer,
 	pgEnum,
 	pgTable,
@@ -8,6 +10,7 @@ import {
 	timestamp,
 	uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth";
 import { clients } from "./crm";
 import { vehicles } from "./vehicles";
@@ -15,6 +18,7 @@ import { vehicles } from "./vehicles";
 // Enums para cobros
 export const estadoMoraEnum = pgEnum("estado_mora", [
 	"al_dia", // Pagos al día
+	"en_convenio", // Crédito con convenio de pago activo
 	"mora_30", // 1-30 días de retraso
 	"mora_60", // 31-60 días de retraso
 	"mora_90", // 61-90 días de retraso
@@ -120,75 +124,99 @@ export const cuotasPago = pgTable("cuotas_pago", {
 });
 
 // Casos de cobros - Se crean cuando hay cuotas en mora
-export const casosCobros = pgTable("casos_cobros", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	contratoId: uuid("contrato_id")
-		.notNull()
-		.references(() => contratosFinanciamiento.id),
+export const casosCobros = pgTable(
+	"casos_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		contratoId: uuid("contrato_id").references(
+			() => contratosFinanciamiento.id,
+		),
 
-	// Referencia a cartera-back (nullable para compatibilidad con datos legacy)
-	numeroCreditoSifco: text("numero_credito_sifco"),
+		// Referencia a cartera-back (nullable para compatibilidad con datos legacy)
+		numeroCreditoSifco: text("numero_credito_sifco"),
 
-	// Estado actual del caso
-	estadoMora: estadoMoraEnum("estado_mora").notNull(),
-	montoEnMora: decimal("monto_en_mora", { precision: 12, scale: 2 }).notNull(),
-	diasMoraMaximo: integer("dias_mora_maximo").notNull(),
-	cuotasVencidas: integer("cuotas_vencidas").notNull(),
+		// Estado actual del caso
+		estadoMora: estadoMoraEnum("estado_mora").notNull(),
+		montoEnMora: decimal("monto_en_mora", {
+			precision: 12,
+			scale: 2,
+		}).notNull(),
+		diasMoraMaximo: integer("dias_mora_maximo").notNull(),
+		cuotasVencidas: integer("cuotas_vencidas").notNull(),
 
-	// Asignación
-	responsableCobros: text("responsable_cobros")
-		.notNull()
-		.references(() => user.id),
+		// Asignación
+		responsableCobros: text("responsable_cobros")
+			.notNull()
+			.references(() => user.id),
 
-	// Información de contacto del cliente
-	telefonoPrincipal: text("telefono_principal").notNull(),
-	telefonoAlternativo: text("telefono_alternativo"),
-	emailContacto: text("email_contacto").notNull(),
-	direccionContacto: text("direccion_contacto").notNull(),
+		// Información de contacto del cliente
+		telefonoPrincipal: text("telefono_principal").notNull(),
+		telefonoAlternativo: text("telefono_alternativo"),
+		emailContacto: text("email_contacto").notNull(),
+		direccionContacto: text("direccion_contacto").notNull(),
 
-	// Próximo contacto programado
-	proximoContacto: timestamp("proximo_contacto"),
-	metodoContactoProximo: metodoContactoEnum("metodo_contacto_proximo"),
+		// Próximo contacto programado
+		proximoContacto: timestamp("proximo_contacto"),
+		metodoContactoProximo: metodoContactoEnum("metodo_contacto_proximo"),
 
-	// Estado del caso
-	activo: boolean("activo").default(true),
+		// Estado del caso
+		activo: boolean("activo").default(true),
 
-	// General notes
-	notes: text("notes"),
+		// General notes
+		notes: text("notes"),
 
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+		// Etiquetas del caso
+		etiquetas: text("etiquetas").array().default([]),
+
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("idx_casos_cobros_activo_proximo_contacto").on(
+			table.activo,
+			table.proximoContacto,
+		),
+	],
+);
 
 // Historial de contactos de cobros
-export const contactosCobros = pgTable("contactos_cobros", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	casoCobroId: uuid("caso_cobro_id")
-		.notNull()
-		.references(() => casosCobros.id, { onDelete: "cascade" }),
+export const contactosCobros = pgTable(
+	"contactos_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
 
-	// Información del contacto
-	fechaContacto: timestamp("fecha_contacto").notNull().defaultNow(),
-	metodoContacto: metodoContactoEnum("metodo_contacto").notNull(),
-	estadoContacto: estadoContactoEnum("estado_contacto").notNull(),
+		// Información del contacto
+		fechaContacto: timestamp("fecha_contacto").notNull().defaultNow(),
+		metodoContacto: metodoContactoEnum("metodo_contacto").notNull(),
+		estadoContacto: estadoContactoEnum("estado_contacto").notNull(),
 
-	// Detalles del contacto
-	duracionLlamada: integer("duracion_llamada"), // en segundos
-	comentarios: text("comentarios").notNull(),
-	acuerdosAlcanzados: text("acuerdos_alcanzados"),
-	compromisosPago: text("compromisos_pago"),
+		// Detalles del contacto
+		duracionLlamada: integer("duracion_llamada"), // en segundos
+		comentarios: text("comentarios").notNull(),
+		acuerdosAlcanzados: text("acuerdos_alcanzados"),
+		compromisosPago: text("compromisos_pago"),
 
-	// Próximo seguimiento
-	requiereSeguimiento: boolean("requiere_seguimiento").default(false),
-	fechaProximoContacto: timestamp("fecha_proximo_contacto"),
+		// Próximo seguimiento
+		requiereSeguimiento: boolean("requiere_seguimiento").default(false),
+		fechaProximoContacto: timestamp("fecha_proximo_contacto"),
 
-	// Usuario que realizó el contacto
-	realizadoPor: text("realizado_por")
-		.notNull()
-		.references(() => user.id),
+		// Usuario que realizó el contacto
+		realizadoPor: text("realizado_por")
+			.notNull()
+			.references(() => user.id),
 
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("idx_contactos_cobros_caso_fecha").on(
+			table.casoCobroId,
+			table.fechaContacto,
+		),
+	],
+);
 
 // Convenios de pago especiales
 export const conveniosPago = pgTable("convenios_pago", {
@@ -282,3 +310,55 @@ export const notificacionesCobros = pgTable("notificaciones_cobros", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// Metas de mora mensuales (porcentajes objetivo globales)
+export const categoriaMetaMoraEnum = pgEnum("categoria_meta_mora", [
+	"mora_total",
+	"mora_30",
+	"mora_60",
+	"mora_90",
+	"mora_120",
+]);
+
+export const metasMoraCobros = pgTable("metas_mora_cobros", {
+	id: uuid("id").primaryKey().defaultRandom(),
+
+	// Período
+	mes: integer("mes").notNull(), // 1-12
+	anio: integer("anio").notNull(),
+
+	// Categoría de mora
+	categoria: categoriaMetaMoraEnum("categoria").notNull(),
+
+	// Porcentaje objetivo (ej: 8.35 = 8.35%)
+	valorObjetivo: decimal("valor_objetivo", {
+		precision: 5,
+		scale: 2,
+	}).notNull(),
+
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Seguimientos programados recurrentes para casos de cobros
+export const seguimientosProgramados = pgTable("seguimientos_programados", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	casoCobroId: uuid("caso_cobro_id")
+		.notNull()
+		.references(() => casosCobros.id, { onDelete: "cascade" }),
+	agenteId: text("agente_id")
+		.notNull()
+		.references(() => user.id),
+	metodoContacto: metodoContactoEnum("metodo_contacto").notNull(),
+	intervaloDias: integer("intervalo_dias").notNull(),
+	ocurrenciasMaximas: integer("ocurrencias_maximas"),
+	ocurrenciasRealizadas: integer("ocurrencias_realizadas").notNull().default(0),
+	fechaInicio: timestamp("fecha_inicio").notNull(),
+	fechaFin: timestamp("fecha_fin"),
+	presetOriginal: text("preset_original"),
+	activo: boolean("activo").default(true),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+	check("intervalo_dias_positive", sql`${table.intervaloDias} > 0`),
+]);

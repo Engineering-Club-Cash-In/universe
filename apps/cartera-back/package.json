@@ -6,10 +6,13 @@
     "dev": "RUST_LOG=error   bun run --watch src/index.ts",
     "devStart": "RUST_LOG=error NODE_ENV=DEV bun run src/index.ts",
     "generate": "bunx drizzle-kit generate",
-    "migrate": "NODE_ENV=LOCAL bunx drizzle-kit push"
+    "migrate": "NODE_ENV=LOCAL bunx drizzle-kit push",
+    "push": "bash ./deploy.sh",
+    "push:dev": "bash ./deploy-dev.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.896.0",
+    "@cci/email": "workspace:*",
     "@aws-sdk/lib-storage": "^3.896.0",
     "@aws-sdk/s3-request-presigner": "^3.896.0",
     "@elysiajs/cookie": "^0.8.0",
@@ -36,6 +39,7 @@
     "drizzle-orm": "^0.36.4",
     "elysia": "^1.4.13",
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.3.3",
     "iconv-lite": "^0.7.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
@@ -46,6 +50,7 @@
     "uuid": "^11.1.0",
     "valibot": "^0.42.1",
     "xlsx": "^0.18.5",
+    "xmlbuilder2": "^4.0.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {

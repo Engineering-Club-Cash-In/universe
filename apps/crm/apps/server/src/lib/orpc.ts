@@ -58,7 +58,7 @@ const requireCrmAccess = o.middleware(async ({ context, next }) => {
 		.limit(1);
 	const userRole = userData[0]?.role;
 
-	if (!PERMISSIONS.canAccessCRM(userRole)) {
+	if (!PERMISSIONS.canAccessClients(userRole)) {
 		throw new ORPCError("FORBIDDEN", { message: "CRM access role required" });
 	}
 
@@ -108,6 +108,74 @@ const requireAnalyst = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireCrmOrCobros = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (
+		!PERMISSIONS.canAccessCRM(userRole) &&
+		!PERMISSIONS.canAccessCobros(userRole)
+	) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "CRM or Cobros access required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+const requireCrmCobrosOrInvestments = o.middleware(
+	async ({ context, next }) => {
+		if (!context.session?.user) {
+			throw new ORPCError("UNAUTHORIZED");
+		}
+
+		const userId = context.session.user.id;
+		const userData = await db
+			.select()
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1);
+		const userRole = userData[0]?.role;
+
+		if (
+			!PERMISSIONS.canAccessCRM(userRole) &&
+			!PERMISSIONS.canAccessCobros(userRole) &&
+			!PERMISSIONS.canAccessInvestments(userRole) &&
+			!PERMISSIONS.canAccessAccounting(userRole)
+		) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "CRM, Cobros, Investments or Accounting access required",
+			});
+		}
+
+		return next({
+			context: {
+				session: context.session,
+				user: userData[0],
+				userId,
+				userRole,
+			},
+		});
+	},
+);
+
 const requireCobros = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -134,6 +202,154 @@ const requireCobros = o.middleware(async ({ context, next }) => {
 		},
 	});
 });
+
+const requireCobrosSupervisor = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAssignCobros(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Cobros supervisor role required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+const requireClosedCreditsReport = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessClosedCreditsReport(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Closed credits report access required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+const requireTiempoCierreReport = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessTiempoCierreReport(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Tiempo cierre report access required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+const requirePorcentajeEfectividadReport = o.middleware(
+	async ({ context, next }) => {
+		if (!context.session?.user) {
+			throw new ORPCError("UNAUTHORIZED");
+		}
+
+		const userId = context.session.user.id;
+		const userData = await db
+			.select()
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1);
+		const userRole = userData[0]?.role;
+
+		if (!PERMISSIONS.canAccessPorcentajeEfectividadReport(userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "Porcentaje efectividad report access required",
+			});
+		}
+
+		return next({
+			context: {
+				session: context.session,
+				user: userData[0],
+				userId,
+				userRole,
+			},
+		});
+	},
+);
+
+const requireViewOpportunityContracts = o.middleware(
+	async ({ context, next }) => {
+		if (!context.session?.user) {
+			throw new ORPCError("UNAUTHORIZED");
+		}
+
+		const userId = context.session.user.id;
+		const userData = await db
+			.select()
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1);
+		const userRole = userData[0]?.role;
+
+		if (!PERMISSIONS.canViewOpportunityContracts(userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "Cannot view opportunity contracts",
+			});
+		}
+
+		return next({
+			context: {
+				session: context.session,
+				user: userData[0],
+				userId,
+				userRole,
+			},
+		});
+	},
+);
 
 const requireJuridico = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
@@ -166,9 +382,153 @@ const requireJuridico = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireTallerAccess = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!userRole || !PERMISSIONS.canAccessTaller(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Taller access required",
+		});
+	}
+
+	return next({
+		context: {
+			...context,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+// Middleware que permite acceso autenticado desde Taller O desde CRM por rol.
+const requireTallerOrCrm = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+	const hasAccess =
+		!!userRole &&
+		(PERMISSIONS.canAccessCRM(userRole) ||
+			PERMISSIONS.canAccessTaller(userRole));
+
+	if (!hasAccess) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "CRM or Taller access required",
+		});
+	}
+
+	return next({
+		context: {
+			...context,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+const requireInvestmentAccess = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessInvestments(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere acceso al modulo de inversiones",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+const requireInvestmentManager = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canValidateInvestmentFunds(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere rol de gerente de inversiones",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
 export const analystProcedure = publicProcedure.use(requireAnalyst);
+export const crmOrCobrosProcedure = publicProcedure.use(requireCrmOrCobros);
+export const crmCobrosOrInvestmentsProcedure = publicProcedure.use(
+	requireCrmCobrosOrInvestments,
+);
 export const cobrosProcedure = publicProcedure.use(requireCobros);
+export const cobrosSupervisorProcedure = publicProcedure.use(
+	requireCobrosSupervisor,
+);
+export const closedCreditsReportProcedure = publicProcedure.use(
+	requireClosedCreditsReport,
+);
+export const tiempoCierreReportProcedure = publicProcedure.use(
+	requireTiempoCierreReport,
+  );
+export const porcentajeEfectividadReportProcedure = publicProcedure.use(
+	requirePorcentajeEfectividadReport,
+);
+export const viewOpportunityContractsProcedure = publicProcedure.use(
+	requireViewOpportunityContracts,
+);
 export const juridicoProcedure = publicProcedure.use(requireJuridico);
+export const tallerProcedure = publicProcedure.use(requireTallerAccess);
+export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);
+export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
+export const investmentManagerProcedure = publicProcedure.use(
+	requireInvestmentManager,
+);

@@ -11,6 +11,14 @@ export interface EnvConfig {
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   CORS_ORIGIN: string;
+  // Frontend URL for password reset
+  FRONTEND_URL: string;
+  // Cartera API Config
+  CARTERA_API_URL: string;
+  CARTERA_USER: string;
+  CARTERA_PASSWORD: string;
+  // CRM API Config
+  CRM_API_URL: string;
 }
 
 function validateEnv(): EnvConfig {
@@ -31,7 +39,7 @@ function validateEnv(): EnvConfig {
   }
 
   // Validaciones adicionales
-  const port = parseInt(process.env.PORT || "3000", 10);
+  const port = parseInt(process.env.PORT || "9500", 10);
   if (isNaN(port) || port < 1 || port > 65535) {
     throw new Error(`❌ Invalid PORT value: ${process.env.PORT}`);
   }
@@ -54,6 +62,14 @@ function validateEnv(): EnvConfig {
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID!,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET!,
     CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:5173",
+    // Frontend
+    FRONTEND_URL: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
+    // Cartera API
+    CARTERA_API_URL: process.env.CARTERA_API_URL || "http://localhost:5000",
+    CARTERA_USER: process.env.CARTERA_USER || "",
+    CARTERA_PASSWORD: process.env.CARTERA_PASSWORD || "",
+    // CRM API
+    CRM_API_URL: process.env.CRM_API_URL || "http://localhost:4000",
   };
 }
 

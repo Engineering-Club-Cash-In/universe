@@ -1,15 +1,20 @@
 import Big from "big.js";
 import z from "zod";
 import { db } from "../database";
-import { 
-  creditos, 
-  creditos_rubros_otros, 
-  creditos_inversionistas, 
-  cuotas_credito, 
-  pagos_credito 
+import {
+  creditos,
+  creditos_rubros_otros,
+  creditos_inversionistas,
+  creditos_inversionistas_espejo,
+  cuotas_credito,
+  pagos_credito,
+  platform_users,
+  inversionistas,
 } from "../database/db";
-import { findOrCreateAdvisorByName } from "./advisor";
+import { findOrCreateAdvisorByName, getAsesorConMenorCarga } from "./advisor";
 import { findOrCreateUserByName } from "./users";
+import { sendNewCreditNotification } from "@cci/email";
+import { eq, and } from "drizzle-orm";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -17,10 +22,12 @@ import { findOrCreateUserByName } from "./users";
 
 interface Inversionista {
   inversionista_id: number;
-  cuota_inversionista?: number;
   porcentaje_cash_in: number;
   porcentaje_inversion: number;
   monto_aportado: number;
+  fecha_inicio_participacion?: string;
+  cuota_inversionista?: number;
+  tipo_inversion?: "compra_cartera" | "reinversion";
 }
 
 interface Rubro {
@@ -55,8 +62,8 @@ interface CreditDataForInsert {
   gps: string;
   observaciones: string;
   no_poliza: string;
-  como_se_entero: string;
   asesor_id: number;
+  como_se_entero: string; 
   plazo: number;
   iva_12: string;
   membresias_pago: string;
@@ -66,12 +73,15 @@ interface CreditDataForInsert {
   royalti: string;
   tipoCredito: string;
   mora: string;
+  is_vehiculo_propio: boolean;
 }
 
 interface NewCredit {
   credito_id: number;
   [key: string]: unknown;
 }
+
+type DbExecutor = Pick<typeof db, "insert" | "select">;
 
 interface User {
   usuario_id: number;
@@ -93,6 +103,7 @@ interface InversionistaData {
   iva_cash_in: string;
   fecha_creacion: Date;
   cuota_inversionista: string;
+  fecha_inicio_participacion?: string;
 }
 
 interface CuotaInsertada {
@@ -139,6 +150,8 @@ interface PagoData {
   reserva: string;
   observaciones: string;
   paymentFalse: boolean;
+  pagoConvenio: string;
+  monto_aplicado: string;
 }
 
 // ========================================
@@ -154,10 +167,10 @@ const creditSchema = z.object({
   gps: z.number().min(0),
   observaciones: z.string().max(1000),
   no_poliza: z.string().max(1000),
-  como_se_entero: z.string().max(100),
-  asesor: z.string().max(1000),
+  como_se_entero: z.string().max(100), 
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
+  dia_pago_mensual: z.number().int().min(1).max(31),
   membresias_pago: z.number().min(0),
   porcentaje_royalti: z.number().min(0),
   royalti: z.number().min(0),
@@ -165,13 +178,34 @@ const creditSchema = z.object({
   nit: z.string().max(1000),
   otros: z.number().min(0),
   reserva: z.number().min(0),
+  asesor_id: z.number().int().positive().optional(),
+  is_vehiculo_propio: z.boolean().optional().default(false),
+  
+  // Campos opcionales de dirección
+  direccion: z.string().max(300).optional().nullable(),
+  municipio: z.string().max(100).optional().nullable(),
+  departamento: z.string().max(100).optional().nullable(),
+  codigo_postal: z.string().max(10).optional().nullable(),
+  pais: z.string().optional().nullable(),
+
+  // Información del vehículo, monto asegurado y opportunity_id (Opcionales para el correo)
+  vehiculo_marca: z.string().optional().nullable(),
+  vehiculo_linea: z.string().optional().nullable(),
+  vehiculo_modelo: z.string().optional().nullable(),
+  vehiculo_placa: z.string().optional().nullable(),
+  vehiculo_vin: z.string().optional().nullable(),
+  monto_asegurado: z.number().min(0).optional().nullable(),
+  opportunity_id: z.string().optional().nullable(),
+  
   inversionistas: z
     .array(
       z.object({
         inversionista_id: z.number().int().positive(),
-        monto_aportado: z.number().positive(),
+        monto_aportado: z.number().nonnegative(),
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
+        tipo_inversion: z.enum(["compra_cartera", "reinversion"]).optional(),
+        fecha_inicio_participacion: z.string().optional(),
         cuota_inversionista: z.number().min(0).optional(),
       })
     )
@@ -192,25 +226,7 @@ const creditSchema = z.object({
 // ========================================
 
 const validateCreditData = (creditData: CreditData, set: SetContext): ValidationResult => {
-  // Validar suma de cuotas inversionistas
-  const totalCuotaInversionista = creditData.inversionistas.reduce(
-    (acc: Big, inv: Inversionista) => acc.plus(inv.cuota_inversionista ?? 0),
-    new Big(0)
-  );
-
-  const totalCuotaInversionistaRedondeado = totalCuotaInversionista.round(2);
-  if (Number(creditData.cuota) !== totalCuotaInversionistaRedondeado.toNumber()) {
-    set.status = 400;
-    return {
-      success: false,
-      error: {
-        message: "La suma de las cuotas asignadas a los inversionistas debe ser igual a la cuota del crédito.",
-        cuotaEsperada: creditData.cuota,
-        totalCuotaInversionista: totalCuotaInversionistaRedondeado.toNumber(),
-      }
-    };
-  }
-
+ 
   // Validar porcentajes cash_in + inversion = 100
   for (const inv of creditData.inversionistas) {
     const sumaPorcentajes = Number(inv.porcentaje_cash_in ?? 0) + Number(inv.porcentaje_inversion ?? 0);
@@ -251,7 +267,7 @@ const validateCreditData = (creditData: CreditData, set: SetContext): Validation
 // 2. INSERCIÓN DE CRÉDITO Y RELACIONADOS
 // ========================================
 
-const insertCreditAndRelated = async (creditData: CreditData): Promise<{
+const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecutor = db): Promise<{
   newCredit: NewCredit;
   creditDataForInsert: CreditDataForInsert;
   total_monto_cash_in: Big;
@@ -269,22 +285,31 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     .plus(creditData.gps ?? 0)
     .plus(creditData.membresias_pago ?? 0)
     .plus(creditData.otros ?? 0);
-
   const deudatotalRedondeado = deudatotal.round(2);
 
-  // Buscar o crear usuario y asesor
+  // Buscar o crear usuario con los nuevos campos opcionales
   const user: User = await findOrCreateUserByName(
     creditData.usuario,
     creditData.categoria,
     creditData.nit,
-    creditData.como_se_entero
+    creditData.como_se_entero,
+    // Campos opcionales de dirección
+    creditData.direccion ?? null,
+    creditData.municipio ?? null,
+    creditData.departamento ?? null,
+    creditData.codigo_postal ?? null,
+    creditData.pais ?? null,
+    executor
   );
 
-  const advisor: Advisor = await findOrCreateAdvisorByName(creditData.asesor, true);
+  console.log("🎯 Aplicando load balancing de asesores...");
+  const asesor_id = creditData.asesor_id || await getAsesorConMenorCarga();
+  console.log(`✅ Asesor asignado: ${asesor_id}`);
 
-  const formatCredit = creditData.inversionistas.some(
-    (inv: Inversionista) => Number(inv.porcentaje_inversion) > 1
-  ) ? "Pool" : "Individual";
+  const formatCredit = creditData.inversionistas.length > 1 &&
+    creditData.inversionistas.some(
+      (inv: Inversionista) => Number(inv.porcentaje_inversion) > 1
+    ) ? "Pool" : "Individual";
 
   const creditDataForInsert: CreditDataForInsert = {
     usuario_id: user.usuario_id,
@@ -300,7 +325,7 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     observaciones: creditData.observaciones ?? "0",
     no_poliza: creditData.no_poliza ?? "",
     como_se_entero: creditData.como_se_entero ?? "",
-    asesor_id: advisor.asesor_id,
+    asesor_id: asesor_id,
     plazo: creditData.plazo,
     iva_12: iva_12.toString(),
     membresias_pago: creditData.membresias_pago.toString(),
@@ -310,12 +335,13 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     royalti: creditData.royalti?.toString() ?? "0",
     tipoCredito: "Nuevo",
     mora: "0",
+    is_vehiculo_propio: creditData.is_vehiculo_propio ?? false,
   };
 
   console.log("Credit data to insert:", creditDataForInsert);
 
   // Insertar crédito principal
-  const [newCredit] = await db
+  const [newCredit] = await executor
     .insert(creditos)
     .values(creditDataForInsert)
     .returning();
@@ -330,59 +356,208 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
       monto: r.monto.toString(),
     }));
 
-    await db.insert(creditos_rubros_otros).values(rubrosToInsert);
+    await executor.insert(creditos_rubros_otros).values(rubrosToInsert);
     console.log("Inserted rubros:", rubrosToInsert);
   }
 
   // Insertar inversionistas
-  const creditosInversionistasData: InversionistaData[] = creditData.inversionistas.map((inv: Inversionista) => {
-    const montoAportado = new Big(inv.monto_aportado);
-    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-    const porcentajeInversion = new Big(inv.porcentaje_inversion);
-    const interes = new Big(creditDataForInsert.porcentaje_interes ?? 0);
-    const newCuotaInteres = new Big(montoAportado ?? 0).times(interes.div(100));
+  const capitalTotal = new Big(creditData.capital);
+const cuotaTotal = new Big(creditData.cuota);
 
-    const montoInversionista = newCuotaInteres.times(porcentajeInversion).div(100).toFixed(2);
-    const montoCashIn = newCuotaInteres.times(porcentajeCashIn).div(100).toFixed(2);
+const creditosInversionistasData: InversionistaData[] = creditData.inversionistas.map((inv: Inversionista, index: number, arr: Inversionista[]) => {
+  console.log(`\n${"=".repeat(60)}`);
+  console.log(`📊 PROCESANDO INVERSIONISTA #${index + 1}`);
+  console.log(`${"=".repeat(60)}`);
+  
+  const montoAportado = new Big(inv.monto_aportado);
+  const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+  const porcentajeInversion = new Big(inv.porcentaje_inversion);
+  
+  console.log(`🆔 ID Inversionista: ${inv.inversionista_id}`); 
+  console.log(`💰 Monto Aportado: Q${montoAportado.toFixed(2)}`);
+  console.log(`💵 Capital Total del Crédito: Q${capitalTotal.toFixed(2)}`);
+  
+  // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN
+  const porcentajeParticipacion = capitalTotal.eq(0)
+    ? new Big(0)
+    : montoAportado.div(capitalTotal).times(100);
+  
+  console.log(`\n📐 CÁLCULO DE PARTICIPACIÓN:`);
+  console.log(`   Fórmula: (${montoAportado.toFixed(2)} / ${capitalTotal.toFixed(2)}) * 100`);
+  console.log(`   Resultado: ${porcentajeParticipacion.toFixed(4)}%`);
+  
+  const seguro = new Big(creditDataForInsert.seguro_10_cuotas || 0);
+  const membresias = new Big(creditDataForInsert.membresias_pago || 0);
+  const gps = new Big(creditDataForInsert.gps || 0);
 
-    const ivaInversionista = Number(montoInversionista) > 0 
-      ? new Big(montoInversionista).times(0.12) 
-      : new Big(0);
-    const ivaCashIn = Number(montoCashIn) > 0 
-      ? new Big(montoCashIn).times(0.12) 
-      : new Big(0);
+  console.log(`\n💳 CUOTA TOTAL Y CARGOS:`);
+  console.log(`   Cuota Total: Q${cuotaTotal.toFixed(2)}`);
+  console.log(`   - Seguro: Q${seguro.toFixed(2)}`);
+  console.log(`   - GPS: Q${gps.toFixed(2)}`);
+  console.log(`   - Membresía: Q${membresias.toFixed(2)}`);
 
-    const cuotaInv = inv.cuota_inversionista === 0
-      ? creditData.cuota.toString()
-      : inv.cuota_inversionista?.toString() ?? creditData.cuota.toString();
+  const cuotaSinCargos = cuotaTotal
+    .minus(membresias)
+    .minus(seguro)
+    .minus(gps);
 
-    return {
-      credito_id: newCredit.credito_id,
-      inversionista_id: inv.inversionista_id,
-      monto_aportado: montoAportado.toString(),
-      porcentaje_cash_in: porcentajeCashIn.toString(),
-      porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-      monto_inversionista: montoInversionista.toString(),
-      monto_cash_in: montoCashIn.toString(),
-      iva_inversionista: ivaInversionista.toString(),
-      iva_cash_in: ivaCashIn.toString(),
-      fecha_creacion: new Date(),
-      cuota_inversionista: cuotaInv,
-    };
+  console.log(`   = Cuota sin cargos: Q${cuotaSinCargos.toFixed(2)}`);
+  console.log(`   Fórmula: ${cuotaTotal.toFixed(2)} - ${membresias.toFixed(2)} - ${seguro.toFixed(2)} - ${gps.toFixed(2)}`);
+  
+  // 🔥 PASO 2: MULTIPLICAR POR EL PORCENTAJE
+  console.log(`\n🔢 PASO 2: MULTIPLICAR POR PORCENTAJE`);
+  console.log(`   Fórmula: ${cuotaSinCargos.toFixed(2)} * (${porcentajeParticipacion.toFixed(4)}% / 100)`);
+  
+  const cuotaBase = cuotaSinCargos
+    .times(porcentajeParticipacion.div(100))
+    .round(6);
+  
+  console.log(`   Cuota Base Calculada: Q${cuotaBase.toFixed(2)}`);
+  
+  // 🔥 ENCONTRAR AL INVERSIONISTA CON MAYOR MONTO APORTADO
+  console.log(`\n🔍 BUSCANDO INVERSIONISTA CON MAYOR MONTO APORTADO:`);
+  
+  arr.forEach((invTemp, idx) => {
+    const montoTemp = new Big(invTemp.monto_aportado);
+    console.log(`   [${idx + 1}] ID ${invTemp.inversionista_id}: Q${montoTemp.toFixed(2)}`);
   });
+  
+  const inversionistaMayor = arr.reduce((max, current) => 
+    new Big(current.monto_aportado).gt(new Big(max.monto_aportado)) ? current : max
+  );
+  
+  console.log(`   🏆 Mayor encontrado: ID ${inversionistaMayor.inversionista_id} con Q${new Big(inversionistaMayor.monto_aportado).toFixed(2)}`);
+  
+  const esMayor = inv.inversionista_id === inversionistaMayor.inversionista_id;
+  
+  console.log(`   ¿Es este inversionista el mayor? ${esMayor ? '✅ SÍ' : '❌ NO'}`);
+  
+  // 🔥 PRIORIDAD 1: Si viene cuota_inversionista desde el frontend, usarla
+  let cuotaInversionista: Big;
+  if (inv.cuota_inversionista !== undefined && inv.cuota_inversionista !== null) {
+    cuotaInversionista = new Big(inv.cuota_inversionista);
+    console.log(`   🚀 FRONTEND: Usando cuota enviada desde el front: Q${cuotaInversionista.toFixed(2)}`);
+  } else if (esMayor) {
+    console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
+    console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
+    console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
+    console.log(`   + Membresía: Q${membresias.toFixed(2)}`);
+    
+    cuotaInversionista = cuotaBase
+      .plus(seguro)
+      .plus(membresias)
+      .round(6);
+    
+    console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(2)}`);
+    console.log(`   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`);
+  } else {
+    console.log(`   📍 Inversionista normal (no es el mayor)`);
+    cuotaInversionista = cuotaBase;
+    console.log(`   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(2)}`);
+    console.log(`   (No se suman cargos)`);
+  }
+  
+  // Calcular interés sobre el monto aportado
+  console.log(`\n💹 CÁLCULO DE INTERESES:`);
+  const interes = new Big(creditDataForInsert.porcentaje_interes ?? 0);
+  console.log(`   Tasa de Interés: ${interes.toFixed(2)}%`);
+  console.log(`   Monto Aportado: Q${montoAportado.toFixed(2)}`);
+  
+  const newCuotaInteres = montoAportado.times(interes.div(100)).round(6);
+  console.log(`   Interés Calculado: Q${newCuotaInteres.toFixed(2)}`);
+  console.log(`   Fórmula: ${montoAportado.toFixed(2)} * (${interes.toFixed(2)}% / 100)`);
 
-  let total_monto_cash_in = new Big(0);
-  let total_iva_cash_in = new Big(0);
+  // Distribución del interés entre inversionista y cash-in
+  console.log(`\n📊 DISTRIBUCIÓN DE INTERÉS:`);
+  console.log(`   % Inversionista: ${porcentajeInversion.toFixed(2)}%`);
+  console.log(`   % Cash-In: ${porcentajeCashIn.toFixed(2)}%`);
+  
+  const montoInversionista = newCuotaInteres.times(porcentajeInversion).div(100).round(2);
+  const montoCashIn = newCuotaInteres.times(porcentajeCashIn).div(100).round(2);
+  
+  console.log(`   Monto Inversionista: Q${montoInversionista.toFixed(2)}`);
+  console.log(`   Fórmula: ${newCuotaInteres.toFixed(2)} * (${porcentajeInversion.toFixed(2)}% / 100)`);
+  console.log(`   Monto Cash-In: Q${montoCashIn.toFixed(2)}`);
+  console.log(`   Fórmula: ${newCuotaInteres.toFixed(2)} * (${porcentajeCashIn.toFixed(2)}% / 100)`);
 
-  creditosInversionistasData.forEach(({ monto_cash_in, iva_cash_in }: InversionistaData) => {
-    total_monto_cash_in = total_monto_cash_in.plus(monto_cash_in);
-    total_iva_cash_in = total_iva_cash_in.plus(iva_cash_in);
-  });
-
-  if (creditosInversionistasData.length > 0) {
-    await db.insert(creditos_inversionistas).values(creditosInversionistasData);
+  // Calcular IVAs
+  console.log(`\n🧾 CÁLCULO DE IVA (12%):`);
+  
+  const ivaInversionista = Number(montoInversionista) > 0 
+    ? montoInversionista.times(0.12).round(6)
+    : new Big(0);
+  const ivaCashIn = Number(montoCashIn) > 0 
+    ? montoCashIn.times(0.12).round(6)
+    : new Big(0);
+  
+  if (Number(montoInversionista) > 0) {
+    console.log(`   IVA Inversionista: Q${ivaInversionista.toFixed(2)}`);
+    console.log(`   Fórmula: ${montoInversionista.toFixed(2)} * 0.12`);
+  } else {
+    console.log(`   IVA Inversionista: Q0.00 (sin monto)`);
+  }
+  
+  if (Number(montoCashIn) > 0) {
+    console.log(`   IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
+    console.log(`   Fórmula: ${montoCashIn.toFixed(2)} * 0.12`);
+  } else {
+    console.log(`   IVA Cash-In: Q0.00 (sin monto)`);
   }
 
+  console.log(`\n✅ RESUMEN FINAL:`);
+  console.log(`   - Cuota Inversionista: Q${cuotaInversionista.toFixed(2)}`);
+  console.log(`   - Monto Inversionista: Q${montoInversionista.toFixed(2)}`);
+  console.log(`   - IVA Inversionista: Q${ivaInversionista.toFixed(2)}`);
+  console.log(`   - Monto Cash-In: Q${montoCashIn.toFixed(2)}`);
+  console.log(`   - IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
+  console.log(`${"=".repeat(60)}\n`);
+
+  return {
+    credito_id: newCredit.credito_id,
+    inversionista_id: inv.inversionista_id,
+    monto_aportado: montoAportado.toString(),
+    porcentaje_cash_in: porcentajeCashIn.toString(),
+    porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+    monto_inversionista: montoInversionista.toString(),
+    monto_cash_in: montoCashIn.toString(),
+    iva_inversionista: ivaInversionista.toString(),
+    iva_cash_in: ivaCashIn.toString(),
+    fecha_creacion: new Date(),
+    cuota_inversionista: cuotaInversionista.toString(),
+    ...(inv.fecha_inicio_participacion ? { fecha_inicio_participacion: inv.fecha_inicio_participacion } : {}),
+  };
+});
+
+// 🔥 VALIDAR QUE LA SUMA DE CUOTAS CALCULADAS = CUOTA TOTAL
+const sumaCuotasCalculadas = creditosInversionistasData.reduce(
+  (acc, inv) => acc.plus(inv.cuota_inversionista),
+  new Big(0)
+);
+
+console.log(`🔍 Validación de cuotas:`);
+console.log(`   - Cuota total del crédito: Q${cuotaTotal.toFixed(2)}`);
+console.log(`   - Suma de cuotas inversionistas: Q${sumaCuotasCalculadas.toFixed(2)}`);
+console.log(`   - Diferencia: Q${cuotaTotal.minus(sumaCuotasCalculadas).abs().toFixed(2)}`);
+
+// Validar con tolerancia de 0.01 por redondeo (skip si cuota es 0)
+if (cuotaTotal.gt(0) && cuotaTotal.minus(sumaCuotasCalculadas).abs().gt(0.01)) {
+  throw new Error(
+    `Error en cálculo de cuotas: La suma de cuotas inversionistas (${sumaCuotasCalculadas.toFixed(2)}) no coincide con la cuota total (${cuotaTotal.toFixed(2)})`
+  );
+}
+
+let total_monto_cash_in = new Big(0);
+let total_iva_cash_in = new Big(0);
+
+creditosInversionistasData.forEach(({ monto_cash_in, iva_cash_in }: InversionistaData) => {
+  total_monto_cash_in = total_monto_cash_in.plus(monto_cash_in);
+  total_iva_cash_in = total_iva_cash_in.plus(iva_cash_in);
+});
+
+if (creditosInversionistasData.length > 0) {
+  await executor.insert(creditos_inversionistas).values(creditosInversionistasData);
+  await executor.insert(creditos_inversionistas_espejo).values(creditosInversionistasData);
+}
   return {
     newCredit,
     creditDataForInsert,
@@ -395,26 +570,26 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
 // 3. GENERACIÓN DE FECHAS
 // ========================================
 
-const generatePaymentDates = (plazo: number): string[] => {
+const generatePaymentDates = (plazo: number, diaPagoMensual: 15 | 30): string[] => {
   const fechas: string[] = [];
   const startDate = new Date();
-  
+
   const fechaHoy = new Date();
   const fechaHoyGuate = fechaHoy.toLocaleDateString("sv-SE", {
     timeZone: "America/Guatemala",
   });
-  
+
   fechas.push(fechaHoyGuate);
 
   for (let i = 0; i < plazo; i++) {
-    const baseDate = new Date(startDate);
-    baseDate.setMonth(baseDate.getMonth() + i + 1);
+    const anioBase = startDate.getFullYear();
+    const mesBase = startDate.getMonth() + i + 1; // JS maneja overflow de meses
 
-    const mes = baseDate.getMonth();
-    const anio = baseDate.getFullYear();
-    const ultimoDiaMes = new Date(anio, mes + 1, 0).getDate();
-    const diaPago = ultimoDiaMes < 30 ? ultimoDiaMes : 30;
-    const fechaLocal = new Date(anio, mes, diaPago, 12, 0, 0);
+    // Último día del mes destino (ej: Feb → 28/29)
+    const ultimoDiaMes = new Date(anioBase, mesBase + 1, 0).getDate();
+    const diaPago = Math.min(diaPagoMensual, ultimoDiaMes);
+
+    const fechaLocal = new Date(anioBase, mesBase, diaPago, 12, 0, 0);
     const fechaGuateStr = fechaLocal.toLocaleDateString("sv-SE", {
       timeZone: "America/Guatemala",
     });
@@ -431,10 +606,11 @@ const generatePaymentDates = (plazo: number): string[] => {
 const insertInstallments = async (
   creditId: number,
   plazo: number,
-  fechas: string[]
+  fechas: string[],
+  executor: DbExecutor = db
 ): Promise<{ cuotaInicial: number | undefined; cuotasInsertadas: CuotaInsertada[] }> => {
   // Insertar cuota inicial (cuota 0)
-  const cuotaInicialArr = await db
+  const cuotaInicialArr = await executor
     .insert(cuotas_credito)
     .values({
       credito_id: creditId,
@@ -459,7 +635,7 @@ const insertInstallments = async (
     });
   }
 
-  const cuotasInsertadas: CuotaInsertada[] = await db
+  const cuotasInsertadas: CuotaInsertada[] = await executor
     .insert(cuotas_credito)
     .values(cuotas)
     .returning({
@@ -470,6 +646,7 @@ const insertInstallments = async (
 
   return { cuotaInicial, cuotasInsertadas };
 };
+
 // ========================================
 // 5. INSERCIÓN DE PAGOS CON AMORTIZACIÓN
 // ========================================
@@ -481,7 +658,8 @@ const insertPayments = async (
   total_iva_cash_in: Big,
   cuotaInicial: number | undefined,
   cuotasInsertadas: CuotaInsertada[],
-  fechas: string[]
+  fechas: string[],
+  executor: DbExecutor = db
 ): Promise<void> => {
   const pagos: PagoData[] = [];
 
@@ -522,8 +700,8 @@ const insertPayments = async (
     gps_restante: gpsFijoPorMes.toString(),
     total_restante: deudaTotalCredito.toString(),
     membresias: creditDataForInsert.membresias?.toString() ?? "0",
-    membresias_pago: creditDataForInsert.membresias_pago?.toString() ?? "",
-    membresias_mes: creditDataForInsert.membresias?.toString() ?? "",
+    membresias_pago:  "0",
+    membresias_mes:  "0",
     otros: creditData.otros?.toString() ?? "0",
     mora: "0",
     monto_boleta_cuota: "0",
@@ -536,6 +714,8 @@ const insertPayments = async (
     reserva: creditData.reserva?.toString() ?? "0",
     observaciones: "",
     paymentFalse: false,
+    pagoConvenio: "0",
+    monto_aplicado: "0",
   });
 
   // Cuota mensual
@@ -594,8 +774,8 @@ const insertPayments = async (
       gps_restante: gpsRestanteMes.toString(),
       total_restante: capitalEnMemoria.round(2).toString(),  // El capital que falta en total
       membresias: membresiasFijoPorMes.toString(),
-      membresias_pago: membresiasFijoPorMes.toString(),
-      membresias_mes: membresiasFijoPorMes.toString(),
+      membresias_pago: "0",
+      membresias_mes: "0",
       otros: "",
       mora: "0",
       monto_boleta_cuota: "0",
@@ -608,6 +788,8 @@ const insertPayments = async (
       reserva: "0",
       observaciones: "",
       paymentFalse: false,
+      pagoConvenio: "0",
+      monto_aplicado: "0",
     });
   }
 
@@ -620,62 +802,148 @@ const insertPayments = async (
     registerBy: "system",
   }));
 
-  await db.insert(pagos_credito).values(pagosValidosSinUndefined);
+  await executor.insert(pagos_credito).values(pagosValidosSinUndefined);
 };
+
 // ========================================
 // FUNCIÓN PRINCIPAL
 // ========================================
 
 export const insertCredit = async ({ body, set }: { body: unknown; set: SetContext }) => {
   try {
+    console.log("===== [INSERT CREDIT] START =====");
+    console.log("[INSERT CREDIT] body received:", JSON.stringify(body, null, 2));
+    console.log("[INSERT CREDIT] body type:", typeof body);
+
     // 1. Validar schema
+    console.log("[INSERT CREDIT] Step 1: Validating schema...");
     const parseResult = creditSchema.safeParse(body);
     if (!parseResult.success) {
+      console.log("[INSERT CREDIT] Schema validation FAILED");
+      console.log("[INSERT CREDIT] Zod errors (full):", JSON.stringify(parseResult.error.errors, null, 2));
+      console.log("[INSERT CREDIT] Zod errors (flattened fieldErrors):", JSON.stringify(parseResult.error.flatten().fieldErrors, null, 2));
+      console.log("[INSERT CREDIT] Zod errors (formErrors):", JSON.stringify(parseResult.error.flatten().formErrors, null, 2));
       set.status = 400;
       return {
         message: "Validation failed",
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
+    console.log("[INSERT CREDIT] Schema validation PASSED");
 
     const creditData = parseResult.data;
+    console.log("[INSERT CREDIT] Parsed creditData:", JSON.stringify(creditData, null, 2));
 
     // 2. Validar datos del crédito
+    console.log("[INSERT CREDIT] Step 2: Validating credit data (business rules)...");
     const validation = validateCreditData(creditData, set);
     if (!validation.success) {
+      console.log("[INSERT CREDIT] Business validation FAILED:", JSON.stringify(validation.error, null, 2));
       return validation.error;
     }
+    console.log("[INSERT CREDIT] Business validation PASSED");
 
-    // 3. Insertar crédito y datos relacionados
-    const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } = 
-      await insertCreditAndRelated(creditData);
+    const { newCredit, creditDataForInsert } = await db.transaction(async (tx) => {
+      // 3. Insertar crédito y datos relacionados
+      console.log("[INSERT CREDIT] Step 3: Inserting credit and related data...");
+      const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } =
+        await insertCreditAndRelated(creditData, tx);
+      console.log("[INSERT CREDIT] Credit inserted, credito_id:", newCredit.credito_id);
+      console.log("[INSERT CREDIT] creditDataForInsert:", JSON.stringify(creditDataForInsert, null, 2));
 
-    // 4. Generar fechas de pago
-    const fechas = generatePaymentDates(creditData.plazo);
+      // 4. Generar fechas de pago (día <= 20 → pago el 15, día > 20 → pago el 30)
+      const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
+      const fechas = generatePaymentDates(creditData.plazo, diaPago);
+      console.log("[INSERT CREDIT] Generated", fechas.length, "payment dates");
 
-    // 5. Insertar cuotas
-    const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
-      newCredit.credito_id,
-      creditData.plazo,
-      fechas
-    );
+      // 5. Insertar cuotas
+      console.log("[INSERT CREDIT] Step 5: Inserting installments...");
+      const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
+        newCredit.credito_id,
+        creditData.plazo,
+        fechas,
+        tx
+      );
+      console.log("[INSERT CREDIT] Installments inserted, cuotaInicial:", cuotaInicial, "total cuotas:", cuotasInsertadas.length);
 
-    // 6. Insertar pagos
-    await insertPayments(
-      creditData,
-      newCredit,
-      creditDataForInsert,
-      total_monto_cash_in,
-      total_iva_cash_in,
-      cuotaInicial,
-      cuotasInsertadas,
-      fechas
-    );
+      // 6. Insertar pagos
+      console.log("[INSERT CREDIT] Step 6: Inserting payments...");
+      await insertPayments(
+        creditData,
+        newCredit,
+        creditDataForInsert,
+        total_monto_cash_in,
+        total_iva_cash_in,
+        cuotaInicial,
+        cuotasInsertadas,
+        fechas,
+        tx
+      );
+      console.log("[INSERT CREDIT] Payments inserted successfully");
 
+      return { newCredit, creditDataForInsert };
+    });
+
+    // 7. Notificar a todos los admins por email
+    console.log("[INSERT CREDIT] Step 7: Sending email notifications...");
+    try {
+      const adminUsers = await db
+        .select({ email: platform_users.email })
+        .from(platform_users)
+        .where(and(eq(platform_users.role, "ADMIN"), eq(platform_users.is_active, true)));
+
+      const adminEmails = adminUsers.map((u) => u.email);
+      console.log("[INSERT CREDIT] Admin emails found:", adminEmails);
+
+      const [asesorUser] = await db
+        .select({ email: platform_users.email })
+        .from(platform_users)
+        .where(and(eq(platform_users.asesor_id, creditDataForInsert.asesor_id), eq(platform_users.is_active, true)));
+
+      if (asesorUser && !adminEmails.includes(asesorUser.email)) {
+        adminEmails.push(asesorUser.email);
+        console.log(`[INSERT CREDIT] Asesor agregado a notificacion: ${asesorUser.email}`);
+      }
+
+      const investorNames: string[] = [];
+      for (const inv of creditData.inversionistas) {
+        const [investor] = await db
+          .select({ nombre: inversionistas.nombre })
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, inv.inversionista_id));
+        if (investor) investorNames.push(`${investor.nombre} (Q.${inv.monto_aportado.toFixed(2)})`);
+      }
+
+      console.log("[INSERT CREDIT] Sending notification to:", adminEmails, "investors:", investorNames);
+      await sendNewCreditNotification({
+        to: adminEmails,
+        clientName: creditData.usuario,
+        creditNumber: creditData.numero_credito_sifco,
+        capital: creditData.capital.toFixed(2),
+        plazo: creditData.plazo,
+        cuota: creditData.cuota.toFixed(2),
+        interestRate: creditData.porcentaje_interes.toString(),
+        investors: investorNames,
+        vehiculoMarca: creditData.vehiculo_marca ?? undefined,
+        vehiculoLinea: creditData.vehiculo_linea ?? undefined,
+        vehiculoModelo: creditData.vehiculo_modelo ?? undefined,
+        vehiculoPlaca: creditData.vehiculo_placa ?? undefined,
+        vehiculoVin: creditData.vehiculo_vin ?? undefined,
+        montoAsegurado: creditData.monto_asegurado ?? undefined,
+        opportunityId: creditData.opportunity_id ?? undefined,
+      });
+      console.log("[INSERT CREDIT] Email notification sent successfully");
+    } catch (emailErr) {
+      console.error("[INSERT CREDIT] Error sending email notification:", emailErr);
+    }
+
+    console.log("[INSERT CREDIT] SUCCESS - returning credit:", newCredit.credito_id);
+    console.log("===== [INSERT CREDIT] END =====");
     set.status = 201;
     return newCredit;
   } catch (error) {
-    console.log("Error inserting credit:", error);
+    console.log("[INSERT CREDIT] FATAL ERROR:", error);
+    console.log("[INSERT CREDIT] Error stack:", error instanceof Error ? error.stack : "no stack");
     set.status = 500;
     return { message: "Error inserting credit", error: String(error) };
   }

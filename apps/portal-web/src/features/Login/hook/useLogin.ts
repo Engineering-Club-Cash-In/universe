@@ -12,15 +12,14 @@ const validationSchema = Yup.object({
   email: Yup.string()
     .email("Correo electrónico inválido")
     .required("El correo electrónico es requerido"),
-  password: Yup.string()
-    .min(6, "La contraseña debe tener al menos 6 caracteres")
-    .required("La contraseña es requerida"),
+  password: Yup.string().required("La contraseña es requerida"),
   rememberMe: Yup.boolean(),
 });
 
 export const useLogin = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [successMessage, setSuccessMessage] = useState<string>("");
 
   // Mutation para el login con better-auth
   const loginMutation = useMutation({
@@ -28,7 +27,7 @@ export const useLogin = () => {
       const result = await authClient.signIn.email({
         email: credentials.email,
         password: credentials.password,
-        rememberMe: credentials.rememberMe,
+        rememberMe: true,
         callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
       });
       console.log("Login result:", result.error);
@@ -72,6 +71,13 @@ export const useLogin = () => {
     },
     validationSchema,
     onSubmit: (values) => {
+      // Guardar o eliminar el email recordado según la opción
+      if (values.rememberMe) {
+        localStorage.setItem(REMEMBERED_EMAIL_KEY, values.email);
+      } else {
+        localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+      }
+
       loginMutation.mutate(values);
     },
   });
@@ -90,9 +96,6 @@ export const useLogin = () => {
     // Iniciar el flujo de OAuth con better-auth
     try {
       setIsGoogleLoading(true);
-
-      console.log("Iniciando login con Google...");
-
       // Iniciar el flujo de OAuth con Google
       // El backend requiere el callbackURL
       await authClient.signIn.social(
@@ -120,11 +123,30 @@ export const useLogin = () => {
     }
   };
 
+  const handleResetPassword = async () => {
+    if (formik.values.email) {
+      await authClient.requestPasswordReset({
+        email: formik.values.email, // required
+        redirectTo: `${import.meta.env.VITE_FRONTEND_URL}/reset-password`,
+      });
+      setSuccessMessage(
+        "Si el correo existe en nuestro sistema, recibirás un email con instrucciones para restablecer tu contraseña."
+      );
+      setErrorMessage("");
+    } else {
+      setErrorMessage(
+        "Por favor, ingresa tu correo electrónico para restablecer la contraseña."
+      );
+    }
+  };
+
   return {
     formik,
     handleGoogleLogin,
     isLoading: loginMutation.isPending,
     isGoogleLoading,
     errorMessage,
+    handleResetPassword,
+    successMessage,
   };
 };

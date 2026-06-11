@@ -1,7 +1,9 @@
-import { count, eq, gte, sql, sum } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
+import { and, count, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
+import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
 	casosCobros,
 	contratosFinanciamiento,
@@ -11,16 +13,57 @@ import {
 	clients,
 	leads,
 	opportunities,
+	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
-import { protectedProcedure } from "../lib/orpc";
+import {
+	closedCreditsReportProcedure,
+	protectedProcedure,
+	tiempoCierreReportProcedure,
+  porcentajeEfectividadReportProcedure,
+} from "../lib/orpc";
+
+const SECONDS_PER_DAY = 60 * 60 * 24;
 
 // Schema para filtros de fecha
 const dateRangeSchema = z.object({
 	startDate: z.string().optional(),
 	endDate: z.string().optional(),
 });
+
+const closedCreditsReportInputSchema = z.object({
+	startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+	endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+function parseGuatemalaDateRange(startDate: string, endDate: string) {
+	const start = new Date(`${startDate}T00:00:00.000-06:00`);
+	const end = new Date(`${endDate}T23:59:59.999-06:00`);
+
+	if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+		throw new ORPCError("BAD_REQUEST", { message: "Rango de fechas inválido" });
+	}
+
+	if (start > end) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "La fecha inicial no puede ser mayor que la fecha final",
+		});
+	}
+
+	const startDay = new Date(`${startDate}T00:00:00.000-06:00`);
+	const endDay = new Date(`${endDate}T00:00:00.000-06:00`);
+	const inclusiveDays =
+		Math.floor((endDay.getTime() - startDay.getTime()) / 86_400_000) + 1;
+
+	if (inclusiveDays > 366) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "El rango máximo permitido es de 366 días",
+		});
+	}
+
+	return { start, end };
+}
 
 /**
  * Dashboard Ejecutivo
@@ -119,6 +162,89 @@ export const getDashboardExecutivo = protectedProcedure
 			leadsStats,
 			nuevosContratos,
 		};
+	});
+
+/**
+ * Reporte de créditos cerrados
+ * Créditos que llegaron por primera vez a una etapa 90%+.
+ */
+export const getReporteCreditosCerrados = closedCreditsReportProcedure
+	.input(closedCreditsReportInputSchema)
+	.handler(async ({ input }) => {
+		const { start, end } = parseGuatemalaDateRange(
+			input.startDate,
+			input.endDate,
+		);
+
+		const firstClosedStageDates = db
+			.select({
+				opportunityId: opportunityStageHistory.opportunityId,
+				firstClosedStageAt:
+					sql<Date>`MIN(${opportunityStageHistory.changedAt})`.as(
+						"first_closed_stage_at",
+					),
+			})
+			.from(opportunityStageHistory)
+			.innerJoin(
+				salesStages,
+				eq(opportunityStageHistory.toStageId, salesStages.id),
+			)
+			.where(gte(salesStages.closurePercentage, 90))
+			.groupBy(opportunityStageHistory.opportunityId)
+			.as("first_closed_stage_dates");
+
+		const latestCarteraReference = db
+			.select({
+				opportunityId: carteraBackReferences.opportunityId,
+				numeroCreditoSifco: carteraBackReferences.numeroCreditoSifco,
+				rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${carteraBackReferences.opportunityId} ORDER BY ${carteraBackReferences.createdAt} DESC, ${carteraBackReferences.id} DESC)`.as(
+					"rn",
+				),
+			})
+			.from(carteraBackReferences)
+			.as("latest_cartera_reference");
+
+		const rows = await db
+			.select({
+				placa: vehicles.licensePlate,
+				chasis: vehicles.vinNumber,
+				cuotaSeguro: opportunities.seguro,
+				clienteNombre: sql<string>`COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.middleName}, ${leads.lastName}, ${leads.secondLastName})), ''), ${clients.contactPerson}, '')`,
+				numeroCredito: sql<string>`COALESCE(${latestCarteraReference.numeroCreditoSifco}, ${opportunities.numeroSifco}, '')`,
+				fecha90: firstClosedStageDates.firstClosedStageAt,
+			})
+			.from(firstClosedStageDates)
+			.innerJoin(
+				opportunities,
+				eq(firstClosedStageDates.opportunityId, opportunities.id),
+			)
+			.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+			.leftJoin(leads, eq(opportunities.leadId, leads.id))
+			.leftJoin(clients, eq(clients.opportunityId, opportunities.id))
+			.leftJoin(
+				latestCarteraReference,
+				and(
+					eq(latestCarteraReference.opportunityId, opportunities.id),
+					eq(latestCarteraReference.rn, 1),
+				),
+			)
+			.where(
+				and(
+					gte(firstClosedStageDates.firstClosedStageAt, start),
+					lte(firstClosedStageDates.firstClosedStageAt, end),
+				),
+			)
+			.orderBy(desc(firstClosedStageDates.firstClosedStageAt))
+			.limit(10_001);
+
+		if (rows.length > 10_000) {
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
+			});
+		}
+
+		return rows;
 	});
 
 /**
@@ -302,6 +428,209 @@ export const getReporteInventario = protectedProcedure.handler(async () => {
 		inspeccionesPorResultado,
 	};
 });
+
+const CLOSED_STAGE_THRESHOLD = 90;
+const MAX_REPORT_ROWS = 10_000;
+/**
+ * Reporte Porcentaje Efectividad
+ * Tasa de conversión de oportunidades a créditos cerrados, por fuente.
+ */
+export const getReportePorcentajeEfectividad =
+	porcentajeEfectividadReportProcedure
+		.input(closedCreditsReportInputSchema)
+		.handler(async ({ input }) => {
+			const { start, end } = parseGuatemalaDateRange(
+				input.startDate,
+				input.endDate,
+			);
+
+			// Sin filtro de fechas intencional: la cohorte es "creadas en el período,
+			// ¿alguna vez cerraron?", no "creadas y cerradas dentro del mismo período".
+			const everClosed = db
+				.select({ opportunityId: opportunityStageHistory.opportunityId })
+				.from(opportunityStageHistory)
+				.innerJoin(
+					salesStages,
+					eq(opportunityStageHistory.toStageId, salesStages.id),
+				)
+				.where(gte(salesStages.closurePercentage, CLOSED_STAGE_THRESHOLD))
+				.groupBy(opportunityStageHistory.opportunityId)
+				.as("ever_closed");
+
+			const baseWhere = and(
+				gte(opportunities.createdAt, start),
+				lte(opportunities.createdAt, end),
+			);
+
+			const totalCerradas =
+				sql<number>`COUNT(${everClosed.opportunityId})`;
+			const porcentaje =
+				sql<number>`ROUND(COUNT(${everClosed.opportunityId}) * 100.0 / NULLIF(COUNT(${opportunities.id}), 0), 1)`;
+
+			const [totalRows, porFuente, registrosRaw] = await Promise.all([
+				db
+					.select({
+						totalOportunidades: count(opportunities.id),
+						totalCerradas,
+						porcentaje,
+					})
+					.from(opportunities)
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere),
+
+				db
+					.select({
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+						totalOportunidades: count(opportunities.id),
+						totalCerradas,
+						porcentaje,
+					})
+					.from(opportunities)
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere)
+					.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
+					.orderBy(desc(count(opportunities.id))),
+
+				db
+					.select({
+						id: opportunities.id,
+						createdAt: opportunities.createdAt,
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+						nombre: sql<string | null>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
+						etapaNombre: salesStages.name,
+						etapaPorcentaje: salesStages.closurePercentage,
+						cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`,
+					})
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere)
+					.orderBy(desc(opportunities.createdAt))
+					.limit(MAX_REPORT_ROWS + 1),
+			]);
+
+			if (registrosRaw.length > MAX_REPORT_ROWS) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
+				});
+			}
+
+			return {
+				total: {
+					totalOportunidades: totalRows[0]?.totalOportunidades ?? 0,
+					totalCerradas: totalRows[0]?.totalCerradas ?? 0,
+					porcentaje: totalRows[0]?.porcentaje ?? 0,
+				},
+				porFuente: porFuente.map((row) => ({
+					source: row.source,
+					totalOportunidades: row.totalOportunidades,
+					totalCerradas: row.totalCerradas ?? 0,
+					porcentaje: row.porcentaje ?? 0,
+				})),
+				registros: registrosRaw.map((row) => ({
+					id: row.id,
+					createdAt: row.createdAt,
+					source: row.source,
+					nombre: row.nombre,
+					etapaNombre: row.etapaNombre,
+					etapaPorcentaje: row.etapaPorcentaje,
+					cerro: row.cerro,
+				})),
+			};
+		});
+
+/**
+ * Reporte de Tiempo de Cierre de Crédito
+ * Días desde la creación del prospecto hasta que la oportunidad alcanza etapa 90%+
+ * Desglosado por fuente (total y por fuente)
+ */
+export const getReporteTiempoCierre = tiempoCierreReportProcedure
+	.input(closedCreditsReportInputSchema)
+	.handler(async ({ input }) => {
+		const { start, end } = parseGuatemalaDateRange(
+			input.startDate,
+			input.endDate,
+		);
+
+		const firstClosedStageDates = db
+			.select({
+				opportunityId: opportunityStageHistory.opportunityId,
+				firstClosedStageAt:
+					sql<Date>`MIN(${opportunityStageHistory.changedAt})`.as(
+						"first_closed_stage_at",
+					),
+			})
+			.from(opportunityStageHistory)
+			.innerJoin(
+				salesStages,
+				eq(opportunityStageHistory.toStageId, salesStages.id),
+			)
+			.where(gte(salesStages.closurePercentage, CLOSED_STAGE_THRESHOLD))
+			.groupBy(opportunityStageHistory.opportunityId)
+			.as("first_closed_stage_dates");
+
+		// Fallback a opportunities.createdAt cuando leadId es null (oportunidades
+		// vinculadas directamente a empresa sin prospecto previo).
+		const diasDesdeCreacion = (fn: "AVG" | "MIN" | "MAX") =>
+			sql<number>`ROUND(${sql.raw(fn)}(EXTRACT(EPOCH FROM (${firstClosedStageDates.firstClosedStageAt} - COALESCE(${leads.createdAt}, ${opportunities.createdAt}))) / ${SECONDS_PER_DAY}), 1)`;
+
+		const baseWhere = and(
+			gte(firstClosedStageDates.firstClosedStageAt, start),
+			lte(firstClosedStageDates.firstClosedStageAt, end),
+		);
+
+		const [totalRows, porFuente] = await Promise.all([
+			db
+				.select({
+					totalCreditos: count(),
+					avgDias: diasDesdeCreacion("AVG"),
+					minDias: diasDesdeCreacion("MIN"),
+					maxDias: diasDesdeCreacion("MAX"),
+				})
+				.from(firstClosedStageDates)
+				.innerJoin(
+					opportunities,
+					eq(firstClosedStageDates.opportunityId, opportunities.id),
+				)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(baseWhere),
+			db
+				.select({
+					source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+					totalCreditos: count(),
+					avgDias: diasDesdeCreacion("AVG"),
+					minDias: diasDesdeCreacion("MIN"),
+					maxDias: diasDesdeCreacion("MAX"),
+				})
+				.from(firstClosedStageDates)
+				.innerJoin(
+					opportunities,
+					eq(firstClosedStageDates.opportunityId, opportunities.id),
+				)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(baseWhere)
+				.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
+				.orderBy(desc(count())),
+		]);
+
+		return {
+			total: {
+				totalCreditos: totalRows[0]?.totalCreditos ?? 0,
+				avgDias: totalRows[0]?.avgDias ?? 0,
+				minDias: totalRows[0]?.minDias ?? 0,
+				maxDias: totalRows[0]?.maxDias ?? 0,
+			},
+			porFuente: porFuente.map((row) => ({
+				source: row.source,
+				totalCreditos: row.totalCreditos,
+				avgDias: row.avgDias ?? 0,
+				minDias: row.minDias ?? 0,
+				maxDias: row.maxDias ?? 0,
+			})),
+		};
+	});
 
 /**
  * Reporte de Subastas

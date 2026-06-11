@@ -16,7 +16,35 @@ export enum ContractType {
   CARTA_SOLICITUD_TRASPASO_VEHICULO = 'carta_traspaso_vehiculo_rdbe',
   CONTRATO_PRIVADO_USO = 'contrato_privado_uso_carro_nuevo',
   SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo_tercero',
-  CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps'
+  CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps',
+
+  // ===== INVERSIONES =====
+  ACUERDO_INVERSION_CASH_IN = 'acuerdo_inversion_cash_in',
+  CARTA_CONFIRMACION_INVERSION_INICIAL = 'carta_confirmacion_inversion_inicial',
+  CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION = 'carta_eleccion_modalidad_pago_reinversion',
+  CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA = 'carta_instruccion_inversion_cartera_activa',
+  CARTA_INCREMENTO_INVERSION = 'carta_incremento_inversion',
+  CARTA_INSTRUCCION_PAGO_ANTICIPADO = 'carta_instruccion_pago_anticipado',
+  CESION_CREDITOS = 'cesion_creditos',
+  CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL = 'contrato_servicios_cash_in_inversor_general',
+  DESIGNACION_BENEFICIARIO = 'designacion_beneficiario',
+
+  // ===== INVERSIONES SOCIEDAD =====
+  ACUERDO_INVERSION_CASH_IN_SOCIEDAD = 'acuerdo_inversion_cash_in_sociedad',
+  CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD = 'carta_confirmacion_inversion_inicial_sociedad',
+  CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD = 'carta_eleccion_modalidad_pago_reinversion_sociedad',
+  CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD = 'carta_instruccion_inversion_cartera_activa_sociedad',
+  CARTA_INCREMENTO_INVERSION_SOCIEDAD = 'carta_incremento_inversion_sociedad',
+  CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD = 'carta_instruccion_pago_anticipado_sociedad',
+  CESION_CREDITOS_SOCIEDAD = 'cesion_creditos_sociedad',
+  CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD = 'contrato_servicios_cash_in_inversor_general_sociedad',
+  DESIGNACION_BENEFICIARIO_SOCIEDAD = 'designacion_beneficiario_sociedad',
+
+  // ===== CARTA PODER =====
+  CARTA_CUBE_ANDRES = 'carta_cube_andres',
+  CARTA_CUBE_DON_ALEX = 'carta_cube_don_alex',
+  CARTA_RDBE_DON_ALEX = 'carta_rdbe_don_alex',
+  CARTA_RDBE_RICHARD = 'carta_rdbe_richard'
   // Agrega más tipos aquí según sea necesario
 }
 
@@ -686,12 +714,17 @@ export interface ContractGenerationResponse {
   data?: {
     [key: string]: any;
   }[];
+  linkDocument?: string;
+  /** Key del archivo PDF en R2 (Cloudflare) */
+  r2Key?: string;
   contractType: ContractType;
   docx_path?: string;
   pdf_path?: string;
   docx_url?: string;
   pdf_url?: string;
   signing_links?: string[];
+  /** Proveedor de firma electrónica usado (weetrust | documenso) */
+  signingProvider?: 'weetrust' | 'documenso';
   message: string;
   error?: string;
   generatedAt?: string;
@@ -724,16 +757,33 @@ export interface ContractTemplateConfig {
   /** Tipo de contrato */
   type: ContractType;
 
-  /** Nombre del archivo template en /templates */
+  /** Nombre del archivo template en /templates (masculino singular) */
   templateFilename: string;
 
+  /** Template femenino singular */
   templateFilenameFemale: string;
+
+  /** Template masculino plural (múltiples deudores) */
+  templateFilenamePlural?: string;
+
+  /** Template femenino plural (múltiples deudores) */
+  templateFilenameFemalePlural?: string;
 
   /** Descripción del contrato */
   description: string;
 
   /** Campos requeridos para validación */
   requiredFields: string[];
+}
+
+/**
+ * Interfaz para deudores adicionales (múltiples firmantes)
+ */
+export interface DeudorAdicional {
+  nombreCompleto: string;
+  dpiTexto: string;
+  dpi: string;
+  [key: string]: any;
 }
 
 /**
@@ -754,5 +804,7 @@ export interface GenerateContractRequest {
     generatePdf?: boolean;
     filenamePrefix?: string;
     gender?: "male" | "female";
+    /** Si hay múltiples deudores, usar template plural */
+    isPlural?: boolean;
   };
 }

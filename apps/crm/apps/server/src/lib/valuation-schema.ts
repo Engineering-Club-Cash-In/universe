@@ -4,7 +4,11 @@ import { z } from "zod";
 export const vehicleValuationSchema = z.object({
 	suggestedValue: z
 		.number()
-		.describe("Valor sugerido del vehículo en Quetzales"),
+		.describe("Valor sugerido del vehículo en Quetzales. Este es el valor EN CONDICIONES ACTUALES (ya descontados los daños físicos, llantas, etc.)"),
+	baseMarketValue: z
+		.number()
+		.optional()
+		.describe("Valor de mercado base en Quetzales (sin tomar en cuenta estado físico ni daños actuales, solo basado en marca, modelo y año del vehículo en el mercado)"),
 	reasoning: z.string().describe("Razón detallada de la valoración"),
 	marketAnalysis: z
 		.string()
@@ -23,15 +27,76 @@ export const vehicleValuationSchema = z.object({
 		.array(z.string())
 		.optional()
 		.describe("Recomendaciones para mejorar el valor"),
+	commercialClassification: z
+		.enum(["Comercial", "No comercial"])
+		.describe(
+			"Comercial = alta demanda en el mercado, se vende fácil. No comercial = vehículo de nicho, difícil de vender",
+		),
+	commercialClassificationReasoning: z
+		.string()
+		.describe("Razón de la clasificación comercial"),
 });
 
 export type VehicleValuation = z.infer<typeof vehicleValuationSchema>;
 
+// Basic interfaces for data structures
+export interface ValuationVehicleData {
+	vehicleMake?: string;
+	vehicleModel?: string;
+	vehicleYear?: string;
+	trim?: string;
+	licensePlate?: string;
+	vinNumber?: string;
+	color?: string;
+	vehicleType?: string;
+	cylinders?: string;
+	engineCC?: string;
+	fuelType?: string;
+	transmission?: string;
+	origin?: string;
+	traction?: string;
+	kmMileage?: string;
+	milesMileage?: string;
+	technicianName?: string;
+	inspectionDate?: Date | string;
+	inspectionResult?: string;
+	tiresCondition?: number;
+	tireConditionFrontLeft?: number;
+	tireConditionFrontRight?: number;
+	tireConditionRearLeft?: number;
+	tireConditionRearRight?: number;
+	hasSpareTire?: boolean | string;
+	tireConditionSpare?: number;
+	paintCondition?: number;
+	hasAgencyHistory?: boolean | string;
+	vehicleEquipment?: string;
+	importantConsiderations?: string;
+	scannerUsed?: string | boolean;
+	airbagWarning?: string | boolean;
+	missingAirbag?: string;
+	testDrive?: string | boolean;
+	noTestDriveReason?: string;
+}
+
+export interface ValuationChecklistItem {
+	item: string;
+	checked: boolean;
+	severity: "critical" | "warning" | "good" | "standard";
+}
+
+export interface ValuationPhoto {
+	category: string;
+	photoType: string;
+	title: string;
+	valuatorComment?: string;
+	noCommentsChecked?: boolean;
+}
+
 // Helper to prepare context for AI valuation
 export function prepareValuationContext(
-	vehicleData: any,
-	checklistItems: any[],
-	photos: any[],
+	vehicleData: ValuationVehicleData,
+	checklistItems: ValuationChecklistItem[],
+	photos: ValuationPhoto[],
 ): {
 	location: string;
 	evaluationDate: string;
@@ -78,6 +143,18 @@ export function prepareValuationContext(
 		comment: string;
 	}>;
 	hasPhotoComments: boolean;
+	// New fields for enhanced valuation
+	trim: string;
+	traction: string;
+	tiresCondition: string;
+	tireConditionFrontLeft: string;
+	tireConditionFrontRight: string;
+	tireConditionRearLeft: string;
+	tireConditionRearRight: string;
+	hasSpareTire: boolean;
+	tireConditionSpare: string;
+	paintCondition: string;
+	hasAgencyHistory: string;
 } {
 	const today = new Date().toLocaleDateString("es-GT");
 
@@ -110,15 +187,17 @@ export function prepareValuationContext(
 				category: photo.category,
 				photoType: photo.photoType,
 				title: photo.title,
-				comment: photo.valuatorComment,
+				comment: photo.valuatorComment!,
 			})) || [];
 
 	// Count photos by category
-	const photoCategories =
-		photos?.reduce((acc, photo) => {
+	const photoCategories = (photos || []).reduce(
+		(acc: Record<string, number>, photo) => {
 			acc[photo.category] = (acc[photo.category] || 0) + 1;
 			return acc;
-		}, {}) || {};
+		},
+		{} as Record<string, number>,
+	);
 
 	return {
 		// Location context
@@ -130,6 +209,7 @@ export function prepareValuationContext(
 		make: vehicleData.vehicleMake || "No especificado",
 		model: vehicleData.vehicleModel || "No especificado",
 		year: vehicleData.vehicleYear || "No especificado",
+		trim: vehicleData.trim || "No especificado", // New Field
 		age: vehicleAge,
 		licensePlate: vehicleData.licensePlate || "No especificado",
 		vin: vehicleData.vinNumber || "No especificado",
@@ -142,6 +222,7 @@ export function prepareValuationContext(
 		fuelType: vehicleData.fuelType || "No especificado",
 		transmission: vehicleData.transmission || "No especificado",
 		origin: vehicleData.origin || "No especificado",
+		traction: vehicleData.traction || "No especificado", // New Field
 
 		// Mileage
 		kmMileage: vehicleData.kmMileage || "No especificado",
@@ -153,6 +234,36 @@ export function prepareValuationContext(
 			? new Date(vehicleData.inspectionDate).toLocaleDateString("es-GT")
 			: today,
 		inspectionResult: vehicleData.inspectionResult || "No especificado",
+
+		// New Condition details
+		tiresCondition: vehicleData.tiresCondition
+			? `${vehicleData.tiresCondition}%`
+			: "No especificado",
+		tireConditionFrontLeft: vehicleData.tireConditionFrontLeft
+			? `${vehicleData.tireConditionFrontLeft}%`
+			: "No especificado",
+		tireConditionFrontRight: vehicleData.tireConditionFrontRight
+			? `${vehicleData.tireConditionFrontRight}%`
+			: "No especificado",
+		tireConditionRearLeft: vehicleData.tireConditionRearLeft
+			? `${vehicleData.tireConditionRearLeft}%`
+			: "No especificado",
+		tireConditionRearRight: vehicleData.tireConditionRearRight
+			? `${vehicleData.tireConditionRearRight}%`
+			: "No especificado",
+		hasSpareTire:
+			vehicleData.hasSpareTire === "Sí" || vehicleData.hasSpareTire === true,
+		tireConditionSpare: vehicleData.tireConditionSpare
+			? `${vehicleData.tireConditionSpare}%`
+			: "No especificado",
+		paintCondition: vehicleData.paintCondition
+			? `${vehicleData.paintCondition}%`
+			: "No especificado",
+		hasAgencyHistory:
+			vehicleData.hasAgencyHistory === "Sí" ||
+			vehicleData.hasAgencyHistory === true
+				? "Sí"
+				: "No",
 
 		// Issues and condition
 		criticalIssues: criticalIssues.map((item) => item.item),
@@ -174,10 +285,10 @@ export function prepareValuationContext(
 		// Documentation
 		photoCount: photos?.length || 0,
 		photoCategories,
-		hasExteriorPhotos: (photoCategories.exterior || 0) > 0,
-		hasInteriorPhotos: (photoCategories.interior || 0) > 0,
-		hasEnginePhotos: (photoCategories.engine || 0) > 0,
-		hasDamagePhotos: (photoCategories.damage || 0) > 0,
+		hasExteriorPhotos: (photoCategories["exterior"] || 0) > 0,
+		hasInteriorPhotos: (photoCategories["interior"] || 0) > 0,
+		hasEnginePhotos: (photoCategories["engine"] || 0) > 0,
+		hasDamagePhotos: (photoCategories["damage"] || 0) > 0,
 
 		// Photo valuator comments (key insights from photos)
 		photoComments,

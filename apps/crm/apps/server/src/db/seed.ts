@@ -82,15 +82,23 @@ const salesStagesData = [
 		description: "Cierre definitivo del negocio",
 	},
 	{
-		name: "Formalización Final",
+		name: "Contratos en Firma",
 		order: 8,
+		closurePercentage: 85,
+		color: "#22c55e", // green-500
+		description:
+			"Contratos generados por jurídico, pendientes de firma por el cliente",
+	},
+	{
+		name: "Formalización Final",
+		order: 9,
 		closurePercentage: 90,
 		color: "#22c55e", // green-500
 		description: "Formalización completa de todos los documentos",
 	},
 	{
 		name: "Post Venta",
-		order: 9,
+		order: 10,
 		closurePercentage: 100,
 		color: "#22c55e", // green-500
 		description: "Seguimiento post-venta y gestión de la relación cliente",
@@ -403,8 +411,8 @@ const documentRequirementsByClientTypeData = [
 		clientType: "comerciante" as const,
 		creditType: "autocompra" as const,
 		documentType: "patente_comercio" as const,
-		required: true,
-		description: "Patente de comercio",
+		required: false,
+		description: "Patente de comercio (opcional para empresarios individuales)",
 		order: 9,
 	},
 
@@ -477,8 +485,8 @@ const documentRequirementsByClientTypeData = [
 		clientType: "comerciante" as const,
 		creditType: "sobre_vehiculo" as const,
 		documentType: "patente_comercio" as const,
-		required: true,
-		description: "Patente de comercio",
+		required: false,
+		description: "Patente de comercio (opcional para empresarios individuales)",
 		order: 9,
 	},
 
@@ -783,7 +791,7 @@ const vehicleDocumentRequirementsData = [
 	{
 		ownerType: "individual" as const,
 		documentType: "pago_impuesto_circulacion" as const,
-		required: true,
+		required: false,
 		order: 4,
 	},
 	{
@@ -821,7 +829,7 @@ const vehicleDocumentRequirementsData = [
 	{
 		ownerType: "empresa_individual" as const,
 		documentType: "pago_impuesto_circulacion" as const,
-		required: true,
+		required: false,
 		order: 4,
 	},
 	{
@@ -865,7 +873,7 @@ const vehicleDocumentRequirementsData = [
 	{
 		ownerType: "sociedad_anonima" as const,
 		documentType: "pago_impuesto_circulacion" as const,
-		required: true,
+		required: false,
 		order: 5,
 	},
 	{
@@ -1346,9 +1354,7 @@ const creditAnalysisData = [
 		monthlyFixedExpenses: "15000.00",
 		monthlyVariableExpenses: "8000.00",
 		economicAvailability: "17000.00",
-		minPayment: "3000.00",
 		maxPayment: "8500.00",
-		adjustedPayment: "5500.00",
 		maxCreditAmount: "350000.00",
 		fullAnalysis: JSON.stringify({
 			datos_generales: {
@@ -1383,9 +1389,7 @@ const creditAnalysisData = [
 		monthlyFixedExpenses: "18000.00",
 		monthlyVariableExpenses: "12000.00",
 		economicAvailability: "25000.00",
-		minPayment: "5000.00",
 		maxPayment: "12500.00",
-		adjustedPayment: "8000.00",
 		maxCreditAmount: "500000.00",
 		fullAnalysis: JSON.stringify({
 			datos_generales: {
@@ -1410,9 +1414,7 @@ const creditAnalysisData = [
 		monthlyFixedExpenses: "20000.00",
 		monthlyVariableExpenses: "5000.00",
 		economicAvailability: "10000.00",
-		minPayment: "2000.00",
 		maxPayment: "5000.00",
-		adjustedPayment: "3500.00",
 		maxCreditAmount: "200000.00",
 		fullAnalysis: JSON.stringify({
 			datos_generales: {
@@ -1429,9 +1431,7 @@ const creditAnalysisData = [
 		monthlyFixedExpenses: "22000.00",
 		monthlyVariableExpenses: "8000.00",
 		economicAvailability: "18000.00",
-		minPayment: "3500.00",
 		maxPayment: "9000.00",
-		adjustedPayment: "6000.00",
 		maxCreditAmount: "400000.00",
 		fullAnalysis: JSON.stringify({
 			datos_generales: {

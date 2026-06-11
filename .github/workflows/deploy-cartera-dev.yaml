@@ -1,0 +1,114 @@
+name: Deploy cartera (dev)
+
+# Construye y empuja las imágenes -dev al ECR público y dispara el redeploy
+# en Coolify. Solo corre cuando hay push a develop que toque la app correspondiente.
+on:
+  push:
+    branches: ["develop"]
+    paths:
+      - "apps/cartera-back/**"
+      - "apps/carteraFront/**"
+      - "packages/email/**"
+      - "package.json"
+      - "bun.lock"
+  workflow_dispatch: {} # permite dispararlo a mano desde la pestaña Actions
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: public.ecr.aws/a6w8m2u2
+
+permissions:
+  contents: read
+
+jobs:
+  # 1) Detecta qué app cambió para no reconstruir las dos siempre
+  changes:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      back: ${{ steps.filter.outputs.back }}
+      front: ${{ steps.filter.outputs.front }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            back:
+              - 'apps/cartera-back/**'
+              - 'packages/email/**'
+              - 'package.json'
+              - 'bun.lock'
+            front:
+              - 'apps/carteraFront/**'
+
+  # 2) Backend → cartera-back-dev:latest
+  backend:
+    name: Backend (dev)
+    needs: changes
+    if: needs.changes.outputs.back == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login a ECR Public (podman)
+        run: |
+          aws ecr-public get-login-password --region $AWS_REGION \
+            | podman login --username AWS --password-stdin public.ecr.aws
+
+      - name: Build & push
+        run: |
+          podman build -f apps/cartera-back/Dockerfile . \
+            -t $ECR_REGISTRY/cartera-back-dev:latest \
+            -t $ECR_REGISTRY/cartera-back-dev:${{ github.sha }}
+          podman push $ECR_REGISTRY/cartera-back-dev:latest
+          podman push $ECR_REGISTRY/cartera-back-dev:${{ github.sha }}
+
+      - name: Redeploy en Coolify
+        run: |
+          curl --fail-with-body --request GET \
+            "${{ secrets.COOLIFY_WEBHOOK_BACK_DEV }}" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
+
+  # 3) Frontend → cartera-front-dev:latest
+  frontend:
+    name: Frontend (dev)
+    needs: changes
+    if: needs.changes.outputs.front == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login a ECR Public (podman)
+        run: |
+          aws ecr-public get-login-password --region $AWS_REGION \
+            | podman login --username AWS --password-stdin public.ecr.aws
+
+      - name: Build & push
+        run: |
+          podman build apps/carteraFront \
+            --build-arg VITE_BACK_URL=https://js4cock4o0k04g4cogckw0cc.s2.devteamatcci.site \
+            -t $ECR_REGISTRY/cartera-front-dev:latest \
+            -t $ECR_REGISTRY/cartera-front-dev:${{ github.sha }}
+          podman push $ECR_REGISTRY/cartera-front-dev:latest
+          podman push $ECR_REGISTRY/cartera-front-dev:${{ github.sha }}
+
+      - name: Redeploy en Coolify
+        run: |
+          curl --fail-with-body --request GET \
+            "${{ secrets.COOLIFY_WEBHOOK_FRONT_DEV }}" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"

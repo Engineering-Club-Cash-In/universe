@@ -42,6 +42,10 @@ jobs:
   # 1) Decide qué apps construir: por diff en pushes, por input en dispatch
   changes:
     name: Detectar cambios
+    # El dispatch manual puede lanzarse desde cualquier rama; solo main puede
+    # deployar a producción. Si este job se salta, build también se salta
+    # (su needs queda insatisfecho).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       apps: ${{ steps.pick.outputs.apps }}

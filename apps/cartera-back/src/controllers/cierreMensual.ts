@@ -32,14 +32,15 @@ function periodoMesAnterior(ref: Date): string {
 }
 
 /**
- * Periodo que debe cerrarse HOY según el día del mes (hora Guatemala). Pensado para
- * correr a diario manteniendo UN registro por mes (upsert que se va refrescando):
+ * Periodo que debe cerrarse HOY según el día del mes (hora Guatemala). Lo usa el CRON
+ * diario (lo pasa explícito); el default sin-periodo de generarCierreMensual sigue siendo
+ * el mes anterior, para no romper el botón "Generar cierre del mes anterior" del front.
  * - Hasta el día 5: se sigue cerrando el mes ANTERIOR (gracia para que asiente la data;
  *   el corte por fecha_creacion hace que ese cierre ignore los créditos del mes nuevo).
  * - Del día 6 en adelante: ya se toma en cuenta el mes ACTUAL.
  * Ej: 3-jul → "2026-06-01" (sigue junio); 6-jul → "2026-07-01" (arranca julio).
  */
-function periodoObjetivo(ref: Date): string {
+export function periodoObjetivo(ref: Date): string {
   const guate = toZonedTime(ref, TZ_GUATEMALA);
   if (guate.getDate() <= 5) return periodoMesAnterior(ref);
   const anio = guate.getFullYear();
@@ -79,12 +80,13 @@ interface AcumEstado {
  * Idempotente: hace upsert sobre (periodo, status_credit).
  *
  * @param periodoOverride opcional "YYYY-MM-01" para regenerar un mes específico.
- *                        Si no se pasa, usa periodoObjetivo(hoy): hasta el día 5 cierra
- *                        el mes anterior; del 6 en adelante, el mes actual (hora Guatemala).
+ *                        Si no se pasa, usa el mes anterior a hoy (lo que espera el botón
+ *                        "Generar cierre del mes anterior" del front). El cron diario pasa
+ *                        periodoObjetivo(hoy) explícito para refrescar el mes en curso.
  */
 export async function generarCierreMensual(periodoOverride?: string) {
   const ahora = new Date();
-  const periodo = periodoOverride ?? periodoObjetivo(ahora);
+  const periodo = periodoOverride ?? periodoMesAnterior(ahora);
   const cutoff = cutoffFinDePeriodo(periodo);
 
   console.log("\n╔════════════════════════════════════════════════════════════");

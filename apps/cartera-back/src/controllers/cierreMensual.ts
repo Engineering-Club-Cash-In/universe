@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
@@ -30,6 +30,18 @@ function periodoMesAnterior(ref: Date): string {
   return `${y}-${m}-01`;
 }
 
+/**
+ * Primer instante del mes SIGUIENTE al periodo, en hora Guatemala (UTC-6 fijo, sin DST).
+ * Sirve de corte: todo crédito creado >= este instante (es decir, del mes siguiente en
+ * adelante) NO entra en la foto del periodo. Ej: periodo "2026-05-01" → 2026-06-01 00:00 GT.
+ */
+function cutoffFinDePeriodo(periodo: string): Date {
+  const [anio, mes] = periodo.split("-").map(Number); // mes = 1..12
+  // Date.UTC con `mes` (1-index) como argumento 0-index cae en el mes SIGUIENTE;
+  // +6h porque Guatemala es UTC-6. Maneja diciembre→enero por overflow.
+  return new Date(Date.UTC(anio, mes, 1, 6, 0, 0));
+}
+
 interface AcumEstado {
   cantidad_creditos: number;
   capital_total: Big;
@@ -44,6 +56,8 @@ interface AcumEstado {
  * - Las columnas de mora salen de la tabla OFICIAL de mora (`moras_credito` con `activa = true`),
  *   la misma que llena el job `procesarMoras` junto con el estado MOROSO. Por eso un crédito
  *   ACTIVO no arrastra mora (la mora activa va de la mano del estado MOROSO).
+ * - Solo entran créditos con `fecha_creacion` ANTERIOR al fin del periodo (hora Guatemala):
+ *   si se cierra mayo, los créditos creados en junio en adelante NO se cuentan ni se suman.
  *
  * Idempotente: hace upsert sobre (periodo, status_credit).
  *
@@ -53,9 +67,11 @@ interface AcumEstado {
 export async function generarCierreMensual(periodoOverride?: string) {
   const ahora = new Date();
   const periodo = periodoOverride ?? periodoMesAnterior(ahora);
+  const cutoff = cutoffFinDePeriodo(periodo);
 
   console.log("\n╔════════════════════════════════════════════════════════════");
   console.log(`║ [JOB] 📊 GENERANDO CIERRE MENSUAL — periodo ${periodo}`);
+  console.log(`║ Solo créditos creados antes de ${cutoff.toISOString()} (fin de periodo GT)`);
   console.log("╚════════════════════════════════════════════════════════════\n");
 
   // 1. Inicializar acumulador con TODOS los estados en cero.
@@ -69,14 +85,16 @@ export async function generarCierreMensual(periodoOverride?: string) {
     };
   }
 
-  // 2. Conteo y capital por estado (foto actual de creditos).
+  // 2. Conteo y capital por estado (foto actual de creditos), excluyendo los
+  //    créditos creados después del periodo (p.ej. los de junio al cerrar mayo).
   const creditosRows = await db
     .select({
       credito_id: creditos.credito_id,
       capital: creditos.capital,
       statusCredit: creditos.statusCredit,
     })
-    .from(creditos);
+    .from(creditos)
+    .where(lt(creditos.fecha_creacion, cutoff));
 
   // Mapa credito_id -> { estado, capital } para cruzar con la mora.
   const creditoInfo = new Map<number, { estado: string; capital: Big }>();

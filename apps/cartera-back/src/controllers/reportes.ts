@@ -319,9 +319,11 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
   const cobrado = await db.execute(sql`
     SELECT
       DATE_TRUNC('month', (p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')) AS mes,
-      COALESCE(SUM(p.abono_capital::numeric + p.abono_interes::numeric + COALESCE(p.abono_interes_ci::numeric, 0)
-        + p.abono_iva_12::numeric + COALESCE(p.abono_iva_ci::numeric, 0) + p.abono_seguro::numeric
-        + p.abono_gps::numeric + COALESCE(p.membresias_pago::numeric, 0)), 0) AS cobrado
+      COALESCE(SUM(
+        COALESCE(p.abono_capital::numeric, 0) + COALESCE(p.abono_interes::numeric, 0) + COALESCE(p.abono_interes_ci::numeric, 0)
+        + COALESCE(p.abono_iva_12::numeric, 0) + COALESCE(p.abono_iva_ci::numeric, 0) + COALESCE(p.abono_seguro::numeric, 0)
+        + COALESCE(p.abono_gps::numeric, 0) + COALESCE(p.membresias_pago::numeric, 0)
+      ), 0) AS cobrado
     FROM cartera.pagos_credito p
     WHERE p.fecha_pago >= ${inicioAnioUtc}::timestamptz
       AND p.fecha_pago < ${finAnioUtc}::timestamptz

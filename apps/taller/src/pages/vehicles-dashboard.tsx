@@ -27,8 +27,9 @@ import {
   Hash,
   ExternalLink,
 } from "lucide-react";
-import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
+import { getVehicleStatusUpdate, getVehicleStatistics, getVehicleById } from "../services/vehicles";
 import { generateInspectionPdf } from "../lib/generate-inspection-pdf";
+import { authClient } from "../lib/auth-client";
 import { vehiclesApi, client } from "../utils/orpc";
 import { toast } from "sonner";
 import { INSPECTION_AREAS } from "../lib/inspection-data";
@@ -375,6 +376,9 @@ const VehiclePhoto = ({ photo, index }: { photo: any; index: number }) => {
 };
 
 export default function VehiclesDashboard() {
+  const { data: session } = authClient.useSession();
+  const userRole = (session?.user as { role?: string } | undefined)?.role;
+  const canManageVehicleStatus = userRole === "admin" || userRole === "service_center_manager";
   const [vehicles, setVehicles] = useState<DashboardVehicle[]>([]);
   const [rawVehiclesData, setRawVehiclesData] = useState<VehicleWithRelations[]>([]);
   const [statistics, setStatistics] = useState<any>(null);
@@ -635,13 +639,24 @@ export default function VehiclesDashboard() {
 
     setIsSaving(true);
     try {
-      await vehiclesApi.update(selectedVehicle.id, {
-        status: editForm.status as "pending" | "available" | "sold" | "maintenance" | "auction",
-      });
-
-      // Get the raw vehicle to update its inspection
+      // Get the raw vehicle to compare vehicle status and update its inspection
       const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle.id);
-      const inspectionId = rawVehicle?.inspections?.[0]?.id;
+      const vehicleStatus = getVehicleStatusUpdate(editForm.status, rawVehicle?.status, canManageVehicleStatus);
+
+      if (vehicleStatus) {
+        await vehiclesApi.update(selectedVehicle.id, {
+          status: vehicleStatus,
+        });
+      }
+
+      const sortedInspections = rawVehicle?.inspections
+        ? [...rawVehicle.inspections].sort((a, b) => {
+            const dateA = a.inspectionDate ? new Date(a.inspectionDate).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+            const dateB = b.inspectionDate ? new Date(b.inspectionDate).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+            return dateB - dateA;
+          })
+        : [];
+      const inspectionId = sortedInspections[selectedInspectionIndex]?.id;
 
       if (inspectionId) {
         // Update the inspection data via the API
@@ -672,7 +687,8 @@ export default function VehiclesDashboard() {
       setActiveTab("details");
     } catch (error) {
       console.error("Error saving changes:", error);
-      toast.error("Error al guardar los cambios");
+      const message = error instanceof Error ? error.message : "Error al guardar los cambios";
+      toast.error(message);
     } finally {
       setIsSaving(false);
     }
@@ -1991,7 +2007,24 @@ export default function VehiclesDashboard() {
                           return (
                             <button
                               key={inspection.id}
-                              onClick={() => setSelectedInspectionIndex(idx)}
+                              onClick={() => {
+                                setSelectedInspectionIndex(idx);
+                                if (!selectedVehicle) return;
+                                const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle.id);
+                                if (rawVehicle) {
+                                  const transformed = transformVehicleData(rawVehicle, idx);
+                                  setSelectedVehicle(transformed);
+                                  setEditForm({
+                                    vehicleRating: transformed.vehicleRating,
+                                    status: transformed.status,
+                                    marketValue: transformed.marketValue,
+                                    suggestedCommercialValue: transformed.suggestedCommercialValue,
+                                    currentConditionValue: transformed.currentConditionValue,
+                                    testDrive: transformed.testDrive,
+                                    inspectionResult: transformed.inspectionResult,
+                                  });
+                                }
+                              }}
                               className={cn(
                                 "w-full text-left rounded-lg border p-3 transition-all",
                                 isSelected

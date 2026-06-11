@@ -241,7 +241,7 @@ export type ColocacionPeriodoRow = {
 };
 
 export type ComparativoHistoricoResponse = {
-	cobrado: { mes: string; cobrado: string }[];
+	cobrado: { mes: number; cobrado: string }[];
 	cartera: { mes: string; creditos_activos: number; cartera_activa: string }[];
 	moraActual: { creditos_mora: number; capital_en_mora: string };
 	cierres: { periodo: string; creditos_mora: number; capital_en_mora: string }[];

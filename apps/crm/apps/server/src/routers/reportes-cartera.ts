@@ -542,17 +542,19 @@ export const reportesCarteraRouter = {
 					});
 				}
 
-				const mesDeBucket = (valor: string): number =>
+				const mesDeDate = (valor: string): number =>
 					new Date(valor).getUTCMonth() + 1;
 
 				const cobradoMap = new Map<number, string>();
 				for (const row of carteraData.cobrado) {
-					cobradoMap.set(mesDeBucket(row.mes), Number(row.cobrado).toFixed(2));
+					// row.mes es integer (1-12) directo de facturacion_snapshot_diario
+					cobradoMap.set(Number(row.mes), Number(row.cobrado).toFixed(2));
 				}
 
 				const carteraMap = new Map<number, { capital: string; creditos: number }>();
 				for (const row of carteraData.cartera) {
-					carteraMap.set(mesDeBucket(row.mes), {
+					// row.mes es date string (periodo de cierre_mensual)
+					carteraMap.set(mesDeDate(row.mes), {
 						capital: Number(row.cartera_activa).toFixed(2),
 						creditos: row.creditos_activos,
 					});
@@ -560,7 +562,7 @@ export const reportesCarteraRouter = {
 
 				const cierreMap = new Map<number, { capital: string; creditos: number }>();
 				for (const row of carteraData.cierres) {
-					cierreMap.set(mesDeBucket(row.periodo), {
+					cierreMap.set(mesDeDate(row.periodo), {
 						capital: Number(row.capital_en_mora).toFixed(2),
 						creditos: row.creditos_mora,
 					});

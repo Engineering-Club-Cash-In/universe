@@ -314,49 +314,30 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
   const inicioAnioUtc = new Date(Date.UTC(anio, 0, 1, 6)).toISOString();
   const finAnioUtc = new Date(Date.UTC(anio + 1, 0, 1, 6)).toISOString();
 
-  // a) Cobrado por mes (rango sargable sobre fecha_pago; NULLs quedan fuera,
-  //    igual que el reporte de facturación existente).
+  // a) Facturación por mes: último acumulado_total del mes en facturacion_snapshot_diario.
+  //    acumulado_total es running total del mes → el último registro = total del mes.
   const cobrado = await db.execute(sql`
-    SELECT
-      DATE_TRUNC('month', (p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')) AS mes,
-      COALESCE(SUM(
-        COALESCE(p.abono_capital::numeric, 0) + COALESCE(p.abono_interes::numeric, 0) + COALESCE(p.abono_interes_ci::numeric, 0)
-        + COALESCE(p.abono_iva_12::numeric, 0) + COALESCE(p.abono_iva_ci::numeric, 0) + COALESCE(p.abono_seguro::numeric, 0)
-        + COALESCE(p.abono_gps::numeric, 0) + COALESCE(p.membresias_pago::numeric, 0)
-      ), 0) AS cobrado
-    FROM cartera.pagos_credito p
-    WHERE p.fecha_pago >= ${inicioAnioUtc}::timestamptz
-      AND p.fecha_pago < ${finAnioUtc}::timestamptz
-    GROUP BY 1
-    ORDER BY 1
+    SELECT DISTINCT ON (mes)
+      mes,
+      acumulado_total AS cobrado
+    FROM cartera.facturacion_snapshot_diario
+    WHERE anio = ${anio}
+    ORDER BY mes, fecha DESC
   `);
 
-  // b) Cartera activa al cierre de cada mes del año.
-  //    Aproximación: crédito vivo en el mes M si fue creado antes del fin de M
-  //    y (su estado actual es vivo O fue cancelado después del fin de M).
+  // b) Cartera activa al cierre de cada mes desde cierre_mensual,
+  //    sumando solo ACTIVO + MOROSO + EN_CONVENIO.
   const cartera = await db.execute(sql`
-    WITH meses AS (
-      SELECT generate_series(
-        make_date(${anio}, 1, 1), make_date(${anio}, 12, 1), interval '1 month'
-      )::date AS mes_inicio
-    )
     SELECT
-      m.mes_inicio AS mes,
-      COUNT(cr.credito_id)::int AS creditos_activos,
-      COALESCE(SUM(cr.capital::numeric), 0) AS cartera_activa
-    FROM meses m
-    LEFT JOIN cartera.creditos cr
-      ON (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::date < (m.mes_inicio + interval '1 month')::date
-      AND (
-        cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
-        OR EXISTS (
-          SELECT 1 FROM cartera.credit_cancelations cc
-          WHERE cc.credit_id = cr.credito_id
-            AND cc.fecha_cancelacion::date >= (m.mes_inicio + interval '1 month')::date
-        )
-      )
-    GROUP BY m.mes_inicio
-    ORDER BY m.mes_inicio
+      periodo AS mes,
+      COALESCE(SUM(cantidad_creditos), 0)::int AS creditos_activos,
+      COALESCE(SUM(capital_total::numeric), 0) AS cartera_activa
+    FROM cartera.cierre_mensual
+    WHERE periodo >= make_date(${anio}, 1, 1)
+      AND periodo < make_date(${anio + 1}, 1, 1)
+      AND status_credit IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+    GROUP BY periodo
+    ORDER BY periodo
   `);
 
   // c) Capital en mora HOY (misma definición que el snapshot de cierre_mensual:

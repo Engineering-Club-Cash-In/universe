@@ -1,5 +1,9 @@
 import { Elysia, t } from "elysia";
-import { generarCierreMensual, getCierreMensual } from "../controllers/cierreMensual";
+import {
+  generarCierreMensual,
+  getCierreMensual,
+  getCierreMoraAging,
+} from "../controllers/cierreMensual";
 import { authMiddleware } from "./midleware";
 
 export const cierreMensualRouter = new Elysia()
@@ -40,5 +44,18 @@ export const cierreMensualRouter = new Elysia()
     } catch (error) {
       set.status = 500;
       return { message: "Error obteniendo cierre mensual", error: String(error) };
+    }
+  })
+
+  // GET - Consultar el aging de mora (buckets 30/60/90/120). ?periodo=2026-06-01 para un mes.
+  .get("/cierre-mensual/mora-aging", async ({ query, set }) => {
+    try {
+      const { periodo } = query as Record<string, string>;
+      const rows = await getCierreMoraAging(periodo || undefined);
+      set.status = 200;
+      return rows;
+    } catch (error) {
+      set.status = 500;
+      return { message: "Error obteniendo aging de mora", error: String(error) };
     }
   });

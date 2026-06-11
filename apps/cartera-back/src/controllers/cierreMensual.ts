@@ -4,6 +4,7 @@ import {
   creditos,
   moras_credito,
   cierre_mensual,
+  cierre_mora_aging,
   StatusCredit,
 } from "../database/db/schema";
 import Big from "big.js";
@@ -171,7 +172,104 @@ export async function generarCierreMensual(periodoOverride?: string) {
 
   console.log(`\n✅ Cierre mensual generado: ${filas} filas para el periodo ${periodo}\n`);
 
-  return { ok: true, periodo, filas };
+  // 5. Aging de mora (buckets por cuotas atrasadas) — mismo periodo y mismo corte.
+  const aging = await generarCierreMoraAging(periodo, cutoff);
+
+  return { ok: true, periodo, filas, aging: aging.buckets };
+}
+
+// Definición de los buckets de aging por cuotas atrasadas.
+// El orden importa: se evalúa de mayor a menor para que "4 o más" caiga en 120.
+const BUCKETS_AGING = [
+  { bucket: "120", cuotas_min: 4, test: (c: number) => c >= 4 },
+  { bucket: "90", cuotas_min: 3, test: (c: number) => c === 3 },
+  { bucket: "60", cuotas_min: 2, test: (c: number) => c === 2 },
+  { bucket: "30", cuotas_min: 1, test: (c: number) => c === 1 },
+] as const;
+
+/**
+ * Genera (o regenera) el aging de mora del periodo: agrupa los créditos con mora ACTIVA
+ * por cuotas atrasadas en buckets 30/60/90/120 y guarda, por bucket, la cantidad de
+ * créditos y la suma de `monto_mora`.
+ *
+ * - Deduplica por crédito (puede haber >1 mora activa por el bug de duplicados): se queda
+ *   con la mora de MAYOR cuotas_atrasadas (el peor atraso) y su `monto_mora`.
+ * - Aplica el MISMO filtro por fecha_creacion que el cierre (excluye créditos creados
+ *   después del periodo).
+ *
+ * Idempotente: upsert sobre (periodo, bucket).
+ */
+export async function generarCierreMoraAging(periodo: string, cutoffOverride?: Date) {
+  const cutoff = cutoffOverride ?? cutoffFinDePeriodo(periodo);
+
+  // Créditos válidos del periodo (creados antes del corte).
+  const creditosValidos = await db
+    .select({ id: creditos.credito_id })
+    .from(creditos)
+    .where(lt(creditos.fecha_creacion, cutoff));
+  const valido = new Set<number>(creditosValidos.map((c) => c.id));
+
+  // Moras activas con su atraso y monto.
+  const moras = await db
+    .select({
+      credito_id: moras_credito.credito_id,
+      cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+      monto_mora: moras_credito.monto_mora,
+    })
+    .from(moras_credito)
+    .where(eq(moras_credito.activa, true));
+
+  // Dedup por crédito: nos quedamos con la mora de mayor cuotas_atrasadas.
+  const porCredito = new Map<number, { cuotas: number; monto: Big }>();
+  for (const m of moras) {
+    if (!valido.has(m.credito_id)) continue; // crédito fuera del periodo
+    if (m.cuotas_atrasadas < 1) continue; // sin atraso real, no aplica bucket
+    const prev = porCredito.get(m.credito_id);
+    const monto = new Big(m.monto_mora);
+    // Mayor cuotas_atrasadas; en empate, el monto_mora mayor (determinístico).
+    if (!prev || m.cuotas_atrasadas > prev.cuotas || (m.cuotas_atrasadas === prev.cuotas && monto.gt(prev.monto))) {
+      porCredito.set(m.credito_id, { cuotas: m.cuotas_atrasadas, monto });
+    }
+  }
+
+  // Acumular en los 4 buckets (siempre las 4 filas, aunque queden en cero).
+  const acum: Record<string, { cuotas_min: number; n: number; monto: Big }> = {};
+  for (const b of BUCKETS_AGING) acum[b.bucket] = { cuotas_min: b.cuotas_min, n: 0, monto: new Big(0) };
+  for (const { cuotas, monto } of porCredito.values()) {
+    const def = BUCKETS_AGING.find((b) => b.test(cuotas))!;
+    acum[def.bucket].n += 1;
+    acum[def.bucket].monto = acum[def.bucket].monto.plus(monto);
+  }
+
+  // Upsert por bucket.
+  const buckets: { bucket: string; cuotas_min: number; cantidad_creditos: number; monto_mora: string }[] = [];
+  for (const b of BUCKETS_AGING) {
+    const d = acum[b.bucket];
+    const valores = {
+      periodo,
+      bucket: b.bucket,
+      cuotas_min: d.cuotas_min,
+      cantidad_creditos: d.n,
+      monto_mora: d.monto.toFixed(2),
+    };
+    await db
+      .insert(cierre_mora_aging)
+      .values(valores)
+      .onConflictDoUpdate({
+        target: [cierre_mora_aging.periodo, cierre_mora_aging.bucket],
+        set: {
+          cuotas_min: valores.cuotas_min,
+          cantidad_creditos: valores.cantidad_creditos,
+          monto_mora: valores.monto_mora,
+          created_at: new Date(),
+        },
+      });
+    buckets.push(valores);
+    console.log(`  [mora ${b.bucket}] créditos=${valores.cantidad_creditos} montoMora=${valores.monto_mora}`);
+  }
+
+  console.log(`\n✅ Aging de mora generado: 4 buckets para el periodo ${periodo}\n`);
+  return { ok: true, periodo, buckets };
 }
 
 /**
@@ -184,6 +282,20 @@ export async function getCierreMensual(periodo?: string) {
         .from(cierre_mensual)
         .where(eq(cierre_mensual.periodo, periodo))
     : await db.select().from(cierre_mensual);
+
+  return rows;
+}
+
+/**
+ * Lista el aging de mora, opcionalmente filtrando por periodo.
+ */
+export async function getCierreMoraAging(periodo?: string) {
+  const rows = periodo
+    ? await db
+        .select()
+        .from(cierre_mora_aging)
+        .where(eq(cierre_mora_aging.periodo, periodo))
+    : await db.select().from(cierre_mora_aging);
 
   return rows;
 }

@@ -936,6 +936,11 @@ if (facturasExistentes.length > 0) {
       //    Se setea dentro de cada flujo (estándar/prorrateado) y se usa al
       //    final para guardar el rubro INTERES en facturacion_desglose.
       let interesCubeConIva = new Big(0);
+      // Marca que el flujo de interés realmente se calculó (NO abortó). Si
+      // queda en false con interés > 0 (p. ej. abort por espejo sin fecha de
+      // participación), NO escribimos los rubros INTERES / INTERES_INVERSIONISTAS,
+      // para no atribuir todo el interés a inversionistas con interesCubeConIva=0.
+      let interesFlujoOk = false;
 
       if (!hayInteresEnPago) {
         console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses (ambos flujos)");
@@ -1286,6 +1291,7 @@ if (facturasExistentes.length > 0) {
 
           // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
           interesCubeConIva = totalCubeFinal;
+          interesFlujoOk = true;
 
           // Set con todos los IDs de inversionistas que aparecieron en cualquier
           // ventana (algunos podrían tener parte solo en una de las dos).
@@ -1757,6 +1763,7 @@ if (facturasExistentes.length > 0) {
 
         // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
         interesCubeConIva = totalCube;
+        interesFlujoOk = true;
 
         console.log(`   📊 Cash-in acumulado de otros: Q${cashInAcumulado.toFixed(2)}`);
         console.log(`   💵 Total CUBE: Q${totalCube.toFixed(2)} (residuo + cash_in)`);
@@ -1925,8 +1932,13 @@ if (facturasExistentes.length > 0) {
           interesTotalConIvaPago.minus(interesCubeConIva);
 
         pushRubro("CAPITAL", capitalCube, false); // solo capital de CUBE (de pci), sin IVA
-        pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
-        pushRubro("INTERES_INVERSIONISTAS", interesInversionistasConIva, true); // residuo no-CUBE, con IVA
+        // Solo si el flujo de interés se calculó OK (no abortó). Si abortó,
+        // interesCubeConIva quedó en 0 y NO debemos volcar todo el interés a
+        // INTERES_INVERSIONISTAS → dejamos ambos rubros sin escribir.
+        if (interesFlujoOk) {
+          pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
+          pushRubro("INTERES_INVERSIONISTAS", interesInversionistasConIva, true); // residuo no-CUBE, con IVA
+        }
         pushRubro("MEMBRESIA", pagoData.membresias_pago, true);
         pushRubro("SEGURO", pagoData.abono_seguro, true);
         pushRubro("GPS", pagoData.abono_gps, true);

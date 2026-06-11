@@ -136,7 +136,7 @@ export async function generarSnapshotDiario(fecha: string) {
   const inv = await db.execute(sql`
     SELECT COALESCE(SUM(monto_total), 0) AS total
     FROM cartera.facturacion_desglose
-    WHERE rubro = 'INTERES_INVERSIONISTAS'
+    WHERE rubro::text = 'INTERES_INVERSIONISTAS'
       AND fecha_aplicado_gt = ${fecha}::date
   `);
   const factInv = new Big((inv as any).rows?.[0]?.total || 0);
@@ -171,7 +171,7 @@ export async function generarSnapshotDiario(fecha: string) {
   const invMtd = await db.execute(sql`
     SELECT COALESCE(SUM(monto_total), 0) AS total
     FROM cartera.facturacion_desglose
-    WHERE rubro = 'INTERES_INVERSIONISTAS'
+    WHERE rubro::text = 'INTERES_INVERSIONISTAS'
       AND fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
   `);
   // Reserva acumulada (MTD) desde pagos_credito.reserva

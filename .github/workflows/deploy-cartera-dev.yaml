@@ -33,6 +33,10 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # Comparar contra el commit anterior de esta misma rama; sin esto
+          # compara contra la rama default (main) y todo push a develop
+          # "cambiaría" cartera aunque no se haya tocado.
+          base: ${{ github.ref }}
           filters: |
             back:
               - 'apps/cartera-back/**'

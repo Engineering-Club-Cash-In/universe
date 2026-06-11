@@ -32,6 +32,7 @@ export interface InspectionData {
   inspectionResult: string;
   vehicleRating: 'Comercial' | 'No comercial';
   marketValue?: string;
+  suggestedCommercialValue?: string;
   currentConditionValue: string;
   vehicleEquipment: string;
   importantConsiderations?: string;
@@ -95,6 +96,31 @@ export interface Inspection360Item {
   notes?: string;
   metadata?: Record<string, any>;
 }
+
+export type VehicleStatus = "pending" | "available" | "sold" | "maintenance" | "auction";
+
+export const getVehicleStatusUpdate = (
+  inspectionStatus: string,
+  currentVehicleStatus?: string | null,
+  canManageVehicleStatus = true,
+): VehicleStatus | undefined => {
+  if (!canManageVehicleStatus) {
+    return undefined;
+  }
+
+  const vehicleStatus =
+    inspectionStatus === "approved"
+      ? "available"
+      : inspectionStatus === "rejected"
+        ? "maintenance"
+        : inspectionStatus;
+
+  if (vehicleStatus === currentVehicleStatus) {
+    return undefined;
+  }
+
+  return vehicleStatus as VehicleStatus;
+};
 
 // Main function to create a full vehicle inspection
 export const createFullInspection = async (
@@ -165,6 +191,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     inspectionResult: formData.inspectionResult,
     vehicleRating: formData.vehicleRating,
     marketValue: formData.marketValue || undefined,
+    suggestedCommercialValue: formData.suggestedCommercialValue || undefined,
     currentConditionValue: formData.currentConditionValue,
     vehicleEquipment: formData.vehicleEquipment,
     importantConsiderations: formData.importantConsiderations,

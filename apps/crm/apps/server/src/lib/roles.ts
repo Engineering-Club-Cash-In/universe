@@ -13,6 +13,8 @@ export const ROLES = {
 	INVESTMENT_ADVISOR_JR: "investment_advisor_jr",
 	INVESTMENT_ADVISOR_SR: "investment_advisor_sr",
 	INVESTMENT_MANAGER: "investment_manager",
+	SERVICE_CENTER_MANAGER: "service_center_manager",
+	VEHICLE_VERIFIER: "vehicle_verifier",
 } as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -73,6 +75,16 @@ export const ROLE_CONFIG = {
 		label: "Gerente de Inversiones",
 		color: "bg-sky-100 text-sky-800",
 		icon: "Landmark" as const,
+	},
+	[ROLES.SERVICE_CENTER_MANAGER]: {
+		label: "Gerente de Centro de Servicio",
+		color: "bg-violet-100 text-violet-800",
+		icon: "Wrench" as const,
+	},
+	[ROLES.VEHICLE_VERIFIER]: {
+		label: "Verificador de Vehículo",
+		color: "bg-lime-100 text-lime-800",
+		icon: "ClipboardCheck" as const,
 	},
 } as const;
 
@@ -213,6 +225,20 @@ export const PERMISSIONS = {
 
 	// Vehicles Module Access - All roles can access
 	canAccessVehicles: (_role: UserRole | string): boolean => true,
+
+	// Taller Module Access
+	canAccessTaller: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.SERVICE_CENTER_MANAGER ||
+		role === ROLES.VEHICLE_VERIFIER,
+
+	canManageTallerInspections: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.SERVICE_CENTER_MANAGER ||
+		role === ROLES.VEHICLE_VERIFIER,
+
+	canManageTallerVehicleStatus: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SERVICE_CENTER_MANAGER,
 
 	// Accounting Module Access (Contabilidad)
 	canAccessAccounting: (role: UserRole | string): boolean =>

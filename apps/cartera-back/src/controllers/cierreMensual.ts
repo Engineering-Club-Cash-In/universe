@@ -32,6 +32,22 @@ function periodoMesAnterior(ref: Date): string {
 }
 
 /**
+ * Periodo que debe cerrarse HOY según el día del mes (hora Guatemala). Pensado para
+ * correr a diario manteniendo UN registro por mes (upsert que se va refrescando):
+ * - Hasta el día 5: se sigue cerrando el mes ANTERIOR (gracia para que asiente la data;
+ *   el corte por fecha_creacion hace que ese cierre ignore los créditos del mes nuevo).
+ * - Del día 6 en adelante: ya se toma en cuenta el mes ACTUAL.
+ * Ej: 3-jul → "2026-06-01" (sigue junio); 6-jul → "2026-07-01" (arranca julio).
+ */
+function periodoObjetivo(ref: Date): string {
+  const guate = toZonedTime(ref, TZ_GUATEMALA);
+  if (guate.getDate() <= 5) return periodoMesAnterior(ref);
+  const anio = guate.getFullYear();
+  const mes = String(guate.getMonth() + 1).padStart(2, "0");
+  return `${anio}-${mes}-01`;
+}
+
+/**
  * Primer instante del mes SIGUIENTE al periodo, en hora Guatemala (UTC-6 fijo, sin DST).
  * Sirve de corte: todo crédito creado >= este instante (es decir, del mes siguiente en
  * adelante) NO entra en la foto del periodo. Ej: periodo "2026-05-01" → 2026-06-01 00:00 GT.
@@ -63,11 +79,12 @@ interface AcumEstado {
  * Idempotente: hace upsert sobre (periodo, status_credit).
  *
  * @param periodoOverride opcional "YYYY-MM-01" para regenerar un mes específico.
- *                        Si no se pasa, usa el mes anterior a hoy (hora Guatemala).
+ *                        Si no se pasa, usa periodoObjetivo(hoy): hasta el día 5 cierra
+ *                        el mes anterior; del 6 en adelante, el mes actual (hora Guatemala).
  */
 export async function generarCierreMensual(periodoOverride?: string) {
   const ahora = new Date();
-  const periodo = periodoOverride ?? periodoMesAnterior(ahora);
+  const periodo = periodoOverride ?? periodoObjetivo(ahora);
   const cutoff = cutoffFinDePeriodo(periodo);
 
   console.log("\n╔════════════════════════════════════════════════════════════");

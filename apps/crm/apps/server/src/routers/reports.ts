@@ -19,10 +19,12 @@ import {
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 import {
 	closedCreditsReportProcedure,
-	porcentajeEfectividadReportProcedure,
 	protectedProcedure,
+	tiempoCierreReportProcedure,
+  porcentajeEfectividadReportProcedure,
 } from "../lib/orpc";
 
+const SECONDS_PER_DAY = 60 * 60 * 24;
 
 // Schema para filtros de fecha
 const dateRangeSchema = z.object({
@@ -538,6 +540,97 @@ export const getReportePorcentajeEfectividad =
 				})),
 			};
 		});
+
+/**
+ * Reporte de Tiempo de Cierre de Crédito
+ * Días desde la creación del prospecto hasta que la oportunidad alcanza etapa 90%+
+ * Desglosado por fuente (total y por fuente)
+ */
+export const getReporteTiempoCierre = tiempoCierreReportProcedure
+	.input(closedCreditsReportInputSchema)
+	.handler(async ({ input }) => {
+		const { start, end } = parseGuatemalaDateRange(
+			input.startDate,
+			input.endDate,
+		);
+
+		const firstClosedStageDates = db
+			.select({
+				opportunityId: opportunityStageHistory.opportunityId,
+				firstClosedStageAt:
+					sql<Date>`MIN(${opportunityStageHistory.changedAt})`.as(
+						"first_closed_stage_at",
+					),
+			})
+			.from(opportunityStageHistory)
+			.innerJoin(
+				salesStages,
+				eq(opportunityStageHistory.toStageId, salesStages.id),
+			)
+			.where(gte(salesStages.closurePercentage, CLOSED_STAGE_THRESHOLD))
+			.groupBy(opportunityStageHistory.opportunityId)
+			.as("first_closed_stage_dates");
+
+		// Fallback a opportunities.createdAt cuando leadId es null (oportunidades
+		// vinculadas directamente a empresa sin prospecto previo).
+		const diasDesdeCreacion = (fn: "AVG" | "MIN" | "MAX") =>
+			sql<number>`ROUND(${sql.raw(fn)}(EXTRACT(EPOCH FROM (${firstClosedStageDates.firstClosedStageAt} - COALESCE(${leads.createdAt}, ${opportunities.createdAt}))) / ${SECONDS_PER_DAY}), 1)`;
+
+		const baseWhere = and(
+			gte(firstClosedStageDates.firstClosedStageAt, start),
+			lte(firstClosedStageDates.firstClosedStageAt, end),
+		);
+
+		const [totalRows, porFuente] = await Promise.all([
+			db
+				.select({
+					totalCreditos: count(),
+					avgDias: diasDesdeCreacion("AVG"),
+					minDias: diasDesdeCreacion("MIN"),
+					maxDias: diasDesdeCreacion("MAX"),
+				})
+				.from(firstClosedStageDates)
+				.innerJoin(
+					opportunities,
+					eq(firstClosedStageDates.opportunityId, opportunities.id),
+				)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(baseWhere),
+			db
+				.select({
+					source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+					totalCreditos: count(),
+					avgDias: diasDesdeCreacion("AVG"),
+					minDias: diasDesdeCreacion("MIN"),
+					maxDias: diasDesdeCreacion("MAX"),
+				})
+				.from(firstClosedStageDates)
+				.innerJoin(
+					opportunities,
+					eq(firstClosedStageDates.opportunityId, opportunities.id),
+				)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(baseWhere)
+				.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
+				.orderBy(desc(count())),
+		]);
+
+		return {
+			total: {
+				totalCreditos: totalRows[0]?.totalCreditos ?? 0,
+				avgDias: totalRows[0]?.avgDias ?? 0,
+				minDias: totalRows[0]?.minDias ?? 0,
+				maxDias: totalRows[0]?.maxDias ?? 0,
+			},
+			porFuente: porFuente.map((row) => ({
+				source: row.source,
+				totalCreditos: row.totalCreditos,
+				avgDias: row.avgDias ?? 0,
+				minDias: row.minDias ?? 0,
+				maxDias: row.maxDias ?? 0,
+			})),
+		};
+	});
 
 /**
  * Reporte de Subastas

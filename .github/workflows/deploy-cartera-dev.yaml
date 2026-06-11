@@ -52,6 +52,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.back == 'true'
     runs-on: ubuntu-latest
+    # Si llega un push nuevo que también reconstruye el back, cancela este run
+    # y deploya solo el último. Por job (no global) para que un push solo-front
+    # no cancele un deploy de back en curso.
+    concurrency:
+      group: deploy-cartera-back-dev
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -87,6 +93,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.front == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-cartera-front-dev
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 

@@ -1320,7 +1320,8 @@ export const inversionistasRouter = new Elysia()
   })
   // ──────────────────────────────────────────────
   // Revertir una liquidación completa por liquidacion_id
-  // Deshace: pagos espejo, monto_aportado, cuotas, boleta, reinversión y liquidación
+  // Deshace: pagos espejo, monto_aportado, cuotas, boleta, snapshots del
+  // histórico de liquidaciones espejo y la liquidación
   // Todo dentro de una transacción
   // ──────────────────────────────────────────────
   .post("/investor/revertir-liquidacion", async ({ body, set }) => {

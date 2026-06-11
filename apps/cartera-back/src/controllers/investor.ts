@@ -2434,32 +2434,19 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     }
 
     // ──────────────────────────────────────────────
-    // PASO 7: Revertir reinversión
-    //   Restamos el monto reinvertido del saldo_reinversion del inversionista
-    //   y restauramos los montos en la tabla reinversiones
+    // PASO 7: Eliminar snapshots del histórico de liquidaciones espejo
+    //   liquidateByInvestorId inserta una fila por (crédito, inversionista)
+    //   con el monto_aportado post-reducción como baseline del cuadre de la
+    //   siguiente liquidación. Hay que borrarlas ANTES de eliminar la
+    //   liquidación: el FK es onDelete "set null" y quedarían huérfanas
+    //   como baseline falso.
     // ──────────────────────────────────────────────
-    const reinvTotal = new Big(liquidacion.reinversion_total ?? 0);
-    if (reinvTotal.gt(0)) {
-      // Restar del saldo_reinversion
-      await tx
-        .update(inversionistas)
-        .set({
-          saldo_reinversion: sql`${inversionistas.saldo_reinversion} - ${reinvTotal.toFixed(2)}::numeric`,
-        })
-        .where(eq(inversionistas.inversionista_id, inv_id));
+    const historicoEliminado = await tx
+      .delete(historico_liquidaciones_espejo)
+      .where(eq(historico_liquidaciones_espejo.liquidacion_id, liquidacion_id))
+      .returning({ id: historico_liquidaciones_espejo.id });
 
-      // Restaurar montos en reinversiones
-      await tx
-        .update(reinversiones)
-        .set({
-          monto_capital: liquidacion.reinversion_capital ?? "0",
-          monto_interes: liquidacion.reinversion_interes ?? "0",
-          monto_total: liquidacion.reinversion_total ?? "0",
-        })
-        .where(eq(reinversiones.inversionista_id, inv_id));
-
-      console.log(`  ✅ Reinversión revertida (-${reinvTotal.toFixed(2)} del saldo)`);
-    }
+    console.log(`  ✅ ${historicoEliminado.length} snapshots de historico_liquidaciones_espejo eliminados`);
 
     // ──────────────────────────────────────────────
     // PASO 8: Eliminar la liquidación
@@ -2479,6 +2466,7 @@ export async function revertirLiquidacion(liquidacion_id: number) {
       inversionista_id: inv_id,
       pagos_revertidos: pagosLiquidados.length,
       creditos_afectados: pagosPorCredito.size,
+      historico_snapshots_eliminados: historicoEliminado.length,
     };
   });
 }

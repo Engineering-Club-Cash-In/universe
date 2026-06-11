@@ -270,8 +270,8 @@ export interface FileRoutesByFullPath {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
-  '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
+  '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
@@ -309,8 +309,8 @@ export interface FileRoutesByTo {
   '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
-  '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
+  '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports': typeof AdminReportsIndexRoute
@@ -349,8 +349,8 @@ export interface FileRoutesById {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
-  '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
+  '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
@@ -390,8 +390,8 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
-    | '/crm/reportes/tiempo-cierre'
     | '/crm/reportes/porcentaje-efectividad'
+    | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
@@ -429,8 +429,8 @@ export interface FileRouteTypes {
     | '/vehicles'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
-    | '/crm/reportes/tiempo-cierre'
     | '/crm/reportes/porcentaje-efectividad'
+    | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports'
@@ -468,8 +468,8 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
-    | '/crm/reportes/tiempo-cierre'
     | '/crm/reportes/porcentaje-efectividad'
+    | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
@@ -508,8 +508,8 @@ export interface RootRouteChildren {
   VehiclesIndexRoute: typeof VehiclesIndexRoute
   CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   CrmAnalysisOpportunityIdRoute: typeof CrmAnalysisOpportunityIdRoute
-  CrmReportesTiempoCierreRoute: typeof CrmReportesTiempoCierreRoute
   CrmReportesPorcentajeEfectividadRoute: typeof CrmReportesPorcentajeEfectividadRoute
+  CrmReportesTiempoCierreRoute: typeof CrmReportesTiempoCierreRoute
   InversionesLiquidacionesInversionistaIdRoute: typeof InversionesLiquidacionesInversionistaIdRoute
   JuridicoGenerateOpportunityIdRoute: typeof JuridicoGenerateOpportunityIdRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
@@ -812,8 +812,8 @@ const rootRouteChildren: RootRouteChildren = {
   VehiclesIndexRoute: VehiclesIndexRoute,
   CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   CrmAnalysisOpportunityIdRoute: CrmAnalysisOpportunityIdRoute,
-  CrmReportesTiempoCierreRoute: CrmReportesTiempoCierreRoute,
   CrmReportesPorcentajeEfectividadRoute: CrmReportesPorcentajeEfectividadRoute,
+  CrmReportesTiempoCierreRoute: CrmReportesTiempoCierreRoute,
   InversionesLiquidacionesInversionistaIdRoute:
     InversionesLiquidacionesInversionistaIdRoute,
   JuridicoGenerateOpportunityIdRoute: JuridicoGenerateOpportunityIdRoute,

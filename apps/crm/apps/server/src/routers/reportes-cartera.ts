@@ -474,4 +474,151 @@ export const reportesCarteraRouter = {
 			},
 		),
 
+	// ========================================================================
+	// REPORTE: COMPARATIVO HISTÓRICO MENSUAL
+	// ========================================================================
+
+	getComparativoHistorico: adminProcedure
+		.input(
+			z.object({
+				anio: z.number().min(2024).max(2100),
+			}),
+		)
+		.handler(
+			async ({ input }): Promise<{
+				data: {
+					mes: number;
+					colocacion_monto: string | null;
+					colocacion_creditos: number | null;
+					facturacion: string | null;
+					cartera_activa: string | null;
+					creditos_activos: number | null;
+					capital_en_mora: string | null;
+					creditos_mora: number | null;
+				}[];
+			}> => {
+				if (!isCarteraBackEnabled()) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Integración con cartera-back no está habilitada",
+					});
+				}
+
+
+				const carteraData = await carteraBackClient.getComparativoHistorico(
+					input.anio,
+				);
+
+				const colocacionResult = await db.execute(sql`
+					WITH first_placed AS (
+						SELECT
+							osh.opportunity_id,
+							MIN(osh.changed_at) AS first_placed_at
+						FROM opportunity_stage_history osh
+						JOIN sales_stages ss ON ss.id = osh.to_stage_id
+						WHERE ss.closure_percentage >= 90
+						GROUP BY osh.opportunity_id
+					)
+					SELECT
+						EXTRACT(MONTH FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala')::int AS mes,
+						COUNT(o.id)::int AS colocacion_creditos,
+						COALESCE(SUM(o.value::numeric), 0) AS colocacion_monto
+					FROM first_placed fp
+					JOIN opportunities o ON o.id = fp.opportunity_id
+					WHERE o.status != 'migrate'
+						AND EXTRACT(YEAR FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${input.anio}
+					GROUP BY 1
+					ORDER BY 1
+				`);
+
+				const colocacionMap = new Map<number, { monto: string; creditos: number }>();
+				for (const row of colocacionResult.rows as {
+					mes: number;
+					colocacion_creditos: number;
+					colocacion_monto: string;
+				}[]) {
+					colocacionMap.set(row.mes, {
+						monto: Number(row.colocacion_monto).toFixed(2),
+						creditos: row.colocacion_creditos,
+					});
+				}
+
+				const mesDeBucket = (valor: string): number =>
+					new Date(valor).getUTCMonth() + 1;
+
+				const cobradoMap = new Map<number, string>();
+				for (const row of carteraData.cobrado) {
+					cobradoMap.set(mesDeBucket(row.mes), Number(row.cobrado).toFixed(2));
+				}
+
+				const carteraMap = new Map<number, { capital: string; creditos: number }>();
+				for (const row of carteraData.cartera) {
+					carteraMap.set(mesDeBucket(row.mes), {
+						capital: Number(row.cartera_activa).toFixed(2),
+						creditos: row.creditos_activos,
+					});
+				}
+
+				const cierreMap = new Map<number, { capital: string; creditos: number }>();
+				for (const row of carteraData.cierres) {
+					cierreMap.set(mesDeBucket(row.periodo), {
+						capital: Number(row.capital_en_mora).toFixed(2),
+						creditos: row.creditos_mora,
+					});
+				}
+
+				const ahoraGt = new Date(Date.now() - 6 * 60 * 60 * 1000);
+				const anioActual = ahoraGt.getUTCFullYear();
+				const mesActual = ahoraGt.getUTCMonth() + 1;
+
+				const data = Array.from({ length: 12 }, (_, i) => {
+					const mes = i + 1;
+					const esFuturo =
+						input.anio > anioActual ||
+						(input.anio === anioActual && mes > mesActual);
+					const esMesActual = input.anio === anioActual && mes === mesActual;
+
+					if (esFuturo) {
+						return {
+							mes,
+							colocacion_monto: null,
+							colocacion_creditos: null,
+							facturacion: null,
+							cartera_activa: null,
+							creditos_activos: null,
+							capital_en_mora: null,
+							creditos_mora: null,
+						};
+					}
+
+					const coloc = colocacionMap.get(mes);
+					const cart = carteraMap.get(mes);
+
+					let capitalEnMora: string | null = null;
+					let creditosMora: number | null = null;
+					if (esMesActual) {
+						capitalEnMora = Number(carteraData.moraActual.capital_en_mora).toFixed(2);
+						creditosMora = carteraData.moraActual.creditos_mora;
+					} else {
+						const cierre = cierreMap.get(mes);
+						if (cierre) {
+							capitalEnMora = cierre.capital;
+							creditosMora = cierre.creditos;
+						}
+					}
+
+					return {
+						mes,
+						colocacion_monto: coloc?.monto ?? null,
+						colocacion_creditos: coloc?.creditos ?? null,
+						facturacion: cobradoMap.get(mes) ?? null,
+						cartera_activa: cart?.capital ?? null,
+						creditos_activos: cart?.creditos ?? null,
+						capital_en_mora: capitalEnMora,
+						creditos_mora: creditosMora,
+					};
+				});
+
+				return { data };
+			},
+		),
 };

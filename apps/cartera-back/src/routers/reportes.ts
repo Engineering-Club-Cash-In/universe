@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { getCobradoDelMes, getEsperadoDelMes, getFlujoCuotasInversiones, getMontoACobrar } from "../controllers/reportes";
+import { getCobradoDelMes, getColocacionPorPeriodo, getComparativoHistorico, getEsperadoDelMes, getFlujoCuotasInversiones, getMontoACobrar } from "../controllers/reportes";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -95,6 +95,42 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/facturacion-mes-esperado]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/colocacion-periodo", async ({ query, set }) => {
+    try {
+      const { periodo, fechaInicio, fechaFin } = query as Record<string, string>;
+      if (!fechaInicio || !fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      const p = validarPeriodo(periodo, set);
+      if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
+      const data = await getColocacionPorPeriodo({ periodo: p, fechaInicio, fechaFin });
+      set.status = 200;
+      return { data };
+    } catch (error) {
+      console.error("[/reportes/colocacion-periodo]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/comparativo-historico", async ({ query, set }) => {
+    try {
+      const anio = Number((query as Record<string, string>).anio);
+      if (!anio || anio < 2020 || anio > 2100) {
+        set.status = 400;
+        return { error: "anio es requerido y debe ser válido" };
+      }
+      const data = await getComparativoHistorico({ anio });
+      set.status = 200;
+      return data;
+    } catch (error) {
+      console.error("[/reportes/comparativo-historico]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

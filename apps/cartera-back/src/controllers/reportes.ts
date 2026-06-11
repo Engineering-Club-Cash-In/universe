@@ -282,3 +282,111 @@ export async function getEsperadoDelMes({
     esperado_membresias: String(row?.esperado_membresias ?? "0"),
   };
 }
+
+export async function getColocacionPorPeriodo({
+  periodo,
+  fechaInicio,
+  fechaFin,
+}: {
+  periodo: Periodo;
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const pg = sql.raw(toPostgresPeriod[periodo]);
+
+  const result = await db.execute(sql`
+    SELECT
+      DATE_TRUNC(${pg}, (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::timestamp) AS bucket,
+      COUNT(cr.credito_id)::int AS cantidad_creditos,
+      COALESCE(SUM(cr.capital::numeric), 0) AS total_colocacion
+    FROM cartera.creditos cr
+    WHERE (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::date >= ${fechaInicio}::date
+      AND (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::date <= ${fechaFin}::date
+    GROUP BY DATE_TRUNC(${pg}, (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::timestamp)
+    ORDER BY bucket ASC
+  `);
+
+  return result.rows;
+}
+
+export async function getComparativoHistorico({ anio }: { anio: number }) {
+  // Guatemala es UTC-6 fijo (sin DST): medianoche GT = 06:00 UTC.
+  const inicioAnioUtc = new Date(Date.UTC(anio, 0, 1, 6)).toISOString();
+  const finAnioUtc = new Date(Date.UTC(anio + 1, 0, 1, 6)).toISOString();
+
+  // a) Cobrado por mes (rango sargable sobre fecha_pago; NULLs quedan fuera,
+  //    igual que el reporte de facturación existente).
+  const cobrado = await db.execute(sql`
+    SELECT
+      DATE_TRUNC('month', (p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')) AS mes,
+      COALESCE(SUM(p.abono_capital::numeric + p.abono_interes::numeric + COALESCE(p.abono_interes_ci::numeric, 0)
+        + p.abono_iva_12::numeric + COALESCE(p.abono_iva_ci::numeric, 0) + p.abono_seguro::numeric
+        + p.abono_gps::numeric + COALESCE(p.membresias_pago::numeric, 0)), 0) AS cobrado
+    FROM cartera.pagos_credito p
+    WHERE p.fecha_pago >= ${inicioAnioUtc}::timestamptz
+      AND p.fecha_pago < ${finAnioUtc}::timestamptz
+    GROUP BY 1
+    ORDER BY 1
+  `);
+
+  // b) Cartera activa al cierre de cada mes del año.
+  //    Aproximación: crédito vivo en el mes M si fue creado antes del fin de M
+  //    y (su estado actual es vivo O fue cancelado después del fin de M).
+  const cartera = await db.execute(sql`
+    WITH meses AS (
+      SELECT generate_series(
+        make_date(${anio}, 1, 1), make_date(${anio}, 12, 1), interval '1 month'
+      )::date AS mes_inicio
+    )
+    SELECT
+      m.mes_inicio AS mes,
+      COUNT(cr.credito_id)::int AS creditos_activos,
+      COALESCE(SUM(cr.capital::numeric), 0) AS cartera_activa
+    FROM meses m
+    LEFT JOIN cartera.creditos cr
+      ON (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::date < (m.mes_inicio + interval '1 month')::date
+      AND (
+        cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+        OR EXISTS (
+          SELECT 1 FROM cartera.credit_cancelations cc
+          WHERE cc.credit_id = cr.credito_id
+            AND cc.fecha_cancelacion::date >= (m.mes_inicio + interval '1 month')::date
+        )
+      )
+    GROUP BY m.mes_inicio
+    ORDER BY m.mes_inicio
+  `);
+
+  // c) Capital en mora HOY (misma definición que el snapshot de cierre_mensual:
+  //    capital de créditos con mora activa, contado una vez por crédito).
+  const moraActual = await db.execute(sql`
+    SELECT
+      COUNT(cr.credito_id)::int AS creditos_mora,
+      COALESCE(SUM(cr.capital::numeric), 0) AS capital_en_mora
+    FROM cartera.creditos cr
+    WHERE EXISTS (
+      SELECT 1 FROM cartera.moras_credito m
+      WHERE m.credito_id = cr.credito_id AND m.activa = true
+    )
+  `);
+
+  // d) Snapshots históricos de mora desde cierre_mensual (suma de todos los status).
+  const cierres = await db.execute(sql`
+    SELECT
+      periodo,
+      COALESCE(SUM(creditos_con_mora), 0)::int AS creditos_mora,
+      COALESCE(SUM(capital_en_mora::numeric), 0) AS capital_en_mora
+    FROM cartera.cierre_mensual
+    WHERE periodo >= make_date(${anio}, 1, 1)
+      AND periodo < make_date(${anio + 1}, 1, 1)
+    GROUP BY periodo
+    ORDER BY periodo
+  `);
+
+  return {
+    cobrado: cobrado.rows,
+    cartera: cartera.rows,
+    moraActual: moraActual.rows[0] ?? { creditos_mora: 0, capital_en_mora: "0" },
+    cierres: cierres.rows,
+  };
+}

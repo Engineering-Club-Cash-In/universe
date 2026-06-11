@@ -1914,8 +1914,19 @@ if (facturasExistentes.length > 0) {
         `);
         const capitalCube = (capCubeRes as any).rows?.[0]?.capital_cube ?? 0;
 
+        // 🆕 Interés que se factura a inversionistas (no-CUBE) = interés total
+        //    del pago − lo que factura CUBE, CON IVA. Un solo registro agregado
+        //    por pago (sin importar cuántos inversionistas se lo repartan).
+        //    factura_id NULL: no es factura de CUBE, es el residuo de los inv.
+        const interesTotalConIvaPago = new Big(pagoData.abono_interes || 0).plus(
+          new Big(pagoData.abono_iva_12 || 0)
+        );
+        const interesInversionistasConIva =
+          interesTotalConIvaPago.minus(interesCubeConIva);
+
         pushRubro("CAPITAL", capitalCube, false); // solo capital de CUBE (de pci), sin IVA
         pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
+        pushRubro("INTERES_INVERSIONISTAS", interesInversionistasConIva, true); // residuo no-CUBE, con IVA
         pushRubro("MEMBRESIA", pagoData.membresias_pago, true);
         pushRubro("SEGURO", pagoData.abono_seguro, true);
         pushRubro("GPS", pagoData.abono_gps, true);

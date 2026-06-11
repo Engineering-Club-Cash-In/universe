@@ -129,14 +129,15 @@ export async function generarSnapshotDiario(fecha: string) {
   `);
   const ingresoCarros = new Big((carr as any).rows?.[0]?.total || 0);
 
-  // 4) Facturación a inversionistas del día (no-CUBE, de pci)
+  // 4) Facturación a inversionistas del día = rubro INTERES_INVERSIONISTAS del
+  //    desglose (el residuo del interés que NO factura CUBE, ya con IVA, que
+  //    cofidi guarda por pago). Se lee del desglose —no de pci— para tener una
+  //    sola fuente y la misma fecha (COALESCE fecha_aplicado/fecha_pago).
   const inv = await db.execute(sql`
-    SELECT COALESCE(SUM(pci.abono_interes + pci.abono_iva_12), 0) AS total
-    FROM cartera.pagos_credito_inversionistas pci
-    INNER JOIN cartera.pagos_credito p ON p.pago_id = pci.pago_id
-    INNER JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
-    WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
-      AND UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+    SELECT COALESCE(SUM(monto_total), 0) AS total
+    FROM cartera.facturacion_desglose
+    WHERE rubro = 'INTERES_INVERSIONISTAS'
+      AND fecha_aplicado_gt = ${fecha}::date
   `);
   const factInv = new Big((inv as any).rows?.[0]?.total || 0);
 
@@ -168,12 +169,10 @@ export async function generarSnapshotDiario(fecha: string) {
     WHERE (c.fecha_creacion AT TIME ZONE 'America/Guatemala')::date BETWEEN ${monthStart}::date AND ${fecha}::date
   `);
   const invMtd = await db.execute(sql`
-    SELECT COALESCE(SUM(pci.abono_interes + pci.abono_iva_12), 0) AS total
-    FROM cartera.pagos_credito_inversionistas pci
-    INNER JOIN cartera.pagos_credito p ON p.pago_id = pci.pago_id
-    INNER JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
-    WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date BETWEEN ${monthStart}::date AND ${fecha}::date
-      AND UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+    SELECT COALESCE(SUM(monto_total), 0) AS total
+    FROM cartera.facturacion_desglose
+    WHERE rubro = 'INTERES_INVERSIONISTAS'
+      AND fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
   `);
   // Reserva acumulada (MTD) desde pagos_credito.reserva
   const reservaMtd = await db.execute(sql`

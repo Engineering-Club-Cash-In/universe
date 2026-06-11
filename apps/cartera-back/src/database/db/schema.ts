@@ -64,6 +64,7 @@
     "GPS",
     "MORA",
     "OTROS",
+    "INTERES_INVERSIONISTAS",
   ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),

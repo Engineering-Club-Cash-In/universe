@@ -282,3 +282,97 @@ export async function getEsperadoDelMes({
     esperado_membresias: String(row?.esperado_membresias ?? "0"),
   };
 }
+
+export async function getColocacionPorPeriodo({
+  periodo,
+  fechaInicio,
+  fechaFin,
+}: {
+  periodo: Periodo;
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const pg = sql.raw(toPostgresPeriod[periodo]);
+
+  const result = await db.execute(sql`
+    SELECT
+      DATE_TRUNC(${pg}, (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::timestamp) AS bucket,
+      COUNT(cr.credito_id)::int AS cantidad_creditos,
+      COALESCE(SUM(cr.capital::numeric), 0) AS total_colocacion
+    FROM cartera.creditos cr
+    WHERE (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::date >= ${fechaInicio}::date
+      AND (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::date <= ${fechaFin}::date
+    GROUP BY DATE_TRUNC(${pg}, (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::timestamp)
+    ORDER BY bucket ASC
+  `);
+
+  return result.rows;
+}
+
+export async function getComparativoHistorico({ anio }: { anio: number }) {
+  // Guatemala es UTC-6 fijo (sin DST): medianoche GT = 06:00 UTC.
+  const inicioAnioUtc = new Date(Date.UTC(anio, 0, 1, 6)).toISOString();
+  const finAnioUtc = new Date(Date.UTC(anio + 1, 0, 1, 6)).toISOString();
+
+  // a) Facturación por mes: último acumulado_total del mes en facturacion_snapshot_diario.
+  //    acumulado_total es running total del mes → el último registro = total del mes.
+  const cobrado = await db.execute(sql`
+    SELECT DISTINCT ON (mes)
+      mes,
+      acumulado_total AS cobrado
+    FROM cartera.facturacion_snapshot_diario
+    WHERE anio = ${anio}
+    ORDER BY mes, fecha DESC
+  `);
+
+  // b) Cartera activa al cierre de cada mes desde cierre_mensual,
+  //    sumando solo ACTIVO + MOROSO + EN_CONVENIO.
+  const cartera = await db.execute(sql`
+    SELECT
+      periodo AS mes,
+      COALESCE(SUM(cantidad_creditos), 0)::int AS creditos_activos,
+      COALESCE(SUM(capital_total::numeric), 0) AS cartera_activa
+    FROM cartera.cierre_mensual
+    WHERE periodo >= make_date(${anio}, 1, 1)
+      AND periodo < make_date(${anio + 1}, 1, 1)
+      AND status_credit IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+    GROUP BY periodo
+    ORDER BY periodo
+  `);
+
+  // c) Mora actual por bucket (mes corriente): moras_credito agrupada por cuotas_atrasadas.
+  const moraActual = await db.execute(sql`
+    SELECT
+      CASE
+        WHEN m.cuotas_atrasadas >= 4 THEN '120'
+        WHEN m.cuotas_atrasadas = 3  THEN '90'
+        WHEN m.cuotas_atrasadas = 2  THEN '60'
+        ELSE '30'
+      END AS bucket,
+      COUNT(DISTINCT m.credito_id)::int AS cantidad_creditos,
+      COALESCE(SUM(m.monto_mora::numeric), 0) AS monto_mora
+    FROM cartera.moras_credito m
+    WHERE m.activa = true
+    GROUP BY 1
+  `);
+
+  // d) Aging histórico desde cierre_mora_aging.
+  const agingHistorico = await db.execute(sql`
+    SELECT
+      periodo,
+      bucket,
+      cantidad_creditos,
+      monto_mora
+    FROM cartera.cierre_mora_aging
+    WHERE periodo >= make_date(${anio}, 1, 1)
+      AND periodo < make_date(${anio + 1}, 1, 1)
+    ORDER BY periodo, bucket
+  `);
+
+  return {
+    cobrado: cobrado.rows,
+    cartera: cartera.rows,
+    moraActual: moraActual.rows,
+    agingHistorico: agingHistorico.rows,
+  };
+}

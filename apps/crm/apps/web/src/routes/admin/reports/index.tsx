@@ -4,6 +4,8 @@ import {
 	Activity,
 	AlertTriangle,
 	CalendarDays,
+	ChevronLeft,
+	ChevronRight,
 	Download,
 	FileText,
 	TrendingDown,
@@ -126,6 +128,29 @@ function getDefaultFlujoCuotasRange(): { fechaInicio: string; fechaFin: string }
 	lastDay.setDate(lastDay.getDate() - 1);
 	return { fechaInicio, fechaFin: formatDateInput(lastDay) };
 }
+
+type ComparativoHistoricoRow = {
+	mes: number;
+	colocacion_monto: string | null;
+	colocacion_creditos: number | null;
+	facturacion: string | null;
+	cartera_activa: string | null;
+	creditos_activos: number | null;
+	mora_30: string | null;
+	mora_60: string | null;
+	mora_90: string | null;
+	mora_120: string | null;
+	creditos_30: number | null;
+	creditos_60: number | null;
+	creditos_90: number | null;
+	creditos_120: number | null;
+};
+
+const MESES = [
+	"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+	"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
 
 const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] = [
 	{ key: "capital", label: "Capital" },
@@ -268,6 +293,9 @@ function RouteComponent() {
 		anio: new Date().getFullYear(),
 	}));
 	const [flujoCuotasRange, setFlujoCuotasRange] = useState(getDefaultFlujoCuotasRange);
+	const [comparativoAnio, setComparativoAnio] = useState(
+		() => new Date().getFullYear(),
+	);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const userRole = userProfile.data?.role;
@@ -327,6 +355,15 @@ function RouteComponent() {
 	});
 	const flujoCuotasData = flujoCuotasQuery.data as FlujoCuotasInversionesResponse | undefined;
 
+	const comparativoQuery = useQuery({
+		...orpc.getComparativoHistorico.queryOptions({
+			input: { anio: comparativoAnio },
+		}),
+		enabled: isAdmin,
+	});
+	const comparativoData = comparativoQuery.data as
+		| { data: ComparativoHistoricoRow[] }
+		| undefined;
 
 	useEffect(() => {
 		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
@@ -1321,6 +1358,161 @@ function RouteComponent() {
 							})()}
 						</CardContent>
 					</Card>
+
+				{/* ============================================================ */}
+				{/* REPORTE: COMPARATIVO HISTÓRICO MENSUAL                        */}
+				{/* ============================================================ */}
+				<Card>
+					<CardHeader>
+						<div className="flex items-center justify-between">
+							<CardTitle className="flex items-center gap-2">
+								<CalendarDays className="h-5 w-5" />
+								Comparativo Histórico Mensual
+							</CardTitle>
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									className="rounded p-1 hover:bg-muted"
+									onClick={() => setComparativoAnio((y) => y - 1)}
+								>
+									<ChevronLeft className="h-4 w-4" />
+								</button>
+								<span className="font-semibold text-sm w-12 text-center">
+									{comparativoAnio}
+								</span>
+								<button
+									type="button"
+									className="rounded p-1 hover:bg-muted"
+									onClick={() =>
+										setComparativoAnio((y) =>
+											y < new Date().getFullYear() ? y + 1 : y,
+										)
+									}
+								>
+									<ChevronRight className="h-4 w-4" />
+								</button>
+							</div>
+						</div>
+					</CardHeader>
+					<CardContent>
+						{comparativoQuery.isPending && (
+							<p className="text-sm text-muted-foreground py-4 text-center">
+								Cargando...
+							</p>
+						)}
+						{comparativoQuery.isError && (
+							<p className="text-sm text-red-500 py-4 text-center">
+								Error al cargar comparativo histórico.
+							</p>
+						)}
+						{comparativoData && (() => {
+							const rows = comparativoData.data;
+							const sumColoc = rows.reduce(
+								(acc, r) => acc + (r.colocacion_monto ? Number(r.colocacion_monto) : 0),
+								0,
+							);
+							const sumFacturacion = rows.reduce(
+								(acc, r) => acc + (r.facturacion ? Number(r.facturacion) : 0),
+								0,
+							);
+							const sumCreditosColoc = rows.reduce(
+								(acc, r) => acc + (r.colocacion_creditos ?? 0),
+								0,
+							);
+							return (
+								<div className="overflow-x-auto">
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Mes</TableHead>
+												<TableHead className="text-right">Colocación (Q)</TableHead>
+												<TableHead className="text-right"># Col.</TableHead>
+												<TableHead className="text-right">Facturación (Q)</TableHead>
+												<TableHead className="text-right">Cartera Activa (Q)</TableHead>
+												<TableHead className="text-right"># Activos</TableHead>
+												<TableHead className="text-right">Mora 30 (Q)</TableHead>
+												<TableHead className="text-right">Mora 60 (Q)</TableHead>
+												<TableHead className="text-right">Mora 90 (Q)</TableHead>
+												<TableHead className="text-right">Mora 120+ (Q)</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{rows.map((row) => {
+												const esFuturo =
+													row.colocacion_monto === null &&
+													row.facturacion === null &&
+													row.cartera_activa === null;
+												return (
+													<TableRow
+														key={row.mes}
+														className={esFuturo ? "opacity-40" : undefined}
+													>
+														<TableCell className="font-medium">
+															{MESES[row.mes - 1]}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.colocacion_monto
+																? formatCurrency(Number(row.colocacion_monto))
+																: "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.colocacion_creditos ?? "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.facturacion
+																? formatCurrency(Number(row.facturacion))
+																: "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.cartera_activa
+																? formatCurrency(Number(row.cartera_activa))
+																: "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.creditos_activos ?? "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_30 ? <span>{formatCurrency(Number(row.mora_30))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_30 ?? 0})</span></span> : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_60 ? <span>{formatCurrency(Number(row.mora_60))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_60 ?? 0})</span></span> : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_90 ? <span>{formatCurrency(Number(row.mora_90))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_90 ?? 0})</span></span> : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_120 ? <span>{formatCurrency(Number(row.mora_120))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_120 ?? 0})</span></span> : "—"}
+														</TableCell>
+													</TableRow>
+												);
+											})}
+										</TableBody>
+										<TableBody>
+											<TableRow className="border-t-2 bg-muted/50 font-bold">
+												<TableCell>Total</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(sumColoc)}
+												</TableCell>
+												<TableCell className="text-right">
+													{sumCreditosColoc}
+												</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(sumFacturacion)}
+												</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+											</TableRow>
+										</TableBody>
+									</Table>
+								</div>
+							);
+						})()}
+					</CardContent>
+				</Card>
 				</>
 			)}
 

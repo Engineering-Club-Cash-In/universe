@@ -474,4 +474,152 @@ export const reportesCarteraRouter = {
 			},
 		),
 
+	// ========================================================================
+	// REPORTE: COMPARATIVO HISTÓRICO MENSUAL
+	// ========================================================================
+
+	getComparativoHistorico: adminProcedure
+		.input(
+			z.object({
+				anio: z.number().min(2024).max(2100),
+			}),
+		)
+		.handler(
+			async ({ input }): Promise<{
+				data: {
+					mes: number;
+					colocacion_monto: string | null;
+					colocacion_creditos: number | null;
+					facturacion: string | null;
+					cartera_activa: string | null;
+					creditos_activos: number | null;
+					mora_30: string | null;
+					mora_60: string | null;
+					mora_90: string | null;
+					mora_120: string | null;
+					creditos_30: number | null;
+					creditos_60: number | null;
+					creditos_90: number | null;
+					creditos_120: number | null;
+				}[];
+			}> => {
+				if (!isCarteraBackEnabled()) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Integración con cartera-back no está habilitada",
+					});
+				}
+
+
+				const carteraData = await carteraBackClient.getComparativoHistorico(
+					input.anio,
+				);
+
+				const colocacionResult = await db.execute(sql`
+					WITH first_placed AS (
+						SELECT
+							osh.opportunity_id,
+							MIN(osh.changed_at) AS first_placed_at
+						FROM opportunity_stage_history osh
+						JOIN sales_stages ss ON ss.id = osh.to_stage_id
+						WHERE ss.closure_percentage >= 90
+						GROUP BY osh.opportunity_id
+					)
+					SELECT
+						EXTRACT(MONTH FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala')::int AS mes,
+						COUNT(o.id)::int AS colocacion_creditos,
+						COALESCE(SUM(o.value::numeric), 0) AS colocacion_monto
+					FROM first_placed fp
+					JOIN opportunities o ON o.id = fp.opportunity_id
+					WHERE o.status != 'migrate'
+						AND EXTRACT(YEAR FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${input.anio}
+					GROUP BY 1
+					ORDER BY 1
+				`);
+
+				const colocacionMap = new Map<number, { monto: string; creditos: number }>();
+				for (const row of colocacionResult.rows as {
+					mes: number;
+					colocacion_creditos: number;
+					colocacion_monto: string;
+				}[]) {
+					colocacionMap.set(row.mes, {
+						monto: Number(row.colocacion_monto).toFixed(2),
+						creditos: row.colocacion_creditos,
+					});
+				}
+
+				const mesDeDate = (valor: string): number =>
+					new Date(valor).getUTCMonth() + 1;
+
+				const cobradoMap = new Map<number, string>();
+				for (const row of carteraData.cobrado) {
+					// row.mes es integer (1-12) directo de facturacion_snapshot_diario
+					cobradoMap.set(Number(row.mes), Number(row.cobrado).toFixed(2));
+				}
+
+				const carteraMap = new Map<number, { capital: string; creditos: number }>();
+				for (const row of carteraData.cartera) {
+					// row.mes es date string (periodo de cierre_mensual)
+					carteraMap.set(mesDeDate(row.mes), {
+						capital: Number(row.cartera_activa).toFixed(2),
+						creditos: row.creditos_activos,
+					});
+				}
+
+				type AgingBuckets = { mora_30: string | null; mora_60: string | null; mora_90: string | null; mora_120: string | null; creditos_30: number | null; creditos_60: number | null; creditos_90: number | null; creditos_120: number | null };
+
+				// Aging histórico por mes
+				const agingHistMap = new Map<number, AgingBuckets>();
+				for (const row of carteraData.agingHistorico) {
+					const m = mesDeDate(row.periodo);
+					if (!agingHistMap.has(m)) agingHistMap.set(m, { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null });
+					const entry = agingHistMap.get(m)!;
+					const key = `mora_${row.bucket}` as keyof AgingBuckets;
+					const cKey = `creditos_${row.bucket}` as keyof AgingBuckets;
+					(entry as Record<string, string | number | null>)[key] = Number(row.monto_mora).toFixed(2);
+					(entry as Record<string, string | number | null>)[cKey] = row.cantidad_creditos;
+				}
+
+				// Aging mes actual desde moraActual
+				const agingActual: AgingBuckets = { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null };
+				for (const row of carteraData.moraActual) {
+					(agingActual as Record<string, string | number | null>)[`mora_${row.bucket}`] = Number(row.monto_mora).toFixed(2);
+					(agingActual as Record<string, string | number | null>)[`creditos_${row.bucket}`] = row.cantidad_creditos;
+				}
+
+				const ahoraGt = new Date(Date.now() - 6 * 60 * 60 * 1000);
+				const anioActual = ahoraGt.getUTCFullYear();
+				const mesActual = ahoraGt.getUTCMonth() + 1;
+
+				const data = Array.from({ length: 12 }, (_, i) => {
+					const mes = i + 1;
+					const esFuturo =
+						input.anio > anioActual ||
+						(input.anio === anioActual && mes > mesActual);
+					const esMesActual = input.anio === anioActual && mes === mesActual;
+
+					const nullAging: AgingBuckets = { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null };
+
+					if (esFuturo) {
+						return { mes, colocacion_monto: null, colocacion_creditos: null, facturacion: null, cartera_activa: null, creditos_activos: null, ...nullAging };
+					}
+
+					const coloc = colocacionMap.get(mes);
+					const cart = carteraMap.get(mes);
+					const aging = esMesActual ? agingActual : (agingHistMap.get(mes) ?? nullAging);
+
+					return {
+						mes,
+						colocacion_monto: coloc?.monto ?? null,
+						colocacion_creditos: coloc?.creditos ?? null,
+						facturacion: cobradoMap.get(mes) ?? null,
+						cartera_activa: cart?.capital ?? null,
+						creditos_activos: cart?.creditos ?? null,
+						...aging,
+					};
+				});
+
+				return { data };
+			},
+		),
 };

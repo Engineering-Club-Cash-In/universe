@@ -1,9 +1,11 @@
 import { Elysia } from "elysia";
-import { getCobradoDelMes, getEsperadoDelMes, getMontoACobrar } from "../controllers/reportes";
+import { getCobradoDelMes, getEsperadoDelMes, getFlujoCuotasInversiones, getMontoACobrar } from "../controllers/reportes";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
 type PeriodoValido = typeof PERIODOS_VALIDOS[number];
+
+const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 function validarPeriodo(periodo: string | undefined, set: { status: number }): PeriodoValido | null {
   const p = periodo || "mes";
@@ -22,6 +24,10 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       if (!fechaInicio || !fechaFin) {
         set.status = 400;
         return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
@@ -49,6 +55,27 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/facturacion-mes-cobrado]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/flujo-cuotas-inversiones", async ({ query, set }) => {
+    try {
+      const { fechaInicio, fechaFin } = query as Record<string, string>;
+      if (!fechaInicio || !fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      const data = await getFlujoCuotasInversiones({ fechaInicio, fechaFin });
+      set.status = 200;
+      return data;
+    } catch (error) {
+      console.error("[/reportes/flujo-cuotas-inversiones]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

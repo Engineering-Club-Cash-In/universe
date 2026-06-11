@@ -19,6 +19,7 @@ import './styles.css'
 import reportWebVitals from './reportWebVitals.ts'
 
 import App from './App.tsx'
+import { LoginPage } from './pages/login.tsx'
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -35,8 +36,15 @@ const indexRoute = createRoute({
   component: App,
 })
 
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/login',
+  component: LoginPage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  loginRoute,
   VehiclesDashboardRoute(rootRoute as any),
   VehicleInspectionRoute(rootRoute as any),
 ])

@@ -210,6 +210,30 @@ export type MontoACobrarRow = {
 	mora_promedio: string;
 };
 
+export type FlujoCuotasRubro = {
+	capital: string;
+	interes: string;
+	iva: string;
+};
+
+export type FlujoCuotasInversionista = FlujoCuotasRubro & {
+	inversionista_id: number;
+	nombre: string;
+};
+
+export type FlujoCuotasInversionesResponse = {
+	reinversionPorTipo: (FlujoCuotasRubro & { tipo: string; monto_reinvertido?: string })[];
+	cashParcialPorTipo: (FlujoCuotasRubro & { tipo: string; monto_cash?: string })[];
+	sinReinversion: {
+		totales: FlujoCuotasRubro;
+		porInversionista: FlujoCuotasInversionista[];
+	};
+	pagosExtras: {
+		abonos_capital: string;
+		cancelaciones: string;
+	};
+};
+
 // ============================================================================
 // HTTP CLIENT
 // ============================================================================
@@ -1282,6 +1306,21 @@ export class CarteraBackClient {
 		};
 
 		return { cobrado, esperado };
+	}
+
+	async getFlujoCuotasInversiones(params: {
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<FlujoCuotasInversionesResponse> {
+		const qp = new URLSearchParams({
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+		return this.request<FlujoCuotasInversionesResponse>(
+			`/reportes/flujo-cuotas-inversiones?${qp}`,
+			{ method: "GET" },
+			true,
+		);
 	}
 
 	// ========================================================================

@@ -14,6 +14,7 @@ import { adminProcedure } from "../lib/orpc";
 import {
 	carteraBackClient,
 	type FacturacionMesResponse,
+	type FlujoCuotasInversionesResponse,
 	type MontoACobrarRow,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
@@ -407,8 +408,8 @@ export const reportesCarteraRouter = {
 				periodo: z
 					.enum(["anio", "trimestre", "mes", "semana", "dia"])
 					.default("mes"),
-				fechaInicio: z.string(),
-				fechaFin: z.string(),
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
 			}),
 		)
 		.handler(async ({ input }): Promise<{ data: MontoACobrarRow[] }> => {
@@ -450,4 +451,27 @@ export const reportesCarteraRouter = {
 				anio: input.anio,
 			});
 		}),
+
+	getFlujoCuotasInversiones: adminProcedure
+		.input(
+			z.object({
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+			}),
+		)
+		.handler(
+			async ({ input }): Promise<FlujoCuotasInversionesResponse> => {
+				if (!isCarteraBackEnabled()) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Integración con cartera-back no está habilitada",
+					});
+				}
+
+				return carteraBackClient.getFlujoCuotasInversiones({
+					fechaInicio: input.fechaInicio,
+					fechaFin: input.fechaFin,
+				});
+			},
+		),
+
 };

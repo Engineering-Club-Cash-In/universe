@@ -1472,16 +1472,16 @@ function RouteComponent() {
 															{row.creditos_activos ?? "—"}
 														</TableCell>
 														<TableCell className="text-right">
-															{row.mora_30 ? formatCurrency(Number(row.mora_30)) : "—"}
+															{row.mora_30 ? <span>{formatCurrency(Number(row.mora_30))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_30 ?? 0})</span></span> : "—"}
 														</TableCell>
 														<TableCell className="text-right">
-															{row.mora_60 ? formatCurrency(Number(row.mora_60)) : "—"}
+															{row.mora_60 ? <span>{formatCurrency(Number(row.mora_60))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_60 ?? 0})</span></span> : "—"}
 														</TableCell>
 														<TableCell className="text-right">
-															{row.mora_90 ? formatCurrency(Number(row.mora_90)) : "—"}
+															{row.mora_90 ? <span>{formatCurrency(Number(row.mora_90))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_90 ?? 0})</span></span> : "—"}
 														</TableCell>
 														<TableCell className="text-right">
-															{row.mora_120 ? formatCurrency(Number(row.mora_120)) : "—"}
+															{row.mora_120 ? <span>{formatCurrency(Number(row.mora_120))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_120 ?? 0})</span></span> : "—"}
 														</TableCell>
 													</TableRow>
 												);

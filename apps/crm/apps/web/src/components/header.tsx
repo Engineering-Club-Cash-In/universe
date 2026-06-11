@@ -16,6 +16,7 @@ import {
 	Landmark,
 	LayoutDashboard,
 	MessageSquare,
+	Percent,
 	Scale,
 	Settings,
 	Target,
@@ -149,6 +150,23 @@ export default function Header() {
 											</DropdownMenuItem>
 										</>
 									)}
+									{userRole &&
+										PERMISSIONS.canAccessPorcentajeEfectividadReport(
+											userRole,
+										) && (
+											<>
+												<DropdownMenuSeparator />
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/reportes/porcentaje-efectividad"
+														className="cursor-pointer"
+													>
+														<Percent className="mr-2 h-4 w-4" />
+														Porcentaje Efectividad
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}

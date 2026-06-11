@@ -17,7 +17,12 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
-import { closedCreditsReportProcedure, protectedProcedure } from "../lib/orpc";
+import {
+	closedCreditsReportProcedure,
+	porcentajeEfectividadReportProcedure,
+	protectedProcedure,
+} from "../lib/orpc";
+
 
 // Schema para filtros de fecha
 const dateRangeSchema = z.object({
@@ -421,6 +426,118 @@ export const getReporteInventario = protectedProcedure.handler(async () => {
 		inspeccionesPorResultado,
 	};
 });
+
+const CLOSED_STAGE_THRESHOLD = 90;
+const MAX_REPORT_ROWS = 10_000;
+/**
+ * Reporte Porcentaje Efectividad
+ * Tasa de conversión de oportunidades a créditos cerrados, por fuente.
+ */
+export const getReportePorcentajeEfectividad =
+	porcentajeEfectividadReportProcedure
+		.input(closedCreditsReportInputSchema)
+		.handler(async ({ input }) => {
+			const { start, end } = parseGuatemalaDateRange(
+				input.startDate,
+				input.endDate,
+			);
+
+			// Sin filtro de fechas intencional: la cohorte es "creadas en el período,
+			// ¿alguna vez cerraron?", no "creadas y cerradas dentro del mismo período".
+			const everClosed = db
+				.select({ opportunityId: opportunityStageHistory.opportunityId })
+				.from(opportunityStageHistory)
+				.innerJoin(
+					salesStages,
+					eq(opportunityStageHistory.toStageId, salesStages.id),
+				)
+				.where(gte(salesStages.closurePercentage, CLOSED_STAGE_THRESHOLD))
+				.groupBy(opportunityStageHistory.opportunityId)
+				.as("ever_closed");
+
+			const baseWhere = and(
+				gte(opportunities.createdAt, start),
+				lte(opportunities.createdAt, end),
+			);
+
+			const totalCerradas =
+				sql<number>`COUNT(${everClosed.opportunityId})`;
+			const porcentaje =
+				sql<number>`ROUND(COUNT(${everClosed.opportunityId}) * 100.0 / NULLIF(COUNT(${opportunities.id}), 0), 1)`;
+
+			const [totalRows, porFuente, registrosRaw] = await Promise.all([
+				db
+					.select({
+						totalOportunidades: count(opportunities.id),
+						totalCerradas,
+						porcentaje,
+					})
+					.from(opportunities)
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere),
+
+				db
+					.select({
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+						totalOportunidades: count(opportunities.id),
+						totalCerradas,
+						porcentaje,
+					})
+					.from(opportunities)
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere)
+					.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
+					.orderBy(desc(count(opportunities.id))),
+
+				db
+					.select({
+						id: opportunities.id,
+						createdAt: opportunities.createdAt,
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+						nombre: sql<string | null>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
+						etapaNombre: salesStages.name,
+						etapaPorcentaje: salesStages.closurePercentage,
+						cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`,
+					})
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere)
+					.orderBy(desc(opportunities.createdAt))
+					.limit(MAX_REPORT_ROWS + 1),
+			]);
+
+			if (registrosRaw.length > MAX_REPORT_ROWS) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
+				});
+			}
+
+			return {
+				total: {
+					totalOportunidades: totalRows[0]?.totalOportunidades ?? 0,
+					totalCerradas: totalRows[0]?.totalCerradas ?? 0,
+					porcentaje: totalRows[0]?.porcentaje ?? 0,
+				},
+				porFuente: porFuente.map((row) => ({
+					source: row.source,
+					totalOportunidades: row.totalOportunidades,
+					totalCerradas: row.totalCerradas ?? 0,
+					porcentaje: row.porcentaje ?? 0,
+				})),
+				registros: registrosRaw.map((row) => ({
+					id: row.id,
+					createdAt: row.createdAt,
+					source: row.source,
+					nombre: row.nombre,
+					etapaNombre: row.etapaNombre,
+					etapaPorcentaje: row.etapaPorcentaje,
+					cerro: row.cerro,
+				})),
+			};
+		});
 
 /**
  * Reporte de Subastas

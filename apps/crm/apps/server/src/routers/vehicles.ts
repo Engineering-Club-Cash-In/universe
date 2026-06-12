@@ -99,7 +99,7 @@ const normalizeManualValuationAmount = (
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
-	getAll: publicProcedure
+	getAll: tallerOrCrmProcedure
 		.input(
 			z
 				.object({
@@ -728,7 +728,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Create vehicle inspection
-	createInspection: protectedProcedure
+	createInspection: tallerOrCrmProcedure
 		.input(
 			z.object({
 				vehicleId: z.string(),
@@ -925,7 +925,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Upload vehicle photo
-	uploadPhoto: protectedProcedure
+	uploadPhoto: tallerOrCrmProcedure
 		.input(
 			z.object({
 				vehicleId: z.string(),
@@ -1092,7 +1092,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Get statistics
-	getStatistics: publicProcedure.handler(async () => {
+	getStatistics: tallerOrCrmProcedure.handler(async () => {
 		const allVehicles = await db.select().from(vehicles);
 		const allInspections = await db.select().from(vehicleInspections);
 
@@ -1124,7 +1124,7 @@ export const vehiclesRouter = {
 	}),
 
 	// Create full inspection with all data (vehicle + inspection + checklist)
-	createFullInspection: publicProcedure
+	createFullInspection: tallerOrCrmProcedure
 		.input(
 			z.object({
 				// Vehicle data
@@ -1506,7 +1506,7 @@ export const vehiclesRouter = {
 		}),
 
 	// OCR endpoint for vehicle registration card (tarjeta de circulación)
-	processVehicleRegistrationOCR: publicProcedure
+	processVehicleRegistrationOCR: tallerOrCrmProcedure
 		.input(
 			z.object({
 				imageBase64: z
@@ -1637,7 +1637,7 @@ REGLAS IMPORTANTES:
 		}),
 
 	// AI Vehicle Valuation endpoint
-	getAIVehicleValuation: publicProcedure
+	getAIVehicleValuation: tallerOrCrmProcedure
 		.input(
 			z.object({
 				vehicleData: z.any().describe("Complete vehicle data from inspection"),

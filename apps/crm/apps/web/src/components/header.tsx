@@ -201,7 +201,7 @@ export default function Header() {
 							</Button>
 						)}
 
-						{/* Vehículos Dropdown - Visible para todos los roles */}
+						{/* Vehículos */}
 						{session && userRole && PERMISSIONS.canAccessVehicles(userRole) && (
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>

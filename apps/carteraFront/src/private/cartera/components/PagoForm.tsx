@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar, ChevronsUpDown, Check } from "lucide-react";
 import { Combobox, Transition } from "@headlessui/react";
 import { Fragment, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { MiniCardCredito } from "./cardInfo";
 import { OpcionesExcesoModal } from "./excessModal";
@@ -89,6 +90,10 @@ export function PagoForm() {
   } = usePagoForm();
 
   const { bancos, loading: loadingBancos } = useBancos();
+
+  // Crédito preseleccionado vía URL (?sifco=...) desde el Historial de Pagos
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sifcoFromUrl = searchParams.get("sifco") ?? undefined;
 
   // 🎯 Estado para el modal de confirmación
   const [modalConfirmacionOpen, setModalConfirmacionOpen] = useState(false);
@@ -497,10 +502,18 @@ export function PagoForm() {
             <BuscadorUsuarioSifco
               onSelect={(sifco) => {
                 if (sifco) { setCreditoVisible(true); fetchCredito(sifco); }
-                else setCreditoVisible(false);
+                else {
+                  setCreditoVisible(false);
+                  // Limpiar el ?sifco=... de la URL al deseleccionar
+                  if (searchParams.has("sifco")) {
+                    searchParams.delete("sifco");
+                    setSearchParams(searchParams, { replace: true });
+                  }
+                }
               }}
               reset={resetBuscador}
               onReset={() => setResetBuscador(false)}
+              initialSifco={sifcoFromUrl}
             />
           </div>
 

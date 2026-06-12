@@ -463,15 +463,26 @@ function RouteComponent() {
 		setIsSavingMetas(true);
 		try {
 			await Promise.all(saves);
-			await queryClient.invalidateQueries(
-				orpc.getMetas.queryOptions({ input: { anio: metasAnio, tipo: "colocacion" } }),
-			);
+			await Promise.all([
+				queryClient.invalidateQueries(
+					orpc.getMetas.queryOptions({ input: { anio: metasAnio, tipo: "colocacion" } }),
+				),
+				queryClient.invalidateQueries(
+					orpc.getPuntoEquilibrio.queryOptions({
+						input: {
+							periodo: equilibrioPeriodo,
+							fechaInicio: equilibrioRange.fechaInicio,
+							fechaFin: equilibrioRange.fechaFin,
+						},
+					}),
+				),
+			]);
 			toast.success(`${saves.length} metas guardadas`);
 			setMetasModalOpen(false);
 		} finally {
 			setIsSavingMetas(false);
 		}
-	}, [editMetas, metasAnio]);
+	}, [editMetas, metasAnio, equilibrioPeriodo, equilibrioRange]);
 
 	useEffect(() => {
 		if (Array.isArray(metasQuery.data)) {

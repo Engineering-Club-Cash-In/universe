@@ -233,7 +233,7 @@ function getDefaultMontoCobrarRange(): { fechaInicio: string; fechaFin: string }
 }
 
 function formatBucket(bucket: string, periodo: string): string {
-	const date = new Date(bucket);
+	const date = new Date(bucket.length === 10 ? `${bucket}T12:00:00` : bucket);
 	if (periodo === "dia") {
 		return new Intl.DateTimeFormat("es-GT", { day: "2-digit", month: "short" }).format(date);
 	}

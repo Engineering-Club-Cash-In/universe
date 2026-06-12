@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { Button } from "@/components/ui/button";
 import { Eye, Pencil, XCircle, FileCheck, CheckCircle2 } from "lucide-react";
 
@@ -173,7 +174,9 @@ export function ListaCreditosPagos() {
           }
         },
         onError: (err: any) => {
-          toast.error(err?.message || `Error al generar reporte ${reportType}`);
+          toast.error(
+            getApiErrorMessage(err, `Error al generar reporte ${reportType}`),
+          );
         },
       }
     );
@@ -631,7 +634,7 @@ export function ListaCreditosPagos() {
                 }
               } catch (err) {
                 console.error("❌ Error generando Excel:", err);
-                toast.error("Error al generar el Excel");
+                toast.error(getApiErrorMessage(err, "Error al generar el Excel"));
               } finally {
                 setIsDownloadingExcel(false);
               }

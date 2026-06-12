@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, Fragment } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { getApiErrorMessage } from "@/lib/apiError";
 
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -391,8 +392,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
           // Otros errores del backend
           toast.error(errorData.message);
         } else {
-          // Error genérico
-          toast.error("Error al generar facturas electrónicas");
+          toast.error(
+            getApiErrorMessage(error, "Error al generar facturas electrónicas"),
+          );
         }
       }
     },
@@ -548,7 +550,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
       }
     } catch (error: any) {
       console.error("Error al generar Excel:", error);
-      toast.error("Error al generar el reporte", { id: "excel-download" });
+      toast.error(getApiErrorMessage(error, "Error al generar el reporte"), {
+        id: "excel-download",
+      });
     } finally {
       setIsDownloadingExcel(false);
     }
@@ -590,7 +594,10 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
       }
     } catch (error: any) {
       console.error("Error al generar reporte asesores:", error);
-      toast.error("Error al generar el reporte", { id: "advisor-download" });
+      toast.error(
+        getApiErrorMessage(error, "Error al generar el reporte de asesores"),
+        { id: "advisor-download" },
+      );
     } finally {
       setIsDownloadingAdvisor(false);
     }

@@ -1,5 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { getReporteNoLiquidados } from "../services/services";
+import { getApiErrorMessage } from "@/lib/apiError";
 
 export function useDownloadReporteNoLiquidados() {
   return useMutation({
@@ -10,11 +12,11 @@ export function useDownloadReporteNoLiquidados() {
       if (data?.url) {
         window.open(data.url, "_blank");
       } else {
-        alert("No se recibió la URL del reporte.");
+        toast.error("No se recibió la URL del reporte");
       }
     },
-    onError: () => {
-      alert("Error al generar el reporte. Intenta de nuevo o contacta soporte.");
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, "Error al generar el reporte"));
     },
   });
 }

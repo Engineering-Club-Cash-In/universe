@@ -134,6 +134,22 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
+    // En peticiones con responseType:"blob", el cuerpo del error llega como Blob
+    // y el mensaje del backend se perdería; lo convertimos a JSON/texto aquí
+    // (getApiErrorMessage es síncrona y no puede leer el Blob).
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+        try {
+          error.response.data = JSON.parse(text);
+        } catch {
+          error.response.data = text;
+        }
+      } catch {
+        // Blob ilegible: se continúa con el error original
+      }
+    }
+
     const originalRequest = error.config as
       | (InternalAxiosRequestConfig & { _retry?: boolean })
       | undefined;

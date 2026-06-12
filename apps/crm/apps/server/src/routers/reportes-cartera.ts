@@ -589,12 +589,9 @@ export const reportesCarteraRouter = {
 					total_colocacion: string;
 				}[];
 
-				const anios = Array.from(
-					new Set([
-						new Date(input.fechaInicio).getFullYear(),
-						new Date(input.fechaFin).getFullYear(),
-					]),
-				);
+				const startYear = new Date(`${input.fechaInicio}T12:00:00Z`).getUTCFullYear();
+				const endYear = new Date(`${input.fechaFin}T12:00:00Z`).getUTCFullYear();
+				const anios = Array.from({ length: endYear - startYear + 1 }, (_, i) => startYear + i);
 
 				const metasRows = await db
 					.select()
@@ -694,7 +691,7 @@ export const reportesCarteraRouter = {
 					const faltante = metaBucket > 0 ? Math.max(0, metaBucket - colocado) : null;
 
 					return {
-						bucket: bucket.toISOString(),
+						bucket: bucket.toISOString().slice(0, 10),
 						cantidad_creditos: col?.cantidad ?? 0,
 						colocado: colocado.toFixed(2),
 						meta: metaBucket.toFixed(2),

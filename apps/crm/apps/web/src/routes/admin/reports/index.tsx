@@ -451,12 +451,13 @@ function RouteComponent() {
 		const saves = MESES.map((_, idx) => {
 			const mes = idx + 1;
 			const monto = editMetas[mes];
-			if (!monto || Number.isNaN(Number(monto)) || Number(monto) <= 0) return null;
+			const montoNum = Number(monto ?? "0");
+			if (Number.isNaN(montoNum)) return null;
 			return client.upsertMeta({
 				tipo: "colocacion",
 				anio: metasAnio,
 				mes,
-				monto: String(Number(monto)),
+				monto: montoNum.toFixed(2),
 			});
 		}).filter(Boolean);
 		if (saves.length === 0) return;

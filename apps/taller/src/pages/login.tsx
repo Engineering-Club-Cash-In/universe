@@ -49,7 +49,7 @@ export function LoginPage() {
         className="w-full max-w-sm space-y-4 rounded-xl border bg-white p-6 shadow-sm"
       >
         <div>
-          <h1 className="font-bold text-2xl text-gray-900">Taller Cash In</h1>
+          <h1 className="font-bold text-2xl text-gray-900">Centro de Servicios Cash In</h1>
           <p className="text-gray-600 text-sm">
             Inicia sesión para gestionar inspecciones vehiculares.
           </p>

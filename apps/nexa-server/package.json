@@ -1,0 +1,28 @@
+{
+  "name": "nexa-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "test": "bun test",
+    "check-types": "tsc --noEmit",
+    "webhook:simulate": "bun run src/scripts/simulate-webhook.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "drizzle-orm": "^0.44.2",
+    "hono": "^4.8.2",
+    "pg": "^8.14.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.6",
+    "@types/pg": "^8.11.11",
+    "drizzle-kit": "^0.31.2",
+    "typescript": "^5.9.2"
+  }
+}

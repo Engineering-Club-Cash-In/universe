@@ -70,7 +70,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
   const [cuotaActualInfo, setCuotaActualInfo] = useState<{
     numero: number;
     pagada: boolean;
-    validationStatus?: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
+    validationStatus?: 'no_required' | 'pending' | 'validated' | 'capital' | 'capital_validated' | 'reset';
     data?: any;
   } | null>(null);
   const [mora, setMora] = useState<number>(0);
@@ -277,7 +277,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       ]
         // Los pagos `pending` también son seleccionables para poder reportar
         // abonos complementarios antes de que contabilidad valide el anterior.
-        .filter((c: any) => c.validationStatus !== "validated")
+        .filter((c: any) => c.validationStatus !== "validated" && c.validationStatus !== "capital_validated")
         .sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
 
       setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);

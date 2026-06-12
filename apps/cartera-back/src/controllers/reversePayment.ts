@@ -18,6 +18,7 @@ import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { updateInstallments } from "./updateCredit";
+import { esPagoAplicado } from "../utils/paymentStatus";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   shouldInstallmentRemainPaidAfterReversal,
@@ -89,7 +90,7 @@ export const reversePayment = async ({ body, set }: any) => {
         throw new Error("Payment not found");
       }
 
-      const pagoValidado = pago.validationStatus === "validated";
+      const pagoValidado = esPagoAplicado(pago.validationStatus);
 
       console.log(`✅ Pago encontrado | Validado: ${pagoValidado}`);
 

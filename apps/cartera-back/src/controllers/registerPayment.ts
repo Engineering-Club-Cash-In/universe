@@ -2765,11 +2765,15 @@ export async function aplicarAbonoCapitalInversionistas(
   await db
     .update(pagos_credito)
     .set({
-      validationStatus: "validated",
+      // Estado propio del abono a capital APLICADO. No usamos `validated`
+      // porque ese estado entra al set de hermanos de la cuota e inflaría su
+      // faltante (un abono a capital NO es pago de cuota). `capital_validated`
+      // lo deja distinguible: cuenta como aplicado en reportes/reversa, pero
+      // queda fuera de la lógica de cuota.
+      validationStatus: "capital_validated",
       // Estampar la fecha de aplicación en hora de Guatemala (igual que
-      // `fecha_pago`). Antes este flujo marcaba `validated` pero dejaba
-      // `fecha_aplicado` en NULL → el abono a capital quedaba "validado sin
-      // fecha" y no se podía saber cuándo se aplicó.
+      // `fecha_pago`). Antes este flujo dejaba `fecha_aplicado` en NULL → el
+      // abono a capital quedaba "validado sin fecha".
       fecha_aplicado: convertirAHoraGuatemala(new Date().toISOString()),
     })
     .where(eq(pagos_credito.pago_id, pago_id));

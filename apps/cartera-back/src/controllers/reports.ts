@@ -3,6 +3,7 @@ import puppeteer from "puppeteer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
 import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
+import { esPagoAplicado } from "../utils/paymentStatus";
 import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import { db } from "../database";
@@ -95,7 +96,7 @@ export function shouldIncludeEstadoCuentaPayment(pago: EstadoCuentaPagoRow) {
     pago.fecha_aplicado !== null && pago.fecha_aplicado !== undefined;
 
   return (
-    pago.validationStatus === "validated" &&
+    esPagoAplicado(pago.validationStatus) &&
     abonoCapital > 0 &&
     montoAplicado > 0 &&
     (esAbonoCapitalPuro || (fueAplicado && pagoNoEsFuturo))
@@ -2049,7 +2050,7 @@ export async function getPagosByVencimiento({
           numeroautorizacion AS numero_boleta
         FROM cartera.pagos_credito
         WHERE credito_id = ANY(ARRAY[${sql.raw(creditoIds.join(","))}]::int[])
-          AND validation_status = 'validated'
+          AND validation_status IN ('validated', 'capital_validated')
           AND "paymentFalse" = false
           AND (
             (cuota_id IS NOT NULL AND cuota_id IN (
@@ -2381,7 +2382,7 @@ export async function getAbonosDelMesPorCredito({
       numeroautorizacion AS numero_boleta
     FROM cartera.pagos_credito
     WHERE credito_id = ${credito_id}
-      AND validation_status = 'validated'
+      AND validation_status IN ('validated', 'capital_validated')
       AND "paymentFalse" = false
       AND (
         (cuota_id IS NOT NULL AND cuota_id IN (

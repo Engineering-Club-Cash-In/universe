@@ -17,7 +17,7 @@ import {
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
-import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
+import { and, eq, lt, sql, asc, lte, inArray, notInArray } from "drizzle-orm";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -2935,7 +2935,12 @@ export async function getAbonosPorCuota(
     .where(
       and(
         eq(pagos_credito.credito_id, credito.credito_id),
-        inArray(pagos_credito.cuota_id, cuotaIds)
+        inArray(pagos_credito.cuota_id, cuotaIds),
+        // Excluir abonos directos a capital (no son pago de cuota) y reversados.
+        // `capital` = sin aplicar, `capital_validated` = aplicado; ninguno es
+        // abono de la cuota, así que no deben aparecer en este desglose.
+        eq(pagos_credito.paymentFalse, false),
+        notInArray(pagos_credito.validationStatus, ["capital", "capital_validated"])
       )
     );
 

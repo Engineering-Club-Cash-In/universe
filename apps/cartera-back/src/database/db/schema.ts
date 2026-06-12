@@ -389,7 +389,8 @@
     'no_required',    // No necesita validación (pagos normales/automáticos)
     'pending',        // Pendiente de validación
     'validated',        // Validado
-    'capital',
+    'capital',          // Abono directo a capital REGISTRADO (sin aplicar)
+    'capital_validated',// Abono directo a capital YA APLICADO (no es pago de cuota)
     'reset'
   ]);
 

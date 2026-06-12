@@ -19,7 +19,6 @@ import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } 
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
-import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
@@ -2764,7 +2763,21 @@ export async function aplicarAbonoCapitalInversionistas(
   }
   await db
     .update(pagos_credito)
-    .set({ validationStatus: "validated" })
+    .set({
+      // Estado propio del abono a capital APLICADO. No usamos `validated`
+      // porque ese estado entra al set de hermanos de la cuota e inflaría su
+      // faltante (un abono a capital NO es pago de cuota). `capital_validated`
+      // lo deja distinguible: cuenta como aplicado en reportes/reversa, pero
+      // queda fuera de la lógica de cuota.
+      validationStatus: "capital_validated",
+      // Estampar la fecha de aplicación. Antes este flujo dejaba `fecha_aplicado`
+      // en NULL → el abono quedaba "validado sin fecha". Se guarda en UTC con
+      // `new Date()` igual que los demás writers de `fecha_aplicado` (~2149/2266
+      // y revalidatePayment): los consumidores ya convierten a hora de Guatemala
+      // con `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala'`. Guardar el
+      // wall-clock GT aquí lo shiftearía dos veces (P2 de Codex).
+      fecha_aplicado: new Date(),
+    })
     .where(eq(pagos_credito.pago_id, pago_id));
 
   console.log(`✅ ========== ABONO APLICADO EXITOSAMENTE ==========\n`);

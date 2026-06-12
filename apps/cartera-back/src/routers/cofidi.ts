@@ -199,7 +199,8 @@ if (facturasExistentes.length > 0) {
       if (
         pagoData.validationStatus !== "validated" &&
         pagoData.validationStatus !== "reset" &&
-        pagoData.validationStatus !== "capital"
+        pagoData.validationStatus !== "capital" &&
+        pagoData.validationStatus !== "capital_validated"
       ) {
         set.status = 400;
         console.error(

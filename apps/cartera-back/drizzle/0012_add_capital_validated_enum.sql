@@ -1,0 +1,16 @@
+-- Nuevo valor del enum payment_validation_status: 'capital_validated'.
+--
+-- Representa un ABONO DIRECTO A CAPITAL YA APLICADO. Antes este caso quedaba
+-- como 'validated', lo que lo hacía entrar al set de hermanos de la cuota e
+-- inflaba su faltante (un abono a capital NO es pago de cuota) → rechazo
+-- "sobre-aplicada" o el pago cayendo a saldo a favor.
+--
+-- Con el estado propio:
+--   - La lógica de cuota (sibling query / cuotaCompleta) filtra solo
+--     'validated'/'pending' → los abonos a capital quedan fuera.
+--   - Reportes/reversa/revalidación lo tratan como aplicado (cuenta como plata).
+--
+-- NOTA: ALTER TYPE ... ADD VALUE no puede correr dentro de una transacción que
+-- además use el valor; ejecutar este archivo solo (sin envolver en BEGIN/COMMIT
+-- junto a otros statements que lo referencien).
+ALTER TYPE public.payment_validation_status ADD VALUE IF NOT EXISTS 'capital_validated';

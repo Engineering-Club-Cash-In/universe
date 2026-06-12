@@ -245,8 +245,9 @@ export const PERMISSIONS = {
 		role === ROLES.SALES_SUPERVISOR ||
 		role === ROLES.ANALYST,
 
-	// Vehicles Module Access - All roles can access
-	canAccessVehicles: (_role: UserRole | string): boolean => true,
+	// Vehicles Module Access
+	canAccessVehicles: (role: UserRole | string): boolean =>
+		PERMISSIONS.canAccessCRM(role) || PERMISSIONS.canAccessTaller(role),
 
 	// Taller Module Access
 	canAccessTaller: (role: UserRole | string): boolean =>

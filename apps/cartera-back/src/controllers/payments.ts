@@ -1637,7 +1637,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       whereClauses.push(`p.validation_status = '${validationStatus}'`);
     } else {
       whereClauses.push(
-        `p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`
+        `p.validation_status IN ('validated', 'pending' ,'reset', 'capital', 'capital_validated')`
       );
     }
 

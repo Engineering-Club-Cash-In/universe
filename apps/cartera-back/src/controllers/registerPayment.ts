@@ -19,7 +19,6 @@ import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } 
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
-import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
@@ -2771,10 +2770,13 @@ export async function aplicarAbonoCapitalInversionistas(
       // lo deja distinguible: cuenta como aplicado en reportes/reversa, pero
       // queda fuera de la lógica de cuota.
       validationStatus: "capital_validated",
-      // Estampar la fecha de aplicación en hora de Guatemala (igual que
-      // `fecha_pago`). Antes este flujo dejaba `fecha_aplicado` en NULL → el
-      // abono a capital quedaba "validado sin fecha".
-      fecha_aplicado: convertirAHoraGuatemala(new Date().toISOString()),
+      // Estampar la fecha de aplicación. Antes este flujo dejaba `fecha_aplicado`
+      // en NULL → el abono quedaba "validado sin fecha". Se guarda en UTC con
+      // `new Date()` igual que los demás writers de `fecha_aplicado` (~2149/2266
+      // y revalidatePayment): los consumidores ya convierten a hora de Guatemala
+      // con `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala'`. Guardar el
+      // wall-clock GT aquí lo shiftearía dos veces (P2 de Codex).
+      fecha_aplicado: new Date(),
     })
     .where(eq(pagos_credito.pago_id, pago_id));
 

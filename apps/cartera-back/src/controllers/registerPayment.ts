@@ -2764,7 +2764,14 @@ export async function aplicarAbonoCapitalInversionistas(
   }
   await db
     .update(pagos_credito)
-    .set({ validationStatus: "validated" })
+    .set({
+      validationStatus: "validated",
+      // Estampar la fecha de aplicación en hora de Guatemala (igual que
+      // `fecha_pago`). Antes este flujo marcaba `validated` pero dejaba
+      // `fecha_aplicado` en NULL → el abono a capital quedaba "validado sin
+      // fecha" y no se podía saber cuándo se aplicó.
+      fecha_aplicado: convertirAHoraGuatemala(new Date().toISOString()),
+    })
     .where(eq(pagos_credito.pago_id, pago_id));
 
   console.log(`✅ ========== ABONO APLICADO EXITOSAMENTE ==========\n`);

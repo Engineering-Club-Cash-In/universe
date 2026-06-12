@@ -34,19 +34,26 @@ const TRADUCCIONES: Array<{
   },
 ];
 
-function traducirDetalleTecnico(detail: string): string {
+function buscarTraduccion(detail: string): string | null {
   for (const { patron, traduccion } of TRADUCCIONES) {
     const match = patron.exec(detail);
     if (match) {
       return typeof traduccion === "function" ? traduccion(match) : traduccion;
     }
   }
-  return detail;
+  return null;
+}
+
+function traducirDetalleTecnico(detail: string): string {
+  return buscarTraduccion(detail) ?? detail;
 }
 
 /**
  * `message` genérico que no aporta información: si el endpoint también
- * manda `error` con el motivo real, se prefiere `error`.
+ * manda en `error` un motivo de negocio conocido (con traducción en
+ * TRADUCCIONES), se prefiere `error`. Si `error` es un crudo no reconocido
+ * (stack de driver, excepción inesperada), NO se promueve: el usuario ve
+ * el genérico y el crudo no se filtra a la UI.
  */
 const MENSAJE_SIN_INFORMACION = /^internal server error$/i;
 
@@ -76,7 +83,7 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
         typeof detail === "string" &&
         MENSAJE_SIN_INFORMACION.test(detail.trim()) &&
         typeof data?.error === "string" &&
-        data.error.trim()
+        buscarTraduccion(data.error.trim()) !== null
       ) {
         detail = data.error;
       }

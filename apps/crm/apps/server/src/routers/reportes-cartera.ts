@@ -8,7 +8,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { carteraBackReferences } from "../db/schema/cartera-back";
-import { metasMensuales } from "../db/schema/metas";
+import { TIPOS_META, metasMensuales } from "../db/schema/metas";
 import { casosCobros } from "../db/schema/cobros";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import { adminProcedure } from "../lib/orpc";
@@ -483,9 +483,7 @@ export const reportesCarteraRouter = {
 		.input(
 			z.object({
 				anio: z.number().min(2024).max(2030),
-				tipo: z
-					.enum(["colocacion", "cobros", "mora_maxima", "captacion"])
-					.default("colocacion"),
+				tipo: z.enum(TIPOS_META).default("colocacion"),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -505,8 +503,8 @@ export const reportesCarteraRouter = {
 	upsertMeta: adminProcedure
 		.input(
 			z.object({
-				tipo: z.enum(["colocacion", "cobros", "mora_maxima", "captacion"]),
-				anio: z.number(),
+				tipo: z.enum(TIPOS_META),
+				anio: z.number().min(2024).max(2030),
 				mes: z.number().min(1).max(12),
 				monto: z.string(),
 			}),
@@ -614,10 +612,14 @@ export const reportesCarteraRouter = {
 					metasMap[r.anio][r.mes] = Number(r.monto);
 				}
 
-				// Indexar colocación por bucket truncado para lookup rápido
+				// Indexar colocación por bucket — parsear como UTC explícito para evitar
+				// interpretación en zona local del servidor (#6)
 				const colocacionMap = new Map<string, { cantidad: number; total: number }>();
 				for (const row of colocacion) {
-					const key = new Date(row.bucket).toISOString().slice(0, 10);
+					// row.bucket viene como timestamp string sin zona de DATE_TRUNC AT TIME ZONE
+					// Forzar parseo UTC agregando Z
+					const raw = typeof row.bucket === "string" ? row.bucket : (row.bucket as Date).toISOString();
+					const key = (raw.endsWith("Z") ? raw : `${raw}Z`).slice(0, 10);
 					colocacionMap.set(key, {
 						cantidad: row.cantidad_creditos,
 						total: Number(row.total_colocacion),
@@ -635,7 +637,8 @@ export const reportesCarteraRouter = {
 					if (periodo === "dia") return new Date(Date.UTC(y, mo, day));
 					if (periodo === "semana") {
 						const dow = gt.getUTCDay();
-						return new Date(Date.UTC(y, mo, day - dow));
+						// DATE_TRUNC('week') ancla al lunes (ISO 8601) — (dow+6)%7 hace lo mismo
+						return new Date(Date.UTC(y, mo, day - ((dow + 6) % 7)));
 					}
 					if (periodo === "mes") return new Date(Date.UTC(y, mo, 1));
 					if (periodo === "trimestre") return new Date(Date.UTC(y, Math.floor(mo / 3) * 3, 1));
@@ -682,7 +685,8 @@ export const reportesCarteraRouter = {
 						const weeksInMonth = Math.ceil(daysInMonth / 7);
 						metaBucket = metaMes / weeksInMonth;
 					} else if (input.periodo === "dia") {
-						metaBucket = metaMes / 25;
+						const daysInMonth = new Date(anio, mes, 0).getDate();
+						metaBucket = metaMes / daysInMonth;
 					}
 
 					const colocado = col?.total ?? 0;

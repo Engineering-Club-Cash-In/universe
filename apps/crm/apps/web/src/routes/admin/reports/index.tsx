@@ -479,6 +479,8 @@ function RouteComponent() {
 			]);
 			toast.success(`${saves.length} metas guardadas`);
 			setMetasModalOpen(false);
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Error al guardar metas");
 		} finally {
 			setIsSavingMetas(false);
 		}

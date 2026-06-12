@@ -1047,7 +1047,7 @@ function RouteComponent() {
 											}))}
 										>
 											<CartesianGrid strokeDasharray="3 3" />
-											<XAxis dataKey="bucket" angle={-30} textAnchor="end" height={60} />
+											<XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval={0} height={36} />
 											<YAxis tickFormatter={(v) => `Q${(Number(v) / 1000).toFixed(0)}k`} />
 											<Tooltip
 												formatter={(value, name) => [

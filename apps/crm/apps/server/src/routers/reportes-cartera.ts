@@ -4,10 +4,11 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { carteraBackReferences } from "../db/schema/cartera-back";
+import { TIPOS_META, metasMensuales } from "../db/schema/metas";
 import { casosCobros } from "../db/schema/cobros";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import { adminProcedure } from "../lib/orpc";
@@ -475,6 +476,235 @@ export const reportesCarteraRouter = {
 		),
 
 	// ========================================================================
+	// METAS MENSUALES
+	// ========================================================================
+
+	getMetas: adminProcedure
+		.input(
+			z.object({
+				anio: z.number().min(2024).max(2030),
+				tipo: z.enum(TIPOS_META).default("colocacion"),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const rows = await db
+				.select()
+				.from(metasMensuales)
+				.where(
+					and(
+						eq(metasMensuales.anio, input.anio),
+						eq(metasMensuales.tipo, input.tipo),
+					),
+				)
+				.orderBy(metasMensuales.mes);
+			return rows;
+		}),
+
+	upsertMeta: adminProcedure
+		.input(
+			z.object({
+				tipo: z.enum(TIPOS_META),
+				anio: z.number().min(2024).max(2030),
+				mes: z.number().min(1).max(12),
+				monto: z.string(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			await db
+				.insert(metasMensuales)
+				.values({
+					tipo: input.tipo,
+					anio: input.anio,
+					mes: input.mes,
+					monto: input.monto,
+					updatedAt: new Date(),
+				})
+				.onConflictDoUpdate({
+					target: [metasMensuales.tipo, metasMensuales.anio, metasMensuales.mes],
+					set: { monto: input.monto, updatedAt: new Date() },
+				});
+			return { ok: true };
+		}),
+
+	// ========================================================================
+	// REPORTE: PUNTO DE EQUILIBRIO (COLOCACIÓN VS META)
+	// ========================================================================
+
+	getPuntoEquilibrio: adminProcedure
+		.input(
+			z.object({
+				periodo: z
+					.enum(["anio", "trimestre", "mes", "semana", "dia"])
+					.default("mes"),
+				fechaInicio: z.string(),
+				fechaFin: z.string(),
+			}),
+		)
+		.handler(
+			async ({ input }): Promise<{
+				data: {
+					bucket: string;
+					cantidad_creditos: number;
+					colocado: string;
+					meta: string;
+					cobertura: string | null;
+					faltante: string | null;
+				}[];
+			}> => {
+				const toPostgresPeriod: Record<string, string> = {
+					dia: "'day'",
+					semana: "'week'",
+					mes: "'month'",
+					trimestre: "'quarter'",
+					anio: "'year'",
+				};
+				const pg = sql.raw(toPostgresPeriod[input.periodo]);
+
+				const colocacionResult = await db.execute(sql`
+					WITH first_placed AS (
+						SELECT
+							osh.opportunity_id,
+							MIN(osh.changed_at) AS first_placed_at
+						FROM opportunity_stage_history osh
+						JOIN sales_stages ss ON ss.id = osh.to_stage_id
+						WHERE ss.closure_percentage >= 90
+						GROUP BY osh.opportunity_id
+					)
+					SELECT
+						DATE_TRUNC(${pg}, fp.first_placed_at AT TIME ZONE 'America/Guatemala') AS bucket,
+						COUNT(o.id)::int AS cantidad_creditos,
+						COALESCE(SUM(o.value::numeric), 0) AS total_colocacion
+					FROM first_placed fp
+					JOIN opportunities o ON o.id = fp.opportunity_id
+					WHERE o.status != 'migrate'
+						AND (fp.first_placed_at AT TIME ZONE 'America/Guatemala')::date >= ${input.fechaInicio}::date
+						AND (fp.first_placed_at AT TIME ZONE 'America/Guatemala')::date <= ${input.fechaFin}::date
+					GROUP BY DATE_TRUNC(${pg}, fp.first_placed_at AT TIME ZONE 'America/Guatemala')
+					ORDER BY bucket ASC
+				`);
+
+				const colocacion = colocacionResult.rows as {
+					bucket: string;
+					cantidad_creditos: number;
+					total_colocacion: string;
+				}[];
+
+				const startYear = new Date(`${input.fechaInicio}T12:00:00Z`).getUTCFullYear();
+				const endYear = new Date(`${input.fechaFin}T12:00:00Z`).getUTCFullYear();
+				const anios = Array.from({ length: endYear - startYear + 1 }, (_, i) => startYear + i);
+
+				const metasRows = await db
+					.select()
+					.from(metasMensuales)
+					.where(
+						and(
+							eq(metasMensuales.tipo, "colocacion"),
+							inArray(metasMensuales.anio, anios),
+						),
+					);
+
+				const metasMap: Record<number, Record<number, number>> = {};
+				for (const r of metasRows) {
+					if (!metasMap[r.anio]) metasMap[r.anio] = {};
+					metasMap[r.anio][r.mes] = Number(r.monto);
+				}
+
+				// Indexar colocación por bucket — parsear como UTC explícito para evitar
+				// interpretación en zona local del servidor (#6)
+				const colocacionMap = new Map<string, { cantidad: number; total: number }>();
+				for (const row of colocacion) {
+					// row.bucket viene como timestamp string sin zona de DATE_TRUNC AT TIME ZONE
+					// Forzar parseo UTC agregando Z
+					const raw = typeof row.bucket === "string" ? row.bucket : (row.bucket as Date).toISOString();
+					const key = (raw.endsWith("Z") ? raw : `${raw}Z`).slice(0, 10);
+					colocacionMap.set(key, {
+						cantidad: row.cantidad_creditos,
+						total: Number(row.total_colocacion),
+					});
+				}
+
+				// Generar todos los buckets del rango para no omitir períodos sin colocación
+				const buckets: Date[] = [];
+				const cur = new Date(`${input.fechaInicio}T12:00:00Z`);
+				const end = new Date(`${input.fechaFin}T12:00:00Z`);
+
+				const truncTz = (d: Date, periodo: string): Date => {
+					const gt = new Date(d.getTime() - 6 * 60 * 60 * 1000);
+					const y = gt.getUTCFullYear(), mo = gt.getUTCMonth(), day = gt.getUTCDate();
+					if (periodo === "dia") return new Date(Date.UTC(y, mo, day));
+					if (periodo === "semana") {
+						const dow = gt.getUTCDay();
+						// DATE_TRUNC('week') ancla al lunes (ISO 8601) — (dow+6)%7 hace lo mismo
+						return new Date(Date.UTC(y, mo, day - ((dow + 6) % 7)));
+					}
+					if (periodo === "mes") return new Date(Date.UTC(y, mo, 1));
+					if (periodo === "trimestre") return new Date(Date.UTC(y, Math.floor(mo / 3) * 3, 1));
+					return new Date(Date.UTC(y, 0, 1));
+				};
+
+				const advancePeriod = (d: Date, periodo: string): Date => {
+					const n = new Date(d);
+					if (periodo === "dia") n.setUTCDate(n.getUTCDate() + 1);
+					else if (periodo === "semana") n.setUTCDate(n.getUTCDate() + 7);
+					else if (periodo === "mes") n.setUTCMonth(n.getUTCMonth() + 1);
+					else if (periodo === "trimestre") n.setUTCMonth(n.getUTCMonth() + 3);
+					else n.setUTCFullYear(n.getUTCFullYear() + 1);
+					return n;
+				};
+
+				let b = truncTz(cur, input.periodo);
+				while (b <= end) {
+					buckets.push(b);
+					b = advancePeriod(b, input.periodo);
+				}
+
+				const resultado = buckets.map((bucket) => {
+					const key = bucket.toISOString().slice(0, 10);
+					const col = colocacionMap.get(key);
+					const anio = bucket.getUTCFullYear();
+					const mes = bucket.getUTCMonth() + 1;
+					const metaMes = metasMap[anio]?.[mes] ?? 0;
+
+					let metaBucket = 0;
+					if (input.periodo === "mes") {
+						metaBucket = metaMes;
+					} else if (input.periodo === "trimestre") {
+						const q = Math.ceil(mes / 3);
+						for (let m = (q - 1) * 3 + 1; m <= q * 3; m++) {
+							metaBucket += metasMap[anio]?.[m] ?? 0;
+						}
+					} else if (input.periodo === "anio") {
+						for (let m = 1; m <= 12; m++) {
+							metaBucket += metasMap[anio]?.[m] ?? 0;
+						}
+					} else if (input.periodo === "semana") {
+						const daysInMonth = new Date(anio, mes, 0).getDate();
+						const weeksInMonth = Math.ceil(daysInMonth / 7);
+						metaBucket = metaMes / weeksInMonth;
+					} else if (input.periodo === "dia") {
+						const daysInMonth = new Date(anio, mes, 0).getDate();
+						metaBucket = metaMes / daysInMonth;
+					}
+
+					const colocado = col?.total ?? 0;
+					const cobertura = metaBucket > 0 ? (colocado / metaBucket) * 100 : null;
+					const faltante = metaBucket > 0 ? Math.max(0, metaBucket - colocado) : null;
+
+					return {
+						bucket: bucket.toISOString().slice(0, 10),
+						cantidad_creditos: col?.cantidad ?? 0,
+						colocado: colocado.toFixed(2),
+						meta: metaBucket.toFixed(2),
+						cobertura: cobertura?.toFixed(1) ?? null,
+						faltante: faltante?.toFixed(2) ?? null,
+					};
+				});
+
+				return { data: resultado };
+			},
+		),
+
+	// ========================================================================
 	// REPORTE: COMPARATIVO HISTÓRICO MENSUAL
 	// ========================================================================
 
@@ -508,7 +738,6 @@ export const reportesCarteraRouter = {
 						message: "Integración con cartera-back no está habilitada",
 					});
 				}
-
 
 				const carteraData = await carteraBackClient.getComparativoHistorico(
 					input.anio,
@@ -553,13 +782,11 @@ export const reportesCarteraRouter = {
 
 				const cobradoMap = new Map<number, string>();
 				for (const row of carteraData.cobrado) {
-					// row.mes es integer (1-12) directo de facturacion_snapshot_diario
 					cobradoMap.set(Number(row.mes), Number(row.cobrado).toFixed(2));
 				}
 
 				const carteraMap = new Map<number, { capital: string; creditos: number }>();
 				for (const row of carteraData.cartera) {
-					// row.mes es date string (periodo de cierre_mensual)
 					carteraMap.set(mesDeDate(row.mes), {
 						capital: Number(row.cartera_activa).toFixed(2),
 						creditos: row.creditos_activos,
@@ -568,7 +795,6 @@ export const reportesCarteraRouter = {
 
 				type AgingBuckets = { mora_30: string | null; mora_60: string | null; mora_90: string | null; mora_120: string | null; creditos_30: number | null; creditos_60: number | null; creditos_90: number | null; creditos_120: number | null };
 
-				// Aging histórico por mes
 				const agingHistMap = new Map<number, AgingBuckets>();
 				for (const row of carteraData.agingHistorico) {
 					const m = mesDeDate(row.periodo);
@@ -580,7 +806,6 @@ export const reportesCarteraRouter = {
 					(entry as Record<string, string | number | null>)[cKey] = row.cantidad_creditos;
 				}
 
-				// Aging mes actual desde moraActual
 				const agingActual: AgingBuckets = { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null };
 				for (const row of carteraData.moraActual) {
 					(agingActual as Record<string, string | number | null>)[`mora_${row.bucket}`] = Number(row.monto_mora).toFixed(2);

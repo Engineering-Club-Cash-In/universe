@@ -50,12 +50,31 @@ function traducirDetalleTecnico(detail: string): string {
 
 /**
  * `message` genérico que no aporta información: si el endpoint también
- * manda en `error` un motivo de negocio conocido (con traducción en
- * TRADUCCIONES), se prefiere `error`. Si `error` es un crudo no reconocido
- * (stack de driver, excepción inesperada), NO se promueve: el usuario ve
- * el genérico y el crudo no se filtra a la UI.
+ * manda en `error` un motivo de negocio legible, se prefiere `error`.
+ * Los crudos técnicos (excepción inesperada, driver de DB, stack) se
+ * detectan con DETALLE_TECNICO y NO se promueven: el usuario ve el
+ * genérico y el crudo no se filtra a la UI.
  */
 const MENSAJE_SIN_INFORMACION = /^internal server error$/i;
+
+/**
+ * Firmas de errores técnicos que nunca deben mostrarse al usuario.
+ * Los throws de negocio del backend ("Payment not found", "No se encontró
+ * el pago con id 123") no calzan con ninguna de estas.
+ */
+const DETALLE_TECNICO = [
+  /^\s*\w*(Error|Exception)\s*:/, // "TypeError: ...", "PostgresError: ..."
+  /\bat\s+\S+\s+\(.+\)/, // frame de stack trace
+  /\b(ECONN\w+|ETIMEDOUT|ENOTFOUND|EPIPE|EAI_AGAIN)\b/,
+  /\b(undefined|null|NaN)\b/i,
+  /cannot read|is not a function|is not defined/i,
+  /\b(query|relation|column|constraint|duplicate key|violates|syntax)\b/i,
+  /fetch failed|socket|connection|timeout/i,
+];
+
+function esDetalleTecnicoCrudo(detail: string): boolean {
+  return DETALLE_TECNICO.some((patron) => patron.test(detail));
+}
 
 /**
  * Extrae el motivo real de un error de API para mostrarlo al usuario.
@@ -83,7 +102,9 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
         typeof detail === "string" &&
         MENSAJE_SIN_INFORMACION.test(detail.trim()) &&
         typeof data?.error === "string" &&
-        buscarTraduccion(data.error.trim()) !== null
+        data.error.trim() &&
+        (buscarTraduccion(data.error.trim()) !== null ||
+          !esDetalleTecnicoCrudo(data.error.trim()))
       ) {
         detail = data.error;
       }

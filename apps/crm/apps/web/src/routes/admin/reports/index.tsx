@@ -1,16 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	Activity,
 	AlertTriangle,
 	CalendarDays,
+	ChevronLeft,
+	ChevronRight,
 	Download,
 	FileText,
+	Loader2,
+	Target,
 	TrendingDown,
 	TrendingUp,
 	Wallet,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import {
 	Bar,
@@ -53,11 +57,17 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { PERMISSIONS } from "@/lib/roles";
-import { orpc } from "@/utils/orpc";
+import { client, orpc, queryClient } from "@/utils/orpc";
 
 export const Route = createFileRoute("/admin/reports/")({
 	component: RouteComponent,
@@ -127,6 +137,50 @@ function getDefaultFlujoCuotasRange(): { fechaInicio: string; fechaFin: string }
 	return { fechaInicio, fechaFin: formatDateInput(lastDay) };
 }
 
+type ComparativoHistoricoRow = {
+	mes: number;
+	colocacion_monto: string | null;
+	colocacion_creditos: number | null;
+	facturacion: string | null;
+	cartera_activa: string | null;
+	creditos_activos: number | null;
+	mora_30: string | null;
+	mora_60: string | null;
+	mora_90: string | null;
+	mora_120: string | null;
+	creditos_30: number | null;
+	creditos_60: number | null;
+	creditos_90: number | null;
+	creditos_120: number | null;
+};
+
+type PuntoEquilibrioRow = {
+	bucket: string;
+	cantidad_creditos: number;
+	colocado: string;
+	meta: string;
+	cobertura: string | null;
+	faltante: string | null;
+};
+
+const MESES = [
+	"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+	"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+function coberturaColor(cobertura: string | null): string {
+	if (!cobertura) return "#6b7280";
+	const pct = Number(cobertura);
+	if (pct >= 100) return "#22c55e";
+	if (pct >= 70) return "#eab308";
+	return "#ef4444";
+}
+
+function coberturaLabel(cobertura: string | null): string {
+	if (!cobertura) return "Sin meta";
+	return `${cobertura}%`;
+}
+
 const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] = [
 	{ key: "capital", label: "Capital" },
 	{ key: "interes", label: "Interés" },
@@ -179,7 +233,7 @@ function getDefaultMontoCobrarRange(): { fechaInicio: string; fechaFin: string }
 }
 
 function formatBucket(bucket: string, periodo: string): string {
-	const date = new Date(bucket);
+	const date = new Date(bucket.length === 10 ? `${bucket}T12:00:00` : bucket);
 	if (periodo === "dia") {
 		return new Intl.DateTimeFormat("es-GT", { day: "2-digit", month: "short" }).format(date);
 	}
@@ -268,6 +322,24 @@ function RouteComponent() {
 		anio: new Date().getFullYear(),
 	}));
 	const [flujoCuotasRange, setFlujoCuotasRange] = useState(getDefaultFlujoCuotasRange);
+	const [comparativoAnio, setComparativoAnio] = useState(
+		() => new Date().getFullYear(),
+	);
+	const [metasAnio, setMetasAnio] = useState(new Date().getFullYear());
+	const [editMetas, setEditMetas] = useState<Record<number, string>>({});
+	const [metasModalOpen, setMetasModalOpen] = useState(false);
+	const [isSavingMetas, setIsSavingMetas] = useState(false);
+	const [focusedMes, setFocusedMes] = useState<number | null>(null);
+	const [equilibrioPeriodo, setEquilibrioPeriodo] = useState<
+		"anio" | "trimestre" | "mes" | "semana" | "dia"
+	>("mes");
+	const [equilibrioRange, setEquilibrioRange] = useState(() => {
+		const today = formatDateInput(new Date());
+		const start = new Date();
+		start.setMonth(start.getMonth() - 5);
+		start.setDate(1);
+		return { fechaInicio: formatDateInput(start), fechaFin: today };
+	});
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const userRole = userProfile.data?.role;
@@ -326,6 +398,104 @@ function RouteComponent() {
 		enabled: isAdmin,
 	});
 	const flujoCuotasData = flujoCuotasQuery.data as FlujoCuotasInversionesResponse | undefined;
+
+	const comparativoQuery = useQuery({
+		...orpc.getComparativoHistorico.queryOptions({
+			input: { anio: comparativoAnio },
+		}),
+		enabled: isAdmin,
+	});
+	const comparativoData = comparativoQuery.data as
+		| { data: ComparativoHistoricoRow[] }
+		| undefined;
+
+	const metasQuery = useQuery({
+		...orpc.getMetas.queryOptions({
+			input: { anio: metasAnio, tipo: "colocacion" },
+		}),
+		enabled: isAdmin,
+	});
+
+	const upsertMetaMutation = useMutation({
+		mutationFn: async (vars: {
+			tipo: "colocacion" | "cobros" | "mora_maxima" | "captacion";
+			anio: number;
+			mes: number;
+			monto: string;
+		}) => client.upsertMeta(vars),
+		onSuccess: () => {
+			queryClient.invalidateQueries(
+				orpc.getMetas.queryOptions({ input: { anio: metasAnio, tipo: "colocacion" } }),
+			);
+		},
+		onError: (error: Error) => {
+			toast.error(error.message);
+		},
+	});
+
+	const puntoEquilibrioQuery = useQuery({
+		...orpc.getPuntoEquilibrio.queryOptions({
+			input: {
+				periodo: equilibrioPeriodo,
+				fechaInicio: equilibrioRange.fechaInicio,
+				fechaFin: equilibrioRange.fechaFin,
+			},
+		}),
+		enabled: isAdmin,
+	});
+	const puntoEquilibrioData = puntoEquilibrioQuery.data as
+		| { data: PuntoEquilibrioRow[] }
+		| undefined;
+
+	const handleGuardarTodo = useCallback(async () => {
+		const saves = MESES.map((_, idx) => {
+			const mes = idx + 1;
+			const monto = editMetas[mes];
+			const montoNum = Number(monto ?? "0");
+			if (Number.isNaN(montoNum)) return null;
+			return client.upsertMeta({
+				tipo: "colocacion",
+				anio: metasAnio,
+				mes,
+				monto: montoNum.toFixed(2),
+			});
+		}).filter(Boolean);
+		if (saves.length === 0) return;
+		setIsSavingMetas(true);
+		try {
+			await Promise.all(saves);
+			await Promise.all([
+				queryClient.invalidateQueries(
+					orpc.getMetas.queryOptions({ input: { anio: metasAnio, tipo: "colocacion" } }),
+				),
+				queryClient.invalidateQueries(
+					orpc.getPuntoEquilibrio.queryOptions({
+						input: {
+							periodo: equilibrioPeriodo,
+							fechaInicio: equilibrioRange.fechaInicio,
+							fechaFin: equilibrioRange.fechaFin,
+						},
+					}),
+				),
+			]);
+			toast.success(`${saves.length} metas guardadas`);
+			setMetasModalOpen(false);
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Error al guardar metas");
+		} finally {
+			setIsSavingMetas(false);
+		}
+	}, [editMetas, metasAnio, equilibrioPeriodo, equilibrioRange]);
+
+	useEffect(() => {
+		if (Array.isArray(metasQuery.data)) {
+			const map: Record<number, string> = {};
+			for (const row of metasQuery.data as { mes: number; monto: string }[]) {
+				map[row.mes] = String(Number(row.monto));
+			}
+			setEditMetas(map);
+		}
+	}, [metasQuery.data]);
 
 
 	useEffect(() => {
@@ -877,7 +1047,7 @@ function RouteComponent() {
 											}))}
 										>
 											<CartesianGrid strokeDasharray="3 3" />
-											<XAxis dataKey="bucket" angle={-30} textAnchor="end" height={60} />
+											<XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval={0} height={36} />
 											<YAxis tickFormatter={(v) => `Q${(Number(v) / 1000).toFixed(0)}k`} />
 											<Tooltip
 												formatter={(value, name) => [
@@ -1321,6 +1491,401 @@ function RouteComponent() {
 							})()}
 						</CardContent>
 					</Card>
+
+					{/* Modal: Metas Mensuales */}
+					<Dialog open={metasModalOpen} onOpenChange={setMetasModalOpen}>
+						<DialogContent className="sm:max-w-[860px]">
+							<DialogHeader>
+								<DialogTitle className="flex items-center gap-2">
+									<Target className="h-4 w-4 text-purple-500" />
+									Metas de Colocación
+								</DialogTitle>
+							</DialogHeader>
+							<div className="flex items-center justify-center gap-3 pb-2">
+								<Button variant="outline" size="sm" onClick={() => setMetasAnio((y) => y - 1)}>‹</Button>
+								<span className="w-16 text-center font-semibold">{metasAnio}</span>
+								<Button variant="outline" size="sm" onClick={() => setMetasAnio((y) => y + 1)}>›</Button>
+							</div>
+							{metasQuery.isPending ? (
+								<p className="text-muted-foreground py-4 text-center text-sm">Cargando...</p>
+							) : (
+								<div className="grid grid-cols-2 gap-x-10 gap-y-4">
+									{MESES.map((nombreMes, idx) => {
+										const mes = idx + 1;
+										return (
+											<div key={mes} className="flex items-center gap-3">
+												<span className="w-20 shrink-0 font-medium text-sm">{nombreMes}</span>
+												<div className="relative min-w-0 flex-1">
+													<span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">Q</span>
+													<Input
+														type="text"
+														inputMode="decimal"
+														className="h-10 pl-7 text-right text-base"
+														placeholder="0"
+														value={
+															focusedMes === mes
+																? (editMetas[mes] ?? "")
+																: editMetas[mes] && Number(editMetas[mes]) > 0
+																	? Number(editMetas[mes]).toLocaleString("es-GT", {
+																			minimumFractionDigits: 2,
+																			maximumFractionDigits: 2,
+																		})
+																	: ""
+														}
+														onFocus={() => setFocusedMes(mes)}
+														onBlur={() => setFocusedMes(null)}
+														onChange={(e) => {
+															const raw = e.target.value.replace(/[^0-9.]/g, "");
+															setEditMetas((prev) => ({ ...prev, [mes]: raw }));
+														}}
+													/>
+												</div>
+											</div>
+										);
+									})}
+								</div>
+							)}
+							<div className="flex justify-end gap-2 pt-2">
+								<Button variant="outline" onClick={() => setMetasModalOpen(false)}>
+									Cancelar
+								</Button>
+								<Button onClick={handleGuardarTodo} disabled={isSavingMetas}>
+									{isSavingMetas && (
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									)}
+									Guardar todo
+								</Button>
+							</div>
+						</DialogContent>
+					</Dialog>
+
+					{/* Cobertura de Colocación vs Meta */}
+					<Card>
+						<CardHeader>
+							<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+								<div className="flex items-center gap-2">
+									<TrendingUp className="h-5 w-5 text-green-500" />
+									<div>
+										<CardTitle>Cobertura de Colocación vs Meta</CardTitle>
+										<CardDescription>
+											Compara el capital colocado en cada período contra la meta mensual definida
+										</CardDescription>
+									</div>
+								</div>
+								<div className="flex flex-wrap items-center gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										className="gap-1.5"
+										onClick={() => setMetasModalOpen(true)}
+									>
+										<Target className="h-3.5 w-3.5" />
+										Configurar metas
+									</Button>
+									<Select
+										value={equilibrioPeriodo}
+										onValueChange={(v) =>
+											setEquilibrioPeriodo(
+												v as "anio" | "trimestre" | "mes" | "semana" | "dia",
+											)
+										}
+									>
+										<SelectTrigger className="w-[140px]">
+											<SelectValue placeholder="Período" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="dia">Día</SelectItem>
+											<SelectItem value="semana">Semana</SelectItem>
+											<SelectItem value="mes">Mes</SelectItem>
+											<SelectItem value="trimestre">Trimestre</SelectItem>
+											<SelectItem value="anio">Año</SelectItem>
+										</SelectContent>
+									</Select>
+									<DateRangeFilter
+										dateRange={
+											equilibrioRange.fechaInicio && equilibrioRange.fechaFin
+												? {
+														from: dateFromInput(equilibrioRange.fechaInicio),
+														to: dateFromInput(equilibrioRange.fechaFin),
+													}
+												: undefined
+										}
+										onDateRangeChange={(range) => {
+											if (range?.from && range?.to) {
+												setEquilibrioRange({
+													fechaInicio: formatDateInput(range.from),
+													fechaFin: formatDateInput(range.to),
+												});
+											}
+										}}
+									/>
+								</div>
+							</div>
+						</CardHeader>
+						<CardContent className="space-y-4">
+							{puntoEquilibrioQuery.isPending && (
+								<p className="text-muted-foreground text-sm">Cargando reporte...</p>
+							)}
+							{puntoEquilibrioQuery.isError && (
+								<p className="text-destructive text-sm">
+									Error al cargar reporte de cobertura.
+								</p>
+							)}
+							{puntoEquilibrioData && puntoEquilibrioData.data.length === 0 && (
+								<p className="text-muted-foreground text-sm">
+									No hay datos de colocación para el rango seleccionado.
+								</p>
+							)}
+							{!!puntoEquilibrioData?.data.length && (() => {
+								const rows = puntoEquilibrioData.data;
+								const totalColocado = rows.reduce((acc, r) => acc + Number(r.colocado), 0);
+								const totalMeta = rows.reduce((acc, r) => acc + Number(r.meta), 0);
+								const totalCreditos = rows.reduce((acc, r) => acc + r.cantidad_creditos, 0);
+								const totalCobertura =
+									totalMeta > 0 ? ((totalColocado / totalMeta) * 100).toFixed(1) : null;
+								return (
+									<>
+										<ResponsiveContainer width="100%" height={300}>
+											<BarChart
+												data={rows.map((row) => ({
+													bucket: formatBucket(row.bucket, equilibrioPeriodo),
+													colocado: Number(row.colocado),
+													meta: Number(row.meta),
+												}))}
+											>
+												<CartesianGrid strokeDasharray="3 3" />
+												<XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval={0} height={36} />
+												<YAxis tickFormatter={(v) => `Q${(Number(v) / 1000).toFixed(0)}k`} />
+												<Tooltip
+													formatter={(value, name) => [
+														formatCurrency(Number(value)),
+														name === "colocado" ? "Colocado" : "Meta",
+													]}
+												/>
+												<Legend formatter={(v) => (v === "colocado" ? "Colocado" : "Meta")} />
+												<Bar dataKey="colocado" fill="#3b82f6" name="colocado" />
+												<Bar dataKey="meta" fill="#d1d5db" name="meta" />
+											</BarChart>
+										</ResponsiveContainer>
+
+										<div className="overflow-x-auto">
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>Período</TableHead>
+														<TableHead className="text-right">Créditos</TableHead>
+														<TableHead className="text-right">Colocado</TableHead>
+														<TableHead className="text-right">Meta</TableHead>
+														<TableHead className="text-right">Cobertura</TableHead>
+														<TableHead className="text-right">Faltante</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													{rows.map((row) => (
+														<TableRow key={row.bucket}>
+															<TableCell>{formatBucket(row.bucket, equilibrioPeriodo)}</TableCell>
+															<TableCell className="text-right">{row.cantidad_creditos}</TableCell>
+															<TableCell className="text-right">{formatCurrency(row.colocado)}</TableCell>
+															<TableCell className="text-right">
+																{Number(row.meta) > 0 ? formatCurrency(row.meta) : <span className="text-muted-foreground">Sin meta</span>}
+															</TableCell>
+															<TableCell className="text-right">
+																<span
+																	className="font-semibold"
+																	style={{ color: coberturaColor(row.cobertura) }}
+																>
+																	{coberturaLabel(row.cobertura)}
+																</span>
+															</TableCell>
+															<TableCell className="text-right">
+																{row.faltante ? formatCurrency(row.faltante) : "—"}
+															</TableCell>
+														</TableRow>
+													))}
+													<TableRow className="border-t-2 bg-muted/50 font-bold">
+														<TableCell>Total</TableCell>
+														<TableCell className="text-right">{totalCreditos}</TableCell>
+														<TableCell className="text-right">{formatCurrency(totalColocado)}</TableCell>
+														<TableCell className="text-right">
+															{totalMeta > 0 ? formatCurrency(totalMeta) : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															<span
+																className="font-semibold"
+																style={{ color: coberturaColor(totalCobertura) }}
+															>
+																{coberturaLabel(totalCobertura)}
+															</span>
+														</TableCell>
+														<TableCell className="text-right">
+															{totalMeta > 0
+																? formatCurrency(Math.max(0, totalMeta - totalColocado))
+																: "—"}
+														</TableCell>
+													</TableRow>
+												</TableBody>
+											</Table>
+										</div>
+									</>
+								);
+							})()}
+						</CardContent>
+					</Card>
+
+				{/* ============================================================ */}
+				{/* REPORTE: COMPARATIVO HISTÓRICO MENSUAL                        */}
+				{/* ============================================================ */}
+				<Card>
+					<CardHeader>
+						<div className="flex items-center justify-between">
+							<CardTitle className="flex items-center gap-2">
+								<CalendarDays className="h-5 w-5" />
+								Comparativo Histórico Mensual
+							</CardTitle>
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									className="rounded p-1 hover:bg-muted"
+									onClick={() => setComparativoAnio((y) => y - 1)}
+								>
+									<ChevronLeft className="h-4 w-4" />
+								</button>
+								<span className="font-semibold text-sm w-12 text-center">
+									{comparativoAnio}
+								</span>
+								<button
+									type="button"
+									className="rounded p-1 hover:bg-muted"
+									onClick={() =>
+										setComparativoAnio((y) =>
+											y < new Date().getFullYear() ? y + 1 : y,
+										)
+									}
+								>
+									<ChevronRight className="h-4 w-4" />
+								</button>
+							</div>
+						</div>
+					</CardHeader>
+					<CardContent>
+						{comparativoQuery.isPending && (
+							<p className="text-sm text-muted-foreground py-4 text-center">
+								Cargando...
+							</p>
+						)}
+						{comparativoQuery.isError && (
+							<p className="text-sm text-red-500 py-4 text-center">
+								Error al cargar comparativo histórico.
+							</p>
+						)}
+						{comparativoData && (() => {
+							const rows = comparativoData.data;
+							const sumColoc = rows.reduce(
+								(acc, r) => acc + (r.colocacion_monto ? Number(r.colocacion_monto) : 0),
+								0,
+							);
+							const sumFacturacion = rows.reduce(
+								(acc, r) => acc + (r.facturacion ? Number(r.facturacion) : 0),
+								0,
+							);
+							const sumCreditosColoc = rows.reduce(
+								(acc, r) => acc + (r.colocacion_creditos ?? 0),
+								0,
+							);
+							return (
+								<div className="overflow-x-auto">
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Mes</TableHead>
+												<TableHead className="text-right">Colocación (Q)</TableHead>
+												<TableHead className="text-right"># Col.</TableHead>
+												<TableHead className="text-right">Facturación (Q)</TableHead>
+												<TableHead className="text-right">Cartera Activa (Q)</TableHead>
+												<TableHead className="text-right"># Activos</TableHead>
+												<TableHead className="text-right">Mora 30 (Q)</TableHead>
+												<TableHead className="text-right">Mora 60 (Q)</TableHead>
+												<TableHead className="text-right">Mora 90 (Q)</TableHead>
+												<TableHead className="text-right">Mora 120+ (Q)</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{rows.map((row) => {
+												const esFuturo =
+													row.colocacion_monto === null &&
+													row.facturacion === null &&
+													row.cartera_activa === null;
+												return (
+													<TableRow
+														key={row.mes}
+														className={esFuturo ? "opacity-40" : undefined}
+													>
+														<TableCell className="font-medium">
+															{MESES[row.mes - 1]}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.colocacion_monto
+																? formatCurrency(Number(row.colocacion_monto))
+																: "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.colocacion_creditos ?? "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.facturacion
+																? formatCurrency(Number(row.facturacion))
+																: "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.cartera_activa
+																? formatCurrency(Number(row.cartera_activa))
+																: "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.creditos_activos ?? "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_30 ? <span>{formatCurrency(Number(row.mora_30))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_30 ?? 0})</span></span> : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_60 ? <span>{formatCurrency(Number(row.mora_60))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_60 ?? 0})</span></span> : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_90 ? <span>{formatCurrency(Number(row.mora_90))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_90 ?? 0})</span></span> : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															{row.mora_120 ? <span>{formatCurrency(Number(row.mora_120))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_120 ?? 0})</span></span> : "—"}
+														</TableCell>
+													</TableRow>
+												);
+											})}
+										</TableBody>
+										<TableBody>
+											<TableRow className="border-t-2 bg-muted/50 font-bold">
+												<TableCell>Total</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(sumColoc)}
+												</TableCell>
+												<TableCell className="text-right">
+													{sumCreditosColoc}
+												</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(sumFacturacion)}
+												</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+												<TableCell className="text-right">—</TableCell>
+											</TableRow>
+										</TableBody>
+									</Table>
+								</div>
+							);
+						})()}
+					</CardContent>
+				</Card>
 				</>
 			)}
 

@@ -3,13 +3,50 @@ import puppeteer from "puppeteer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
 import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
+import { esPagoAplicado } from "../utils/paymentStatus";
 import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import { db } from "../database";
 import { sql } from "drizzle-orm";
 import Big from "big.js";
+import { STATUS_EXCLUIDOS_MORA } from "./latefee";
 
 const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
+
+// Créditos "muertos" que NO facturan → se excluyen del esperado del mes (panel azul).
+// Subconjunto de STATUS_EXCLUIDOS_MORA; EN_CONVENIO y CAIDO sí siguen facturando.
+const STATUS_SIN_FACTURACION = ["CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION"];
+
+// Construye una lista parametrizada para un IN (...) de SQL a partir de un array de strings.
+const sqlStrList = (vals: readonly string[]) => sql.join(vals.map((v) => sql`${v}`), sql`, `);
+
+// ── Predicados de status (fuente única; STATUS_EXCLUIDOS_MORA vive en latefee.ts) ──
+// Excluido de mora Y de la deuda acumulada (panel rojo): convenio, incobrable, cancelado, etc.
+export const esStatusExcluidoMora = (status?: string | null) =>
+  !!status && STATUS_EXCLUIDOS_MORA.includes(status);
+// Sin facturación esperada (panel azul): solo los "muertos". EN_CONVENIO y CAIDO SÍ facturan.
+export const esStatusSinFacturacion = (status?: string | null) =>
+  !!status && STATUS_SIN_FACTURACION.includes(status);
+
+// Escala el capital de las cuotas vencidas para que su suma no exceda el principal remanente
+// del crédito (no se puede deber más capital que el que queda). Morosos normales (suma ≤
+// principal) → factor 1, intactos. Recalcula total_restante = capital topado + demás rubros.
+// Pura (sin DB) para poder testearla; usada por getAcumuladoPorCredito (drill-down) y alineada
+// con el tope cap_ant del panel rojo.
+export const escalarCapitalAlPrincipal = <T extends Record<string, any>>(
+  cuotas: T[],
+  principal: number,
+): (T & { capital_restante: string; total_restante: string })[] => {
+  const sumCap = cuotas.reduce((s, r) => s + Number(r.capital_restante), 0);
+  const factor = sumCap > principal + 0.01 && sumCap > 0 ? principal / sumCap : 1;
+  return cuotas.map((r) => {
+    const capital = Number(r.capital_restante) * factor;
+    const total =
+      capital + Number(r.interes_restante) + Number(r.iva_12_restante) +
+      Number(r.seguro_restante) + Number(r.gps_restante) + Number(r.membresias);
+    return { ...r, capital_restante: capital.toFixed(2), total_restante: total.toFixed(2) };
+  });
+};
 
 type EstadoCuentaPagoRow = {
   pago_id?: number | string | null;
@@ -59,7 +96,7 @@ export function shouldIncludeEstadoCuentaPayment(pago: EstadoCuentaPagoRow) {
     pago.fecha_aplicado !== null && pago.fecha_aplicado !== undefined;
 
   return (
-    pago.validationStatus === "validated" &&
+    esPagoAplicado(pago.validationStatus) &&
     abonoCapital > 0 &&
     montoAplicado > 0 &&
     (esAbonoCapitalPuro || (fueAplicado && pagoNoEsFuturo))
@@ -1786,7 +1823,7 @@ export async function getPagosByVencimiento({
 
   const commonGroupHaving = sql`
     GROUP BY
-      c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti,
+      c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti, c."statusCredit",
       c.capital, c.porcentaje_interes, c.cuota, c.seguro_10_cuotas, c.gps, c.membresias_pago,
       cap_anterior.total_restante, mora_real.cuotas_atrasadas
     HAVING SUM(${totalFilaSql}) <> 0
@@ -1795,6 +1832,7 @@ export async function getPagosByVencimiento({
   const pagosSelectFields = sql`
     SELECT
       c.credito_id,
+      c."statusCredit" AS status,
       c.numero_credito_sifco,
       u.nombre AS nombre_usuario,
       a.nombre AS asesor,
@@ -1842,6 +1880,7 @@ export async function getPagosByVencimiento({
     const totalPagosDelMes = abonoCapitalCalculado.plus(interesCalculado).plus(ivaCalculado).plus(seguro).plus(gps).plus(membresia);
     return {
       credito_id: row.credito_id,
+      status: row.status,
       numero_credito_sifco: row.numero_credito_sifco,
       nombre_usuario: row.nombre_usuario,
       asesor: row.asesor,
@@ -1888,17 +1927,22 @@ export async function getPagosByVencimiento({
     let totalPagosDelMesRecalc = new Big(0);
 
     allPagosRecalculated.forEach((p: any) => {
-      totalCapitalRecalc = totalCapitalRecalc.plus(p.capital_restante);
-      totalInteresRecalc = totalInteresRecalc.plus(p.interes_restante);
-      totalIvaRecalc = totalIvaRecalc.plus(p.iva_12_restante);
-      totalSeguroRecalc = totalSeguroRecalc.plus(p.seguro_restante);
-      totalGpsRecalc = totalGpsRecalc.plus(p.gps_restante);
-      totalMembresiasRecalc = totalMembresiasRecalc.plus(p.membresias);
-      totalInteresCubeRecalc = totalInteresCubeRecalc.plus(p.interes_cube);
-      totalIvaCubeRecalc = totalIvaCubeRecalc.plus(p.iva_cube);
+      // Créditos muertos (CANCELADO/INCOBRABLE/PENDIENTE_CANCELACION) NO facturan → fuera del
+      // esperado (mismo criterio que el panel azul). Mora y boletas SÍ se cuentan (dinero real).
+      const muerto = esStatusSinFacturacion(p.status);
+      if (!muerto) {
+        totalCapitalRecalc = totalCapitalRecalc.plus(p.capital_restante);
+        totalInteresRecalc = totalInteresRecalc.plus(p.interes_restante);
+        totalIvaRecalc = totalIvaRecalc.plus(p.iva_12_restante);
+        totalSeguroRecalc = totalSeguroRecalc.plus(p.seguro_restante);
+        totalGpsRecalc = totalGpsRecalc.plus(p.gps_restante);
+        totalMembresiasRecalc = totalMembresiasRecalc.plus(p.membresias);
+        totalInteresCubeRecalc = totalInteresCubeRecalc.plus(p.interes_cube);
+        totalIvaCubeRecalc = totalIvaCubeRecalc.plus(p.iva_cube);
+        totalPagosDelMesRecalc = totalPagosDelMesRecalc.plus(p.total_pagos_del_mes);
+      }
       totalMoraRecalc = totalMoraRecalc.plus(p.mora);
       totalMontoAplicadoRecalc = totalMontoAplicadoRecalc.plus(p.monto_aplicado);
-      totalPagosDelMesRecalc = totalPagosDelMesRecalc.plus(p.total_pagos_del_mes);
     });
 
     {
@@ -2006,7 +2050,7 @@ export async function getPagosByVencimiento({
           numeroautorizacion AS numero_boleta
         FROM cartera.pagos_credito
         WHERE credito_id = ANY(ARRAY[${sql.raw(creditoIds.join(","))}]::int[])
-          AND validation_status = 'validated'
+          AND validation_status IN ('validated', 'capital_validated')
           AND "paymentFalse" = false
           AND (
             (cuota_id IS NOT NULL AND cuota_id IN (
@@ -2137,6 +2181,7 @@ export async function getPagosByVencimiento({
       WITH per_credito AS (
         SELECT
           c.credito_id AS credito_id,
+          c."statusCredit" AS status,
           COALESCE(cap_anterior.total_restante, c.capital::numeric) AS cap_ant,
           c.porcentaje_interes::numeric / 100 AS tasa,
           c.cuota::numeric AS cuota_c,
@@ -2164,6 +2209,11 @@ export async function getPagosByVencimiento({
       calc_acum AS (
         SELECT
           calc.*,
+          -- Mismos status que NO generan mora (latefee.ts STATUS_EXCLUIDOS_MORA): no deben
+          -- aportar deuda acumulada (estaban inflando el capital con créditos CANCELADO/etc.).
+          (calc.status IN (${sqlStrList(STATUS_EXCLUIDOS_MORA)})) AS excluido_mora,
+          -- Créditos muertos que no facturan → fuera del esperado del mes (panel azul).
+          (calc.status IN (${sqlStrList(STATUS_SIN_FACTURACION)})) AS excluido_factura,
           LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant) AS exp_capital,
           acum.acum_capital,
           acum.acum_interes,
@@ -2174,7 +2224,15 @@ export async function getPagosByVencimiento({
         FROM calc
         LEFT JOIN LATERAL (
           SELECT
-            COALESCE(SUM(a.capital_restante), 0) AS acum_capital,
+            -- Capital topado al "slot" real de la cuota (cuota − otros rubros). Sin esto,
+            -- los créditos con abono directo a capital (donde capital_restante guarda el
+            -- SALDO CORRIENTE del crédito, no la porción de la cuota) se sumarían ×N cuotas
+            -- vencidas → sobre-conteo. El cap nunca sube un valor, solo evita la inflación.
+            COALESCE(SUM(LEAST(
+              a.capital_restante,
+              GREATEST(calc.cuota_c - a.interes_restante - a.iva_12_restante
+                       - a.seguro_restante - a.gps_restante - a.membresias, 0::numeric)
+            )), 0) AS acum_capital,
             COALESCE(SUM(a.interes_restante), 0) AS acum_interes,
             COALESCE(SUM(a.iva_12_restante), 0)  AS acum_iva,
             COALESCE(SUM(a.seguro_restante), 0)  AS acum_seguro,
@@ -2218,27 +2276,36 @@ export async function getPagosByVencimiento({
       )
       SELECT
         COUNT(*) AS total_count,
-        -- Totales esperados del mes (sin cambios)
-        COALESCE(SUM(exp_capital), 0) AS total_capital,
-        COALESCE(SUM(interes), 0) AS total_interes,
-        COALESCE(SUM(iva), 0) AS total_iva,
-        COALESCE(SUM(seguro), 0) AS total_seguro,
-        COALESCE(SUM(gps), 0) AS total_gps,
-        COALESCE(SUM(mem), 0) AS total_membresias,
-        COALESCE(SUM(ROUND(interes * cash_pct, 2)), 0) AS total_interes_cube,
-        COALESCE(SUM(ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2)), 0) AS total_iva_cube,
+        -- Totales esperados del mes. Los créditos muertos (CANCELADO/INCOBRABLE/
+        -- PENDIENTE_CANCELACION) NO facturan → fuera del esperado. EN_CONVENIO y CAIDO sí.
+        -- (mora y monto_aplicado NO se filtran: mora ya es ~0 en muertos y boletas = dinero real.)
+        COALESCE(SUM(CASE WHEN excluido_factura THEN 0 ELSE exp_capital END), 0) AS total_capital,
+        COALESCE(SUM(CASE WHEN excluido_factura THEN 0 ELSE interes END), 0) AS total_interes,
+        COALESCE(SUM(CASE WHEN excluido_factura THEN 0 ELSE iva END), 0) AS total_iva,
+        COALESCE(SUM(CASE WHEN excluido_factura THEN 0 ELSE seguro END), 0) AS total_seguro,
+        COALESCE(SUM(CASE WHEN excluido_factura THEN 0 ELSE gps END), 0) AS total_gps,
+        COALESCE(SUM(CASE WHEN excluido_factura THEN 0 ELSE mem END), 0) AS total_membresias,
+        COALESCE(SUM(CASE WHEN excluido_factura THEN 0 ELSE ROUND(interes * cash_pct, 2) END), 0) AS total_interes_cube,
+        COALESCE(SUM(CASE WHEN excluido_factura THEN 0 ELSE ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2) END), 0) AS total_iva_cube,
         COALESCE(SUM(mora), 0) AS total_mora,
         COALESCE(SUM(monto_apl), 0) AS total_monto_aplicado,
-        -- Totales acumulados: morosos => deuda acumulada, al día => esperado del mes
-        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_capital, 0) ELSE exp_capital END), 0) AS acum_total_capital,
-        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_interes, 0) ELSE interes END), 0) AS acum_total_interes,
-        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_iva, 0) ELSE iva END), 0) AS acum_total_iva,
-        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_seguro, 0) ELSE seguro END), 0) AS acum_total_seguro,
-        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_gps, 0) ELSE gps END), 0) AS acum_total_gps,
-        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_mem, 0) ELSE mem END), 0) AS acum_total_membresias,
-        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) ELSE ROUND(interes * cash_pct, 2) END), 0) AS acum_total_interes_cube,
-        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN ROUND(ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) * 0.12, 2) ELSE ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2) END), 0) AS acum_total_iva_cube,
-        COALESCE(SUM(mora), 0) AS acum_total_mora
+        -- Totales acumulados: morosos => deuda acumulada, al día => esperado del mes.
+        -- Los status excluidos (CANCELADO/EN_CONVENIO/etc.) NO aportan (igual que la mora).
+        -- Tope final: la deuda de capital acumulada de un crédito no puede exceder su
+        -- principal remanente (cap_ant). Cubre los casos que el cap por-cuota no agarra:
+        -- créditos capital=0 (cap_ant=0 → aporta 0) y créditos con cuota ≈ capital donde
+        -- varias cuotas vencidas sumarían más que todo el préstamo.
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(COALESCE(acum_capital, 0), cap_ant) ELSE exp_capital END), 0) AS acum_total_capital,
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_interes, 0) ELSE interes END), 0) AS acum_total_interes,
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_iva, 0) ELSE iva END), 0) AS acum_total_iva,
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_seguro, 0) ELSE seguro END), 0) AS acum_total_seguro,
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_gps, 0) ELSE gps END), 0) AS acum_total_gps,
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_mem, 0) ELSE mem END), 0) AS acum_total_membresias,
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) ELSE ROUND(interes * cash_pct, 2) END), 0) AS acum_total_interes_cube,
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN ROUND(ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) * 0.12, 2) ELSE ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2) END), 0) AS acum_total_iva_cube,
+        -- Mora también se excluye en el acumulado (consistencia con los demás rubros: un
+        -- crédito CANCELADO/EN_CONVENIO con mora activa rezagada no debe aportar al rojo).
+        COALESCE(SUM(CASE WHEN excluido_mora THEN 0 ELSE mora END), 0) AS acum_total_mora
       FROM calc_acum
     `),
   ]);
@@ -2315,7 +2382,7 @@ export async function getAbonosDelMesPorCredito({
       numeroautorizacion AS numero_boleta
     FROM cartera.pagos_credito
     WHERE credito_id = ${credito_id}
-      AND validation_status = 'validated'
+      AND validation_status IN ('validated', 'capital_validated')
       AND "paymentFalse" = false
       AND (
         (cuota_id IS NOT NULL AND cuota_id IN (
@@ -2334,77 +2401,103 @@ export async function getAbonosDelMesPorCredito({
 }
 
 export async function getAcumuladoPorCredito({ credito_id }: { credito_id: number }) {
+  // Reconcilia con el panel rojo (getPagosByVencimiento): (1) status excluido => sin deuda
+  // (el WHERE deja la base vacía), (2) capital topado por cuota a su slot real (cuota − otros
+  // rubros), (3) abajo se topa el total al principal remanente.
   const result = await db.execute<any>(sql`
-    SELECT
-      q.numero_cuota,
-      TO_CHAR(q.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento,
-      COALESCE(MIN(pc.capital_restante::numeric),  0) AS capital_restante,
-      COALESCE(MIN(pc.interes_restante::numeric),  0) AS interes_restante,
-      COALESCE(MIN(pc.iva_12_restante::numeric),   0) AS iva_12_restante,
-      COALESCE(MIN(pc.seguro_restante::numeric),   0) AS seguro_restante,
-      COALESCE(MIN(pc.gps_restante::numeric),      0) AS gps_restante,
-      COALESCE(MIN(pc.membresias::numeric),        0) AS membresias,
-      COALESCE(MIN(pc.capital_restante::numeric),  0)
-        + COALESCE(MIN(pc.interes_restante::numeric),  0)
-        + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
-        + COALESCE(MIN(pc.seguro_restante::numeric),   0)
-        + COALESCE(MIN(pc.gps_restante::numeric),      0)
-        + COALESCE(MIN(pc.membresias::numeric),        0) AS total_restante,
-      ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) AS interes_cube,
-      ROUND(ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) * 0.12, 2) AS iva_cube
-    FROM cartera.cuotas_credito q
-    INNER JOIN cartera.creditos c ON c.credito_id = q.credito_id
-    LEFT JOIN cartera.pagos_credito pc
-      ON pc.cuota_id = q.cuota_id
-      AND pc."paymentFalse" = false
-    LEFT JOIN LATERAL (
+    WITH base AS (
       SELECT
-        COALESCE((
-          SELECT
-            CASE
-              WHEN COALESCE(SUM(ci_all.monto_aportado::numeric), 0) > 0 OR c.capital::numeric > 0 THEN
-                (COALESCE(SUM(
-                  ci_all.monto_aportado::numeric *
-                  CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
-                       ELSE ci_all.porcentaje_cash_in::numeric
-                  END
-                ), 0) / 100.0
-                + GREATEST(0, c.capital::numeric - COALESCE(SUM(ci_all.monto_aportado::numeric), 0)))
-                / NULLIF(GREATEST(c.capital::numeric, COALESCE(SUM(ci_all.monto_aportado::numeric), 0)), 0)
-              WHEN COUNT(*) > 0 THEN
-                AVG(CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
-                         ELSE ci_all.porcentaje_cash_in::numeric END) / 100.0
-              ELSE 0
-            END
-          FROM cartera.creditos_inversionistas ci_all
-          WHERE ci_all.credito_id = q.credito_id
-        ), 0) AS cash_in_pct
-    ) cube_data ON true
-    WHERE q.credito_id = ${credito_id}
-      AND q.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
-      AND q.pagado = false
-      AND NOT EXISTS (
-        SELECT 1 FROM cartera.pagos_credito pc2
-        WHERE pc2.cuota_id = q.cuota_id
-          AND pc2."paymentFalse" = false
-          AND pc2.pagado = true
-          AND pc2.validation_status IN ('validated', 'no_required')
-      )
-    GROUP BY q.cuota_id, q.numero_cuota, q.fecha_vencimiento
-    HAVING (
-        COALESCE(MIN(pc.capital_restante::numeric),  0)
-        + COALESCE(MIN(pc.interes_restante::numeric),  0)
-        + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
-        + COALESCE(MIN(pc.seguro_restante::numeric),   0)
-        + COALESCE(MIN(pc.gps_restante::numeric),      0)
-        + COALESCE(MIN(pc.membresias::numeric),        0)
-      ) > 0
-      OR COUNT(pc.pago_id) = 0
-      OR MIN(pc.capital_restante) IS NULL
-    ORDER BY q.fecha_vencimiento ASC
+        q.numero_cuota,
+        TO_CHAR(q.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento,
+        COALESCE(MIN(pc.capital_restante::numeric),  0) AS cap_r,
+        COALESCE(MIN(pc.interes_restante::numeric),  0) AS int_r,
+        COALESCE(MIN(pc.iva_12_restante::numeric),   0) AS iva_r,
+        COALESCE(MIN(pc.seguro_restante::numeric),   0) AS seg_r,
+        COALESCE(MIN(pc.gps_restante::numeric),      0) AS gps_r,
+        COALESCE(MIN(pc.membresias::numeric),        0) AS mem_r,
+        MIN(c.cuota::numeric) AS cuota_c,
+        ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) AS interes_cube
+      FROM cartera.cuotas_credito q
+      INNER JOIN cartera.creditos c ON c.credito_id = q.credito_id
+      LEFT JOIN cartera.pagos_credito pc
+        ON pc.cuota_id = q.cuota_id
+        AND pc."paymentFalse" = false
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE((
+            SELECT
+              CASE
+                WHEN COALESCE(SUM(ci_all.monto_aportado::numeric), 0) > 0 OR c.capital::numeric > 0 THEN
+                  (COALESCE(SUM(
+                    ci_all.monto_aportado::numeric *
+                    CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
+                         ELSE ci_all.porcentaje_cash_in::numeric
+                    END
+                  ), 0) / 100.0
+                  + GREATEST(0, c.capital::numeric - COALESCE(SUM(ci_all.monto_aportado::numeric), 0)))
+                  / NULLIF(GREATEST(c.capital::numeric, COALESCE(SUM(ci_all.monto_aportado::numeric), 0)), 0)
+                WHEN COUNT(*) > 0 THEN
+                  AVG(CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
+                           ELSE ci_all.porcentaje_cash_in::numeric END) / 100.0
+                ELSE 0
+              END
+            FROM cartera.creditos_inversionistas ci_all
+            WHERE ci_all.credito_id = q.credito_id
+          ), 0) AS cash_in_pct
+      ) cube_data ON true
+      WHERE q.credito_id = ${credito_id}
+        AND c."statusCredit" NOT IN (${sqlStrList(STATUS_EXCLUIDOS_MORA)})
+        AND q.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+        AND q.pagado = false
+        AND NOT EXISTS (
+          SELECT 1 FROM cartera.pagos_credito pc2
+          WHERE pc2.cuota_id = q.cuota_id
+            AND pc2."paymentFalse" = false
+            AND pc2.pagado = true
+            AND pc2.validation_status IN ('validated', 'no_required')
+        )
+      GROUP BY q.cuota_id, q.numero_cuota, q.fecha_vencimiento
+      HAVING (
+          COALESCE(MIN(pc.capital_restante::numeric),  0)
+          + COALESCE(MIN(pc.interes_restante::numeric),  0)
+          + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
+          + COALESCE(MIN(pc.seguro_restante::numeric),   0)
+          + COALESCE(MIN(pc.gps_restante::numeric),      0)
+          + COALESCE(MIN(pc.membresias::numeric),        0)
+        ) > 0
+        OR COUNT(pc.pago_id) = 0
+        OR MIN(pc.capital_restante) IS NULL
+    )
+    SELECT
+      numero_cuota,
+      fecha_vencimiento,
+      LEAST(cap_r, GREATEST(cuota_c - int_r - iva_r - seg_r - gps_r - mem_r, 0)) AS capital_restante,
+      int_r AS interes_restante,
+      iva_r AS iva_12_restante,
+      seg_r AS seguro_restante,
+      gps_r AS gps_restante,
+      mem_r AS membresias,
+      interes_cube,
+      ROUND(interes_cube * 0.12, 2) AS iva_cube
+    FROM base
+    ORDER BY fecha_vencimiento ASC
   `);
 
-  const cuotas = result.rows;
+  // Tope de principal: la deuda de capital acumulada no puede exceder el principal remanente
+  // (capital − Σabono_capital). Si la suma de los topes por-cuota lo excede (créditos con
+  // cuota ≈ capital o capital=0), se escala proporcional para que las filas sumen el total
+  // correcto y reconcilie con el panel rojo. Para morosos normales el factor es 1 (no cambia).
+  const principal = Number(
+    (await db.execute<any>(sql`
+      SELECT GREATEST(c.capital::numeric - COALESCE((
+        SELECT SUM(abono_capital::numeric) FROM cartera.pagos_credito
+        WHERE credito_id = ${credito_id} AND "paymentFalse" = false
+      ), 0), 0) AS principal
+      FROM cartera.creditos c WHERE c.credito_id = ${credito_id}
+    `)).rows[0]?.principal ?? 0
+  );
+
+  const cuotas = escalarCapitalAlPrincipal(result.rows, principal);
 
   const totales = cuotas.reduce(
     (acc: any, row: any) => ({

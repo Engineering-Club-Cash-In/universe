@@ -188,6 +188,10 @@ export interface PagoCarteraExcel {
 export async function leerPagosCarteraPorVencimiento(
   filePath: string,
   pedidos: Array<{ sifco: string; vencimientos: string[]; todos?: boolean }>,
+  // Pools "raros": un mismo crédito repartido en SIFCOs distintos (no _N). Mapa
+  // companion-base (14 díg) → base destino (14 díg). Las filas del companion se
+  // reasignan al crédito destino y se suman como una parte más por mes.
+  companionToBase?: Map<string, string>,
 ): Promise<Map<string, Map<string, PagoCarteraExcel>>> {
   // base SIFCO → set de MESES (yyyy-mm) deseados, o "ALL" para traer todos
   // (modo cronológico: se necesitan todas las filas del crédito).
@@ -270,10 +274,13 @@ export async function leerPagosCarteraPorVencimiento(
 
       if (!col || col.pago === -1) continue;
 
-      const base = String(cell(v[col.sifco]) ?? "")
+      let base = String(cell(v[col.sifco]) ?? "")
         .split("_")[0]
         .replace(/[^0-9]/g, "")
         .padStart(14, "0");
+      // Si este SIFCO es companion de otro crédito (pool repartido), se trata
+      // como si fuera del crédito destino para que sus filas se sumen ahí.
+      if (companionToBase?.has(base)) base = companionToBase.get(base)!;
       const set = deseados.get(base);
       if (!set) continue;
 
@@ -311,11 +318,15 @@ export async function leerPagosCarteraPorVencimiento(
       const porVenc = intermedio.get(base)!;
       if (!porVenc.has(mes)) porVenc.set(mes, new Map());
       const porRaw = porVenc.get(mes)!;
-      // Dedup por inversionista (raw SIFCO): si esta fila aparece en varias
+      // Dedup por (raw SIFCO + inversionista): si esta fila aparece en varias
       // hojas, preferimos la que tenga abonos (cuota pagada) sobre la pendiente.
-      const prev = porRaw.get(rawSifco);
+      // OJO: la llave incluye el inversionista porque un crédito "pool" puede
+      // tener varios inversionistas bajo el MISMO SIFCO (sin sufijo _N); si solo
+      // se usara rawSifco, una fila pisaría a la otra y no se sumarían capitales.
+      const dedupKey = `${rawSifco}|${inv}`;
+      const prev = porRaw.get(dedupKey);
       if (!prev || pago.abono_capital !== 0 || pago.pago_del_mes !== 0) {
-        porRaw.set(rawSifco, { pago, inv });
+        porRaw.set(dedupKey, { pago, inv });
       }
     }
   }

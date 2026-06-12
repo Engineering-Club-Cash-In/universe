@@ -21,7 +21,7 @@ type MoraEventoOrigen =
   | "CONDONACION_INDIVIDUAL"
   | "CONDONACION_MASIVA";
 
-const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
+export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
 
 export function isOverdueInstallmentForMora(
   cuota: {
@@ -464,8 +464,9 @@ export async function updateMora({
  * 3. Group overdue installments by credit.
  * 4. For each credit:
  *    - Calculate the new penalty (mora) = capital × percentage × overdue installments.
- *    - If a mora record already exists, update it (accumulate total).
- *    - If not, insert a new mora record.
+ *      The mora is RECALCULATED from scratch each run (idempotent): the stored value is
+ *      REPLACED, never accumulated, so re-running the job does not double the amount.
+ *    - If an active mora record already exists, recalculate it; if not, insert a new one.
  *    - Update the credit status to "MOROSO".
  * 5. Log every step for debugging and monitoring.
  */
@@ -489,6 +490,7 @@ export async function procesarMoras() {
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
         statusCredit: creditos.statusCredit,
+        capital: creditos.capital,
         hasPaidPayment: sql<boolean>`EXISTS (
           SELECT 1
           FROM cartera.pagos_credito pc
@@ -508,10 +510,13 @@ export async function procesarMoras() {
 
     console.log(`[DEBUG] Overdue installments found: ${cuotasVencidas.length}`);
 
-    // 3. Group by credit
+    // 3. Group by credit (conteo de cuotas vencidas + capital del crédito,
+    //    ya traído en el JOIN para evitar un SELECT por crédito dentro del loop).
     const moraPorCredito: Record<number, number> = {};
+    const capitalPorCredito = new Map<number, string>();
     for (const cuota of cuotasVencidas) {
       moraPorCredito[cuota.credito_id] = (moraPorCredito[cuota.credito_id] ?? 0) + 1;
+      capitalPorCredito.set(cuota.credito_id, cuota.capital);
     }
 
     console.log("[DEBUG] Grouping overdue installments by credit:", moraPorCredito);
@@ -543,17 +548,13 @@ export async function procesarMoras() {
     for (const [creditoIdStr, cuotasAtrasadas] of Object.entries(moraPorCredito)) {
       const creditoId = Number(creditoIdStr);
 
-      const [credito] = await db
-        .select({ capital: creditos.capital })
-        .from(creditos)
-        .where(eq(creditos.credito_id, creditoId));
-
-      if (!credito) {
+      const capitalStr = capitalPorCredito.get(creditoId);
+      if (capitalStr === undefined) {
         console.log(`[WARN] Credit ${creditoId} not found`);
         continue;
       }
 
-      const capital = new Big(credito.capital);
+      const capital = new Big(capitalStr);
 
       // Sin capital no aplica mora. Si tenía una mora activa, se le quita (desactiva).
       if (capital.lte(0)) {
@@ -589,7 +590,7 @@ export async function procesarMoras() {
             motivo: "Crédito sin capital — no aplica mora",
           });
         }
-        console.log(`[SKIP] Credit #${creditoId} sin capital (${credito.capital}) — mora quitada`);
+        console.log(`[SKIP] Credit #${creditoId} sin capital (${capitalStr}) — mora quitada`);
         continue;
       }
 
@@ -626,7 +627,7 @@ export async function procesarMoras() {
           monto_nuevo: moraNuevaStr,
           cuotas_atrasadas_anterior: 0,
           cuotas_atrasadas_nuevas: cuotasAtrasadas,
-          capital_credito: credito.capital,
+          capital_credito: capitalStr,
           porcentaje_mora: insertada.porcentaje_mora,
         });
 
@@ -665,7 +666,7 @@ export async function procesarMoras() {
           monto_nuevo: moraNuevaStr,
           cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas,
           cuotas_atrasadas_nuevas: cuotasAtrasadas,
-          capital_credito: credito.capital,
+          capital_credito: capitalStr,
           porcentaje_mora: moraActual.porcentaje_mora,
         });
 

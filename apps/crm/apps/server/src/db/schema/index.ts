@@ -14,6 +14,7 @@ export * from "./investments";
 export * from "./juridico-dashboard";
 export * from "./legal-contracts";
 export * from "./locations";
+export * from "./metas";
 export * from "./miniagent-credentials";
 export * from "./notes";
 export * from "./notifications";

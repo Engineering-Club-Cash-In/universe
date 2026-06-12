@@ -234,6 +234,25 @@ export type FlujoCuotasInversionesResponse = {
 	};
 };
 
+export type ColocacionPeriodoRow = {
+	bucket: string;
+	cantidad_creditos: number;
+	total_colocacion: string;
+};
+
+export type MoraAgingBucket = {
+	bucket: "30" | "60" | "90" | "120";
+	cantidad_creditos: number;
+	monto_mora: string;
+};
+
+export type ComparativoHistoricoResponse = {
+	cobrado: { mes: number; cobrado: string }[];
+	cartera: { mes: string; creditos_activos: number; cartera_activa: string }[];
+	moraActual: MoraAgingBucket[];
+	agingHistorico: ({ periodo: string } & MoraAgingBucket)[];
+};
+
 // ============================================================================
 // HTTP CLIENT
 // ============================================================================
@@ -1257,6 +1276,27 @@ export class CarteraBackClient {
 		);
 
 		return response.data ?? [];
+	}
+
+	async getColocacionPeriodo(params: {
+		periodo: string;
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<{ data: ColocacionPeriodoRow[] }> {
+		const qp = new URLSearchParams(params as Record<string, string>);
+		return this.request<{ data: ColocacionPeriodoRow[] }>(
+			`/reportes/colocacion-periodo?${qp}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	async getComparativoHistorico(anio: number): Promise<ComparativoHistoricoResponse> {
+		return this.request<ComparativoHistoricoResponse>(
+			`/reportes/comparativo-historico?anio=${anio}`,
+			{ method: "GET" },
+			true,
+		);
 	}
 
 	async getFacturacionMes(params: {

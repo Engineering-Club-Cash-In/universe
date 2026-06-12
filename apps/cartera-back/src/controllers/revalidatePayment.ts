@@ -4,6 +4,7 @@ import Big from "big.js";
 import { db } from "../database";
 import { pagos_credito, creditos } from "../database/db";
 import { insertPagosCreditoInversionistasV2 } from "./payments";
+import { esPagoAplicado } from "../utils/paymentStatus";
 
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
@@ -51,7 +52,7 @@ export const revalidatePayment = async ({ body, set }: any) => {
         throw new Error(`Payment ${pago_id} not found`);
       }
       
-      if (pago.validationStatus === "validated") {
+      if (esPagoAplicado(pago.validationStatus)) {
         throw new Error(`Payment ${pago_id} is already validated`);
       }
 

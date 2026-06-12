@@ -64,6 +64,7 @@
     "GPS",
     "MORA",
     "OTROS",
+    "INTERES_INVERSIONISTAS",
   ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),
@@ -263,6 +264,32 @@
     })
   );
 
+  // 📊 Aging de mora — foto por periodo agrupando los créditos morosos por cuotas
+  //    atrasadas. Buckets: 30 (1 cuota), 60 (2), 90 (3), 120 (4 o más). Una fila por
+  //    (periodo, bucket). Se llena junto con cierre_mensual (mismo filtro de fecha).
+  export const cierre_mora_aging = customSchema.table(
+    "cierre_mora_aging",
+    {
+      id: serial("id").primaryKey(),
+      periodo: date("periodo").notNull(), // primer día del mes cerrado, ej. 2026-06-01
+      bucket: text("bucket").notNull(), // '30' | '60' | '90' | '120'
+      cuotas_min: integer("cuotas_min").notNull(), // 1 | 2 | 3 | 4 (mínimo de cuotas atrasadas del bucket)
+      cantidad_creditos: integer("cantidad_creditos").notNull().default(0),
+      monto_mora: numeric("monto_mora", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+    },
+    (table) => ({
+      uqPeriodoBucket: uniqueIndex("uq_cierre_mora_aging_periodo_bucket").on(
+        table.periodo,
+        table.bucket
+      ),
+    })
+  );
+
   export const moras_credito = customSchema.table("moras_credito", {
     mora_id: serial("mora_id").primaryKey(),
     credito_id: integer("credito_id")
@@ -362,7 +389,8 @@
     'no_required',    // No necesita validación (pagos normales/automáticos)
     'pending',        // Pendiente de validación
     'validated',        // Validado
-    'capital',
+    'capital',          // Abono directo a capital REGISTRADO (sin aplicar)
+    'capital_validated',// Abono directo a capital YA APLICADO (no es pago de cuota)
     'reset'
   ]);
 

@@ -26,7 +26,7 @@ function App() {
         </div>
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            Sistema de Gestión de Taller
+            Sistema de Gestión de Centro de Servicios
           </h1>
           <p className="text-lg text-gray-600">
             Gestione inspecciones y vehículos de manera eficiente

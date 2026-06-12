@@ -8,8 +8,9 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { BadgeCheck, AlertTriangle, FileText, ChevronDown, ChevronUp, Calendar } from "lucide-react";
+import { BadgeCheck, AlertTriangle, FileText, ChevronDown, ChevronUp, Calendar, Eye } from "lucide-react";
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 
 export function MiniCardCredito({
   credito,
@@ -124,7 +125,7 @@ export function MiniCardCredito({
     // Permitir seleccionar cuotas con pagos pendientes; solo se ocultan las
     // cuotas ya validadas/cerradas. Se mantiene limitado a la cuota pagable
     // más antigua para no saltar deuda anterior.
-    .filter((c) => c.validationStatus !== "validated")
+    .filter((c) => c.validationStatus !== "validated" && c.validationStatus !== "capital_validated")
     .sort((a, b) => a.numero_cuota - b.numero_cuota)
     .slice(0, 1);
 
@@ -326,9 +327,14 @@ export function MiniCardCredito({
             <span className="font-bold text-blue-700 text-sm mb-1">
               Crédito SIFCO
             </span>
-            <span className="text-gray-900 text-xl font-bold tracking-wider">
+            <Link
+              to={`/pagos/${credito.numero_credito_sifco}`}
+              title="Ver historial de pagos"
+              className="group inline-flex items-center gap-1.5 text-blue-700 text-xl font-bold tracking-wider hover:text-blue-900 hover:underline underline-offset-2 transition-colors w-fit"
+            >
               {credito.numero_credito_sifco}
-            </span>
+              <Eye className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
           </div>
 
           {/* Usuario */}
@@ -336,9 +342,14 @@ export function MiniCardCredito({
             <span className="font-bold text-blue-700 text-sm mb-1">
               Usuario
             </span>
-            <span className="text-gray-800 font-semibold text-base">
+            <Link
+              to={`/pagos/${credito.numero_credito_sifco}`}
+              title="Ver historial de pagos"
+              className="group inline-flex items-center gap-1.5 text-blue-700 font-semibold text-base hover:text-blue-900 hover:underline underline-offset-2 transition-colors w-fit"
+            >
               {usuario.nombre}
-            </span>
+              <Eye className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
           </div>
 
           {/* Deuda Total */}

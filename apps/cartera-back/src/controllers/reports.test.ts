@@ -21,7 +21,7 @@ mock.module("@cci/email", () => ({
   sendInvestorAddedToCreditsNotification: mock(() => Promise.resolve()),
 }));
 
-const { applyEstadoCuentaRunningCapital, buildEstadoCuentaTableHeader, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments } = await import("./reports");
+const { applyEstadoCuentaRunningCapital, buildEstadoCuentaTableHeader, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments, esStatusExcluidoMora, esStatusSinFacturacion, escalarCapitalAlPrincipal } = await import("./reports");
 
 describe("estado de cuenta PDF", () => {
   it("incluye la columna de fecha de aplicacion del pago", () => {
@@ -200,5 +200,66 @@ describe("estado de cuenta PDF", () => {
       "115196.94",
       "40196.94",
     ]);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Fix "Totales acumulados" (panel rojo) de Pagos por Vencimiento
+// ──────────────────────────────────────────────────────────────────────────
+describe("status excluidos del reporte", () => {
+  it("excluye de mora y deuda acumulada (panel rojo) los 5 status: convenio/incobrable/cancelado/pend.cancelacion/caido", () => {
+    expect(esStatusExcluidoMora("EN_CONVENIO")).toBe(true);
+    expect(esStatusExcluidoMora("INCOBRABLE")).toBe(true);
+    expect(esStatusExcluidoMora("CANCELADO")).toBe(true);
+    expect(esStatusExcluidoMora("PENDIENTE_CANCELACION")).toBe(true);
+    expect(esStatusExcluidoMora("CAIDO")).toBe(true);
+    expect(esStatusExcluidoMora("ACTIVO")).toBe(false);
+    expect(esStatusExcluidoMora("MOROSO")).toBe(false);
+    expect(esStatusExcluidoMora(null)).toBe(false);
+    expect(esStatusExcluidoMora(undefined)).toBe(false);
+  });
+
+  it("excluye del esperado del mes (panel azul) SOLO los muertos; EN_CONVENIO y CAIDO sí facturan", () => {
+    expect(esStatusSinFacturacion("CANCELADO")).toBe(true);
+    expect(esStatusSinFacturacion("INCOBRABLE")).toBe(true);
+    expect(esStatusSinFacturacion("PENDIENTE_CANCELACION")).toBe(true);
+    // estos generan ingreso esperado aunque no generen mora:
+    expect(esStatusSinFacturacion("EN_CONVENIO")).toBe(false);
+    expect(esStatusSinFacturacion("CAIDO")).toBe(false);
+    expect(esStatusSinFacturacion("ACTIVO")).toBe(false);
+  });
+});
+
+describe("escalarCapitalAlPrincipal (tope de la deuda de capital acumulada)", () => {
+  const cuota = (capital: string, interes = "0.00", iva = "0.00", seguro = "0.00", gps = "0.00", membresias = "0.00") => ({
+    capital_restante: capital, interes_restante: interes, iva_12_restante: iva,
+    seguro_restante: seguro, gps_restante: gps, membresias,
+  });
+
+  it("morosos normales (suma de capital ≤ principal): factor 1, no toca el capital", () => {
+    const cuotas = [cuota("1000.00", "200.00", "24.00", "50.00", "0.00", "30.00"), cuota("1000.00", "200.00", "24.00", "50.00", "0.00", "30.00")];
+    const out = escalarCapitalAlPrincipal(cuotas, 100000);
+    expect(out.map((c) => c.capital_restante)).toEqual(["1000.00", "1000.00"]);
+    // total_restante = capital + interes + iva + seguro + gps + membresias
+    expect(out[0].total_restante).toBe("1304.00");
+  });
+
+  it("cuota ≈ capital: escala proporcional para que la suma = principal (no sobre-cuenta)", () => {
+    const cuotas = [cuota("70000.00"), cuota("70000.00")]; // suma 140000
+    const out = escalarCapitalAlPrincipal(cuotas, 70000);  // factor 0.5
+    expect(out.map((c) => c.capital_restante)).toEqual(["35000.00", "35000.00"]);
+    const sumaCap = out.reduce((s, c) => s + Number(c.capital_restante), 0);
+    expect(sumaCap).toBeCloseTo(70000, 2);
+  });
+
+  it("crédito con capital=0: el principal es 0 → toda la deuda de capital va a 0", () => {
+    const out = escalarCapitalAlPrincipal([cuota("233021.46")], 0);
+    expect(out[0].capital_restante).toBe("0.00");
+    expect(out[0].total_restante).toBe("0.00");
+  });
+
+  it("no infla cuando hay tolerancia de centavos (suma apenas sobre principal)", () => {
+    const out = escalarCapitalAlPrincipal([cuota("100.00")], 100.005);
+    expect(out[0].capital_restante).toBe("100.00"); // dentro de la tolerancia → factor 1
   });
 });

@@ -5,6 +5,7 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { auth } from "../lib/auth";
 import { adminProcedure } from "../lib/orpc";
+import { USER_ROLE_VALUES } from "../lib/roles";
 
 export const adminRouter = {
 	getStats: adminProcedure.handler(async ({ context: _ }) => {
@@ -42,19 +43,7 @@ export const adminRouter = {
 		.input(
 			z.object({
 				userId: z.string(),
-				role: z.enum([
-					"admin",
-					"sales",
-					"sales_supervisor",
-					"analyst",
-					"cobros",
-					"cobros_supervisor",
-					"juridico",
-					"accounting",
-					"investment_advisor_jr",
-					"investment_advisor_sr",
-					"investment_manager",
-				]),
+				role: z.enum(USER_ROLE_VALUES),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -145,19 +134,7 @@ export const adminRouter = {
 				email: z.string().email("Invalid email address"),
 				password: z.string().min(8, "Password must be at least 8 characters"),
 				role: z
-					.enum([
-						"admin",
-						"sales",
-						"sales_supervisor",
-						"analyst",
-						"cobros",
-						"cobros_supervisor",
-						"juridico",
-						"accounting",
-						"investment_advisor_jr",
-						"investment_advisor_sr",
-						"investment_manager",
-					])
+					.enum(USER_ROLE_VALUES)
 					.default("sales"),
 			}),
 		)

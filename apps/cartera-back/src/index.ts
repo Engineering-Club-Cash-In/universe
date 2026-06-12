@@ -4,8 +4,10 @@ import * as routers from "./routers";
 import { cors } from "@elysiajs/cors";
 import { iniciarTareasProgramadas } from "../schedule";
 import { auditLogMiddleware } from "./middleware/auditLog";
+import { validationErrorMiddleware } from "./middleware/validationError";
 
 const app = new Elysia()
+  .use(validationErrorMiddleware)
   .use(cors({
     origin: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

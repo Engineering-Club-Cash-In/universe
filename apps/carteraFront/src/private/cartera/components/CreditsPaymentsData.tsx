@@ -13,8 +13,9 @@ import {
   X,
 } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, FileCheck, CheckCircle2 } from "lucide-react";
+import { Eye, Pencil, XCircle, FileCheck, CheckCircle2, DollarSign } from "lucide-react";
 
 import {
   Table,
@@ -173,7 +174,9 @@ export function ListaCreditosPagos() {
           }
         },
         onError: (err: any) => {
-          toast.error(err?.message || `Error al generar reporte ${reportType}`);
+          toast.error(
+            getApiErrorMessage(err, `Error al generar reporte ${reportType}`),
+          );
         },
       }
     );
@@ -631,7 +634,7 @@ export function ListaCreditosPagos() {
                 }
               } catch (err) {
                 console.error("❌ Error generando Excel:", err);
-                toast.error("Error al generar el Excel");
+                toast.error(getApiErrorMessage(err, "Error al generar el Excel"));
               } finally {
                 setIsDownloadingExcel(false);
               }
@@ -1316,6 +1319,17 @@ function MobileView({
 
           {/* Acciones */}
           <div className="flex justify-center flex-wrap gap-2 mt-3">
+            {(user?.role === "ADMIN" || user?.role === "ASESOR") && (
+              <Button
+                variant="outline"
+                className="text-green-700 border-green-300 hover:bg-green-50"
+                onClick={() =>
+                  navigate(`/realizarPago?sifco=${item.creditos.numero_credito_sifco}`)
+                }
+              >
+                <DollarSign className="w-4 h-4 mr-1" /> Registrar Pago
+              </Button>
+            )}
             <Button
               variant="outline"
               className="text-blue-700 border-blue-300 hover:bg-blue-50"
@@ -1619,6 +1633,22 @@ function DesktopView({
                   <TableCell colSpan={6} className="p-0 bg-blue-50 rounded-b-2xl">
                     {/* Botones de acción */}
                     <div className="flex flex-wrap justify-center gap-2 px-6 py-4 border-b border-blue-100">
+                        {(user?.role === "ADMIN" || user?.role === "ASESOR") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
+                            onClick={() =>
+                              navigate(
+                                `/realizarPago?sifco=${item.creditos.numero_credito_sifco}`
+                              )
+                            }
+                          >
+                            <DollarSign className="w-4 h-4" />
+                            Registrar Pago
+                          </Button>
+                        )}
+
                         {canViewPayments(item.creditos.statusCredit) && (
                           <Button
                             variant="outline"

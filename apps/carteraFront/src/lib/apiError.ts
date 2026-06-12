@@ -1,34 +1,62 @@
 import { AxiosError } from "axios";
 
 /**
- * Traduce mensajes técnicos conocidos (jwt, validación de Elysia, etc.)
- * a texto entendible para el usuario final. Si el mensaje ya es legible
- * (el backend lo mandó en español), se devuelve tal cual.
+ * Traducciones de mensajes técnicos o en inglés conocidos. Se recorre en
+ * orden y gana la primera regla que matchea, así que las reglas específicas
+ * van antes que las generales (p. ej. "credit not found or not active"
+ * antes que "credit not found").
  */
+const TRADUCCIONES: Array<{
+  patron: RegExp;
+  traduccion: string | ((match: RegExpExecArray) => string);
+}> = [
+  { patron: /jwt expired/i, traduccion: "tu sesión expiró, vuelve a iniciar sesión" },
+  {
+    patron: /jwt|invalid signature|invalid token|token no proporcionado|token inválido/i,
+    traduccion: "tu sesión no es válida, vuelve a iniciar sesión",
+  },
+  {
+    patron: /^Expected /,
+    traduccion: (m) => `uno de los filtros o datos enviados no es válido (${m.input})`,
+  },
+  { patron: /payment\s+(\d+)\s+not found/i, traduccion: (m) => `no se encontró el pago ${m[1]}` },
+  { patron: /payment not found/i, traduccion: "no se encontró el pago" },
+  { patron: /credit not found or not active/i, traduccion: "no se encontró el crédito o no está activo" },
+  { patron: /credit not found/i, traduccion: "no se encontró el crédito" },
+  { patron: /user not found/i, traduccion: "no se encontró el usuario" },
+  {
+    patron: /validation failed/i,
+    traduccion: "los datos enviados no son válidos, revisa los campos e intenta de nuevo",
+  },
+  {
+    patron: /internal server error/i,
+    traduccion: "error interno del servidor, intenta de nuevo o contacta soporte",
+  },
+];
+
 function traducirDetalleTecnico(detail: string): string {
-  const d = detail.toLowerCase();
-  if (d.includes("jwt expired")) {
-    return "tu sesión expiró, vuelve a iniciar sesión";
-  }
-  if (
-    d.includes("jwt") ||
-    d.includes("invalid signature") ||
-    d.includes("invalid token") ||
-    d.includes("token no proporcionado") ||
-    d.includes("token inválido")
-  ) {
-    return "tu sesión no es válida, vuelve a iniciar sesión";
-  }
-  if (detail.startsWith("Expected ")) {
-    return `uno de los filtros o datos enviados no es válido (${detail})`;
+  for (const { patron, traduccion } of TRADUCCIONES) {
+    const match = patron.exec(detail);
+    if (match) {
+      return typeof traduccion === "function" ? traduccion(match) : traduccion;
+    }
   }
   return detail;
 }
 
 /**
+ * `message` genérico que no aporta información: si el endpoint también
+ * manda `error` con el motivo real, se prefiere `error`.
+ */
+const MENSAJE_SIN_INFORMACION = /^internal server error$/i;
+
+/**
  * Extrae el motivo real de un error de API para mostrarlo al usuario.
- * El backend devuelve el detalle en `error`, `message` o `mensaje`
- * según el endpoint, por lo que se revisan los tres campos.
+ *
+ * Prioridad de campos: `message` (texto curado de los endpoints) primero;
+ * `error` cuando no hay `message` o cuando este es un genérico sin
+ * información, porque hay endpoints donde los roles están invertidos
+ * (`message: "Internal server error"` y el motivo real en `error`).
  */
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof AxiosError) {
@@ -39,10 +67,20 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
       return `${fallback}: sin conexión con el servidor`;
     }
     const { status, data } = error.response;
-    const detail =
-      typeof data === "string"
-        ? data
-        : (data?.error ?? data?.message ?? data?.mensaje);
+    let detail: unknown;
+    if (typeof data === "string") {
+      detail = data;
+    } else {
+      detail = data?.message ?? data?.error ?? data?.mensaje;
+      if (
+        typeof detail === "string" &&
+        MENSAJE_SIN_INFORMACION.test(detail.trim()) &&
+        typeof data?.error === "string" &&
+        data.error.trim()
+      ) {
+        detail = data.error;
+      }
+    }
     if (typeof detail === "string" && detail.trim()) {
       return `${fallback}: ${traducirDetalleTecnico(detail.trim())}`;
     }

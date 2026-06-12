@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
  
 import { toast } from "sonner";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { getCuentasEmpresaService, type ActualizarCuentaPagoRequest, actualizarCuentaPagoService } from "../services/services";
 
 // 📋 Hook para obtener todas las cuentas de empresa
@@ -38,7 +39,7 @@ export function useActualizarCuentaPago() {
 
     onError: (error) => {
       console.error("❌ Error al actualizar cuenta:", error);
-      toast.error("❌ Error al actualizar la cuenta del pago");
+      toast.error(getApiErrorMessage(error, "❌ Error al actualizar la cuenta del pago"));
     },
   });
 }

@@ -614,10 +614,55 @@ export const reportesCarteraRouter = {
 					metasMap[r.anio][r.mes] = Number(r.monto);
 				}
 
-				const resultado = colocacion.map((row) => {
-					const bucket = new Date(row.bucket);
-					const anio = bucket.getFullYear();
-					const mes = bucket.getMonth() + 1;
+				// Indexar colocación por bucket truncado para lookup rápido
+				const colocacionMap = new Map<string, { cantidad: number; total: number }>();
+				for (const row of colocacion) {
+					const key = new Date(row.bucket).toISOString().slice(0, 10);
+					colocacionMap.set(key, {
+						cantidad: row.cantidad_creditos,
+						total: Number(row.total_colocacion),
+					});
+				}
+
+				// Generar todos los buckets del rango para no omitir períodos sin colocación
+				const buckets: Date[] = [];
+				const cur = new Date(`${input.fechaInicio}T12:00:00Z`);
+				const end = new Date(`${input.fechaFin}T12:00:00Z`);
+
+				const truncTz = (d: Date, periodo: string): Date => {
+					const gt = new Date(d.getTime() - 6 * 60 * 60 * 1000);
+					const y = gt.getUTCFullYear(), mo = gt.getUTCMonth(), day = gt.getUTCDate();
+					if (periodo === "dia") return new Date(Date.UTC(y, mo, day));
+					if (periodo === "semana") {
+						const dow = gt.getUTCDay();
+						return new Date(Date.UTC(y, mo, day - dow));
+					}
+					if (periodo === "mes") return new Date(Date.UTC(y, mo, 1));
+					if (periodo === "trimestre") return new Date(Date.UTC(y, Math.floor(mo / 3) * 3, 1));
+					return new Date(Date.UTC(y, 0, 1));
+				};
+
+				const advancePeriod = (d: Date, periodo: string): Date => {
+					const n = new Date(d);
+					if (periodo === "dia") n.setUTCDate(n.getUTCDate() + 1);
+					else if (periodo === "semana") n.setUTCDate(n.getUTCDate() + 7);
+					else if (periodo === "mes") n.setUTCMonth(n.getUTCMonth() + 1);
+					else if (periodo === "trimestre") n.setUTCMonth(n.getUTCMonth() + 3);
+					else n.setUTCFullYear(n.getUTCFullYear() + 1);
+					return n;
+				};
+
+				let b = truncTz(cur, input.periodo);
+				while (b <= end) {
+					buckets.push(b);
+					b = advancePeriod(b, input.periodo);
+				}
+
+				const resultado = buckets.map((bucket) => {
+					const key = bucket.toISOString().slice(0, 10);
+					const col = colocacionMap.get(key);
+					const anio = bucket.getUTCFullYear();
+					const mes = bucket.getUTCMonth() + 1;
 					const metaMes = metasMap[anio]?.[mes] ?? 0;
 
 					let metaBucket = 0;
@@ -640,15 +685,13 @@ export const reportesCarteraRouter = {
 						metaBucket = metaMes / 25;
 					}
 
-					const colocado = Number(row.total_colocacion);
-					const cobertura =
-						metaBucket > 0 ? (colocado / metaBucket) * 100 : null;
-					const faltante =
-						metaBucket > 0 ? Math.max(0, metaBucket - colocado) : null;
+					const colocado = col?.total ?? 0;
+					const cobertura = metaBucket > 0 ? (colocado / metaBucket) * 100 : null;
+					const faltante = metaBucket > 0 ? Math.max(0, metaBucket - colocado) : null;
 
 					return {
-						bucket: row.bucket,
-						cantidad_creditos: row.cantidad_creditos,
+						bucket: bucket.toISOString(),
+						cantidad_creditos: col?.cantidad ?? 0,
 						colocado: colocado.toFixed(2),
 						meta: metaBucket.toFixed(2),
 						cobertura: cobertura?.toFixed(1) ?? null,

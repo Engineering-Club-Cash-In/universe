@@ -71,6 +71,7 @@ import {
 	getUltimasSincronizaciones,
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
+import { toDateStrGT } from "../lib/guatemala-month-window";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
 import { createNotification } from "./notifications";
 
@@ -4048,12 +4049,7 @@ export const cobrosRouter = {
 				});
 			}
 
-			const hoy = new Date();
 			const pad = (n: number) => n.toString().padStart(2, "0");
-			const toISO = (d: Date) =>
-				`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-			const fechaInicio = toISO(hoy);
 
 			const diasAdelanteMap: Record<typeof input.temporalidad, number> = {
 				hoy: 0,
@@ -4063,9 +4059,16 @@ export const cobrosRouter = {
 			};
 			const diasAdelante = diasAdelanteMap[input.temporalidad];
 
-			const fechaFinDate = new Date(hoy);
-			fechaFinDate.setDate(fechaFinDate.getDate() + diasAdelante);
-			const fechaFin = toISO(fechaFinDate);
+			// Las fechas de negocio son días calendario de Guatemala (UTC-6). Si el
+			// server corre en UTC, usar getFullYear/getMonth/getDate directo desplaza
+			// "hoy" un día entre las 00:00 y 05:59 UTC. Anclamos en la fecha GT y
+			// hacemos la aritmética de días sobre esos componentes en UTC puro.
+			const fechaInicio = toDateStrGT(new Date());
+			const [anioGT, mesGT, diaGT] = fechaInicio.split("-").map(Number);
+			const fechaFinUTC = new Date(
+				Date.UTC(anioGT, mesGT - 1, diaGT + diasAdelante),
+			);
+			const fechaFin = `${fechaFinUTC.getUTCFullYear()}-${pad(fechaFinUTC.getUTCMonth() + 1)}-${pad(fechaFinUTC.getUTCDate())}`;
 
 			const desglose = await carteraBackClient.getMontoACobrar({
 				periodo: "dia",

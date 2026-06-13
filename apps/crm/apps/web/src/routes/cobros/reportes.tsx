@@ -329,7 +329,7 @@ function TabPagos({ session, canSeeAll }: { session: ReturnType<typeof authClien
 	});
 
 	const { data: asesoresData } = useQuery({
-		...orpc.getAsesores.queryOptions({ input: {} }),
+		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
 		enabled: !!session && canSeeAll,
 	});
 
@@ -563,7 +563,7 @@ function TabDescuentos({ session, canSeeAll }: { session: ReturnType<typeof auth
 	const emailCobrador = canSeeAll ? (emailAsesor || undefined) : (session?.user?.email ?? undefined);
 
 	const { data: asesoresData } = useQuery({
-		...orpc.getAsesores.queryOptions({ input: {} }),
+		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
 		enabled: !!session && canSeeAll,
 	});
 

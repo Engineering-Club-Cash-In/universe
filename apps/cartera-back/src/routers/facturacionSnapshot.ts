@@ -6,6 +6,7 @@ import {
   generarExcelFacturacionDiaria,
   generarSnapshotDiario,
   getSnapshotsDiarios,
+  regenerarSnapshotRango,
 } from "../controllers/facturacionSnapshot";
 
 export const facturacionSnapshotRouter = new Elysia({
@@ -33,6 +34,35 @@ export const facturacionSnapshotRouter = new Elysia({
     {
       body: t.Object({
         fecha: t.String(), // "YYYY-MM-DD"
+      }),
+    }
+  )
+
+  // POST - Regenerar (force) el snapshot de un RANGO de días. Recalcula aunque
+  //        la fila exista. { fechaInicio: "YYYY-MM-DD", fechaFin: "YYYY-MM-DD" }
+  .post(
+    "/regenerar-rango",
+    async ({ body, set }: any) => {
+      try {
+        const result = await regenerarSnapshotRango(
+          body.fechaInicio,
+          body.fechaFin
+        );
+        if (!result.success) set.status = 400;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error regenerando rango de snapshots",
+          error: String(error),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        fechaInicio: t.String(), // "YYYY-MM-DD"
+        fechaFin: t.String(), // "YYYY-MM-DD"
       }),
     }
   )

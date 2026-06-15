@@ -24,6 +24,7 @@ import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
   getCuotaIdForPaymentInsert,
+  shouldIncobrableInstallmentBePaid,
 } from "./registerPaymentPolicy";
 
 // Tipo de conexión del pool (pg no expone tipos; lo derivamos de client.connect)
@@ -2087,6 +2088,29 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       console.log(
         `📊 Cuota ${pago.cuota_id}: aplicado ${totalAplicadoEnCuota.toFixed(2)} / esperado ${cuotaAmount.toFixed(2)} (otros validated: ${otrosPagosValidados.length}) → ${cuotaCompleta ? "COMPLETA" : "incompleta"}`
       );
+    }
+
+    // INCOBRABLE: la cuota se cierra SI Y SOLO SI el capital del crédito llega
+    // a 0 con este abono. No se usa la suma de `monto_aplicado` porque las filas
+    // estructurales del castigo (system_reset / SISTEMA-INCOBRABLE) la
+    // contaminan y cerrarían la cuota sin recuperación real. Ver
+    // shouldIncobrableInstallmentBePaid. (Si no es incobrable devuelve null y
+    // se conserva la decisión por suma de arriba.)
+    if (pago.cuota_id !== null) {
+      const incobrableCuotaPagada = shouldIncobrableInstallmentBePaid({
+        statusCredit: credito.statusCredit,
+        capital: credito.capital,
+        abonoCapital: pago.abono_capital,
+      });
+      if (incobrableCuotaPagada !== null) {
+        cuotaCompleta = incobrableCuotaPagada;
+        const capitalPostPago = new Big(credito.capital ?? 0).minus(
+          new Big(pago.abono_capital ?? 0)
+        );
+        console.log(
+          `🔴 INCOBRABLE crédito ${credito.credito_id}: capital ${new Big(credito.capital ?? 0).toFixed(2)} − abono ${new Big(pago.abono_capital ?? 0).toFixed(2)} = ${capitalPostPago.toFixed(2)} → cuota ${cuotaCompleta ? "PAGADA (capital=0)" : "sigue pendiente"}`
+        );
+      }
     }
 
     // ─────────────────────────────────────────────────────────────────

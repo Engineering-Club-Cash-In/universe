@@ -5,6 +5,7 @@ import {
 	AlertTriangle,
 	CalendarDays,
 	ChevronLeft,
+	ChevronDown,
 	ChevronRight,
 	Download,
 	FileText,
@@ -33,6 +34,7 @@ import {
 	YAxis,
 } from "recharts";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { ReportCard } from "@/components/reports/report-card";
 import { ScenarioModal } from "@/components/reports/scenario-modal";
@@ -316,6 +318,8 @@ function RouteComponent() {
 	const [flujoCuotasRange, setFlujoCuotasRange] = useState(
 		getDefaultFlujoCuotasRange,
 	);
+	const [desgloseInversionistaOpen, setDesgloseInversionistaOpen] =
+		useState(false);
 	const [comparativoAnio, setComparativoAnio] = useState(() =>
 		new Date().getFullYear(),
 	);
@@ -400,6 +404,18 @@ function RouteComponent() {
 	const flujoCuotasData = flujoCuotasQuery.data as
 		| FlujoCuotasInversionesResponse
 		| undefined;
+
+	const flujoPorInversionistaQuery = useQuery({
+		...orpc.getFlujoCuotasPorInversionista.queryOptions({
+			input: {
+				fechaInicio: flujoCuotasRange.fechaInicio,
+				fechaFin: flujoCuotasRange.fechaFin,
+			},
+		}),
+		enabled: isAdmin,
+	});
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const flujoPorInversionistaData = flujoPorInversionistaQuery.data as any;
 
 	const comparativoQuery = useQuery({
 		...orpc.getComparativoHistorico.queryOptions({
@@ -1602,7 +1618,7 @@ function RouteComponent() {
 											{/* Sección 2: Cash (sin reinversión + porciones cash de reinversión parcial) */}
 											<div>
 												<p className="mb-2 font-semibold text-sm">
-													Cuotas → Cash
+													Cuotas → A Recibir
 												</p>
 												<Table>
 													<TableHeader>
@@ -1665,7 +1681,7 @@ function RouteComponent() {
 														)}
 														{/* Total general cash */}
 														<TableRow className="border-t-2 bg-muted/50 font-bold">
-															<TableCell>Total Cash</TableCell>
+															<TableCell>Total a Recibir</TableCell>
 															<TableCell colSpan={3} />
 															<TableCell className="text-right">
 																{formatCurrency(
@@ -1720,6 +1736,147 @@ function RouteComponent() {
 										</>
 									);
 								})()}
+
+							{/* Sección 4: Desglose por Inversionista */}
+							<div className="border-t pt-4">
+								<div className="mb-3 flex items-center justify-between">
+									<button
+										type="button"
+										className="flex items-center gap-1 font-semibold text-sm hover:text-foreground/70 transition-colors"
+										onClick={() =>
+											setDesgloseInversionistaOpen(
+												(o) => !o,
+											)
+										}
+									>
+										{desgloseInversionistaOpen ? (
+											<ChevronDown className="h-4 w-4" />
+										) : (
+											<ChevronRight className="h-4 w-4" />
+										)}
+										Desglose por Inversionista
+									</button>
+									{desgloseInversionistaOpen &&
+										(flujoPorInversionistaData?.porInversionista?.length ?? 0) > 0 && (
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => {
+												const rows = (
+													// eslint-disable-next-line @typescript-eslint/no-explicit-any
+													(flujoPorInversionistaData!.porInversionista as any[])
+												).map((r: any) => ({
+													Inversionista: r.nombre,
+													"Reinv. Capital": r.reinversion_capital,
+													"Reinv. Interés": r.reinversion_interes,
+													"Total Reinversión": r.reinversion_total,
+													"Capital a Recibir": r.cash_capital,
+													"Interés a Recibir": r.cash_interes,
+													"Total a Recibir": r.cash_total,
+													"Total General": r.total,
+												}));
+												const ws = XLSX.utils.json_to_sheet(rows);
+												ws["!cols"] = [
+													{ wch: 30 },
+													{ wch: 18 },
+													{ wch: 18 },
+													{ wch: 18 },
+													{ wch: 18 },
+													{ wch: 18 },
+													{ wch: 18 },
+													{ wch: 18 },
+												];
+												const wb = XLSX.utils.book_new();
+												XLSX.utils.book_append_sheet(
+													wb,
+													ws,
+													"Por Inversionista",
+												);
+												XLSX.writeFile(
+													wb,
+													`flujo-inversionistas-${flujoCuotasRange.fechaInicio}-${flujoCuotasRange.fechaFin}.xlsx`,
+												);
+											}}
+										>
+											<Download className="mr-2 h-4 w-4" />
+											Exportar Excel
+										</Button>
+									)}
+								</div>
+								{desgloseInversionistaOpen && (flujoPorInversionistaQuery.isPending ? (
+									<p className="py-4 text-center text-muted-foreground text-sm">
+										Cargando...
+									</p>
+								) : flujoPorInversionistaQuery.isError ? (
+									<p className="py-4 text-center text-destructive text-sm">
+										Error al cargar desglose por inversionista
+									</p>
+								) : !flujoPorInversionistaData?.porInversionista?.length ? (
+									<p className="py-4 text-center text-muted-foreground text-sm">
+										Sin datos para el período seleccionado
+									</p>
+								) : (
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Inversionista</TableHead>
+												<TableHead className="text-right">
+													Reinversión
+												</TableHead>
+												<TableHead className="text-right">A Recibir</TableHead>
+												<TableHead className="text-right">Total</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{(
+												flujoPorInversionistaData.porInversionista as any[]
+											).map((row: any) => (
+												<TableRow key={row.inversionista_id}>
+													<TableCell className="font-medium">
+														{row.nombre}
+													</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(Number(row.reinversion_total))}
+													</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(Number(row.cash_total))}
+													</TableCell>
+													<TableCell className="text-right font-semibold">
+														{formatCurrency(Number(row.total))}
+													</TableCell>
+												</TableRow>
+											))}
+										</TableBody>
+										{flujoPorInversionistaData?.totales && (
+											<tfoot>
+												<TableRow className="border-t-2 bg-muted/50 font-bold">
+													<TableCell>Total</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(
+															Number(
+																flujoPorInversionistaData.totales
+																	.reinversion_total,
+															),
+														)}
+													</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(
+															Number(
+																flujoPorInversionistaData.totales.cash_total,
+															),
+														)}
+													</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(
+															Number(flujoPorInversionistaData.totales.total),
+														)}
+													</TableCell>
+												</TableRow>
+											</tfoot>
+										)}
+									</Table>
+								))}
+							</div>
 						</CardContent>
 					</Card>
 

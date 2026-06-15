@@ -17,6 +17,25 @@ type RemainingPayment = {
 
 const toBig = (value?: string | number | null) => new Big(value ?? 0);
 
+// Estados de crédito sobre los que se permite reversar un pago.
+// Incluye INCOBRABLE: aunque el crédito ya esté castigado, si se registró un
+// pago por error (p. ej. el pago aún se puede crear sobre un incobrable) debe
+// poder reversarse. Los estados de cierre (CANCELADO, PENDIENTE_CANCELACION,
+// CAIDO) siguen bloqueados.
+export const REVERSIBLE_CREDIT_STATUSES = [
+  "ACTIVO",
+  "MOROSO",
+  "EN_CONVENIO",
+  "INCOBRABLE",
+] as const;
+
+export function isCreditStatusReversible(status?: string | null) {
+  return (
+    status != null &&
+    (REVERSIBLE_CREDIT_STATUSES as readonly string[]).includes(status)
+  );
+}
+
 export function shouldRemoveSameInstallmentPaymentOnReverse(
   payment: SameInstallmentPayment,
 ) {

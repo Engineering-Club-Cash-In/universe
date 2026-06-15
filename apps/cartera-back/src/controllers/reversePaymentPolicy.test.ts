@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
+  isCreditStatusReversible,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
@@ -70,5 +71,20 @@ describe("reverse payment policy", () => {
   it("marca los pagos restantes igual que el estado recalculado de la cuota", () => {
     expect(getRemainingPaymentPaidStatusAfterReversal(true)).toBeTrue();
     expect(getRemainingPaymentPaidStatusAfterReversal(false)).toBeFalse();
+  });
+
+  it("permite reversar pagos en creditos activos, en mora, en convenio e incobrables", () => {
+    expect(isCreditStatusReversible("ACTIVO")).toBeTrue();
+    expect(isCreditStatusReversible("MOROSO")).toBeTrue();
+    expect(isCreditStatusReversible("EN_CONVENIO")).toBeTrue();
+    expect(isCreditStatusReversible("INCOBRABLE")).toBeTrue();
+  });
+
+  it("bloquea reversar pagos en creditos en estado de cierre o sin estado", () => {
+    expect(isCreditStatusReversible("CANCELADO")).toBeFalse();
+    expect(isCreditStatusReversible("PENDIENTE_CANCELACION")).toBeFalse();
+    expect(isCreditStatusReversible("CAIDO")).toBeFalse();
+    expect(isCreditStatusReversible(null)).toBeFalse();
+    expect(isCreditStatusReversible(undefined)).toBeFalse();
   });
 });

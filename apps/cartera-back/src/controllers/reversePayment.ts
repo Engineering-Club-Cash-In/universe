@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, or, not, inArray, sql } from "drizzle-orm";
+import { eq, and, not, inArray, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import {
@@ -20,6 +20,7 @@ import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { updateInstallments } from "./updateCredit";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
+  REVERSIBLE_CREDIT_STATUSES,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
@@ -103,11 +104,7 @@ export const reversePayment = async ({ body, set }: any) => {
         .where(
           and(
             eq(creditos.credito_id, credito_id),
-            or(
-              eq(creditos.statusCredit, "ACTIVO"),
-              eq(creditos.statusCredit, "MOROSO"),
-              eq(creditos.statusCredit, "EN_CONVENIO"),
-            ),
+            inArray(creditos.statusCredit, [...REVERSIBLE_CREDIT_STATUSES]),
           ),
         )
         .limit(1);

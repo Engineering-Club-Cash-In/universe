@@ -12,9 +12,9 @@ const LOGO_URL =
 // ============================================================================
 // 📸 SNAPSHOT DIARIO DE FACTURACIÓN (tipo Excel "Reuniones diarias")
 //    Calcula y CONGELA una fila por día con las columnas A→BK.
-//    Fuentes: facturacion_desglose (CUBE), creditos.royalti (royalty),
-//    gastos_administrativos, pagos_credito.reserva, pci (inversionistas),
-//    metas_facturacion. Upsert por fecha (regenerable).
+//    Fuentes: facturacion_desglose (CUBE + genéricas: otros, royalty facturado,
+//    inversionistas), gastos_administrativos, ingresos_carros,
+//    pagos_credito.reserva, metas_facturacion. Upsert por fecha (regenerable).
 // ============================================================================
 
 // Prefijo de columna por rubro (lo que factura CUBE).

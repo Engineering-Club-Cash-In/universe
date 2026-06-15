@@ -456,6 +456,7 @@ function buildInvoices(
 				{
 					monto: royalti,
 					rubro: "Royalty",
+					rubro_desglose: "ROYALTY",
 				},
 			],
 		});
@@ -480,6 +481,7 @@ function buildInvoices(
 				{
 					monto: FACTURACION_TRASPASO_COSTO,
 					rubro: "Cargo por servicios",
+					rubro_desglose: "OTROS",
 				},
 			],
 		});
@@ -497,6 +499,7 @@ function buildInvoices(
 				{
 					monto: leasingContractCost,
 					rubro: "Cargo por servicios",
+					rubro_desglose: "OTROS",
 				},
 			],
 		});
@@ -514,6 +517,7 @@ function buildInvoices(
 				{
 					monto: FACTURACION_GARANTIA_MOBILIARIA_COSTO,
 					rubro: "Cargo por servicios",
+					rubro_desglose: "OTROS",
 				},
 			],
 		});
@@ -533,12 +537,14 @@ function buildInvoices(
 			cuota0Items.push({
 				monto: interestCost,
 				rubro: "Gastos varios",
+				rubro_desglose: "INTERES",
 			});
 		}
 		if (extraMembershipCost > 0) {
 			cuota0Items.push({
 				monto: extraMembershipCost,
 				rubro: "Gastos varios",
+				rubro_desglose: "MEMBRESIA",
 			});
 		}
 		if (cuota0Items.length > 0) {
@@ -562,6 +568,7 @@ function buildInvoices(
 				{
 					monto: FACTURACION_NOMBRAMIENTO_COSTO,
 					rubro: "Cargo por servicios",
+					rubro_desglose: "OTROS",
 				},
 			],
 		});
@@ -579,6 +586,7 @@ function buildInvoices(
 				{
 					monto: keyCopyDiffCost,
 					rubro: "Cargo por servicios",
+					rubro_desglose: "OTROS",
 				},
 			],
 		});
@@ -598,12 +606,14 @@ function buildInvoices(
 			seguroGastosItems.push({
 				monto: extraInsuranceCost,
 				rubro: "Gastos varios",
+				rubro_desglose: "SEGURO",
 			});
 		}
 		if (extraAdminCost > 0) {
 			seguroGastosItems.push({
 				monto: extraAdminCost,
 				rubro: "Gastos varios",
+				rubro_desglose: "OTROS",
 			});
 		}
 		if (seguroGastosItems.length > 0) {

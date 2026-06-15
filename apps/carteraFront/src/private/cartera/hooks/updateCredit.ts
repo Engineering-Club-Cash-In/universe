@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner"; // o donde uses tu toast
+import { getApiErrorMessage } from "@/lib/apiError";
 import { updateCreditService, type UpdateCreditBody } from "../services/services";
 
 export function useUpdateCredit() {
@@ -10,8 +11,7 @@ export function useUpdateCredit() {
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (error: any) => {
-      const msg = error?.response?.data?.message || "Error actualizando crédito";
-      toast.error(msg);
+      toast.error(getApiErrorMessage(error, "Error actualizando crédito"));
     },
   });
 }

@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { generarReciboPago } from "../services/services";
 import { toast } from "sonner";
+import { getApiErrorMessage } from "@/lib/apiError";
 
 export function useReciboPago() {
   return useMutation({
@@ -10,7 +11,7 @@ export function useReciboPago() {
       window.open(data.pdfUrl, "_blank");
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.message || "Error al generar el recibo de pago");
+      toast.error(getApiErrorMessage(err, "Error al generar el recibo de pago"));
     },
   });
 }

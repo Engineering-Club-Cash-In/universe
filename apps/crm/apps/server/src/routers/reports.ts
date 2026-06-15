@@ -692,8 +692,6 @@ export const getReporteMetaColocacion = metaColocacionReportProcedure
 					FROM opportunity_stage_history osh
 					JOIN sales_stages ss ON ss.id = osh.to_stage_id
 					WHERE ss.closure_percentage >= 90
-						AND EXTRACT(YEAR FROM osh.changed_at AT TIME ZONE 'America/Guatemala') = ${anio}
-						AND EXTRACT(MONTH FROM osh.changed_at AT TIME ZONE 'America/Guatemala') = ${mes}
 					GROUP BY osh.opportunity_id
 				)
 				SELECT
@@ -703,8 +701,13 @@ export const getReporteMetaColocacion = metaColocacionReportProcedure
 					COALESCE(SUM(o.value::numeric), 0) AS monto
 				FROM first_placed fp
 				JOIN opportunities o ON o.id = fp.opportunity_id
+				JOIN sales_stages ss_cur
+					ON ss_cur.id = o.stage_id
+					AND ss_cur.closure_percentage >= 90
 				LEFT JOIN "user" u ON u.id = o.assigned_to
 				WHERE o.status != 'migrate'
+					AND EXTRACT(YEAR FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${anio}
+					AND EXTRACT(MONTH FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${mes}
 				GROUP BY o.assigned_to, u.name
 				ORDER BY monto DESC
 			`),

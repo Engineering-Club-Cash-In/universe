@@ -2441,6 +2441,21 @@ if (facturasExistentes.length > 0) {
 
       console.log('✅ Estado de factura actualizado en base de datos');
 
+      // 🧾 Si la factura tenía desglose GENÉRICO (para el reporte diario), borrarlo
+      //    para que no siga sumando en el snapshot tras la anulación. Solo toca las
+      //    filas genéricas (pago_id IS NULL); las ligadas a un pago no se tocan.
+      //    Best-effort: la factura ya quedó anulada, esto no debe romper la respuesta.
+      try {
+        await db.execute(
+          sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${facturaAnulada.factura_id} AND pago_id IS NULL`
+        );
+      } catch (limpiezaError) {
+        console.error(
+          '⚠️ No se pudo limpiar el desglose genérico de la factura anulada (NO afecta la anulación):',
+          (limpiezaError as Error).message
+        );
+      }
+
       // ============================================
       // 8️⃣ RESPUESTA EXITOSA
       // ============================================
@@ -3334,7 +3349,10 @@ if (facturasExistentes.length > 0) {
                     ${rubro}::cartera.rubro_facturacion,
                     ${montoBig.toFixed(2)},
                     ${iva.toFixed(2)},
-                    (SELECT (fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date
+                    -- fecha_emision YA se guarda en hora Guatemala (certificarFacturaHelper
+                    -- le resta 6h antes de persistir), así que se usa directo SIN volver a
+                    -- convertir de UTC→GT (eso shifteaba las genéricas de 00:00–05:59 al día anterior).
+                    (SELECT fecha_emision::date
                        FROM cartera.facturas_electronicas WHERE factura_id = ${resultado.factura_id}),
                     ${categoria}
                   )

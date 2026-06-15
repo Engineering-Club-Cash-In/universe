@@ -665,6 +665,9 @@ export interface GetStatsParams {
 export interface FacturaItem {
 	monto: number;
 	rubro: string;
+	/** Rubro del REPORTE (enum rubro_facturacion de cartera-back) para el desglose.
+	 *  Opcional: si viene, cartera lo guarda en facturacion_desglose y el snapshot lo suma. */
+	rubro_desglose?: string;
 }
 
 /** Input para facturación genérica */

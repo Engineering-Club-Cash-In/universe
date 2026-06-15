@@ -342,6 +342,34 @@ export async function asegurarSnapshotDiario(fecha: string) {
   return { success: true, created: true, fecha };
 }
 
+// Regenera (force, upsert) el snapshot de CADA día en [fechaInicio, fechaFin].
+// A diferencia de asegurarSnapshotDiario, SIEMPRE recalcula aunque la fila ya
+// exista — útil para refrescar días pre-creados (p. ej. del import del Excel)
+// o capturar facturación que entró con fecha atrasada.
+export async function regenerarSnapshotRango(
+  fechaInicio: string,
+  fechaFin: string
+) {
+  const dias: string[] = [];
+  const d = new Date(`${fechaInicio}T00:00:00Z`);
+  const fin = new Date(`${fechaFin}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || Number.isNaN(fin.getTime()) || d > fin) {
+    return { success: false, message: "Rango de fechas inválido" };
+  }
+  while (d <= fin) {
+    dias.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (dias.length > 400) break; // tope defensivo
+  }
+  for (const f of dias) await generarSnapshotDiario(f);
+  return {
+    success: true,
+    regenerados: dias.length,
+    desde: dias[0],
+    hasta: dias[dias.length - 1],
+  };
+}
+
 // ============================================================================
 // 📥 EXPORTAR A EXCEL (diseño tipo Reuniones diarias, con logo y totales)
 // ============================================================================

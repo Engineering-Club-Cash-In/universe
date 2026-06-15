@@ -12,9 +12,9 @@ const LOGO_URL =
 // ============================================================================
 // 📸 SNAPSHOT DIARIO DE FACTURACIÓN (tipo Excel "Reuniones diarias")
 //    Calcula y CONGELA una fila por día con las columnas A→BK.
-//    Fuentes: facturacion_desglose (CUBE), creditos.royalti (royalty),
-//    gastos_administrativos, pagos_credito.reserva, pci (inversionistas),
-//    metas_facturacion. Upsert por fecha (regenerable).
+//    Fuentes: facturacion_desglose (CUBE + genéricas: otros, royalty facturado,
+//    inversionistas), gastos_administrativos, ingresos_carros,
+//    pagos_credito.reserva, metas_facturacion. Upsert por fecha (regenerable).
 // ============================================================================
 
 // Prefijo de columna por rubro (lo que factura CUBE).
@@ -24,6 +24,7 @@ const RUBRO_PREFIX: Record<string, string> = {
   MEMBRESIA: "mem",
   OTROS: "oi",
   MORA: "mora",
+  ROYALTY: "roy",
 };
 
 // categoría BD -> producto Excel (sufijo). "__NUEVO__" usa el patrón nuevo_<prefijo>_autocompras.
@@ -67,15 +68,20 @@ export async function generarSnapshotDiario(fecha: string) {
   };
   const g = (col: string) => C[col] ?? new Big(0);
 
-  // 1) Desglose CUBE del día: por categoría × rubro
+  // 1) Desglose del día: por categoría × rubro. LEFT JOIN para incluir también las
+  //    GENÉRICAS (pago_id NULL): para esas la categoría sale de la columna guardada
+  //    `fd.categoria` (resuelta por NIT al facturar); las de pago la derivan por JOIN.
   const desg = await db.execute(sql`
-    SELECT u.categoria AS categoria, fd.rubro AS rubro, SUM(fd.monto_total) AS total
+    SELECT COALESCE(u.categoria, fd.categoria) AS categoria, fd.rubro AS rubro, SUM(fd.monto_total) AS total
     FROM cartera.facturacion_desglose fd
-    INNER JOIN cartera.pagos_credito p ON p.pago_id   = fd.pago_id
-    INNER JOIN cartera.creditos      c ON c.credito_id = p.credito_id
-    INNER JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
+    LEFT JOIN cartera.pagos_credito p ON p.pago_id   = fd.pago_id
+    LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
+    LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
     WHERE fd.fecha_aplicado_gt = ${fecha}::date
-    GROUP BY u.categoria, fd.rubro
+      -- una fila de PAGO huérfana (credito/usuario borrado) no debe sumar al
+      -- total; las GENÉRICAS (pago_id NULL) sí entran.
+      AND (fd.pago_id IS NULL OR p.pago_id IS NOT NULL)
+    GROUP BY COALESCE(u.categoria, fd.categoria), fd.rubro
   `);
   for (const r of (desg as any).rows ?? []) {
     const cat = r.categoria as string;
@@ -97,23 +103,18 @@ export async function generarSnapshotDiario(fecha: string) {
         ? "membresia"
         : rubro === "OTROS"
         ? "otros_ingresos"
+        : rubro === "ROYALTY"
+        ? "royalty"
         : "mora_cube"; // MORA
     add(totalCol, total);
     add(colProducto(prefix, cat), total);
   }
 
-  // 2) Royalty del día: de creditos.royalti por fecha_creacion (GT) + categoría
-  const roy = await db.execute(sql`
-    SELECT u.categoria AS categoria, COALESCE(SUM(c.royalti), 0) AS total
-    FROM cartera.creditos c
-    INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-    WHERE (c.fecha_creacion AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
-    GROUP BY u.categoria
-  `);
-  for (const r of (roy as any).rows ?? []) {
-    add("royalty", r.total);
-    add(colProducto("roy", r.categoria as string), r.total);
-  }
+  // 2) Royalty del día = SOLO lo REALMENTE facturado (rubro ROYALTY del desglose,
+  //    ya sumado en el bloque 1). Decisión de diseño: NO se usa creditos.royalti de
+  //    respaldo — lo facturado es la fuente correcta (creditos.royalti difería de
+  //    contabilidad) y el respaldo causaba doble conteo. Crédito sin royalty
+  //    facturado genérico → no suma royalty (0).
 
   // 3) Gastos administrativos del día
   const adm = await db.execute(sql`
@@ -164,9 +165,13 @@ export async function generarSnapshotDiario(fecha: string) {
     FROM cartera.facturacion_desglose
     WHERE fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
   `);
+  // Royalty MTD: SOLO lo facturado (rubro ROYALTY del desglose). Sin respaldo de
+  // creditos.royalti (misma decisión que el bloque 2).
   const royMtd = await db.execute(sql`
-    SELECT COALESCE(SUM(c.royalti), 0) AS total FROM cartera.creditos c
-    WHERE (c.fecha_creacion AT TIME ZONE 'America/Guatemala')::date BETWEEN ${monthStart}::date AND ${fecha}::date
+    SELECT COALESCE(SUM(monto_total), 0) AS total
+    FROM cartera.facturacion_desglose
+    WHERE rubro::text = 'ROYALTY'
+      AND fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
   `);
   const invMtd = await db.execute(sql`
     SELECT COALESCE(SUM(monto_total), 0) AS total

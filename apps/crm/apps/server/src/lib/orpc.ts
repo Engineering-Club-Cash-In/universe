@@ -325,12 +325,7 @@ const requireMetaColocacionReport = o.middleware(async ({ context, next }) => {
 	}
 
 	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
+	const userRole = context.session.user.role ?? "";
 
 	if (!PERMISSIONS.canAccessMetaColocacionReport(userRole)) {
 		throw new ORPCError("FORBIDDEN", {
@@ -341,7 +336,6 @@ const requireMetaColocacionReport = o.middleware(async ({ context, next }) => {
 	return next({
 		context: {
 			session: context.session,
-			user: userData[0],
 			userId,
 			userRole,
 		},

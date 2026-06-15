@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
+import { formatCurrency } from "@/lib/crm-formatters";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -54,13 +55,6 @@ function nowGT(): Date {
 			day: "2-digit",
 		}).format(new Date()) + "T12:00:00Z",
 	);
-}
-
-function formatQ(value: string | number): string {
-	return `Q${Number(value).toLocaleString("es-GT", {
-		minimumFractionDigits: 2,
-		maximumFractionDigits: 2,
-	})}`;
 }
 
 function coberturaColor(pct: number | null): string {
@@ -138,25 +132,11 @@ function RouteComponent() {
 
 	const anios = Array.from({ length: 5 }, (_, i) => now.getUTCFullYear() - i);
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const meta = (data as any)?.meta as string | undefined;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const realMonto = (data as any)?.realMonto as string | undefined;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const realCreditos = (data as any)?.realCreditos as number | undefined;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const cobertura = (data as any)?.cobertura as number | null | undefined;
-	const porColaborador =
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		((data as any)?.porColaborador as
-			| {
-					userId: string | null;
-					nombre: string;
-					creditos: number;
-					monto: string;
-					pctDelTotal: number;
-			  }[]
-			| undefined) ?? [];
+	const meta = data?.meta;
+	const realMonto = data?.realMonto;
+	const realCreditos = data?.realCreditos;
+	const cobertura = data?.cobertura;
+	const porColaborador = data?.porColaborador ?? [];
 
 	return (
 		<div className="container mx-auto max-w-5xl space-y-6 p-6">
@@ -199,12 +179,12 @@ function RouteComponent() {
 			<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 				<ReportCard
 					title="Meta"
-					value={isLoading ? "—" : formatQ(meta ?? 0)}
+					value={isLoading ? "—" : formatCurrency(meta ?? 0)}
 					icon={Target}
 				/>
 				<ReportCard
 					title="Real Colocado"
-					value={isLoading ? "—" : formatQ(realMonto ?? 0)}
+					value={isLoading ? "—" : formatCurrency(realMonto ?? 0)}
 					icon={TrendingUp}
 				/>
 				<ReportCard
@@ -252,7 +232,7 @@ function RouteComponent() {
 										<TableCell className="font-medium">{row.nombre}</TableCell>
 										<TableCell className="text-right">{row.creditos}</TableCell>
 										<TableCell className="text-right">
-											{formatQ(row.monto)}
+											{formatCurrency(row.monto)}
 										</TableCell>
 										<TableCell className="text-right text-muted-foreground">
 											{row.pctDelTotal.toFixed(1)}%
@@ -265,7 +245,7 @@ function RouteComponent() {
 										{realCreditos ?? 0}
 									</TableCell>
 									<TableCell className="text-right">
-										{formatQ(realMonto ?? 0)}
+										{formatCurrency(realMonto ?? 0)}
 									</TableCell>
 									<TableCell className="text-right">100%</TableCell>
 								</TableRow>
@@ -285,7 +265,7 @@ function RouteComponent() {
 						<div className="space-y-2">
 							<div className="flex justify-between text-sm">
 								<span className="text-muted-foreground">
-									{formatQ(realMonto ?? 0)} de {formatQ(meta)}
+									{formatCurrency(realMonto ?? 0)} de {formatCurrency(meta)}
 								</span>
 								<span
 									className={`font-semibold ${coberturaColor(cobertura ?? null)}`}
@@ -303,7 +283,7 @@ function RouteComponent() {
 							</div>
 							<p className="text-muted-foreground text-xs">
 								Faltante:{" "}
-								{formatQ(Math.max(0, Number(meta) - Number(realMonto ?? 0)))}
+								{formatCurrency(Math.max(0, Number(meta) - Number(realMonto ?? 0)))}
 							</p>
 						</div>
 					</CardContent>

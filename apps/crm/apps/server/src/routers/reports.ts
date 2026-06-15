@@ -671,7 +671,7 @@ export const getReporteMetaColocacion = metaColocacionReportProcedure
 	.handler(async ({ input }) => {
 		const { anio, mes } = input;
 
-		const [metaRow, porColaboradorRows, totalesRow] = await Promise.all([
+		const [metaRow, porColaboradorRows] = await Promise.all([
 			db
 				.select({ monto: metasMensuales.monto })
 				.from(metasMensuales)
@@ -692,6 +692,8 @@ export const getReporteMetaColocacion = metaColocacionReportProcedure
 					FROM opportunity_stage_history osh
 					JOIN sales_stages ss ON ss.id = osh.to_stage_id
 					WHERE ss.closure_percentage >= 90
+						AND EXTRACT(YEAR FROM osh.changed_at AT TIME ZONE 'America/Guatemala') = ${anio}
+						AND EXTRACT(MONTH FROM osh.changed_at AT TIME ZONE 'America/Guatemala') = ${mes}
 					GROUP BY osh.opportunity_id
 				)
 				SELECT
@@ -703,49 +705,23 @@ export const getReporteMetaColocacion = metaColocacionReportProcedure
 				JOIN opportunities o ON o.id = fp.opportunity_id
 				LEFT JOIN "user" u ON u.id = o.assigned_to
 				WHERE o.status != 'migrate'
-					AND EXTRACT(YEAR FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${anio}
-					AND EXTRACT(MONTH FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${mes}
 				GROUP BY o.assigned_to, u.name
 				ORDER BY monto DESC
-			`),
-
-			db.execute(sql`
-				WITH first_placed AS (
-					SELECT
-						osh.opportunity_id,
-						MIN(osh.changed_at) AS first_placed_at
-					FROM opportunity_stage_history osh
-					JOIN sales_stages ss ON ss.id = osh.to_stage_id
-					WHERE ss.closure_percentage >= 90
-					GROUP BY osh.opportunity_id
-				)
-				SELECT
-					COUNT(o.id)::int AS creditos,
-					COALESCE(SUM(o.value::numeric), 0) AS monto
-				FROM first_placed fp
-				JOIN opportunities o ON o.id = fp.opportunity_id
-				WHERE o.status != 'migrate'
-					AND EXTRACT(YEAR FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${anio}
-					AND EXTRACT(MONTH FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${mes}
 			`),
 		]);
 
 		const meta = Number(metaRow[0]?.monto ?? 0);
-		const totalRow = totalesRow.rows[0] as
-			| { creditos: number; monto: string }
-			| undefined;
-		const realMonto = Number(totalRow?.monto ?? 0);
-		const realCreditos = Number(totalRow?.creditos ?? 0);
+		const rawRows = porColaboradorRows.rows as {
+			user_id: string | null;
+			nombre: string | null;
+			creditos: number;
+			monto: string;
+		}[];
+		const realMonto = rawRows.reduce((acc, r) => acc + Number(r.monto), 0);
+		const realCreditos = rawRows.reduce((acc, r) => acc + r.creditos, 0);
 		const cobertura = meta > 0 ? (realMonto / meta) * 100 : null;
 
-		const porColaborador = (
-			porColaboradorRows.rows as {
-				user_id: string | null;
-				nombre: string | null;
-				creditos: number;
-				monto: string;
-			}[]
-		).map((r) => ({
+		const porColaborador = rawRows.map((r) => ({
 			userId: r.user_id,
 			nombre: r.nombre ?? "Sin asignar",
 			creditos: r.creditos,

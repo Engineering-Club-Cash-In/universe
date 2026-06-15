@@ -194,7 +194,7 @@ app.get("/", (c) => {
 // Vehicle photo upload endpoint
 app.post("/api/upload-vehicle-photo", async (c) => {
 	try {
-		// Get the context and require authenticated taller/CRM access.
+		// Get the context and require authenticated vehicle access.
 		const context = await createContext({ context: c });
 		const userRole = context.session?.user?.role;
 
@@ -202,11 +202,7 @@ app.post("/api/upload-vehicle-photo", async (c) => {
 			return c.json({ error: "No autorizado" }, 401);
 		}
 
-		if (
-			!userRole ||
-			(!PERMISSIONS.canAccessTaller(userRole) &&
-				!PERMISSIONS.canAccessCRM(userRole))
-		) {
+		if (!userRole || !PERMISSIONS.canAccessVehicles(userRole)) {
 			return c.json({ error: "No tienes permiso para subir fotos" }, 403);
 		}
 

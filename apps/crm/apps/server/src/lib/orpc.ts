@@ -445,6 +445,35 @@ const requireTallerOrCrm = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireVehicleAccess = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!userRole || !PERMISSIONS.canAccessVehicles(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere acceso a vehículos",
+		});
+	}
+
+	return next({
+		context: {
+			...context,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 const requireInvestmentAccess = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -528,6 +557,7 @@ export const viewOpportunityContractsProcedure = publicProcedure.use(
 export const juridicoProcedure = publicProcedure.use(requireJuridico);
 export const tallerProcedure = publicProcedure.use(requireTallerAccess);
 export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);
+export const vehiclesProcedure = publicProcedure.use(requireVehicleAccess);
 export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
 export const investmentManagerProcedure = publicProcedure.use(
 	requireInvestmentManager,

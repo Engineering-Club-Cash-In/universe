@@ -199,7 +199,10 @@ export function transformFacturacion(
 	for (const k of rubros) {
 		const c = num(data.cobrado[k]);
 		const e = num(data.esperado[k]);
-		cobrado[k] = money(c + (e - c) * close);
+		// Solo cerramos brechas positivas (esperado > cobrado). Si ya está
+		// sobre-cobrado (c >= e), se preserva el monto real intacto.
+		const gap = e - c;
+		cobrado[k] = money(gap > 0 ? c + gap * close : c);
 	}
 	return { cobrado, esperado: data.esperado };
 }

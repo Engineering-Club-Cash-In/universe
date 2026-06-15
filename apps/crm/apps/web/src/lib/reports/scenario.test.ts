@@ -107,6 +107,18 @@ describe("transformFacturacion", () => {
 		);
 		expect(out.esperado.capital).toBe("1000");
 	});
+
+	test("rubro sobre-cobrado (cobrado > esperado) se preserva intacto", () => {
+		const over: FacturacionMesResponse = {
+			cobrado: { ...data.cobrado, interes: "150" },
+			esperado: { ...data.esperado, interes: "100" },
+		};
+		const out = transformFacturacion(
+			over,
+			params({ efectividadDeltaPct: 100 }),
+		);
+		expect(out.cobrado.interes).toBe("150.00");
+	});
 });
 
 describe("transformCobertura", () => {

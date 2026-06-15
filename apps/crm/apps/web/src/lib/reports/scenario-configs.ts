@@ -90,18 +90,31 @@ export const flujoCuotasConfig: ScenarioReportConfig<FlujoCuotasInversionesRespo
 		usaMetodoCuota: true,
 		transform: transformFlujoCuotas,
 		summarize: (data) => {
-			const reinvCap = sumBy(data.reinversionPorTipo, (r) => num(r.capital));
-			const reinvInt = sumBy(data.reinversionPorTipo, (r) => num(r.interes));
-			const cash = sumBy(
-				data.cashParcialPorTipo,
-				(r) => num(r.capital) + num(r.interes),
+			// Réplica de la lógica de totales del reporte (admin/reports/index.tsx):
+			// variable/excedente son total-only (monto_reinvertido), interés incluye
+			// IVA, cash usa monto_cash si existe, y sin-reinversión suma capital+interés+IVA.
+			const reinversion = sumBy(data.reinversionPorTipo, (r) => {
+				if (
+					r.tipo === "reinversion_variable" ||
+					r.tipo === "reinversion_excedente"
+				)
+					return num(r.monto_reinvertido);
+				if (r.tipo === "reinversion_capital") return num(r.capital);
+				if (r.tipo === "reinversion_interes")
+					return num(r.interes) + num(r.iva);
+				return num(r.capital) + num(r.interes) + num(r.iva);
+			});
+			const cash = sumBy(data.cashParcialPorTipo, (r) =>
+				r.monto_cash
+					? num(r.monto_cash)
+					: num(r.capital) + num(r.interes) + num(r.iva),
 			);
 			const sinReinv =
 				num(data.sinReinversion.totales.capital) +
-				num(data.sinReinversion.totales.interes);
+				num(data.sinReinversion.totales.interes) +
+				num(data.sinReinversion.totales.iva);
 			return [
-				{ concepto: "Reinv. capital", valor: reinvCap },
-				{ concepto: "Reinv. interés", valor: reinvInt },
+				{ concepto: "Reinversión", valor: reinversion },
 				{ concepto: "Cash parcial", valor: cash },
 				{ concepto: "Sin reinversión", valor: sinReinv },
 				{

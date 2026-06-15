@@ -157,47 +157,35 @@ export async function generarSnapshotDiario(fecha: string) {
     .plus(interes_cube);
   const facturacion_mas_servicios = facturacion.plus(servicios);
 
-  // 6) Acumulados MTD (recalculados sobre [monthStart, fecha])
-  const mtd = await db.execute(sql`
+  // 6) Acumulados del MES = SUMA CORRIDA de las columnas DIARIAS del snapshot
+  //    [1º del mes … este día]: días PREVIOS ya guardados + lo de HOY (recién
+  //    calculado). Así el acumulado SUMA TODO EL MES y enlaza CONTINUO aunque
+  //    parte del mes venga del Excel importado y parte del sistema. Las diarias
+  //    de los días viejos quedan intactas → no se recalculan desde el desglose.
+  //    reserva NO (sin columna diaria; pagos_credito tiene histórico → MTD de pagos).
+  const prev = await db.execute(sql`
     SELECT
-      COALESCE(SUM(CASE WHEN rubro IN ('INTERES','MEMBRESIA','OTROS','MORA') THEN monto_total ELSE 0 END), 0) AS fact_desg,
-      COALESCE(SUM(CASE WHEN rubro IN ('SEGURO','GPS') THEN monto_total ELSE 0 END), 0) AS servicios
-    FROM cartera.facturacion_desglose
-    WHERE fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
+      COALESCE(SUM(facturacion), 0)                AS fact,
+      COALESCE(SUM(servicios_seguro_gps), 0)       AS serv,
+      COALESCE(SUM(facturacion_inversionistas), 0) AS inv,
+      COALESCE(SUM(ingreso_carros), 0)             AS carros
+    FROM cartera.facturacion_snapshot_diario
+    WHERE fecha >= ${monthStart}::date AND fecha < ${fecha}::date
   `);
-  // Royalty MTD: SOLO lo facturado (rubro ROYALTY del desglose). Sin respaldo de
-  // creditos.royalti (misma decisión que el bloque 2).
-  const royMtd = await db.execute(sql`
-    SELECT COALESCE(SUM(monto_total), 0) AS total
-    FROM cartera.facturacion_desglose
-    WHERE rubro::text = 'ROYALTY'
-      AND fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
-  `);
-  const invMtd = await db.execute(sql`
-    SELECT COALESCE(SUM(monto_total), 0) AS total
-    FROM cartera.facturacion_desglose
-    WHERE rubro::text = 'INTERES_INVERSIONISTAS'
-      AND fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
-  `);
-  // Reserva acumulada (MTD) desde pagos_credito.reserva
-  const reservaMtd = await db.execute(sql`
-    SELECT COALESCE(SUM(reserva), 0) AS total FROM cartera.pagos_credito
-    WHERE (fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date BETWEEN ${monthStart}::date AND ${fecha}::date
-  `);
-  const carrosMtd = await db.execute(sql`
-    SELECT COALESCE(SUM(monto), 0) AS total FROM cartera.ingresos_carros
-    WHERE fecha BETWEEN ${monthStart}::date AND ${fecha}::date
-  `);
-  const facturacion_acumulado = new Big((mtd as any).rows[0].fact_desg).plus(
-    (royMtd as any).rows[0].total
-  );
-  const acum_servicios = new Big((mtd as any).rows[0].servicios);
-  const ingresoCarrosMtd = new Big((carrosMtd as any).rows[0].total);
+  const P = (prev as any).rows?.[0] ?? {};
+  const facturacion_acumulado = new Big(P.fact || 0).plus(facturacion);
+  const acum_servicios = new Big(P.serv || 0).plus(servicios);
+  const acumulado_inversionistas = new Big(P.inv || 0).plus(factInv);
+  const ingresoCarrosMtd = new Big(P.carros || 0).plus(ingresoCarros);
   // AY (Excel): facturación + servicios + ingreso carros (acumulado del mes).
   const acumulado_total = facturacion_acumulado
     .plus(acum_servicios)
     .plus(ingresoCarrosMtd);
-  const acumulado_inversionistas = new Big((invMtd as any).rows[0].total);
+  // Reserva acumulada (MTD) desde pagos_credito.reserva (pagos tiene histórico → sin corte).
+  const reservaMtd = await db.execute(sql`
+    SELECT COALESCE(SUM(reserva), 0) AS total FROM cartera.pagos_credito
+    WHERE (fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date BETWEEN ${monthStart}::date AND ${fecha}::date
+  `);
   const reserva_acumulada = new Big((reservaMtd as any).rows[0].total);
 
   // 7) Tendencias (proyección lineal sobre MTD)
@@ -303,10 +291,14 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
           SELECT SUM(monto) FROM cartera.gastos_administrativos g WHERE g.fecha = ${fecha}::date), 0),
         ingreso_carros = COALESCE((
           SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
-        acumulado_total = s.facturacion_acumulado + s.acum_servicios_seguro_gps + COALESCE((
-          SELECT SUM(monto) FROM cartera.ingresos_carros c
-          WHERE c.fecha >= make_date(EXTRACT(YEAR FROM ${fecha}::date)::int, EXTRACT(MONTH FROM ${fecha}::date)::int, 1)
-            AND c.fecha <= ${fecha}::date), 0),
+        -- carros acumulado consistente con la suma corrida: días PREVIOS del mes
+        -- desde la columna del snapshot (incluye lo importado del Excel) + lo de HOY
+        -- desde la tabla de ingresos_carros.
+        acumulado_total = s.facturacion_acumulado + s.acum_servicios_seguro_gps
+          + COALESCE((SELECT SUM(d.ingreso_carros) FROM cartera.facturacion_snapshot_diario d
+                      WHERE d.fecha >= make_date(EXTRACT(YEAR FROM ${fecha}::date)::int, EXTRACT(MONTH FROM ${fecha}::date)::int, 1)
+                        AND d.fecha < ${fecha}::date), 0)
+          + COALESCE((SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
         updated_at = now()
     WHERE s.fecha = ${fecha}::date
   `);

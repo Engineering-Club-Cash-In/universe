@@ -3282,6 +3282,76 @@ if (facturasExistentes.length > 0) {
         console.log(`✅ Serie: ${resultado.serie}-${resultado.numero}`);
         console.log(`✅ UUID: ${resultado.uuid}`);
 
+        // 🧾 Desglose de la factura GENÉRICA para el reporte diario (best-effort,
+        //    NO afecta la facturación). Solo para items que traen `rubro_desglose`.
+        //    La categoría (columna de producto del reporte) se resuelve por el NIT
+        //    del receptor → usuario con créditos → usuarios.categoria.
+        try {
+          const RUBROS_VALIDOS = new Set([
+            "CAPITAL", "INTERES", "MEMBRESIA", "SEGURO", "GPS",
+            "MORA", "OTROS", "INTERES_INVERSIONISTAS", "ROYALTY",
+          ]);
+          const itemsConRubro = (itemsInput as any[]).filter(
+            (it) =>
+              it.rubro_desglose &&
+              RUBROS_VALIDOS.has(String(it.rubro_desglose).toUpperCase())
+          );
+          if (itemsConRubro.length > 0 && resultado.factura_id) {
+            // Categoría del receptor: usuario (con créditos) por NIT; el del crédito más reciente.
+            const catRes = await db.execute(sql`
+              SELECT u.categoria
+              FROM cartera.usuarios u
+              WHERE regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g') = ${nitNormalizado}
+                AND EXISTS (SELECT 1 FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id)
+              ORDER BY (SELECT MAX(c.fecha_creacion) FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id) DESC NULLS LAST
+              LIMIT 1
+            `);
+            const categoria = (catRes as any).rows?.[0]?.categoria ?? null;
+
+            // Agrupar por rubro (varios items pueden compartir rubro). monto = total con IVA.
+            const porRubro: Record<string, Big> = {};
+            for (const it of itemsConRubro) {
+              const k = String(it.rubro_desglose).toUpperCase();
+              porRubro[k] = (porRubro[k] ?? new Big(0)).plus(new Big(it.monto || 0));
+            }
+
+            await db.transaction(async (tx) => {
+              // Reemplazar para que re-facturar no duplique.
+              await tx.execute(
+                sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${resultado.factura_id} AND pago_id IS NULL`
+              );
+              for (const [rubro, montoBig] of Object.entries(porRubro)) {
+                if (montoBig.lte(0)) continue;
+                const iva = new Big(
+                  calcularIvaExacto(parseFloat(montoBig.toFixed(2))).montoImpuesto
+                );
+                await tx.execute(sql`
+                  INSERT INTO cartera.facturacion_desglose
+                    (pago_id, factura_id, rubro, monto_total, monto_iva, fecha_aplicado_gt, categoria)
+                  VALUES (
+                    NULL,
+                    ${resultado.factura_id},
+                    ${rubro}::cartera.rubro_facturacion,
+                    ${montoBig.toFixed(2)},
+                    ${iva.toFixed(2)},
+                    (SELECT (fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date
+                       FROM cartera.facturas_electronicas WHERE factura_id = ${resultado.factura_id}),
+                    ${categoria}
+                  )
+                `);
+              }
+            });
+            console.log(
+              `🧾 Desglose genérico guardado: ${Object.keys(porRubro).length} rubro(s) para factura ${resultado.factura_id} (categoria=${categoria ?? "—"})`
+            );
+          }
+        } catch (desgloseError: any) {
+          console.error(
+            `⚠️ No se pudo guardar el desglose genérico (NO afecta la facturación):`,
+            desgloseError?.message
+          );
+        }
+
         return {
           success: true,
           data: {
@@ -3320,6 +3390,10 @@ if (facturasExistentes.length > 0) {
           t.Object({
             monto: t.Number(),
             rubro: t.String(),
+            // Opcional: rubro del REPORTE (enum rubro_facturacion) para el desglose.
+            // Si viene, se guarda en facturacion_desglose y el snapshot lo suma.
+            // Si no viene, la factura no entra al reporte (mejor no contar que mal).
+            rubro_desglose: t.Optional(t.String()),
           })
         ),
         created_by: t.Optional(t.Number()),

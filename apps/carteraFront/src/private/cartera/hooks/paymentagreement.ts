@@ -3,8 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
  
 import { toast } from "sonner";
-import { 
-  type GetPaymentAgreementsFilters, 
+import { getApiErrorMessage } from "@/lib/apiError";
+import {
+  type GetPaymentAgreementsFilters,
   getPaymentAgreements, 
   type CreatePaymentAgreementInput, 
   createPaymentAgreement, 
@@ -44,7 +45,7 @@ export const useCreatePaymentAgreement = () => {
       toast.success("Convenio de pago creado exitosamente");
     },
     onError: (error: Error) => {
-      toast.error(error.message || "Error al crear el convenio de pago");
+      toast.error(getApiErrorMessage(error, "Error al crear el convenio de pago"));
     },
   });
 }; 
@@ -67,7 +68,7 @@ export const useTogglePaymentAgreementStatus = () => {
       toast.success(mensaje);
     },
     onError: (error: Error) => {
-      toast.error(error.message || "Error al actualizar el estado del convenio");
+      toast.error(getApiErrorMessage(error, "Error al actualizar el estado del convenio"));
     },
   });
 };

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getApiErrorMessage } from "@/lib/apiError";
 import {
   condonarMoraService,
   createMoraService,
@@ -100,7 +101,7 @@ export const useMorasMasivo = () => {
       }
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || 'Error en condonación masiva');
+      toast.error(getApiErrorMessage(error, 'Error en condonación masiva'));
     },
   });
 

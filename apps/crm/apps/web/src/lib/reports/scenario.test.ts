@@ -110,6 +110,16 @@ describe("transformFacturacion", () => {
 		expect(out.esperado.capital).toBe("1000");
 	});
 
+	test("efectividad negativa no cancela reducción de mora válida", () => {
+		// mora=100 debería cerrar el 100% de la brecha aunque efectividad=-100
+		const out = transformFacturacion(
+			data,
+			params({ moraReduccionPct: 100, efectividadDeltaPct: -100 }),
+		);
+		// capital: cobrado=800, esperado=1000, brecha=200, close=clamp01(0+1)=1 → 1000
+		expect(out.cobrado.capital).toBe("1000.00");
+	});
+
 	test("rubro sobre-cobrado (cobrado > esperado) se preserva intacto", () => {
 		const over: FacturacionMesResponse = {
 			cobrado: { ...data.cobrado, interes: "150" },

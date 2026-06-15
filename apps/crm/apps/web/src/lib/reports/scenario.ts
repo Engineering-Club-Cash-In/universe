@@ -60,9 +60,13 @@ const colocacionFactor = (p: ScenarioParams) =>
 	1 + Math.max(0, p.colocacionDeltaPct) / 100;
 /** Reducción de mora acotada a [0, 100]% → factor en [0, 1]. */
 const moraFactor = (p: ScenarioParams) => 1 - clamp01(p.moraReduccionPct / 100);
-/** Fracción de la brecha cobrado→esperado que se cierra (efectividad + mora). */
+/** Fracción de la brecha cobrado→esperado que se cierra (efectividad + mora).
+ *  Cada palanca se acota individualmente a [0,1] antes de sumar para evitar
+ *  que valores negativos en una cancelen una reducción válida en la otra. */
 const gapClose = (p: ScenarioParams) =>
-	clamp01(p.efectividadDeltaPct / 100 + p.moraReduccionPct / 100);
+	clamp01(
+		clamp01(p.efectividadDeltaPct / 100) + clamp01(p.moraReduccionPct / 100),
+	);
 
 // ---------------------------------------------------------------------------
 // Tipos de fila de cada reporte (estructuralmente iguales a los de la ruta)

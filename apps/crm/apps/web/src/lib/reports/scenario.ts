@@ -270,7 +270,8 @@ export function transformComparativo(
 ): ComparativoHistoricoRow[] {
 	const col = colocacionFactor(p);
 	const mora = moraFactor(p);
-	const fact = 1 + p.efectividadDeltaPct / 100;
+	// Acotado a ≥0: "subir efectividad" nunca debe reducir la facturación.
+	const fact = 1 + Math.max(0, p.efectividadDeltaPct) / 100;
 	const scale = (v: string | null, f: number) =>
 		v == null ? null : money(num(v) * f);
 	const scaleN = (v: number | null, f: number) =>

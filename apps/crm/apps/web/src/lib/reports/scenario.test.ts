@@ -169,6 +169,14 @@ describe("transformComparativo", () => {
 		expect(out[0].mora_120).toBe("50.00");
 	});
 
+	test("efectividad negativa se acota a 0 (facturación no baja)", () => {
+		const out = transformComparativo(
+			rows,
+			params({ efectividadDeltaPct: -150 }),
+		);
+		expect(out[0].facturacion).toBe("50000.00");
+	});
+
 	test("colocar +10% escala colocación; nulos siguen nulos", () => {
 		const withNull = [{ ...rows[0], colocacion_monto: null }];
 		const out = transformComparativo(

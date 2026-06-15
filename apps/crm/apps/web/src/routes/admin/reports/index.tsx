@@ -9,6 +9,7 @@ import {
 	Download,
 	FileText,
 	Loader2,
+	Sparkles,
 	Target,
 	TrendingDown,
 	TrendingUp,
@@ -34,6 +35,7 @@ import {
 import { toast } from "sonner";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { ReportCard } from "@/components/reports/report-card";
+import { ScenarioModal } from "@/components/reports/scenario-modal";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -43,13 +45,12 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
 	Select,
 	SelectContent,
@@ -58,14 +59,31 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
+import type {
+	ComparativoHistoricoRow,
+	FacturacionMesResponse,
+	FacturacionMesRubro,
+	FlujoCuotasInversionesResponse,
+	FlujoCuotasRubro,
+	MontoACobrarRow,
+	PuntoEquilibrioRow,
+} from "@/lib/reports/scenario";
+import {
+	coberturaConfig,
+	comparativoConfig,
+	facturacionConfig,
+	flujoCuotasConfig,
+	montoACobrarConfig,
+} from "@/lib/reports/scenario-configs";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
@@ -84,88 +102,41 @@ const COLORS = {
 	incobrable: "#7f1d1d",
 };
 
-type MontoACobrarRow = {
-	bucket: string;
-	cuotas_count: number;
-	total_cuota: string;
-	total_interes: string;
-	total_iva: string;
-	total_seguro: string;
-	total_gps: string;
-	total_membresias: string;
-	total_royalti: string;
-	mora_promedio: string;
-};
-
-type FacturacionMesRubro = {
-	capital: string;
-	interes: string;
-	iva: string;
-	seguro: string;
-	gps: string;
-	membresias: string;
-};
-
-type FacturacionMesResponse = {
-	cobrado: FacturacionMesRubro;
-	esperado: FacturacionMesRubro;
-};
-
-type FlujoCuotasRubro = { capital: string; interes: string; iva: string };
-type FlujoCuotasInversionista = FlujoCuotasRubro & { inversionista_id: number; nombre: string };
-type FlujoCuotasInversionesResponse = {
-	reinversionPorTipo: (FlujoCuotasRubro & { tipo: string; monto_reinvertido?: string })[];
-	cashParcialPorTipo: (FlujoCuotasRubro & { tipo: string; monto_cash?: string })[];
-	sinReinversion: { totales: FlujoCuotasRubro; porInversionista: FlujoCuotasInversionista[] };
-	pagosExtras: { abonos_capital: string; cancelaciones: string };
-};
-
 const FLUJO_RUBROS: { key: keyof FlujoCuotasRubro; label: string }[] = [
 	{ key: "capital", label: "Capital" },
 	{ key: "interes", label: "Interés" },
 	{ key: "iva", label: "IVA 12%" },
 ];
 
-function getDefaultFlujoCuotasRange(): { fechaInicio: string; fechaFin: string } {
+function getDefaultFlujoCuotasRange(): {
+	fechaInicio: string;
+	fechaFin: string;
+} {
 	const todayGt = formatDateInput(new Date());
 	const [year, month] = todayGt.split("-").map(Number);
 	const fechaInicio = `${year}-${String(month).padStart(2, "0")}-01`;
 	const nextM = month === 12 ? 1 : month + 1;
 	const nextY = month === 12 ? year + 1 : year;
-	const lastDay = new Date(`${nextY}-${String(nextM).padStart(2, "0")}-01T12:00:00`);
+	const lastDay = new Date(
+		`${nextY}-${String(nextM).padStart(2, "0")}-01T12:00:00`,
+	);
 	lastDay.setDate(lastDay.getDate() - 1);
 	return { fechaInicio, fechaFin: formatDateInput(lastDay) };
 }
 
-type ComparativoHistoricoRow = {
-	mes: number;
-	colocacion_monto: string | null;
-	colocacion_creditos: number | null;
-	facturacion: string | null;
-	cartera_activa: string | null;
-	creditos_activos: number | null;
-	mora_30: string | null;
-	mora_60: string | null;
-	mora_90: string | null;
-	mora_120: string | null;
-	creditos_30: number | null;
-	creditos_60: number | null;
-	creditos_90: number | null;
-	creditos_120: number | null;
-};
-
-type PuntoEquilibrioRow = {
-	bucket: string;
-	cantidad_creditos: number;
-	colocado: string;
-	meta: string;
-	cobertura: string | null;
-	faltante: string | null;
-};
-
 const MESES = [
-	"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-	"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+	"Enero",
+	"Febrero",
+	"Marzo",
+	"Abril",
+	"Mayo",
+	"Junio",
+	"Julio",
+	"Agosto",
+	"Septiembre",
+	"Octubre",
+	"Noviembre",
+	"Diciembre",
 ];
 
 function coberturaColor(cobertura: string | null): string {
@@ -181,14 +152,15 @@ function coberturaLabel(cobertura: string | null): string {
 	return `${cobertura}%`;
 }
 
-const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] = [
-	{ key: "capital", label: "Capital" },
-	{ key: "interes", label: "Interés" },
-	{ key: "iva", label: "IVA 12%" },
-	{ key: "seguro", label: "Seguro" },
-	{ key: "gps", label: "GPS" },
-	{ key: "membresias", label: "Membresías" },
-];
+const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] =
+	[
+		{ key: "capital", label: "Capital" },
+		{ key: "interes", label: "Interés" },
+		{ key: "iva", label: "IVA 12%" },
+		{ key: "seguro", label: "Seguro" },
+		{ key: "gps", label: "GPS" },
+		{ key: "membresias", label: "Membresías" },
+	];
 
 const MONTO_COBRAR_COLORS = {
 	total_cuota: "#3b82f6",
@@ -225,7 +197,10 @@ function dateFromInput(value: string) {
 	return new Date(`${value}T12:00:00`);
 }
 
-function getDefaultMontoCobrarRange(): { fechaInicio: string; fechaFin: string } {
+function getDefaultMontoCobrarRange(): {
+	fechaInicio: string;
+	fechaFin: string;
+} {
 	const today = formatDateInput(new Date());
 	const fin = new Date();
 	fin.setFullYear(fin.getFullYear() + 1);
@@ -235,7 +210,10 @@ function getDefaultMontoCobrarRange(): { fechaInicio: string; fechaFin: string }
 function formatBucket(bucket: string, periodo: string): string {
 	const date = new Date(bucket.length === 10 ? `${bucket}T12:00:00` : bucket);
 	if (periodo === "dia") {
-		return new Intl.DateTimeFormat("es-GT", { day: "2-digit", month: "short" }).format(date);
+		return new Intl.DateTimeFormat("es-GT", {
+			day: "2-digit",
+			month: "short",
+		}).format(date);
 	}
 	if (periodo === "semana") {
 		return `Sem ${new Intl.DateTimeFormat("es-GT", { day: "2-digit", month: "short" }).format(date)}`;
@@ -247,7 +225,10 @@ function formatBucket(bucket: string, periodo: string): string {
 	if (periodo === "anio") {
 		return String(date.getFullYear());
 	}
-	return new Intl.DateTimeFormat("es-GT", { month: "short", year: "numeric" }).format(date);
+	return new Intl.DateTimeFormat("es-GT", {
+		month: "short",
+		year: "numeric",
+	}).format(date);
 }
 
 function getDefaultClosedCreditsRange(): DateRange {
@@ -286,6 +267,15 @@ function downloadCsv(filename: string, rows: (string | number | null)[][]) {
 	URL.revokeObjectURL(url);
 }
 
+function SimularButton({ onClick }: { onClick: () => void }) {
+	return (
+		<Button variant="outline" size="sm" className="gap-1.5" onClick={onClick}>
+			<Sparkles className="h-3.5 w-3.5 text-purple-500" />
+			Simular
+		</Button>
+	);
+}
+
 function ProgressBar({ value, max }: { value: number; max: number }) {
 	const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
 	const color = pct >= 100 ? "#22c55e" : pct >= 80 ? "#eab308" : "#ef4444";
@@ -316,18 +306,25 @@ function RouteComponent() {
 	const [montoCobrarPeriodo, setMontoCobrarPeriodo] = useState<
 		"anio" | "trimestre" | "mes" | "semana" | "dia"
 	>("mes");
-	const [montoCobrarRange, setMontoCobrarRange] = useState(getDefaultMontoCobrarRange);
+	const [montoCobrarRange, setMontoCobrarRange] = useState(
+		getDefaultMontoCobrarRange,
+	);
 	const [facturacionMes, setFacturacionMes] = useState(() => ({
 		mes: new Date().getMonth() + 1,
 		anio: new Date().getFullYear(),
 	}));
-	const [flujoCuotasRange, setFlujoCuotasRange] = useState(getDefaultFlujoCuotasRange);
-	const [comparativoAnio, setComparativoAnio] = useState(
-		() => new Date().getFullYear(),
+	const [flujoCuotasRange, setFlujoCuotasRange] = useState(
+		getDefaultFlujoCuotasRange,
+	);
+	const [comparativoAnio, setComparativoAnio] = useState(() =>
+		new Date().getFullYear(),
 	);
 	const [metasAnio, setMetasAnio] = useState(new Date().getFullYear());
 	const [editMetas, setEditMetas] = useState<Record<number, string>>({});
 	const [metasModalOpen, setMetasModalOpen] = useState(false);
+	const [scenarioOpen, setScenarioOpen] = useState<
+		null | "monto" | "facturacion" | "flujo" | "cobertura" | "comparativo"
+	>(null);
 	const [isSavingMetas, setIsSavingMetas] = useState(false);
 	const [focusedMes, setFocusedMes] = useState<number | null>(null);
 	const [equilibrioPeriodo, setEquilibrioPeriodo] = useState<
@@ -393,11 +390,16 @@ function RouteComponent() {
 
 	const flujoCuotasQuery = useQuery({
 		...orpc.getFlujoCuotasInversiones.queryOptions({
-			input: { fechaInicio: flujoCuotasRange.fechaInicio, fechaFin: flujoCuotasRange.fechaFin },
+			input: {
+				fechaInicio: flujoCuotasRange.fechaInicio,
+				fechaFin: flujoCuotasRange.fechaFin,
+			},
 		}),
 		enabled: isAdmin,
 	});
-	const flujoCuotasData = flujoCuotasQuery.data as FlujoCuotasInversionesResponse | undefined;
+	const flujoCuotasData = flujoCuotasQuery.data as
+		| FlujoCuotasInversionesResponse
+		| undefined;
 
 	const comparativoQuery = useQuery({
 		...orpc.getComparativoHistorico.queryOptions({
@@ -425,7 +427,9 @@ function RouteComponent() {
 		}) => client.upsertMeta(vars),
 		onSuccess: () => {
 			queryClient.invalidateQueries(
-				orpc.getMetas.queryOptions({ input: { anio: metasAnio, tipo: "colocacion" } }),
+				orpc.getMetas.queryOptions({
+					input: { anio: metasAnio, tipo: "colocacion" },
+				}),
 			);
 		},
 		onError: (error: Error) => {
@@ -466,7 +470,9 @@ function RouteComponent() {
 			await Promise.all(saves);
 			await Promise.all([
 				queryClient.invalidateQueries(
-					orpc.getMetas.queryOptions({ input: { anio: metasAnio, tipo: "colocacion" } }),
+					orpc.getMetas.queryOptions({
+						input: { anio: metasAnio, tipo: "colocacion" },
+					}),
 				),
 				queryClient.invalidateQueries(
 					orpc.getPuntoEquilibrio.queryOptions({
@@ -481,7 +487,9 @@ function RouteComponent() {
 			toast.success(`${saves.length} metas guardadas`);
 			setMetasModalOpen(false);
 		} catch (err) {
-			toast.error(err instanceof Error ? err.message : "Error al guardar metas");
+			toast.error(
+				err instanceof Error ? err.message : "Error al guardar metas",
+			);
 		} finally {
 			setIsSavingMetas(false);
 		}
@@ -496,7 +504,6 @@ function RouteComponent() {
 			setEditMetas(map);
 		}
 	}, [metasQuery.data]);
-
 
 	useEffect(() => {
 		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
@@ -973,11 +980,13 @@ function RouteComponent() {
 									<div>
 										<CardTitle>Monto a Cobrarse por Período</CardTitle>
 										<CardDescription>
-											Cuotas pendientes desglosadas por rubro (capital, interés, seguro, etc.)
+											Cuotas pendientes desglosadas por rubro (capital, interés,
+											seguro, etc.)
 										</CardDescription>
 									</div>
 								</div>
 								<div className="flex flex-wrap items-center gap-2">
+									<SimularButton onClick={() => setScenarioOpen("monto")} />
 									<Select
 										value={montoCobrarPeriodo}
 										onValueChange={(v) =>
@@ -1035,33 +1044,52 @@ function RouteComponent() {
 									{/* Gráfica de barras apiladas */}
 									<ResponsiveContainer width="100%" height={350}>
 										<BarChart
-											data={montoCobrarData.data.map((row: MontoACobrarRow) => ({
-												bucket: formatBucket(row.bucket, montoCobrarPeriodo),
-												total_cuota: Number.parseFloat(row.total_cuota),
-												total_interes: Number.parseFloat(row.total_interes),
-												total_iva: Number.parseFloat(row.total_iva),
-												total_seguro: Number.parseFloat(row.total_seguro),
-												total_gps: Number.parseFloat(row.total_gps),
-												total_membresias: Number.parseFloat(row.total_membresias),
-												total_royalti: Number.parseFloat(row.total_royalti),
-											}))}
+											data={montoCobrarData.data.map(
+												(row: MontoACobrarRow) => ({
+													bucket: formatBucket(row.bucket, montoCobrarPeriodo),
+													total_cuota: Number.parseFloat(row.total_cuota),
+													total_interes: Number.parseFloat(row.total_interes),
+													total_iva: Number.parseFloat(row.total_iva),
+													total_seguro: Number.parseFloat(row.total_seguro),
+													total_gps: Number.parseFloat(row.total_gps),
+													total_membresias: Number.parseFloat(
+														row.total_membresias,
+													),
+													total_royalti: Number.parseFloat(row.total_royalti),
+												}),
+											)}
 										>
 											<CartesianGrid strokeDasharray="3 3" />
-											<XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval={0} height={36} />
-											<YAxis tickFormatter={(v) => `Q${(Number(v) / 1000).toFixed(0)}k`} />
+											<XAxis
+												dataKey="bucket"
+												tick={{ fontSize: 11 }}
+												interval={0}
+												height={36}
+											/>
+											<YAxis
+												tickFormatter={(v) =>
+													`Q${(Number(v) / 1000).toFixed(0)}k`
+												}
+											/>
 											<Tooltip
 												formatter={(value, name) => [
 													formatCurrency(Number(value)),
-													MONTO_COBRAR_LABELS[name as keyof typeof MONTO_COBRAR_LABELS] ?? name,
+													MONTO_COBRAR_LABELS[
+														name as keyof typeof MONTO_COBRAR_LABELS
+													] ?? name,
 												]}
 											/>
 											<Legend
 												formatter={(value) =>
-													MONTO_COBRAR_LABELS[value as keyof typeof MONTO_COBRAR_LABELS] ?? value
+													MONTO_COBRAR_LABELS[
+														value as keyof typeof MONTO_COBRAR_LABELS
+													] ?? value
 												}
 											/>
 											{(
-												Object.keys(MONTO_COBRAR_COLORS) as (keyof typeof MONTO_COBRAR_COLORS)[]
+												Object.keys(
+													MONTO_COBRAR_COLORS,
+												) as (keyof typeof MONTO_COBRAR_COLORS)[]
 											).map((key) => (
 												<Bar
 													key={key}
@@ -1085,10 +1113,16 @@ function RouteComponent() {
 													<TableHead className="text-right">IVA</TableHead>
 													<TableHead className="text-right">Seguro</TableHead>
 													<TableHead className="text-right">GPS</TableHead>
-													<TableHead className="text-right">Membresías</TableHead>
+													<TableHead className="text-right">
+														Membresías
+													</TableHead>
 													<TableHead className="text-right">Royalti</TableHead>
-													<TableHead className="text-right">Mora Prom.</TableHead>
-													<TableHead className="text-right font-bold">Total</TableHead>
+													<TableHead className="text-right">
+														Mora Prom.
+													</TableHead>
+													<TableHead className="text-right font-bold">
+														Total
+													</TableHead>
 												</TableRow>
 											</TableHeader>
 											<TableBody>
@@ -1099,30 +1133,55 @@ function RouteComponent() {
 														Number.parseFloat(row.total_iva) +
 														Number.parseFloat(row.total_seguro) +
 														Number.parseFloat(row.total_gps) +
-														Number.parseFloat(row.total_membresias);
+														Number.parseFloat(row.total_membresias) +
+														Number.parseFloat(row.total_royalti);
 													return (
 														<TableRow key={row.bucket}>
-															<TableCell>{formatBucket(row.bucket, montoCobrarPeriodo)}</TableCell>
-															<TableCell className="text-right">{row.cuotas_count}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.total_cuota)}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.total_interes)}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.total_iva)}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.total_seguro)}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.total_gps)}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.total_membresias)}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.total_royalti)}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.mora_promedio)}</TableCell>
-															<TableCell className="text-right font-bold">{formatCurrency(total)}</TableCell>
+															<TableCell>
+																{formatBucket(row.bucket, montoCobrarPeriodo)}
+															</TableCell>
+															<TableCell className="text-right">
+																{row.cuotas_count}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(row.total_cuota)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(row.total_interes)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(row.total_iva)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(row.total_seguro)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(row.total_gps)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(row.total_membresias)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(row.total_royalti)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(row.mora_promedio)}
+															</TableCell>
+															<TableCell className="text-right font-bold">
+																{formatCurrency(total)}
+															</TableCell>
 														</TableRow>
 													);
 												})}
 												{/* Fila de totales */}
 												{(() => {
-													const rows = montoCobrarData.data as MontoACobrarRow[];
+													const rows =
+														montoCobrarData.data as MontoACobrarRow[];
 													const sum = (key: keyof MontoACobrarRow) =>
 														rows.reduce(
 															(acc: number, r: MontoACobrarRow) =>
-																acc + Number.parseFloat((r[key] as string) || "0"),
+																acc +
+																Number.parseFloat((r[key] as string) || "0"),
 															0,
 														);
 													const grandTotal =
@@ -1131,22 +1190,42 @@ function RouteComponent() {
 														sum("total_iva") +
 														sum("total_seguro") +
 														sum("total_gps") +
-														sum("total_membresias");
+														sum("total_membresias") +
+														sum("total_royalti");
 													return (
 														<TableRow className="border-t-2 bg-muted/50 font-bold">
 															<TableCell>Total</TableCell>
 															<TableCell className="text-right">
-																{rows.reduce((acc, r) => acc + r.cuotas_count, 0)}
+																{rows.reduce(
+																	(acc, r) => acc + r.cuotas_count,
+																	0,
+																)}
 															</TableCell>
-															<TableCell className="text-right">{formatCurrency(sum("total_cuota"))}</TableCell>
-															<TableCell className="text-right">{formatCurrency(sum("total_interes"))}</TableCell>
-															<TableCell className="text-right">{formatCurrency(sum("total_iva"))}</TableCell>
-															<TableCell className="text-right">{formatCurrency(sum("total_seguro"))}</TableCell>
-															<TableCell className="text-right">{formatCurrency(sum("total_gps"))}</TableCell>
-															<TableCell className="text-right">{formatCurrency(sum("total_membresias"))}</TableCell>
-															<TableCell className="text-right">{formatCurrency(sum("total_royalti"))}</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(sum("total_cuota"))}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(sum("total_interes"))}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(sum("total_iva"))}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(sum("total_seguro"))}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(sum("total_gps"))}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(sum("total_membresias"))}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(sum("total_royalti"))}
+															</TableCell>
 															<TableCell className="text-right">—</TableCell>
-															<TableCell className="text-right">{formatCurrency(grandTotal)}</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(grandTotal)}
+															</TableCell>
 														</TableRow>
 													);
 												})()}
@@ -1168,10 +1247,14 @@ function RouteComponent() {
 										Facturado del Mes vs Esperado
 									</CardTitle>
 									<CardDescription>
-										Compara lo cobrado en el mes contra lo esperado según fecha de vencimiento
+										Compara lo cobrado en el mes contra lo esperado según fecha
+										de vencimiento
 									</CardDescription>
 								</div>
 								<div className="flex items-center gap-2">
+									<SimularButton
+										onClick={() => setScenarioOpen("facturacion")}
+									/>
 									<Select
 										value={String(facturacionMes.mes)}
 										onValueChange={(v) =>
@@ -1183,8 +1266,18 @@ function RouteComponent() {
 										</SelectTrigger>
 										<SelectContent>
 											{[
-												"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-												"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+												"Enero",
+												"Febrero",
+												"Marzo",
+												"Abril",
+												"Mayo",
+												"Junio",
+												"Julio",
+												"Agosto",
+												"Septiembre",
+												"Octubre",
+												"Noviembre",
+												"Diciembre",
 											].map((label, i) => (
 												<SelectItem key={i + 1} value={String(i + 1)}>
 													{label}
@@ -1210,69 +1303,73 @@ function RouteComponent() {
 						</CardHeader>
 						<CardContent>
 							{facturacionMesQuery.isPending && (
-								<div className="text-muted-foreground py-4 text-center text-sm">
+								<div className="py-4 text-center text-muted-foreground text-sm">
 									Cargando...
 								</div>
 							)}
 							{facturacionMesQuery.isError && (
-								<div className="text-destructive py-4 text-center text-sm">
+								<div className="py-4 text-center text-destructive text-sm">
 									Error al cargar datos
 								</div>
 							)}
-							{facturacionMesData && (() => {
-								const { cobrado, esperado } = facturacionMesData;
-								const totalCobrado = FACTURACION_RUBROS.reduce(
-									(acc, r) => acc + Number(cobrado[r.key] || 0),
-									0,
-								);
-								const totalEsperado = FACTURACION_RUBROS.reduce(
-									(acc, r) => acc + Number(esperado[r.key] || 0),
-									0,
-								);
-								return (
-									<Table>
-										<TableHeader>
-											<TableRow>
-												<TableHead>Rubro</TableHead>
-												<TableHead className="text-right">Cobrado</TableHead>
-												<TableHead className="text-right">Esperado</TableHead>
-												<TableHead className="w-48">Progreso</TableHead>
-											</TableRow>
-										</TableHeader>
-										<TableBody>
-											{FACTURACION_RUBROS.map(({ key, label }) => (
-												<TableRow key={key}>
-													<TableCell>{label}</TableCell>
+							{facturacionMesData &&
+								(() => {
+									const { cobrado, esperado } = facturacionMesData;
+									const totalCobrado = FACTURACION_RUBROS.reduce(
+										(acc, r) => acc + Number(cobrado[r.key] || 0),
+										0,
+									);
+									const totalEsperado = FACTURACION_RUBROS.reduce(
+										(acc, r) => acc + Number(esperado[r.key] || 0),
+										0,
+									);
+									return (
+										<Table>
+											<TableHeader>
+												<TableRow>
+													<TableHead>Rubro</TableHead>
+													<TableHead className="text-right">Cobrado</TableHead>
+													<TableHead className="text-right">Esperado</TableHead>
+													<TableHead className="w-48">Progreso</TableHead>
+												</TableRow>
+											</TableHeader>
+											<TableBody>
+												{FACTURACION_RUBROS.map(({ key, label }) => (
+													<TableRow key={key}>
+														<TableCell>{label}</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(Number(cobrado[key] || 0))}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(Number(esperado[key] || 0))}
+														</TableCell>
+														<TableCell>
+															<ProgressBar
+																value={Number(cobrado[key] || 0)}
+																max={Number(esperado[key] || 0)}
+															/>
+														</TableCell>
+													</TableRow>
+												))}
+												<TableRow className="border-t-2 bg-muted/50 font-bold">
+													<TableCell>Total</TableCell>
 													<TableCell className="text-right">
-														{formatCurrency(Number(cobrado[key] || 0))}
+														{formatCurrency(totalCobrado)}
 													</TableCell>
 													<TableCell className="text-right">
-														{formatCurrency(Number(esperado[key] || 0))}
+														{formatCurrency(totalEsperado)}
 													</TableCell>
 													<TableCell>
 														<ProgressBar
-															value={Number(cobrado[key] || 0)}
-															max={Number(esperado[key] || 0)}
+															value={totalCobrado}
+															max={totalEsperado}
 														/>
 													</TableCell>
 												</TableRow>
-											))}
-											<TableRow className="border-t-2 bg-muted/50 font-bold">
-												<TableCell>Total</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(totalCobrado)}
-												</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(totalEsperado)}
-												</TableCell>
-												<TableCell>
-													<ProgressBar value={totalCobrado} max={totalEsperado} />
-												</TableCell>
-											</TableRow>
-										</TableBody>
-									</Table>
-								);
-							})()}
+											</TableBody>
+										</Table>
+									);
+								})()}
 						</CardContent>
 					</Card>
 
@@ -1286,17 +1383,22 @@ function RouteComponent() {
 										Flujo de Cuotas de Inversiones
 									</CardTitle>
 									<CardDescription>
-										Cuotas esperadas hacia reinversión y hacia pago en efectivo, por período
+										Cuotas esperadas hacia reinversión y hacia pago en efectivo,
+										por período
 									</CardDescription>
 								</div>
 								<div className="flex items-center gap-2">
+									<SimularButton onClick={() => setScenarioOpen("flujo")} />
 									<Input
 										type="date"
 										aria-label="Fecha inicio"
 										className="w-40"
 										value={flujoCuotasRange.fechaInicio}
 										onChange={(e) =>
-											setFlujoCuotasRange((prev) => ({ ...prev, fechaInicio: e.target.value }))
+											setFlujoCuotasRange((prev) => ({
+												...prev,
+												fechaInicio: e.target.value,
+											}))
 										}
 									/>
 									<span className="text-muted-foreground text-sm">–</span>
@@ -1306,7 +1408,10 @@ function RouteComponent() {
 										className="w-40"
 										value={flujoCuotasRange.fechaFin}
 										onChange={(e) =>
-											setFlujoCuotasRange((prev) => ({ ...prev, fechaFin: e.target.value }))
+											setFlujoCuotasRange((prev) => ({
+												...prev,
+												fechaFin: e.target.value,
+											}))
 										}
 									/>
 								</div>
@@ -1314,181 +1419,307 @@ function RouteComponent() {
 						</CardHeader>
 						<CardContent className="space-y-6">
 							{flujoCuotasQuery.isPending && (
-								<div className="text-muted-foreground py-4 text-center text-sm">
+								<div className="py-4 text-center text-muted-foreground text-sm">
 									Cargando...
 								</div>
 							)}
 							{flujoCuotasQuery.isError && (
-								<div className="text-destructive py-4 text-center text-sm">
+								<div className="py-4 text-center text-destructive text-sm">
 									Error al cargar datos
 								</div>
 							)}
-							{flujoCuotasData && (() => {
-								const { reinversionPorTipo, cashParcialPorTipo, sinReinversion, pagosExtras } = flujoCuotasData;
-								const TIPO_LABELS: Record<string, string> = {
-									reinversion_capital: "Reinversión Capital",
-									reinversion_interes: "Reinversión Interés",
-									reinversion_total: "Reinversión Total",
-									reinversion_variable: "Reinversión Variable",
-									reinversion_excedente: "Reinversión Excedente",
-								};
-								type ReinvertidoResult =
-									| { esTotal: true; total: number }
-									| { esTotal: false; capital: number; interes: number; iva: number };
-								function getReinvertido(tipo: string, t: FlujoCuotasRubro & { monto_reinvertido?: string }): ReinvertidoResult {
-									if (tipo === "reinversion_variable" || tipo === "reinversion_excedente")
-										return { esTotal: true, total: Number(t.monto_reinvertido ?? 0) };
-									if (tipo === "reinversion_capital")
-										return { esTotal: false, capital: Number(t.capital), interes: 0, iva: 0 };
-									if (tipo === "reinversion_interes")
-										return { esTotal: false, capital: 0, interes: Number(t.interes), iva: Number(t.iva) };
-									return { esTotal: false, capital: Number(t.capital), interes: Number(t.interes), iva: Number(t.iva) };
-								}
-								const totalesReinv = reinversionPorTipo.reduce(
-									(a, t) => {
-										const r = getReinvertido(t.tipo, t);
-										const tot = r.esTotal ? r.total : r.capital + r.interes + r.iva;
+							{flujoCuotasData &&
+								(() => {
+									const {
+										reinversionPorTipo,
+										cashParcialPorTipo,
+										sinReinversion,
+										pagosExtras,
+									} = flujoCuotasData;
+									const TIPO_LABELS: Record<string, string> = {
+										reinversion_capital: "Reinversión Capital",
+										reinversion_interes: "Reinversión Interés",
+										reinversion_total: "Reinversión Total",
+										reinversion_variable: "Reinversión Variable",
+										reinversion_excedente: "Reinversión Excedente",
+									};
+									type ReinvertidoResult =
+										| { esTotal: true; total: number }
+										| {
+												esTotal: false;
+												capital: number;
+												interes: number;
+												iva: number;
+										  };
+									function getReinvertido(
+										tipo: string,
+										t: FlujoCuotasRubro & { monto_reinvertido?: string },
+									): ReinvertidoResult {
+										if (
+											tipo === "reinversion_variable" ||
+											tipo === "reinversion_excedente"
+										)
+											return {
+												esTotal: true,
+												total: Number(t.monto_reinvertido ?? 0),
+											};
+										if (tipo === "reinversion_capital")
+											return {
+												esTotal: false,
+												capital: Number(t.capital),
+												interes: 0,
+												iva: 0,
+											};
+										if (tipo === "reinversion_interes")
+											return {
+												esTotal: false,
+												capital: 0,
+												interes: Number(t.interes),
+												iva: Number(t.iva),
+											};
 										return {
-											total: a.total + tot,
-											capital: a.capital + (r.esTotal ? 0 : r.capital),
-											interes: a.interes + (r.esTotal ? 0 : r.interes),
-											iva: a.iva + (r.esTotal ? 0 : r.iva),
+											esTotal: false,
+											capital: Number(t.capital),
+											interes: Number(t.interes),
+											iva: Number(t.iva),
 										};
-									},
-									{ total: 0, capital: 0, interes: 0, iva: 0 },
-								);
-								const totalReinv = totalesReinv.total;
-								const cashParcialTotal = cashParcialPorTipo.reduce(
-									(a, t) => a + (t.monto_cash ? Number(t.monto_cash) : Number(t.capital) + Number(t.interes) + Number(t.iva)),
-									0,
-								);
-								const totalSinReinv = FLUJO_RUBROS.reduce((a, r) => a + Number(sinReinversion.totales[r.key] || 0), 0);
-								const totalExtras = Number(pagosExtras.abonos_capital) + Number(pagosExtras.cancelaciones);
-								return (
-									<>
-										{/* Sección 1: Hacia Reinversión por tipo */}
-										<div>
-											<p className="mb-2 text-sm font-semibold">Cuotas → Reinversión</p>
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>Tipo de Reinversión</TableHead>
-														<TableHead className="text-right">Capital</TableHead>
-														<TableHead className="text-right">Interés</TableHead>
-														<TableHead className="text-right">IVA 12%</TableHead>
-														<TableHead className="text-right">Total</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													{reinversionPorTipo.filter((t) => {
-														const r = getReinvertido(t.tipo, t);
-														const tot = r.esTotal ? r.total : r.capital + r.interes + r.iva;
-														return tot > 0;
-													}).map((t) => {
-														const r = getReinvertido(t.tipo, t);
-														const rowTotal = r.esTotal ? r.total : r.capital + r.interes + r.iva;
-														return (
-															<TableRow key={t.tipo}>
-																<TableCell>{TIPO_LABELS[t.tipo] ?? t.tipo}</TableCell>
-																<TableCell className="text-right text-muted-foreground">
-																	{r.esTotal ? "—" : formatCurrency(r.capital)}
-																</TableCell>
-																<TableCell className="text-right text-muted-foreground">
-																	{r.esTotal ? "—" : formatCurrency(r.interes)}
-																</TableCell>
-																<TableCell className="text-right text-muted-foreground">
-																	{r.esTotal ? "—" : formatCurrency(r.iva)}
-																</TableCell>
-																<TableCell className="text-right">{formatCurrency(rowTotal)}</TableCell>
-															</TableRow>
-														);
-													})}
-													<TableRow className="border-t-2 bg-muted/50 font-bold">
-														<TableCell>Total</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totalesReinv.capital)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totalesReinv.interes)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totalesReinv.iva)}
-														</TableCell>
-														<TableCell className="text-right">{formatCurrency(totalReinv)}</TableCell>
-													</TableRow>
-												</TableBody>
-											</Table>
-										</div>
-
-										{/* Sección 2: Cash (sin reinversión + porciones cash de reinversión parcial) */}
-										<div>
-											<p className="mb-2 text-sm font-semibold">Cuotas → Cash</p>
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>Origen</TableHead>
-														<TableHead className="text-right">Capital</TableHead>
-														<TableHead className="text-right">Interés</TableHead>
-														<TableHead className="text-right">IVA 12%</TableHead>
-														<TableHead className="text-right">Total</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													{/* Inversionistas sin reinversión */}
-													<TableRow>
-														<TableCell>Sin Reinversión</TableCell>
-														<TableCell className="text-right">{formatCurrency(Number(sinReinversion.totales.capital))}</TableCell>
-														<TableCell className="text-right">{formatCurrency(Number(sinReinversion.totales.interes))}</TableCell>
-														<TableCell className="text-right">{formatCurrency(Number(sinReinversion.totales.iva))}</TableCell>
-														<TableCell className="text-right">{formatCurrency(totalSinReinv)}</TableCell>
-													</TableRow>
-													{/* Porciones cash de inversionistas con reinversión parcial — combinado */}
-													{cashParcialPorTipo.length > 0 && (
+									}
+									const totalesReinv = reinversionPorTipo.reduce(
+										(a, t) => {
+											const r = getReinvertido(t.tipo, t);
+											const tot = r.esTotal
+												? r.total
+												: r.capital + r.interes + r.iva;
+											return {
+												total: a.total + tot,
+												capital: a.capital + (r.esTotal ? 0 : r.capital),
+												interes: a.interes + (r.esTotal ? 0 : r.interes),
+												iva: a.iva + (r.esTotal ? 0 : r.iva),
+											};
+										},
+										{ total: 0, capital: 0, interes: 0, iva: 0 },
+									);
+									const totalReinv = totalesReinv.total;
+									const cashParcialTotal = cashParcialPorTipo.reduce(
+										(a, t) =>
+											a +
+											(t.monto_cash
+												? Number(t.monto_cash)
+												: Number(t.capital) +
+													Number(t.interes) +
+													Number(t.iva)),
+										0,
+									);
+									const totalSinReinv = FLUJO_RUBROS.reduce(
+										(a, r) => a + Number(sinReinversion.totales[r.key] || 0),
+										0,
+									);
+									const totalExtras =
+										Number(pagosExtras.abonos_capital) +
+										Number(pagosExtras.cancelaciones);
+									return (
+										<>
+											{/* Sección 1: Hacia Reinversión por tipo */}
+											<div>
+												<p className="mb-2 font-semibold text-sm">
+													Cuotas → Reinversión
+												</p>
+												<Table>
+													<TableHeader>
 														<TableRow>
-															<TableCell>Intereses y excedentes pagados a inversionistas</TableCell>
-															<TableCell colSpan={3} className="text-muted-foreground text-right text-sm">capital/interés/IVA según tipo</TableCell>
-															<TableCell className="text-right">{formatCurrency(cashParcialTotal)}</TableCell>
+															<TableHead>Tipo de Reinversión</TableHead>
+															<TableHead className="text-right">
+																Capital
+															</TableHead>
+															<TableHead className="text-right">
+																Interés
+															</TableHead>
+															<TableHead className="text-right">
+																IVA 12%
+															</TableHead>
+															<TableHead className="text-right">
+																Total
+															</TableHead>
 														</TableRow>
-													)}
-													{/* Total general cash */}
-													<TableRow className="border-t-2 bg-muted/50 font-bold">
-														<TableCell>Total Cash</TableCell>
-														<TableCell colSpan={3} />
-														<TableCell className="text-right">{formatCurrency(totalSinReinv + cashParcialTotal)}</TableCell>
-													</TableRow>
-												</TableBody>
-											</Table>
-										</div>
+													</TableHeader>
+													<TableBody>
+														{reinversionPorTipo
+															.filter((t) => {
+																const r = getReinvertido(t.tipo, t);
+																const tot = r.esTotal
+																	? r.total
+																	: r.capital + r.interes + r.iva;
+																return tot > 0;
+															})
+															.map((t) => {
+																const r = getReinvertido(t.tipo, t);
+																const rowTotal = r.esTotal
+																	? r.total
+																	: r.capital + r.interes + r.iva;
+																return (
+																	<TableRow key={t.tipo}>
+																		<TableCell>
+																			{TIPO_LABELS[t.tipo] ?? t.tipo}
+																		</TableCell>
+																		<TableCell className="text-right text-muted-foreground">
+																			{r.esTotal
+																				? "—"
+																				: formatCurrency(r.capital)}
+																		</TableCell>
+																		<TableCell className="text-right text-muted-foreground">
+																			{r.esTotal
+																				? "—"
+																				: formatCurrency(r.interes)}
+																		</TableCell>
+																		<TableCell className="text-right text-muted-foreground">
+																			{r.esTotal ? "—" : formatCurrency(r.iva)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(rowTotal)}
+																		</TableCell>
+																	</TableRow>
+																);
+															})}
+														<TableRow className="border-t-2 bg-muted/50 font-bold">
+															<TableCell>Total</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(totalesReinv.capital)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(totalesReinv.interes)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(totalesReinv.iva)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(totalReinv)}
+															</TableCell>
+														</TableRow>
+													</TableBody>
+												</Table>
+											</div>
 
-										{/* Sección 3: Pagos Extras Recibidos */}
-										<div>
-											<p className="mb-2 text-sm font-semibold">Pagos Extras Recibidos</p>
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>Tipo</TableHead>
-														<TableHead className="text-right">Monto</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													<TableRow>
-														<TableCell>Abonos Extra a Capital</TableCell>
-														<TableCell className="text-right">{formatCurrency(Number(pagosExtras.abonos_capital))}</TableCell>
-													</TableRow>
-													<TableRow>
-														<TableCell>Cancelaciones</TableCell>
-														<TableCell className="text-right">{formatCurrency(Number(pagosExtras.cancelaciones))}</TableCell>
-													</TableRow>
-													<TableRow className="border-t-2 bg-muted/50 font-bold">
-														<TableCell>Total</TableCell>
-														<TableCell className="text-right">{formatCurrency(totalExtras)}</TableCell>
-													</TableRow>
-												</TableBody>
-											</Table>
-										</div>
-									</>
-								);
-							})()}
+											{/* Sección 2: Cash (sin reinversión + porciones cash de reinversión parcial) */}
+											<div>
+												<p className="mb-2 font-semibold text-sm">
+													Cuotas → Cash
+												</p>
+												<Table>
+													<TableHeader>
+														<TableRow>
+															<TableHead>Origen</TableHead>
+															<TableHead className="text-right">
+																Capital
+															</TableHead>
+															<TableHead className="text-right">
+																Interés
+															</TableHead>
+															<TableHead className="text-right">
+																IVA 12%
+															</TableHead>
+															<TableHead className="text-right">
+																Total
+															</TableHead>
+														</TableRow>
+													</TableHeader>
+													<TableBody>
+														{/* Inversionistas sin reinversión */}
+														<TableRow>
+															<TableCell>Sin Reinversión</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(
+																	Number(sinReinversion.totales.capital),
+																)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(
+																	Number(sinReinversion.totales.interes),
+																)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(
+																	Number(sinReinversion.totales.iva),
+																)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(totalSinReinv)}
+															</TableCell>
+														</TableRow>
+														{/* Porciones cash de inversionistas con reinversión parcial — combinado */}
+														{cashParcialPorTipo.length > 0 && (
+															<TableRow>
+																<TableCell>
+																	Intereses y excedentes pagados a
+																	inversionistas
+																</TableCell>
+																<TableCell
+																	colSpan={3}
+																	className="text-right text-muted-foreground text-sm"
+																>
+																	capital/interés/IVA según tipo
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(cashParcialTotal)}
+																</TableCell>
+															</TableRow>
+														)}
+														{/* Total general cash */}
+														<TableRow className="border-t-2 bg-muted/50 font-bold">
+															<TableCell>Total Cash</TableCell>
+															<TableCell colSpan={3} />
+															<TableCell className="text-right">
+																{formatCurrency(
+																	totalSinReinv + cashParcialTotal,
+																)}
+															</TableCell>
+														</TableRow>
+													</TableBody>
+												</Table>
+											</div>
+
+											{/* Sección 3: Pagos Extras Recibidos */}
+											<div>
+												<p className="mb-2 font-semibold text-sm">
+													Pagos Extras Recibidos
+												</p>
+												<Table>
+													<TableHeader>
+														<TableRow>
+															<TableHead>Tipo</TableHead>
+															<TableHead className="text-right">
+																Monto
+															</TableHead>
+														</TableRow>
+													</TableHeader>
+													<TableBody>
+														<TableRow>
+															<TableCell>Abonos Extra a Capital</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(
+																	Number(pagosExtras.abonos_capital),
+																)}
+															</TableCell>
+														</TableRow>
+														<TableRow>
+															<TableCell>Cancelaciones</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(
+																	Number(pagosExtras.cancelaciones),
+																)}
+															</TableCell>
+														</TableRow>
+														<TableRow className="border-t-2 bg-muted/50 font-bold">
+															<TableCell>Total</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(totalExtras)}
+															</TableCell>
+														</TableRow>
+													</TableBody>
+												</Table>
+											</div>
+										</>
+									);
+								})()}
 						</CardContent>
 					</Card>
 
@@ -1502,21 +1733,41 @@ function RouteComponent() {
 								</DialogTitle>
 							</DialogHeader>
 							<div className="flex items-center justify-center gap-3 pb-2">
-								<Button variant="outline" size="sm" onClick={() => setMetasAnio((y) => y - 1)}>‹</Button>
-								<span className="w-16 text-center font-semibold">{metasAnio}</span>
-								<Button variant="outline" size="sm" onClick={() => setMetasAnio((y) => y + 1)}>›</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setMetasAnio((y) => y - 1)}
+								>
+									‹
+								</Button>
+								<span className="w-16 text-center font-semibold">
+									{metasAnio}
+								</span>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setMetasAnio((y) => y + 1)}
+								>
+									›
+								</Button>
 							</div>
 							{metasQuery.isPending ? (
-								<p className="text-muted-foreground py-4 text-center text-sm">Cargando...</p>
+								<p className="py-4 text-center text-muted-foreground text-sm">
+									Cargando...
+								</p>
 							) : (
 								<div className="grid grid-cols-2 gap-x-10 gap-y-4">
 									{MESES.map((nombreMes, idx) => {
 										const mes = idx + 1;
 										return (
 											<div key={mes} className="flex items-center gap-3">
-												<span className="w-20 shrink-0 font-medium text-sm">{nombreMes}</span>
+												<span className="w-20 shrink-0 font-medium text-sm">
+													{nombreMes}
+												</span>
 												<div className="relative min-w-0 flex-1">
-													<span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">Q</span>
+													<span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 font-medium text-muted-foreground text-sm">
+														Q
+													</span>
 													<Input
 														type="text"
 														inputMode="decimal"
@@ -1526,16 +1777,22 @@ function RouteComponent() {
 															focusedMes === mes
 																? (editMetas[mes] ?? "")
 																: editMetas[mes] && Number(editMetas[mes]) > 0
-																	? Number(editMetas[mes]).toLocaleString("es-GT", {
-																			minimumFractionDigits: 2,
-																			maximumFractionDigits: 2,
-																		})
+																	? Number(editMetas[mes]).toLocaleString(
+																			"es-GT",
+																			{
+																				minimumFractionDigits: 2,
+																				maximumFractionDigits: 2,
+																			},
+																		)
 																	: ""
 														}
 														onFocus={() => setFocusedMes(mes)}
 														onBlur={() => setFocusedMes(null)}
 														onChange={(e) => {
-															const raw = e.target.value.replace(/[^0-9.]/g, "");
+															const raw = e.target.value.replace(
+																/[^0-9.]/g,
+																"",
+															);
 															setEditMetas((prev) => ({ ...prev, [mes]: raw }));
 														}}
 													/>
@@ -1546,7 +1803,10 @@ function RouteComponent() {
 								</div>
 							)}
 							<div className="flex justify-end gap-2 pt-2">
-								<Button variant="outline" onClick={() => setMetasModalOpen(false)}>
+								<Button
+									variant="outline"
+									onClick={() => setMetasModalOpen(false)}
+								>
 									Cancelar
 								</Button>
 								<Button onClick={handleGuardarTodo} disabled={isSavingMetas}>
@@ -1559,6 +1819,38 @@ function RouteComponent() {
 						</DialogContent>
 					</Dialog>
 
+					{/* Modales de simulación de escenarios */}
+					<ScenarioModal
+						open={scenarioOpen === "monto"}
+						onOpenChange={(o) => setScenarioOpen(o ? "monto" : null)}
+						config={montoACobrarConfig}
+						baseData={montoCobrarData?.data}
+					/>
+					<ScenarioModal
+						open={scenarioOpen === "facturacion"}
+						onOpenChange={(o) => setScenarioOpen(o ? "facturacion" : null)}
+						config={facturacionConfig}
+						baseData={facturacionMesData}
+					/>
+					<ScenarioModal
+						open={scenarioOpen === "flujo"}
+						onOpenChange={(o) => setScenarioOpen(o ? "flujo" : null)}
+						config={flujoCuotasConfig}
+						baseData={flujoCuotasData}
+					/>
+					<ScenarioModal
+						open={scenarioOpen === "cobertura"}
+						onOpenChange={(o) => setScenarioOpen(o ? "cobertura" : null)}
+						config={coberturaConfig}
+						baseData={puntoEquilibrioData?.data}
+					/>
+					<ScenarioModal
+						open={scenarioOpen === "comparativo"}
+						onOpenChange={(o) => setScenarioOpen(o ? "comparativo" : null)}
+						config={comparativoConfig}
+						baseData={comparativoData?.data}
+					/>
+
 					{/* Cobertura de Colocación vs Meta */}
 					<Card>
 						<CardHeader>
@@ -1568,11 +1860,13 @@ function RouteComponent() {
 									<div>
 										<CardTitle>Cobertura de Colocación vs Meta</CardTitle>
 										<CardDescription>
-											Compara el capital colocado en cada período contra la meta mensual definida
+											Compara el capital colocado en cada período contra la meta
+											mensual definida
 										</CardDescription>
 									</div>
 								</div>
 								<div className="flex flex-wrap items-center gap-2">
+									<SimularButton onClick={() => setScenarioOpen("cobertura")} />
 									<Button
 										variant="outline"
 										size="sm"
@@ -1624,7 +1918,9 @@ function RouteComponent() {
 						</CardHeader>
 						<CardContent className="space-y-4">
 							{puntoEquilibrioQuery.isPending && (
-								<p className="text-muted-foreground text-sm">Cargando reporte...</p>
+								<p className="text-muted-foreground text-sm">
+									Cargando reporte...
+								</p>
 							)}
 							{puntoEquilibrioQuery.isError && (
 								<p className="text-destructive text-sm">
@@ -1636,259 +1932,380 @@ function RouteComponent() {
 									No hay datos de colocación para el rango seleccionado.
 								</p>
 							)}
-							{!!puntoEquilibrioData?.data.length && (() => {
-								const rows = puntoEquilibrioData.data;
-								const totalColocado = rows.reduce((acc, r) => acc + Number(r.colocado), 0);
-								const totalMeta = rows.reduce((acc, r) => acc + Number(r.meta), 0);
-								const totalCreditos = rows.reduce((acc, r) => acc + r.cantidad_creditos, 0);
-								const totalCobertura =
-									totalMeta > 0 ? ((totalColocado / totalMeta) * 100).toFixed(1) : null;
-								return (
-									<>
-										<ResponsiveContainer width="100%" height={300}>
-											<BarChart
-												data={rows.map((row) => ({
-													bucket: formatBucket(row.bucket, equilibrioPeriodo),
-													colocado: Number(row.colocado),
-													meta: Number(row.meta),
-												}))}
-											>
-												<CartesianGrid strokeDasharray="3 3" />
-												<XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval={0} height={36} />
-												<YAxis tickFormatter={(v) => `Q${(Number(v) / 1000).toFixed(0)}k`} />
-												<Tooltip
-													formatter={(value, name) => [
-														formatCurrency(Number(value)),
-														name === "colocado" ? "Colocado" : "Meta",
-													]}
-												/>
-												<Legend formatter={(v) => (v === "colocado" ? "Colocado" : "Meta")} />
-												<Bar dataKey="colocado" fill="#3b82f6" name="colocado" />
-												<Bar dataKey="meta" fill="#d1d5db" name="meta" />
-											</BarChart>
-										</ResponsiveContainer>
+							{!!puntoEquilibrioData?.data.length &&
+								(() => {
+									const rows = puntoEquilibrioData.data;
+									const totalColocado = rows.reduce(
+										(acc, r) => acc + Number(r.colocado),
+										0,
+									);
+									const totalMeta = rows.reduce(
+										(acc, r) => acc + Number(r.meta),
+										0,
+									);
+									const totalCreditos = rows.reduce(
+										(acc, r) => acc + r.cantidad_creditos,
+										0,
+									);
+									const totalCobertura =
+										totalMeta > 0
+											? ((totalColocado / totalMeta) * 100).toFixed(1)
+											: null;
+									return (
+										<>
+											<ResponsiveContainer width="100%" height={300}>
+												<BarChart
+													data={rows.map((row) => ({
+														bucket: formatBucket(row.bucket, equilibrioPeriodo),
+														colocado: Number(row.colocado),
+														meta: Number(row.meta),
+													}))}
+												>
+													<CartesianGrid strokeDasharray="3 3" />
+													<XAxis
+														dataKey="bucket"
+														tick={{ fontSize: 11 }}
+														interval={0}
+														height={36}
+													/>
+													<YAxis
+														tickFormatter={(v) =>
+															`Q${(Number(v) / 1000).toFixed(0)}k`
+														}
+													/>
+													<Tooltip
+														formatter={(value, name) => [
+															formatCurrency(Number(value)),
+															name === "colocado" ? "Colocado" : "Meta",
+														]}
+													/>
+													<Legend
+														formatter={(v) =>
+															v === "colocado" ? "Colocado" : "Meta"
+														}
+													/>
+													<Bar
+														dataKey="colocado"
+														fill="#3b82f6"
+														name="colocado"
+													/>
+													<Bar dataKey="meta" fill="#d1d5db" name="meta" />
+												</BarChart>
+											</ResponsiveContainer>
 
-										<div className="overflow-x-auto">
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>Período</TableHead>
-														<TableHead className="text-right">Créditos</TableHead>
-														<TableHead className="text-right">Colocado</TableHead>
-														<TableHead className="text-right">Meta</TableHead>
-														<TableHead className="text-right">Cobertura</TableHead>
-														<TableHead className="text-right">Faltante</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													{rows.map((row) => (
-														<TableRow key={row.bucket}>
-															<TableCell>{formatBucket(row.bucket, equilibrioPeriodo)}</TableCell>
-															<TableCell className="text-right">{row.cantidad_creditos}</TableCell>
-															<TableCell className="text-right">{formatCurrency(row.colocado)}</TableCell>
+											<div className="overflow-x-auto">
+												<Table>
+													<TableHeader>
+														<TableRow>
+															<TableHead>Período</TableHead>
+															<TableHead className="text-right">
+																Créditos
+															</TableHead>
+															<TableHead className="text-right">
+																Colocado
+															</TableHead>
+															<TableHead className="text-right">Meta</TableHead>
+															<TableHead className="text-right">
+																Cobertura
+															</TableHead>
+															<TableHead className="text-right">
+																Faltante
+															</TableHead>
+														</TableRow>
+													</TableHeader>
+													<TableBody>
+														{rows.map((row) => (
+															<TableRow key={row.bucket}>
+																<TableCell>
+																	{formatBucket(row.bucket, equilibrioPeriodo)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.cantidad_creditos}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(row.colocado)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{Number(row.meta) > 0 ? (
+																		formatCurrency(row.meta)
+																	) : (
+																		<span className="text-muted-foreground">
+																			Sin meta
+																		</span>
+																	)}
+																</TableCell>
+																<TableCell className="text-right">
+																	<span
+																		className="font-semibold"
+																		style={{
+																			color: coberturaColor(row.cobertura),
+																		}}
+																	>
+																		{coberturaLabel(row.cobertura)}
+																	</span>
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.faltante
+																		? formatCurrency(row.faltante)
+																		: "—"}
+																</TableCell>
+															</TableRow>
+														))}
+														<TableRow className="border-t-2 bg-muted/50 font-bold">
+															<TableCell>Total</TableCell>
 															<TableCell className="text-right">
-																{Number(row.meta) > 0 ? formatCurrency(row.meta) : <span className="text-muted-foreground">Sin meta</span>}
+																{totalCreditos}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(totalColocado)}
+															</TableCell>
+															<TableCell className="text-right">
+																{totalMeta > 0
+																	? formatCurrency(totalMeta)
+																	: "—"}
 															</TableCell>
 															<TableCell className="text-right">
 																<span
 																	className="font-semibold"
-																	style={{ color: coberturaColor(row.cobertura) }}
+																	style={{
+																		color: coberturaColor(totalCobertura),
+																	}}
 																>
-																	{coberturaLabel(row.cobertura)}
+																	{coberturaLabel(totalCobertura)}
 																</span>
 															</TableCell>
 															<TableCell className="text-right">
-																{row.faltante ? formatCurrency(row.faltante) : "—"}
+																{totalMeta > 0
+																	? formatCurrency(
+																			Math.max(0, totalMeta - totalColocado),
+																		)
+																	: "—"}
 															</TableCell>
 														</TableRow>
-													))}
+													</TableBody>
+												</Table>
+											</div>
+										</>
+									);
+								})()}
+						</CardContent>
+					</Card>
+
+					{/* ============================================================ */}
+					{/* REPORTE: COMPARATIVO HISTÓRICO MENSUAL                        */}
+					{/* ============================================================ */}
+					<Card>
+						<CardHeader>
+							<div className="flex items-center justify-between">
+								<CardTitle className="flex items-center gap-2">
+									<CalendarDays className="h-5 w-5" />
+									Comparativo Histórico Mensual
+								</CardTitle>
+								<div className="flex items-center gap-2">
+									<SimularButton
+										onClick={() => setScenarioOpen("comparativo")}
+									/>
+									<button
+										type="button"
+										className="rounded p-1 hover:bg-muted"
+										onClick={() => setComparativoAnio((y) => y - 1)}
+									>
+										<ChevronLeft className="h-4 w-4" />
+									</button>
+									<span className="w-12 text-center font-semibold text-sm">
+										{comparativoAnio}
+									</span>
+									<button
+										type="button"
+										className="rounded p-1 hover:bg-muted"
+										onClick={() =>
+											setComparativoAnio((y) =>
+												y < new Date().getFullYear() ? y + 1 : y,
+											)
+										}
+									>
+										<ChevronRight className="h-4 w-4" />
+									</button>
+								</div>
+							</div>
+						</CardHeader>
+						<CardContent>
+							{comparativoQuery.isPending && (
+								<p className="py-4 text-center text-muted-foreground text-sm">
+									Cargando...
+								</p>
+							)}
+							{comparativoQuery.isError && (
+								<p className="py-4 text-center text-red-500 text-sm">
+									Error al cargar comparativo histórico.
+								</p>
+							)}
+							{comparativoData &&
+								(() => {
+									const rows = comparativoData.data;
+									const sumColoc = rows.reduce(
+										(acc, r) =>
+											acc +
+											(r.colocacion_monto ? Number(r.colocacion_monto) : 0),
+										0,
+									);
+									const sumFacturacion = rows.reduce(
+										(acc, r) =>
+											acc + (r.facturacion ? Number(r.facturacion) : 0),
+										0,
+									);
+									const sumCreditosColoc = rows.reduce(
+										(acc, r) => acc + (r.colocacion_creditos ?? 0),
+										0,
+									);
+									return (
+										<div className="overflow-x-auto">
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>Mes</TableHead>
+														<TableHead className="text-right">
+															Colocación (Q)
+														</TableHead>
+														<TableHead className="text-right"># Col.</TableHead>
+														<TableHead className="text-right">
+															Facturación (Q)
+														</TableHead>
+														<TableHead className="text-right">
+															Cartera Activa (Q)
+														</TableHead>
+														<TableHead className="text-right">
+															# Activos
+														</TableHead>
+														<TableHead className="text-right">
+															Mora 30 (Q)
+														</TableHead>
+														<TableHead className="text-right">
+															Mora 60 (Q)
+														</TableHead>
+														<TableHead className="text-right">
+															Mora 90 (Q)
+														</TableHead>
+														<TableHead className="text-right">
+															Mora 120+ (Q)
+														</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													{rows.map((row) => {
+														const esFuturo =
+															row.colocacion_monto === null &&
+															row.facturacion === null &&
+															row.cartera_activa === null;
+														return (
+															<TableRow
+																key={row.mes}
+																className={esFuturo ? "opacity-40" : undefined}
+															>
+																<TableCell className="font-medium">
+																	{MESES[row.mes - 1]}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.colocacion_monto
+																		? formatCurrency(
+																				Number(row.colocacion_monto),
+																			)
+																		: "—"}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.colocacion_creditos ?? "—"}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.facturacion
+																		? formatCurrency(Number(row.facturacion))
+																		: "—"}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.cartera_activa
+																		? formatCurrency(Number(row.cartera_activa))
+																		: "—"}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.creditos_activos ?? "—"}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.mora_30 ? (
+																		<span>
+																			{formatCurrency(Number(row.mora_30))}
+																			<span className="ml-1 text-muted-foreground text-xs">
+																				({row.creditos_30 ?? 0})
+																			</span>
+																		</span>
+																	) : (
+																		"—"
+																	)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.mora_60 ? (
+																		<span>
+																			{formatCurrency(Number(row.mora_60))}
+																			<span className="ml-1 text-muted-foreground text-xs">
+																				({row.creditos_60 ?? 0})
+																			</span>
+																		</span>
+																	) : (
+																		"—"
+																	)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.mora_90 ? (
+																		<span>
+																			{formatCurrency(Number(row.mora_90))}
+																			<span className="ml-1 text-muted-foreground text-xs">
+																				({row.creditos_90 ?? 0})
+																			</span>
+																		</span>
+																	) : (
+																		"—"
+																	)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{row.mora_120 ? (
+																		<span>
+																			{formatCurrency(Number(row.mora_120))}
+																			<span className="ml-1 text-muted-foreground text-xs">
+																				({row.creditos_120 ?? 0})
+																			</span>
+																		</span>
+																	) : (
+																		"—"
+																	)}
+																</TableCell>
+															</TableRow>
+														);
+													})}
 													<TableRow className="border-t-2 bg-muted/50 font-bold">
 														<TableCell>Total</TableCell>
-														<TableCell className="text-right">{totalCreditos}</TableCell>
-														<TableCell className="text-right">{formatCurrency(totalColocado)}</TableCell>
 														<TableCell className="text-right">
-															{totalMeta > 0 ? formatCurrency(totalMeta) : "—"}
+															{formatCurrency(sumColoc)}
 														</TableCell>
 														<TableCell className="text-right">
-															<span
-																className="font-semibold"
-																style={{ color: coberturaColor(totalCobertura) }}
-															>
-																{coberturaLabel(totalCobertura)}
-															</span>
+															{sumCreditosColoc}
 														</TableCell>
 														<TableCell className="text-right">
-															{totalMeta > 0
-																? formatCurrency(Math.max(0, totalMeta - totalColocado))
-																: "—"}
+															{formatCurrency(sumFacturacion)}
 														</TableCell>
+														<TableCell className="text-right">—</TableCell>
+														<TableCell className="text-right">—</TableCell>
+														<TableCell className="text-right">—</TableCell>
+														<TableCell className="text-right">—</TableCell>
+														<TableCell className="text-right">—</TableCell>
+														<TableCell className="text-right">—</TableCell>
 													</TableRow>
 												</TableBody>
 											</Table>
 										</div>
-									</>
-								);
-							})()}
+									);
+								})()}
 						</CardContent>
 					</Card>
-
-				{/* ============================================================ */}
-				{/* REPORTE: COMPARATIVO HISTÓRICO MENSUAL                        */}
-				{/* ============================================================ */}
-				<Card>
-					<CardHeader>
-						<div className="flex items-center justify-between">
-							<CardTitle className="flex items-center gap-2">
-								<CalendarDays className="h-5 w-5" />
-								Comparativo Histórico Mensual
-							</CardTitle>
-							<div className="flex items-center gap-2">
-								<button
-									type="button"
-									className="rounded p-1 hover:bg-muted"
-									onClick={() => setComparativoAnio((y) => y - 1)}
-								>
-									<ChevronLeft className="h-4 w-4" />
-								</button>
-								<span className="font-semibold text-sm w-12 text-center">
-									{comparativoAnio}
-								</span>
-								<button
-									type="button"
-									className="rounded p-1 hover:bg-muted"
-									onClick={() =>
-										setComparativoAnio((y) =>
-											y < new Date().getFullYear() ? y + 1 : y,
-										)
-									}
-								>
-									<ChevronRight className="h-4 w-4" />
-								</button>
-							</div>
-						</div>
-					</CardHeader>
-					<CardContent>
-						{comparativoQuery.isPending && (
-							<p className="text-sm text-muted-foreground py-4 text-center">
-								Cargando...
-							</p>
-						)}
-						{comparativoQuery.isError && (
-							<p className="text-sm text-red-500 py-4 text-center">
-								Error al cargar comparativo histórico.
-							</p>
-						)}
-						{comparativoData && (() => {
-							const rows = comparativoData.data;
-							const sumColoc = rows.reduce(
-								(acc, r) => acc + (r.colocacion_monto ? Number(r.colocacion_monto) : 0),
-								0,
-							);
-							const sumFacturacion = rows.reduce(
-								(acc, r) => acc + (r.facturacion ? Number(r.facturacion) : 0),
-								0,
-							);
-							const sumCreditosColoc = rows.reduce(
-								(acc, r) => acc + (r.colocacion_creditos ?? 0),
-								0,
-							);
-							return (
-								<div className="overflow-x-auto">
-									<Table>
-										<TableHeader>
-											<TableRow>
-												<TableHead>Mes</TableHead>
-												<TableHead className="text-right">Colocación (Q)</TableHead>
-												<TableHead className="text-right"># Col.</TableHead>
-												<TableHead className="text-right">Facturación (Q)</TableHead>
-												<TableHead className="text-right">Cartera Activa (Q)</TableHead>
-												<TableHead className="text-right"># Activos</TableHead>
-												<TableHead className="text-right">Mora 30 (Q)</TableHead>
-												<TableHead className="text-right">Mora 60 (Q)</TableHead>
-												<TableHead className="text-right">Mora 90 (Q)</TableHead>
-												<TableHead className="text-right">Mora 120+ (Q)</TableHead>
-											</TableRow>
-										</TableHeader>
-										<TableBody>
-											{rows.map((row) => {
-												const esFuturo =
-													row.colocacion_monto === null &&
-													row.facturacion === null &&
-													row.cartera_activa === null;
-												return (
-													<TableRow
-														key={row.mes}
-														className={esFuturo ? "opacity-40" : undefined}
-													>
-														<TableCell className="font-medium">
-															{MESES[row.mes - 1]}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.colocacion_monto
-																? formatCurrency(Number(row.colocacion_monto))
-																: "—"}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.colocacion_creditos ?? "—"}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.facturacion
-																? formatCurrency(Number(row.facturacion))
-																: "—"}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.cartera_activa
-																? formatCurrency(Number(row.cartera_activa))
-																: "—"}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.creditos_activos ?? "—"}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.mora_30 ? <span>{formatCurrency(Number(row.mora_30))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_30 ?? 0})</span></span> : "—"}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.mora_60 ? <span>{formatCurrency(Number(row.mora_60))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_60 ?? 0})</span></span> : "—"}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.mora_90 ? <span>{formatCurrency(Number(row.mora_90))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_90 ?? 0})</span></span> : "—"}
-														</TableCell>
-														<TableCell className="text-right">
-															{row.mora_120 ? <span>{formatCurrency(Number(row.mora_120))}<span className="text-muted-foreground text-xs ml-1">({row.creditos_120 ?? 0})</span></span> : "—"}
-														</TableCell>
-													</TableRow>
-												);
-											})}
-										</TableBody>
-										<TableBody>
-											<TableRow className="border-t-2 bg-muted/50 font-bold">
-												<TableCell>Total</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(sumColoc)}
-												</TableCell>
-												<TableCell className="text-right">
-													{sumCreditosColoc}
-												</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(sumFacturacion)}
-												</TableCell>
-												<TableCell className="text-right">—</TableCell>
-												<TableCell className="text-right">—</TableCell>
-												<TableCell className="text-right">—</TableCell>
-												<TableCell className="text-right">—</TableCell>
-												<TableCell className="text-right">—</TableCell>
-												<TableCell className="text-right">—</TableCell>
-											</TableRow>
-										</TableBody>
-									</Table>
-								</div>
-							);
-						})()}
-					</CardContent>
-				</Card>
 				</>
 			)}
-
 		</div>
 	);
 }

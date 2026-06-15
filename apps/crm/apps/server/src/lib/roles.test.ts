@@ -17,7 +17,8 @@ describe("taller role permissions", () => {
 		expect(PERMISSIONS.canAccessVehicles(ROLES.ADMIN)).toBe(true);
 		expect(PERMISSIONS.canAccessVehicles(ROLES.SALES)).toBe(true);
 		expect(PERMISSIONS.canAccessVehicles(ROLES.ANALYST)).toBe(true);
-		expect(PERMISSIONS.canAccessVehicles(ROLES.COBROS)).toBe(false);
+		expect(PERMISSIONS.canAccessVehicles(ROLES.COBROS)).toBe(true);
+		expect(PERMISSIONS.canAccessVehicles(ROLES.COBROS_SUPERVISOR)).toBe(true);
 		expect(PERMISSIONS.canAccessVehicles(ROLES.ACCOUNTING)).toBe(false);
 		expect(PERMISSIONS.canAccessVehicles(ROLES.INVESTMENT_MANAGER)).toBe(false);
 	});

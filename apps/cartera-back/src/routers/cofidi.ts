@@ -3316,7 +3316,8 @@ if (facturasExistentes.length > 0) {
             const catRes = await db.execute(sql`
               SELECT u.categoria
               FROM cartera.usuarios u
-              WHERE regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g') = ${nitNormalizado}
+              WHERE regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g')
+                  = regexp_replace(${nitNormalizado}, '[^0-9A-Za-z]', '', 'g')
                 AND EXISTS (SELECT 1 FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id)
               ORDER BY (SELECT MAX(c.fecha_creacion) FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id) DESC NULLS LAST
               LIMIT 1

@@ -78,6 +78,9 @@ export async function generarSnapshotDiario(fecha: string) {
     LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
     LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
     WHERE fd.fecha_aplicado_gt = ${fecha}::date
+      -- una fila de PAGO huérfana (credito/usuario borrado) no debe sumar al
+      -- total; las GENÉRICAS (pago_id NULL) sí entran.
+      AND (fd.pago_id IS NULL OR p.pago_id IS NOT NULL)
     GROUP BY COALESCE(u.categoria, fd.categoria), fd.rubro
   `);
   for (const r of (desg as any).rows ?? []) {
@@ -107,21 +110,29 @@ export async function generarSnapshotDiario(fecha: string) {
     add(colProducto(prefix, cat), total);
   }
 
-  // 2) Royalty del día: PRIORIDAD a lo REALMENTE facturado (rubro ROYALTY del
-  //    desglose, ya sumado en el bloque 1). Solo si ese día NO hubo royalty
-  //    facturado, se usa el RESPALDO de creditos.royalti por fecha_creacion (GT).
-  if (g("royalty").lte(0)) {
-    const roy = await db.execute(sql`
-      SELECT u.categoria AS categoria, COALESCE(SUM(c.royalti), 0) AS total
-      FROM cartera.creditos c
-      INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-      WHERE (c.fecha_creacion AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
-      GROUP BY u.categoria
-    `);
-    for (const r of (roy as any).rows ?? []) {
-      add("royalty", r.total);
-      add(colProducto("roy", r.categoria as string), r.total);
-    }
+  // 2) Royalty del día = lo facturado (rubro ROYALTY del desglose, ya sumado en
+  //    el bloque 1) + RESPALDO de creditos.royalti (por fecha_creacion), PERO solo
+  //    para créditos cuyo NIT NO tenga una factura genérica ROYALTY en el mes
+  //    (dedup por NIT: si su royalty ya se facturó genérico, no se vuelve a contar).
+  const roy = await db.execute(sql`
+    SELECT u.categoria AS categoria, COALESCE(SUM(c.royalti), 0) AS total
+    FROM cartera.creditos c
+    INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+    WHERE (c.fecha_creacion AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
+      AND NOT EXISTS (
+        SELECT 1
+        FROM cartera.facturacion_desglose fdr
+        JOIN cartera.facturas_electronicas fe ON fe.factura_id = fdr.factura_id
+        WHERE fdr.rubro::text = 'ROYALTY' AND fdr.pago_id IS NULL
+          AND fdr.fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
+          AND regexp_replace(COALESCE(fe.receptor_nit, ''), '[^0-9A-Za-z]', '', 'g')
+            = regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g')
+      )
+    GROUP BY u.categoria
+  `);
+  for (const r of (roy as any).rows ?? []) {
+    add("royalty", r.total);
+    add(colProducto("roy", r.categoria as string), r.total);
   }
 
   // 3) Gastos administrativos del día
@@ -174,20 +185,27 @@ export async function generarSnapshotDiario(fecha: string) {
     WHERE fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
   `);
   // Royalty MTD: lo REALMENTE facturado (rubro ROYALTY del desglose) + RESPALDO de
-  // creditos.royalti SOLO para los días del mes SIN royalty facturado (mismo criterio
-  // que el día, pero acumulado).
+  // creditos.royalti, pero SOLO de créditos cuyo NIT NO tenga factura genérica
+  // ROYALTY en el mes (dedup por NIT, mismo criterio que el día → la suma de los
+  // días cuadra con el MTD y no hay doble conteo por fechas distintas).
   const royMtd = await db.execute(sql`
     SELECT
       COALESCE((SELECT SUM(monto_total) FROM cartera.facturacion_desglose
                 WHERE rubro::text = 'ROYALTY'
                   AND fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date), 0)
       +
-      COALESCE((SELECT SUM(c.royalti) FROM cartera.creditos c
+      COALESCE((SELECT SUM(c.royalti)
+                FROM cartera.creditos c
+                JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
                 WHERE (c.fecha_creacion AT TIME ZONE 'America/Guatemala')::date BETWEEN ${monthStart}::date AND ${fecha}::date
                   AND NOT EXISTS (
-                    SELECT 1 FROM cartera.facturacion_desglose fd
-                    WHERE fd.rubro::text = 'ROYALTY'
-                      AND fd.fecha_aplicado_gt = (c.fecha_creacion AT TIME ZONE 'America/Guatemala')::date
+                    SELECT 1
+                    FROM cartera.facturacion_desglose fdr
+                    JOIN cartera.facturas_electronicas fe ON fe.factura_id = fdr.factura_id
+                    WHERE fdr.rubro::text = 'ROYALTY' AND fdr.pago_id IS NULL
+                      AND fdr.fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
+                      AND regexp_replace(COALESCE(fe.receptor_nit, ''), '[^0-9A-Za-z]', '', 'g')
+                        = regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g')
                   )), 0) AS total
   `);
   const invMtd = await db.execute(sql`

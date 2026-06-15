@@ -3900,6 +3900,10 @@ export interface AgregarInversionistaCreditoPayload {
   fecha_inicio_participacion?: string;
   porcentaje_cash_in?: number;
   porcentaje_inversion?: number;
+  // MODO MANUAL: créditos específicos con su monto. Si viene, el backend
+  // ignora el buscador de candidatos y opera solo sobre estos. La suma de los
+  // montos debe igualar monto_aportado.
+  manual?: { credito_id: number; monto: number }[];
 }
 
 export interface AgregarInversionistaCreditoResponse {

@@ -319,6 +319,34 @@ const requirePorcentajeEfectividadReport = o.middleware(
 		});
 	},
 );
+const requireMetaColocacionReport = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessMetaColocacionReport(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Meta colocación report access required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
 
 const requireViewOpportunityContracts = o.middleware(
 	async ({ context, next }) => {
@@ -547,9 +575,12 @@ export const closedCreditsReportProcedure = publicProcedure.use(
 );
 export const tiempoCierreReportProcedure = publicProcedure.use(
 	requireTiempoCierreReport,
-  );
+);
 export const porcentajeEfectividadReportProcedure = publicProcedure.use(
 	requirePorcentajeEfectividadReport,
+);
+export const metaColocacionReportProcedure = publicProcedure.use(
+	requireMetaColocacionReport,
 );
 export const viewOpportunityContractsProcedure = publicProcedure.use(
 	requireViewOpportunityContracts,

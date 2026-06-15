@@ -38,23 +38,24 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import {
+	interpolar as interpolarPlantilla,
+	PLANTILLAS_MENSAJES,
+} from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
+import { toDateStrGT } from "../lib/guatemala-month-window";
+import {
+	getTestPhone,
+	isTestModeEnabled,
+	TEST_EMAIL,
+} from "../lib/messaging-test-mode";
+import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
-import {
-	interpolar as interpolarPlantilla,
-	PLANTILLAS_MENSAJES,
-} from "../lib/cobros-plantillas";
-import {
-	getTestPhone,
-	isTestModeEnabled,
-	TEST_EMAIL,
-} from "../lib/messaging-test-mode";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	sendWhatsappTemplate,
@@ -71,7 +72,6 @@ import {
 	getUltimasSincronizaciones,
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
-import { toDateStrGT } from "../lib/guatemala-month-window";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
 import { createNotification } from "./notifications";
 
@@ -131,10 +131,18 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 			params.email_cobrador !== "" && {
 				email_cobrador: params.email_cobrador,
 			}),
-			...(params.fecha_desde !== undefined && { fecha_desde: params.fecha_desde }),
-			...(params.fecha_hasta !== undefined && { fecha_hasta: params.fecha_hasta }),
-			...(params.capital_min !== undefined && { capital_min: params.capital_min }),
-			...(params.capital_max !== undefined && { capital_max: params.capital_max }),
+		...(params.fecha_desde !== undefined && {
+			fecha_desde: params.fecha_desde,
+		}),
+		...(params.fecha_hasta !== undefined && {
+			fecha_hasta: params.fecha_hasta,
+		}),
+		...(params.capital_min !== undefined && {
+			capital_min: params.capital_min,
+		}),
+		...(params.capital_max !== undefined && {
+			capital_max: params.capital_max,
+		}),
 	});
 
 	return {
@@ -732,9 +740,9 @@ export const cobrosRouter = {
 							.from(casosCobros)
 							.where(
 								sql`${casosCobros.etiquetas} && ARRAY[${sql.join(
-							input.etiquetas.map((e) => sql`${e}`),
-							sql`, `,
-						)}]::text[]`,
+									input.etiquetas.map((e) => sql`${e}`),
+									sql`, `,
+								)}]::text[]`,
 							);
 						sifcosPorEtiquetas = filas
 							.map((r) => r.numeroSifco)
@@ -982,9 +990,7 @@ export const cobrosRouter = {
 								etiquetas: casosCobros.etiquetas,
 							})
 							.from(casosCobros)
-							.where(
-								inArray(casosCobros.numeroCreditoSifco, sifcosPagina),
-							);
+							.where(inArray(casosCobros.numeroCreditoSifco, sifcosPagina));
 						for (const row of casosRows) {
 							if (!row.numeroSifco) continue;
 							casosPorSifco.set(row.numeroSifco, {
@@ -1824,7 +1830,8 @@ export const cobrosRouter = {
 
 				// 0. Si el creditoId es un UUID (viene de una notificación), resolverlo
 				//    al numeroCreditoSifco del caso de cobros antes de consultar cartera-back.
-				const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+				const UUID_REGEX =
+					/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 				if (UUID_REGEX.test(numeroSifco)) {
 					const [casoPorUUID] = await db
 						.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
@@ -2183,7 +2190,9 @@ export const cobrosRouter = {
 					? Number.parseInt(
 							cuotaParaDiaPago.fecha_vencimiento.substring(8, 10),
 							10,
-						) || oportunidadData?.diaPago || null
+						) ||
+						oportunidadData?.diaPago ||
+						null
 					: oportunidadData?.diaPago || null;
 
 				const statusCredit = creditoCompleto.credito.statusCredit;
@@ -2202,7 +2211,9 @@ export const cobrosRouter = {
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
 					cuotaConvenio: tieneConvenioActivo
-						? Number(creditoCompleto.convenioActivo!.cuota_mensual ?? 0).toFixed(2)
+						? Number(
+								creditoCompleto.convenioActivo!.cuota_mensual ?? 0,
+							).toFixed(2)
 						: null,
 
 					// Datos de contacto (del caso de cobros primero, fallback al lead)
@@ -2216,7 +2227,10 @@ export const cobrosRouter = {
 					etiquetas: casoCobro?.etiquetas || [],
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
-					montoFinanciado: creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
+					montoFinanciado:
+						creditoCompleto.credito.capital ??
+						creditoCompleto.credito.deudatotal ??
+						"0.00",
 					cuotaMensual:
 						creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual,
 					numeroCuotas: creditoCompleto.credito.plazo,
@@ -3124,7 +3138,9 @@ export const cobrosRouter = {
 			const result = await sendWhatsappTemplate({
 				phone: telefonoDestino,
 				message: input.mensaje,
-				logPrefix: testMode ? "[SimpleTech][cobros][TEST]" : "[SimpleTech][cobros]",
+				logPrefix: testMode
+					? "[SimpleTech][cobros][TEST]"
+					: "[SimpleTech][cobros]",
 			});
 
 			await persistCobrosSendLog({
@@ -3215,11 +3231,8 @@ export const cobrosRouter = {
 			// 1. Mapear estadoMora → params de cartera-back (mismo mapping que
 			// getTodosLosCreditos).
 			let cuotasAtrasadas: number | undefined;
-			let estadoCartera:
-				| "ACTIVO"
-				| "CANCELADO"
-				| "INCOBRABLE"
-				| undefined = "ACTIVO";
+			let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined =
+				"ACTIVO";
 			if (input.estadoMora) {
 				switch (input.estadoMora) {
 					case "al_dia":
@@ -3265,7 +3278,8 @@ export const cobrosRouter = {
 			const isNameSearch =
 				!numeroSifcoExacto && searchTerm.length > 0 && !hasNumber;
 
-			let numeroSifcoFiltro: string | undefined = numeroSifcoExacto || undefined;
+			let numeroSifcoFiltro: string | undefined =
+				numeroSifcoExacto || undefined;
 			let searchPorPlacaSinMatch = false;
 			const matchingSifcos = new Set<string>();
 			if (isPlateSearch) {
@@ -3398,8 +3412,7 @@ export const cobrosRouter = {
 						cuotasAtrasadas,
 						// Mismo criterio que getTodosLosCreditos: si hay rango de fechas
 						// custom, ignoramos el preset `time` para que no se pisen.
-						time:
-							input.fechaDesde || input.fechaHasta ? undefined : input.time,
+						time: input.fechaDesde || input.fechaHasta ? undefined : input.time,
 						email_cobrador: emailCobrador,
 						nombre_usuario: isNameSearch ? searchTerm : undefined,
 						numero_credito_sifco: numeroSifcoFiltro,
@@ -3510,15 +3523,27 @@ export const cobrosRouter = {
 				const clienteNombre = credito.usuarios.nombre ?? null;
 
 				if (!cuota || Number(cuota) === 0) {
-					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin cuota" });
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: "sin cuota",
+					});
 					continue;
 				}
 				if (!telefono) {
-					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin teléfono" });
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: "sin teléfono",
+					});
 					continue;
 				}
 				if (!asesor) {
-					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin asesor" });
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: "sin asesor",
+					});
 					continue;
 				}
 
@@ -3534,8 +3559,7 @@ export const cobrosRouter = {
 				// Total a cobrar = monto en mora + cuota mensual (mismo criterio
 				// que se muestra en la pantalla de detalle del caso).
 				const montoMora = Number(credito.mora?.monto_mora ?? 0);
-				const totalACobrar =
-					montoMora > 0 ? montoMora + Number(cuota) : 0;
+				const totalACobrar = montoMora > 0 ? montoMora + Number(cuota) : 0;
 
 				const cuerpoBase = input.cuerpoEditado?.trim()
 					? input.cuerpoEditado
@@ -3670,9 +3694,7 @@ export const cobrosRouter = {
 							: {
 									success: false,
 									errorMessage:
-										res?.error ??
-										batch.transportError ??
-										"Error desconocido",
+										res?.error ?? batch.transportError ?? "Error desconocido",
 									providerResponse: {
 										...(batch.providerResponse ?? {}),
 										...(testMode
@@ -3758,11 +3780,7 @@ export const cobrosRouter = {
 			let sendError: string | null = null;
 			let emailId: string | undefined;
 			try {
-				const result = await sendPlainEmail(
-					emailDestino,
-					input.asunto,
-					html,
-				);
+				const result = await sendPlainEmail(emailDestino, input.asunto, html);
 
 				if (!result.success) {
 					sendError =
@@ -3773,8 +3791,7 @@ export const cobrosRouter = {
 					emailId = result.data?.id;
 				}
 			} catch (error) {
-				sendError =
-					error instanceof Error ? error.message : String(error);
+				sendError = error instanceof Error ? error.message : String(error);
 			}
 
 			await persistCobrosSendLog({
@@ -3869,15 +3886,12 @@ export const cobrosRouter = {
 
 				if (!result.success) {
 					sendError =
-						result.error?.hint ||
-						result.error?.message ||
-						"desconocido";
+						result.error?.hint || result.error?.message || "desconocido";
 				} else {
 					mailingId = result.mailingId;
 				}
 			} catch (error) {
-				sendError =
-					error instanceof Error ? error.message : String(error);
+				sendError = error instanceof Error ? error.message : String(error);
 			}
 
 			await persistCobrosSendLog({
@@ -3966,29 +3980,64 @@ export const cobrosRouter = {
 			const serializeBuckets = (b: BucketsAcc) => {
 				const fmt = (v: number) => v.toFixed(2);
 				const totalCantidad =
-					b.mora_30.cantidad + b.mora_60.cantidad + b.mora_90.cantidad + b.mora_120_plus.cantidad;
+					b.mora_30.cantidad +
+					b.mora_60.cantidad +
+					b.mora_90.cantidad +
+					b.mora_120_plus.cantidad;
 				const totalMora =
-					b.mora_30.sumaMora + b.mora_60.sumaMora + b.mora_90.sumaMora + b.mora_120_plus.sumaMora;
+					b.mora_30.sumaMora +
+					b.mora_60.sumaMora +
+					b.mora_90.sumaMora +
+					b.mora_120_plus.sumaMora;
 				return {
-					mora_30: { cantidad: b.mora_30.cantidad, sumaCapital: fmt(b.mora_30.sumaCapital), sumaMora: fmt(b.mora_30.sumaMora) },
-					mora_60: { cantidad: b.mora_60.cantidad, sumaCapital: fmt(b.mora_60.sumaCapital), sumaMora: fmt(b.mora_60.sumaMora) },
-					mora_90: { cantidad: b.mora_90.cantidad, sumaCapital: fmt(b.mora_90.sumaCapital), sumaMora: fmt(b.mora_90.sumaMora) },
-					mora_120_plus: { cantidad: b.mora_120_plus.cantidad, sumaCapital: fmt(b.mora_120_plus.sumaCapital), sumaMora: fmt(b.mora_120_plus.sumaMora) },
+					mora_30: {
+						cantidad: b.mora_30.cantidad,
+						sumaCapital: fmt(b.mora_30.sumaCapital),
+						sumaMora: fmt(b.mora_30.sumaMora),
+					},
+					mora_60: {
+						cantidad: b.mora_60.cantidad,
+						sumaCapital: fmt(b.mora_60.sumaCapital),
+						sumaMora: fmt(b.mora_60.sumaMora),
+					},
+					mora_90: {
+						cantidad: b.mora_90.cantidad,
+						sumaCapital: fmt(b.mora_90.sumaCapital),
+						sumaMora: fmt(b.mora_90.sumaMora),
+					},
+					mora_120_plus: {
+						cantidad: b.mora_120_plus.cantidad,
+						sumaCapital: fmt(b.mora_120_plus.sumaCapital),
+						sumaMora: fmt(b.mora_120_plus.sumaMora),
+					},
 					totalEnMora: { cantidad: totalCantidad, sumaMora: fmt(totalMora) },
 				};
 			};
 
 			const acumuladoTotal = emptyBuckets();
 
-			type AsesorEntry = { asesorId: number; nombre: string; email: string; buckets: BucketsAcc };
+			type AsesorEntry = {
+				asesorId: number;
+				nombre: string;
+				email: string;
+				buckets: BucketsAcc;
+			};
 			const porAsesorMap = new Map<string, AsesorEntry>();
 
-			const addToBucket = (acc: BucketsAcc, cuotasAtrasadas: number, capital: number, mora: number) => {
+			const addToBucket = (
+				acc: BucketsAcc,
+				cuotasAtrasadas: number,
+				capital: number,
+				mora: number,
+			) => {
 				const key =
-					cuotasAtrasadas >= 4 ? "mora_120_plus" :
-					cuotasAtrasadas === 3 ? "mora_90" :
-					cuotasAtrasadas === 2 ? "mora_60" :
-					"mora_30";
+					cuotasAtrasadas >= 4
+						? "mora_120_plus"
+						: cuotasAtrasadas === 3
+							? "mora_90"
+							: cuotasAtrasadas === 2
+								? "mora_60"
+								: "mora_30";
 				acc[key].cantidad += 1;
 				acc[key].sumaCapital += capital;
 				acc[key].sumaMora += mora;
@@ -3998,8 +4047,10 @@ export const cobrosRouter = {
 				const cuotasAtrasadas = item.mora?.cuotas_atrasadas ?? 0;
 				if (cuotasAtrasadas < 1) continue;
 
-				const capital = parseFloat(item.creditos.capital as string || "0");
-				const montoMora = parseFloat(item.mora?.monto_mora ?? "0");
+				const capital = Number.parseFloat(
+					(item.creditos.capital as string) || "0",
+				);
+				const montoMora = Number.parseFloat(item.mora?.monto_mora ?? "0");
 
 				addToBucket(acumuladoTotal, cuotasAtrasadas, capital, montoMora);
 
@@ -4010,7 +4061,12 @@ export const cobrosRouter = {
 
 				let entry = porAsesorMap.get(emailAsesor);
 				if (!entry) {
-					entry = { asesorId, nombre: nombreAsesor, email: emailAsesor, buckets: emptyBuckets() };
+					entry = {
+						asesorId,
+						nombre: nombreAsesor,
+						email: emailAsesor,
+						buckets: emptyBuckets(),
+					};
 					porAsesorMap.set(emailAsesor, entry);
 				}
 				addToBucket(entry.buckets, cuotasAtrasadas, capital, montoMora);
@@ -4018,8 +4074,16 @@ export const cobrosRouter = {
 
 			const porAsesor = Array.from(porAsesorMap.values())
 				.sort((a, b) => {
-					const totalA = a.buckets.mora_30.sumaMora + a.buckets.mora_60.sumaMora + a.buckets.mora_90.sumaMora + a.buckets.mora_120_plus.sumaMora;
-					const totalB = b.buckets.mora_30.sumaMora + b.buckets.mora_60.sumaMora + b.buckets.mora_90.sumaMora + b.buckets.mora_120_plus.sumaMora;
+					const totalA =
+						a.buckets.mora_30.sumaMora +
+						a.buckets.mora_60.sumaMora +
+						a.buckets.mora_90.sumaMora +
+						a.buckets.mora_120_plus.sumaMora;
+					const totalB =
+						b.buckets.mora_30.sumaMora +
+						b.buckets.mora_60.sumaMora +
+						b.buckets.mora_90.sumaMora +
+						b.buckets.mora_120_plus.sumaMora;
 					return totalB - totalA;
 				})
 				.map((e) => ({
@@ -4089,13 +4153,13 @@ export const cobrosRouter = {
 			let cantidadCuotas = 0;
 
 			for (const row of desglose) {
-				totalCapital += parseFloat(row.total_cuota);
-				totalInteres += parseFloat(row.total_interes);
-				totalIva += parseFloat(row.total_iva);
-				totalSeguro += parseFloat(row.total_seguro);
-				totalGps += parseFloat(row.total_gps);
-				totalMembresias += parseFloat(row.total_membresias);
-				totalRoyalti += parseFloat(row.total_royalti);
+				totalCapital += Number.parseFloat(row.total_cuota);
+				totalInteres += Number.parseFloat(row.total_interes);
+				totalIva += Number.parseFloat(row.total_iva);
+				totalSeguro += Number.parseFloat(row.total_seguro);
+				totalGps += Number.parseFloat(row.total_gps);
+				totalMembresias += Number.parseFloat(row.total_membresias);
+				totalRoyalti += Number.parseFloat(row.total_royalti);
 				cantidadCuotas += row.cuotas_count;
 			}
 
@@ -4105,7 +4169,8 @@ export const cobrosRouter = {
 				totalIva +
 				totalSeguro +
 				totalGps +
-				totalMembresias;
+				totalMembresias +
+				totalRoyalti;
 
 			return {
 				fechaInicio,
@@ -4191,8 +4256,7 @@ export const cobrosRouter = {
 				montoMora: item.mora?.monto_mora ?? "0",
 				capital: item.proxima_cuota?.capital_restante ?? item.creditos.capital,
 				cuotaMensual: item.creditos.cuota,
-				proximaFechaVencimiento:
-					item.proxima_cuota?.fecha_vencimiento ?? null,
+				proximaFechaVencimiento: item.proxima_cuota?.fecha_vencimiento ?? null,
 				tipoCredito: item.creditos.tipoCredito ?? null,
 			}));
 
@@ -4236,23 +4300,24 @@ export const cobrosRouter = {
 			const todos = creditos
 				.map((item) => {
 					const cred = item.creditos;
-					const gps = parseFloat(cred.gps || "0");
-					const seguro = parseFloat(cred.seguro_10_cuotas || "0");
-					const membresias = parseFloat(cred.membresias_pago || "0");
-					const otros = parseFloat(cred.otros || "0");
+					const gps = Number.parseFloat(cred.gps || "0");
+					const seguro = Number.parseFloat(cred.seguro_10_cuotas || "0");
+					const membresias = Number.parseFloat(cred.membresias_pago || "0");
+					const otros = Number.parseFloat(cred.otros || "0");
 
-					const rubros = (
-						(item.rubros as RubroItem[] | null) ?? []
-					).map((r) => ({
-						nombre: r.nombre_rubro,
-						monto: parseFloat(String(r.monto || "0")).toFixed(2),
-					}));
+					const rubros = ((item.rubros as RubroItem[] | null) ?? []).map(
+						(r) => ({
+							nombre: r.nombre_rubro,
+							monto: Number.parseFloat(String(r.monto || "0")).toFixed(2),
+						}),
+					);
 					const rubrosTotal = rubros.reduce(
-						(s, r) => s + parseFloat(r.monto),
+						(s, r) => s + Number.parseFloat(r.monto),
 						0,
 					);
 
-					const totalDescuentos = gps + seguro + membresias + otros + rubrosTotal;
+					const totalDescuentos =
+						gps + seguro + membresias + otros + rubrosTotal;
 					if (totalDescuentos <= 0) return null;
 
 					return {
@@ -4270,11 +4335,7 @@ export const cobrosRouter = {
 						tipoCredito: cred.tipoCredito ?? null,
 					};
 				})
-				.filter(
-					(
-						v,
-					): v is NonNullable<typeof v> => v !== null,
-				);
+				.filter((v): v is NonNullable<typeof v> => v !== null);
 
 			const total = todos.length;
 			const totalPages = Math.max(1, Math.ceil(total / input.pageSize));
@@ -4323,7 +4384,11 @@ async function persistCobrosSendLog(params: {
 	createdBy: string;
 	result:
 		| { success: true; providerResponse?: Record<string, unknown> }
-		| { success: false; errorMessage?: string; providerResponse?: Record<string, unknown> };
+		| {
+				success: false;
+				errorMessage?: string;
+				providerResponse?: Record<string, unknown>;
+		  };
 }) {
 	try {
 		await db.insert(cobrosSendLogs).values({

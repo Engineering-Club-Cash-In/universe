@@ -342,6 +342,7 @@ export const reportsAppRouter = {
 	getMontoACobrar: reportesCarteraRouter.getMontoACobrar,
 	getFacturacionMes: reportesCarteraRouter.getFacturacionMes,
 	getFlujoCuotasInversiones: reportesCarteraRouter.getFlujoCuotasInversiones,
+	getFlujoCuotasPorInversionista: reportesCarteraRouter.getFlujoCuotasPorInversionista,
 	getComparativoHistorico: reportesCarteraRouter.getComparativoHistorico,
 	getMetas: reportesCarteraRouter.getMetas,
 	upsertMeta: reportesCarteraRouter.upsertMeta,

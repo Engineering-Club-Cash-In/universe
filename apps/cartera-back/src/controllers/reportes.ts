@@ -245,6 +245,127 @@ export async function getFlujoCuotasInversiones({
 }
 
 
+export async function getFlujoCuotasPorInversionista({
+  fechaInicio,
+  fechaFin,
+}: {
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const rows = await db.execute(sql`
+    SELECT
+      CASE
+        WHEN i.tipo_reinversion = 'reinversion_combinada'
+        THEN COALESCE(ce.tipo_reinversion::text, 'sin_reinversion')
+        ELSE i.tipo_reinversion::text
+      END AS tipo_reinv_efectivo,
+      i.inversionista_id,
+      i.nombre,
+      COALESCE(SUM(ci.cuota_inversionista::numeric), 0) AS total_capital,
+      COALESCE(SUM(ci.monto_inversionista::numeric), 0) AS total_interes,
+      COALESCE(SUM(ci.iva_inversionista::numeric), 0)   AS total_iva,
+      MAX(i.monto_reinversion::numeric)                  AS monto_reinversion_inv
+    FROM cartera.cuotas_credito c
+    JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+    JOIN cartera.creditos_inversionistas ci ON cr.credito_id = ci.credito_id
+    JOIN cartera.inversionistas i ON ci.inversionista_id = i.inversionista_id
+    LEFT JOIN cartera.creditos_inversionistas_espejo ce
+      ON cr.credito_id = ce.credito_id AND ci.inversionista_id = ce.inversionista_id
+    WHERE c.pagado = false
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      AND c.fecha_vencimiento >= ${fechaInicio}::date
+      AND c.fecha_vencimiento <= ${fechaFin}::date
+    GROUP BY tipo_reinv_efectivo, i.inversionista_id, i.nombre
+    ORDER BY i.nombre
+  `);
+
+  const fmt = (n: number) => n.toFixed(2);
+
+  type InvRow = {
+    inversionista_id: number;
+    nombre: string;
+    reinv_capital: number;
+    reinv_interes: number;
+    cash_capital: number;
+    cash_interes: number;
+  };
+
+  const porInv: Record<number, InvRow> = {};
+
+  for (const row of rows.rows as Record<string, unknown>[]) {
+    const id = Number(row.inversionista_id);
+    const nombre = String(row.nombre);
+    const capital = Number(row.total_capital);
+    const interes = Number(row.total_interes);
+    const iva = Number(row.total_iva);
+    const tipo = String(row.tipo_reinv_efectivo);
+    const montoReinvInv = Number(row.monto_reinversion_inv ?? 0);
+    const totalCuota = capital + interes + iva;
+
+    if (!porInv[id]) {
+      porInv[id] = { inversionista_id: id, nombre, reinv_capital: 0, reinv_interes: 0, cash_capital: 0, cash_interes: 0 };
+    }
+
+    const inv = porInv[id];
+
+    if (tipo === "sin_reinversion") {
+      inv.cash_capital += capital;
+      inv.cash_interes += interes + iva;
+    } else if (tipo === "reinversion_capital") {
+      inv.reinv_capital += capital;
+      inv.cash_interes += interes + iva;
+    } else if (tipo === "reinversion_interes") {
+      inv.reinv_interes += interes + iva;
+      inv.cash_capital += capital;
+    } else if (tipo === "reinversion_total") {
+      inv.reinv_capital += capital;
+      inv.reinv_interes += interes + iva;
+    } else if (tipo === "reinversion_variable") {
+      const reinvertido = Math.min(montoReinvInv, totalCuota);
+      const cash = Math.max(0, totalCuota - reinvertido);
+      inv.reinv_capital += reinvertido;
+      inv.cash_capital += cash;
+    } else if (tipo === "reinversion_excedente") {
+      const recibe = Math.min(montoReinvInv, totalCuota);
+      inv.cash_capital += recibe;
+      inv.reinv_capital += Math.max(0, totalCuota - recibe);
+    }
+  }
+
+  const lista = Object.values(porInv).sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+  let totalReinv = 0;
+  let totalCash = 0;
+
+  for (const inv of lista) {
+    totalReinv += inv.reinv_capital + inv.reinv_interes;
+    totalCash += inv.cash_capital + inv.cash_interes;
+  }
+
+  return {
+    porInversionista: lista.map((inv) => {
+      const reinvTotal = inv.reinv_capital + inv.reinv_interes;
+      const cashTotal = inv.cash_capital + inv.cash_interes;
+      return {
+        inversionista_id: inv.inversionista_id,
+        nombre: inv.nombre,
+        reinversion_capital: fmt(inv.reinv_capital),
+        reinversion_interes: fmt(inv.reinv_interes),
+        reinversion_total: fmt(reinvTotal),
+        cash_capital: fmt(inv.cash_capital),
+        cash_interes: fmt(inv.cash_interes),
+        cash_total: fmt(cashTotal),
+        total: fmt(reinvTotal + cashTotal),
+      };
+    }),
+    totales: {
+      reinversion_total: fmt(totalReinv),
+      cash_total: fmt(totalCash),
+      total: fmt(totalReinv + totalCash),
+    },
+  };
+}
+
 export async function getEsperadoDelMes({
   mes,
   anio,

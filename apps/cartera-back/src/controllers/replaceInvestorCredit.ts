@@ -869,6 +869,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       const comprasPendientesOrigen = await tx
         .select({
           monto_aportado: compras_credito_inversionista.monto_aportado,
+          tipo_reinversion: compras_credito_inversionista.tipo_reinversion,
         })
         .from(compras_credito_inversionista)
         .where(
@@ -889,6 +890,13 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         (acc, r) => acc.plus(new Big(r.monto_aportado)),
         new Big(0),
       );
+
+      // tipo_reinversion de la operación pendiente del origen. Se conserva
+      // para que la fila nueva del destino (insert) no lo pierda (antes se
+      // guardaba en null).
+      const tipoReinversionOrigen =
+        comprasPendientesOrigen.find((c) => c.tipo_reinversion != null)
+          ?.tipo_reinversion ?? null;
 
       const montoPadreOrigen = new Big(invEnOrigen.monto_aportado);
       const montoEnOrigen = deltaPendienteOrigen.gt(0)
@@ -1199,7 +1207,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           inversionista_id,
           monto_aportado: montoAsignar.toString(),
           tipo_operacion,
-          tipo_reinversion: null,
+          tipo_reinversion: tipoReinversionOrigen,
           status: statusEspejo,
         });
 

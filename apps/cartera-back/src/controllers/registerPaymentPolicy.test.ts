@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { shouldIncobrableInstallmentBePaid } from "./registerPaymentPolicy";
+import {
+  recomputeCreditAfterCapital,
+  shouldIncobrableInstallmentBePaid,
+} from "./registerPaymentPolicy";
 
 describe("registerPaymentPolicy - shouldIncobrableInstallmentBePaid", () => {
   it("no aplica (null) cuando el crédito no es incobrable", () => {
@@ -82,5 +85,54 @@ describe("registerPaymentPolicy - shouldIncobrableInstallmentBePaid", () => {
         abonoCapital: null,
       }),
     ).toBeTrue(); // 0 - 0 = 0 ≤ tolerancia
+  });
+});
+
+describe("recomputeCreditAfterCapital", () => {
+  it("crédito normal: recalcula interés/IVA sobre el porcentaje", () => {
+    const r = recomputeCreditAfterCapital({
+      statusCredit: "ACTIVO",
+      newCapital: "10000",
+      porcentajeInteres: "1.5",
+    });
+    expect(r.capital.toString()).toBe("10000");
+    expect(r.cuotaInteres.toString()).toBe("150"); // 10000 * 1.5%
+    expect(r.iva.toString()).toBe("18"); // 150 * 0.12
+    expect(r.deudaTotal.toString()).toBe("10168");
+  });
+
+  it("INCOBRABLE: NO devenga interés aunque tenga porcentaje_interes>0", () => {
+    const r = recomputeCreditAfterCapital({
+      statusCredit: "INCOBRABLE",
+      newCapital: "7744.11",
+      porcentajeInteres: "1.5", // preservado del castigo, NO debe revivir
+    });
+    expect(r.cuotaInteres.toString()).toBe("0");
+    expect(r.iva.toString()).toBe("0");
+    expect(r.capital.toString()).toBe("7744.11");
+    expect(r.deudaTotal.toString()).toBe("7744.11");
+  });
+
+  it("clampa el capital a 0 en sobre-recuperación (no queda negativo)", () => {
+    const r = recomputeCreditAfterCapital({
+      statusCredit: "INCOBRABLE",
+      newCapital: "-50", // capital 100 - abono 150
+      porcentajeInteres: "1.5",
+    });
+    expect(r.capital.toString()).toBe("0");
+    expect(r.cuotaInteres.toString()).toBe("0");
+    expect(r.deudaTotal.toString()).toBe("0");
+  });
+
+  it("suma seguro/gps/membresías a la deuda total", () => {
+    const r = recomputeCreditAfterCapital({
+      statusCredit: "ACTIVO",
+      newCapital: "1000",
+      porcentajeInteres: "0",
+      seguro: "30",
+      gps: "20",
+      membresias: "10",
+    });
+    expect(r.deudaTotal.toString()).toBe("1060");
   });
 });

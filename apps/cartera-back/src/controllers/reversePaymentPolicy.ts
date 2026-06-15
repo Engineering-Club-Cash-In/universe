@@ -36,6 +36,38 @@ export function isCreditStatusReversible(status?: string | null) {
   );
 }
 
+// `registerBy` de filas generadas por el sistema (no son recuperaciones reales):
+// cierre de castigo e importaciones. Si una de estas se reversa en un incobrable,
+// se corrompe la estructura del castigo (resetea la fila, borra boletas, y si está
+// `validated` hasta devuelve capital). Ver crédito 23 / pago 121102 (system_reset,
+// validated, abono 6,272.54 → reversarlo duplicaría el capital).
+const SYSTEM_REGISTER_BY_PREFIXES = ["sistema", "sifco"];
+const SYSTEM_REGISTER_BY_EXACT = ["system_reset"];
+
+/**
+ * En un crédito INCOBRABLE solo se permite reversar PAGOS DE RECUPERACIÓN reales:
+ * un pago en `pending`/`validated` registrado por un usuario (no por el sistema).
+ * Excluye filas estructurales (reset/castigo/SIFCO, abonos directos a capital).
+ */
+export function isReversibleIncobrablePayment({
+  validationStatus,
+  registerBy,
+}: {
+  validationStatus?: string | null;
+  registerBy?: string | null;
+}): boolean {
+  const isRecoveryStatus =
+    validationStatus === "pending" || validationStatus === "validated";
+  if (!isRecoveryStatus) return false;
+
+  const rb = (registerBy ?? "").trim().toLowerCase();
+  if (SYSTEM_REGISTER_BY_EXACT.includes(rb)) return false;
+  if (SYSTEM_REGISTER_BY_PREFIXES.some((prefix) => rb.startsWith(prefix))) {
+    return false;
+  }
+  return true;
+}
+
 export function shouldRemoveSameInstallmentPaymentOnReverse(
   payment: SameInstallmentPayment,
 ) {

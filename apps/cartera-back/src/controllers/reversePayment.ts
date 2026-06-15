@@ -20,10 +20,12 @@ import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { updateInstallments } from "./updateCredit";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
+  isReversibleIncobrablePayment,
   REVERSIBLE_CREDIT_STATUSES,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
+import { recomputeCreditAfterCapital } from "./registerPaymentPolicy";
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
 // ============================================================================
@@ -115,6 +117,20 @@ export const reversePayment = async ({ body, set }: any) => {
 
       console.log("✅ Crédito encontrado y activo");
 
+      // En un INCOBRABLE solo se permite reversar pagos de recuperación reales.
+      // Reversar una fila estructural del castigo (system_reset / SISTEMA-INCOBRABLE
+      // / SIFCO / abono directo a capital) corrompe el cierre: resetea la fila,
+      // borra boletas/inversionistas y, si está `validated`, hasta devuelve capital.
+      if (
+        creditData.creditos.statusCredit === "INCOBRABLE" &&
+        !isReversibleIncobrablePayment({
+          validationStatus: pago.validationStatus,
+          registerBy: pago.registerBy,
+        })
+      ) {
+        throw new Error("Incobrable structural row cannot be reversed");
+      }
+
       // ======================================================================
       // 4️⃣ OBTENER DATOS DEL USUARIO
       // ======================================================================
@@ -145,30 +161,28 @@ export const reversePayment = async ({ body, set }: any) => {
 
         const capitalActual = new Big(creditData.creditos.capital ?? 0);
         const abonoCapital = new Big(pago.abono_capital ?? 0);
-        nuevoCapital = capitalActual.plus(abonoCapital);
+
+        // Devuelve el abono al capital. recomputeCreditAfterCapital aplica las
+        // invariantes: si es INCOBRABLE no revive interés/IVA y el capital no
+        // queda negativo.
+        const recomputed = recomputeCreditAfterCapital({
+          statusCredit: creditData.creditos.statusCredit,
+          newCapital: capitalActual.plus(abonoCapital),
+          porcentajeInteres: creditData.creditos.porcentaje_interes,
+          seguro: creditData.creditos.seguro_10_cuotas,
+          gps: creditData.creditos.gps,
+          membresias: creditData.creditos.membresias_pago,
+        });
+        nuevoCapital = recomputed.capital;
+        cuota_interes = recomputed.cuotaInteres;
+        iva_12 = recomputed.iva;
+        deudatotal = recomputed.deudaTotal;
 
         console.log(`💰 Capital actual: ${capitalActual.toString()}`);
         console.log(`💵 Abono capital a reversar: ${abonoCapital.toString()}`);
         console.log(`✅ Nuevo capital: ${nuevoCapital.toString()}`);
-
-        // Recalcular interés e IVA basado en el nuevo capital
-        const porcentajeInteres = new Big(
-          creditData.creditos.porcentaje_interes ?? 0,
-        ).div(100);
-        cuota_interes = nuevoCapital.times(porcentajeInteres).round(2);
-        iva_12 = cuota_interes.times(0.12).round(2);
-
         console.log(`🔢 Nuevo interés: ${cuota_interes.toString()}`);
         console.log(`🔢 Nuevo IVA: ${iva_12.toString()}`);
-
-        // Recalcular deuda total
-        deudatotal = nuevoCapital
-          .plus(cuota_interes)
-          .plus(iva_12)
-          .plus(creditData.creditos.seguro_10_cuotas ?? 0)
-          .plus(creditData.creditos.gps ?? 0)
-          .plus(creditData.creditos.membresias_pago ?? 0);
-
         console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
       } else {
         console.log("⏭️ Cuota no pagada — se omite recálculo de capital/interés/IVA");
@@ -729,6 +743,7 @@ try {
     } else if (
       error.message === "Payment is not marked as paid" ||
       error.message === "Credit not found or not active" ||
+      error.message === "Incobrable structural row cannot be reversed" ||
       error.message === "User not found"
     ) {
       set.status = 400;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   isCreditStatusReversible,
+  isReversibleIncobrablePayment,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
@@ -86,5 +87,59 @@ describe("reverse payment policy", () => {
     expect(isCreditStatusReversible("CAIDO")).toBeFalse();
     expect(isCreditStatusReversible(null)).toBeFalse();
     expect(isCreditStatusReversible(undefined)).toBeFalse();
+  });
+});
+
+describe("isReversibleIncobrablePayment", () => {
+  it("permite reversar pagos de recuperación reales (usuario, pending/validated)", () => {
+    expect(
+      isReversibleIncobrablePayment({
+        validationStatus: "validated",
+        registerBy: "caren.r@sepresta.com",
+      }),
+    ).toBeTrue();
+    expect(
+      isReversibleIncobrablePayment({
+        validationStatus: "pending",
+        registerBy: "caren.r@sepresta.com",
+      }),
+    ).toBeTrue();
+  });
+
+  it("bloquea filas estructurales del castigo (system_reset, aun estando validated)", () => {
+    // crédito 23 / pago 121102: validated pero system_reset → NO reversable
+    expect(
+      isReversibleIncobrablePayment({
+        validationStatus: "validated",
+        registerBy: "system_reset",
+      }),
+    ).toBeFalse();
+    expect(
+      isReversibleIncobrablePayment({
+        validationStatus: "no_required",
+        registerBy: "SISTEMA-INCOBRABLE",
+      }),
+    ).toBeFalse();
+    expect(
+      isReversibleIncobrablePayment({
+        validationStatus: "validated",
+        registerBy: "SIFCO_IMPORT",
+      }),
+    ).toBeFalse();
+  });
+
+  it("bloquea estados que no son de recuperación (reset, capital, no_required)", () => {
+    expect(
+      isReversibleIncobrablePayment({
+        validationStatus: "reset",
+        registerBy: "caren.r@sepresta.com",
+      }),
+    ).toBeFalse();
+    expect(
+      isReversibleIncobrablePayment({
+        validationStatus: "capital",
+        registerBy: "caren.r@sepresta.com",
+      }),
+    ).toBeFalse();
   });
 });

@@ -65,6 +65,7 @@
     "MORA",
     "OTROS",
     "INTERES_INVERSIONISTAS",
+    "ROYALTY",
   ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),
@@ -1135,9 +1136,11 @@
     "facturacion_desglose",
     {
       id: serial("id").primaryKey(),
-      pago_id: integer("pago_id")
-        .notNull()
-        .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      // nullable: las facturas GENÉRICAS no tienen pago (se anclan por factura_id).
+      pago_id: integer("pago_id").references(
+        () => pagos_credito.pago_id,
+        { onDelete: "cascade" }
+      ),
       factura_id: integer("factura_id").references(
         () => facturas_electronicas.factura_id,
         { onDelete: "set null" }
@@ -1150,6 +1153,10 @@
         .notNull()
         .default("0"),
       fecha_aplicado_gt: date("fecha_aplicado_gt"),
+      // Categoría del receptor (resuelta por NIT) para las genéricas → columna de
+      // producto del reporte. En filas ligadas a un pago queda NULL y se deriva
+      // por JOIN pago→credito→usuario.
+      categoria: varchar("categoria", { length: 100 }),
       created_at: timestamp("created_at").defaultNow().notNull(),
     },
     (table) => ({

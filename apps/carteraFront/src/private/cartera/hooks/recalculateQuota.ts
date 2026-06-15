@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { recalculateQuotaService, type RecalculateQuotaPayload } from "../services/services";
 
 export function useRecalculateQuota() {
@@ -10,8 +11,7 @@ export function useRecalculateQuota() {
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (error: any) => {
-      const msg = error?.response?.data?.message || "Error recalculando cuota";
-      toast.error(msg);
+      toast.error(getApiErrorMessage(error, "Error recalculando cuota"));
     },
   });
 }

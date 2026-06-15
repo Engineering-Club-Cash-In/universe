@@ -272,6 +272,17 @@ export default function Header() {
 											</Link>
 										</DropdownMenuItem>
 									)}
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<>
+											<DropdownMenuSeparator />
+											<DropdownMenuItem asChild>
+												<Link to="/cobros/reportes" className="cursor-pointer">
+													<BarChart3 className="mr-2 h-4 w-4" />
+													Reportes
+												</Link>
+											</DropdownMenuItem>
+										</>
+									)}
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}

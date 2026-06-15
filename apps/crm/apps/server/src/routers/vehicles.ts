@@ -511,6 +511,11 @@ export const vehiclesRouter = {
 						message: `Ya existe un vehículo con la placa "${input.licensePlate}"`,
 					});
 				}
+				if (isUniqueViolation(error, "vehicles_vin_number_unique")) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Ya existe un vehículo con el número de VIN "${input.vinNumber}"`,
+					});
+				}
 				throw error;
 			}
 		}),

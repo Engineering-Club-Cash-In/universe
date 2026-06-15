@@ -7,7 +7,7 @@ import {
   verificarFacturasSat,
   reportarFacturasFallidasSat,
 } from './src/controllers/verificarFacturasSat';
-import { asegurarSnapshotDiario } from './src/controllers/facturacionSnapshot';
+import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -111,18 +111,21 @@ export function iniciarTareasProgramadas() {
     }
   });
 
-  // 📸 Snapshot diario de facturación - 01:00 hora Guatemala (respaldo).
-  //    Genera el snapshot del DÍA ANTERIOR SOLO si no se guardó ya manualmente.
+  // 📸 Snapshot diario de facturación - 01:00 hora Guatemala.
+  //    REGENERA (force) los últimos 3 días, NO "solo si falta": así captura
+  //    facturación que entró con fecha atrasada y refresca filas pre-creadas
+  //    (p. ej. del import del Excel hasta 2026-12-31) que de otro modo
+  //    quedarían congeladas en su valor viejo/0.
   schedule.scheduleJob({ rule: '0 1 * * *', tz: TZ_GUATEMALA }, async () => {
-    const fecha = getFechaGuatemalaISO(-1); // ayer en GT
-    console.log(`📸 Ejecutando asegurarSnapshotDiario para ${fecha} (01:00 Guatemala)...`);
-    try {
-      const res = await asegurarSnapshotDiario(fecha);
-      console.log(
-        `✅ snapshotDiario ${fecha}: ${res.created ? 'generado' : 'ya existía'}`,
-      );
-    } catch (error) {
-      console.error('❌ Error al ejecutar asegurarSnapshotDiario:', error);
+    for (const off of [-1, -2, -3]) {
+      const fecha = getFechaGuatemalaISO(off); // ayer, antier, trasantier (GT)
+      console.log(`📸 Regenerando snapshot diario ${fecha} (01:00 Guatemala)...`);
+      try {
+        await generarSnapshotDiario(fecha);
+        console.log(`✅ snapshotDiario ${fecha}: regenerado`);
+      } catch (error) {
+        console.error(`❌ Error regenerando snapshot ${fecha}:`, error);
+      }
     }
   });
 

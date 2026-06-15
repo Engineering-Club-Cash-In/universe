@@ -169,6 +169,12 @@ export const cobrosAppRouter = {
 	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
 
+	// CRM Cobros — nuevas vistas
+	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
+	getPagosEsperadosCobros: cobrosRouter.getPagosEsperadosCobros,
+	getPagosNoRecibidos: cobrosRouter.getPagosNoRecibidos,
+	getDescuentosCRM: cobrosRouter.getDescuentosCRM,
+
 	// Seguimientos programados
 	createSeguimiento: seguimientosRouter.createSeguimiento,
 	getSeguimientosActivos: seguimientosRouter.getSeguimientosActivos,

@@ -73,6 +73,8 @@ const addInvestorToCreditSchema = z.object({
       "reinversion_total",
     ])
     .optional(),
+  // Se sigue aceptando por compatibilidad, pero YA NO se usa para actualizar
+  // la fecha de las filas (ni del inversionista nuevo ni del existente).
   fecha_inicio_participacion: z.string().optional(),
   // Nuevos campos para el buscador de capital
   minimo: z.number().int().positive().optional(),
@@ -326,7 +328,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       porcentaje_inversion,
       tipo_operacion,
       tipo_reinversion,
-      fecha_inicio_participacion,
+      // NOTA: fecha_inicio_participacion se sigue aceptando en el body pero
+      // ya NO se desestructura ni se usa: no actualiza la fecha de las filas.
       minimo,
       manual,
     } = parseResult.data;
@@ -496,12 +499,17 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     }
 
     // ================================================================
-    // MODO MANUAL: VALIDACIÓN DE TOPE (pre-transacción)
-    // Las reglas son las mismas que en automático: no se puede tomar más de
-    // lo que CUBE tiene en el padre. PERO en manual el monto es una instrucción
-    // exacta, así que NO asignamos parcial: si algún crédito no cabe, fallamos
-    // TODA la operación para que el operador corrija y reintente. Se valida
-    // sobre el snapshot ya cargado en `candidatos` (no se toca la BD).
+    // MODO MANUAL: VALIDACIONES PRE-TRANSACCIÓN
+    // En manual saltamos getCreditCandidates, así que replicamos a mano sus
+    // guards críticos sobre el snapshot ya cargado (no se toca la BD):
+    //   1. Espejo SIN operación en curso (todas las filas en "completado").
+    //      getCreditCandidates descarta los pendiente_*; si no lo hiciéramos,
+    //      el nuke&rebuild del espejo borraría esas filas pendientes y las
+    //      reinsertaría como "completado", perdiendo la compra/reinversión
+    //      en vuelo de ese crédito.
+    //   2. CUBE presente y con tope suficiente. Como el monto es una
+    //      instrucción exacta, NO asignamos parcial: si algún crédito no cabe,
+    //      fallamos TODA la operación para que el operador corrija y reintente.
     // ================================================================
     if (esManual) {
       const violaciones: {
@@ -516,6 +524,25 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         const montoSolicitado =
           montoManualPorCredito.get(candidato.credito_id) ?? new Big(0);
 
+        // ── Guard 1: espejo sin operación en curso ──
+        // Un crédito pasa solo si TODAS sus filas de espejo están en
+        // "completado" (o no tiene filas de espejo). Si alguna está en
+        // pendiente_*, ya hay un proceso en curso y reasignarlo lo pisaría.
+        const espejoPendiente = (
+          candidato.credito_completo?.espejo ?? []
+        ).find((e: any) => e.status && e.status !== "completado");
+
+        if (espejoPendiente) {
+          violaciones.push({
+            credito_id: candidato.credito_id,
+            numero_credito_sifco: candidato.numero_credito_sifco,
+            razon: `El espejo tiene una operación en curso (status ${espejoPendiente.status}); no se puede reasignar manualmente`,
+            monto_solicitado: montoSolicitado.toString(),
+          });
+          continue;
+        }
+
+        // ── Guard 2: CUBE presente ──
         const cubePadre = (
           candidato.credito_completo?.inversionistas_detalle ?? []
         ).find((inv: any) => inv.inversionista_id === CUBE_INVESTMENT_ID);
@@ -530,6 +557,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           continue;
         }
 
+        // ── Guard 3: CUBE con tope suficiente ──
         const montoCubePadre = new Big(cubePadre.monto_aportado);
         if (montoSolicitado.gt(montoCubePadre)) {
           violaciones.push({
@@ -548,7 +576,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         return {
           success: false,
           message:
-            "No se pudo crear la asignación manual: uno o más créditos superan el tope disponible de CUBE",
+            "No se pudo crear la asignación manual: uno o más créditos no son elegibles (espejo con operación en curso, sin CUBE, o monto sobre el tope de CUBE)",
           violaciones,
         };
       }
@@ -836,8 +864,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
                 ),
                 porcentaje_cash_in: porcCashIn,
                 porcentaje_inversion: porcInversion,
-                fecha_inicio_participacion:
-                  fecha_inicio_participacion ?? inv.fecha_inicio_participacion,
+                // Se conserva la fecha existente. El fecha_inicio_participacion
+                // del request se sigue aceptando pero NO se usa para actualizar.
+                fecha_inicio_participacion: inv.fecha_inicio_participacion,
               });
             } else {
               // ── Otro inversionista: se copia igual ──
@@ -863,8 +892,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
               monto_aportado: montoParaEsteCredito,
               porcentaje_cash_in: porcCashIn,
               porcentaje_inversion: porcInversion,
-              fecha_inicio_participacion:
-                fecha_inicio_participacion ?? fechaPorDefecto,
+              // Fecha por defecto (no se usa la del request).
+              fecha_inicio_participacion: fechaPorDefecto,
             });
           }
 

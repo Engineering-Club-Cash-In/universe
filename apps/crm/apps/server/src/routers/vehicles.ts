@@ -734,7 +734,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Create vehicle inspection
-	createInspection: vehiclesProcedure
+	createInspection: tallerOrCrmProcedure
 		.input(
 			z.object({
 				vehicleId: z.string(),
@@ -1130,7 +1130,7 @@ export const vehiclesRouter = {
 	}),
 
 	// Create full inspection with all data (vehicle + inspection + checklist)
-	createFullInspection: vehiclesProcedure
+	createFullInspection: tallerOrCrmProcedure
 		.input(
 			z.object({
 				// Vehicle data

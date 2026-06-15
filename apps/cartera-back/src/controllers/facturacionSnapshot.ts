@@ -58,6 +58,7 @@ export async function generarSnapshotDiario(fecha: string) {
   const [y, m, d] = fecha.split("-").map(Number);
   const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const monthEnd = `${y}-${String(m).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
   const dayOfMonth = d;
 
   // Acumulador de columnas (Big.js)
@@ -124,9 +125,11 @@ export async function generarSnapshotDiario(fecha: string) {
         FROM cartera.facturacion_desglose fdr
         JOIN cartera.facturas_electronicas fe ON fe.factura_id = fdr.factura_id
         WHERE fdr.rubro::text = 'ROYALTY' AND fdr.pago_id IS NULL
-          AND fdr.fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${fecha}::date
-          AND regexp_replace(COALESCE(fe.receptor_nit, ''), '[^0-9A-Za-z]', '', 'g')
-            = regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g')
+          -- mes COMPLETO (no solo hasta hoy): si la factura ROYALTY del NIT se
+          -- emite DESPUÉS en el mes, igual debe suprimir el respaldo al regenerar.
+          AND fdr.fecha_aplicado_gt BETWEEN ${monthStart}::date AND ${monthEnd}::date
+          AND upper(regexp_replace(COALESCE(fe.receptor_nit, ''), '[^0-9A-Za-z]', '', 'g'))
+            = upper(regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g'))
       )
     GROUP BY u.categoria
   `);

@@ -10,27 +10,27 @@ const TRADUCCIONES: Array<{
   patron: RegExp;
   traduccion: string | ((match: RegExpExecArray) => string);
 }> = [
-  { patron: /jwt expired/i, traduccion: "tu sesión expiró, vuelve a iniciar sesión" },
+  { patron: /jwt expired/i, traduccion: "Tu sesión expiró, vuelve a iniciar sesión" },
   {
     patron: /jwt|invalid signature|invalid token|token no proporcionado|token inválido/i,
-    traduccion: "tu sesión no es válida, vuelve a iniciar sesión",
+    traduccion: "Tu sesión no es válida, vuelve a iniciar sesión",
   },
   {
     patron: /^Expected /,
-    traduccion: (m) => `uno de los filtros o datos enviados no es válido (${m.input})`,
+    traduccion: (m) => `Uno de los filtros o datos enviados no es válido (${m.input})`,
   },
-  { patron: /payment\s+(\d+)\s+not found/i, traduccion: (m) => `no se encontró el pago ${m[1]}` },
-  { patron: /payment not found/i, traduccion: "no se encontró el pago" },
-  { patron: /credit not found or not active/i, traduccion: "no se encontró el crédito o no está activo" },
-  { patron: /credit not found/i, traduccion: "no se encontró el crédito" },
-  { patron: /user not found/i, traduccion: "no se encontró el usuario" },
+  { patron: /payment\s+(\d+)\s+not found/i, traduccion: (m) => `No se encontró el pago ${m[1]}` },
+  { patron: /payment not found/i, traduccion: "No se encontró el pago" },
+  { patron: /credit not found or not active/i, traduccion: "No se encontró el crédito o no está activo" },
+  { patron: /credit not found/i, traduccion: "No se encontró el crédito" },
+  { patron: /user not found/i, traduccion: "No se encontró el usuario" },
   {
     patron: /validation failed/i,
-    traduccion: "los datos enviados no son válidos, revisa los campos e intenta de nuevo",
+    traduccion: "Los datos enviados no son válidos, revisa los campos e intenta de nuevo",
   },
   {
     patron: /internal server error/i,
-    traduccion: "error interno del servidor, intenta de nuevo o contacta soporte",
+    traduccion: "Error interno del servidor, intenta de nuevo o contacta soporte",
   },
 ];
 
@@ -87,10 +87,10 @@ function esDetalleTecnicoCrudo(detail: string): boolean {
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof AxiosError) {
     if (error.code === "ECONNABORTED") {
-      return `${fallback}: el servidor tardó demasiado en responder, intenta de nuevo`;
+      return `${fallback}: El servidor tardó demasiado en responder, intenta de nuevo`;
     }
     if (!error.response) {
-      return `${fallback}: sin conexión con el servidor`;
+      return `${fallback}: Sin conexión con el servidor`;
     }
     const { status, data } = error.response;
     let detail: unknown;
@@ -113,10 +113,10 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
       return `${fallback}: ${traducirDetalleTecnico(detail.trim())}`;
     }
     if (status === 401 || status === 403) {
-      return `${fallback}: tu sesión no es válida, vuelve a iniciar sesión`;
+      return `${fallback}: Tu sesión no es válida, vuelve a iniciar sesión`;
     }
     if (status >= 500) {
-      return `${fallback}: error interno del servidor (HTTP ${status})`;
+      return `${fallback}: Error interno del servidor (HTTP ${status})`;
     }
     return `${fallback} (HTTP ${status})`;
   }

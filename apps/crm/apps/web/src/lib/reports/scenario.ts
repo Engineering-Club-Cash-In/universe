@@ -11,8 +11,6 @@ import {
 	IVA_FACTOR,
 } from "@/utils/quoter-calculations";
 
-export type MetodoCuota = "actual" | "frances" | "fija";
-
 export type LeverKey = "colocacion" | "mora" | "efectividad" | "metodo";
 
 export interface ScenarioParams {
@@ -22,8 +20,6 @@ export interface ScenarioParams {
 	moraReduccionPct: number;
 	/** Cierra la brecha cobrado vs esperado en X% (0 = sin cambio). */
 	efectividadDeltaPct: number;
-	/** Método de amortización para la cuota ilustrativa. */
-	metodoCuota: MetodoCuota;
 	/** Plazo promedio (meses) para la cuota ilustrativa. */
 	metodoPlazoMeses: number;
 	/** Tasa mensual (%) para la cuota ilustrativa. */
@@ -36,7 +32,6 @@ export const DEFAULT_SCENARIO_PARAMS: ScenarioParams = {
 	colocacionDeltaPct: 0,
 	moraReduccionPct: 0,
 	efectividadDeltaPct: 0,
-	metodoCuota: "actual",
 	metodoPlazoMeses: 12,
 	metodoTasaMensual: 1.78,
 	metodoCapital: 50000,

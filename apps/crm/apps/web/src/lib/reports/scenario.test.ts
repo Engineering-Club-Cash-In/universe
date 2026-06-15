@@ -4,6 +4,7 @@ import {
 	cuotaIlustrativa,
 	DEFAULT_SCENARIO_PARAMS,
 	type FacturacionMesResponse,
+	type FlujoCuotasInversionesResponse,
 	type MontoACobrarRow,
 	type PuntoEquilibrioRow,
 	type ScenarioParams,
@@ -12,6 +13,7 @@ import {
 	transformFacturacion,
 	transformMontoACobrar,
 } from "./scenario";
+import { flujoCuotasConfig, montoACobrarConfig } from "./scenario-configs";
 
 const params = (overrides: Partial<ScenarioParams> = {}): ScenarioParams => ({
 	...DEFAULT_SCENARIO_PARAMS,
@@ -175,6 +177,57 @@ describe("transformComparativo", () => {
 		);
 		expect(out[0].colocacion_monto).toBeNull();
 		expect(out[0].cartera_activa).toBe("220000.00");
+	});
+});
+
+describe("montoACobrarConfig.summarize", () => {
+	test("mora se promedia entre buckets, no se suma", () => {
+		const rows: MontoACobrarRow[] = [
+			montoRow({ mora_promedio: "100" }),
+			montoRow({ mora_promedio: "100" }),
+		];
+		const summary = montoACobrarConfig.summarize(rows);
+		const mora = summary.find((s) => s.concepto === "Mora prom.");
+		expect(mora?.valor).toBe(100);
+	});
+});
+
+describe("flujoCuotasConfig.summarize", () => {
+	const data: FlujoCuotasInversionesResponse = {
+		reinversionPorTipo: [
+			{
+				tipo: "reinversion_variable",
+				capital: "0",
+				interes: "0",
+				iva: "0",
+				monto_reinvertido: "5000",
+			},
+			{ tipo: "reinversion_interes", capital: "0", interes: "200", iva: "24" },
+		],
+		cashParcialPorTipo: [
+			{ tipo: "cash", capital: "0", interes: "0", iva: "0", monto_cash: "300" },
+		],
+		sinReinversion: {
+			totales: { capital: "100", interes: "50", iva: "6" },
+			porInversionista: [],
+		},
+		pagosExtras: { abonos_capital: "0", cancelaciones: "0" },
+	};
+
+	test("reinversión variable usa monto_reinvertido e interés incluye IVA", () => {
+		const summary = flujoCuotasConfig.summarize(data);
+		const reinv = summary.find((s) => s.concepto === "Reinversión");
+		// 5000 (variable total-only) + 200 + 24 (interés + IVA)
+		expect(reinv?.valor).toBe(5224);
+	});
+
+	test("cash usa monto_cash y sin-reinversión incluye IVA", () => {
+		const summary = flujoCuotasConfig.summarize(data);
+		expect(summary.find((s) => s.concepto === "Cash parcial")?.valor).toBe(300);
+		// 100 + 50 + 6
+		expect(summary.find((s) => s.concepto === "Sin reinversión")?.valor).toBe(
+			156,
+		);
 	});
 });
 

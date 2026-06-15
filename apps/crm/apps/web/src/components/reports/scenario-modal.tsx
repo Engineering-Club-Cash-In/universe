@@ -28,13 +28,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import {
 	Table,
 	TableBody,
 	TableCell,
@@ -46,7 +39,6 @@ import {
 	cuotaIlustrativa,
 	DEFAULT_SCENARIO_PARAMS,
 	type LeverKey,
-	type MetodoCuota,
 	type ScenarioParams,
 } from "@/lib/reports/scenario";
 import type {
@@ -215,26 +207,11 @@ export function ScenarioModal<T>({
 
 							{config.usaMetodoCuota && (
 								<div className="space-y-2 border-t pt-3">
-									<Label className="text-sm">Método de cuota</Label>
-									<Select
-										value={params.metodoCuota}
-										onValueChange={(v) =>
-											setField("metodoCuota", v as MetodoCuota)
-										}
-									>
-										<SelectTrigger className="h-9">
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="actual">Actual</SelectItem>
-											<SelectItem value="frances">
-												Francés (nivelada)
-											</SelectItem>
-											<SelectItem value="fija">
-												Cuota fija de capital
-											</SelectItem>
-										</SelectContent>
-									</Select>
+									<Label className="text-sm">Cuota mensual por método</Label>
+									<p className="text-muted-foreground text-xs">
+										Compara la cuota de un crédito promedio según el método de
+										amortización.
+									</p>
 									<div className="grid grid-cols-3 gap-2">
 										<div>
 											<Label className="text-muted-foreground text-xs">

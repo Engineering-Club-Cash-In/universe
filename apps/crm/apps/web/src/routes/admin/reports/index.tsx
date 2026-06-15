@@ -2197,6 +2197,15 @@ function RouteComponent() {
 															row.colocacion_monto === null &&
 															row.facturacion === null &&
 															row.cartera_activa === null;
+														const totalMoraFila =
+															Number(row.mora_30 ?? 0) +
+															Number(row.mora_60 ?? 0) +
+															Number(row.mora_90 ?? 0) +
+															Number(row.mora_120 ?? 0);
+														const pctMora = (val: string | null) =>
+															totalMoraFila > 0 && val
+																? ((Number(val) / totalMoraFila) * 100).toFixed(1)
+																: null;
 														return (
 															<TableRow
 																key={row.mes}
@@ -2230,48 +2239,76 @@ function RouteComponent() {
 																</TableCell>
 																<TableCell className="text-right">
 																	{row.mora_30 ? (
-																		<span>
-																			{formatCurrency(Number(row.mora_30))}
-																			<span className="ml-1 text-muted-foreground text-xs">
-																				({row.creditos_30 ?? 0})
+																		<div>
+																			<span>
+																				{formatCurrency(Number(row.mora_30))}
+																				<span className="ml-1 text-muted-foreground text-xs">
+																					({row.creditos_30 ?? 0})
+																				</span>
 																			</span>
-																		</span>
+																			{pctMora(row.mora_30) && (
+																				<div className="text-muted-foreground text-xs">
+																					{pctMora(row.mora_30)}%
+																				</div>
+																			)}
+																		</div>
 																	) : (
 																		"—"
 																	)}
 																</TableCell>
 																<TableCell className="text-right">
 																	{row.mora_60 ? (
-																		<span>
-																			{formatCurrency(Number(row.mora_60))}
-																			<span className="ml-1 text-muted-foreground text-xs">
-																				({row.creditos_60 ?? 0})
+																		<div>
+																			<span>
+																				{formatCurrency(Number(row.mora_60))}
+																				<span className="ml-1 text-muted-foreground text-xs">
+																					({row.creditos_60 ?? 0})
+																				</span>
 																			</span>
-																		</span>
+																			{pctMora(row.mora_60) && (
+																				<div className="text-muted-foreground text-xs">
+																					{pctMora(row.mora_60)}%
+																				</div>
+																			)}
+																		</div>
 																	) : (
 																		"—"
 																	)}
 																</TableCell>
 																<TableCell className="text-right">
 																	{row.mora_90 ? (
-																		<span>
-																			{formatCurrency(Number(row.mora_90))}
-																			<span className="ml-1 text-muted-foreground text-xs">
-																				({row.creditos_90 ?? 0})
+																		<div>
+																			<span>
+																				{formatCurrency(Number(row.mora_90))}
+																				<span className="ml-1 text-muted-foreground text-xs">
+																					({row.creditos_90 ?? 0})
+																				</span>
 																			</span>
-																		</span>
+																			{pctMora(row.mora_90) && (
+																				<div className="text-muted-foreground text-xs">
+																					{pctMora(row.mora_90)}%
+																				</div>
+																			)}
+																		</div>
 																	) : (
 																		"—"
 																	)}
 																</TableCell>
 																<TableCell className="text-right">
 																	{row.mora_120 ? (
-																		<span>
-																			{formatCurrency(Number(row.mora_120))}
-																			<span className="ml-1 text-muted-foreground text-xs">
-																				({row.creditos_120 ?? 0})
+																		<div>
+																			<span>
+																				{formatCurrency(Number(row.mora_120))}
+																				<span className="ml-1 text-muted-foreground text-xs">
+																					({row.creditos_120 ?? 0})
+																				</span>
 																			</span>
-																		</span>
+																			{pctMora(row.mora_120) && (
+																				<div className="text-muted-foreground text-xs">
+																					{pctMora(row.mora_120)}%
+																				</div>
+																			)}
+																		</div>
 																	) : (
 																		"—"
 																	)}

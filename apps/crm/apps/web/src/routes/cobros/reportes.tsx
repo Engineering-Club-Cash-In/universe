@@ -135,6 +135,9 @@ function TabMora({
 					{ETAPAS.map((etapa) => {
 						// eslint-disable-next-line @typescript-eslint/no-explicit-any
 						const bucket = (data as any)?.totales?.[etapa.key];
+						// eslint-disable-next-line @typescript-eslint/no-explicit-any
+						const totalMora = parseFloat((data as any)?.totales?.totalEnMora?.sumaMora ?? "0");
+						const pct = totalMora > 0 ? (parseFloat(bucket?.sumaMora ?? "0") / totalMora) * 100 : 0;
 						return (
 							<Card key={etapa.key}>
 								<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -149,6 +152,9 @@ function TabMora({
 									</div>
 									<p className="text-muted-foreground text-xs">
 										Capital: {fmtQ(bucket?.sumaCapital ?? "0")}
+									</p>
+									<p className="mt-1 font-medium text-xs text-muted-foreground">
+										{pct.toFixed(1)}% del total en mora
 									</p>
 								</CardContent>
 							</Card>
@@ -245,6 +251,16 @@ function TabMora({
 											<div className="text-muted-foreground text-xs">
 												{asesor.totalEnMora?.cantidad ?? 0} créd.
 											</div>
+											{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+											{(() => {
+												const totalMora = parseFloat((data as any)?.totales?.totalEnMora?.sumaMora ?? "0");
+												const pct = totalMora > 0 ? (parseFloat(asesor.totalEnMora?.sumaMora ?? "0") / totalMora) * 100 : 0;
+												return pct > 0 ? (
+													<div className="font-medium text-muted-foreground text-xs">
+														{pct.toFixed(1)}%
+													</div>
+												) : null;
+											})()}
 										</td>
 									</tr>
 								))}

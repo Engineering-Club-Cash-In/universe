@@ -1183,6 +1183,13 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             | "pendiente_reinversion"
             | "pendiente_compra_cartera"
             | "completado",
+          // Estampar la modalidad en la fila del inversionista reasignado:
+          // sesiones pendientes y la aceptación de compra leen tipo_reinversion
+          // DEL ESPEJO, no de compras_credito_inversionista.
+          tipo_reinversion:
+            inv.inversionista_id === inversionista_id
+              ? tipoReinversionOrigen
+              : null,
           updated_at: new Date(),
         }));
 

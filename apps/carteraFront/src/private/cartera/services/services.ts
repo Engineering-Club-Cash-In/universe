@@ -3113,6 +3113,9 @@ export const getBoletas = async (filters?: GetBoletasFilters) => {
 export interface FacturarGenericoItem {
   monto: number;
   rubro: string;
+  /** Rubro del REPORTE (enum rubro_facturacion de cartera-back) para el desglose.
+   *  Opcional: si viene, cartera lo guarda en facturacion_desglose y el snapshot lo suma. */
+  rubro_desglose?: string;
 }
 
 export type EmisorKey = "CUBE" | "SE_PRESTA" | "AMJK" | "CREACION_IMAGEN" | "GRUPO_BATRO" | "AUTOCASH";

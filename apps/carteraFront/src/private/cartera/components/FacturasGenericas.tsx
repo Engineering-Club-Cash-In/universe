@@ -182,7 +182,7 @@ export function FacturasGenericas() {
     initialValues: {
       nit: "",
       emisor: "" as EmisorKey | "",
-      items: [{ rubro: "", monto: 0 }],
+      items: [{ rubro: "", monto: 0, rubro_desglose: "" }],
     },
     validationSchema,
     onSubmit: (values, { resetForm }) => {
@@ -197,6 +197,7 @@ export function FacturasGenericas() {
           items: values.items.map((item) => ({
             rubro: item.rubro,
             monto: Number(item.monto),
+            rubro_desglose: item.rubro_desglose || undefined,
           })),
           created_by: user.id,
           emisor: values.emisor as EmisorKey,
@@ -835,6 +836,37 @@ export function FacturasGenericas() {
                                     </p>
                                   )}
                               </div>
+
+                              {/* Rubro del reporte (desglose) — opcional */}
+                              <div>
+                                <label className="block text-purple-800 text-sm font-medium mb-1">
+                                  Rubro del reporte{" "}
+                                  <span className="text-purple-400 font-normal">
+                                    (opcional)
+                                  </span>
+                                </label>
+                                <select
+                                  name={`items.${index}.rubro_desglose`}
+                                  value={item.rubro_desglose || ""}
+                                  onChange={formik.handleChange}
+                                  onBlur={formik.handleBlur}
+                                  className="w-full border-2 border-purple-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition [color-scheme:light]"
+                                >
+                                  <option value="">
+                                    — No clasificar (no entra al reporte) —
+                                  </option>
+                                  <option value="OTROS">Otros ingresos</option>
+                                  <option value="ROYALTY">Royalty</option>
+                                  <option value="INTERES">Interés</option>
+                                  <option value="MEMBRESIA">Membresía</option>
+                                  <option value="SEGURO">Seguro</option>
+                                  <option value="GPS">GPS</option>
+                                </select>
+                                <p className="text-purple-400 text-xs mt-1">
+                                  Define en qué rubro del reporte diario suma esta
+                                  factura.
+                                </p>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -842,7 +874,7 @@ export function FacturasGenericas() {
                         {/* Botón agregar item */}
                         <button
                           type="button"
-                          onClick={() => push({ rubro: "", monto: 0 })}
+                          onClick={() => push({ rubro: "", monto: 0, rubro_desglose: "" })}
                           className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-purple-300 rounded-lg text-purple-600 font-semibold hover:bg-purple-50 hover:border-purple-400 transition"
                         >
                           <Plus className="w-5 h-5" />

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { leadSourceEnum } from "../db/schema/crm";
 import {
+	buildCarteraMatchedClientRows,
 	buildCarteraOnlyClientRow,
 	calculateCarteraClientStats,
 	getClientCreditSifcosFromCartera,
@@ -102,6 +103,64 @@ describe("buildCarteraOnlyClientRow", () => {
 	});
 });
 
+describe("buildCarteraMatchedClientRows", () => {
+	const lead = {
+		id: "lead-1",
+		firstName: "Ana",
+		lastName: "Pérez",
+		email: "ana@example.com",
+		phone: "5555-0000",
+		dpi: "1234567890101",
+		createdAt: new Date("2026-01-01T00:00:00.000Z"),
+		updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+	};
+
+	test("builds one matched row per current cartera credit for the same lead", () => {
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
+				{ id: "opp-2", numeroSifco: "SIFCO-2", value: "7000.00", isClosed: true },
+			],
+			creditAnalysis: null,
+			carteraCreditBySifco: new Map([
+				[
+					"SIFCO-1",
+					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+				],
+				[
+					"SIFCO-2",
+					{ creditos: { numero_credito_sifco: "SIFCO-2", deudatotal: "3400.00" } },
+				],
+			]),
+		});
+
+		expect(rows).toHaveLength(2);
+		expect(rows.map((row) => row.carteraCredit?.numeroSifco)).toEqual([
+			"SIFCO-1",
+			"SIFCO-2",
+		]);
+	});
+
+	test("uses cartera debt instead of opportunity value for matched rows", () => {
+		const [row] = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
+			],
+			creditAnalysis: null,
+			carteraCreditBySifco: new Map([
+				[
+					"SIFCO-1",
+					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+				],
+			]),
+		});
+
+		expect(row.totalClosedValue).toBe(1200);
+	});
+});
+
 describe("calculateCarteraClientStats", () => {
 	test("scopes sales total value to matched assigned SIFCOs", () => {
 		const stats = calculateCarteraClientStats({
@@ -119,6 +178,21 @@ describe("calculateCarteraClientStats", () => {
 		expect(stats.totalClosedOpportunities).toBe(1);
 		expect(stats.totalValue).toBe(100);
 		expect(stats.missingCrmCount).toBe(0);
+	});
+
+	test("counts sales clients by matched cartera credits", () => {
+		const stats = calculateCarteraClientStats({
+			carteraCredits: [
+				{ creditos: { numero_credito_sifco: "A-1", deudatotal: "100.00" } },
+				{ creditos: { numero_credito_sifco: "A-2", deudatotal: "200.00" } },
+			],
+			matchedSifcos: new Set(["A-1", "A-2"]),
+			uniqueLeadCount: 1,
+			scopedOpportunityCount: 2,
+			userRole: "sales",
+		});
+
+		expect(stats.totalClients).toBe(2);
 	});
 
 	test("uses full cartera totals for non-sales users", () => {

@@ -60,7 +60,10 @@ import {
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
-import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
+import {
+	getGuatemalaMonthWindow,
+	toDateStrGT,
+} from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -79,9 +82,302 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { carteraBackClient } from "../services/cartera-back-client";
 import { scoreLead } from "../services/lead-scoring";
+import type { StatusCreditEnum } from "../types/cartera-back";
 import { validarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
+
+const CLIENT_CREDIT_CARTERA_STATUSES = [
+	"ACTIVO",
+	"MOROSO",
+	"EN_CONVENIO",
+] as const satisfies readonly StatusCreditEnum[];
+
+type ClientCreditCarteraStatus =
+	(typeof CLIENT_CREDIT_CARTERA_STATUSES)[number];
+
+type ClientCreditFetcher = (params: {
+	mes: number;
+	anio: number;
+	estado: ClientCreditCarteraStatus;
+	page: number;
+	perPage: number;
+}) => Promise<{
+	data: CarteraClientCredit[];
+	totalPages?: number | null;
+}>;
+
+type CarteraClientCredit = {
+	creditos?: {
+		numero_credito_sifco?: string | null;
+		statusCredit?: StatusCreditEnum | null;
+		capital?: string | null;
+		deudatotal?: string | null;
+		cuota?: string | null;
+		fecha_creacion?: string | null;
+		tipoCredito?: string | null;
+	};
+	usuarios?: {
+		nombre?: string | null;
+		nit?: string | null;
+	};
+	asesores?: {
+		nombre?: string | null;
+	} | null;
+};
+
+type ClientRowOpportunity = {
+	id: string;
+	title?: string;
+	value?: string | null;
+	creditType?: string | null;
+	numeroSifco: string | null;
+	status?: string;
+	createdAt?: Date;
+	stage?: {
+		id: string;
+		name: string;
+		closurePercentage: number;
+		color: string | null;
+	} | null;
+	isClosed: boolean;
+};
+
+type MatchedClientLead = {
+	id: string;
+	firstName: string;
+	middleName?: string | null;
+	lastName: string;
+	secondLastName?: string | null;
+	email: string | null;
+	phone: string | null;
+	dpi: string | null;
+	nit?: string | null;
+	age?: number | null;
+	clientType?: string | null;
+	maritalStatus?: string | null;
+	dependents?: number | null;
+	monthlyIncome?: string | null;
+	loanAmount?: string | null;
+	occupation?: string | null;
+	workTime?: string | null;
+	ownsHome?: boolean | null;
+	ownsVehicle?: boolean | null;
+	hasCreditCard?: boolean | null;
+	jobTitle?: string | null;
+	direccion?: string | null;
+	departamento?: string | null;
+	municipio?: string | null;
+	zona?: string | null;
+	assignedTo?: string | null;
+	createdAt: Date;
+	updatedAt: Date;
+	assignedUser?: { id: string | null; name: string | null } | null;
+};
+
+type MatchedClientRow = MatchedClientLead & {
+	rowId: string;
+	opportunities: ClientRowOpportunity[];
+	creditAnalysis: unknown;
+	totalClosedValue: number;
+	closedOpportunitiesCount: number;
+	crmMatchStatus: "matched";
+	carteraCredit: ReturnType<typeof buildCarteraOnlyClientRow>["carteraCredit"];
+};
+
+function getCarteraCreditAmount(credit: CarteraClientCredit) {
+	return (
+		Number.parseFloat(
+			credit.creditos?.deudatotal || credit.creditos?.capital || "0",
+		) || 0
+	);
+}
+
+function getCurrentCarteraMonthParams(now = new Date()) {
+	const [anio, mes] = toDateStrGT(now).split("-").map(Number);
+	return { mes, anio };
+}
+
+export async function getClientCreditSifcosFromCartera(
+	fetchCredits: ClientCreditFetcher,
+	params: { mes: number; anio: number },
+) {
+	const credits = await getClientCreditsFromCartera(fetchCredits, params);
+	return credits
+		.map((row) => row.creditos?.numero_credito_sifco?.trim())
+		.filter((sifco): sifco is string => Boolean(sifco));
+}
+
+async function getClientCreditsFromCartera(
+	fetchCredits: ClientCreditFetcher,
+	params: { mes: number; anio: number },
+) {
+	const perPage = 100;
+	const maxPages = 200;
+	const creditsBySifco = new Map<string, CarteraClientCredit>();
+
+	for (const estado of CLIENT_CREDIT_CARTERA_STATUSES) {
+		let page = 1;
+		while (page <= maxPages) {
+			const response = await fetchCredits({
+				...params,
+				estado,
+				page,
+				perPage,
+			});
+
+			for (const row of response.data) {
+				const sifco = row.creditos?.numero_credito_sifco?.trim();
+				if (sifco && !creditsBySifco.has(sifco)) creditsBySifco.set(sifco, row);
+			}
+
+			if (response.data.length < perPage) break;
+			if (response.totalPages != null && page >= response.totalPages) break;
+			page += 1;
+		}
+	}
+
+	return Array.from(creditsBySifco.values());
+}
+
+async function getCurrentClientCreditsFromCartera() {
+	return getClientCreditsFromCartera(
+		(params) => carteraBackClient.getAllCreditos(params),
+		getCurrentCarteraMonthParams(),
+	);
+}
+
+function splitFullName(fullName: string | null | undefined) {
+	const parts = (fullName || "Cliente sin nombre")
+		.trim()
+		.split(/\s+/)
+		.filter(Boolean);
+	return {
+		firstName: parts[0] || "Cliente",
+		middleName: parts.length > 3 ? parts[1] : null,
+		lastName:
+			parts.length > 1 ? parts[parts.length > 2 ? parts.length - 2 : 1] : "",
+		secondLastName: parts.length > 2 ? parts[parts.length - 1] : null,
+	};
+}
+
+export function buildCarteraOnlyClientRow(credit: CarteraClientCredit) {
+	const sifco = credit.creditos?.numero_credito_sifco?.trim() || "sin-sifco";
+	const name = splitFullName(credit.usuarios?.nombre);
+	const createdAt = credit.creditos?.fecha_creacion
+		? new Date(credit.creditos.fecha_creacion)
+		: new Date();
+	const totalValue = getCarteraCreditAmount(credit);
+
+	return {
+		id: `cartera-${sifco}`,
+		rowId: `cartera-${sifco}`,
+		...name,
+		email: "",
+		phone: null,
+		dpi: null,
+		nit: credit.usuarios?.nit || null,
+		age: null,
+		clientType: "individual",
+		maritalStatus: null,
+		dependents: null,
+		monthlyIncome: null,
+		loanAmount: credit.creditos?.capital || null,
+		occupation: null,
+		workTime: null,
+		ownsHome: null,
+		ownsVehicle: null,
+		hasCreditCard: null,
+		jobTitle: null,
+		direccion: null,
+		departamento: null,
+		municipio: null,
+		zona: null,
+		assignedTo: "",
+		createdAt,
+		updatedAt: createdAt,
+		assignedUser: credit.asesores?.nombre
+			? { id: "cartera", name: credit.asesores.nombre }
+			: null,
+		opportunities: [],
+		creditAnalysis: null,
+		totalClosedValue: totalValue,
+		closedOpportunitiesCount: 0,
+		crmMatchStatus: "missing" as const,
+		carteraCredit: {
+			numeroSifco: sifco,
+			statusCredit: credit.creditos?.statusCredit || null,
+			capital: credit.creditos?.capital || null,
+			deudaTotal: credit.creditos?.deudatotal || null,
+			cuota: credit.creditos?.cuota || null,
+			tipoCredito: credit.creditos?.tipoCredito || null,
+		},
+	};
+}
+
+export function buildCarteraMatchedClientRows(params: {
+	lead: MatchedClientLead;
+	leadOpportunities: ClientRowOpportunity[];
+	creditAnalysis: unknown;
+	carteraCreditBySifco: Map<string, CarteraClientCredit>;
+}): MatchedClientRow[] {
+	const rows: MatchedClientRow[] = [];
+
+	for (const [sifco, credit] of params.carteraCreditBySifco) {
+		const matchingOpportunities = params.leadOpportunities.filter(
+			(opp) => opp.numeroSifco === sifco,
+		);
+		if (matchingOpportunities.length === 0) continue;
+
+		rows.push({
+			...params.lead,
+			rowId: `${params.lead.id}-${sifco}`,
+			opportunities: matchingOpportunities,
+			creditAnalysis: params.creditAnalysis,
+			totalClosedValue: getCarteraCreditAmount(credit),
+			closedOpportunitiesCount: matchingOpportunities.filter(
+				(opp) => opp.isClosed,
+			).length,
+			crmMatchStatus: "matched",
+			carteraCredit: buildCarteraOnlyClientRow(credit).carteraCredit,
+		});
+	}
+
+	return rows;
+}
+
+export function calculateCarteraClientStats(params: {
+	carteraCredits: CarteraClientCredit[];
+	matchedSifcos: Set<string>;
+	uniqueLeadCount: number;
+	scopedOpportunityCount: number;
+	userRole: string | null | undefined;
+}) {
+	const visibleCredits =
+		params.userRole === "sales"
+			? params.carteraCredits.filter((credit) => {
+					const sifco = credit.creditos?.numero_credito_sifco?.trim();
+					return sifco ? params.matchedSifcos.has(sifco) : false;
+				})
+			: params.carteraCredits;
+
+	return {
+		totalClients:
+			params.userRole === "sales"
+				? params.matchedSifcos.size
+				: params.carteraCredits.length,
+		totalClosedOpportunities: params.scopedOpportunityCount,
+		totalValue: visibleCredits.reduce(
+			(sum, credit) => sum + getCarteraCreditAmount(credit),
+			0,
+		),
+		missingCrmCount:
+			params.userRole === "sales"
+				? 0
+				: Math.max(0, params.carteraCredits.length - params.matchedSifcos.size),
+	};
+}
 
 export const getLeadsInputSchema = z.object({
 	limit: z.number().min(1).max(100).default(20),
@@ -758,7 +1054,10 @@ export const crmRouter = {
 					.where(eq(opportunities.leadId, id));
 			}
 
-			if (updateData.source !== undefined || updateData.campaign !== undefined) {
+			if (
+				updateData.source !== undefined ||
+				updateData.campaign !== undefined
+			) {
 				const [activeOpportunity] = await db
 					.select({ id: opportunities.id })
 					.from(opportunities)
@@ -774,15 +1073,15 @@ export const crmRouter = {
 				if (activeOpportunity) {
 					await db
 						.update(opportunities)
-					.set({
-						...(updateData.source !== undefined
-							? { source: updateData.source }
-							: {}),
-						...(updateData.campaign !== undefined
-							? { campaign: updateData.campaign }
-							: {}),
-						updatedAt: new Date(),
-					})
+						.set({
+							...(updateData.source !== undefined
+								? { source: updateData.source }
+								: {}),
+							...(updateData.campaign !== undefined
+								? { campaign: updateData.campaign }
+								: {}),
+							updatedAt: new Date(),
+						})
 						.where(eq(opportunities.id, activeOpportunity.id));
 				}
 			}
@@ -1093,8 +1392,7 @@ export const crmRouter = {
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("latest_stage_history");
 
-			const closedAtExpression =
-				sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`;
+			const closedAtExpression = sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`;
 
 			const selectFields = {
 				id: opportunities.id,
@@ -1892,7 +2190,11 @@ export const crmRouter = {
 			}
 
 			// If lead is being changed (not just preserved) and no explicit source provided, copy source from new lead
-			if (input.leadId && input.leadId !== currentOpportunity[0].leadId && !updateData.source) {
+			if (
+				input.leadId &&
+				input.leadId !== currentOpportunity[0].leadId &&
+				!updateData.source
+			) {
 				const newLead = await db
 					.select({ source: leads.source })
 					.from(leads)
@@ -3024,19 +3326,21 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { limit, offset, search } = input;
 
-			// Build subquery to find leads with at least one won opportunity
-			const leadsWithClosedOpportunities = await db
-				.selectDistinct({ leadId: opportunities.leadId })
-				.from(opportunities)
-				.where(
-					and(isNotNull(opportunities.leadId), eq(opportunities.status, "won")),
-				);
+			const carteraCredits = await getCurrentClientCreditsFromCartera();
+			const clientCreditSifcos = carteraCredits
+				.map((row) => row.creditos?.numero_credito_sifco?.trim())
+				.filter((sifco): sifco is string => Boolean(sifco));
+			const carteraCreditBySifco = new Map(
+				carteraCredits
+					.map(
+						(row) => [row.creditos?.numero_credito_sifco?.trim(), row] as const,
+					)
+					.filter((entry): entry is readonly [string, CarteraClientCredit] =>
+						Boolean(entry[0]),
+					),
+			);
 
-			const clientLeadIds = leadsWithClosedOpportunities
-				.map((r) => r.leadId)
-				.filter((id): id is string => id !== null);
-
-			if (clientLeadIds.length === 0) {
+			if (clientCreditSifcos.length === 0) {
 				return {
 					data: [],
 					total: 0,
@@ -3045,13 +3349,33 @@ export const crmRouter = {
 				};
 			}
 
+			// Find leads with at least one credit currently active, overdue, or in agreement in cartera.
+			const leadsWithClientCredits = await db
+				.selectDistinct({ leadId: opportunities.leadId })
+				.from(opportunities)
+				.where(
+					and(
+						isNotNull(opportunities.leadId),
+						inArray(opportunities.numeroSifco, clientCreditSifcos),
+					),
+				);
+
+			const clientLeadIds = leadsWithClientCredits
+				.map((r) => r.leadId)
+				.filter((id): id is string => id !== null);
+
 			// Build conditions for the main query
-			const conditions: any[] = [
-				sql`${leads.id} IN (${sql.join(
-					clientLeadIds.map((id) => sql`${id}`),
-					sql`, `,
-				)})`,
-			];
+			const conditions: any[] = [];
+			if (clientLeadIds.length > 0) {
+				conditions.push(
+					sql`${leads.id} IN (${sql.join(
+						clientLeadIds.map((id) => sql`${id}`),
+						sql`, `,
+					)})`,
+				);
+			} else {
+				conditions.push(sql`false`);
+			}
 
 			// Filter by user if not admin/sales_supervisor
 			if (context.userRole === "sales") {
@@ -3063,41 +3387,7 @@ export const crmRouter = {
 				conditions.push(eq(leads.id, input.leadId));
 			}
 
-			// Search filter
-			if (search && search.trim() !== "") {
-				const searchPattern = `%${search.trim()}%`;
-				conditions.push(
-					or(
-						ilike(leads.firstName, searchPattern),
-						ilike(leads.middleName, searchPattern),
-						ilike(leads.lastName, searchPattern),
-						ilike(leads.secondLastName, searchPattern),
-						ilike(leads.email, searchPattern),
-						ilike(leads.phone, searchPattern),
-						ilike(leads.dpi, searchPattern),
-					),
-				);
-			}
-
-			// Date range filter on createdAt
-			if (input.dateFrom) {
-				conditions.push(gte(leads.createdAt, new Date(input.dateFrom)));
-			}
-			if (input.dateTo) {
-				const toDate = new Date(input.dateTo);
-				toDate.setHours(23, 59, 59, 999);
-				conditions.push(lte(leads.createdAt, toDate));
-			}
-
 			const whereClause = and(...conditions);
-
-			// Get total count
-			const countResult = await db
-				.select({ count: sql<number>`count(*)` })
-				.from(leads)
-				.where(whereClause);
-
-			const total = Number(countResult[0]?.count || 0);
 
 			// Get paginated leads
 			const clientLeads = await db
@@ -3138,9 +3428,7 @@ export const crmRouter = {
 				.from(leads)
 				.leftJoin(user, eq(leads.assignedTo, user.id))
 				.where(whereClause)
-				.orderBy(desc(leads.createdAt))
-				.limit(limit)
-				.offset(offset);
+				.orderBy(desc(leads.createdAt));
 
 			// Now get the opportunities for each lead
 			const leadIds = clientLeads.map((l) => l.id);
@@ -3193,8 +3481,8 @@ export const crmRouter = {
 							createdAt: opp.createdAt,
 							stage: opp.stage,
 							isClosed:
-								opp.numeroSifco !== null ||
-								(opp.stage?.closurePercentage ?? 0) >= 100,
+								opp.numeroSifco != null &&
+								clientCreditSifcos.includes(opp.numeroSifco),
 						});
 					}
 					return acc;
@@ -3238,27 +3526,64 @@ export const crmRouter = {
 			);
 
 			// Combine leads with their opportunities and credit analysis
-			const data = clientLeads.map((lead) => ({
-				...lead,
-				opportunities: opportunitiesByLead[lead.id] || [],
-				creditAnalysis: creditAnalysisMap[lead.id] || null,
-				// Calculate total value from closed opportunities
-				totalClosedValue: (opportunitiesByLead[lead.id] || [])
-					.filter((opp: any) => opp.isClosed)
-					.reduce(
-						(sum: number, opp: any) =>
-							sum + (Number.parseFloat(opp.value || "0") || 0),
-						0,
-					),
-				// Count of closed opportunities
-				closedOpportunitiesCount: (opportunitiesByLead[lead.id] || []).filter(
-					(opp: any) => opp.isClosed,
-				).length,
-			}));
+			const crmRows = clientLeads.flatMap((lead) => {
+				const leadOpportunities = opportunitiesByLead[lead.id] || [];
+				return buildCarteraMatchedClientRows({
+					lead,
+					leadOpportunities,
+					creditAnalysis: creditAnalysisMap[lead.id] || null,
+					carteraCreditBySifco,
+				});
+			});
+			const matchedSifcos = new Set(
+				crmRows
+					.map((row) => row.carteraCredit?.numeroSifco)
+					.filter((sifco): sifco is string => Boolean(sifco)),
+			);
+
+			const carteraOnlyRows = carteraCredits
+				.filter((credit) => {
+					const sifco = credit.creditos?.numero_credito_sifco?.trim();
+					return sifco && !matchedSifcos.has(sifco);
+				})
+				.map(buildCarteraOnlyClientRow);
+
+			const searchValue = search?.trim().toLowerCase();
+			const fromDate = input.dateFrom ? new Date(input.dateFrom) : null;
+			const toDate = input.dateTo ? new Date(input.dateTo) : null;
+			if (toDate) toDate.setHours(23, 59, 59, 999);
+
+			const visibleCarteraOnlyRows =
+				input.leadId || context.userRole === "sales" ? [] : carteraOnlyRows;
+			const allRows = [...crmRows, ...visibleCarteraOnlyRows]
+				.filter((row) => {
+					if (!searchValue) return true;
+					return [
+						row.firstName,
+						(row as any).middleName,
+						row.lastName,
+						(row as any).secondLastName,
+						row.email,
+						row.phone,
+						row.dpi,
+						(row as any).nit,
+						(row as any).carteraCredit?.numeroSifco,
+					]
+						.filter(Boolean)
+						.some((value) => String(value).toLowerCase().includes(searchValue));
+				})
+				.filter((row) => {
+					if (fromDate && row.createdAt < fromDate) return false;
+					if (toDate && row.createdAt > toDate) return false;
+					return true;
+				})
+				.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+			const data = allRows.slice(offset, offset + limit);
 
 			return {
 				data,
-				total,
+				total: allRows.length,
 				limit,
 				offset,
 			};
@@ -3266,32 +3591,29 @@ export const crmRouter = {
 
 	// Estadísticas de leads como clientes (totales globales, no paginados)
 	getLeadsAsClientsStats: crmProcedure.handler(async ({ context }) => {
-		// Get all stages with 100% closure
-		const closedStages = await db
-			.select({ id: salesStages.id })
-			.from(salesStages)
-			.where(gte(salesStages.closurePercentage, 100));
+		const carteraCredits = await getCurrentClientCreditsFromCartera();
+		const clientCreditSifcos = carteraCredits
+			.map((row) => row.creditos?.numero_credito_sifco?.trim())
+			.filter((sifco): sifco is string => Boolean(sifco));
 
-		const closedStageIds = closedStages.map((s) => s.id);
+		if (clientCreditSifcos.length === 0) {
+			return {
+				totalClients: 0,
+				totalClosedOpportunities: 0,
+				totalValue: 0,
+				missingCrmCount: 0,
+			};
+		}
 
-		// Build condition for closed opportunities
-		const closedOpportunityCondition = and(
+		const clientCreditOpportunityCondition = and(
 			isNotNull(opportunities.leadId),
-			or(
-				isNotNull(opportunities.numeroSifco),
-				closedStageIds.length > 0
-					? sql`${opportunities.stageId} IN (${sql.join(
-							closedStageIds.map((id) => sql`${id}`),
-							sql`, `,
-						)})`
-					: sql`false`,
-			),
+			inArray(opportunities.numeroSifco, clientCreditSifcos),
 		);
 
-		// Get all closed opportunities with their values
-		const closedOpportunitiesData = await db
+		const clientCreditOpportunitiesData = await db
 			.select({
 				leadId: opportunities.leadId,
+				numeroSifco: opportunities.numeroSifco,
 				value: opportunities.value,
 			})
 			.from(opportunities)
@@ -3299,31 +3621,31 @@ export const crmRouter = {
 			.where(
 				context.userRole === "sales"
 					? and(
-							closedOpportunityCondition,
+							clientCreditOpportunityCondition,
 							eq(leads.assignedTo, context.userId),
 						)
-					: closedOpportunityCondition,
+					: clientCreditOpportunityCondition,
 			);
 
 		// Calculate stats
 		const uniqueLeadIds = new Set(
-			closedOpportunitiesData
+			clientCreditOpportunitiesData
 				.map((o) => o.leadId)
 				.filter((id): id is string => id !== null),
 		);
-
-		const totalClients = uniqueLeadIds.size;
-		const totalClosedOpportunities = closedOpportunitiesData.length;
-		const totalValue = closedOpportunitiesData.reduce(
-			(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
-			0,
+		const matchedSifcos = new Set(
+			clientCreditOpportunitiesData
+				.map((o: any) => o.numeroSifco)
+				.filter((sifco: unknown): sifco is string => typeof sifco === "string"),
 		);
 
-		return {
-			totalClients,
-			totalClosedOpportunities,
-			totalValue,
-		};
+		return calculateCarteraClientStats({
+			carteraCredits,
+			matchedSifcos,
+			uniqueLeadCount: uniqueLeadIds.size,
+			scopedOpportunityCount: clientCreditOpportunitiesData.length,
+			userRole: context.userRole,
+		});
 	}),
 
 	createClient: crmProcedure
@@ -4807,9 +5129,7 @@ export const crmRouter = {
 			const [checklist] = await db
 				.select({ notes: disbursementChecklists.notes })
 				.from(disbursementChecklists)
-				.where(
-					eq(disbursementChecklists.opportunityId, input.opportunityId),
-				)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId))
 				.limit(1);
 
 			return { notes: checklist?.notes ?? null };

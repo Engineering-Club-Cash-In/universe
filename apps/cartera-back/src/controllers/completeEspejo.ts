@@ -29,6 +29,13 @@ const completeEspejoSchema = z.object({
   // en lugar del usuario del JWT / "Contabilidad". Útil cuando el flujo
   // se dispara desde el portal del inversionista.
   aceptada_por_inversionista: z.boolean().optional(),
+  // Fecha de inicio de participación (YYYY-MM-DD) elegida manualmente al
+  // confirmar una compra de cartera. Si se omite, se usa la fecha de hoy.
+  // Solo afecta al camino de compra (idsOtros); la reinversión la ignora.
+  fecha_participacion: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "fecha_participacion debe tener formato YYYY-MM-DD")
+    .optional(),
 });
 
 // ========================================
@@ -50,6 +57,7 @@ export const completeEspejo = async ({ body, set, request }: any) => {
       creditos: creditosInput,
       inversionista_id,
       aceptada_por_inversionista,
+      fecha_participacion,
     } = parseResult.data;
 
     // Normalizar a array
@@ -94,6 +102,11 @@ export const completeEspejo = async ({ body, set, request }: any) => {
           .toISOString()
           .split("T")[0];
 
+        // Fecha de participación para el camino de compra (idsOtros): la que
+        // el operador eligió manualmente en el modal de confirmar, o hoy si no
+        // se envió ninguna. La reinversión nunca usa esta fecha.
+        const fechaParticipacionCompra = fecha_participacion ?? fechaHoy;
+
         // ── Particionar inversionistas por status previo ──
         const idsReinversion = previos
           .filter((p) => p.status === "pendiente_reinversion")
@@ -135,7 +148,7 @@ export const completeEspejo = async ({ body, set, request }: any) => {
                 .update(creditos_inversionistas_espejo)
                 .set({
                   status: "completado",
-                  fecha_inicio_participacion: fechaHoy,
+                  fecha_inicio_participacion: fechaParticipacionCompra,
                   updated_at: new Date(),
                 })
                 .where(
@@ -165,7 +178,7 @@ export const completeEspejo = async ({ body, set, request }: any) => {
         if (idsOtros.length > 0) {
           await tx
             .update(creditos_inversionistas)
-            .set({ fecha_inicio_participacion: fechaHoy })
+            .set({ fecha_inicio_participacion: fechaParticipacionCompra })
             .where(
               and(
                 eq(creditos_inversionistas.credito_id, credito_id),

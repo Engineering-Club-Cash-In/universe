@@ -26,6 +26,9 @@ import {
 	protectedProcedure,
 	tiempoCierreReportProcedure,
 } from "../lib/orpc";
+import { toDateStrGT } from "../lib/guatemala-month-window";
+import { carteraBackClient } from "../services/cartera-back-client";
+import type { StatusCreditEnum } from "../types/cartera-back";
 
 const SECONDS_PER_DAY = 60 * 60 * 24;
 
@@ -39,6 +42,61 @@ const closedCreditsReportInputSchema = z.object({
 	startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 	endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+
+const CLOSED_CREDIT_REPORT_CARTERA_STATUSES: StatusCreditEnum[] = [
+	"ACTIVO",
+	"MOROSO",
+	"EN_CONVENIO",
+];
+export const CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE = 50;
+
+export function isClosedCreditReportCarteraStatusIncluded(
+	status: StatusCreditEnum | null,
+) {
+	return status ? CLOSED_CREDIT_REPORT_CARTERA_STATUSES.includes(status) : false;
+}
+
+export function enforceClosedCreditReportLimit<T>(rows: T[]) {
+	if (rows.length > 10_000) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
+		});
+	}
+}
+
+async function getClosedCreditReportCarteraStatuses(sifcos: string[]) {
+	const uniqueSifcos = [...new Set(sifcos.filter(Boolean))];
+	const statuses = new Map<string, StatusCreditEnum>();
+	const [anio, mes] = toDateStrGT(new Date()).split("-").map(Number);
+
+	for (
+		let index = 0;
+		index < uniqueSifcos.length;
+		index += CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE
+	) {
+		const chunk = uniqueSifcos.slice(
+			index,
+			index + CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
+		);
+		const response = await carteraBackClient.getAllCreditos({
+			mes,
+			anio,
+			page: 1,
+			perPage: chunk.length,
+			numeros_credito_sifco: chunk,
+		});
+
+		for (const row of response.data) {
+			statuses.set(
+				row.creditos.numero_credito_sifco,
+				row.creditos.statusCredit,
+			);
+		}
+	}
+
+	return statuses;
+}
 
 function parseGuatemalaDateRange(startDate: string, endDate: string) {
 	const start = new Date(`${startDate}T00:00:00.000-06:00`);
@@ -199,6 +257,8 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 		const latestCarteraReference = db
 			.select({
 				opportunityId: carteraBackReferences.opportunityId,
+				contratoFinanciamientoId:
+					carteraBackReferences.contratoFinanciamientoId,
 				numeroCreditoSifco: carteraBackReferences.numeroCreditoSifco,
 				rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${carteraBackReferences.opportunityId} ORDER BY ${carteraBackReferences.createdAt} DESC, ${carteraBackReferences.id} DESC)`.as(
 					"rn",
@@ -231,23 +291,33 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 					eq(latestCarteraReference.rn, 1),
 				),
 			)
+			.innerJoin(
+				contratosFinanciamiento,
+				eq(
+					latestCarteraReference.contratoFinanciamientoId,
+					contratosFinanciamiento.id,
+				),
+			)
 			.where(
 				and(
 					gte(firstClosedStageDates.firstClosedStageAt, start),
 					lte(firstClosedStageDates.firstClosedStageAt, end),
 				),
 			)
-			.orderBy(desc(firstClosedStageDates.firstClosedStageAt))
-			.limit(10_001);
+			.orderBy(desc(firstClosedStageDates.firstClosedStageAt));
 
-		if (rows.length > 10_000) {
-			throw new ORPCError("BAD_REQUEST", {
-				message:
-					"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
-			});
-		}
+		const carteraStatuses = await getClosedCreditReportCarteraStatuses(
+			rows.map((row) => row.numeroCredito),
+		);
 
-		return rows;
+		const activeRows = rows.filter((row) =>
+			isClosedCreditReportCarteraStatusIncluded(
+				carteraStatuses.get(row.numeroCredito) ?? null,
+			),
+		);
+		enforceClosedCreditReportLimit(activeRows);
+
+		return activeRows;
 	});
 
 /**

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	AlertTriangle,
 	Banknote,
 	Briefcase,
 	Calendar,
@@ -13,7 +14,6 @@ import {
 	Eye,
 	FileText,
 	HandshakeIcon,
-	Home,
 	Loader2,
 	Mail,
 	MapPin,
@@ -26,7 +26,6 @@ import {
 	X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { DateRange } from "react-day-picker";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
@@ -66,12 +65,12 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { formatGuatemalaDate } from "@/lib/crm-formatters";
 import { PERMISSIONS } from "@/lib/roles";
-import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/clients")({
@@ -92,22 +91,9 @@ function formatLeadFullName(lead: {
 	secondLastName?: string | null;
 }) {
 	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
-		.filter((part): part is string => Boolean(part && part.trim()))
+		.filter((part): part is string => Boolean(part?.trim()))
 		.join(" ");
 }
-
-const getClientTypeLabel = (type: string) => {
-	switch (type) {
-		case "individual":
-			return "Individual";
-		case "comerciante":
-			return "Comerciante";
-		case "empresa":
-			return "Empresa";
-		default:
-			return type;
-	}
-};
 
 const getMaritalStatusLabel = (status: string | null) => {
 	if (!status) return "No especificado";
@@ -159,6 +145,32 @@ const formatCurrency = (value: string | number | null) => {
 	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+const getCarteraStatusLabel = (status?: string | null) => {
+	switch (status) {
+		case "ACTIVO":
+			return "Activo";
+		case "MOROSO":
+			return "Moroso";
+		case "EN_CONVENIO":
+			return "En convenio";
+		default:
+			return "Cartera";
+	}
+};
+
+const getCarteraStatusClassName = (status?: string | null) => {
+	switch (status) {
+		case "ACTIVO":
+			return "bg-green-100 text-green-800";
+		case "MOROSO":
+			return "bg-red-100 text-red-800";
+		case "EN_CONVENIO":
+			return "bg-blue-100 text-blue-800";
+		default:
+			return "bg-muted text-muted-foreground";
+	}
+};
+
 // Type definition for credit analysis
 type CreditAnalysisData = {
 	leadId: string;
@@ -175,11 +187,15 @@ type CreditAnalysisData = {
 // Type definition for client data
 type ClientData = {
 	id: string;
+	rowId?: string;
 	firstName: string;
+	middleName?: string | null;
 	lastName: string;
+	secondLastName?: string | null;
 	email: string;
 	phone: string | null;
 	dpi: string | null;
+	nit?: string | null;
 	age: number | null;
 	clientType: string;
 	maritalStatus: string | null;
@@ -219,6 +235,15 @@ type ClientData = {
 	creditAnalysis: CreditAnalysisData;
 	totalClosedValue: number;
 	closedOpportunitiesCount: number;
+	crmMatchStatus?: "matched" | "missing";
+	carteraCredit?: {
+		numeroSifco: string;
+		statusCredit: string | null;
+		capital: string | null;
+		deudaTotal: string | null;
+		cuota: string | null;
+		tipoCredito: string | null;
+	} | null;
 };
 
 function RouteComponent() {
@@ -229,9 +254,14 @@ function RouteComponent() {
 	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const search = Route.useSearch();
-	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/clients/searchTerm", "");
+	const [searchTerm, setSearchTerm] = usePersistedState<string>(
+		"crm/clients/searchTerm",
+		"",
+	);
 	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
-	const [dateRange, setDateRange] = usePersistedDateRange("crm/clients/dateRange");
+	const [dateRange, setDateRange] = usePersistedDateRange(
+		"crm/clients/dateRange",
+	);
 	const [page, setPage] = usePersistedState<number>("crm/clients/page", 0);
 	const pageSize = 20;
 
@@ -519,7 +549,7 @@ function RouteComponent() {
 			<div>
 				<h1 className="font-bold text-3xl">Cartera de Clientes</h1>
 				<p className="text-muted-foreground">
-					Leads con oportunidades cerradas
+					Créditos vigentes de cartera enriquecidos con CRM cuando existe match
 				</p>
 			</div>
 
@@ -537,15 +567,13 @@ function RouteComponent() {
 							{statsQuery.data?.totalClients ?? 0}
 						</div>
 						<p className="text-muted-foreground text-xs">
-							Leads con créditos cerrados
+							Créditos activos, morosos o en convenio
 						</p>
 					</CardContent>
 				</Card>
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="font-medium text-sm">
-							Oportunidades Cerradas
-						</CardTitle>
+						<CardTitle className="font-medium text-sm">Con CRM</CardTitle>
 						<CheckCircle2 className="h-4 w-4 text-green-500" />
 					</CardHeader>
 					<CardContent>
@@ -553,7 +581,7 @@ function RouteComponent() {
 							{statsQuery.data?.totalClosedOpportunities ?? 0}
 						</div>
 						<p className="text-muted-foreground text-xs">
-							Total de créditos activos
+							Créditos con oportunidad enlazada
 						</p>
 					</CardContent>
 				</Card>
@@ -571,7 +599,7 @@ function RouteComponent() {
 							})}
 						</div>
 						<p className="text-muted-foreground text-xs">
-							En créditos cerrados
+							Deuda total en cartera vigente
 						</p>
 					</CardContent>
 				</Card>
@@ -583,7 +611,8 @@ function RouteComponent() {
 						<div>
 							<CardTitle>Directorio de Clientes</CardTitle>
 							<CardDescription>
-								Leads que tienen al menos una oportunidad cerrada
+								Clientes de cartera; CRM se muestra cuando hay oportunidad
+								enlazada
 							</CardDescription>
 						</div>
 					</div>
@@ -594,7 +623,7 @@ function RouteComponent() {
 						<div className="relative max-w-md flex-1">
 							<Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
 							<Input
-								placeholder="Buscar por nombre, email, teléfono o DPI..."
+								placeholder="Buscar por nombre, NIT, SIFCO, email o teléfono..."
 								value={searchTerm}
 								onChange={(e) => setSearchTerm(e.target.value)}
 								className="pl-8"
@@ -608,11 +637,19 @@ function RouteComponent() {
 							}}
 						/>
 						{hasActiveFilters && (
-							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={resetFilters}
+								className="shrink-0 text-muted-foreground"
+							>
 								<X className="mr-1 h-3 w-3" />
 								Limpiar filtros
 								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-									{[searchTerm !== "", dateRange !== undefined].filter(Boolean).length}
+									{
+										[searchTerm !== "", dateRange !== undefined].filter(Boolean)
+											.length
+									}
 								</Badge>
 							</Button>
 						)}
@@ -631,8 +668,8 @@ function RouteComponent() {
 							<HandshakeIcon className="mb-4 h-12 w-12 text-muted-foreground" />
 							<h3 className="font-medium text-lg">No hay clientes aún</h3>
 							<p className="max-w-md text-muted-foreground text-sm">
-								Los clientes aparecerán aquí cuando los leads tengan
-								oportunidades en etapa al 100%
+								Los clientes aparecerán aquí cuando cartera tenga créditos
+								activos, morosos o en convenio.
 							</p>
 						</div>
 					) : (
@@ -642,9 +679,9 @@ function RouteComponent() {
 									<TableRow>
 										<TableHead>Cliente</TableHead>
 										<TableHead>Contacto</TableHead>
-										<TableHead>Tipo</TableHead>
-										<TableHead>Oportunidades Cerradas</TableHead>
-										<TableHead>Valor Total</TableHead>
+										<TableHead>Estado cartera</TableHead>
+										<TableHead>CRM</TableHead>
+										<TableHead>Deuda / valor</TableHead>
 										<TableHead>Desde</TableHead>
 										<TableHead className="text-right">Acciones</TableHead>
 									</TableRow>
@@ -652,7 +689,7 @@ function RouteComponent() {
 								<TableBody>
 									{clients.map((clientData) => (
 										<TableRow
-											key={clientData.id}
+											key={clientData.rowId ?? clientData.id}
 											className="cursor-pointer hover:bg-muted/50"
 											onClick={() => handleViewDetails(clientData)}
 										>
@@ -663,9 +700,19 @@ function RouteComponent() {
 														<div className="font-medium">
 															{formatLeadFullName(clientData)}
 														</div>
+														{clientData.carteraCredit?.numeroSifco && (
+															<div className="text-muted-foreground text-xs">
+																SIFCO: {clientData.carteraCredit.numeroSifco}
+															</div>
+														)}
 														{clientData.dpi && (
 															<div className="text-muted-foreground text-xs">
 																DPI: {clientData.dpi}
+															</div>
+														)}
+														{!clientData.dpi && clientData.nit && (
+															<div className="text-muted-foreground text-xs">
+																NIT: {clientData.nit}
 															</div>
 														)}
 													</div>
@@ -685,53 +732,67 @@ function RouteComponent() {
 												</div>
 											</TableCell>
 											<TableCell>
-												<Badge variant="outline" className="capitalize">
-													{getClientTypeLabel(clientData.clientType)}
-												</Badge>
+												<div className="space-y-1">
+													<Badge
+														className={getCarteraStatusClassName(
+															clientData.carteraCredit?.statusCredit,
+														)}
+													>
+														{getCarteraStatusLabel(
+															clientData.carteraCredit?.statusCredit,
+														)}
+													</Badge>
+													{clientData.carteraCredit?.cuota && (
+														<div className="text-muted-foreground text-xs">
+															Cuota:{" "}
+															{formatCurrency(clientData.carteraCredit.cuota)}
+														</div>
+													)}
+												</div>
 											</TableCell>
 											<TableCell>
-												<TooltipProvider>
-													<Tooltip>
-														<TooltipTrigger asChild>
-															<div className="flex items-center gap-2">
+												{clientData.crmMatchStatus === "missing" ? (
+													<Badge
+														variant="outline"
+														className="border-amber-300 text-amber-700"
+													>
+														<AlertTriangle className="mr-1 h-3 w-3" />
+														Sin oportunidad CRM
+													</Badge>
+												) : (
+													<TooltipProvider>
+														<Tooltip>
+															<TooltipTrigger asChild>
 																<Badge
 																	variant="secondary"
 																	className="bg-green-100 text-green-800"
 																>
 																	{clientData.closedOpportunitiesCount}{" "}
-																	cerrada(s)
+																	enlazada(s)
 																</Badge>
-																{clientData.opportunities.length >
-																	clientData.closedOpportunitiesCount && (
-																	<Badge variant="outline">
-																		+
-																		{clientData.opportunities.length -
-																			clientData.closedOpportunitiesCount}{" "}
-																		abierta(s)
-																	</Badge>
-																)}
-															</div>
-														</TooltipTrigger>
-														<TooltipContent side="bottom" className="max-w-sm">
-															<div className="space-y-2">
-																<p className="font-medium">Oportunidades:</p>
-																{clientData.opportunities.map((opp) => (
-																	<div
-																		key={opp.id}
-																		className="flex items-center gap-2 text-sm"
-																	>
-																		{opp.isClosed ? (
+															</TooltipTrigger>
+															<TooltipContent
+																side="bottom"
+																className="max-w-sm"
+															>
+																<div className="space-y-2">
+																	<p className="font-medium">
+																		Oportunidades CRM:
+																	</p>
+																	{clientData.opportunities.map((opp) => (
+																		<div
+																			key={opp.id}
+																			className="flex items-center gap-2 text-sm"
+																		>
 																			<CheckCircle2 className="h-3 w-3 text-green-500" />
-																		) : (
-																			<FileText className="h-3 w-3 text-muted-foreground" />
-																		)}
-																		<span>{opp.title}</span>
-																	</div>
-																))}
-															</div>
-														</TooltipContent>
-													</Tooltip>
-												</TooltipProvider>
+																			<span>{opp.title}</span>
+																		</div>
+																	))}
+																</div>
+															</TooltipContent>
+														</Tooltip>
+													</TooltipProvider>
+												)}
 											</TableCell>
 											<TableCell>
 												<div className="flex items-center gap-1 font-medium text-green-600">
@@ -833,12 +894,27 @@ function RouteComponent() {
 										<h3 className="truncate font-semibold text-xl">
 											{formatLeadFullName(selectedClient)}
 										</h3>
-										<Badge variant="outline" className="shrink-0 text-xs">
-											{getClientTypeLabel(selectedClient.clientType)}
+										<Badge
+											className={`shrink-0 text-xs ${getCarteraStatusClassName(
+												selectedClient.carteraCredit?.statusCredit,
+											)}`}
+										>
+											{getCarteraStatusLabel(
+												selectedClient.carteraCredit?.statusCredit,
+											)}
 										</Badge>
-										<Badge className="shrink-0 bg-green-500 text-xs hover:bg-green-600">
-											Activo
-										</Badge>
+										{selectedClient.crmMatchStatus === "missing" ? (
+											<Badge
+												variant="outline"
+												className="shrink-0 border-amber-300 text-amber-700 text-xs"
+											>
+												Sin oportunidad CRM
+											</Badge>
+										) : (
+											<Badge variant="outline" className="shrink-0 text-xs">
+												CRM enlazado
+											</Badge>
+										)}
 									</div>
 									<div className="mt-1 flex items-center gap-4 text-muted-foreground text-sm">
 										{selectedClient.email && (
@@ -851,6 +927,12 @@ function RouteComponent() {
 											<span className="flex items-center gap-1">
 												<Phone className="h-3.5 w-3.5" />
 												{selectedClient.phone}
+											</span>
+										)}
+										{selectedClient.carteraCredit?.numeroSifco && (
+											<span className="flex items-center gap-1">
+												<CreditCard className="h-3.5 w-3.5" />
+												SIFCO: {selectedClient.carteraCredit.numeroSifco}
 											</span>
 										)}
 										{selectedClient.dpi && (
@@ -866,9 +948,7 @@ function RouteComponent() {
 										<p className="font-bold text-green-600 text-xl">
 											{selectedClient.closedOpportunitiesCount}
 										</p>
-										<p className="text-[11px] text-muted-foreground">
-											Cerradas
-										</p>
+										<p className="text-[11px] text-muted-foreground">CRM</p>
 									</div>
 									<div className="h-8 w-px bg-border" />
 									<div className="text-center">
@@ -883,7 +963,7 @@ function RouteComponent() {
 											{formatCurrency(selectedClient.totalClosedValue)}
 										</p>
 										<p className="text-[11px] text-muted-foreground">
-											Valor cerrado
+											Deuda / valor
 										</p>
 									</div>
 								</div>
@@ -893,12 +973,30 @@ function RouteComponent() {
 							<div className="space-y-3">
 								<h3 className="flex items-center gap-2 font-semibold text-base">
 									<HandshakeIcon className="h-4 w-4" />
-									Oportunidades
+									Oportunidad CRM
 									<Badge variant="secondary" className="ml-1 text-xs">
 										{selectedClient.opportunities.length}
 									</Badge>
 								</h3>
 								<div className="space-y-2">
+									{selectedClient.opportunities.length === 0 && (
+										<div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+											<div className="flex items-start gap-3">
+												<AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+												<div>
+													<p className="font-medium">
+														Sin oportunidad CRM enlazada
+													</p>
+													<p className="mt-1 text-sm">
+														Este crédito existe en cartera, pero no hay una
+														oportunidad CRM con el mismo número SIFCO. Los datos
+														de etapa, vehículo, documentos, análisis e historial
+														CRM no están disponibles.
+													</p>
+												</div>
+											</div>
+										</div>
+									)}
 									{selectedClient.opportunities.map((opp) => (
 										<div
 											key={opp.id}
@@ -1112,7 +1210,7 @@ function RouteComponent() {
 														Guardar
 													</Button>
 												</div>
-											) : (
+											) : selectedClient.crmMatchStatus !== "missing" ? (
 												<Button
 													variant="ghost"
 													size="sm"
@@ -1122,7 +1220,7 @@ function RouteComponent() {
 													<Pencil className="mr-1 h-3 w-3" />
 													Editar
 												</Button>
-											)}
+											) : null}
 										</div>
 										{isEditingContact ? (
 											<div className="space-y-3">

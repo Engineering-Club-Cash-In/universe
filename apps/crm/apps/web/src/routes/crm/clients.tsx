@@ -187,6 +187,7 @@ type CreditAnalysisData = {
 // Type definition for client data
 type ClientData = {
 	id: string;
+	rowId?: string;
 	firstName: string;
 	middleName?: string | null;
 	lastName: string;
@@ -688,7 +689,7 @@ function RouteComponent() {
 								<TableBody>
 									{clients.map((clientData) => (
 										<TableRow
-											key={clientData.id}
+											key={clientData.rowId ?? clientData.id}
 											className="cursor-pointer hover:bg-muted/50"
 											onClick={() => handleViewDetails(clientData)}
 										>

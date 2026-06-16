@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { isClosedCreditReportContractStateIncluded } from "./reports";
+import { isClosedCreditReportCarteraStatusIncluded } from "./reports";
 
-describe("isClosedCreditReportContractStateIncluded", () => {
-	test("only includes credits with an active contract state", () => {
-		expect(isClosedCreditReportContractStateIncluded("activo")).toBe(true);
-		expect(isClosedCreditReportContractStateIncluded("completado")).toBe(false);
-		expect(isClosedCreditReportContractStateIncluded("incobrable")).toBe(false);
-		expect(isClosedCreditReportContractStateIncluded("recuperado")).toBe(false);
-		expect(isClosedCreditReportContractStateIncluded(null)).toBe(false);
+describe("isClosedCreditReportCarteraStatusIncluded", () => {
+	test("only includes currently active cartera credit states", () => {
+		expect(isClosedCreditReportCarteraStatusIncluded("ACTIVO")).toBe(true);
+		expect(isClosedCreditReportCarteraStatusIncluded("MOROSO")).toBe(true);
+		expect(isClosedCreditReportCarteraStatusIncluded("EN_CONVENIO")).toBe(true);
+		expect(isClosedCreditReportCarteraStatusIncluded("CANCELADO")).toBe(false);
+		expect(isClosedCreditReportCarteraStatusIncluded("INCOBRABLE")).toBe(false);
+		expect(isClosedCreditReportCarteraStatusIncluded(null)).toBe(false);
 	});
 });

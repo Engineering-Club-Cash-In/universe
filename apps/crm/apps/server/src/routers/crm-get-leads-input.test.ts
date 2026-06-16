@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { leadSourceEnum } from "../db/schema/crm";
 import {
+	buildCarteraMatchedClientRows,
 	buildCarteraOnlyClientRow,
 	calculateCarteraClientStats,
 	getClientCreditSifcosFromCartera,
@@ -99,6 +100,64 @@ describe("buildCarteraOnlyClientRow", () => {
 		expect(row.opportunities).toEqual([]);
 		expect(row.closedOpportunitiesCount).toBe(0);
 		expect(row.totalClosedValue).toBe(12500);
+	});
+});
+
+describe("buildCarteraMatchedClientRows", () => {
+	const lead = {
+		id: "lead-1",
+		firstName: "Ana",
+		lastName: "Pérez",
+		email: "ana@example.com",
+		phone: "5555-0000",
+		dpi: "1234567890101",
+		createdAt: new Date("2026-01-01T00:00:00.000Z"),
+		updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+	};
+
+	test("builds one matched row per current cartera credit for the same lead", () => {
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
+				{ id: "opp-2", numeroSifco: "SIFCO-2", value: "7000.00", isClosed: true },
+			],
+			creditAnalysis: null,
+			carteraCreditBySifco: new Map([
+				[
+					"SIFCO-1",
+					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+				],
+				[
+					"SIFCO-2",
+					{ creditos: { numero_credito_sifco: "SIFCO-2", deudatotal: "3400.00" } },
+				],
+			]),
+		});
+
+		expect(rows).toHaveLength(2);
+		expect(rows.map((row) => row.carteraCredit?.numeroSifco)).toEqual([
+			"SIFCO-1",
+			"SIFCO-2",
+		]);
+	});
+
+	test("uses cartera debt instead of opportunity value for matched rows", () => {
+		const [row] = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
+			],
+			creditAnalysis: null,
+			carteraCreditBySifco: new Map([
+				[
+					"SIFCO-1",
+					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+				],
+			]),
+		});
+
+		expect(row.totalClosedValue).toBe(1200);
 	});
 });
 

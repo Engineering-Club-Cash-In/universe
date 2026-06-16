@@ -127,6 +127,73 @@ type CarteraClientCredit = {
 	} | null;
 };
 
+type ClientRowOpportunity = {
+	id: string;
+	title?: string;
+	value?: string | null;
+	creditType?: string | null;
+	numeroSifco: string | null;
+	status?: string;
+	createdAt?: Date;
+	stage?: {
+		id: string;
+		name: string;
+		closurePercentage: number;
+		color: string | null;
+	} | null;
+	isClosed: boolean;
+};
+
+type MatchedClientLead = {
+	id: string;
+	firstName: string;
+	middleName?: string | null;
+	lastName: string;
+	secondLastName?: string | null;
+	email: string | null;
+	phone: string | null;
+	dpi: string | null;
+	nit?: string | null;
+	age?: number | null;
+	clientType?: string | null;
+	maritalStatus?: string | null;
+	dependents?: number | null;
+	monthlyIncome?: string | null;
+	loanAmount?: string | null;
+	occupation?: string | null;
+	workTime?: string | null;
+	ownsHome?: boolean | null;
+	ownsVehicle?: boolean | null;
+	hasCreditCard?: boolean | null;
+	jobTitle?: string | null;
+	direccion?: string | null;
+	departamento?: string | null;
+	municipio?: string | null;
+	zona?: string | null;
+	assignedTo?: string | null;
+	createdAt: Date;
+	updatedAt: Date;
+	assignedUser?: { id: string | null; name: string | null } | null;
+};
+
+type MatchedClientRow = MatchedClientLead & {
+	rowId: string;
+	opportunities: ClientRowOpportunity[];
+	creditAnalysis: unknown;
+	totalClosedValue: number;
+	closedOpportunitiesCount: number;
+	crmMatchStatus: "matched";
+	carteraCredit: ReturnType<typeof buildCarteraOnlyClientRow>["carteraCredit"];
+};
+
+function getCarteraCreditAmount(credit: CarteraClientCredit) {
+	return (
+		Number.parseFloat(
+			credit.creditos?.deudatotal || credit.creditos?.capital || "0",
+		) || 0
+	);
+}
+
 function getCurrentCarteraMonthParams(now = new Date()) {
 	const [anio, mes] = toDateStrGT(now).split("-").map(Number);
 	return { mes, anio };
@@ -201,13 +268,11 @@ export function buildCarteraOnlyClientRow(credit: CarteraClientCredit) {
 	const createdAt = credit.creditos?.fecha_creacion
 		? new Date(credit.creditos.fecha_creacion)
 		: new Date();
-	const totalValue =
-		Number.parseFloat(
-			credit.creditos?.deudatotal || credit.creditos?.capital || "0",
-		) || 0;
+	const totalValue = getCarteraCreditAmount(credit);
 
 	return {
 		id: `cartera-${sifco}`,
+		rowId: `cartera-${sifco}`,
 		...name,
 		email: "",
 		phone: null,
@@ -251,6 +316,37 @@ export function buildCarteraOnlyClientRow(credit: CarteraClientCredit) {
 	};
 }
 
+export function buildCarteraMatchedClientRows(params: {
+	lead: MatchedClientLead;
+	leadOpportunities: ClientRowOpportunity[];
+	creditAnalysis: unknown;
+	carteraCreditBySifco: Map<string, CarteraClientCredit>;
+}): MatchedClientRow[] {
+	const rows: MatchedClientRow[] = [];
+
+	for (const [sifco, credit] of params.carteraCreditBySifco) {
+		const matchingOpportunities = params.leadOpportunities.filter(
+			(opp) => opp.numeroSifco === sifco,
+		);
+		if (matchingOpportunities.length === 0) continue;
+
+		rows.push({
+			...params.lead,
+			rowId: `${params.lead.id}-${sifco}`,
+			opportunities: matchingOpportunities,
+			creditAnalysis: params.creditAnalysis,
+			totalClosedValue: getCarteraCreditAmount(credit),
+			closedOpportunitiesCount: matchingOpportunities.filter(
+				(opp) => opp.isClosed,
+			).length,
+			crmMatchStatus: "matched",
+			carteraCredit: buildCarteraOnlyClientRow(credit).carteraCredit,
+		});
+	}
+
+	return rows;
+}
+
 export function calculateCarteraClientStats(params: {
 	carteraCredits: CarteraClientCredit[];
 	matchedSifcos: Set<string>;
@@ -273,11 +369,7 @@ export function calculateCarteraClientStats(params: {
 				: params.carteraCredits.length,
 		totalClosedOpportunities: params.scopedOpportunityCount,
 		totalValue: visibleCredits.reduce(
-			(sum, credit) =>
-				sum +
-				(Number.parseFloat(
-					credit.creditos?.deudatotal || credit.creditos?.capital || "0",
-				) || 0),
+			(sum, credit) => sum + getCarteraCreditAmount(credit),
 			0,
 		),
 		missingCrmCount:
@@ -3434,41 +3526,20 @@ export const crmRouter = {
 			);
 
 			// Combine leads with their opportunities and credit analysis
-			const matchedSifcos = new Set<string>();
-			const crmRows = clientLeads.map((lead) => {
+			const crmRows = clientLeads.flatMap((lead) => {
 				const leadOpportunities = opportunitiesByLead[lead.id] || [];
-				for (const opp of leadOpportunities) {
-					if (opp.numeroSifco && clientCreditSifcos.includes(opp.numeroSifco)) {
-						matchedSifcos.add(opp.numeroSifco);
-					}
-				}
-
-				const primaryCredit = leadOpportunities
-					.map((opp: any) =>
-						opp.numeroSifco ? carteraCreditBySifco.get(opp.numeroSifco) : null,
-					)
-					.find(Boolean);
-
-				return {
-					...lead,
-					opportunities: leadOpportunities,
+				return buildCarteraMatchedClientRows({
+					lead,
+					leadOpportunities,
 					creditAnalysis: creditAnalysisMap[lead.id] || null,
-					totalClosedValue: leadOpportunities
-						.filter((opp: any) => opp.isClosed)
-						.reduce(
-							(sum: number, opp: any) =>
-								sum + (Number.parseFloat(opp.value || "0") || 0),
-							0,
-						),
-					closedOpportunitiesCount: leadOpportunities.filter(
-						(opp: any) => opp.isClosed,
-					).length,
-					crmMatchStatus: "matched" as const,
-					carteraCredit: primaryCredit
-						? buildCarteraOnlyClientRow(primaryCredit).carteraCredit
-						: null,
-				};
+					carteraCreditBySifco,
+				});
 			});
+			const matchedSifcos = new Set(
+				crmRows
+					.map((row) => row.carteraCredit?.numeroSifco)
+					.filter((sifco): sifco is string => Boolean(sifco)),
+			);
 
 			const carteraOnlyRows = carteraCredits
 				.filter((credit) => {

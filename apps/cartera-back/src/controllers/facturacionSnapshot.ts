@@ -104,8 +104,8 @@ export function calcularAcumuladosCorridos(
 //   facturacion_mas_servicios = facturacion + servicios_seguro_gps
 // (capital_total NO entra en facturacion.) Se usa tras editar rubros para que el
 // total del día y los acumulados cuadren con lo que el usuario tipeó.
-export async function recomputarTotalesDia(fecha: string) {
-  await db.execute(sql`
+export async function recomputarTotalesDia(fecha: string, exec: any = db) {
+  await exec.execute(sql`
     UPDATE cartera.facturacion_snapshot_diario SET
       facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty,
       facturacion_mas_servicios =
@@ -115,15 +115,20 @@ export async function recomputarTotalesDia(fecha: string) {
   `);
 }
 
-// Refresca SOLO las columnas de acumulado de los días no bloqueados del mes,
-// usando la suma corrida de las diarias guardadas. No lee la fuente ni toca
-// diarias → seguro para días históricos importados del Excel.
-export async function recomputarAcumuladosMes(anio: number, mes: number) {
+// Refresca las columnas de acumulado de TODOS los días del mes (incluidos los
+// bloqueados: sus acumulados también suman, ver calcularAcumuladosCorridos),
+// como suma corrida de las diarias guardadas. No lee la fuente ni toca diarias
+// → seguro para días históricos importados del Excel.
+export async function recomputarAcumuladosMes(
+  anio: number,
+  mes: number,
+  exec: any = db
+) {
   // Filtramos por RANGO de fecha (no por anio/mes) porque esas columnas helper
   // pueden venir NULL en filas importadas → quedarían fuera del SUM y romperían
   // la continuidad del acumulado.
   const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
-  const res = await db.execute(sql`
+  const res = await exec.execute(sql`
     SELECT fecha::text AS fecha, bloqueado,
            facturacion, servicios_seguro_gps, facturacion_inversionistas, ingreso_carros
     FROM cartera.facturacion_snapshot_diario
@@ -134,7 +139,7 @@ export async function recomputarAcumuladosMes(anio: number, mes: number) {
   const dias = ((res as any).rows ?? res) as DiaAcumulable[];
   const updates = calcularAcumuladosCorridos(dias);
   for (const u of updates) {
-    await db.execute(sql`
+    await exec.execute(sql`
       UPDATE cartera.facturacion_snapshot_diario SET
         facturacion_acumulado = ${u.facturacion_acumulado},
         acum_servicios_seguro_gps = ${u.acum_servicios_seguro_gps},
@@ -865,18 +870,22 @@ export async function guardarCeldasSnapshot(input: {
           VALUES (${c.fecha}::date, '*', NULL, NULL, 'lock', ${usuarioId})
         `);
       }
+
+      // Recomputes DENTRO de la transacción (con tx) para que la edición, la
+      // re-derivación del total y los acumulados sean atómicos: si algo falla,
+      // rollback completo (nada de día bloqueado con totales/acumulados stale).
+    }
+
+    // 1) Re-derivar el total del día (facturacion + fact_mas_servicios) desde
+    //    los rubros editados, en cada día tocado.
+    for (const f of diasAfectados) await recomputarTotalesDia(f, tx);
+
+    // 2) Refrescar acumulados de cada mes afectado (suma corrida).
+    for (const k of mesesAfectados) {
+      const [anio, mes] = k.split("-").map(Number);
+      await recomputarAcumuladosMes(anio, mes, tx);
     }
   });
-
-  // 1) Re-derivar el total del día (facturacion + fact_mas_servicios) desde los
-  //    rubros editados, en cada día tocado.
-  for (const f of diasAfectados) await recomputarTotalesDia(f);
-
-  // 2) Refrescar acumulados de cada mes afectado (suma corrida).
-  for (const k of mesesAfectados) {
-    const [anio, mes] = k.split("-").map(Number);
-    await recomputarAcumuladosMes(anio, mes);
-  }
 
   return { success: true, dias: cambios.length, meses: mesesAfectados.size };
 }
@@ -910,7 +919,8 @@ export async function listarAuditoriaSnapshot(opts: {
   fechaFin?: string;
   limit?: number;
 }) {
-  const lim = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+  const n = Number(opts.limit);
+  const lim = Number.isFinite(n) ? Math.min(Math.max(n, 1), 1000) : 200;
   const conds: any[] = [];
   if (opts.fechaInicio) conds.push(sql`a.fecha >= ${opts.fechaInicio}::date`);
   if (opts.fechaFin) conds.push(sql`a.fecha <= ${opts.fechaFin}::date`);

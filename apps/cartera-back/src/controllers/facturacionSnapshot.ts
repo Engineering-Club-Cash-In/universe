@@ -10,22 +10,18 @@ const LOGO_URL =
   "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
 // ── Edición manual: whitelist de columnas editables + validación ──────────────
-// SOLO los 6 TOTALES de rubro (los que se ven colapsados). El detalle por
-// producto, servicios/inversionistas/carros, metas, y los ACUMULADOS/tendencias
-// quedan fuera: read-only. `facturacion` (total del día) se DERIVA de los rubros
-// (interes+membresia+otros+mora+royalty) — ver recomputarTotalesDia. Los
-// acumulados se auto-calculan (suma corrida). El front además solo deja editar HOY.
-export const RUBROS_TOTALES_EDITABLES = [
-  "capital_total",
-  "interes_cube",
-  "membresia",
-  "otros_ingresos",
-  "mora_cube",
-  "royalty",
-] as const;
-export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set(
-  RUBROS_TOTALES_EDITABLES
-);
+// Editables SOLO los grupos ROYALTY y OTROS INGRESOS, COMPLETOS (detalle por
+// producto + total + administrativos + otros_cobros). Capital, Interés,
+// Membresía, Mora, servicios/inversionistas/carros, metas y los acumulados/
+// tendencias quedan read-only. `facturacion` se DERIVA (interes+membresia+
+// otros_ingresos+mora+royalty, usando los totales editados) y los acumulados se
+// auto-calculan (suma corrida). El front además solo deja editar HOY.
+export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set([
+  // Royalty (completo)
+  "roy_autocompras","roy_sobre_vehiculo","nuevo_roy_autocompras","roy_hipotecario","roy_extra_financiamiento","roy_reestructura","royalty",
+  // Otros ingresos (completo, incl. administrativos y otros_cobros)
+  "oi_autocompras","oi_sobre_vehiculo","nuevo_oi_autocompras","oi_hipotecario","oi_extra_financiamiento","oi_reestructura","otros_ingresos","administrativos","otros_cobros",
+]);
 
 export function esColumnaEditable(col: string): boolean {
   return COLUMNAS_EDITABLES.has(col);
@@ -110,9 +106,9 @@ export async function recomputarTotalesDia(fecha: string, exec: any = db) {
       facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty,
       facturacion_mas_servicios =
         interes_cube + membresia + otros_ingresos + mora_cube + royalty + servicios_seguro_gps,
-      -- otros_cobros = otros_ingresos − administrativos (igual que generarSnapshotDiario);
-      -- al editar otros_ingresos debe refrescarse o queda stale en el día bloqueado.
-      otros_cobros = otros_ingresos - administrativos,
+      -- NO se recalcula otros_cobros: ahora es columna EDITABLE (grupo Otros
+      -- ingresos), el usuario la maneja a mano. Si la quiere = otros_ingresos −
+      -- administrativos, la edita él (todo libre en ese grupo).
       updated_at = now()
     WHERE fecha = ${fecha}::date
   `);
@@ -442,9 +438,8 @@ export async function generarSnapshotDiario(fecha: string) {
 //    los montos importados). Si el día no tiene fila, la genera primero.
 //    - administrativos = SUM(gastos del día); otros_cobros = otros_ingresos − administrativos
 //    - ingreso_carros = SUM(carros del día); acumulado_total = fact_acum + acum_servicios + carros MTD
-//    NO lleva guard de bloqueado: ninguna de estas columnas es editable a mano (lo
-//    editable son los 6 totales de rubro) → deben refrescar también en días bloqueados.
-//    El lock solo lo respeta generarSnapshotDiario (que sí reescribe los rubros).
+//    SÍ respeta el lock: administrativos y otros_cobros son EDITABLES (grupo Otros
+//    ingresos), así que en un día bloqueado NO debe pisarlos → salta días bloqueados.
 export async function aplicarManualesEnSnapshotDia(fecha: string) {
   const existe = await db
     .select({ id: facturacion_snapshot_diario.id })
@@ -471,6 +466,7 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
           + COALESCE((SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
         updated_at = now()
     WHERE s.fecha = ${fecha}::date
+      AND s.bloqueado = false
   `);
   return { success: true };
 }

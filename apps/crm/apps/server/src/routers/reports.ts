@@ -56,6 +56,15 @@ export function isClosedCreditReportCarteraStatusIncluded(
 	return status ? CLOSED_CREDIT_REPORT_CARTERA_STATUSES.includes(status) : false;
 }
 
+export function enforceClosedCreditReportLimit<T>(rows: T[]) {
+	if (rows.length > 10_000) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
+		});
+	}
+}
+
 async function getClosedCreditReportCarteraStatuses(sifcos: string[]) {
 	const uniqueSifcos = [...new Set(sifcos.filter(Boolean))];
 	const statuses = new Map<string, StatusCreditEnum>();
@@ -295,25 +304,20 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 					lte(firstClosedStageDates.firstClosedStageAt, end),
 				),
 			)
-			.orderBy(desc(firstClosedStageDates.firstClosedStageAt))
-			.limit(10_001);
-
-		if (rows.length > 10_000) {
-			throw new ORPCError("BAD_REQUEST", {
-				message:
-					"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
-			});
-		}
+			.orderBy(desc(firstClosedStageDates.firstClosedStageAt));
 
 		const carteraStatuses = await getClosedCreditReportCarteraStatuses(
 			rows.map((row) => row.numeroCredito),
 		);
 
-		return rows.filter((row) =>
+		const activeRows = rows.filter((row) =>
 			isClosedCreditReportCarteraStatusIncluded(
 				carteraStatuses.get(row.numeroCredito) ?? null,
 			),
 		);
+		enforceClosedCreditReportLimit(activeRows);
+
+		return activeRows;
 	});
 
 /**

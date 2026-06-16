@@ -180,6 +180,21 @@ describe("calculateCarteraClientStats", () => {
 		expect(stats.missingCrmCount).toBe(0);
 	});
 
+	test("counts sales clients by matched cartera credits", () => {
+		const stats = calculateCarteraClientStats({
+			carteraCredits: [
+				{ creditos: { numero_credito_sifco: "A-1", deudatotal: "100.00" } },
+				{ creditos: { numero_credito_sifco: "A-2", deudatotal: "200.00" } },
+			],
+			matchedSifcos: new Set(["A-1", "A-2"]),
+			uniqueLeadCount: 1,
+			scopedOpportunityCount: 2,
+			userRole: "sales",
+		});
+
+		expect(stats.totalClients).toBe(2);
+	});
+
 	test("uses full cartera totals for non-sales users", () => {
 		const stats = calculateCarteraClientStats({
 			carteraCredits: [

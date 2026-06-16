@@ -365,7 +365,7 @@ export function calculateCarteraClientStats(params: {
 	return {
 		totalClients:
 			params.userRole === "sales"
-				? params.uniqueLeadCount
+				? params.matchedSifcos.size
 				: params.carteraCredits.length,
 		totalClosedOpportunities: params.scopedOpportunityCount,
 		totalValue: visibleCredits.reduce(

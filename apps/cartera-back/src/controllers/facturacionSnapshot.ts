@@ -9,6 +9,48 @@ const LOGO_URL =
   process.env.LOGO_URL ||
   "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
+// ── Edición manual: whitelist de columnas editables + validación ──────────────
+export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set([
+  // Capital
+  "cap_autocompras","cap_sobre_vehiculo","nuevo_cap_autocompras","cap_hipotecario","cap_extra_financiamiento","cap_reestructura","capital_total",
+  // Interés
+  "int_autocompras","int_sobre_vehiculo","nuevo_int_autocompras","int_hipotecario","int_extra_financiamiento","int_reestructura","interes_cube",
+  // Membresía
+  "mem_autocompras","mem_sobre_vehiculo","nuevo_mem_autocompras","mem_hipotecario","mem_extra_financiamiento","mem_reestructura","membresia",
+  // Otros ingresos
+  "oi_autocompras","oi_sobre_vehiculo","nuevo_oi_autocompras","oi_hipotecario","oi_extra_financiamiento","oi_reestructura","otros_ingresos","administrativos","otros_cobros",
+  // Mora
+  "mora_autocompras","mora_sobre_vehiculo","nuevo_mora_autocompras","mora_hipotecario","mora_extra_financiamiento","mora_reestructura","mora_cube",
+  // Royalty
+  "roy_autocompras","roy_sobre_vehiculo","nuevo_roy_autocompras","roy_hipotecario","roy_extra_financiamiento","roy_reestructura","royalty",
+  // Totales / acumulados / servicios
+  "facturacion","facturacion_acumulado","servicios_seguro_gps","acum_servicios_seguro_gps","facturacion_mas_servicios","acumulado_total","facturacion_inversionistas","acumulado_inversionistas","tendencia_fin_mes","tendencia_semanal","ingreso_carros","reserva_acumulada","semana",
+  // Metas
+  "meta_facturacion_mensual","meta_facturacion_semanal","meta_facturacion_diaria","porcentaje_meta_mensual","meta_diaria",
+]);
+
+export function esColumnaEditable(col: string): boolean {
+  return COLUMNAS_EDITABLES.has(col);
+}
+
+export function validarValores(valores: Record<string, unknown>): {
+  ok: boolean;
+  invalidas: string[];
+} {
+  const invalidas: string[] = [];
+  for (const [col, val] of Object.entries(valores)) {
+    if (!esColumnaEditable(col)) {
+      invalidas.push(col);
+      continue;
+    }
+    const n = Number(val);
+    if (val === null || val === "" || Number.isNaN(n) || !Number.isFinite(n)) {
+      invalidas.push(col);
+    }
+  }
+  return { ok: invalidas.length === 0, invalidas };
+}
+
 // ============================================================================
 // 📸 SNAPSHOT DIARIO DE FACTURACIÓN (tipo Excel "Reuniones diarias")
 //    Calcula y CONGELA una fila por día con las columnas A→BK.

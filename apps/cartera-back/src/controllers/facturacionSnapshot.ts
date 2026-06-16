@@ -10,22 +10,18 @@ const LOGO_URL =
   "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
 // ── Edición manual: whitelist de columnas editables + validación ──────────────
-// SOLO los 6 TOTALES de rubro (los que se ven colapsados). El detalle por
-// producto, servicios/inversionistas/carros, metas, y los ACUMULADOS/tendencias
-// quedan fuera: read-only. `facturacion` (total del día) se DERIVA de los rubros
-// (interes+membresia+otros+mora+royalty) — ver recomputarTotalesDia. Los
-// acumulados se auto-calculan (suma corrida). El front además solo deja editar HOY.
-export const RUBROS_TOTALES_EDITABLES = [
-  "capital_total",
-  "interes_cube",
-  "membresia",
-  "otros_ingresos",
-  "mora_cube",
-  "royalty",
-] as const;
-export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set(
-  RUBROS_TOTALES_EDITABLES
-);
+// Editables SOLO los grupos ROYALTY y OTROS INGRESOS, COMPLETOS (detalle por
+// producto + total + administrativos + otros_cobros). Capital, Interés,
+// Membresía, Mora, servicios/inversionistas/carros, metas y los acumulados/
+// tendencias quedan read-only. `facturacion` se DERIVA (interes+membresia+
+// otros_ingresos+mora+royalty, usando los totales editados) y los acumulados se
+// auto-calculan (suma corrida). El front además solo deja editar HOY.
+export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set([
+  // Royalty (completo)
+  "roy_autocompras","roy_sobre_vehiculo","nuevo_roy_autocompras","roy_hipotecario","roy_extra_financiamiento","roy_reestructura","royalty",
+  // Otros ingresos (completo, incl. administrativos y otros_cobros)
+  "oi_autocompras","oi_sobre_vehiculo","nuevo_oi_autocompras","oi_hipotecario","oi_extra_financiamiento","oi_reestructura","otros_ingresos","administrativos","otros_cobros",
+]);
 
 export function esColumnaEditable(col: string): boolean {
   return COLUMNAS_EDITABLES.has(col);
@@ -110,9 +106,9 @@ export async function recomputarTotalesDia(fecha: string, exec: any = db) {
       facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty,
       facturacion_mas_servicios =
         interes_cube + membresia + otros_ingresos + mora_cube + royalty + servicios_seguro_gps,
-      -- otros_cobros = otros_ingresos − administrativos (igual que generarSnapshotDiario);
-      -- al editar otros_ingresos debe refrescarse o queda stale en el día bloqueado.
-      otros_cobros = otros_ingresos - administrativos,
+      -- NO se recalcula otros_cobros: ahora es columna EDITABLE (grupo Otros
+      -- ingresos), el usuario la maneja a mano. Si la quiere = otros_ingresos −
+      -- administrativos, la edita él (todo libre en ese grupo).
       updated_at = now()
     WHERE fecha = ${fecha}::date
   `);
@@ -442,9 +438,8 @@ export async function generarSnapshotDiario(fecha: string) {
 //    los montos importados). Si el día no tiene fila, la genera primero.
 //    - administrativos = SUM(gastos del día); otros_cobros = otros_ingresos − administrativos
 //    - ingreso_carros = SUM(carros del día); acumulado_total = fact_acum + acum_servicios + carros MTD
-//    NO lleva guard de bloqueado: ninguna de estas columnas es editable a mano (lo
-//    editable son los 6 totales de rubro) → deben refrescar también en días bloqueados.
-//    El lock solo lo respeta generarSnapshotDiario (que sí reescribe los rubros).
+//    SÍ respeta el lock: administrativos y otros_cobros son EDITABLES (grupo Otros
+//    ingresos), así que en un día bloqueado NO debe pisarlos → salta días bloqueados.
 export async function aplicarManualesEnSnapshotDia(fecha: string) {
   const existe = await db
     .select({ id: facturacion_snapshot_diario.id })
@@ -471,6 +466,7 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
           + COALESCE((SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
         updated_at = now()
     WHERE s.fecha = ${fecha}::date
+      AND s.bloqueado = false
   `);
   return { success: true };
 }
@@ -799,6 +795,23 @@ export async function guardarCeldasSnapshot(input: {
   if (!Array.isArray(cambios) || cambios.length === 0) {
     return { success: false, message: "Sin cambios" };
   }
+
+  // SOLO se puede editar el DÍA DE HOY (zona Guatemala). Se valida en el server
+  // además del front: un token ADMIN/script podría hacer PUT de una fecha vieja y
+  // bloquear una fila histórica, cambiando el mes reportado.
+  const hoyRes = await db.execute(
+    sql`SELECT (now() AT TIME ZONE 'America/Guatemala')::date::text AS hoy`
+  );
+  const hoyGT = ((hoyRes as any).rows ?? hoyRes)[0]?.hoy as string;
+  const fueraDeHoy = cambios.filter((c) => c.fecha !== hoyGT);
+  if (fueraDeHoy.length > 0) {
+    return {
+      success: false,
+      message: `Solo se puede editar el día de hoy (${hoyGT}).`,
+      fechas_invalidas: fueraDeHoy.map((c) => c.fecha),
+    };
+  }
+
   // Validar todo antes de escribir.
   for (const c of cambios) {
     const v = validarValores(c.valores);
@@ -959,7 +972,12 @@ export async function listarAuditoriaSnapshot(opts: {
     : sql``;
   const res = await db.execute(sql`
     SELECT a.id, a.fecha::text AS fecha, a.columna, a.valor_anterior, a.valor_nuevo,
-           a.accion, a.usuario_id, u.email AS usuario_email, a.created_at
+           a.accion, a.usuario_id, u.email AS usuario_email,
+           -- created_at en hora de Guatemala, YA formateado (a prueba de la zona
+           -- horaria de node/navegador): el guardado se interpreta como UTC y se
+           -- convierte a America/Guatemala.
+           to_char((a.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Guatemala',
+                   'DD/MM/YYYY HH24:MI:SS') AS created_at
     FROM cartera.facturacion_snapshot_auditoria a
     LEFT JOIN cartera.platform_users u ON u.id = a.usuario_id
     ${whereSql}

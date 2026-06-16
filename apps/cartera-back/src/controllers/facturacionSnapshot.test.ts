@@ -6,20 +6,23 @@ mock.module("../database", () => ({ db: {} }));
 const { esColumnaEditable, validarValores } = await import("./facturacionSnapshot");
 
 describe("esColumnaEditable", () => {
-  it("acepta SOLO los 6 totales de rubro", () => {
-    expect(esColumnaEditable("capital_total")).toBe(true);
-    expect(esColumnaEditable("interes_cube")).toBe(true);
-    expect(esColumnaEditable("membresia")).toBe(true);
-    expect(esColumnaEditable("otros_ingresos")).toBe(true);
-    expect(esColumnaEditable("mora_cube")).toBe(true);
+  it("acepta TODO Royalty y TODO Otros ingresos (detalle + total)", () => {
     expect(esColumnaEditable("royalty")).toBe(true);
+    expect(esColumnaEditable("roy_hipotecario")).toBe(true);
+    expect(esColumnaEditable("nuevo_roy_autocompras")).toBe(true);
+    expect(esColumnaEditable("otros_ingresos")).toBe(true);
+    expect(esColumnaEditable("oi_autocompras")).toBe(true);
+    expect(esColumnaEditable("administrativos")).toBe(true);
+    expect(esColumnaEditable("otros_cobros")).toBe(true);
   });
-  it("rechaza detalle por producto, facturación, servicios, metas y acumulados", () => {
+  it("rechaza Capital/Interés/Membresía/Mora, servicios, metas y acumulados", () => {
     expect(esColumnaEditable("id")).toBe(false);
     expect(esColumnaEditable("fecha")).toBe(false);
     expect(esColumnaEditable("bloqueado")).toBe(false);
-    expect(esColumnaEditable("roy_hipotecario")).toBe(false); // detalle producto
-    expect(esColumnaEditable("administrativos")).toBe(false);
+    expect(esColumnaEditable("capital_total")).toBe(false);
+    expect(esColumnaEditable("interes_cube")).toBe(false);
+    expect(esColumnaEditable("membresia")).toBe(false);
+    expect(esColumnaEditable("mora_cube")).toBe(false);
     expect(esColumnaEditable("facturacion")).toBe(false); // se DERIVA de rubros
     expect(esColumnaEditable("servicios_seguro_gps")).toBe(false);
     expect(esColumnaEditable("ingreso_carros")).toBe(false);
@@ -33,19 +36,19 @@ describe("esColumnaEditable", () => {
 
 describe("validarValores", () => {
   it("ok con rubros editables y números", () => {
-    const r = validarValores({ capital_total: "100.50", royalty: "0" });
+    const r = validarValores({ royalty: "100.50", otros_ingresos: "0" });
     expect(r.ok).toBe(true);
     expect(r.invalidas).toEqual([]);
   });
   it("marca columna no editable", () => {
-    const r = validarValores({ fecha: "2026-06-10" });
-    expect(r.ok).toBe(false);
-    expect(r.invalidas).toContain("fecha");
-  });
-  it("marca valor no numérico", () => {
-    const r = validarValores({ capital_total: "abc" });
+    const r = validarValores({ capital_total: "100" });
     expect(r.ok).toBe(false);
     expect(r.invalidas).toContain("capital_total");
+  });
+  it("marca valor no numérico", () => {
+    const r = validarValores({ royalty: "abc" });
+    expect(r.ok).toBe(false);
+    expect(r.invalidas).toContain("royalty");
   });
 });
 

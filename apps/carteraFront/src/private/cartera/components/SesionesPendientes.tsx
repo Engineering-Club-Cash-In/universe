@@ -75,12 +75,18 @@ const ACCION_CONFIG: Record<AccionTipo, {
   },
 };
 
-// Fecha de hoy en hora local (YYYY-MM-DD), evitando el corrimiento de UTC
-// que provoca toISOString() a partir de las 18:00 en Guatemala.
-function todayLocalISO(): string {
-  const d = new Date();
-  const off = d.getTimezoneOffset();
-  return new Date(d.getTime() - off * 60000).toISOString().split("T")[0];
+// Fecha de hoy (YYYY-MM-DD) en el calendario de Guatemala, sin importar la
+// zona horaria configurada en el navegador del operador. Usamos un formateo
+// explícito con timeZone en lugar de getTimezoneOffset() para no corrernos
+// de día cuando el cliente no está en America/Guatemala.
+function todayGuatemalaISO(): string {
+  // El locale en-CA produce el formato YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guatemala",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 function ModalConfirmAccion({
@@ -99,11 +105,11 @@ function ModalConfirmAccion({
   // Solo la confirmación de compra de cartera deja elegir la fecha de
   // participación manualmente. Default: hoy. La reinversión no entra aquí.
   const requiereFecha = tipo === "confirmar";
-  const [fechaParticipacion, setFechaParticipacion] = useState<string>(todayLocalISO);
+  const [fechaParticipacion, setFechaParticipacion] = useState<string>(todayGuatemalaISO);
 
   // Reiniciar a hoy cada vez que se abre el modal.
   useEffect(() => {
-    if (open) setFechaParticipacion(todayLocalISO());
+    if (open) setFechaParticipacion(todayGuatemalaISO());
   }, [open]);
 
   return (

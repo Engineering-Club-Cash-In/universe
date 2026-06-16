@@ -23,6 +23,7 @@ import {
   AlertCircle,
   Clock,
   Plus,
+  CalendarDays,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -74,18 +75,42 @@ const ACCION_CONFIG: Record<AccionTipo, {
   },
 };
 
+// Fecha de hoy (YYYY-MM-DD) en el calendario de Guatemala, sin importar la
+// zona horaria configurada en el navegador del operador. Usamos un formateo
+// explícito con timeZone en lugar de getTimezoneOffset() para no corrernos
+// de día cuando el cliente no está en America/Guatemala.
+function todayGuatemalaISO(): string {
+  // El locale en-CA produce el formato YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guatemala",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 function ModalConfirmAccion({
   open, onClose, onConfirm, tipo, creditos, isPending,
 }: {
   open: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (fechaParticipacion?: string) => void;
   tipo: AccionTipo;
   creditos: CreditoEspejoPendiente[];
   isPending: boolean;
 }) {
   const cfg = ACCION_CONFIG[tipo];
   const totalMonto = creditos.reduce((s, c) => s + Number(c.monto_aportado_nuevo ?? c.monto_aportado), 0);
+
+  // Solo la confirmación de compra de cartera deja elegir la fecha de
+  // participación manualmente. Default: hoy. La reinversión no entra aquí.
+  const requiereFecha = tipo === "confirmar";
+  const [fechaParticipacion, setFechaParticipacion] = useState<string>(todayGuatemalaISO);
+
+  // Reiniciar a hoy cada vez que se abre el modal.
+  useEffect(() => {
+    if (open) setFechaParticipacion(todayGuatemalaISO());
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -115,6 +140,27 @@ function ModalConfirmAccion({
           ))}
         </div>
 
+        {/* Fecha de participación (solo confirmar compra de cartera) */}
+        {requiereFecha && (
+          <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-3">
+            <label htmlFor="fecha-participacion" className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 mb-2">
+              <CalendarDays className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              Fecha de inicio de participación
+            </label>
+            <Input
+              id="fecha-participacion"
+              type="date"
+              value={fechaParticipacion}
+              onChange={(e) => setFechaParticipacion(e.target.value)}
+              disabled={isPending}
+              className="h-9 text-xs text-gray-900 bg-white"
+            />
+            <p className="text-[10px] text-amber-700/80 mt-1.5">
+              Se aplicará a la participación de la compra. Por defecto, hoy.
+            </p>
+          </div>
+        )}
+
         {/* Acciones */}
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-gray-400">
@@ -124,7 +170,12 @@ function ModalConfirmAccion({
             <Button size="sm" variant="outline" onClick={onClose} disabled={isPending} className="h-8 text-xs px-4 border-gray-300 text-gray-700 hover:bg-gray-100">
               No
             </Button>
-            <Button size="sm" className={`h-8 text-xs px-4 gap-1.5 ${cfg.btnClass}`} onClick={onConfirm} disabled={isPending}>
+            <Button
+              size="sm"
+              className={`h-8 text-xs px-4 gap-1.5 ${cfg.btnClass}`}
+              onClick={() => onConfirm(requiereFecha ? fechaParticipacion : undefined)}
+              disabled={isPending || (requiereFecha && !fechaParticipacion)}
+            >
               {isPending && <Loader2 className="w-3 h-3 animate-spin" />}
               {cfg.btnLabel}
             </Button>
@@ -750,7 +801,7 @@ function InvestorCard({
   const [idsToCancel, setIdsToCancel] = useState<number[] | null>(null);
   const [cancelLabelOverride, setCancelLabelOverride] = useState<string>("");
   const [confirmingCancel, setConfirmingCancel] = useState(false);
-  const [pendingAction, setPendingAction] = useState<{ tipo: AccionTipo; creditos: CreditoEspejoPendiente[]; handler: () => void } | null>(null);
+  const [pendingAction, setPendingAction] = useState<{ tipo: AccionTipo; creditos: CreditoEspejoPendiente[]; handler: (fechaParticipacion?: string) => void } | null>(null);
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
   const devolverPendientes = useDevolverPendientesACube();
@@ -946,13 +997,14 @@ function InvestorCard({
     });
   }, [allReinversionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleConfirmCompraCartera = useCallback(() => {
+  const handleConfirmCompraCartera = useCallback((fechaParticipacion?: string) => {
     if (selectedConfirmarIds.length === 0) return;
 
     completarEspejo.mutate(
       {
         creditos: selectedConfirmarIds,
         inversionista_id: investor.inversionista_id,
+        fecha_participacion: fechaParticipacion,
       },
       {
         onSuccess: () => {
@@ -1409,7 +1461,7 @@ function InvestorCard({
       <ModalConfirmAccion
         open={!!pendingAction}
         onClose={() => setPendingAction(null)}
-        onConfirm={() => { pendingAction?.handler(); setPendingAction(null); }}
+        onConfirm={(fecha) => { pendingAction?.handler(fecha); setPendingAction(null); }}
         tipo={pendingAction?.tipo ?? "aceptar"}
         creditos={pendingAction?.creditos ?? []}
         isPending={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || extenderCompra.isPending}

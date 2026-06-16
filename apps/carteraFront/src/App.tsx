@@ -22,6 +22,7 @@ import { SesionesPendientes } from "./private/cartera/components/SesionesPendien
 import { RecibosGenericos } from "./private/recibos-genericos/components/RecibosGenericos";
 import { FallenCredits } from "./private/cartera/components/FallenCredits";
 import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
+import { MoraHistorial } from "./private/cartera/components/MoraHistorial";
 import { DevolucionCube } from "./private/cartera/components/DevolucionCube";
 import { CierreCartera } from "./private/cartera/components/CierreCartera";
 import { FacturacionDiaria } from "./private/cartera/components/FacturacionDiaria";
@@ -251,6 +252,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <PagosPorVencimiento />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="mora-historial"
+          element={
+            <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
+              <MoraHistorial />
             </RoleRoute>
           }
         />

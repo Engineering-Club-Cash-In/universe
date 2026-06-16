@@ -4,6 +4,13 @@ import { Elysia, t } from "elysia";
  
 import { authMiddleware } from "./midleware";
 import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras } from "../controllers/latefee";
+import { getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, getMoraHistorialExcel } from "../controllers/moraHistorial";
+
+// Fecha de hoy en zona Guatemala (YYYY-MM-DD), para el corte por defecto del historial.
+const hoyGT = () => {
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" }));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 export const morasRouter = new Elysia()
   .use(authMiddleware)
@@ -205,4 +212,85 @@ export const morasRouter = new Elysia()
         description: "Procesa todas las cuotas vencidas y genera/actualiza los registros de mora para los créditos correspondientes"
       }
     }
-  );
+  )
+
+  // ───────────── Mora Histórica (reconstruida desde moras_historial) ─────────────
+  // Snapshot de la mora por crédito a una fecha de corte (con totales + filtros).
+  .get("/moras/historial", async ({ query, set }: any) => {
+    try {
+      return await getMoraHistorialSnapshot({
+        fecha: query.fecha || hoyGT(),
+        asesor: query.asesor,
+        etapa: query.etapa,
+        numero_credito_sifco: query.numero_credito_sifco,
+        nombre_usuario: query.nombre_usuario,
+        page: query.page ? Number(query.page) : 1,
+        pageSize: query.pageSize ? Number(query.pageSize) : 20,
+      });
+    } catch (err) {
+      set.status = 500;
+      return { success: false, message: "[ERROR] No se pudo obtener el historial de mora", error: String(err) };
+    }
+  }, {
+    query: t.Object({
+      fecha: t.Optional(t.String()),
+      asesor: t.Optional(t.String()),
+      etapa: t.Optional(t.String()),
+      numero_credito_sifco: t.Optional(t.String()),
+      nombre_usuario: t.Optional(t.String()),
+      page: t.Optional(t.String()),
+      pageSize: t.Optional(t.String()),
+    }),
+  })
+
+  // Evolución (timeline) del total de mora día a día en un rango.
+  .get("/moras/historial/timeline", async ({ query, set }: any) => {
+    try {
+      return await getMoraTimeline({ desde: query.desde, hasta: query.hasta || hoyGT(), asesor: query.asesor });
+    } catch (err) {
+      set.status = 500;
+      return { success: false, message: "[ERROR] No se pudo obtener el timeline de mora", error: String(err) };
+    }
+  }, {
+    query: t.Object({ desde: t.String(), hasta: t.Optional(t.String()), asesor: t.Optional(t.String()) }),
+  })
+
+  // Excel del snapshot a la fecha de corte.
+  .get("/moras/historial/excel", async ({ query, set }: any) => {
+    try {
+      const fecha = query.fecha || hoyGT();
+      const buf = await getMoraHistorialExcel({
+        fecha, asesor: query.asesor, etapa: query.etapa,
+        numero_credito_sifco: query.numero_credito_sifco, nombre_usuario: query.nombre_usuario,
+      });
+      return new Response(new Uint8Array(buf), {
+        headers: {
+          "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "content-disposition": `attachment; filename="mora-${fecha}.xlsx"`,
+        },
+      });
+    } catch (err) {
+      set.status = 500;
+      return { success: false, message: "[ERROR] No se pudo generar el Excel de mora", error: String(err) };
+    }
+  }, {
+    query: t.Object({
+      fecha: t.Optional(t.String()), asesor: t.Optional(t.String()), etapa: t.Optional(t.String()),
+      numero_credito_sifco: t.Optional(t.String()), nombre_usuario: t.Optional(t.String()),
+    }),
+  })
+
+  // Historial completo de eventos de mora de un crédito (drill-down).
+  .get("/moras/historial/credito/:credito_id", async ({ params, set }: any) => {
+    try {
+      const creditoId = Number(params.credito_id);
+      if (!Number.isInteger(creditoId) || creditoId <= 0) {
+        set.status = 400;
+        return { success: false, message: "[ERROR] credito_id inválido" };
+      }
+      return await getMoraHistorialCredito({ credito_id: creditoId });
+    } catch (err) {
+      set.status = 500;
+      return { success: false, message: "[ERROR] No se pudo obtener el historial del crédito", error: String(err) };
+    }
+  });

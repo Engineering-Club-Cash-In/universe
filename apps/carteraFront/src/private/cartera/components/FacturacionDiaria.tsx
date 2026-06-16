@@ -128,6 +128,8 @@ export function FacturacionDiaria() {
   const { user } = useAuth();
   const esAdmin = user?.role === "ADMIN";
   const [modoEdicion, setModoEdicion] = useState(false);
+  // día pendiente de confirmar desbloqueo (null = modal cerrado)
+  const [desbloquearTarget, setDesbloquearTarget] = useState<string | null>(null);
   // edits: { [fechaISO]: { [columna]: string } }
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
   const hayCambios = Object.values(edits).some((c) => Object.keys(c).length > 0);
@@ -378,14 +380,7 @@ export function FacturacionDiaria() {
                       {row.bloqueado && (
                         <button
                           title="Día manual (bloqueado). Click para desbloquear y volver a automático."
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `¿Desbloquear ${row.fecha}? Volverá a calcularse desde el sistema (días históricos previos al 2026-06-10 pueden quedar en 0).`
-                              )
-                            )
-                              desbloquearMut.mutate(row.fecha);
-                          }}
+                          onClick={() => setDesbloquearTarget(row.fecha)}
                           className="ml-2 text-amber-600 hover:text-amber-800"
                         >
                           🔒
@@ -449,6 +444,48 @@ export function FacturacionDiaria() {
         {/* Secciones de registro */}
         <RegistrosManuales mes={Number(fechaFin.slice(5, 7))} anio={Number(fechaFin.slice(0, 4))} />
       </div>
+
+      {/* Modal de confirmación de desbloqueo */}
+      {desbloquearTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-blue-100 w-full max-w-md p-6">
+            <h3 className="text-lg font-bold text-blue-900 mb-2">
+              Desbloquear {desbloquearTarget}
+            </h3>
+            <p className="text-sm text-gray-600 mb-1">
+              El día volverá a calcularse automáticamente desde el sistema y se
+              perderán los valores manuales.
+            </p>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-5">
+              ⚠️ Si es un día histórico (anterior al 2026-06-10) puede quedar en 0,
+              porque no hay datos del sistema para esa fecha.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDesbloquearTarget(null)}
+                disabled={desbloquearMut.isPending}
+                className="px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() =>
+                  desbloquearMut.mutate(desbloquearTarget!, {
+                    onSettled: () => setDesbloquearTarget(null),
+                  })
+                }
+                disabled={desbloquearMut.isPending}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold disabled:opacity-50"
+              >
+                {desbloquearMut.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
+                Desbloquear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

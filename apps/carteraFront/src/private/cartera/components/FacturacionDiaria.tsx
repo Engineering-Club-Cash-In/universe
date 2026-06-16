@@ -23,12 +23,17 @@ import {
   getIngresosCarros,
   getMetasFacturacion,
   getSnapshotsDiarios,
+  guardarCeldasSnapshot,
+  desbloquearDiaSnapshot,
+  getAuditoriaSnapshot,
   upsertMetaFacturacion,
   type GastoAdministrativo,
   type IngresoCarro,
   type MetaFacturacion,
   type SnapshotDiario,
+  type AuditoriaSnapshot,
 } from "../services/facturacionDiaria.services";
+import { useAuth } from "@/Provider/authProvider";
 
 // ───────────── helpers ─────────────
 // Fecha en hora Guatemala (no UTC), para no adelantarse de día por la noche.
@@ -106,8 +111,56 @@ const GRUPOS: Grupo[] = [
   },
 ];
 
+// ÚNICAS columnas editables: los 6 TOTALES de rubro. Todo lo demás (detalle por
+// producto, servicios/carros/inversionistas, metas, y los acumulados/tendencias)
+// es de solo lectura. `Facturación` se deriva de estos rubros en el backend y los
+// acumulados se recalculan como suma corrida. Además solo se edita el día de HOY.
+const EDITABLES = new Set<string>([
+  "capital_total",
+  "interes_cube",
+  "membresia",
+  "otros_ingresos",
+  "mora_cube",
+  "royalty",
+]);
+
 export function FacturacionDiaria() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const esAdmin = user?.role === "ADMIN";
+  const [modoEdicion, setModoEdicion] = useState(false);
+  // día pendiente de confirmar desbloqueo (null = modal cerrado)
+  const [desbloquearTarget, setDesbloquearTarget] = useState<string | null>(null);
+  // modal de historial de cambios (auditoría)
+  const [historialOpen, setHistorialOpen] = useState(false);
+  const histQuery = useQuery({
+    queryKey: ["facturacion-auditoria"],
+    queryFn: () => getAuditoriaSnapshot({ limit: 300 }),
+    enabled: historialOpen,
+    refetchOnWindowFocus: false,
+  });
+  // edits: { [fechaISO]: { [columna]: string } }
+  const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
+  // Celdas con cambio real (ignora vacías, que no se envían).
+  const nCambios = Object.values(edits).reduce(
+    (acc, c) => acc + Object.values(c).filter((v) => String(v).trim() !== "").length,
+    0
+  );
+  const nDiasCambiados = Object.values(edits).filter((c) =>
+    Object.values(c).some((v) => String(v).trim() !== "")
+  ).length;
+  const hayCambios = nCambios > 0;
+
+  // Avisar si se intenta cerrar/recargar con cambios sin guardar.
+  useEffect(() => {
+    if (!hayCambios) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hayCambios]);
   const [fechaInicio, setFechaInicio] = useState(inicioMesISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
   // rango "aplicado" (lo que de verdad consulta react-query)
@@ -145,6 +198,44 @@ export function FacturacionDiaria() {
     onError: () => setMsg("❌ Error generando el snapshot"),
   });
 
+  // ── Edición manual de celdas (solo ADMIN) ──
+  const setCell = (fecha: string, columna: string, valor: string) =>
+    setEdits((e) => ({ ...e, [fecha]: { ...(e[fecha] || {}), [columna]: valor } }));
+
+  const guardarMut = useMutation({
+    mutationFn: async () => {
+      // Por día, descartar celdas vacías (input limpiado) — el backend rechaza ""
+      // y abortaría todo el batch. Solo se mandan valores con contenido.
+      const cambios = Object.entries(edits)
+        .map(([fecha, valores]) => {
+          const limpios = Object.fromEntries(
+            Object.entries(valores).filter(([, val]) => String(val).trim() !== "")
+          );
+          return { fecha, valores: limpios };
+        })
+        .filter((c) => Object.keys(c.valores).length > 0);
+      return guardarCeldasSnapshot(cambios);
+    },
+    onSuccess: () => {
+      setEdits({});
+      setModoEdicion(false);
+      setMsg("✅ Cambios guardados (días bloqueados)");
+      qc.invalidateQueries({ queryKey: [SNAP_KEY] });
+      qc.invalidateQueries({ queryKey: ["facturacion-auditoria"] });
+    },
+    onError: () => setMsg("❌ Error guardando los cambios"),
+  });
+
+  const desbloquearMut = useMutation({
+    mutationFn: (fecha: string) => desbloquearDiaSnapshot(fecha),
+    onSuccess: (_d, fecha) => {
+      setMsg(`🔓 ${fecha} desbloqueado (vuelve a automático)`);
+      qc.invalidateQueries({ queryKey: [SNAP_KEY] });
+      qc.invalidateQueries({ queryKey: ["facturacion-auditoria"] });
+    },
+    onError: () => setMsg("❌ Error desbloqueando el día"),
+  });
+
   const descargarExcel = async () => {
     setDescargando(true);
     try {
@@ -166,6 +257,10 @@ export function FacturacionDiaria() {
   };
 
   const colsDe = (g: Grupo): Col[] => (exp[g.key] ? [...g.detalle, g.total] : [g.total]);
+  const hoy = hoyISO(); // se edita SOLO la fila de hoy
+
+  const esCeldaEditable = (fecha: string, k: string) =>
+    modoEdicion && esAdmin && fecha === hoy && EDITABLES.has(k);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-white p-4 sm:p-6">
@@ -212,6 +307,45 @@ export function FacturacionDiaria() {
             {descargando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Descargar Excel
           </button>
+
+          {esAdmin && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setHistorialOpen(true)}
+                className="px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200"
+              >
+                Historial de cambios
+              </button>
+              <button
+                onClick={() => {
+                  setModoEdicion((m) => !m);
+                  setEdits({});
+                }}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-100 text-blue-800 font-semibold hover:bg-blue-200"
+              >
+                {modoEdicion ? "Cancelar edición" : "Modo edición"}
+              </button>
+              {modoEdicion && (
+                <>
+                  {hayCambios && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                      <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                      {nCambios} cambio{nCambios !== 1 ? "s" : ""} sin guardar
+                      {nDiasCambiados > 1 ? ` (${nDiasCambiados} días)` : ""}
+                    </span>
+                  )}
+                  <button
+                    disabled={!hayCambios || guardarMut.isPending}
+                    onClick={() => guardarMut.mutate()}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold disabled:opacity-50"
+                  >
+                    {guardarMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Guardar cambios{hayCambios ? ` (${nCambios})` : ""}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="ml-auto flex items-end gap-2">
             <div>
@@ -290,8 +424,17 @@ export function FacturacionDiaria() {
               ) : (
                 snapshots.map((row) => (
                   <tr key={row.id} className="hover:bg-blue-50/50 border-b border-gray-100">
-                    <td className="sticky left-0 z-10 bg-white px-3 py-2 font-semibold text-blue-900 border-r border-gray-200 whitespace-nowrap">
+                    <td className={`sticky left-0 z-10 px-3 py-2 font-semibold text-blue-900 border-r border-gray-200 whitespace-nowrap ${row.bloqueado ? "bg-amber-50" : "bg-white"}`}>
                       {row.fecha}
+                      {row.bloqueado && (
+                        <button
+                          title="Día manual (bloqueado). Click para desbloquear y volver a automático."
+                          onClick={() => setDesbloquearTarget(row.fecha)}
+                          className="ml-2 text-amber-600 hover:text-amber-800"
+                        >
+                          🔒
+                        </button>
+                      )}
                     </td>
                     {GRUPOS.flatMap((g) =>
                       colsDe(g).map((c) => (
@@ -301,7 +444,19 @@ export function FacturacionDiaria() {
                             c.k === g.total.k ? "bg-blue-50/60 font-semibold text-blue-900" : "text-gray-700"
                           }`}
                         >
-                          {c.k === "porcentaje_meta_mensual" ? (
+                          {esCeldaEditable(row.fecha, c.k) ? (
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={edits[row.fecha]?.[c.k] ?? String(row[c.k] ?? "")}
+                              onChange={(e) => setCell(row.fecha, c.k, e.target.value)}
+                              className={`w-24 text-right border rounded px-1 py-0.5 text-xs [color-scheme:light] ${
+                                edits[row.fecha]?.[c.k] !== undefined
+                                  ? "bg-yellow-50 border-yellow-400"
+                                  : "bg-white border-gray-200"
+                              }`}
+                            />
+                          ) : c.k === "porcentaje_meta_mensual" ? (
                             Number(row[c.k] ?? 0) ? `${nf.format(Number(row[c.k]))}%` : <span className="text-gray-300">—</span>
                           ) : (
                             fmt(row[c.k])
@@ -338,6 +493,123 @@ export function FacturacionDiaria() {
         {/* Secciones de registro */}
         <RegistrosManuales mes={Number(fechaFin.slice(5, 7))} anio={Number(fechaFin.slice(0, 4))} />
       </div>
+
+      {/* Modal de historial de cambios (auditoría) */}
+      {historialOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-blue-100 w-full max-w-4xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-blue-900">Historial de cambios</h3>
+              <button
+                onClick={() => setHistorialOpen(false)}
+                className="text-gray-400 hover:text-gray-700 text-xl leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-auto p-5">
+              {histQuery.isLoading ? (
+                <div className="text-center py-10 text-gray-400">
+                  <Loader2 className="h-6 w-6 animate-spin inline" />
+                </div>
+              ) : (histQuery.data?.data ?? []).length === 0 ? (
+                <p className="text-center py-10 text-gray-400">Sin cambios registrados.</p>
+              ) : (
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-blue-50 text-blue-800 text-left">
+                      <th className="px-3 py-2 font-semibold">Cuándo</th>
+                      <th className="px-3 py-2 font-semibold">Día</th>
+                      <th className="px-3 py-2 font-semibold">Acción</th>
+                      <th className="px-3 py-2 font-semibold">Columna</th>
+                      <th className="px-3 py-2 font-semibold text-right">Anterior</th>
+                      <th className="px-3 py-2 font-semibold text-right">Nuevo</th>
+                      <th className="px-3 py-2 font-semibold">Usuario</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(histQuery.data?.data ?? []).map((a: AuditoriaSnapshot) => (
+                      <tr key={a.id} className="border-b border-gray-100">
+                        <td className="px-3 py-2 whitespace-nowrap text-gray-500">
+                          {a.created_at
+                            ? new Date(a.created_at).toLocaleString("es-GT")
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">{a.fecha}</td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                              a.accion === "edit"
+                                ? "bg-blue-100 text-blue-800"
+                                : a.accion === "lock"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-green-100 text-green-800"
+                            }`}
+                          >
+                            {a.accion}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">{a.columna}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-gray-500">
+                          {a.valor_anterior ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                          {a.valor_nuevo ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-gray-600">
+                          {a.usuario_email ?? (a.usuario_id ? `#${a.usuario_id}` : "—")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación de desbloqueo */}
+      {desbloquearTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-blue-100 w-full max-w-md p-6">
+            <h3 className="text-lg font-bold text-blue-900 mb-2">
+              Desbloquear {desbloquearTarget}
+            </h3>
+            <p className="text-sm text-gray-600 mb-1">
+              El día volverá a calcularse automáticamente desde el sistema y se
+              perderán los valores manuales.
+            </p>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-5">
+              ⚠️ Si es un día histórico (anterior al 2026-06-10) puede quedar en 0,
+              porque no hay datos del sistema para esa fecha.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDesbloquearTarget(null)}
+                disabled={desbloquearMut.isPending}
+                className="px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() =>
+                  desbloquearMut.mutate(desbloquearTarget!, {
+                    onSettled: () => setDesbloquearTarget(null),
+                  })
+                }
+                disabled={desbloquearMut.isPending}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold disabled:opacity-50"
+              >
+                {desbloquearMut.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
+                Desbloquear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

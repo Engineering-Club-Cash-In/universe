@@ -63,9 +63,10 @@ export const getMoraHistorialSnapshot = async (params: SnapshotParams): Promise<
 export const getMoraTimeline = async (
   desde: string,
   hasta: string,
-  asesor?: string
+  asesor?: string,
+  etapa?: string
 ): Promise<{ success: boolean; data: { fecha: string; mora_total: string }[] }> => {
-  const { data } = await api.get(`${API_URL}/moras/historial/timeline`, { params: { desde, hasta, asesor } });
+  const { data } = await api.get(`${API_URL}/moras/historial/timeline`, { params: { desde, hasta, asesor, etapa } });
   return data;
 };
 

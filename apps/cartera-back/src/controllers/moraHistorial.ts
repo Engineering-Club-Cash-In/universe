@@ -137,7 +137,8 @@ export async function getMoraHistorialSnapshot(a: SnapshotArgs) {
 }
 
 // Timeline: total de mora reconstruido as-of para cada día del rango (evolución).
-export async function getMoraTimeline({ desde, hasta, asesor }: { desde: string; hasta: string; asesor?: string }) {
+// Respeta el filtro de etapa (Mora 30/60/90/120+) para poder comparar la curva por bucket.
+export async function getMoraTimeline({ desde, hasta, asesor, etapa }: { desde: string; hasta: string; asesor?: string; etapa?: string }) {
   // Filtro de asesor: limita a créditos del/los asesor(es).
   let asesorFilter = sql``;
   if (asesor) {
@@ -150,16 +151,32 @@ export async function getMoraTimeline({ desde, hasta, asesor }: { desde: string;
       )`;
     }
   }
+  // Filtro de etapa sobre las cuotas "vivas" (carry-forward) de cada crédito a esa fecha.
+  let etapaFilter = sql``;
+  if (etapa === "0-30") etapaFilter = sql` AND s.cuotas = 1`;
+  else if (etapa === "31-60") etapaFilter = sql` AND s.cuotas = 2`;
+  else if (etapa === "61-90") etapaFilter = sql` AND s.cuotas = 3`;
+  else if (etapa === "+90") etapaFilter = sql` AND s.cuotas >= 4`;
+
   const res = await db.execute<any>(sql`
     SELECT d::date AS fecha, (
       SELECT COALESCE(SUM(s.monto), 0)
       FROM (
-        SELECT DISTINCT ON (h.credito_id) h.monto_nuevo::numeric AS monto, h.tipo_evento
-        FROM cartera.moras_historial h
-        WHERE (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= d ${asesorFilter}
-        ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
+        -- estado as-of por crédito: monto/tipo del último evento, cuotas con carry-forward
+        -- (último evento con cuotas>0) para clasificar la etapa igual que el snapshot.
+        SELECT credito_id, monto, tipo_evento, cuotas,
+          ROW_NUMBER() OVER (PARTITION BY credito_id ORDER BY fecha DESC, historial_id DESC) AS rn
+        FROM (
+          SELECT h.credito_id, h.monto_nuevo::numeric AS monto, h.tipo_evento, h.fecha, h.historial_id,
+            FIRST_VALUE(h.cuotas_atrasadas_nuevas) OVER (
+              PARTITION BY h.credito_id
+              ORDER BY (h.cuotas_atrasadas_nuevas > 0) DESC, h.fecha DESC, h.historial_id DESC
+            ) AS cuotas
+          FROM cartera.moras_historial h
+          WHERE (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= d ${asesorFilter}
+        ) hh
       ) s
-      WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0
+      WHERE s.rn = 1 AND s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 ${etapaFilter}
     ) AS mora_total
     FROM generate_series(${desde}::date, ${hasta}::date, INTERVAL '1 day') d
     ORDER BY d

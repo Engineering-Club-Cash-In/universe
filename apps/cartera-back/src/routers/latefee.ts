@@ -259,13 +259,13 @@ export const morasRouter = new Elysia()
   .get("/moras/historial/timeline", async ({ query, set, user }: any) => {
     if (!requireMoraHistorialRole(user, set)) return NO_AUTORIZADO;
     try {
-      return await getMoraTimeline({ desde: query.desde, hasta: query.hasta || hoyGT(), asesor: query.asesor });
+      return await getMoraTimeline({ desde: query.desde, hasta: query.hasta || hoyGT(), asesor: query.asesor, etapa: query.etapa });
     } catch (err) {
       set.status = 500;
       return { success: false, message: "[ERROR] No se pudo obtener el timeline de mora", error: String(err) };
     }
   }, {
-    query: t.Object({ desde: t.String(), hasta: t.Optional(t.String()), asesor: t.Optional(t.String()) }),
+    query: t.Object({ desde: t.String(), hasta: t.Optional(t.String()), asesor: t.Optional(t.String()), etapa: t.Optional(t.String()) }),
   })
 
   // Excel del snapshot a la fecha de corte.

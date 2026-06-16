@@ -19,9 +19,9 @@ import {
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 import {
 	closedCreditsReportProcedure,
+	porcentajeEfectividadReportProcedure,
 	protectedProcedure,
 	tiempoCierreReportProcedure,
-  porcentajeEfectividadReportProcedure,
 } from "../lib/orpc";
 
 const SECONDS_PER_DAY = 60 * 60 * 24;
@@ -36,6 +36,12 @@ const closedCreditsReportInputSchema = z.object({
 	startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 	endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+
+export function isClosedCreditReportContractStateIncluded(
+	estado: string | null,
+) {
+	return estado === "activo";
+}
 
 function parseGuatemalaDateRange(startDate: string, endDate: string) {
 	const start = new Date(`${startDate}T00:00:00.000-06:00`);
@@ -196,6 +202,8 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 		const latestCarteraReference = db
 			.select({
 				opportunityId: carteraBackReferences.opportunityId,
+				contratoFinanciamientoId:
+					carteraBackReferences.contratoFinanciamientoId,
 				numeroCreditoSifco: carteraBackReferences.numeroCreditoSifco,
 				rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${carteraBackReferences.opportunityId} ORDER BY ${carteraBackReferences.createdAt} DESC, ${carteraBackReferences.id} DESC)`.as(
 					"rn",
@@ -228,10 +236,18 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 					eq(latestCarteraReference.rn, 1),
 				),
 			)
+			.innerJoin(
+				contratosFinanciamiento,
+				eq(
+					latestCarteraReference.contratoFinanciamientoId,
+					contratosFinanciamiento.id,
+				),
+			)
 			.where(
 				and(
 					gte(firstClosedStageDates.firstClosedStageAt, start),
 					lte(firstClosedStageDates.firstClosedStageAt, end),
+					eq(contratosFinanciamiento.estado, "activo"),
 				),
 			)
 			.orderBy(desc(firstClosedStageDates.firstClosedStageAt))
@@ -462,10 +478,8 @@ export const getReportePorcentajeEfectividad =
 				lte(opportunities.createdAt, end),
 			);
 
-			const totalCerradas =
-				sql<number>`COUNT(${everClosed.opportunityId})`;
-			const porcentaje =
-				sql<number>`ROUND(COUNT(${everClosed.opportunityId}) * 100.0 / NULLIF(COUNT(${opportunities.id}), 0), 1)`;
+			const totalCerradas = sql<number>`COUNT(${everClosed.opportunityId})`;
+			const porcentaje = sql<number>`ROUND(COUNT(${everClosed.opportunityId}) * 100.0 / NULLIF(COUNT(${opportunities.id}), 0), 1)`;
 
 			const [totalRows, porFuente, registrosRaw] = await Promise.all([
 				db
@@ -496,7 +510,9 @@ export const getReportePorcentajeEfectividad =
 						id: opportunities.id,
 						createdAt: opportunities.createdAt,
 						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
-						nombre: sql<string | null>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
+						nombre: sql<
+							string | null
+						>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
 						etapaNombre: salesStages.name,
 						etapaPorcentaje: salesStages.closurePercentage,
 						cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`,

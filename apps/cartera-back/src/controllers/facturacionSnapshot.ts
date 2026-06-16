@@ -169,6 +169,16 @@ function colProducto(prefix: string, categoria: string): string | null {
 }
 
 export async function generarSnapshotDiario(fecha: string) {
+  // Si el día está bloqueado (editado a mano), NO se sobreescribe.
+  const lockRes = await db.execute(sql`
+    SELECT bloqueado FROM cartera.facturacion_snapshot_diario
+    WHERE fecha = ${fecha}::date
+  `);
+  const lockRow = ((lockRes as any).rows ?? lockRes)[0];
+  if (lockRow?.bloqueado === true) {
+    return { success: true, skipped: true, reason: "bloqueado", fecha };
+  }
+
   // "YYYY-MM-DD"
   const [y, m, d] = fecha.split("-").map(Number);
   const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
@@ -721,4 +731,140 @@ export async function getSnapshotsDiarios(opts: {
   }
 
   return { success: true, data: rows, totales };
+}
+
+// ============================================================================
+// ✏️ EDICIÓN MANUAL DE CELDAS (lock por fila + auditoría). Solo ADMIN (gate en router).
+// ============================================================================
+
+type CambioDia = { fecha: string; valores: Record<string, unknown> };
+
+// Guarda (upsert) las celdas tocadas por día, bloquea el día, audita cada cambio
+// y refresca los acumulados de los meses afectados. Solo columnas del whitelist.
+export async function guardarCeldasSnapshot(input: {
+  cambios: CambioDia[];
+  usuarioId: number | null;
+}) {
+  const { cambios, usuarioId } = input;
+  if (!Array.isArray(cambios) || cambios.length === 0) {
+    return { success: false, message: "Sin cambios" };
+  }
+  // Validar todo antes de escribir.
+  for (const c of cambios) {
+    const v = validarValores(c.valores);
+    if (!v.ok) {
+      return {
+        success: false,
+        message: `Columnas inválidas en ${c.fecha}`,
+        invalidas: v.invalidas,
+      };
+    }
+  }
+
+  const mesesAfectados = new Set<string>();
+
+  await db.transaction(async (tx) => {
+    for (const c of cambios) {
+      const [y, m] = c.fecha.split("-");
+      const anio = Number(y);
+      const mes = Number(m);
+      mesesAfectados.add(`${anio}-${mes}`);
+
+      // Fila actual (para valores viejos + saber si ya estaba bloqueado).
+      const prevRes = await tx.execute(sql`
+        SELECT * FROM cartera.facturacion_snapshot_diario WHERE fecha = ${c.fecha}::date
+      `);
+      const prev = ((prevRes as any).rows ?? prevRes)[0] ?? null;
+
+      const cols = Object.keys(c.valores);
+      // SET dinámico de las columnas tocadas. sql.raw para el nombre de columna
+      // (YA validado contra el whitelist) y bind del valor.
+      const sets = cols.map(
+        (col) => sql`${sql.raw(col)} = ${String(c.valores[col])}`
+      );
+
+      if (prev) {
+        await tx.execute(sql`
+          UPDATE cartera.facturacion_snapshot_diario
+          SET ${sql.join(sets, sql`, `)},
+              bloqueado = true, bloqueado_por = ${usuarioId}, bloqueado_at = now(), updated_at = now()
+          WHERE fecha = ${c.fecha}::date
+        `);
+      } else {
+        const insertCols = [
+          "fecha",
+          "anio",
+          "mes",
+          ...cols,
+          "bloqueado",
+          "bloqueado_por",
+          "bloqueado_at",
+        ];
+        const insertVals = [
+          sql`${c.fecha}::date`,
+          sql`${anio}`,
+          sql`${mes}`,
+          ...cols.map((col) => sql`${String(c.valores[col])}`),
+          sql`true`,
+          sql`${usuarioId}`,
+          sql`now()`,
+        ];
+        await tx.execute(sql`
+          INSERT INTO cartera.facturacion_snapshot_diario (${sql.join(
+            insertCols.map((x) => sql.raw(x)),
+            sql`, `
+          )})
+          VALUES (${sql.join(insertVals, sql`, `)})
+        `);
+      }
+
+      // Auditoría por celda.
+      for (const col of cols) {
+        const anterior = prev ? prev[col] ?? null : null;
+        await tx.execute(sql`
+          INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+          VALUES (${c.fecha}::date, ${col}, ${
+          anterior === null ? null : String(anterior)
+        }, ${String(c.valores[col])}, 'edit', ${usuarioId})
+        `);
+      }
+      // Auditoría de lock si no estaba bloqueado.
+      if (!prev || prev.bloqueado !== true) {
+        await tx.execute(sql`
+          INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+          VALUES (${c.fecha}::date, '*', NULL, NULL, 'lock', ${usuarioId})
+        `);
+      }
+    }
+  });
+
+  // Refrescar acumulados de cada mes afectado (recomputarAcumuladosMes hace sus updates).
+  for (const k of mesesAfectados) {
+    const [anio, mes] = k.split("-").map(Number);
+    await recomputarAcumuladosMes(anio, mes);
+  }
+
+  return { success: true, dias: cambios.length, meses: mesesAfectados.size };
+}
+
+export async function desbloquearDiaSnapshot(
+  fecha: string,
+  usuarioId: number | null
+) {
+  const [y, m] = fecha.split("-");
+  const anio = Number(y);
+  const mes = Number(m);
+  await db.execute(sql`
+    UPDATE cartera.facturacion_snapshot_diario
+    SET bloqueado = false, bloqueado_por = ${usuarioId}, bloqueado_at = now(), updated_at = now()
+    WHERE fecha = ${fecha}::date
+  `);
+  await db.execute(sql`
+    INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+    VALUES (${fecha}::date, '*', NULL, NULL, 'unlock', ${usuarioId})
+  `);
+  // Vuelve a valores del sistema y refresca acumulados.
+  await generarSnapshotDiario(fecha);
+  await recomputarAcumuladosMes(anio, mes);
+  return { success: true, fecha };
 }

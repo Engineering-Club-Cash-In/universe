@@ -3,7 +3,6 @@ import { and, count, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
-import { user } from "../db/schema/auth";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
 	casosCobros,
@@ -20,13 +19,16 @@ import {
 import { metasMensuales } from "../db/schema/metas";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 import {
+	getGuatemalaMonthWindow,
+	toDateStrGT,
+} from "../lib/guatemala-month-window";
+import {
 	closedCreditsReportProcedure,
 	metaColocacionReportProcedure,
 	porcentajeEfectividadReportProcedure,
 	protectedProcedure,
 	tiempoCierreReportProcedure,
 } from "../lib/orpc";
-import { toDateStrGT } from "../lib/guatemala-month-window";
 import { carteraBackClient } from "../services/cartera-back-client";
 import type { StatusCreditEnum } from "../types/cartera-back";
 
@@ -53,7 +55,9 @@ export const CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE = 50;
 export function isClosedCreditReportCarteraStatusIncluded(
 	status: StatusCreditEnum | null,
 ) {
-	return status ? CLOSED_CREDIT_REPORT_CARTERA_STATUSES.includes(status) : false;
+	return status
+		? CLOSED_CREDIT_REPORT_CARTERA_STATUSES.includes(status)
+		: false;
 }
 
 export function enforceClosedCreditReportLimit<T>(rows: T[]) {
@@ -740,6 +744,7 @@ export const getReporteMetaColocacion = metaColocacionReportProcedure
 	)
 	.handler(async ({ input }) => {
 		const { anio, mes } = input;
+		const { startOfMonth, endOfMonth } = getGuatemalaMonthWindow(anio, mes);
 
 		const [metaRow, porColaboradorRows] = await Promise.all([
 			db
@@ -755,29 +760,40 @@ export const getReporteMetaColocacion = metaColocacionReportProcedure
 				.limit(1),
 
 			db.execute(sql`
-				WITH first_placed AS (
+				WITH placed_stage_ids AS (
+					SELECT id
+					FROM sales_stages
+					WHERE closure_percentage >= 90
+				), moved_to_placed_this_month AS (
 					SELECT
-						osh.opportunity_id,
-						MIN(osh.changed_at) AS first_placed_at
+						DISTINCT osh.opportunity_id
 					FROM opportunity_stage_history osh
-					JOIN sales_stages ss ON ss.id = osh.to_stage_id
-					WHERE ss.closure_percentage >= 90
-					GROUP BY osh.opportunity_id
+					WHERE osh.to_stage_id IN (SELECT id FROM placed_stage_ids)
+						AND osh.changed_at >= ${startOfMonth}
+						AND osh.changed_at < ${endOfMonth}
+				), already_placed_before AS (
+					SELECT DISTINCT osh.opportunity_id
+					FROM opportunity_stage_history osh
+					WHERE osh.opportunity_id IN (
+						SELECT opportunity_id FROM moved_to_placed_this_month
+					)
+						AND osh.to_stage_id IN (SELECT id FROM placed_stage_ids)
+						AND osh.changed_at < ${startOfMonth}
+				), placed_this_month AS (
+					SELECT opportunity_id FROM moved_to_placed_this_month
+					EXCEPT
+					SELECT opportunity_id FROM already_placed_before
 				)
 				SELECT
 					o.assigned_to AS user_id,
 					u.name AS nombre,
 					COUNT(o.id)::int AS creditos,
 					COALESCE(SUM(o.value::numeric), 0) AS monto
-				FROM first_placed fp
-				JOIN opportunities o ON o.id = fp.opportunity_id
-				JOIN sales_stages ss_cur
-					ON ss_cur.id = o.stage_id
-					AND ss_cur.closure_percentage >= 90
+				FROM placed_this_month ptm
+				JOIN opportunities o ON o.id = ptm.opportunity_id
 				LEFT JOIN "user" u ON u.id = o.assigned_to
 				WHERE o.status != 'migrate'
-					AND EXTRACT(YEAR FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${anio}
-					AND EXTRACT(MONTH FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${mes}
+					AND o.stage_id IN (SELECT id FROM placed_stage_ids)
 				GROUP BY o.assigned_to, u.name
 				ORDER BY monto DESC
 			`),

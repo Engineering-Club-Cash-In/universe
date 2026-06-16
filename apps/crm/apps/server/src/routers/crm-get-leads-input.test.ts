@@ -4,6 +4,7 @@ import {
 	buildCarteraMatchedClientRows,
 	buildCarteraOnlyClientRow,
 	calculateCarteraClientStats,
+	getCurrentClientCreditsFromCartera,
 	getClientCreditSifcosFromCartera,
 	getLeadsInputSchema,
 } from "./crm";
@@ -69,6 +70,39 @@ describe("getClientCreditSifcosFromCartera", () => {
 			"ACTIVO",
 			"MOROSO",
 			"EN_CONVENIO",
+		]);
+	});
+});
+
+describe("getCurrentClientCreditsFromCartera", () => {
+	test("requests active cartera credits without month/year filtering", async () => {
+		const calls: Array<{ mes: number; anio: number; estado: string }> = [];
+		const fetchCredits = async (params: {
+			mes: number;
+			anio: number;
+			estado: string;
+			page: number;
+			perPage: number;
+		}) => {
+			calls.push(params);
+
+			return {
+				data: [{ creditos: { numero_credito_sifco: `${params.estado}-1` } }],
+				totalPages: 1,
+			};
+		};
+
+		const credits = await getCurrentClientCreditsFromCartera(fetchCredits);
+
+		expect(credits.map((row) => row.creditos?.numero_credito_sifco)).toEqual([
+			"ACTIVO-1",
+			"MOROSO-1",
+			"EN_CONVENIO-1",
+		]);
+		expect(calls.map(({ mes, anio }) => ({ mes, anio }))).toEqual([
+			{ mes: 0, anio: 0 },
+			{ mes: 0, anio: 0 },
+			{ mes: 0, anio: 0 },
 		]);
 	});
 });

@@ -694,13 +694,23 @@ export const reversePayment = async ({ body, set }: any) => {
       };
     });
 try {
-  await updateInstallments({
-    numero_credito_sifco: result.creditData.creditos.numero_credito_sifco, 
-    nueva_cuota: Number(result.creditData.creditos.cuota),  
-    all: true
-  });
-  
-  console.log("✅ UPDATE ALL STATEMENT ejecutado correctamente");
+  // En un INCOBRABLE NO se refrescan las cuotas: updateInstallments recalcula
+  // interes_restante/iva_12_restante de cada fila con `porcentaje_interes`
+  // (preservado en el castigo) y revivirían interés/IVA sobre un calendario
+  // que debe ser capital-only, corrompiendo el castigo tras la reversa.
+  if (result.creditData.creditos.statusCredit === "INCOBRABLE") {
+    console.log(
+      "⏭️ INCOBRABLE: se omite updateInstallments (cuota capital-only, no se recalcula interés)"
+    );
+  } else {
+    await updateInstallments({
+      numero_credito_sifco: result.creditData.creditos.numero_credito_sifco,
+      nueva_cuota: Number(result.creditData.creditos.cuota),
+      all: true,
+    });
+
+    console.log("✅ UPDATE ALL STATEMENT ejecutado correctamente");
+  }
 } catch (updateError: any) {
   console.error("⚠️ Error en UPDATE ALL STATEMENT:", updateError.message);
   // NO hacer throw aquí porque la transacción ya se completó

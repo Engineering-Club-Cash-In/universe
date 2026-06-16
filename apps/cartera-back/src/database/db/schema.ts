@@ -1346,10 +1346,28 @@
 
       created_at: timestamp("created_at").defaultNow().notNull(),
       updated_at: timestamp("updated_at").defaultNow().notNull(),
+
+      bloqueado: boolean("bloqueado").notNull().default(false),
+      bloqueado_por: integer("bloqueado_por"),
+      bloqueado_at: timestamp("bloqueado_at"),
     },
     (table) => ({
       uqFecha: uniqueIndex("uq_facturacion_snapshot_diario_fecha").on(table.fecha),
     })
+  );
+
+  export const facturacion_snapshot_auditoria = customSchema.table(
+    "facturacion_snapshot_auditoria",
+    {
+      id: serial("id").primaryKey(),
+      fecha: date("fecha").notNull(),
+      columna: varchar("columna", { length: 100 }).notNull(),
+      valor_anterior: text("valor_anterior"),
+      valor_nuevo: text("valor_nuevo"),
+      accion: varchar("accion", { length: 20 }).notNull(),
+      usuario_id: integer("usuario_id"),
+      created_at: timestamp("created_at").defaultNow().notNull(),
+    }
   );
 
   // ============================================

@@ -77,12 +77,49 @@ function esDetalleTecnicoCrudo(detail: string): boolean {
 }
 
 /**
+ * Decide qué texto del cuerpo del error se muestra al usuario, según la
+ * convención del backend de cartera:
+ *  - `message` / `mensaje`: texto curado (normalmente español), salvo cuando
+ *    es el genérico "Internal server error".
+ *  - `error`: por convención carga `error.message` crudo de la excepción
+ *    (`return { error: error.message }` en los catch), aunque algunos
+ *    endpoints meten ahí el motivo de negocio. Por eso `error` solo se
+ *    muestra si es traducible (negocio conocido) o no parece un crudo técnico
+ *    (stack, driver de DB, etc.). Esta regla aplica venga de donde venga el
+ *    `error`, no solo cuando los roles están invertidos.
+ */
+function extraerDetalle(data: unknown): string | undefined {
+  const cuerpo = (data ?? {}) as { message?: unknown; error?: unknown; mensaje?: unknown };
+  const message = typeof cuerpo.message === "string" ? cuerpo.message.trim() : "";
+  const mensaje = typeof cuerpo.mensaje === "string" ? cuerpo.mensaje.trim() : "";
+  const errorRaw = typeof cuerpo.error === "string" ? cuerpo.error.trim() : "";
+
+  const errorUtilizable =
+    !!errorRaw && (buscarTraduccion(errorRaw) !== null || !esDetalleTecnicoCrudo(errorRaw));
+
+  // `message` curado tiene prioridad, salvo que sea el genérico sin información.
+  if (message && !MENSAJE_SIN_INFORMACION.test(message)) {
+    return message;
+  }
+  // `error` solo si pasa el filtro de crudos.
+  if (errorUtilizable) {
+    return errorRaw;
+  }
+  // `message` genérico ("Internal server error") como último recurso textual.
+  if (message) {
+    return message;
+  }
+  if (mensaje) {
+    return mensaje;
+  }
+  return undefined;
+}
+
+/**
  * Extrae el motivo real de un error de API para mostrarlo al usuario.
  *
- * Prioridad de campos: `message` (texto curado de los endpoints) primero;
- * `error` cuando no hay `message` o cuando este es un genérico sin
- * información, porque hay endpoints donde los roles están invertidos
- * (`message: "Internal server error"` y el motivo real en `error`).
+ * El campo `error` (crudo por convención del backend) se filtra en
+ * `extraerDetalle`: nunca se muestra una excepción técnica al usuario.
  */
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof AxiosError) {
@@ -93,22 +130,7 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
       return `${fallback}: Sin conexión con el servidor`;
     }
     const { status, data } = error.response;
-    let detail: unknown;
-    if (typeof data === "string") {
-      detail = data;
-    } else {
-      detail = data?.message ?? data?.error ?? data?.mensaje;
-      if (
-        typeof detail === "string" &&
-        MENSAJE_SIN_INFORMACION.test(detail.trim()) &&
-        typeof data?.error === "string" &&
-        data.error.trim() &&
-        (buscarTraduccion(data.error.trim()) !== null ||
-          !esDetalleTecnicoCrudo(data.error.trim()))
-      ) {
-        detail = data.error;
-      }
-    }
+    const detail = typeof data === "string" ? data : extraerDetalle(data);
     if (typeof detail === "string" && detail.trim()) {
       return `${fallback}: ${traducirDetalleTecnico(detail.trim())}`;
     }
@@ -121,7 +143,21 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
     return `${fallback} (HTTP ${status})`;
   }
   if (error instanceof Error && error.message) {
-    return `${fallback}: ${error.message}`;
+    const msg = error.message.trim();
+    // Algunos servicios relanzan `new Error(data.message || "<fallback>")`,
+    // por lo que `msg` puede ser ya el mismo fallback: no duplicar ("X: X").
+    if (!msg || msg === fallback) {
+      return fallback;
+    }
+    const traducido = buscarTraduccion(msg);
+    if (traducido) {
+      return `${fallback}: ${traducido}`;
+    }
+    // Mismo criterio que extraerDetalle: no filtrar crudos técnicos a la UI.
+    if (esDetalleTecnicoCrudo(msg)) {
+      return fallback;
+    }
+    return `${fallback}: ${msg}`;
   }
   return fallback;
 }

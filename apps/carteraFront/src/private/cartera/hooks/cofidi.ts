@@ -4,6 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { toast } from 'sonner'; // o tu librería de toast
+import { getApiErrorMessage } from "@/lib/apiError";
 import {
   anularFactura,
   facturarPagoCompleto,
@@ -46,12 +47,8 @@ export const useFacturarPagoCompleto = () => {
       }
     },
     onError: (error: any) => {
-      const errorMsg = error?.response?.data?.error 
-        || error?.message 
-        || 'Error al generar facturas';
-      
-      toast.error(errorMsg);
-      
+      toast.error(getApiErrorMessage(error, 'Error al generar facturas'));
+
       // Log para debugging
       console.error('Error facturando pago completo:', error);
     }
@@ -87,7 +84,7 @@ export const useAnularFactura = () => {
       }
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.error || 'Error al anular factura');
+      toast.error(getApiErrorMessage(error, 'Error al anular factura'));
     }
   });
 };
@@ -149,11 +146,7 @@ export const useFacturarGenerico = () => {
       }
     },
     onError: (error: any) => {
-      const errorMsg = error?.response?.data?.error
-        || error?.message
-        || 'Error al generar factura genérica';
-
-      toast.error(errorMsg);
+      toast.error(getApiErrorMessage(error, 'Error al generar factura genérica'));
 
       console.error('Error facturando genérico:', error);
     }
@@ -190,7 +183,7 @@ export const useExportFacturasExcel = () => {
       }
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Error al exportar Excel');
+      toast.error(getApiErrorMessage(error, 'Error al exportar Excel'));
     },
   });
 };

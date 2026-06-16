@@ -2672,7 +2672,7 @@ export const createPaymentAgreement = async (
     return data;
   } catch (error: any) {
     console.error("Error creating payment agreement:", error);
-    throw new Error(error?.response?.data?.message || "Failed to create payment agreement");
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 
@@ -2716,9 +2716,7 @@ export const togglePaymentAgreementStatus = async (
     return data;
   } catch (error: any) {
     console.error("Error toggling payment agreement status:", error);
-    throw new Error(
-      error?.response?.data?.message || "Failed to toggle payment agreement status"
-    );
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 
@@ -3063,9 +3061,7 @@ export const createBoleta = async (data: CreateBoletaDTO) => {
     return response.data;
   } catch (error: any) {
     console.error("❌ Error creando boleta:", error);
-    throw new Error(
-      error.response?.data?.message || "Error al crear boleta"
-    );
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 

@@ -9,6 +9,163 @@ const LOGO_URL =
   process.env.LOGO_URL ||
   "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
+// ── Edición manual: whitelist de columnas editables + validación ──────────────
+// SOLO los 6 TOTALES de rubro (los que se ven colapsados). El detalle por
+// producto, servicios/inversionistas/carros, metas, y los ACUMULADOS/tendencias
+// quedan fuera: read-only. `facturacion` (total del día) se DERIVA de los rubros
+// (interes+membresia+otros+mora+royalty) — ver recomputarTotalesDia. Los
+// acumulados se auto-calculan (suma corrida). El front además solo deja editar HOY.
+export const RUBROS_TOTALES_EDITABLES = [
+  "capital_total",
+  "interes_cube",
+  "membresia",
+  "otros_ingresos",
+  "mora_cube",
+  "royalty",
+] as const;
+export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set(
+  RUBROS_TOTALES_EDITABLES
+);
+
+export function esColumnaEditable(col: string): boolean {
+  return COLUMNAS_EDITABLES.has(col);
+}
+
+export function validarValores(valores: Record<string, unknown>): {
+  ok: boolean;
+  invalidas: string[];
+} {
+  const invalidas: string[] = [];
+  for (const [col, val] of Object.entries(valores)) {
+    if (!esColumnaEditable(col)) {
+      invalidas.push(col);
+      continue;
+    }
+    // Solo decimal plano (opcional signo): "123", "-12.50", "0". Rechaza "", null,
+    // notación científica ("1e3"), hex ("0x10"), comas ("1,000") y basura — que
+    // Number() aceptaría pero romperían el cast a numeric en el INSERT/UPDATE.
+    const s = String(val ?? "").trim();
+    if (!/^-?\d+(\.\d+)?$/.test(s)) {
+      invalidas.push(col);
+    }
+  }
+  return { ok: invalidas.length === 0, invalidas };
+}
+
+export type DiaAcumulable = {
+  fecha: string;
+  bloqueado: boolean;
+  facturacion: string | number;
+  servicios_seguro_gps: string | number;
+  facturacion_inversionistas: string | number;
+  ingreso_carros: string | number;
+};
+
+export type UpdateAcumulado = {
+  fecha: string;
+  facturacion_acumulado: string;
+  acum_servicios_seguro_gps: string;
+  acumulado_inversionistas: string;
+  acumulado_total: string;
+};
+
+// Suma corrida sobre días YA ordenados por fecha. Emite el acumulado para CADA
+// día (incluidos los bloqueados): los ACUMULADOS SIEMPRE SUMAN, no se congelan.
+// El lock protege los valores DIARIOS (los salta generarSnapshotDiario), pero el
+// acumulado de un día = suma corrida de las diarias hasta ese día. Así no hay
+// discontinuidad cuando se edita+bloquea un día. No toca reserva_acumulada
+// (es MTD desde pagos, sin columna diaria).
+export function calcularAcumuladosCorridos(
+  dias: DiaAcumulable[]
+): UpdateAcumulado[] {
+  let accFact = new Big(0);
+  let accServ = new Big(0);
+  let accInv = new Big(0);
+  let accCarros = new Big(0);
+  const updates: UpdateAcumulado[] = [];
+  for (const d of dias) {
+    accFact = accFact.plus(new Big(d.facturacion || 0));
+    accServ = accServ.plus(new Big(d.servicios_seguro_gps || 0));
+    accInv = accInv.plus(new Big(d.facturacion_inversionistas || 0));
+    accCarros = accCarros.plus(new Big(d.ingreso_carros || 0));
+    updates.push({
+      fecha: d.fecha,
+      facturacion_acumulado: accFact.toFixed(2),
+      acum_servicios_seguro_gps: accServ.toFixed(2),
+      acumulado_inversionistas: accInv.toFixed(2),
+      acumulado_total: accFact.plus(accServ).plus(accCarros).toFixed(2),
+    });
+  }
+  return updates;
+}
+
+// Re-deriva los totales DEL DÍA desde los rubros editados a mano:
+//   facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty
+//   facturacion_mas_servicios = facturacion + servicios_seguro_gps
+// (capital_total NO entra en facturacion.) Se usa tras editar rubros para que el
+// total del día y los acumulados cuadren con lo que el usuario tipeó.
+export async function recomputarTotalesDia(fecha: string, exec: any = db) {
+  await exec.execute(sql`
+    UPDATE cartera.facturacion_snapshot_diario SET
+      facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty,
+      facturacion_mas_servicios =
+        interes_cube + membresia + otros_ingresos + mora_cube + royalty + servicios_seguro_gps,
+      -- otros_cobros = otros_ingresos − administrativos (igual que generarSnapshotDiario);
+      -- al editar otros_ingresos debe refrescarse o queda stale en el día bloqueado.
+      otros_cobros = otros_ingresos - administrativos,
+      updated_at = now()
+    WHERE fecha = ${fecha}::date
+  `);
+}
+
+// Refresca las columnas de acumulado de TODOS los días del mes (incluidos los
+// bloqueados: sus acumulados también suman, ver calcularAcumuladosCorridos),
+// como suma corrida de las diarias guardadas. No lee la fuente ni toca diarias
+// → seguro para días históricos importados del Excel.
+export async function recomputarAcumuladosMes(
+  anio: number,
+  mes: number,
+  exec: any = db
+) {
+  // Filtramos por RANGO de fecha (no por anio/mes) porque esas columnas helper
+  // pueden venir NULL en filas importadas → quedarían fuera del SUM y romperían
+  // la continuidad del acumulado.
+  const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
+  const res = await exec.execute(sql`
+    SELECT fecha::text AS fecha, bloqueado,
+           facturacion, servicios_seguro_gps, facturacion_inversionistas, ingreso_carros
+    FROM cartera.facturacion_snapshot_diario
+    WHERE fecha >= ${inicioMes}::date
+      AND fecha < (${inicioMes}::date + INTERVAL '1 month')
+    ORDER BY fecha
+  `);
+  const dias = ((res as any).rows ?? res) as DiaAcumulable[];
+  const updates = calcularAcumuladosCorridos(dias);
+  for (const u of updates) {
+    await exec.execute(sql`
+      UPDATE cartera.facturacion_snapshot_diario SET
+        facturacion_acumulado = ${u.facturacion_acumulado},
+        acum_servicios_seguro_gps = ${u.acum_servicios_seguro_gps},
+        acumulado_inversionistas = ${u.acumulado_inversionistas},
+        acumulado_total = ${u.acumulado_total},
+        -- Proyecciones y % meta derivan del acumulado → refrescar o quedan stale.
+        tendencia_fin_mes = CASE WHEN EXTRACT(DAY FROM fecha) > 0
+          THEN ${u.facturacion_acumulado}::numeric / EXTRACT(DAY FROM fecha)
+               * EXTRACT(DAY FROM (date_trunc('month', fecha) + INTERVAL '1 month - 1 day'))
+          ELSE 0 END,
+        tendencia_semanal = CASE WHEN EXTRACT(DAY FROM fecha) > 0
+          THEN ${u.facturacion_acumulado}::numeric / EXTRACT(DAY FROM fecha) * 5
+          ELSE 0 END,
+        porcentaje_meta_mensual = CASE WHEN meta_facturacion_mensual > 0
+          THEN ROUND(${u.facturacion_acumulado}::numeric / meta_facturacion_mensual * 100, 4)
+          ELSE 0 END,
+        updated_at = now()
+      WHERE fecha = ${u.fecha}::date
+    `);
+  }
+  return { success: true, dias_actualizados: updates.length };
+}
+
 // ============================================================================
 // 📸 SNAPSHOT DIARIO DE FACTURACIÓN (tipo Excel "Reuniones diarias")
 //    Calcula y CONGELA una fila por día con las columnas A→BK.
@@ -54,6 +211,16 @@ function colProducto(prefix: string, categoria: string): string | null {
 }
 
 export async function generarSnapshotDiario(fecha: string) {
+  // Si el día está bloqueado (editado a mano), NO se sobreescribe.
+  const lockRes = await db.execute(sql`
+    SELECT bloqueado FROM cartera.facturacion_snapshot_diario
+    WHERE fecha = ${fecha}::date
+  `);
+  const lockRow = ((lockRes as any).rows ?? lockRes)[0];
+  if (lockRow?.bloqueado === true) {
+    return { success: true, skipped: true, reason: "bloqueado", fecha };
+  }
+
   // "YYYY-MM-DD"
   const [y, m, d] = fecha.split("-").map(Number);
   const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
@@ -275,6 +442,9 @@ export async function generarSnapshotDiario(fecha: string) {
 //    los montos importados). Si el día no tiene fila, la genera primero.
 //    - administrativos = SUM(gastos del día); otros_cobros = otros_ingresos − administrativos
 //    - ingreso_carros = SUM(carros del día); acumulado_total = fact_acum + acum_servicios + carros MTD
+//    NO lleva guard de bloqueado: ninguna de estas columnas es editable a mano (lo
+//    editable son los 6 totales de rubro) → deben refrescar también en días bloqueados.
+//    El lock solo lo respeta generarSnapshotDiario (que sí reescribe los rubros).
 export async function aplicarManualesEnSnapshotDia(fecha: string) {
   const existe = await db
     .select({ id: facturacion_snapshot_diario.id })
@@ -307,6 +477,8 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
 
 // ✅ Aplica SOLO las columnas de meta a los snapshots del mes (sin recalcular
 //    los montos importados). Recalcula el % meta con el acumulado existente.
+//    NO lleva guard de bloqueado: las columnas de meta no son editables a mano →
+//    deben refrescar también en días bloqueados (el lock vive en generarSnapshotDiario).
 export async function aplicarMetaEnSnapshotsMes(anio: number, mes: number) {
   const res = await db.execute(sql`
     UPDATE cartera.facturacion_snapshot_diario s
@@ -577,6 +749,9 @@ export async function getSnapshotsDiarios(opts: {
     "anio",
     "mes",
     "semana",
+    "bloqueado",
+    "bloqueado_por",
+    "bloqueado_at",
     "facturacion_acumulado",
     "acum_servicios_seguro_gps",
     "acumulado_total",
@@ -606,4 +781,190 @@ export async function getSnapshotsDiarios(opts: {
   }
 
   return { success: true, data: rows, totales };
+}
+
+// ============================================================================
+// ✏️ EDICIÓN MANUAL DE CELDAS (lock por fila + auditoría). Solo ADMIN (gate en router).
+// ============================================================================
+
+type CambioDia = { fecha: string; valores: Record<string, unknown> };
+
+// Guarda (upsert) las celdas tocadas por día, bloquea el día, audita cada cambio
+// y refresca los acumulados de los meses afectados. Solo columnas del whitelist.
+export async function guardarCeldasSnapshot(input: {
+  cambios: CambioDia[];
+  usuarioId: number | null;
+}) {
+  const { cambios, usuarioId } = input;
+  if (!Array.isArray(cambios) || cambios.length === 0) {
+    return { success: false, message: "Sin cambios" };
+  }
+  // Validar todo antes de escribir.
+  for (const c of cambios) {
+    const v = validarValores(c.valores);
+    if (!v.ok) {
+      return {
+        success: false,
+        message: `Columnas inválidas en ${c.fecha}`,
+        invalidas: v.invalidas,
+      };
+    }
+  }
+
+  // Si un día NO tiene fila aún, generarlo COMPLETO primero (columnas source:
+  // detalle por producto, servicios, inversionistas, metas, reserva, semana) y
+  // LUEGO editar+bloquear. Si no, quedaría una fila sparse en 0 y el cron no la
+  // llenaría (la salta por bloqueado). Mismo patrón que aplicarManualesEnSnapshotDia.
+  for (const c of cambios) {
+    const ex = await db.execute(sql`
+      SELECT 1 FROM cartera.facturacion_snapshot_diario WHERE fecha = ${c.fecha}::date LIMIT 1
+    `);
+    if ((((ex as any).rows ?? ex) as any[]).length === 0) {
+      await generarSnapshotDiario(c.fecha);
+    }
+  }
+
+  const mesesAfectados = new Set<string>();
+  const diasAfectados = new Set<string>();
+
+  await db.transaction(async (tx) => {
+    for (const c of cambios) {
+      const [y, m] = c.fecha.split("-");
+      const anio = Number(y);
+      const mes = Number(m);
+      mesesAfectados.add(`${anio}-${mes}`);
+      diasAfectados.add(c.fecha);
+
+      // Fila actual (para valores viejos + saber si ya estaba bloqueado).
+      const prevRes = await tx.execute(sql`
+        SELECT * FROM cartera.facturacion_snapshot_diario WHERE fecha = ${c.fecha}::date
+      `);
+      const prev = ((prevRes as any).rows ?? prevRes)[0] ?? null;
+
+      const cols = Object.keys(c.valores);
+      // Valor canónico (trim) — validarValores ya garantizó que es decimal plano.
+      const valOf = (col: string) => String(c.valores[col] ?? "").trim();
+      // SET dinámico de las columnas tocadas. sql.raw para el nombre de columna
+      // (YA validado contra el whitelist) y bind del valor.
+      const sets = cols.map((col) => sql`${sql.raw(col)} = ${valOf(col)}`);
+
+      if (prev) {
+        await tx.execute(sql`
+          UPDATE cartera.facturacion_snapshot_diario
+          SET ${sql.join(sets, sql`, `)},
+              bloqueado = true, bloqueado_por = ${usuarioId}, bloqueado_at = now(), updated_at = now()
+          WHERE fecha = ${c.fecha}::date
+        `);
+      } else {
+        const insertCols = [
+          "fecha",
+          "anio",
+          "mes",
+          ...cols,
+          "bloqueado",
+          "bloqueado_por",
+          "bloqueado_at",
+        ];
+        const insertVals = [
+          sql`${c.fecha}::date`,
+          sql`${anio}`,
+          sql`${mes}`,
+          ...cols.map((col) => sql`${valOf(col)}`),
+          sql`true`,
+          sql`${usuarioId}`,
+          sql`now()`,
+        ];
+        await tx.execute(sql`
+          INSERT INTO cartera.facturacion_snapshot_diario (${sql.join(
+            insertCols.map((x) => sql.raw(x)),
+            sql`, `
+          )})
+          VALUES (${sql.join(insertVals, sql`, `)})
+        `);
+      }
+
+      // Auditoría por celda.
+      for (const col of cols) {
+        const anterior = prev ? prev[col] ?? null : null;
+        await tx.execute(sql`
+          INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+          VALUES (${c.fecha}::date, ${col}, ${
+          anterior === null ? null : String(anterior)
+        }, ${valOf(col)}, 'edit', ${usuarioId})
+        `);
+      }
+      // Auditoría de lock si no estaba bloqueado.
+      if (!prev || prev.bloqueado !== true) {
+        await tx.execute(sql`
+          INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+          VALUES (${c.fecha}::date, '*', NULL, NULL, 'lock', ${usuarioId})
+        `);
+      }
+
+      // Recomputes DENTRO de la transacción (con tx) para que la edición, la
+      // re-derivación del total y los acumulados sean atómicos: si algo falla,
+      // rollback completo (nada de día bloqueado con totales/acumulados stale).
+    }
+
+    // 1) Re-derivar el total del día (facturacion + fact_mas_servicios) desde
+    //    los rubros editados, en cada día tocado.
+    for (const f of diasAfectados) await recomputarTotalesDia(f, tx);
+
+    // 2) Refrescar acumulados de cada mes afectado (suma corrida).
+    for (const k of mesesAfectados) {
+      const [anio, mes] = k.split("-").map(Number);
+      await recomputarAcumuladosMes(anio, mes, tx);
+    }
+  });
+
+  return { success: true, dias: cambios.length, meses: mesesAfectados.size };
+}
+
+export async function desbloquearDiaSnapshot(
+  fecha: string,
+  usuarioId: number | null
+) {
+  const [y, m] = fecha.split("-");
+  const anio = Number(y);
+  const mes = Number(m);
+  await db.execute(sql`
+    UPDATE cartera.facturacion_snapshot_diario
+    SET bloqueado = false, bloqueado_por = ${usuarioId}, bloqueado_at = now(), updated_at = now()
+    WHERE fecha = ${fecha}::date
+  `);
+  await db.execute(sql`
+    INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+    VALUES (${fecha}::date, '*', NULL, NULL, 'unlock', ${usuarioId})
+  `);
+  // Vuelve a valores del sistema y refresca acumulados.
+  await generarSnapshotDiario(fecha);
+  await recomputarAcumuladosMes(anio, mes);
+  return { success: true, fecha };
+}
+
+// Historial de cambios manuales (tabla de auditoría), más reciente primero.
+// Une al usuario del sistema (platform_users) para mostrar el email de quién editó.
+export async function listarAuditoriaSnapshot(opts: {
+  fechaInicio?: string;
+  fechaFin?: string;
+  limit?: number;
+}) {
+  const n = Number(opts.limit);
+  const lim = Number.isFinite(n) ? Math.min(Math.max(n, 1), 1000) : 200;
+  const conds: any[] = [];
+  if (opts.fechaInicio) conds.push(sql`a.fecha >= ${opts.fechaInicio}::date`);
+  if (opts.fechaFin) conds.push(sql`a.fecha <= ${opts.fechaFin}::date`);
+  const whereSql = conds.length
+    ? sql`WHERE ${sql.join(conds, sql` AND `)}`
+    : sql``;
+  const res = await db.execute(sql`
+    SELECT a.id, a.fecha::text AS fecha, a.columna, a.valor_anterior, a.valor_nuevo,
+           a.accion, a.usuario_id, u.email AS usuario_email, a.created_at
+    FROM cartera.facturacion_snapshot_auditoria a
+    LEFT JOIN cartera.platform_users u ON u.id = a.usuario_id
+    ${whereSql}
+    ORDER BY a.created_at DESC
+    LIMIT ${lim}
+  `);
+  return { success: true, data: (res as any).rows ?? res };
 }

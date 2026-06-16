@@ -3,9 +3,12 @@ import { authMiddleware } from "./midleware";
 import {
   aplicarManualesEnSnapshotDia,
   aplicarMetaEnSnapshotsMes,
+  desbloquearDiaSnapshot,
   generarExcelFacturacionDiaria,
   generarSnapshotDiario,
   getSnapshotsDiarios,
+  guardarCeldasSnapshot,
+  listarAuditoriaSnapshot,
   regenerarSnapshotRango,
 } from "../controllers/facturacionSnapshot";
 
@@ -122,6 +125,93 @@ export const facturacionSnapshotRouter = new Elysia({
       query: t.Object({
         fechaInicio: t.String(),
         fechaFin: t.String(),
+      }),
+    }
+  )
+
+  // PUT - Guardar celdas editadas a mano (batch). Bloquea los días tocados. Solo ADMIN.
+  .put(
+    "/celdas",
+    async ({ body, user, set }: any) => {
+      if (user?.role !== "ADMIN") {
+        set.status = 403;
+        return { success: false, message: "Solo ADMIN puede editar el reporte" };
+      }
+      try {
+        const result = await guardarCeldasSnapshot({
+          cambios: body.cambios,
+          usuarioId: user?.id ?? null,
+        });
+        if (!result.success) set.status = 400;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error guardando celdas",
+          error: String(error),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        cambios: t.Array(
+          t.Object({
+            fecha: t.String(),
+            valores: t.Record(t.String(), t.Union([t.String(), t.Number()])),
+          })
+        ),
+      }),
+    }
+  )
+
+  // POST - Desbloquear un día (vuelve a automático). Solo ADMIN.
+  .post(
+    "/desbloquear-dia",
+    async ({ body, user, set }: any) => {
+      if (user?.role !== "ADMIN") {
+        set.status = 403;
+        return { success: false, message: "Solo ADMIN puede desbloquear" };
+      }
+      try {
+        return await desbloquearDiaSnapshot(body.fecha, user?.id ?? null);
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error desbloqueando el día",
+          error: String(error),
+        };
+      }
+    },
+    { body: t.Object({ fecha: t.String() }) }
+  )
+
+  // GET - Historial de cambios manuales (auditoría). Solo ADMIN.
+  //       ?fechaInicio=&fechaFin=&limit= (opcionales)
+  .get(
+    "/auditoria",
+    async ({ query, user, set }: any) => {
+      if (user?.role !== "ADMIN") {
+        set.status = 403;
+        return { success: false, message: "Solo ADMIN" };
+      }
+      try {
+        return await listarAuditoriaSnapshot({
+          fechaInicio: query.fechaInicio,
+          fechaFin: query.fechaFin,
+          limit: query.limit ? Number(query.limit) : undefined,
+        });
+      } catch (error) {
+        set.status = 500;
+        return { success: false, message: "Error obteniendo auditoría", error: String(error) };
+      }
+    },
+    {
+      query: t.Object({
+        fechaInicio: t.Optional(t.String()),
+        fechaFin: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
       }),
     }
   )

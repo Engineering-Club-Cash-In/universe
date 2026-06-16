@@ -23,10 +23,14 @@ export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set([
   "mora_autocompras","mora_sobre_vehiculo","nuevo_mora_autocompras","mora_hipotecario","mora_extra_financiamiento","mora_reestructura","mora_cube",
   // Royalty
   "roy_autocompras","roy_sobre_vehiculo","nuevo_roy_autocompras","roy_hipotecario","roy_extra_financiamiento","roy_reestructura","royalty",
-  // Totales / acumulados / servicios
-  "facturacion","facturacion_acumulado","servicios_seguro_gps","acum_servicios_seguro_gps","facturacion_mas_servicios","acumulado_total","facturacion_inversionistas","acumulado_inversionistas","tendencia_fin_mes","tendencia_semanal","ingreso_carros","reserva_acumulada","semana",
-  // Metas
-  "meta_facturacion_mensual","meta_facturacion_semanal","meta_facturacion_diaria","porcentaje_meta_mensual","meta_diaria",
+  // Totales / servicios DIARIOS (editables). Los ACUMULADOS y tendencias NO van
+  // aquí: se auto-calculan (suma corrida) y no se editan a mano —ver
+  // calcularAcumuladosCorridos. (facturacion_acumulado, acum_servicios_seguro_gps,
+  // acumulado_total, acumulado_inversionistas, tendencia_*, reserva_acumulada,
+  // porcentaje_meta_mensual quedan fuera a propósito.)
+  "facturacion","servicios_seguro_gps","facturacion_mas_servicios","facturacion_inversionistas","ingreso_carros","semana",
+  // Metas (editables; el % se deriva del acumulado, no se edita)
+  "meta_facturacion_mensual","meta_facturacion_semanal","meta_facturacion_diaria","meta_diaria",
 ]);
 
 export function esColumnaEditable(col: string): boolean {
@@ -43,8 +47,11 @@ export function validarValores(valores: Record<string, unknown>): {
       invalidas.push(col);
       continue;
     }
-    const n = Number(val);
-    if (val === null || val === "" || Number.isNaN(n) || !Number.isFinite(n)) {
+    // Solo decimal plano (opcional signo): "123", "-12.50", "0". Rechaza "", null,
+    // notación científica ("1e3"), hex ("0x10"), comas ("1,000") y basura — que
+    // Number() aceptaría pero romperían el cast a numeric en el INSERT/UPDATE.
+    const s = String(val ?? "").trim();
+    if (!/^-?\d+(\.\d+)?$/.test(s)) {
       invalidas.push(col);
     }
   }
@@ -68,9 +75,12 @@ export type UpdateAcumulado = {
   acumulado_total: string;
 };
 
-// Suma corrida sobre días YA ordenados por fecha. Acumula TODAS las diarias
-// (incluidas las de días bloqueados) pero solo emite update para los NO bloqueados.
-// No toca reserva_acumulada (es MTD desde pagos, sin columna diaria).
+// Suma corrida sobre días YA ordenados por fecha. Emite el acumulado para CADA
+// día (incluidos los bloqueados): los ACUMULADOS SIEMPRE SUMAN, no se congelan.
+// El lock protege los valores DIARIOS (los salta generarSnapshotDiario), pero el
+// acumulado de un día = suma corrida de las diarias hasta ese día. Así no hay
+// discontinuidad cuando se edita+bloquea un día. No toca reserva_acumulada
+// (es MTD desde pagos, sin columna diaria).
 export function calcularAcumuladosCorridos(
   dias: DiaAcumulable[]
 ): UpdateAcumulado[] {
@@ -84,15 +94,13 @@ export function calcularAcumuladosCorridos(
     accServ = accServ.plus(new Big(d.servicios_seguro_gps || 0));
     accInv = accInv.plus(new Big(d.facturacion_inversionistas || 0));
     accCarros = accCarros.plus(new Big(d.ingreso_carros || 0));
-    if (!d.bloqueado) {
-      updates.push({
-        fecha: d.fecha,
-        facturacion_acumulado: accFact.toFixed(2),
-        acum_servicios_seguro_gps: accServ.toFixed(2),
-        acumulado_inversionistas: accInv.toFixed(2),
-        acumulado_total: accFact.plus(accServ).plus(accCarros).toFixed(2),
-      });
-    }
+    updates.push({
+      fecha: d.fecha,
+      facturacion_acumulado: accFact.toFixed(2),
+      acum_servicios_seguro_gps: accServ.toFixed(2),
+      acumulado_inversionistas: accInv.toFixed(2),
+      acumulado_total: accFact.plus(accServ).plus(accCarros).toFixed(2),
+    });
   }
   return updates;
 }
@@ -101,11 +109,16 @@ export function calcularAcumuladosCorridos(
 // usando la suma corrida de las diarias guardadas. No lee la fuente ni toca
 // diarias → seguro para días históricos importados del Excel.
 export async function recomputarAcumuladosMes(anio: number, mes: number) {
+  // Filtramos por RANGO de fecha (no por anio/mes) porque esas columnas helper
+  // pueden venir NULL en filas importadas → quedarían fuera del SUM y romperían
+  // la continuidad del acumulado.
+  const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
   const res = await db.execute(sql`
     SELECT fecha::text AS fecha, bloqueado,
            facturacion, servicios_seguro_gps, facturacion_inversionistas, ingreso_carros
     FROM cartera.facturacion_snapshot_diario
-    WHERE anio = ${anio} AND mes = ${mes}
+    WHERE fecha >= ${inicioMes}::date
+      AND fecha < (${inicioMes}::date + INTERVAL '1 month')
     ORDER BY fecha
   `);
   const dias = ((res as any).rows ?? res) as DiaAcumulable[];
@@ -426,6 +439,7 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
           + COALESCE((SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
         updated_at = now()
     WHERE s.fecha = ${fecha}::date
+      AND s.bloqueado = false
   `);
   return { success: true };
 }
@@ -448,6 +462,7 @@ export async function aplicarMetaEnSnapshotsMes(anio: number, mes: number) {
     WHERE m.anio = ${anio} AND m.mes = ${mes}
       AND s.fecha >= make_date(${anio}, ${mes}, 1)
       AND s.fecha < (make_date(${anio}, ${mes}, 1) + INTERVAL '1 month')
+      AND s.bloqueado = false
   `);
   return { success: true, actualizados: (res as any).rowCount ?? 0 };
 }
@@ -702,6 +717,9 @@ export async function getSnapshotsDiarios(opts: {
     "anio",
     "mes",
     "semana",
+    "bloqueado",
+    "bloqueado_por",
+    "bloqueado_at",
     "facturacion_acumulado",
     "acum_servicios_seguro_gps",
     "acumulado_total",
@@ -777,11 +795,11 @@ export async function guardarCeldasSnapshot(input: {
       const prev = ((prevRes as any).rows ?? prevRes)[0] ?? null;
 
       const cols = Object.keys(c.valores);
+      // Valor canónico (trim) — validarValores ya garantizó que es decimal plano.
+      const valOf = (col: string) => String(c.valores[col] ?? "").trim();
       // SET dinámico de las columnas tocadas. sql.raw para el nombre de columna
       // (YA validado contra el whitelist) y bind del valor.
-      const sets = cols.map(
-        (col) => sql`${sql.raw(col)} = ${String(c.valores[col])}`
-      );
+      const sets = cols.map((col) => sql`${sql.raw(col)} = ${valOf(col)}`);
 
       if (prev) {
         await tx.execute(sql`
@@ -804,7 +822,7 @@ export async function guardarCeldasSnapshot(input: {
           sql`${c.fecha}::date`,
           sql`${anio}`,
           sql`${mes}`,
-          ...cols.map((col) => sql`${String(c.valores[col])}`),
+          ...cols.map((col) => sql`${valOf(col)}`),
           sql`true`,
           sql`${usuarioId}`,
           sql`now()`,
@@ -825,7 +843,7 @@ export async function guardarCeldasSnapshot(input: {
           INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
           VALUES (${c.fecha}::date, ${col}, ${
           anterior === null ? null : String(anterior)
-        }, ${String(c.valores[col])}, 'edit', ${usuarioId})
+        }, ${valOf(col)}, 'edit', ${usuarioId})
         `);
       }
       // Auditoría de lock si no estaba bloqueado.

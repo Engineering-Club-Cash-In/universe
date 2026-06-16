@@ -109,6 +109,20 @@ const GRUPOS: Grupo[] = [
   },
 ];
 
+// Columnas AUTO-calculadas (acumulados/tendencias/% meta): NO editables a mano —
+// se recalculan como suma corrida en el backend. En modo edición se ven de solo
+// lectura para no confundir (lo que escribas ahí lo pisa el recálculo).
+const ACUM_AUTO = new Set<string>([
+  "facturacion_acumulado",
+  "acum_servicios_seguro_gps",
+  "acumulado_total",
+  "acumulado_inversionistas",
+  "tendencia_fin_mes",
+  "tendencia_semanal",
+  "reserva_acumulada",
+  "porcentaje_meta_mensual",
+]);
+
 export function FacturacionDiaria() {
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -160,9 +174,16 @@ export function FacturacionDiaria() {
 
   const guardarMut = useMutation({
     mutationFn: async () => {
+      // Por día, descartar celdas vacías (input limpiado) — el backend rechaza ""
+      // y abortaría todo el batch. Solo se mandan valores con contenido.
       const cambios = Object.entries(edits)
-        .filter(([, v]) => Object.keys(v).length > 0)
-        .map(([fecha, valores]) => ({ fecha, valores }));
+        .map(([fecha, valores]) => {
+          const limpios = Object.fromEntries(
+            Object.entries(valores).filter(([, val]) => String(val).trim() !== "")
+          );
+          return { fecha, valores: limpios };
+        })
+        .filter((c) => Object.keys(c.valores).length > 0);
       return guardarCeldasSnapshot(cambios);
     },
     onSuccess: () => {
@@ -379,7 +400,7 @@ export function FacturacionDiaria() {
                             c.k === g.total.k ? "bg-blue-50/60 font-semibold text-blue-900" : "text-gray-700"
                           }`}
                         >
-                          {modoEdicion && esAdmin ? (
+                          {modoEdicion && esAdmin && !ACUM_AUTO.has(c.k) ? (
                             <input
                               type="number"
                               step="0.01"

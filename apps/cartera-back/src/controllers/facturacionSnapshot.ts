@@ -955,7 +955,12 @@ export async function listarAuditoriaSnapshot(opts: {
     : sql``;
   const res = await db.execute(sql`
     SELECT a.id, a.fecha::text AS fecha, a.columna, a.valor_anterior, a.valor_nuevo,
-           a.accion, a.usuario_id, u.email AS usuario_email, a.created_at
+           a.accion, a.usuario_id, u.email AS usuario_email,
+           -- created_at en hora de Guatemala, YA formateado (a prueba de la zona
+           -- horaria de node/navegador): el guardado se interpreta como UTC y se
+           -- convierte a America/Guatemala.
+           to_char((a.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Guatemala',
+                   'DD/MM/YYYY HH24:MI:SS') AS created_at
     FROM cartera.facturacion_snapshot_auditoria a
     LEFT JOIN cartera.platform_users u ON u.id = a.usuario_id
     ${whereSql}

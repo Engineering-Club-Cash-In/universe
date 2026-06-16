@@ -251,6 +251,42 @@ export function buildCarteraOnlyClientRow(credit: CarteraClientCredit) {
 	};
 }
 
+export function calculateCarteraClientStats(params: {
+	carteraCredits: CarteraClientCredit[];
+	matchedSifcos: Set<string>;
+	uniqueLeadCount: number;
+	scopedOpportunityCount: number;
+	userRole: string | null | undefined;
+}) {
+	const visibleCredits =
+		params.userRole === "sales"
+			? params.carteraCredits.filter((credit) => {
+					const sifco = credit.creditos?.numero_credito_sifco?.trim();
+					return sifco ? params.matchedSifcos.has(sifco) : false;
+				})
+			: params.carteraCredits;
+
+	return {
+		totalClients:
+			params.userRole === "sales"
+				? params.uniqueLeadCount
+				: params.carteraCredits.length,
+		totalClosedOpportunities: params.scopedOpportunityCount,
+		totalValue: visibleCredits.reduce(
+			(sum, credit) =>
+				sum +
+				(Number.parseFloat(
+					credit.creditos?.deudatotal || credit.creditos?.capital || "0",
+				) || 0),
+			0,
+		),
+		missingCrmCount:
+			params.userRole === "sales"
+				? 0
+				: Math.max(0, params.carteraCredits.length - params.matchedSifcos.size),
+	};
+}
+
 export const getLeadsInputSchema = z.object({
 	limit: z.number().min(1).max(100).default(20),
 	offset: z.number().min(0).default(0),
@@ -3532,27 +3568,13 @@ export const crmRouter = {
 				.filter((sifco: unknown): sifco is string => typeof sifco === "string"),
 		);
 
-		const totalClients =
-			context.userRole === "sales" ? uniqueLeadIds.size : carteraCredits.length;
-		const totalClosedOpportunities = clientCreditOpportunitiesData.length;
-		const totalValue = carteraCredits.reduce(
-			(sum, credit) =>
-				sum +
-				(Number.parseFloat(
-					credit.creditos?.deudatotal || credit.creditos?.capital || "0",
-				) || 0),
-			0,
-		);
-
-		return {
-			totalClients,
-			totalClosedOpportunities,
-			totalValue,
-			missingCrmCount:
-				context.userRole === "sales"
-					? 0
-					: Math.max(0, carteraCredits.length - matchedSifcos.size),
-		};
+		return calculateCarteraClientStats({
+			carteraCredits,
+			matchedSifcos,
+			uniqueLeadCount: uniqueLeadIds.size,
+			scopedOpportunityCount: clientCreditOpportunitiesData.length,
+			userRole: context.userRole,
+		});
 	}),
 
 	createClient: crmProcedure

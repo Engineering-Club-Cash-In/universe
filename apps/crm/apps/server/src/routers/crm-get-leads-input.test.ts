@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { leadSourceEnum } from "../db/schema/crm";
 import {
 	buildCarteraOnlyClientRow,
+	calculateCarteraClientStats,
 	getClientCreditSifcosFromCartera,
 	getLeadsInputSchema,
 } from "./crm";
@@ -98,5 +99,42 @@ describe("buildCarteraOnlyClientRow", () => {
 		expect(row.opportunities).toEqual([]);
 		expect(row.closedOpportunitiesCount).toBe(0);
 		expect(row.totalClosedValue).toBe(12500);
+	});
+});
+
+describe("calculateCarteraClientStats", () => {
+	test("scopes sales total value to matched assigned SIFCOs", () => {
+		const stats = calculateCarteraClientStats({
+			carteraCredits: [
+				{ creditos: { numero_credito_sifco: "A-1", deudatotal: "100.00" } },
+				{ creditos: { numero_credito_sifco: "B-1", deudatotal: "900.00" } },
+			],
+			matchedSifcos: new Set(["A-1"]),
+			uniqueLeadCount: 1,
+			scopedOpportunityCount: 1,
+			userRole: "sales",
+		});
+
+		expect(stats.totalClients).toBe(1);
+		expect(stats.totalClosedOpportunities).toBe(1);
+		expect(stats.totalValue).toBe(100);
+		expect(stats.missingCrmCount).toBe(0);
+	});
+
+	test("uses full cartera totals for non-sales users", () => {
+		const stats = calculateCarteraClientStats({
+			carteraCredits: [
+				{ creditos: { numero_credito_sifco: "A-1", deudatotal: "100.00" } },
+				{ creditos: { numero_credito_sifco: "B-1", capital: "900.00" } },
+			],
+			matchedSifcos: new Set(["A-1"]),
+			uniqueLeadCount: 1,
+			scopedOpportunityCount: 1,
+			userRole: "admin",
+		});
+
+		expect(stats.totalClients).toBe(2);
+		expect(stats.totalValue).toBe(1000);
+		expect(stats.missingCrmCount).toBe(1);
 	});
 });

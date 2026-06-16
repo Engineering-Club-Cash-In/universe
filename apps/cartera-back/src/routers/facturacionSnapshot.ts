@@ -3,9 +3,11 @@ import { authMiddleware } from "./midleware";
 import {
   aplicarManualesEnSnapshotDia,
   aplicarMetaEnSnapshotsMes,
+  desbloquearDiaSnapshot,
   generarExcelFacturacionDiaria,
   generarSnapshotDiario,
   getSnapshotsDiarios,
+  guardarCeldasSnapshot,
   regenerarSnapshotRango,
 } from "../controllers/facturacionSnapshot";
 
@@ -124,6 +126,64 @@ export const facturacionSnapshotRouter = new Elysia({
         fechaFin: t.String(),
       }),
     }
+  )
+
+  // PUT - Guardar celdas editadas a mano (batch). Bloquea los días tocados. Solo ADMIN.
+  .put(
+    "/celdas",
+    async ({ body, user, set }: any) => {
+      if (user?.role !== "ADMIN") {
+        set.status = 403;
+        return { success: false, message: "Solo ADMIN puede editar el reporte" };
+      }
+      try {
+        const result = await guardarCeldasSnapshot({
+          cambios: body.cambios,
+          usuarioId: user?.id ?? null,
+        });
+        if (!result.success) set.status = 400;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error guardando celdas",
+          error: String(error),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        cambios: t.Array(
+          t.Object({
+            fecha: t.String(),
+            valores: t.Record(t.String(), t.Union([t.String(), t.Number()])),
+          })
+        ),
+      }),
+    }
+  )
+
+  // POST - Desbloquear un día (vuelve a automático). Solo ADMIN.
+  .post(
+    "/desbloquear-dia",
+    async ({ body, user, set }: any) => {
+      if (user?.role !== "ADMIN") {
+        set.status = 403;
+        return { success: false, message: "Solo ADMIN puede desbloquear" };
+      }
+      try {
+        return await desbloquearDiaSnapshot(body.fecha, user?.id ?? null);
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error desbloqueando el día",
+          error: String(error),
+        };
+      }
+    },
+    { body: t.Object({ fecha: t.String() }) }
   )
 
   // GET - Leer snapshots. ?fechaInicio=YYYY-MM-DD&fechaFin=YYYY-MM-DD (opcionales).

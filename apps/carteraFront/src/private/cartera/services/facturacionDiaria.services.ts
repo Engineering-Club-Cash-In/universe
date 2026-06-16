@@ -9,6 +9,9 @@ export interface SnapshotDiario {
   anio: number;
   mes: number;
   semana: number;
+  bloqueado?: boolean;
+  bloqueado_por?: number | null;
+  bloqueado_at?: string | null;
   [k: string]: any;
 }
 
@@ -156,5 +159,23 @@ export const upsertMetaFacturacion = async (body: {
   deuda_diaria?: number | string | null;
 }) => {
   const { data } = await api.post(`${API_URL}/api/metas-facturacion`, body);
+  return data;
+};
+
+// ───────────── Edición manual de celdas (lock por fila) ─────────────
+export const guardarCeldasSnapshot = async (
+  cambios: { fecha: string; valores: Record<string, string | number> }[]
+) => {
+  const { data } = await api.put(`${API_URL}/api/facturacion-snapshot/celdas`, {
+    cambios,
+  });
+  return data;
+};
+
+export const desbloquearDiaSnapshot = async (fecha: string) => {
+  const { data } = await api.post(
+    `${API_URL}/api/facturacion-snapshot/desbloquear-dia`,
+    { fecha }
+  );
   return data;
 };

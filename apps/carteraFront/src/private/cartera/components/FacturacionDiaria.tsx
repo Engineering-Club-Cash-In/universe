@@ -517,7 +517,7 @@ export function FacturacionDiaria() {
               ) : (histQuery.data?.data ?? []).length === 0 ? (
                 <p className="text-center py-10 text-gray-400">Sin cambios registrados.</p>
               ) : (
-                <table className="w-full text-sm border-collapse">
+                <table className="w-full text-sm border-collapse text-gray-800">
                   <thead>
                     <tr className="bg-blue-50 text-blue-800 text-left">
                       <th className="px-3 py-2 font-semibold">Cuándo</th>

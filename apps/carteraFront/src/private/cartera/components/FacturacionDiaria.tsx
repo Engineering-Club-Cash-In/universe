@@ -111,17 +111,19 @@ const GRUPOS: Grupo[] = [
   },
 ];
 
-// ÚNICAS columnas editables: los 6 TOTALES de rubro. Todo lo demás (detalle por
-// producto, servicios/carros/inversionistas, metas, y los acumulados/tendencias)
-// es de solo lectura. `Facturación` se deriva de estos rubros en el backend y los
+// Editables: grupos ROYALTY y OTROS INGRESOS COMPLETOS (detalle por producto +
+// total + administrativos + otros_cobros). Capital, Interés, Membresía, Mora,
+// servicios/carros/inversionistas, metas y los acumulados/tendencias quedan
+// read-only. `Facturación` se deriva en el backend de los totales editados y los
 // acumulados se recalculan como suma corrida. Además solo se edita el día de HOY.
 const EDITABLES = new Set<string>([
-  "capital_total",
-  "interes_cube",
-  "membresia",
-  "otros_ingresos",
-  "mora_cube",
-  "royalty",
+  // Royalty (completo)
+  "roy_autocompras", "roy_sobre_vehiculo", "nuevo_roy_autocompras",
+  "roy_hipotecario", "roy_extra_financiamiento", "roy_reestructura", "royalty",
+  // Otros ingresos (completo, incl. administrativos y otros_cobros)
+  "oi_autocompras", "oi_sobre_vehiculo", "nuevo_oi_autocompras",
+  "oi_hipotecario", "oi_extra_financiamiento", "oi_reestructura",
+  "otros_ingresos", "administrativos", "otros_cobros",
 ]);
 
 export function FacturacionDiaria() {
@@ -532,7 +534,9 @@ export function FacturacionDiaria() {
                       <tr key={a.id} className="border-b border-gray-100">
                         <td className="px-3 py-2 whitespace-nowrap text-gray-500">
                           {a.created_at
-                            ? new Date(a.created_at).toLocaleString("es-GT")
+                            ? new Date(a.created_at).toLocaleString("es-GT", {
+                                timeZone: "America/Guatemala",
+                              })
                             : "—"}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{a.fecha}</td>

@@ -62,7 +62,6 @@ import {
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import {
 	getGuatemalaMonthWindow,
-	toDateStrGT,
 } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
@@ -194,11 +193,6 @@ function getCarteraCreditAmount(credit: CarteraClientCredit) {
 	);
 }
 
-function getCurrentCarteraMonthParams(now = new Date()) {
-	const [anio, mes] = toDateStrGT(now).split("-").map(Number);
-	return { mes, anio };
-}
-
 export async function getClientCreditSifcosFromCartera(
 	fetchCredits: ClientCreditFetcher,
 	params: { mes: number; anio: number },
@@ -241,10 +235,13 @@ async function getClientCreditsFromCartera(
 	return Array.from(creditsBySifco.values());
 }
 
-async function getCurrentClientCreditsFromCartera() {
+export async function getCurrentClientCreditsFromCartera(
+	fetchCredits: ClientCreditFetcher = (params) =>
+		carteraBackClient.getAllCreditos(params),
+) {
 	return getClientCreditsFromCartera(
-		(params) => carteraBackClient.getAllCreditos(params),
-		getCurrentCarteraMonthParams(),
+		fetchCredits,
+		{ mes: 0, anio: 0 },
 	);
 }
 

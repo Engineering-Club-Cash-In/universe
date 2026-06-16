@@ -110,6 +110,9 @@ export async function recomputarTotalesDia(fecha: string, exec: any = db) {
       facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty,
       facturacion_mas_servicios =
         interes_cube + membresia + otros_ingresos + mora_cube + royalty + servicios_seguro_gps,
+      -- otros_cobros = otros_ingresos − administrativos (igual que generarSnapshotDiario);
+      -- al editar otros_ingresos debe refrescarse o queda stale en el día bloqueado.
+      otros_cobros = otros_ingresos - administrativos,
       updated_at = now()
     WHERE fecha = ${fecha}::date
   `);
@@ -145,6 +148,17 @@ export async function recomputarAcumuladosMes(
         acum_servicios_seguro_gps = ${u.acum_servicios_seguro_gps},
         acumulado_inversionistas = ${u.acumulado_inversionistas},
         acumulado_total = ${u.acumulado_total},
+        -- Proyecciones y % meta derivan del acumulado → refrescar o quedan stale.
+        tendencia_fin_mes = CASE WHEN EXTRACT(DAY FROM fecha) > 0
+          THEN ${u.facturacion_acumulado}::numeric / EXTRACT(DAY FROM fecha)
+               * EXTRACT(DAY FROM (date_trunc('month', fecha) + INTERVAL '1 month - 1 day'))
+          ELSE 0 END,
+        tendencia_semanal = CASE WHEN EXTRACT(DAY FROM fecha) > 0
+          THEN ${u.facturacion_acumulado}::numeric / EXTRACT(DAY FROM fecha) * 5
+          ELSE 0 END,
+        porcentaje_meta_mensual = CASE WHEN meta_facturacion_mensual > 0
+          THEN ROUND(${u.facturacion_acumulado}::numeric / meta_facturacion_mensual * 100, 4)
+          ELSE 0 END,
         updated_at = now()
       WHERE fecha = ${u.fecha}::date
     `);
@@ -428,6 +442,9 @@ export async function generarSnapshotDiario(fecha: string) {
 //    los montos importados). Si el día no tiene fila, la genera primero.
 //    - administrativos = SUM(gastos del día); otros_cobros = otros_ingresos − administrativos
 //    - ingreso_carros = SUM(carros del día); acumulado_total = fact_acum + acum_servicios + carros MTD
+//    NO lleva guard de bloqueado: ninguna de estas columnas es editable a mano (lo
+//    editable son los 6 totales de rubro) → deben refrescar también en días bloqueados.
+//    El lock solo lo respeta generarSnapshotDiario (que sí reescribe los rubros).
 export async function aplicarManualesEnSnapshotDia(fecha: string) {
   const existe = await db
     .select({ id: facturacion_snapshot_diario.id })
@@ -454,13 +471,14 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
           + COALESCE((SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
         updated_at = now()
     WHERE s.fecha = ${fecha}::date
-      AND s.bloqueado = false
   `);
   return { success: true };
 }
 
 // ✅ Aplica SOLO las columnas de meta a los snapshots del mes (sin recalcular
 //    los montos importados). Recalcula el % meta con el acumulado existente.
+//    NO lleva guard de bloqueado: las columnas de meta no son editables a mano →
+//    deben refrescar también en días bloqueados (el lock vive en generarSnapshotDiario).
 export async function aplicarMetaEnSnapshotsMes(anio: number, mes: number) {
   const res = await db.execute(sql`
     UPDATE cartera.facturacion_snapshot_diario s
@@ -477,7 +495,6 @@ export async function aplicarMetaEnSnapshotsMes(anio: number, mes: number) {
     WHERE m.anio = ${anio} AND m.mes = ${mes}
       AND s.fecha >= make_date(${anio}, ${mes}, 1)
       AND s.fecha < (make_date(${anio}, ${mes}, 1) + INTERVAL '1 month')
-      AND s.bloqueado = false
   `);
   return { success: true, actualizados: (res as any).rowCount ?? 0 };
 }

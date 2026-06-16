@@ -51,6 +51,79 @@ export function validarValores(valores: Record<string, unknown>): {
   return { ok: invalidas.length === 0, invalidas };
 }
 
+export type DiaAcumulable = {
+  fecha: string;
+  bloqueado: boolean;
+  facturacion: string | number;
+  servicios_seguro_gps: string | number;
+  facturacion_inversionistas: string | number;
+  ingreso_carros: string | number;
+};
+
+export type UpdateAcumulado = {
+  fecha: string;
+  facturacion_acumulado: string;
+  acum_servicios_seguro_gps: string;
+  acumulado_inversionistas: string;
+  acumulado_total: string;
+};
+
+// Suma corrida sobre días YA ordenados por fecha. Acumula TODAS las diarias
+// (incluidas las de días bloqueados) pero solo emite update para los NO bloqueados.
+// No toca reserva_acumulada (es MTD desde pagos, sin columna diaria).
+export function calcularAcumuladosCorridos(
+  dias: DiaAcumulable[]
+): UpdateAcumulado[] {
+  let accFact = new Big(0);
+  let accServ = new Big(0);
+  let accInv = new Big(0);
+  let accCarros = new Big(0);
+  const updates: UpdateAcumulado[] = [];
+  for (const d of dias) {
+    accFact = accFact.plus(new Big(d.facturacion || 0));
+    accServ = accServ.plus(new Big(d.servicios_seguro_gps || 0));
+    accInv = accInv.plus(new Big(d.facturacion_inversionistas || 0));
+    accCarros = accCarros.plus(new Big(d.ingreso_carros || 0));
+    if (!d.bloqueado) {
+      updates.push({
+        fecha: d.fecha,
+        facturacion_acumulado: accFact.toFixed(2),
+        acum_servicios_seguro_gps: accServ.toFixed(2),
+        acumulado_inversionistas: accInv.toFixed(2),
+        acumulado_total: accFact.plus(accServ).plus(accCarros).toFixed(2),
+      });
+    }
+  }
+  return updates;
+}
+
+// Refresca SOLO las columnas de acumulado de los días no bloqueados del mes,
+// usando la suma corrida de las diarias guardadas. No lee la fuente ni toca
+// diarias → seguro para días históricos importados del Excel.
+export async function recomputarAcumuladosMes(anio: number, mes: number) {
+  const res = await db.execute(sql`
+    SELECT fecha::text AS fecha, bloqueado,
+           facturacion, servicios_seguro_gps, facturacion_inversionistas, ingreso_carros
+    FROM cartera.facturacion_snapshot_diario
+    WHERE anio = ${anio} AND mes = ${mes}
+    ORDER BY fecha
+  `);
+  const dias = ((res as any).rows ?? res) as DiaAcumulable[];
+  const updates = calcularAcumuladosCorridos(dias);
+  for (const u of updates) {
+    await db.execute(sql`
+      UPDATE cartera.facturacion_snapshot_diario SET
+        facturacion_acumulado = ${u.facturacion_acumulado},
+        acum_servicios_seguro_gps = ${u.acum_servicios_seguro_gps},
+        acumulado_inversionistas = ${u.acumulado_inversionistas},
+        acumulado_total = ${u.acumulado_total},
+        updated_at = now()
+      WHERE fecha = ${u.fecha}::date
+    `);
+  }
+  return { success: true, dias_actualizados: updates.length };
+}
+
 // ============================================================================
 // 📸 SNAPSHOT DIARIO DE FACTURACIÓN (tipo Excel "Reuniones diarias")
 //    Calcula y CONGELA una fila por día con las columnas A→BK.

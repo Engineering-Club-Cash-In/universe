@@ -16,6 +16,7 @@ import {
 	carteraBackClient,
 	type FacturacionMesResponse,
 	type FlujoCuotasInversionesResponse,
+	type FlujoCuotasPorInversionistaResponse,
 	type MontoACobrarRow,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
@@ -469,6 +470,28 @@ export const reportesCarteraRouter = {
 				}
 
 				return carteraBackClient.getFlujoCuotasInversiones({
+					fechaInicio: input.fechaInicio,
+					fechaFin: input.fechaFin,
+				});
+			},
+		),
+
+	getFlujoCuotasPorInversionista: adminProcedure
+		.input(
+			z.object({
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+			}),
+		)
+		.handler(
+			async ({ input }): Promise<FlujoCuotasPorInversionistaResponse> => {
+				if (!isCarteraBackEnabled()) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Integración con cartera-back no está habilitada",
+					});
+				}
+
+				return carteraBackClient.getFlujoCuotasPorInversionista({
 					fechaInicio: input.fechaInicio,
 					fechaFin: input.fechaFin,
 				});

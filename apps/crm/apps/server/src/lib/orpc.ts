@@ -319,6 +319,28 @@ const requirePorcentajeEfectividadReport = o.middleware(
 		});
 	},
 );
+const requireMetaColocacionReport = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userRole = context.session.user.role ?? "";
+
+	if (!PERMISSIONS.canAccessMetaColocacionReport(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Meta colocación report access required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			userId,
+			userRole,
+		},
+	});
+});
 
 const requireViewOpportunityContracts = o.middleware(
 	async ({ context, next }) => {
@@ -445,6 +467,35 @@ const requireTallerOrCrm = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireVehicleAccess = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!userRole || !PERMISSIONS.canAccessVehicles(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere acceso a vehículos",
+		});
+	}
+
+	return next({
+		context: {
+			...context,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 const requireInvestmentAccess = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -518,9 +569,12 @@ export const closedCreditsReportProcedure = publicProcedure.use(
 );
 export const tiempoCierreReportProcedure = publicProcedure.use(
 	requireTiempoCierreReport,
-  );
+);
 export const porcentajeEfectividadReportProcedure = publicProcedure.use(
 	requirePorcentajeEfectividadReport,
+);
+export const metaColocacionReportProcedure = publicProcedure.use(
+	requireMetaColocacionReport,
 );
 export const viewOpportunityContractsProcedure = publicProcedure.use(
 	requireViewOpportunityContracts,
@@ -528,6 +582,7 @@ export const viewOpportunityContractsProcedure = publicProcedure.use(
 export const juridicoProcedure = publicProcedure.use(requireJuridico);
 export const tallerProcedure = publicProcedure.use(requireTallerAccess);
 export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);
+export const vehiclesProcedure = publicProcedure.use(requireVehicleAccess);
 export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
 export const investmentManagerProcedure = publicProcedure.use(
 	requireInvestmentManager,

@@ -166,11 +166,11 @@ export default function Header() {
 												</DropdownMenuItem>
 											</>
 										)}
-                  {userRole &&
+									{userRole &&
 										PERMISSIONS.canAccessPorcentajeEfectividadReport(
 											userRole,
 										) && (
-                    <>
+											<>
 												<DropdownMenuSeparator />
 												<DropdownMenuItem asChild>
 													<Link
@@ -179,6 +179,21 @@ export default function Header() {
 													>
 														<Percent className="mr-2 h-4 w-4" />
 														Porcentaje Efectividad
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
+									{userRole &&
+										PERMISSIONS.canAccessMetaColocacionReport(userRole) && (
+											<>
+												<DropdownMenuSeparator />
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/reportes/meta-colocacion"
+														className="cursor-pointer"
+													>
+														<Target className="mr-2 h-4 w-4" />
+														Meta Colocación
 													</Link>
 												</DropdownMenuItem>
 											</>

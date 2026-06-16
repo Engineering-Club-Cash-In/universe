@@ -2672,7 +2672,7 @@ export const createPaymentAgreement = async (
     return data;
   } catch (error: any) {
     console.error("Error creating payment agreement:", error);
-    throw new Error(error?.response?.data?.message || "Failed to create payment agreement");
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 
@@ -2716,9 +2716,7 @@ export const togglePaymentAgreementStatus = async (
     return data;
   } catch (error: any) {
     console.error("Error toggling payment agreement status:", error);
-    throw new Error(
-      error?.response?.data?.message || "Failed to toggle payment agreement status"
-    );
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 
@@ -3063,9 +3061,7 @@ export const createBoleta = async (data: CreateBoletaDTO) => {
     return response.data;
   } catch (error: any) {
     console.error("❌ Error creando boleta:", error);
-    throw new Error(
-      error.response?.data?.message || "Error al crear boleta"
-    );
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 
@@ -3900,6 +3896,10 @@ export interface AgregarInversionistaCreditoPayload {
   fecha_inicio_participacion?: string;
   porcentaje_cash_in?: number;
   porcentaje_inversion?: number;
+  // MODO MANUAL: créditos específicos con su monto. Si viene, el backend
+  // ignora el buscador de candidatos y opera solo sobre estos. La suma de los
+  // montos debe igualar monto_aportado.
+  manual?: { credito_id: number; monto: number }[];
 }
 
 export interface AgregarInversionistaCreditoResponse {

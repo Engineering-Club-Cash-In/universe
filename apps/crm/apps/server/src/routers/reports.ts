@@ -3,6 +3,7 @@ import { and, count, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
+import { user } from "../db/schema/auth";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
 	casosCobros,
@@ -16,12 +17,14 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
+import { metasMensuales } from "../db/schema/metas";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 import {
 	closedCreditsReportProcedure,
+	metaColocacionReportProcedure,
+	porcentajeEfectividadReportProcedure,
 	protectedProcedure,
 	tiempoCierreReportProcedure,
-  porcentajeEfectividadReportProcedure,
 } from "../lib/orpc";
 
 const SECONDS_PER_DAY = 60 * 60 * 24;
@@ -462,10 +465,8 @@ export const getReportePorcentajeEfectividad =
 				lte(opportunities.createdAt, end),
 			);
 
-			const totalCerradas =
-				sql<number>`COUNT(${everClosed.opportunityId})`;
-			const porcentaje =
-				sql<number>`ROUND(COUNT(${everClosed.opportunityId}) * 100.0 / NULLIF(COUNT(${opportunities.id}), 0), 1)`;
+			const totalCerradas = sql<number>`COUNT(${everClosed.opportunityId})`;
+			const porcentaje = sql<number>`ROUND(COUNT(${everClosed.opportunityId}) * 100.0 / NULLIF(COUNT(${opportunities.id}), 0), 1)`;
 
 			const [totalRows, porFuente, registrosRaw] = await Promise.all([
 				db
@@ -496,7 +497,9 @@ export const getReportePorcentajeEfectividad =
 						id: opportunities.id,
 						createdAt: opportunities.createdAt,
 						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
-						nombre: sql<string | null>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
+						nombre: sql<
+							string | null
+						>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
 						etapaNombre: salesStages.name,
 						etapaPorcentaje: salesStages.closurePercentage,
 						cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`,
@@ -652,3 +655,88 @@ export const getReporteSubastas = protectedProcedure.handler(async () => {
 		resumenSubastas,
 	};
 });
+
+/**
+ * Reporte de Meta de Colocación vs Real
+ * Compara la meta mensual de colocación con lo efectivamente colocado,
+ * desglosado por colaborador (assigned_to del opportunity).
+ */
+export const getReporteMetaColocacion = metaColocacionReportProcedure
+	.input(
+		z.object({
+			anio: z.number().min(2024).max(2100),
+			mes: z.number().min(1).max(12),
+		}),
+	)
+	.handler(async ({ input }) => {
+		const { anio, mes } = input;
+
+		const [metaRow, porColaboradorRows] = await Promise.all([
+			db
+				.select({ monto: metasMensuales.monto })
+				.from(metasMensuales)
+				.where(
+					and(
+						eq(metasMensuales.tipo, "colocacion"),
+						eq(metasMensuales.anio, anio),
+						eq(metasMensuales.mes, mes),
+					),
+				)
+				.limit(1),
+
+			db.execute(sql`
+				WITH first_placed AS (
+					SELECT
+						osh.opportunity_id,
+						MIN(osh.changed_at) AS first_placed_at
+					FROM opportunity_stage_history osh
+					JOIN sales_stages ss ON ss.id = osh.to_stage_id
+					WHERE ss.closure_percentage >= 90
+					GROUP BY osh.opportunity_id
+				)
+				SELECT
+					o.assigned_to AS user_id,
+					u.name AS nombre,
+					COUNT(o.id)::int AS creditos,
+					COALESCE(SUM(o.value::numeric), 0) AS monto
+				FROM first_placed fp
+				JOIN opportunities o ON o.id = fp.opportunity_id
+				JOIN sales_stages ss_cur
+					ON ss_cur.id = o.stage_id
+					AND ss_cur.closure_percentage >= 90
+				LEFT JOIN "user" u ON u.id = o.assigned_to
+				WHERE o.status != 'migrate'
+					AND EXTRACT(YEAR FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${anio}
+					AND EXTRACT(MONTH FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${mes}
+				GROUP BY o.assigned_to, u.name
+				ORDER BY monto DESC
+			`),
+		]);
+
+		const meta = Number(metaRow[0]?.monto ?? 0);
+		const rawRows = porColaboradorRows.rows as {
+			user_id: string | null;
+			nombre: string | null;
+			creditos: number;
+			monto: string;
+		}[];
+		const realMonto = rawRows.reduce((acc, r) => acc + Number(r.monto), 0);
+		const realCreditos = rawRows.reduce((acc, r) => acc + r.creditos, 0);
+		const cobertura = meta > 0 ? (realMonto / meta) * 100 : null;
+
+		const porColaborador = rawRows.map((r) => ({
+			userId: r.user_id,
+			nombre: r.nombre ?? "Sin asignar",
+			creditos: r.creditos,
+			monto: Number(r.monto).toFixed(2),
+			pctDelTotal: realMonto > 0 ? (Number(r.monto) / realMonto) * 100 : 0,
+		}));
+
+		return {
+			meta: meta.toFixed(2),
+			realMonto: realMonto.toFixed(2),
+			realCreditos,
+			cobertura: cobertura !== null ? Number(cobertura.toFixed(1)) : null,
+			porColaborador,
+		};
+	});

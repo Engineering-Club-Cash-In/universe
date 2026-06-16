@@ -45,6 +45,7 @@ import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juri
 import { Route as InversionesLiquidacionesInversionistaIdRouteImport } from './routes/inversiones/liquidaciones.$inversionistaId'
 import { Route as CrmReportesTiempoCierreRouteImport } from './routes/crm/reportes/tiempo-cierre'
 import { Route as CrmReportesPorcentajeEfectividadRouteImport } from './routes/crm/reportes/porcentaje-efectividad'
+import { Route as CrmReportesMetaColocacionRouteImport } from './routes/crm/reportes/meta-colocacion'
 import { Route as CrmAnalysisOpportunityIdRouteImport } from './routes/crm/analysis/$opportunityId'
 import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
 
@@ -233,6 +234,12 @@ const CrmReportesPorcentajeEfectividadRoute =
     path: '/crm/reportes/porcentaje-efectividad',
     getParentRoute: () => rootRouteImport,
   } as any)
+const CrmReportesMetaColocacionRoute =
+  CrmReportesMetaColocacionRouteImport.update({
+    id: '/crm/reportes/meta-colocacion',
+    path: '/crm/reportes/meta-colocacion',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const CrmAnalysisOpportunityIdRoute =
   CrmAnalysisOpportunityIdRouteImport.update({
     id: '/crm/analysis/$opportunityId',
@@ -277,6 +284,7 @@ export interface FileRoutesByFullPath {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
@@ -317,6 +325,7 @@ export interface FileRoutesByTo {
   '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
@@ -358,6 +367,7 @@ export interface FileRoutesById {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
@@ -400,6 +410,7 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
@@ -440,6 +451,7 @@ export interface FileRouteTypes {
     | '/vehicles'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
@@ -480,6 +492,7 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
@@ -521,6 +534,7 @@ export interface RootRouteChildren {
   VehiclesIndexRoute: typeof VehiclesIndexRoute
   CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   CrmAnalysisOpportunityIdRoute: typeof CrmAnalysisOpportunityIdRoute
+  CrmReportesMetaColocacionRoute: typeof CrmReportesMetaColocacionRoute
   CrmReportesPorcentajeEfectividadRoute: typeof CrmReportesPorcentajeEfectividadRoute
   CrmReportesTiempoCierreRoute: typeof CrmReportesTiempoCierreRoute
   InversionesLiquidacionesInversionistaIdRoute: typeof InversionesLiquidacionesInversionistaIdRoute
@@ -784,6 +798,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmReportesPorcentajeEfectividadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/crm/reportes/meta-colocacion': {
+      id: '/crm/reportes/meta-colocacion'
+      path: '/crm/reportes/meta-colocacion'
+      fullPath: '/crm/reportes/meta-colocacion'
+      preLoaderRoute: typeof CrmReportesMetaColocacionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/$opportunityId': {
       id: '/crm/analysis/$opportunityId'
       path: '/crm/analysis/$opportunityId'
@@ -833,6 +854,7 @@ const rootRouteChildren: RootRouteChildren = {
   VehiclesIndexRoute: VehiclesIndexRoute,
   CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   CrmAnalysisOpportunityIdRoute: CrmAnalysisOpportunityIdRoute,
+  CrmReportesMetaColocacionRoute: CrmReportesMetaColocacionRoute,
   CrmReportesPorcentajeEfectividadRoute: CrmReportesPorcentajeEfectividadRoute,
   CrmReportesTiempoCierreRoute: CrmReportesTiempoCierreRoute,
   InversionesLiquidacionesInversionistaIdRoute:

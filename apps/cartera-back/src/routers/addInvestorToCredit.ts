@@ -28,11 +28,23 @@ export const addInvestorToCreditRouter = new Elysia()
       ),
       fecha_inicio_participacion: t.Optional(t.String()),
       minimo: t.Optional(t.Number({ minimum: 1 })),
+      // MODO MANUAL: arreglo de { credito_id, monto }. Si viene, se ignora el
+      // buscador de candidatos y se opera SOLO sobre estos créditos. La suma
+      // de los montos debe igualar monto_aportado.
+      manual: t.Optional(
+        t.Array(
+          t.Object({
+            credito_id: t.Number({ minimum: 1 }),
+            monto: t.Number({ minimum: 0.01 }),
+          }),
+          { minItems: 1 },
+        ),
+      ),
     }),
     detail: {
       summary: "Agregar inversionista a créditos existentes",
       description:
-        "Recibe un inversionista y monto, obtiene los créditos candidatos internamente, redistribuye restando a CUBE (ID 86), recalcula cuotas/intereses/IVA para todos los inversionistas, e inserta en ambas tablas (padre y espejo).",
+        "Recibe un inversionista y monto, obtiene los créditos candidatos internamente, redistribuye restando a CUBE (ID 86), recalcula cuotas/intereses/IVA para todos los inversionistas, e inserta en ambas tablas (padre y espejo). MODO MANUAL: si se envía `manual` (arreglo de { credito_id, monto }), se ignora el buscador y se opera SOLO sobre esos créditos; la suma de los montos debe igualar monto_aportado.",
       tags: ["Inversionistas", "Créditos"],
     },
   },

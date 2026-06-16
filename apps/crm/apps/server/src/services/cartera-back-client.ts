@@ -234,6 +234,27 @@ export type FlujoCuotasInversionesResponse = {
 	};
 };
 
+export type FlujoPorInversionistaRow = {
+	inversionista_id: number;
+	nombre: string;
+	reinversion_capital: string;
+	reinversion_interes: string;
+	reinversion_total: string;
+	cash_capital: string;
+	cash_interes: string;
+	cash_total: string;
+	total: string;
+};
+
+export type FlujoCuotasPorInversionistaResponse = {
+	porInversionista: FlujoPorInversionistaRow[];
+	totales: {
+		reinversion_total: string;
+		cash_total: string;
+		total: string;
+	};
+};
+
 export type ColocacionPeriodoRow = {
 	bucket: string;
 	cantidad_creditos: number;
@@ -1358,6 +1379,21 @@ export class CarteraBackClient {
 		});
 		return this.request<FlujoCuotasInversionesResponse>(
 			`/reportes/flujo-cuotas-inversiones?${qp}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	async getFlujoCuotasPorInversionista(params: {
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<FlujoCuotasPorInversionistaResponse> {
+		const qp = new URLSearchParams({
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+		return this.request<FlujoCuotasPorInversionistaResponse>(
+			`/reportes/flujo-cuotas-inversiones/por-inversionista?${qp}`,
 			{ method: "GET" },
 			true,
 		);

@@ -246,3 +246,83 @@ export const applyCapitalPaymentAndBuildResponse = async (
       "Pago validado como abono a capital , se abonó a inversionistas correctamente",
   };
 };
+
+// Tolerancia de un centavo por redondeos al comparar el capital contra cero.
+export const INCOBRABLE_CAPITAL_TOLERANCE = 0.01;
+
+/**
+ * Regla de cierre de cuota para créditos en estado INCOBRABLE.
+ *
+ * Al castigar un crédito queda una sola cuota que representa el capital
+ * incobrable y se va recuperando con pagos parciales. NO se puede usar la suma
+ * de `monto_aplicado` para decidir si la cuota quedó pagada: filas
+ * estructurales (reset / `system_reset`, `SISTEMA-INCOBRABLE`) contaminan esa
+ * suma y cerrarían la cuota sin recuperación real (ver crédito 23 / SIFCO
+ * 01010214119670, donde una fila `system_reset` de 6,272.54 marcaba la cuota
+ * como pagada mientras el capital seguía en 7,744.11).
+ *
+ * Criterio fiel: la cuota se marca pagada si y solo si el capital del crédito
+ * llega a 0 (≤ tolerancia) después de aplicar el `abono_capital` de este pago.
+ *
+ * @returns `true`/`false` cuando el crédito es INCOBRABLE; `null` cuando la
+ *   regla NO aplica (cualquier otro estado), para que el caller conserve su
+ *   lógica normal basada en la suma de `monto_aplicado`.
+ */
+export const shouldIncobrableInstallmentBePaid = ({
+  statusCredit,
+  capital,
+  abonoCapital,
+}: {
+  statusCredit?: string | null;
+  capital?: string | number | null;
+  abonoCapital?: string | number | null;
+}): boolean | null => {
+  if (statusCredit !== "INCOBRABLE") return null;
+
+  const capitalDespuesDelPago = new Big(capital ?? 0).minus(new Big(abonoCapital ?? 0));
+  return capitalDespuesDelPago.lte(INCOBRABLE_CAPITAL_TOLERANCE);
+};
+
+/**
+ * Recalcula capital / cuota_interes / iva_12 / deudatotal de un crédito tras un
+ * cambio de capital, aplicando dos invariantes:
+ *  - El capital nunca queda NEGATIVO (una sobre-recuperación se clampa a 0).
+ *  - Un crédito INCOBRABLE NO devenga interés: cuota_interes = iva_12 = 0. El
+ *    castigo preserva `porcentaje_interes`, así que recalcular interés sobre él
+ *    reviviría deuda fantasma en un castigado (que es capital-only).
+ *
+ * `newCapital` es el capital YA calculado por el caller (capital ± abono).
+ */
+export const recomputeCreditAfterCapital = ({
+  statusCredit,
+  newCapital,
+  porcentajeInteres,
+  seguro = 0,
+  gps = 0,
+  membresias = 0,
+}: {
+  statusCredit?: string | null;
+  newCapital: string | number | Big | null;
+  porcentajeInteres?: string | number | null;
+  seguro?: string | number | null;
+  gps?: string | number | null;
+  membresias?: string | number | null;
+}) => {
+  let capital = new Big(newCapital ?? 0);
+  if (capital.lt(0)) capital = new Big(0);
+
+  const cuotaInteres =
+    statusCredit === "INCOBRABLE"
+      ? new Big(0)
+      : capital.times(new Big(porcentajeInteres ?? 0).div(100)).round(2);
+  const iva = cuotaInteres.times(0.12).round(2);
+  const deudaTotal = capital
+    .plus(cuotaInteres)
+    .plus(iva)
+    .plus(new Big(seguro ?? 0))
+    .plus(new Big(gps ?? 0))
+    .plus(new Big(membresias ?? 0))
+    .round(2);
+
+  return { capital, cuotaInteres, iva, deudaTotal };
+};

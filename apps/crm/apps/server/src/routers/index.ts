@@ -336,12 +336,14 @@ export const reportsAppRouter = {
 	getReporteTiempoCierre: reportsRouter.getReporteTiempoCierre,
 	getReportePorcentajeEfectividad:
 		reportsRouter.getReportePorcentajeEfectividad,
+	getReporteMetaColocacion: reportsRouter.getReporteMetaColocacion,
 	// Reportes unificados (cartera-back + CRM)
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
 	getMontoACobrar: reportesCarteraRouter.getMontoACobrar,
 	getFacturacionMes: reportesCarteraRouter.getFacturacionMes,
 	getFlujoCuotasInversiones: reportesCarteraRouter.getFlujoCuotasInversiones,
+	getFlujoCuotasPorInversionista: reportesCarteraRouter.getFlujoCuotasPorInversionista,
 	getComparativoHistorico: reportesCarteraRouter.getComparativoHistorico,
 	getMetas: reportesCarteraRouter.getMetas,
 	upsertMeta: reportesCarteraRouter.upsertMeta,

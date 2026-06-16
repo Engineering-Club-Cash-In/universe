@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, or, not, inArray, sql } from "drizzle-orm";
+import { eq, and, not, inArray, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import {
@@ -21,9 +21,15 @@ import { updateInstallments } from "./updateCredit";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
+  isReversibleIncobrablePayment,
+  REVERSIBLE_CREDIT_STATUSES,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
+import {
+  recomputeCreditAfterCapital,
+  shouldIncobrableInstallmentBePaid,
+} from "./registerPaymentPolicy";
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
 // ============================================================================
@@ -104,11 +110,7 @@ export const reversePayment = async ({ body, set }: any) => {
         .where(
           and(
             eq(creditos.credito_id, credito_id),
-            or(
-              eq(creditos.statusCredit, "ACTIVO"),
-              eq(creditos.statusCredit, "MOROSO"),
-              eq(creditos.statusCredit, "EN_CONVENIO"),
-            ),
+            inArray(creditos.statusCredit, [...REVERSIBLE_CREDIT_STATUSES]),
           ),
         )
         .limit(1);
@@ -118,6 +120,20 @@ export const reversePayment = async ({ body, set }: any) => {
       }
 
       console.log("✅ Crédito encontrado y activo");
+
+      // En un INCOBRABLE solo se permite reversar pagos de recuperación reales.
+      // Reversar una fila estructural del castigo (system_reset / SISTEMA-INCOBRABLE
+      // / SIFCO / abono directo a capital) corrompe el cierre: resetea la fila,
+      // borra boletas/inversionistas y, si está `validated`, hasta devuelve capital.
+      if (
+        creditData.creditos.statusCredit === "INCOBRABLE" &&
+        !isReversibleIncobrablePayment({
+          validationStatus: pago.validationStatus,
+          registerBy: pago.registerBy,
+        })
+      ) {
+        throw new Error("Incobrable structural row cannot be reversed");
+      }
 
       // ======================================================================
       // 4️⃣ OBTENER DATOS DEL USUARIO
@@ -149,30 +165,28 @@ export const reversePayment = async ({ body, set }: any) => {
 
         const capitalActual = new Big(creditData.creditos.capital ?? 0);
         const abonoCapital = new Big(pago.abono_capital ?? 0);
-        nuevoCapital = capitalActual.plus(abonoCapital);
+
+        // Devuelve el abono al capital. recomputeCreditAfterCapital aplica las
+        // invariantes: si es INCOBRABLE no revive interés/IVA y el capital no
+        // queda negativo.
+        const recomputed = recomputeCreditAfterCapital({
+          statusCredit: creditData.creditos.statusCredit,
+          newCapital: capitalActual.plus(abonoCapital),
+          porcentajeInteres: creditData.creditos.porcentaje_interes,
+          seguro: creditData.creditos.seguro_10_cuotas,
+          gps: creditData.creditos.gps,
+          membresias: creditData.creditos.membresias_pago,
+        });
+        nuevoCapital = recomputed.capital;
+        cuota_interes = recomputed.cuotaInteres;
+        iva_12 = recomputed.iva;
+        deudatotal = recomputed.deudaTotal;
 
         console.log(`💰 Capital actual: ${capitalActual.toString()}`);
         console.log(`💵 Abono capital a reversar: ${abonoCapital.toString()}`);
         console.log(`✅ Nuevo capital: ${nuevoCapital.toString()}`);
-
-        // Recalcular interés e IVA basado en el nuevo capital
-        const porcentajeInteres = new Big(
-          creditData.creditos.porcentaje_interes ?? 0,
-        ).div(100);
-        cuota_interes = nuevoCapital.times(porcentajeInteres).round(2);
-        iva_12 = cuota_interes.times(0.12).round(2);
-
         console.log(`🔢 Nuevo interés: ${cuota_interes.toString()}`);
         console.log(`🔢 Nuevo IVA: ${iva_12.toString()}`);
-
-        // Recalcular deuda total
-        deudatotal = nuevoCapital
-          .plus(cuota_interes)
-          .plus(iva_12)
-          .plus(creditData.creditos.seguro_10_cuotas ?? 0)
-          .plus(creditData.creditos.gps ?? 0)
-          .plus(creditData.creditos.membresias_pago ?? 0);
-
         console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
       } else {
         console.log("⏭️ Cuota no pagada — se omite recálculo de capital/interés/IVA");
@@ -610,10 +624,24 @@ export const reversePayment = async ({ body, set }: any) => {
         const pagosRestantesCuota = pagosMismaCuota.filter(
           (p) => !ids.includes(p.pago_id),
         );
-        const cuotaPermanecePagada = shouldInstallmentRemainPaidAfterReversal({
+        let cuotaPermanecePagada = shouldInstallmentRemainPaidAfterReversal({
           cuota: creditData.creditos.cuota,
           remainingPayments: pagosRestantesCuota,
         });
+
+        // INCOBRABLE: el estado de la cuota se rige por el CAPITAL (igual que en
+        // el alta), no por la suma de `monto_aplicado`, que se contamina con las
+        // filas estructurales del castigo (system_reset / SISTEMA-INCOBRABLE).
+        // Tras la reversa, la cuota sigue pagada solo si el capital restaurado
+        // (`nuevoCapital`) quedó en 0. Devuelve null si no es incobrable.
+        const incobrableCuotaPagada = shouldIncobrableInstallmentBePaid({
+          statusCredit: creditData.creditos.statusCredit,
+          capital: nuevoCapital.toString(),
+          abonoCapital: 0,
+        });
+        if (incobrableCuotaPagada !== null) {
+          cuotaPermanecePagada = incobrableCuotaPagada;
+        }
 
         if (pago.cuota_id !== null) {
           await tx
@@ -733,6 +761,7 @@ try {
     } else if (
       error.message === "Payment is not marked as paid" ||
       error.message === "Credit not found or not active" ||
+      error.message === "Incobrable structural row cannot be reversed" ||
       error.message === "User not found"
     ) {
       set.status = 400;

@@ -33,6 +33,7 @@ import {
 	protectedProcedure,
 	publicProcedure,
 	tallerOrCrmProcedure,
+	vehiclesProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS, ROLES } from "../lib/roles";
 import {
@@ -99,7 +100,7 @@ const normalizeManualValuationAmount = (
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
-	getAll: tallerOrCrmProcedure
+	getAll: vehiclesProcedure
 		.input(
 			z
 				.object({
@@ -332,7 +333,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Get vehicle by ID with all related data
-	getById: tallerOrCrmProcedure
+	getById: vehiclesProcedure
 		.input(z.object({ id: z.string() }))
 		.handler(async ({ input }) => {
 			const [vehicle] = await db
@@ -521,7 +522,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Update vehicle
-	update: tallerOrCrmProcedure
+	update: vehiclesProcedure
 		.input(
 			z.object({
 				id: z.string(),
@@ -660,7 +661,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Search ONLY vehicles with recorded inspections
-	searchWithInspections: tallerOrCrmProcedure
+	searchWithInspections: vehiclesProcedure
 		.input(
 			z.object({
 				query: z.string().optional(),
@@ -930,7 +931,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Upload vehicle photo
-	uploadPhoto: tallerOrCrmProcedure
+	uploadPhoto: vehiclesProcedure
 		.input(
 			z.object({
 				vehicleId: z.string(),
@@ -1097,7 +1098,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Get statistics
-	getStatistics: tallerOrCrmProcedure.handler(async () => {
+	getStatistics: vehiclesProcedure.handler(async () => {
 		const allVehicles = await db.select().from(vehicles);
 		const allInspections = await db.select().from(vehicleInspections);
 
@@ -1511,7 +1512,7 @@ export const vehiclesRouter = {
 		}),
 
 	// OCR endpoint for vehicle registration card (tarjeta de circulación)
-	processVehicleRegistrationOCR: tallerOrCrmProcedure
+	processVehicleRegistrationOCR: vehiclesProcedure
 		.input(
 			z.object({
 				imageBase64: z
@@ -1642,7 +1643,7 @@ REGLAS IMPORTANTES:
 		}),
 
 	// AI Vehicle Valuation endpoint
-	getAIVehicleValuation: tallerOrCrmProcedure
+	getAIVehicleValuation: vehiclesProcedure
 		.input(
 			z.object({
 				vehicleData: z.any().describe("Complete vehicle data from inspection"),

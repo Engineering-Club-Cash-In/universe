@@ -26,7 +26,9 @@ import {
   getRequestedInstallmentFloor,
   getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
+  recomputeCreditAfterCapital,
   shouldApplyStaleZeroRestanteAdjustment,
+  shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
@@ -2134,6 +2136,29 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       );
     }
 
+    // INCOBRABLE: la cuota se cierra SI Y SOLO SI el capital del crédito llega
+    // a 0 con este abono. No se usa la suma de `monto_aplicado` porque las filas
+    // estructurales del castigo (system_reset / SISTEMA-INCOBRABLE) la
+    // contaminan y cerrarían la cuota sin recuperación real. Ver
+    // shouldIncobrableInstallmentBePaid. (Si no es incobrable devuelve null y
+    // se conserva la decisión por suma de arriba.)
+    if (pago.cuota_id !== null) {
+      const incobrableCuotaPagada = shouldIncobrableInstallmentBePaid({
+        statusCredit: credito.statusCredit,
+        capital: credito.capital,
+        abonoCapital: pago.abono_capital,
+      });
+      if (incobrableCuotaPagada !== null) {
+        cuotaCompleta = incobrableCuotaPagada;
+        const capitalPostPago = new Big(credito.capital ?? 0).minus(
+          new Big(pago.abono_capital ?? 0)
+        );
+        console.log(
+          `🔴 INCOBRABLE crédito ${credito.credito_id}: capital ${new Big(credito.capital ?? 0).toFixed(2)} − abono ${new Big(pago.abono_capital ?? 0).toFixed(2)} = ${capitalPostPago.toFixed(2)} → cuota ${cuotaCompleta ? "PAGADA (capital=0)" : "sigue pendiente"}`
+        );
+      }
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // RAMA A: la cuota AÚN no se cierra con este pago
     //   → valida el pago, aplica abono_capital al crédito si lo hay,
@@ -2156,30 +2181,24 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         );
 
         const capitalAct = new Big(credito.capital ?? 0);
-        const nuevoCapitalParc = capitalAct.minus(abonoCapitalPago);
-        const cuotaInteresParc = nuevoCapitalParc
-          .times(new Big(credito.porcentaje_interes ?? 0).div(100))
-          .round(2);
-        const iva12Parc = cuotaInteresParc.times(0.12).round(2);
-        const seguroParc = new Big(credito.seguro_10_cuotas ?? 0);
-        const gpsParc = new Big(credito.gps ?? 0);
-        const membresiasParc = new Big(credito.membresias_pago ?? 0);
-
-        const nuevaDeudaParc = nuevoCapitalParc
-          .plus(cuotaInteresParc)
-          .plus(iva12Parc)
-          .plus(seguroParc)
-          .plus(gpsParc)
-          .plus(membresiasParc)
-          .round(2);
+        // Invariantes: INCOBRABLE sin interés/IVA, capital no-negativo.
+        const recomputedParc = recomputeCreditAfterCapital({
+          statusCredit: credito.statusCredit,
+          newCapital: capitalAct.minus(abonoCapitalPago),
+          porcentajeInteres: credito.porcentaje_interes,
+          seguro: credito.seguro_10_cuotas,
+          gps: credito.gps,
+          membresias: credito.membresias_pago,
+        });
+        const nuevoCapitalParc = recomputedParc.capital;
 
         await db
           .update(creditos)
           .set({
             capital: nuevoCapitalParc.toString(),
-            deudatotal: nuevaDeudaParc.toString(),
-            iva_12: iva12Parc.toString(),
-            cuota_interes: cuotaInteresParc.toString(),
+            deudatotal: recomputedParc.deudaTotal.toString(),
+            iva_12: recomputedParc.iva.toString(),
+            cuota_interes: recomputedParc.cuotaInteres.toString(),
           })
           .where(eq(creditos.credito_id, pago.credito_id));
 
@@ -2223,29 +2242,25 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     // Re-sumarlos aquí y restarlos otra vez causa doble descuento.
     const capital_actual = new Big(credito.capital ?? 0);
     const abono_capital_pago = new Big(pago.abono_capital ?? 0);
-    const nuevo_capital = capital_actual.minus(abono_capital_pago);
+
+    // 5. RECALCULAR CAPITAL Y DEUDA con invariantes: INCOBRABLE sin interés/IVA
+    //    y capital no-negativo (sobre-recuperación → 0).
+    const recomputedCierre = recomputeCreditAfterCapital({
+      statusCredit: credito.statusCredit,
+      newCapital: capital_actual.minus(abono_capital_pago),
+      porcentajeInteres: credito.porcentaje_interes,
+      seguro: credito.seguro_10_cuotas,
+      gps: credito.gps,
+      membresias: credito.membresias_pago,
+    });
+    const nuevo_capital = recomputedCierre.capital;
+    const cuota_interes = recomputedCierre.cuotaInteres;
+    const iva_12 = recomputedCierre.iva;
+    const nueva_deuda_total = recomputedCierre.deudaTotal;
 
     console.log("💰 Capital actual:", capital_actual.toString());
     console.log("💰 Abono capital:", abono_capital_pago.toString());
     console.log("💰 Nuevo capital:", nuevo_capital.toString());
-
-    // 5. CALCULAR NUEVA DEUDA TOTAL
-    const cuota_interes = new Big(nuevo_capital)
-      .times(new Big(credito.porcentaje_interes ?? 0).div(100))
-      .round(2);
-    const iva_12 = cuota_interes.times(0.12).round(2);
-    const seguro = new Big(credito.seguro_10_cuotas ?? 0);
-    const gps = new Big(credito.gps ?? 0);
-    const membresias_pago = new Big(credito.membresias_pago ?? 0);
-
-    const nueva_deuda_total = nuevo_capital
-      .plus(cuota_interes)
-      .plus(iva_12)
-      .plus(seguro)
-      .plus(gps)
-      .plus(membresias_pago)
-      .round(2);
-
     console.log("📊 Nueva deuda total:", nueva_deuda_total.toString());
 
     // 6. ACTUALIZAR EL CRÉDITO

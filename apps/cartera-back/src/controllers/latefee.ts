@@ -385,13 +385,33 @@ export async function updateMora({
         .where(eq(moras_credito.mora_id, moraActual.id))
         .returning();
 
-      // statusCredit según la lógica documentada (rules 3 y 4 de la docstring)
+      // statusCredit según la lógica documentada (rules 3 y 4 de la docstring),
+      // PERO nunca pisar un estado de cierre/castigo: un ajuste de mora no debe
+      // "des-castigar" un crédito (p.ej. reversar un pago con mora sobre un
+      // INCOBRABLE lo flipeaba a MOROSO/ACTIVO). Solo se toca el status si el
+      // crédito NO está en STATUS_EXCLUIDOS_MORA.
       const newStatus = (newMonto.gt(0) && newActiva) ? "MOROSO" : "ACTIVO";
 
-      await tx
-        .update(creditos)
-        .set({ statusCredit: newStatus })
-        .where(eq(creditos.credito_id, targetCreditoId));
+      const [creditoActual] = await tx
+        .select({ statusCredit: creditos.statusCredit })
+        .from(creditos)
+        .where(eq(creditos.credito_id, targetCreditoId))
+        .limit(1);
+
+      const estadoProtegido = STATUS_EXCLUIDOS_MORA.includes(
+        creditoActual?.statusCredit ?? "",
+      );
+
+      if (!estadoProtegido) {
+        await tx
+          .update(creditos)
+          .set({ statusCredit: newStatus })
+          .where(eq(creditos.credito_id, targetCreditoId));
+      } else {
+        console.log(
+          `[${requestId}] ⏭️ Status '${creditoActual?.statusCredit}' protegido (STATUS_EXCLUIDOS_MORA): no se cambia a ${newStatus}`,
+        );
+      }
 
       return {
         kind: "ok" as const,

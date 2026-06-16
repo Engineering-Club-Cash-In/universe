@@ -230,6 +230,13 @@ const menuSections: MenuSection[] = [
         roles: ["ADMIN"],
       },
       {
+        key: "mora-historial",
+        label: "Mora Histórica",
+        icon: <TrendingDown className="h-4 w-4" />,
+        path: "/mora-historial",
+        roles: ["ADMIN", "CONTA"],
+      },
+      {
         key: "cierre-cartera",
         label: "Cierre de Cartera",
         icon: <PiggyBank className="h-4 w-4" />,

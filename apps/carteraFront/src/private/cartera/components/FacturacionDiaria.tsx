@@ -532,12 +532,10 @@ export function FacturacionDiaria() {
                   <tbody>
                     {(histQuery.data?.data ?? []).map((a: AuditoriaSnapshot) => (
                       <tr key={a.id} className="border-b border-gray-100">
+                        {/* created_at ya viene formateado en hora de Guatemala
+                            desde el backend (to_char en SQL) → se muestra tal cual. */}
                         <td className="px-3 py-2 whitespace-nowrap text-gray-500">
-                          {a.created_at
-                            ? new Date(a.created_at).toLocaleString("es-GT", {
-                                timeZone: "America/Guatemala",
-                              })
-                            : "—"}
+                          {a.created_at ?? "—"}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{a.fecha}</td>
                         <td className="px-3 py-2">

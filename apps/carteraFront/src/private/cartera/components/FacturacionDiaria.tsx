@@ -132,7 +132,26 @@ export function FacturacionDiaria() {
   const [desbloquearTarget, setDesbloquearTarget] = useState<string | null>(null);
   // edits: { [fechaISO]: { [columna]: string } }
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
-  const hayCambios = Object.values(edits).some((c) => Object.keys(c).length > 0);
+  // Celdas con cambio real (ignora vacías, que no se envían).
+  const nCambios = Object.values(edits).reduce(
+    (acc, c) => acc + Object.values(c).filter((v) => String(v).trim() !== "").length,
+    0
+  );
+  const nDiasCambiados = Object.values(edits).filter((c) =>
+    Object.values(c).some((v) => String(v).trim() !== "")
+  ).length;
+  const hayCambios = nCambios > 0;
+
+  // Avisar si se intenta cerrar/recargar con cambios sin guardar.
+  useEffect(() => {
+    if (!hayCambios) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hayCambios]);
   const [fechaInicio, setFechaInicio] = useState(inicioMesISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
   // rango "aplicado" (lo que de verdad consulta react-query)
@@ -286,14 +305,23 @@ export function FacturacionDiaria() {
                 {modoEdicion ? "Cancelar edición" : "Modo edición"}
               </button>
               {modoEdicion && (
-                <button
-                  disabled={!hayCambios || guardarMut.isPending}
-                  onClick={() => guardarMut.mutate()}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold disabled:opacity-50"
-                >
-                  {guardarMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  Guardar cambios
-                </button>
+                <>
+                  {hayCambios && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                      <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                      {nCambios} cambio{nCambios !== 1 ? "s" : ""} sin guardar
+                      {nDiasCambiados > 1 ? ` (${nDiasCambiados} días)` : ""}
+                    </span>
+                  )}
+                  <button
+                    disabled={!hayCambios || guardarMut.isPending}
+                    onClick={() => guardarMut.mutate()}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold disabled:opacity-50"
+                  >
+                    {guardarMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Guardar cambios{hayCambios ? ` (${nCambios})` : ""}
+                  </button>
+                </>
               )}
             </div>
           )}

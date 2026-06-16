@@ -23,12 +23,15 @@ import {
   getIngresosCarros,
   getMetasFacturacion,
   getSnapshotsDiarios,
+  guardarCeldasSnapshot,
+  desbloquearDiaSnapshot,
   upsertMetaFacturacion,
   type GastoAdministrativo,
   type IngresoCarro,
   type MetaFacturacion,
   type SnapshotDiario,
 } from "../services/facturacionDiaria.services";
+import { useAuth } from "@/Provider/authProvider";
 
 // ───────────── helpers ─────────────
 // Fecha en hora Guatemala (no UTC), para no adelantarse de día por la noche.
@@ -108,6 +111,12 @@ const GRUPOS: Grupo[] = [
 
 export function FacturacionDiaria() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const esAdmin = user?.role === "ADMIN";
+  const [modoEdicion, setModoEdicion] = useState(false);
+  // edits: { [fechaISO]: { [columna]: string } }
+  const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
+  const hayCambios = Object.values(edits).some((c) => Object.keys(c).length > 0);
   const [fechaInicio, setFechaInicio] = useState(inicioMesISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
   // rango "aplicado" (lo que de verdad consulta react-query)
@@ -143,6 +152,35 @@ export function FacturacionDiaria() {
       qc.invalidateQueries({ queryKey: [SNAP_KEY] });
     },
     onError: () => setMsg("❌ Error generando el snapshot"),
+  });
+
+  // ── Edición manual de celdas (solo ADMIN) ──
+  const setCell = (fecha: string, columna: string, valor: string) =>
+    setEdits((e) => ({ ...e, [fecha]: { ...(e[fecha] || {}), [columna]: valor } }));
+
+  const guardarMut = useMutation({
+    mutationFn: async () => {
+      const cambios = Object.entries(edits)
+        .filter(([, v]) => Object.keys(v).length > 0)
+        .map(([fecha, valores]) => ({ fecha, valores }));
+      return guardarCeldasSnapshot(cambios);
+    },
+    onSuccess: () => {
+      setEdits({});
+      setModoEdicion(false);
+      setMsg("✅ Cambios guardados (días bloqueados)");
+      qc.invalidateQueries({ queryKey: [SNAP_KEY] });
+    },
+    onError: () => setMsg("❌ Error guardando los cambios"),
+  });
+
+  const desbloquearMut = useMutation({
+    mutationFn: (fecha: string) => desbloquearDiaSnapshot(fecha),
+    onSuccess: (_d, fecha) => {
+      setMsg(`🔓 ${fecha} desbloqueado (vuelve a automático)`);
+      qc.invalidateQueries({ queryKey: [SNAP_KEY] });
+    },
+    onError: () => setMsg("❌ Error desbloqueando el día"),
   });
 
   const descargarExcel = async () => {
@@ -212,6 +250,30 @@ export function FacturacionDiaria() {
             {descargando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Descargar Excel
           </button>
+
+          {esAdmin && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setModoEdicion((m) => !m);
+                  setEdits({});
+                }}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-100 text-blue-800 font-semibold hover:bg-blue-200"
+              >
+                {modoEdicion ? "Cancelar edición" : "Modo edición"}
+              </button>
+              {modoEdicion && (
+                <button
+                  disabled={!hayCambios || guardarMut.isPending}
+                  onClick={() => guardarMut.mutate()}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold disabled:opacity-50"
+                >
+                  {guardarMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Guardar cambios
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="ml-auto flex items-end gap-2">
             <div>
@@ -290,8 +352,24 @@ export function FacturacionDiaria() {
               ) : (
                 snapshots.map((row) => (
                   <tr key={row.id} className="hover:bg-blue-50/50 border-b border-gray-100">
-                    <td className="sticky left-0 z-10 bg-white px-3 py-2 font-semibold text-blue-900 border-r border-gray-200 whitespace-nowrap">
+                    <td className={`sticky left-0 z-10 px-3 py-2 font-semibold text-blue-900 border-r border-gray-200 whitespace-nowrap ${row.bloqueado ? "bg-amber-50" : "bg-white"}`}>
                       {row.fecha}
+                      {row.bloqueado && (
+                        <button
+                          title="Día manual (bloqueado). Click para desbloquear y volver a automático."
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `¿Desbloquear ${row.fecha}? Volverá a calcularse desde el sistema (días históricos previos al 2026-06-10 pueden quedar en 0).`
+                              )
+                            )
+                              desbloquearMut.mutate(row.fecha);
+                          }}
+                          className="ml-2 text-amber-600 hover:text-amber-800"
+                        >
+                          🔒
+                        </button>
+                      )}
                     </td>
                     {GRUPOS.flatMap((g) =>
                       colsDe(g).map((c) => (
@@ -301,7 +379,19 @@ export function FacturacionDiaria() {
                             c.k === g.total.k ? "bg-blue-50/60 font-semibold text-blue-900" : "text-gray-700"
                           }`}
                         >
-                          {c.k === "porcentaje_meta_mensual" ? (
+                          {modoEdicion && esAdmin ? (
+                            <input
+                              type="number"
+                              step="0.01"
+                              defaultValue={edits[row.fecha]?.[c.k] ?? (row[c.k] ?? "")}
+                              onChange={(e) => setCell(row.fecha, c.k, e.target.value)}
+                              className={`w-24 text-right border rounded px-1 py-0.5 text-xs [color-scheme:light] ${
+                                edits[row.fecha]?.[c.k] !== undefined
+                                  ? "bg-yellow-50 border-yellow-400"
+                                  : "bg-white border-gray-200"
+                              }`}
+                            />
+                          ) : c.k === "porcentaje_meta_mensual" ? (
                             Number(row[c.k] ?? 0) ? `${nf.format(Number(row[c.k]))}%` : <span className="text-gray-300">—</span>
                           ) : (
                             fmt(row[c.k])

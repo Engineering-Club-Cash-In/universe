@@ -3920,6 +3920,10 @@ export async function agregarInversionistaCreditoService(
 export interface CompletarEspejoPayload {
   creditos: number[];
   inversionista_id: number;
+  // Fecha de inicio de participación (YYYY-MM-DD) elegida manualmente al
+  // confirmar una compra de cartera. Solo se envía en el flujo de compra;
+  // la reinversión la omite.
+  fecha_participacion?: string;
 }
 
 export interface CompletarEspejoResponse {

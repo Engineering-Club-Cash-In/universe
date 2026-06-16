@@ -15,6 +15,10 @@ export const completeEspejoRouter = new Elysia()
       ]),
       inversionista_id: t.Optional(t.Number({ minimum: 1 })),
       aceptada_por_inversionista: t.Optional(t.Boolean()),
+      // Fecha de inicio de participación (YYYY-MM-DD) elegida manualmente al
+      // confirmar una compra de cartera. Solo aplica al camino de compra; la
+      // reinversión la ignora.
+      fecha_participacion: t.Optional(t.String()),
     }),
     detail: {
       summary: "Marcar créditos espejo como completado",

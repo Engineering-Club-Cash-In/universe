@@ -795,6 +795,23 @@ export async function guardarCeldasSnapshot(input: {
   if (!Array.isArray(cambios) || cambios.length === 0) {
     return { success: false, message: "Sin cambios" };
   }
+
+  // SOLO se puede editar el DÍA DE HOY (zona Guatemala). Se valida en el server
+  // además del front: un token ADMIN/script podría hacer PUT de una fecha vieja y
+  // bloquear una fila histórica, cambiando el mes reportado.
+  const hoyRes = await db.execute(
+    sql`SELECT (now() AT TIME ZONE 'America/Guatemala')::date::text AS hoy`
+  );
+  const hoyGT = ((hoyRes as any).rows ?? hoyRes)[0]?.hoy as string;
+  const fueraDeHoy = cambios.filter((c) => c.fecha !== hoyGT);
+  if (fueraDeHoy.length > 0) {
+    return {
+      success: false,
+      message: `Solo se puede editar el día de hoy (${hoyGT}).`,
+      fechas_invalidas: fueraDeHoy.map((c) => c.fecha),
+    };
+  }
+
   // Validar todo antes de escribir.
   for (const c of cambios) {
     const v = validarValores(c.valores);

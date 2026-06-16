@@ -10,28 +10,22 @@ const LOGO_URL =
   "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
 // ── Edición manual: whitelist de columnas editables + validación ──────────────
-export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set([
-  // Capital
-  "cap_autocompras","cap_sobre_vehiculo","nuevo_cap_autocompras","cap_hipotecario","cap_extra_financiamiento","cap_reestructura","capital_total",
-  // Interés
-  "int_autocompras","int_sobre_vehiculo","nuevo_int_autocompras","int_hipotecario","int_extra_financiamiento","int_reestructura","interes_cube",
-  // Membresía
-  "mem_autocompras","mem_sobre_vehiculo","nuevo_mem_autocompras","mem_hipotecario","mem_extra_financiamiento","mem_reestructura","membresia",
-  // Otros ingresos
-  "oi_autocompras","oi_sobre_vehiculo","nuevo_oi_autocompras","oi_hipotecario","oi_extra_financiamiento","oi_reestructura","otros_ingresos","administrativos","otros_cobros",
-  // Mora
-  "mora_autocompras","mora_sobre_vehiculo","nuevo_mora_autocompras","mora_hipotecario","mora_extra_financiamiento","mora_reestructura","mora_cube",
-  // Royalty
-  "roy_autocompras","roy_sobre_vehiculo","nuevo_roy_autocompras","roy_hipotecario","roy_extra_financiamiento","roy_reestructura","royalty",
-  // Totales / servicios DIARIOS (editables). Los ACUMULADOS y tendencias NO van
-  // aquí: se auto-calculan (suma corrida) y no se editan a mano —ver
-  // calcularAcumuladosCorridos. (facturacion_acumulado, acum_servicios_seguro_gps,
-  // acumulado_total, acumulado_inversionistas, tendencia_*, reserva_acumulada,
-  // porcentaje_meta_mensual quedan fuera a propósito.)
-  "facturacion","servicios_seguro_gps","facturacion_mas_servicios","facturacion_inversionistas","ingreso_carros","semana",
-  // Metas (editables; el % se deriva del acumulado, no se edita)
-  "meta_facturacion_mensual","meta_facturacion_semanal","meta_facturacion_diaria","meta_diaria",
-]);
+// SOLO los 6 TOTALES de rubro (los que se ven colapsados). El detalle por
+// producto, servicios/inversionistas/carros, metas, y los ACUMULADOS/tendencias
+// quedan fuera: read-only. `facturacion` (total del día) se DERIVA de los rubros
+// (interes+membresia+otros+mora+royalty) — ver recomputarTotalesDia. Los
+// acumulados se auto-calculan (suma corrida). El front además solo deja editar HOY.
+export const RUBROS_TOTALES_EDITABLES = [
+  "capital_total",
+  "interes_cube",
+  "membresia",
+  "otros_ingresos",
+  "mora_cube",
+  "royalty",
+] as const;
+export const COLUMNAS_EDITABLES: ReadonlySet<string> = new Set(
+  RUBROS_TOTALES_EDITABLES
+);
 
 export function esColumnaEditable(col: string): boolean {
   return COLUMNAS_EDITABLES.has(col);
@@ -103,6 +97,22 @@ export function calcularAcumuladosCorridos(
     });
   }
   return updates;
+}
+
+// Re-deriva los totales DEL DÍA desde los rubros editados a mano:
+//   facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty
+//   facturacion_mas_servicios = facturacion + servicios_seguro_gps
+// (capital_total NO entra en facturacion.) Se usa tras editar rubros para que el
+// total del día y los acumulados cuadren con lo que el usuario tipeó.
+export async function recomputarTotalesDia(fecha: string) {
+  await db.execute(sql`
+    UPDATE cartera.facturacion_snapshot_diario SET
+      facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty,
+      facturacion_mas_servicios =
+        interes_cube + membresia + otros_ingresos + mora_cube + royalty + servicios_seguro_gps,
+      updated_at = now()
+    WHERE fecha = ${fecha}::date
+  `);
 }
 
 // Refresca SOLO las columnas de acumulado de los días no bloqueados del mes,
@@ -780,6 +790,7 @@ export async function guardarCeldasSnapshot(input: {
   }
 
   const mesesAfectados = new Set<string>();
+  const diasAfectados = new Set<string>();
 
   await db.transaction(async (tx) => {
     for (const c of cambios) {
@@ -787,6 +798,7 @@ export async function guardarCeldasSnapshot(input: {
       const anio = Number(y);
       const mes = Number(m);
       mesesAfectados.add(`${anio}-${mes}`);
+      diasAfectados.add(c.fecha);
 
       // Fila actual (para valores viejos + saber si ya estaba bloqueado).
       const prevRes = await tx.execute(sql`
@@ -856,7 +868,11 @@ export async function guardarCeldasSnapshot(input: {
     }
   });
 
-  // Refrescar acumulados de cada mes afectado (recomputarAcumuladosMes hace sus updates).
+  // 1) Re-derivar el total del día (facturacion + fact_mas_servicios) desde los
+  //    rubros editados, en cada día tocado.
+  for (const f of diasAfectados) await recomputarTotalesDia(f);
+
+  // 2) Refrescar acumulados de cada mes afectado (suma corrida).
   for (const k of mesesAfectados) {
     const [anio, mes] = k.split("-").map(Number);
     await recomputarAcumuladosMes(anio, mes);
@@ -885,4 +901,30 @@ export async function desbloquearDiaSnapshot(
   await generarSnapshotDiario(fecha);
   await recomputarAcumuladosMes(anio, mes);
   return { success: true, fecha };
+}
+
+// Historial de cambios manuales (tabla de auditoría), más reciente primero.
+// Une al usuario del sistema (platform_users) para mostrar el email de quién editó.
+export async function listarAuditoriaSnapshot(opts: {
+  fechaInicio?: string;
+  fechaFin?: string;
+  limit?: number;
+}) {
+  const lim = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+  const conds: any[] = [];
+  if (opts.fechaInicio) conds.push(sql`a.fecha >= ${opts.fechaInicio}::date`);
+  if (opts.fechaFin) conds.push(sql`a.fecha <= ${opts.fechaFin}::date`);
+  const whereSql = conds.length
+    ? sql`WHERE ${sql.join(conds, sql` AND `)}`
+    : sql``;
+  const res = await db.execute(sql`
+    SELECT a.id, a.fecha::text AS fecha, a.columna, a.valor_anterior, a.valor_nuevo,
+           a.accion, a.usuario_id, u.email AS usuario_email, a.created_at
+    FROM cartera.facturacion_snapshot_auditoria a
+    LEFT JOIN cartera.platform_users u ON u.id = a.usuario_id
+    ${whereSql}
+    ORDER BY a.created_at DESC
+    LIMIT ${lim}
+  `);
+  return { success: true, data: (res as any).rows ?? res };
 }

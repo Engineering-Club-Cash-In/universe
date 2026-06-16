@@ -6,17 +6,24 @@ mock.module("../database", () => ({ db: {} }));
 const { esColumnaEditable, validarValores } = await import("./facturacionSnapshot");
 
 describe("esColumnaEditable", () => {
-  it("acepta columnas de valor DIARIAS", () => {
+  it("acepta SOLO los 6 totales de rubro", () => {
     expect(esColumnaEditable("capital_total")).toBe(true);
-    expect(esColumnaEditable("facturacion")).toBe(true);
-    expect(esColumnaEditable("roy_hipotecario")).toBe(true);
+    expect(esColumnaEditable("interes_cube")).toBe(true);
+    expect(esColumnaEditable("membresia")).toBe(true);
+    expect(esColumnaEditable("otros_ingresos")).toBe(true);
+    expect(esColumnaEditable("mora_cube")).toBe(true);
+    expect(esColumnaEditable("royalty")).toBe(true);
   });
-  it("rechaza columnas no editables (incl. acumulados auto-calculados)", () => {
+  it("rechaza detalle por producto, facturación, servicios, metas y acumulados", () => {
     expect(esColumnaEditable("id")).toBe(false);
     expect(esColumnaEditable("fecha")).toBe(false);
-    expect(esColumnaEditable("anio")).toBe(false);
     expect(esColumnaEditable("bloqueado")).toBe(false);
-    // Acumulados/tendencias/% se auto-calculan → NO editables a mano.
+    expect(esColumnaEditable("roy_hipotecario")).toBe(false); // detalle producto
+    expect(esColumnaEditable("administrativos")).toBe(false);
+    expect(esColumnaEditable("facturacion")).toBe(false); // se DERIVA de rubros
+    expect(esColumnaEditable("servicios_seguro_gps")).toBe(false);
+    expect(esColumnaEditable("ingreso_carros")).toBe(false);
+    expect(esColumnaEditable("meta_facturacion_diaria")).toBe(false);
     expect(esColumnaEditable("facturacion_acumulado")).toBe(false);
     expect(esColumnaEditable("acumulado_total")).toBe(false);
     expect(esColumnaEditable("porcentaje_meta_mensual")).toBe(false);
@@ -25,8 +32,8 @@ describe("esColumnaEditable", () => {
 });
 
 describe("validarValores", () => {
-  it("ok con columnas válidas y números", () => {
-    const r = validarValores({ capital_total: "100.50", facturacion: "0" });
+  it("ok con rubros editables y números", () => {
+    const r = validarValores({ capital_total: "100.50", royalty: "0" });
     expect(r.ok).toBe(true);
     expect(r.invalidas).toEqual([]);
   });
@@ -70,13 +77,13 @@ describe("calcularAcumuladosCorridos", () => {
 
 describe("validarValores numérico estricto", () => {
   it("rechaza notación científica, hex y comas", () => {
-    expect(validarValores({ facturacion: "1e3" }).ok).toBe(false);
-    expect(validarValores({ facturacion: "0x10" }).ok).toBe(false);
-    expect(validarValores({ facturacion: "1,000" }).ok).toBe(false);
+    expect(validarValores({ royalty: "1e3" }).ok).toBe(false);
+    expect(validarValores({ royalty: "0x10" }).ok).toBe(false);
+    expect(validarValores({ royalty: "1,000" }).ok).toBe(false);
   });
   it("acepta decimal plano con espacios y signo", () => {
-    expect(validarValores({ facturacion: " 1000 " }).ok).toBe(true);
-    expect(validarValores({ facturacion: "-12.50" }).ok).toBe(true);
-    expect(validarValores({ facturacion: "0" }).ok).toBe(true);
+    expect(validarValores({ royalty: " 1000 " }).ok).toBe(true);
+    expect(validarValores({ royalty: "-12.50" }).ok).toBe(true);
+    expect(validarValores({ royalty: "0" }).ok).toBe(true);
   });
 });

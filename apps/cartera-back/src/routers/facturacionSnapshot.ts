@@ -8,6 +8,7 @@ import {
   generarSnapshotDiario,
   getSnapshotsDiarios,
   guardarCeldasSnapshot,
+  listarAuditoriaSnapshot,
   regenerarSnapshotRango,
 } from "../controllers/facturacionSnapshot";
 
@@ -184,6 +185,35 @@ export const facturacionSnapshotRouter = new Elysia({
       }
     },
     { body: t.Object({ fecha: t.String() }) }
+  )
+
+  // GET - Historial de cambios manuales (auditoría). Solo ADMIN.
+  //       ?fechaInicio=&fechaFin=&limit= (opcionales)
+  .get(
+    "/auditoria",
+    async ({ query, user, set }: any) => {
+      if (user?.role !== "ADMIN") {
+        set.status = 403;
+        return { success: false, message: "Solo ADMIN" };
+      }
+      try {
+        return await listarAuditoriaSnapshot({
+          fechaInicio: query.fechaInicio,
+          fechaFin: query.fechaFin,
+          limit: query.limit ? Number(query.limit) : undefined,
+        });
+      } catch (error) {
+        set.status = 500;
+        return { success: false, message: "Error obteniendo auditoría", error: String(error) };
+      }
+    },
+    {
+      query: t.Object({
+        fechaInicio: t.Optional(t.String()),
+        fechaFin: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }),
+    }
   )
 
   // GET - Leer snapshots. ?fechaInicio=YYYY-MM-DD&fechaFin=YYYY-MM-DD (opcionales).

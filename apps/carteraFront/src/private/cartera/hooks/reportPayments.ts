@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getApiErrorMessage } from "@/lib/apiError";
 import {
   getPagosConInversionistasService,
   pagosService,
@@ -68,7 +69,7 @@ export function useAplicarPago() {
     onError: (error) => {
       // ❌ Mostrar error
       console.error("Error al aplicar pago:", error);
-      alert(error.message || "Error al aplicar el pago al crédito");
+      alert(getApiErrorMessage(error, "Error al aplicar el pago al crédito"));
     },
   });
 }

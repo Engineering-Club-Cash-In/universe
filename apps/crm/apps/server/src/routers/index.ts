@@ -169,6 +169,12 @@ export const cobrosAppRouter = {
 	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
 
+	// CRM Cobros — nuevas vistas
+	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
+	getPagosEsperadosCobros: cobrosRouter.getPagosEsperadosCobros,
+	getPagosNoRecibidos: cobrosRouter.getPagosNoRecibidos,
+	getDescuentosCRM: cobrosRouter.getDescuentosCRM,
+
 	// Seguimientos programados
 	createSeguimiento: seguimientosRouter.createSeguimiento,
 	getSeguimientosActivos: seguimientosRouter.getSeguimientosActivos,
@@ -327,9 +333,21 @@ export const reportsAppRouter = {
 	getReporteCreditosCerrados: reportsRouter.getReporteCreditosCerrados,
 	getReporteInventario: reportsRouter.getReporteInventario,
 	getReporteSubastas: reportsRouter.getReporteSubastas,
+	getReporteTiempoCierre: reportsRouter.getReporteTiempoCierre,
+	getReportePorcentajeEfectividad:
+		reportsRouter.getReportePorcentajeEfectividad,
+	getReporteMetaColocacion: reportsRouter.getReporteMetaColocacion,
 	// Reportes unificados (cartera-back + CRM)
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
+	getMontoACobrar: reportesCarteraRouter.getMontoACobrar,
+	getFacturacionMes: reportesCarteraRouter.getFacturacionMes,
+	getFlujoCuotasInversiones: reportesCarteraRouter.getFlujoCuotasInversiones,
+	getFlujoCuotasPorInversionista: reportesCarteraRouter.getFlujoCuotasPorInversionista,
+	getComparativoHistorico: reportesCarteraRouter.getComparativoHistorico,
+	getMetas: reportesCarteraRouter.getMetas,
+	upsertMeta: reportesCarteraRouter.upsertMeta,
+	getPuntoEquilibrio: reportesCarteraRouter.getPuntoEquilibrio,
 
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,

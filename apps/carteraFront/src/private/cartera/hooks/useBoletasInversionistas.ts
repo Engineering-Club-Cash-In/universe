@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"; 
 import { toast } from "sonner";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { createBoleta, getBoletas, type CreateBoletaDTO, type GetBoletasFilters } from "../services/services";
 
 // ============================================
@@ -23,7 +24,7 @@ export const useCreateBoleta = () => {
     },
     onError: (error: Error) => {
       console.error("❌ Error creando boleta:", error);
-      toast.error(error.message || "Error al crear boleta");
+      toast.error(getApiErrorMessage(error, "Error al crear boleta"));
     },
   });
 };

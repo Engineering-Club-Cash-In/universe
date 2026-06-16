@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -14,6 +14,7 @@ import { User, BadgeDollarSign, XCircle, ChevronLeft, ChevronRight } from "lucid
 type OpcionSifco = {
   nombre: string;
   sifco: string;
+  credito_id: number;
 };
 
 const ESTADOS_SELECCIONABLES = new Set([
@@ -27,20 +28,25 @@ const ESTADOS_SELECCIONABLES = new Set([
 
 interface BuscadorUsuarioSifcoProps {
   onSelect: (sifco: string) => void;
+  // Callback opcional con la opción completa (incluye credito_id). Útil cuando
+  // el consumidor necesita el id y no solo el número SIFCO.
+  onSelectOption?: (option: OpcionSifco) => void;
   reset?: boolean;
   onReset?: () => void;
+  initialSifco?: string;
 }
 
 function esSifco(search: string): boolean {
   return /\d/.test(search);
 }
 
-export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuarioSifcoProps) {
-  const [search, setSearch] = useState<string>("");
-  const [debouncedSearch, setDebouncedSearch] = useState<string>("");
+export function BuscadorUsuarioSifco({ onSelect, onSelectOption, reset, onReset, initialSifco }: BuscadorUsuarioSifcoProps) {
+  const [search, setSearch] = useState<string>(initialSifco ?? "");
+  const [debouncedSearch, setDebouncedSearch] = useState<string>(initialSifco ?? "");
   const [page, setPage] = useState<number>(1);
   const [selectedSifco, setSelectedSifco] = useState<string>("");
   const [selectedOption, setSelectedOption] = useState<OpcionSifco | null>(null);
+  const initialAppliedRef = useRef<boolean>(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -80,6 +86,7 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
       .map((item) => ({
         nombre: item.usuarios.nombre,
         sifco: item.creditos.numero_credito_sifco,
+        credito_id: item.creditos.credito_id,
       }));
   }, [data]);
 
@@ -90,6 +97,7 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
     setSelectedOption(opt);
     setSelectedSifco(valor);
     onSelect(valor);
+    if (opt) onSelectOption?.(opt);
   };
 
   const handleClear = () => {
@@ -104,9 +112,22 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
   useEffect(() => {
     if (reset) {
       handleClear();
+      initialAppliedRef.current = false;
       onReset?.();
     }
   }, [reset, onReset]);
+
+  // Autoselección cuando se llega con un crédito preseleccionado por URL
+  useEffect(() => {
+    if (!initialSifco || initialAppliedRef.current) return;
+    const opt = opciones.find((o) => o.sifco === initialSifco);
+    if (opt) {
+      initialAppliedRef.current = true;
+      setSelectedOption(opt);
+      setSelectedSifco(opt.sifco);
+      onSelect(opt.sifco);
+    }
+  }, [opciones, initialSifco, onSelect]);
 
   return (
     <div className="mb-4 w-full max-w-md flex flex-col gap-2">
@@ -164,7 +185,7 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
                 <span className="text-gray-400">Selecciona un crédito SIFCO</span>
               )}
             </SelectTrigger>
-            <SelectContent className="bg-white border rounded-xl shadow-lg max-w-full w-full p-0">
+            <SelectContent className="z-[80] bg-white border rounded-xl shadow-lg max-w-full w-full p-0">
               <div className="max-h-60 overflow-y-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
                 {opciones.map((option) => (
                   <SelectItem

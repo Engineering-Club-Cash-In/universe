@@ -80,6 +80,18 @@ export const investmentManagerRole = ac.newRole({
 	report: ["read", "export"],
 });
 
+export const serviceCenterManagerRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
+export const vehicleVerifierRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
 export const auth = betterAuth({
 	database: drizzleAdapter(db, {
 		provider: "pg",
@@ -100,6 +112,8 @@ export const auth = betterAuth({
 				investment_advisor_jr: investmentAdvisorJrRole,
 				investment_advisor_sr: investmentAdvisorSrRole,
 				investment_manager: investmentManagerRole,
+				service_center_manager: serviceCenterManagerRole,
+				vehicle_verifier: vehicleVerifierRole,
 			},
 			schema: {
 				user: {
@@ -117,7 +131,15 @@ export const auth = betterAuth({
 			},
 		}),
 	],
-	trustedOrigins: [process.env.CORS_ORIGIN || ""],
+	trustedOrigins: [
+		process.env.CORS_ORIGIN,
+		process.env.FRONT_URL,
+		process.env.TALLER_URL,
+	].filter((origin): origin is string => Boolean(origin && origin !== "*")),
+	advanced: {
+		useSecureCookies: true,
+		defaultCookieAttributes: { sameSite: "none" as const, secure: true },
+	},
 	emailAndPassword: {
 		enabled: true,
 		requireEmailVerification: false,

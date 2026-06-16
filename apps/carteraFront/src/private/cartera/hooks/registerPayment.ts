@@ -20,6 +20,7 @@ import {
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useResetCredit } from "./resetCredit";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
 export const pagoSchema = z.object({
@@ -70,7 +71,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
   const [cuotaActualInfo, setCuotaActualInfo] = useState<{
     numero: number;
     pagada: boolean;
-    validationStatus?: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
+    validationStatus?: 'no_required' | 'pending' | 'validated' | 'capital' | 'capital_validated' | 'reset';
     data?: any;
   } | null>(null);
   const [mora, setMora] = useState<number>(0);
@@ -207,9 +208,11 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setArchivosParaSubir([]);
         setResetBuscador(true);
       } catch (error: any) {
-        const backendMessage =
-          error?.response?.data?.message || "Error desconocido";
-        toast.error(`No se pudo registrar el pago: ${backendMessage}`);
+        const backendMessage = getApiErrorMessage(
+          error,
+          "No se pudo registrar el pago",
+        );
+        toast.error(backendMessage);
         setStatus({ success: false, error: backendMessage });
       } finally {
         setSubmitting(false);
@@ -277,7 +280,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       ]
         // Los pagos `pending` también son seleccionables para poder reportar
         // abonos complementarios antes de que contabilidad valide el anterior.
-        .filter((c: any) => c.validationStatus !== "validated")
+        .filter((c: any) => c.validationStatus !== "validated" && c.validationStatus !== "capital_validated")
         .sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
 
       setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);
@@ -596,7 +599,7 @@ const handleAbonoOtros = () => {
         }
       },
       onError: (err: any) => {
-        toast.error(err?.response?.data?.message || "Error al liquidar pagos");
+        toast.error(getApiErrorMessage(err, "Error al liquidar pagos"));
       },
     });
   }
@@ -608,7 +611,7 @@ const handleAbonoOtros = () => {
         toast.success("Pago reversado correctamente");
       },
       onError: (err: any) => {
-        toast.error("Error al reversar pago: " + (err?.response?.data?.message || "Error desconocido"));
+        toast.error(getApiErrorMessage(err, "Error al reversar pago"));
       },
     });
   }
@@ -621,7 +624,7 @@ const handleAbonoOtros = () => {
         queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
       },
       onError: (err: any) => {
-        toast.error("Error al reversar pago a pendiente: " + (err?.response?.data?.message || "Error desconocido"));
+        toast.error(getApiErrorMessage(err, "Error al reversar pago a pendiente"));
       },
     });
   }
@@ -634,7 +637,7 @@ const handleAbonoOtros = () => {
         queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
       },
       onError: (err: any) => {
-        toast.error("Error al revalidar pago: " + (err?.response?.data?.message || "Error desconocido"));
+        toast.error(getApiErrorMessage(err, "Error al revalidar pago"));
       },
     });
   }
@@ -647,7 +650,7 @@ const handleAbonoOtros = () => {
         queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
       },
       onError: (err: any) => {
-        toast.error("Error al procesar inversionistas: " + (err?.response?.data?.message || "Error desconocido"));
+        toast.error(getApiErrorMessage(err, "Error al procesar inversionistas"));
       },
     });
   }
@@ -668,7 +671,7 @@ const handleAbonoOtros = () => {
 
       // Aquí podrías hacer un refetch/queryClient.invalidateQueries para actualizar
     } catch (error) {
-      toast.error("Error al liquidar el pago");
+      toast.error(getApiErrorMessage(error, "Error al liquidar el pago"));
       console.error("Error liquidando pago:", error);
     }
   }
@@ -685,7 +688,7 @@ const handleAbonoOtros = () => {
         queryClient.invalidateQueries({ queryKey: ["pagosByCredito"] });
       },
       onError: (err: any) => {
-        toast.error("Error al recalcular pagos: " + (err?.response?.data?.message || "Error desconocido"));
+        toast.error(getApiErrorMessage(err, "Error al recalcular pagos"));
       },
     });
   }
@@ -770,7 +773,7 @@ async function handleResetCredito() {
         }
     },
     onError: (error) => {
-      toast.error("Error al reiniciar crédito: " + (error?.message || error));
+      toast.error(getApiErrorMessage(error, "Error al reiniciar crédito"));
     }
   });
 }

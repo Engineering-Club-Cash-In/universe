@@ -13,23 +13,30 @@ import {
   pagos_credito_inversionistas,
   cuentasEmpresa,
 } from "../database/db";
-import { eq, and, lte, asc, desc, sql, gt, gte, or, ne, inArray } from "drizzle-orm";
+import { eq, and, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
-import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
   getCuotaIdForPaymentInsert,
+  getRequestedInstallmentFloor,
+  getSpecialPaymentInstallmentFields,
+  getSpecialPaymentCuotaId,
   recomputeCreditAfterCapital,
+  shouldApplyStaleZeroRestanteAdjustment,
   shouldIncobrableInstallmentBePaid,
+  shouldMarkInstallmentPaymentPaid,
+  sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
 
-// Tipo de conexión del pool (pg no expone tipos; lo derivamos de client.connect)
-type PoolConn = Awaited<ReturnType<typeof client.connect>>;
+type LockConn = {
+  query: (text: string, values?: unknown[]) => Promise<unknown>;
+  release: () => void;
+};
 
 // Namespace para advisory locks de pagos (evita colisión con otros locks).
 // pg_advisory_lock(ns, credito_id) serializa pagos concurrentes del mismo crédito.
@@ -327,7 +334,7 @@ const obtenerInfoCompletaCredito = async (
             // Permitir reportar/aplicar pagos adicionales aunque la cuota
             // ya tenga otro pago pendiente de validación. Contabilidad puede
             // validar después y el cálculo usa los restantes del pago previo.
-            gte(cuotas_credito.numero_cuota, cuotaApagar)
+            sql`${cuotas_credito.numero_cuota} >= ${getRequestedInstallmentFloor(cuotaApagar)}`
           )
         )
         .orderBy(cuotas_credito.numero_cuota),
@@ -499,7 +506,7 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 
 export const insertPayment = async ({ body, set }: any) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
-  let lockConn: PoolConn | undefined;
+  let lockConn: LockConn | undefined;
   let lockedCreditoId: number | undefined;
   try {
     // 1. Validar schema
@@ -595,6 +602,14 @@ export const insertPayment = async ({ body, set }: any) => {
       stats,
       usuario_id,
     } = creditoData;
+    const cuotaIdPagoEspecial = getSpecialPaymentCuotaId({
+      requestedInstallment: cuotaApagar,
+      pendingInstallments: cuotasPendientes.map((cuota) => ({
+        numeroCuota: cuota.cuotas_credito.numero_cuota,
+        cuotaId: cuota.cuotas_credito.cuota_id,
+      })),
+    });
+    const pagoEspecialCuota = getSpecialPaymentInstallmentFields();
 
     // 3. Preparar creditoInfo con las variables destructuradas
     const creditoInfo = {
@@ -616,20 +631,17 @@ export const insertPayment = async ({ body, set }: any) => {
       await insertarPago({
         numero_credito_sifco: credito.numero_credito_sifco,
         numero_cuota: cuotaApagar,
-        cuotaId:
-          cuotasPendientes.length > 0
-            ? cuotasPendientes[0].cuotas_credito.cuota_id
-            : 0,
+        cuotaId: cuotaIdPagoEspecial,
         otros: otrosBig.toNumber(),
         mora: 0,
         boleta: montoBoleta.toNumber(),
         urlBoletas: urlCompletas ?? [],
-        pagado: true,
+        pagado: pagoEspecialCuota.pagado,
         banco_id: banco_id ?? 0,
         numeroAutorizacion: numeroAutorizacion ?? "",
         registerBy: registerBy ?? "",
         fecha_boleta,
-        monto_aplicado: otrosBig.toNumber(),
+        monto_aplicado: pagoEspecialCuota.montoAplicado,
       });
     }
 
@@ -702,20 +714,17 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
-            cuotaId:
-              cuotasPendientes.length > 0
-                ? cuotasPendientes[0].cuotas_credito.cuota_id
-                : 0,
+            cuotaId: cuotaIdPagoEspecial,
             otros: otrosBig.toNumber(),
             mora: resultadoMora.montoAplicadoMora,
             boleta: montoBoleta.toNumber(),
             urlBoletas: urlCompletas ?? [],
-            pagado: true,
+            pagado: pagoEspecialCuota.pagado,
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
             fecha_boleta,
-            monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
+            monto_aplicado: pagoEspecialCuota.montoAplicado,
           });
         }
         console.log(
@@ -727,20 +736,17 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
-            cuotaId:
-              cuotasPendientes.length > 0
-                ? cuotasPendientes[0].cuotas_credito.cuota_id
-                : 0,
+            cuotaId: cuotaIdPagoEspecial,
             otros: otrosBig.toNumber(),
             mora: resultadoMora.montoAplicadoMora,
             boleta: montoBoleta.toNumber(),
             urlBoletas: urlCompletas ?? [],
-            pagado: true,
+            pagado: pagoEspecialCuota.pagado,
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
             fecha_boleta,
-            monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
+            monto_aplicado: pagoEspecialCuota.montoAplicado,
           });
         }
         return {
@@ -756,20 +762,17 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
-          cuotaId:
-            cuotasPendientes.length > 0
-              ? cuotasPendientes[0].cuotas_credito.cuota_id
-              : 0,
+          cuotaId: cuotaIdPagoEspecial,
           otros: otrosBig.toNumber(),
           mora: resultadoMora.montoAplicadoMora,
           boleta: montoBoleta.toNumber(),
           urlBoletas: urlCompletas ?? [],
-          pagado: true,
+          pagado: pagoEspecialCuota.pagado,
           banco_id: banco_id ?? 0,
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
           fecha_boleta,
-          monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
+          monto_aplicado: pagoEspecialCuota.montoAplicado,
         });
       }
       return {
@@ -913,6 +916,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           .select({
             pago_id: pagos_credito.pago_id,
             monto_aplicado: pagos_credito.monto_aplicado,
+            abono_capital: pagos_credito.abono_capital,
             abono_interes: pagos_credito.abono_interes,
             abono_iva_12: pagos_credito.abono_iva_12,
             abono_seguro: pagos_credito.abono_seguro,
@@ -941,7 +945,13 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             (acc, p) => acc.plus(new Big(sel(p) ?? 0)),
             new Big(0)
           );
-        const aplicadoPrevioCuota = sumaHermanos((p) => p.monto_aplicado);
+        // Lo aplicado a la CUOTA por los hermanos = Σ de sus rubros de cuota
+        // (capital+interés+IVA+seguro+GPS+membresías), NO `monto_aplicado`.
+        // `monto_aplicado` legacy carga mora/otros (filas de sólo mora traen
+        // rubros en 0) y abonos directos a capital; contarlos inflaba el
+        // faltante de la cuota → colapsaba `saldoRealCuota` a 0 y disparaba el
+        // rechazo falso de "sobre-aplicación". Ver `sumarAplicadoACuota`.
+        const aplicadoPrevioCuota = sumarAplicadoACuota(pagosHermanos);
         const interesPrevioCuota = sumaHermanos((p) => p.abono_interes);
         const seguroPrevioCuota = sumaHermanos((p) => p.abono_seguro);
         const gpsPrevioCuota = sumaHermanos((p) => p.abono_gps);
@@ -1189,22 +1199,22 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           .plus(abono_seguro)
           .plus(abono_gps)
           .plus(abono_membresias);
-        const esCuotaSeleccionadaInicial =
-          cuota.cuotas_credito.numero_cuota === cuotaApagar &&
-          cuotas_completas === 0 &&
-          cuotas_parciales === 0;
+        const esPrimeraCuotaProcesada =
+          cuotas_completas === 0 && cuotas_parciales === 0;
         const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
         const faltanteContraCuota = montoCuota.minus(totalPagado);
 
         if (
-          !!existingPago &&
-          esCuotaSeleccionadaInicial &&
-          pagoExactoDeUnaCuota &&
-          !tienePagosValidados &&
-          !ultimoPagoParcialConRestante &&
-          todosRestantesEnCero &&
-          faltanteContraCuota.gt(0) &&
-          disponible_restante.gte(faltanteContraCuota)
+          shouldApplyStaleZeroRestanteAdjustment({
+            hasExistingPayment: !!existingPago,
+            isFirstProcessedInstallment: esPrimeraCuotaProcesada,
+            isExactSingleInstallmentPayment: pagoExactoDeUnaCuota,
+            hasValidatedPayments: tienePagosValidados,
+            hasLastPartialPaymentWithRemaining: !!ultimoPagoParcialConRestante,
+            allRemainingZero: todosRestantesEnCero,
+            missingAgainstInstallment: faltanteContraCuota,
+            availableRemaining: disponible_restante,
+          })
         ) {
           console.log(
             "⚠️ Restantes de cuota subestimados; reteniendo ajuste neutro en la cuota seleccionada:",
@@ -1244,7 +1254,11 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
 
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
         // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        const cuota_pagada = todosRestantesEnCero && !!existingPago;
+        const cuota_pagada = shouldMarkInstallmentPaymentPaid({
+          allRemainingZero: todosRestantesEnCero,
+          hasExistingInstallmentPayment: !!existingPago,
+          installmentAmountApplied: totalPagado.toString(),
+        });
         // Preparar datos del pago
         const currentDate = new Date();
         const months = [
@@ -1505,6 +1519,37 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
               
             }
           }
+
+          // ── Sincronizar `*_restante` en TODAS las filas vivas de la cuota ──
+          // Antes los `*_restante` se guardaban por fila (snapshot del momento)
+          // y se desincronizaban entre pagos hermanos: la fila `no_required` y
+          // las intermedias quedaban con saldos viejos, así que el front (que
+          // puede leer cualquier fila, ej. la `no_required`) mostraba restantes
+          // que NO reflejaban los parciales ya aplicados. Replicamos el saldo
+          // VIVO recién calculado (`nuevo_*_restante`) a todas las filas de la
+          // cuota → `*_restante` pasa a ser un valor consistente por cuota,
+          // leíble desde cualquier fila. No cambia la distribución: interés/IVA
+          // se distribuyen con la fila vigente (la última, que ya trae el saldo
+          // correcto) y los rubros planos se netean contra objetivos+Σmonto_
+          // aplicado, no contra estos saldos.
+          await db
+            .update(pagos_credito)
+            .set({
+              capital_restante: nuevo_capital_restante.toString(),
+              interes_restante: nuevo_interes_restante.toString(),
+              iva_12_restante: nuevo_iva_restante.toString(),
+              seguro_restante: nuevo_seguro_restante.toString(),
+              gps_restante: nuevo_gps_restante.toString(),
+              membresias: nuevo_membresias_restante.toString(),
+            })
+            .where(
+              and(
+                eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+                eq(pagos_credito.credito_id, credito.credito_id),
+                eq(pagos_credito.paymentFalse, false)
+              )
+            );
+
           if (disponible_restante.lte(0)) {
             break;
           }
@@ -2733,7 +2778,21 @@ export async function aplicarAbonoCapitalInversionistas(
   }
   await db
     .update(pagos_credito)
-    .set({ validationStatus: "validated" })
+    .set({
+      // Estado propio del abono a capital APLICADO. No usamos `validated`
+      // porque ese estado entra al set de hermanos de la cuota e inflaría su
+      // faltante (un abono a capital NO es pago de cuota). `capital_validated`
+      // lo deja distinguible: cuenta como aplicado en reportes/reversa, pero
+      // queda fuera de la lógica de cuota.
+      validationStatus: "capital_validated",
+      // Estampar la fecha de aplicación. Antes este flujo dejaba `fecha_aplicado`
+      // en NULL → el abono quedaba "validado sin fecha". Se guarda en UTC con
+      // `new Date()` igual que los demás writers de `fecha_aplicado` (~2149/2266
+      // y revalidatePayment): los consumidores ya convierten a hora de Guatemala
+      // con `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala'`. Guardar el
+      // wall-clock GT aquí lo shiftearía dos veces (P2 de Codex).
+      fecha_aplicado: new Date(),
+    })
     .where(eq(pagos_credito.pago_id, pago_id));
 
   console.log(`✅ ========== ABONO APLICADO EXITOSAMENTE ==========\n`);

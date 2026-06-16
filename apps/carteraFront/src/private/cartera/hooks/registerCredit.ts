@@ -4,6 +4,7 @@ import { useFormik } from "formik";
 
 import { z } from "zod";
 import { createCredit } from "../services/services";
+import { getApiErrorMessage } from "@/lib/apiError";
 export const creditSchema = z.object({
   usuario: z.string().max(1000),
   numero_credito_sifco: z.string().max(1000),
@@ -131,9 +132,8 @@ export function useCreditForm(initialValues?: Partial<CreditFormValues>) {
         alert("¡Crédito creado correctamente!");
         setStatus({ success: true });
       } catch (error: any) {
-        const backendMessage =
-          error?.response?.data?.message || "Error desconocido";
-        alert(`No se pudo crear el crédito:\n${backendMessage}`);
+        const backendMessage = getApiErrorMessage(error, "No se pudo crear el crédito");
+        alert(backendMessage);
         setStatus({ success: false, error: backendMessage });
       } finally {
         setSubmitting(false);

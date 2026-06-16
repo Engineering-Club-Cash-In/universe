@@ -18,7 +18,6 @@ import { Label } from "@/components/ui/label";
 import {
   ChevronDown,
   ChevronUp,
-  Search,
   Calendar,
   Loader2,
   CheckCircle2,
@@ -410,7 +409,7 @@ export function PaymentsCredits() {
     usePagoForm();
   const [mesFiltro, setMesFiltro] = useState<string>("");
   const [anioFiltro, setAnioFiltro] = useState<string>("");
-  const [search, setSearch] = useState("");
+  const [descargandoExcel, setDescargandoExcel] = useState<boolean>(false);
   const { numero_credito_sifco } = useParams<{
     numero_credito_sifco: string;
   }>();
@@ -440,23 +439,23 @@ export function PaymentsCredits() {
     enabled: !!numero_credito_sifco,
   });
 const handleDownloadExcel = async () => {
-  if (!numero_credito_sifco) return;
+  if (!numero_credito_sifco || descargandoExcel) return;
 
+  setDescargandoExcel(true);
   try {
     const res = await getPagosByCredito(numero_credito_sifco, true); // 👈 pedimos excel
     // Check if response has excelUrl (is ExcelResponse)
     if ('excelUrl' in res && res.excelUrl) {
-      const link = document.createElement("a");
-      link.href = res.excelUrl;
-      link.download = `pagos_${numero_credito_sifco}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // Abrir el estado de cuenta en otra pestaña
+      window.open(res.excelUrl, "_blank", "noopener,noreferrer");
     } else {
-      alert("⚠️ No se pudo generar el Excel.");
+      toast.error("No se pudo generar el estado de cuenta.");
     }
   } catch (error) {
-    console.error("❌ Error descargando Excel:", error);
+    console.error("❌ Error descargando estado de cuenta:", error);
+    toast.error("Error al generar el estado de cuenta.");
+  } finally {
+    setDescargandoExcel(false);
   }
 };
   const meses = [
@@ -484,18 +483,10 @@ const handleDownloadExcel = async () => {
       const anioOk = anioFiltro ? anio === anioFiltro : true;
       return mesOk && anioOk;
     })
-    .filter(
-      (pago: any) =>
-        !search ||
-        Object.values(pago)
-          .join(" ")
-          .toLowerCase()
-          .includes(search.toLowerCase())
-    )
     : [];
   return (
     <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-      <div className="w-full max-w-6xl mx-auto">
+      <div className="w-full max-w-[1600px] mx-auto">
         <button
           className="mb-6 px-6 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg font-bold text-blue-700 shadow"
           onClick={() => navigate(-1)}
@@ -509,14 +500,15 @@ const handleDownloadExcel = async () => {
           {numero_credito_sifco}
         </Label>
 
-        {/* Filtros */}
-        <div className="flex flex-col md:flex-row gap-4 mb-8 justify-center items-center">
-          <div className="flex items-center gap-2 bg-blue-50 border-2 border-blue-200 rounded-xl px-4 py-2 shadow-md">
-            <Calendar className="text-blue-500 w-5 h-5" />
+        {/* Filtros y acciones */}
+        <div className="flex flex-col md:flex-row gap-3 mb-8 justify-center items-center flex-wrap">
+          {/* Filtro de periodo */}
+          <div className="flex items-center gap-2 bg-white border border-blue-200 rounded-xl px-4 py-2.5 shadow-sm">
+            <Calendar className="text-blue-500 w-5 h-5 shrink-0" />
             <select
               value={mesFiltro}
               onChange={(e) => setMesFiltro(e.target.value)}
-              className="bg-transparent outline-none text-blue-800 font-semibold"
+              className="bg-transparent outline-none text-blue-800 font-semibold cursor-pointer"
             >
               <option value="">Mes</option>
               {meses.map((mes) => (
@@ -525,10 +517,11 @@ const handleDownloadExcel = async () => {
                 </option>
               ))}
             </select>
+            <span className="w-px h-5 bg-blue-200" />
             <select
               value={anioFiltro}
               onChange={(e) => setAnioFiltro(e.target.value)}
-              className="bg-transparent outline-none text-blue-800 font-semibold"
+              className="bg-transparent outline-none text-blue-800 font-semibold cursor-pointer"
             >
               <option value="">Año</option>
               {["2023", "2024", "2025", "2026"].map((anio) => (
@@ -538,26 +531,36 @@ const handleDownloadExcel = async () => {
               ))}
             </select>
           </div>
-          <div className="flex items-center gap-2 bg-blue-50 border-2 border-blue-200 rounded-xl px-4 py-2 shadow-md">
-            <Search className="text-blue-500 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="Buscar pago (general)..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="border-none outline-none bg-transparent text-blue-800 font-semibold placeholder-blue-400"
-            />
-          </div>
-                <div className="flex items-center gap-2 bg-blue-50 border-2 border-blue-200 rounded-xl px-4 py-2 shadow-md">
+
+          {/* Descargar Estado de Cuenta */}
           <button
             onClick={handleDownloadExcel}
-            className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition flex items-center gap-2"
+            disabled={descargandoExcel}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-md"
           >
-            <FileText className="w-5 h-5" />
-            Descargar Excel
+            {descargandoExcel ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Generando...
+              </>
+            ) : (
+              <>
+                <FileText className="w-5 h-5" />
+                Descargar Estado de Cuenta
+              </>
+            )}
           </button>
-        </div>
 
+          {/* Registrar Pago */}
+          {(user?.role === "ADMIN" || user?.role === "ASESOR") && numero_credito_sifco && (
+            <button
+              onClick={() => navigate(`/realizarPago?sifco=${numero_credito_sifco}`)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
+            >
+              <DollarSign className="w-5 h-5" />
+              Registrar Pago
+            </button>
+          )}
         </div>
 
           {historialFecha.length > 0 && (
@@ -831,7 +834,7 @@ const handleDownloadExcel = async () => {
                                             Monto Aportado
                                           </TableHead>
                                           <TableHead className="font-bold text-blue-700">
-                                            IVA inversionista
+                                            IVA Inversionista
                                           </TableHead>
                                           <TableHead className="font-bold text-blue-700">
                                             Detalles
@@ -918,7 +921,7 @@ const handleDownloadExcel = async () => {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Cuota Interes Inversionista:{" "}
+                                                          Cuota Interés Inversionista:{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(
@@ -928,7 +931,7 @@ const handleDownloadExcel = async () => {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Cuota Interes Cash In:{" "}
+                                                          Cuota Interés Cash In:{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(

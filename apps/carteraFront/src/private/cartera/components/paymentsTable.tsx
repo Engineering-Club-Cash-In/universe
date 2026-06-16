@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, Fragment } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { getApiErrorMessage } from "@/lib/apiError";
 
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -391,8 +392,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
           // Otros errores del backend
           toast.error(errorData.message);
         } else {
-          // Error genérico
-          toast.error("Error al generar facturas electrónicas");
+          toast.error(
+            getApiErrorMessage(error, "Error al generar facturas electrónicas"),
+          );
         }
       }
     },
@@ -548,7 +550,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
       }
     } catch (error: any) {
       console.error("Error al generar Excel:", error);
-      toast.error("Error al generar el reporte", { id: "excel-download" });
+      toast.error(getApiErrorMessage(error, "Error al generar el reporte"), {
+        id: "excel-download",
+      });
     } finally {
       setIsDownloadingExcel(false);
     }
@@ -590,7 +594,10 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
       }
     } catch (error: any) {
       console.error("Error al generar reporte asesores:", error);
-      toast.error("Error al generar el reporte", { id: "advisor-download" });
+      toast.error(
+        getApiErrorMessage(error, "Error al generar el reporte de asesores"),
+        { id: "advisor-download" },
+      );
     } finally {
       setIsDownloadingAdvisor(false);
     }
@@ -964,6 +971,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       : validationStatusFilter === "pending" ? "#a16207"
                       : validationStatusFilter === "reset" ? "#c2410c"
                       : validationStatusFilter === "capital" ? "#1d4ed8"
+                      : validationStatusFilter === "capital_validated" ? "#0e7490"
                       : validationStatusFilter === "no_required" ? "#374151"
                       : "#1f2937"
                   }}
@@ -973,6 +981,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   <option value="pending" style={{ color: "#a16207" }}>Pendiente</option>
                   <option value="reset" style={{ color: "#c2410c" }}>Reset</option>
                   <option value="capital" style={{ color: "#1d4ed8" }}>Capital</option>
+                  <option value="capital_validated" style={{ color: "#0e7490" }}>Capital Aplicado</option>
                   <option value="no_required" style={{ color: "#374151" }}>No Requiere</option>
                 </select>
               </div>
@@ -1309,11 +1318,11 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       disabled={
                         user?.role !== "ADMIN" ||
                         isPending ||
-                        pago.validationStatus === "validated" ||
+                        (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated") ||
                         !tieneCuentaAsignada(pago)
                       }
                       className={`font-semibold flex items-center gap-1 ${
-                        pago.validationStatus === "validated"
+                        (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated")
                           ? "text-gray-400 cursor-not-allowed"
                           : user?.role !== "ADMIN"
                             ? "text-gray-400 cursor-not-allowed opacity-50"
@@ -1324,13 +1333,13 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                           ? "Solo administradores"
                           : !tieneCuentaAsignada(pago)
                             ? "Debe asignar una cuenta primero"
-                            : pago.validationStatus === "validated"
+                            : (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated")
                               ? "Ya validado"
                               : ""
                       }
                     >
                       <Check className="w-4 h-4" />
-                      {pago.validationStatus === "validated"
+                      {(pago.validationStatus === "validated" || pago.validationStatus === "capital_validated")
                         ? "Ya Validado"
                         : !tieneCuentaAsignada(pago)
                           ? "Sin Cuenta"
@@ -1438,7 +1447,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       onClick={() => {
                         handleRevalidatePayment(pago.pagoId, pago.credito?.creditoId || 0);
                       }}
-                      disabled={revalidatePayment.isPending || user?.role !== "ADMIN" || pago.validationStatus === "validated"}
+                      disabled={revalidatePayment.isPending || user?.role !== "ADMIN" || (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated")}
                     >
                       {revalidatePayment.isPending ? (
                         <>
@@ -1814,7 +1823,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                               onClick={() => {
                                 if (
                                   user?.role === "ADMIN" &&
-                                  pago.validationStatus !== "validated" &&
+                                  (pago.validationStatus !== "validated" && pago.validationStatus !== "capital_validated") &&
                                   tieneCuentaAsignada(pago)
                                 ) {
                                   setValidandoPagoId(pago.pagoId);
@@ -1832,11 +1841,11 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 user?.role !== "ADMIN" ||
                                 isPending ||
                                 validandoPagoId === pago.pagoId ||
-                                pago.validationStatus === "validated" ||
+                                (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated") ||
                                 !tieneCuentaAsignada(pago)
                               }
                               className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
-                                pago.validationStatus === "validated" ||
+                                (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated") ||
                                 user?.role !== "ADMIN" ||
                                 !tieneCuentaAsignada(pago)
                                   ? "opacity-50 text-gray-400 bg-gray-50"
@@ -1845,7 +1854,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             >
                               <Check
                                 className={`w-4 h-4 mr-2 flex-shrink-0 ${
-                                  pago.validationStatus === "validated" ||
+                                  (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated") ||
                                   user?.role !== "ADMIN" ||
                                   !tieneCuentaAsignada(pago)
                                     ? "text-gray-400"
@@ -1855,7 +1864,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                               <span className="font-semibold">
                                 {validandoPagoId === pago.pagoId
                                   ? "Validando..."
-                                  : pago.validationStatus === "validated"
+                                  : (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated")
                                     ? "Ya Validado"
                                     : !tieneCuentaAsignada(pago)
                                       ? "Sin Cuenta"
@@ -1873,7 +1882,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                               onClick={() => {
                                 if (
                                   user?.role === "ADMIN" &&
-                                  pago.validationStatus !== "validated" &&
+                                  (pago.validationStatus !== "validated" && pago.validationStatus !== "capital_validated") &&
                                   tieneCuentaAsignada(pago)
                                 ) {
                                   setValidandoPagoId(pago.pagoId);
@@ -1896,11 +1905,11 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 isPending ||
                                 validandoPagoId === pago.pagoId ||
                                 generandoFacturaId === pago.pagoId ||
-                                pago.validationStatus === "validated" ||
+                                (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated") ||
                                 !tieneCuentaAsignada(pago)
                               }
                               className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
-                                pago.validationStatus === "validated" ||
+                                (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated") ||
                                 user?.role !== "ADMIN" ||
                                 !tieneCuentaAsignada(pago)
                                   ? "opacity-50 text-gray-400 bg-gray-50"
@@ -1909,7 +1918,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             >
                               <Check
                                 className={`w-4 h-4 mr-2 flex-shrink-0 ${
-                                  pago.validationStatus === "validated" ||
+                                  (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated") ||
                                   user?.role !== "ADMIN" ||
                                   !tieneCuentaAsignada(pago)
                                     ? "text-gray-400"
@@ -1921,7 +1930,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                   ? "Validando pago..."
                                   : generandoFacturaId === pago.pagoId
                                     ? "Generando factura..."
-                                    : pago.validationStatus === "validated"
+                                    : (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated")
                                       ? "Ya Validado"
                                       : !tieneCuentaAsignada(pago)
                                         ? "Sin Cuenta"
@@ -2092,16 +2101,16 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 }
                               }}
                               disabled={
-                                revalidatePayment.isPending || user?.role !== "ADMIN" || pago.validationStatus === "validated"
+                                revalidatePayment.isPending || user?.role !== "ADMIN" || (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated")
                               }
                               className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
-                                user?.role !== "ADMIN" || pago.validationStatus === "validated"
+                                user?.role !== "ADMIN" || (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated")
                                   ? "opacity-50 text-gray-400 bg-gray-50"
                                   : "text-purple-700 hover:text-purple-900 hover:bg-purple-50"
                               }`}
                             >
                               <Check
-                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" || pago.validationStatus === "validated" ? "text-gray-400" : "text-purple-600"}`}
+                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" || (pago.validationStatus === "validated" || pago.validationStatus === "capital_validated") ? "text-gray-400" : "text-purple-600"}`}
                               />
                               <span className="font-semibold">
                                 {revalidatePayment.isPending

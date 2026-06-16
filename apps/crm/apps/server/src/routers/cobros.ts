@@ -38,23 +38,24 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import {
+	interpolar as interpolarPlantilla,
+	PLANTILLAS_MENSAJES,
+} from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
+import { toDateStrGT } from "../lib/guatemala-month-window";
+import {
+	getTestPhone,
+	isTestModeEnabled,
+	TEST_EMAIL,
+} from "../lib/messaging-test-mode";
+import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
-import {
-	interpolar as interpolarPlantilla,
-	PLANTILLAS_MENSAJES,
-} from "../lib/cobros-plantillas";
-import {
-	getTestPhone,
-	isTestModeEnabled,
-	TEST_EMAIL,
-} from "../lib/messaging-test-mode";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	sendWhatsappTemplate,
@@ -130,10 +131,18 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 			params.email_cobrador !== "" && {
 				email_cobrador: params.email_cobrador,
 			}),
-			...(params.fecha_desde !== undefined && { fecha_desde: params.fecha_desde }),
-			...(params.fecha_hasta !== undefined && { fecha_hasta: params.fecha_hasta }),
-			...(params.capital_min !== undefined && { capital_min: params.capital_min }),
-			...(params.capital_max !== undefined && { capital_max: params.capital_max }),
+		...(params.fecha_desde !== undefined && {
+			fecha_desde: params.fecha_desde,
+		}),
+		...(params.fecha_hasta !== undefined && {
+			fecha_hasta: params.fecha_hasta,
+		}),
+		...(params.capital_min !== undefined && {
+			capital_min: params.capital_min,
+		}),
+		...(params.capital_max !== undefined && {
+			capital_max: params.capital_max,
+		}),
 	});
 
 	return {
@@ -143,6 +152,43 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		totalCount: response.totalCount,
 		totalPages: response.totalPages,
 	};
+}
+
+// Helper: Pagina getAllCreditos hasta traer la cartera completa que matchea
+// los filtros. Sin esto, un solo fetch trunca silenciosamente cuando la
+// cartera supera el perPage.
+async function obtenerTodasLasPaginasCreditos(
+	params: Omit<
+		Parameters<typeof obtenerTodosLosCreditosCarteraBack>[0],
+		"page" | "perPage"
+	>,
+) {
+	const perPage = 100;
+	// Tope duro: si cartera-back devolviera totalPages null/undefined y siempre
+	// exactamente `perPage` items, el loop no terminaría. 200 páginas = 20k
+	// créditos, muy por encima de la cartera real.
+	const MAX_PAGES = 200;
+	const data: Awaited<
+		ReturnType<typeof obtenerTodosLosCreditosCarteraBack>
+	>["data"] = [];
+	let page = 1;
+	while (page <= MAX_PAGES) {
+		const resp = await obtenerTodosLosCreditosCarteraBack({
+			...params,
+			page,
+			perPage,
+		});
+		data.push(...resp.data);
+		if (resp.data.length < perPage) break;
+		if (resp.totalPages != null && page >= resp.totalPages) break;
+		page += 1;
+	}
+	if (page > MAX_PAGES) {
+		console.warn(
+			`[obtenerTodasLasPaginasCreditos] Se alcanzó MAX_PAGES=${MAX_PAGES} (${data.length} créditos). Posible truncamiento — la cartera supera el tope.`,
+		);
+	}
+	return data;
 }
 
 /**
@@ -694,9 +740,9 @@ export const cobrosRouter = {
 							.from(casosCobros)
 							.where(
 								sql`${casosCobros.etiquetas} && ARRAY[${sql.join(
-							input.etiquetas.map((e) => sql`${e}`),
-							sql`, `,
-						)}]::text[]`,
+									input.etiquetas.map((e) => sql`${e}`),
+									sql`, `,
+								)}]::text[]`,
 							);
 						sifcosPorEtiquetas = filas
 							.map((r) => r.numeroSifco)
@@ -944,9 +990,7 @@ export const cobrosRouter = {
 								etiquetas: casosCobros.etiquetas,
 							})
 							.from(casosCobros)
-							.where(
-								inArray(casosCobros.numeroCreditoSifco, sifcosPagina),
-							);
+							.where(inArray(casosCobros.numeroCreditoSifco, sifcosPagina));
 						for (const row of casosRows) {
 							if (!row.numeroSifco) continue;
 							casosPorSifco.set(row.numeroSifco, {
@@ -1786,7 +1830,8 @@ export const cobrosRouter = {
 
 				// 0. Si el creditoId es un UUID (viene de una notificación), resolverlo
 				//    al numeroCreditoSifco del caso de cobros antes de consultar cartera-back.
-				const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+				const UUID_REGEX =
+					/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 				if (UUID_REGEX.test(numeroSifco)) {
 					const [casoPorUUID] = await db
 						.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
@@ -2145,7 +2190,9 @@ export const cobrosRouter = {
 					? Number.parseInt(
 							cuotaParaDiaPago.fecha_vencimiento.substring(8, 10),
 							10,
-						) || oportunidadData?.diaPago || null
+						) ||
+						oportunidadData?.diaPago ||
+						null
 					: oportunidadData?.diaPago || null;
 
 				const statusCredit = creditoCompleto.credito.statusCredit;
@@ -2164,7 +2211,9 @@ export const cobrosRouter = {
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
 					cuotaConvenio: tieneConvenioActivo
-						? Number(creditoCompleto.convenioActivo!.cuota_mensual ?? 0).toFixed(2)
+						? Number(
+								creditoCompleto.convenioActivo!.cuota_mensual ?? 0,
+							).toFixed(2)
 						: null,
 
 					// Datos de contacto (del caso de cobros primero, fallback al lead)
@@ -2178,7 +2227,10 @@ export const cobrosRouter = {
 					etiquetas: casoCobro?.etiquetas || [],
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
-					montoFinanciado: creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
+					montoFinanciado:
+						creditoCompleto.credito.capital ??
+						creditoCompleto.credito.deudatotal ??
+						"0.00",
 					cuotaMensual:
 						creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual,
 					numeroCuotas: creditoCompleto.credito.plazo,
@@ -3086,7 +3138,9 @@ export const cobrosRouter = {
 			const result = await sendWhatsappTemplate({
 				phone: telefonoDestino,
 				message: input.mensaje,
-				logPrefix: testMode ? "[SimpleTech][cobros][TEST]" : "[SimpleTech][cobros]",
+				logPrefix: testMode
+					? "[SimpleTech][cobros][TEST]"
+					: "[SimpleTech][cobros]",
 			});
 
 			await persistCobrosSendLog({
@@ -3177,11 +3231,8 @@ export const cobrosRouter = {
 			// 1. Mapear estadoMora → params de cartera-back (mismo mapping que
 			// getTodosLosCreditos).
 			let cuotasAtrasadas: number | undefined;
-			let estadoCartera:
-				| "ACTIVO"
-				| "CANCELADO"
-				| "INCOBRABLE"
-				| undefined = "ACTIVO";
+			let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined =
+				"ACTIVO";
 			if (input.estadoMora) {
 				switch (input.estadoMora) {
 					case "al_dia":
@@ -3227,7 +3278,8 @@ export const cobrosRouter = {
 			const isNameSearch =
 				!numeroSifcoExacto && searchTerm.length > 0 && !hasNumber;
 
-			let numeroSifcoFiltro: string | undefined = numeroSifcoExacto || undefined;
+			let numeroSifcoFiltro: string | undefined =
+				numeroSifcoExacto || undefined;
 			let searchPorPlacaSinMatch = false;
 			const matchingSifcos = new Set<string>();
 			if (isPlateSearch) {
@@ -3360,8 +3412,7 @@ export const cobrosRouter = {
 						cuotasAtrasadas,
 						// Mismo criterio que getTodosLosCreditos: si hay rango de fechas
 						// custom, ignoramos el preset `time` para que no se pisen.
-						time:
-							input.fechaDesde || input.fechaHasta ? undefined : input.time,
+						time: input.fechaDesde || input.fechaHasta ? undefined : input.time,
 						email_cobrador: emailCobrador,
 						nombre_usuario: isNameSearch ? searchTerm : undefined,
 						numero_credito_sifco: numeroSifcoFiltro,
@@ -3472,15 +3523,27 @@ export const cobrosRouter = {
 				const clienteNombre = credito.usuarios.nombre ?? null;
 
 				if (!cuota || Number(cuota) === 0) {
-					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin cuota" });
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: "sin cuota",
+					});
 					continue;
 				}
 				if (!telefono) {
-					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin teléfono" });
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: "sin teléfono",
+					});
 					continue;
 				}
 				if (!asesor) {
-					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin asesor" });
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: "sin asesor",
+					});
 					continue;
 				}
 
@@ -3496,16 +3559,27 @@ export const cobrosRouter = {
 				// Total a cobrar = monto en mora + cuota mensual (mismo criterio
 				// que se muestra en la pantalla de detalle del caso).
 				const montoMora = Number(credito.mora?.monto_mora ?? 0);
-				const totalACobrar =
-					montoMora > 0 ? montoMora + Number(cuota) : 0;
+				const totalACobrar = montoMora > 0 ? montoMora + Number(cuota) : 0;
 
 				const cuerpoBase = input.cuerpoEditado?.trim()
 					? input.cuerpoEditado
 					: plantilla.cuerpo;
 
+				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
+				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
+				// criterio que usa el detalle individual de este router, y la única
+				// fuente del día de pago que vive en cartera. Sin esto el masivo
+				// dejaba "{fechaPago}" vacío ("Su día de pago es el .").
+				const diaPago = credito.proxima_cuota?.fecha_vencimiento
+					? Number.parseInt(
+							credito.proxima_cuota.fecha_vencimiento.substring(8, 10),
+							10,
+						) || null
+					: null;
+
 				const mensaje = interpolarPlantilla(cuerpoBase, {
 					clienteNombre: credito.usuarios.nombre ?? "",
-					fechaPago: "",
+					fechaPago: diaPago ? String(diaPago) : "",
 					cuotaMensual: String(cuota),
 					placa: info?.placa ?? "",
 					marcaLineaModelo,
@@ -3620,9 +3694,7 @@ export const cobrosRouter = {
 							: {
 									success: false,
 									errorMessage:
-										res?.error ??
-										batch.transportError ??
-										"Error desconocido",
+										res?.error ?? batch.transportError ?? "Error desconocido",
 									providerResponse: {
 										...(batch.providerResponse ?? {}),
 										...(testMode
@@ -3708,11 +3780,7 @@ export const cobrosRouter = {
 			let sendError: string | null = null;
 			let emailId: string | undefined;
 			try {
-				const result = await sendPlainEmail(
-					emailDestino,
-					input.asunto,
-					html,
-				);
+				const result = await sendPlainEmail(emailDestino, input.asunto, html);
 
 				if (!result.success) {
 					sendError =
@@ -3723,8 +3791,7 @@ export const cobrosRouter = {
 					emailId = result.data?.id;
 				}
 			} catch (error) {
-				sendError =
-					error instanceof Error ? error.message : String(error);
+				sendError = error instanceof Error ? error.message : String(error);
 			}
 
 			await persistCobrosSendLog({
@@ -3819,15 +3886,12 @@ export const cobrosRouter = {
 
 				if (!result.success) {
 					sendError =
-						result.error?.hint ||
-						result.error?.message ||
-						"desconocido";
+						result.error?.hint || result.error?.message || "desconocido";
 				} else {
 					mailingId = result.mailingId;
 				}
 			} catch (error) {
-				sendError =
-					error instanceof Error ? error.message : String(error);
+				sendError = error instanceof Error ? error.message : String(error);
 			}
 
 			await persistCobrosSendLog({
@@ -3867,6 +3931,425 @@ export const cobrosRouter = {
 				casoCobroId: input.casoCobroId,
 			};
 		}),
+
+	// ========================================================================
+	// MORA POR ETAPA Y ASESOR
+	// ========================================================================
+
+	getMoraByEtapaYAsesor: cobrosSupervisorProcedure
+		.input(
+			z
+				.object({
+					emailCobrador: z.string().optional(),
+				})
+				.optional(),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			// Traer cartera completa (mes=0 = todos los créditos)
+			const creditos = await obtenerTodasLasPaginasCreditos({
+				mes: 0,
+				anio: new Date().getFullYear(),
+				estado: "ACTIVO",
+				email_cobrador: input?.emailCobrador,
+			});
+
+			type BucketAcc = {
+				cantidad: number;
+				sumaCapital: number;
+				sumaMora: number;
+			};
+			type BucketsAcc = {
+				mora_30: BucketAcc;
+				mora_60: BucketAcc;
+				mora_90: BucketAcc;
+				mora_120_plus: BucketAcc;
+			};
+			const emptyBuckets = (): BucketsAcc => ({
+				mora_30: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+				mora_60: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+				mora_90: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+				mora_120_plus: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+			});
+
+			const serializeBuckets = (b: BucketsAcc) => {
+				const fmt = (v: number) => v.toFixed(2);
+				const totalCantidad =
+					b.mora_30.cantidad +
+					b.mora_60.cantidad +
+					b.mora_90.cantidad +
+					b.mora_120_plus.cantidad;
+				const totalMora =
+					b.mora_30.sumaMora +
+					b.mora_60.sumaMora +
+					b.mora_90.sumaMora +
+					b.mora_120_plus.sumaMora;
+				return {
+					mora_30: {
+						cantidad: b.mora_30.cantidad,
+						sumaCapital: fmt(b.mora_30.sumaCapital),
+						sumaMora: fmt(b.mora_30.sumaMora),
+					},
+					mora_60: {
+						cantidad: b.mora_60.cantidad,
+						sumaCapital: fmt(b.mora_60.sumaCapital),
+						sumaMora: fmt(b.mora_60.sumaMora),
+					},
+					mora_90: {
+						cantidad: b.mora_90.cantidad,
+						sumaCapital: fmt(b.mora_90.sumaCapital),
+						sumaMora: fmt(b.mora_90.sumaMora),
+					},
+					mora_120_plus: {
+						cantidad: b.mora_120_plus.cantidad,
+						sumaCapital: fmt(b.mora_120_plus.sumaCapital),
+						sumaMora: fmt(b.mora_120_plus.sumaMora),
+					},
+					totalEnMora: { cantidad: totalCantidad, sumaMora: fmt(totalMora) },
+				};
+			};
+
+			const acumuladoTotal = emptyBuckets();
+
+			type AsesorEntry = {
+				asesorId: number;
+				nombre: string;
+				email: string;
+				buckets: BucketsAcc;
+			};
+			const porAsesorMap = new Map<string, AsesorEntry>();
+
+			const addToBucket = (
+				acc: BucketsAcc,
+				cuotasAtrasadas: number,
+				capital: number,
+				mora: number,
+			) => {
+				const key =
+					cuotasAtrasadas >= 4
+						? "mora_120_plus"
+						: cuotasAtrasadas === 3
+							? "mora_90"
+							: cuotasAtrasadas === 2
+								? "mora_60"
+								: "mora_30";
+				acc[key].cantidad += 1;
+				acc[key].sumaCapital += capital;
+				acc[key].sumaMora += mora;
+			};
+
+			for (const item of creditos) {
+				const cuotasAtrasadas = item.mora?.cuotas_atrasadas ?? 0;
+				if (cuotasAtrasadas < 1) continue;
+
+				const capital = Number.parseFloat(
+					(item.creditos.capital as string) || "0",
+				);
+				const montoMora = Number.parseFloat(item.mora?.monto_mora ?? "0");
+
+				addToBucket(acumuladoTotal, cuotasAtrasadas, capital, montoMora);
+
+				// Agrupar por asesor usando emailCashIn del crédito mismo
+				const emailAsesor = item.asesores?.emailCashIn ?? "sin_asesor";
+				const nombreAsesor = item.asesores?.nombre ?? "Sin asesor";
+				const asesorId = item.asesores?.asesor_id ?? 0;
+
+				let entry = porAsesorMap.get(emailAsesor);
+				if (!entry) {
+					entry = {
+						asesorId,
+						nombre: nombreAsesor,
+						email: emailAsesor,
+						buckets: emptyBuckets(),
+					};
+					porAsesorMap.set(emailAsesor, entry);
+				}
+				addToBucket(entry.buckets, cuotasAtrasadas, capital, montoMora);
+			}
+
+			const porAsesor = Array.from(porAsesorMap.values())
+				.sort((a, b) => {
+					const totalA =
+						a.buckets.mora_30.sumaMora +
+						a.buckets.mora_60.sumaMora +
+						a.buckets.mora_90.sumaMora +
+						a.buckets.mora_120_plus.sumaMora;
+					const totalB =
+						b.buckets.mora_30.sumaMora +
+						b.buckets.mora_60.sumaMora +
+						b.buckets.mora_90.sumaMora +
+						b.buckets.mora_120_plus.sumaMora;
+					return totalB - totalA;
+				})
+				.map((e) => ({
+					asesorId: e.asesorId,
+					nombre: e.nombre,
+					email: e.email,
+					...serializeBuckets(e.buckets),
+				}));
+
+			return { totales: serializeBuckets(acumuladoTotal), porAsesor };
+		}),
+
+	// ========================================================================
+	// PAGOS ESPERADOS (COBROS)
+	// ========================================================================
+
+	getPagosEsperadosCobros: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				temporalidad: z.enum(["hoy", "semana", "quincena", "mes"]),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			const pad = (n: number) => n.toString().padStart(2, "0");
+
+			const diasAdelanteMap: Record<typeof input.temporalidad, number> = {
+				hoy: 0,
+				semana: 6,
+				quincena: 14,
+				mes: 29,
+			};
+			const diasAdelante = diasAdelanteMap[input.temporalidad];
+
+			// Las fechas de negocio son días calendario de Guatemala (UTC-6). Si el
+			// server corre en UTC, usar getFullYear/getMonth/getDate directo desplaza
+			// "hoy" un día entre las 00:00 y 05:59 UTC. Anclamos en la fecha GT y
+			// hacemos la aritmética de días sobre esos componentes en UTC puro.
+			const fechaInicio = toDateStrGT(new Date());
+			const [anioGT, mesGT, diaGT] = fechaInicio.split("-").map(Number);
+			const fechaFinUTC = new Date(
+				Date.UTC(anioGT, mesGT - 1, diaGT + diasAdelante),
+			);
+			const fechaFin = `${fechaFinUTC.getUTCFullYear()}-${pad(fechaFinUTC.getUTCMonth() + 1)}-${pad(fechaFinUTC.getUTCDate())}`;
+
+			const desglose = await carteraBackClient.getMontoACobrar({
+				periodo: "dia",
+				fechaInicio,
+				fechaFin,
+			});
+
+			// Ojo: en cartera-back `total_cuota` ES el capital de las cuotas
+			// (mismo criterio que el reporte de monto-a-cobrar existente, que lo
+			// etiqueta "Capital" y calcula el total sumando todos los rubros).
+			let totalCapital = 0;
+			let totalInteres = 0;
+			let totalIva = 0;
+			let totalSeguro = 0;
+			let totalGps = 0;
+			let totalMembresias = 0;
+			let totalRoyalti = 0;
+			let cantidadCuotas = 0;
+
+			for (const row of desglose) {
+				totalCapital += Number.parseFloat(row.total_cuota);
+				totalInteres += Number.parseFloat(row.total_interes);
+				totalIva += Number.parseFloat(row.total_iva);
+				totalSeguro += Number.parseFloat(row.total_seguro);
+				totalGps += Number.parseFloat(row.total_gps);
+				totalMembresias += Number.parseFloat(row.total_membresias);
+				totalRoyalti += Number.parseFloat(row.total_royalti);
+				cantidadCuotas += row.cuotas_count;
+			}
+
+			const totalACobrar =
+				totalCapital +
+				totalInteres +
+				totalIva +
+				totalSeguro +
+				totalGps +
+				totalMembresias +
+				totalRoyalti;
+
+			return {
+				fechaInicio,
+				fechaFin,
+				temporalidad: input.temporalidad,
+				desglose,
+				totales: {
+					capital: totalCapital.toFixed(2),
+					interes: totalInteres.toFixed(2),
+					iva: totalIva.toFixed(2),
+					seguro: totalSeguro.toFixed(2),
+					gps: totalGps.toFixed(2),
+					membresias: totalMembresias.toFixed(2),
+					royalti: totalRoyalti.toFixed(2),
+					totalCuota: totalACobrar.toFixed(2),
+					cantidadCuotas,
+				},
+			};
+		}),
+
+	// ========================================================================
+	// PAGOS NO RECIBIDOS
+	// ========================================================================
+
+	getPagosNoRecibidos: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				emailCobrador: z.string().optional(),
+				capitalMin: z.number().optional(),
+				capitalMax: z.number().optional(),
+				cuotasAtrasadasMin: z.number().min(1).optional(),
+				cuotasAtrasadasMax: z.number().min(1).optional(),
+				fechaDesde: z.string().optional(),
+				fechaHasta: z.string().optional(),
+				page: z.number().min(1).default(1),
+				pageSize: z.number().min(1).max(100).default(25),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			// mes=0 trae TODOS los créditos sin filtrar por mes (mismo criterio
+			// que getTodosLosCreditos); con el mes actual cartera-back devuelve
+			// solo el snapshot mensual y el listado sale vacío.
+			const creditos = await obtenerTodasLasPaginasCreditos({
+				mes: 0,
+				anio: new Date().getFullYear(),
+				estado: "ACTIVO",
+				email_cobrador: input.emailCobrador,
+				capital_min: input.capitalMin,
+				capital_max: input.capitalMax,
+				fecha_desde: input.fechaDesde,
+				fecha_hasta: input.fechaHasta,
+			});
+
+			const minCuotas = input.cuotasAtrasadasMin ?? 1;
+
+			const todosOverdue = creditos.filter((item) => {
+				const cuotasAtrasadas = item.mora?.cuotas_atrasadas ?? 0;
+				if (cuotasAtrasadas < minCuotas) return false;
+				if (
+					input.cuotasAtrasadasMax !== undefined &&
+					cuotasAtrasadas > input.cuotasAtrasadasMax
+				)
+					return false;
+				return true;
+			});
+
+			const total = todosOverdue.length;
+			const totalPages = Math.max(1, Math.ceil(total / input.pageSize));
+			const start = (input.page - 1) * input.pageSize;
+			const pageData = todosOverdue.slice(start, start + input.pageSize);
+
+			const items = pageData.map((item) => ({
+				sifco: item.creditos.numero_credito_sifco,
+				clienteNombre: item.usuarios.nombre,
+				asesorNombre: item.asesores?.nombre ?? "Sin asesor",
+				cuotasAtrasadas: item.mora?.cuotas_atrasadas ?? 0,
+				montoMora: item.mora?.monto_mora ?? "0",
+				capital: item.proxima_cuota?.capital_restante ?? item.creditos.capital,
+				cuotaMensual: item.creditos.cuota,
+				proximaFechaVencimiento: item.proxima_cuota?.fecha_vencimiento ?? null,
+				tipoCredito: item.creditos.tipoCredito ?? null,
+			}));
+
+			return {
+				data: items,
+				total,
+				page: input.page,
+				pageSize: input.pageSize,
+				totalPages,
+			};
+		}),
+
+	// ========================================================================
+	// DESCUENTOS / RUBROS POR CRÉDITO
+	// ========================================================================
+
+	getDescuentosCRM: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				page: z.number().min(1).default(1),
+				pageSize: z.number().min(1).max(100).default(25),
+				emailCobrador: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			const creditos = await obtenerTodasLasPaginasCreditos({
+				mes: 0,
+				anio: new Date().getFullYear(),
+				estado: "ACTIVO",
+				email_cobrador: input.emailCobrador,
+			});
+
+			type RubroItem = { nombre_rubro: string; monto: string | number };
+
+			const todos = creditos
+				.map((item) => {
+					const cred = item.creditos;
+					const gps = Number.parseFloat(cred.gps || "0");
+					const seguro = Number.parseFloat(cred.seguro_10_cuotas || "0");
+					const membresias = Number.parseFloat(cred.membresias_pago || "0");
+					const otros = Number.parseFloat(cred.otros || "0");
+
+					const rubros = ((item.rubros as RubroItem[] | null) ?? []).map(
+						(r) => ({
+							nombre: r.nombre_rubro,
+							monto: Number.parseFloat(String(r.monto || "0")).toFixed(2),
+						}),
+					);
+					const rubrosTotal = rubros.reduce(
+						(s, r) => s + Number.parseFloat(r.monto),
+						0,
+					);
+
+					const totalDescuentos =
+						gps + seguro + membresias + otros + rubrosTotal;
+					if (totalDescuentos <= 0) return null;
+
+					return {
+						sifco: cred.numero_credito_sifco,
+						clienteNombre: item.usuarios.nombre,
+						asesorNombre: item.asesores?.nombre ?? "Sin asesor",
+						gps: gps.toFixed(2),
+						seguro: seguro.toFixed(2),
+						membresias: membresias.toFixed(2),
+						otros: otros.toFixed(2),
+						rubros,
+						rubrosTotal: rubrosTotal.toFixed(2),
+						totalDescuentos: totalDescuentos.toFixed(2),
+						capital: cred.capital,
+						tipoCredito: cred.tipoCredito ?? null,
+					};
+				})
+				.filter((v): v is NonNullable<typeof v> => v !== null);
+
+			const total = todos.length;
+			const totalPages = Math.max(1, Math.ceil(total / input.pageSize));
+			const start = (input.page - 1) * input.pageSize;
+			const pageData = todos.slice(start, start + input.pageSize);
+
+			return {
+				data: pageData,
+				total,
+				page: input.page,
+				pageSize: input.pageSize,
+				totalPages,
+			};
+		}),
 };
 
 /**
@@ -3901,7 +4384,11 @@ async function persistCobrosSendLog(params: {
 	createdBy: string;
 	result:
 		| { success: true; providerResponse?: Record<string, unknown> }
-		| { success: false; errorMessage?: string; providerResponse?: Record<string, unknown> };
+		| {
+				success: false;
+				errorMessage?: string;
+				providerResponse?: Record<string, unknown>;
+		  };
 }) {
 	try {
 		await db.insert(cobrosSendLogs).values({

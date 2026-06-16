@@ -13,7 +13,25 @@ export const ROLES = {
 	INVESTMENT_ADVISOR_JR: "investment_advisor_jr",
 	INVESTMENT_ADVISOR_SR: "investment_advisor_sr",
 	INVESTMENT_MANAGER: "investment_manager",
+	SERVICE_CENTER_MANAGER: "service_center_manager",
+	VEHICLE_VERIFIER: "vehicle_verifier",
 } as const;
+
+export const USER_ROLE_VALUES = [
+	ROLES.ADMIN,
+	ROLES.SALES,
+	ROLES.SALES_SUPERVISOR,
+	ROLES.ANALYST,
+	ROLES.COBROS,
+	ROLES.COBROS_SUPERVISOR,
+	ROLES.JURIDICO,
+	ROLES.ACCOUNTING,
+	ROLES.INVESTMENT_ADVISOR_JR,
+	ROLES.INVESTMENT_ADVISOR_SR,
+	ROLES.INVESTMENT_MANAGER,
+	ROLES.SERVICE_CENTER_MANAGER,
+	ROLES.VEHICLE_VERIFIER,
+] as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
 
@@ -74,6 +92,16 @@ export const ROLE_CONFIG = {
 		color: "bg-sky-100 text-sky-800",
 		icon: "Landmark" as const,
 	},
+	[ROLES.SERVICE_CENTER_MANAGER]: {
+		label: "Gerente de Centro de Servicio",
+		color: "bg-violet-100 text-violet-800",
+		icon: "Wrench" as const,
+	},
+	[ROLES.VEHICLE_VERIFIER]: {
+		label: "Verificador de Vehículo",
+		color: "bg-lime-100 text-lime-800",
+		icon: "ClipboardCheck" as const,
+	},
 } as const;
 
 // Permission definitions - these match the server-side access control
@@ -133,6 +161,15 @@ export const PERMISSIONS = {
 
 	canAccessClosedCreditsReport: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
+
+	canAccessTiempoCierreReport: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
+
+	canAccessPorcentajeEfectividadReport: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
+
+	canAccessMetaColocacionReport: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
 
 	// Credit Detail Approval (40% → 50%)
 	canApproveCreditDetail: (role: UserRole | string): boolean =>
@@ -211,8 +248,26 @@ export const PERMISSIONS = {
 		role === ROLES.SALES_SUPERVISOR ||
 		role === ROLES.ANALYST,
 
-	// Vehicles Module Access - All roles can access
-	canAccessVehicles: (_role: UserRole | string): boolean => true,
+	// Vehicles Module Access
+	canAccessVehicles: (role: UserRole | string): boolean =>
+		PERMISSIONS.canAccessCRM(role) ||
+		PERMISSIONS.canAccessTaller(role) ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR,
+
+	// Taller Module Access
+	canAccessTaller: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.SERVICE_CENTER_MANAGER ||
+		role === ROLES.VEHICLE_VERIFIER,
+
+	canManageTallerInspections: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.SERVICE_CENTER_MANAGER ||
+		role === ROLES.VEHICLE_VERIFIER,
+
+	canManageTallerVehicleStatus: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SERVICE_CENTER_MANAGER,
 
 	// Accounting Module Access (Contabilidad)
 	canAccessAccounting: (role: UserRole | string): boolean =>
@@ -258,7 +313,7 @@ export const getRoleIcon = (role: UserRole | string): string => {
 };
 
 // Export all roles as an array for iteration
-export const ALL_ROLES = Object.values(ROLES);
+export const ALL_ROLES = [...USER_ROLE_VALUES];
 
 // Type guard
 export const isValidRole = (role: string): role is UserRole => {

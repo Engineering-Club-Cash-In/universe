@@ -31,6 +31,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { PagoFormValues } from "./registerPayment";
 import { toast } from "sonner"; // 🔥 O tu librería de toast preferida
+import { getApiErrorMessage } from "@/lib/apiError";
 
 // ========== Hook ==========
 // 🚀 Administración de asesores, contadores, inversionistas, créditos y pagos
@@ -57,7 +58,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error creando asesor:", error);
-      toast.error(`❌ Error al crear asesor: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al crear asesor"));
     },
   });
 
@@ -71,7 +72,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error actualizando asesor:", error);
-      toast.error(`❌ Error al actualizar asesor: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al actualizar asesor"));
     },
   });
 
@@ -95,7 +96,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error creando contador:", error);
-      toast.error(`❌ Error al crear contador: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al crear contador"));
     },
   });
 
@@ -108,7 +109,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error actualizando contador:", error);
-      toast.error(`❌ Error al actualizar contador: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al actualizar contador"));
     },
   });
 
@@ -132,7 +133,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error con inversionista:", error);
-      toast.error(`❌ Error al procesar inversionista: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al procesar inversionista"));
     },
   });
 
@@ -144,7 +145,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error actualizando inversionista:", error);
-      toast.error(`❌ Error al actualizar inversionista: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al actualizar inversionista"));
     },
   });
 
@@ -157,7 +158,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error creando crédito:", error);
-      toast.error(`❌ Error al crear crédito: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al crear crédito"));
     },
   });
 
@@ -169,7 +170,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error actualizando crédito:", error);
-      toast.error(`❌ Error al actualizar crédito: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al actualizar crédito"));
     },
   });
 
@@ -197,7 +198,7 @@ export const useAdminData = () => {
     },
     onError: (error: any) => {
       console.error("Error registrando pago:", error);
-      toast.error(`❌ Error al registrar pago: ${error.message || "Error desconocido"}`);
+      toast.error(getApiErrorMessage(error, "❌ Error al registrar pago"));
     },
   });
 

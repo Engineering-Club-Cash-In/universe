@@ -13,8 +13,9 @@ import {
   X,
 } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, FileCheck, CheckCircle2 } from "lucide-react";
+import { Eye, Pencil, XCircle, FileCheck, CheckCircle2, DollarSign } from "lucide-react";
 
 import {
   Table,
@@ -173,7 +174,9 @@ export function ListaCreditosPagos() {
           }
         },
         onError: (err: any) => {
-          toast.error(err?.message || `Error al generar reporte ${reportType}`);
+          toast.error(
+            getApiErrorMessage(err, `Error al generar reporte ${reportType}`),
+          );
         },
       }
     );
@@ -346,7 +349,7 @@ export function ListaCreditosPagos() {
             ref={inputRef}
             className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
             type="text"
-            placeholder="# Crédito SIFCO"
+            placeholder="No. Crédito SIFCO"
             defaultValue={creditoSifco}
             onChange={(e) => {
               if (e.target.value === "") handleSifco("");
@@ -631,7 +634,7 @@ export function ListaCreditosPagos() {
                 }
               } catch (err) {
                 console.error("❌ Error generando Excel:", err);
-                toast.error("Error al generar el Excel");
+                toast.error(getApiErrorMessage(err, "Error al generar el Excel"));
               } finally {
                 setIsDownloadingExcel(false);
               }
@@ -1304,12 +1307,29 @@ function MobileView({
                     ? "En Convenio"
                     : item.creditos.statusCredit === "CAIDO"
                       ? "Caído"
-                      : item.creditos.statusCredit}
+                      : item.creditos.statusCredit === "ACTIVO"
+                        ? "Activo"
+                        : item.creditos.statusCredit === "CANCELADO"
+                          ? "Cancelado"
+                          : item.creditos.statusCredit === "MOROSO"
+                            ? "En Mora"
+                            : item.creditos.statusCredit}
             </span>
           </p>
 
           {/* Acciones */}
           <div className="flex justify-center flex-wrap gap-2 mt-3">
+            {(user?.role === "ADMIN" || user?.role === "ASESOR") && (
+              <Button
+                variant="outline"
+                className="text-green-700 border-green-300 hover:bg-green-50"
+                onClick={() =>
+                  navigate(`/realizarPago?sifco=${item.creditos.numero_credito_sifco}`)
+                }
+              >
+                <DollarSign className="w-4 h-4 mr-1" /> Registrar Pago
+              </Button>
+            )}
             <Button
               variant="outline"
               className="text-blue-700 border-blue-300 hover:bg-blue-50"
@@ -1613,6 +1633,22 @@ function DesktopView({
                   <TableCell colSpan={6} className="p-0 bg-blue-50 rounded-b-2xl">
                     {/* Botones de acción */}
                     <div className="flex flex-wrap justify-center gap-2 px-6 py-4 border-b border-blue-100">
+                        {(user?.role === "ADMIN" || user?.role === "ASESOR") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
+                            onClick={() =>
+                              navigate(
+                                `/realizarPago?sifco=${item.creditos.numero_credito_sifco}`
+                              )
+                            }
+                          >
+                            <DollarSign className="w-4 h-4" />
+                            Registrar Pago
+                          </Button>
+                        )}
+
                         {canViewPayments(item.creditos.statusCredit) && (
                           <Button
                             variant="outline"
@@ -1906,7 +1942,7 @@ function DetallesCredito({
           { label: "Seguro 10 Cuotas", value: item.creditos.seguro_10_cuotas, isMoney: true },
           { label: "GPS", value: item.creditos.gps, isMoney: true },
           { label: "Membresías", value: item.creditos.membresias, isMoney: true },
-          { label: "Royalti", value: item.creditos.royalti, isMoney: true },
+          { label: "Royalty", value: item.creditos.royalti, isMoney: true },
           { label: "Plazo", value: `${item.creditos.plazo} meses` },
           { label: "Formato Crédito", value: item.creditos.formato_credito },
           ...(item.fecha_inicio ? [{ label: "Fecha Primera Cuota", value: new Date(item.fecha_inicio + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }), isDate: true }] : []),

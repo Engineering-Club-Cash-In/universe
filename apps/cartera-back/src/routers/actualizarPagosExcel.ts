@@ -178,7 +178,9 @@ function construirUpdatesCuota(
         // capital/total restante = saldo del crédito (igual en toda la cuota).
         capital_restante: totalRestante,
         total_restante: totalRestante,
-        pagado: esUltimo,
+        // Todos los pagos de la cuota quedan pagados (no solo el último): la
+        // cuota se reconstruye completa desde el Excel. Ver commit 0dc646a6.
+        pagado: true,
       },
     });
   });
@@ -198,7 +200,20 @@ export const actualizarPagosExcelRouter = new Elysia()
         dry_run = true,
         orden_cronologico = [],
         omitir_sin_match = true,
+        companions = {},
       } = body ?? {};
+
+      // Pools "raros": un mismo crédito repartido en varios SIFCOs distintos
+      // (no _N). El mapa { "<sifco base>": ["<sifco companion>", ...] } indica
+      // qué SIFCOs deben sumarse al crédito base. Se arma companion → base.
+      const companionToBase = new Map<string, string>();
+      for (const [target, comps] of Object.entries(companions ?? {})) {
+        const tBase = String(target).replace(/[^0-9]/g, "").padStart(14, "0");
+        for (const c of Array.isArray(comps) ? comps : []) {
+          const cBase = String(c).replace(/[^0-9]/g, "").padStart(14, "0");
+          companionToBase.set(cBase, tBase);
+        }
+      }
 
       if (!Array.isArray(lista) || lista.length === 0) {
         set.status = 400;
@@ -224,7 +239,12 @@ export const actualizarPagosExcelRouter = new Elysia()
       };
       const datosCredito = new Map<
         string,
-        { credito_id: number; base: string; cuotasPagadas: CuotaInfo[] }
+        {
+          credito_id: number;
+          base: string;
+          cuotasPagadas: CuotaInfo[];
+          cuotaCeroPagoIds: number[];
+        }
       >();
       const pedidos: Array<{ sifco: string; vencimientos: string[]; todos?: boolean }> = [];
 
@@ -239,7 +259,7 @@ export const actualizarPagosExcelRouter = new Elysia()
           .limit(1);
 
         if (!credito) {
-          datosCredito.set(sifco, { credito_id: -1, base, cuotasPagadas: [] });
+          datosCredito.set(sifco, { credito_id: -1, base, cuotasPagadas: [], cuotaCeroPagoIds: [] });
           continue;
         }
 
@@ -258,8 +278,14 @@ export const actualizarPagosExcelRouter = new Elysia()
           .orderBy(asc(cuotas_credito.numero_cuota), asc(pagos_credito.pago_id));
 
         const porCuota = new Map<number, CuotaInfo>();
+        const cuotaCeroPagoIds: number[] = [];
         for (const r of rows) {
           const c = r.cuotas_credito;
+          // Cuota 0 (desembolso): se guarda aparte para sembrarle el capital inicial.
+          if (c.numero_cuota === 0) {
+            cuotaCeroPagoIds.push(r.pagos_credito.pago_id);
+            continue;
+          }
           if (!c.pagado || c.numero_cuota <= 0) continue;
           if (!porCuota.has(c.numero_cuota)) {
             porCuota.set(c.numero_cuota, {
@@ -278,7 +304,12 @@ export const actualizarPagosExcelRouter = new Elysia()
         const cuotasPagadas = [...porCuota.values()].sort(
           (a, b) => b.numero_cuota - a.numero_cuota, // de la última a la primera
         );
-        datosCredito.set(sifco, { credito_id: credito.credito_id, base, cuotasPagadas });
+        datosCredito.set(sifco, {
+          credito_id: credito.credito_id,
+          base,
+          cuotasPagadas,
+          cuotaCeroPagoIds,
+        });
         pedidos.push({
           sifco,
           vencimientos: cuotasPagadas
@@ -289,7 +320,11 @@ export const actualizarPagosExcelRouter = new Elysia()
       }
 
       // 3️⃣ Leer del Excel solo las hojas necesarias.
-      const excelIdx = await leerPagosCarteraPorVencimiento(descarga.filePath, pedidos);
+      const excelIdx = await leerPagosCarteraPorVencimiento(
+        descarga.filePath,
+        pedidos,
+        companionToBase,
+      );
 
       // 4️⃣ Validar + construir updates (sin escribir).
       const resultados: any[] = [];
@@ -358,6 +393,27 @@ export const actualizarPagosExcelRouter = new Elysia()
             inversionistas: excel.inversionistas,
             datos: dry_run ? updates.map((u) => ({ pago_id: u.pago_id, ...u.datos })) : undefined,
           });
+
+          // Cuota 0 (desembolso): sembrar su total_restante con el capital
+          // inicial = total_restante + abono_capital de la PRIMERA cuota pagada
+          // (i === 0). Para pools, ambos vienen sumados, así que da el capital
+          // total. Solo se escribe total_restante (decisión de Daniel).
+          if (i === 0 && d.cuotaCeroPagoIds.length > 0) {
+            const inicial = Q(new Big(excel.total_restante).plus(excel.abono_capital));
+            for (const pagoId of d.cuotaCeroPagoIds) {
+              updatesGlobal.push({ pago_id: pagoId, datos: { total_restante: inicial } });
+              pagosAfectados += 1;
+            }
+            cambiosCredito.push({
+              numero_cuota: 0,
+              motivo: "cuota_cero_desembolso",
+              total_restante: inicial,
+              pagos: d.cuotaCeroPagoIds.length,
+              datos: dry_run
+                ? d.cuotaCeroPagoIds.map((id) => ({ pago_id: id, total_restante: inicial }))
+                : undefined,
+            });
+          }
         });
 
         resultados.push({
@@ -435,6 +491,7 @@ export const actualizarPagosExcelRouter = new Elysia()
         dry_run: t.Optional(t.Boolean()),
         orden_cronologico: t.Optional(t.Array(t.String())),
         omitir_sin_match: t.Optional(t.Boolean()),
+        companions: t.Optional(t.Record(t.String(), t.Array(t.String()))),
       }),
       detail: {
         summary: "Actualizar pagos pagados de créditos desde el Excel de cartera (R2)",

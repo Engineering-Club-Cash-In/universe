@@ -4,8 +4,10 @@ import * as routers from "./routers";
 import { cors } from "@elysiajs/cors";
 import { iniciarTareasProgramadas } from "../schedule";
 import { auditLogMiddleware } from "./middleware/auditLog";
+import { validationErrorMiddleware } from "./middleware/validationError";
 
 const app = new Elysia()
+  .use(validationErrorMiddleware)
   .use(cors({
     origin: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -44,7 +46,12 @@ const app = new Elysia()
   .use(routers.creditosNuevosConAbonosRouter)
   .use(routers.cuentasExtraInversionistaRouter)
   .use(routers.cierreMensualRouter)
-  .use(routers.actualizarPagosExcelRouter);
+  .use(routers.actualizarPagosExcelRouter)
+  .use(routers.reportesRouter)
+  .use(routers.gastosAdministrativosRouter)
+  .use(routers.metasFacturacionRouter)
+  .use(routers.facturacionSnapshotRouter)
+  .use(routers.ingresosCarrosRouter);
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor
 iniciarTareasProgramadas();

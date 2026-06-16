@@ -23,6 +23,7 @@ import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
+import { esPagoAplicado } from "../utils/paymentStatus";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -524,8 +525,8 @@ export const paymentRouter = new Elysia()
         };
       }
 
-      // Verificar que el pago no esté ya validado
-      if (pagoExiste.validationStatus === 'validated') {
+      // Verificar que el pago no esté ya validado (incluye abono a capital aplicado)
+      if (esPagoAplicado(pagoExiste.validationStatus)) {
         set.status = 400;
         return {
           success: false,

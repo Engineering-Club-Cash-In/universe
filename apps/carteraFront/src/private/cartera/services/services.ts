@@ -130,6 +130,7 @@ export interface Credito {
   formato_credito: string;
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
   permite_abono_capital?: boolean;
+  no_amortiza_capital?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -398,6 +399,7 @@ export interface Credito {
   royalti: string;
   mora: string;
   permite_abono_capital?: boolean;
+  no_amortiza_capital?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -684,6 +686,7 @@ export interface UpdateCreditBody {
 
   // Abono capital
   permite_abono_capital?: boolean;
+  no_amortiza_capital?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 
   // Inversionistas nuevos
@@ -2669,7 +2672,7 @@ export const createPaymentAgreement = async (
     return data;
   } catch (error: any) {
     console.error("Error creating payment agreement:", error);
-    throw new Error(error?.response?.data?.message || "Failed to create payment agreement");
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 
@@ -2713,9 +2716,7 @@ export const togglePaymentAgreementStatus = async (
     return data;
   } catch (error: any) {
     console.error("Error toggling payment agreement status:", error);
-    throw new Error(
-      error?.response?.data?.message || "Failed to toggle payment agreement status"
-    );
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 
@@ -3060,9 +3061,7 @@ export const createBoleta = async (data: CreateBoletaDTO) => {
     return response.data;
   } catch (error: any) {
     console.error("❌ Error creando boleta:", error);
-    throw new Error(
-      error.response?.data?.message || "Error al crear boleta"
-    );
+    throw error; // propaga el AxiosError para que el hook lo traduzca/filtre
   }
 };
 
@@ -3110,6 +3109,9 @@ export const getBoletas = async (filters?: GetBoletasFilters) => {
 export interface FacturarGenericoItem {
   monto: number;
   rubro: string;
+  /** Rubro del REPORTE (enum rubro_facturacion de cartera-back) para el desglose.
+   *  Opcional: si viene, cartera lo guarda en facturacion_desglose y el snapshot lo suma. */
+  rubro_desglose?: string;
 }
 
 export type EmisorKey = "CUBE" | "SE_PRESTA" | "AMJK" | "CREACION_IMAGEN" | "GRUPO_BATRO" | "AUTOCASH";
@@ -3894,6 +3896,10 @@ export interface AgregarInversionistaCreditoPayload {
   fecha_inicio_participacion?: string;
   porcentaje_cash_in?: number;
   porcentaje_inversion?: number;
+  // MODO MANUAL: créditos específicos con su monto. Si viene, el backend
+  // ignora el buscador de candidatos y opera solo sobre estos. La suma de los
+  // montos debe igualar monto_aportado.
+  manual?: { credito_id: number; monto: number }[];
 }
 
 export interface AgregarInversionistaCreditoResponse {
@@ -3927,10 +3933,10 @@ export interface CandidatesResponse {
   candidates: OtroCreditoDisponible[];
 }
 
-export async function getCreditCandidatesService(params?: { monto?: number; minimo?: number; inversionista_id?: number }): Promise<OtroCreditoDisponible[]> {
+export async function getCreditCandidatesService(params?: { monto?: number; minimo?: number; inversionista_id?: number; porcentaje?: number }): Promise<OtroCreditoDisponible[]> {
   const res = await api.get<CandidatesResponse>(
     `${API_URL}/assign-capital/candidates`,
-    { params: { monto: params?.monto, minimo: params?.minimo ?? 10, inversionista_id: params?.inversionista_id } }
+    { params: { monto: params?.monto, minimo: params?.minimo ?? 10, inversionista_id: params?.inversionista_id, porcentaje: params?.porcentaje } }
   );
   return res.data.candidates;
 }

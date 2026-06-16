@@ -223,8 +223,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                 >
                   <option value="sin_reinversion">Sin Reinversión</option>
                   <option value="reinversion_capital">Reinversión Capital</option>
-                  <option value="reinversion_interes">Reinversión Interés</option>
-                  <option value="reinversion_total">Reinversión Total</option>
+                  <option value="reinversion_total">Interés Compuesto</option>
                   <option value="reinversion_variable">Reinversión Variable</option>
                   <option value="reinversion_excedente">Reinversión Excedente</option>
                   <option value="reinversion_combinada">Reinversión Combinada</option>

@@ -36,6 +36,18 @@ const cobrosRole = ac.newRole({
 	report: ["read"],
 });
 
+const serviceCenterManagerRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
+const vehicleVerifierRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
 export const authClient = createAuthClient({
 	baseURL: import.meta.env.VITE_SERVER_URL,
 	fetchOptions: {
@@ -69,6 +81,8 @@ export const authClient = createAuthClient({
 				sales: salesRole,
 				analyst: analystRole,
 				cobros: cobrosRole,
+				service_center_manager: serviceCenterManagerRole,
+				vehicle_verifier: vehicleVerifierRole,
 			},
 		}),
 	],

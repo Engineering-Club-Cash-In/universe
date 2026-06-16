@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -405,7 +406,7 @@ export function HistorialLiquidaciones() {
         toast.error("No se pudo generar el Excel");
       }
     } catch (err: any) {
-      toast.error(err?.message ?? "Error al generar el Excel");
+      toast.error(getApiErrorMessage(err, "Error al generar el Excel"));
     } finally {
       setDescargandoExcel(false);
     }

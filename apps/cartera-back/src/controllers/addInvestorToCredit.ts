@@ -13,7 +13,11 @@ import {
   platform_users,
 } from "../database/db";
 import z from "zod";
-import { getCreditCandidates } from "./assignCapital";
+import {
+  getCreditCandidates,
+  getCreditCandidateById,
+  type CreditCandidate,
+} from "./assignCapital";
 import { sendInvestorAddedToCreditsNotification } from "@cci/email";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
@@ -69,10 +73,51 @@ const addInvestorToCreditSchema = z.object({
       "reinversion_total",
     ])
     .optional(),
+  // Se sigue aceptando por compatibilidad, pero YA NO se usa para actualizar
+  // la fecha de las filas (ni del inversionista nuevo ni del existente).
   fecha_inicio_participacion: z.string().optional(),
   // Nuevos campos para el buscador de capital
   minimo: z.number().int().positive().optional(),
-});
+  // MODO MANUAL: arreglo de { credito_id, monto }. Si viene (y no vacío) se
+  // IGNORA el buscador de candidatos y se opera SOLO sobre estos créditos,
+  // asignando a cada uno su `monto`. La suma de los montos debe igualar
+  // monto_aportado. El resto del flujo (recálculo, padre/espejo, correo) es
+  // idéntico al modo automático.
+  manual: z
+    .array(
+      z.object({
+        credito_id: z.number().int().positive(),
+        monto: z.number().positive(),
+      }),
+    )
+    .min(1)
+    .optional(),
+})
+  .superRefine((data, ctx) => {
+    if (!data.manual || data.manual.length === 0) return;
+
+    // No se permiten créditos repetidos: el loop borra y reinserta por
+    // credito_id, así que un duplicado se pisaría a sí mismo.
+    const ids = data.manual.map((m) => m.credito_id);
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["manual"],
+        message: "No se permiten créditos duplicados en 'manual'",
+      });
+    }
+
+    // La suma de los montos manuales debe igualar monto_aportado
+    // (tolerancia de 1 centavo por redondeos de coma flotante).
+    const suma = data.manual.reduce((acc, m) => acc + m.monto, 0);
+    if (Math.abs(suma - data.monto_aportado) > 0.01) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["manual"],
+        message: `La suma de los montos manuales (${suma}) debe igualar monto_aportado (${data.monto_aportado})`,
+      });
+    }
+  });
 
 // ========================================
 // RECALCULAR INVERSIONISTAS
@@ -283,8 +328,10 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       porcentaje_inversion,
       tipo_operacion,
       tipo_reinversion,
-      fecha_inicio_participacion,
+      // NOTA: fecha_inicio_participacion se sigue aceptando en el body pero
+      // ya NO se desestructura ni se usa: no actualiza la fecha de las filas.
       minimo,
+      manual,
     } = parseResult.data;
 
     // ================================================================
@@ -317,20 +364,67 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     //   - Los ordena por score DESC (mejores primero)
     //   - Incluye credito_completo con toda la data relacional
     // ================================================================
-    console.log("================================================================");
-    console.log("[addInvestorToCredit] Llamando a getCreditCandidates con:");
-    console.log(` - monto: ${monto_aportado}`);
-    console.log(` - limit (minimo): ${minimo ?? "Sin límite"}`);
-    console.log(` - inversionista_id: ${inversionista_id}`);
-    console.log("================================================================");
+    // ================================================================
+    // MODO MANUAL vs AUTOMÁTICO
+    // Si vino `manual` (arreglo no vacío) NO se usa el buscador: se opera
+    // SOLO sobre esos créditos, asignando a cada uno su `monto` propio.
+    // ================================================================
+    const esManual = Array.isArray(manual) && manual.length > 0;
 
-    let candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id);
+    // Mapa credito_id → monto a asignar (solo se llena en modo manual).
+    const montoManualPorCredito = new Map<number, Big>();
 
-    console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
-    candidatos.forEach((c, i) => {
-      console.log(` [${i}] Credito: ${c.numero_credito_sifco}, Score: ${c.score}, Capital Activo: ${c.capital_activo}`);
-    });
-    console.log("================================================================");
+    let candidatos: CreditCandidate[];
+
+    if (esManual) {
+      console.log("================================================================");
+      console.log(`[addInvestorToCredit] MODO MANUAL: ${manual!.length} crédito(s) forzado(s)`);
+
+      const armados: CreditCandidate[] = [];
+      const noEncontrados: number[] = [];
+
+      for (const item of manual!) {
+        // Mismo credito_completo que arma getCreditCandidates en su paso 8,
+        // para que el flujo aguas abajo sea idéntico.
+        const candidato = await getCreditCandidateById(item.credito_id);
+        if (!candidato) {
+          noEncontrados.push(item.credito_id);
+          continue;
+        }
+        montoManualPorCredito.set(item.credito_id, new Big(item.monto));
+        armados.push(candidato);
+        console.log(
+          ` - Credito ${item.credito_id} (${candidato.numero_credito_sifco}): asignar Q${item.monto}`,
+        );
+      }
+      console.log("================================================================");
+
+      if (noEncontrados.length > 0) {
+        set.status = 404;
+        return {
+          success: false,
+          message: `Créditos no encontrados: ${noEncontrados.join(", ")}`,
+        };
+      }
+
+      candidatos = armados;
+    } else {
+      console.log("================================================================");
+      console.log("[addInvestorToCredit] Llamando a getCreditCandidates con:");
+      console.log(` - monto: ${monto_aportado}`);
+      console.log(` - limit (minimo): ${minimo ?? "Sin límite"}`);
+      console.log(` - inversionista_id: ${inversionista_id}`);
+      console.log(` - porcentaje_inversion: ${porcentaje_inversion}`);
+      console.log("================================================================");
+
+      candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentaje_inversion);
+
+      console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
+      candidatos.forEach((c, i) => {
+        console.log(` [${i}] Credito: ${c.numero_credito_sifco}, Score: ${c.score}, Capital Activo: ${c.capital_activo}`);
+      });
+      console.log("================================================================");
+    }
 
     if (candidatos.length === 0) {
       set.status = 404;
@@ -361,7 +455,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       tipo_reinversion_solicitado: string;
     }[] = [];
 
-    if (tipo_reinversion) {
+    // En modo MANUAL se omite este filtro: el operador eligió los créditos
+    // explícitamente, así que no se descartan por modalidad del espejo.
+    if (tipo_reinversion && !esManual) {
       candidatos = candidatos.filter((candidato) => {
         const espejoActual = candidato.credito_completo?.espejo ?? [];
 
@@ -398,6 +494,90 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           message:
             "No se encontraron créditos candidatos compatibles (todos tienen alguna modalidad ya asignada)",
           descartados: filtradosPorTipoReinversion,
+        };
+      }
+    }
+
+    // ================================================================
+    // MODO MANUAL: VALIDACIONES PRE-TRANSACCIÓN
+    // En manual saltamos getCreditCandidates, así que replicamos a mano sus
+    // guards críticos sobre el snapshot ya cargado (no se toca la BD):
+    //   1. Espejo SIN operación en curso (todas las filas en "completado").
+    //      getCreditCandidates descarta los pendiente_*; si no lo hiciéramos,
+    //      el nuke&rebuild del espejo borraría esas filas pendientes y las
+    //      reinsertaría como "completado", perdiendo la compra/reinversión
+    //      en vuelo de ese crédito.
+    //   2. CUBE presente y con tope suficiente. Como el monto es una
+    //      instrucción exacta, NO asignamos parcial: si algún crédito no cabe,
+    //      fallamos TODA la operación para que el operador corrija y reintente.
+    // ================================================================
+    if (esManual) {
+      const violaciones: {
+        credito_id: number;
+        numero_credito_sifco: string;
+        razon: string;
+        cube_disponible?: string;
+        monto_solicitado: string;
+      }[] = [];
+
+      for (const candidato of candidatos) {
+        const montoSolicitado =
+          montoManualPorCredito.get(candidato.credito_id) ?? new Big(0);
+
+        // ── Guard 1: espejo sin operación en curso ──
+        // Un crédito pasa solo si TODAS sus filas de espejo están en
+        // "completado" (o no tiene filas de espejo). Si alguna está en
+        // pendiente_*, ya hay un proceso en curso y reasignarlo lo pisaría.
+        const espejoPendiente = (
+          candidato.credito_completo?.espejo ?? []
+        ).find((e: any) => e.status && e.status !== "completado");
+
+        if (espejoPendiente) {
+          violaciones.push({
+            credito_id: candidato.credito_id,
+            numero_credito_sifco: candidato.numero_credito_sifco,
+            razon: `El espejo tiene una operación en curso (status ${espejoPendiente.status}); no se puede reasignar manualmente`,
+            monto_solicitado: montoSolicitado.toString(),
+          });
+          continue;
+        }
+
+        // ── Guard 2: CUBE presente ──
+        const cubePadre = (
+          candidato.credito_completo?.inversionistas_detalle ?? []
+        ).find((inv: any) => inv.inversionista_id === CUBE_INVESTMENT_ID);
+
+        if (!cubePadre) {
+          violaciones.push({
+            credito_id: candidato.credito_id,
+            numero_credito_sifco: candidato.numero_credito_sifco,
+            razon: "El crédito no tiene a CUBE en el padre",
+            monto_solicitado: montoSolicitado.toString(),
+          });
+          continue;
+        }
+
+        // ── Guard 3: CUBE con tope suficiente ──
+        const montoCubePadre = new Big(cubePadre.monto_aportado);
+        if (montoSolicitado.gt(montoCubePadre)) {
+          violaciones.push({
+            credito_id: candidato.credito_id,
+            numero_credito_sifco: candidato.numero_credito_sifco,
+            razon:
+              "El monto solicitado supera el tope disponible de CUBE en este crédito",
+            cube_disponible: montoCubePadre.toString(),
+            monto_solicitado: montoSolicitado.toString(),
+          });
+        }
+      }
+
+      if (violaciones.length > 0) {
+        set.status = 409;
+        return {
+          success: false,
+          message:
+            "No se pudo crear la asignación manual: uno o más créditos no son elegibles (espejo con operación en curso, sin CUBE, o monto sobre el tope de CUBE)",
+          violaciones,
         };
       }
     }
@@ -485,7 +665,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
 
       for (const candidato of candidatos) {
         // ── Si ya se distribuyó todo el monto, no seguir ──
-        if (montoRestante.lte(0)) break;
+        // En modo manual cada crédito trae su propio monto independiente,
+        // así que NO cortamos por el saldo global.
+        if (!esManual && montoRestante.lte(0)) break;
 
         const { credito_id, numero_credito_sifco, credito_completo } = candidato;
 
@@ -571,9 +753,16 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         // Si el espejo tiene un CUBE con monto distinto, se le aplicará la
         // misma operación pero con su propio monto inicial.
         // ================================================================
-        const montoParaEsteCredito = montoRestante.gt(montoCubePadre)
-          ? montoCubePadre
+        // En modo manual el objetivo es el monto del arreglo para ESTE
+        // crédito; en automático es el saldo global restante. En ambos casos
+        // se topa al monto de CUBE en el padre (no se toma más de lo que tiene).
+        const montoObjetivo = esManual
+          ? (montoManualPorCredito.get(credito_id) ?? new Big(0))
           : montoRestante;
+
+        const montoParaEsteCredito = montoObjetivo.gt(montoCubePadre)
+          ? montoCubePadre
+          : montoObjetivo;
 
         // ================================================================
         // PASO 3c: DETERMINAR PORCENTAJES DEL NUEVO INVERSIONISTA
@@ -675,8 +864,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
                 ),
                 porcentaje_cash_in: porcCashIn,
                 porcentaje_inversion: porcInversion,
-                fecha_inicio_participacion:
-                  fecha_inicio_participacion ?? inv.fecha_inicio_participacion,
+                // Se conserva la fecha existente. El fecha_inicio_participacion
+                // del request se sigue aceptando pero NO se usa para actualizar.
+                fecha_inicio_participacion: inv.fecha_inicio_participacion,
               });
             } else {
               // ── Otro inversionista: se copia igual ──
@@ -702,8 +892,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
               monto_aportado: montoParaEsteCredito,
               porcentaje_cash_in: porcCashIn,
               porcentaje_inversion: porcInversion,
-              fecha_inicio_participacion:
-                fecha_inicio_participacion ?? fechaPorDefecto,
+              // Fecha por defecto (no se usa la del request).
+              fecha_inicio_participacion: fechaPorDefecto,
             });
           }
 

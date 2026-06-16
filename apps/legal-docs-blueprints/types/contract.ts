@@ -29,6 +29,17 @@ export enum ContractType {
   CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL = 'contrato_servicios_cash_in_inversor_general',
   DESIGNACION_BENEFICIARIO = 'designacion_beneficiario',
 
+  // ===== INVERSIONES SOCIEDAD =====
+  ACUERDO_INVERSION_CASH_IN_SOCIEDAD = 'acuerdo_inversion_cash_in_sociedad',
+  CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD = 'carta_confirmacion_inversion_inicial_sociedad',
+  CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD = 'carta_eleccion_modalidad_pago_reinversion_sociedad',
+  CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD = 'carta_instruccion_inversion_cartera_activa_sociedad',
+  CARTA_INCREMENTO_INVERSION_SOCIEDAD = 'carta_incremento_inversion_sociedad',
+  CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD = 'carta_instruccion_pago_anticipado_sociedad',
+  CESION_CREDITOS_SOCIEDAD = 'cesion_creditos_sociedad',
+  CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD = 'contrato_servicios_cash_in_inversor_general_sociedad',
+  DESIGNACION_BENEFICIARIO_SOCIEDAD = 'designacion_beneficiario_sociedad',
+
   // ===== CARTA PODER =====
   CARTA_CUBE_ANDRES = 'carta_cube_andres',
   CARTA_CUBE_DON_ALEX = 'carta_cube_don_alex',

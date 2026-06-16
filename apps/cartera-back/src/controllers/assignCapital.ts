@@ -143,7 +143,8 @@ function calcCapitalProximityBonus(
 export async function getCreditCandidates(
   monto?: number,
   limit?: number,
-  inversionistaIdSolicitante?: number
+  inversionistaIdSolicitante?: number,
+  porcentaje?: number
 ): Promise<CreditCandidate[]> {
   console.log("\n🔍 ========== getCreditCandidates ==========");
   console.log(`   monto: ${monto ?? "no especificado"}`);
@@ -333,6 +334,7 @@ export async function getCreditCandidates(
       credito_id: creditos_inversionistas.credito_id,
       inversionista_id: creditos_inversionistas.inversionista_id,
       monto_aportado: creditos_inversionistas.monto_aportado,
+      porcentaje_participacion_inversionista: creditos_inversionistas.porcentaje_participacion_inversionista,
       nombre: inversionistas.nombre,
     })
     .from(creditos_inversionistas)
@@ -346,6 +348,8 @@ export async function getCreditCandidates(
     .where(inArray(creditos_inversionistas.credito_id, creditoIds));
 
   const invsByCredito = new Map<number, InversionistaResult[]>();
+  const porcentajeMismatchSet = new Set<number>();
+
   for (const row of invRows) {
     if (!invsByCredito.has(row.credito_id)) {
       invsByCredito.set(row.credito_id, []);
@@ -357,6 +361,21 @@ export async function getCreditCandidates(
       monto_aportado: Number(row.monto_aportado),
       es_cube: esCube,
     });
+
+    // Detectar mismatch de porcentaje en memoria (sin round-trip extra)
+    if (
+      inversionistaIdSolicitante !== undefined &&
+      porcentaje !== undefined &&
+      row.inversionista_id === inversionistaIdSolicitante &&
+      Number(row.monto_aportado) > 0 &&
+      Number(row.porcentaje_participacion_inversionista) !== porcentaje
+    ) {
+      if (row.credito_id !== null) porcentajeMismatchSet.add(row.credito_id);
+    }
+  }
+
+  if (inversionistaIdSolicitante !== undefined && porcentaje !== undefined) {
+    console.log(`   Créditos descartados por porcentaje incompatible (inversionista propio): ${porcentajeMismatchSet.size}`);
   }
 
   // ──────────────────────────────────────────────────────────
@@ -483,6 +502,14 @@ export async function getCreditCandidates(
     if (cuotasVencidasSet.has(credito_id)) {
       console.log(
         `   ❌ [${numero_credito_sifco}] Descartado: tiene cuotas vencidas sin pagar`
+      );
+      continue;
+    }
+
+    // Filtro: inversionista ya participa con porcentaje distinto al solicitado
+    if (porcentajeMismatchSet.has(credito_id)) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: inversionista ya participa con porcentaje distinto`
       );
       continue;
     }
@@ -693,4 +720,104 @@ export async function getCreditCandidates(
   console.log("===========================================\n");
 
   return candidates;
+}
+
+// ============================================================
+// CANDIDATO MANUAL POR ID
+// ============================================================
+// Versión "a mano" de getCreditCandidates para el caso donde NO queremos
+// pasar por el buscador/scoring sino forzar un crédito específico.
+//
+// Devuelve UN candidato con EXACTAMENTE la misma forma de `credito_completo`
+// que arma getCreditCandidates en su paso 8 (credito, usuario, espejo,
+// inversionistas_detalle), para que el flujo aguas abajo (addInvestorToCredit)
+// sea idéntico. No corre ningún filtro hard ni calcula score: el caller
+// asume la responsabilidad de elegir un crédito válido.
+//
+// Devuelve null si el crédito no existe.
+// ============================================================
+export async function getCreditCandidateById(
+  creditoId: number
+): Promise<CreditCandidate | null> {
+  const [c] = await db
+    .select()
+    .from(creditos)
+    .where(eq(creditos.credito_id, creditoId));
+
+  if (!c) return null;
+
+  const u =
+    c.usuario_id != null
+      ? (
+          await db
+            .select()
+            .from(usuarios)
+            .where(eq(usuarios.usuario_id, c.usuario_id))
+        )[0]
+      : undefined;
+
+  const esp = await db
+    .select()
+    .from(creditos_inversionistas_espejo)
+    .where(eq(creditos_inversionistas_espejo.credito_id, creditoId));
+
+  const invs = await db
+    .select({
+      detalle_credito_inversionista: creditos_inversionistas,
+      nombre_inversionista: inversionistas.nombre,
+    })
+    .from(creditos_inversionistas)
+    .innerJoin(
+      inversionistas,
+      eq(
+        creditos_inversionistas.inversionista_id,
+        inversionistas.inversionista_id
+      )
+    )
+    .where(eq(creditos_inversionistas.credito_id, creditoId));
+
+  const inversionistasResult: InversionistaResult[] = invs.map((i) => ({
+    inversionista_id: i.detalle_credito_inversionista.inversionista_id,
+    nombre: i.nombre_inversionista,
+    monto_aportado: Number(i.detalle_credito_inversionista.monto_aportado),
+    es_cube: i.detalle_credito_inversionista.inversionista_id === CUBE_ID,
+  }));
+
+  // Formato real (solo informativo; no se usa aguas abajo)
+  const invsConSaldo = inversionistasResult.filter((i) => i.monto_aportado > 0);
+  const esIndividual =
+    invsConSaldo.length === 1 && invsConSaldo[0].inversionista_id === CUBE_ID;
+
+  return {
+    credito_id: c.credito_id,
+    numero_credito_sifco: c.numero_credito_sifco ?? "",
+    capital: Number(c.capital),
+    // capital_activo / cuotas / score no se calculan en modo manual:
+    // el flujo aguas abajo solo consume credito_completo.
+    capital_activo: 0,
+    formato_credito: esIndividual ? "Individual" : "Pool",
+    cuotas_pagadas: 0,
+    total_cuotas: 0,
+    inversionistas: inversionistasResult,
+    score: 0,
+    score_breakdown: {
+      crm_bonus: 0,
+      formato: 0,
+      cuotas: 0,
+      proximidad: 0,
+      reinversion: 0,
+      vencimiento_dia_30: 0,
+      total: 0,
+    },
+    capital_evaluado: 0,
+    credito_completo: {
+      credito: c,
+      usuario: u,
+      espejo: esp,
+      inversionistas_detalle: invs.map((i) => ({
+        ...i.detalle_credito_inversionista,
+        nombre: i.nombre_inversionista,
+      })),
+    },
+  };
 }

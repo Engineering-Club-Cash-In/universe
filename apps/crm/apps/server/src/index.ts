@@ -36,6 +36,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
+import { PERMISSIONS } from "./lib/roles";
 import {
 	appRouter,
 	disbursementRouter,
@@ -92,9 +93,14 @@ app.use(
 				return origin;
 			}
 
-			// En producción, usar el CORS_ORIGIN específico
-			const productionOrigin = process.env.CORS_ORIGIN;
-			if (productionOrigin && origin === productionOrigin) {
+			// En producción, usar los origin específicos configurados
+			const allowedOrigins = [
+				process.env.CORS_ORIGIN,
+				process.env.FRONT_URL,
+				process.env.TALLER_URL,
+			].filter((o): o is string => Boolean(o && o !== "*"));
+
+			if (origin && allowedOrigins.includes(origin)) {
 				return origin;
 			}
 
@@ -188,13 +194,17 @@ app.get("/", (c) => {
 // Vehicle photo upload endpoint
 app.post("/api/upload-vehicle-photo", async (c) => {
 	try {
-		// Get the context (optional for this endpoint)
+		// Get the context and require authenticated vehicle access.
 		const context = await createContext({ context: c });
+		const userRole = context.session?.user?.role;
 
-		// Public endpoint - no auth required
-		// if (!context.session?.user?.id || !context.session?.user?.role) {
-		// 	return c.json({ error: "No autorizado" }, 401);
-		// }
+		if (!context.session?.user?.id) {
+			return c.json({ error: "No autorizado" }, 401);
+		}
+
+		if (!userRole || !PERMISSIONS.canAccessVehicles(userRole)) {
+			return c.json({ error: "No tienes permiso para subir fotos" }, 403);
+		}
 
 		// Parse multipart form data
 		const formData = await c.req.formData();

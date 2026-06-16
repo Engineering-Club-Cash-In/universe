@@ -9,6 +9,7 @@ import {
 	Calculator,
 	Car,
 	ChevronDown,
+	Clock,
 	Database,
 	FileText,
 	Gavel,
@@ -16,6 +17,7 @@ import {
 	Landmark,
 	LayoutDashboard,
 	MessageSquare,
+	Percent,
 	Scale,
 	Settings,
 	Target,
@@ -149,6 +151,53 @@ export default function Header() {
 											</DropdownMenuItem>
 										</>
 									)}
+									{userRole &&
+										PERMISSIONS.canAccessTiempoCierreReport(userRole) && (
+											<>
+												<DropdownMenuSeparator />
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/reportes/tiempo-cierre"
+														className="cursor-pointer"
+													>
+														<Clock className="mr-2 h-4 w-4" />
+														Tiempo Cierre Crédito
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
+									{userRole &&
+										PERMISSIONS.canAccessPorcentajeEfectividadReport(
+											userRole,
+										) && (
+											<>
+												<DropdownMenuSeparator />
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/reportes/porcentaje-efectividad"
+														className="cursor-pointer"
+													>
+														<Percent className="mr-2 h-4 w-4" />
+														Porcentaje Efectividad
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
+									{userRole &&
+										PERMISSIONS.canAccessMetaColocacionReport(userRole) && (
+											<>
+												<DropdownMenuSeparator />
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/reportes/meta-colocacion"
+														className="cursor-pointer"
+													>
+														<Target className="mr-2 h-4 w-4" />
+														Meta Colocación
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}
@@ -167,7 +216,7 @@ export default function Header() {
 							</Button>
 						)}
 
-						{/* Vehículos Dropdown - Visible para todos los roles */}
+						{/* Vehículos */}
 						{session && userRole && PERMISSIONS.canAccessVehicles(userRole) && (
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
@@ -237,6 +286,17 @@ export default function Header() {
 												Metas de Mora
 											</Link>
 										</DropdownMenuItem>
+									)}
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<>
+											<DropdownMenuSeparator />
+											<DropdownMenuItem asChild>
+												<Link to="/cobros/reportes" className="cursor-pointer">
+													<BarChart3 className="mr-2 h-4 w-4" />
+													Reportes
+												</Link>
+											</DropdownMenuItem>
+										</>
 									)}
 								</DropdownMenuContent>
 							</DropdownMenu>

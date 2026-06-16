@@ -33,6 +33,7 @@ export const assignCapitalRouter = new Elysia()
       solo_insertable: soloInsertableStr,
       minimo: minimoStr,
       inversionista_id: inversionistaIdStr,
+      porcentaje: porcentajeStr,
     } = query as Record<string, string | undefined>;
 
     // ── Validar monto ──────────────────────────────────────────
@@ -77,8 +78,19 @@ export const assignCapitalRouter = new Elysia()
       }
     }
 
+    // ── Validar porcentaje ─────────────────────────────────────
+    let porcentaje: number | undefined;
+    if (porcentajeStr !== undefined) {
+      const parsed = Number(porcentajeStr);
+      if (isNaN(parsed) || parsed <= 0 || parsed > 100) {
+        set.status = 400;
+        return { ok: false, message: "El parámetro 'porcentaje' debe ser un número mayor a 0 y máximo 100." };
+      }
+      porcentaje = parsed;
+    }
+
     try {
-      const allCandidates = await getCreditCandidates(monto, minimo, inversionista_id);
+      const allCandidates = await getCreditCandidates(monto, minimo, inversionista_id, porcentaje);
 
       let result: CreditCandidate[];
 

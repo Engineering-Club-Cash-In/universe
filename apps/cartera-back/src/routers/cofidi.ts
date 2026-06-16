@@ -199,7 +199,8 @@ if (facturasExistentes.length > 0) {
       if (
         pagoData.validationStatus !== "validated" &&
         pagoData.validationStatus !== "reset" &&
-        pagoData.validationStatus !== "capital"
+        pagoData.validationStatus !== "capital" &&
+        pagoData.validationStatus !== "capital_validated"
       ) {
         set.status = 400;
         console.error(
@@ -932,6 +933,16 @@ if (facturasExistentes.length > 0) {
       // ============================================
       const hayInteresEnPago = new Big(pagoData.abono_interes || "0").gt(0);
 
+      // 🧾 Interés que finalmente factura CUBE (residuo + cash_in), CON IVA.
+      //    Se setea dentro de cada flujo (estándar/prorrateado) y se usa al
+      //    final para guardar el rubro INTERES en facturacion_desglose.
+      let interesCubeConIva = new Big(0);
+      // Marca que el flujo de interés realmente se calculó (NO abortó). Si
+      // queda en false con interés > 0 (p. ej. abort por espejo sin fecha de
+      // participación), NO escribimos los rubros INTERES / INTERES_INVERSIONISTAS,
+      // para no atribuir todo el interés a inversionistas con interesCubeConIva=0.
+      let interesFlujoOk = false;
+
       if (!hayInteresEnPago) {
         console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses (ambos flujos)");
       } else if (tieneOperacionesPendientesFacturar) {
@@ -1278,6 +1289,10 @@ if (facturasExistentes.length > 0) {
 
           // Total que va a CUBE = lo de las DOS ventanas sumado.
           const totalCubeFinal = repartoAntes.totalCubeParcial.plus(repartoDespues.totalCubeParcial);
+
+          // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
+          interesCubeConIva = totalCubeFinal;
+          interesFlujoOk = true;
 
           // Set con todos los IDs de inversionistas que aparecieron en cualquier
           // ventana (algunos podrían tener parte solo en una de las dos).
@@ -1747,6 +1762,10 @@ if (facturasExistentes.length > 0) {
 
         const totalCube = cubePropio.plus(cashInAcumulado);
 
+        // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
+        interesCubeConIva = totalCube;
+        interesFlujoOk = true;
+
         console.log(`   📊 Cash-in acumulado de otros: Q${cashInAcumulado.toFixed(2)}`);
         console.log(`   💵 Total CUBE: Q${totalCube.toFixed(2)} (residuo + cash_in)`);
 
@@ -1846,12 +1865,135 @@ if (facturasExistentes.length > 0) {
         `✅ Exitosas: ${facturasExitosas.length} | ❌ Errores: ${facturasConError.length}`
       );
 
-      if (facturasExitosas.length === 0) {
+      // ⛔ Si NO se generó ninguna factura y hubo errores de certificación, es un
+      //    fallo real: NO escribimos el desglose (no se facturó nada de verdad).
+      if (facturasExitosas.length === 0 && facturasConError.length > 0) {
         set.status = 500;
         return {
           success: false,
           error: "No se pudo generar ninguna factura",
           errores: facturasConError,
+        };
+      }
+
+      // ============================================
+      // 🧾 DESGLOSE DE FACTURACIÓN (reporte diario)
+      //    Guarda 1 fila por (pago, rubro) con LO QUE FACTURA CUBE, con IVA.
+      //    - INTERES = interesCubeConIva (residuo + cash_in, ya con IVA).
+      //    - Resto de rubros = abono del pago tratado como total con IVA.
+      //    - CAPITAL no se factura: factura_id NULL, monto_iva 0.
+      //    - fecha_aplicado_gt se calcula en SQL (zona America/Guatemala).
+      //    Best-effort: si falla, NO rompe la facturación (solo loguea).
+      // ============================================
+      let rubrosGuardados = 0;
+      try {
+        const rubrosDesglose: {
+          rubro: string;
+          monto_total: string;
+          monto_iva: string;
+        }[] = [];
+
+        const pushRubro = (
+          rubro: string,
+          totalConIva: any,
+          gravadoIva: boolean
+        ) => {
+          const t = new Big(totalConIva || 0);
+          if (t.lte(0)) return;
+          const iva = gravadoIva
+            ? new Big(calcularIvaExacto(parseFloat(t.toFixed(2))).montoImpuesto)
+            : new Big(0);
+          rubrosDesglose.push({
+            rubro,
+            monto_total: t.toFixed(2),
+            monto_iva: iva.toFixed(2),
+          });
+        };
+
+        // 💰 Capital de CUBE: NO es el abono_capital total del pago, sino la
+        //    porción de CUBE en pagos_credito_inversionistas (el capital sí se
+        //    reparte y se guarda por inversionista). Solo guardamos lo de CUBE.
+        const capCubeRes = await db.execute(sql`
+          SELECT COALESCE(SUM(pci.abono_capital), 0) AS capital_cube
+          FROM cartera.pagos_credito_inversionistas pci
+          JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+          WHERE pci.pago_id = ${pago_id}
+            AND UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
+        `);
+        const capitalCube = (capCubeRes as any).rows?.[0]?.capital_cube ?? 0;
+
+        // 🆕 Interés que se factura a inversionistas (no-CUBE) = interés total
+        //    del pago − lo que factura CUBE, CON IVA. Un solo registro agregado
+        //    por pago (sin importar cuántos inversionistas se lo repartan).
+        //    factura_id NULL: no es factura de CUBE, es el residuo de los inv.
+        const interesTotalConIvaPago = new Big(pagoData.abono_interes || 0).plus(
+          new Big(pagoData.abono_iva_12 || 0)
+        );
+        const interesInversionistasConIva =
+          interesTotalConIvaPago.minus(interesCubeConIva);
+
+        pushRubro("CAPITAL", capitalCube, false); // solo capital de CUBE (de pci), sin IVA
+        // Solo si el flujo de interés se calculó OK (no abortó). Si abortó,
+        // interesCubeConIva quedó en 0 y NO debemos volcar todo el interés a
+        // INTERES_INVERSIONISTAS → dejamos ambos rubros sin escribir.
+        if (interesFlujoOk) {
+          pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
+          pushRubro("INTERES_INVERSIONISTAS", interesInversionistasConIva, true); // residuo no-CUBE, con IVA
+        }
+        pushRubro("MEMBRESIA", pagoData.membresias_pago, true);
+        pushRubro("SEGURO", pagoData.abono_seguro, true);
+        pushRubro("GPS", pagoData.abono_gps, true);
+        pushRubro("MORA", pagoData.mora, true);
+        pushRubro("OTROS", pagoData.otros, true);
+
+        await db.transaction(async (tx) => {
+          // Reemplazar para que re-facturar no duplique ni deje rubros viejos.
+          await tx.execute(
+            sql`DELETE FROM cartera.facturacion_desglose WHERE pago_id = ${pago_id}`
+          );
+          for (const r of rubrosDesglose) {
+            await tx.execute(sql`
+              INSERT INTO cartera.facturacion_desglose
+                (pago_id, factura_id, rubro, monto_total, monto_iva, fecha_aplicado_gt)
+              VALUES (
+                ${pago_id},
+                NULL,
+                ${r.rubro}::cartera.rubro_facturacion,
+                ${r.monto_total},
+                ${r.monto_iva},
+                (SELECT (COALESCE(pc.fecha_aplicado, pc.fecha_pago) AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date
+                   FROM cartera.pagos_credito pc WHERE pc.pago_id = ${pago_id})
+              )
+            `);
+          }
+        });
+
+        rubrosGuardados = rubrosDesglose.length;
+        console.log(
+          `🧾 Desglose facturación guardado: ${rubrosDesglose.length} rubro(s) para pago ${pago_id}`
+        );
+      } catch (desgloseError: any) {
+        console.error(
+          `⚠️ No se pudo guardar facturacion_desglose para pago ${pago_id} (NO afecta la facturación):`,
+          desgloseError?.message
+        );
+      }
+
+      // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
+      // El desglose ya quedó guardado arriba (capital de CUBE).
+      if (facturasExitosas.length === 0) {
+        return {
+          success: true,
+          data: {
+            pago_id,
+            cliente: { nombre: pagoData.nombre, nit: pagoData.nit },
+            total_facturas: 0,
+            facturas: [],
+          },
+          mensaje:
+            rubrosGuardados > 0
+              ? "Sin DTE que emitir (p. ej. solo capital). Guardado en el registro diario de facturación."
+              : "Sin DTE que emitir y sin montos para el registro diario.",
         };
       }
 
@@ -2298,6 +2440,21 @@ if (facturasExistentes.length > 0) {
         .returning();
 
       console.log('✅ Estado de factura actualizado en base de datos');
+
+      // 🧾 Si la factura tenía desglose GENÉRICO (para el reporte diario), borrarlo
+      //    para que no siga sumando en el snapshot tras la anulación. Solo toca las
+      //    filas genéricas (pago_id IS NULL); las ligadas a un pago no se tocan.
+      //    Best-effort: la factura ya quedó anulada, esto no debe romper la respuesta.
+      try {
+        await db.execute(
+          sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${facturaAnulada.factura_id} AND pago_id IS NULL`
+        );
+      } catch (limpiezaError) {
+        console.error(
+          '⚠️ No se pudo limpiar el desglose genérico de la factura anulada (NO afecta la anulación):',
+          (limpiezaError as Error).message
+        );
+      }
 
       // ============================================
       // 8️⃣ RESPUESTA EXITOSA
@@ -3140,6 +3297,80 @@ if (facturasExistentes.length > 0) {
         console.log(`✅ Serie: ${resultado.serie}-${resultado.numero}`);
         console.log(`✅ UUID: ${resultado.uuid}`);
 
+        // 🧾 Desglose de la factura GENÉRICA para el reporte diario (best-effort,
+        //    NO afecta la facturación). Solo para items que traen `rubro_desglose`.
+        //    La categoría (columna de producto del reporte) se resuelve por el NIT
+        //    del receptor → usuario con créditos → usuarios.categoria.
+        try {
+          const RUBROS_VALIDOS = new Set([
+            "CAPITAL", "INTERES", "MEMBRESIA", "SEGURO", "GPS",
+            "MORA", "OTROS", "INTERES_INVERSIONISTAS", "ROYALTY",
+          ]);
+          const itemsConRubro = (itemsInput as any[]).filter(
+            (it) =>
+              it.rubro_desglose &&
+              RUBROS_VALIDOS.has(String(it.rubro_desglose).toUpperCase())
+          );
+          if (itemsConRubro.length > 0 && resultado.factura_id) {
+            // Categoría del receptor: usuario (con créditos) por NIT; el del crédito más reciente.
+            const catRes = await db.execute(sql`
+              SELECT u.categoria
+              FROM cartera.usuarios u
+              WHERE upper(regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g'))
+                  = upper(regexp_replace(${nitNormalizado}, '[^0-9A-Za-z]', '', 'g'))
+                AND EXISTS (SELECT 1 FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id)
+              ORDER BY (SELECT MAX(c.fecha_creacion) FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id) DESC NULLS LAST
+              LIMIT 1
+            `);
+            const categoria = (catRes as any).rows?.[0]?.categoria ?? null;
+
+            // Agrupar por rubro (varios items pueden compartir rubro). monto = total con IVA.
+            const porRubro: Record<string, Big> = {};
+            for (const it of itemsConRubro) {
+              const k = String(it.rubro_desglose).toUpperCase();
+              porRubro[k] = (porRubro[k] ?? new Big(0)).plus(new Big(it.monto || 0));
+            }
+
+            await db.transaction(async (tx) => {
+              // Reemplazar para que re-facturar no duplique.
+              await tx.execute(
+                sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${resultado.factura_id} AND pago_id IS NULL`
+              );
+              for (const [rubro, montoBig] of Object.entries(porRubro)) {
+                if (montoBig.lte(0)) continue;
+                const iva = new Big(
+                  calcularIvaExacto(parseFloat(montoBig.toFixed(2))).montoImpuesto
+                );
+                await tx.execute(sql`
+                  INSERT INTO cartera.facturacion_desglose
+                    (pago_id, factura_id, rubro, monto_total, monto_iva, fecha_aplicado_gt, categoria)
+                  VALUES (
+                    NULL,
+                    ${resultado.factura_id},
+                    ${rubro}::cartera.rubro_facturacion,
+                    ${montoBig.toFixed(2)},
+                    ${iva.toFixed(2)},
+                    -- fecha_emision YA se guarda en hora Guatemala (certificarFacturaHelper
+                    -- le resta 6h antes de persistir), así que se usa directo SIN volver a
+                    -- convertir de UTC→GT (eso shifteaba las genéricas de 00:00–05:59 al día anterior).
+                    (SELECT fecha_emision::date
+                       FROM cartera.facturas_electronicas WHERE factura_id = ${resultado.factura_id}),
+                    ${categoria}
+                  )
+                `);
+              }
+            });
+            console.log(
+              `🧾 Desglose genérico guardado: ${Object.keys(porRubro).length} rubro(s) para factura ${resultado.factura_id} (categoria=${categoria ?? "—"})`
+            );
+          }
+        } catch (desgloseError: any) {
+          console.error(
+            `⚠️ No se pudo guardar el desglose genérico (NO afecta la facturación):`,
+            desgloseError?.message
+          );
+        }
+
         return {
           success: true,
           data: {
@@ -3178,6 +3409,10 @@ if (facturasExistentes.length > 0) {
           t.Object({
             monto: t.Number(),
             rubro: t.String(),
+            // Opcional: rubro del REPORTE (enum rubro_facturacion) para el desglose.
+            // Si viene, se guarda en facturacion_desglose y el snapshot lo suma.
+            // Si no viene, la factura no entra al reporte (mejor no contar que mal).
+            rubro_desglose: t.Optional(t.String()),
           })
         ),
         created_by: t.Optional(t.Number()),
@@ -3225,14 +3460,15 @@ if (facturasExistentes.length > 0) {
           conditions.push(eq(facturas_electronicas.receptor_nit, nit));
         }
 
+        // Offset explícito de Guatemala (UTC-6 fijo, sin horario de verano):
+        // sin él, "YYYY-MM-DD" se interpreta en la zona horaria del proceso
+        // (UTC en el contenedor) y el rango se corre 6 horas.
         if (fecha_inicio) {
-          conditions.push(gte(facturas_electronicas.fecha_emision, new Date(fecha_inicio)));
+          conditions.push(gte(facturas_electronicas.fecha_emision, new Date(`${fecha_inicio}T00:00:00-06:00`)));
         }
 
         if (fecha_fin) {
-          const fin = new Date(fecha_fin);
-          fin.setHours(23, 59, 59, 999);
-          conditions.push(lte(facturas_electronicas.fecha_emision, fin));
+          conditions.push(lte(facturas_electronicas.fecha_emision, new Date(`${fecha_fin}T23:59:59.999-06:00`)));
         }
 
         if (tipo === "pago") {

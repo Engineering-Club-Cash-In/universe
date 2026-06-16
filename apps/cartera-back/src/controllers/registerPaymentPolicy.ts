@@ -1,15 +1,81 @@
 import Big from "big.js";
 
+type BigInput = number | string | Big;
+
 export const getCuotaIdForPaymentInsert = (
   cuotaId: number | null | undefined
 ) => cuotaId ?? null;
 
-type BigInput = number | string | Big;
+export const getRequestedInstallmentFloor = (_requestedInstallment: number) => 1;
+
+export const shouldMarkInstallmentPaymentPaid = ({
+  allRemainingZero,
+  hasExistingInstallmentPayment,
+  installmentAmountApplied,
+}: {
+  allRemainingZero: boolean;
+  hasExistingInstallmentPayment: boolean;
+  installmentAmountApplied: number | string;
+}) =>
+  allRemainingZero &&
+  hasExistingInstallmentPayment &&
+  Number(installmentAmountApplied) > 0;
+
+export const shouldApplyStaleZeroRestanteAdjustment = ({
+  hasExistingPayment,
+  isFirstProcessedInstallment,
+  isExactSingleInstallmentPayment,
+  hasValidatedPayments,
+  hasLastPartialPaymentWithRemaining,
+  allRemainingZero,
+  missingAgainstInstallment,
+  availableRemaining,
+}: {
+  hasExistingPayment: boolean;
+  isFirstProcessedInstallment: boolean;
+  isExactSingleInstallmentPayment: boolean;
+  hasValidatedPayments: boolean;
+  hasLastPartialPaymentWithRemaining: boolean;
+  allRemainingZero: boolean;
+  missingAgainstInstallment: BigInput;
+  availableRemaining: BigInput;
+}) =>
+  hasExistingPayment &&
+  isFirstProcessedInstallment &&
+  isExactSingleInstallmentPayment &&
+  !hasValidatedPayments &&
+  !hasLastPartialPaymentWithRemaining &&
+  allRemainingZero &&
+  new Big(missingAgainstInstallment).gt(0) &&
+  new Big(availableRemaining).gte(missingAgainstInstallment);
+
+export const getSpecialPaymentCuotaId = ({
+  requestedInstallment,
+  pendingInstallments,
+}: {
+  requestedInstallment: number;
+  pendingInstallments: { numeroCuota: number; cuotaId: number }[];
+}) =>
+  pendingInstallments.find(
+    (installment) => installment.numeroCuota === requestedInstallment
+  )?.cuotaId ??
+  pendingInstallments[0]?.cuotaId ??
+  0;
+
+export const getSpecialPaymentInstallmentFields = () => ({
+  montoAplicado: 0,
+  pagado: true,
+});
 
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;
-  /** Σ monto_aplicado de los pagos hermanos vivos (validated/pending). */
+  /**
+   * Σ de los rubros de cuota aplicados por los pagos hermanos vivos
+   * (validated/pending): capital + interés + IVA + seguro + GPS + membresías.
+   * Excluye mora/otros y abonos directos a capital (no son parte de la cuota).
+   * Ver `sumarAplicadoACuota`.
+   */
   aplicadoPrevioCuota: BigInput;
   // Saldos que indica la fila de pago vigente (pueden estar desincronizados).
   filaInteresRestante: BigInput;
@@ -38,6 +104,45 @@ export type SaldoCuotaInput = {
   hermanosIva: BigInput;
 };
 
+/** Fila de pago hermano con sus rubros de cuota (los `abono_*`). */
+export type RubrosCuotaRow = {
+  abono_capital?: BigInput | null;
+  abono_interes?: BigInput | null;
+  abono_iva_12?: BigInput | null;
+  abono_seguro?: BigInput | null;
+  abono_gps?: BigInput | null;
+  membresias_pago?: BigInput | null;
+};
+
+/**
+ * Σ de lo que los pagos hermanos aplicaron a la CUOTA contractual
+ * (`credito.cuota`): capital + interés + IVA + seguro + GPS + membresías.
+ *
+ * A propósito NO usa `monto_aplicado` ni suma `mora`/`otros`. Esos buckets no
+ * son parte de la cuota:
+ *  - Las filas de sólo mora/otros traen TODOS los `abono_*` en 0, así que
+ *    aportan 0 (su `monto_aplicado` legacy = mora+otros, que no es cuota).
+ *  - Los abonos directos a capital viven en `validationStatus = "capital"` y
+ *    ni siquiera entran al set de hermanos vivos.
+ *
+ * Para una fila de cuota normal `monto_aplicado` == esta suma, así que en datos
+ * limpios es equivalente; sólo deja de inflar el faltante con mora/otros, que
+ * antes colapsaba `saldoRealCuota` a 0 y disparaba un rechazo falso de
+ * "sobre-aplicación".
+ */
+export const sumarAplicadoACuota = (rows: RubrosCuotaRow[]): Big =>
+  rows.reduce(
+    (acc, r) =>
+      acc
+        .plus(new Big(r.abono_capital ?? 0))
+        .plus(new Big(r.abono_interes ?? 0))
+        .plus(new Big(r.abono_iva_12 ?? 0))
+        .plus(new Big(r.abono_seguro ?? 0))
+        .plus(new Big(r.abono_gps ?? 0))
+        .plus(new Big(r.membresias_pago ?? 0)),
+    new Big(0)
+  );
+
 export type SaldoCuotaNeto = {
   saldoRealCuota: Big;
   interesRestante: Big;
@@ -52,7 +157,9 @@ export type SaldoCuotaNeto = {
  * Saldo NETO de una cuota para distribuir un pago, robusto ante `*_restante`
  * desincronizados entre pagos hermanos.
  *
- * - Faltante real de la cuota = monto_cuota − Σ monto_aplicado hermanos.
+ * - Faltante real de la cuota = monto_cuota − Σ rubros de cuota de hermanos
+ *   (capital+interés+IVA+seguro+GPS+membresías; ver `sumarAplicadoACuota`).
+ *   NO se cuenta mora/otros ni abonos directos a capital: no son cuota.
  * - Rubros planos (seguro/GPS/membresías) = mín(saldo de la fila, objetivo −
  *   ya abonado por hermanos), nunca negativo. Así un rubro ya cubierto por un
  *   pago previo no se vuelve a aplicar aunque la fila vigente lo muestre lleno.

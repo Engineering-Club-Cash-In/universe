@@ -71,6 +71,8 @@ import { CrearBoletaInversionista } from "./investorPayment";
 import { InvestorDocumentsModal } from "./investorDocuments";
 import { toast } from "sonner";
 import { useAgregarInversionistaCredito } from "../hooks/useAgregarInversionistaCredito";
+import { Switch } from "@/components/ui/switch";
+import { BuscadorUsuarioSifco } from "./searchByNameSifco";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
 
@@ -334,7 +336,6 @@ export function TableInvestors() {
   const [compraCarteraOpen, setCompraCarteraOpen] = useState(false);
   const [compraCarteraInvId, setCompraCarteraInvId] = useState<number | null>(null);
   const [compraCarteraMonto, setCompraCarteraMonto] = useState("");
-  const [compraCarteraFecha, setCompraCarteraFecha] = useState("");
   const [compraCarteraPctInv, setCompraCarteraPctInv] = useState("70");
   const [compraCarteraPctCashIn, setCompraCarteraPctCashIn] = useState("30");
   const [compraCarteraTipoReinversion, setCompraCarteraTipoReinversion] =
@@ -346,8 +347,13 @@ export function TableInvestors() {
   const [compraCarteraTipoOperacion, setCompraCarteraTipoOperacion] = useState<
     "compra_cartera" | "reinversion"
   >("compra_cartera");
-  // Fecha por defecto bloqueada (diciembre 2025).
-  const FECHA_INICIO_DEFAULT = "2025-12-01";
+  // MODO MANUAL: en vez de dejar que el backend busque candidatos, el usuario
+  // elige créditos específicos (por SIFCO/nombre) y le asigna un monto a cada
+  // uno. La suma de los montos es el monto_aportado total.
+  const [compraCarteraManual, setCompraCarteraManual] = useState(false);
+  const [compraCarteraManualList, setCompraCarteraManualList] = useState<
+    { credito_id: number; numero_credito_sifco: string; nombre: string; monto: string }[]
+  >([]);
   const agregarInvCredito = useAgregarInversionistaCredito();
 
   const [incluirLiquidados, setIncluirLiquidados] = useState(false);
@@ -559,8 +565,8 @@ export function TableInvestors() {
   const handleAbrirCompraCartera = (inv: any) => {
     setCompraCarteraInvId(inv.inversionista_id);
     setCompraCarteraMonto("");
-    // Default compra_cartera → fecha de hoy (editable)
-    setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
+    setCompraCarteraManual(false);
+    setCompraCarteraManualList([]);
     setCompraCarteraTipoReinversion("sin_reinversion");
     setCompraCarteraTipoOperacion("compra_cartera");
     // Calcular moda del porcentaje de participación desde créditos existentes
@@ -584,6 +590,39 @@ export function TableInvestors() {
     }
     setCompraCarteraOpen(true);
   };
+
+  // ── Helpers del modo manual (elegir créditos específicos + monto) ──
+  const handleManualAddCredito = (opt: { sifco: string; nombre: string; credito_id: number }) => {
+    setCompraCarteraManualList((prev) =>
+      prev.some((c) => c.credito_id === opt.credito_id)
+        ? prev
+        : [
+            ...prev,
+            {
+              credito_id: opt.credito_id,
+              numero_credito_sifco: opt.sifco,
+              nombre: opt.nombre,
+              monto: "",
+            },
+          ],
+    );
+  };
+  const handleManualRemoveCredito = (creditoId: number) => {
+    setCompraCarteraManualList((prev) => prev.filter((c) => c.credito_id !== creditoId));
+  };
+  const handleManualMontoChange = (creditoId: number, monto: string) => {
+    setCompraCarteraManualList((prev) =>
+      prev.map((c) => (c.credito_id === creditoId ? { ...c, monto } : c)),
+    );
+  };
+  const montoTotalManual = compraCarteraManualList.reduce(
+    (s, c) => s + (Number(c.monto) || 0),
+    0,
+  );
+  // En manual: hay al menos un crédito y todos con monto > 0.
+  const manualValido =
+    compraCarteraManualList.length > 0 &&
+    compraCarteraManualList.every((c) => Number(c.monto) > 0);
 
   // Inversionista objetivo para los botones del header: el de la lista filtrada (currentInv)
   // o, si no tiene créditos y no aparece en la lista, el del catálogo (para igual permitir editar/comprar)
@@ -2588,7 +2627,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           }
         }}
       >
-        <DialogContent className="!bg-white sm:max-w-md z-[60] border border-gray-200 shadow-2xl rounded-2xl">
+        <DialogContent className="!bg-white sm:max-w-xl z-[60] border border-gray-200 shadow-2xl rounded-2xl">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold text-gray-900">
               {compraCarteraTipoOperacion === "reinversion"
@@ -2596,7 +2635,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 : "Compra de Cartera"}
             </DialogTitle>
             <DialogDescription className="text-gray-500 text-sm">
-              Ingresa el monto, porcentajes y la fecha de inicio de participación
+              {compraCarteraManual
+                ? "Elige los créditos, asigna el monto a cada uno y los porcentajes"
+                : "Ingresa el monto y los porcentajes"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -2605,7 +2646,6 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 type="button"
                 onClick={() => {
                   setCompraCarteraTipoOperacion("compra_cartera");
-                  setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
                 }}
                 className={`px-3 py-2 text-sm font-medium rounded-lg transition-all ${
                   compraCarteraTipoOperacion === "compra_cartera"
@@ -2619,7 +2659,6 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 type="button"
                 onClick={() => {
                   setCompraCarteraTipoOperacion("reinversion");
-                  setCompraCarteraFecha(FECHA_INICIO_DEFAULT);
                 }}
                 className={`px-3 py-2 text-sm font-medium rounded-lg transition-all ${
                   compraCarteraTipoOperacion === "reinversion"
@@ -2658,21 +2697,113 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <label htmlFor="compra-monto" className="text-sm font-medium text-gray-700">
-                Monto aportado
-              </label>
-              <Input
-                id="compra-monto"
-                type="number"
-                min={0.01}
-                step="0.01"
-                placeholder="0.00"
-                value={compraCarteraMonto}
-                onChange={(e) => setCompraCarteraMonto(e.target.value)}
-                className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+            {/* Toggle: Asignación manual */}
+            <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <div className="pr-3">
+                <label htmlFor="compra-manual" className="text-sm font-medium text-gray-700 cursor-pointer">
+                  Asignación manual
+                </label>
+                <p className="text-xs text-gray-500">
+                  Elige los créditos y asigna el monto a cada uno.
+                </p>
+              </div>
+              <Switch
+                id="compra-manual"
+                checked={compraCarteraManual}
+                onCheckedChange={(v) => {
+                  setCompraCarteraManual(v);
+                  setCompraCarteraManualList([]);
+                }}
               />
             </div>
+
+            {compraCarteraManual ? (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Créditos</label>
+                {/* Mismo buscador de la página de pago (busca por nombre o SIFCO) */}
+                <BuscadorUsuarioSifco
+                  onSelect={() => {}}
+                  onSelectOption={(opt) =>
+                    handleManualAddCredito({
+                      sifco: opt.sifco,
+                      nombre: opt.nombre,
+                      credito_id: opt.credito_id,
+                    })
+                  }
+                />
+                {compraCarteraManualList.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">
+                    Busca por nombre o SIFCO y agrégalos a la lista.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                    {compraCarteraManualList.map((c) => (
+                      <div
+                        key={c.credito_id}
+                        className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 py-2"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-mono text-gray-500 truncate">
+                            {c.numero_credito_sifco}
+                          </p>
+                          <p className="text-xs font-semibold text-gray-800 truncate">
+                            {c.nombre}
+                          </p>
+                        </div>
+                        <Input
+                          type="number"
+                          min={0.01}
+                          step="0.01"
+                          placeholder="0.00"
+                          value={c.monto}
+                          onChange={(e) =>
+                            handleManualMontoChange(c.credito_id, e.target.value)
+                          }
+                          className="w-28 h-8 text-sm !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleManualRemoveCredito(c.credito_id)}
+                          className="p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          title="Quitar"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between px-1 pt-1">
+                      <span className="text-xs text-gray-500">
+                        {compraCarteraManualList.length} crédito
+                        {compraCarteraManualList.length !== 1 ? "s" : ""}
+                      </span>
+                      <span className="text-sm font-bold text-gray-800 tabular-nums">
+                        Total: Q
+                        {montoTotalManual.toLocaleString("es-GT", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label htmlFor="compra-monto" className="text-sm font-medium text-gray-700">
+                  Monto aportado
+                </label>
+                <Input
+                  id="compra-monto"
+                  type="number"
+                  min={0.01}
+                  step="0.01"
+                  placeholder="0.00"
+                  value={compraCarteraMonto}
+                  onChange={(e) => setCompraCarteraMonto(e.target.value)}
+                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label htmlFor="compra-pct-inv" className="text-sm font-medium text-gray-700">
@@ -2719,24 +2850,6 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 />
               </div>
             </div>
-            <div>
-              <label htmlFor="compra-fecha" className="text-sm font-medium text-gray-700">
-                Fecha inicio participación
-              </label>
-              <Input
-                id="compra-fecha"
-                type="date"
-                value={compraCarteraFecha}
-                onChange={(e) => setCompraCarteraFecha(e.target.value)}
-                disabled={compraCarteraTipoOperacion === "reinversion"}
-                readOnly={compraCarteraTipoOperacion === "reinversion"}
-                className={
-                  compraCarteraTipoOperacion === "reinversion"
-                    ? "mt-1 !bg-gray-100 !border-gray-300 !text-gray-700 cursor-not-allowed focus:!border-gray-300 focus:!ring-0"
-                    : "mt-1 !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
-                }
-              />
-            </div>
           </div>
           <DialogFooter>
             <button
@@ -2751,20 +2864,35 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             </button>
             <button
               type="button"
-              disabled={agregarInvCredito.isPending || !compraCarteraMonto || Number(compraCarteraMonto) <= 0}
+              disabled={
+                agregarInvCredito.isPending ||
+                (compraCarteraManual
+                  ? !manualValido
+                  : !compraCarteraMonto || Number(compraCarteraMonto) <= 0)
+              }
               onClick={() => {
-                if (!compraCarteraInvId || !compraCarteraMonto) return;
+                if (!compraCarteraInvId) return;
                 const esReinversion =
                   compraCarteraTipoOperacion === "reinversion";
+                // Monto total: en manual es la suma de los montos del arreglo.
+                const montoTotal = compraCarteraManual
+                  ? montoTotalManual
+                  : Number(compraCarteraMonto);
+                if (compraCarteraManual ? !manualValido : montoTotal <= 0) return;
                 agregarInvCredito.mutate(
                   {
                     inversionista_id: compraCarteraInvId,
-                    monto_aportado: Number(compraCarteraMonto),
+                    monto_aportado: montoTotal,
                     tipo_operacion: compraCarteraTipoOperacion,
                     tipo_reinversion: compraCarteraTipoReinversion,
                     porcentaje_inversion: Number(compraCarteraPctInv),
                     porcentaje_cash_in: Number(compraCarteraPctCashIn),
-                    fecha_inicio_participacion: compraCarteraFecha || undefined,
+                    ...(compraCarteraManual && {
+                      manual: compraCarteraManualList.map((c) => ({
+                        credito_id: c.credito_id,
+                        monto: Number(c.monto),
+                      })),
+                    }),
                   },
                   {
                     onSuccess: () => {

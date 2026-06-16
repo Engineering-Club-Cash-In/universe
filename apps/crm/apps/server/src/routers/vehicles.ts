@@ -33,8 +33,9 @@ import {
 	protectedProcedure,
 	publicProcedure,
 	tallerOrCrmProcedure,
+	vehiclesProcedure,
 } from "../lib/orpc";
-import { ROLES } from "../lib/roles";
+import { PERMISSIONS, ROLES } from "../lib/roles";
 import {
 	buildUploadPrefix,
 	deleteFileFromR2,
@@ -99,7 +100,7 @@ const normalizeManualValuationAmount = (
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
-	getAll: publicProcedure
+	getAll: vehiclesProcedure
 		.input(
 			z
 				.object({
@@ -181,20 +182,19 @@ export const vehiclesRouter = {
 				category === "alerts" ||
 				isInspectionStatus;
 
+			// Always LEFT JOIN for ordering by latest inspection date
 			const idsQueryBase = db
-				.selectDistinct({ id: vehicles.id, createdAt: vehicles.createdAt })
-				.from(vehicles);
+				.select({ id: vehicles.id, createdAt: vehicles.createdAt })
+				.from(vehicles)
+				.leftJoin(vehicleInspections, eq(vehicles.id, vehicleInspections.vehicleId))
+				.groupBy(vehicles.id, vehicles.createdAt);
 
 			const countQueryBase = db
 				.select({ count: sql<number>`count(distinct ${vehicles.id})` })
 				.from(vehicles);
 
-			const idsQuery = needsJoin
-				? idsQueryBase.innerJoin(
-						vehicleInspections,
-						eq(vehicles.id, vehicleInspections.vehicleId),
-					)
-				: idsQueryBase;
+			// idsQuery always has the leftJoin; countQuery only joins when needed for filters
+			const idsQuery = idsQueryBase;
 
 			const countQuery = needsJoin
 				? countQueryBase.innerJoin(
@@ -211,7 +211,10 @@ export const vehiclesRouter = {
 
 			const paginatedIds = await idsQuery
 				.where(whereClause)
-				.orderBy(desc(vehicles.createdAt))
+				.orderBy(
+				sql`CASE WHEN MAX(${vehicleInspections.inspectionDate}) IS NULL THEN 1 ELSE 0 END ASC`,
+				sql`COALESCE(MAX(${vehicleInspections.inspectionDate}), ${vehicles.createdAt}) DESC`,
+			)
 				.limit(limit)
 				.offset(offset);
 
@@ -235,7 +238,7 @@ export const vehiclesRouter = {
 					eq(vehicles.id, vehicleInspections.vehicleId),
 				)
 				.where(or(...vehicleIdsArray.map((id) => eq(vehicles.id, id))))
-				.orderBy(desc(vehicles.createdAt));
+				.orderBy(desc(vehicleInspections.inspectionDate), desc(vehicles.createdAt));
 
 			// Get photos only for these vehicles
 			const allPhotos = await db
@@ -330,7 +333,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Get vehicle by ID with all related data
-	getById: tallerOrCrmProcedure
+	getById: vehiclesProcedure
 		.input(z.object({ id: z.string() }))
 		.handler(async ({ input }) => {
 			const [vehicle] = await db
@@ -509,12 +512,17 @@ export const vehiclesRouter = {
 						message: `Ya existe un vehículo con la placa "${input.licensePlate}"`,
 					});
 				}
+				if (isUniqueViolation(error, "vehicles_vin_number_unique")) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Ya existe un vehículo con el número de VIN "${input.vinNumber}"`,
+					});
+				}
 				throw error;
 			}
 		}),
 
 	// Update vehicle
-	update: tallerOrCrmProcedure
+	update: vehiclesProcedure
 		.input(
 			z.object({
 				id: z.string(),
@@ -550,8 +558,18 @@ export const vehiclesRouter = {
 				}),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			try {
+				if (
+					input.data.status &&
+					!PERMISSIONS.canManageTallerVehicleStatus(context.userRole) &&
+					!PERMISSIONS.canAccessCRM(context.userRole)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para cambiar el estado del vehículo",
+					});
+				}
+
 				const [updated] = await db
 					.update(vehicles)
 					.set({
@@ -643,7 +661,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Search ONLY vehicles with recorded inspections
-	searchWithInspections: tallerOrCrmProcedure
+	searchWithInspections: vehiclesProcedure
 		.input(
 			z.object({
 				query: z.string().optional(),
@@ -716,7 +734,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Create vehicle inspection
-	createInspection: protectedProcedure
+	createInspection: tallerOrCrmProcedure
 		.input(
 			z.object({
 				vehicleId: z.string(),
@@ -862,7 +880,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Update inspection
-	updateInspection: protectedProcedure
+	updateInspection: tallerOrCrmProcedure
 		.input(
 			z.object({
 				id: z.string(),
@@ -890,7 +908,16 @@ export const vehiclesRouter = {
 				}),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			if (
+				!PERMISSIONS.canManageTallerInspections(context.userRole) &&
+				!PERMISSIONS.canAccessCRM(context.userRole)
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para actualizar inspecciones",
+				});
+			}
+
 			const [updated] = await db
 				.update(vehicleInspections)
 				.set({
@@ -904,7 +931,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Upload vehicle photo
-	uploadPhoto: protectedProcedure
+	uploadPhoto: vehiclesProcedure
 		.input(
 			z.object({
 				vehicleId: z.string(),
@@ -1071,7 +1098,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Get statistics
-	getStatistics: publicProcedure.handler(async () => {
+	getStatistics: vehiclesProcedure.handler(async () => {
 		const allVehicles = await db.select().from(vehicles);
 		const allInspections = await db.select().from(vehicleInspections);
 
@@ -1103,7 +1130,7 @@ export const vehiclesRouter = {
 	}),
 
 	// Create full inspection with all data (vehicle + inspection + checklist)
-	createFullInspection: publicProcedure
+	createFullInspection: tallerOrCrmProcedure
 		.input(
 			z.object({
 				// Vehicle data
@@ -1485,7 +1512,7 @@ export const vehiclesRouter = {
 		}),
 
 	// OCR endpoint for vehicle registration card (tarjeta de circulación)
-	processVehicleRegistrationOCR: publicProcedure
+	processVehicleRegistrationOCR: vehiclesProcedure
 		.input(
 			z.object({
 				imageBase64: z
@@ -1616,7 +1643,7 @@ REGLAS IMPORTANTES:
 		}),
 
 	// AI Vehicle Valuation endpoint
-	getAIVehicleValuation: publicProcedure
+	getAIVehicleValuation: vehiclesProcedure
 		.input(
 			z.object({
 				vehicleData: z.any().describe("Complete vehicle data from inspection"),

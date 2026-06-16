@@ -180,6 +180,101 @@ class SimpleCache {
 }
 
 // ============================================================================
+// TYPES
+// ============================================================================
+
+export type FacturacionMesRubro = {
+	capital: string;
+	interes: string;
+	iva: string;
+	seguro: string;
+	gps: string;
+	membresias: string;
+};
+
+export type FacturacionMesResponse = {
+	cobrado: FacturacionMesRubro;
+	esperado: FacturacionMesRubro;
+};
+
+export type MontoACobrarRow = {
+	bucket: string;
+	cuotas_count: number;
+	total_cuota: string;
+	total_interes: string;
+	total_iva: string;
+	total_seguro: string;
+	total_gps: string;
+	total_membresias: string;
+	total_royalti: string;
+	mora_promedio: string;
+};
+
+export type FlujoCuotasRubro = {
+	capital: string;
+	interes: string;
+	iva: string;
+};
+
+export type FlujoCuotasInversionista = FlujoCuotasRubro & {
+	inversionista_id: number;
+	nombre: string;
+};
+
+export type FlujoCuotasInversionesResponse = {
+	reinversionPorTipo: (FlujoCuotasRubro & { tipo: string; monto_reinvertido?: string })[];
+	cashParcialPorTipo: (FlujoCuotasRubro & { tipo: string; monto_cash?: string })[];
+	sinReinversion: {
+		totales: FlujoCuotasRubro;
+		porInversionista: FlujoCuotasInversionista[];
+	};
+	pagosExtras: {
+		abonos_capital: string;
+		cancelaciones: string;
+	};
+};
+
+export type FlujoPorInversionistaRow = {
+	inversionista_id: number;
+	nombre: string;
+	reinversion_capital: string;
+	reinversion_interes: string;
+	reinversion_total: string;
+	cash_capital: string;
+	cash_interes: string;
+	cash_total: string;
+	total: string;
+};
+
+export type FlujoCuotasPorInversionistaResponse = {
+	porInversionista: FlujoPorInversionistaRow[];
+	totales: {
+		reinversion_total: string;
+		cash_total: string;
+		total: string;
+	};
+};
+
+export type ColocacionPeriodoRow = {
+	bucket: string;
+	cantidad_creditos: number;
+	total_colocacion: string;
+};
+
+export type MoraAgingBucket = {
+	bucket: "30" | "60" | "90" | "120";
+	cantidad_creditos: number;
+	monto_mora: string;
+};
+
+export type ComparativoHistoricoResponse = {
+	cobrado: { mes: number; cobrado: string }[];
+	cartera: { mes: string; creditos_activos: number; cartera_activa: string }[];
+	moraActual: MoraAgingBucket[];
+	agingHistorico: ({ periodo: string } & MoraAgingBucket)[];
+};
+
+// ============================================================================
 // HTTP CLIENT
 // ============================================================================
 
@@ -831,6 +926,48 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	/**
+	 * Registra un gasto administrativo en cartera-back.
+	 *
+	 * Se usa al cerrar una oportunidad: por cada factura de servicio generada
+	 * (todas menos la de royalty) guarda el monto facturado en la tabla
+	 * cartera.gastos_administrativos, para que aparezca en el reporte diario.
+	 * El token Bearer y los reintentos los maneja request() automáticamente.
+	 *
+	 * @param input - fecha ("YYYY-MM-DD" en hora Guatemala), concepto y monto
+	 * @returns Resultado de la operación ({ success, data })
+	 */
+	async crearGastoAdministrativo(input: {
+		fecha: string;
+		concepto: string;
+		monto: number;
+	}): Promise<{ success: boolean; data?: unknown }> {
+		const response = await this.request<{ success: boolean; data?: unknown }>(
+			"/api/gastos-administrativos",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
+		return response;
+	}
+
+	/**
+	 * Refresca (aplica los registros manuales de) el snapshot diario de
+	 * facturación para una fecha. Es necesario DESPUÉS de insertar gastos
+	 * administrativos: el reporte diario lee de facturacion_snapshot_diario,
+	 * y este endpoint copia el SUM de gastos del día a las columnas
+	 * administrativos/otros_cobros (el mismo paso que hace la UI manual).
+	 *
+	 * @param fecha - "YYYY-MM-DD" (hora Guatemala)
+	 */
+	async aplicarManualesDia(fecha: string): Promise<unknown> {
+		return this.request("/api/facturacion-snapshot/aplicar-manuales-dia", {
+			method: "POST",
+			body: JSON.stringify({ fecha }),
+		});
+	}
+
 	// ========================================================================
 	// RESUMEN GLOBAL INVERSIONISTAS
 	// ========================================================================
@@ -1136,6 +1273,130 @@ export class CarteraBackClient {
 			body: JSON.stringify(input),
 		});
 		return response;
+	}
+
+	// ========================================================================
+	// REPORTES
+	// ========================================================================
+
+	async getMontoACobrar(params: {
+		periodo: string;
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<MontoACobrarRow[]> {
+		const queryParams = new URLSearchParams({
+			periodo: params.periodo,
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+
+		const response = await this.request<{ data: MontoACobrarRow[] }>(
+			`/reportes/monto-cobrar?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+
+		return response.data ?? [];
+	}
+
+	async getColocacionPeriodo(params: {
+		periodo: string;
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<{ data: ColocacionPeriodoRow[] }> {
+		const qp = new URLSearchParams(params as Record<string, string>);
+		return this.request<{ data: ColocacionPeriodoRow[] }>(
+			`/reportes/colocacion-periodo?${qp}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	async getComparativoHistorico(anio: number): Promise<ComparativoHistoricoResponse> {
+		return this.request<ComparativoHistoricoResponse>(
+			`/reportes/comparativo-historico?anio=${anio}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	async getFacturacionMes(params: {
+		mes: number;
+		anio: number;
+	}): Promise<FacturacionMesResponse> {
+		const qp = new URLSearchParams({
+			mes: String(params.mes),
+			anio: String(params.anio),
+		});
+
+		const [cobradoResult, esperadoResult] = await Promise.all([
+			this.request<{
+				cobrado_capital?: string;
+				cobrado_interes?: string;
+				cobrado_iva?: string;
+				cobrado_seguro?: string;
+				cobrado_gps?: string;
+				cobrado_membresias?: string;
+			}>(`/reportes/facturacion-mes-cobrado?${qp}`, { method: "GET" }, true),
+			this.request<{
+				esperado_capital?: string;
+				esperado_interes?: string;
+				esperado_iva?: string;
+				esperado_seguro?: string;
+				esperado_gps?: string;
+				esperado_membresias?: string;
+			}>(`/reportes/facturacion-mes-esperado?${qp}`, { method: "GET" }, true),
+		]);
+
+		const cobrado: FacturacionMesRubro = {
+			capital: cobradoResult.cobrado_capital ?? "0",
+			interes: cobradoResult.cobrado_interes ?? "0",
+			iva: cobradoResult.cobrado_iva ?? "0",
+			seguro: cobradoResult.cobrado_seguro ?? "0",
+			gps: cobradoResult.cobrado_gps ?? "0",
+			membresias: cobradoResult.cobrado_membresias ?? "0",
+		};
+
+		const esperado: FacturacionMesRubro = {
+			capital: esperadoResult.esperado_capital ?? "0",
+			interes: esperadoResult.esperado_interes ?? "0",
+			iva: esperadoResult.esperado_iva ?? "0",
+			seguro: esperadoResult.esperado_seguro ?? "0",
+			gps: esperadoResult.esperado_gps ?? "0",
+			membresias: esperadoResult.esperado_membresias ?? "0",
+		};
+
+		return { cobrado, esperado };
+	}
+
+	async getFlujoCuotasInversiones(params: {
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<FlujoCuotasInversionesResponse> {
+		const qp = new URLSearchParams({
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+		return this.request<FlujoCuotasInversionesResponse>(
+			`/reportes/flujo-cuotas-inversiones?${qp}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	async getFlujoCuotasPorInversionista(params: {
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<FlujoCuotasPorInversionistaResponse> {
+		const qp = new URLSearchParams({
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+		return this.request<FlujoCuotasPorInversionistaResponse>(
+			`/reportes/flujo-cuotas-inversiones/por-inversionista?${qp}`,
+			{ method: "GET" },
+			true,
+		);
 	}
 
 	// ========================================================================

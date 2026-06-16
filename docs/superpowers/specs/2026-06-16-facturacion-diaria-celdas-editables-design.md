@@ -76,6 +76,17 @@ Neon** primero, luego prod (correr el SQL a mano, drizzle-kit no se usa).
   de las columnas diarias** de los días previos (incluidos los bloqueados con sus
   valores manuales) → sigue cuadrando sin importar qué esté bloqueado. No requiere
   cambios extra en el cálculo del acumulado.
+- **Helper nuevo `recomputarAcumuladosMes(anio, mes)`** (para el refresco post-edición):
+  recorre los días del mes EN ORDEN y actualiza **solo las columnas de acumulado que
+  derivan de una columna diaria** (`facturacion_acumulado`, `acum_servicios_seguro_gps`,
+  `acumulado_inversionistas`, `acumulado_total`) como suma corrida de las diarias ya
+  guardadas. **No** toca `reserva_acumulada` (es MTD desde `pagos`, sin columna diaria;
+  solo `generarSnapshotDiario` la recalcula). **Nunca lee de la fuente ni toca las
+  columnas diarias** → seguro
+  para días históricos importados del Excel (no los pone en 0). **Salta** los días
+  bloqueados (no pisa su acumulado manual), pero **sí** incluye sus diarias en la
+  suma corrida de los días siguientes. Este helper, NO `regenerarSnapshotRango`, es
+  el que se usa tras guardar/desbloquear.
 
 ### 3. Backend — endpoints nuevos
 
@@ -92,15 +103,19 @@ Neon** primero, luego prod (correr el SQL a mano, drizzle-kit no se usa).
      updated_at`. Si la fila no existía → insert (bloqueado).
   5. Escribir **auditoría** por cada celda cambiada (`edit`, viejo→nuevo) + una fila
      `lock` si el día no estaba bloqueado antes.
-  6. Tras guardar todos los días: `regenerarSnapshotRango(inicioMesAfectado, hoy)`
-     (que salta bloqueados) → refresca los acumulados de los días **no** bloqueados
-     del/los mes(es) afectado(s) para mantener la columna continua.
+  6. Tras guardar: por cada **mes afectado** (un batch puede tocar varios),
+     `recomputarAcumuladosMes(anio, mes)` → refresca SOLO los acumulados de los días
+     no bloqueados del mes, sin tocar diarias ni leer fuente (seguro para histórico).
 - Respuesta: filas actualizadas + resumen (días bloqueados, celdas cambiadas).
 
 **`POST /api/facturacion-snapshot/desbloquear-dia`** — `{ fecha }`:
 - Gate ADMIN. `bloqueado=false`; auditoría `accion='unlock'`; `generarSnapshotDiario(fecha)`
-  (vuelve a valores del sistema); `regenerarSnapshotRango(inicioMes, hoy)` para
-  refrescar acumulados.
+  (vuelve a valores del sistema); `recomputarAcumuladosMes(anio, mes)` para refrescar
+  acumulados.
+- ⚠️ Caveat histórico: desbloquear un día **histórico importado del Excel** (sin
+  desglose en BD) lo recalcula a ~0, porque "automático" para esos días no tiene
+  fuente. El front debe **confirmar/advertir** antes de desbloquear días previos a la
+  ventana operativa del sistema (corte 06-10-2026).
 
 `GET /` (existente) devuelve además `bloqueado`/`bloqueado_por`/`bloqueado_at` por fila.
 
@@ -128,6 +143,11 @@ Neon** primero, luego prod (correr el SQL a mano, drizzle-kit no se usa).
   suma corrida de las **diarias** (no encadenan el acumulado manual). Documentado;
   es el costo de permitir editar todo.
 - Concurrencia: last-write-wins; la auditoría deja rastro de ambos cambios.
+- **Histórico vs sistema**: editar+bloquear preserva cualquier día (incluido el
+  histórico del Excel). Pero **desbloquear** un día histórico (< corte 06-10-2026)
+  lo manda a "automático" = ~0 (no hay fuente). El front advierte antes de
+  desbloquear esos días. El refresco de acumulados (`recomputarAcumuladosMes`) NUNCA
+  toca diarias, así que nunca borra un día del Excel por sí solo.
 
 ### 6. Pruebas
 

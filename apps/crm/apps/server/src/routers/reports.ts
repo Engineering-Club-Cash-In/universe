@@ -48,6 +48,7 @@ const CLOSED_CREDIT_REPORT_CARTERA_STATUSES: StatusCreditEnum[] = [
 	"MOROSO",
 	"EN_CONVENIO",
 ];
+export const CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE = 50;
 
 export function isClosedCreditReportCarteraStatusIncluded(
 	status: StatusCreditEnum | null,
@@ -59,10 +60,16 @@ async function getClosedCreditReportCarteraStatuses(sifcos: string[]) {
 	const uniqueSifcos = [...new Set(sifcos.filter(Boolean))];
 	const statuses = new Map<string, StatusCreditEnum>();
 	const [anio, mes] = toDateStrGT(new Date()).split("-").map(Number);
-	const chunkSize = 100;
 
-	for (let index = 0; index < uniqueSifcos.length; index += chunkSize) {
-		const chunk = uniqueSifcos.slice(index, index + chunkSize);
+	for (
+		let index = 0;
+		index < uniqueSifcos.length;
+		index += CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE
+	) {
+		const chunk = uniqueSifcos.slice(
+			index,
+			index + CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
+		);
 		const response = await carteraBackClient.getAllCreditos({
 			mes,
 			anio,

@@ -25,7 +25,10 @@ import {
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
-import { recomputeCreditAfterCapital } from "./registerPaymentPolicy";
+import {
+  recomputeCreditAfterCapital,
+  shouldIncobrableInstallmentBePaid,
+} from "./registerPaymentPolicy";
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
 // ============================================================================
@@ -620,10 +623,24 @@ export const reversePayment = async ({ body, set }: any) => {
         const pagosRestantesCuota = pagosMismaCuota.filter(
           (p) => !ids.includes(p.pago_id),
         );
-        const cuotaPermanecePagada = shouldInstallmentRemainPaidAfterReversal({
+        let cuotaPermanecePagada = shouldInstallmentRemainPaidAfterReversal({
           cuota: creditData.creditos.cuota,
           remainingPayments: pagosRestantesCuota,
         });
+
+        // INCOBRABLE: el estado de la cuota se rige por el CAPITAL (igual que en
+        // el alta), no por la suma de `monto_aplicado`, que se contamina con las
+        // filas estructurales del castigo (system_reset / SISTEMA-INCOBRABLE).
+        // Tras la reversa, la cuota sigue pagada solo si el capital restaurado
+        // (`nuevoCapital`) quedó en 0. Devuelve null si no es incobrable.
+        const incobrableCuotaPagada = shouldIncobrableInstallmentBePaid({
+          statusCredit: creditData.creditos.statusCredit,
+          capital: nuevoCapital.toString(),
+          abonoCapital: 0,
+        });
+        if (incobrableCuotaPagada !== null) {
+          cuotaPermanecePagada = incobrableCuotaPagada;
+        }
 
         if (pago.cuota_id !== null) {
           await tx

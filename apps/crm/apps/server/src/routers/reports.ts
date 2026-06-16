@@ -40,6 +40,12 @@ const closedCreditsReportInputSchema = z.object({
 	endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
+export function isClosedCreditReportContractStateIncluded(
+	estado: string | null,
+) {
+	return estado === "activo";
+}
+
 function parseGuatemalaDateRange(startDate: string, endDate: string) {
 	const start = new Date(`${startDate}T00:00:00.000-06:00`);
 	const end = new Date(`${endDate}T23:59:59.999-06:00`);
@@ -199,6 +205,8 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 		const latestCarteraReference = db
 			.select({
 				opportunityId: carteraBackReferences.opportunityId,
+				contratoFinanciamientoId:
+					carteraBackReferences.contratoFinanciamientoId,
 				numeroCreditoSifco: carteraBackReferences.numeroCreditoSifco,
 				rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${carteraBackReferences.opportunityId} ORDER BY ${carteraBackReferences.createdAt} DESC, ${carteraBackReferences.id} DESC)`.as(
 					"rn",
@@ -231,10 +239,18 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 					eq(latestCarteraReference.rn, 1),
 				),
 			)
+			.innerJoin(
+				contratosFinanciamiento,
+				eq(
+					latestCarteraReference.contratoFinanciamientoId,
+					contratosFinanciamiento.id,
+				),
+			)
 			.where(
 				and(
 					gte(firstClosedStageDates.firstClosedStageAt, start),
 					lte(firstClosedStageDates.firstClosedStageAt, end),
+					eq(contratosFinanciamiento.estado, "activo"),
 				),
 			)
 			.orderBy(desc(firstClosedStageDates.firstClosedStageAt))

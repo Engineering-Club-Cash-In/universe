@@ -811,6 +811,19 @@ export async function guardarCeldasSnapshot(input: {
     }
   }
 
+  // Si un día NO tiene fila aún, generarlo COMPLETO primero (columnas source:
+  // detalle por producto, servicios, inversionistas, metas, reserva, semana) y
+  // LUEGO editar+bloquear. Si no, quedaría una fila sparse en 0 y el cron no la
+  // llenaría (la salta por bloqueado). Mismo patrón que aplicarManualesEnSnapshotDia.
+  for (const c of cambios) {
+    const ex = await db.execute(sql`
+      SELECT 1 FROM cartera.facturacion_snapshot_diario WHERE fecha = ${c.fecha}::date LIMIT 1
+    `);
+    if ((((ex as any).rows ?? ex) as any[]).length === 0) {
+      await generarSnapshotDiario(c.fecha);
+    }
+  }
+
   const mesesAfectados = new Set<string>();
   const diasAfectados = new Set<string>();
 

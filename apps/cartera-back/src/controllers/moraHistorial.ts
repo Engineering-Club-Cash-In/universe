@@ -26,7 +26,10 @@ const snapCte = (fecha: string) => sql`
       h.cuotas_atrasadas_nuevas     AS cuotas,
       h.fecha
     FROM cartera.moras_historial h
-    WHERE h.fecha < (${fecha}::date + INTERVAL '1 day')
+    -- Corte por DÍA Guatemala: fecha es timestamp UTC (defaultNow, session UTC) y el cron
+    -- corre ~23:59 GT (≈06:00 UTC del día siguiente); comparar en GT evita correr esos
+    -- eventos al día siguiente.
+    WHERE (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= ${fecha}::date
     ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
   )`;
 
@@ -142,7 +145,7 @@ export async function getMoraTimeline({ desde, hasta, asesor }: { desde: string;
       FROM (
         SELECT DISTINCT ON (h.credito_id) h.monto_nuevo::numeric AS monto, h.tipo_evento
         FROM cartera.moras_historial h
-        WHERE h.fecha < (d + INTERVAL '1 day') ${asesorFilter}
+        WHERE (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= d ${asesorFilter}
         ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
       ) s
       WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0

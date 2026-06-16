@@ -12,6 +12,17 @@ const hoyGT = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+// Gate de rol server-side para el historial de mora (expone data de TODOS los clientes).
+// authMiddleware solo autentica; aquí exigimos ADMIN/CONTA (igual que el front).
+const requireMoraHistorialRole = (user: any, set: any): boolean => {
+  if (!user || !["ADMIN", "CONTA"].includes(user.role)) {
+    set.status = 403;
+    return false;
+  }
+  return true;
+};
+const NO_AUTORIZADO = { success: false, message: "[ERROR] No autorizado (requiere ADMIN o CONTA)" };
+
 export const morasRouter = new Elysia()
   .use(authMiddleware)
 
@@ -216,7 +227,8 @@ export const morasRouter = new Elysia()
 
   // ───────────── Mora Histórica (reconstruida desde moras_historial) ─────────────
   // Snapshot de la mora por crédito a una fecha de corte (con totales + filtros).
-  .get("/moras/historial", async ({ query, set }: any) => {
+  .get("/moras/historial", async ({ query, set, user }: any) => {
+    if (!requireMoraHistorialRole(user, set)) return NO_AUTORIZADO;
     try {
       return await getMoraHistorialSnapshot({
         fecha: query.fecha || hoyGT(),
@@ -244,7 +256,8 @@ export const morasRouter = new Elysia()
   })
 
   // Evolución (timeline) del total de mora día a día en un rango.
-  .get("/moras/historial/timeline", async ({ query, set }: any) => {
+  .get("/moras/historial/timeline", async ({ query, set, user }: any) => {
+    if (!requireMoraHistorialRole(user, set)) return NO_AUTORIZADO;
     try {
       return await getMoraTimeline({ desde: query.desde, hasta: query.hasta || hoyGT(), asesor: query.asesor });
     } catch (err) {
@@ -256,7 +269,8 @@ export const morasRouter = new Elysia()
   })
 
   // Excel del snapshot a la fecha de corte.
-  .get("/moras/historial/excel", async ({ query, set }: any) => {
+  .get("/moras/historial/excel", async ({ query, set, user }: any) => {
+    if (!requireMoraHistorialRole(user, set)) return NO_AUTORIZADO;
     try {
       const fecha = query.fecha || hoyGT();
       const buf = await getMoraHistorialExcel({
@@ -281,7 +295,8 @@ export const morasRouter = new Elysia()
   })
 
   // Historial completo de eventos de mora de un crédito (drill-down).
-  .get("/moras/historial/credito/:credito_id", async ({ params, set }: any) => {
+  .get("/moras/historial/credito/:credito_id", async ({ params, set, user }: any) => {
+    if (!requireMoraHistorialRole(user, set)) return NO_AUTORIZADO;
     try {
       const creditoId = Number(params.credito_id);
       if (!Number.isInteger(creditoId) || creditoId <= 0) {

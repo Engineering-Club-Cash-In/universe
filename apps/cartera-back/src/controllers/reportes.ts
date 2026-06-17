@@ -94,7 +94,8 @@ export async function getMontoACobrarPeriodo({
         SUM(COALESCE(pc.monto_boleta::numeric, 0))                                                       AS monto_boleta
       FROM cartera.pagos_credito pc
       JOIN cartera.cuotas_credito q ON q.cuota_id = pc.cuota_id
-      WHERE q.fecha_vencimiento::date >= ${fechaInicio}::date
+      WHERE pc."paymentFalse" = false
+        AND q.fecha_vencimiento::date >= ${fechaInicio}::date
         AND q.fecha_vencimiento::date <= ${fechaFin}::date
       GROUP BY pc.credito_id, pc.cuota_id, q.fecha_vencimiento
 
@@ -112,7 +113,8 @@ export async function getMontoACobrarPeriodo({
         COALESCE(pc.membresias::numeric, 0)        + COALESCE(pc.membresias_pago::numeric, 0)           AS membresias,
         COALESCE(pc.monto_boleta::numeric, 0)                                                            AS monto_boleta
       FROM cartera.pagos_credito pc
-      WHERE pc.cuota_id IS NULL
+      WHERE pc."paymentFalse" = false
+        AND pc.cuota_id IS NULL
         AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
         AND pc.fecha_vencimiento::date <= ${fechaFin}::date
     ),
@@ -276,13 +278,14 @@ export async function getMontoACobrarPeriodo({
         MAX(acum_iva)                           AS acum_iva,
         MAX(acum_seguro)                        AS acum_seguro,
         MAX(acum_gps)                           AS acum_gps,
-        MAX(acum_mem)                           AS acum_mem
+        MAX(acum_mem)                           AS acum_mem,
+        COUNT(*)::int                           AS cuotas_count
       FROM calc_acum
       GROUP BY DATE_TRUNC(${pg}, bucket::timestamp), credito_id
     )
     SELECT
       bucket,
-      COUNT(*)::int                                                                                AS cuotas_count,
+      COALESCE(SUM(cuotas_count), 0)::int                                                        AS cuotas_count,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END), 0)               AS total_cuota,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN interes     ELSE 0 END), 0)               AS total_interes,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN iva         ELSE 0 END), 0)               AS total_iva,

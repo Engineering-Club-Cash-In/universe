@@ -16,6 +16,12 @@ function validarPeriodo(periodo: string | undefined, set: { status: number }): P
   return p as PeriodoValido;
 }
 
+function fechaValida(s: string): boolean {
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
 export const reportesRouter = new Elysia().use(authMiddleware)
 
   .get("/reportes/monto-cobrar", async ({ query, set }) => {
@@ -29,15 +35,13 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
-      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
-        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
-          set.status = 400;
-          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
-        }
-        if (fechaInicio > fechaFin) {
-          set.status = 400;
-          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
-        }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
@@ -62,15 +66,13 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
-      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
-        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
-          set.status = 400;
-          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
-        }
-        if (fechaInicio > fechaFin) {
-          set.status = 400;
-          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
-        }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
@@ -114,15 +116,13 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
-      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
-        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
-          set.status = 400;
-          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
-        }
-        if (fechaInicio > fechaFin) {
-          set.status = 400;
-          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
-        }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const data = await getFlujoCuotasInversiones({ fechaInicio, fechaFin });
       set.status = 200;
@@ -164,15 +164,13 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
-      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
-        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
-          set.status = 400;
-          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
-        }
-        if (fechaInicio > fechaFin) {
-          set.status = 400;
-          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
-        }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const data = await getFlujoCuotasPorInversionista({ fechaInicio, fechaFin });
       set.status = 200;
@@ -214,15 +212,13 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
-      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
-        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
-          set.status = 400;
-          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
-        }
-        if (fechaInicio > fechaFin) {
-          set.status = 400;
-          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
-        }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };

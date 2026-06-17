@@ -128,6 +128,15 @@ const A_RECIBIR_MODALIDADES: { tipo: string; label: string }[] = [
 	...REINVERSION_MODALIDADES,
 ];
 
+// Estilo compartido para cada sub-sección del reporte de Flujo de Cuotas:
+// panel enmarcado, título con divisor y encabezados de tabla refinados
+// (mayúsculas, muted, números tabulares para alinear montos).
+const SECCION_REPORTE_CLASS =
+	"rounded-xl border bg-card p-4 shadow-sm " +
+	"[&>p:first-child]:border-b [&>p:first-child]:pb-2.5 [&>p:first-child]:text-foreground " +
+	"[&_thead_th]:h-9 [&_thead_th]:text-[11px] [&_thead_th]:font-semibold [&_thead_th]:uppercase [&_thead_th]:tracking-wider [&_thead_th]:text-muted-foreground " +
+	"[&_table]:tabular-nums";
+
 /** Mes por defecto (actual) en formato "YYYY-MM" para el <input type="month">. */
 function getDefaultFlujoMes(): string {
 	const todayGt = formatDateInput(new Date());
@@ -347,6 +356,25 @@ function RouteComponent() {
 	const [flujoAnioStr, flujoMesStr] = flujoMes.split("-");
 	const flujoMesNum = Number(flujoMesStr);
 	const flujoAnioNum = Number(flujoAnioStr);
+	// Selectores de mes/año: últimos 3 años y sin meses a futuro.
+	const flujoHoy = new Date();
+	const flujoAnioActual = flujoHoy.getFullYear();
+	const flujoMesActual = flujoHoy.getMonth() + 1;
+	const aniosDisponibles = [
+		flujoAnioActual,
+		flujoAnioActual - 1,
+		flujoAnioActual - 2,
+	];
+	const mesesDisponibles = MESES.map((nombre, i) => ({
+		num: i + 1,
+		nombre,
+	})).filter((m) => flujoAnioNum < flujoAnioActual || m.num <= flujoMesActual);
+	const setFlujoMesAnio = (anio: number, mes: number) => {
+		// No permitir meses a futuro en el año actual.
+		const m =
+			anio === flujoAnioActual && mes > flujoMesActual ? flujoMesActual : mes;
+		setFlujoMes(`${anio}-${String(m).padStart(2, "0")}`);
+	};
 	const [desgloseInversionistaOpen, setDesgloseInversionistaOpen] =
 		useState(false);
 	const [comparativoAnio, setComparativoAnio] = useState(() =>
@@ -1445,19 +1473,46 @@ function RouteComponent() {
 								</div>
 								<div className="flex items-center gap-2">
 									<SimularButton onClick={() => setScenarioOpen("flujo")} />
-									<Input
-										type="month"
-										aria-label="Mes"
-										className="w-44"
-										value={flujoMes}
-										onChange={(e) => setFlujoMes(e.target.value)}
-									/>
+									<Select
+										value={String(flujoMesNum)}
+										onValueChange={(v) =>
+											setFlujoMesAnio(flujoAnioNum, Number(v))
+										}
+									>
+										<SelectTrigger className="w-36" aria-label="Mes">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{mesesDisponibles.map((m) => (
+												<SelectItem key={m.num} value={String(m.num)}>
+													{m.nombre}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+									<Select
+										value={String(flujoAnioNum)}
+										onValueChange={(v) =>
+											setFlujoMesAnio(Number(v), flujoMesNum)
+										}
+									>
+										<SelectTrigger className="w-24" aria-label="Año">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{aniosDisponibles.map((a) => (
+												<SelectItem key={a} value={String(a)}>
+													{a}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
 								</div>
 							</div>
 						</CardHeader>
-						<CardContent className="space-y-6">
+						<CardContent className="space-y-8">
 							{/* Sección 1: Cuotas → Reinversión (desde liquidaciones) */}
-							<div>
+							<div className={SECCION_REPORTE_CLASS}>
 								<p className="mb-2 font-semibold text-sm">
 									Cuotas → Reinversión
 								</p>
@@ -1476,7 +1531,7 @@ function RouteComponent() {
 											monto: Number(
 												reinversionData.porTipo[m.tipo]?.reinversion_total ?? 0,
 											),
-										}));
+										})).filter((f) => f.monto !== 0);
 										const totalMostrado = filas.reduce(
 											(a, f) => a + f.monto,
 											0,
@@ -1514,7 +1569,7 @@ function RouteComponent() {
 							</div>
 
 							{/* Sección 2: Cuotas → A Recibir (efectivo neto = total_cuota) */}
-							<div>
+							<div className={SECCION_REPORTE_CLASS}>
 								<p className="mb-2 font-semibold text-sm">Cuotas → A Recibir</p>
 								{reinversionLiquidacionesQuery.isPending ? (
 									<div className="py-4 text-center text-muted-foreground text-sm">
@@ -1536,7 +1591,14 @@ function RouteComponent() {
 												isr: Number(d?.total_isr ?? 0),
 												total: Number(d?.total_cuota ?? 0),
 											};
-										});
+										}).filter(
+											(f) =>
+												f.capital !== 0 ||
+												f.interes !== 0 ||
+												f.iva !== 0 ||
+												f.isr !== 0 ||
+												f.total !== 0,
+										);
 										const totales = filas.reduce(
 											(a, f) => ({
 												capital: a.capital + f.capital,
@@ -1623,7 +1685,7 @@ function RouteComponent() {
 									const totalIsr = Number(sf.isr);
 									const totalNeto = Number(cf.neto) + Number(sf.neto);
 									return (
-										<div>
+										<div className={SECCION_REPORTE_CLASS}>
 											<p className="mb-2 font-semibold text-sm">Interés Neto</p>
 											<Table>
 												<TableHeader>
@@ -1712,7 +1774,7 @@ function RouteComponent() {
 									return (
 										<>
 											{/* Sección 3: Pagos Extras Recibidos */}
-											<div>
+											<div className={SECCION_REPORTE_CLASS}>
 												<p className="mb-2 font-semibold text-sm">
 													Pagos Extras Recibidos
 												</p>

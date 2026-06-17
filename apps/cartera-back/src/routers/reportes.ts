@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { getCobradoDelMes, getColocacionPorPeriodo, getComparativoHistorico, getEsperadoDelMes, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getReinversionLiquidaciones } from "../controllers/reportes";
+import { getCobradoDelMes, getColocacionPorPeriodo, getComparativoHistorico, getEsperadoDelMes, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -16,6 +16,12 @@ function validarPeriodo(periodo: string | undefined, set: { status: number }): P
   return p as PeriodoValido;
 }
 
+function fechaValida(s: string): boolean {
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
 export const reportesRouter = new Elysia().use(authMiddleware)
 
   .get("/reportes/monto-cobrar", async ({ query, set }) => {
@@ -29,6 +35,14 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+      }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
       const data = await getMontoACobrar({ periodo: p, fechaInicio, fechaFin });
@@ -36,6 +50,37 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return { data };
     } catch (error) {
       console.error("[/reportes/monto-cobrar]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/monto-cobrar-periodo", async ({ query, set }) => {
+    try {
+      const { periodo, fechaInicio, fechaFin } = query as Record<string, string>;
+      if (!fechaInicio || !fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+      }
+      const p = validarPeriodo(periodo, set);
+      if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
+      const data = await getMontoACobrarPeriodo({ periodo: p, fechaInicio, fechaFin });
+      set.status = 200;
+      return { data };
+    } catch (error) {
+      console.error("[/reportes/monto-cobrar-periodo]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }
@@ -70,6 +115,14 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const data = await getFlujoCuotasInversiones({ fechaInicio, fechaFin });
       set.status = 200;
@@ -111,6 +164,14 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+      }
       const data = await getFlujoCuotasPorInversionista({ fechaInicio, fechaFin });
       set.status = 200;
       return data;
@@ -146,6 +207,18 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       if (!fechaInicio || !fechaFin) {
         set.status = 400;
         return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };

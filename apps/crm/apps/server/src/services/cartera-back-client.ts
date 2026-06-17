@@ -210,6 +210,25 @@ export type MontoACobrarRow = {
 	mora_promedio: string;
 };
 
+export type MontoACobrarPeriodoRow = {
+	bucket: string;
+	cuotas_count: number;
+	total_cuota: string;
+	total_interes: string;
+	total_iva: string;
+	total_seguro: string;
+	total_gps: string;
+	total_membresias: string;
+	mora_promedio: string;
+	mora_count: number;
+	acum_total_cuota: string;
+	acum_total_interes: string;
+	acum_total_iva: string;
+	acum_total_seguro: string;
+	acum_total_gps: string;
+	acum_total_membresias: string;
+};
+
 export type FlujoCuotasRubro = {
 	capital: string;
 	interes: string;
@@ -1339,6 +1358,26 @@ export class CarteraBackClient {
 
 		const response = await this.request<{ data: MontoACobrarRow[] }>(
 			`/reportes/monto-cobrar?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+
+		return response.data ?? [];
+	}
+
+	async getMontoACobrarPeriodo(params: {
+		periodo: string;
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<MontoACobrarPeriodoRow[]> {
+		const queryParams = new URLSearchParams({
+			periodo: params.periodo,
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+
+		const response = await this.request<{ data: MontoACobrarPeriodoRow[] }>(
+			`/reportes/monto-cobrar-periodo?${queryParams}`,
 			{ method: "GET" },
 			true,
 		);

@@ -39,6 +39,21 @@ describe("getMembershipAdjustment", () => {
 		expect(result.percentage).toBe(25);
 	});
 
+	test("manual microbus without selected vehicle is treated as new commercial", () => {
+		const result = getMembershipAdjustment({
+			creditType: "autocompra",
+			insuredAmount: 100000,
+			vehicleType: "microbus",
+			isNew: true,
+			origin: null,
+		});
+
+		expect(result.category).toBe(
+			"Nuevo (camión, microbus, panel, uber o similar)",
+		);
+		expect(result.percentage).toBe(25);
+	});
+
 	test("uses used agency category from non-rodado origin", () => {
 		const result = getMembershipAdjustment({
 			creditType: "autocompra",

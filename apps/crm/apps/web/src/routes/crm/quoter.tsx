@@ -971,6 +971,7 @@ function QuoterPage() {
 	const updateInsuranceCost = async (
 		insuredAmount: number,
 		vehicleType: string,
+		vehicleContext?: { isNew?: boolean; origin?: string | null },
 	) => {
 		if (insuredAmount <= 0) return;
 
@@ -987,12 +988,24 @@ function QuoterPage() {
 			const selectedVehicle = vehiclesQuery.data?.data?.find(
 				(vehicle) => vehicle.id === quoterForm.state.values.vehicleId,
 			);
+			const normalizedVehicleType = vehicleType.trim().toLowerCase();
+			const inferredNewType = [
+				"nuevo",
+				"camion",
+				"camión",
+				"microbus",
+				"microbus_20",
+				"microbus_35",
+				"microbus_36plus",
+				"panel",
+				"uber",
+			].includes(normalizedVehicleType);
 			const membershipAdjustment = getMembershipAdjustment({
 				creditType: quoterForm.state.values.creditType,
 				insuredAmount,
 				vehicleType,
-				isNew: selectedVehicle?.isNew ?? vehicleType === "nuevo",
-				origin: selectedVehicle?.origin,
+				isNew: vehicleContext?.isNew ?? selectedVehicle?.isNew ?? inferredNewType,
+				origin: vehicleContext?.origin ?? selectedVehicle?.origin,
 			});
 			const rawMembershipCost = applyMembershipAdjustment(
 				rawMembershipCostBeforeAdjustment,

@@ -151,6 +151,8 @@ export type ReinversionLiquidacionesResponse = {
 	porTipo: Record<
 		string,
 		{
+			reinversion_capital: string;
+			reinversion_interes: string;
 			reinversion_total: string;
 			total_capital: string;
 			total_interes: string;

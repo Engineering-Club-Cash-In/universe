@@ -305,9 +305,7 @@ function fillMissingPeriods(
 	const toKey = (d: Date) =>
 		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-	const dataMap = new Map(
-		data.map((row) => [row.bucket.slice(0, 10), row]),
-	);
+	const dataMap = new Map(data.map((row) => [row.bucket.slice(0, 10), row]));
 
 	const dates: Date[] = [];
 	const start = new Date(`${fechaInicio}T12:00:00`);
@@ -1262,20 +1260,35 @@ function RouteComponent() {
 														montoCobrarPeriodo,
 														montoCobrarRange.fechaInicio,
 														montoCobrarRange.fechaFin,
-													).map(
-														(row: MontoACobrarPeriodoRow) => {
-															const a = montoCobrarAcumulado;
-															return {
-																bucket: formatBucket(row.bucket, montoCobrarPeriodo),
-																total_cuota: Number.parseFloat(a ? row.acum_total_cuota : row.total_cuota),
-																total_interes: Number.parseFloat(a ? row.acum_total_interes : row.total_interes),
-																total_iva: Number.parseFloat(a ? row.acum_total_iva : row.total_iva),
-																total_seguro: Number.parseFloat(a ? row.acum_total_seguro : row.total_seguro),
-																total_gps: Number.parseFloat(a ? row.acum_total_gps : row.total_gps),
-																total_membresias: Number.parseFloat(a ? row.acum_total_membresias : row.total_membresias),
-															};
-														},
-													)}
+													).map((row: MontoACobrarPeriodoRow) => {
+														const a = montoCobrarAcumulado;
+														return {
+															bucket: formatBucket(
+																row.bucket,
+																montoCobrarPeriodo,
+															),
+															total_cuota: Number.parseFloat(
+																a ? row.acum_total_cuota : row.total_cuota,
+															),
+															total_interes: Number.parseFloat(
+																a ? row.acum_total_interes : row.total_interes,
+															),
+															total_iva: Number.parseFloat(
+																a ? row.acum_total_iva : row.total_iva,
+															),
+															total_seguro: Number.parseFloat(
+																a ? row.acum_total_seguro : row.total_seguro,
+															),
+															total_gps: Number.parseFloat(
+																a ? row.acum_total_gps : row.total_gps,
+															),
+															total_membresias: Number.parseFloat(
+																a
+																	? row.acum_total_membresias
+																	: row.total_membresias,
+															),
+														};
+													})}
 												>
 													<CartesianGrid strokeDasharray="3 3" />
 													<XAxis
@@ -1356,66 +1369,86 @@ function RouteComponent() {
 															montoCobrarPeriodo,
 															montoCobrarRange.fechaInicio,
 															montoCobrarRange.fechaFin,
-														).map(
-															(row: MontoACobrarPeriodoRow) => {
-																const a = montoCobrarAcumulado;
-																const cuota = a ? row.acum_total_cuota : row.total_cuota;
-																const interes = a ? row.acum_total_interes : row.total_interes;
-																const iva = a ? row.acum_total_iva : row.total_iva;
-																const seguro = a ? row.acum_total_seguro : row.total_seguro;
-																const gps = a ? row.acum_total_gps : row.total_gps;
-																const membresias = a ? row.acum_total_membresias : row.total_membresias;
-																const total =
-																	Number.parseFloat(cuota) +
-																	Number.parseFloat(interes) +
-																	Number.parseFloat(iva) +
-																	Number.parseFloat(seguro) +
-																	Number.parseFloat(gps) +
-																	Number.parseFloat(membresias);
-																return (
-																	<TableRow key={row.bucket}>
-																		<TableCell>
-																			{formatBucket(row.bucket, montoCobrarPeriodo)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{row.cuotas_count}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(cuota)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(interes)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(iva)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(seguro)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(gps)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(membresias)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			<div>{formatCurrency(row.mora_promedio)}</div>
-																			<div
-																				className="text-xs text-muted-foreground cursor-help"
-																				title="% de cuotas del período con mora activa"
-																			>
-																				{row.cuotas_count > 0
-																					? ((row.mora_count / row.cuotas_count) * 100).toFixed(1)
-																					: "0.0"}%
-																			</div>
-																		</TableCell>
-																		<TableCell className="text-right font-bold">
-																			{formatCurrency(total)}
-																		</TableCell>
-																	</TableRow>
-																);
-															},
-														)}
+														).map((row: MontoACobrarPeriodoRow) => {
+															const a = montoCobrarAcumulado;
+															const cuota = a
+																? row.acum_total_cuota
+																: row.total_cuota;
+															const interes = a
+																? row.acum_total_interes
+																: row.total_interes;
+															const iva = a
+																? row.acum_total_iva
+																: row.total_iva;
+															const seguro = a
+																? row.acum_total_seguro
+																: row.total_seguro;
+															const gps = a
+																? row.acum_total_gps
+																: row.total_gps;
+															const membresias = a
+																? row.acum_total_membresias
+																: row.total_membresias;
+															const total =
+																Number.parseFloat(cuota) +
+																Number.parseFloat(interes) +
+																Number.parseFloat(iva) +
+																Number.parseFloat(seguro) +
+																Number.parseFloat(gps) +
+																Number.parseFloat(membresias);
+															return (
+																<TableRow key={row.bucket}>
+																	<TableCell>
+																		{formatBucket(
+																			row.bucket,
+																			montoCobrarPeriodo,
+																		)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{row.cuotas_count}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(cuota)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(interes)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(iva)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(seguro)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(gps)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(membresias)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		<div>
+																			{formatCurrency(row.mora_promedio)}
+																		</div>
+																		<div
+																			className="cursor-help text-muted-foreground text-xs"
+																			title="% de cuotas del período con mora activa"
+																		>
+																			{row.cuotas_count > 0
+																				? (
+																						(row.mora_count /
+																							row.cuotas_count) *
+																						100
+																					).toFixed(1)
+																				: "0.0"}
+																			%
+																		</div>
+																	</TableCell>
+																	<TableCell className="text-right font-bold">
+																		{formatCurrency(total)}
+																	</TableCell>
+																</TableRow>
+															);
+														})}
 														{(() => {
 															const rows =
 																montoCobrarData.data as MontoACobrarPeriodoRow[];
@@ -1430,9 +1463,13 @@ function RouteComponent() {
 																		),
 																	0,
 																);
-															const val = (key: keyof MontoACobrarPeriodoRow) =>
+															const val = (
+																key: keyof MontoACobrarPeriodoRow,
+															) =>
 																a && lastRow
-																	? Number.parseFloat((lastRow[key] as string) || "0")
+																	? Number.parseFloat(
+																			(lastRow[key] as string) || "0",
+																		)
 																	: sum(key);
 															const grandTotal =
 																val("acum_total_cuota") +
@@ -1441,8 +1478,20 @@ function RouteComponent() {
 																val("acum_total_seguro") +
 																val("acum_total_gps") +
 																val("acum_total_membresias");
-															const totalCred = a && lastRow ? lastRow.cuotas_count : rows.reduce((acc, r) => acc + r.cuotas_count, 0);
-															const totalMora = a && lastRow ? lastRow.mora_count : rows.reduce((acc, r) => acc + r.mora_count, 0);
+															const totalCred =
+																a && lastRow
+																	? lastRow.cuotas_count
+																	: rows.reduce(
+																			(acc, r) => acc + r.cuotas_count,
+																			0,
+																		);
+															const totalMora =
+																a && lastRow
+																	? lastRow.mora_count
+																	: rows.reduce(
+																			(acc, r) => acc + r.mora_count,
+																			0,
+																		);
 															return (
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
 																	<TableCell>Total</TableCell>
@@ -1450,22 +1499,48 @@ function RouteComponent() {
 																		{totalCred}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_cuota" : "total_cuota"))}
+																		{formatCurrency(
+																			val(
+																				a ? "acum_total_cuota" : "total_cuota",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_interes" : "total_interes"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_interes"
+																					: "total_interes",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_iva" : "total_iva"))}
+																		{formatCurrency(
+																			val(a ? "acum_total_iva" : "total_iva"),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_seguro" : "total_seguro"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_seguro"
+																					: "total_seguro",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_gps" : "total_gps"))}
+																		{formatCurrency(
+																			val(a ? "acum_total_gps" : "total_gps"),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_membresias" : "total_membresias"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_membresias"
+																					: "total_membresias",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{totalCred > 0
@@ -1698,22 +1773,34 @@ function RouteComponent() {
 											</div>
 										) : reinversionData ? (
 											(() => {
-												const filas = REINVERSION_MODALIDADES.map((m) => ({
-													...m,
-													monto: Number(
-														reinversionData.porTipo[m.tipo]
-															?.reinversion_total ?? 0,
-													),
-												})).filter((f) => f.monto !== 0);
-												const totalMostrado = filas.reduce(
-													(a, f) => a + f.monto,
-													0,
+												const filas = REINVERSION_MODALIDADES.map((m) => {
+													const d = reinversionData.porTipo[m.tipo];
+													return {
+														...m,
+														capital: Number(d?.reinversion_capital ?? 0),
+														interes: Number(d?.reinversion_interes ?? 0),
+														total: Number(d?.reinversion_total ?? 0),
+													};
+												}).filter((f) => f.total !== 0);
+												const totales = filas.reduce(
+													(a, f) => ({
+														capital: a.capital + f.capital,
+														interes: a.interes + f.interes,
+														total: a.total + f.total,
+													}),
+													{ capital: 0, interes: 0, total: 0 },
 												);
 												return (
 													<Table>
 														<TableHeader>
 															<TableRow>
 																<TableHead>Modalidad de Reinversión</TableHead>
+																<TableHead className="text-right">
+																	Capital
+																</TableHead>
+																<TableHead className="text-right">
+																	Interés
+																</TableHead>
 																<TableHead className="text-right">
 																	Reinversión Total
 																</TableHead>
@@ -1724,14 +1811,26 @@ function RouteComponent() {
 																<TableRow key={f.tipo}>
 																	<TableCell>{f.label}</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.monto)}
+																		{formatCurrency(f.capital)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(f.interes)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(f.total)}
 																	</TableCell>
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total Reinvertido</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalMostrado)}
+																	{formatCurrency(totales.capital)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totales.interes)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totales.total)}
 																</TableCell>
 															</TableRow>
 														</TableBody>

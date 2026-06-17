@@ -649,6 +649,8 @@ export async function getReinversionLiquidaciones({
   const result = await db.execute(sql`
     SELECT
       COALESCE(i.tipo_reinversion::text, 'sin_reinversion') AS tipo,
+      COALESCE(SUM(l.reinversion_capital::numeric), 0)      AS reinversion_capital,
+      COALESCE(SUM(l.reinversion_interes::numeric), 0)      AS reinversion_interes,
       COALESCE(SUM(l.reinversion_total::numeric), 0)        AS reinversion_total,
       COALESCE(SUM(l.total_capital::numeric), 0)            AS total_capital,
       COALESCE(SUM(l.total_interes::numeric), 0)            AS total_interes,
@@ -666,6 +668,8 @@ export async function getReinversionLiquidaciones({
   const porTipo: Record<
     string,
     {
+      reinversion_capital: string;
+      reinversion_interes: string;
       reinversion_total: string;
       total_capital: string;
       total_interes: string;
@@ -679,6 +683,8 @@ export async function getReinversionLiquidaciones({
   for (const r of result.rows as Record<string, unknown>[]) {
     const tipo = String(r.tipo ?? "sin_reinversion");
     porTipo[tipo] = {
+      reinversion_capital: Number(r.reinversion_capital ?? 0).toFixed(2),
+      reinversion_interes: Number(r.reinversion_interes ?? 0).toFixed(2),
       reinversion_total: Number(r.reinversion_total ?? 0).toFixed(2),
       total_capital: Number(r.total_capital ?? 0).toFixed(2),
       total_interes: Number(r.total_interes ?? 0).toFixed(2),

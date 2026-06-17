@@ -341,6 +341,7 @@ export const reportsAppRouter = {
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
 	getMontoACobrar: reportesCarteraRouter.getMontoACobrar,
+	getMontoACobrarPeriodo: reportesCarteraRouter.getMontoACobrarPeriodo,
 	getFacturacionMes: reportesCarteraRouter.getFacturacionMes,
 	getFlujoCuotasInversiones: reportesCarteraRouter.getFlujoCuotasInversiones,
 	getReinversionLiquidaciones:

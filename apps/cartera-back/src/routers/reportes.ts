@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { getCobradoDelMes, getColocacionPorPeriodo, getComparativoHistorico, getEsperadoDelMes, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getReinversionLiquidaciones } from "../controllers/reportes";
+import { getCobradoDelMes, getColocacionPorPeriodo, getComparativoHistorico, getEsperadoDelMes, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -36,6 +36,29 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return { data };
     } catch (error) {
       console.error("[/reportes/monto-cobrar]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/monto-cobrar-periodo", async ({ query, set }) => {
+    try {
+      const { periodo, fechaInicio, fechaFin } = query as Record<string, string>;
+      if (!fechaInicio || !fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      const p = validarPeriodo(periodo, set);
+      if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
+      const data = await getMontoACobrarPeriodo({ periodo: p, fechaInicio, fechaFin });
+      set.status = 200;
+      return { data };
+    } catch (error) {
+      console.error("[/reportes/monto-cobrar-periodo]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

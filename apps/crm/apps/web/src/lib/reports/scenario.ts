@@ -81,8 +81,26 @@ export type MontoACobrarRow = {
 	total_seguro: string;
 	total_gps: string;
 	total_membresias: string;
-	total_royalti: string;
 	mora_promedio: string;
+};
+
+export type MontoACobrarPeriodoRow = {
+	bucket: string;
+	cuotas_count: number;
+	total_cuota: string;
+	total_interes: string;
+	total_iva: string;
+	total_seguro: string;
+	total_gps: string;
+	total_membresias: string;
+	mora_promedio: string;
+	mora_count: number;
+	acum_total_cuota: string;
+	acum_total_interes: string;
+	acum_total_iva: string;
+	acum_total_seguro: string;
+	acum_total_gps: string;
+	acum_total_membresias: string;
 };
 
 export type FacturacionMesRubro = {
@@ -202,7 +220,6 @@ export function transformMontoACobrar(
 		total_seguro: money(num(r.total_seguro) * col),
 		total_gps: money(num(r.total_gps) * col),
 		total_membresias: money(num(r.total_membresias) * col),
-		total_royalti: money(num(r.total_royalti) * col),
 		mora_promedio: money(num(r.mora_promedio) * mora),
 	}));
 }

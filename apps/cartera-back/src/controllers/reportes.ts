@@ -292,7 +292,7 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN gps         ELSE 0 END), 0)               AS total_gps,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN mem         ELSE 0 END), 0)               AS total_membresias,
       AVG(CASE WHEN cuotas_atrasadas > 0 AND NOT excluido_mora THEN mora_val END)                AS mora_promedio,
-      COALESCE(SUM(cuotas_count) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)::int AS mora_count,
+      COALESCE(SUM(cuotas_atrasadas) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)::int AS mora_count,
       COALESCE(SUM(CASE
         WHEN excluido_mora     THEN 0
         WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant)

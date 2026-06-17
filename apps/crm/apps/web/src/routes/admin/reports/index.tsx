@@ -1420,6 +1420,7 @@ function RouteComponent() {
 															const rows =
 																montoCobrarData.data as MontoACobrarPeriodoRow[];
 															const a = montoCobrarAcumulado;
+															const lastRow = rows[rows.length - 1];
 															const sum = (key: keyof MontoACobrarPeriodoRow) =>
 																rows.reduce(
 																	(acc: number, r: MontoACobrarPeriodoRow) =>
@@ -1429,48 +1430,47 @@ function RouteComponent() {
 																		),
 																	0,
 																);
+															const val = (key: keyof MontoACobrarPeriodoRow) =>
+																a && lastRow
+																	? Number.parseFloat((lastRow[key] as string) || "0")
+																	: sum(key);
 															const grandTotal =
-																sum(a ? "acum_total_cuota" : "total_cuota") +
-																sum(a ? "acum_total_interes" : "total_interes") +
-																sum(a ? "acum_total_iva" : "total_iva") +
-																sum(a ? "acum_total_seguro" : "total_seguro") +
-																sum(a ? "acum_total_gps" : "total_gps") +
-																sum(a ? "acum_total_membresias" : "total_membresias");
+																val("acum_total_cuota") +
+																val("acum_total_interes") +
+																val("acum_total_iva") +
+																val("acum_total_seguro") +
+																val("acum_total_gps") +
+																val("acum_total_membresias");
+															const totalCred = a && lastRow ? lastRow.cuotas_count : rows.reduce((acc, r) => acc + r.cuotas_count, 0);
+															const totalMora = a && lastRow ? lastRow.mora_count : rows.reduce((acc, r) => acc + r.mora_count, 0);
 															return (
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
 																	<TableCell>Total</TableCell>
 																	<TableCell className="text-right">
-																		{rows.reduce(
-																			(acc, r) => acc + r.cuotas_count,
-																			0,
-																		)}
+																		{totalCred}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum(a ? "acum_total_cuota" : "total_cuota"))}
+																		{formatCurrency(val(a ? "acum_total_cuota" : "total_cuota"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum(a ? "acum_total_interes" : "total_interes"))}
+																		{formatCurrency(val(a ? "acum_total_interes" : "total_interes"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum(a ? "acum_total_iva" : "total_iva"))}
+																		{formatCurrency(val(a ? "acum_total_iva" : "total_iva"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum(a ? "acum_total_seguro" : "total_seguro"))}
+																		{formatCurrency(val(a ? "acum_total_seguro" : "total_seguro"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum(a ? "acum_total_gps" : "total_gps"))}
+																		{formatCurrency(val(a ? "acum_total_gps" : "total_gps"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum(a ? "acum_total_membresias" : "total_membresias"))}
+																		{formatCurrency(val(a ? "acum_total_membresias" : "total_membresias"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{(() => {
-																			const totalCred = rows.reduce((a, r) => a + r.cuotas_count, 0);
-																			const totalMora = rows.reduce((a, r) => a + r.mora_count, 0);
-																			return totalCred > 0
-																				? `${((totalMora / totalCred) * 100).toFixed(1)}%`
-																				: "—";
-																		})()} 
+																		{totalCred > 0
+																			? `${((totalMora / totalCred) * 100).toFixed(1)}%`
+																			: "—"}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(grandTotal)}

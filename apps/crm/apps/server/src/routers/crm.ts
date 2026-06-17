@@ -60,9 +60,7 @@ import {
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
-import {
-	getGuatemalaMonthWindow,
-} from "../lib/guatemala-month-window";
+import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -239,10 +237,7 @@ export async function getCurrentClientCreditsFromCartera(
 	fetchCredits: ClientCreditFetcher = (params) =>
 		carteraBackClient.getAllCreditos(params),
 ) {
-	return getClientCreditsFromCartera(
-		fetchCredits,
-		{ mes: 0, anio: 0 },
-	);
+	return getClientCreditsFromCartera(fetchCredits, { mes: 0, anio: 0 });
 }
 
 function splitFullName(fullName: string | null | undefined) {
@@ -1422,6 +1417,11 @@ export const crmRouter = {
 				// Additional credit fields
 				seguro: opportunities.seguro,
 				gps: opportunities.gps,
+				insuranceProvider: opportunities.insuranceProvider,
+				customerInsuranceCost: opportunities.customerInsuranceCost,
+				internalInsuranceCost: opportunities.internalInsuranceCost,
+				insuranceSavingsToMembership:
+					opportunities.insuranceSavingsToMembership,
 				categoria: opportunities.categoria,
 				nit: opportunities.nit,
 				royalti: opportunities.royalti,
@@ -2163,6 +2163,15 @@ export const crmRouter = {
 			const vehicleChanged =
 				input.vehicleId !== undefined &&
 				input.vehicleId !== currentOpportunity[0].vehicleId;
+			const insuranceFallback =
+				seguro !== undefined
+					? {
+							insuranceProvider: "universales",
+							customerInsuranceCost: String(seguro),
+							internalInsuranceCost: String(seguro),
+							insuranceSavingsToMembership: "0",
+						}
+					: {};
 
 			// Check if this is an override (sales moving from analysis stage)
 			let isOverride = false;
@@ -2215,6 +2224,7 @@ export const crmRouter = {
 					}),
 					// Convert numeric fields to strings for decimal columns
 					...(seguro !== undefined && { seguro: String(seguro) }),
+					...insuranceFallback,
 					...(gps !== undefined && { gps: String(gps) }),
 					...(royalti !== undefined && { royalti: String(royalti) }),
 					...(porcentajeRoyalti !== undefined && {

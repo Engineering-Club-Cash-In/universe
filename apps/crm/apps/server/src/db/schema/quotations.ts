@@ -84,6 +84,23 @@ export const quotations = pgTable("quotations", {
 	membershipCost: decimal("membership_cost", { precision: 16, scale: 8 })
 		.notNull()
 		.default("0"),
+	insuranceProvider: text("insurance_provider")
+		.notNull()
+		.default("universales"),
+	customerInsuranceCost: decimal("customer_insurance_cost", {
+		precision: 16,
+		scale: 8,
+	}),
+	internalInsuranceCost: decimal("internal_insurance_cost", {
+		precision: 16,
+		scale: 8,
+	}),
+	insuranceSavingsToMembership: decimal("insurance_savings_to_membership", {
+		precision: 16,
+		scale: 8,
+	})
+		.notNull()
+		.default("0"),
 
 	// Comisiones - Free lance
 	freelanceCost: decimal("freelance_cost", { precision: 14, scale: 2 }).default(

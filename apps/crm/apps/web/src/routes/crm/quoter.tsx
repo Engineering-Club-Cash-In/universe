@@ -119,6 +119,11 @@ interface QuotationFormValues {
 	termMonths: number;
 	interestRate: number;
 	insuranceCost: number;
+	insuranceProvider: "universales" | "gyt";
+	customerInsuranceCost: number;
+	internalInsuranceCost: number;
+	excelCurrentInsuranceCost: number;
+	insuranceSavingsToMembership: number;
 	gpsCost: number;
 	transferCost: number;
 	adminCost: number;
@@ -829,6 +834,11 @@ function QuoterPage() {
 			termMonths: 60,
 			interestRate: 1.5, // default autocompra; sobre_vehiculo usa 3
 			insuranceCost: 0,
+			insuranceProvider: "universales" as "universales" | "gyt",
+			customerInsuranceCost: 0,
+			internalInsuranceCost: 0,
+			excelCurrentInsuranceCost: 0,
+			insuranceSavingsToMembership: 0,
 			gpsCost: GPS_COST,
 			transferCost: 545, // 395 + 150 según Excel
 			adminCost: 0,
@@ -964,11 +974,30 @@ function QuoterPage() {
 
 			const baseInsuranceCost =
 				Math.round(result.baseInsuranceCost * 100) / 100;
-			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
+			const rawMembershipCost =
+				Math.round(result.effectiveMembershipCost * 100) / 100;
+			quoterForm.setFieldValue("insuranceProvider", result.provider);
+			quoterForm.setFieldValue(
+				"customerInsuranceCost",
+				Math.round(result.customerInsuranceCost * 100) / 100,
+			);
+			quoterForm.setFieldValue(
+				"internalInsuranceCost",
+				Math.round(result.internalInsuranceCost * 100) / 100,
+			);
+			quoterForm.setFieldValue(
+				"excelCurrentInsuranceCost",
+				Math.round((result.excelCurrentInsuranceCost ?? 0) * 100) / 100,
+			);
+			quoterForm.setFieldValue(
+				"insuranceSavingsToMembership",
+				Math.round(result.insuranceSavingsToMembership * 100) / 100,
+			);
 
 			if (isInterno) {
 				// Crédito interno: solo seguro base, sin membresía ni GPS
 				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("customerInsuranceCost", baseInsuranceCost);
 				quoterForm.setFieldValue("membershipCost", 0);
 				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
 				quoterForm.setFieldValue("extraMembershipCost", 0);
@@ -980,6 +1009,7 @@ function QuoterPage() {
 					Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
 
 				quoterForm.setFieldValue("insuranceCost", insuranceCost);
+				quoterForm.setFieldValue("customerInsuranceCost", insuranceCost);
 				quoterForm.setFieldValue("membershipCost", netMembershipCost);
 				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
 				quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
@@ -1896,6 +1926,27 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
+									{quoterForm.state.values.insuranceProvider === "gyt" ? (
+										<p className="text-muted-foreground text-xs">
+											Seguro: GyT. Actual Excel: Q
+											{quoterForm.state.values.excelCurrentInsuranceCost.toFixed(
+												2,
+											)}{" "}
+											/ CRM: Q
+											{quoterForm.state.values.customerInsuranceCost.toFixed(2)}{" "}
+											/ GyT: Q
+											{quoterForm.state.values.internalInsuranceCost.toFixed(2)}
+											. Diferencia a membresía: Q
+											{quoterForm.state.values.insuranceSavingsToMembership.toFixed(
+												2,
+											)}
+											.
+										</p>
+									) : (
+										<p className="text-muted-foreground text-xs">
+											Seguro: Universales
+										</p>
+									)}
 
 									<quoterForm.Field name="gpsCost">
 										{(field) => (
@@ -2104,16 +2155,32 @@ function QuoterPage() {
 																{row.period}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																Q
+																{row.initialBalance.toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.interestPlusVAT.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																Q
+																{row.interestPlusVAT.toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.principal.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																Q
+																{row.principal.toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.finalBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																Q
+																{row.finalBalance.toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
 															</TableCell>
 														</TableRow>
 													))}
@@ -2422,10 +2489,34 @@ function QuotationDetailDialog({
 										.map((row: any) => (
 											<TableRow key={row.period}>
 												<TableCell>{row.period}</TableCell>
-												<TableCell>Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-												<TableCell>Q{row.interestPlusVAT.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-												<TableCell>Q{row.principal.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-												<TableCell>Q{row.finalBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+												<TableCell>
+													Q
+													{row.initialBalance.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</TableCell>
+												<TableCell>
+													Q
+													{row.interestPlusVAT.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</TableCell>
+												<TableCell>
+													Q
+													{row.principal.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</TableCell>
+												<TableCell>
+													Q
+													{row.finalBalance.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</TableCell>
 											</TableRow>
 										))}
 								</TableBody>

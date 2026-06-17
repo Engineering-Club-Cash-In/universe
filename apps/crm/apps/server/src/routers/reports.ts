@@ -276,6 +276,7 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 				placa: vehicles.licensePlate,
 				chasis: vehicles.vinNumber,
 				cuotaSeguro: opportunities.seguro,
+				insuranceProvider: opportunities.insuranceProvider,
 				clienteNombre: sql<string>`COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.middleName}, ${leads.lastName}, ${leads.secondLastName})), ''), ${clients.contactPerson}, '')`,
 				numeroCredito: sql<string>`COALESCE(${latestCarteraReference.numeroCreditoSifco}, ${opportunities.numeroSifco}, '')`,
 				fecha90: firstClosedStageDates.firstClosedStageAt,

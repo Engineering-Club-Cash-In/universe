@@ -3,9 +3,13 @@ import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { quotations, vehicles } from "../db/schema";
+import { buildServerInsurancePersistence } from "../lib/insurance-selection";
 import { crmProcedure } from "../lib/orpc";
-import { canManageAnyQuotation, canManageQuotations } from "../lib/quotation-permissions";
-import { ROLES } from "../lib/roles";
+import {
+	canManageAnyQuotation,
+	canManageQuotations,
+} from "../lib/quotation-permissions";
+import { getInsuranceCost } from "./insurance";
 
 /**
  * Calcula la cuota mensual usando la fórmula PMT de Excel
@@ -193,6 +197,22 @@ export const quotationsRouter = {
 				}
 			}
 
+			const serverInsurance = await getInsuranceCost(
+				input.insuredAmount,
+				input.vehicleType,
+			);
+			const insurancePersistence = buildServerInsurancePersistence({
+				insuredAmount: input.insuredAmount,
+				vehicleType: input.vehicleType,
+				universalesCost: serverInsurance.baseInsuranceCost,
+				gytCost:
+					serverInsurance.provider === "gyt"
+						? serverInsurance.internalInsuranceCost
+						: null,
+				membershipCost: input.membershipCost,
+				customerInsuranceCost: input.insuranceCost,
+			});
+
 			// Calcular valores
 			const isSobreVehiculo = input.creditType === "sobre_vehiculo";
 			const downPaymentPercentage = isSobreVehiculo
@@ -224,7 +244,7 @@ export const quotationsRouter = {
 				totalFinanced,
 				input.interestRate,
 				input.termMonths,
-				input.insuranceCost,
+				Number(insurancePersistence.seguro),
 				input.gpsCost,
 			);
 
@@ -245,11 +265,16 @@ export const quotationsRouter = {
 					downPaymentPercentage: downPaymentPercentage.toString(),
 					termMonths: input.termMonths,
 					interestRate: input.interestRate.toString(),
-					insuranceCost: input.insuranceCost.toString(),
+					insuranceCost: insurancePersistence.seguro,
 					gpsCost: input.gpsCost.toString(),
 					transferCost: input.transferCost.toString(),
 					adminCost: input.adminCost.toString(),
-					membershipCost: input.membershipCost.toString(),
+					membershipCost: insurancePersistence.membresiaPago,
+					insuranceProvider: insurancePersistence.insuranceProvider,
+					customerInsuranceCost: insurancePersistence.customerInsuranceCost,
+					internalInsuranceCost: insurancePersistence.internalInsuranceCost,
+					insuranceSavingsToMembership:
+						insurancePersistence.insuranceSavingsToMembership,
 					// Gastos adicionales para detalle de crédito
 					freelanceCost: input.freelanceCost.toString(),
 					freelancePercentage: input.freelancePercentage?.toString() ?? null,
@@ -327,7 +352,10 @@ export const quotationsRouter = {
 
 			// Validar acceso
 			const userRole = context.userRole;
-			if (!canManageAnyQuotation(userRole) && quotation.salesUserId !== context.userId) {
+			if (
+				!canManageAnyQuotation(userRole) &&
+				quotation.salesUserId !== context.userId
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para ver esta cotización",
 				});

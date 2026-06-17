@@ -111,17 +111,19 @@ const GRUPOS: Grupo[] = [
   },
 ];
 
-// ÚNICAS columnas editables: los 6 TOTALES de rubro. Todo lo demás (detalle por
-// producto, servicios/carros/inversionistas, metas, y los acumulados/tendencias)
-// es de solo lectura. `Facturación` se deriva de estos rubros en el backend y los
+// Editables: grupos ROYALTY y OTROS INGRESOS COMPLETOS (detalle por producto +
+// total + administrativos + otros_cobros). Capital, Interés, Membresía, Mora,
+// servicios/carros/inversionistas, metas y los acumulados/tendencias quedan
+// read-only. `Facturación` se deriva en el backend de los totales editados y los
 // acumulados se recalculan como suma corrida. Además solo se edita el día de HOY.
 const EDITABLES = new Set<string>([
-  "capital_total",
-  "interes_cube",
-  "membresia",
-  "otros_ingresos",
-  "mora_cube",
-  "royalty",
+  // Royalty (completo)
+  "roy_autocompras", "roy_sobre_vehiculo", "nuevo_roy_autocompras",
+  "roy_hipotecario", "roy_extra_financiamiento", "roy_reestructura", "royalty",
+  // Otros ingresos (completo, incl. administrativos y otros_cobros)
+  "oi_autocompras", "oi_sobre_vehiculo", "nuevo_oi_autocompras",
+  "oi_hipotecario", "oi_extra_financiamiento", "oi_reestructura",
+  "otros_ingresos", "administrativos", "otros_cobros",
 ]);
 
 export function FacturacionDiaria() {
@@ -515,7 +517,7 @@ export function FacturacionDiaria() {
               ) : (histQuery.data?.data ?? []).length === 0 ? (
                 <p className="text-center py-10 text-gray-400">Sin cambios registrados.</p>
               ) : (
-                <table className="w-full text-sm border-collapse">
+                <table className="w-full text-sm border-collapse text-gray-800">
                   <thead>
                     <tr className="bg-blue-50 text-blue-800 text-left">
                       <th className="px-3 py-2 font-semibold">Cuándo</th>
@@ -530,10 +532,10 @@ export function FacturacionDiaria() {
                   <tbody>
                     {(histQuery.data?.data ?? []).map((a: AuditoriaSnapshot) => (
                       <tr key={a.id} className="border-b border-gray-100">
+                        {/* created_at ya viene formateado en hora de Guatemala
+                            desde el backend (to_char en SQL) → se muestra tal cual. */}
                         <td className="px-3 py-2 whitespace-nowrap text-gray-500">
-                          {a.created_at
-                            ? new Date(a.created_at).toLocaleString("es-GT")
-                            : "—"}
+                          {a.created_at ?? "—"}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{a.fecha}</td>
                         <td className="px-3 py-2">

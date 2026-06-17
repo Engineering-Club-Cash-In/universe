@@ -8,8 +8,12 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { carteraBackReferences } from "../db/schema/cartera-back";
-import { TIPOS_META, metasMensuales } from "../db/schema/metas";
 import { casosCobros } from "../db/schema/cobros";
+import { metasMensuales, TIPOS_META } from "../db/schema/metas";
+import {
+	getGuatemalaMonthWindow,
+	gtDateStrToDate,
+} from "../lib/guatemala-month-window";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import { adminProcedure } from "../lib/orpc";
 import {
@@ -410,8 +414,12 @@ export const reportesCarteraRouter = {
 				periodo: z
 					.enum(["anio", "trimestre", "mes", "semana", "dia"])
 					.default("mes"),
-				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
-				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaInicio: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
 			}),
 		)
 		.handler(async ({ input }): Promise<{ data: MontoACobrarRow[] }> => {
@@ -457,30 +465,36 @@ export const reportesCarteraRouter = {
 	getFlujoCuotasInversiones: adminProcedure
 		.input(
 			z.object({
-				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
-				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaInicio: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
 			}),
 		)
-		.handler(
-			async ({ input }): Promise<FlujoCuotasInversionesResponse> => {
-				if (!isCarteraBackEnabled()) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: "Integración con cartera-back no está habilitada",
-					});
-				}
-
-				return carteraBackClient.getFlujoCuotasInversiones({
-					fechaInicio: input.fechaInicio,
-					fechaFin: input.fechaFin,
+		.handler(async ({ input }): Promise<FlujoCuotasInversionesResponse> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
 				});
-			},
-		),
+			}
+
+			return carteraBackClient.getFlujoCuotasInversiones({
+				fechaInicio: input.fechaInicio,
+				fechaFin: input.fechaFin,
+			});
+		}),
 
 	getFlujoCuotasPorInversionista: adminProcedure
 		.input(
 			z.object({
-				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
-				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaInicio: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
 			}),
 		)
 		.handler(
@@ -543,7 +557,11 @@ export const reportesCarteraRouter = {
 					updatedAt: new Date(),
 				})
 				.onConflictDoUpdate({
-					target: [metasMensuales.tipo, metasMensuales.anio, metasMensuales.mes],
+					target: [
+						metasMensuales.tipo,
+						metasMensuales.anio,
+						metasMensuales.mes,
+					],
 					set: { monto: input.monto, updatedAt: new Date() },
 				});
 			return { ok: true };
@@ -564,7 +582,9 @@ export const reportesCarteraRouter = {
 			}),
 		)
 		.handler(
-			async ({ input }): Promise<{
+			async ({
+				input,
+			}): Promise<{
 				data: {
 					bucket: string;
 					cantidad_creditos: number;
@@ -574,6 +594,12 @@ export const reportesCarteraRouter = {
 					faltante: string | null;
 				}[];
 			}> => {
+				const startDate = gtDateStrToDate(input.fechaInicio);
+				const endInclusive = new Date(`${input.fechaFin}T12:00:00Z`);
+				endInclusive.setUTCDate(endInclusive.getUTCDate() + 1);
+				const endDate = gtDateStrToDate(
+					endInclusive.toISOString().slice(0, 10),
+				);
 				const toPostgresPeriod: Record<string, string> = {
 					dia: "'day'",
 					semana: "'week'",
@@ -584,25 +610,29 @@ export const reportesCarteraRouter = {
 				const pg = sql.raw(toPostgresPeriod[input.periodo]);
 
 				const colocacionResult = await db.execute(sql`
-					WITH first_placed AS (
+					WITH placed_stage_ids AS (
+						SELECT id
+						FROM sales_stages
+						WHERE closure_percentage >= 90
+					), first_placed AS (
 						SELECT
 							osh.opportunity_id,
 							MIN(osh.changed_at) AS first_placed_at
 						FROM opportunity_stage_history osh
-						JOIN sales_stages ss ON ss.id = osh.to_stage_id
-						WHERE ss.closure_percentage >= 90
+						WHERE osh.to_stage_id IN (SELECT id FROM placed_stage_ids)
 						GROUP BY osh.opportunity_id
 					)
 					SELECT
-						DATE_TRUNC(${pg}, fp.first_placed_at AT TIME ZONE 'America/Guatemala') AS bucket,
+						DATE_TRUNC(${pg}, fp.first_placed_at - INTERVAL '6 hours') AS bucket,
 						COUNT(o.id)::int AS cantidad_creditos,
 						COALESCE(SUM(o.value::numeric), 0) AS total_colocacion
 					FROM first_placed fp
 					JOIN opportunities o ON o.id = fp.opportunity_id
 					WHERE o.status != 'migrate'
-						AND (fp.first_placed_at AT TIME ZONE 'America/Guatemala')::date >= ${input.fechaInicio}::date
-						AND (fp.first_placed_at AT TIME ZONE 'America/Guatemala')::date <= ${input.fechaFin}::date
-					GROUP BY DATE_TRUNC(${pg}, fp.first_placed_at AT TIME ZONE 'America/Guatemala')
+						AND o.stage_id IN (SELECT id FROM placed_stage_ids)
+						AND fp.first_placed_at >= ${startDate}
+						AND fp.first_placed_at < ${endDate}
+					GROUP BY DATE_TRUNC(${pg}, fp.first_placed_at - INTERVAL '6 hours')
 					ORDER BY bucket ASC
 				`);
 
@@ -612,9 +642,16 @@ export const reportesCarteraRouter = {
 					total_colocacion: string;
 				}[];
 
-				const startYear = new Date(`${input.fechaInicio}T12:00:00Z`).getUTCFullYear();
-				const endYear = new Date(`${input.fechaFin}T12:00:00Z`).getUTCFullYear();
-				const anios = Array.from({ length: endYear - startYear + 1 }, (_, i) => startYear + i);
+				const startYear = new Date(
+					`${input.fechaInicio}T12:00:00Z`,
+				).getUTCFullYear();
+				const endYear = new Date(
+					`${input.fechaFin}T12:00:00Z`,
+				).getUTCFullYear();
+				const anios = Array.from(
+					{ length: endYear - startYear + 1 },
+					(_, i) => startYear + i,
+				);
 
 				const metasRows = await db
 					.select()
@@ -632,13 +669,19 @@ export const reportesCarteraRouter = {
 					metasMap[r.anio][r.mes] = Number(r.monto);
 				}
 
-				// Indexar colocación por bucket — parsear como UTC explícito para evitar
-				// interpretación en zona local del servidor (#6)
-				const colocacionMap = new Map<string, { cantidad: number; total: number }>();
+				// Indexar colocación por bucket local GT — parsear como UTC explícito
+				// para evitar interpretación en zona local del servidor (#6)
+				const colocacionMap = new Map<
+					string,
+					{ cantidad: number; total: number }
+				>();
 				for (const row of colocacion) {
-					// row.bucket viene como timestamp string sin zona de DATE_TRUNC AT TIME ZONE
+					// row.bucket viene como timestamp string sin zona de DATE_TRUNC
 					// Forzar parseo UTC agregando Z
-					const raw = typeof row.bucket === "string" ? row.bucket : (row.bucket as Date).toISOString();
+					const raw =
+						typeof row.bucket === "string"
+							? row.bucket
+							: (row.bucket as Date).toISOString();
 					const key = (raw.endsWith("Z") ? raw : `${raw}Z`).slice(0, 10);
 					colocacionMap.set(key, {
 						cantidad: row.cantidad_creditos,
@@ -653,7 +696,9 @@ export const reportesCarteraRouter = {
 
 				const truncTz = (d: Date, periodo: string): Date => {
 					const gt = new Date(d.getTime() - 6 * 60 * 60 * 1000);
-					const y = gt.getUTCFullYear(), mo = gt.getUTCMonth(), day = gt.getUTCDate();
+					const y = gt.getUTCFullYear();
+					const mo = gt.getUTCMonth();
+					const day = gt.getUTCDate();
 					if (periodo === "dia") return new Date(Date.UTC(y, mo, day));
 					if (periodo === "semana") {
 						const dow = gt.getUTCDay();
@@ -661,7 +706,8 @@ export const reportesCarteraRouter = {
 						return new Date(Date.UTC(y, mo, day - ((dow + 6) % 7)));
 					}
 					if (periodo === "mes") return new Date(Date.UTC(y, mo, 1));
-					if (periodo === "trimestre") return new Date(Date.UTC(y, Math.floor(mo / 3) * 3, 1));
+					if (periodo === "trimestre")
+						return new Date(Date.UTC(y, Math.floor(mo / 3) * 3, 1));
 					return new Date(Date.UTC(y, 0, 1));
 				};
 
@@ -710,8 +756,10 @@ export const reportesCarteraRouter = {
 					}
 
 					const colocado = col?.total ?? 0;
-					const cobertura = metaBucket > 0 ? (colocado / metaBucket) * 100 : null;
-					const faltante = metaBucket > 0 ? Math.max(0, metaBucket - colocado) : null;
+					const cobertura =
+						metaBucket > 0 ? (colocado / metaBucket) * 100 : null;
+					const faltante =
+						metaBucket > 0 ? Math.max(0, metaBucket - colocado) : null;
 
 					return {
 						bucket: bucket.toISOString().slice(0, 10),
@@ -738,7 +786,9 @@ export const reportesCarteraRouter = {
 			}),
 		)
 		.handler(
-			async ({ input }): Promise<{
+			async ({
+				input,
+			}): Promise<{
 				data: {
 					mes: number;
 					colocacion_monto: string | null;
@@ -765,30 +815,46 @@ export const reportesCarteraRouter = {
 				const carteraData = await carteraBackClient.getComparativoHistorico(
 					input.anio,
 				);
+				const { startOfMonth: startOfYear } = getGuatemalaMonthWindow(
+					input.anio,
+					1,
+				);
+				const { startOfMonth: endOfYear } = getGuatemalaMonthWindow(
+					input.anio + 1,
+					1,
+				);
 
 				const colocacionResult = await db.execute(sql`
-					WITH first_placed AS (
+					WITH placed_stage_ids AS (
+						SELECT id
+						FROM sales_stages
+						WHERE closure_percentage >= 90
+					), first_placed AS (
 						SELECT
 							osh.opportunity_id,
 							MIN(osh.changed_at) AS first_placed_at
 						FROM opportunity_stage_history osh
-						JOIN sales_stages ss ON ss.id = osh.to_stage_id
-						WHERE ss.closure_percentage >= 90
+						WHERE osh.to_stage_id IN (SELECT id FROM placed_stage_ids)
 						GROUP BY osh.opportunity_id
 					)
 					SELECT
-						EXTRACT(MONTH FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala')::int AS mes,
+						EXTRACT(MONTH FROM fp.first_placed_at - INTERVAL '6 hours')::int AS mes,
 						COUNT(o.id)::int AS colocacion_creditos,
 						COALESCE(SUM(o.value::numeric), 0) AS colocacion_monto
 					FROM first_placed fp
 					JOIN opportunities o ON o.id = fp.opportunity_id
 					WHERE o.status != 'migrate'
-						AND EXTRACT(YEAR FROM fp.first_placed_at AT TIME ZONE 'America/Guatemala') = ${input.anio}
+						AND o.stage_id IN (SELECT id FROM placed_stage_ids)
+						AND fp.first_placed_at >= ${startOfYear}
+						AND fp.first_placed_at < ${endOfYear}
 					GROUP BY 1
 					ORDER BY 1
 				`);
 
-				const colocacionMap = new Map<number, { monto: string; creditos: number }>();
+				const colocacionMap = new Map<
+					number,
+					{ monto: string; creditos: number }
+				>();
 				for (const row of colocacionResult.rows as {
 					mes: number;
 					colocacion_creditos: number;
@@ -808,7 +874,10 @@ export const reportesCarteraRouter = {
 					cobradoMap.set(Number(row.mes), Number(row.cobrado).toFixed(2));
 				}
 
-				const carteraMap = new Map<number, { capital: string; creditos: number }>();
+				const carteraMap = new Map<
+					number,
+					{ capital: string; creditos: number }
+				>();
 				for (const row of carteraData.cartera) {
 					carteraMap.set(mesDeDate(row.mes), {
 						capital: Number(row.cartera_activa).toFixed(2),
@@ -816,23 +885,58 @@ export const reportesCarteraRouter = {
 					});
 				}
 
-				type AgingBuckets = { mora_30: string | null; mora_60: string | null; mora_90: string | null; mora_120: string | null; creditos_30: number | null; creditos_60: number | null; creditos_90: number | null; creditos_120: number | null };
+				type AgingBuckets = {
+					mora_30: string | null;
+					mora_60: string | null;
+					mora_90: string | null;
+					mora_120: string | null;
+					creditos_30: number | null;
+					creditos_60: number | null;
+					creditos_90: number | null;
+					creditos_120: number | null;
+				};
 
 				const agingHistMap = new Map<number, AgingBuckets>();
 				for (const row of carteraData.agingHistorico) {
 					const m = mesDeDate(row.periodo);
-					if (!agingHistMap.has(m)) agingHistMap.set(m, { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null });
+					if (!agingHistMap.has(m))
+						agingHistMap.set(m, {
+							mora_30: null,
+							mora_60: null,
+							mora_90: null,
+							mora_120: null,
+							creditos_30: null,
+							creditos_60: null,
+							creditos_90: null,
+							creditos_120: null,
+						});
 					const entry = agingHistMap.get(m)!;
 					const key = `mora_${row.bucket}` as keyof AgingBuckets;
 					const cKey = `creditos_${row.bucket}` as keyof AgingBuckets;
-					(entry as Record<string, string | number | null>)[key] = Number(row.monto_mora).toFixed(2);
-					(entry as Record<string, string | number | null>)[cKey] = row.cantidad_creditos;
+					(entry as Record<string, string | number | null>)[key] = Number(
+						row.monto_mora,
+					).toFixed(2);
+					(entry as Record<string, string | number | null>)[cKey] =
+						row.cantidad_creditos;
 				}
 
-				const agingActual: AgingBuckets = { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null };
+				const agingActual: AgingBuckets = {
+					mora_30: null,
+					mora_60: null,
+					mora_90: null,
+					mora_120: null,
+					creditos_30: null,
+					creditos_60: null,
+					creditos_90: null,
+					creditos_120: null,
+				};
 				for (const row of carteraData.moraActual) {
-					(agingActual as Record<string, string | number | null>)[`mora_${row.bucket}`] = Number(row.monto_mora).toFixed(2);
-					(agingActual as Record<string, string | number | null>)[`creditos_${row.bucket}`] = row.cantidad_creditos;
+					(agingActual as Record<string, string | number | null>)[
+						`mora_${row.bucket}`
+					] = Number(row.monto_mora).toFixed(2);
+					(agingActual as Record<string, string | number | null>)[
+						`creditos_${row.bucket}`
+					] = row.cantidad_creditos;
 				}
 
 				const ahoraGt = new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -846,15 +950,34 @@ export const reportesCarteraRouter = {
 						(input.anio === anioActual && mes > mesActual);
 					const esMesActual = input.anio === anioActual && mes === mesActual;
 
-					const nullAging: AgingBuckets = { mora_30: null, mora_60: null, mora_90: null, mora_120: null, creditos_30: null, creditos_60: null, creditos_90: null, creditos_120: null };
+					const nullAging: AgingBuckets = {
+						mora_30: null,
+						mora_60: null,
+						mora_90: null,
+						mora_120: null,
+						creditos_30: null,
+						creditos_60: null,
+						creditos_90: null,
+						creditos_120: null,
+					};
 
 					if (esFuturo) {
-						return { mes, colocacion_monto: null, colocacion_creditos: null, facturacion: null, cartera_activa: null, creditos_activos: null, ...nullAging };
+						return {
+							mes,
+							colocacion_monto: null,
+							colocacion_creditos: null,
+							facturacion: null,
+							cartera_activa: null,
+							creditos_activos: null,
+							...nullAging,
+						};
 					}
 
 					const coloc = colocacionMap.get(mes);
 					const cart = carteraMap.get(mes);
-					const aging = esMesActual ? agingActual : (agingHistMap.get(mes) ?? nullAging);
+					const aging = esMesActual
+						? agingActual
+						: (agingHistMap.get(mes) ?? nullAging);
 
 					return {
 						mes,

@@ -4,6 +4,7 @@ import {
 	buildCarteraMatchedClientRows,
 	buildCarteraOnlyClientRow,
 	calculateCarteraClientStats,
+	getCurrentClientCreditsFromCartera,
 	getClientCreditSifcosFromCartera,
 	getLeadsInputSchema,
 } from "./crm";
@@ -69,6 +70,39 @@ describe("getClientCreditSifcosFromCartera", () => {
 			"ACTIVO",
 			"MOROSO",
 			"EN_CONVENIO",
+		]);
+	});
+});
+
+describe("getCurrentClientCreditsFromCartera", () => {
+	test("requests active cartera credits without month/year filtering", async () => {
+		const calls: Array<{ mes: number; anio: number; estado: string }> = [];
+		const fetchCredits = async (params: {
+			mes: number;
+			anio: number;
+			estado: string;
+			page: number;
+			perPage: number;
+		}) => {
+			calls.push(params);
+
+			return {
+				data: [{ creditos: { numero_credito_sifco: `${params.estado}-1` } }],
+				totalPages: 1,
+			};
+		};
+
+		const credits = await getCurrentClientCreditsFromCartera(fetchCredits);
+
+		expect(credits.map((row) => row.creditos?.numero_credito_sifco)).toEqual([
+			"ACTIVO-1",
+			"MOROSO-1",
+			"EN_CONVENIO-1",
+		]);
+		expect(calls.map(({ mes, anio }) => ({ mes, anio }))).toEqual([
+			{ mes: 0, anio: 0 },
+			{ mes: 0, anio: 0 },
+			{ mes: 0, anio: 0 },
 		]);
 	});
 });
@@ -158,6 +192,33 @@ describe("buildCarteraMatchedClientRows", () => {
 		});
 
 		expect(row.totalClosedValue).toBe(1200);
+	});
+
+	test("includes all lead opportunities in each matched client detail row", () => {
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
+				{ id: "opp-2", numeroSifco: "SIFCO-2", value: "7000.00", isClosed: true },
+			],
+			creditAnalysis: null,
+			carteraCreditBySifco: new Map([
+				[
+					"SIFCO-1",
+					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+				],
+				[
+					"SIFCO-2",
+					{ creditos: { numero_credito_sifco: "SIFCO-2", deudatotal: "3400.00" } },
+				],
+			]),
+		});
+
+		expect(rows[0].carteraCredit?.numeroSifco).toBe("SIFCO-1");
+		expect(rows[0].opportunities.map((opp) => opp.id)).toEqual([
+			"opp-1",
+			"opp-2",
+		]);
 	});
 });
 

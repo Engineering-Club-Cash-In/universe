@@ -33,6 +33,17 @@ const etapaBadge = (etapa: string) => {
   return map[etapa] ?? "bg-gray-100 text-gray-700";
 };
 
+// Etiqueta legible para el valor del filtro de etapa (mismo mapeo que el backend).
+const etapaLabel = (etapa: string) => {
+  const map: Record<string, string> = {
+    "0-30": "Mora 30",
+    "31-60": "Mora 60",
+    "61-90": "Mora 90",
+    "+90": "Mora 120+",
+  };
+  return map[etapa] ?? etapa;
+};
+
 export function MoraHistorial() {
   const { advisors } = useAdminData();
   const [fecha, setFecha] = useState(hoyISO());
@@ -64,8 +75,8 @@ export function MoraHistorial() {
   });
 
   const timelineQuery = useQuery({
-    queryKey: ["mora-timeline", fecha, asesorCsv],
-    queryFn: () => getMoraTimeline(menosDias(fecha, 45), fecha, asesorCsv),
+    queryKey: ["mora-timeline", fecha, asesorCsv, etapa],
+    queryFn: () => getMoraTimeline(menosDias(fecha, 45), fecha, asesorCsv, etapa || undefined),
     refetchOnWindowFocus: false,
   });
 
@@ -215,7 +226,7 @@ export function MoraHistorial() {
 
         {/* Timeline */}
         <div className="bg-white rounded-2xl shadow-lg border border-red-100 p-5 mb-6">
-          <h2 className="text-sm font-bold text-red-800 mb-3 uppercase tracking-wide flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Evolución de la mora (últimos 45 días)</h2>
+          <h2 className="text-sm font-bold text-red-800 mb-3 uppercase tracking-wide flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Evolución de la mora{etapa ? ` — ${etapaLabel(etapa)}` : ""} (últimos 45 días)</h2>
           {timelineQuery.isFetching ? (
             <div className="h-64 flex items-center justify-center text-red-300"><Loader2 className="h-6 w-6 animate-spin" /></div>
           ) : (

@@ -22,6 +22,7 @@ import {
 	type FlujoCuotasInversionesResponse,
 	type FlujoCuotasPorInversionistaResponse,
 	type MontoACobrarRow,
+	type MontoACobrarPeriodoRow,
 	type ReinversionLiquidacionesResponse,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
@@ -431,6 +432,36 @@ export const reportesCarteraRouter = {
 			}
 
 			const data = await carteraBackClient.getMontoACobrar({
+				periodo: input.periodo,
+				fechaInicio: input.fechaInicio,
+				fechaFin: input.fechaFin,
+			});
+
+			return { data };
+		}),
+
+	// ========================================================================
+	// REPORTE: MONTO A COBRARSE POR PERÍODO (lógica cartera web, con acumulado)
+	// ========================================================================
+
+	getMontoACobrarPeriodo: adminProcedure
+		.input(
+			z.object({
+				periodo: z
+					.enum(["anio", "trimestre", "mes", "semana", "dia"])
+					.default("mes"),
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+			}),
+		)
+		.handler(async ({ input }): Promise<{ data: MontoACobrarPeriodoRow[] }> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			const data = await carteraBackClient.getMontoACobrarPeriodo({
 				periodo: input.periodo,
 				fechaInicio: input.fechaInicio,
 				fechaFin: input.fechaFin,

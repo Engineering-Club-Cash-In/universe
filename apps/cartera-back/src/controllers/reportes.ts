@@ -67,6 +67,264 @@ export async function getMontoACobrar({
   return result.rows;
 }
 
+export async function getMontoACobrarPeriodo({
+  periodo,
+  fechaInicio,
+  fechaFin,
+}: {
+  periodo: Periodo;
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const pg = sql.raw(toPostgresPeriod[periodo]);
+
+  const result = await db.execute(sql`
+    WITH
+    pagos_en_rango AS (
+      SELECT
+        pc.credito_id,
+        pc.cuota_id,
+        q.fecha_vencimiento                                                                                                AS fecha_venc,
+        COALESCE(MIN(pc.capital_restante::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_capital::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0)   AS capital_restante,
+        COALESCE(MIN(pc.interes_restante::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_interes::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0)   AS interes_restante,
+        COALESCE(MIN(pc.iva_12_restante::numeric)  FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_iva_12::numeric)   FILTER (WHERE NOT pc."paymentFalse"), 0)  AS iva_12_restante,
+        COALESCE(MIN(pc.seguro_restante::numeric)  FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_seguro::numeric)   FILTER (WHERE NOT pc."paymentFalse"), 0)  AS seguro_restante,
+        COALESCE(MIN(pc.gps_restante::numeric)     FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_gps::numeric)      FILTER (WHERE NOT pc."paymentFalse"), 0)  AS gps_restante,
+        COALESCE(MIN(pc.membresias::numeric)       FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.membresias_pago::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0) AS membresias,
+        SUM(COALESCE(pc.monto_boleta::numeric, 0))                                                                         AS monto_boleta
+      FROM cartera.pagos_credito pc
+      JOIN cartera.cuotas_credito q ON q.cuota_id = pc.cuota_id
+      WHERE q.fecha_vencimiento::date >= ${fechaInicio}::date
+        AND q.fecha_vencimiento::date <= ${fechaFin}::date
+      GROUP BY pc.credito_id, pc.cuota_id, q.fecha_vencimiento
+
+      UNION ALL
+
+      SELECT
+        pc.credito_id,
+        pc.cuota_id,
+        pc.fecha_vencimiento                                                                             AS fecha_venc,
+        COALESCE(pc.capital_restante::numeric, 0)  + COALESCE(pc.abono_capital::numeric, 0)             AS capital_restante,
+        COALESCE(pc.interes_restante::numeric, 0)  + COALESCE(pc.abono_interes::numeric, 0)             AS interes_restante,
+        COALESCE(pc.iva_12_restante::numeric, 0)   + COALESCE(pc.abono_iva_12::numeric, 0)              AS iva_12_restante,
+        COALESCE(pc.seguro_restante::numeric, 0)   + COALESCE(pc.abono_seguro::numeric, 0)              AS seguro_restante,
+        COALESCE(pc.gps_restante::numeric, 0)      + COALESCE(pc.abono_gps::numeric, 0)                 AS gps_restante,
+        COALESCE(pc.membresias::numeric, 0)        + COALESCE(pc.membresias_pago::numeric, 0)           AS membresias,
+        COALESCE(pc.monto_boleta::numeric, 0)                                                            AS monto_boleta
+      FROM cartera.pagos_credito pc
+      WHERE pc."paymentFalse" = false
+        AND pc.cuota_id IS NULL
+        AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
+        AND pc.fecha_vencimiento::date <= ${fechaFin}::date
+    ),
+    per_credito AS (
+      SELECT
+        p.fecha_venc::date                                             AS bucket,
+        c.credito_id,
+        c."statusCredit"                                               AS status,
+        c.porcentaje_interes::numeric / 100                            AS tasa,
+        c.cuota::numeric                                               AS cuota_c,
+        COALESCE(c.seguro_10_cuotas::numeric, 0)                       AS seguro,
+        COALESCE(c.gps::numeric, 0)                                    AS gps,
+        COALESCE(c.membresias_pago::numeric, 0)                        AS mem,
+        COALESCE(cap_anterior.total_restante, c.capital::numeric)       AS cap_ant,
+        MAX(mora_real.cuotas_atrasadas)                                 AS cuotas_atrasadas,
+        CASE WHEN MAX(mora_real.cuotas_atrasadas) > 0
+             THEN COALESCE(MAX(m.monto_mora::numeric), 0)
+             ELSE 0 END                                                 AS mora_val
+      FROM pagos_en_rango p
+      INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
+      INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
+      INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
+      LEFT JOIN cartera.moras_credito m ON m.credito_id = c.credito_id AND m.activa = true
+      LEFT JOIN LATERAL (
+        SELECT pc_a.total_restante::numeric AS total_restante
+        FROM cartera.pagos_credito pc_a
+        LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
+        WHERE pc_a.credito_id = c.credito_id
+          AND pc_a."paymentFalse" = false
+          AND pc_a.total_restante IS NOT NULL
+          AND pc_a.total_restante::numeric > 0
+          AND COALESCE(
+            qcc_a.fecha_vencimiento::date,
+            GREATEST(
+              COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
+              COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+            )
+          ) < DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date
+        ORDER BY COALESCE(
+          qcc_a.fecha_vencimiento::date,
+          GREATEST(
+            COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
+            COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+          )
+        ) DESC, pc_a.pago_id DESC
+        LIMIT 1
+      ) cap_anterior ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS cuotas_atrasadas
+        FROM cartera.cuotas_credito qc_mora
+        WHERE qc_mora.credito_id = c.credito_id
+          AND qc_mora.fecha_vencimiento::date < p.fecha_venc::date
+          AND NOT EXISTS (
+            SELECT 1 FROM cartera.pagos_credito pc_mora
+            WHERE pc_mora.cuota_id = qc_mora.cuota_id
+              AND pc_mora."paymentFalse" = false
+              AND pc_mora.pagado = true
+              AND pc_mora.validation_status IN ('validated', 'no_required')
+              AND COALESCE(pc_mora.fecha_boleta::date, pc_mora.fecha_pago::date) <= p.fecha_venc::date
+          )
+      ) mora_real ON true
+      GROUP BY
+        p.fecha_venc::date,
+        c.credito_id, c."statusCredit", c.capital, c.porcentaje_interes, c.cuota,
+        c.seguro_10_cuotas, c.gps, c.membresias_pago,
+        cap_anterior.total_restante, mora_real.cuotas_atrasadas
+      HAVING (
+        SUM(COALESCE(p.capital_restante, 0)) +
+        SUM(COALESCE(p.interes_restante, 0)) +
+        SUM(COALESCE(p.iva_12_restante, 0))  +
+        SUM(COALESCE(p.seguro_restante, 0))  +
+        SUM(COALESCE(p.gps_restante, 0))     +
+        SUM(COALESCE(p.membresias, 0))       +
+        SUM(COALESCE(p.monto_boleta, 0))
+      ) <> 0
+    ),
+    calc AS (
+      SELECT *,
+        ROUND(cap_ant * tasa, 2)                   AS interes,
+        ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2)  AS iva
+      FROM per_credito
+    ),
+    calc_acum AS (
+      SELECT
+        calc.*,
+        (calc.status IN ('EN_CONVENIO', 'INCOBRABLE', 'CANCELADO', 'PENDIENTE_CANCELACION', 'CAIDO')) AS excluido_mora,
+        (calc.status IN ('CANCELADO', 'INCOBRABLE', 'PENDIENTE_CANCELACION'))                          AS excluido_factura,
+        LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant)             AS exp_capital,
+        COALESCE(acum.acum_capital, 0) AS acum_capital,
+        COALESCE(acum.acum_interes, 0) AS acum_interes,
+        COALESCE(acum.acum_iva,     0) AS acum_iva,
+        COALESCE(acum.acum_seguro,  0) AS acum_seguro,
+        COALESCE(acum.acum_gps,     0) AS acum_gps,
+        COALESCE(acum.acum_mem,     0) AS acum_mem
+      FROM calc
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(SUM(LEAST(
+            a.capital_restante,
+            GREATEST(calc.cuota_c - a.interes_restante - a.iva_12_restante
+                     - a.seguro_restante - a.gps_restante - a.membresias, 0::numeric)
+          )), 0) AS acum_capital,
+          COALESCE(SUM(a.interes_restante), 0) AS acum_interes,
+          COALESCE(SUM(a.iva_12_restante),  0) AS acum_iva,
+          COALESCE(SUM(a.seguro_restante),  0) AS acum_seguro,
+          COALESCE(SUM(a.gps_restante),     0) AS acum_gps,
+          COALESCE(SUM(a.membresias),       0) AS acum_mem
+        FROM (
+          SELECT
+            COALESCE(MIN(pc_a.capital_restante::numeric), 0) AS capital_restante,
+            COALESCE(MIN(pc_a.interes_restante::numeric), 0) AS interes_restante,
+            COALESCE(MIN(pc_a.iva_12_restante::numeric),  0) AS iva_12_restante,
+            COALESCE(MIN(pc_a.seguro_restante::numeric),  0) AS seguro_restante,
+            COALESCE(MIN(pc_a.gps_restante::numeric),     0) AS gps_restante,
+            COALESCE(MIN(pc_a.membresias::numeric),       0) AS membresias
+          FROM cartera.cuotas_credito q_a
+          LEFT JOIN cartera.pagos_credito pc_a
+            ON pc_a.cuota_id = q_a.cuota_id
+            AND pc_a."paymentFalse" = false
+          WHERE q_a.credito_id = calc.credito_id
+            AND q_a.fecha_vencimiento::date < calc.bucket
+            AND NOT EXISTS (
+              SELECT 1 FROM cartera.pagos_credito pc2
+              WHERE pc2.cuota_id = q_a.cuota_id
+                AND pc2."paymentFalse" = false
+                AND pc2.pagado = true
+                AND pc2.validation_status IN ('validated', 'no_required')
+                AND COALESCE(pc2.fecha_boleta::date, pc2.fecha_pago::date) <= calc.bucket
+            )
+          GROUP BY q_a.cuota_id
+          HAVING (
+              COALESCE(MIN(pc_a.capital_restante::numeric), 0)
+            + COALESCE(MIN(pc_a.interes_restante::numeric), 0)
+            + COALESCE(MIN(pc_a.iva_12_restante::numeric),  0)
+            + COALESCE(MIN(pc_a.seguro_restante::numeric),  0)
+            + COALESCE(MIN(pc_a.gps_restante::numeric),     0)
+            + COALESCE(MIN(pc_a.membresias::numeric),       0)
+          ) > 0
+          OR COUNT(pc_a.pago_id) = 0
+          OR MIN(pc_a.capital_restante) IS NULL
+        ) a
+      ) acum ON calc.cuotas_atrasadas > 0
+    ),
+    per_bucket_credit AS (
+      SELECT
+        DATE_TRUNC(${pg}, bucket::timestamp)    AS bucket,
+        credito_id,
+        MAX(excluido_mora::int)::bool           AS excluido_mora,
+        MAX(excluido_factura::int)::bool        AS excluido_factura,
+        SUM(exp_capital)                        AS exp_capital,
+        SUM(interes)                            AS interes,
+        SUM(iva)                                AS iva,
+        SUM(seguro)                             AS seguro,
+        SUM(gps)                                AS gps,
+        SUM(mem)                                AS mem,
+        MAX(mora_val)                           AS mora_val,
+        MAX(cuotas_atrasadas)                   AS cuotas_atrasadas,
+        MIN(cap_ant)                            AS cap_ant,
+        MAX(acum_capital)                       AS acum_capital,
+        MAX(acum_interes)                       AS acum_interes,
+        MAX(acum_iva)                           AS acum_iva,
+        MAX(acum_seguro)                        AS acum_seguro,
+        MAX(acum_gps)                           AS acum_gps,
+        MAX(acum_mem)                           AS acum_mem,
+        COUNT(*)::int                           AS cuotas_count
+      FROM calc_acum
+      GROUP BY DATE_TRUNC(${pg}, bucket::timestamp), credito_id
+    )
+    SELECT
+      bucket,
+      COALESCE(SUM(cuotas_count), 0)::int                                                        AS cuotas_count,
+      COALESCE(SUM(CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END), 0)               AS total_cuota,
+      COALESCE(SUM(CASE WHEN NOT excluido_factura THEN interes     ELSE 0 END), 0)               AS total_interes,
+      COALESCE(SUM(CASE WHEN NOT excluido_factura THEN iva         ELSE 0 END), 0)               AS total_iva,
+      COALESCE(SUM(CASE WHEN NOT excluido_factura THEN seguro      ELSE 0 END), 0)               AS total_seguro,
+      COALESCE(SUM(CASE WHEN NOT excluido_factura THEN gps         ELSE 0 END), 0)               AS total_gps,
+      COALESCE(SUM(CASE WHEN NOT excluido_factura THEN mem         ELSE 0 END), 0)               AS total_membresias,
+      AVG(CASE WHEN cuotas_atrasadas > 0 AND NOT excluido_mora THEN mora_val END)                AS mora_promedio,
+      COALESCE(SUM(cuotas_atrasadas) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)::int AS mora_count,
+      COALESCE(SUM(CASE
+        WHEN excluido_mora     THEN 0
+        WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant)
+        ELSE exp_capital END), 0)                                                                 AS acum_total_cuota,
+      COALESCE(SUM(CASE
+        WHEN excluido_mora     THEN 0
+        WHEN cuotas_atrasadas > 0 THEN acum_interes
+        ELSE interes END), 0)                                                                     AS acum_total_interes,
+      COALESCE(SUM(CASE
+        WHEN excluido_mora     THEN 0
+        WHEN cuotas_atrasadas > 0 THEN acum_iva
+        ELSE iva END), 0)                                                                         AS acum_total_iva,
+      COALESCE(SUM(CASE
+        WHEN excluido_mora     THEN 0
+        WHEN cuotas_atrasadas > 0 THEN acum_seguro
+        ELSE seguro END), 0)                                                                      AS acum_total_seguro,
+      COALESCE(SUM(CASE
+        WHEN excluido_mora     THEN 0
+        WHEN cuotas_atrasadas > 0 THEN acum_gps
+        ELSE gps END), 0)                                                                         AS acum_total_gps,
+      COALESCE(SUM(CASE
+        WHEN excluido_mora     THEN 0
+        WHEN cuotas_atrasadas > 0 THEN acum_mem
+        ELSE mem END), 0)                                                                         AS acum_total_membresias
+    FROM per_bucket_credit
+    GROUP BY bucket
+    ORDER BY bucket ASC
+  `);
+
+  return result.rows;
+}
+
 export async function getCobradoDelMes({
   mes,
   anio,

@@ -36,6 +36,7 @@ import {
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
+import { PeriodDatePicker } from "@/components/reports/period-date-picker";
 import { ReportCard } from "@/components/reports/report-card";
 import { ScenarioModal } from "@/components/reports/scenario-modal";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,8 @@ import type {
 	FacturacionMesResponse,
 	FacturacionMesRubro,
 	FlujoCuotasInversionesResponse,
+	FlujoCuotasRubro,
+	MontoACobrarPeriodoRow,
 	MontoACobrarRow,
 	PuntoEquilibrioRow,
 	ReinversionLiquidacionesResponse,
@@ -205,7 +208,6 @@ const MONTO_COBRAR_COLORS = {
 	total_seguro: "#f97316",
 	total_gps: "#8b5cf6",
 	total_membresias: "#ec4899",
-	total_royalti: "#14b8a6",
 } as const;
 
 const MONTO_COBRAR_LABELS: Record<keyof typeof MONTO_COBRAR_COLORS, string> = {
@@ -215,7 +217,6 @@ const MONTO_COBRAR_LABELS: Record<keyof typeof MONTO_COBRAR_COLORS, string> = {
 	total_seguro: "Seguro",
 	total_gps: "GPS",
 	total_membresias: "Membresías",
-	total_royalti: "Royalti",
 };
 
 const GUATEMALA_TIME_ZONE = "America/Guatemala";
@@ -243,6 +244,32 @@ function getDefaultMontoCobrarRange(): {
 	return { fechaInicio: today, fechaFin: formatDateInput(fin) };
 }
 
+function getDefaultRangeForPeriodo(
+	periodo: "anio" | "trimestre" | "mes" | "semana" | "dia",
+): { fechaInicio: string; fechaFin: string } {
+	const now = new Date();
+	const year = now.getFullYear();
+	const month = now.getMonth() + 1;
+	const pad = (n: number) => String(n).padStart(2, "0");
+	const lastDay = (y: number, m: number) => new Date(y, m, 0).getDate();
+	if (periodo === "anio") {
+		return { fechaInicio: `${year}-01-01`, fechaFin: `${year}-12-31` };
+	}
+	if (periodo === "trimestre") {
+		const q = Math.ceil(month / 3);
+		const startMonth = (q - 1) * 3 + 1;
+		const endMonth = startMonth + 2;
+		return {
+			fechaInicio: `${year}-${pad(startMonth)}-01`,
+			fechaFin: `${year}-${pad(endMonth)}-${pad(lastDay(year, endMonth))}`,
+		};
+	}
+	return {
+		fechaInicio: `${year}-${pad(month)}-01`,
+		fechaFin: `${year}-${pad(month)}-${pad(lastDay(year, month))}`,
+	};
+}
+
 function formatBucket(bucket: string, periodo: string): string {
 	const date = new Date(bucket.length === 10 ? `${bucket}T12:00:00` : bucket);
 	if (periodo === "dia") {
@@ -265,6 +292,67 @@ function formatBucket(bucket: string, periodo: string): string {
 		month: "short",
 		year: "numeric",
 	}).format(date);
+}
+
+function fillMissingPeriods(
+	data: MontoACobrarPeriodoRow[],
+	periodo: "anio" | "trimestre" | "mes" | "semana" | "dia",
+	fechaInicio: string,
+	fechaFin: string,
+): MontoACobrarPeriodoRow[] {
+	if (periodo !== "semana" && periodo !== "dia") return data;
+
+	const toKey = (d: Date) =>
+		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+	const dataMap = new Map(
+		data.map((row) => [row.bucket.slice(0, 10), row]),
+	);
+
+	const dates: Date[] = [];
+	const start = new Date(`${fechaInicio}T12:00:00`);
+	const end = new Date(`${fechaFin}T12:00:00`);
+
+	if (periodo === "dia") {
+		const cur = new Date(start);
+		while (cur <= end) {
+			dates.push(new Date(cur));
+			cur.setDate(cur.getDate() + 1);
+		}
+	} else {
+		// ISO week: Monday start (matches PostgreSQL DATE_TRUNC('week'))
+		const cur = new Date(start);
+		const dow = cur.getDay();
+		cur.setDate(cur.getDate() + (dow === 0 ? -6 : 1 - dow));
+		while (cur <= end) {
+			dates.push(new Date(cur));
+			cur.setDate(cur.getDate() + 7);
+		}
+	}
+
+	return dates.map((d) => {
+		const key = toKey(d);
+		return (
+			dataMap.get(key) ?? {
+				bucket: key,
+				cuotas_count: 0,
+				total_cuota: "0",
+				total_interes: "0",
+				total_iva: "0",
+				total_seguro: "0",
+				total_gps: "0",
+				total_membresias: "0",
+				mora_promedio: "0",
+				mora_count: 0,
+				acum_total_cuota: "0",
+				acum_total_interes: "0",
+				acum_total_iva: "0",
+				acum_total_seguro: "0",
+				acum_total_gps: "0",
+				acum_total_membresias: "0",
+			}
+		);
+	});
 }
 
 function getDefaultClosedCreditsRange(): DateRange {
@@ -342,9 +430,10 @@ function RouteComponent() {
 	const [montoCobrarPeriodo, setMontoCobrarPeriodo] = useState<
 		"anio" | "trimestre" | "mes" | "semana" | "dia"
 	>("mes");
-	const [montoCobrarRange, setMontoCobrarRange] = useState(
-		getDefaultMontoCobrarRange,
+	const [montoCobrarRange, setMontoCobrarRange] = useState(() =>
+		getDefaultRangeForPeriodo("mes"),
 	);
+	const [montoCobrarAcumulado, setMontoCobrarAcumulado] = useState(false);
 	const [facturacionMes, setFacturacionMes] = useState(() => ({
 		mes: new Date().getMonth() + 1,
 		anio: new Date().getFullYear(),
@@ -426,7 +515,7 @@ function RouteComponent() {
 	});
 
 	const montoCobrarQuery = useQuery({
-		...orpc.getMontoACobrar.queryOptions({
+		...orpc.getMontoACobrarPeriodo.queryOptions({
 			input: {
 				periodo: montoCobrarPeriodo,
 				fechaInicio: montoCobrarRange.fechaInicio,
@@ -436,7 +525,7 @@ function RouteComponent() {
 		enabled: isAdmin,
 	});
 	const montoCobrarData = montoCobrarQuery.data as
-		| { data: MontoACobrarRow[] }
+		| { data: MontoACobrarPeriodoRow[] }
 		| undefined;
 
 	const facturacionMesQuery = useQuery({
@@ -1104,16 +1193,16 @@ function RouteComponent() {
 											<SimularButton onClick={() => setScenarioOpen("monto")} />
 											<Select
 												value={montoCobrarPeriodo}
-												onValueChange={(v) =>
-													setMontoCobrarPeriodo(
-														v as
-															| "anio"
-															| "trimestre"
-															| "mes"
-															| "semana"
-															| "dia",
-													)
-												}
+												onValueChange={(v) => {
+													const p = v as
+														| "anio"
+														| "trimestre"
+														| "mes"
+														| "semana"
+														| "dia";
+													setMontoCobrarPeriodo(p);
+													setMontoCobrarRange(getDefaultRangeForPeriodo(p));
+												}}
 											>
 												<SelectTrigger className="w-[140px]">
 													<SelectValue placeholder="Período" />
@@ -1126,27 +1215,28 @@ function RouteComponent() {
 													<SelectItem value="anio">Año</SelectItem>
 												</SelectContent>
 											</Select>
-											<DateRangeFilter
-												dateRange={
-													montoCobrarRange.fechaInicio &&
-													montoCobrarRange.fechaFin
-														? {
-																from: dateFromInput(
-																	montoCobrarRange.fechaInicio,
-																),
-																to: dateFromInput(montoCobrarRange.fechaFin),
-															}
-														: undefined
+											<PeriodDatePicker
+												periodo={montoCobrarPeriodo}
+												fechaInicio={montoCobrarRange.fechaInicio}
+												fechaFin={montoCobrarRange.fechaFin}
+												onChange={(fechaInicio, fechaFin) =>
+													setMontoCobrarRange({ fechaInicio, fechaFin })
 												}
-												onDateRangeChange={(range) => {
-													if (range?.from && range?.to) {
-														setMontoCobrarRange({
-															fechaInicio: formatDateInput(range.from),
-															fechaFin: formatDateInput(range.to),
-														});
-													}
-												}}
 											/>
+											<Select
+												value={montoCobrarAcumulado ? "acumulado" : "periodo"}
+												onValueChange={(v) =>
+													setMontoCobrarAcumulado(v === "acumulado")
+												}
+											>
+												<SelectTrigger className="w-[150px]">
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="periodo">Por período</SelectItem>
+													<SelectItem value="acumulado">Acumulado</SelectItem>
+												</SelectContent>
+											</Select>
 										</div>
 									</div>
 								</CardHeader>
@@ -1167,26 +1257,24 @@ function RouteComponent() {
 											{/* Gráfica de barras apiladas */}
 											<ResponsiveContainer width="100%" height={350}>
 												<BarChart
-													data={montoCobrarData.data.map(
-														(row: MontoACobrarRow) => ({
-															bucket: formatBucket(
-																row.bucket,
-																montoCobrarPeriodo,
-															),
-															total_cuota: Number.parseFloat(row.total_cuota),
-															total_interes: Number.parseFloat(
-																row.total_interes,
-															),
-															total_iva: Number.parseFloat(row.total_iva),
-															total_seguro: Number.parseFloat(row.total_seguro),
-															total_gps: Number.parseFloat(row.total_gps),
-															total_membresias: Number.parseFloat(
-																row.total_membresias,
-															),
-															total_royalti: Number.parseFloat(
-																row.total_royalti,
-															),
-														}),
+													data={fillMissingPeriods(
+														montoCobrarData.data,
+														montoCobrarPeriodo,
+														montoCobrarRange.fechaInicio,
+														montoCobrarRange.fechaFin,
+													).map(
+														(row: MontoACobrarPeriodoRow) => {
+															const a = montoCobrarAcumulado;
+															return {
+																bucket: formatBucket(row.bucket, montoCobrarPeriodo),
+																total_cuota: Number.parseFloat(a ? row.acum_total_cuota : row.total_cuota),
+																total_interes: Number.parseFloat(a ? row.acum_total_interes : row.total_interes),
+																total_iva: Number.parseFloat(a ? row.acum_total_iva : row.total_iva),
+																total_seguro: Number.parseFloat(a ? row.acum_total_seguro : row.total_seguro),
+																total_gps: Number.parseFloat(a ? row.acum_total_gps : row.total_gps),
+																total_membresias: Number.parseFloat(a ? row.acum_total_membresias : row.total_membresias),
+															};
+														},
 													)}
 												>
 													<CartesianGrid strokeDasharray="3 3" />
@@ -1255,9 +1343,6 @@ function RouteComponent() {
 																Membresías
 															</TableHead>
 															<TableHead className="text-right">
-																Royalti
-															</TableHead>
-															<TableHead className="text-right">
 																Mora Prom.
 															</TableHead>
 															<TableHead className="text-right font-bold">
@@ -1266,50 +1351,63 @@ function RouteComponent() {
 														</TableRow>
 													</TableHeader>
 													<TableBody>
-														{montoCobrarData.data.map(
-															(row: MontoACobrarRow) => {
+														{fillMissingPeriods(
+															montoCobrarData.data,
+															montoCobrarPeriodo,
+															montoCobrarRange.fechaInicio,
+															montoCobrarRange.fechaFin,
+														).map(
+															(row: MontoACobrarPeriodoRow) => {
+																const a = montoCobrarAcumulado;
+																const cuota = a ? row.acum_total_cuota : row.total_cuota;
+																const interes = a ? row.acum_total_interes : row.total_interes;
+																const iva = a ? row.acum_total_iva : row.total_iva;
+																const seguro = a ? row.acum_total_seguro : row.total_seguro;
+																const gps = a ? row.acum_total_gps : row.total_gps;
+																const membresias = a ? row.acum_total_membresias : row.total_membresias;
 																const total =
-																	Number.parseFloat(row.total_cuota) +
-																	Number.parseFloat(row.total_interes) +
-																	Number.parseFloat(row.total_iva) +
-																	Number.parseFloat(row.total_seguro) +
-																	Number.parseFloat(row.total_gps) +
-																	Number.parseFloat(row.total_membresias) +
-																	Number.parseFloat(row.total_royalti);
+																	Number.parseFloat(cuota) +
+																	Number.parseFloat(interes) +
+																	Number.parseFloat(iva) +
+																	Number.parseFloat(seguro) +
+																	Number.parseFloat(gps) +
+																	Number.parseFloat(membresias);
 																return (
 																	<TableRow key={row.bucket}>
 																		<TableCell>
-																			{formatBucket(
-																				row.bucket,
-																				montoCobrarPeriodo,
-																			)}
+																			{formatBucket(row.bucket, montoCobrarPeriodo)}
 																		</TableCell>
 																		<TableCell className="text-right">
 																			{row.cuotas_count}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.total_cuota)}
+																			{formatCurrency(cuota)}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.total_interes)}
+																			{formatCurrency(interes)}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.total_iva)}
+																			{formatCurrency(iva)}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.total_seguro)}
+																			{formatCurrency(seguro)}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.total_gps)}
+																			{formatCurrency(gps)}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.total_membresias)}
+																			{formatCurrency(membresias)}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.total_royalti)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(row.mora_promedio)}
+																			<div>{formatCurrency(row.mora_promedio)}</div>
+																			<div
+																				className="text-xs text-muted-foreground cursor-help"
+																				title="% de cuotas del período con mora activa"
+																			>
+																				{row.cuotas_count > 0
+																					? ((row.mora_count / row.cuotas_count) * 100).toFixed(1)
+																					: "0.0"}%
+																			</div>
 																		</TableCell>
 																		<TableCell className="text-right font-bold">
 																			{formatCurrency(total)}
@@ -1318,59 +1416,61 @@ function RouteComponent() {
 																);
 															},
 														)}
-														{/* Fila de totales */}
 														{(() => {
 															const rows =
-																montoCobrarData.data as MontoACobrarRow[];
-															const sum = (key: keyof MontoACobrarRow) =>
+																montoCobrarData.data as MontoACobrarPeriodoRow[];
+															const a = montoCobrarAcumulado;
+															const lastRow = rows[rows.length - 1];
+															const sum = (key: keyof MontoACobrarPeriodoRow) =>
 																rows.reduce(
-																	(acc: number, r: MontoACobrarRow) =>
+																	(acc: number, r: MontoACobrarPeriodoRow) =>
 																		acc +
 																		Number.parseFloat(
 																			(r[key] as string) || "0",
 																		),
 																	0,
 																);
+															const val = (key: keyof MontoACobrarPeriodoRow) =>
+																a && lastRow
+																	? Number.parseFloat((lastRow[key] as string) || "0")
+																	: sum(key);
 															const grandTotal =
-																sum("total_cuota") +
-																sum("total_interes") +
-																sum("total_iva") +
-																sum("total_seguro") +
-																sum("total_gps") +
-																sum("total_membresias") +
-																sum("total_royalti");
+																val("acum_total_cuota") +
+																val("acum_total_interes") +
+																val("acum_total_iva") +
+																val("acum_total_seguro") +
+																val("acum_total_gps") +
+																val("acum_total_membresias");
+															const totalCred = a && lastRow ? lastRow.cuotas_count : rows.reduce((acc, r) => acc + r.cuotas_count, 0);
+															const totalMora = a && lastRow ? lastRow.mora_count : rows.reduce((acc, r) => acc + r.mora_count, 0);
 															return (
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
 																	<TableCell>Total</TableCell>
 																	<TableCell className="text-right">
-																		{rows.reduce(
-																			(acc, r) => acc + r.cuotas_count,
-																			0,
-																		)}
+																		{totalCred}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum("total_cuota"))}
+																		{formatCurrency(val(a ? "acum_total_cuota" : "total_cuota"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum("total_interes"))}
+																		{formatCurrency(val(a ? "acum_total_interes" : "total_interes"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum("total_iva"))}
+																		{formatCurrency(val(a ? "acum_total_iva" : "total_iva"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum("total_seguro"))}
+																		{formatCurrency(val(a ? "acum_total_seguro" : "total_seguro"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum("total_gps"))}
+																		{formatCurrency(val(a ? "acum_total_gps" : "total_gps"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum("total_membresias"))}
+																		{formatCurrency(val(a ? "acum_total_membresias" : "total_membresias"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(sum("total_royalti"))}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		—
+																		{totalCred > 0
+																			? `${((totalMora / totalCred) * 100).toFixed(1)}%`
+																			: "—"}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(grandTotal)}

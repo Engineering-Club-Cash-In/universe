@@ -57,7 +57,6 @@ export const montoACobrarConfig: ScenarioReportConfig<MontoACobrarRow[]> = {
 			concepto: "Membresías",
 			valor: sumBy(rows, (r) => num(r.total_membresias)),
 		},
-		{ concepto: "Royalti", valor: sumBy(rows, (r) => num(r.total_royalti)) },
 		{
 			// mora_promedio ya es un promedio por bucket; promediamos entre
 			// buckets para no inflar el valor con la cantidad de períodos.

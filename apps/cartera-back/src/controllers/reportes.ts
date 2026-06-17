@@ -84,18 +84,17 @@ export async function getMontoACobrarPeriodo({
       SELECT
         pc.credito_id,
         pc.cuota_id,
-        q.fecha_vencimiento                                                                            AS fecha_venc,
-        MIN(COALESCE(pc.capital_restante::numeric, 0))  + SUM(COALESCE(pc.abono_capital::numeric, 0))   AS capital_restante,
-        MIN(COALESCE(pc.interes_restante::numeric, 0))  + SUM(COALESCE(pc.abono_interes::numeric, 0))   AS interes_restante,
-        MIN(COALESCE(pc.iva_12_restante::numeric, 0))   + SUM(COALESCE(pc.abono_iva_12::numeric, 0))    AS iva_12_restante,
-        MIN(COALESCE(pc.seguro_restante::numeric, 0))   + SUM(COALESCE(pc.abono_seguro::numeric, 0))    AS seguro_restante,
-        MIN(COALESCE(pc.gps_restante::numeric, 0))      + SUM(COALESCE(pc.abono_gps::numeric, 0))       AS gps_restante,
-        MIN(COALESCE(pc.membresias::numeric, 0))        + SUM(COALESCE(pc.membresias_pago::numeric, 0)) AS membresias,
-        SUM(COALESCE(pc.monto_boleta::numeric, 0))                                                       AS monto_boleta
+        q.fecha_vencimiento                                                                                                AS fecha_venc,
+        COALESCE(MIN(pc.capital_restante::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_capital::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0)   AS capital_restante,
+        COALESCE(MIN(pc.interes_restante::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_interes::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0)   AS interes_restante,
+        COALESCE(MIN(pc.iva_12_restante::numeric)  FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_iva_12::numeric)   FILTER (WHERE NOT pc."paymentFalse"), 0)  AS iva_12_restante,
+        COALESCE(MIN(pc.seguro_restante::numeric)  FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_seguro::numeric)   FILTER (WHERE NOT pc."paymentFalse"), 0)  AS seguro_restante,
+        COALESCE(MIN(pc.gps_restante::numeric)     FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_gps::numeric)      FILTER (WHERE NOT pc."paymentFalse"), 0)  AS gps_restante,
+        COALESCE(MIN(pc.membresias::numeric)       FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.membresias_pago::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0) AS membresias,
+        SUM(COALESCE(pc.monto_boleta::numeric, 0))                                                                         AS monto_boleta
       FROM cartera.pagos_credito pc
       JOIN cartera.cuotas_credito q ON q.cuota_id = pc.cuota_id
-      WHERE pc."paymentFalse" = false
-        AND q.fecha_vencimiento::date >= ${fechaInicio}::date
+      WHERE q.fecha_vencimiento::date >= ${fechaInicio}::date
         AND q.fecha_vencimiento::date <= ${fechaFin}::date
       GROUP BY pc.credito_id, pc.cuota_id, q.fecha_vencimiento
 
@@ -152,7 +151,7 @@ export async function getMontoACobrarPeriodo({
               COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
               COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
             )
-          ) < p.fecha_venc::date
+          ) < DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date
         ORDER BY COALESCE(
           qcc_a.fecha_vencimiento::date,
           GREATEST(
@@ -167,13 +166,13 @@ export async function getMontoACobrarPeriodo({
         FROM cartera.cuotas_credito qc_mora
         WHERE qc_mora.credito_id = c.credito_id
           AND qc_mora.fecha_vencimiento::date < p.fecha_venc::date
-          AND qc_mora.pagado = false
           AND NOT EXISTS (
             SELECT 1 FROM cartera.pagos_credito pc_mora
             WHERE pc_mora.cuota_id = qc_mora.cuota_id
               AND pc_mora."paymentFalse" = false
               AND pc_mora.pagado = true
               AND pc_mora.validation_status IN ('validated', 'no_required')
+              AND COALESCE(pc_mora.fecha_boleta::date, pc_mora.fecha_pago::date) <= p.fecha_venc::date
           )
       ) mora_real ON true
       GROUP BY
@@ -236,13 +235,13 @@ export async function getMontoACobrarPeriodo({
             AND pc_a."paymentFalse" = false
           WHERE q_a.credito_id = calc.credito_id
             AND q_a.fecha_vencimiento::date < calc.bucket
-            AND q_a.pagado = false
             AND NOT EXISTS (
               SELECT 1 FROM cartera.pagos_credito pc2
               WHERE pc2.cuota_id = q_a.cuota_id
                 AND pc2."paymentFalse" = false
                 AND pc2.pagado = true
                 AND pc2.validation_status IN ('validated', 'no_required')
+                AND COALESCE(pc2.fecha_boleta::date, pc2.fecha_pago::date) <= calc.bucket
             )
           GROUP BY q_a.cuota_id
           HAVING (
@@ -293,7 +292,7 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN gps         ELSE 0 END), 0)               AS total_gps,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN mem         ELSE 0 END), 0)               AS total_membresias,
       AVG(CASE WHEN cuotas_atrasadas > 0 AND NOT excluido_mora THEN mora_val END)                AS mora_promedio,
-      COUNT(*) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora)::int                   AS mora_count,
+      COALESCE(SUM(cuotas_count) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)::int AS mora_count,
       COALESCE(SUM(CASE
         WHEN excluido_mora     THEN 0
         WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant)

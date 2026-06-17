@@ -1416,8 +1416,7 @@ function RouteComponent() {
 																);
 															},
 														)}
-														{/* Fila de totales: oculta en modo acumulado (sumar snapshots = doble conteo) */}
-														{!montoCobrarAcumulado && (() => {
+														{(() => {
 															const rows =
 																montoCobrarData.data as MontoACobrarPeriodoRow[];
 															const a = montoCobrarAcumulado;

@@ -1344,9 +1344,6 @@ function RouteComponent() {
 																Membresías
 															</TableHead>
 															<TableHead className="text-right">
-																Royalty
-															</TableHead>
-															<TableHead className="text-right">
 																Mora Promedio
 															</TableHead>
 															<TableHead className="text-right font-bold">

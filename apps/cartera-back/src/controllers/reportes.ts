@@ -431,32 +431,34 @@ export async function getReinversionLiquidaciones({
     cantidad += Number(r.cantidad ?? 0);
   }
 
-  // Interés neto, agrupado por si el inversionista emite factura o no:
+  // Interés neto, agrupado según el tratamiento fiscal *guardado en la propia
+  // liquidación* (no según el flag actual del inversionista, que puede cambiar
+  // y reclasificaría meses históricos). Una liquidación sin factura es la que
+  // tiene ISR retenido (`total_isr > 0`); las con factura tienen IVA y sin ISR.
   //   - Con factura:  neto = interés + IVA
   //   - Sin factura:  neto = interés − ISR
   const facturaRows = await db.execute(sql`
     SELECT
-      i.emite_factura                              AS emite_factura,
+      (l.total_isr::numeric > 0)                   AS sin_factura,
       COALESCE(SUM(l.total_interes::numeric), 0)   AS total_interes,
       COALESCE(SUM(l.total_iva::numeric), 0)       AS total_iva,
       COALESCE(SUM(l.total_isr::numeric), 0)       AS total_isr
     FROM cartera.liquidaciones l
-    JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    GROUP BY i.emite_factura
+    GROUP BY (l.total_isr::numeric > 0)
   `);
 
   const conFactura = { interes: 0, iva: 0 };
   const sinFactura = { interes: 0, isr: 0 };
   for (const r of facturaRows.rows as Record<string, unknown>[]) {
     const interes = Number(r.total_interes ?? 0);
-    if (r.emite_factura === true) {
-      conFactura.interes += interes;
-      conFactura.iva += Number(r.total_iva ?? 0);
-    } else {
+    if (r.sin_factura === true) {
       sinFactura.interes += interes;
       sinFactura.isr += Number(r.total_isr ?? 0);
+    } else {
+      conFactura.interes += interes;
+      conFactura.iva += Number(r.total_iva ?? 0);
     }
   }
 

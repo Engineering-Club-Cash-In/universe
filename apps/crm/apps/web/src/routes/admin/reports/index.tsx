@@ -4,8 +4,8 @@ import {
 	Activity,
 	AlertTriangle,
 	CalendarDays,
-	ChevronLeft,
 	ChevronDown,
+	ChevronLeft,
 	ChevronRight,
 	Download,
 	FileText,
@@ -75,9 +75,9 @@ import type {
 	FacturacionMesResponse,
 	FacturacionMesRubro,
 	FlujoCuotasInversionesResponse,
-	FlujoCuotasRubro,
 	MontoACobrarRow,
 	PuntoEquilibrioRow,
+	ReinversionLiquidacionesResponse,
 } from "@/lib/reports/scenario";
 import {
 	coberturaConfig,
@@ -104,18 +104,43 @@ const COLORS = {
 	incobrable: "#7f1d1d",
 };
 
-const FLUJO_RUBROS: { key: keyof FlujoCuotasRubro; label: string }[] = [
-	{ key: "capital", label: "Capital" },
-	{ key: "interes", label: "Interés" },
-	{ key: "iva", label: "IVA 12%" },
+// Modalidades de reinversión a mostrar en "Cuotas → Reinversión".
+// El monto de cada una es la suma de `liquidaciones.reinversion_total`.
+// Se omiten `reinversion_interes` ("solo interés", no se usa) y `sin_reinversion`.
+const REINVERSION_MODALIDADES: { tipo: string; label: string }[] = [
+	{ tipo: "reinversion_capital", label: "Reinversión de Capital" },
+	{ tipo: "reinversion_total", label: "Interés compuesto" },
+	{ tipo: "reinversion_variable", label: "Reinversión Variable" },
+	{
+		tipo: "reinversion_excedente",
+		label: "Reinversión Excedente (monto fijo a recibir)",
+	},
+	{
+		tipo: "reinversion_combinada",
+		label: "Reinversión Combinada (combinaciones de modalidades)",
+	},
 ];
 
-function getDefaultFlujoCuotasRange(): {
+// Modalidades a mostrar en "Cuotas → A Recibir" (efectivo neto = total_cuota).
+// Incluye `sin_reinversion`; sigue omitiendo `reinversion_interes`.
+const A_RECIBIR_MODALIDADES: { tipo: string; label: string }[] = [
+	{ tipo: "sin_reinversion", label: "Sin Reinversión" },
+	...REINVERSION_MODALIDADES,
+];
+
+/** Mes por defecto (actual) en formato "YYYY-MM" para el <input type="month">. */
+function getDefaultFlujoMes(): string {
+	const todayGt = formatDateInput(new Date());
+	const [year, month] = todayGt.split("-");
+	return `${year}-${month}`;
+}
+
+/** Convierte "YYYY-MM" al rango de fechas [primer día, último día] del mes. */
+function mesToRange(mesStr: string): {
 	fechaInicio: string;
 	fechaFin: string;
 } {
-	const todayGt = formatDateInput(new Date());
-	const [year, month] = todayGt.split("-").map(Number);
+	const [year, month] = mesStr.split("-").map(Number);
 	const fechaInicio = `${year}-${String(month).padStart(2, "0")}-01`;
 	const nextM = month === 12 ? 1 : month + 1;
 	const nextY = month === 12 ? year + 1 : year;
@@ -315,9 +340,13 @@ function RouteComponent() {
 		mes: new Date().getMonth() + 1,
 		anio: new Date().getFullYear(),
 	}));
-	const [flujoCuotasRange, setFlujoCuotasRange] = useState(
-		getDefaultFlujoCuotasRange,
-	);
+	const [flujoMes, setFlujoMes] = useState(getDefaultFlujoMes);
+	// Rango derivado (primer/último día del mes) para los reportes que aún
+	// consumen el endpoint por rango de fechas (secciones 2 y 3).
+	const flujoCuotasRange = mesToRange(flujoMes);
+	const [flujoAnioStr, flujoMesStr] = flujoMes.split("-");
+	const flujoMesNum = Number(flujoMesStr);
+	const flujoAnioNum = Number(flujoAnioStr);
 	const [desgloseInversionistaOpen, setDesgloseInversionistaOpen] =
 		useState(false);
 	const [comparativoAnio, setComparativoAnio] = useState(() =>
@@ -403,6 +432,17 @@ function RouteComponent() {
 	});
 	const flujoCuotasData = flujoCuotasQuery.data as
 		| FlujoCuotasInversionesResponse
+		| undefined;
+
+	// Sección "Cuotas → Reinversión": se calcula desde la tabla de liquidaciones.
+	const reinversionLiquidacionesQuery = useQuery({
+		...orpc.getReinversionLiquidaciones.queryOptions({
+			input: { mes: flujoMesNum, anio: flujoAnioNum },
+		}),
+		enabled: isAdmin,
+	});
+	const reinversionData = reinversionLiquidacionesQuery.data as
+		| ReinversionLiquidacionesResponse
 		| undefined;
 
 	const flujoPorInversionistaQuery = useQuery({
@@ -1406,34 +1446,253 @@ function RouteComponent() {
 								<div className="flex items-center gap-2">
 									<SimularButton onClick={() => setScenarioOpen("flujo")} />
 									<Input
-										type="date"
-										aria-label="Fecha inicio"
-										className="w-40"
-										value={flujoCuotasRange.fechaInicio}
-										onChange={(e) =>
-											setFlujoCuotasRange((prev) => ({
-												...prev,
-												fechaInicio: e.target.value,
-											}))
-										}
-									/>
-									<span className="text-muted-foreground text-sm">–</span>
-									<Input
-										type="date"
-										aria-label="Fecha fin"
-										className="w-40"
-										value={flujoCuotasRange.fechaFin}
-										onChange={(e) =>
-											setFlujoCuotasRange((prev) => ({
-												...prev,
-												fechaFin: e.target.value,
-											}))
-										}
+										type="month"
+										aria-label="Mes"
+										className="w-44"
+										value={flujoMes}
+										onChange={(e) => setFlujoMes(e.target.value)}
 									/>
 								</div>
 							</div>
 						</CardHeader>
 						<CardContent className="space-y-6">
+							{/* Sección 1: Cuotas → Reinversión (desde liquidaciones) */}
+							<div>
+								<p className="mb-2 font-semibold text-sm">
+									Cuotas → Reinversión
+								</p>
+								{reinversionLiquidacionesQuery.isPending ? (
+									<div className="py-4 text-center text-muted-foreground text-sm">
+										Cargando...
+									</div>
+								) : reinversionLiquidacionesQuery.isError ? (
+									<div className="py-4 text-center text-destructive text-sm">
+										Error al cargar datos
+									</div>
+								) : reinversionData ? (
+									(() => {
+										const filas = REINVERSION_MODALIDADES.map((m) => ({
+											...m,
+											monto: Number(
+												reinversionData.porTipo[m.tipo]?.reinversion_total ?? 0,
+											),
+										}));
+										const totalMostrado = filas.reduce(
+											(a, f) => a + f.monto,
+											0,
+										);
+										return (
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>Modalidad de Reinversión</TableHead>
+														<TableHead className="text-right">
+															Reinversión Total
+														</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													{filas.map((f) => (
+														<TableRow key={f.tipo}>
+															<TableCell>{f.label}</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(f.monto)}
+															</TableCell>
+														</TableRow>
+													))}
+													<TableRow className="border-t-2 bg-muted/50 font-bold">
+														<TableCell>Total Reinvertido</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totalMostrado)}
+														</TableCell>
+													</TableRow>
+												</TableBody>
+											</Table>
+										);
+									})()
+								) : null}
+							</div>
+
+							{/* Sección 2: Cuotas → A Recibir (efectivo neto = total_cuota) */}
+							<div>
+								<p className="mb-2 font-semibold text-sm">Cuotas → A Recibir</p>
+								{reinversionLiquidacionesQuery.isPending ? (
+									<div className="py-4 text-center text-muted-foreground text-sm">
+										Cargando...
+									</div>
+								) : reinversionLiquidacionesQuery.isError ? (
+									<div className="py-4 text-center text-destructive text-sm">
+										Error al cargar datos
+									</div>
+								) : reinversionData ? (
+									(() => {
+										const filas = A_RECIBIR_MODALIDADES.map((m) => {
+											const d = reinversionData.porTipo[m.tipo];
+											return {
+												...m,
+												capital: Number(d?.total_capital ?? 0),
+												interes: Number(d?.total_interes ?? 0),
+												iva: Number(d?.total_iva ?? 0),
+												isr: Number(d?.total_isr ?? 0),
+												total: Number(d?.total_cuota ?? 0),
+											};
+										});
+										const totales = filas.reduce(
+											(a, f) => ({
+												capital: a.capital + f.capital,
+												interes: a.interes + f.interes,
+												iva: a.iva + f.iva,
+												isr: a.isr + f.isr,
+												total: a.total + f.total,
+											}),
+											{ capital: 0, interes: 0, iva: 0, isr: 0, total: 0 },
+										);
+										return (
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>Modalidad de Reinversión</TableHead>
+														<TableHead className="text-right">
+															Capital
+														</TableHead>
+														<TableHead className="text-right">
+															Interés
+														</TableHead>
+														<TableHead className="text-right">
+															IVA 12%
+														</TableHead>
+														<TableHead className="text-right">ISR</TableHead>
+														<TableHead className="text-right">
+															Total a Recibir
+														</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													{filas.map((f) => (
+														<TableRow key={f.tipo}>
+															<TableCell>{f.label}</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(f.capital)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(f.interes)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(f.iva)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(f.isr)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(f.total)}
+															</TableCell>
+														</TableRow>
+													))}
+													<TableRow className="border-t-2 bg-muted/50 font-bold">
+														<TableCell>Total a Recibir</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totales.capital)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totales.interes)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totales.iva)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totales.isr)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totales.total)}
+														</TableCell>
+													</TableRow>
+												</TableBody>
+											</Table>
+										);
+									})()
+								) : null}
+							</div>
+
+							{/* Sección: Interés Neto (agrupado por si el inversionista emite factura) */}
+							{reinversionData &&
+								(() => {
+									const cf = reinversionData.interesNeto.conFactura;
+									const sf = reinversionData.interesNeto.sinFactura;
+									const totalInteres = Number(cf.interes) + Number(sf.interes);
+									const totalIva = Number(cf.iva);
+									const totalIsr = Number(sf.isr);
+									const totalNeto = Number(cf.neto) + Number(sf.neto);
+									return (
+										<div>
+											<p className="mb-2 font-semibold text-sm">Interés Neto</p>
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>Grupo</TableHead>
+														<TableHead className="text-right">
+															Interés
+														</TableHead>
+														<TableHead className="text-right">
+															IVA 12%
+														</TableHead>
+														<TableHead className="text-right">ISR</TableHead>
+														<TableHead className="text-right">
+															Interés Neto
+														</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													<TableRow>
+														<TableCell>Con Factura</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(cf.interes)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(cf.iva)}
+														</TableCell>
+														<TableCell className="text-right text-muted-foreground">
+															—
+														</TableCell>
+														<TableCell className="text-right font-semibold">
+															{formatCurrency(cf.neto)}
+														</TableCell>
+													</TableRow>
+													<TableRow>
+														<TableCell>Sin Factura</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(sf.interes)}
+														</TableCell>
+														<TableCell className="text-right text-muted-foreground">
+															—
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(sf.isr)}
+														</TableCell>
+														<TableCell className="text-right font-semibold">
+															{formatCurrency(sf.neto)}
+														</TableCell>
+													</TableRow>
+													<TableRow className="border-t-2 bg-muted/50 font-bold">
+														<TableCell>Total</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totalInteres)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totalIva)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totalIsr)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(totalNeto)}
+														</TableCell>
+													</TableRow>
+												</TableBody>
+											</Table>
+										</div>
+									);
+								})()}
+
 							{flujoCuotasQuery.isPending && (
 								<div className="py-4 text-center text-muted-foreground text-sm">
 									Cargando...
@@ -1446,253 +1705,12 @@ function RouteComponent() {
 							)}
 							{flujoCuotasData &&
 								(() => {
-									const {
-										reinversionPorTipo,
-										cashParcialPorTipo,
-										sinReinversion,
-										pagosExtras,
-									} = flujoCuotasData;
-									const TIPO_LABELS: Record<string, string> = {
-										reinversion_capital: "Reinversión Capital",
-										reinversion_interes: "Reinversión Interés",
-										reinversion_total: "Reinversión Total",
-										reinversion_variable: "Reinversión Variable",
-										reinversion_excedente: "Reinversión Excedente",
-									};
-									type ReinvertidoResult =
-										| { esTotal: true; total: number }
-										| {
-												esTotal: false;
-												capital: number;
-												interes: number;
-												iva: number;
-										  };
-									function getReinvertido(
-										tipo: string,
-										t: FlujoCuotasRubro & { monto_reinvertido?: string },
-									): ReinvertidoResult {
-										if (
-											tipo === "reinversion_variable" ||
-											tipo === "reinversion_excedente"
-										)
-											return {
-												esTotal: true,
-												total: Number(t.monto_reinvertido ?? 0),
-											};
-										if (tipo === "reinversion_capital")
-											return {
-												esTotal: false,
-												capital: Number(t.capital),
-												interes: 0,
-												iva: 0,
-											};
-										if (tipo === "reinversion_interes")
-											return {
-												esTotal: false,
-												capital: 0,
-												interes: Number(t.interes),
-												iva: Number(t.iva),
-											};
-										return {
-											esTotal: false,
-											capital: Number(t.capital),
-											interes: Number(t.interes),
-											iva: Number(t.iva),
-										};
-									}
-									const totalesReinv = reinversionPorTipo.reduce(
-										(a, t) => {
-											const r = getReinvertido(t.tipo, t);
-											const tot = r.esTotal
-												? r.total
-												: r.capital + r.interes + r.iva;
-											return {
-												total: a.total + tot,
-												capital: a.capital + (r.esTotal ? 0 : r.capital),
-												interes: a.interes + (r.esTotal ? 0 : r.interes),
-												iva: a.iva + (r.esTotal ? 0 : r.iva),
-											};
-										},
-										{ total: 0, capital: 0, interes: 0, iva: 0 },
-									);
-									const totalReinv = totalesReinv.total;
-									const cashParcialTotal = cashParcialPorTipo.reduce(
-										(a, t) =>
-											a +
-											(t.monto_cash
-												? Number(t.monto_cash)
-												: Number(t.capital) +
-													Number(t.interes) +
-													Number(t.iva)),
-										0,
-									);
-									const totalSinReinv = FLUJO_RUBROS.reduce(
-										(a, r) => a + Number(sinReinversion.totales[r.key] || 0),
-										0,
-									);
+									const { pagosExtras } = flujoCuotasData;
 									const totalExtras =
 										Number(pagosExtras.abonos_capital) +
 										Number(pagosExtras.cancelaciones);
 									return (
 										<>
-											{/* Sección 1: Hacia Reinversión por tipo */}
-											<div>
-												<p className="mb-2 font-semibold text-sm">
-													Cuotas → Reinversión
-												</p>
-												<Table>
-													<TableHeader>
-														<TableRow>
-															<TableHead>Tipo de Reinversión</TableHead>
-															<TableHead className="text-right">
-																Capital
-															</TableHead>
-															<TableHead className="text-right">
-																Interés
-															</TableHead>
-															<TableHead className="text-right">
-																IVA 12%
-															</TableHead>
-															<TableHead className="text-right">
-																Total
-															</TableHead>
-														</TableRow>
-													</TableHeader>
-													<TableBody>
-														{reinversionPorTipo
-															.filter((t) => {
-																const r = getReinvertido(t.tipo, t);
-																const tot = r.esTotal
-																	? r.total
-																	: r.capital + r.interes + r.iva;
-																return tot > 0;
-															})
-															.map((t) => {
-																const r = getReinvertido(t.tipo, t);
-																const rowTotal = r.esTotal
-																	? r.total
-																	: r.capital + r.interes + r.iva;
-																return (
-																	<TableRow key={t.tipo}>
-																		<TableCell>
-																			{TIPO_LABELS[t.tipo] ?? t.tipo}
-																		</TableCell>
-																		<TableCell className="text-right text-muted-foreground">
-																			{r.esTotal
-																				? "—"
-																				: formatCurrency(r.capital)}
-																		</TableCell>
-																		<TableCell className="text-right text-muted-foreground">
-																			{r.esTotal
-																				? "—"
-																				: formatCurrency(r.interes)}
-																		</TableCell>
-																		<TableCell className="text-right text-muted-foreground">
-																			{r.esTotal ? "—" : formatCurrency(r.iva)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(rowTotal)}
-																		</TableCell>
-																	</TableRow>
-																);
-															})}
-														<TableRow className="border-t-2 bg-muted/50 font-bold">
-															<TableCell>Total</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalesReinv.capital)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalesReinv.interes)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalesReinv.iva)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalReinv)}
-															</TableCell>
-														</TableRow>
-													</TableBody>
-												</Table>
-											</div>
-
-											{/* Sección 2: Cash (sin reinversión + porciones cash de reinversión parcial) */}
-											<div>
-												<p className="mb-2 font-semibold text-sm">
-													Cuotas → A Recibir
-												</p>
-												<Table>
-													<TableHeader>
-														<TableRow>
-															<TableHead>Origen</TableHead>
-															<TableHead className="text-right">
-																Capital
-															</TableHead>
-															<TableHead className="text-right">
-																Interés
-															</TableHead>
-															<TableHead className="text-right">
-																IVA 12%
-															</TableHead>
-															<TableHead className="text-right">
-																Total
-															</TableHead>
-														</TableRow>
-													</TableHeader>
-													<TableBody>
-														{/* Inversionistas sin reinversión */}
-														<TableRow>
-															<TableCell>Sin Reinversión</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(
-																	Number(sinReinversion.totales.capital),
-																)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(
-																	Number(sinReinversion.totales.interes),
-																)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(
-																	Number(sinReinversion.totales.iva),
-																)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalSinReinv)}
-															</TableCell>
-														</TableRow>
-														{/* Porciones cash de inversionistas con reinversión parcial — combinado */}
-														{cashParcialPorTipo.length > 0 && (
-															<TableRow>
-																<TableCell>
-																	Intereses y excedentes pagados a
-																	inversionistas
-																</TableCell>
-																<TableCell
-																	colSpan={3}
-																	className="text-right text-muted-foreground text-sm"
-																>
-																	capital/interés/IVA según tipo
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(cashParcialTotal)}
-																</TableCell>
-															</TableRow>
-														)}
-														{/* Total general cash */}
-														<TableRow className="border-t-2 bg-muted/50 font-bold">
-															<TableCell>Total a Recibir</TableCell>
-															<TableCell colSpan={3} />
-															<TableCell className="text-right">
-																{formatCurrency(
-																	totalSinReinv + cashParcialTotal,
-																)}
-															</TableCell>
-														</TableRow>
-													</TableBody>
-												</Table>
-											</div>
-
 											{/* Sección 3: Pagos Extras Recibidos */}
 											<div>
 												<p className="mb-2 font-semibold text-sm">
@@ -1742,12 +1760,8 @@ function RouteComponent() {
 								<div className="mb-3 flex items-center justify-between">
 									<button
 										type="button"
-										className="flex items-center gap-1 font-semibold text-sm hover:text-foreground/70 transition-colors"
-										onClick={() =>
-											setDesgloseInversionistaOpen(
-												(o) => !o,
-											)
-										}
+										className="flex items-center gap-1 font-semibold text-sm transition-colors hover:text-foreground/70"
+										onClick={() => setDesgloseInversionistaOpen((o) => !o)}
 									>
 										{desgloseInversionistaOpen ? (
 											<ChevronDown className="h-4 w-4" />
@@ -1757,125 +1771,131 @@ function RouteComponent() {
 										Desglose por Inversionista
 									</button>
 									{desgloseInversionistaOpen &&
-										(flujoPorInversionistaData?.porInversionista?.length ?? 0) > 0 && (
-										<Button
-											variant="outline"
-											size="sm"
-											onClick={() => {
-												const rows = (
-													// eslint-disable-next-line @typescript-eslint/no-explicit-any
-													(flujoPorInversionistaData!.porInversionista as any[])
-												).map((r: any) => ({
-													Inversionista: r.nombre,
-													"Reinv. Capital": r.reinversion_capital,
-													"Reinv. Interés": r.reinversion_interes,
-													"Total Reinversión": r.reinversion_total,
-													"Capital a Recibir": r.cash_capital,
-													"Interés a Recibir": r.cash_interes,
-													"Total a Recibir": r.cash_total,
-													"Total General": r.total,
-												}));
-												const ws = XLSX.utils.json_to_sheet(rows);
-												ws["!cols"] = [
-													{ wch: 30 },
-													{ wch: 18 },
-													{ wch: 18 },
-													{ wch: 18 },
-													{ wch: 18 },
-													{ wch: 18 },
-													{ wch: 18 },
-													{ wch: 18 },
-												];
-												const wb = XLSX.utils.book_new();
-												XLSX.utils.book_append_sheet(
-													wb,
-													ws,
-													"Por Inversionista",
-												);
-												XLSX.writeFile(
-													wb,
-													`flujo-inversionistas-${flujoCuotasRange.fechaInicio}-${flujoCuotasRange.fechaFin}.xlsx`,
-												);
-											}}
-										>
-											<Download className="mr-2 h-4 w-4" />
-											Exportar Excel
-										</Button>
-									)}
-								</div>
-								{desgloseInversionistaOpen && (flujoPorInversionistaQuery.isPending ? (
-									<p className="py-4 text-center text-muted-foreground text-sm">
-										Cargando...
-									</p>
-								) : flujoPorInversionistaQuery.isError ? (
-									<p className="py-4 text-center text-destructive text-sm">
-										Error al cargar desglose por inversionista
-									</p>
-								) : !flujoPorInversionistaData?.porInversionista?.length ? (
-									<p className="py-4 text-center text-muted-foreground text-sm">
-										Sin datos para el período seleccionado
-									</p>
-								) : (
-									<Table>
-										<TableHeader>
-											<TableRow>
-												<TableHead>Inversionista</TableHead>
-												<TableHead className="text-right">
-													Reinversión
-												</TableHead>
-												<TableHead className="text-right">A Recibir</TableHead>
-												<TableHead className="text-right">Total</TableHead>
-											</TableRow>
-										</TableHeader>
-										<TableBody>
-											{(
-												flujoPorInversionistaData.porInversionista as any[]
-											).map((row: any) => (
-												<TableRow key={row.inversionista_id}>
-													<TableCell className="font-medium">
-														{row.nombre}
-													</TableCell>
-													<TableCell className="text-right">
-														{formatCurrency(Number(row.reinversion_total))}
-													</TableCell>
-													<TableCell className="text-right">
-														{formatCurrency(Number(row.cash_total))}
-													</TableCell>
-													<TableCell className="text-right font-semibold">
-														{formatCurrency(Number(row.total))}
-													</TableCell>
-												</TableRow>
-											))}
-										</TableBody>
-										{flujoPorInversionistaData?.totales && (
-											<tfoot>
-												<TableRow className="border-t-2 bg-muted/50 font-bold">
-													<TableCell>Total</TableCell>
-													<TableCell className="text-right">
-														{formatCurrency(
-															Number(
-																flujoPorInversionistaData.totales
-																	.reinversion_total,
-															),
-														)}
-													</TableCell>
-													<TableCell className="text-right">
-														{formatCurrency(
-															Number(
-																flujoPorInversionistaData.totales.cash_total,
-															),
-														)}
-													</TableCell>
-													<TableCell className="text-right">
-														{formatCurrency(
-															Number(flujoPorInversionistaData.totales.total),
-														)}
-													</TableCell>
-												</TableRow>
-											</tfoot>
+										(flujoPorInversionistaData?.porInversionista?.length ?? 0) >
+											0 && (
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() => {
+													const rows =
+														// eslint-disable-next-line @typescript-eslint/no-explicit-any
+														(
+															flujoPorInversionistaData!
+																.porInversionista as any[]
+														).map((r: any) => ({
+															Inversionista: r.nombre,
+															"Reinv. Capital": r.reinversion_capital,
+															"Reinv. Interés": r.reinversion_interes,
+															"Total Reinversión": r.reinversion_total,
+															"Capital a Recibir": r.cash_capital,
+															"Interés a Recibir": r.cash_interes,
+															"Total a Recibir": r.cash_total,
+															"Total General": r.total,
+														}));
+													const ws = XLSX.utils.json_to_sheet(rows);
+													ws["!cols"] = [
+														{ wch: 30 },
+														{ wch: 18 },
+														{ wch: 18 },
+														{ wch: 18 },
+														{ wch: 18 },
+														{ wch: 18 },
+														{ wch: 18 },
+														{ wch: 18 },
+													];
+													const wb = XLSX.utils.book_new();
+													XLSX.utils.book_append_sheet(
+														wb,
+														ws,
+														"Por Inversionista",
+													);
+													XLSX.writeFile(
+														wb,
+														`flujo-inversionistas-${flujoCuotasRange.fechaInicio}-${flujoCuotasRange.fechaFin}.xlsx`,
+													);
+												}}
+											>
+												<Download className="mr-2 h-4 w-4" />
+												Exportar Excel
+											</Button>
 										)}
-									</Table>
-								))}
+								</div>
+								{desgloseInversionistaOpen &&
+									(flujoPorInversionistaQuery.isPending ? (
+										<p className="py-4 text-center text-muted-foreground text-sm">
+											Cargando...
+										</p>
+									) : flujoPorInversionistaQuery.isError ? (
+										<p className="py-4 text-center text-destructive text-sm">
+											Error al cargar desglose por inversionista
+										</p>
+									) : !flujoPorInversionistaData?.porInversionista?.length ? (
+										<p className="py-4 text-center text-muted-foreground text-sm">
+											Sin datos para el período seleccionado
+										</p>
+									) : (
+										<Table>
+											<TableHeader>
+												<TableRow>
+													<TableHead>Inversionista</TableHead>
+													<TableHead className="text-right">
+														Reinversión
+													</TableHead>
+													<TableHead className="text-right">
+														A Recibir
+													</TableHead>
+													<TableHead className="text-right">Total</TableHead>
+												</TableRow>
+											</TableHeader>
+											<TableBody>
+												{(
+													flujoPorInversionistaData.porInversionista as any[]
+												).map((row: any) => (
+													<TableRow key={row.inversionista_id}>
+														<TableCell className="font-medium">
+															{row.nombre}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(Number(row.reinversion_total))}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(Number(row.cash_total))}
+														</TableCell>
+														<TableCell className="text-right font-semibold">
+															{formatCurrency(Number(row.total))}
+														</TableCell>
+													</TableRow>
+												))}
+											</TableBody>
+											{flujoPorInversionistaData?.totales && (
+												<tfoot>
+													<TableRow className="border-t-2 bg-muted/50 font-bold">
+														<TableCell>Total</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(
+																Number(
+																	flujoPorInversionistaData.totales
+																		.reinversion_total,
+																),
+															)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(
+																Number(
+																	flujoPorInversionistaData.totales.cash_total,
+																),
+															)}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatCurrency(
+																Number(flujoPorInversionistaData.totales.total),
+															)}
+														</TableCell>
+													</TableRow>
+												</tfoot>
+											)}
+										</Table>
+									))}
 							</div>
 						</CardContent>
 					</Card>
@@ -2361,7 +2381,9 @@ function RouteComponent() {
 															Number(row.mora_120 ?? 0);
 														const pctMora = (val: string | null) =>
 															totalMoraFila > 0 && val
-																? ((Number(val) / totalMoraFila) * 100).toFixed(1)
+																? ((Number(val) / totalMoraFila) * 100).toFixed(
+																		1,
+																	)
 																: null;
 														return (
 															<TableRow

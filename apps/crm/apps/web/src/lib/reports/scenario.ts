@@ -123,6 +123,36 @@ export type FlujoCuotasInversionesResponse = {
 	pagosExtras: { abonos_capital: string; cancelaciones: string };
 };
 
+export type ReinversionLiquidacionesResponse = {
+	/**
+	 * Por modalidad (`tipo_reinversion`), campos crudos de la liquidación:
+	 * - `reinversion_total` → sección "Cuotas → Reinversión".
+	 * - `total_capital` / `total_interes` / `total_iva` / `total_isr` / `total_cuota`
+	 *   → sección "Cuotas → A Recibir".
+	 */
+	porTipo: Record<
+		string,
+		{
+			reinversion_total: string;
+			total_capital: string;
+			total_interes: string;
+			total_iva: string;
+			total_isr: string;
+			total_cuota: string;
+		}
+	>;
+	/**
+	 * Interés neto agrupado por si el inversionista emite factura:
+	 * - `conFactura`: neto = interés + IVA.
+	 * - `sinFactura`: neto = interés − ISR.
+	 */
+	interesNeto: {
+		conFactura: { interes: string; iva: string; neto: string };
+		sinFactura: { interes: string; isr: string; neto: string };
+	};
+	cantidad_liquidaciones: number;
+};
+
 export type PuntoEquilibrioRow = {
 	bucket: string;
 	cantidad_creditos: number;

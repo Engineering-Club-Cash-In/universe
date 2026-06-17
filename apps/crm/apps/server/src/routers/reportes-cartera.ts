@@ -22,6 +22,7 @@ import {
 	type FlujoCuotasInversionesResponse,
 	type FlujoCuotasPorInversionistaResponse,
 	type MontoACobrarRow,
+	type ReinversionLiquidacionesResponse,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 
@@ -483,6 +484,26 @@ export const reportesCarteraRouter = {
 			return carteraBackClient.getFlujoCuotasInversiones({
 				fechaInicio: input.fechaInicio,
 				fechaFin: input.fechaFin,
+			});
+		}),
+
+	getReinversionLiquidaciones: adminProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2020),
+			}),
+		)
+		.handler(async ({ input }): Promise<ReinversionLiquidacionesResponse> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getReinversionLiquidaciones({
+				mes: input.mes,
+				anio: input.anio,
 			});
 		}),
 

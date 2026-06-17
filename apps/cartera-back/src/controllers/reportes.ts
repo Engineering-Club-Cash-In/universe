@@ -366,6 +366,118 @@ export async function getFlujoCuotasPorInversionista({
   };
 }
 
+/**
+ * Liquidaciones del mes agrupadas por modalidad de reinversión del inversionista
+ * (`inversionistas.tipo_reinversion`). Por cada modalidad devuelve los campos
+ * crudos de la liquidación (sumas, sin derivar ni restar nada):
+ *   - `reinversion_total` → sección "Cuotas → Reinversión".
+ *   - `total_capital` / `total_interes` / `total_iva` / `total_isr` / `total_cuota`
+ *     → sección "Cuotas → A Recibir". (`total_iva` ya es el 12% del interés.)
+ * Se filtra por `fecha_liquidacion` dentro del mes en zona America/Guatemala.
+ * El etiquetado/omisión de modalidades se maneja en el front.
+ */
+export async function getReinversionLiquidaciones({
+  mes,
+  anio,
+}: {
+  mes: number;
+  anio: number;
+}) {
+  const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
+  const nextMonth = mes === 12 ? 1 : mes + 1;
+  const nextYear = mes === 12 ? anio + 1 : anio;
+  const inicioMesSiguiente = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+
+  const result = await db.execute(sql`
+    SELECT
+      COALESCE(i.tipo_reinversion::text, 'sin_reinversion') AS tipo,
+      COALESCE(SUM(l.reinversion_total::numeric), 0)        AS reinversion_total,
+      COALESCE(SUM(l.total_capital::numeric), 0)            AS total_capital,
+      COALESCE(SUM(l.total_interes::numeric), 0)            AS total_interes,
+      COALESCE(SUM(l.total_iva::numeric), 0)                AS total_iva,
+      COALESCE(SUM(l.total_isr::numeric), 0)                AS total_isr,
+      COALESCE(SUM(l.total_cuota::numeric), 0)              AS total_cuota,
+      COUNT(*)::int                                          AS cantidad
+    FROM cartera.liquidaciones l
+    JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    GROUP BY i.tipo_reinversion
+  `);
+
+  const porTipo: Record<
+    string,
+    {
+      reinversion_total: string;
+      total_capital: string;
+      total_interes: string;
+      total_iva: string;
+      total_isr: string;
+      total_cuota: string;
+    }
+  > = {};
+  let cantidad = 0;
+
+  for (const r of result.rows as Record<string, unknown>[]) {
+    const tipo = String(r.tipo ?? "sin_reinversion");
+    porTipo[tipo] = {
+      reinversion_total: Number(r.reinversion_total ?? 0).toFixed(2),
+      total_capital: Number(r.total_capital ?? 0).toFixed(2),
+      total_interes: Number(r.total_interes ?? 0).toFixed(2),
+      total_iva: Number(r.total_iva ?? 0).toFixed(2),
+      total_isr: Number(r.total_isr ?? 0).toFixed(2),
+      total_cuota: Number(r.total_cuota ?? 0).toFixed(2),
+    };
+    cantidad += Number(r.cantidad ?? 0);
+  }
+
+  // Interés neto, agrupado por si el inversionista emite factura o no:
+  //   - Con factura:  neto = interés + IVA
+  //   - Sin factura:  neto = interés − ISR
+  const facturaRows = await db.execute(sql`
+    SELECT
+      i.emite_factura                              AS emite_factura,
+      COALESCE(SUM(l.total_interes::numeric), 0)   AS total_interes,
+      COALESCE(SUM(l.total_iva::numeric), 0)       AS total_iva,
+      COALESCE(SUM(l.total_isr::numeric), 0)       AS total_isr
+    FROM cartera.liquidaciones l
+    JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    GROUP BY i.emite_factura
+  `);
+
+  const conFactura = { interes: 0, iva: 0 };
+  const sinFactura = { interes: 0, isr: 0 };
+  for (const r of facturaRows.rows as Record<string, unknown>[]) {
+    const interes = Number(r.total_interes ?? 0);
+    if (r.emite_factura === true) {
+      conFactura.interes += interes;
+      conFactura.iva += Number(r.total_iva ?? 0);
+    } else {
+      sinFactura.interes += interes;
+      sinFactura.isr += Number(r.total_isr ?? 0);
+    }
+  }
+
+  return {
+    porTipo,
+    interesNeto: {
+      conFactura: {
+        interes: conFactura.interes.toFixed(2),
+        iva: conFactura.iva.toFixed(2),
+        neto: (conFactura.interes + conFactura.iva).toFixed(2),
+      },
+      sinFactura: {
+        interes: sinFactura.interes.toFixed(2),
+        isr: sinFactura.isr.toFixed(2),
+        neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
+      },
+    },
+    cantidad_liquidaciones: cantidad,
+  };
+}
+
 export async function getEsperadoDelMes({
   mes,
   anio,

@@ -89,6 +89,10 @@ export const Route = createFileRoute("/crm/quoter")({
 });
 
 import {
+	applyMembershipAdjustment,
+	getMembershipAdjustment,
+} from "@/utils/membership-adjustment";
+import {
 	calculateQuotation,
 	GARANTIA_MOBILIARIA_INTERNO,
 	GPS_COST,
@@ -123,6 +127,8 @@ interface QuotationFormValues {
 	transferCost: number;
 	adminCost: number;
 	membershipCost: number;
+	membershipAdjustmentCategory: string;
+	membershipAdjustmentPercentage: number;
 	freelanceCost: number;
 	freelancePercentage: number;
 	royalty: number;
@@ -833,6 +839,8 @@ function QuoterPage() {
 			transferCost: 545, // 395 + 150 según Excel
 			adminCost: 0,
 			membershipCost: 0,
+			membershipAdjustmentCategory: "",
+			membershipAdjustmentPercentage: 0,
 			// Gastos adicionales para detalle de crédito
 			freelanceCost: 0,
 			freelancePercentage: 0,
@@ -962,9 +970,30 @@ function QuoterPage() {
 				vehicleType: vehicleType as any,
 			});
 
-			const baseInsuranceCost =
-				Math.round(result.baseInsuranceCost * 100) / 100;
-			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
+			const rawMembershipCostBeforeAdjustment =
+				Math.round(result.membershipCost * 100) / 100;
+			const selectedVehicle = vehiclesQuery.data?.data?.find(
+				(vehicle) => vehicle.id === quoterForm.state.values.vehicleId,
+			);
+			const membershipAdjustment = getMembershipAdjustment({
+				creditType: quoterForm.state.values.creditType,
+				insuredAmount,
+				vehicleType,
+				isNew: selectedVehicle?.isNew ?? vehicleType === "nuevo",
+				origin: selectedVehicle?.origin,
+			});
+			const rawMembershipCost = applyMembershipAdjustment(
+				rawMembershipCostBeforeAdjustment,
+				membershipAdjustment,
+			);
+			quoterForm.setFieldValue(
+				"membershipAdjustmentCategory",
+				membershipAdjustment.category,
+			);
+			quoterForm.setFieldValue(
+				"membershipAdjustmentPercentage",
+				membershipAdjustment.percentage,
+			);
 
 			if (isInterno) {
 				// Crédito interno: solo seguro base, sin membresía ni GPS
@@ -1896,6 +1925,16 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
+									<Badge variant="secondary">Seguro: Universales</Badge>
+									{quoterForm.state.values.membershipAdjustmentCategory ? (
+										<p className="text-muted-foreground text-xs">
+											Membresía: ajuste automático {""}
+											{quoterForm.state.values.membershipAdjustmentPercentage.toFixed(
+												2,
+											)}
+											% por {quoterForm.state.values.membershipAdjustmentCategory}.
+										</p>
+									) : null}
 
 									<quoterForm.Field name="gpsCost">
 										{(field) => (

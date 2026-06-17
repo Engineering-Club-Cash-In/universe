@@ -330,10 +330,10 @@ export function buildCarteraMatchedClientRows(params: {
 		rows.push({
 			...params.lead,
 			rowId: `${params.lead.id}-${sifco}`,
-			opportunities: matchingOpportunities,
+			opportunities: params.leadOpportunities,
 			creditAnalysis: params.creditAnalysis,
 			totalClosedValue: getCarteraCreditAmount(credit),
-			closedOpportunitiesCount: matchingOpportunities.filter(
+			closedOpportunitiesCount: params.leadOpportunities.filter(
 				(opp) => opp.isClosed,
 			).length,
 			crmMatchStatus: "matched",

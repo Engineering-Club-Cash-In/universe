@@ -164,7 +164,7 @@ export async function getMontoACobrarPeriodo({
         SELECT COUNT(*)::int AS cuotas_atrasadas
         FROM cartera.cuotas_credito qc_mora
         WHERE qc_mora.credito_id = c.credito_id
-          AND qc_mora.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+          AND qc_mora.fecha_vencimiento::date < p.fecha_venc::date
           AND qc_mora.pagado = false
           AND NOT EXISTS (
             SELECT 1 FROM cartera.pagos_credito pc_mora
@@ -233,7 +233,7 @@ export async function getMontoACobrarPeriodo({
             ON pc_a.cuota_id = q_a.cuota_id
             AND pc_a."paymentFalse" = false
           WHERE q_a.credito_id = calc.credito_id
-            AND q_a.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+            AND q_a.fecha_vencimiento::date < calc.bucket
             AND q_a.pagado = false
             AND NOT EXISTS (
               SELECT 1 FROM cartera.pagos_credito pc2

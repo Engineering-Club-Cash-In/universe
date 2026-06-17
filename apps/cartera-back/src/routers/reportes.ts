@@ -29,6 +29,16 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
+      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
+        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
+          set.status = 400;
+          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+        }
+        if (fechaInicio > fechaFin) {
+          set.status = 400;
+          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+        }
+      }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
       const data = await getMontoACobrar({ periodo: p, fechaInicio, fechaFin });
@@ -51,6 +61,16 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
+        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
+          set.status = 400;
+          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+        }
+        if (fechaInicio > fechaFin) {
+          set.status = 400;
+          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+        }
       }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
@@ -94,6 +114,16 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
+      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
+        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
+          set.status = 400;
+          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+        }
+        if (fechaInicio > fechaFin) {
+          set.status = 400;
+          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+        }
+      }
       const data = await getFlujoCuotasInversiones({ fechaInicio, fechaFin });
       set.status = 200;
       return data;
@@ -134,6 +164,16 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
+      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
+        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
+          set.status = 400;
+          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+        }
+        if (fechaInicio > fechaFin) {
+          set.status = 400;
+          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+        }
+      }
       const data = await getFlujoCuotasPorInversionista({ fechaInicio, fechaFin });
       set.status = 200;
       return data;
@@ -169,6 +209,20 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       if (!fechaInicio || !fechaFin) {
         set.status = 400;
         return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      { const fd1 = new Date(fechaInicio), fd2 = new Date(fechaFin);
+        if (isNaN(fd1.getTime()) || isNaN(fd2.getTime())) {
+          set.status = 400;
+          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+        }
+        if (fechaInicio > fechaFin) {
+          set.status = 400;
+          return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+        }
       }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };

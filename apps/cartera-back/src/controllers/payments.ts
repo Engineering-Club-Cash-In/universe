@@ -25,6 +25,7 @@ import {
 } from "./investor";
 import { updateMora } from "./latefee";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
+import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { t } from "elysia";
 
 // ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
@@ -1029,6 +1030,93 @@ export async function insertPagosCreditoInversionistasV2(
     throw new Error("La suma de montos aportados es 0, no se puede distribuir");
   }
 
+  // 4.5 🆕 ¿El crédito tiene una compra de cartera PENDIENTE de facturar?
+  //      Mismo disparador que la facturación (compras_credito_inversionista con
+  //      pendiente_facturar=true y tipo_operacion='compra_cartera'), SIN filtrar por mes.
+  //      Si la hay → el interés se reparte PRORRATEADO (ventanas antes/después).
+  //      Si NO la hay → factorInteresPorInv queda en null y TODO el reparto de abajo
+  //      sigue EXACTAMENTE igual que antes (flujo normal, cero cambios).
+  //
+  // ⚠️ TODO (gating de período — COMPARTIDO con la facturación): este flujo se activa
+  //    SOLO con pendiente_facturar (igual que cofidi.ts), sin verificar que el pago
+  //    pertenezca al mes de la compra. Si un pago de un mes POSTERIOR se distribuye
+  //    mientras la bandera sigue en true (la facturación es quien la limpia), el corte
+  //    del mes de la compra se aplicaría a un mes que no corresponde. La facturación
+  //    tiene el MISMO comportamiento, así que pci y la factura no divergen; cuando se
+  //    decida cerrar este borde hay que hacerlo en AMBOS lados (cofidi.ts + acá).
+  const comprasPendientesFacturar = await db
+    .select({
+      inversionista_id: compras_credito_inversionista.inversionista_id,
+      monto_aportado: compras_credito_inversionista.monto_aportado,
+    })
+    .from(compras_credito_inversionista)
+    .where(
+      and(
+        eq(compras_credito_inversionista.credito_id, credito_id),
+        eq(compras_credito_inversionista.pendiente_facturar, true),
+        eq(compras_credito_inversionista.tipo_operacion, "compra_cartera")
+      )
+    );
+
+  let factorInteresPorInv: Map<number, Big> | null = null;
+
+  if (comprasPendientesFacturar.length > 0) {
+    if (comprasPendientesFacturar.length > 1) {
+      console.warn(
+        `⚠️ [V2 prorrateo] Se esperaba 1 compra pendiente pero llegaron ${comprasPendientesFacturar.length} (crédito ${credito_id}). Se usa la primera.`
+      );
+    }
+    const compra = comprasPendientesFacturar[0];
+
+    // Espejo: base (monto_aportado), status y fecha_inicio_participacion por inversionista.
+    const espejoRows = await db
+      .select({
+        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+        monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+        status: creditos_inversionistas_espejo.status,
+        fecha_inicio_participacion:
+          creditos_inversionistas_espejo.fecha_inicio_participacion,
+      })
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
+    const espejoPorInv = new Map(espejoRows.map((e) => [e.inversionista_id, e]));
+
+    const fechaCorteRaw = espejoPorInv.get(
+      compra.inversionista_id
+    )?.fecha_inicio_participacion;
+
+    if (!fechaCorteRaw) {
+      // Sin fecha de corte no se puede prorratear → caemos al flujo normal (no rompe el pago).
+      console.warn(
+        `⚠️ [V2 prorrateo] Comprador ${compra.inversionista_id} sin fecha_inicio_participacion en espejo (crédito ${credito_id}). Se usa reparto normal.`
+      );
+    } else {
+      factorInteresPorInv = calcularFactoresProrrateoInteresV2({
+        inversionistas: inversionistasWithName.map((inv) => ({
+          inversionista_id: inv.inversionista_id,
+          nombre: inv.nombre,
+          porcentaje_participacion: inv.porcentaje_participacion_inversionista ?? 0,
+          porcentaje_cash_in: inv.porcentaje_cash_in ?? 0,
+          // Para el prorrateo se usa la base del ESPEJO (refleja la compra); si por algún
+          // motivo el inv no estuviera en el espejo, se cae a su monto_aportado live.
+          monto_aportado_espejo:
+            espejoPorInv.get(inv.inversionista_id)?.monto_aportado ??
+            inv.monto_aportado ??
+            0,
+          status_espejo: espejoPorInv.get(inv.inversionista_id)?.status ?? null,
+        })),
+        idComprador: compra.inversionista_id,
+        montoComprado: compra.monto_aportado,
+        fechaCorte: new Date(fechaCorteRaw as unknown as string),
+        // compra_cartera normalmente no usa redirección por reinversión → false.
+        banderaReinversion: false,
+      });
+      console.log(
+        `🆕 [V2 prorrateo] Crédito ${credito_id}: interés PRORRATEADO por compra de cartera (comprador ${compra.inversionista_id}, corte ${String(fechaCorteRaw)}).`
+      );
+    }
+  }
+
   // 5. Abonos totales del pago
   const pagoAbonoCapital = new Big(currentPago.abono_capital ?? 0);
   const pagoAbonoInteres = new Big(currentPago.abono_interes ?? 0);
@@ -1050,10 +1138,23 @@ export async function insertPagosCreditoInversionistasV2(
       ? new Big(inv.porcentaje_cash_in ?? 0).div(100)
       : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
 
-    // Distribuir abonos: primero por participación, luego por porcentaje general
+    // Capital: SIEMPRE por porcentaje general (sin cambios respecto al flujo original).
     const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
-    const abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
-    const abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
+
+    // Interés / IVA:
+    //   • Con compra de cartera pendiente (factorInteresPorInv != null) → PRORRATEADO
+    //     por ventanas antes/después (mismo criterio que la facturación, sin residuo a CUBE).
+    //   • Sin compra → fórmula de siempre: participación × porcentaje general.
+    let abonoInteresInv: Big;
+    let abonoIvaInv: Big;
+    if (factorInteresPorInv) {
+      const f = factorInteresPorInv.get(inv.inversionista_id) ?? new Big(0);
+      abonoInteresInv = pagoAbonoInteres.times(f);
+      abonoIvaInv = pagoAbonoIva.times(f);
+    } else {
+      abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
+      abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
+    }
 
     // Solo actualizar monto_aportado si hubo abono a capital
     if (abonoCapitalInv.gt(0)) {

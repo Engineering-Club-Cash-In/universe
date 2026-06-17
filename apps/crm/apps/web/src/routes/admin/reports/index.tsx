@@ -1629,7 +1629,7 @@ function RouteComponent() {
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Reinversión Total</TableCell>
+																<TableCell>Total </TableCell>
 																<TableCell className="text-right">
 																	{formatCurrency(totalMostrado)}
 																</TableCell>

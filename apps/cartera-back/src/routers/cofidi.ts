@@ -1936,6 +1936,22 @@ if (facturasExistentes.length > 0) {
           WHERE pci.pago_id = ${pago_id}
             AND UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
             AND i.emite_factura = false
+            -- ⚠️ Excluir inversionistas REDIRIGIDOS A CUBE: si el crédito tiene
+            --    bandera_reinversion=true y el espejo del inversionista está
+            --    pendiente (pendiente_reinversion / pendiente_compra_cartera), el
+            --    loop de interés (PASO 1) redirige su interés a CUBE → ya está en
+            --    interesCubeConIva (rubro INTERES). Contarlo también acá lo
+            --    duplicaría en el snapshot. Misma condición que el redirigirACube.
+            --    NOT EXISTS (no JOIN) para no multiplicar filas ni romper con NULL.
+            AND NOT (
+              ${pagoData.bandera_reinversion === true}
+              AND EXISTS (
+                SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
+                WHERE esp.credito_id = ${pagoData.credito_id}
+                  AND esp.inversionista_id = pci.inversionista_id
+                  AND esp.status IN ('pendiente_reinversion', 'pendiente_compra_cartera')
+              )
+            )
         `);
         const invFacturadoTotal = new Big(
           (invFacturadoRes as any).rows?.[0]?.total || 0

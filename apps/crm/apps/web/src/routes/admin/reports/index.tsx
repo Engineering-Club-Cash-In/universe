@@ -1399,7 +1399,15 @@ function RouteComponent() {
 																			{formatCurrency(membresias)}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.mora_promedio)}
+																			<div>{formatCurrency(row.mora_promedio)}</div>
+																			<div
+																				className="text-xs text-muted-foreground cursor-help"
+																				title="% de cuotas del período con mora activa"
+																			>
+																				{row.cuotas_count > 0
+																					? ((row.mora_count / row.cuotas_count) * 100).toFixed(1)
+																					: "0.0"}%
+																			</div>
 																		</TableCell>
 																		<TableCell className="text-right font-bold">
 																			{formatCurrency(total)}
@@ -1457,7 +1465,13 @@ function RouteComponent() {
 																		{formatCurrency(sum(a ? "acum_total_membresias" : "total_membresias"))}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		—
+																		{(() => {
+																			const totalCred = rows.reduce((a, r) => a + r.cuotas_count, 0);
+																			const totalMora = rows.reduce((a, r) => a + r.mora_count, 0);
+																			return totalCred > 0
+																				? `${((totalMora / totalCred) * 100).toFixed(1)}%`
+																				: "—";
+																		})()} 
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(grandTotal)}

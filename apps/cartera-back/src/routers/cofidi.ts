@@ -1922,15 +1922,27 @@ if (facturasExistentes.length > 0) {
         `);
         const capitalCube = (capCubeRes as any).rows?.[0]?.capital_cube ?? 0;
 
-        // 🆕 Interés que se factura a inversionistas (no-CUBE) = interés total
-        //    del pago − lo que factura CUBE, CON IVA. Un solo registro agregado
-        //    por pago (sin importar cuántos inversionistas se lo repartan).
-        //    factura_id NULL: no es factura de CUBE, es el residuo de los inv.
-        const interesTotalConIvaPago = new Big(pagoData.abono_interes || 0).plus(
-          new Big(pagoData.abono_iva_12 || 0)
+        // 🆕 Interés que CUBE/el sistema factura a inversionistas = SOLO los
+        //    no-CUBE que NO emiten su propia factura (emite_factura=false). Los
+        //    que se autofacturan NO van acá (ese pedazo lo factura el inversionista,
+        //    no CUBE) → si no, el reporte sobre-cuenta. Se toma de pci (interés +
+        //    IVA por inversionista), mismo criterio que el backfill histórico.
+        //    factura_id NULL: es el residuo de los inversionistas, no factura CUBE.
+        const invFacturadoRes = await db.execute(sql`
+          SELECT COALESCE(SUM(pci.abono_interes + pci.abono_iva_12), 0) AS total,
+                 COALESCE(SUM(pci.abono_iva_12), 0) AS iva
+          FROM cartera.pagos_credito_inversionistas pci
+          JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+          WHERE pci.pago_id = ${pago_id}
+            AND UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+            AND i.emite_factura = false
+        `);
+        const invFacturadoTotal = new Big(
+          (invFacturadoRes as any).rows?.[0]?.total || 0
         );
-        const interesInversionistasConIva =
-          interesTotalConIvaPago.minus(interesCubeConIva);
+        const invFacturadoIva = new Big(
+          (invFacturadoRes as any).rows?.[0]?.iva || 0
+        );
 
         pushRubro("CAPITAL", capitalCube, false); // solo capital de CUBE (de pci), sin IVA
         // Solo si el flujo de interés se calculó OK (no abortó). Si abortó,
@@ -1938,7 +1950,15 @@ if (facturasExistentes.length > 0) {
         // INTERES_INVERSIONISTAS → dejamos ambos rubros sin escribir.
         if (interesFlujoOk) {
           pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
-          pushRubro("INTERES_INVERSIONISTAS", interesInversionistasConIva, true); // residuo no-CUBE, con IVA
+          // INTERES_INVERSIONISTAS: monto + IVA directo de pci (no recalcular el
+          // IVA) para que coincida con el reparto real. Solo si hay monto.
+          if (invFacturadoTotal.gt(0)) {
+            rubrosDesglose.push({
+              rubro: "INTERES_INVERSIONISTAS",
+              monto_total: invFacturadoTotal.toFixed(2),
+              monto_iva: invFacturadoIva.toFixed(2),
+            });
+          }
         }
         pushRubro("MEMBRESIA", pagoData.membresias_pago, true);
         pushRubro("SEGURO", pagoData.abono_seguro, true);

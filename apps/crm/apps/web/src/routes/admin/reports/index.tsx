@@ -68,6 +68,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import type {
@@ -840,1365 +841,341 @@ function RouteComponent() {
 
 			{isAdmin && (
 				<>
-					{/* Enlaces a otros reportes - TODO: Implementar rutas */}
-					<div className="grid gap-4 md:grid-cols-4">
-						<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
-							<div className="flex items-center gap-2">
-								<AlertTriangle className="h-5 w-5 text-orange-500" />
-								<span className="font-semibold">Cobranza</span>
-							</div>
-							<p className="mt-1 text-muted-foreground text-sm">
-								Gestión de mora y recuperación (Próximamente)
-							</p>
-						</div>
-						<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
-							<div className="flex items-center gap-2">
-								<Wallet className="h-5 w-5 text-blue-500" />
-								<span className="font-semibold">Cartera</span>
-							</div>
-							<p className="mt-1 text-muted-foreground text-sm">
-								Análisis de créditos activos (Próximamente)
-							</p>
-						</div>
-						<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
-							<div className="flex items-center gap-2">
-								<Activity className="h-5 w-5 text-green-500" />
-								<span className="font-semibold">Inventario</span>
-							</div>
-							<p className="mt-1 text-muted-foreground text-sm">
-								Estado de vehículos (Próximamente)
-							</p>
-						</div>
-						<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
-							<div className="flex items-center gap-2">
-								<TrendingDown className="h-5 w-5 text-red-500" />
-								<span className="font-semibold">Subastas</span>
-							</div>
-							<p className="mt-1 text-muted-foreground text-sm">
-								Análisis de pérdidas (Próximamente)
-							</p>
-						</div>
-					</div>
-
-					{/* KPIs principales */}
-					<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-						<ReportCard
-							title="Cartera Activa"
-							value={formatCurrency(
-								dashboardData.data?.carteraActiva.montoTotal || 0,
-							)}
-							description={`${dashboardData.data?.carteraActiva.totalContratos || 0} contratos activos`}
-							icon={Wallet}
-						/>
-						<ReportCard
-							title="Total en Mora"
-							value={formatCurrency(totalEnMora)}
-							description="Cuotas pendientes de pago"
-							icon={AlertTriangle}
-							className="border-orange-200 dark:border-orange-900"
-						/>
-						<ReportCard
-							title="Total Recuperado"
-							value={formatCurrency(totalPagado)}
-							description="Cuotas pagadas"
-							icon={TrendingUp}
-							className="border-green-200 dark:border-green-900"
-						/>
-						<ReportCard
-							title="Casos Activos"
-							value={
-								dashboardData.data?.casosActivos.reduce(
-									(acc, c) => acc + c.totalCasos,
-									0,
-								) || 0
-							}
-							description="Casos en gestión de cobros"
-							icon={FileText}
-						/>
-					</div>
-
-					{/* Gráficas */}
-					<div className="grid gap-6 md:grid-cols-2">
-						<Card>
-							<CardHeader>
-								<CardTitle>Distribución de Cuotas por Estado</CardTitle>
-								<CardDescription>
-									Análisis del estado de pago de las cuotas
-								</CardDescription>
-							</CardHeader>
-							<CardContent>
-								<ResponsiveContainer width="100%" height={300}>
-									<PieChart>
-										<Pie
-											data={pieData}
-											dataKey="value"
-											nameKey="name"
-											cx="50%"
-											cy="50%"
-											outerRadius={100}
-											label
-										>
-											{pieData.map((entry, index) => (
-												<Cell
-													key={entry.name}
-													fill={
-														COLORS[
-															moraData[index]?.estadoMora as keyof typeof COLORS
-														]
-													}
-												/>
-											))}
-										</Pie>
-										<Tooltip
-											formatter={(value) => formatCurrency(Number(value))}
-										/>
-									</PieChart>
-								</ResponsiveContainer>
-							</CardContent>
-						</Card>
-
-						<Card>
-							<CardHeader>
-								<CardTitle>Pipeline de Ventas</CardTitle>
-								<CardDescription>
-									Oportunidades por etapa del proceso
-								</CardDescription>
-							</CardHeader>
-							<CardContent>
-								<ResponsiveContainer width="100%" height={300}>
-									<BarChart data={pipelineData}>
-										<CartesianGrid strokeDasharray="3 3" />
-										<XAxis
-											dataKey="etapa"
-											angle={-45}
-											textAnchor="end"
-											height={100}
-										/>
-										<YAxis />
-										<Tooltip />
-										<Legend />
-										<Bar
-											dataKey="oportunidades"
-											fill="#3b82f6"
-											name="Oportunidades"
-										/>
-									</BarChart>
-								</ResponsiveContainer>
-							</CardContent>
-						</Card>
-
-						<Card className="md:col-span-2">
-							<CardHeader>
-								<CardTitle>Tendencia de Nuevos Contratos</CardTitle>
-								<CardDescription>Últimos 6 meses de actividad</CardDescription>
-							</CardHeader>
-							<CardContent>
-								<ResponsiveContainer width="100%" height={300}>
-									<LineChart data={contratosData}>
-										<CartesianGrid strokeDasharray="3 3" />
-										<XAxis dataKey="mes" />
-										<YAxis yAxisId="left" />
-										<YAxis yAxisId="right" orientation="right" />
-										<Tooltip
-											formatter={(value, name) =>
-												name === "monto" ? formatCurrency(Number(value)) : value
-											}
-										/>
-										<Legend />
-										<Line
-											yAxisId="left"
-											type="monotone"
-											dataKey="contratos"
-											stroke="#3b82f6"
-											name="Contratos"
-										/>
-										<Line
-											yAxisId="right"
-											type="monotone"
-											dataKey="monto"
-											stroke="#10b981"
-											name="Capital Activo"
-										/>
-									</LineChart>
-								</ResponsiveContainer>
-							</CardContent>
-						</Card>
-					</div>
-
-					{/* Estadísticas de Leads */}
-					<Card>
-						<CardHeader>
-							<CardTitle>Conversión de Leads</CardTitle>
-							<CardDescription>
-								Estado de los prospectos en el sistema
-							</CardDescription>
-						</CardHeader>
-						<CardContent>
-							<div className="grid gap-4 md:grid-cols-5">
-								{dashboardData.data?.leadsStats.map((stat) => (
-									<div key={stat.status} className="rounded-lg border p-4">
-										<div className="text-muted-foreground text-sm">
-											{stat.status === "new"
-												? "Nuevos"
-												: stat.status === "contacted"
-													? "Contactados"
-													: stat.status === "qualified"
-														? "Calificados"
-														: stat.status === "unqualified"
-															? "No calificados"
-															: "Convertidos"}
-										</div>
-										<div className="mt-1 font-bold text-2xl">{stat.total}</div>
+					<Tabs defaultValue="resumen" className="space-y-6">
+						<TabsList>
+							<TabsTrigger value="resumen">Resumen</TabsTrigger>
+							<TabsTrigger value="graficas">Gráficas</TabsTrigger>
+							<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
+							<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
+							<TabsTrigger value="colocacion">Colocación</TabsTrigger>
+						</TabsList>
+						<TabsContent value="resumen" className="space-y-6">
+							{/* Enlaces a otros reportes - TODO: Implementar rutas */}
+							<div className="grid gap-4 md:grid-cols-4">
+								<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
+									<div className="flex items-center gap-2">
+										<AlertTriangle className="h-5 w-5 text-orange-500" />
+										<span className="font-semibold">Cobranza</span>
 									</div>
-								))}
-							</div>
-						</CardContent>
-					</Card>
-
-					{/* Reporte: Monto a Cobrarse por Período */}
-					<Card>
-						<CardHeader>
-							<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-								<div className="flex items-center gap-2">
-									<CalendarDays className="h-5 w-5 text-blue-500" />
-									<div>
-										<CardTitle>Monto a Cobrarse por Período</CardTitle>
-										<CardDescription>
-											Cuotas pendientes desglosadas por rubro (capital, interés,
-											seguro, etc.)
-										</CardDescription>
-									</div>
+									<p className="mt-1 text-muted-foreground text-sm">
+										Gestión de mora y recuperación (Próximamente)
+									</p>
 								</div>
-								<div className="flex flex-wrap items-center gap-2">
-									<SimularButton onClick={() => setScenarioOpen("monto")} />
-									<Select
-										value={montoCobrarPeriodo}
-										onValueChange={(v) =>
-											setMontoCobrarPeriodo(
-												v as "anio" | "trimestre" | "mes" | "semana" | "dia",
-											)
-										}
-									>
-										<SelectTrigger className="w-[140px]">
-											<SelectValue placeholder="Período" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="dia">Día</SelectItem>
-											<SelectItem value="semana">Semana</SelectItem>
-											<SelectItem value="mes">Mes</SelectItem>
-											<SelectItem value="trimestre">Trimestre</SelectItem>
-											<SelectItem value="anio">Año</SelectItem>
-										</SelectContent>
-									</Select>
-									<DateRangeFilter
-										dateRange={
-											montoCobrarRange.fechaInicio && montoCobrarRange.fechaFin
-												? {
-														from: dateFromInput(montoCobrarRange.fechaInicio),
-														to: dateFromInput(montoCobrarRange.fechaFin),
-													}
-												: undefined
-										}
-										onDateRangeChange={(range) => {
-											if (range?.from && range?.to) {
-												setMontoCobrarRange({
-													fechaInicio: formatDateInput(range.from),
-													fechaFin: formatDateInput(range.to),
-												});
-											}
-										}}
-									/>
+								<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
+									<div className="flex items-center gap-2">
+										<Wallet className="h-5 w-5 text-blue-500" />
+										<span className="font-semibold">Cartera</span>
+									</div>
+									<p className="mt-1 text-muted-foreground text-sm">
+										Análisis de créditos activos (Próximamente)
+									</p>
+								</div>
+								<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
+									<div className="flex items-center gap-2">
+										<Activity className="h-5 w-5 text-green-500" />
+										<span className="font-semibold">Inventario</span>
+									</div>
+									<p className="mt-1 text-muted-foreground text-sm">
+										Estado de vehículos (Próximamente)
+									</p>
+								</div>
+								<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
+									<div className="flex items-center gap-2">
+										<TrendingDown className="h-5 w-5 text-red-500" />
+										<span className="font-semibold">Subastas</span>
+									</div>
+									<p className="mt-1 text-muted-foreground text-sm">
+										Análisis de pérdidas (Próximamente)
+									</p>
 								</div>
 							</div>
-						</CardHeader>
-						<CardContent className="space-y-6">
-							{montoCobrarQuery.isPending && <p>Cargando reporte...</p>}
-							{montoCobrarQuery.isError && (
-								<p className="text-destructive">
-									Error al cargar el reporte de monto a cobrarse.
-								</p>
-							)}
-							{montoCobrarData && montoCobrarData.data.length === 0 && (
-								<p className="text-muted-foreground">
-									No hay cuotas pendientes para el rango seleccionado.
-								</p>
-							)}
-							{!!montoCobrarData?.data.length && (
-								<>
-									{/* Gráfica de barras apiladas */}
-									<ResponsiveContainer width="100%" height={350}>
-										<BarChart
-											data={montoCobrarData.data.map(
-												(row: MontoACobrarRow) => ({
-													bucket: formatBucket(row.bucket, montoCobrarPeriodo),
-													total_cuota: Number.parseFloat(row.total_cuota),
-													total_interes: Number.parseFloat(row.total_interes),
-													total_iva: Number.parseFloat(row.total_iva),
-													total_seguro: Number.parseFloat(row.total_seguro),
-													total_gps: Number.parseFloat(row.total_gps),
-													total_membresias: Number.parseFloat(
-														row.total_membresias,
-													),
-													total_royalti: Number.parseFloat(row.total_royalti),
-												}),
-											)}
-										>
-											<CartesianGrid strokeDasharray="3 3" />
-											<XAxis
-												dataKey="bucket"
-												tick={{ fontSize: 11 }}
-												interval={0}
-												height={36}
-											/>
-											<YAxis
-												tickFormatter={(v) =>
-													`Q${(Number(v) / 1000).toFixed(0)}k`
-												}
-											/>
-											<Tooltip
-												formatter={(value, name) => [
-													formatCurrency(Number(value)),
-													MONTO_COBRAR_LABELS[
-														name as keyof typeof MONTO_COBRAR_LABELS
-													] ?? name,
-												]}
-											/>
-											<Legend
-												formatter={(value) =>
-													MONTO_COBRAR_LABELS[
-														value as keyof typeof MONTO_COBRAR_LABELS
-													] ?? value
-												}
-											/>
-											{(
-												Object.keys(
-													MONTO_COBRAR_COLORS,
-												) as (keyof typeof MONTO_COBRAR_COLORS)[]
-											).map((key) => (
-												<Bar
-													key={key}
-													dataKey={key}
-													stackId="a"
-													fill={MONTO_COBRAR_COLORS[key]}
-												/>
-											))}
-										</BarChart>
-									</ResponsiveContainer>
 
-									{/* Tabla detallada */}
-									<div className="overflow-x-auto">
-										<Table>
-											<TableHeader>
-												<TableRow>
-													<TableHead>Período</TableHead>
-													<TableHead className="text-right">Cuotas</TableHead>
-													<TableHead className="text-right">Capital</TableHead>
-													<TableHead className="text-right">Interés</TableHead>
-													<TableHead className="text-right">IVA</TableHead>
-													<TableHead className="text-right">Seguro</TableHead>
-													<TableHead className="text-right">GPS</TableHead>
-													<TableHead className="text-right">
-														Membresías
-													</TableHead>
-													<TableHead className="text-right">Royalti</TableHead>
-													<TableHead className="text-right">
-														Mora Prom.
-													</TableHead>
-													<TableHead className="text-right font-bold">
-														Total
-													</TableHead>
-												</TableRow>
-											</TableHeader>
-											<TableBody>
-												{montoCobrarData.data.map((row: MontoACobrarRow) => {
-													const total =
-														Number.parseFloat(row.total_cuota) +
-														Number.parseFloat(row.total_interes) +
-														Number.parseFloat(row.total_iva) +
-														Number.parseFloat(row.total_seguro) +
-														Number.parseFloat(row.total_gps) +
-														Number.parseFloat(row.total_membresias) +
-														Number.parseFloat(row.total_royalti);
-													return (
-														<TableRow key={row.bucket}>
-															<TableCell>
-																{formatBucket(row.bucket, montoCobrarPeriodo)}
-															</TableCell>
-															<TableCell className="text-right">
-																{row.cuotas_count}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(row.total_cuota)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(row.total_interes)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(row.total_iva)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(row.total_seguro)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(row.total_gps)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(row.total_membresias)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(row.total_royalti)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(row.mora_promedio)}
-															</TableCell>
-															<TableCell className="text-right font-bold">
-																{formatCurrency(total)}
-															</TableCell>
-														</TableRow>
-													);
-												})}
-												{/* Fila de totales */}
-												{(() => {
-													const rows =
-														montoCobrarData.data as MontoACobrarRow[];
-													const sum = (key: keyof MontoACobrarRow) =>
-														rows.reduce(
-															(acc: number, r: MontoACobrarRow) =>
-																acc +
-																Number.parseFloat((r[key] as string) || "0"),
-															0,
-														);
-													const grandTotal =
-														sum("total_cuota") +
-														sum("total_interes") +
-														sum("total_iva") +
-														sum("total_seguro") +
-														sum("total_gps") +
-														sum("total_membresias") +
-														sum("total_royalti");
-													return (
-														<TableRow className="border-t-2 bg-muted/50 font-bold">
-															<TableCell>Total</TableCell>
-															<TableCell className="text-right">
-																{rows.reduce(
-																	(acc, r) => acc + r.cuotas_count,
-																	0,
-																)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(sum("total_cuota"))}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(sum("total_interes"))}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(sum("total_iva"))}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(sum("total_seguro"))}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(sum("total_gps"))}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(sum("total_membresias"))}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(sum("total_royalti"))}
-															</TableCell>
-															<TableCell className="text-right">—</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(grandTotal)}
-															</TableCell>
-														</TableRow>
-													);
-												})()}
-											</TableBody>
-										</Table>
-									</div>
-								</>
-							)}
-						</CardContent>
-					</Card>
-
-					{/* Reporte: Facturado del Mes vs Esperado */}
-					<Card>
-						<CardHeader>
-							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-								<div>
-									<CardTitle className="flex items-center gap-2">
-										<CalendarDays className="h-5 w-5" />
-										Facturado del Mes vs Esperado
-									</CardTitle>
-									<CardDescription>
-										Compara lo cobrado en el mes contra lo esperado según fecha
-										de vencimiento
-									</CardDescription>
-								</div>
-								<div className="flex items-center gap-2">
-									<SimularButton
-										onClick={() => setScenarioOpen("facturacion")}
-									/>
-									<Select
-										value={String(facturacionMes.mes)}
-										onValueChange={(v) =>
-											setFacturacionMes((prev) => ({ ...prev, mes: Number(v) }))
-										}
-									>
-										<SelectTrigger className="w-36">
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{[
-												"Enero",
-												"Febrero",
-												"Marzo",
-												"Abril",
-												"Mayo",
-												"Junio",
-												"Julio",
-												"Agosto",
-												"Septiembre",
-												"Octubre",
-												"Noviembre",
-												"Diciembre",
-											].map((label, i) => (
-												<SelectItem key={i + 1} value={String(i + 1)}>
-													{label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-									<Input
-										type="number"
-										className="w-24"
-										value={facturacionMes.anio}
-										min={2020}
-										max={2100}
-										onChange={(e) =>
-											setFacturacionMes((prev) => ({
-												...prev,
-												anio: Number(e.target.value),
-											}))
-										}
-									/>
-								</div>
-							</div>
-						</CardHeader>
-						<CardContent>
-							{facturacionMesQuery.isPending && (
-								<div className="py-4 text-center text-muted-foreground text-sm">
-									Cargando...
-								</div>
-							)}
-							{facturacionMesQuery.isError && (
-								<div className="py-4 text-center text-destructive text-sm">
-									Error al cargar datos
-								</div>
-							)}
-							{facturacionMesData &&
-								(() => {
-									const { cobrado, esperado } = facturacionMesData;
-									const totalCobrado = FACTURACION_RUBROS.reduce(
-										(acc, r) => acc + Number(cobrado[r.key] || 0),
-										0,
-									);
-									const totalEsperado = FACTURACION_RUBROS.reduce(
-										(acc, r) => acc + Number(esperado[r.key] || 0),
-										0,
-									);
-									return (
-										<Table>
-											<TableHeader>
-												<TableRow>
-													<TableHead>Rubro</TableHead>
-													<TableHead className="text-right">Cobrado</TableHead>
-													<TableHead className="text-right">Esperado</TableHead>
-													<TableHead className="w-48">Progreso</TableHead>
-												</TableRow>
-											</TableHeader>
-											<TableBody>
-												{FACTURACION_RUBROS.map(({ key, label }) => (
-													<TableRow key={key}>
-														<TableCell>{label}</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(Number(cobrado[key] || 0))}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(Number(esperado[key] || 0))}
-														</TableCell>
-														<TableCell>
-															<ProgressBar
-																value={Number(cobrado[key] || 0)}
-																max={Number(esperado[key] || 0)}
-															/>
-														</TableCell>
-													</TableRow>
-												))}
-												<TableRow className="border-t-2 bg-muted/50 font-bold">
-													<TableCell>Total</TableCell>
-													<TableCell className="text-right">
-														{formatCurrency(totalCobrado)}
-													</TableCell>
-													<TableCell className="text-right">
-														{formatCurrency(totalEsperado)}
-													</TableCell>
-													<TableCell>
-														<ProgressBar
-															value={totalCobrado}
-															max={totalEsperado}
-														/>
-													</TableCell>
-												</TableRow>
-											</TableBody>
-										</Table>
-									);
-								})()}
-						</CardContent>
-					</Card>
-
-					{/* Reporte: Flujo de Cuotas de Inversiones */}
-					<Card>
-						<CardHeader>
-							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-								<div>
-									<CardTitle className="flex items-center gap-2">
-										<TrendingUp className="h-5 w-5" />
-										Flujo de Cuotas de Inversiones
-									</CardTitle>
-									<CardDescription>
-										Cuotas esperadas hacia reinversión y hacia pago en efectivo,
-										por período
-									</CardDescription>
-								</div>
-								<div className="flex items-center gap-2">
-									<SimularButton onClick={() => setScenarioOpen("flujo")} />
-									<Select
-										value={String(flujoMesNum)}
-										onValueChange={(v) =>
-											setFlujoMesAnio(flujoAnioNum, Number(v))
-										}
-									>
-										<SelectTrigger className="w-36" aria-label="Mes">
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{mesesDisponibles.map((m) => (
-												<SelectItem key={m.num} value={String(m.num)}>
-													{m.nombre}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-									<Select
-										value={String(flujoAnioNum)}
-										onValueChange={(v) =>
-											setFlujoMesAnio(Number(v), flujoMesNum)
-										}
-									>
-										<SelectTrigger className="w-24" aria-label="Año">
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{aniosDisponibles.map((a) => (
-												<SelectItem key={a} value={String(a)}>
-													{a}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-							</div>
-						</CardHeader>
-						<CardContent className="space-y-8">
-							{/* Sección 1: Cuotas → Reinversión (desde liquidaciones) */}
-							<div className={SECCION_REPORTE_CLASS}>
-								<p className="mb-2 font-semibold text-sm">
-									Cuotas → Reinversión
-								</p>
-								{reinversionLiquidacionesQuery.isPending ? (
-									<div className="py-4 text-center text-muted-foreground text-sm">
-										Cargando...
-									</div>
-								) : reinversionLiquidacionesQuery.isError ? (
-									<div className="py-4 text-center text-destructive text-sm">
-										Error al cargar datos
-									</div>
-								) : reinversionData ? (
-									(() => {
-										const filas = REINVERSION_MODALIDADES.map((m) => ({
-											...m,
-											monto: Number(
-												reinversionData.porTipo[m.tipo]?.reinversion_total ?? 0,
-											),
-										})).filter((f) => f.monto !== 0);
-										const totalMostrado = filas.reduce(
-											(a, f) => a + f.monto,
+							{/* KPIs principales */}
+							<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+								<ReportCard
+									title="Cartera Activa"
+									value={formatCurrency(
+										dashboardData.data?.carteraActiva.montoTotal || 0,
+									)}
+									description={`${dashboardData.data?.carteraActiva.totalContratos || 0} contratos activos`}
+									icon={Wallet}
+								/>
+								<ReportCard
+									title="Total en Mora"
+									value={formatCurrency(totalEnMora)}
+									description="Cuotas pendientes de pago"
+									icon={AlertTriangle}
+									className="border-orange-200 dark:border-orange-900"
+								/>
+								<ReportCard
+									title="Total Recuperado"
+									value={formatCurrency(totalPagado)}
+									description="Cuotas pagadas"
+									icon={TrendingUp}
+									className="border-green-200 dark:border-green-900"
+								/>
+								<ReportCard
+									title="Casos Activos"
+									value={
+										dashboardData.data?.casosActivos.reduce(
+											(acc, c) => acc + c.totalCasos,
 											0,
-										);
-										return (
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>Modalidad de Reinversión</TableHead>
-														<TableHead className="text-right">
-															Reinversión Total
-														</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													{filas.map((f) => (
-														<TableRow key={f.tipo}>
-															<TableCell>{f.label}</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(f.monto)}
-															</TableCell>
-														</TableRow>
+										) || 0
+									}
+									description="Casos en gestión de cobros"
+									icon={FileText}
+								/>
+							</div>
+						</TabsContent>
+						<TabsContent value="graficas" className="space-y-6">
+							{/* Gráficas */}
+							<div className="grid gap-6 md:grid-cols-2">
+								<Card>
+									<CardHeader>
+										<CardTitle>Distribución de Cuotas por Estado</CardTitle>
+										<CardDescription>
+											Análisis del estado de pago de las cuotas
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<ResponsiveContainer width="100%" height={300}>
+											<PieChart>
+												<Pie
+													data={pieData}
+													dataKey="value"
+													nameKey="name"
+													cx="50%"
+													cy="50%"
+													outerRadius={100}
+													label
+												>
+													{pieData.map((entry, index) => (
+														<Cell
+															key={entry.name}
+															fill={
+																COLORS[
+																	moraData[index]
+																		?.estadoMora as keyof typeof COLORS
+																]
+															}
+														/>
 													))}
-													<TableRow className="border-t-2 bg-muted/50 font-bold">
-														<TableCell>Total Reinvertido</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totalMostrado)}
-														</TableCell>
-													</TableRow>
-												</TableBody>
-											</Table>
-										);
-									})()
-								) : null}
+												</Pie>
+												<Tooltip
+													formatter={(value) => formatCurrency(Number(value))}
+												/>
+											</PieChart>
+										</ResponsiveContainer>
+									</CardContent>
+								</Card>
+
+								<Card>
+									<CardHeader>
+										<CardTitle>Pipeline de Ventas</CardTitle>
+										<CardDescription>
+											Oportunidades por etapa del proceso
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<ResponsiveContainer width="100%" height={300}>
+											<BarChart data={pipelineData}>
+												<CartesianGrid strokeDasharray="3 3" />
+												<XAxis
+													dataKey="etapa"
+													angle={-45}
+													textAnchor="end"
+													height={100}
+												/>
+												<YAxis />
+												<Tooltip />
+												<Legend />
+												<Bar
+													dataKey="oportunidades"
+													fill="#3b82f6"
+													name="Oportunidades"
+												/>
+											</BarChart>
+										</ResponsiveContainer>
+									</CardContent>
+								</Card>
+
+								<Card className="md:col-span-2">
+									<CardHeader>
+										<CardTitle>Tendencia de Nuevos Contratos</CardTitle>
+										<CardDescription>
+											Últimos 6 meses de actividad
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<ResponsiveContainer width="100%" height={300}>
+											<LineChart data={contratosData}>
+												<CartesianGrid strokeDasharray="3 3" />
+												<XAxis dataKey="mes" />
+												<YAxis yAxisId="left" />
+												<YAxis yAxisId="right" orientation="right" />
+												<Tooltip
+													formatter={(value, name) =>
+														name === "monto"
+															? formatCurrency(Number(value))
+															: value
+													}
+												/>
+												<Legend />
+												<Line
+													yAxisId="left"
+													type="monotone"
+													dataKey="contratos"
+													stroke="#3b82f6"
+													name="Contratos"
+												/>
+												<Line
+													yAxisId="right"
+													type="monotone"
+													dataKey="monto"
+													stroke="#10b981"
+													name="Capital Activo"
+												/>
+											</LineChart>
+										</ResponsiveContainer>
+									</CardContent>
+								</Card>
 							</div>
 
-							{/* Sección 2: Cuotas → A Recibir (efectivo neto = total_cuota) */}
-							<div className={SECCION_REPORTE_CLASS}>
-								<p className="mb-2 font-semibold text-sm">Cuotas → A Recibir</p>
-								{reinversionLiquidacionesQuery.isPending ? (
-									<div className="py-4 text-center text-muted-foreground text-sm">
-										Cargando...
-									</div>
-								) : reinversionLiquidacionesQuery.isError ? (
-									<div className="py-4 text-center text-destructive text-sm">
-										Error al cargar datos
-									</div>
-								) : reinversionData ? (
-									(() => {
-										const filas = A_RECIBIR_MODALIDADES.map((m) => {
-											const d = reinversionData.porTipo[m.tipo];
-											return {
-												...m,
-												capital: Number(d?.total_capital ?? 0),
-												interes: Number(d?.total_interes ?? 0),
-												iva: Number(d?.total_iva ?? 0),
-												isr: Number(d?.total_isr ?? 0),
-												total: Number(d?.total_cuota ?? 0),
-											};
-										}).filter(
-											(f) =>
-												f.capital !== 0 ||
-												f.interes !== 0 ||
-												f.iva !== 0 ||
-												f.isr !== 0 ||
-												f.total !== 0,
-										);
-										const totales = filas.reduce(
-											(a, f) => ({
-												capital: a.capital + f.capital,
-												interes: a.interes + f.interes,
-												iva: a.iva + f.iva,
-												isr: a.isr + f.isr,
-												total: a.total + f.total,
-											}),
-											{ capital: 0, interes: 0, iva: 0, isr: 0, total: 0 },
-										);
-										return (
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>Modalidad de Reinversión</TableHead>
-														<TableHead className="text-right">
-															Capital
-														</TableHead>
-														<TableHead className="text-right">
-															Interés
-														</TableHead>
-														<TableHead className="text-right">
-															IVA 12%
-														</TableHead>
-														<TableHead className="text-right">ISR</TableHead>
-														<TableHead className="text-right">
-															Total a Recibir
-														</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													{filas.map((f) => (
-														<TableRow key={f.tipo}>
-															<TableCell>{f.label}</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(f.capital)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(f.interes)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(f.iva)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(f.isr)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(f.total)}
-															</TableCell>
-														</TableRow>
-													))}
-													<TableRow className="border-t-2 bg-muted/50 font-bold">
-														<TableCell>Total a Recibir</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totales.capital)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totales.interes)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totales.iva)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totales.isr)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totales.total)}
-														</TableCell>
-													</TableRow>
-												</TableBody>
-											</Table>
-										);
-									})()
-								) : null}
-							</div>
-
-							{/* Sección: Interés Neto (agrupado por si el inversionista emite factura) */}
-							{reinversionData &&
-								(() => {
-									const cf = reinversionData.interesNeto.conFactura;
-									const sf = reinversionData.interesNeto.sinFactura;
-									const totalInteres = Number(cf.interes) + Number(sf.interes);
-									const totalIva = Number(cf.iva);
-									const totalIsr = Number(sf.isr);
-									const totalNeto = Number(cf.neto) + Number(sf.neto);
-									return (
-										<div className={SECCION_REPORTE_CLASS}>
-											<p className="mb-2 font-semibold text-sm">Interés Neto</p>
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>Grupo</TableHead>
-														<TableHead className="text-right">
-															Interés
-														</TableHead>
-														<TableHead className="text-right">
-															IVA 12%
-														</TableHead>
-														<TableHead className="text-right">ISR</TableHead>
-														<TableHead className="text-right">
-															Interés Neto
-														</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													<TableRow>
-														<TableCell>Con Factura</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(cf.interes)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(cf.iva)}
-														</TableCell>
-														<TableCell className="text-right text-muted-foreground">
-															—
-														</TableCell>
-														<TableCell className="text-right font-semibold">
-															{formatCurrency(cf.neto)}
-														</TableCell>
-													</TableRow>
-													<TableRow>
-														<TableCell>Sin Factura</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(sf.interes)}
-														</TableCell>
-														<TableCell className="text-right text-muted-foreground">
-															—
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(sf.isr)}
-														</TableCell>
-														<TableCell className="text-right font-semibold">
-															{formatCurrency(sf.neto)}
-														</TableCell>
-													</TableRow>
-													<TableRow className="border-t-2 bg-muted/50 font-bold">
-														<TableCell>Total</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totalInteres)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totalIva)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totalIsr)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(totalNeto)}
-														</TableCell>
-													</TableRow>
-												</TableBody>
-											</Table>
-										</div>
-									);
-								})()}
-
-							{flujoCuotasQuery.isPending && (
-								<div className="py-4 text-center text-muted-foreground text-sm">
-									Cargando...
-								</div>
-							)}
-							{flujoCuotasQuery.isError && (
-								<div className="py-4 text-center text-destructive text-sm">
-									Error al cargar datos
-								</div>
-							)}
-							{flujoCuotasData &&
-								(() => {
-									const { pagosExtras } = flujoCuotasData;
-									const totalExtras =
-										Number(pagosExtras.abonos_capital) +
-										Number(pagosExtras.cancelaciones);
-									return (
-										<>
-											{/* Sección 3: Pagos Extras Recibidos */}
-											<div className={SECCION_REPORTE_CLASS}>
-												<p className="mb-2 font-semibold text-sm">
-													Pagos Extras Recibidos
-												</p>
-												<Table>
-													<TableHeader>
-														<TableRow>
-															<TableHead>Tipo</TableHead>
-															<TableHead className="text-right">
-																Monto
-															</TableHead>
-														</TableRow>
-													</TableHeader>
-													<TableBody>
-														<TableRow>
-															<TableCell>Abonos Extra a Capital</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(
-																	Number(pagosExtras.abonos_capital),
-																)}
-															</TableCell>
-														</TableRow>
-														<TableRow>
-															<TableCell>Cancelaciones</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(
-																	Number(pagosExtras.cancelaciones),
-																)}
-															</TableCell>
-														</TableRow>
-														<TableRow className="border-t-2 bg-muted/50 font-bold">
-															<TableCell>Total</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalExtras)}
-															</TableCell>
-														</TableRow>
-													</TableBody>
-												</Table>
-											</div>
-										</>
-									);
-								})()}
-
-							{/* Sección 4: Desglose por Inversionista */}
-							<div className="border-t pt-4">
-								<div className="mb-3 flex items-center justify-between">
-									<button
-										type="button"
-										className="flex items-center gap-1 font-semibold text-sm transition-colors hover:text-foreground/70"
-										onClick={() => setDesgloseInversionistaOpen((o) => !o)}
-									>
-										{desgloseInversionistaOpen ? (
-											<ChevronDown className="h-4 w-4" />
-										) : (
-											<ChevronRight className="h-4 w-4" />
-										)}
-										Desglose por Inversionista
-									</button>
-									{desgloseInversionistaOpen &&
-										(flujoPorInversionistaData?.porInversionista?.length ?? 0) >
-											0 && (
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => {
-													const rows =
-														// eslint-disable-next-line @typescript-eslint/no-explicit-any
-														(
-															flujoPorInversionistaData!
-																.porInversionista as any[]
-														).map((r: any) => ({
-															Inversionista: r.nombre,
-															"Reinv. Capital": r.reinversion_capital,
-															"Reinv. Interés": r.reinversion_interes,
-															"Total Reinversión": r.reinversion_total,
-															"Capital a Recibir": r.cash_capital,
-															"Interés a Recibir": r.cash_interes,
-															"Total a Recibir": r.cash_total,
-															"Total General": r.total,
-														}));
-													const ws = XLSX.utils.json_to_sheet(rows);
-													ws["!cols"] = [
-														{ wch: 30 },
-														{ wch: 18 },
-														{ wch: 18 },
-														{ wch: 18 },
-														{ wch: 18 },
-														{ wch: 18 },
-														{ wch: 18 },
-														{ wch: 18 },
-													];
-													const wb = XLSX.utils.book_new();
-													XLSX.utils.book_append_sheet(
-														wb,
-														ws,
-														"Por Inversionista",
-													);
-													XLSX.writeFile(
-														wb,
-														`flujo-inversionistas-${flujoCuotasRange.fechaInicio}-${flujoCuotasRange.fechaFin}.xlsx`,
-													);
-												}}
-											>
-												<Download className="mr-2 h-4 w-4" />
-												Exportar Excel
-											</Button>
-										)}
-								</div>
-								{desgloseInversionistaOpen &&
-									(flujoPorInversionistaQuery.isPending ? (
-										<p className="py-4 text-center text-muted-foreground text-sm">
-											Cargando...
-										</p>
-									) : flujoPorInversionistaQuery.isError ? (
-										<p className="py-4 text-center text-destructive text-sm">
-											Error al cargar desglose por inversionista
-										</p>
-									) : !flujoPorInversionistaData?.porInversionista?.length ? (
-										<p className="py-4 text-center text-muted-foreground text-sm">
-											Sin datos para el período seleccionado
-										</p>
-									) : (
-										<Table>
-											<TableHeader>
-												<TableRow>
-													<TableHead>Inversionista</TableHead>
-													<TableHead className="text-right">
-														Reinversión
-													</TableHead>
-													<TableHead className="text-right">
-														A Recibir
-													</TableHead>
-													<TableHead className="text-right">Total</TableHead>
-												</TableRow>
-											</TableHeader>
-											<TableBody>
-												{(
-													flujoPorInversionistaData.porInversionista as any[]
-												).map((row: any) => (
-													<TableRow key={row.inversionista_id}>
-														<TableCell className="font-medium">
-															{row.nombre}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(Number(row.reinversion_total))}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(Number(row.cash_total))}
-														</TableCell>
-														<TableCell className="text-right font-semibold">
-															{formatCurrency(Number(row.total))}
-														</TableCell>
-													</TableRow>
-												))}
-											</TableBody>
-											{flujoPorInversionistaData?.totales && (
-												<tfoot>
-													<TableRow className="border-t-2 bg-muted/50 font-bold">
-														<TableCell>Total</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(
-																Number(
-																	flujoPorInversionistaData.totales
-																		.reinversion_total,
-																),
-															)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(
-																Number(
-																	flujoPorInversionistaData.totales.cash_total,
-																),
-															)}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(
-																Number(flujoPorInversionistaData.totales.total),
-															)}
-														</TableCell>
-													</TableRow>
-												</tfoot>
-											)}
-										</Table>
-									))}
-							</div>
-						</CardContent>
-					</Card>
-
-					{/* Modal: Metas Mensuales */}
-					<Dialog open={metasModalOpen} onOpenChange={setMetasModalOpen}>
-						<DialogContent className="sm:max-w-[860px]">
-							<DialogHeader>
-								<DialogTitle className="flex items-center gap-2">
-									<Target className="h-4 w-4 text-purple-500" />
-									Metas de Colocación
-								</DialogTitle>
-							</DialogHeader>
-							<div className="flex items-center justify-center gap-3 pb-2">
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setMetasAnio((y) => y - 1)}
-								>
-									‹
-								</Button>
-								<span className="w-16 text-center font-semibold">
-									{metasAnio}
-								</span>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setMetasAnio((y) => y + 1)}
-								>
-									›
-								</Button>
-							</div>
-							{metasQuery.isPending ? (
-								<p className="py-4 text-center text-muted-foreground text-sm">
-									Cargando...
-								</p>
-							) : (
-								<div className="grid grid-cols-2 gap-x-10 gap-y-4">
-									{MESES.map((nombreMes, idx) => {
-										const mes = idx + 1;
-										return (
-											<div key={mes} className="flex items-center gap-3">
-												<span className="w-20 shrink-0 font-medium text-sm">
-													{nombreMes}
-												</span>
-												<div className="relative min-w-0 flex-1">
-													<span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 font-medium text-muted-foreground text-sm">
-														Q
-													</span>
-													<Input
-														type="text"
-														inputMode="decimal"
-														className="h-10 pl-7 text-right text-base"
-														placeholder="0"
-														value={
-															focusedMes === mes
-																? (editMetas[mes] ?? "")
-																: editMetas[mes] && Number(editMetas[mes]) > 0
-																	? Number(editMetas[mes]).toLocaleString(
-																			"es-GT",
-																			{
-																				minimumFractionDigits: 2,
-																				maximumFractionDigits: 2,
-																			},
-																		)
-																	: ""
-														}
-														onFocus={() => setFocusedMes(mes)}
-														onBlur={() => setFocusedMes(null)}
-														onChange={(e) => {
-															const raw = e.target.value.replace(
-																/[^0-9.]/g,
-																"",
-															);
-															setEditMetas((prev) => ({ ...prev, [mes]: raw }));
-														}}
-													/>
+							{/* Estadísticas de Leads */}
+							<Card>
+								<CardHeader>
+									<CardTitle>Conversión de Leads</CardTitle>
+									<CardDescription>
+										Estado de los prospectos en el sistema
+									</CardDescription>
+								</CardHeader>
+								<CardContent>
+									<div className="grid gap-4 md:grid-cols-5">
+										{dashboardData.data?.leadsStats.map((stat) => (
+											<div key={stat.status} className="rounded-lg border p-4">
+												<div className="text-muted-foreground text-sm">
+													{stat.status === "new"
+														? "Nuevos"
+														: stat.status === "contacted"
+															? "Contactados"
+															: stat.status === "qualified"
+																? "Calificados"
+																: stat.status === "unqualified"
+																	? "No calificados"
+																	: "Convertidos"}
+												</div>
+												<div className="mt-1 font-bold text-2xl">
+													{stat.total}
 												</div>
 											</div>
-										);
-									})}
-								</div>
-							)}
-							<div className="flex justify-end gap-2 pt-2">
-								<Button
-									variant="outline"
-									onClick={() => setMetasModalOpen(false)}
-								>
-									Cancelar
-								</Button>
-								<Button onClick={handleGuardarTodo} disabled={isSavingMetas}>
-									{isSavingMetas && (
-										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									)}
-									Guardar todo
-								</Button>
-							</div>
-						</DialogContent>
-					</Dialog>
-
-					{/* Modales de simulación de escenarios */}
-					<ScenarioModal
-						open={scenarioOpen === "monto"}
-						onOpenChange={(o) => setScenarioOpen(o ? "monto" : null)}
-						config={montoACobrarConfig}
-						baseData={montoCobrarData?.data}
-					/>
-					<ScenarioModal
-						open={scenarioOpen === "facturacion"}
-						onOpenChange={(o) => setScenarioOpen(o ? "facturacion" : null)}
-						config={facturacionConfig}
-						baseData={facturacionMesData}
-					/>
-					<ScenarioModal
-						open={scenarioOpen === "flujo"}
-						onOpenChange={(o) => setScenarioOpen(o ? "flujo" : null)}
-						config={flujoCuotasConfig}
-						baseData={flujoCuotasData}
-					/>
-					<ScenarioModal
-						open={scenarioOpen === "cobertura"}
-						onOpenChange={(o) => setScenarioOpen(o ? "cobertura" : null)}
-						config={coberturaConfig}
-						baseData={puntoEquilibrioData?.data}
-					/>
-					<ScenarioModal
-						open={scenarioOpen === "comparativo"}
-						onOpenChange={(o) => setScenarioOpen(o ? "comparativo" : null)}
-						config={comparativoConfig}
-						baseData={comparativoData?.data}
-					/>
-
-					{/* Cobertura de Colocación vs Meta */}
-					<Card>
-						<CardHeader>
-							<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-								<div className="flex items-center gap-2">
-									<TrendingUp className="h-5 w-5 text-green-500" />
-									<div>
-										<CardTitle>Cobertura de Colocación vs Meta</CardTitle>
-										<CardDescription>
-											Compara el capital colocado en cada período contra la meta
-											mensual definida
-										</CardDescription>
+										))}
 									</div>
-								</div>
-								<div className="flex flex-wrap items-center gap-2">
-									<SimularButton onClick={() => setScenarioOpen("cobertura")} />
-									<Button
-										variant="outline"
-										size="sm"
-										className="gap-1.5"
-										onClick={() => setMetasModalOpen(true)}
-									>
-										<Target className="h-3.5 w-3.5" />
-										Configurar metas
-									</Button>
-									<Select
-										value={equilibrioPeriodo}
-										onValueChange={(v) =>
-											setEquilibrioPeriodo(
-												v as "anio" | "trimestre" | "mes" | "semana" | "dia",
-											)
-										}
-									>
-										<SelectTrigger className="w-[140px]">
-											<SelectValue placeholder="Período" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="dia">Día</SelectItem>
-											<SelectItem value="semana">Semana</SelectItem>
-											<SelectItem value="mes">Mes</SelectItem>
-											<SelectItem value="trimestre">Trimestre</SelectItem>
-											<SelectItem value="anio">Año</SelectItem>
-										</SelectContent>
-									</Select>
-									<DateRangeFilter
-										dateRange={
-											equilibrioRange.fechaInicio && equilibrioRange.fechaFin
-												? {
-														from: dateFromInput(equilibrioRange.fechaInicio),
-														to: dateFromInput(equilibrioRange.fechaFin),
+								</CardContent>
+							</Card>
+						</TabsContent>
+						<TabsContent value="cobranza" className="space-y-6">
+							{/* Reporte: Monto a Cobrarse por Período */}
+							<Card>
+								<CardHeader>
+									<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+										<div className="flex items-center gap-2">
+											<CalendarDays className="h-5 w-5 text-blue-500" />
+											<div>
+												<CardTitle>Monto a Cobrarse por Período</CardTitle>
+												<CardDescription>
+													Cuotas pendientes desglosadas por rubro (capital,
+													interés, seguro, etc.)
+												</CardDescription>
+											</div>
+										</div>
+										<div className="flex flex-wrap items-center gap-2">
+											<SimularButton onClick={() => setScenarioOpen("monto")} />
+											<Select
+												value={montoCobrarPeriodo}
+												onValueChange={(v) =>
+													setMontoCobrarPeriodo(
+														v as
+															| "anio"
+															| "trimestre"
+															| "mes"
+															| "semana"
+															| "dia",
+													)
+												}
+											>
+												<SelectTrigger className="w-[140px]">
+													<SelectValue placeholder="Período" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="dia">Día</SelectItem>
+													<SelectItem value="semana">Semana</SelectItem>
+													<SelectItem value="mes">Mes</SelectItem>
+													<SelectItem value="trimestre">Trimestre</SelectItem>
+													<SelectItem value="anio">Año</SelectItem>
+												</SelectContent>
+											</Select>
+											<DateRangeFilter
+												dateRange={
+													montoCobrarRange.fechaInicio &&
+													montoCobrarRange.fechaFin
+														? {
+																from: dateFromInput(
+																	montoCobrarRange.fechaInicio,
+																),
+																to: dateFromInput(montoCobrarRange.fechaFin),
+															}
+														: undefined
+												}
+												onDateRangeChange={(range) => {
+													if (range?.from && range?.to) {
+														setMontoCobrarRange({
+															fechaInicio: formatDateInput(range.from),
+															fechaFin: formatDateInput(range.to),
+														});
 													}
-												: undefined
-										}
-										onDateRangeChange={(range) => {
-											if (range?.from && range?.to) {
-												setEquilibrioRange({
-													fechaInicio: formatDateInput(range.from),
-													fechaFin: formatDateInput(range.to),
-												});
-											}
-										}}
-									/>
-								</div>
-							</div>
-						</CardHeader>
-						<CardContent className="space-y-4">
-							{puntoEquilibrioQuery.isPending && (
-								<p className="text-muted-foreground text-sm">
-									Cargando reporte...
-								</p>
-							)}
-							{puntoEquilibrioQuery.isError && (
-								<p className="text-destructive text-sm">
-									Error al cargar reporte de cobertura.
-								</p>
-							)}
-							{puntoEquilibrioData && puntoEquilibrioData.data.length === 0 && (
-								<p className="text-muted-foreground text-sm">
-									No hay datos de colocación para el rango seleccionado.
-								</p>
-							)}
-							{!!puntoEquilibrioData?.data.length &&
-								(() => {
-									const rows = puntoEquilibrioData.data;
-									const totalColocado = rows.reduce(
-										(acc, r) => acc + Number(r.colocado),
-										0,
-									);
-									const totalMeta = rows.reduce(
-										(acc, r) => acc + Number(r.meta),
-										0,
-									);
-									const totalCreditos = rows.reduce(
-										(acc, r) => acc + r.cantidad_creditos,
-										0,
-									);
-									const totalCobertura =
-										totalMeta > 0
-											? ((totalColocado / totalMeta) * 100).toFixed(1)
-											: null;
-									return (
+												}}
+											/>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent className="space-y-6">
+									{montoCobrarQuery.isPending && <p>Cargando reporte...</p>}
+									{montoCobrarQuery.isError && (
+										<p className="text-destructive">
+											Error al cargar el reporte de monto a cobrarse.
+										</p>
+									)}
+									{montoCobrarData && montoCobrarData.data.length === 0 && (
+										<p className="text-muted-foreground">
+											No hay cuotas pendientes para el rango seleccionado.
+										</p>
+									)}
+									{!!montoCobrarData?.data.length && (
 										<>
-											<ResponsiveContainer width="100%" height={300}>
+											{/* Gráfica de barras apiladas */}
+											<ResponsiveContainer width="100%" height={350}>
 												<BarChart
-													data={rows.map((row) => ({
-														bucket: formatBucket(row.bucket, equilibrioPeriodo),
-														colocado: Number(row.colocado),
-														meta: Number(row.meta),
-													}))}
+													data={montoCobrarData.data.map(
+														(row: MontoACobrarRow) => ({
+															bucket: formatBucket(
+																row.bucket,
+																montoCobrarPeriodo,
+															),
+															total_cuota: Number.parseFloat(row.total_cuota),
+															total_interes: Number.parseFloat(
+																row.total_interes,
+															),
+															total_iva: Number.parseFloat(row.total_iva),
+															total_seguro: Number.parseFloat(row.total_seguro),
+															total_gps: Number.parseFloat(row.total_gps),
+															total_membresias: Number.parseFloat(
+																row.total_membresias,
+															),
+															total_royalti: Number.parseFloat(
+																row.total_royalti,
+															),
+														}),
+													)}
 												>
 													<CartesianGrid strokeDasharray="3 3" />
 													<XAxis
@@ -2215,373 +1192,1520 @@ function RouteComponent() {
 													<Tooltip
 														formatter={(value, name) => [
 															formatCurrency(Number(value)),
-															name === "colocado" ? "Colocado" : "Meta",
+															MONTO_COBRAR_LABELS[
+																name as keyof typeof MONTO_COBRAR_LABELS
+															] ?? name,
 														]}
 													/>
 													<Legend
-														formatter={(v) =>
-															v === "colocado" ? "Colocado" : "Meta"
+														formatter={(value) =>
+															MONTO_COBRAR_LABELS[
+																value as keyof typeof MONTO_COBRAR_LABELS
+															] ?? value
 														}
 													/>
-													<Bar
-														dataKey="colocado"
-														fill="#3b82f6"
-														name="colocado"
-													/>
-													<Bar dataKey="meta" fill="#d1d5db" name="meta" />
+													{(
+														Object.keys(
+															MONTO_COBRAR_COLORS,
+														) as (keyof typeof MONTO_COBRAR_COLORS)[]
+													).map((key) => (
+														<Bar
+															key={key}
+															dataKey={key}
+															stackId="a"
+															fill={MONTO_COBRAR_COLORS[key]}
+														/>
+													))}
 												</BarChart>
 											</ResponsiveContainer>
 
+											{/* Tabla detallada */}
 											<div className="overflow-x-auto">
 												<Table>
 													<TableHeader>
 														<TableRow>
 															<TableHead>Período</TableHead>
 															<TableHead className="text-right">
-																Créditos
+																Cuotas
 															</TableHead>
 															<TableHead className="text-right">
-																Colocado
-															</TableHead>
-															<TableHead className="text-right">Meta</TableHead>
-															<TableHead className="text-right">
-																Cobertura
+																Capital
 															</TableHead>
 															<TableHead className="text-right">
-																Faltante
+																Interés
+															</TableHead>
+															<TableHead className="text-right">IVA</TableHead>
+															<TableHead className="text-right">
+																Seguro
+															</TableHead>
+															<TableHead className="text-right">GPS</TableHead>
+															<TableHead className="text-right">
+																Membresías
+															</TableHead>
+															<TableHead className="text-right">
+																Royalti
+															</TableHead>
+															<TableHead className="text-right">
+																Mora Prom.
+															</TableHead>
+															<TableHead className="text-right font-bold">
+																Total
 															</TableHead>
 														</TableRow>
 													</TableHeader>
 													<TableBody>
-														{rows.map((row) => (
-															<TableRow key={row.bucket}>
+														{montoCobrarData.data.map(
+															(row: MontoACobrarRow) => {
+																const total =
+																	Number.parseFloat(row.total_cuota) +
+																	Number.parseFloat(row.total_interes) +
+																	Number.parseFloat(row.total_iva) +
+																	Number.parseFloat(row.total_seguro) +
+																	Number.parseFloat(row.total_gps) +
+																	Number.parseFloat(row.total_membresias) +
+																	Number.parseFloat(row.total_royalti);
+																return (
+																	<TableRow key={row.bucket}>
+																		<TableCell>
+																			{formatBucket(
+																				row.bucket,
+																				montoCobrarPeriodo,
+																			)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.cuotas_count}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.total_cuota)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.total_interes)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.total_iva)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.total_seguro)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.total_gps)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.total_membresias)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.total_royalti)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.mora_promedio)}
+																		</TableCell>
+																		<TableCell className="text-right font-bold">
+																			{formatCurrency(total)}
+																		</TableCell>
+																	</TableRow>
+																);
+															},
+														)}
+														{/* Fila de totales */}
+														{(() => {
+															const rows =
+																montoCobrarData.data as MontoACobrarRow[];
+															const sum = (key: keyof MontoACobrarRow) =>
+																rows.reduce(
+																	(acc: number, r: MontoACobrarRow) =>
+																		acc +
+																		Number.parseFloat(
+																			(r[key] as string) || "0",
+																		),
+																	0,
+																);
+															const grandTotal =
+																sum("total_cuota") +
+																sum("total_interes") +
+																sum("total_iva") +
+																sum("total_seguro") +
+																sum("total_gps") +
+																sum("total_membresias") +
+																sum("total_royalti");
+															return (
+																<TableRow className="border-t-2 bg-muted/50 font-bold">
+																	<TableCell>Total</TableCell>
+																	<TableCell className="text-right">
+																		{rows.reduce(
+																			(acc, r) => acc + r.cuotas_count,
+																			0,
+																		)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(sum("total_cuota"))}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(sum("total_interes"))}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(sum("total_iva"))}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(sum("total_seguro"))}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(sum("total_gps"))}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(sum("total_membresias"))}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(sum("total_royalti"))}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		—
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(grandTotal)}
+																	</TableCell>
+																</TableRow>
+															);
+														})()}
+													</TableBody>
+												</Table>
+											</div>
+										</>
+									)}
+								</CardContent>
+							</Card>
+
+							{/* Reporte: Facturado del Mes vs Esperado */}
+							<Card>
+								<CardHeader>
+									<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+										<div>
+											<CardTitle className="flex items-center gap-2">
+												<CalendarDays className="h-5 w-5" />
+												Facturado del Mes vs Esperado
+											</CardTitle>
+											<CardDescription>
+												Compara lo cobrado en el mes contra lo esperado según
+												fecha de vencimiento
+											</CardDescription>
+										</div>
+										<div className="flex items-center gap-2">
+											<SimularButton
+												onClick={() => setScenarioOpen("facturacion")}
+											/>
+											<Select
+												value={String(facturacionMes.mes)}
+												onValueChange={(v) =>
+													setFacturacionMes((prev) => ({
+														...prev,
+														mes: Number(v),
+													}))
+												}
+											>
+												<SelectTrigger className="w-36">
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													{[
+														"Enero",
+														"Febrero",
+														"Marzo",
+														"Abril",
+														"Mayo",
+														"Junio",
+														"Julio",
+														"Agosto",
+														"Septiembre",
+														"Octubre",
+														"Noviembre",
+														"Diciembre",
+													].map((label, i) => (
+														<SelectItem key={i + 1} value={String(i + 1)}>
+															{label}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+											<Input
+												type="number"
+												className="w-24"
+												value={facturacionMes.anio}
+												min={2020}
+												max={2100}
+												onChange={(e) =>
+													setFacturacionMes((prev) => ({
+														...prev,
+														anio: Number(e.target.value),
+													}))
+												}
+											/>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent>
+									{facturacionMesQuery.isPending && (
+										<div className="py-4 text-center text-muted-foreground text-sm">
+											Cargando...
+										</div>
+									)}
+									{facturacionMesQuery.isError && (
+										<div className="py-4 text-center text-destructive text-sm">
+											Error al cargar datos
+										</div>
+									)}
+									{facturacionMesData &&
+										(() => {
+											const { cobrado, esperado } = facturacionMesData;
+											const totalCobrado = FACTURACION_RUBROS.reduce(
+												(acc, r) => acc + Number(cobrado[r.key] || 0),
+												0,
+											);
+											const totalEsperado = FACTURACION_RUBROS.reduce(
+												(acc, r) => acc + Number(esperado[r.key] || 0),
+												0,
+											);
+											return (
+												<Table>
+													<TableHeader>
+														<TableRow>
+															<TableHead>Rubro</TableHead>
+															<TableHead className="text-right">
+																Cobrado
+															</TableHead>
+															<TableHead className="text-right">
+																Esperado
+															</TableHead>
+															<TableHead className="w-48">Progreso</TableHead>
+														</TableRow>
+													</TableHeader>
+													<TableBody>
+														{FACTURACION_RUBROS.map(({ key, label }) => (
+															<TableRow key={key}>
+																<TableCell>{label}</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(Number(cobrado[key] || 0))}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(Number(esperado[key] || 0))}
+																</TableCell>
 																<TableCell>
-																	{formatBucket(row.bucket, equilibrioPeriodo)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{row.cantidad_creditos}
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(row.colocado)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{Number(row.meta) > 0 ? (
-																		formatCurrency(row.meta)
-																	) : (
-																		<span className="text-muted-foreground">
-																			Sin meta
-																		</span>
-																	)}
-																</TableCell>
-																<TableCell className="text-right">
-																	<span
-																		className="font-semibold"
-																		style={{
-																			color: coberturaColor(row.cobertura),
-																		}}
-																	>
-																		{coberturaLabel(row.cobertura)}
-																	</span>
-																</TableCell>
-																<TableCell className="text-right">
-																	{row.faltante
-																		? formatCurrency(row.faltante)
-																		: "—"}
+																	<ProgressBar
+																		value={Number(cobrado[key] || 0)}
+																		max={Number(esperado[key] || 0)}
+																	/>
 																</TableCell>
 															</TableRow>
 														))}
 														<TableRow className="border-t-2 bg-muted/50 font-bold">
 															<TableCell>Total</TableCell>
 															<TableCell className="text-right">
-																{totalCreditos}
+																{formatCurrency(totalCobrado)}
 															</TableCell>
 															<TableCell className="text-right">
-																{formatCurrency(totalColocado)}
+																{formatCurrency(totalEsperado)}
 															</TableCell>
-															<TableCell className="text-right">
-																{totalMeta > 0
-																	? formatCurrency(totalMeta)
-																	: "—"}
-															</TableCell>
-															<TableCell className="text-right">
-																<span
-																	className="font-semibold"
-																	style={{
-																		color: coberturaColor(totalCobertura),
-																	}}
-																>
-																	{coberturaLabel(totalCobertura)}
-																</span>
-															</TableCell>
-															<TableCell className="text-right">
-																{totalMeta > 0
-																	? formatCurrency(
-																			Math.max(0, totalMeta - totalColocado),
-																		)
-																	: "—"}
+															<TableCell>
+																<ProgressBar
+																	value={totalCobrado}
+																	max={totalEsperado}
+																/>
 															</TableCell>
 														</TableRow>
 													</TableBody>
 												</Table>
+											);
+										})()}
+								</CardContent>
+							</Card>
+						</TabsContent>
+						<TabsContent value="inversiones" className="space-y-6">
+							{/* Reporte: Flujo de Cuotas de Inversiones */}
+							<Card>
+								<CardHeader>
+									<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+										<div>
+											<CardTitle className="flex items-center gap-2">
+												<TrendingUp className="h-5 w-5" />
+												Flujo de Cuotas de Inversiones
+											</CardTitle>
+											<CardDescription>
+												Cuotas esperadas hacia reinversión y hacia pago en
+												efectivo, por período
+											</CardDescription>
+										</div>
+										<div className="flex items-center gap-2">
+											<SimularButton onClick={() => setScenarioOpen("flujo")} />
+											<Select
+												value={String(flujoMesNum)}
+												onValueChange={(v) =>
+													setFlujoMesAnio(flujoAnioNum, Number(v))
+												}
+											>
+												<SelectTrigger className="w-36" aria-label="Mes">
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													{mesesDisponibles.map((m) => (
+														<SelectItem key={m.num} value={String(m.num)}>
+															{m.nombre}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+											<Select
+												value={String(flujoAnioNum)}
+												onValueChange={(v) =>
+													setFlujoMesAnio(Number(v), flujoMesNum)
+												}
+											>
+												<SelectTrigger className="w-24" aria-label="Año">
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													{aniosDisponibles.map((a) => (
+														<SelectItem key={a} value={String(a)}>
+															{a}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent className="space-y-8">
+									{/* Sección 1: Cuotas → Reinversión (desde liquidaciones) */}
+									<div className={SECCION_REPORTE_CLASS}>
+										<p className="mb-2 font-semibold text-sm">
+											Cuotas → Reinversión
+										</p>
+										{reinversionLiquidacionesQuery.isPending ? (
+											<div className="py-4 text-center text-muted-foreground text-sm">
+												Cargando...
 											</div>
-										</>
-									);
-								})()}
-						</CardContent>
-					</Card>
+										) : reinversionLiquidacionesQuery.isError ? (
+											<div className="py-4 text-center text-destructive text-sm">
+												Error al cargar datos
+											</div>
+										) : reinversionData ? (
+											(() => {
+												const filas = REINVERSION_MODALIDADES.map((m) => ({
+													...m,
+													monto: Number(
+														reinversionData.porTipo[m.tipo]
+															?.reinversion_total ?? 0,
+													),
+												})).filter((f) => f.monto !== 0);
+												const totalMostrado = filas.reduce(
+													(a, f) => a + f.monto,
+													0,
+												);
+												return (
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Modalidad de Reinversión</TableHead>
+																<TableHead className="text-right">
+																	Reinversión Total
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															{filas.map((f) => (
+																<TableRow key={f.tipo}>
+																	<TableCell>{f.label}</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(f.monto)}
+																	</TableCell>
+																</TableRow>
+															))}
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total Reinvertido</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totalMostrado)}
+																</TableCell>
+															</TableRow>
+														</TableBody>
+													</Table>
+												);
+											})()
+										) : null}
+									</div>
 
-					{/* ============================================================ */}
-					{/* REPORTE: COMPARATIVO HISTÓRICO MENSUAL                        */}
-					{/* ============================================================ */}
-					<Card>
-						<CardHeader>
-							<div className="flex items-center justify-between">
-								<CardTitle className="flex items-center gap-2">
-									<CalendarDays className="h-5 w-5" />
-									Comparativo Histórico Mensual
-								</CardTitle>
-								<div className="flex items-center gap-2">
-									<SimularButton
-										onClick={() => setScenarioOpen("comparativo")}
-									/>
-									<button
-										type="button"
-										className="rounded p-1 hover:bg-muted"
-										onClick={() => setComparativoAnio((y) => y - 1)}
-									>
-										<ChevronLeft className="h-4 w-4" />
-									</button>
-									<span className="w-12 text-center font-semibold text-sm">
-										{comparativoAnio}
-									</span>
-									<button
-										type="button"
-										className="rounded p-1 hover:bg-muted"
-										onClick={() =>
-											setComparativoAnio((y) =>
-												y < new Date().getFullYear() ? y + 1 : y,
-											)
-										}
-									>
-										<ChevronRight className="h-4 w-4" />
-									</button>
-								</div>
-							</div>
-						</CardHeader>
-						<CardContent>
-							{comparativoQuery.isPending && (
-								<p className="py-4 text-center text-muted-foreground text-sm">
-									Cargando...
-								</p>
-							)}
-							{comparativoQuery.isError && (
-								<p className="py-4 text-center text-red-500 text-sm">
-									Error al cargar comparativo histórico.
-								</p>
-							)}
-							{comparativoData &&
-								(() => {
-									const rows = comparativoData.data;
-									const sumColoc = rows.reduce(
-										(acc, r) =>
-											acc +
-											(r.colocacion_monto ? Number(r.colocacion_monto) : 0),
-										0,
-									);
-									const sumFacturacion = rows.reduce(
-										(acc, r) =>
-											acc + (r.facturacion ? Number(r.facturacion) : 0),
-										0,
-									);
-									const sumCreditosColoc = rows.reduce(
-										(acc, r) => acc + (r.colocacion_creditos ?? 0),
-										0,
-									);
-									return (
-										<div className="overflow-x-auto">
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>Mes</TableHead>
-														<TableHead className="text-right">
-															Colocación (Q)
-														</TableHead>
-														<TableHead className="text-right"># Col.</TableHead>
-														<TableHead className="text-right">
-															Facturación (Q)
-														</TableHead>
-														<TableHead className="text-right">
-															Cartera Activa (Q)
-														</TableHead>
-														<TableHead className="text-right">
-															# Activos
-														</TableHead>
-														<TableHead className="text-right">
-															Mora 30 (Q)
-														</TableHead>
-														<TableHead className="text-right">
-															Mora 60 (Q)
-														</TableHead>
-														<TableHead className="text-right">
-															Mora 90 (Q)
-														</TableHead>
-														<TableHead className="text-right">
-															Mora 120+ (Q)
-														</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													{rows.map((row) => {
-														const esFuturo =
-															row.colocacion_monto === null &&
-															row.facturacion === null &&
-															row.cartera_activa === null;
-														const totalMoraFila =
-															Number(row.mora_30 ?? 0) +
-															Number(row.mora_60 ?? 0) +
-															Number(row.mora_90 ?? 0) +
-															Number(row.mora_120 ?? 0);
-														const pctMora = (val: string | null) =>
-															totalMoraFila > 0 && val
-																? ((Number(val) / totalMoraFila) * 100).toFixed(
-																		1,
-																	)
-																: null;
-														return (
-															<TableRow
-																key={row.mes}
-																className={esFuturo ? "opacity-40" : undefined}
-															>
+									{/* Sección 2: Cuotas → A Recibir (efectivo neto = total_cuota) */}
+									<div className={SECCION_REPORTE_CLASS}>
+										<p className="mb-2 font-semibold text-sm">
+											Cuotas → A Recibir
+										</p>
+										{reinversionLiquidacionesQuery.isPending ? (
+											<div className="py-4 text-center text-muted-foreground text-sm">
+												Cargando...
+											</div>
+										) : reinversionLiquidacionesQuery.isError ? (
+											<div className="py-4 text-center text-destructive text-sm">
+												Error al cargar datos
+											</div>
+										) : reinversionData ? (
+											(() => {
+												const filas = A_RECIBIR_MODALIDADES.map((m) => {
+													const d = reinversionData.porTipo[m.tipo];
+													return {
+														...m,
+														capital: Number(d?.total_capital ?? 0),
+														interes: Number(d?.total_interes ?? 0),
+														iva: Number(d?.total_iva ?? 0),
+														isr: Number(d?.total_isr ?? 0),
+														total: Number(d?.total_cuota ?? 0),
+													};
+												}).filter(
+													(f) =>
+														f.capital !== 0 ||
+														f.interes !== 0 ||
+														f.iva !== 0 ||
+														f.isr !== 0 ||
+														f.total !== 0,
+												);
+												const totales = filas.reduce(
+													(a, f) => ({
+														capital: a.capital + f.capital,
+														interes: a.interes + f.interes,
+														iva: a.iva + f.iva,
+														isr: a.isr + f.isr,
+														total: a.total + f.total,
+													}),
+													{ capital: 0, interes: 0, iva: 0, isr: 0, total: 0 },
+												);
+												return (
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Modalidad de Reinversión</TableHead>
+																<TableHead className="text-right">
+																	Capital
+																</TableHead>
+																<TableHead className="text-right">
+																	Interés
+																</TableHead>
+																<TableHead className="text-right">
+																	IVA 12%
+																</TableHead>
+																<TableHead className="text-right">
+																	ISR
+																</TableHead>
+																<TableHead className="text-right">
+																	Total a Recibir
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															{filas.map((f) => (
+																<TableRow key={f.tipo}>
+																	<TableCell>{f.label}</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(f.capital)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(f.interes)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(f.iva)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(f.isr)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(f.total)}
+																	</TableCell>
+																</TableRow>
+															))}
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total a Recibir</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totales.capital)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totales.interes)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totales.iva)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totales.isr)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totales.total)}
+																</TableCell>
+															</TableRow>
+														</TableBody>
+													</Table>
+												);
+											})()
+										) : null}
+									</div>
+
+									{/* Sección: Interés Neto (agrupado por si el inversionista emite factura) */}
+									{reinversionData &&
+										(() => {
+											const cf = reinversionData.interesNeto.conFactura;
+											const sf = reinversionData.interesNeto.sinFactura;
+											const totalInteres =
+												Number(cf.interes) + Number(sf.interes);
+											const totalIva = Number(cf.iva);
+											const totalIsr = Number(sf.isr);
+											const totalNeto = Number(cf.neto) + Number(sf.neto);
+											return (
+												<div className={SECCION_REPORTE_CLASS}>
+													<p className="mb-2 font-semibold text-sm">
+														Interés Neto
+													</p>
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Grupo</TableHead>
+																<TableHead className="text-right">
+																	Interés
+																</TableHead>
+																<TableHead className="text-right">
+																	IVA 12%
+																</TableHead>
+																<TableHead className="text-right">
+																	ISR
+																</TableHead>
+																<TableHead className="text-right">
+																	Interés Neto
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															<TableRow>
+																<TableCell>Con Factura</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(cf.interes)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(cf.iva)}
+																</TableCell>
+																<TableCell className="text-right text-muted-foreground">
+																	—
+																</TableCell>
+																<TableCell className="text-right font-semibold">
+																	{formatCurrency(cf.neto)}
+																</TableCell>
+															</TableRow>
+															<TableRow>
+																<TableCell>Sin Factura</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(sf.interes)}
+																</TableCell>
+																<TableCell className="text-right text-muted-foreground">
+																	—
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(sf.isr)}
+																</TableCell>
+																<TableCell className="text-right font-semibold">
+																	{formatCurrency(sf.neto)}
+																</TableCell>
+															</TableRow>
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totalInteres)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totalIva)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totalIsr)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(totalNeto)}
+																</TableCell>
+															</TableRow>
+														</TableBody>
+													</Table>
+												</div>
+											);
+										})()}
+
+									{flujoCuotasQuery.isPending && (
+										<div className="py-4 text-center text-muted-foreground text-sm">
+											Cargando...
+										</div>
+									)}
+									{flujoCuotasQuery.isError && (
+										<div className="py-4 text-center text-destructive text-sm">
+											Error al cargar datos
+										</div>
+									)}
+									{flujoCuotasData &&
+										(() => {
+											const { pagosExtras } = flujoCuotasData;
+											const totalExtras =
+												Number(pagosExtras.abonos_capital) +
+												Number(pagosExtras.cancelaciones);
+											return (
+												<>
+													{/* Sección 3: Pagos Extras Recibidos */}
+													<div className={SECCION_REPORTE_CLASS}>
+														<p className="mb-2 font-semibold text-sm">
+															Pagos Extras Recibidos
+														</p>
+														<Table>
+															<TableHeader>
+																<TableRow>
+																	<TableHead>Tipo</TableHead>
+																	<TableHead className="text-right">
+																		Monto
+																	</TableHead>
+																</TableRow>
+															</TableHeader>
+															<TableBody>
+																<TableRow>
+																	<TableCell>Abonos Extra a Capital</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(
+																			Number(pagosExtras.abonos_capital),
+																		)}
+																	</TableCell>
+																</TableRow>
+																<TableRow>
+																	<TableCell>Cancelaciones</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(
+																			Number(pagosExtras.cancelaciones),
+																		)}
+																	</TableCell>
+																</TableRow>
+																<TableRow className="border-t-2 bg-muted/50 font-bold">
+																	<TableCell>Total</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(totalExtras)}
+																	</TableCell>
+																</TableRow>
+															</TableBody>
+														</Table>
+													</div>
+												</>
+											);
+										})()}
+
+									{/* Sección 4: Desglose por Inversionista */}
+									<div className="border-t pt-4">
+										<div className="mb-3 flex items-center justify-between">
+											<button
+												type="button"
+												className="flex items-center gap-1 font-semibold text-sm transition-colors hover:text-foreground/70"
+												onClick={() => setDesgloseInversionistaOpen((o) => !o)}
+											>
+												{desgloseInversionistaOpen ? (
+													<ChevronDown className="h-4 w-4" />
+												) : (
+													<ChevronRight className="h-4 w-4" />
+												)}
+												Desglose por Inversionista
+											</button>
+											{desgloseInversionistaOpen &&
+												(flujoPorInversionistaData?.porInversionista?.length ??
+													0) > 0 && (
+													<Button
+														variant="outline"
+														size="sm"
+														onClick={() => {
+															const rows =
+																// eslint-disable-next-line @typescript-eslint/no-explicit-any
+																(
+																	flujoPorInversionistaData!
+																		.porInversionista as any[]
+																).map((r: any) => ({
+																	Inversionista: r.nombre,
+																	"Reinv. Capital": r.reinversion_capital,
+																	"Reinv. Interés": r.reinversion_interes,
+																	"Total Reinversión": r.reinversion_total,
+																	"Capital a Recibir": r.cash_capital,
+																	"Interés a Recibir": r.cash_interes,
+																	"Total a Recibir": r.cash_total,
+																	"Total General": r.total,
+																}));
+															const ws = XLSX.utils.json_to_sheet(rows);
+															ws["!cols"] = [
+																{ wch: 30 },
+																{ wch: 18 },
+																{ wch: 18 },
+																{ wch: 18 },
+																{ wch: 18 },
+																{ wch: 18 },
+																{ wch: 18 },
+																{ wch: 18 },
+															];
+															const wb = XLSX.utils.book_new();
+															XLSX.utils.book_append_sheet(
+																wb,
+																ws,
+																"Por Inversionista",
+															);
+															XLSX.writeFile(
+																wb,
+																`flujo-inversionistas-${flujoCuotasRange.fechaInicio}-${flujoCuotasRange.fechaFin}.xlsx`,
+															);
+														}}
+													>
+														<Download className="mr-2 h-4 w-4" />
+														Exportar Excel
+													</Button>
+												)}
+										</div>
+										{desgloseInversionistaOpen &&
+											(flujoPorInversionistaQuery.isPending ? (
+												<p className="py-4 text-center text-muted-foreground text-sm">
+													Cargando...
+												</p>
+											) : flujoPorInversionistaQuery.isError ? (
+												<p className="py-4 text-center text-destructive text-sm">
+													Error al cargar desglose por inversionista
+												</p>
+											) : !flujoPorInversionistaData?.porInversionista
+													?.length ? (
+												<p className="py-4 text-center text-muted-foreground text-sm">
+													Sin datos para el período seleccionado
+												</p>
+											) : (
+												<Table>
+													<TableHeader>
+														<TableRow>
+															<TableHead>Inversionista</TableHead>
+															<TableHead className="text-right">
+																Reinversión
+															</TableHead>
+															<TableHead className="text-right">
+																A Recibir
+															</TableHead>
+															<TableHead className="text-right">
+																Total
+															</TableHead>
+														</TableRow>
+													</TableHeader>
+													<TableBody>
+														{(
+															flujoPorInversionistaData.porInversionista as any[]
+														).map((row: any) => (
+															<TableRow key={row.inversionista_id}>
 																<TableCell className="font-medium">
-																	{MESES[row.mes - 1]}
+																	{row.nombre}
 																</TableCell>
 																<TableCell className="text-right">
-																	{row.colocacion_monto
-																		? formatCurrency(
-																				Number(row.colocacion_monto),
-																			)
-																		: "—"}
-																</TableCell>
-																<TableCell className="text-right">
-																	{row.colocacion_creditos ?? "—"}
-																</TableCell>
-																<TableCell className="text-right">
-																	{row.facturacion
-																		? formatCurrency(Number(row.facturacion))
-																		: "—"}
-																</TableCell>
-																<TableCell className="text-right">
-																	{row.cartera_activa
-																		? formatCurrency(Number(row.cartera_activa))
-																		: "—"}
-																</TableCell>
-																<TableCell className="text-right">
-																	{row.creditos_activos ?? "—"}
-																</TableCell>
-																<TableCell className="text-right">
-																	{row.mora_30 ? (
-																		<div>
-																			<span>
-																				{formatCurrency(Number(row.mora_30))}
-																				<span className="ml-1 text-muted-foreground text-xs">
-																					({row.creditos_30 ?? 0})
-																				</span>
-																			</span>
-																			{pctMora(row.mora_30) && (
-																				<div className="text-muted-foreground text-xs">
-																					{pctMora(row.mora_30)}%
-																				</div>
-																			)}
-																		</div>
-																	) : (
-																		"—"
+																	{formatCurrency(
+																		Number(row.reinversion_total),
 																	)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{row.mora_60 ? (
-																		<div>
-																			<span>
-																				{formatCurrency(Number(row.mora_60))}
-																				<span className="ml-1 text-muted-foreground text-xs">
-																					({row.creditos_60 ?? 0})
-																				</span>
-																			</span>
-																			{pctMora(row.mora_60) && (
-																				<div className="text-muted-foreground text-xs">
-																					{pctMora(row.mora_60)}%
-																				</div>
-																			)}
-																		</div>
-																	) : (
-																		"—"
+																	{formatCurrency(Number(row.cash_total))}
+																</TableCell>
+																<TableCell className="text-right font-semibold">
+																	{formatCurrency(Number(row.total))}
+																</TableCell>
+															</TableRow>
+														))}
+													</TableBody>
+													{flujoPorInversionistaData?.totales && (
+														<tfoot>
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(
+																		Number(
+																			flujoPorInversionistaData.totales
+																				.reinversion_total,
+																		),
 																	)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{row.mora_90 ? (
-																		<div>
-																			<span>
-																				{formatCurrency(Number(row.mora_90))}
-																				<span className="ml-1 text-muted-foreground text-xs">
-																					({row.creditos_90 ?? 0})
-																				</span>
-																			</span>
-																			{pctMora(row.mora_90) && (
-																				<div className="text-muted-foreground text-xs">
-																					{pctMora(row.mora_90)}%
-																				</div>
-																			)}
-																		</div>
-																	) : (
-																		"—"
+																	{formatCurrency(
+																		Number(
+																			flujoPorInversionistaData.totales
+																				.cash_total,
+																		),
 																	)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{row.mora_120 ? (
-																		<div>
-																			<span>
-																				{formatCurrency(Number(row.mora_120))}
-																				<span className="ml-1 text-muted-foreground text-xs">
-																					({row.creditos_120 ?? 0})
-																				</span>
-																			</span>
-																			{pctMora(row.mora_120) && (
-																				<div className="text-muted-foreground text-xs">
-																					{pctMora(row.mora_120)}%
-																				</div>
-																			)}
-																		</div>
-																	) : (
-																		"—"
+																	{formatCurrency(
+																		Number(
+																			flujoPorInversionistaData.totales.total,
+																		),
 																	)}
 																</TableCell>
 															</TableRow>
-														);
-													})}
-													<TableRow className="border-t-2 bg-muted/50 font-bold">
-														<TableCell>Total</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(sumColoc)}
-														</TableCell>
-														<TableCell className="text-right">
-															{sumCreditosColoc}
-														</TableCell>
-														<TableCell className="text-right">
-															{formatCurrency(sumFacturacion)}
-														</TableCell>
-														<TableCell className="text-right">—</TableCell>
-														<TableCell className="text-right">—</TableCell>
-														<TableCell className="text-right">—</TableCell>
-														<TableCell className="text-right">—</TableCell>
-														<TableCell className="text-right">—</TableCell>
-														<TableCell className="text-right">—</TableCell>
-													</TableRow>
-												</TableBody>
-											</Table>
+														</tfoot>
+													)}
+												</Table>
+											))}
+									</div>
+								</CardContent>
+							</Card>
+						</TabsContent>
+						{/* Modal: Metas Mensuales */}
+						<Dialog open={metasModalOpen} onOpenChange={setMetasModalOpen}>
+							<DialogContent className="sm:max-w-[860px]">
+								<DialogHeader>
+									<DialogTitle className="flex items-center gap-2">
+										<Target className="h-4 w-4 text-purple-500" />
+										Metas de Colocación
+									</DialogTitle>
+								</DialogHeader>
+								<div className="flex items-center justify-center gap-3 pb-2">
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => setMetasAnio((y) => y - 1)}
+									>
+										‹
+									</Button>
+									<span className="w-16 text-center font-semibold">
+										{metasAnio}
+									</span>
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => setMetasAnio((y) => y + 1)}
+									>
+										›
+									</Button>
+								</div>
+								{metasQuery.isPending ? (
+									<p className="py-4 text-center text-muted-foreground text-sm">
+										Cargando...
+									</p>
+								) : (
+									<div className="grid grid-cols-2 gap-x-10 gap-y-4">
+										{MESES.map((nombreMes, idx) => {
+											const mes = idx + 1;
+											return (
+												<div key={mes} className="flex items-center gap-3">
+													<span className="w-20 shrink-0 font-medium text-sm">
+														{nombreMes}
+													</span>
+													<div className="relative min-w-0 flex-1">
+														<span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 font-medium text-muted-foreground text-sm">
+															Q
+														</span>
+														<Input
+															type="text"
+															inputMode="decimal"
+															className="h-10 pl-7 text-right text-base"
+															placeholder="0"
+															value={
+																focusedMes === mes
+																	? (editMetas[mes] ?? "")
+																	: editMetas[mes] && Number(editMetas[mes]) > 0
+																		? Number(editMetas[mes]).toLocaleString(
+																				"es-GT",
+																				{
+																					minimumFractionDigits: 2,
+																					maximumFractionDigits: 2,
+																				},
+																			)
+																		: ""
+															}
+															onFocus={() => setFocusedMes(mes)}
+															onBlur={() => setFocusedMes(null)}
+															onChange={(e) => {
+																const raw = e.target.value.replace(
+																	/[^0-9.]/g,
+																	"",
+																);
+																setEditMetas((prev) => ({
+																	...prev,
+																	[mes]: raw,
+																}));
+															}}
+														/>
+													</div>
+												</div>
+											);
+										})}
+									</div>
+								)}
+								<div className="flex justify-end gap-2 pt-2">
+									<Button
+										variant="outline"
+										onClick={() => setMetasModalOpen(false)}
+									>
+										Cancelar
+									</Button>
+									<Button onClick={handleGuardarTodo} disabled={isSavingMetas}>
+										{isSavingMetas && (
+											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										)}
+										Guardar todo
+									</Button>
+								</div>
+							</DialogContent>
+						</Dialog>
+
+						{/* Modales de simulación de escenarios */}
+						<ScenarioModal
+							open={scenarioOpen === "monto"}
+							onOpenChange={(o) => setScenarioOpen(o ? "monto" : null)}
+							config={montoACobrarConfig}
+							baseData={montoCobrarData?.data}
+						/>
+						<ScenarioModal
+							open={scenarioOpen === "facturacion"}
+							onOpenChange={(o) => setScenarioOpen(o ? "facturacion" : null)}
+							config={facturacionConfig}
+							baseData={facturacionMesData}
+						/>
+						<ScenarioModal
+							open={scenarioOpen === "flujo"}
+							onOpenChange={(o) => setScenarioOpen(o ? "flujo" : null)}
+							config={flujoCuotasConfig}
+							baseData={flujoCuotasData}
+						/>
+						<ScenarioModal
+							open={scenarioOpen === "cobertura"}
+							onOpenChange={(o) => setScenarioOpen(o ? "cobertura" : null)}
+							config={coberturaConfig}
+							baseData={puntoEquilibrioData?.data}
+						/>
+						<ScenarioModal
+							open={scenarioOpen === "comparativo"}
+							onOpenChange={(o) => setScenarioOpen(o ? "comparativo" : null)}
+							config={comparativoConfig}
+							baseData={comparativoData?.data}
+						/>
+
+						<TabsContent value="colocacion" className="space-y-6">
+							{/* Cobertura de Colocación vs Meta */}
+							<Card>
+								<CardHeader>
+									<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+										<div className="flex items-center gap-2">
+											<TrendingUp className="h-5 w-5 text-green-500" />
+											<div>
+												<CardTitle>Cobertura de Colocación vs Meta</CardTitle>
+												<CardDescription>
+													Compara el capital colocado en cada período contra la
+													meta mensual definida
+												</CardDescription>
+											</div>
 										</div>
-									);
-								})()}
-						</CardContent>
-					</Card>
+										<div className="flex flex-wrap items-center gap-2">
+											<SimularButton
+												onClick={() => setScenarioOpen("cobertura")}
+											/>
+											<Button
+												variant="outline"
+												size="sm"
+												className="gap-1.5"
+												onClick={() => setMetasModalOpen(true)}
+											>
+												<Target className="h-3.5 w-3.5" />
+												Configurar metas
+											</Button>
+											<Select
+												value={equilibrioPeriodo}
+												onValueChange={(v) =>
+													setEquilibrioPeriodo(
+														v as
+															| "anio"
+															| "trimestre"
+															| "mes"
+															| "semana"
+															| "dia",
+													)
+												}
+											>
+												<SelectTrigger className="w-[140px]">
+													<SelectValue placeholder="Período" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="dia">Día</SelectItem>
+													<SelectItem value="semana">Semana</SelectItem>
+													<SelectItem value="mes">Mes</SelectItem>
+													<SelectItem value="trimestre">Trimestre</SelectItem>
+													<SelectItem value="anio">Año</SelectItem>
+												</SelectContent>
+											</Select>
+											<DateRangeFilter
+												dateRange={
+													equilibrioRange.fechaInicio &&
+													equilibrioRange.fechaFin
+														? {
+																from: dateFromInput(
+																	equilibrioRange.fechaInicio,
+																),
+																to: dateFromInput(equilibrioRange.fechaFin),
+															}
+														: undefined
+												}
+												onDateRangeChange={(range) => {
+													if (range?.from && range?.to) {
+														setEquilibrioRange({
+															fechaInicio: formatDateInput(range.from),
+															fechaFin: formatDateInput(range.to),
+														});
+													}
+												}}
+											/>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent className="space-y-4">
+									{puntoEquilibrioQuery.isPending && (
+										<p className="text-muted-foreground text-sm">
+											Cargando reporte...
+										</p>
+									)}
+									{puntoEquilibrioQuery.isError && (
+										<p className="text-destructive text-sm">
+											Error al cargar reporte de cobertura.
+										</p>
+									)}
+									{puntoEquilibrioData &&
+										puntoEquilibrioData.data.length === 0 && (
+											<p className="text-muted-foreground text-sm">
+												No hay datos de colocación para el rango seleccionado.
+											</p>
+										)}
+									{!!puntoEquilibrioData?.data.length &&
+										(() => {
+											const rows = puntoEquilibrioData.data;
+											const totalColocado = rows.reduce(
+												(acc, r) => acc + Number(r.colocado),
+												0,
+											);
+											const totalMeta = rows.reduce(
+												(acc, r) => acc + Number(r.meta),
+												0,
+											);
+											const totalCreditos = rows.reduce(
+												(acc, r) => acc + r.cantidad_creditos,
+												0,
+											);
+											const totalCobertura =
+												totalMeta > 0
+													? ((totalColocado / totalMeta) * 100).toFixed(1)
+													: null;
+											return (
+												<>
+													<ResponsiveContainer width="100%" height={300}>
+														<BarChart
+															data={rows.map((row) => ({
+																bucket: formatBucket(
+																	row.bucket,
+																	equilibrioPeriodo,
+																),
+																colocado: Number(row.colocado),
+																meta: Number(row.meta),
+															}))}
+														>
+															<CartesianGrid strokeDasharray="3 3" />
+															<XAxis
+																dataKey="bucket"
+																tick={{ fontSize: 11 }}
+																interval={0}
+																height={36}
+															/>
+															<YAxis
+																tickFormatter={(v) =>
+																	`Q${(Number(v) / 1000).toFixed(0)}k`
+																}
+															/>
+															<Tooltip
+																formatter={(value, name) => [
+																	formatCurrency(Number(value)),
+																	name === "colocado" ? "Colocado" : "Meta",
+																]}
+															/>
+															<Legend
+																formatter={(v) =>
+																	v === "colocado" ? "Colocado" : "Meta"
+																}
+															/>
+															<Bar
+																dataKey="colocado"
+																fill="#3b82f6"
+																name="colocado"
+															/>
+															<Bar dataKey="meta" fill="#d1d5db" name="meta" />
+														</BarChart>
+													</ResponsiveContainer>
+
+													<div className="overflow-x-auto">
+														<Table>
+															<TableHeader>
+																<TableRow>
+																	<TableHead>Período</TableHead>
+																	<TableHead className="text-right">
+																		Créditos
+																	</TableHead>
+																	<TableHead className="text-right">
+																		Colocado
+																	</TableHead>
+																	<TableHead className="text-right">
+																		Meta
+																	</TableHead>
+																	<TableHead className="text-right">
+																		Cobertura
+																	</TableHead>
+																	<TableHead className="text-right">
+																		Faltante
+																	</TableHead>
+																</TableRow>
+															</TableHeader>
+															<TableBody>
+																{rows.map((row) => (
+																	<TableRow key={row.bucket}>
+																		<TableCell>
+																			{formatBucket(
+																				row.bucket,
+																				equilibrioPeriodo,
+																			)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.cantidad_creditos}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatCurrency(row.colocado)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{Number(row.meta) > 0 ? (
+																				formatCurrency(row.meta)
+																			) : (
+																				<span className="text-muted-foreground">
+																					Sin meta
+																				</span>
+																			)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			<span
+																				className="font-semibold"
+																				style={{
+																					color: coberturaColor(row.cobertura),
+																				}}
+																			>
+																				{coberturaLabel(row.cobertura)}
+																			</span>
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.faltante
+																				? formatCurrency(row.faltante)
+																				: "—"}
+																		</TableCell>
+																	</TableRow>
+																))}
+																<TableRow className="border-t-2 bg-muted/50 font-bold">
+																	<TableCell>Total</TableCell>
+																	<TableCell className="text-right">
+																		{totalCreditos}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(totalColocado)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{totalMeta > 0
+																			? formatCurrency(totalMeta)
+																			: "—"}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		<span
+																			className="font-semibold"
+																			style={{
+																				color: coberturaColor(totalCobertura),
+																			}}
+																		>
+																			{coberturaLabel(totalCobertura)}
+																		</span>
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{totalMeta > 0
+																			? formatCurrency(
+																					Math.max(
+																						0,
+																						totalMeta - totalColocado,
+																					),
+																				)
+																			: "—"}
+																	</TableCell>
+																</TableRow>
+															</TableBody>
+														</Table>
+													</div>
+												</>
+											);
+										})()}
+								</CardContent>
+							</Card>
+
+							{/* ============================================================ */}
+							{/* REPORTE: COMPARATIVO HISTÓRICO MENSUAL                        */}
+							{/* ============================================================ */}
+							<Card>
+								<CardHeader>
+									<div className="flex items-center justify-between">
+										<CardTitle className="flex items-center gap-2">
+											<CalendarDays className="h-5 w-5" />
+											Comparativo Histórico Mensual
+										</CardTitle>
+										<div className="flex items-center gap-2">
+											<SimularButton
+												onClick={() => setScenarioOpen("comparativo")}
+											/>
+											<button
+												type="button"
+												className="rounded p-1 hover:bg-muted"
+												onClick={() => setComparativoAnio((y) => y - 1)}
+											>
+												<ChevronLeft className="h-4 w-4" />
+											</button>
+											<span className="w-12 text-center font-semibold text-sm">
+												{comparativoAnio}
+											</span>
+											<button
+												type="button"
+												className="rounded p-1 hover:bg-muted"
+												onClick={() =>
+													setComparativoAnio((y) =>
+														y < new Date().getFullYear() ? y + 1 : y,
+													)
+												}
+											>
+												<ChevronRight className="h-4 w-4" />
+											</button>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent>
+									{comparativoQuery.isPending && (
+										<p className="py-4 text-center text-muted-foreground text-sm">
+											Cargando...
+										</p>
+									)}
+									{comparativoQuery.isError && (
+										<p className="py-4 text-center text-red-500 text-sm">
+											Error al cargar comparativo histórico.
+										</p>
+									)}
+									{comparativoData &&
+										(() => {
+											const rows = comparativoData.data;
+											const sumColoc = rows.reduce(
+												(acc, r) =>
+													acc +
+													(r.colocacion_monto ? Number(r.colocacion_monto) : 0),
+												0,
+											);
+											const sumFacturacion = rows.reduce(
+												(acc, r) =>
+													acc + (r.facturacion ? Number(r.facturacion) : 0),
+												0,
+											);
+											const sumCreditosColoc = rows.reduce(
+												(acc, r) => acc + (r.colocacion_creditos ?? 0),
+												0,
+											);
+											return (
+												<div className="overflow-x-auto">
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Mes</TableHead>
+																<TableHead className="text-right">
+																	Colocación (Q)
+																</TableHead>
+																<TableHead className="text-right">
+																	# Col.
+																</TableHead>
+																<TableHead className="text-right">
+																	Facturación (Q)
+																</TableHead>
+																<TableHead className="text-right">
+																	Cartera Activa (Q)
+																</TableHead>
+																<TableHead className="text-right">
+																	# Activos
+																</TableHead>
+																<TableHead className="text-right">
+																	Mora 30 (Q)
+																</TableHead>
+																<TableHead className="text-right">
+																	Mora 60 (Q)
+																</TableHead>
+																<TableHead className="text-right">
+																	Mora 90 (Q)
+																</TableHead>
+																<TableHead className="text-right">
+																	Mora 120+ (Q)
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															{rows.map((row) => {
+																const esFuturo =
+																	row.colocacion_monto === null &&
+																	row.facturacion === null &&
+																	row.cartera_activa === null;
+																const totalMoraFila =
+																	Number(row.mora_30 ?? 0) +
+																	Number(row.mora_60 ?? 0) +
+																	Number(row.mora_90 ?? 0) +
+																	Number(row.mora_120 ?? 0);
+																const pctMora = (val: string | null) =>
+																	totalMoraFila > 0 && val
+																		? (
+																				(Number(val) / totalMoraFila) *
+																				100
+																			).toFixed(1)
+																		: null;
+																return (
+																	<TableRow
+																		key={row.mes}
+																		className={
+																			esFuturo ? "opacity-40" : undefined
+																		}
+																	>
+																		<TableCell className="font-medium">
+																			{MESES[row.mes - 1]}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.colocacion_monto
+																				? formatCurrency(
+																						Number(row.colocacion_monto),
+																					)
+																				: "—"}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.colocacion_creditos ?? "—"}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.facturacion
+																				? formatCurrency(
+																						Number(row.facturacion),
+																					)
+																				: "—"}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.cartera_activa
+																				? formatCurrency(
+																						Number(row.cartera_activa),
+																					)
+																				: "—"}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.creditos_activos ?? "—"}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.mora_30 ? (
+																				<div>
+																					<span>
+																						{formatCurrency(
+																							Number(row.mora_30),
+																						)}
+																						<span className="ml-1 text-muted-foreground text-xs">
+																							({row.creditos_30 ?? 0})
+																						</span>
+																					</span>
+																					{pctMora(row.mora_30) && (
+																						<div className="text-muted-foreground text-xs">
+																							{pctMora(row.mora_30)}%
+																						</div>
+																					)}
+																				</div>
+																			) : (
+																				"—"
+																			)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.mora_60 ? (
+																				<div>
+																					<span>
+																						{formatCurrency(
+																							Number(row.mora_60),
+																						)}
+																						<span className="ml-1 text-muted-foreground text-xs">
+																							({row.creditos_60 ?? 0})
+																						</span>
+																					</span>
+																					{pctMora(row.mora_60) && (
+																						<div className="text-muted-foreground text-xs">
+																							{pctMora(row.mora_60)}%
+																						</div>
+																					)}
+																				</div>
+																			) : (
+																				"—"
+																			)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.mora_90 ? (
+																				<div>
+																					<span>
+																						{formatCurrency(
+																							Number(row.mora_90),
+																						)}
+																						<span className="ml-1 text-muted-foreground text-xs">
+																							({row.creditos_90 ?? 0})
+																						</span>
+																					</span>
+																					{pctMora(row.mora_90) && (
+																						<div className="text-muted-foreground text-xs">
+																							{pctMora(row.mora_90)}%
+																						</div>
+																					)}
+																				</div>
+																			) : (
+																				"—"
+																			)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{row.mora_120 ? (
+																				<div>
+																					<span>
+																						{formatCurrency(
+																							Number(row.mora_120),
+																						)}
+																						<span className="ml-1 text-muted-foreground text-xs">
+																							({row.creditos_120 ?? 0})
+																						</span>
+																					</span>
+																					{pctMora(row.mora_120) && (
+																						<div className="text-muted-foreground text-xs">
+																							{pctMora(row.mora_120)}%
+																						</div>
+																					)}
+																				</div>
+																			) : (
+																				"—"
+																			)}
+																		</TableCell>
+																	</TableRow>
+																);
+															})}
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(sumColoc)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{sumCreditosColoc}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatCurrency(sumFacturacion)}
+																</TableCell>
+																<TableCell className="text-right">—</TableCell>
+																<TableCell className="text-right">—</TableCell>
+																<TableCell className="text-right">—</TableCell>
+																<TableCell className="text-right">—</TableCell>
+																<TableCell className="text-right">—</TableCell>
+																<TableCell className="text-right">—</TableCell>
+															</TableRow>
+														</TableBody>
+													</Table>
+												</div>
+											);
+										})()}
+								</CardContent>
+							</Card>
+						</TabsContent>
+					</Tabs>
 				</>
 			)}
 		</div>

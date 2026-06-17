@@ -3,10 +3,6 @@
  * Type-safe HTTP client with retry logic, circuit breaker, and caching
  */
 
-import {
-	getCarteraAccessToken,
-	invalidateAndReauth,
-} from "./cartera-auth.service";
 import type {
 	BoletaPagoInversionista,
 	CarteraAsesor,
@@ -41,6 +37,10 @@ import type {
 	ReversePagoInput,
 	UpdateCreditoInput,
 } from "../types/cartera-back";
+import {
+	getCarteraAccessToken,
+	invalidateAndReauth,
+} from "./cartera-auth.service";
 
 // ============================================================================
 // CONFIGURATION
@@ -210,6 +210,25 @@ export type MontoACobrarRow = {
 	mora_promedio: string;
 };
 
+export type MontoACobrarPeriodoRow = {
+	bucket: string;
+	cuotas_count: number;
+	total_cuota: string;
+	total_interes: string;
+	total_iva: string;
+	total_seguro: string;
+	total_gps: string;
+	total_membresias: string;
+	mora_promedio: string;
+	mora_count: number;
+	acum_total_cuota: string;
+	acum_total_interes: string;
+	acum_total_iva: string;
+	acum_total_seguro: string;
+	acum_total_gps: string;
+	acum_total_membresias: string;
+};
+
 export type FlujoCuotasRubro = {
 	capital: string;
 	interes: string;
@@ -222,8 +241,14 @@ export type FlujoCuotasInversionista = FlujoCuotasRubro & {
 };
 
 export type FlujoCuotasInversionesResponse = {
-	reinversionPorTipo: (FlujoCuotasRubro & { tipo: string; monto_reinvertido?: string })[];
-	cashParcialPorTipo: (FlujoCuotasRubro & { tipo: string; monto_cash?: string })[];
+	reinversionPorTipo: (FlujoCuotasRubro & {
+		tipo: string;
+		monto_reinvertido?: string;
+	})[];
+	cashParcialPorTipo: (FlujoCuotasRubro & {
+		tipo: string;
+		monto_cash?: string;
+	})[];
 	sinReinversion: {
 		totales: FlujoCuotasRubro;
 		porInversionista: FlujoCuotasInversionista[];
@@ -232,6 +257,36 @@ export type FlujoCuotasInversionesResponse = {
 		abonos_capital: string;
 		cancelaciones: string;
 	};
+};
+
+export type ReinversionLiquidacionesResponse = {
+	/**
+	 * Por modalidad (`tipo_reinversion`), campos crudos de la liquidación:
+	 * - `reinversion_total` → sección "Cuotas → Reinversión".
+	 * - `total_capital` / `total_interes` / `total_iva` / `total_isr` / `total_cuota`
+	 *   → sección "Cuotas → A Recibir".
+	 */
+	porTipo: Record<
+		string,
+		{
+			reinversion_total: string;
+			total_capital: string;
+			total_interes: string;
+			total_iva: string;
+			total_isr: string;
+			total_cuota: string;
+		}
+	>;
+	/**
+	 * Interés neto agrupado por si el inversionista emite factura:
+	 * - `conFactura`: neto = interés + IVA.
+	 * - `sinFactura`: neto = interés − ISR.
+	 */
+	interesNeto: {
+		conFactura: { interes: string; iva: string; neto: string };
+		sinFactura: { interes: string; isr: string; neto: string };
+	};
+	cantidad_liquidaciones: number;
 };
 
 export type FlujoPorInversionistaRow = {
@@ -551,7 +606,7 @@ export class CarteraBackClient {
 				`[CarteraBackClient] getAllCreditos: usando POST (${params.numeros_credito_sifco?.length} SIFCOs en lista)`,
 			);
 			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
-				`/getAllCredits`,
+				"/getAllCredits",
 				{
 					method: "POST",
 					body: JSON.stringify({
@@ -576,8 +631,12 @@ export class CarteraBackClient {
 						...(params.email_cobrador && {
 							email_asesor: params.email_cobrador,
 						}),
-						...(params.capital_min !== undefined && { capital_min: params.capital_min }),
-						...(params.capital_max !== undefined && { capital_max: params.capital_max }),
+						...(params.capital_min !== undefined && {
+							capital_min: params.capital_min,
+						}),
+						...(params.capital_max !== undefined && {
+							capital_max: params.capital_max,
+						}),
 						excel: false,
 					}),
 				},
@@ -606,8 +665,12 @@ export class CarteraBackClient {
 				...(params.email_cobrador && { email_asesor: params.email_cobrador }),
 				...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
 				...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
-				...(params.capital_min !== undefined && { capital_min: params.capital_min.toString() }),
-				...(params.capital_max !== undefined && { capital_max: params.capital_max.toString() }),
+				...(params.capital_min !== undefined && {
+					capital_min: params.capital_min.toString(),
+				}),
+				...(params.capital_max !== undefined && {
+					capital_max: params.capital_max.toString(),
+				}),
 				excel: "false",
 			});
 
@@ -733,9 +796,11 @@ export class CarteraBackClient {
 	// NIT VALIDATION
 	// ========================================================================
 
-	async consultarNit(
-		nit: string,
-	): Promise<{ success: boolean; data?: { nit: string; nombre: string | null }; mensaje: string }> {
+	async consultarNit(nit: string): Promise<{
+		success: boolean;
+		data?: { nit: string; nombre: string | null };
+		mensaje: string;
+	}> {
 		return this.request("/api/dte/consultarNit", {
 			method: "POST",
 			body: JSON.stringify({ nit }),
@@ -781,9 +846,7 @@ export class CarteraBackClient {
 		};
 	}
 
-	async getInvestorRendimiento(
-		email: string,
-	): Promise<{
+	async getInvestorRendimiento(email: string): Promise<{
 		success: boolean;
 		data: {
 			inversionista_id: number;
@@ -1169,9 +1232,7 @@ export class CarteraBackClient {
 		return response;
 	}
 
-	async deleteInvestorDocument(
-		documentoId: number,
-	): Promise<{
+	async deleteInvestorDocument(documentoId: number): Promise<{
 		success: boolean;
 		message: string;
 		data?: Record<string, any>;
@@ -1204,14 +1265,19 @@ export class CarteraBackClient {
 		tipo_reinversion?: string | null;
 		monto_reinversion?: number | null;
 		moneda?: string;
-	}): Promise<{ message: string; data: { inversionista_id: number; nombre: string; [key: string]: any }[] }> {
+	}): Promise<{
+		message: string;
+		data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+	}> {
 		const response = await this.request<{
 			message: string;
 			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
 		}>("/investor", {
 			method: "POST",
 			body: JSON.stringify({
-				...(input.inversionista_id && { inversionista_id: input.inversionista_id }),
+				...(input.inversionista_id && {
+					inversionista_id: input.inversionista_id,
+				}),
 				...(input.operation && { operation: input.operation }),
 				nombre: input.nombre,
 				dpi: input.dpi ?? null,
@@ -1299,6 +1365,26 @@ export class CarteraBackClient {
 		return response.data ?? [];
 	}
 
+	async getMontoACobrarPeriodo(params: {
+		periodo: string;
+		fechaInicio: string;
+		fechaFin: string;
+	}): Promise<MontoACobrarPeriodoRow[]> {
+		const queryParams = new URLSearchParams({
+			periodo: params.periodo,
+			fechaInicio: params.fechaInicio,
+			fechaFin: params.fechaFin,
+		});
+
+		const response = await this.request<{ data: MontoACobrarPeriodoRow[] }>(
+			`/reportes/monto-cobrar-periodo?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+
+		return response.data ?? [];
+	}
+
 	async getColocacionPeriodo(params: {
 		periodo: string;
 		fechaInicio: string;
@@ -1312,7 +1398,9 @@ export class CarteraBackClient {
 		);
 	}
 
-	async getComparativoHistorico(anio: number): Promise<ComparativoHistoricoResponse> {
+	async getComparativoHistorico(
+		anio: number,
+	): Promise<ComparativoHistoricoResponse> {
 		return this.request<ComparativoHistoricoResponse>(
 			`/reportes/comparativo-historico?anio=${anio}`,
 			{ method: "GET" },
@@ -1381,6 +1469,24 @@ export class CarteraBackClient {
 			`/reportes/flujo-cuotas-inversiones?${qp}`,
 			{ method: "GET" },
 			true,
+		);
+	}
+
+	async getReinversionLiquidaciones(params: {
+		mes: number;
+		anio: number;
+	}): Promise<ReinversionLiquidacionesResponse> {
+		const qp = new URLSearchParams({
+			mes: String(params.mes),
+			anio: String(params.anio),
+		});
+		// Sin cache: el reporte debe reflejar liquidaciones recién creadas/ajustadas.
+		// Con cache activo, tras crear liquidaciones el mes podía seguir devolviendo
+		// los totales previos hasta expirar el TTL.
+		return this.request<ReinversionLiquidacionesResponse>(
+			`/reportes/reinversion-liquidaciones?${qp}`,
+			{ method: "GET" },
+			false,
 		);
 	}
 

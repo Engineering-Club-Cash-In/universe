@@ -29,7 +29,6 @@ const montoRow = (over: Partial<MontoACobrarRow> = {}): MontoACobrarRow => ({
 	total_seguro: "50",
 	total_gps: "30",
 	total_membresias: "40",
-	total_royalti: "10",
 	mora_promedio: "100",
 	...over,
 });

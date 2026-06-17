@@ -1091,6 +1091,28 @@ export async function insertPagosCreditoInversionistasV2(
         `⚠️ [V2 prorrateo] Comprador ${compra.inversionista_id} sin fecha_inicio_participacion en espejo (crédito ${credito_id}). Se usa reparto normal.`
       );
     } else {
+      // 🆕 VENTA TOTAL DE CUBE: si la compra consumió toda la posición de CUBE,
+      //    addInvestorToCredit ELIMINA a CUBE de creditos_inversionistas (no lo deja en 0;
+      //    ver addInvestorToCredit.ts: "Si queda en 0, se elimina"), así que no viene en
+      //    inversionistasWithName. Sin CUBE, la ventana "antes" no tendría quién reciba lo
+      //    que CUBE poseía antes de vender → su interés pre-corte se perdería y NO se le
+      //    insertaría fila de pci. Lo sintetizamos en 0 SOLO acá (hay compra_cartera
+      //    pendiente, donde CUBE siempre es el vendedor): el helper le da baseAntes = 0 +
+      //    montoComprado, y el loop le inserta su fila de pci (capital 0 → porcentajeGeneral 0,
+      //    no llama a processAndReplaceCreditInvestors; interés = su factor "antes").
+      if (!inversionistasWithName.some((i) => i.inversionista_id === CUBE_ID)) {
+        inversionistasWithName.push({
+          inversionista_id: CUBE_ID,
+          nombre: "Cube Investments S.A.",
+          monto_aportado: "0",
+          porcentaje_cash_in: "100",
+          porcentaje_participacion_inversionista: "0",
+        } as any);
+        console.log(
+          `🆕 [V2 prorrateo] CUBE vendido a 0 (no está en creditos_inversionistas); se sintetiza en 0 para el prorrateo y su fila de pci (crédito ${credito_id}).`
+        );
+      }
+
       factorInteresPorInv = calcularFactoresProrrateoInteresV2({
         inversionistas: inversionistasWithName.map((inv) => ({
           inversionista_id: inv.inversionista_id,

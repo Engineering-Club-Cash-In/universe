@@ -193,6 +193,33 @@ describe("buildCarteraMatchedClientRows", () => {
 
 		expect(row.totalClosedValue).toBe(1200);
 	});
+
+	test("includes all lead opportunities in each matched client detail row", () => {
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
+				{ id: "opp-2", numeroSifco: "SIFCO-2", value: "7000.00", isClosed: true },
+			],
+			creditAnalysis: null,
+			carteraCreditBySifco: new Map([
+				[
+					"SIFCO-1",
+					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+				],
+				[
+					"SIFCO-2",
+					{ creditos: { numero_credito_sifco: "SIFCO-2", deudatotal: "3400.00" } },
+				],
+			]),
+		});
+
+		expect(rows[0].carteraCredit?.numeroSifco).toBe("SIFCO-1");
+		expect(rows[0].opportunities.map((opp) => opp.id)).toEqual([
+			"opp-1",
+			"opp-2",
+		]);
+	});
 });
 
 describe("calculateCarteraClientStats", () => {

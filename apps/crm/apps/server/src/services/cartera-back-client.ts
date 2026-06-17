@@ -1441,10 +1441,13 @@ export class CarteraBackClient {
 			mes: String(params.mes),
 			anio: String(params.anio),
 		});
+		// Sin cache: el reporte debe reflejar liquidaciones recién creadas/ajustadas.
+		// Con cache activo, tras crear liquidaciones el mes podía seguir devolviendo
+		// los totales previos hasta expirar el TTL.
 		return this.request<ReinversionLiquidacionesResponse>(
 			`/reportes/reinversion-liquidaciones?${qp}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
 	}
 

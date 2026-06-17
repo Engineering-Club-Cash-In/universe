@@ -84,7 +84,6 @@ import {
 	coberturaConfig,
 	comparativoConfig,
 	facturacionConfig,
-	flujoCuotasConfig,
 	montoACobrarConfig,
 } from "@/lib/reports/scenario-configs";
 import { PERMISSIONS } from "@/lib/roles";
@@ -1546,7 +1545,6 @@ function RouteComponent() {
 											</CardDescription>
 										</div>
 										<div className="flex items-center gap-2">
-											<SimularButton onClick={() => setScenarioOpen("flujo")} />
 											<Select
 												value={String(flujoMesNum)}
 												onValueChange={(v) =>
@@ -2165,12 +2163,6 @@ function RouteComponent() {
 							onOpenChange={(o) => setScenarioOpen(o ? "facturacion" : null)}
 							config={facturacionConfig}
 							baseData={facturacionMesData}
-						/>
-						<ScenarioModal
-							open={scenarioOpen === "flujo"}
-							onOpenChange={(o) => setScenarioOpen(o ? "flujo" : null)}
-							config={flujoCuotasConfig}
-							baseData={flujoCuotasData}
 						/>
 						<ScenarioModal
 							open={scenarioOpen === "cobertura"}

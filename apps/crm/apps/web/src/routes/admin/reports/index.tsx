@@ -723,6 +723,101 @@ function RouteComponent() {
 		);
 	};
 
+	const creditosCerradosCard = (
+		<Card>
+			<CardHeader>
+				<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+					<div>
+						<CardTitle>Créditos cerrados</CardTitle>
+						<CardDescription>
+							Créditos que llegaron por primera vez a una etapa 90%+.
+						</CardDescription>
+					</div>
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setClosedCreditsPreset("week")}
+						>
+							Esta semana
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setClosedCreditsPreset("last15")}
+						>
+							Últimos 15 días
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setClosedCreditsPreset("month")}
+						>
+							Este mes
+						</Button>
+						<DateRangeFilter
+							dateRange={closedCreditsRange}
+							onDateRangeChange={setClosedCreditsRange}
+							required
+						/>
+						<Button
+							onClick={exportClosedCreditsCsv}
+							disabled={!closedCreditsReport.data?.length}
+						>
+							<Download className="mr-2 h-4 w-4" />
+							Exportar CSV
+						</Button>
+					</div>
+				</div>
+			</CardHeader>
+			<CardContent>
+				{closedCreditsReport.isPending && <p>Cargando reporte...</p>}
+				{closedCreditsReport.isError && (
+					<p className="text-destructive">Error al cargar el reporte.</p>
+				)}
+				{closedCreditsReport.data?.length === 0 && (
+					<p className="text-muted-foreground">
+						No hay créditos cerrados para el rango seleccionado.
+					</p>
+				)}
+				{!!closedCreditsReport.data?.length && (
+					<div className="overflow-x-auto">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>Placa</TableHead>
+									<TableHead>Chasis</TableHead>
+									<TableHead>Cuota Seguro</TableHead>
+									<TableHead>Nombre del Cliente</TableHead>
+									<TableHead>Número de Crédito</TableHead>
+									<TableHead>Fecha 90%+</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{closedCreditsReport.data.map((row) => (
+									<TableRow
+										key={`${row.numeroCredito}-${row.fecha90}-${row.placa}-${row.chasis}`}
+									>
+										<TableCell>{row.placa || "-"}</TableCell>
+										<TableCell>{row.chasis || "-"}</TableCell>
+										<TableCell>{formatCurrency(row.cuotaSeguro)}</TableCell>
+										<TableCell>{row.clienteNombre || "-"}</TableCell>
+										<TableCell>{row.numeroCredito || "-"}</TableCell>
+										<TableCell>
+											{row.fecha90
+												? formatDateInput(new Date(row.fecha90))
+												: "-"}
+										</TableCell>
+									</TableRow>
+								))}
+							</TableBody>
+						</Table>
+					</div>
+				)}
+			</CardContent>
+		</Card>
+	);
+
 	return (
 		<div className="container mx-auto space-y-6 p-6">
 			<div className="flex items-center justify-between">
@@ -744,111 +839,29 @@ function RouteComponent() {
 				)}
 			</div>
 
-			{canAccessClosedCreditsReport && (
-				<Card>
-					<CardHeader>
-						<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-							<div>
-								<CardTitle>Créditos cerrados</CardTitle>
-								<CardDescription>
-									Créditos que llegaron por primera vez a una etapa 90%+.
-								</CardDescription>
-							</div>
-							<div className="flex flex-wrap items-center gap-2">
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setClosedCreditsPreset("week")}
-								>
-									Esta semana
-								</Button>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setClosedCreditsPreset("last15")}
-								>
-									Últimos 15 días
-								</Button>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setClosedCreditsPreset("month")}
-								>
-									Este mes
-								</Button>
-								<DateRangeFilter
-									dateRange={closedCreditsRange}
-									onDateRangeChange={setClosedCreditsRange}
-									required
-								/>
-								<Button
-									onClick={exportClosedCreditsCsv}
-									disabled={!closedCreditsReport.data?.length}
-								>
-									<Download className="mr-2 h-4 w-4" />
-									Exportar CSV
-								</Button>
-							</div>
-						</div>
-					</CardHeader>
-					<CardContent>
-						{closedCreditsReport.isPending && <p>Cargando reporte...</p>}
-						{closedCreditsReport.isError && (
-							<p className="text-destructive">Error al cargar el reporte.</p>
-						)}
-						{closedCreditsReport.data?.length === 0 && (
-							<p className="text-muted-foreground">
-								No hay créditos cerrados para el rango seleccionado.
-							</p>
-						)}
-						{!!closedCreditsReport.data?.length && (
-							<div className="overflow-x-auto">
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead>Placa</TableHead>
-											<TableHead>Chasis</TableHead>
-											<TableHead>Cuota Seguro</TableHead>
-											<TableHead>Nombre del Cliente</TableHead>
-											<TableHead>Número de Crédito</TableHead>
-											<TableHead>Fecha 90%+</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{closedCreditsReport.data.map((row) => (
-											<TableRow
-												key={`${row.numeroCredito}-${row.fecha90}-${row.placa}-${row.chasis}`}
-											>
-												<TableCell>{row.placa || "-"}</TableCell>
-												<TableCell>{row.chasis || "-"}</TableCell>
-												<TableCell>{formatCurrency(row.cuotaSeguro)}</TableCell>
-												<TableCell>{row.clienteNombre || "-"}</TableCell>
-												<TableCell>{row.numeroCredito || "-"}</TableCell>
-												<TableCell>
-													{row.fecha90
-														? formatDateInput(new Date(row.fecha90))
-														: "-"}
-												</TableCell>
-											</TableRow>
-										))}
-									</TableBody>
-								</Table>
-							</div>
-						)}
-					</CardContent>
-				</Card>
-			)}
+			{!isAdmin && canAccessClosedCreditsReport && creditosCerradosCard}
 
 			{isAdmin && (
 				<>
-					<Tabs defaultValue="resumen" className="space-y-6">
+					<Tabs
+						defaultValue={canAccessClosedCreditsReport ? "creditos" : "resumen"}
+						className="space-y-6"
+					>
 						<TabsList>
+							{canAccessClosedCreditsReport && (
+								<TabsTrigger value="creditos">Créditos cerrados</TabsTrigger>
+							)}
 							<TabsTrigger value="resumen">Resumen</TabsTrigger>
 							<TabsTrigger value="graficas">Gráficas</TabsTrigger>
 							<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
 							<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
 							<TabsTrigger value="colocacion">Colocación</TabsTrigger>
 						</TabsList>
+						{canAccessClosedCreditsReport && (
+							<TabsContent value="creditos" className="space-y-6">
+								{creditosCerradosCard}
+							</TabsContent>
+						)}
 						<TabsContent value="resumen" className="space-y-6">
 							{/* Enlaces a otros reportes - TODO: Implementar rutas */}
 							<div className="grid gap-4 md:grid-cols-4">

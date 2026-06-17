@@ -1193,16 +1193,16 @@ function RouteComponent() {
 											<SimularButton onClick={() => setScenarioOpen("monto")} />
 											<Select
 												value={montoCobrarPeriodo}
-												onValueChange={(v) =>
-													setMontoCobrarPeriodo(
-														v as
-															| "anio"
-															| "trimestre"
-															| "mes"
-															| "semana"
-															| "dia",
-													)
-												}
+												onValueChange={(v) => {
+													const p = v as
+														| "anio"
+														| "trimestre"
+														| "mes"
+														| "semana"
+														| "dia";
+													setMontoCobrarPeriodo(p);
+													setMontoCobrarRange(getDefaultRangeForPeriodo(p));
+												}}
 											>
 												<SelectTrigger className="w-[140px]">
 													<SelectValue placeholder="Período" />
@@ -1215,26 +1215,13 @@ function RouteComponent() {
 													<SelectItem value="anio">Año</SelectItem>
 												</SelectContent>
 											</Select>
-											<DateRangeFilter
-												dateRange={
-													montoCobrarRange.fechaInicio &&
-													montoCobrarRange.fechaFin
-														? {
-																from: dateFromInput(
-																	montoCobrarRange.fechaInicio,
-																),
-																to: dateFromInput(montoCobrarRange.fechaFin),
-															}
-														: undefined
+											<PeriodDatePicker
+												periodo={montoCobrarPeriodo}
+												fechaInicio={montoCobrarRange.fechaInicio}
+												fechaFin={montoCobrarRange.fechaFin}
+												onChange={(fechaInicio, fechaFin) =>
+													setMontoCobrarRange({ fechaInicio, fechaFin })
 												}
-												onDateRangeChange={(range) => {
-													if (range?.from && range?.to) {
-														setMontoCobrarRange({
-															fechaInicio: formatDateInput(range.from),
-															fechaFin: formatDateInput(range.to),
-														});
-													}
-												}}
 											/>
 										</div>
 									</div>
@@ -1256,8 +1243,13 @@ function RouteComponent() {
 											{/* Gráfica de barras apiladas */}
 											<ResponsiveContainer width="100%" height={350}>
 												<BarChart
-													data={montoCobrarData.data.map(
-														(row: MontoACobrarRow) => ({
+													data={fillMissingPeriods(
+														montoCobrarData.data,
+														montoCobrarPeriodo,
+														montoCobrarRange.fechaInicio,
+														montoCobrarRange.fechaFin,
+													).map(
+														(row: MontoACobrarPeriodoRow) => ({
 															bucket: formatBucket(
 																row.bucket,
 																montoCobrarPeriodo,
@@ -1271,9 +1263,6 @@ function RouteComponent() {
 															total_gps: Number.parseFloat(row.total_gps),
 															total_membresias: Number.parseFloat(
 																row.total_membresias,
-															),
-															total_royalti: Number.parseFloat(
-																row.total_royalti,
 															),
 														}),
 													)}
@@ -1344,9 +1333,6 @@ function RouteComponent() {
 																Membresías
 															</TableHead>
 															<TableHead className="text-right">
-																Royalti
-															</TableHead>
-															<TableHead className="text-right">
 																Mora Prom.
 															</TableHead>
 															<TableHead className="text-right font-bold">
@@ -1356,15 +1342,14 @@ function RouteComponent() {
 													</TableHeader>
 													<TableBody>
 														{montoCobrarData.data.map(
-															(row: MontoACobrarRow) => {
+															(row: MontoACobrarPeriodoRow) => {
 																const total =
 																	Number.parseFloat(row.total_cuota) +
 																	Number.parseFloat(row.total_interes) +
 																	Number.parseFloat(row.total_iva) +
 																	Number.parseFloat(row.total_seguro) +
 																	Number.parseFloat(row.total_gps) +
-																	Number.parseFloat(row.total_membresias) +
-																	Number.parseFloat(row.total_royalti);
+																	Number.parseFloat(row.total_membresias);
 																return (
 																	<TableRow key={row.bucket}>
 																		<TableCell>
@@ -1395,9 +1380,6 @@ function RouteComponent() {
 																			{formatCurrency(row.total_membresias)}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatCurrency(row.total_royalti)}
-																		</TableCell>
-																		<TableCell className="text-right">
 																			{formatCurrency(row.mora_promedio)}
 																		</TableCell>
 																		<TableCell className="text-right font-bold">
@@ -1410,10 +1392,10 @@ function RouteComponent() {
 														{/* Fila de totales */}
 														{(() => {
 															const rows =
-																montoCobrarData.data as MontoACobrarRow[];
-															const sum = (key: keyof MontoACobrarRow) =>
+																montoCobrarData.data as MontoACobrarPeriodoRow[];
+															const sum = (key: keyof MontoACobrarPeriodoRow) =>
 																rows.reduce(
-																	(acc: number, r: MontoACobrarRow) =>
+																	(acc: number, r: MontoACobrarPeriodoRow) =>
 																		acc +
 																		Number.parseFloat(
 																			(r[key] as string) || "0",
@@ -1426,8 +1408,7 @@ function RouteComponent() {
 																sum("total_iva") +
 																sum("total_seguro") +
 																sum("total_gps") +
-																sum("total_membresias") +
-																sum("total_royalti");
+																sum("total_membresias");
 															return (
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
 																	<TableCell>Total</TableCell>
@@ -1454,9 +1435,6 @@ function RouteComponent() {
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(sum("total_membresias"))}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(sum("total_royalti"))}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		—

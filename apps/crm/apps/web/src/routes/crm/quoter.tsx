@@ -1592,8 +1592,15 @@ function QuoterPage() {
 												value,
 												selectedOpp?.vehicle ?? undefined,
 											);
-											if (!loadedExistingQuotation && selectedOpp?.creditType) {
-												await applyCreditTypeChange(selectedOpp.creditType);
+											if (!loadedExistingQuotation) {
+												if (selectedOpp?.vehicle) {
+													await handleOpportunityVehicleSelect(
+														selectedOpp.vehicle,
+													);
+												}
+												if (selectedOpp?.creditType) {
+													await applyCreditTypeChange(selectedOpp.creditType);
+												}
 											}
 
 													// Guardar vehículo de la oportunidad para el combobox

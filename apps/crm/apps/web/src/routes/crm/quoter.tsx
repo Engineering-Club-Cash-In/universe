@@ -793,13 +793,14 @@ function QuoterPage() {
 		mutationFn: async (values: any) => {
 			return await client.createQuotation(values);
 		},
-		onSuccess: () => {
-			toast.success("Cotización creada exitosamente");
-			queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
-			quoterForm.reset();
-			setIsInterno(false);
-			setOpportunityVehicle(null);
-			setCalculatedValues({
+			onSuccess: () => {
+				toast.success("Cotización creada exitosamente");
+				queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
+				quoterForm.reset();
+				setIsInterno(false);
+				setOpportunityVehicle(null);
+				setVehicleConditionLocked(false);
+				setCalculatedValues({
 				amountToFinance: 0,
 				totalFinanced: 0,
 				monthlyPayment: 0,
@@ -1197,6 +1198,10 @@ function QuoterPage() {
 			quoterForm.setFieldValue("vehicleBrand", vehicle.make);
 			quoterForm.setFieldValue("vehicleLine", vehicle.model);
 			quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
+			const vehicleTypeToUse =
+				(vehicle.vehicleType as typeof quoterForm.state.values.vehicleType) ||
+				"particular";
+			quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
 			const vehicleContext = applyVehicleConditionAndOrigin(vehicle);
 
 			// El marketValue está en la inspección más reciente
@@ -1220,7 +1225,7 @@ function QuoterPage() {
 					isSobreVehiculo
 						? quoterForm.state.values.insuredAmount || numericValue
 						: numericValue,
-					quoterForm.state.values.vehicleType,
+					vehicleTypeToUse,
 					vehicleContext ?? undefined,
 				);
 			}

@@ -81,7 +81,7 @@ export type MontoACobrarRow = {
 	total_seguro: string;
 	total_gps: string;
 	total_membresias: string;
-	mora_promedio: string;
+	total_mora: string;
 };
 
 export type MontoACobrarPeriodoRow = {
@@ -93,8 +93,10 @@ export type MontoACobrarPeriodoRow = {
 	total_seguro: string;
 	total_gps: string;
 	total_membresias: string;
-	mora_promedio: string;
+	total_mora: string;
 	mora_count: number;
+	total_credits: number;
+	credits_con_mora: number;
 	acum_total_cuota: string;
 	acum_total_interes: string;
 	acum_total_iva: string;
@@ -106,15 +108,14 @@ export type MontoACobrarPeriodoRow = {
 export type FacturacionMesRubro = {
 	capital: string;
 	interes: string;
-	iva: string;
-	seguro: string;
-	gps: string;
 	membresias: string;
+	seguro_gps: string;
+	royalti: string;
 };
 
 export type FacturacionMesResponse = {
 	cobrado: FacturacionMesRubro;
-	esperado: FacturacionMesRubro;
+	esperado: { meta_mensual: string };
 };
 
 export type FlujoCuotasRubro = {
@@ -151,6 +152,8 @@ export type ReinversionLiquidacionesResponse = {
 	porTipo: Record<
 		string,
 		{
+			reinversion_capital: string;
+			reinversion_interes: string;
 			reinversion_total: string;
 			total_capital: string;
 			total_interes: string;
@@ -168,6 +171,21 @@ export type ReinversionLiquidacionesResponse = {
 		conFactura: { interes: string; iva: string; neto: string };
 		sinFactura: { interes: string; isr: string; neto: string };
 	};
+	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
+	pagosExtras: { abonos_capital: string; cancelaciones: string };
+	/** Desglose por inversionista (desde liquidaciones): reinversión y a recibir. */
+	porInversionista: {
+		inversionista_id: number;
+		nombre: string;
+		tipo_reinversion: string;
+		reinversion_capital: string;
+		reinversion_interes: string;
+		reinversion: string;
+		a_recibir: string;
+		monto_aportado: string;
+	}[];
+	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
+	comprasMes: { tipo: string; cantidad: number; monto: string }[];
 	cantidad_liquidaciones: number;
 };
 
@@ -220,7 +238,7 @@ export function transformMontoACobrar(
 		total_seguro: money(num(r.total_seguro) * col),
 		total_gps: money(num(r.total_gps) * col),
 		total_membresias: money(num(r.total_membresias) * col),
-		mora_promedio: money(num(r.mora_promedio) * mora),
+		total_mora: money(num(r.total_mora) * mora),
 	}));
 }
 
@@ -236,19 +254,21 @@ export function transformFacturacion(
 	const rubros: (keyof FacturacionMesRubro)[] = [
 		"capital",
 		"interes",
-		"iva",
-		"seguro",
-		"gps",
 		"membresias",
+		"seguro_gps",
+		"royalti",
 	];
+	const totalCobrado = rubros.reduce((acc, k) => acc + num(data.cobrado[k]), 0);
+	const totalEsperado = num(data.esperado.meta_mensual);
+	const gap = totalEsperado - totalCobrado;
+	if (gap <= 0 || totalCobrado === 0) {
+		return data;
+	}
+	// Distribuir el cierre de brecha proporcionalmente a cada rubro
+	const factor = 1 + (gap * close) / totalCobrado;
 	const cobrado = { ...data.cobrado };
 	for (const k of rubros) {
-		const c = num(data.cobrado[k]);
-		const e = num(data.esperado[k]);
-		// Solo cerramos brechas positivas (esperado > cobrado). Si ya está
-		// sobre-cobrado (c >= e), se preserva el monto real intacto.
-		const gap = e - c;
-		cobrado[k] = money(gap > 0 ? c + gap * close : c);
+		cobrado[k] = money(num(data.cobrado[k]) * factor);
 	}
 	return { cobrado, esperado: data.esperado };
 }

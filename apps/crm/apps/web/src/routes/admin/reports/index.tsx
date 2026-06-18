@@ -4,7 +4,6 @@ import {
 	Activity,
 	AlertTriangle,
 	CalendarDays,
-	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
 	Download,
@@ -16,8 +15,7 @@ import {
 	TrendingUp,
 	Wallet,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import type { DateRange } from "react-day-picker";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
 	Bar,
 	BarChart,
@@ -76,8 +74,6 @@ import type {
 	ComparativoHistoricoRow,
 	FacturacionMesResponse,
 	FacturacionMesRubro,
-	FlujoCuotasInversionesResponse,
-	FlujoCuotasRubro,
 	MontoACobrarPeriodoRow,
 	MontoACobrarRow,
 	PuntoEquilibrioRow,
@@ -130,6 +126,30 @@ const A_RECIBIR_MODALIDADES: { tipo: string; label: string }[] = [
 	{ tipo: "sin_reinversion", label: "Sin Reinversión" },
 	...REINVERSION_MODALIDADES,
 ];
+
+// Etiqueta corta de la modalidad de reinversión, para el chip por inversionista.
+const MODALIDAD_LABEL: Record<string, string> = {
+	sin_reinversion: "Sin reinversión",
+	reinversion_capital: "Capital",
+	reinversion_interes: "Interés",
+	reinversion_total: "Interés compuesto",
+	reinversion_variable: "Variable",
+	reinversion_excedente: "Excedente",
+	reinversion_combinada: "Combinada",
+};
+
+// Borde de color por modalidad (outline, sin relleno) para diferenciarlas.
+const MODALIDAD_CHIP_CLASS: Record<string, string> = {
+	sin_reinversion: "border-muted-foreground/30 text-muted-foreground",
+	reinversion_capital: "border-blue-400 text-blue-600 dark:text-blue-400",
+	reinversion_interes: "border-cyan-400 text-cyan-600 dark:text-cyan-400",
+	reinversion_total:
+		"border-emerald-400 text-emerald-600 dark:text-emerald-400",
+	reinversion_variable: "border-amber-400 text-amber-600 dark:text-amber-400",
+	reinversion_excedente:
+		"border-violet-400 text-violet-600 dark:text-violet-400",
+	reinversion_combinada: "border-pink-400 text-pink-600 dark:text-pink-400",
+};
 
 // Estilo compartido para cada sub-sección del reporte de Flujo de Cuotas:
 // panel enmarcado, título con divisor y encabezados de tabla refinados
@@ -195,10 +215,9 @@ const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] =
 	[
 		{ key: "capital", label: "Capital" },
 		{ key: "interes", label: "Interés" },
-		{ key: "iva", label: "IVA 12%" },
-		{ key: "seguro", label: "Seguro" },
-		{ key: "gps", label: "GPS" },
 		{ key: "membresias", label: "Membresías" },
+		{ key: "seguro_gps", label: "Seguro + GPS" },
+		{ key: "royalti", label: "Royaltí" },
 	];
 
 const MONTO_COBRAR_COLORS = {
@@ -213,7 +232,7 @@ const MONTO_COBRAR_COLORS = {
 const MONTO_COBRAR_LABELS: Record<keyof typeof MONTO_COBRAR_COLORS, string> = {
 	total_cuota: "Capital",
 	total_interes: "Interés",
-	total_iva: "IVA",
+	total_iva: "IVA 12%",
 	total_seguro: "Seguro",
 	total_gps: "GPS",
 	total_membresias: "Membresías",
@@ -232,6 +251,18 @@ function formatDateInput(date: Date) {
 
 function dateFromInput(value: string) {
 	return new Date(`${value}T12:00:00`);
+}
+
+// Fecha legible en zona Guatemala, p.ej. "17 jun 2026".
+function formatFechaCorta(value: string | Date | null | undefined): string {
+	if (!value) return "-";
+	const date = typeof value === "string" ? new Date(value) : value;
+	return new Intl.DateTimeFormat("es-GT", {
+		timeZone: GUATEMALA_TIME_ZONE,
+		day: "2-digit",
+		month: "short",
+		year: "numeric",
+	}).format(date);
 }
 
 function getDefaultMontoCobrarRange(): {
@@ -305,9 +336,7 @@ function fillMissingPeriods(
 	const toKey = (d: Date) =>
 		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-	const dataMap = new Map(
-		data.map((row) => [row.bucket.slice(0, 10), row]),
-	);
+	const dataMap = new Map(data.map((row) => [row.bucket.slice(0, 10), row]));
 
 	const dates: Date[] = [];
 	const start = new Date(`${fechaInicio}T12:00:00`);
@@ -342,8 +371,10 @@ function fillMissingPeriods(
 				total_seguro: "0",
 				total_gps: "0",
 				total_membresias: "0",
-				mora_promedio: "0",
+				total_mora: "0",
 				mora_count: 0,
+				total_credits: 0,
+				credits_con_mora: 0,
 				acum_total_cuota: "0",
 				acum_total_interes: "0",
 				acum_total_iva: "0",
@@ -355,41 +386,8 @@ function fillMissingPeriods(
 	});
 }
 
-function getDefaultClosedCreditsRange(): DateRange {
-	const today = dateFromInput(formatDateInput(new Date()));
-	const start = new Date(today);
-	start.setDate(today.getDate() - 14);
-	return { from: start, to: today };
-}
-
-function buildClosedCreditsInput(dateRange: DateRange | undefined) {
-	if (!dateRange?.from || !dateRange?.to) return null;
-	return {
-		startDate: formatDateInput(dateRange.from),
-		endDate: formatDateInput(dateRange.to),
-	};
-}
-
-function escapeCsvValue(value: string | number | null | undefined) {
-	const raw = value == null ? "" : String(value);
-	if (/[",\n\r]/.test(raw)) {
-		return `"${raw.replaceAll('"', '""')}"`;
-	}
-	return raw;
-}
-
-function downloadCsv(filename: string, rows: (string | number | null)[][]) {
-	const csv = `\uFEFF${rows
-		.map((row) => row.map((value) => escapeCsvValue(value)).join(","))
-		.join("\n")}`;
-	const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-	const url = URL.createObjectURL(blob);
-	const link = document.createElement("a");
-	link.href = url;
-	link.download = filename;
-	link.click();
-	URL.revokeObjectURL(url);
-}
+// Filas por página del reporte "Créditos cerrados" (paginado del lado servidor).
+const CLOSED_CREDITS_PAGE_SIZE = 25;
 
 function SimularButton({ onClick }: { onClick: () => void }) {
 	return (
@@ -397,6 +395,27 @@ function SimularButton({ onClick }: { onClick: () => void }) {
 			<Sparkles className="h-3.5 w-3.5 text-purple-500" />
 			Simular
 		</Button>
+	);
+}
+
+// Un control de filtro con su etiqueta encima. Da jerarquía a las barras de
+// filtros: cada control dice qué controla, agrupados visualmente.
+function FilterField({
+	label,
+	className,
+	children,
+}: {
+	label: string;
+	className?: string;
+	children: ReactNode;
+}) {
+	return (
+		<div className={`flex flex-col gap-1.5 ${className ?? ""}`}>
+			<span className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+				{label}
+			</span>
+			{children}
+		</div>
 	);
 }
 
@@ -423,10 +442,12 @@ function RouteComponent() {
 		isPending,
 	} = authClient.useSession();
 	const navigate = Route.useNavigate();
-	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
-	const [closedCreditsRange, setClosedCreditsRange] = useState<
-		DateRange | undefined
-	>(getDefaultClosedCreditsRange);
+	const [closedCreditsMes, setClosedCreditsMes] = useState(() => ({
+		mes: new Date().getMonth() + 1,
+		anio: new Date().getFullYear(),
+	}));
+	const [closedCreditsPage, setClosedCreditsPage] = useState(1);
+	const [isExportingCerrados, setIsExportingCerrados] = useState(false);
 	const [montoCobrarPeriodo, setMontoCobrarPeriodo] = useState<
 		"anio" | "trimestre" | "mes" | "semana" | "dia"
 	>("mes");
@@ -464,8 +485,8 @@ function RouteComponent() {
 			anio === flujoAnioActual && mes > flujoMesActual ? flujoMesActual : mes;
 		setFlujoMes(`${anio}-${String(m).padStart(2, "0")}`);
 	};
-	const [desgloseInversionistaOpen, setDesgloseInversionistaOpen] =
-		useState(false);
+	// Filtro de modalidad (solo front) para el Desglose por Inversionista.
+	const [modalidadFiltro, setModalidadFiltro] = useState<string[]>([]);
 	const [comparativoAnio, setComparativoAnio] = useState(() =>
 		new Date().getFullYear(),
 	);
@@ -495,24 +516,36 @@ function RouteComponent() {
 		? PERMISSIONS.canAccessClosedCreditsReport(userRole)
 		: false;
 	const canAccessReports = isAdmin || canAccessClosedCreditsReport;
-	const closedCreditsInput = buildClosedCreditsInput(closedCreditsRange);
 
 	const dashboardData = useQuery({
 		...orpc.getDashboardExecutivo.queryOptions({
-			input: {
-				startDate: dateRange?.from?.toISOString(),
-				endDate: dateRange?.to?.toISOString(),
-			},
+			input: {},
 		}),
 		enabled: isAdmin,
 	});
 
 	const closedCreditsReport = useQuery({
 		...orpc.getReporteCreditosCerrados.queryOptions({
-			input: closedCreditsInput ?? { startDate: "", endDate: "" },
+			input: {
+				anio: closedCreditsMes.anio,
+				mes: closedCreditsMes.mes,
+				page: closedCreditsPage,
+				pageSize: CLOSED_CREDITS_PAGE_SIZE,
+			},
 		}),
-		enabled: canAccessClosedCreditsReport && !!closedCreditsInput,
+		enabled: canAccessClosedCreditsReport,
 	});
+
+	// Si la página quedó fuera de rango (datos borrados / page stale), el total
+	// del server sigue siendo correcto: volvemos a la última página válida en vez
+	// de mostrar el mes vacío.
+	useEffect(() => {
+		const total = closedCreditsReport.data?.total ?? 0;
+		const totalPages = Math.max(1, Math.ceil(total / CLOSED_CREDITS_PAGE_SIZE));
+		if (closedCreditsPage > totalPages) {
+			setClosedCreditsPage(totalPages);
+		}
+	}, [closedCreditsReport.data?.total, closedCreditsPage]);
 
 	const montoCobrarQuery = useQuery({
 		...orpc.getMontoACobrarPeriodo.queryOptions({
@@ -538,19 +571,6 @@ function RouteComponent() {
 		| FacturacionMesResponse
 		| undefined;
 
-	const flujoCuotasQuery = useQuery({
-		...orpc.getFlujoCuotasInversiones.queryOptions({
-			input: {
-				fechaInicio: flujoCuotasRange.fechaInicio,
-				fechaFin: flujoCuotasRange.fechaFin,
-			},
-		}),
-		enabled: isAdmin,
-	});
-	const flujoCuotasData = flujoCuotasQuery.data as
-		| FlujoCuotasInversionesResponse
-		| undefined;
-
 	// Sección "Cuotas → Reinversión": se calcula desde la tabla de liquidaciones.
 	const reinversionLiquidacionesQuery = useQuery({
 		...orpc.getReinversionLiquidaciones.queryOptions({
@@ -561,18 +581,6 @@ function RouteComponent() {
 	const reinversionData = reinversionLiquidacionesQuery.data as
 		| ReinversionLiquidacionesResponse
 		| undefined;
-
-	const flujoPorInversionistaQuery = useQuery({
-		...orpc.getFlujoCuotasPorInversionista.queryOptions({
-			input: {
-				fechaInicio: flujoCuotasRange.fechaInicio,
-				fechaFin: flujoCuotasRange.fechaFin,
-			},
-		}),
-		enabled: isAdmin,
-	});
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const flujoPorInversionistaData = flujoPorInversionistaQuery.data as any;
 
 	const comparativoQuery = useQuery({
 		...orpc.getComparativoHistorico.queryOptions({
@@ -713,6 +721,10 @@ function RouteComponent() {
 		}).format(num);
 	};
 
+	// Igual que formatCurrency pero muestra "—" cuando el monto es 0.
+	const dash = (value: string | number | null | undefined) =>
+		Number(value ?? 0) === 0 ? "—" : formatCurrency(value);
+
 	const moraData = dashboardData.data?.morosidad || [];
 	const totalEnMora = moraData
 		.filter((m) => m.estadoMora !== "pagado" && m.estadoMora !== "al_dia")
@@ -730,15 +742,15 @@ function RouteComponent() {
 				m.estadoMora === "pagado"
 					? "Pagado"
 					: m.estadoMora === "mora_30"
-						? "Mora 1-30 días"
+						? "Mora 30"
 						: m.estadoMora === "mora_60"
-							? "Mora 31-60 días"
+							? "Mora 60"
 							: m.estadoMora === "mora_90"
-								? "Mora 61-90 días"
+								? "Mora 90"
 								: m.estadoMora === "mora_120"
-									? "Mora 91-120 días"
+									? "Mora 120"
 									: m.estadoMora === "mora_120_plus"
-										? "Mora +120 días"
+										? "Mora 120+"
 										: "Incobrable",
 			value: Number(m.montoTotal || 0),
 			count: m.totalCuotas,
@@ -758,58 +770,56 @@ function RouteComponent() {
 		}),
 	);
 
-	const setClosedCreditsPreset = (preset: "week" | "last15" | "month") => {
-		const today = dateFromInput(formatDateInput(new Date()));
-
-		if (preset === "last15") {
-			const start = new Date(today);
-			start.setDate(today.getDate() - 14);
-			setClosedCreditsRange({ from: start, to: today });
-			return;
-		}
-
-		if (preset === "month") {
-			setClosedCreditsRange({
-				from: new Date(today.getFullYear(), today.getMonth(), 1),
-				to: new Date(today.getFullYear(), today.getMonth() + 1, 0),
+	// Exporta TODO el mes (sin paginar): se pide al server sin `pageSize`.
+	const exportClosedCreditsExcel = async () => {
+		setIsExportingCerrados(true);
+		try {
+			const res = await client.getReporteCreditosCerrados({
+				anio: closedCreditsMes.anio,
+				mes: closedCreditsMes.mes,
 			});
-			return;
+			const headers = [
+				"Fecha de Cierre",
+				"Nombre del Cliente",
+				"SIFCO",
+				"Cuota de Seguro",
+				"Monto del Crédito",
+				"Cuota del Crédito",
+				"Día de Pago",
+			];
+			const data = res.rows.map((row) => [
+				row.fechaCierre ? formatFechaCorta(row.fechaCierre) : "",
+				row.clienteNombre || "",
+				row.numeroSifco || "",
+				Number(row.cuotaSeguro ?? 0),
+				Number(row.montoCredito ?? 0),
+				Number(row.cuotaCredito ?? 0),
+				row.diaPago ?? "",
+			]);
+			const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+			const workbook = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(workbook, worksheet, "Créditos cerrados");
+			XLSX.writeFile(
+				workbook,
+				`creditos-cerrados-${closedCreditsMes.anio}-${String(
+					closedCreditsMes.mes,
+				).padStart(2, "0")}.xlsx`,
+			);
+		} catch (err) {
+			toast.error(
+				err instanceof Error ? err.message : "Error al exportar el reporte",
+			);
+		} finally {
+			setIsExportingCerrados(false);
 		}
-
-		const day = today.getDay();
-		const daysSinceMonday = day === 0 ? 6 : day - 1;
-		const start = new Date(today);
-		start.setDate(today.getDate() - daysSinceMonday);
-		const end = new Date(start);
-		end.setDate(start.getDate() + 6);
-		setClosedCreditsRange({ from: start, to: end });
 	};
 
-	const exportClosedCreditsCsv = () => {
-		if (!closedCreditsInput) return;
-		const rows = closedCreditsReport.data ?? [];
-		downloadCsv(
-			`creditos-cerrados-${closedCreditsInput.startDate}-a-${closedCreditsInput.endDate}.csv`,
-			[
-				[
-					"Placa",
-					"Chasis",
-					"Cuota Seguro",
-					"Nombre del Cliente",
-					"Número de Crédito",
-					"Fecha 90%+",
-				],
-				...rows.map((row) => [
-					row.placa ?? "",
-					row.chasis ?? "",
-					row.cuotaSeguro ?? "",
-					row.clienteNombre ?? "",
-					row.numeroCredito ?? "",
-					row.fecha90 ? formatDateInput(new Date(row.fecha90)) : "",
-				]),
-			],
-		);
-	};
+	const closedCreditsRows = closedCreditsReport.data?.rows ?? [];
+	const closedCreditsTotal = closedCreditsReport.data?.total ?? 0;
+	const closedCreditsTotalPages = Math.max(
+		1,
+		Math.ceil(closedCreditsTotal / CLOSED_CREDITS_PAGE_SIZE),
+	);
 
 	const creditosCerradosCard = (
 		<Card>
@@ -818,88 +828,150 @@ function RouteComponent() {
 					<div>
 						<CardTitle>Créditos cerrados</CardTitle>
 						<CardDescription>
-							Créditos que llegaron por primera vez a una etapa 90%+.
+							Oportunidades ganadas, según el mes en que se cerraron.
 						</CardDescription>
 					</div>
 					<div className="flex flex-wrap items-center gap-2">
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setClosedCreditsPreset("week")}
+						<Select
+							value={String(closedCreditsMes.mes)}
+							onValueChange={(v) => {
+								setClosedCreditsMes((prev) => ({ ...prev, mes: Number(v) }));
+								setClosedCreditsPage(1);
+							}}
 						>
-							Esta semana
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setClosedCreditsPreset("last15")}
-						>
-							Últimos 15 días
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setClosedCreditsPreset("month")}
-						>
-							Este mes
-						</Button>
-						<DateRangeFilter
-							dateRange={closedCreditsRange}
-							onDateRangeChange={setClosedCreditsRange}
-							required
+							<SelectTrigger className="w-36">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{MESES.map((label, i) => (
+									<SelectItem key={label} value={String(i + 1)}>
+										{label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<Input
+							type="number"
+							className="w-24"
+							value={closedCreditsMes.anio}
+							min={2020}
+							max={2100}
+							onChange={(e) => {
+								setClosedCreditsMes((prev) => ({
+									...prev,
+									anio: Number(e.target.value),
+								}));
+								setClosedCreditsPage(1);
+							}}
 						/>
 						<Button
-							onClick={exportClosedCreditsCsv}
-							disabled={!closedCreditsReport.data?.length}
+							onClick={exportClosedCreditsExcel}
+							disabled={isExportingCerrados || closedCreditsTotal === 0}
 						>
-							<Download className="mr-2 h-4 w-4" />
-							Exportar CSV
+							{isExportingCerrados ? (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							) : (
+								<Download className="mr-2 h-4 w-4" />
+							)}
+							Exportar Excel
 						</Button>
 					</div>
 				</div>
 			</CardHeader>
 			<CardContent>
-				{closedCreditsReport.isPending && <p>Cargando reporte...</p>}
+				{closedCreditsReport.isPending && <p>Cargando...</p>}
 				{closedCreditsReport.isError && (
 					<p className="text-destructive">Error al cargar el reporte.</p>
 				)}
-				{closedCreditsReport.data?.length === 0 && (
+				{closedCreditsReport.data && closedCreditsTotal === 0 && (
 					<p className="text-muted-foreground">
-						No hay créditos cerrados para el rango seleccionado.
+						No hay créditos cerrados para el mes seleccionado.
 					</p>
 				)}
-				{!!closedCreditsReport.data?.length && (
-					<div className="overflow-x-auto">
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead>Placa</TableHead>
-									<TableHead>Chasis</TableHead>
-									<TableHead>Cuota Seguro</TableHead>
-									<TableHead>Nombre del Cliente</TableHead>
-									<TableHead>Número de Crédito</TableHead>
-									<TableHead>Fecha 90%+</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{closedCreditsReport.data.map((row) => (
-									<TableRow
-										key={`${row.numeroCredito}-${row.fecha90}-${row.placa}-${row.chasis}`}
-									>
-										<TableCell>{row.placa || "-"}</TableCell>
-										<TableCell>{row.chasis || "-"}</TableCell>
-										<TableCell>{formatCurrency(row.cuotaSeguro)}</TableCell>
-										<TableCell>{row.clienteNombre || "-"}</TableCell>
-										<TableCell>{row.numeroCredito || "-"}</TableCell>
-										<TableCell>
-											{row.fecha90
-												? formatDateInput(new Date(row.fecha90))
-												: "-"}
-										</TableCell>
+				{closedCreditsRows.length > 0 && (
+					<div className="space-y-4">
+						<div className="overflow-x-auto [&_td]:px-5 [&_th]:px-5">
+							<Table className="tabular-nums">
+								<TableHeader>
+									<TableRow>
+										<TableHead>Fecha de Cierre</TableHead>
+										<TableHead>Cliente / SIFCO</TableHead>
+										<TableHead className="text-right">
+											Cuota de Seguro
+										</TableHead>
+										<TableHead className="text-right">
+											Monto del Crédito
+										</TableHead>
+										<TableHead className="text-right">
+											Cuota del Crédito
+										</TableHead>
+										<TableHead className="text-right">Día de Pago</TableHead>
 									</TableRow>
-								))}
-							</TableBody>
-						</Table>
+								</TableHeader>
+								<TableBody>
+									{closedCreditsRows.map((row) => (
+										<TableRow key={row.id}>
+											<TableCell>{formatFechaCorta(row.fechaCierre)}</TableCell>
+											<TableCell>
+												<div className="font-medium">
+													{row.clienteNombre || "-"}
+												</div>
+												<div className="text-muted-foreground text-xs">
+													{row.numeroSifco || "Sin SIFCO"}
+												</div>
+											</TableCell>
+											<TableCell className="text-right">
+												{formatCurrency(row.cuotaSeguro)}
+											</TableCell>
+											<TableCell className="text-right">
+												{formatCurrency(row.montoCredito)}
+											</TableCell>
+											<TableCell className="text-right">
+												{row.cuotaCredito
+													? formatCurrency(row.cuotaCredito)
+													: "-"}
+											</TableCell>
+											<TableCell className="text-right">
+												{row.diaPago ?? "-"}
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</div>
+						<div className="flex items-center justify-between">
+							<p className="text-muted-foreground text-sm">
+								{closedCreditsTotal}{" "}
+								{closedCreditsTotal === 1 ? "crédito" : "créditos"} · Página{" "}
+								{closedCreditsPage} de {closedCreditsTotalPages}
+							</p>
+							<div className="flex items-center gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() =>
+										setClosedCreditsPage((p) => Math.max(1, p - 1))
+									}
+									disabled={closedCreditsPage <= 1}
+								>
+									<ChevronLeft className="h-4 w-4" />
+									Anterior
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() =>
+										setClosedCreditsPage((p) =>
+											Math.min(closedCreditsTotalPages, p + 1),
+										)
+									}
+									disabled={closedCreditsPage >= closedCreditsTotalPages}
+								>
+									Siguiente
+									<ChevronRight className="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
 					</div>
 				)}
 			</CardContent>
@@ -919,12 +991,6 @@ function RouteComponent() {
 							: "Reportes disponibles para el área de cobros"}
 					</p>
 				</div>
-				{isAdmin && (
-					<DateRangeFilter
-						dateRange={dateRange}
-						onDateRangeChange={setDateRange}
-					/>
-				)}
 			</div>
 
 			{!isAdmin && canAccessClosedCreditsReport && creditosCerradosCard}
@@ -932,15 +998,19 @@ function RouteComponent() {
 			{isAdmin && (
 				<>
 					<Tabs
-						defaultValue={canAccessClosedCreditsReport ? "creditos" : "resumen"}
+						defaultValue={
+							canAccessClosedCreditsReport ? "creditos" : "cobranza"
+						}
 						className="space-y-6"
 					>
 						<TabsList>
 							{canAccessClosedCreditsReport && (
 								<TabsTrigger value="creditos">Créditos cerrados</TabsTrigger>
 							)}
-							<TabsTrigger value="resumen">Resumen</TabsTrigger>
-							<TabsTrigger value="graficas">Gráficas</TabsTrigger>
+							{/* Tabs "Resumen" y "Gráficas" ocultos a propósito. Las
+							    secciones (TabsContent value="resumen" / "graficas") se
+							    conservan más abajo por si se quieren reutilizar; para
+							    volver a mostrarlas, reañadir aquí sus TabsTrigger. */}
 							<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
 							<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
 							<TabsTrigger value="colocacion">Colocación</TabsTrigger>
@@ -994,7 +1064,7 @@ function RouteComponent() {
 							{/* KPIs principales */}
 							<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 								<ReportCard
-									title="Cartera Activa"
+									title="Capital Activo"
 									value={formatCurrency(
 										dashboardData.data?.carteraActiva.montoTotal || 0,
 									)}
@@ -1011,7 +1081,7 @@ function RouteComponent() {
 								<ReportCard
 									title="Total Recuperado"
 									value={formatCurrency(totalPagado)}
-									description="Cuotas pagadas"
+									description="Monto recuperado en cobros"
 									icon={TrendingUp}
 									className="border-green-200 dark:border-green-900"
 								/>
@@ -1147,7 +1217,7 @@ function RouteComponent() {
 								<CardHeader>
 									<CardTitle>Conversión de Leads</CardTitle>
 									<CardDescription>
-										Estado de los prospectos en el sistema
+										Estado de los leads en el sistema
 									</CardDescription>
 								</CardHeader>
 								<CardContent>
@@ -1178,7 +1248,7 @@ function RouteComponent() {
 							{/* Reporte: Monto a Cobrarse por Período */}
 							<Card>
 								<CardHeader>
-									<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+									<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
 										<div className="flex items-center gap-2">
 											<CalendarDays className="h-5 w-5 text-blue-500" />
 											<div>
@@ -1189,8 +1259,11 @@ function RouteComponent() {
 												</CardDescription>
 											</div>
 										</div>
-										<div className="flex flex-wrap items-center gap-2">
-											<SimularButton onClick={() => setScenarioOpen("monto")} />
+										<SimularButton onClick={() => setScenarioOpen("monto")} />
+									</div>
+
+									<div className="mt-4 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-lg border bg-muted/30 px-4 py-3">
+										<FilterField label="Período">
 											<Select
 												value={montoCobrarPeriodo}
 												onValueChange={(v) => {
@@ -1215,6 +1288,9 @@ function RouteComponent() {
 													<SelectItem value="anio">Año</SelectItem>
 												</SelectContent>
 											</Select>
+										</FilterField>
+
+										<FilterField label="Rango">
 											<PeriodDatePicker
 												periodo={montoCobrarPeriodo}
 												fechaInicio={montoCobrarRange.fechaInicio}
@@ -1223,6 +1299,9 @@ function RouteComponent() {
 													setMontoCobrarRange({ fechaInicio, fechaFin })
 												}
 											/>
+										</FilterField>
+
+										<FilterField label="Vista" className="sm:ml-auto">
 											<Select
 												value={montoCobrarAcumulado ? "acumulado" : "periodo"}
 												onValueChange={(v) =>
@@ -1237,11 +1316,11 @@ function RouteComponent() {
 													<SelectItem value="acumulado">Acumulado</SelectItem>
 												</SelectContent>
 											</Select>
-										</div>
+										</FilterField>
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-6">
-									{montoCobrarQuery.isPending && <p>Cargando reporte...</p>}
+									{montoCobrarQuery.isPending && <p>Cargando...</p>}
 									{montoCobrarQuery.isError && (
 										<p className="text-destructive">
 											Error al cargar el reporte de monto a cobrarse.
@@ -1262,20 +1341,35 @@ function RouteComponent() {
 														montoCobrarPeriodo,
 														montoCobrarRange.fechaInicio,
 														montoCobrarRange.fechaFin,
-													).map(
-														(row: MontoACobrarPeriodoRow) => {
-															const a = montoCobrarAcumulado;
-															return {
-																bucket: formatBucket(row.bucket, montoCobrarPeriodo),
-																total_cuota: Number.parseFloat(a ? row.acum_total_cuota : row.total_cuota),
-																total_interes: Number.parseFloat(a ? row.acum_total_interes : row.total_interes),
-																total_iva: Number.parseFloat(a ? row.acum_total_iva : row.total_iva),
-																total_seguro: Number.parseFloat(a ? row.acum_total_seguro : row.total_seguro),
-																total_gps: Number.parseFloat(a ? row.acum_total_gps : row.total_gps),
-																total_membresias: Number.parseFloat(a ? row.acum_total_membresias : row.total_membresias),
-															};
-														},
-													)}
+													).map((row: MontoACobrarPeriodoRow) => {
+														const a = montoCobrarAcumulado;
+														return {
+															bucket: formatBucket(
+																row.bucket,
+																montoCobrarPeriodo,
+															),
+															total_cuota: Number.parseFloat(
+																a ? row.acum_total_cuota : row.total_cuota,
+															),
+															total_interes: Number.parseFloat(
+																a ? row.acum_total_interes : row.total_interes,
+															),
+															total_iva: Number.parseFloat(
+																a ? row.acum_total_iva : row.total_iva,
+															),
+															total_seguro: Number.parseFloat(
+																a ? row.acum_total_seguro : row.total_seguro,
+															),
+															total_gps: Number.parseFloat(
+																a ? row.acum_total_gps : row.total_gps,
+															),
+															total_membresias: Number.parseFloat(
+																a
+																	? row.acum_total_membresias
+																	: row.total_membresias,
+															),
+														};
+													})}
 												>
 													<CartesianGrid strokeDasharray="3 3" />
 													<XAxis
@@ -1326,7 +1420,7 @@ function RouteComponent() {
 														<TableRow>
 															<TableHead>Período</TableHead>
 															<TableHead className="text-right">
-																Cuotas
+																Cantidad de Cuotas
 															</TableHead>
 															<TableHead className="text-right">
 																Capital
@@ -1334,7 +1428,9 @@ function RouteComponent() {
 															<TableHead className="text-right">
 																Interés
 															</TableHead>
-															<TableHead className="text-right">IVA</TableHead>
+															<TableHead className="text-right">
+																IVA 12%
+															</TableHead>
 															<TableHead className="text-right">
 																Seguro
 															</TableHead>
@@ -1343,7 +1439,7 @@ function RouteComponent() {
 																Membresías
 															</TableHead>
 															<TableHead className="text-right">
-																Mora Prom.
+																Total Mora
 															</TableHead>
 															<TableHead className="text-right font-bold">
 																Total
@@ -1356,66 +1452,84 @@ function RouteComponent() {
 															montoCobrarPeriodo,
 															montoCobrarRange.fechaInicio,
 															montoCobrarRange.fechaFin,
-														).map(
-															(row: MontoACobrarPeriodoRow) => {
-																const a = montoCobrarAcumulado;
-																const cuota = a ? row.acum_total_cuota : row.total_cuota;
-																const interes = a ? row.acum_total_interes : row.total_interes;
-																const iva = a ? row.acum_total_iva : row.total_iva;
-																const seguro = a ? row.acum_total_seguro : row.total_seguro;
-																const gps = a ? row.acum_total_gps : row.total_gps;
-																const membresias = a ? row.acum_total_membresias : row.total_membresias;
-																const total =
-																	Number.parseFloat(cuota) +
-																	Number.parseFloat(interes) +
-																	Number.parseFloat(iva) +
-																	Number.parseFloat(seguro) +
-																	Number.parseFloat(gps) +
-																	Number.parseFloat(membresias);
-																return (
-																	<TableRow key={row.bucket}>
-																		<TableCell>
-																			{formatBucket(row.bucket, montoCobrarPeriodo)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{row.cuotas_count}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(cuota)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(interes)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(iva)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(seguro)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(gps)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(membresias)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			<div>{formatCurrency(row.mora_promedio)}</div>
-																			<div
-																				className="text-xs text-muted-foreground cursor-help"
-																				title="% de cuotas del período con mora activa"
-																			>
-																				{row.cuotas_count > 0
-																					? ((row.mora_count / row.cuotas_count) * 100).toFixed(1)
-																					: "0.0"}%
-																			</div>
-																		</TableCell>
-																		<TableCell className="text-right font-bold">
-																			{formatCurrency(total)}
-																		</TableCell>
-																	</TableRow>
-																);
-															},
-														)}
+														).map((row: MontoACobrarPeriodoRow) => {
+															const a = montoCobrarAcumulado;
+															const cuota = a
+																? row.acum_total_cuota
+																: row.total_cuota;
+															const interes = a
+																? row.acum_total_interes
+																: row.total_interes;
+															const iva = a
+																? row.acum_total_iva
+																: row.total_iva;
+															const seguro = a
+																? row.acum_total_seguro
+																: row.total_seguro;
+															const gps = a
+																? row.acum_total_gps
+																: row.total_gps;
+															const membresias = a
+																? row.acum_total_membresias
+																: row.total_membresias;
+															const total =
+																Number.parseFloat(cuota) +
+																Number.parseFloat(interes) +
+																Number.parseFloat(iva) +
+																Number.parseFloat(seguro) +
+																Number.parseFloat(gps) +
+																Number.parseFloat(membresias);
+															return (
+																<TableRow key={row.bucket}>
+																	<TableCell>
+																		{formatBucket(
+																			row.bucket,
+																			montoCobrarPeriodo,
+																		)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{row.cuotas_count}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(cuota)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(interes)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(iva)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(seguro)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(gps)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(membresias)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		<div>{formatCurrency(row.total_mora)}</div>
+																		<div
+																			className="text-muted-foreground text-xs"
+																			title="% de créditos del período con mora activa"
+																		>
+																			{row.total_credits > 0
+																				? (
+																						(row.credits_con_mora /
+																							row.total_credits) *
+																						100
+																					).toFixed(1)
+																				: "0.0"}
+																			%
+																		</div>
+																	</TableCell>
+																	<TableCell className="text-right font-bold">
+																		{formatCurrency(total)}
+																	</TableCell>
+																</TableRow>
+															);
+														})}
 														{(() => {
 															const rows =
 																montoCobrarData.data as MontoACobrarPeriodoRow[];
@@ -1430,9 +1544,13 @@ function RouteComponent() {
 																		),
 																	0,
 																);
-															const val = (key: keyof MontoACobrarPeriodoRow) =>
+															const val = (
+																key: keyof MontoACobrarPeriodoRow,
+															) =>
 																a && lastRow
-																	? Number.parseFloat((lastRow[key] as string) || "0")
+																	? Number.parseFloat(
+																			(lastRow[key] as string) || "0",
+																		)
 																	: sum(key);
 															const grandTotal =
 																val("acum_total_cuota") +
@@ -1441,8 +1559,13 @@ function RouteComponent() {
 																val("acum_total_seguro") +
 																val("acum_total_gps") +
 																val("acum_total_membresias");
-															const totalCred = a && lastRow ? lastRow.cuotas_count : rows.reduce((acc, r) => acc + r.cuotas_count, 0);
-															const totalMora = a && lastRow ? lastRow.mora_count : rows.reduce((acc, r) => acc + r.mora_count, 0);
+															const totalCred =
+																a && lastRow
+																	? lastRow.cuotas_count
+																	: rows.reduce(
+																			(acc, r) => acc + r.cuotas_count,
+																			0,
+																		);
 															return (
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
 																	<TableCell>Total</TableCell>
@@ -1450,27 +1573,51 @@ function RouteComponent() {
 																		{totalCred}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_cuota" : "total_cuota"))}
+																		{formatCurrency(
+																			val(
+																				a ? "acum_total_cuota" : "total_cuota",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_interes" : "total_interes"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_interes"
+																					: "total_interes",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_iva" : "total_iva"))}
+																		{formatCurrency(
+																			val(a ? "acum_total_iva" : "total_iva"),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_seguro" : "total_seguro"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_seguro"
+																					: "total_seguro",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_gps" : "total_gps"))}
+																		{formatCurrency(
+																			val(a ? "acum_total_gps" : "total_gps"),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_membresias" : "total_membresias"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_membresias"
+																					: "total_membresias",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{totalCred > 0
-																			? `${((totalMora / totalCred) * 100).toFixed(1)}%`
-																			: "—"}
+																		{formatCurrency(val("total_mora"))}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(grandTotal)}
@@ -1493,7 +1640,7 @@ function RouteComponent() {
 										<div>
 											<CardTitle className="flex items-center gap-2">
 												<CalendarDays className="h-5 w-5" />
-												Facturado del Mes vs Esperado
+												Cobrado del Mes vs Esperado
 											</CardTitle>
 											<CardDescription>
 												Compara lo cobrado en el mes contra lo esperado según
@@ -1561,7 +1708,7 @@ function RouteComponent() {
 									)}
 									{facturacionMesQuery.isError && (
 										<div className="py-4 text-center text-destructive text-sm">
-											Error al cargar datos
+											Error al cargar datos.
 										</div>
 									)}
 									{facturacionMesData &&
@@ -1571,59 +1718,84 @@ function RouteComponent() {
 												(acc, r) => acc + Number(cobrado[r.key] || 0),
 												0,
 											);
-											const totalEsperado = FACTURACION_RUBROS.reduce(
-												(acc, r) => acc + Number(esperado[r.key] || 0),
-												0,
-											);
+											const totalEsperado = Number(esperado.meta_mensual || 0);
+											const pct =
+												totalEsperado > 0
+													? Math.min((totalCobrado / totalEsperado) * 100, 100)
+													: 0;
 											return (
-												<Table>
-													<TableHeader>
-														<TableRow>
-															<TableHead>Rubro</TableHead>
-															<TableHead className="text-right">
-																Cobrado
-															</TableHead>
-															<TableHead className="text-right">
-																Esperado
-															</TableHead>
-															<TableHead className="w-48">Progreso</TableHead>
-														</TableRow>
-													</TableHeader>
-													<TableBody>
-														{FACTURACION_RUBROS.map(({ key, label }) => (
-															<TableRow key={key}>
-																<TableCell>{label}</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(Number(cobrado[key] || 0))}
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(Number(esperado[key] || 0))}
-																</TableCell>
-																<TableCell>
-																	<ProgressBar
-																		value={Number(cobrado[key] || 0)}
-																		max={Number(esperado[key] || 0)}
-																	/>
-																</TableCell>
-															</TableRow>
-														))}
-														<TableRow className="border-t-2 bg-muted/50 font-bold">
-															<TableCell>Total</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalCobrado)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalEsperado)}
-															</TableCell>
-															<TableCell>
-																<ProgressBar
-																	value={totalCobrado}
-																	max={totalEsperado}
-																/>
-															</TableCell>
-														</TableRow>
-													</TableBody>
-												</Table>
+												<div className="space-y-6">
+													{/* Resumen total vs meta */}
+													<div className="space-y-3">
+														<div className="grid grid-cols-3 gap-4">
+															<div>
+																<p className="text-muted-foreground text-sm">
+																	Total Cobrado
+																</p>
+																<p className="font-bold text-2xl">
+																	{formatCurrency(totalCobrado)}
+																</p>
+															</div>
+															<div>
+																<p className="text-muted-foreground text-sm">
+																	Meta del Mes
+																</p>
+																<p className="font-bold text-2xl">
+																	{totalEsperado > 0 ? (
+																		formatCurrency(totalEsperado)
+																	) : (
+																		<span className="text-base text-muted-foreground">
+																			Por definir
+																		</span>
+																	)}
+																</p>
+															</div>
+															<div>
+																<p className="text-muted-foreground text-sm">
+																	Avance
+																</p>
+																<p className="font-bold text-2xl">
+																	{totalEsperado > 0 ? (
+																		`${pct.toFixed(1)}%`
+																	) : (
+																		<span className="text-base text-muted-foreground">
+																			—
+																		</span>
+																	)}
+																</p>
+															</div>
+														</div>
+														{totalEsperado > 0 && (
+															<ProgressBar
+																value={totalCobrado}
+																max={totalEsperado}
+															/>
+														)}
+													</div>
+
+													{/* Desglose por rubro */}
+													<div>
+														<p className="mb-2 font-medium text-muted-foreground text-sm">
+															Desglose por rubro
+														</p>
+														<Table>
+															<TableBody>
+																{FACTURACION_RUBROS.map(({ key, label }) => (
+																	<TableRow key={key}>
+																		<TableCell className="text-muted-foreground">
+																			{label}
+																		</TableCell>
+																		<TableCell className="text-right font-medium">
+																			{formatCurrency(
+																				Number(cobrado[key] || 0),
+																			)}
+																		</TableCell>
+																	</TableRow>
+																))}
+															</TableBody>
+														</Table>
+													</div>
+												</div>
 											);
 										})()}
 								</CardContent>
@@ -1694,26 +1866,38 @@ function RouteComponent() {
 											</div>
 										) : reinversionLiquidacionesQuery.isError ? (
 											<div className="py-4 text-center text-destructive text-sm">
-												Error al cargar datos
+												Error al cargar datos.
 											</div>
 										) : reinversionData ? (
 											(() => {
-												const filas = REINVERSION_MODALIDADES.map((m) => ({
-													...m,
-													monto: Number(
-														reinversionData.porTipo[m.tipo]
-															?.reinversion_total ?? 0,
-													),
-												})).filter((f) => f.monto !== 0);
-												const totalMostrado = filas.reduce(
-													(a, f) => a + f.monto,
-													0,
+												const filas = REINVERSION_MODALIDADES.map((m) => {
+													const d = reinversionData.porTipo[m.tipo];
+													return {
+														...m,
+														capital: Number(d?.reinversion_capital ?? 0),
+														interes: Number(d?.reinversion_interes ?? 0),
+														total: Number(d?.reinversion_total ?? 0),
+													};
+												}).filter((f) => f.total !== 0);
+												const totales = filas.reduce(
+													(a, f) => ({
+														capital: a.capital + f.capital,
+														interes: a.interes + f.interes,
+														total: a.total + f.total,
+													}),
+													{ capital: 0, interes: 0, total: 0 },
 												);
 												return (
 													<Table>
 														<TableHeader>
 															<TableRow>
 																<TableHead>Modalidad de Reinversión</TableHead>
+																<TableHead className="text-right">
+																	Capital
+																</TableHead>
+																<TableHead className="text-right">
+																	Interés
+																</TableHead>
 																<TableHead className="text-right">
 																	Reinversión Total
 																</TableHead>
@@ -1724,14 +1908,26 @@ function RouteComponent() {
 																<TableRow key={f.tipo}>
 																	<TableCell>{f.label}</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.monto)}
+																		{dash(f.capital)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{dash(f.interes)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{dash(f.total)}
 																	</TableCell>
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Total Reinvertido</TableCell>
+																<TableCell>Total </TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalMostrado)}
+																	{dash(totales.capital)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{dash(totales.interes)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{dash(totales.total)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -1752,7 +1948,7 @@ function RouteComponent() {
 											</div>
 										) : reinversionLiquidacionesQuery.isError ? (
 											<div className="py-4 text-center text-destructive text-sm">
-												Error al cargar datos
+												Error al cargar datos.
 											</div>
 										) : reinversionData ? (
 											(() => {
@@ -1811,38 +2007,38 @@ function RouteComponent() {
 																<TableRow key={f.tipo}>
 																	<TableCell>{f.label}</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.capital)}
+																		{dash(f.capital)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.interes)}
+																		{dash(f.interes)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.iva)}
+																		{dash(f.iva)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.isr)}
+																		{dash(f.isr)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.total)}
+																		{dash(f.total)}
 																	</TableCell>
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total a Recibir</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.capital)}
+																	{dash(totales.capital)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.interes)}
+																	{dash(totales.interes)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.iva)}
+																	{dash(totales.iva)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.isr)}
+																	{dash(totales.isr)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.total)}
+																	{dash(totales.total)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -1870,7 +2066,7 @@ function RouteComponent() {
 													<Table>
 														<TableHeader>
 															<TableRow>
-																<TableHead>Grupo</TableHead>
+																<TableHead>Tipo</TableHead>
 																<TableHead className="text-right">
 																	Interés
 																</TableHead>
@@ -1889,46 +2085,46 @@ function RouteComponent() {
 															<TableRow>
 																<TableCell>Con Factura</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(cf.interes)}
+																	{dash(cf.interes)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(cf.iva)}
+																	{dash(cf.iva)}
 																</TableCell>
 																<TableCell className="text-right text-muted-foreground">
 																	—
 																</TableCell>
 																<TableCell className="text-right font-semibold">
-																	{formatCurrency(cf.neto)}
+																	{dash(cf.neto)}
 																</TableCell>
 															</TableRow>
 															<TableRow>
 																<TableCell>Sin Factura</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(sf.interes)}
+																	{dash(sf.interes)}
 																</TableCell>
 																<TableCell className="text-right text-muted-foreground">
 																	—
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(sf.isr)}
+																	{dash(sf.isr)}
 																</TableCell>
 																<TableCell className="text-right font-semibold">
-																	{formatCurrency(sf.neto)}
+																	{dash(sf.neto)}
 																</TableCell>
 															</TableRow>
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalInteres)}
+																	{dash(totalInteres)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalIva)}
+																	{dash(totalIva)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalIsr)}
+																	{dash(totalIsr)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalNeto)}
+																	{dash(totalNeto)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -1937,217 +2133,307 @@ function RouteComponent() {
 											);
 										})()}
 
-									{flujoCuotasQuery.isPending && (
-										<div className="py-4 text-center text-muted-foreground text-sm">
-											Cargando...
-										</div>
-									)}
-									{flujoCuotasQuery.isError && (
-										<div className="py-4 text-center text-destructive text-sm">
-											Error al cargar datos
-										</div>
-									)}
-									{flujoCuotasData &&
+									{/* Sección 3: Pagos Extras Recibidos */}
+									{reinversionData &&
 										(() => {
-											const { pagosExtras } = flujoCuotasData;
+											const pe = reinversionData.pagosExtras;
 											const totalExtras =
-												Number(pagosExtras.abonos_capital) +
-												Number(pagosExtras.cancelaciones);
+												Number(pe.abonos_capital) + Number(pe.cancelaciones);
 											return (
-												<>
-													{/* Sección 3: Pagos Extras Recibidos */}
-													<div className={SECCION_REPORTE_CLASS}>
-														<p className="mb-2 font-semibold text-sm">
-															Pagos Extras Recibidos
-														</p>
+												<div className={SECCION_REPORTE_CLASS}>
+													<p className="mb-2 font-semibold text-sm">
+														Pagos Extras Recibidos
+													</p>
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Tipo</TableHead>
+																<TableHead className="text-right">
+																	Monto
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															<TableRow>
+																<TableCell>Abonos Extra a Capital</TableCell>
+																<TableCell className="text-right">
+																	{dash(pe.abonos_capital)}
+																</TableCell>
+															</TableRow>
+															<TableRow>
+																<TableCell>Cancelaciones</TableCell>
+																<TableCell className="text-right">
+																	{dash(pe.cancelaciones)}
+																</TableCell>
+															</TableRow>
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total</TableCell>
+																<TableCell className="text-right">
+																	{dash(totalExtras)}
+																</TableCell>
+															</TableRow>
+														</TableBody>
+													</Table>
+												</div>
+											);
+										})()}
+
+									{/* Sección: Compras en el Mes (compra_cartera, por fecha_completada) */}
+									<div className={SECCION_REPORTE_CLASS}>
+										<p className="mb-2 font-semibold text-sm">
+											Compras en el Mes
+										</p>
+										{reinversionLiquidacionesQuery.isPending ? (
+											<div className="py-4 text-center text-muted-foreground text-sm">
+												Cargando...
+											</div>
+										) : reinversionLiquidacionesQuery.isError ? (
+											<div className="py-4 text-center text-destructive text-sm">
+												Error al cargar datos
+											</div>
+										) : !reinversionData?.comprasMes?.length ? (
+											<div className="py-4 text-center text-muted-foreground text-sm">
+												Sin compras en el período seleccionado
+											</div>
+										) : (
+											(() => {
+												const filas = reinversionData.comprasMes;
+												const totales = filas.reduce(
+													(a, f) => ({
+														cantidad: a.cantidad + f.cantidad,
+														monto: a.monto + Number(f.monto),
+													}),
+													{ cantidad: 0, monto: 0 },
+												);
+												return (
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Modalidad</TableHead>
+																<TableHead className="text-right">
+																	Cantidad
+																</TableHead>
+																<TableHead className="text-right">
+																	Monto
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															{filas.map((row) => (
+																<TableRow key={row.tipo}>
+																	<TableCell>
+																		{MODALIDAD_LABEL[row.tipo] ?? row.tipo}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{row.cantidad}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{dash(row.monto)}
+																	</TableCell>
+																</TableRow>
+															))}
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total</TableCell>
+																<TableCell className="text-right">
+																	{totales.cantidad}
+																</TableCell>
+																<TableCell className="text-right">
+																	{dash(totales.monto)}
+																</TableCell>
+															</TableRow>
+														</TableBody>
+													</Table>
+												);
+											})()
+										)}
+									</div>
+
+									{/* Sección 4: Desglose por Inversionista (desde liquidaciones) */}
+									<div className={SECCION_REPORTE_CLASS}>
+										<div className="mb-2 flex items-center justify-between">
+											<p className="font-semibold text-sm">
+												Desglose por Inversionista
+											</p>
+											{(reinversionData?.porInversionista?.length ?? 0) > 0 && (
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() => {
+														const fuente =
+															reinversionData?.porInversionista ?? [];
+														const data =
+															modalidadFiltro.length === 0
+																? fuente
+																: fuente.filter((r) =>
+																		modalidadFiltro.includes(
+																			r.tipo_reinversion,
+																		),
+																	);
+														const rows = data.map((r) => ({
+															Inversionista: r.nombre,
+															Modalidad:
+																MODALIDAD_LABEL[r.tipo_reinversion] ??
+																r.tipo_reinversion,
+															Reinversión: r.reinversion,
+															"A Recibir": r.a_recibir,
+															"Monto Aportado": r.monto_aportado,
+														}));
+														const ws = XLSX.utils.json_to_sheet(rows);
+														ws["!cols"] = [
+															{ wch: 30 },
+															{ wch: 18 },
+															{ wch: 18 },
+															{ wch: 18 },
+															{ wch: 18 },
+														];
+														const wb = XLSX.utils.book_new();
+														XLSX.utils.book_append_sheet(
+															wb,
+															ws,
+															"Por Inversionista",
+														);
+														XLSX.writeFile(
+															wb,
+															`flujo-inversionistas-${flujoCuotasRange.fechaInicio}-${flujoCuotasRange.fechaFin}.xlsx`,
+														);
+													}}
+												>
+													<Download className="mr-2 h-4 w-4" />
+													Exportar Excel
+												</Button>
+											)}
+										</div>
+										{reinversionLiquidacionesQuery.isPending ? (
+											<div className="py-4 text-center text-muted-foreground text-sm">
+												Cargando...
+											</div>
+										) : reinversionLiquidacionesQuery.isError ? (
+											<div className="py-4 text-center text-destructive text-sm">
+												Error al cargar datos
+											</div>
+										) : !reinversionData?.porInversionista?.length ? (
+											<div className="py-4 text-center text-muted-foreground text-sm">
+												Sin datos para el período seleccionado
+											</div>
+										) : (
+											(() => {
+												const todas = reinversionData.porInversionista;
+												const presentes = new Set(
+													todas.map((f) => f.tipo_reinversion),
+												);
+												const modalidades = Object.keys(MODALIDAD_LABEL).filter(
+													(t) => presentes.has(t),
+												);
+												const filas =
+													modalidadFiltro.length === 0
+														? todas
+														: todas.filter((f) =>
+																modalidadFiltro.includes(f.tipo_reinversion),
+															);
+												const totales = filas.reduce(
+													(a, f) => ({
+														reinversion: a.reinversion + Number(f.reinversion),
+														a_recibir: a.a_recibir + Number(f.a_recibir),
+														monto_aportado:
+															a.monto_aportado + Number(f.monto_aportado),
+													}),
+													{ reinversion: 0, a_recibir: 0, monto_aportado: 0 },
+												);
+												return (
+													<>
+														<div className="mb-3 flex flex-wrap items-center gap-1.5">
+															<span className="text-muted-foreground text-xs">
+																Modalidad:
+															</span>
+															{modalidades.map((tipo) => {
+																const activo = modalidadFiltro.includes(tipo);
+																return (
+																	<button
+																		key={tipo}
+																		type="button"
+																		onClick={() =>
+																			setModalidadFiltro((prev) =>
+																				prev.includes(tipo)
+																					? prev.filter((t) => t !== tipo)
+																					: [...prev, tipo],
+																			)
+																		}
+																		className={`rounded border px-2 py-0.5 text-xs transition-colors ${activo ? "bg-muted font-medium text-foreground" : "text-muted-foreground"}`}
+																	>
+																		{MODALIDAD_LABEL[tipo] ?? tipo}
+																	</button>
+																);
+															})}
+															{modalidadFiltro.length > 0 && (
+																<button
+																	type="button"
+																	onClick={() => setModalidadFiltro([])}
+																	className="text-muted-foreground text-xs underline"
+																>
+																	Limpiar
+																</button>
+															)}
+														</div>
 														<Table>
 															<TableHeader>
 																<TableRow>
-																	<TableHead>Tipo</TableHead>
+																	<TableHead>Inversionista</TableHead>
+																	<TableHead>Modalidad</TableHead>
 																	<TableHead className="text-right">
-																		Monto
+																		Reinversión
+																	</TableHead>
+																	<TableHead className="text-right">
+																		A Recibir
+																	</TableHead>
+																	<TableHead className="text-right">
+																		Monto Aportado
 																	</TableHead>
 																</TableRow>
 															</TableHeader>
 															<TableBody>
-																<TableRow>
-																	<TableCell>Abonos Extra a Capital</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			Number(pagosExtras.abonos_capital),
-																		)}
-																	</TableCell>
-																</TableRow>
-																<TableRow>
-																	<TableCell>Cancelaciones</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			Number(pagosExtras.cancelaciones),
-																		)}
-																	</TableCell>
-																</TableRow>
+																{filas.map((row) => (
+																	<TableRow key={row.inversionista_id}>
+																		<TableCell className="font-medium">
+																			{row.nombre}
+																		</TableCell>
+																		<TableCell>
+																			<span
+																				className={`inline-block rounded border px-1.5 py-0.5 font-normal text-[10px] ${MODALIDAD_CHIP_CLASS[row.tipo_reinversion] ?? "border-muted-foreground/30 text-muted-foreground"}`}
+																			>
+																				{MODALIDAD_LABEL[
+																					row.tipo_reinversion
+																				] ?? row.tipo_reinversion}
+																			</span>
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{dash(row.reinversion)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{dash(row.a_recibir)}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{dash(row.monto_aportado)}
+																		</TableCell>
+																	</TableRow>
+																))}
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
-																	<TableCell>Total</TableCell>
+																	<TableCell colSpan={2}>Total</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(totalExtras)}
+																		{dash(totales.reinversion)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{dash(totales.a_recibir)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{dash(totales.monto_aportado)}
 																	</TableCell>
 																</TableRow>
 															</TableBody>
 														</Table>
-													</div>
-												</>
-											);
-										})()}
-
-									{/* Sección 4: Desglose por Inversionista */}
-									<div className="border-t pt-4">
-										<div className="mb-3 flex items-center justify-between">
-											<button
-												type="button"
-												className="flex items-center gap-1 font-semibold text-sm transition-colors hover:text-foreground/70"
-												onClick={() => setDesgloseInversionistaOpen((o) => !o)}
-											>
-												{desgloseInversionistaOpen ? (
-													<ChevronDown className="h-4 w-4" />
-												) : (
-													<ChevronRight className="h-4 w-4" />
-												)}
-												Desglose por Inversionista
-											</button>
-											{desgloseInversionistaOpen &&
-												(flujoPorInversionistaData?.porInversionista?.length ??
-													0) > 0 && (
-													<Button
-														variant="outline"
-														size="sm"
-														onClick={() => {
-															const rows =
-																// eslint-disable-next-line @typescript-eslint/no-explicit-any
-																(
-																	flujoPorInversionistaData!
-																		.porInversionista as any[]
-																).map((r: any) => ({
-																	Inversionista: r.nombre,
-																	"Reinv. Capital": r.reinversion_capital,
-																	"Reinv. Interés": r.reinversion_interes,
-																	"Total Reinversión": r.reinversion_total,
-																	"Capital a Recibir": r.cash_capital,
-																	"Interés a Recibir": r.cash_interes,
-																	"Total a Recibir": r.cash_total,
-																	"Total General": r.total,
-																}));
-															const ws = XLSX.utils.json_to_sheet(rows);
-															ws["!cols"] = [
-																{ wch: 30 },
-																{ wch: 18 },
-																{ wch: 18 },
-																{ wch: 18 },
-																{ wch: 18 },
-																{ wch: 18 },
-																{ wch: 18 },
-																{ wch: 18 },
-															];
-															const wb = XLSX.utils.book_new();
-															XLSX.utils.book_append_sheet(
-																wb,
-																ws,
-																"Por Inversionista",
-															);
-															XLSX.writeFile(
-																wb,
-																`flujo-inversionistas-${flujoCuotasRange.fechaInicio}-${flujoCuotasRange.fechaFin}.xlsx`,
-															);
-														}}
-													>
-														<Download className="mr-2 h-4 w-4" />
-														Exportar Excel
-													</Button>
-												)}
-										</div>
-										{desgloseInversionistaOpen &&
-											(flujoPorInversionistaQuery.isPending ? (
-												<p className="py-4 text-center text-muted-foreground text-sm">
-													Cargando...
-												</p>
-											) : flujoPorInversionistaQuery.isError ? (
-												<p className="py-4 text-center text-destructive text-sm">
-													Error al cargar desglose por inversionista
-												</p>
-											) : !flujoPorInversionistaData?.porInversionista
-													?.length ? (
-												<p className="py-4 text-center text-muted-foreground text-sm">
-													Sin datos para el período seleccionado
-												</p>
-											) : (
-												<Table>
-													<TableHeader>
-														<TableRow>
-															<TableHead>Inversionista</TableHead>
-															<TableHead className="text-right">
-																Reinversión
-															</TableHead>
-															<TableHead className="text-right">
-																A Recibir
-															</TableHead>
-															<TableHead className="text-right">
-																Total
-															</TableHead>
-														</TableRow>
-													</TableHeader>
-													<TableBody>
-														{(
-															flujoPorInversionistaData.porInversionista as any[]
-														).map((row: any) => (
-															<TableRow key={row.inversionista_id}>
-																<TableCell className="font-medium">
-																	{row.nombre}
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(
-																		Number(row.reinversion_total),
-																	)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(Number(row.cash_total))}
-																</TableCell>
-																<TableCell className="text-right font-semibold">
-																	{formatCurrency(Number(row.total))}
-																</TableCell>
-															</TableRow>
-														))}
-													</TableBody>
-													{flujoPorInversionistaData?.totales && (
-														<tfoot>
-															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Total</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(
-																		Number(
-																			flujoPorInversionistaData.totales
-																				.reinversion_total,
-																		),
-																	)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(
-																		Number(
-																			flujoPorInversionistaData.totales
-																				.cash_total,
-																		),
-																	)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(
-																		Number(
-																			flujoPorInversionistaData.totales.total,
-																		),
-																	)}
-																</TableCell>
-															</TableRow>
-														</tfoot>
-													)}
-												</Table>
-											))}
+													</>
+												);
+											})()
+										)}
 									</div>
 								</CardContent>
 							</Card>
@@ -2281,7 +2567,7 @@ function RouteComponent() {
 							{/* Cobertura de Colocación vs Meta */}
 							<Card>
 								<CardHeader>
-									<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+									<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
 										<div className="flex items-center gap-2">
 											<TrendingUp className="h-5 w-5 text-green-500" />
 											<div>
@@ -2292,7 +2578,7 @@ function RouteComponent() {
 												</CardDescription>
 											</div>
 										</div>
-										<div className="flex flex-wrap items-center gap-2">
+										<div className="flex items-center gap-2">
 											<SimularButton
 												onClick={() => setScenarioOpen("cobertura")}
 											/>
@@ -2305,6 +2591,11 @@ function RouteComponent() {
 												<Target className="h-3.5 w-3.5" />
 												Configurar metas
 											</Button>
+										</div>
+									</div>
+
+									<div className="mt-4 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-lg border bg-muted/30 px-4 py-3">
+										<FilterField label="Período">
 											<Select
 												value={equilibrioPeriodo}
 												onValueChange={(v) =>
@@ -2329,6 +2620,9 @@ function RouteComponent() {
 													<SelectItem value="anio">Año</SelectItem>
 												</SelectContent>
 											</Select>
+										</FilterField>
+
+										<FilterField label="Rango">
 											<DateRangeFilter
 												dateRange={
 													equilibrioRange.fechaInicio &&
@@ -2350,14 +2644,12 @@ function RouteComponent() {
 													}
 												}}
 											/>
-										</div>
+										</FilterField>
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-4">
 									{puntoEquilibrioQuery.isPending && (
-										<p className="text-muted-foreground text-sm">
-											Cargando reporte...
-										</p>
+										<p className="text-muted-foreground text-sm">Cargando...</p>
 									)}
 									{puntoEquilibrioQuery.isError && (
 										<p className="text-destructive text-sm">
@@ -2617,7 +2909,7 @@ function RouteComponent() {
 																	Colocación (Q)
 																</TableHead>
 																<TableHead className="text-right">
-																	# Col.
+																	Colocados
 																</TableHead>
 																<TableHead className="text-right">
 																	Facturación (Q)
@@ -2626,7 +2918,7 @@ function RouteComponent() {
 																	Cartera Activa (Q)
 																</TableHead>
 																<TableHead className="text-right">
-																	# Activos
+																	Activos
 																</TableHead>
 																<TableHead className="text-right">
 																	Mora 30 (Q)

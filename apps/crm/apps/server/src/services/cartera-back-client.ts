@@ -186,15 +186,14 @@ class SimpleCache {
 export type FacturacionMesRubro = {
 	capital: string;
 	interes: string;
-	iva: string;
-	seguro: string;
-	gps: string;
 	membresias: string;
+	seguro_gps: string;
+	royalti: string;
 };
 
 export type FacturacionMesResponse = {
 	cobrado: FacturacionMesRubro;
-	esperado: FacturacionMesRubro;
+	esperado: { meta_mensual: string };
 };
 
 export type MontoACobrarRow = {
@@ -219,8 +218,10 @@ export type MontoACobrarPeriodoRow = {
 	total_seguro: string;
 	total_gps: string;
 	total_membresias: string;
-	mora_promedio: string;
+	total_mora: string;
 	mora_count: number;
+	total_credits: number;
+	credits_con_mora: number;
 	acum_total_cuota: string;
 	acum_total_interes: string;
 	acum_total_iva: string;
@@ -269,6 +270,8 @@ export type ReinversionLiquidacionesResponse = {
 	porTipo: Record<
 		string,
 		{
+			reinversion_capital: string;
+			reinversion_interes: string;
 			reinversion_total: string;
 			total_capital: string;
 			total_interes: string;
@@ -286,6 +289,21 @@ export type ReinversionLiquidacionesResponse = {
 		conFactura: { interes: string; iva: string; neto: string };
 		sinFactura: { interes: string; isr: string; neto: string };
 	};
+	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
+	pagosExtras: { abonos_capital: string; cancelaciones: string };
+	/** Desglose por inversionista (desde liquidaciones): reinversión y a recibir. */
+	porInversionista: {
+		inversionista_id: number;
+		nombre: string;
+		tipo_reinversion: string;
+		reinversion_capital: string;
+		reinversion_interes: string;
+		reinversion: string;
+		a_recibir: string;
+		monto_aportado: string;
+	}[];
+	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
+	comprasMes: { tipo: string; cantidad: number; monto: string }[];
 	cantidad_liquidaciones: number;
 };
 
@@ -327,6 +345,25 @@ export type ComparativoHistoricoResponse = {
 	cartera: { mes: string; creditos_activos: number; cartera_activa: string }[];
 	moraActual: MoraAgingBucket[];
 	agingHistorico: ({ periodo: string } & MoraAgingBucket)[];
+};
+
+export type MoraBucketResult = {
+	cantidad: number;
+	sumaCapital: string;
+	sumaMora: string;
+};
+
+export type MoraTotales = {
+	mora_30: MoraBucketResult;
+	mora_60: MoraBucketResult;
+	mora_90: MoraBucketResult;
+	mora_120_plus: MoraBucketResult;
+	totalEnMora: { cantidad: number; sumaMora: string };
+};
+
+export type MoraByEtapaYAsesorResponse = {
+	totales: MoraTotales;
+	porAsesor: ({ asesorId: number; nombre: string; email: string } & MoraTotales)[];
 };
 
 // ============================================================================
@@ -1421,40 +1458,24 @@ export class CarteraBackClient {
 			this.request<{
 				cobrado_capital?: string;
 				cobrado_interes?: string;
-				cobrado_iva?: string;
-				cobrado_seguro?: string;
-				cobrado_gps?: string;
 				cobrado_membresias?: string;
+				cobrado_seguro_gps?: string;
+				cobrado_royalti?: string;
 			}>(`/reportes/facturacion-mes-cobrado?${qp}`, { method: "GET" }, true),
 			this.request<{
-				esperado_capital?: string;
-				esperado_interes?: string;
-				esperado_iva?: string;
-				esperado_seguro?: string;
-				esperado_gps?: string;
-				esperado_membresias?: string;
+				meta_mensual?: string;
 			}>(`/reportes/facturacion-mes-esperado?${qp}`, { method: "GET" }, true),
 		]);
 
 		const cobrado: FacturacionMesRubro = {
 			capital: cobradoResult.cobrado_capital ?? "0",
 			interes: cobradoResult.cobrado_interes ?? "0",
-			iva: cobradoResult.cobrado_iva ?? "0",
-			seguro: cobradoResult.cobrado_seguro ?? "0",
-			gps: cobradoResult.cobrado_gps ?? "0",
 			membresias: cobradoResult.cobrado_membresias ?? "0",
+			seguro_gps: cobradoResult.cobrado_seguro_gps ?? "0",
+			royalti: cobradoResult.cobrado_royalti ?? "0",
 		};
 
-		const esperado: FacturacionMesRubro = {
-			capital: esperadoResult.esperado_capital ?? "0",
-			interes: esperadoResult.esperado_interes ?? "0",
-			iva: esperadoResult.esperado_iva ?? "0",
-			seguro: esperadoResult.esperado_seguro ?? "0",
-			gps: esperadoResult.esperado_gps ?? "0",
-			membresias: esperadoResult.esperado_membresias ?? "0",
-		};
-
-		return { cobrado, esperado };
+		return { cobrado, esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" } };
 	}
 
 	async getFlujoCuotasInversiones(params: {
@@ -1500,6 +1521,21 @@ export class CarteraBackClient {
 		});
 		return this.request<FlujoCuotasPorInversionistaResponse>(
 			`/reportes/flujo-cuotas-inversiones/por-inversionista?${qp}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	// ========================================================================
+	// REPORTES
+	// ========================================================================
+
+	async getMoraByEtapaYAsesor(params?: { emailCobrador?: string }) {
+		const queryParams = new URLSearchParams();
+		if (params?.emailCobrador) queryParams.set("email_cobrador", params.emailCobrador);
+		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
+		return this.request<MoraByEtapaYAsesorResponse>(
+			`/reportes/mora-por-etapa-asesor${qs}`,
 			{ method: "GET" },
 			true,
 		);

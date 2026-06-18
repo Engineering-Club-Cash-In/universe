@@ -77,6 +77,14 @@ export async function getMontoACobrarPeriodo({
   fechaFin: string;
 }) {
   const pg = sql.raw(toPostgresPeriod[periodo]);
+  const pgIntervalMap: Record<Periodo, string> = {
+    anio: "1 year",
+    trimestre: "3 months",
+    mes: "1 month",
+    semana: "1 week",
+    dia: "1 day",
+  };
+  const pgInterval = sql.raw(`interval '${pgIntervalMap[periodo]}'`);
 
   const result = await db.execute(sql`
     WITH
@@ -130,13 +138,20 @@ export async function getMontoACobrarPeriodo({
         COALESCE(cap_anterior.total_restante, c.capital::numeric)       AS cap_ant,
         MAX(mora_real.cuotas_atrasadas)                                 AS cuotas_atrasadas,
         CASE WHEN MAX(mora_real.cuotas_atrasadas) > 0
-             THEN COALESCE(MAX(m.monto_mora::numeric), 0)
+             THEN COALESCE(MAX(hist_mora.monto_mora), 0)
              ELSE 0 END                                                 AS mora_val
       FROM pagos_en_rango p
       INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
       INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
       INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
-      LEFT JOIN cartera.moras_credito m ON m.credito_id = c.credito_id AND m.activa = true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(mh.monto_nuevo, 0) AS monto_mora
+        FROM cartera.moras_historial mh
+        WHERE mh.credito_id = c.credito_id
+          AND (mh.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') < DATE_TRUNC(${pg}, p.fecha_venc::timestamp) + ${pgInterval}
+        ORDER BY mh.fecha DESC
+        LIMIT 1
+      ) hist_mora ON true
       LEFT JOIN LATERAL (
         SELECT pc_a.total_restante::numeric AS total_restante
         FROM cartera.pagos_credito pc_a
@@ -291,8 +306,10 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN seguro      ELSE 0 END), 0)               AS total_seguro,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN gps         ELSE 0 END), 0)               AS total_gps,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN mem         ELSE 0 END), 0)               AS total_membresias,
-      AVG(CASE WHEN cuotas_atrasadas > 0 AND NOT excluido_mora THEN mora_val END)                AS mora_promedio,
+      COALESCE(SUM(mora_val) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)       AS total_mora,
       COALESCE(SUM(cuotas_atrasadas) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)::int AS mora_count,
+      COUNT(credito_id)::int                                                                    AS total_credits,
+      COUNT(credito_id) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora)::int          AS credits_con_mora,
       COALESCE(SUM(CASE
         WHEN excluido_mora     THEN 0
         WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant)
@@ -358,6 +375,58 @@ export async function getCobradoDelMes({
     cobrado_seguro: String(row?.cobrado_seguro ?? "0"),
     cobrado_gps: String(row?.cobrado_gps ?? "0"),
     cobrado_membresias: String(row?.cobrado_membresias ?? "0"),
+  };
+}
+
+export async function getCobradoDelMesSnapshot({
+  mes,
+  anio,
+}: {
+  mes: number;
+  anio: number;
+}) {
+  // Filtramos por rango de fecha (no por anio/mes) porque esas columnas helper
+  // pueden venir NULL en filas importadas → quedarían fuera del SUM.
+  const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
+  const result = await db.execute(sql`
+    SELECT
+      COALESCE(SUM(capital_total::numeric), 0)          AS cobrado_capital,
+      COALESCE(SUM(interes_cube::numeric), 0)           AS cobrado_interes,
+      COALESCE(SUM(membresia::numeric), 0)              AS cobrado_membresias,
+      COALESCE(SUM(servicios_seguro_gps::numeric), 0)   AS cobrado_seguro_gps,
+      COALESCE(SUM(royalty::numeric), 0)                AS cobrado_royalti
+    FROM cartera.facturacion_snapshot_diario
+    WHERE fecha >= ${inicioMes}::date
+      AND fecha < (${inicioMes}::date + INTERVAL '1 month')
+  `);
+
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  return {
+    cobrado_capital: String(row?.cobrado_capital ?? "0"),
+    cobrado_interes: String(row?.cobrado_interes ?? "0"),
+    cobrado_membresias: String(row?.cobrado_membresias ?? "0"),
+    cobrado_seguro_gps: String(row?.cobrado_seguro_gps ?? "0"),
+    cobrado_royalti: String(row?.cobrado_royalti ?? "0"),
+  };
+}
+
+export async function getEsperadoDelMesMeta({
+  mes,
+  anio,
+}: {
+  mes: number;
+  anio: number;
+}) {
+  const result = await db.execute(sql`
+    SELECT meta_mensual
+    FROM cartera.metas_facturacion
+    WHERE anio = ${anio} AND mes = ${mes}
+    LIMIT 1
+  `);
+
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  return {
+    meta_mensual: String(row?.meta_mensual ?? "0"),
   };
 }
 
@@ -649,6 +718,8 @@ export async function getReinversionLiquidaciones({
   const result = await db.execute(sql`
     SELECT
       COALESCE(i.tipo_reinversion::text, 'sin_reinversion') AS tipo,
+      COALESCE(SUM(l.reinversion_capital::numeric), 0)      AS reinversion_capital,
+      COALESCE(SUM(l.reinversion_interes::numeric), 0)      AS reinversion_interes,
       COALESCE(SUM(l.reinversion_total::numeric), 0)        AS reinversion_total,
       COALESCE(SUM(l.total_capital::numeric), 0)            AS total_capital,
       COALESCE(SUM(l.total_interes::numeric), 0)            AS total_interes,
@@ -666,6 +737,8 @@ export async function getReinversionLiquidaciones({
   const porTipo: Record<
     string,
     {
+      reinversion_capital: string;
+      reinversion_interes: string;
       reinversion_total: string;
       total_capital: string;
       total_interes: string;
@@ -679,6 +752,8 @@ export async function getReinversionLiquidaciones({
   for (const r of result.rows as Record<string, unknown>[]) {
     const tipo = String(r.tipo ?? "sin_reinversion");
     porTipo[tipo] = {
+      reinversion_capital: Number(r.reinversion_capital ?? 0).toFixed(2),
+      reinversion_interes: Number(r.reinversion_interes ?? 0).toFixed(2),
       reinversion_total: Number(r.reinversion_total ?? 0).toFixed(2),
       total_capital: Number(r.total_capital ?? 0).toFixed(2),
       total_interes: Number(r.total_interes ?? 0).toFixed(2),
@@ -720,8 +795,161 @@ export async function getReinversionLiquidaciones({
     }
   }
 
+  // Pagos extras recibidos (abonos a capital / cancelaciones) que fluyen desde
+  // las liquidaciones del mes: liquidación → pago espejo → abono.
+  // Cada abono se cuenta una sola vez (DISTINCT) aunque tenga varios pagos espejo.
+  const extrasRows = await db.execute(sql`
+    SELECT a.tipo, COALESCE(SUM(a.monto::numeric), 0) AS total
+    FROM cartera.abonos_capital a
+    WHERE a.abono_id IN (
+      SELECT DISTINCT e.abono_capital_id
+      FROM cartera.pagos_credito_inversionistas_espejo e
+      JOIN cartera.liquidaciones l ON l.liquidacion_id = e.liquidacion_id
+      WHERE e.abono_capital_id IS NOT NULL
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    )
+    GROUP BY a.tipo
+  `);
+
+  let abonosCapital = 0;
+  let cancelaciones = 0;
+  for (const r of extrasRows.rows as Record<string, unknown>[]) {
+    if (r.tipo === "CAPITAL") abonosCapital = Number(r.total ?? 0);
+    if (r.tipo === "CANCELACION") cancelaciones = Number(r.total ?? 0);
+  }
+
+  // Cancelaciones manuales: pagos del espejo (>= Q2,000) liquidados en el mes que
+  // NO quedaron registrados en abonos_capital (abono_capital_id IS NULL) y cuyo
+  // inversionista ya no tiene posición en el crédito (monto_aportado = 0 o ya no
+  // existe la fila en creditos_inversionistas_espejo). Se excluyen créditos ACTIVO:
+  // un saldo en 0 sobre un crédito vigente es anómalo / pago normal, no cancelación.
+  // Se suman a las formales.
+  const cancelExtraRows = await db.execute(sql`
+    SELECT COALESCE(SUM(t.abono), 0) AS total
+    FROM (
+      SELECT
+        SUM(pe.abono_capital::numeric)                 AS abono,
+        COALESCE(MAX(ce.monto_aportado::numeric), 0)   AS monto_aportado,
+        bool_and(ce.id IS NULL)                        AS sin_fila
+      FROM cartera.pagos_credito_inversionistas_espejo pe
+      JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+      JOIN cartera.creditos cr ON cr.credito_id = pe.credito_id
+      LEFT JOIN cartera.creditos_inversionistas_espejo ce
+        ON ce.credito_id = pe.credito_id
+       AND ce.inversionista_id = pe.inversionista_id
+      WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+        AND pe.abono_capital::numeric >= 2000
+        AND pe.abono_capital_id IS NULL
+        AND cr."statusCredit" <> 'ACTIVO'
+      GROUP BY pe.credito_id, pe.inversionista_id
+    ) t
+    WHERE t.monto_aportado = 0 OR t.sin_fila
+  `);
+  cancelaciones += Number(
+    (cancelExtraRows.rows[0] as Record<string, unknown>)?.total ?? 0
+  );
+
+  // Desglose por inversionista (desde las liquidaciones del mes):
+  //   - reinversion_capital / reinversion_interes / reinversion (total)
+  //   - a_recibir = SUM(total_cuota)
+  //   - monto_aportado = lo que le quedó al inversionista tras la liquidación
+  const porInvRows = await db.execute(sql`
+    SELECT
+      l.inversionista_id,
+      i.nombre,
+      COALESCE(i.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
+      COALESCE(SUM(l.reinversion_capital::numeric), 0) AS reinversion_capital,
+      COALESCE(SUM(l.reinversion_interes::numeric), 0) AS reinversion_interes,
+      COALESCE(SUM(l.reinversion_total::numeric), 0)   AS reinversion,
+      COALESCE(SUM(l.total_cuota::numeric), 0)         AS a_recibir
+    FROM cartera.liquidaciones l
+    JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    GROUP BY l.inversionista_id, i.nombre, i.tipo_reinversion
+    ORDER BY i.nombre
+  `);
+
+  // Monto aportado que le quedó al inversionista DESPUÉS de la liquidación
+  // (sin reinversiones), desde historico_liquidaciones_espejo.
+  // ⚠️ Mayo 2026 fue la primera vez que se usó y el histórico quedó CON la
+  // reinversión sumada; para ese mes se descuenta la reinversión.
+  const montoAportadoRows = await db.execute(sql`
+    SELECT
+      h.inversionista_id,
+      COALESCE(SUM(h.monto_aportado::numeric), 0) AS monto_aportado
+    FROM cartera.historico_liquidaciones_espejo h
+    JOIN cartera.liquidaciones l ON l.liquidacion_id = h.liquidacion_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    GROUP BY h.inversionista_id
+  `);
+  const montoAportadoPorInv = new Map<number, number>();
+  for (const r of montoAportadoRows.rows as Record<string, unknown>[]) {
+    montoAportadoPorInv.set(
+      Number(r.inversionista_id),
+      Number(r.monto_aportado ?? 0)
+    );
+  }
+  const esMayo2026 = anio === 2026 && mes === 5;
+
+  const porInversionista = (porInvRows.rows as Record<string, unknown>[]).map(
+    (r) => {
+      const id = Number(r.inversionista_id);
+      const reinversion = Number(r.reinversion ?? 0);
+      const montoHist = montoAportadoPorInv.get(id) ?? 0;
+      const montoAportado = esMayo2026 ? montoHist - reinversion : montoHist;
+      return {
+        inversionista_id: id,
+        nombre: String(r.nombre),
+        tipo_reinversion: String(r.tipo_reinversion ?? "sin_reinversion"),
+        reinversion_capital: Number(r.reinversion_capital ?? 0).toFixed(2),
+        reinversion_interes: Number(r.reinversion_interes ?? 0).toFixed(2),
+        reinversion: reinversion.toFixed(2),
+        a_recibir: Number(r.a_recibir ?? 0).toFixed(2),
+        monto_aportado: montoAportado.toFixed(2),
+      };
+    }
+  ).filter(
+    // La liquidación manda: si no aportó nada (todo en cero), no se muestra.
+    (p) =>
+      Number(p.reinversion) !== 0 ||
+      Number(p.a_recibir) !== 0 ||
+      Number(p.monto_aportado) !== 0
+  );
+
+  // Compras del mes: solo operación de compra (no reinversión) y solo las
+  // COMPLETADAS (status = 'completado'); las pendientes no se cuentan. La fecha
+  // efectiva prioriza fecha_completada y cae a updated_at cuando es NULL
+  // (columna nueva, registros viejos) — mismo criterio que utils/comprasAjuste.ts.
+  const fechaCompra = sql`COALESCE(c.fecha_completada, c.updated_at)`;
+  const comprasRows = await db.execute(sql`
+    SELECT
+      COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo,
+      COUNT(DISTINCT (c.inversionista_id, ${fechaCompra}))::int AS cantidad,
+      COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
+    FROM cartera.compras_credito_inversionista c
+    WHERE c.tipo_operacion = 'compra_cartera'
+      AND c.status = 'completado'
+      AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    GROUP BY c.tipo_reinversion
+    ORDER BY monto DESC
+  `);
+  const comprasMes = (comprasRows.rows as Record<string, unknown>[]).map(
+    (r) => ({
+      tipo: String(r.tipo ?? "sin_reinversion"),
+      cantidad: Number(r.cantidad ?? 0),
+      monto: Number(r.monto ?? 0).toFixed(2),
+    })
+  );
+
   return {
     porTipo,
+    porInversionista,
+    comprasMes,
     interesNeto: {
       conFactura: {
         interes: conFactura.interes.toFixed(2),
@@ -733,6 +961,10 @@ export async function getReinversionLiquidaciones({
         isr: sinFactura.isr.toFixed(2),
         neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
       },
+    },
+    pagosExtras: {
+      abonos_capital: abonosCapital.toFixed(2),
+      cancelaciones: cancelaciones.toFixed(2),
     },
     cantidad_liquidaciones: cantidad,
   };
@@ -868,4 +1100,103 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
     moraActual: moraActual.rows,
     agingHistorico: agingHistorico.rows,
   };
+}
+
+type BucketAcc = { cantidad: number; sumaCapital: number; sumaMora: number };
+type BucketsAcc = { mora_30: BucketAcc; mora_60: BucketAcc; mora_90: BucketAcc; mora_120_plus: BucketAcc };
+
+function emptyBuckets(): BucketsAcc {
+  return {
+    mora_30: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+    mora_60: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+    mora_90: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+    mora_120_plus: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+  };
+}
+
+function serializeBuckets(b: BucketsAcc) {
+  const fmt = (n: number) => n.toFixed(2);
+  const totalCantidad = b.mora_30.cantidad + b.mora_60.cantidad + b.mora_90.cantidad + b.mora_120_plus.cantidad;
+  const totalMora = b.mora_30.sumaMora + b.mora_60.sumaMora + b.mora_90.sumaMora + b.mora_120_plus.sumaMora;
+  return {
+    mora_30: { cantidad: b.mora_30.cantidad, sumaCapital: fmt(b.mora_30.sumaCapital), sumaMora: fmt(b.mora_30.sumaMora) },
+    mora_60: { cantidad: b.mora_60.cantidad, sumaCapital: fmt(b.mora_60.sumaCapital), sumaMora: fmt(b.mora_60.sumaMora) },
+    mora_90: { cantidad: b.mora_90.cantidad, sumaCapital: fmt(b.mora_90.sumaCapital), sumaMora: fmt(b.mora_90.sumaMora) },
+    mora_120_plus: { cantidad: b.mora_120_plus.cantidad, sumaCapital: fmt(b.mora_120_plus.sumaCapital), sumaMora: fmt(b.mora_120_plus.sumaMora) },
+    totalEnMora: { cantidad: totalCantidad, sumaMora: fmt(totalMora) },
+  };
+}
+
+export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?: string } = {}) {
+  const rows = await db.execute<{
+    asesor_id: number;
+    nombre: string;
+    email_asesor: string | null;
+    bucket: keyof BucketsAcc;
+    cantidad: number;
+    suma_capital: string;
+    suma_mora: string;
+  }>(sql`
+    WITH mora_activa AS (
+      SELECT DISTINCT ON (credito_id)
+        credito_id,
+        cuotas_atrasadas,
+        monto_mora
+      FROM cartera.moras_credito
+      WHERE activa           = true
+        AND cuotas_atrasadas > 0
+      ORDER BY credito_id, mora_id DESC
+    )
+    SELECT
+      a.asesor_id,
+      a.nombre,
+      a.email_cash_in         AS email_asesor,
+      CASE
+        WHEN m.cuotas_atrasadas >= 4 THEN 'mora_120_plus'
+        WHEN m.cuotas_atrasadas = 3  THEN 'mora_90'
+        WHEN m.cuotas_atrasadas = 2  THEN 'mora_60'
+        ELSE                              'mora_30'
+      END                             AS bucket,
+      COUNT(*)::int                   AS cantidad,
+      COALESCE(SUM(c.capital::numeric), 0)    AS suma_capital,
+      COALESCE(SUM(m.monto_mora::numeric), 0) AS suma_mora
+    FROM mora_activa m
+    INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
+    INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
+    WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      ${emailCobrador ? sql`AND a.email_cash_in = ${emailCobrador}` : sql``}
+    GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
+  `);
+
+  const totalAcc = emptyBuckets();
+  const asesorMap = new Map<number, { asesorId: number; nombre: string; email: string; acc: BucketsAcc }>();
+
+  for (const row of rows.rows) {
+    const bucket = row.bucket;
+    const cantidad = row.cantidad;
+    const sumaCapital = Number(row.suma_capital);
+    const sumaMora = Number(row.suma_mora);
+
+    totalAcc[bucket].cantidad += cantidad;
+    totalAcc[bucket].sumaCapital += sumaCapital;
+    totalAcc[bucket].sumaMora += sumaMora;
+
+    if (!asesorMap.has(row.asesor_id)) {
+      asesorMap.set(row.asesor_id, { asesorId: row.asesor_id, nombre: row.nombre, email: row.email_asesor ?? "", acc: emptyBuckets() });
+    }
+    const entry = asesorMap.get(row.asesor_id)!;
+    entry.acc[bucket].cantidad += cantidad;
+    entry.acc[bucket].sumaCapital += sumaCapital;
+    entry.acc[bucket].sumaMora += sumaMora;
+  }
+
+  const porAsesor = Array.from(asesorMap.values())
+    .sort((a, b) => {
+      const tA = a.acc.mora_30.sumaMora + a.acc.mora_60.sumaMora + a.acc.mora_90.sumaMora + a.acc.mora_120_plus.sumaMora;
+      const tB = b.acc.mora_30.sumaMora + b.acc.mora_60.sumaMora + b.acc.mora_90.sumaMora + b.acc.mora_120_plus.sumaMora;
+      return tB - tA;
+    })
+    .map((e) => ({ asesorId: e.asesorId, nombre: e.nombre, email: e.email, ...serializeBuckets(e.acc) }));
+
+  return { totales: serializeBuckets(totalAcc), porAsesor };
 }

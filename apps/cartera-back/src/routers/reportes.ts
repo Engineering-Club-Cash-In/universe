@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { getCobradoDelMes, getColocacionPorPeriodo, getComparativoHistorico, getEsperadoDelMes, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
+import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMoraByEtapaYAsesor, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -95,7 +95,7 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "mes y anio son requeridos y deben ser válidos" };
       }
-      const data = await getCobradoDelMes({ mes: m, anio: a });
+      const data = await getCobradoDelMesSnapshot({ mes: m, anio: a });
       set.status = 200;
       return data;
     } catch (error) {
@@ -191,7 +191,7 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "mes y anio son requeridos y deben ser válidos" };
       }
-      const data = await getEsperadoDelMes({ mes: m, anio: a });
+      const data = await getEsperadoDelMesMeta({ mes: m, anio: a });
       set.status = 200;
       return data;
     } catch (error) {
@@ -244,6 +244,19 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/comparativo-historico]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/mora-por-etapa-asesor", async ({ query, set }) => {
+    try {
+      const { email_cobrador } = query as Record<string, string>;
+      const data = await getMoraByEtapaYAsesor({ emailCobrador: email_cobrador });
+      set.status = 200;
+      return data;
+    } catch (error) {
+      console.error("[/reportes/mora-por-etapa-asesor]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

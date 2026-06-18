@@ -106,6 +106,24 @@ function RouteComponent() {
 		}
 	}, [session, sessionError, sessionPending, userProfile.isPending, canAccess, navigate]);
 
+	if (isPending) {
+		return (
+			<div className="flex h-96 items-center justify-center text-muted-foreground">
+				Cargando...
+			</div>
+		);
+	}
+
+	if (!canAccess) return null;
+
+	return (
+		<div className="container mx-auto space-y-6 p-6">
+			<TiempoCierreContent />
+		</div>
+	);
+}
+
+export function TiempoCierreContent() {
 	const [dateRange, setDateRange] = useState<DateRange | undefined>(getDefaultDateRange);
 
 	const input =
@@ -117,18 +135,8 @@ function RouteComponent() {
 		...orpc.getReporteTiempoCierre.queryOptions({
 			input: input ?? { startDate: "", endDate: "" },
 		}),
-		enabled: canAccess && !!input,
+		enabled: !!input,
 	});
-
-	if (isPending) {
-		return (
-			<div className="flex h-96 items-center justify-center text-muted-foreground">
-				Cargando...
-			</div>
-		);
-	}
-
-	if (!canAccess) return null;
 
 	const data = reportQuery.data;
 	const isLoading = reportQuery.isLoading;
@@ -147,7 +155,7 @@ function RouteComponent() {
 	const chartHeight = Math.max(280, chartData.length * BAR_HEIGHT_PX);
 
 	return (
-		<div className="container mx-auto space-y-6 p-6">
+		<div className="space-y-6">
 			<div>
 				<h1 className="font-bold text-3xl tracking-tight">
 					Tiempo Cierre Crédito

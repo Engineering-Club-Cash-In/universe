@@ -86,10 +86,6 @@ function RouteComponent() {
 	const isPending =
 		sessionPending || userProfile.isPending || (!session && !sessionError);
 
-	const now = nowGT();
-	const [mes, setMes] = useState<number>(now.getUTCMonth() + 1);
-	const [anio, setAnio] = useState<number>(now.getUTCFullYear());
-
 	useEffect(() => {
 		if (
 			shouldRedirectToLogin({
@@ -112,11 +108,6 @@ function RouteComponent() {
 		navigate,
 	]);
 
-	const reportQuery = useQuery({
-		...orpc.getReporteMetaColocacion.queryOptions({ input: { anio, mes } }),
-		enabled: canAccess,
-	});
-
 	if (isPending) {
 		return (
 			<div className="flex h-96 items-center justify-center text-muted-foreground">
@@ -126,6 +117,22 @@ function RouteComponent() {
 	}
 
 	if (!canAccess) return null;
+
+	return (
+		<div className="container mx-auto max-w-5xl space-y-6 p-6">
+			<MetaColocacionContent />
+		</div>
+	);
+}
+
+export function MetaColocacionContent() {
+	const now = nowGT();
+	const [mes, setMes] = useState<number>(now.getUTCMonth() + 1);
+	const [anio, setAnio] = useState<number>(now.getUTCFullYear());
+
+	const reportQuery = useQuery(
+		orpc.getReporteMetaColocacion.queryOptions({ input: { anio, mes } }),
+	);
 
 	const data = reportQuery.data;
 	const isLoading = reportQuery.isLoading;
@@ -139,7 +146,7 @@ function RouteComponent() {
 	const porColaborador = data?.porColaborador ?? [];
 
 	return (
-		<div className="container mx-auto max-w-5xl space-y-6 p-6">
+		<div className="space-y-6">
 			{/* Header */}
 			<div>
 				<h1 className="font-bold text-2xl">Meta de Colocación</h1>

@@ -89,6 +89,10 @@ export const Route = createFileRoute("/crm/quoter")({
 });
 
 import {
+	applyMembershipAdjustment,
+	getMembershipAdjustment,
+} from "@/utils/membership-adjustment";
+import {
 	calculateQuotation,
 	GARANTIA_MOBILIARIA_INTERNO,
 	GPS_COST,
@@ -113,6 +117,8 @@ interface QuotationFormValues {
 		| "microbus_20"
 		| "microbus_35"
 		| "microbus_36plus";
+	vehicleCondition: "new" | "used";
+	vehicleOrigin: "agencia" | "rodado" | "importado" | "subasta" | "otro";
 	vehicleValue: number;
 	insuredAmount: number;
 	downPayment: number;
@@ -122,7 +128,10 @@ interface QuotationFormValues {
 	gpsCost: number;
 	transferCost: number;
 	adminCost: number;
+	baseMembershipCost: number;
 	membershipCost: number;
+	membershipAdjustmentCategory: string;
+	membershipAdjustmentPercentage: number;
 	freelanceCost: number;
 	freelancePercentage: number;
 	royalty: number;
@@ -764,6 +773,7 @@ function QuoterPage() {
 		value: string;
 		label: string;
 	} | null>(null);
+	const [vehicleConditionLocked, setVehicleConditionLocked] = useState(false);
 
 	// Estado del formulario
 	const [calculatedValues, setCalculatedValues] = useState({
@@ -783,13 +793,14 @@ function QuoterPage() {
 		mutationFn: async (values: any) => {
 			return await client.createQuotation(values);
 		},
-		onSuccess: () => {
-			toast.success("Cotización creada exitosamente");
-			queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
-			quoterForm.reset();
-			setIsInterno(false);
-			setOpportunityVehicle(null);
-			setCalculatedValues({
+			onSuccess: () => {
+				toast.success("Cotización creada exitosamente");
+				queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
+				quoterForm.reset();
+				setIsInterno(false);
+				setOpportunityVehicle(null);
+				setVehicleConditionLocked(false);
+				setCalculatedValues({
 				amountToFinance: 0,
 				totalFinanced: 0,
 				monthlyPayment: 0,
@@ -814,53 +825,60 @@ function QuoterPage() {
 	});
 
 	// Form
+	const defaultQuotationValues: QuotationFormValues = {
+		opportunityId: "",
+		vehicleId: "",
+		creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
+		vehicleBrand: "",
+		vehicleLine: "",
+		vehicleModel: "",
+		vehicleType: "particular" as const,
+		vehicleCondition: "used" as const,
+		vehicleOrigin: "agencia" as const,
+		vehicleValue: 0,
+		insuredAmount: 0,
+		downPayment: 0,
+		termMonths: 60,
+		interestRate: 1.5, // default autocompra; sobre_vehiculo usa 3
+		insuranceCost: 0,
+		gpsCost: GPS_COST,
+		transferCost: 545, // 395 + 150 según Excel
+		adminCost: 0,
+		baseMembershipCost: 0,
+		membershipCost: 0,
+		membershipAdjustmentCategory: "",
+		membershipAdjustmentPercentage: 0,
+		// Gastos adicionales para detalle de crédito
+		freelanceCost: 0,
+		freelancePercentage: 0,
+		royalty: 0,
+		royaltyPercentage: 4.0,
+		inspectionCost: 0,
+		finesCost: 0,
+		keyCopyCost: 0,
+		keyCopyDiffCost: 0,
+		circulationTaxCost: 0,
+		vehicleTransferCost: 0,
+		mobileGuaranteeCost: 400,
+		licensePlatesCost: 0,
+		leasingContractCost: 400,
+		collectionAuthCost: 0,
+		legalCost: 0,
+		// Gastos específicos de Autocompras
+		appointmentCost: 150,
+		addressVerificationCost: 395,
+		// Interés calculado automáticamente
+		interestCost: 0,
+		// Gastos extra (separados de los principales)
+		extraGpsCost: 0,
+		extraInsuranceCost: 0,
+		extraMembershipCost: 0,
+		extraAdminCost: 600,
+		rcdpCost: 0,
+	};
+
 	const quoterForm = useForm({
-		defaultValues: {
-			opportunityId: "",
-			vehicleId: "",
-			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
-			vehicleBrand: "",
-			vehicleLine: "",
-			vehicleModel: "",
-			vehicleType: "particular" as const,
-			vehicleValue: 0,
-			insuredAmount: 0,
-			downPayment: 0,
-			termMonths: 60,
-			interestRate: 1.5, // default autocompra; sobre_vehiculo usa 3
-			insuranceCost: 0,
-			gpsCost: GPS_COST,
-			transferCost: 545, // 395 + 150 según Excel
-			adminCost: 0,
-			membershipCost: 0,
-			// Gastos adicionales para detalle de crédito
-			freelanceCost: 0,
-			freelancePercentage: 0,
-			royalty: 0,
-			royaltyPercentage: 4.0,
-			inspectionCost: 0,
-			finesCost: 0,
-			keyCopyCost: 0,
-			keyCopyDiffCost: 0,
-			circulationTaxCost: 0,
-			vehicleTransferCost: 0,
-			mobileGuaranteeCost: 400,
-			licensePlatesCost: 0,
-			leasingContractCost: 400,
-			collectionAuthCost: 0,
-			legalCost: 0,
-			// Gastos específicos de Autocompras
-			appointmentCost: 150,
-			addressVerificationCost: 395,
-			// Interés calculado automáticamente
-			interestCost: 0,
-			// Gastos extra (separados de los principales)
-			extraGpsCost: 0,
-			extraInsuranceCost: 0,
-			extraMembershipCost: 0,
-			extraAdminCost: 600,
-			rcdpCost: 0,
-		},
+		defaultValues: defaultQuotationValues,
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
 				opportunityId: value.opportunityId || undefined,
@@ -870,6 +888,8 @@ function QuoterPage() {
 				vehicleLine: value.vehicleLine,
 				vehicleModel: value.vehicleModel,
 				vehicleType: value.vehicleType,
+				vehicleCondition: value.vehicleCondition,
+				vehicleOrigin: value.vehicleOrigin,
 				vehicleValue: Number(value.vehicleValue),
 				insuredAmount: Number(value.insuredAmount),
 				downPayment: Number(value.downPayment),
@@ -949,10 +969,84 @@ function QuoterPage() {
 	// Tipos de bus RCDP (membresía ya incluida en la tarifa)
 	const BUS_TYPES = ["microbus_20", "microbus_35", "microbus_36plus"];
 
+	const normalizeVehicleOrigin = (
+		origin?: string | null,
+	): QuotationFormValues["vehicleOrigin"] => {
+		const normalized = (origin ?? "").trim().toLowerCase();
+		if (normalized.includes("rodado")) return "rodado";
+		if (normalized.includes("import")) return "importado";
+		if (normalized.includes("subasta")) return "subasta";
+		if (normalized.includes("agencia")) return "agencia";
+		return "otro";
+	};
+
+	const normalizeVehicleTypeForQuoter = (
+		vehicleType?: string | null,
+	): QuotationFormValues["vehicleType"] => {
+		const normalized = (vehicleType ?? "").trim().toLowerCase();
+
+		if (
+			[
+				"particular",
+				"sedan",
+				"sedán",
+				"hatchback",
+				"suv",
+				"minivan",
+				"deportivo",
+				"otro",
+			].includes(normalized)
+		) {
+			return "particular";
+		}
+		if (normalized === "bus hasta 20 pasajeros") return "microbus_20";
+		if (normalized === "bus 21-35 pasajeros") return "microbus_35";
+		if (normalized === "bus más de 35 pasajeros") return "microbus_36plus";
+		if (normalized === "bus mas de 35 pasajeros") return "microbus_36plus";
+		if (["pickup", "pick up", "pick-up"].includes(normalized)) {
+			return "pickup";
+		}
+		if (normalized === "nuevo") return "nuevo";
+		if (normalized === "uber") return "uber";
+		if (normalized === "panel") return "panel";
+		if (normalized === "camion" || normalized === "camión") return "camion";
+		if (normalized === "microbus" || normalized === "microbús") {
+			return "microbus";
+		}
+		if (normalized === "microbus_20") return "microbus_20";
+		if (normalized === "microbus_35") return "microbus_35";
+		if (normalized === "microbus_36plus") return "microbus_36plus";
+
+		return "particular";
+	};
+
+	const applyVehicleConditionAndOrigin = (vehicle?: {
+		isNew?: boolean | null;
+		origin?: string | null;
+	}) => {
+		if (!vehicle) return null;
+
+		const vehicleCondition: QuotationFormValues["vehicleCondition"] = vehicle.isNew
+			? "new"
+			: "used";
+		const vehicleOrigin = normalizeVehicleOrigin(vehicle.origin);
+		quoterForm.setFieldValue("vehicleCondition", vehicleCondition);
+		quoterForm.setFieldValue("vehicleOrigin", vehicleOrigin);
+		setVehicleConditionLocked(true);
+
+		return { condition: vehicleCondition, origin: vehicleOrigin };
+	};
+
 	// Obtener costo de seguro automáticamente
 	const updateInsuranceCost = async (
 		insuredAmount: number,
 		vehicleType: string,
+		vehicleContext?: {
+			creditType?: "autocompra" | "sobre_vehiculo";
+			condition?: "new" | "used";
+			isInterno?: boolean;
+			origin?: string | null;
+		},
 	) => {
 		if (insuredAmount <= 0) return;
 
@@ -964,11 +1058,47 @@ function QuoterPage() {
 
 			const baseInsuranceCost =
 				Math.round(result.baseInsuranceCost * 100) / 100;
-			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
+			const rawMembershipCostBeforeAdjustment =
+				Math.round(result.membershipCost * 100) / 100;
+			quoterForm.setFieldValue(
+				"baseMembershipCost",
+				rawMembershipCostBeforeAdjustment,
+			);
+			const condition =
+				vehicleContext?.condition ??
+				quoterForm.getFieldValue("vehicleCondition") ??
+				"used";
+			const origin =
+				vehicleContext?.origin ??
+				quoterForm.getFieldValue("vehicleOrigin") ??
+				"agencia";
+			const membershipAdjustment = getMembershipAdjustment({
+				creditType:
+					vehicleContext?.creditType ?? quoterForm.state.values.creditType,
+				insuredAmount,
+				vehicleType,
+				isNew: condition === "new",
+				condition,
+				origin,
+			});
+			const rawMembershipCost = applyMembershipAdjustment(
+				rawMembershipCostBeforeAdjustment,
+				membershipAdjustment,
+			);
+			quoterForm.setFieldValue(
+				"membershipAdjustmentCategory",
+				membershipAdjustment.category,
+			);
+			quoterForm.setFieldValue(
+				"membershipAdjustmentPercentage",
+				membershipAdjustment.percentage,
+			);
+			const shouldUseInterno = vehicleContext?.isInterno ?? isInterno;
 
-			if (isInterno) {
+			if (shouldUseInterno) {
 				// Crédito interno: solo seguro base, sin membresía ni GPS
 				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("baseMembershipCost", 0);
 				quoterForm.setFieldValue("membershipCost", 0);
 				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
 				quoterForm.setFieldValue("extraMembershipCost", 0);
@@ -987,14 +1117,49 @@ function QuoterPage() {
 			quoterForm.setFieldValue("rcdpCost", result.rcdpCost);
 
 			// Recalcular después de actualizar
-			setTimeout(() => recalculate(), 100);
+			setTimeout(() => recalculate(shouldUseInterno), 100);
 		} catch (error) {
 			console.error("Error al obtener costo de seguro:", error);
 		}
 	};
 
+	const applyCreditTypeChange = async (
+		creditType: QuotationFormValues["creditType"],
+	) => {
+		quoterForm.setFieldValue("creditType", creditType);
+
+		const shouldUseInterno = creditType === "sobre_vehiculo" ? false : isInterno;
+
+		if (creditType === "sobre_vehiculo") {
+			setIsInterno(false);
+			quoterForm.setFieldValue("appointmentCost", 0);
+			quoterForm.setFieldValue("interestRate", 3);
+			quoterForm.setFieldValue("downPayment", 0);
+		} else {
+			quoterForm.setFieldValue("addressVerificationCost", 395);
+			quoterForm.setFieldValue("appointmentCost", 150);
+			quoterForm.setFieldValue("interestRate", 1.5);
+		}
+
+		const insuredAmount = quoterForm.getFieldValue("insuredAmount") ?? 0;
+		if (insuredAmount > 0) {
+			await updateInsuranceCost(
+				insuredAmount,
+				quoterForm.getFieldValue("vehicleType"),
+				{
+					creditType,
+					condition: quoterForm.getFieldValue("vehicleCondition"),
+					isInterno: shouldUseInterno,
+					origin: quoterForm.getFieldValue("vehicleOrigin"),
+				},
+			);
+		}
+
+		setTimeout(() => recalculate(shouldUseInterno), 100);
+	};
+
 	// Función para recalcular cuando cambian los valores (según Excel)
-	const recalculate = () => {
+	const recalculate = (isInternoOverride = isInterno) => {
 		const values = quoterForm.state.values;
 
 		const result = calculateQuotation({
@@ -1008,7 +1173,7 @@ function QuoterPage() {
 			transferCost: Number(values.transferCost),
 			royaltyPercentage: Number(values.royaltyPercentage),
 			rcdpCost: Number(values.rcdpCost),
-			isInterno,
+			isInterno: isInternoOverride,
 		});
 
 		quoterForm.setFieldValue("royalty", result.calculatedRoyalty);
@@ -1046,6 +1211,8 @@ function QuoterPage() {
 		year: number;
 		licensePlate: string | null;
 		vehicleType?: string | null;
+		isNew?: boolean | null;
+		origin?: string | null;
 	}) => {
 		// Guardar el vehículo para mostrarlo en el combobox
 		setOpportunityVehicle({
@@ -1060,10 +1227,9 @@ function QuoterPage() {
 		quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
 
 		// Establecer el tipo de vehículo si viene de la oportunidad
-		const vehicleTypeToUse =
-			(vehicle.vehicleType as typeof quoterForm.state.values.vehicleType) ||
-			"particular";
+		const vehicleTypeToUse = normalizeVehicleTypeForQuoter(vehicle.vehicleType);
 		quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
+		const vehicleContext = applyVehicleConditionAndOrigin(vehicle);
 
 		// Obtener la inspección más reciente para el marketValue
 		try {
@@ -1091,6 +1257,7 @@ function QuoterPage() {
 						? quoterForm.state.values.insuredAmount || numericValue
 						: numericValue,
 					vehicleTypeToUse,
+					vehicleContext ?? undefined,
 				);
 			}
 		} catch (error) {
@@ -1106,6 +1273,9 @@ function QuoterPage() {
 			quoterForm.setFieldValue("vehicleBrand", vehicle.make);
 			quoterForm.setFieldValue("vehicleLine", vehicle.model);
 			quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
+			const vehicleTypeToUse = normalizeVehicleTypeForQuoter(vehicle.vehicleType);
+			quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
+			const vehicleContext = applyVehicleConditionAndOrigin(vehicle);
 
 			// El marketValue está en la inspección más reciente
 			const latestInspection = vehicle.inspections?.[0];
@@ -1128,14 +1298,22 @@ function QuoterPage() {
 					isSobreVehiculo
 						? quoterForm.state.values.insuredAmount || numericValue
 						: numericValue,
-					quoterForm.state.values.vehicleType,
+					vehicleTypeToUse,
+					vehicleContext ?? undefined,
 				);
 			}
 		}
 	};
 
 	// Cargar cotización existente de una oportunidad
-	const loadExistingQuotation = async (opportunityId: string) => {
+	const loadExistingQuotation = async (
+		opportunityId: string,
+		fallbackVehicle?: {
+			id: string;
+			isNew?: boolean | null;
+			origin?: string | null;
+		},
+	): Promise<boolean> => {
 		try {
 			const quotations = await client.listQuotationsByOpportunity({
 				opportunityId,
@@ -1143,16 +1321,37 @@ function QuoterPage() {
 
 			if (quotations && quotations.length > 0) {
 				const q = quotations[0]; // La más reciente
+				const savedVehicleContext = q as typeof q & {
+					vehicleCondition?: QuotationFormValues["vehicleCondition"] | null;
+					vehicleOrigin?: QuotationFormValues["vehicleOrigin"] | null;
+				};
+				const linkedVehicle = q.vehicleId
+					? (vehiclesQuery.data?.data?.find(
+							(vehicle) => vehicle.id === q.vehicleId,
+						) ??
+						(fallbackVehicle?.id === q.vehicleId ? fallbackVehicle : undefined))
+					: undefined;
 
 				// Cargar todos los campos de la cotización
 				quoterForm.setFieldValue("vehicleId", q.vehicleId || "");
 				quoterForm.setFieldValue("vehicleBrand", q.vehicleBrand || "");
 				quoterForm.setFieldValue("vehicleLine", q.vehicleLine || "");
 				quoterForm.setFieldValue("vehicleModel", q.vehicleModel || "");
-				const vehicleTypeToUse =
-					(q.vehicleType as typeof quoterForm.state.values.vehicleType) ||
-					"particular";
+				const vehicleTypeToUse = normalizeVehicleTypeForQuoter(q.vehicleType);
 				quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
+				if (linkedVehicle) {
+					applyVehicleConditionAndOrigin(linkedVehicle);
+				} else {
+					quoterForm.setFieldValue(
+						"vehicleCondition",
+						savedVehicleContext.vehicleCondition ?? "used",
+					);
+					quoterForm.setFieldValue(
+						"vehicleOrigin",
+						savedVehicleContext.vehicleOrigin ?? "agencia",
+					);
+					setVehicleConditionLocked(false);
+				}
 				quoterForm.setFieldValue("vehicleValue", Number(q.vehicleValue) || 0);
 				quoterForm.setFieldValue("insuredAmount", Number(q.insuredAmount) || 0);
 				quoterForm.setFieldValue("downPayment", Number(q.downPayment) || 0);
@@ -1252,9 +1451,13 @@ function QuoterPage() {
 				setTimeout(() => recalculate(), 100);
 
 				toast.success("Cotización existente cargada");
+				return true;
 			}
+
+			return false;
 		} catch (error) {
 			console.error("Error al cargar cotización existente:", error);
+			return false;
 		}
 	};
 
@@ -1377,15 +1580,28 @@ function QuoterPage() {
 													const selectedOpp = opportunitiesQuery.data?.find(
 														(opp: any) => opp.id === value,
 													);
-													if (selectedOpp?.creditType) {
-														quoterForm.setFieldValue(
-															"creditType",
-															selectedOpp.creditType,
-														);
-													}
+											if (selectedOpp?.creditType) {
+												quoterForm.setFieldValue(
+													"creditType",
+													selectedOpp.creditType,
+												);
+											}
 
-													// Intentar cargar cotización existente primero
-													await loadExistingQuotation(value);
+											// Intentar cargar cotización existente primero
+											const loadedExistingQuotation = await loadExistingQuotation(
+												value,
+												selectedOpp?.vehicle ?? undefined,
+											);
+											if (!loadedExistingQuotation) {
+												if (selectedOpp?.vehicle) {
+													await handleOpportunityVehicleSelect(
+														selectedOpp.vehicle,
+													);
+												}
+												if (selectedOpp?.creditType) {
+													await applyCreditTypeChange(selectedOpp.creditType);
+												}
+											}
 
 													// Guardar vehículo de la oportunidad para el combobox
 													if (selectedOpp?.vehicle?.id) {
@@ -1394,10 +1610,11 @@ function QuoterPage() {
 															label: `${selectedOpp.vehicle.make} ${selectedOpp.vehicle.model} ${selectedOpp.vehicle.year} - ${selectedOpp.vehicle.licensePlate || ""}`,
 														});
 													}
-												} else {
-													// Limpiar vehículo de oportunidad cuando se deselecciona
-													setOpportunityVehicle(null);
-												}
+										} else {
+											// Limpiar vehículo de oportunidad cuando se deselecciona
+											setOpportunityVehicle(null);
+											setVehicleConditionLocked(false);
+										}
 											}}
 											onSearchChange={setOpportunitiesSearch}
 											isLoading={opportunitiesQuery.isFetching}
@@ -1424,33 +1641,16 @@ function QuoterPage() {
 												<Label htmlFor={field.name} className="mb-2">
 													Tipo de Crédito
 												</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) => {
-														field.handleChange(
-															value as "autocompra" | "sobre_vehiculo",
-														);
-														// Resetear crédito interno al cambiar tipo
-														if (value === "sobre_vehiculo") {
-															setIsInterno(false);
-														}
-														// Actualizar campos específicos según tipo de crédito
-														if (value === "autocompra") {
-															quoterForm.setFieldValue(
-																"addressVerificationCost",
-																395,
-															);
-															quoterForm.setFieldValue("appointmentCost", 150);
-															quoterForm.setFieldValue("interestRate", 1.5);
-														} else {
-															quoterForm.setFieldValue("appointmentCost", 0);
-															quoterForm.setFieldValue("interestRate", 3);
-															// En sobre vehículo no hay enganche, limpiar
-															quoterForm.setFieldValue("downPayment", 0);
-														}
-														// Recalcular después del cambio de tipo
-														setTimeout(() => recalculate(), 100);
-													}}
+										<Select
+											value={field.state.value}
+											onValueChange={(value) => {
+												field.handleChange(
+													value as QuotationFormValues["creditType"],
+												);
+												void applyCreditTypeChange(
+													value as QuotationFormValues["creditType"],
+												);
+											}}
 													disabled={isDisabled}
 												>
 													<SelectTrigger>
@@ -1521,11 +1721,12 @@ function QuoterPage() {
 														updateInsuranceCost(
 															insuredAmount,
 															quoterForm.state.values.vehicleType,
+															{ isInterno: false },
 														);
 													}
 												}
-												setTimeout(() => recalculate(), 100);
-											}}
+											setTimeout(() => recalculate(value), 100);
+										}}
 										/>
 										<Label
 											htmlFor="isInterno"
@@ -1673,6 +1874,93 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
+
+									<div className="grid gap-4 sm:grid-cols-2">
+										<quoterForm.Field name="vehicleCondition">
+											{(field) => {
+												return (
+													<div>
+														<Label htmlFor={field.name} className="mb-2">
+															Condición
+														</Label>
+														<Select
+															disabled={vehicleConditionLocked}
+															value={field.state.value}
+															onValueChange={(value) => {
+																const condition = value as "new" | "used";
+																field.handleChange(condition);
+																const insuredAmount =
+																	quoterForm.getFieldValue("insuredAmount") ?? 0;
+																if (insuredAmount > 0) {
+																	updateInsuranceCost(
+																		insuredAmount,
+																		quoterForm.state.values.vehicleType,
+																		{
+																			condition,
+																			origin: quoterForm.getFieldValue("vehicleOrigin"),
+																		},
+																	);
+																}
+															}}
+														>
+															<SelectTrigger>
+																<SelectValue placeholder="Seleccionar condición..." />
+															</SelectTrigger>
+															<SelectContent>
+																<SelectItem value="new">Nuevo</SelectItem>
+																<SelectItem value="used">Usado</SelectItem>
+															</SelectContent>
+														</Select>
+													</div>
+												);
+											}}
+										</quoterForm.Field>
+
+										<quoterForm.Field name="vehicleOrigin">
+											{(field) => {
+												return (
+													<div>
+														<Label htmlFor={field.name} className="mb-2">
+															Origen
+														</Label>
+														<Select
+															disabled={vehicleConditionLocked}
+															value={field.state.value}
+															onValueChange={(value) => {
+																const origin =
+																	value as QuotationFormValues["vehicleOrigin"];
+																field.handleChange(origin);
+																const insuredAmount =
+																	quoterForm.getFieldValue("insuredAmount") ?? 0;
+																if (insuredAmount > 0) {
+																	updateInsuranceCost(
+																		insuredAmount,
+																		quoterForm.state.values.vehicleType,
+																		{
+																			condition:
+																				quoterForm.getFieldValue("vehicleCondition"),
+																			origin,
+																		},
+																	);
+																}
+															}}
+														>
+															<SelectTrigger>
+																<SelectValue placeholder="Seleccionar origen..." />
+															</SelectTrigger>
+															<SelectContent>
+																<SelectItem value="agencia">Agencia</SelectItem>
+																<SelectItem value="rodado">Rodado</SelectItem>
+																<SelectItem value="importado">Importado</SelectItem>
+																<SelectItem value="subasta">Subasta</SelectItem>
+																<SelectItem value="otro">Otro</SelectItem>
+															</SelectContent>
+														</Select>
+													</div>
+												);
+											}}
+										</quoterForm.Field>
+									</div>
 
 									<quoterForm.Field name="vehicleValue">
 										{(field) => (
@@ -1896,7 +2184,6 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
-
 									<quoterForm.Field name="gpsCost">
 										{(field) => (
 											<div>

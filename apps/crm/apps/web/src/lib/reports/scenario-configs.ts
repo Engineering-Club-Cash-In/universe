@@ -58,12 +58,8 @@ export const montoACobrarConfig: ScenarioReportConfig<MontoACobrarRow[]> = {
 			valor: sumBy(rows, (r) => num(r.total_membresias)),
 		},
 		{
-			// mora_promedio ya es un promedio por bucket; promediamos entre
-			// buckets para no inflar el valor con la cantidad de períodos.
-			concepto: "Mora prom.",
-			valor: rows.length
-				? sumBy(rows, (r) => num(r.mora_promedio)) / rows.length
-				: 0,
+			concepto: "Total mora",
+			valor: sumBy(rows, (r) => num(r.total_mora)),
 		},
 	],
 };
@@ -78,10 +74,9 @@ export const facturacionConfig: ScenarioReportConfig<FacturacionMesResponse> = {
 	summarize: (data) => [
 		{ concepto: "Capital", valor: num(data.cobrado.capital) },
 		{ concepto: "Interés", valor: num(data.cobrado.interes) },
-		{ concepto: "IVA", valor: num(data.cobrado.iva) },
-		{ concepto: "Seguro", valor: num(data.cobrado.seguro) },
-		{ concepto: "GPS", valor: num(data.cobrado.gps) },
 		{ concepto: "Membresías", valor: num(data.cobrado.membresias) },
+		{ concepto: "Seguro + GPS", valor: num(data.cobrado.seguro_gps) },
+		{ concepto: "Royaltí", valor: num(data.cobrado.royalti) },
 	],
 };
 

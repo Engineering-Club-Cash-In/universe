@@ -1023,6 +1023,16 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
     suma_capital: string;
     suma_mora: string;
   }>(sql`
+    WITH mora_activa AS (
+      SELECT DISTINCT ON (credito_id)
+        credito_id,
+        cuotas_atrasadas,
+        monto_mora
+      FROM cartera.moras_credito
+      WHERE activa           = true
+        AND cuotas_atrasadas > 0
+      ORDER BY credito_id, mora_id DESC
+    )
     SELECT
       a.asesor_id,
       a.nombre,
@@ -1036,12 +1046,10 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
       COUNT(*)::int                   AS cantidad,
       COALESCE(SUM(c.capital::numeric), 0)    AS suma_capital,
       COALESCE(SUM(m.monto_mora::numeric), 0) AS suma_mora
-    FROM cartera.moras_credito m
+    FROM mora_activa m
     INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
     INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
-    WHERE m.activa           = true
-      AND m.cuotas_atrasadas > 0
-      AND c."statusCredit"   IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+    WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
       ${emailCobrador ? sql`AND a.email_cash_in = ${emailCobrador}` : sql``}
     GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
   `);

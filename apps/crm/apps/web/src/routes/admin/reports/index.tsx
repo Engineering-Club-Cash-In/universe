@@ -76,8 +76,6 @@ import type {
 	ComparativoHistoricoRow,
 	FacturacionMesResponse,
 	FacturacionMesRubro,
-	FlujoCuotasInversionesResponse,
-	FlujoCuotasRubro,
 	MontoACobrarPeriodoRow,
 	MontoACobrarRow,
 	PuntoEquilibrioRow,
@@ -536,19 +534,6 @@ function RouteComponent() {
 		| FacturacionMesResponse
 		| undefined;
 
-	const flujoCuotasQuery = useQuery({
-		...orpc.getFlujoCuotasInversiones.queryOptions({
-			input: {
-				fechaInicio: flujoCuotasRange.fechaInicio,
-				fechaFin: flujoCuotasRange.fechaFin,
-			},
-		}),
-		enabled: isAdmin,
-	});
-	const flujoCuotasData = flujoCuotasQuery.data as
-		| FlujoCuotasInversionesResponse
-		| undefined;
-
 	// Sección "Cuotas → Reinversión": se calcula desde la tabla de liquidaciones.
 	const reinversionLiquidacionesQuery = useQuery({
 		...orpc.getReinversionLiquidaciones.queryOptions({
@@ -710,6 +695,10 @@ function RouteComponent() {
 			maximumFractionDigits: 2,
 		}).format(num);
 	};
+
+	// Igual que formatCurrency pero muestra "—" cuando el monto es 0.
+	const dash = (value: string | number | null | undefined) =>
+		Number(value ?? 0) === 0 ? "—" : formatCurrency(value);
 
 	const moraData = dashboardData.data?.morosidad || [];
 	const totalEnMora = moraData
@@ -1811,26 +1800,26 @@ function RouteComponent() {
 																<TableRow key={f.tipo}>
 																	<TableCell>{f.label}</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.capital)}
+																		{dash(f.capital)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.interes)}
+																		{dash(f.interes)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.total)}
+																		{dash(f.total)}
 																	</TableCell>
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total Reinvertido</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.capital)}
+																	{dash(totales.capital)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.interes)}
+																	{dash(totales.interes)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.total)}
+																	{dash(totales.total)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -1910,38 +1899,38 @@ function RouteComponent() {
 																<TableRow key={f.tipo}>
 																	<TableCell>{f.label}</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.capital)}
+																		{dash(f.capital)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.interes)}
+																		{dash(f.interes)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.iva)}
+																		{dash(f.iva)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.isr)}
+																		{dash(f.isr)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.total)}
+																		{dash(f.total)}
 																	</TableCell>
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total a Recibir</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.capital)}
+																	{dash(totales.capital)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.interes)}
+																	{dash(totales.interes)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.iva)}
+																	{dash(totales.iva)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.isr)}
+																	{dash(totales.isr)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.total)}
+																	{dash(totales.total)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -1988,46 +1977,46 @@ function RouteComponent() {
 															<TableRow>
 																<TableCell>Con Factura</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(cf.interes)}
+																	{dash(cf.interes)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(cf.iva)}
+																	{dash(cf.iva)}
 																</TableCell>
 																<TableCell className="text-right text-muted-foreground">
 																	—
 																</TableCell>
 																<TableCell className="text-right font-semibold">
-																	{formatCurrency(cf.neto)}
+																	{dash(cf.neto)}
 																</TableCell>
 															</TableRow>
 															<TableRow>
 																<TableCell>Sin Factura</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(sf.interes)}
+																	{dash(sf.interes)}
 																</TableCell>
 																<TableCell className="text-right text-muted-foreground">
 																	—
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(sf.isr)}
+																	{dash(sf.isr)}
 																</TableCell>
 																<TableCell className="text-right font-semibold">
-																	{formatCurrency(sf.neto)}
+																	{dash(sf.neto)}
 																</TableCell>
 															</TableRow>
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalInteres)}
+																	{dash(totalInteres)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalIva)}
+																	{dash(totalIva)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalIsr)}
+																	{dash(totalIsr)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalNeto)}
+																	{dash(totalNeto)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -2036,65 +2025,48 @@ function RouteComponent() {
 											);
 										})()}
 
-									{flujoCuotasQuery.isPending && (
-										<div className="py-4 text-center text-muted-foreground text-sm">
-											Cargando...
-										</div>
-									)}
-									{flujoCuotasQuery.isError && (
-										<div className="py-4 text-center text-destructive text-sm">
-											Error al cargar datos
-										</div>
-									)}
-									{flujoCuotasData &&
+									{/* Sección 3: Pagos Extras Recibidos */}
+									{reinversionData &&
 										(() => {
-											const { pagosExtras } = flujoCuotasData;
+											const pe = reinversionData.pagosExtras;
 											const totalExtras =
-												Number(pagosExtras.abonos_capital) +
-												Number(pagosExtras.cancelaciones);
+												Number(pe.abonos_capital) + Number(pe.cancelaciones);
 											return (
-												<>
-													{/* Sección 3: Pagos Extras Recibidos */}
-													<div className={SECCION_REPORTE_CLASS}>
-														<p className="mb-2 font-semibold text-sm">
-															Pagos Extras Recibidos
-														</p>
-														<Table>
-															<TableHeader>
-																<TableRow>
-																	<TableHead>Tipo</TableHead>
-																	<TableHead className="text-right">
-																		Monto
-																	</TableHead>
-																</TableRow>
-															</TableHeader>
-															<TableBody>
-																<TableRow>
-																	<TableCell>Abonos Extra a Capital</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			Number(pagosExtras.abonos_capital),
-																		)}
-																	</TableCell>
-																</TableRow>
-																<TableRow>
-																	<TableCell>Cancelaciones</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			Number(pagosExtras.cancelaciones),
-																		)}
-																	</TableCell>
-																</TableRow>
-																<TableRow className="border-t-2 bg-muted/50 font-bold">
-																	<TableCell>Total</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(totalExtras)}
-																	</TableCell>
-																</TableRow>
-															</TableBody>
-														</Table>
-													</div>
-												</>
+												<div className={SECCION_REPORTE_CLASS}>
+													<p className="mb-2 font-semibold text-sm">
+														Pagos Extras Recibidos
+													</p>
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Tipo</TableHead>
+																<TableHead className="text-right">
+																	Monto
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															<TableRow>
+																<TableCell>Abonos Extra a Capital</TableCell>
+																<TableCell className="text-right">
+																	{dash(pe.abonos_capital)}
+																</TableCell>
+															</TableRow>
+															<TableRow>
+																<TableCell>Cancelaciones</TableCell>
+																<TableCell className="text-right">
+																	{dash(pe.cancelaciones)}
+																</TableCell>
+															</TableRow>
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total</TableCell>
+																<TableCell className="text-right">
+																	{dash(totalExtras)}
+																</TableCell>
+															</TableRow>
+														</TableBody>
+													</Table>
+												</div>
 											);
 										})()}
 

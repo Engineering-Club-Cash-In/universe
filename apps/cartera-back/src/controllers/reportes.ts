@@ -726,6 +726,58 @@ export async function getReinversionLiquidaciones({
     }
   }
 
+  // Pagos extras recibidos (abonos a capital / cancelaciones) que fluyen desde
+  // las liquidaciones del mes: liquidación → pago espejo → abono.
+  // Cada abono se cuenta una sola vez (DISTINCT) aunque tenga varios pagos espejo.
+  const extrasRows = await db.execute(sql`
+    SELECT a.tipo, COALESCE(SUM(a.monto::numeric), 0) AS total
+    FROM cartera.abonos_capital a
+    WHERE a.abono_id IN (
+      SELECT DISTINCT e.abono_capital_id
+      FROM cartera.pagos_credito_inversionistas_espejo e
+      JOIN cartera.liquidaciones l ON l.liquidacion_id = e.liquidacion_id
+      WHERE e.abono_capital_id IS NOT NULL
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    )
+    GROUP BY a.tipo
+  `);
+
+  let abonosCapital = 0;
+  let cancelaciones = 0;
+  for (const r of extrasRows.rows as Record<string, unknown>[]) {
+    if (r.tipo === "CAPITAL") abonosCapital = Number(r.total ?? 0);
+    if (r.tipo === "CANCELACION") cancelaciones = Number(r.total ?? 0);
+  }
+
+  // Cancelaciones manuales: pagos del espejo (>= Q2,000) liquidados en el mes que
+  // NO quedaron registrados en abonos_capital (abono_capital_id IS NULL) y cuyo
+  // inversionista ya no tiene posición en el crédito (monto_aportado = 0 o ya no
+  // existe la fila en creditos_inversionistas_espejo). Se suman a las formales.
+  const cancelExtraRows = await db.execute(sql`
+    SELECT COALESCE(SUM(t.abono), 0) AS total
+    FROM (
+      SELECT
+        SUM(pe.abono_capital::numeric)                 AS abono,
+        COALESCE(MAX(ce.monto_aportado::numeric), 0)   AS monto_aportado,
+        bool_and(ce.id IS NULL)                        AS sin_fila
+      FROM cartera.pagos_credito_inversionistas_espejo pe
+      JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+      LEFT JOIN cartera.creditos_inversionistas_espejo ce
+        ON ce.credito_id = pe.credito_id
+       AND ce.inversionista_id = pe.inversionista_id
+      WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+        AND pe.abono_capital::numeric >= 2000
+        AND pe.abono_capital_id IS NULL
+      GROUP BY pe.credito_id, pe.inversionista_id
+    ) t
+    WHERE t.monto_aportado = 0 OR t.sin_fila
+  `);
+  cancelaciones += Number(
+    (cancelExtraRows.rows[0] as Record<string, unknown>)?.total ?? 0
+  );
+
   return {
     porTipo,
     interesNeto: {
@@ -739,6 +791,10 @@ export async function getReinversionLiquidaciones({
         isr: sinFactura.isr.toFixed(2),
         neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
       },
+    },
+    pagosExtras: {
+      abonos_capital: abonosCapital.toFixed(2),
+      cancelaciones: cancelaciones.toFixed(2),
     },
     cantidad_liquidaciones: cantidad,
   };

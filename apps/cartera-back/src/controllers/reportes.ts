@@ -368,6 +368,9 @@ export async function getCobradoDelMesSnapshot({
   mes: number;
   anio: number;
 }) {
+  // Filtramos por rango de fecha (no por anio/mes) porque esas columnas helper
+  // pueden venir NULL en filas importadas → quedarían fuera del SUM.
+  const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
   const result = await db.execute(sql`
     SELECT
       COALESCE(SUM(capital_total::numeric), 0)          AS cobrado_capital,
@@ -376,7 +379,8 @@ export async function getCobradoDelMesSnapshot({
       COALESCE(SUM(servicios_seguro_gps::numeric), 0)   AS cobrado_seguro_gps,
       COALESCE(SUM(royalty::numeric), 0)                AS cobrado_royalti
     FROM cartera.facturacion_snapshot_diario
-    WHERE anio = ${anio} AND mes = ${mes}
+    WHERE fecha >= ${inicioMes}::date
+      AND fecha < (${inicioMes}::date + INTERVAL '1 month')
   `);
 
   const row = result.rows[0] as Record<string, unknown> | undefined;

@@ -985,9 +985,24 @@ function QuoterPage() {
 	): QuotationFormValues["vehicleType"] => {
 		const normalized = (vehicleType ?? "").trim().toLowerCase();
 
-		if (["particular", "sedan", "sedán", "suv"].includes(normalized)) {
+		if (
+			[
+				"particular",
+				"sedan",
+				"sedán",
+				"hatchback",
+				"suv",
+				"minivan",
+				"deportivo",
+				"otro",
+			].includes(normalized)
+		) {
 			return "particular";
 		}
+		if (normalized === "bus hasta 20 pasajeros") return "microbus_20";
+		if (normalized === "bus 21-35 pasajeros") return "microbus_35";
+		if (normalized === "bus más de 35 pasajeros") return "microbus_36plus";
+		if (normalized === "bus mas de 35 pasajeros") return "microbus_36plus";
 		if (["pickup", "pick up", "pick-up"].includes(normalized)) {
 			return "pickup";
 		}

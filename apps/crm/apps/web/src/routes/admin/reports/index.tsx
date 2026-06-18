@@ -193,10 +193,9 @@ const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] =
 	[
 		{ key: "capital", label: "Capital" },
 		{ key: "interes", label: "Interés" },
-		{ key: "iva", label: "IVA 12%" },
-		{ key: "seguro", label: "Seguro" },
-		{ key: "gps", label: "GPS" },
 		{ key: "membresias", label: "Membresías" },
+		{ key: "seguro_gps", label: "Seguro + GPS" },
+		{ key: "royalti", label: "Royaltí" },
 	];
 
 const MONTO_COBRAR_COLORS = {
@@ -1635,59 +1634,50 @@ function RouteComponent() {
 												(acc, r) => acc + Number(cobrado[r.key] || 0),
 												0,
 											);
-											const totalEsperado = FACTURACION_RUBROS.reduce(
-												(acc, r) => acc + Number(esperado[r.key] || 0),
-												0,
-											);
+											const totalEsperado = Number(esperado.meta_mensual || 0);
+											const pct = totalEsperado > 0
+												? Math.min((totalCobrado / totalEsperado) * 100, 100)
+												: 0;
 											return (
-												<Table>
-													<TableHeader>
-														<TableRow>
-															<TableHead>Rubro</TableHead>
-															<TableHead className="text-right">
-																Cobrado
-															</TableHead>
-															<TableHead className="text-right">
-																Esperado
-															</TableHead>
-															<TableHead className="w-48">Progreso</TableHead>
-														</TableRow>
-													</TableHeader>
-													<TableBody>
-														{FACTURACION_RUBROS.map(({ key, label }) => (
-															<TableRow key={key}>
-																<TableCell>{label}</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(Number(cobrado[key] || 0))}
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatCurrency(Number(esperado[key] || 0))}
-																</TableCell>
-																<TableCell>
-																	<ProgressBar
-																		value={Number(cobrado[key] || 0)}
-																		max={Number(esperado[key] || 0)}
-																	/>
-																</TableCell>
-															</TableRow>
-														))}
-														<TableRow className="border-t-2 bg-muted/50 font-bold">
-															<TableCell>Total</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalCobrado)}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatCurrency(totalEsperado)}
-															</TableCell>
-															<TableCell>
-																<ProgressBar
-																	value={totalCobrado}
-																	max={totalEsperado}
-																/>
-															</TableCell>
-														</TableRow>
-													</TableBody>
-												</Table>
+												<div className="space-y-6">
+													{/* Resumen total vs meta */}
+													<div className="space-y-3">
+														<div className="grid grid-cols-3 gap-4">
+															<div>
+																<p className="text-muted-foreground text-sm">Total Cobrado</p>
+																<p className="font-bold text-2xl">{formatCurrency(totalCobrado)}</p>
+															</div>
+															<div>
+																<p className="text-muted-foreground text-sm">Meta del Mes</p>
+																<p className="font-bold text-2xl">
+																	{totalEsperado > 0 ? formatCurrency(totalEsperado) : <span className="text-muted-foreground text-base">Sin meta</span>}
+																</p>
+															</div>
+															<div>
+																<p className="text-muted-foreground text-sm">Avance</p>
+																<p className="font-bold text-2xl">{pct.toFixed(1)}%</p>
+															</div>
+														</div>
+														<ProgressBar value={totalCobrado} max={totalEsperado} />
+													</div>
+
+													{/* Desglose por rubro */}
+													<div>
+														<p className="mb-2 font-medium text-muted-foreground text-sm">Desglose por rubro</p>
+														<Table>
+															<TableBody>
+																{FACTURACION_RUBROS.map(({ key, label }) => (
+																	<TableRow key={key}>
+																		<TableCell className="text-muted-foreground">{label}</TableCell>
+																		<TableCell className="text-right font-medium">
+																			{formatCurrency(Number(cobrado[key] || 0))}
+																		</TableCell>
+																	</TableRow>
+																))}
+															</TableBody>
+														</Table>
+													</div>
+												</div>
 											);
 										})()}
 								</CardContent>

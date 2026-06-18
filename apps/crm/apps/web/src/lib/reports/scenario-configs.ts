@@ -78,10 +78,9 @@ export const facturacionConfig: ScenarioReportConfig<FacturacionMesResponse> = {
 	summarize: (data) => [
 		{ concepto: "Capital", valor: num(data.cobrado.capital) },
 		{ concepto: "Interés", valor: num(data.cobrado.interes) },
-		{ concepto: "IVA", valor: num(data.cobrado.iva) },
-		{ concepto: "Seguro", valor: num(data.cobrado.seguro) },
-		{ concepto: "GPS", valor: num(data.cobrado.gps) },
 		{ concepto: "Membresías", valor: num(data.cobrado.membresias) },
+		{ concepto: "Seguro + GPS", valor: num(data.cobrado.seguro_gps) },
+		{ concepto: "Royaltí", valor: num(data.cobrado.royalti) },
 	],
 };
 

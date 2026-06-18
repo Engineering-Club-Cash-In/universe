@@ -186,15 +186,14 @@ class SimpleCache {
 export type FacturacionMesRubro = {
 	capital: string;
 	interes: string;
-	iva: string;
-	seguro: string;
-	gps: string;
 	membresias: string;
+	seguro_gps: string;
+	royalti: string;
 };
 
 export type FacturacionMesResponse = {
 	cobrado: FacturacionMesRubro;
-	esperado: FacturacionMesRubro;
+	esperado: { meta_mensual: string };
 };
 
 export type MontoACobrarRow = {
@@ -1425,40 +1424,24 @@ export class CarteraBackClient {
 			this.request<{
 				cobrado_capital?: string;
 				cobrado_interes?: string;
-				cobrado_iva?: string;
-				cobrado_seguro?: string;
-				cobrado_gps?: string;
 				cobrado_membresias?: string;
+				cobrado_seguro_gps?: string;
+				cobrado_royalti?: string;
 			}>(`/reportes/facturacion-mes-cobrado?${qp}`, { method: "GET" }, true),
 			this.request<{
-				esperado_capital?: string;
-				esperado_interes?: string;
-				esperado_iva?: string;
-				esperado_seguro?: string;
-				esperado_gps?: string;
-				esperado_membresias?: string;
+				meta_mensual?: string;
 			}>(`/reportes/facturacion-mes-esperado?${qp}`, { method: "GET" }, true),
 		]);
 
 		const cobrado: FacturacionMesRubro = {
 			capital: cobradoResult.cobrado_capital ?? "0",
 			interes: cobradoResult.cobrado_interes ?? "0",
-			iva: cobradoResult.cobrado_iva ?? "0",
-			seguro: cobradoResult.cobrado_seguro ?? "0",
-			gps: cobradoResult.cobrado_gps ?? "0",
 			membresias: cobradoResult.cobrado_membresias ?? "0",
+			seguro_gps: cobradoResult.cobrado_seguro_gps ?? "0",
+			royalti: cobradoResult.cobrado_royalti ?? "0",
 		};
 
-		const esperado: FacturacionMesRubro = {
-			capital: esperadoResult.esperado_capital ?? "0",
-			interes: esperadoResult.esperado_interes ?? "0",
-			iva: esperadoResult.esperado_iva ?? "0",
-			seguro: esperadoResult.esperado_seguro ?? "0",
-			gps: esperadoResult.esperado_gps ?? "0",
-			membresias: esperadoResult.esperado_membresias ?? "0",
-		};
-
-		return { cobrado, esperado };
+		return { cobrado, esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" } };
 	}
 
 	async getFlujoCuotasInversiones(params: {

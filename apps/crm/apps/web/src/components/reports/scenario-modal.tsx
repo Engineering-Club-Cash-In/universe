@@ -114,8 +114,11 @@ function LeverSlider({
 				<Label className="text-sm">{cfg.label}</Label>
 				<TooltipProvider>
 					<Tooltip>
-						<TooltipTrigger asChild>
-							<Info className="h-3.5 w-3.5 cursor-pointer text-muted-foreground" />
+						<TooltipTrigger
+							aria-label={hint}
+							className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						>
+							<Info className="h-3.5 w-3.5 text-muted-foreground" />
 						</TooltipTrigger>
 						<TooltipContent className="max-w-56 text-xs">
 							{hint}

@@ -269,6 +269,8 @@ export type ReinversionLiquidacionesResponse = {
 	porTipo: Record<
 		string,
 		{
+			reinversion_capital: string;
+			reinversion_interes: string;
 			reinversion_total: string;
 			total_capital: string;
 			total_interes: string;
@@ -286,6 +288,8 @@ export type ReinversionLiquidacionesResponse = {
 		conFactura: { interes: string; iva: string; neto: string };
 		sinFactura: { interes: string; isr: string; neto: string };
 	};
+	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
+	pagosExtras: { abonos_capital: string; cancelaciones: string };
 	cantidad_liquidaciones: number;
 };
 

@@ -904,16 +904,19 @@ export async function getReinversionLiquidaciones({
   );
 
   // Compras del mes (solo operación de compra, no reinversión), agrupadas por
-  // la modalidad de reinversión elegida. Se filtra por fecha_completada.
+  // la modalidad de reinversión elegida. La fecha efectiva prioriza
+  // fecha_completada y cae a updated_at cuando es NULL (columna nueva, registros
+  // viejos sin completar) — mismo criterio que utils/comprasAjuste.ts.
+  const fechaCompra = sql`COALESCE(c.fecha_completada, c.updated_at)`;
   const comprasRows = await db.execute(sql`
     SELECT
       COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo,
-      COUNT(DISTINCT (c.inversionista_id, c.fecha_completada))::int AS cantidad,
+      COUNT(DISTINCT (c.inversionista_id, ${fechaCompra}))::int AS cantidad,
       COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
     FROM cartera.compras_credito_inversionista c
     WHERE c.tipo_operacion = 'compra_cartera'
-      AND (c.fecha_completada AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
-      AND (c.fecha_completada AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+      AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     GROUP BY c.tipo_reinversion
     ORDER BY monto DESC
   `);

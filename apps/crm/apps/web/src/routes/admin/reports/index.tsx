@@ -76,8 +76,6 @@ import type {
 	ComparativoHistoricoRow,
 	FacturacionMesResponse,
 	FacturacionMesRubro,
-	FlujoCuotasInversionesResponse,
-	FlujoCuotasRubro,
 	MontoACobrarPeriodoRow,
 	MontoACobrarRow,
 	PuntoEquilibrioRow,
@@ -305,9 +303,7 @@ function fillMissingPeriods(
 	const toKey = (d: Date) =>
 		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-	const dataMap = new Map(
-		data.map((row) => [row.bucket.slice(0, 10), row]),
-	);
+	const dataMap = new Map(data.map((row) => [row.bucket.slice(0, 10), row]));
 
 	const dates: Date[] = [];
 	const start = new Date(`${fechaInicio}T12:00:00`);
@@ -538,19 +534,6 @@ function RouteComponent() {
 		| FacturacionMesResponse
 		| undefined;
 
-	const flujoCuotasQuery = useQuery({
-		...orpc.getFlujoCuotasInversiones.queryOptions({
-			input: {
-				fechaInicio: flujoCuotasRange.fechaInicio,
-				fechaFin: flujoCuotasRange.fechaFin,
-			},
-		}),
-		enabled: isAdmin,
-	});
-	const flujoCuotasData = flujoCuotasQuery.data as
-		| FlujoCuotasInversionesResponse
-		| undefined;
-
 	// Sección "Cuotas → Reinversión": se calcula desde la tabla de liquidaciones.
 	const reinversionLiquidacionesQuery = useQuery({
 		...orpc.getReinversionLiquidaciones.queryOptions({
@@ -712,6 +695,10 @@ function RouteComponent() {
 			maximumFractionDigits: 2,
 		}).format(num);
 	};
+
+	// Igual que formatCurrency pero muestra "—" cuando el monto es 0.
+	const dash = (value: string | number | null | undefined) =>
+		Number(value ?? 0) === 0 ? "—" : formatCurrency(value);
 
 	const moraData = dashboardData.data?.morosidad || [];
 	const totalEnMora = moraData
@@ -1262,20 +1249,35 @@ function RouteComponent() {
 														montoCobrarPeriodo,
 														montoCobrarRange.fechaInicio,
 														montoCobrarRange.fechaFin,
-													).map(
-														(row: MontoACobrarPeriodoRow) => {
-															const a = montoCobrarAcumulado;
-															return {
-																bucket: formatBucket(row.bucket, montoCobrarPeriodo),
-																total_cuota: Number.parseFloat(a ? row.acum_total_cuota : row.total_cuota),
-																total_interes: Number.parseFloat(a ? row.acum_total_interes : row.total_interes),
-																total_iva: Number.parseFloat(a ? row.acum_total_iva : row.total_iva),
-																total_seguro: Number.parseFloat(a ? row.acum_total_seguro : row.total_seguro),
-																total_gps: Number.parseFloat(a ? row.acum_total_gps : row.total_gps),
-																total_membresias: Number.parseFloat(a ? row.acum_total_membresias : row.total_membresias),
-															};
-														},
-													)}
+													).map((row: MontoACobrarPeriodoRow) => {
+														const a = montoCobrarAcumulado;
+														return {
+															bucket: formatBucket(
+																row.bucket,
+																montoCobrarPeriodo,
+															),
+															total_cuota: Number.parseFloat(
+																a ? row.acum_total_cuota : row.total_cuota,
+															),
+															total_interes: Number.parseFloat(
+																a ? row.acum_total_interes : row.total_interes,
+															),
+															total_iva: Number.parseFloat(
+																a ? row.acum_total_iva : row.total_iva,
+															),
+															total_seguro: Number.parseFloat(
+																a ? row.acum_total_seguro : row.total_seguro,
+															),
+															total_gps: Number.parseFloat(
+																a ? row.acum_total_gps : row.total_gps,
+															),
+															total_membresias: Number.parseFloat(
+																a
+																	? row.acum_total_membresias
+																	: row.total_membresias,
+															),
+														};
+													})}
 												>
 													<CartesianGrid strokeDasharray="3 3" />
 													<XAxis
@@ -1356,66 +1358,86 @@ function RouteComponent() {
 															montoCobrarPeriodo,
 															montoCobrarRange.fechaInicio,
 															montoCobrarRange.fechaFin,
-														).map(
-															(row: MontoACobrarPeriodoRow) => {
-																const a = montoCobrarAcumulado;
-																const cuota = a ? row.acum_total_cuota : row.total_cuota;
-																const interes = a ? row.acum_total_interes : row.total_interes;
-																const iva = a ? row.acum_total_iva : row.total_iva;
-																const seguro = a ? row.acum_total_seguro : row.total_seguro;
-																const gps = a ? row.acum_total_gps : row.total_gps;
-																const membresias = a ? row.acum_total_membresias : row.total_membresias;
-																const total =
-																	Number.parseFloat(cuota) +
-																	Number.parseFloat(interes) +
-																	Number.parseFloat(iva) +
-																	Number.parseFloat(seguro) +
-																	Number.parseFloat(gps) +
-																	Number.parseFloat(membresias);
-																return (
-																	<TableRow key={row.bucket}>
-																		<TableCell>
-																			{formatBucket(row.bucket, montoCobrarPeriodo)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{row.cuotas_count}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(cuota)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(interes)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(iva)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(seguro)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(gps)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{formatCurrency(membresias)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			<div>{formatCurrency(row.mora_promedio)}</div>
-																			<div
-																				className="text-xs text-muted-foreground cursor-help"
-																				title="% de cuotas del período con mora activa"
-																			>
-																				{row.cuotas_count > 0
-																					? ((row.mora_count / row.cuotas_count) * 100).toFixed(1)
-																					: "0.0"}%
-																			</div>
-																		</TableCell>
-																		<TableCell className="text-right font-bold">
-																			{formatCurrency(total)}
-																		</TableCell>
-																	</TableRow>
-																);
-															},
-														)}
+														).map((row: MontoACobrarPeriodoRow) => {
+															const a = montoCobrarAcumulado;
+															const cuota = a
+																? row.acum_total_cuota
+																: row.total_cuota;
+															const interes = a
+																? row.acum_total_interes
+																: row.total_interes;
+															const iva = a
+																? row.acum_total_iva
+																: row.total_iva;
+															const seguro = a
+																? row.acum_total_seguro
+																: row.total_seguro;
+															const gps = a
+																? row.acum_total_gps
+																: row.total_gps;
+															const membresias = a
+																? row.acum_total_membresias
+																: row.total_membresias;
+															const total =
+																Number.parseFloat(cuota) +
+																Number.parseFloat(interes) +
+																Number.parseFloat(iva) +
+																Number.parseFloat(seguro) +
+																Number.parseFloat(gps) +
+																Number.parseFloat(membresias);
+															return (
+																<TableRow key={row.bucket}>
+																	<TableCell>
+																		{formatBucket(
+																			row.bucket,
+																			montoCobrarPeriodo,
+																		)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{row.cuotas_count}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(cuota)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(interes)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(iva)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(seguro)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(gps)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(membresias)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		<div>
+																			{formatCurrency(row.mora_promedio)}
+																		</div>
+																		<div
+																			className="cursor-help text-muted-foreground text-xs"
+																			title="% de cuotas del período con mora activa"
+																		>
+																			{row.cuotas_count > 0
+																				? (
+																						(row.mora_count /
+																							row.cuotas_count) *
+																						100
+																					).toFixed(1)
+																				: "0.0"}
+																			%
+																		</div>
+																	</TableCell>
+																	<TableCell className="text-right font-bold">
+																		{formatCurrency(total)}
+																	</TableCell>
+																</TableRow>
+															);
+														})}
 														{(() => {
 															const rows =
 																montoCobrarData.data as MontoACobrarPeriodoRow[];
@@ -1430,9 +1452,13 @@ function RouteComponent() {
 																		),
 																	0,
 																);
-															const val = (key: keyof MontoACobrarPeriodoRow) =>
+															const val = (
+																key: keyof MontoACobrarPeriodoRow,
+															) =>
 																a && lastRow
-																	? Number.parseFloat((lastRow[key] as string) || "0")
+																	? Number.parseFloat(
+																			(lastRow[key] as string) || "0",
+																		)
 																	: sum(key);
 															const grandTotal =
 																val("acum_total_cuota") +
@@ -1441,8 +1467,20 @@ function RouteComponent() {
 																val("acum_total_seguro") +
 																val("acum_total_gps") +
 																val("acum_total_membresias");
-															const totalCred = a && lastRow ? lastRow.cuotas_count : rows.reduce((acc, r) => acc + r.cuotas_count, 0);
-															const totalMora = a && lastRow ? lastRow.mora_count : rows.reduce((acc, r) => acc + r.mora_count, 0);
+															const totalCred =
+																a && lastRow
+																	? lastRow.cuotas_count
+																	: rows.reduce(
+																			(acc, r) => acc + r.cuotas_count,
+																			0,
+																		);
+															const totalMora =
+																a && lastRow
+																	? lastRow.mora_count
+																	: rows.reduce(
+																			(acc, r) => acc + r.mora_count,
+																			0,
+																		);
 															return (
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
 																	<TableCell>Total</TableCell>
@@ -1450,22 +1488,48 @@ function RouteComponent() {
 																		{totalCred}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_cuota" : "total_cuota"))}
+																		{formatCurrency(
+																			val(
+																				a ? "acum_total_cuota" : "total_cuota",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_interes" : "total_interes"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_interes"
+																					: "total_interes",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_iva" : "total_iva"))}
+																		{formatCurrency(
+																			val(a ? "acum_total_iva" : "total_iva"),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_seguro" : "total_seguro"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_seguro"
+																					: "total_seguro",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_gps" : "total_gps"))}
+																		{formatCurrency(
+																			val(a ? "acum_total_gps" : "total_gps"),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(val(a ? "acum_total_membresias" : "total_membresias"))}
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_membresias"
+																					: "total_membresias",
+																			),
+																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{totalCred > 0
@@ -1698,22 +1762,34 @@ function RouteComponent() {
 											</div>
 										) : reinversionData ? (
 											(() => {
-												const filas = REINVERSION_MODALIDADES.map((m) => ({
-													...m,
-													monto: Number(
-														reinversionData.porTipo[m.tipo]
-															?.reinversion_total ?? 0,
-													),
-												})).filter((f) => f.monto !== 0);
-												const totalMostrado = filas.reduce(
-													(a, f) => a + f.monto,
-													0,
+												const filas = REINVERSION_MODALIDADES.map((m) => {
+													const d = reinversionData.porTipo[m.tipo];
+													return {
+														...m,
+														capital: Number(d?.reinversion_capital ?? 0),
+														interes: Number(d?.reinversion_interes ?? 0),
+														total: Number(d?.reinversion_total ?? 0),
+													};
+												}).filter((f) => f.total !== 0);
+												const totales = filas.reduce(
+													(a, f) => ({
+														capital: a.capital + f.capital,
+														interes: a.interes + f.interes,
+														total: a.total + f.total,
+													}),
+													{ capital: 0, interes: 0, total: 0 },
 												);
 												return (
 													<Table>
 														<TableHeader>
 															<TableRow>
 																<TableHead>Modalidad de Reinversión</TableHead>
+																<TableHead className="text-right">
+																	Capital
+																</TableHead>
+																<TableHead className="text-right">
+																	Interés
+																</TableHead>
 																<TableHead className="text-right">
 																	Reinversión Total
 																</TableHead>
@@ -1724,14 +1800,26 @@ function RouteComponent() {
 																<TableRow key={f.tipo}>
 																	<TableCell>{f.label}</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.monto)}
+																		{dash(f.capital)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{dash(f.interes)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{dash(f.total)}
 																	</TableCell>
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total Reinvertido</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalMostrado)}
+																	{dash(totales.capital)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{dash(totales.interes)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{dash(totales.total)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -1811,38 +1899,38 @@ function RouteComponent() {
 																<TableRow key={f.tipo}>
 																	<TableCell>{f.label}</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.capital)}
+																		{dash(f.capital)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.interes)}
+																		{dash(f.interes)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.iva)}
+																		{dash(f.iva)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.isr)}
+																		{dash(f.isr)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(f.total)}
+																		{dash(f.total)}
 																	</TableCell>
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total a Recibir</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.capital)}
+																	{dash(totales.capital)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.interes)}
+																	{dash(totales.interes)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.iva)}
+																	{dash(totales.iva)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.isr)}
+																	{dash(totales.isr)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totales.total)}
+																	{dash(totales.total)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -1889,46 +1977,46 @@ function RouteComponent() {
 															<TableRow>
 																<TableCell>Con Factura</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(cf.interes)}
+																	{dash(cf.interes)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(cf.iva)}
+																	{dash(cf.iva)}
 																</TableCell>
 																<TableCell className="text-right text-muted-foreground">
 																	—
 																</TableCell>
 																<TableCell className="text-right font-semibold">
-																	{formatCurrency(cf.neto)}
+																	{dash(cf.neto)}
 																</TableCell>
 															</TableRow>
 															<TableRow>
 																<TableCell>Sin Factura</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(sf.interes)}
+																	{dash(sf.interes)}
 																</TableCell>
 																<TableCell className="text-right text-muted-foreground">
 																	—
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(sf.isr)}
+																	{dash(sf.isr)}
 																</TableCell>
 																<TableCell className="text-right font-semibold">
-																	{formatCurrency(sf.neto)}
+																	{dash(sf.neto)}
 																</TableCell>
 															</TableRow>
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalInteres)}
+																	{dash(totalInteres)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalIva)}
+																	{dash(totalIva)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalIsr)}
+																	{dash(totalIsr)}
 																</TableCell>
 																<TableCell className="text-right">
-																	{formatCurrency(totalNeto)}
+																	{dash(totalNeto)}
 																</TableCell>
 															</TableRow>
 														</TableBody>
@@ -1937,65 +2025,48 @@ function RouteComponent() {
 											);
 										})()}
 
-									{flujoCuotasQuery.isPending && (
-										<div className="py-4 text-center text-muted-foreground text-sm">
-											Cargando...
-										</div>
-									)}
-									{flujoCuotasQuery.isError && (
-										<div className="py-4 text-center text-destructive text-sm">
-											Error al cargar datos
-										</div>
-									)}
-									{flujoCuotasData &&
+									{/* Sección 3: Pagos Extras Recibidos */}
+									{reinversionData &&
 										(() => {
-											const { pagosExtras } = flujoCuotasData;
+											const pe = reinversionData.pagosExtras;
 											const totalExtras =
-												Number(pagosExtras.abonos_capital) +
-												Number(pagosExtras.cancelaciones);
+												Number(pe.abonos_capital) + Number(pe.cancelaciones);
 											return (
-												<>
-													{/* Sección 3: Pagos Extras Recibidos */}
-													<div className={SECCION_REPORTE_CLASS}>
-														<p className="mb-2 font-semibold text-sm">
-															Pagos Extras Recibidos
-														</p>
-														<Table>
-															<TableHeader>
-																<TableRow>
-																	<TableHead>Tipo</TableHead>
-																	<TableHead className="text-right">
-																		Monto
-																	</TableHead>
-																</TableRow>
-															</TableHeader>
-															<TableBody>
-																<TableRow>
-																	<TableCell>Abonos Extra a Capital</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			Number(pagosExtras.abonos_capital),
-																		)}
-																	</TableCell>
-																</TableRow>
-																<TableRow>
-																	<TableCell>Cancelaciones</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			Number(pagosExtras.cancelaciones),
-																		)}
-																	</TableCell>
-																</TableRow>
-																<TableRow className="border-t-2 bg-muted/50 font-bold">
-																	<TableCell>Total</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(totalExtras)}
-																	</TableCell>
-																</TableRow>
-															</TableBody>
-														</Table>
-													</div>
-												</>
+												<div className={SECCION_REPORTE_CLASS}>
+													<p className="mb-2 font-semibold text-sm">
+														Pagos Extras Recibidos
+													</p>
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>Tipo</TableHead>
+																<TableHead className="text-right">
+																	Monto
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															<TableRow>
+																<TableCell>Abonos Extra a Capital</TableCell>
+																<TableCell className="text-right">
+																	{dash(pe.abonos_capital)}
+																</TableCell>
+															</TableRow>
+															<TableRow>
+																<TableCell>Cancelaciones</TableCell>
+																<TableCell className="text-right">
+																	{dash(pe.cancelaciones)}
+																</TableCell>
+															</TableRow>
+															<TableRow className="border-t-2 bg-muted/50 font-bold">
+																<TableCell>Total</TableCell>
+																<TableCell className="text-right">
+																	{dash(totalExtras)}
+																</TableCell>
+															</TableRow>
+														</TableBody>
+													</Table>
+												</div>
 											);
 										})()}
 

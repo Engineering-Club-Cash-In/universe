@@ -271,8 +271,6 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 				fechaCierre: opportunities.actualCloseDate,
 				// Día del mes en que paga (1-31), tomado de la oportunidad.
 				diaPago: opportunities.diaPagoMensual,
-				// Total de filas que cumplen el filtro (antes de LIMIT/OFFSET).
-				total: sql<number>`COUNT(*) OVER()`,
 			})
 			.from(opportunities)
 			.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -300,14 +298,21 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 			.where(whereClause)
 			.orderBy(desc(opportunities.actualCloseDate));
 
-		const result = input.pageSize
+		const rows = input.pageSize
 			? await baseQuery
 					.limit(input.pageSize)
 					.offset(((input.page ?? 1) - 1) * input.pageSize)
 			: await baseQuery;
 
-		const total = Number(result[0]?.total ?? 0);
-		const rows = result.map(({ total: _total, ...row }) => row);
+		// Conteo total independiente de la página. Cada oportunidad produce
+		// exactamente una fila (los joins están deduplicados a rn=1), así que
+		// contar oportunidades que cumplen el filtro = total real. Con esto, una
+		// página fuera de rango (datos borrados o page stale) deja de reportar 0.
+		const totalResult = await db
+			.select({ total: count() })
+			.from(opportunities)
+			.where(whereClause);
+		const total = totalResult[0]?.total ?? 0;
 
 		// Solo la exportación (sin paginar) puede traer todo; ahí aplicamos el tope.
 		if (!input.pageSize) {

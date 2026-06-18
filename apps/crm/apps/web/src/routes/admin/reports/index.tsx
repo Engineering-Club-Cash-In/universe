@@ -536,6 +536,17 @@ function RouteComponent() {
 		enabled: canAccessClosedCreditsReport,
 	});
 
+	// Si la página quedó fuera de rango (datos borrados / page stale), el total
+	// del server sigue siendo correcto: volvemos a la última página válida en vez
+	// de mostrar el mes vacío.
+	useEffect(() => {
+		const total = closedCreditsReport.data?.total ?? 0;
+		const totalPages = Math.max(1, Math.ceil(total / CLOSED_CREDITS_PAGE_SIZE));
+		if (closedCreditsPage > totalPages) {
+			setClosedCreditsPage(totalPages);
+		}
+	}, [closedCreditsReport.data?.total, closedCreditsPage]);
+
 	const montoCobrarQuery = useQuery({
 		...orpc.getMontoACobrarPeriodo.queryOptions({
 			input: {

@@ -1077,8 +1077,40 @@ function QuoterPage() {
 			// Recalcular después de actualizar
 			setTimeout(() => recalculate(), 100);
 		} catch (error) {
-			console.error("Error al obtener costo de seguro:", error);
+		console.error("Error al obtener costo de seguro:", error);
+	}
+	};
+
+	const applyCreditTypeChange = async (
+		creditType: QuotationFormValues["creditType"],
+	) => {
+		quoterForm.setFieldValue("creditType", creditType);
+
+		if (creditType === "sobre_vehiculo") {
+			setIsInterno(false);
+			quoterForm.setFieldValue("appointmentCost", 0);
+			quoterForm.setFieldValue("interestRate", 3);
+			quoterForm.setFieldValue("downPayment", 0);
+		} else {
+			quoterForm.setFieldValue("addressVerificationCost", 395);
+			quoterForm.setFieldValue("appointmentCost", 150);
+			quoterForm.setFieldValue("interestRate", 1.5);
 		}
+
+		const insuredAmount = quoterForm.getFieldValue("insuredAmount") ?? 0;
+		if (insuredAmount > 0) {
+			await updateInsuranceCost(
+				insuredAmount,
+				quoterForm.getFieldValue("vehicleType"),
+				{
+					creditType,
+					condition: quoterForm.getFieldValue("vehicleCondition"),
+					origin: quoterForm.getFieldValue("vehicleOrigin"),
+				},
+			);
+		}
+
+		setTimeout(() => recalculate(), 100);
 	};
 
 	// Función para recalcular cuando cambian los valores (según Excel)
@@ -1240,7 +1272,7 @@ function QuoterPage() {
 			isNew?: boolean | null;
 			origin?: string | null;
 		},
-	) => {
+	): Promise<boolean> => {
 		try {
 			const quotations = await client.listQuotationsByOpportunity({
 				opportunityId,
@@ -1380,9 +1412,13 @@ function QuoterPage() {
 				setTimeout(() => recalculate(), 100);
 
 				toast.success("Cotización existente cargada");
+				return true;
 			}
+
+			return false;
 		} catch (error) {
 			console.error("Error al cargar cotización existente:", error);
+			return false;
 		}
 	};
 
@@ -1505,19 +1541,21 @@ function QuoterPage() {
 													const selectedOpp = opportunitiesQuery.data?.find(
 														(opp: any) => opp.id === value,
 													);
-													if (selectedOpp?.creditType) {
-														quoterForm.setFieldValue(
-															"creditType",
-															selectedOpp.creditType,
-														);
-													}
-
+											if (selectedOpp?.creditType) {
+												quoterForm.setFieldValue(
+													"creditType",
+													selectedOpp.creditType,
+												);
+											}
 
 											// Intentar cargar cotización existente primero
-											await loadExistingQuotation(
+											const loadedExistingQuotation = await loadExistingQuotation(
 												value,
 												selectedOpp?.vehicle ?? undefined,
 											);
+											if (!loadedExistingQuotation && selectedOpp?.creditType) {
+												await applyCreditTypeChange(selectedOpp.creditType);
+											}
 
 													// Guardar vehículo de la oportunidad para el combobox
 													if (selectedOpp?.vehicle?.id) {
@@ -1557,48 +1595,15 @@ function QuoterPage() {
 												<Label htmlFor={field.name} className="mb-2">
 													Tipo de Crédito
 												</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) => {
-														field.handleChange(
-															value as "autocompra" | "sobre_vehiculo",
-														);
-														// Resetear crédito interno al cambiar tipo
-														if (value === "sobre_vehiculo") {
-															setIsInterno(false);
-														}
-														// Actualizar campos específicos según tipo de crédito
-														if (value === "autocompra") {
-															quoterForm.setFieldValue(
-																"addressVerificationCost",
-																395,
-															);
-															quoterForm.setFieldValue("appointmentCost", 150);
-															quoterForm.setFieldValue("interestRate", 1.5);
-														} else {
-															quoterForm.setFieldValue("appointmentCost", 0);
-															quoterForm.setFieldValue("interestRate", 3);
-															// En sobre vehículo no hay enganche, limpiar
-															quoterForm.setFieldValue("downPayment", 0);
-														}
-												// Recalcular después del cambio de tipo
-												const insuredAmount =
-													quoterForm.getFieldValue("insuredAmount") ?? 0;
-												if (insuredAmount > 0) {
-													updateInsuranceCost(
-														insuredAmount,
-														quoterForm.state.values.vehicleType,
-														{
-															creditType: value as
-																| "autocompra"
-																| "sobre_vehiculo",
-															condition:
-																quoterForm.getFieldValue("vehicleCondition"),
-															origin: quoterForm.getFieldValue("vehicleOrigin"),
-														},
-													);
-												}
-												setTimeout(() => recalculate(), 100);
+										<Select
+											value={field.state.value}
+											onValueChange={(value) => {
+												field.handleChange(
+													value as QuotationFormValues["creditType"],
+												);
+												void applyCreditTypeChange(
+													value as QuotationFormValues["creditType"],
+												);
 											}}
 													disabled={isDisabled}
 												>

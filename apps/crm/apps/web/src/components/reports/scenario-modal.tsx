@@ -5,7 +5,7 @@
  * cliente y muestra el resultado simulado vs real. No modifica datos reales.
  */
 
-import { Sparkles } from "lucide-react";
+import { AlertTriangle, Info, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
 	Bar,
@@ -13,7 +13,7 @@ import {
 	CartesianGrid,
 	Legend,
 	ResponsiveContainer,
-	Tooltip,
+	Tooltip as RechartsTooltip,
 	XAxis,
 	YAxis,
 } from "recharts";
@@ -27,6 +27,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
 	Table,
 	TableBody,
@@ -93,17 +99,29 @@ function LeverSlider({
 	lever,
 	value,
 	onChange,
+	hintOverride,
 }: {
 	lever: Exclude<LeverKey, "metodo">;
 	value: number;
 	onChange: (v: number) => void;
+	hintOverride?: string;
 }) {
 	const cfg = LEVER_LABELS[lever];
+	const hint = hintOverride ?? cfg.hint;
 	return (
 		<div className="space-y-1.5">
-			<div className="flex items-center justify-between">
+			<div className="flex items-center gap-1.5">
 				<Label className="text-sm">{cfg.label}</Label>
-				<span className="text-muted-foreground text-xs">{cfg.hint}</span>
+				<TooltipProvider>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Info className="h-3.5 w-3.5 cursor-pointer text-muted-foreground" />
+						</TooltipTrigger>
+						<TooltipContent className="max-w-56 text-xs">
+							{hint}
+						</TooltipContent>
+					</Tooltip>
+				</TooltipProvider>
 			</div>
 			<div className="flex items-center gap-3">
 				<input
@@ -173,6 +191,7 @@ export function ScenarioModal<T>({
 	);
 
 	const cuota = config.usaMetodoCuota ? cuotaIlustrativa(params) : null;
+	const warning = baseData ? (config.getWarning?.(baseData) ?? null) : null;
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -191,6 +210,12 @@ export function ScenarioModal<T>({
 					</p>
 				) : (
 					<div className="grid gap-6 md:grid-cols-[280px_1fr]">
+						{warning && (
+							<div className="col-span-full flex items-start gap-3 rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+								<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+								<span>{warning}</span>
+							</div>
+						)}
 						{/* Supuestos */}
 						<div className="space-y-4">
 							<h4 className="font-semibold text-sm">Supuestos</h4>
@@ -202,6 +227,7 @@ export function ScenarioModal<T>({
 										lever={lever}
 										value={params[LEVER_FIELD[lever]] as number}
 										onChange={(v) => setField(LEVER_FIELD[lever], v)}
+										hintOverride={config.leverDescriptions?.[lever]}
 									/>
 								))}
 
@@ -299,7 +325,7 @@ export function ScenarioModal<T>({
 										tickFormatter={(v) => `Q${(Number(v) / 1000).toFixed(0)}k`}
 										tick={{ fontSize: 11 }}
 									/>
-									<Tooltip formatter={(v) => formatQ(Number(v))} />
+									<RechartsTooltip formatter={(v) => formatQ(Number(v))} />
 									<Legend />
 									<Bar dataKey="Real" fill="#94a3b8" radius={[4, 4, 0, 0]} />
 									<Bar

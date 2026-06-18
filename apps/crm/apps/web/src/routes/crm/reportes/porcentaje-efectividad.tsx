@@ -1,7 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { subMonths } from "date-fns";
-import { Activity, CheckCircle2, Download, Target, XCircle } from "lucide-react";
+import {
+	Activity,
+	CheckCircle2,
+	Download,
+	Target,
+	XCircle,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import {
@@ -15,7 +20,11 @@ import {
 	YAxis,
 } from "recharts";
 import { toast } from "sonner";
-import { DateRangeFilter } from "@/components/reports/date-range-filter";
+import {
+	DEFAULT_PRESET,
+	RangePresetFilter,
+	rangeForPreset,
+} from "@/components/reports/range-preset-filter";
 import { ReportCard } from "@/components/reports/report-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -98,11 +107,6 @@ function formatDisplayDate(date: Date | string | null): string {
 	}).format(new Date(date));
 }
 
-function getDefaultDateRange(): DateRange {
-	const today = new Date();
-	return { from: subMonths(today, 1), to: today };
-}
-
 // Prefija celdas que empiecen con operadores de fórmula para evitar CSV injection
 function sanitizeCSVCell(value: string): string {
 	return /^[=+\-@]/.test(value) ? `'${value}` : value;
@@ -163,8 +167,8 @@ function RouteComponent() {
 }
 
 export function PorcentajeEfectividadContent() {
-	const [dateRange, setDateRange] = useState<DateRange | undefined>(
-		getDefaultDateRange,
+	const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
+		rangeForPreset(DEFAULT_PRESET),
 	);
 	const [pageSize, setPageSize] = useState(25);
 	const [page, setPage] = useState(0);
@@ -201,7 +205,14 @@ export function PorcentajeEfectividadContent() {
 
 	// exportCSV cierra sobre allRegistros para que el tipo sea inferido por oRPC
 	function exportCSV() {
-		const headers = ["Fecha", "Prospecto", "Fuente", "Etapa", "% Etapa", "¿Cerró?"];
+		const headers = [
+			"Fecha",
+			"Prospecto",
+			"Fuente",
+			"Etapa",
+			"% Etapa",
+			"¿Cerró?",
+		];
 		const rows = allRegistros.map((row) => [
 			formatDisplayDate(row.createdAt),
 			row.nombre || "Sin nombre",
@@ -214,8 +225,7 @@ export function PorcentajeEfectividadContent() {
 			.map((row) =>
 				row
 					.map(
-						(cell) =>
-							`"${sanitizeCSVCell(String(cell)).replace(/"/g, '""')}"`,
+						(cell) => `"${sanitizeCSVCell(String(cell)).replace(/"/g, '""')}"`,
 					)
 					.join(","),
 			)
@@ -250,186 +260,15 @@ export function PorcentajeEfectividadContent() {
 					Porcentaje Efectividad
 				</h1>
 				<p className="mt-1 text-muted-foreground">
-					Oportunidades creadas en el período y si alcanzaron cierre (90%+),
-					con resumen de conversión por fuente.
+					Oportunidades creadas en el período y si alcanzaron cierre (90%+), con
+					resumen de conversión por fuente.
 				</p>
 			</div>
 
-			<DateRangeFilter
+			<RangePresetFilter
 				dateRange={dateRange}
 				onDateRangeChange={setDateRange}
 			/>
-
-			{/* ── Registros individuales (prioridad) ── */}
-			<Card>
-				<CardHeader>
-					<div className="flex items-start justify-between gap-4">
-						<div>
-							<CardTitle>Oportunidades del período</CardTitle>
-							<CardDescription className="mt-1">
-								Todas las oportunidades creadas en el rango seleccionado y su
-								estado de conversión
-							</CardDescription>
-						</div>
-						{allRegistros.length > 0 && (
-							<Button
-								variant="outline"
-								size="sm"
-								className="shrink-0"
-								onClick={exportCSV}
-							>
-								<Download className="mr-2 h-4 w-4" />
-								Exportar CSV
-							</Button>
-						)}
-					</div>
-				</CardHeader>
-				<CardContent className="space-y-3">
-					<div className="max-h-[600px] overflow-y-auto rounded-md border">
-						<Table>
-							<TableHeader className="sticky top-0 z-10 bg-background">
-								<TableRow>
-									<TableHead>Fecha</TableHead>
-									<TableHead>Prospecto</TableHead>
-									<TableHead>Fuente</TableHead>
-									<TableHead>Etapa actual</TableHead>
-									<TableHead className="text-center">¿Cerró?</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{isLoading ? (
-									<TableRow>
-										<TableCell
-											colSpan={5}
-											className="py-8 text-center text-muted-foreground"
-										>
-											Cargando...
-										</TableCell>
-									</TableRow>
-								) : visibleRegistros.length === 0 ? (
-									<TableRow>
-										<TableCell
-											colSpan={5}
-											className="py-8 text-center text-muted-foreground"
-										>
-											No hay datos para el período seleccionado
-										</TableCell>
-									</TableRow>
-								) : (
-									visibleRegistros.map((row) => (
-										<TableRow key={row.id}>
-											<TableCell className="whitespace-nowrap text-muted-foreground text-sm">
-												{formatDisplayDate(row.createdAt)}
-											</TableCell>
-											<TableCell className="font-medium">
-												{row.nombre || (
-													<span className="italic text-muted-foreground">
-														Sin nombre
-													</span>
-												)}
-											</TableCell>
-											<TableCell>
-												<div className="flex items-center gap-2">
-													<span
-														className="h-2 w-2 shrink-0 rounded-full"
-														style={{
-															backgroundColor: getSourceColor(row.source),
-														}}
-													/>
-													{getSourceLabel(row.source)}
-												</div>
-											</TableCell>
-											<TableCell>
-												{row.etapaNombre ? (
-													<span className="text-sm">
-														{row.etapaNombre}{" "}
-														<span className="text-muted-foreground">
-															({row.etapaPorcentaje}%)
-														</span>
-													</span>
-												) : (
-													<span className="italic text-muted-foreground text-sm">
-														Sin etapa
-													</span>
-												)}
-											</TableCell>
-											<TableCell className="text-center">
-												{row.cerro ? (
-													<Badge className="gap-1 bg-green-100 text-green-700 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400">
-														<CheckCircle2 className="h-3 w-3" />
-														Sí
-													</Badge>
-												) : (
-													<Badge
-														variant="outline"
-														className="gap-1 text-muted-foreground"
-													>
-														<XCircle className="h-3 w-3" />
-														No
-													</Badge>
-												)}
-											</TableCell>
-										</TableRow>
-									))
-								)}
-							</TableBody>
-						</Table>
-					</div>
-
-					{/* Footer: paginación + selector de page size */}
-					{!isLoading && allRegistros.length > 0 && (
-						<div className="flex items-center justify-between text-sm text-muted-foreground">
-							<span>
-								{`Mostrando ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, allRegistros.length)} de ${allRegistros.length} registros`}
-							</span>
-							<div className="flex items-center gap-3">
-								<div className="flex items-center gap-2">
-									<span>Mostrar</span>
-									<Select
-										value={String(pageSize)}
-										onValueChange={(v) => {
-											setPageSize(Number(v));
-											setPage(0);
-										}}
-									>
-										<SelectTrigger className="h-7 w-16 text-xs">
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="25">25</SelectItem>
-											<SelectItem value="50">50</SelectItem>
-											<SelectItem value="100">100</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="flex items-center gap-1">
-									<Button
-										variant="outline"
-										size="sm"
-										className="h-7 px-2 text-xs"
-										disabled={page === 0}
-										onClick={() => setPage((p) => p - 1)}
-									>
-										Anterior
-									</Button>
-									<span className="px-2">
-										{page + 1} / {totalPages}
-									</span>
-									<Button
-										variant="outline"
-										size="sm"
-										className="h-7 px-2 text-xs"
-										disabled={page + 1 >= totalPages}
-										onClick={() => setPage((p) => p + 1)}
-									>
-										Siguiente
-									</Button>
-								</div>
-							</div>
-						</div>
-					)}
-				</CardContent>
-			</Card>
 
 			{/* ── Resumen estadístico ── */}
 			<div className="grid gap-4 md:grid-cols-3">
@@ -576,6 +415,177 @@ export function PorcentajeEfectividadContent() {
 							)}
 						</TableBody>
 					</Table>
+				</CardContent>
+			</Card>
+
+			{/* ── Registros individuales (detalle) ── */}
+			<Card>
+				<CardHeader>
+					<div className="flex items-start justify-between gap-4">
+						<div>
+							<CardTitle>Oportunidades del período</CardTitle>
+							<CardDescription className="mt-1">
+								Todas las oportunidades creadas en el rango seleccionado y su
+								estado de conversión
+							</CardDescription>
+						</div>
+						{allRegistros.length > 0 && (
+							<Button
+								variant="outline"
+								size="sm"
+								className="shrink-0"
+								onClick={exportCSV}
+							>
+								<Download className="mr-2 h-4 w-4" />
+								Exportar CSV
+							</Button>
+						)}
+					</div>
+				</CardHeader>
+				<CardContent className="space-y-3">
+					<div className="max-h-[600px] overflow-y-auto rounded-md border">
+						<Table>
+							<TableHeader className="sticky top-0 z-10 bg-background">
+								<TableRow>
+									<TableHead>Fecha</TableHead>
+									<TableHead>Prospecto</TableHead>
+									<TableHead>Fuente</TableHead>
+									<TableHead>Etapa actual</TableHead>
+									<TableHead className="text-center">¿Cerró?</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{isLoading ? (
+									<TableRow>
+										<TableCell
+											colSpan={5}
+											className="py-8 text-center text-muted-foreground"
+										>
+											Cargando...
+										</TableCell>
+									</TableRow>
+								) : visibleRegistros.length === 0 ? (
+									<TableRow>
+										<TableCell
+											colSpan={5}
+											className="py-8 text-center text-muted-foreground"
+										>
+											No hay datos para el período seleccionado
+										</TableCell>
+									</TableRow>
+								) : (
+									visibleRegistros.map((row) => (
+										<TableRow key={row.id}>
+											<TableCell className="whitespace-nowrap text-muted-foreground text-sm">
+												{formatDisplayDate(row.createdAt)}
+											</TableCell>
+											<TableCell className="font-medium">
+												{row.nombre || (
+													<span className="text-muted-foreground italic">
+														Sin nombre
+													</span>
+												)}
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center gap-2">
+													<span
+														className="h-2 w-2 shrink-0 rounded-full"
+														style={{
+															backgroundColor: getSourceColor(row.source),
+														}}
+													/>
+													{getSourceLabel(row.source)}
+												</div>
+											</TableCell>
+											<TableCell>
+												{row.etapaNombre ? (
+													<span className="text-sm">
+														{row.etapaNombre}{" "}
+														<span className="text-muted-foreground">
+															({row.etapaPorcentaje}%)
+														</span>
+													</span>
+												) : (
+													<span className="text-muted-foreground text-sm italic">
+														Sin etapa
+													</span>
+												)}
+											</TableCell>
+											<TableCell className="text-center">
+												{row.cerro ? (
+													<Badge className="gap-1 bg-green-100 text-green-700 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400">
+														<CheckCircle2 className="h-3 w-3" />
+														Sí
+													</Badge>
+												) : (
+													<Badge
+														variant="outline"
+														className="gap-1 text-muted-foreground"
+													>
+														<XCircle className="h-3 w-3" />
+														No
+													</Badge>
+												)}
+											</TableCell>
+										</TableRow>
+									))
+								)}
+							</TableBody>
+						</Table>
+					</div>
+
+					{/* Footer: paginación + selector de page size */}
+					{!isLoading && allRegistros.length > 0 && (
+						<div className="flex items-center justify-between text-muted-foreground text-sm">
+							<span>
+								{`Mostrando ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, allRegistros.length)} de ${allRegistros.length} registros`}
+							</span>
+							<div className="flex items-center gap-3">
+								<div className="flex items-center gap-2">
+									<span>Mostrar</span>
+									<Select
+										value={String(pageSize)}
+										onValueChange={(v) => {
+											setPageSize(Number(v));
+											setPage(0);
+										}}
+									>
+										<SelectTrigger className="h-7 w-16 text-xs">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="25">25</SelectItem>
+											<SelectItem value="50">50</SelectItem>
+											<SelectItem value="100">100</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="flex items-center gap-1">
+									<Button
+										variant="outline"
+										size="sm"
+										className="h-7 px-2 text-xs"
+										disabled={page === 0}
+										onClick={() => setPage((p) => p - 1)}
+									>
+										Anterior
+									</Button>
+									<span className="px-2">
+										{page + 1} / {totalPages}
+									</span>
+									<Button
+										variant="outline"
+										size="sm"
+										className="h-7 px-2 text-xs"
+										disabled={page + 1 >= totalPages}
+										onClick={() => setPage((p) => p + 1)}
+									>
+										Siguiente
+									</Button>
+								</div>
+							</div>
+						</div>
+					)}
 				</CardContent>
 			</Card>
 		</div>

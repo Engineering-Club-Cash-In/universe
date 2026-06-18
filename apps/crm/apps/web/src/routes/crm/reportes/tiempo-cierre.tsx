@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { subMonths } from "date-fns";
 import { Activity, Clock, TrendingDown, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DateRange } from "react-day-picker";
@@ -15,7 +14,11 @@ import {
 	YAxis,
 } from "recharts";
 import { toast } from "sonner";
-import { DateRangeFilter } from "@/components/reports/date-range-filter";
+import {
+	DEFAULT_PRESET,
+	RangePresetFilter,
+	rangeForPreset,
+} from "@/components/reports/range-preset-filter";
 import { ReportCard } from "@/components/reports/report-card";
 import {
 	Card,
@@ -79,11 +82,6 @@ function formatDateInput(date: Date): string {
 	}).format(date);
 }
 
-function getDefaultDateRange(): DateRange {
-	const today = new Date();
-	return { from: subMonths(today, 1), to: today };
-}
-
 function RouteComponent() {
 	const {
 		data: session,
@@ -94,17 +92,32 @@ function RouteComponent() {
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const userRole = userProfile.data?.role;
-	const canAccess = userRole ? PERMISSIONS.canAccessTiempoCierreReport(userRole) : false;
+	const canAccess = userRole
+		? PERMISSIONS.canAccessTiempoCierreReport(userRole)
+		: false;
 	const isPending = sessionPending || userProfile.isPending;
 
 	useEffect(() => {
-		if (shouldRedirectToLogin({ error: sessionError, isPending: sessionPending, session })) {
+		if (
+			shouldRedirectToLogin({
+				error: sessionError,
+				isPending: sessionPending,
+				session,
+			})
+		) {
 			navigate({ to: "/login" });
 		} else if (session && !userProfile.isPending && !canAccess) {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado");
 		}
-	}, [session, sessionError, sessionPending, userProfile.isPending, canAccess, navigate]);
+	}, [
+		session,
+		sessionError,
+		sessionPending,
+		userProfile.isPending,
+		canAccess,
+		navigate,
+	]);
 
 	if (isPending) {
 		return (
@@ -124,11 +137,16 @@ function RouteComponent() {
 }
 
 export function TiempoCierreContent() {
-	const [dateRange, setDateRange] = useState<DateRange | undefined>(getDefaultDateRange);
+	const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
+		rangeForPreset(DEFAULT_PRESET),
+	);
 
 	const input =
 		dateRange?.from && dateRange?.to
-			? { startDate: formatDateInput(dateRange.from), endDate: formatDateInput(dateRange.to) }
+			? {
+					startDate: formatDateInput(dateRange.from),
+					endDate: formatDateInput(dateRange.to),
+				}
 			: null;
 
 	const reportQuery = useQuery({
@@ -166,7 +184,7 @@ export function TiempoCierreContent() {
 				</p>
 			</div>
 
-			<DateRangeFilter
+			<RangePresetFilter
 				dateRange={dateRange}
 				onDateRangeChange={setDateRange}
 			/>
@@ -237,7 +255,11 @@ export function TiempoCierreContent() {
 									formatter={(value) => [`${value} días`, "Promedio"]}
 									labelFormatter={(label) => `Fuente: ${label}`}
 								/>
-								<Bar dataKey="avgDias" name="Días promedio" radius={[0, 4, 4, 0]}>
+								<Bar
+									dataKey="avgDias"
+									name="Días promedio"
+									radius={[0, 4, 4, 0]}
+								>
 									{chartData.map((entry) => (
 										<Cell
 											key={entry.rawSource}
@@ -295,7 +317,9 @@ export function TiempoCierreContent() {
 											<div className="flex items-center gap-2">
 												<span
 													className="h-2.5 w-2.5 shrink-0 rounded-full"
-													style={{ backgroundColor: getSourceColor(row.rawSource) }}
+													style={{
+														backgroundColor: getSourceColor(row.rawSource),
+													}}
 												/>
 												{row.source}
 											</div>

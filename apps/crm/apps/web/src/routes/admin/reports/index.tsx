@@ -337,8 +337,10 @@ function fillMissingPeriods(
 				total_seguro: "0",
 				total_gps: "0",
 				total_membresias: "0",
-				mora_promedio: "0",
+				total_mora: "0",
 				mora_count: 0,
+				total_credits: 0,
+				credits_con_mora: 0,
 				acum_total_cuota: "0",
 				acum_total_interes: "0",
 				acum_total_iva: "0",
@@ -1344,7 +1346,7 @@ function RouteComponent() {
 																Membresías
 															</TableHead>
 															<TableHead className="text-right">
-																Mora Promedio
+																Total Mora
 															</TableHead>
 															<TableHead className="text-right font-bold">
 																Total
@@ -1415,21 +1417,16 @@ function RouteComponent() {
 																	</TableCell>
 																	<TableCell className="text-right">
 																		<div>
-																			{formatCurrency(row.mora_promedio)}
+																			{formatCurrency(row.total_mora)}
 																		</div>
-																		<div
-																			className="cursor-help text-muted-foreground text-xs"
-																			title="% de cuotas del período con mora activa"
-																		>
-																			{row.cuotas_count > 0
-																				? (
-																						(row.mora_count /
-																							row.cuotas_count) *
-																						100
-																					).toFixed(1)
-																				: "0.0"}
-																			%
-																		</div>
+																																																																								<div
+																																					className="text-muted-foreground text-xs"
+																																					title="% de créditos del período con mora activa"
+																																				>
+																																					{row.total_credits > 0
+																																						? ((row.credits_con_mora / row.total_credits) * 100).toFixed(1)
+																																						: "0.0"}%
+																																				</div>
 																	</TableCell>
 																	<TableCell className="text-right font-bold">
 																		{formatCurrency(total)}
@@ -1471,13 +1468,6 @@ function RouteComponent() {
 																	? lastRow.cuotas_count
 																	: rows.reduce(
 																			(acc, r) => acc + r.cuotas_count,
-																			0,
-																		);
-															const totalMora =
-																a && lastRow
-																	? lastRow.mora_count
-																	: rows.reduce(
-																			(acc, r) => acc + r.mora_count,
 																			0,
 																		);
 															return (
@@ -1531,9 +1521,7 @@ function RouteComponent() {
 																		)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{totalCred > 0
-																			? `${((totalMora / totalCred) * 100).toFixed(1)}%`
-																			: "—"}
+																		{formatCurrency(val("total_mora"))}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(grandTotal)}

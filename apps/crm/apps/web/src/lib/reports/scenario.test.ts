@@ -29,7 +29,7 @@ const montoRow = (over: Partial<MontoACobrarRow> = {}): MontoACobrarRow => ({
 	total_seguro: "50",
 	total_gps: "30",
 	total_membresias: "40",
-	mora_promedio: "100",
+	total_mora: "100",
 	...over,
 });
 
@@ -38,16 +38,16 @@ describe("transformMontoACobrar", () => {
 		const rows = [montoRow()];
 		const out = transformMontoACobrar(rows, params());
 		expect(out[0].total_cuota).toBe("1000.00");
-		expect(out[0].mora_promedio).toBe("100.00");
+		expect(out[0].total_mora).toBe("100.00");
 		expect(out[0].cuotas_count).toBe(10);
 	});
 
-	test("bajar mora 10% reduce mora_promedio 10%", () => {
+	test("bajar mora 10% reduce total_mora 10%", () => {
 		const out = transformMontoACobrar(
 			[montoRow()],
 			params({ moraReduccionPct: 10 }),
 		);
-		expect(out[0].mora_promedio).toBe("90.00");
+		expect(out[0].total_mora).toBe("90.00");
 	});
 
 	test("bajar mora >100% se acota a 0 (sin mora negativa)", () => {
@@ -55,7 +55,7 @@ describe("transformMontoACobrar", () => {
 			[montoRow()],
 			params({ moraReduccionPct: 120 }),
 		);
-		expect(out[0].mora_promedio).toBe("0.00");
+		expect(out[0].total_mora).toBe("0.00");
 	});
 
 	test("colocar +20% escala los rubros", () => {
@@ -193,14 +193,14 @@ describe("transformComparativo", () => {
 });
 
 describe("montoACobrarConfig.summarize", () => {
-	test("mora se promedia entre buckets, no se suma", () => {
+	test("mora total se suma entre buckets", () => {
 		const rows: MontoACobrarRow[] = [
-			montoRow({ mora_promedio: "100" }),
-			montoRow({ mora_promedio: "100" }),
+			montoRow({ total_mora: "100" }),
+			montoRow({ total_mora: "100" }),
 		];
 		const summary = montoACobrarConfig.summarize(rows);
-		const mora = summary.find((s) => s.concepto === "Mora prom.");
-		expect(mora?.valor).toBe(100);
+		const mora = summary.find((s) => s.concepto === "Total mora");
+		expect(mora?.valor).toBe(200);
 	});
 });
 

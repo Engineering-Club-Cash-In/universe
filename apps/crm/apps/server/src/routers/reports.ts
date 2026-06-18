@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, lte, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
@@ -17,11 +17,9 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { metasMensuales } from "../db/schema/metas";
+import { quotations } from "../db/schema/quotations";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
-import {
-	getGuatemalaMonthWindow,
-	toDateStrGT,
-} from "../lib/guatemala-month-window";
+import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	closedCreditsReportProcedure,
 	metaColocacionReportProcedure,
@@ -29,7 +27,6 @@ import {
 	protectedProcedure,
 	tiempoCierreReportProcedure,
 } from "../lib/orpc";
-import { carteraBackClient } from "../services/cartera-back-client";
 import type { StatusCreditEnum } from "../types/cartera-back";
 
 const SECONDS_PER_DAY = 60 * 60 * 24;
@@ -43,6 +40,15 @@ const dateRangeSchema = z.object({
 const closedCreditsReportInputSchema = z.object({
 	startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 	endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+// Reporte "Créditos cerrados": filtro por mes + paginación del lado del servidor.
+// Sin `pageSize` se devuelven todas las filas del mes (usado por la exportación).
+const creditosCerradosInputSchema = z.object({
+	anio: z.number().int().min(2000).max(2100),
+	mes: z.number().int().min(1).max(12),
+	page: z.number().int().min(1).optional(),
+	pageSize: z.number().int().min(1).max(500).optional(),
 });
 
 const CLOSED_CREDIT_REPORT_CARTERA_STATUSES: StatusCreditEnum[] = [
@@ -67,39 +73,6 @@ export function enforceClosedCreditReportLimit<T>(rows: T[]) {
 				"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
 		});
 	}
-}
-
-async function getClosedCreditReportCarteraStatuses(sifcos: string[]) {
-	const uniqueSifcos = [...new Set(sifcos.filter(Boolean))];
-	const statuses = new Map<string, StatusCreditEnum>();
-	const [anio, mes] = toDateStrGT(new Date()).split("-").map(Number);
-
-	for (
-		let index = 0;
-		index < uniqueSifcos.length;
-		index += CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE
-	) {
-		const chunk = uniqueSifcos.slice(
-			index,
-			index + CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
-		);
-		const response = await carteraBackClient.getAllCreditos({
-			mes,
-			anio,
-			page: 1,
-			perPage: chunk.length,
-			numeros_credito_sifco: chunk,
-		});
-
-		for (const row of response.data) {
-			statuses.set(
-				row.creditos.numero_credito_sifco,
-				row.creditos.statusCredit,
-			);
-		}
-	}
-
-	return statuses;
 }
 
 function parseGuatemalaDateRange(startDate: string, endDate: string) {
@@ -231,63 +204,85 @@ export const getDashboardExecutivo = protectedProcedure
 
 /**
  * Reporte de créditos cerrados
- * Créditos que llegaron por primera vez a una etapa 90%+.
+ * Oportunidades ganadas (status = 'won'), filtradas por la fecha en que se
+ * cerraron (actualCloseDate) dentro del mes seleccionado. Paginado del lado del
+ * servidor; sin `pageSize` se devuelven todas las filas del mes (exportación).
  */
 export const getReporteCreditosCerrados = closedCreditsReportProcedure
-	.input(closedCreditsReportInputSchema)
+	.input(creditosCerradosInputSchema)
 	.handler(async ({ input }) => {
-		const { start, end } = parseGuatemalaDateRange(
-			input.startDate,
-			input.endDate,
+		const { startOfMonth, endOfMonth } = getGuatemalaMonthWindow(
+			input.anio,
+			input.mes,
 		);
 
-		const firstClosedStageDates = db
+		// Cuota del crédito = monthlyPayment de la cotización enlazada a la
+		// oportunidad. Si hay varias, se prefiere la aceptada y luego la más reciente.
+		const latestQuotation = db
 			.select({
-				opportunityId: opportunityStageHistory.opportunityId,
-				firstClosedStageAt:
-					sql<Date>`MIN(${opportunityStageHistory.changedAt})`.as(
-						"first_closed_stage_at",
-					),
+				opportunityId: quotations.opportunityId,
+				monthlyPayment: quotations.monthlyPayment,
+				rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${quotations.opportunityId} ORDER BY (${quotations.status} = 'accepted') DESC, ${quotations.createdAt} DESC)`.as(
+					"rn_quot",
+				),
 			})
-			.from(opportunityStageHistory)
-			.innerJoin(
-				salesStages,
-				eq(opportunityStageHistory.toStageId, salesStages.id),
-			)
-			.where(gte(salesStages.closurePercentage, 90))
-			.groupBy(opportunityStageHistory.opportunityId)
-			.as("first_closed_stage_dates");
+			.from(quotations)
+			.as("latest_quotation");
 
+		// Número SIFCO: referencia de cartera más reciente; fallback al de la opp.
 		const latestCarteraReference = db
 			.select({
 				opportunityId: carteraBackReferences.opportunityId,
-				contratoFinanciamientoId:
-					carteraBackReferences.contratoFinanciamientoId,
 				numeroCreditoSifco: carteraBackReferences.numeroCreditoSifco,
 				rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${carteraBackReferences.opportunityId} ORDER BY ${carteraBackReferences.createdAt} DESC, ${carteraBackReferences.id} DESC)`.as(
-					"rn",
+					"rn_cart",
 				),
 			})
 			.from(carteraBackReferences)
 			.as("latest_cartera_reference");
 
-		const rows = await db
+		// Cliente por oportunidad (deduplicado) — solo para el nombre de respaldo.
+		// Garantiza una fila por oportunidad (evita multiplicar el conteo/paginado).
+		const latestClient = db
 			.select({
-				placa: vehicles.licensePlate,
-				chasis: vehicles.vinNumber,
-				cuotaSeguro: opportunities.seguro,
-				clienteNombre: sql<string>`COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.middleName}, ${leads.lastName}, ${leads.secondLastName})), ''), ${clients.contactPerson}, '')`,
-				numeroCredito: sql<string>`COALESCE(${latestCarteraReference.numeroCreditoSifco}, ${opportunities.numeroSifco}, '')`,
-				fecha90: firstClosedStageDates.firstClosedStageAt,
+				opportunityId: clients.opportunityId,
+				contactPerson: clients.contactPerson,
+				rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${clients.opportunityId} ORDER BY ${clients.createdAt} DESC, ${clients.id} DESC)`.as(
+					"rn_cli",
+				),
 			})
-			.from(firstClosedStageDates)
-			.innerJoin(
-				opportunities,
-				eq(firstClosedStageDates.opportunityId, opportunities.id),
-			)
-			.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+			.from(clients)
+			.as("latest_client");
+
+		const whereClause = and(
+			eq(opportunities.status, "won"),
+			gte(opportunities.actualCloseDate, startOfMonth),
+			lt(opportunities.actualCloseDate, endOfMonth),
+		);
+
+		const baseQuery = db
+			.select({
+				id: opportunities.id,
+				clienteNombre: sql<string>`COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.middleName}, ${leads.lastName}, ${leads.secondLastName})), ''), ${latestClient.contactPerson}, '')`,
+				numeroSifco: sql<string>`COALESCE(${latestCarteraReference.numeroCreditoSifco}, ${opportunities.numeroSifco}, '')`,
+				cuotaSeguro: opportunities.seguro,
+				montoCredito: opportunities.value,
+				cuotaCredito: latestQuotation.monthlyPayment,
+				fechaCierre: opportunities.actualCloseDate,
+				// Día del mes en que paga (1-31), tomado de la oportunidad.
+				diaPago: opportunities.diaPagoMensual,
+				// Total de filas que cumplen el filtro (antes de LIMIT/OFFSET).
+				total: sql<number>`COUNT(*) OVER()`,
+			})
+			.from(opportunities)
 			.leftJoin(leads, eq(opportunities.leadId, leads.id))
-			.leftJoin(clients, eq(clients.opportunityId, opportunities.id))
+			.leftJoin(
+				latestClient,
+				and(
+					eq(latestClient.opportunityId, opportunities.id),
+					eq(latestClient.rn, 1),
+				),
+			)
 			.leftJoin(
 				latestCarteraReference,
 				and(
@@ -295,33 +290,36 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 					eq(latestCarteraReference.rn, 1),
 				),
 			)
-			.innerJoin(
-				contratosFinanciamiento,
-				eq(
-					latestCarteraReference.contratoFinanciamientoId,
-					contratosFinanciamiento.id,
-				),
-			)
-			.where(
+			.leftJoin(
+				latestQuotation,
 				and(
-					gte(firstClosedStageDates.firstClosedStageAt, start),
-					lte(firstClosedStageDates.firstClosedStageAt, end),
+					eq(latestQuotation.opportunityId, opportunities.id),
+					eq(latestQuotation.rn, 1),
 				),
 			)
-			.orderBy(desc(firstClosedStageDates.firstClosedStageAt));
+			.where(whereClause)
+			.orderBy(desc(opportunities.actualCloseDate));
 
-		const carteraStatuses = await getClosedCreditReportCarteraStatuses(
-			rows.map((row) => row.numeroCredito),
-		);
+		const result = input.pageSize
+			? await baseQuery
+					.limit(input.pageSize)
+					.offset(((input.page ?? 1) - 1) * input.pageSize)
+			: await baseQuery;
 
-		const activeRows = rows.filter((row) =>
-			isClosedCreditReportCarteraStatusIncluded(
-				carteraStatuses.get(row.numeroCredito) ?? null,
-			),
-		);
-		enforceClosedCreditReportLimit(activeRows);
+		const total = Number(result[0]?.total ?? 0);
+		const rows = result.map(({ total: _total, ...row }) => row);
 
-		return activeRows;
+		// Solo la exportación (sin paginar) puede traer todo; ahí aplicamos el tope.
+		if (!input.pageSize) {
+			enforceClosedCreditReportLimit(rows);
+		}
+
+		return {
+			rows,
+			total,
+			page: input.page ?? 1,
+			pageSize: input.pageSize ?? total,
+		};
 	});
 
 /**

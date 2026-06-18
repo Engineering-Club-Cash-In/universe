@@ -16,7 +16,6 @@ import {
 	Wallet,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { DateRange } from "react-day-picker";
 import {
 	Bar,
 	BarChart,
@@ -254,6 +253,18 @@ function dateFromInput(value: string) {
 	return new Date(`${value}T12:00:00`);
 }
 
+// Fecha legible en zona Guatemala, p.ej. "17 jun 2026".
+function formatFechaCorta(value: string | Date | null | undefined): string {
+	if (!value) return "-";
+	const date = typeof value === "string" ? new Date(value) : value;
+	return new Intl.DateTimeFormat("es-GT", {
+		timeZone: GUATEMALA_TIME_ZONE,
+		day: "2-digit",
+		month: "short",
+		year: "numeric",
+	}).format(date);
+}
+
 function getDefaultMontoCobrarRange(): {
 	fechaInicio: string;
 	fechaFin: string;
@@ -375,41 +386,8 @@ function fillMissingPeriods(
 	});
 }
 
-function getDefaultClosedCreditsRange(): DateRange {
-	const today = dateFromInput(formatDateInput(new Date()));
-	const start = new Date(today);
-	start.setDate(today.getDate() - 14);
-	return { from: start, to: today };
-}
-
-function buildClosedCreditsInput(dateRange: DateRange | undefined) {
-	if (!dateRange?.from || !dateRange?.to) return null;
-	return {
-		startDate: formatDateInput(dateRange.from),
-		endDate: formatDateInput(dateRange.to),
-	};
-}
-
-function escapeCsvValue(value: string | number | null | undefined) {
-	const raw = value == null ? "" : String(value);
-	if (/[",\n\r]/.test(raw)) {
-		return `"${raw.replaceAll('"', '""')}"`;
-	}
-	return raw;
-}
-
-function downloadCsv(filename: string, rows: (string | number | null)[][]) {
-	const csv = `\uFEFF${rows
-		.map((row) => row.map((value) => escapeCsvValue(value)).join(","))
-		.join("\n")}`;
-	const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-	const url = URL.createObjectURL(blob);
-	const link = document.createElement("a");
-	link.href = url;
-	link.download = filename;
-	link.click();
-	URL.revokeObjectURL(url);
-}
+// Filas por página del reporte "Créditos cerrados" (paginado del lado servidor).
+const CLOSED_CREDITS_PAGE_SIZE = 25;
 
 function SimularButton({ onClick }: { onClick: () => void }) {
 	return (
@@ -443,10 +421,12 @@ function RouteComponent() {
 		isPending,
 	} = authClient.useSession();
 	const navigate = Route.useNavigate();
-	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
-	const [closedCreditsRange, setClosedCreditsRange] = useState<
-		DateRange | undefined
-	>(getDefaultClosedCreditsRange);
+	const [closedCreditsMes, setClosedCreditsMes] = useState(() => ({
+		mes: new Date().getMonth() + 1,
+		anio: new Date().getFullYear(),
+	}));
+	const [closedCreditsPage, setClosedCreditsPage] = useState(1);
+	const [isExportingCerrados, setIsExportingCerrados] = useState(false);
 	const [montoCobrarPeriodo, setMontoCobrarPeriodo] = useState<
 		"anio" | "trimestre" | "mes" | "semana" | "dia"
 	>("mes");
@@ -515,23 +495,24 @@ function RouteComponent() {
 		? PERMISSIONS.canAccessClosedCreditsReport(userRole)
 		: false;
 	const canAccessReports = isAdmin || canAccessClosedCreditsReport;
-	const closedCreditsInput = buildClosedCreditsInput(closedCreditsRange);
 
 	const dashboardData = useQuery({
 		...orpc.getDashboardExecutivo.queryOptions({
-			input: {
-				startDate: dateRange?.from?.toISOString(),
-				endDate: dateRange?.to?.toISOString(),
-			},
+			input: {},
 		}),
 		enabled: isAdmin,
 	});
 
 	const closedCreditsReport = useQuery({
 		...orpc.getReporteCreditosCerrados.queryOptions({
-			input: closedCreditsInput ?? { startDate: "", endDate: "" },
+			input: {
+				anio: closedCreditsMes.anio,
+				mes: closedCreditsMes.mes,
+				page: closedCreditsPage,
+				pageSize: CLOSED_CREDITS_PAGE_SIZE,
+			},
 		}),
-		enabled: canAccessClosedCreditsReport && !!closedCreditsInput,
+		enabled: canAccessClosedCreditsReport,
 	});
 
 	const montoCobrarQuery = useQuery({
@@ -757,58 +738,56 @@ function RouteComponent() {
 		}),
 	);
 
-	const setClosedCreditsPreset = (preset: "week" | "last15" | "month") => {
-		const today = dateFromInput(formatDateInput(new Date()));
-
-		if (preset === "last15") {
-			const start = new Date(today);
-			start.setDate(today.getDate() - 14);
-			setClosedCreditsRange({ from: start, to: today });
-			return;
-		}
-
-		if (preset === "month") {
-			setClosedCreditsRange({
-				from: new Date(today.getFullYear(), today.getMonth(), 1),
-				to: new Date(today.getFullYear(), today.getMonth() + 1, 0),
+	// Exporta TODO el mes (sin paginar): se pide al server sin `pageSize`.
+	const exportClosedCreditsExcel = async () => {
+		setIsExportingCerrados(true);
+		try {
+			const res = await client.getReporteCreditosCerrados({
+				anio: closedCreditsMes.anio,
+				mes: closedCreditsMes.mes,
 			});
-			return;
+			const headers = [
+				"Fecha de Cierre",
+				"Nombre del Cliente",
+				"SIFCO",
+				"Cuota de Seguro",
+				"Monto del Crédito",
+				"Cuota del Crédito",
+				"Día de Pago",
+			];
+			const data = res.rows.map((row) => [
+				row.fechaCierre ? formatFechaCorta(row.fechaCierre) : "",
+				row.clienteNombre || "",
+				row.numeroSifco || "",
+				Number(row.cuotaSeguro ?? 0),
+				Number(row.montoCredito ?? 0),
+				Number(row.cuotaCredito ?? 0),
+				row.diaPago ?? "",
+			]);
+			const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+			const workbook = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(workbook, worksheet, "Créditos cerrados");
+			XLSX.writeFile(
+				workbook,
+				`creditos-cerrados-${closedCreditsMes.anio}-${String(
+					closedCreditsMes.mes,
+				).padStart(2, "0")}.xlsx`,
+			);
+		} catch (err) {
+			toast.error(
+				err instanceof Error ? err.message : "Error al exportar el reporte",
+			);
+		} finally {
+			setIsExportingCerrados(false);
 		}
-
-		const day = today.getDay();
-		const daysSinceMonday = day === 0 ? 6 : day - 1;
-		const start = new Date(today);
-		start.setDate(today.getDate() - daysSinceMonday);
-		const end = new Date(start);
-		end.setDate(start.getDate() + 6);
-		setClosedCreditsRange({ from: start, to: end });
 	};
 
-	const exportClosedCreditsCsv = () => {
-		if (!closedCreditsInput) return;
-		const rows = closedCreditsReport.data ?? [];
-		downloadCsv(
-			`creditos-cerrados-${closedCreditsInput.startDate}-a-${closedCreditsInput.endDate}.csv`,
-			[
-				[
-					"Placa",
-					"Chasis",
-					"Cuota de Seguro",
-					"Nombre del Cliente",
-					"Número de Crédito",
-					"Fecha 90%+",
-				],
-				...rows.map((row) => [
-					row.placa ?? "",
-					row.chasis ?? "",
-					row.cuotaSeguro ?? "",
-					row.clienteNombre ?? "",
-					row.numeroCredito ?? "",
-					row.fecha90 ? formatDateInput(new Date(row.fecha90)) : "",
-				]),
-			],
-		);
-	};
+	const closedCreditsRows = closedCreditsReport.data?.rows ?? [];
+	const closedCreditsTotal = closedCreditsReport.data?.total ?? 0;
+	const closedCreditsTotalPages = Math.max(
+		1,
+		Math.ceil(closedCreditsTotal / CLOSED_CREDITS_PAGE_SIZE),
+	);
 
 	const creditosCerradosCard = (
 		<Card>
@@ -817,42 +796,52 @@ function RouteComponent() {
 					<div>
 						<CardTitle>Créditos cerrados</CardTitle>
 						<CardDescription>
-							Créditos que llegaron por primera vez a una etapa 90%+.
+							Oportunidades ganadas, según el mes en que se cerraron.
 						</CardDescription>
 					</div>
 					<div className="flex flex-wrap items-center gap-2">
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setClosedCreditsPreset("week")}
+						<Select
+							value={String(closedCreditsMes.mes)}
+							onValueChange={(v) => {
+								setClosedCreditsMes((prev) => ({ ...prev, mes: Number(v) }));
+								setClosedCreditsPage(1);
+							}}
 						>
-							Esta semana
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setClosedCreditsPreset("last15")}
-						>
-							Últimos 15 días
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setClosedCreditsPreset("month")}
-						>
-							Este mes
-						</Button>
-						<DateRangeFilter
-							dateRange={closedCreditsRange}
-							onDateRangeChange={setClosedCreditsRange}
-							required
+							<SelectTrigger className="w-36">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{MESES.map((label, i) => (
+									<SelectItem key={label} value={String(i + 1)}>
+										{label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<Input
+							type="number"
+							className="w-24"
+							value={closedCreditsMes.anio}
+							min={2020}
+							max={2100}
+							onChange={(e) => {
+								setClosedCreditsMes((prev) => ({
+									...prev,
+									anio: Number(e.target.value),
+								}));
+								setClosedCreditsPage(1);
+							}}
 						/>
 						<Button
-							onClick={exportClosedCreditsCsv}
-							disabled={!closedCreditsReport.data?.length}
+							onClick={exportClosedCreditsExcel}
+							disabled={isExportingCerrados || closedCreditsTotal === 0}
 						>
-							<Download className="mr-2 h-4 w-4" />
-							Exportar CSV
+							{isExportingCerrados ? (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							) : (
+								<Download className="mr-2 h-4 w-4" />
+							)}
+							Exportar Excel
 						</Button>
 					</div>
 				</div>
@@ -862,43 +851,95 @@ function RouteComponent() {
 				{closedCreditsReport.isError && (
 					<p className="text-destructive">Error al cargar el reporte.</p>
 				)}
-				{closedCreditsReport.data?.length === 0 && (
+				{closedCreditsReport.data && closedCreditsTotal === 0 && (
 					<p className="text-muted-foreground">
-						No hay créditos cerrados para el rango seleccionado.
+						No hay créditos cerrados para el mes seleccionado.
 					</p>
 				)}
-				{!!closedCreditsReport.data?.length && (
-					<div className="overflow-x-auto">
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead>Placa</TableHead>
-									<TableHead>Chasis</TableHead>
-									<TableHead>Cuota de Seguro</TableHead>
-									<TableHead>Nombre del Cliente</TableHead>
-									<TableHead>Número de Crédito</TableHead>
-									<TableHead>Fecha 90%+</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{closedCreditsReport.data.map((row) => (
-									<TableRow
-										key={`${row.numeroCredito}-${row.fecha90}-${row.placa}-${row.chasis}`}
-									>
-										<TableCell>{row.placa || "-"}</TableCell>
-										<TableCell>{row.chasis || "-"}</TableCell>
-										<TableCell>{formatCurrency(row.cuotaSeguro)}</TableCell>
-										<TableCell>{row.clienteNombre || "-"}</TableCell>
-										<TableCell>{row.numeroCredito || "-"}</TableCell>
-										<TableCell>
-											{row.fecha90
-												? formatDateInput(new Date(row.fecha90))
-												: "-"}
-										</TableCell>
+				{closedCreditsRows.length > 0 && (
+					<div className="space-y-4">
+						<div className="overflow-x-auto [&_td]:px-5 [&_th]:px-5">
+							<Table className="tabular-nums">
+								<TableHeader>
+									<TableRow>
+										<TableHead>Fecha de Cierre</TableHead>
+										<TableHead>Cliente / SIFCO</TableHead>
+										<TableHead className="text-right">
+											Cuota de Seguro
+										</TableHead>
+										<TableHead className="text-right">
+											Monto del Crédito
+										</TableHead>
+										<TableHead className="text-right">
+											Cuota del Crédito
+										</TableHead>
+										<TableHead className="text-right">Día de Pago</TableHead>
 									</TableRow>
-								))}
-							</TableBody>
-						</Table>
+								</TableHeader>
+								<TableBody>
+									{closedCreditsRows.map((row) => (
+										<TableRow key={row.id}>
+											<TableCell>{formatFechaCorta(row.fechaCierre)}</TableCell>
+											<TableCell>
+												<div className="font-medium">
+													{row.clienteNombre || "-"}
+												</div>
+												<div className="text-muted-foreground text-xs">
+													{row.numeroSifco || "Sin SIFCO"}
+												</div>
+											</TableCell>
+											<TableCell className="text-right">
+												{formatCurrency(row.cuotaSeguro)}
+											</TableCell>
+											<TableCell className="text-right">
+												{formatCurrency(row.montoCredito)}
+											</TableCell>
+											<TableCell className="text-right">
+												{row.cuotaCredito
+													? formatCurrency(row.cuotaCredito)
+													: "-"}
+											</TableCell>
+											<TableCell className="text-right">
+												{row.diaPago ?? "-"}
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</div>
+						<div className="flex items-center justify-between">
+							<p className="text-muted-foreground text-sm">
+								{closedCreditsTotal}{" "}
+								{closedCreditsTotal === 1 ? "crédito" : "créditos"} · Página{" "}
+								{closedCreditsPage} de {closedCreditsTotalPages}
+							</p>
+							<div className="flex items-center gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() =>
+										setClosedCreditsPage((p) => Math.max(1, p - 1))
+									}
+									disabled={closedCreditsPage <= 1}
+								>
+									<ChevronLeft className="h-4 w-4" />
+									Anterior
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() =>
+										setClosedCreditsPage((p) =>
+											Math.min(closedCreditsTotalPages, p + 1),
+										)
+									}
+									disabled={closedCreditsPage >= closedCreditsTotalPages}
+								>
+									Siguiente
+									<ChevronRight className="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
 					</div>
 				)}
 			</CardContent>
@@ -918,12 +959,6 @@ function RouteComponent() {
 							: "Reportes disponibles para el área de cobros"}
 					</p>
 				</div>
-				{isAdmin && (
-					<DateRangeFilter
-						dateRange={dateRange}
-						onDateRangeChange={setDateRange}
-					/>
-				)}
 			</div>
 
 			{!isAdmin && canAccessClosedCreditsReport && creditosCerradosCard}
@@ -931,15 +966,19 @@ function RouteComponent() {
 			{isAdmin && (
 				<>
 					<Tabs
-						defaultValue={canAccessClosedCreditsReport ? "creditos" : "resumen"}
+						defaultValue={
+							canAccessClosedCreditsReport ? "creditos" : "cobranza"
+						}
 						className="space-y-6"
 					>
 						<TabsList>
 							{canAccessClosedCreditsReport && (
 								<TabsTrigger value="creditos">Créditos cerrados</TabsTrigger>
 							)}
-							<TabsTrigger value="resumen">Resumen</TabsTrigger>
-							<TabsTrigger value="graficas">Gráficas</TabsTrigger>
+							{/* Tabs "Resumen" y "Gráficas" ocultos a propósito. Las
+							    secciones (TabsContent value="resumen" / "graficas") se
+							    conservan más abajo por si se quieren reutilizar; para
+							    volver a mostrarlas, reañadir aquí sus TabsTrigger. */}
 							<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
 							<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
 							<TabsTrigger value="colocacion">Colocación</TabsTrigger>

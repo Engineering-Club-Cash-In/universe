@@ -980,6 +980,31 @@ function QuoterPage() {
 		return "otro";
 	};
 
+	const normalizeVehicleTypeForQuoter = (
+		vehicleType?: string | null,
+	): QuotationFormValues["vehicleType"] => {
+		const normalized = (vehicleType ?? "").trim().toLowerCase();
+
+		if (["particular", "sedan", "sedán", "suv"].includes(normalized)) {
+			return "particular";
+		}
+		if (["pickup", "pick up", "pick-up"].includes(normalized)) {
+			return "pickup";
+		}
+		if (normalized === "nuevo") return "nuevo";
+		if (normalized === "uber") return "uber";
+		if (normalized === "panel") return "panel";
+		if (normalized === "camion" || normalized === "camión") return "camion";
+		if (normalized === "microbus" || normalized === "microbús") {
+			return "microbus";
+		}
+		if (normalized === "microbus_20") return "microbus_20";
+		if (normalized === "microbus_35") return "microbus_35";
+		if (normalized === "microbus_36plus") return "microbus_36plus";
+
+		return "particular";
+	};
+
 	const applyVehicleConditionAndOrigin = (vehicle?: {
 		isNew?: boolean | null;
 		origin?: string | null;
@@ -1182,9 +1207,7 @@ function QuoterPage() {
 		quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
 
 		// Establecer el tipo de vehículo si viene de la oportunidad
-		const vehicleTypeToUse =
-			(vehicle.vehicleType as typeof quoterForm.state.values.vehicleType) ||
-			"particular";
+		const vehicleTypeToUse = normalizeVehicleTypeForQuoter(vehicle.vehicleType);
 		quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
 		const vehicleContext = applyVehicleConditionAndOrigin(vehicle);
 
@@ -1230,9 +1253,7 @@ function QuoterPage() {
 			quoterForm.setFieldValue("vehicleBrand", vehicle.make);
 			quoterForm.setFieldValue("vehicleLine", vehicle.model);
 			quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
-			const vehicleTypeToUse =
-				(vehicle.vehicleType as typeof quoterForm.state.values.vehicleType) ||
-				"particular";
+			const vehicleTypeToUse = normalizeVehicleTypeForQuoter(vehicle.vehicleType);
 			quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
 			const vehicleContext = applyVehicleConditionAndOrigin(vehicle);
 
@@ -1296,9 +1317,7 @@ function QuoterPage() {
 				quoterForm.setFieldValue("vehicleBrand", q.vehicleBrand || "");
 				quoterForm.setFieldValue("vehicleLine", q.vehicleLine || "");
 				quoterForm.setFieldValue("vehicleModel", q.vehicleModel || "");
-				const vehicleTypeToUse =
-					(q.vehicleType as typeof quoterForm.state.values.vehicleType) ||
-					"particular";
+				const vehicleTypeToUse = normalizeVehicleTypeForQuoter(q.vehicleType);
 				quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
 				if (linkedVehicle) {
 					applyVehicleConditionAndOrigin(linkedVehicle);

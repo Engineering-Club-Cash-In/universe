@@ -1993,7 +1993,7 @@ function RouteComponent() {
 														</TableHeader>
 														<TableBody>
 															<TableRow>
-																<TableCell>Con Factura</TableCell>
+																<TableCell>Inversionista Con Factura</TableCell>
 																<TableCell className="text-right">
 																	{dash(cf.interes)}
 																</TableCell>
@@ -2007,8 +2007,8 @@ function RouteComponent() {
 																	{dash(cf.neto)}
 																</TableCell>
 															</TableRow>
-															<TableRow>
-																<TableCell>Sin Factura</TableCell>
+															<TableRow>	
+																<TableCell>Inversionista Sin Factura</TableCell>
 																<TableCell className="text-right">
 																	{dash(sf.interes)}
 																</TableCell>

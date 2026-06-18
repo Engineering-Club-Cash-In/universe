@@ -211,7 +211,7 @@ const MONTO_COBRAR_COLORS = {
 const MONTO_COBRAR_LABELS: Record<keyof typeof MONTO_COBRAR_COLORS, string> = {
 	total_cuota: "Capital",
 	total_interes: "Interés",
-	total_iva: "IVA",
+	total_iva: "IVA 12%",
 	total_seguro: "Seguro",
 	total_gps: "GPS",
 	total_membresias: "Membresías",
@@ -717,15 +717,15 @@ function RouteComponent() {
 				m.estadoMora === "pagado"
 					? "Pagado"
 					: m.estadoMora === "mora_30"
-						? "Mora 1-30 días"
+						? "Mora 30"
 						: m.estadoMora === "mora_60"
-							? "Mora 31-60 días"
+							? "Mora 60"
 							: m.estadoMora === "mora_90"
-								? "Mora 61-90 días"
+								? "Mora 90"
 								: m.estadoMora === "mora_120"
-									? "Mora 91-120 días"
+									? "Mora 120"
 									: m.estadoMora === "mora_120_plus"
-										? "Mora +120 días"
+										? "Mora 120+"
 										: "Incobrable",
 			value: Number(m.montoTotal || 0),
 			count: m.totalCuotas,
@@ -781,7 +781,7 @@ function RouteComponent() {
 				[
 					"Placa",
 					"Chasis",
-					"Cuota Seguro",
+					"Cuota de Seguro",
 					"Nombre del Cliente",
 					"Número de Crédito",
 					"Fecha 90%+",
@@ -846,7 +846,7 @@ function RouteComponent() {
 				</div>
 			</CardHeader>
 			<CardContent>
-				{closedCreditsReport.isPending && <p>Cargando reporte...</p>}
+				{closedCreditsReport.isPending && <p>Cargando...</p>}
 				{closedCreditsReport.isError && (
 					<p className="text-destructive">Error al cargar el reporte.</p>
 				)}
@@ -862,7 +862,7 @@ function RouteComponent() {
 								<TableRow>
 									<TableHead>Placa</TableHead>
 									<TableHead>Chasis</TableHead>
-									<TableHead>Cuota Seguro</TableHead>
+									<TableHead>Cuota de Seguro</TableHead>
 									<TableHead>Nombre del Cliente</TableHead>
 									<TableHead>Número de Crédito</TableHead>
 									<TableHead>Fecha 90%+</TableHead>
@@ -981,7 +981,7 @@ function RouteComponent() {
 							{/* KPIs principales */}
 							<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 								<ReportCard
-									title="Cartera Activa"
+									title="Capital Activo"
 									value={formatCurrency(
 										dashboardData.data?.carteraActiva.montoTotal || 0,
 									)}
@@ -998,7 +998,7 @@ function RouteComponent() {
 								<ReportCard
 									title="Total Recuperado"
 									value={formatCurrency(totalPagado)}
-									description="Cuotas pagadas"
+									description="Monto recuperado en cobros"
 									icon={TrendingUp}
 									className="border-green-200 dark:border-green-900"
 								/>
@@ -1134,7 +1134,7 @@ function RouteComponent() {
 								<CardHeader>
 									<CardTitle>Conversión de Leads</CardTitle>
 									<CardDescription>
-										Estado de los prospectos en el sistema
+										Estado de los leads en el sistema
 									</CardDescription>
 								</CardHeader>
 								<CardContent>
@@ -1228,7 +1228,7 @@ function RouteComponent() {
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-6">
-									{montoCobrarQuery.isPending && <p>Cargando reporte...</p>}
+									{montoCobrarQuery.isPending && <p>Cargando...</p>}
 									{montoCobrarQuery.isError && (
 										<p className="text-destructive">
 											Error al cargar el reporte de monto a cobrarse.
@@ -1328,7 +1328,7 @@ function RouteComponent() {
 														<TableRow>
 															<TableHead>Período</TableHead>
 															<TableHead className="text-right">
-																Cuotas
+																Cantidad de Cuotas
 															</TableHead>
 															<TableHead className="text-right">
 																Capital
@@ -1336,7 +1336,7 @@ function RouteComponent() {
 															<TableHead className="text-right">
 																Interés
 															</TableHead>
-															<TableHead className="text-right">IVA</TableHead>
+															<TableHead className="text-right">IVA 12%</TableHead>
 															<TableHead className="text-right">
 																Seguro
 															</TableHead>
@@ -1345,7 +1345,7 @@ function RouteComponent() {
 																Membresías
 															</TableHead>
 															<TableHead className="text-right">
-																Mora Prom.
+																Mora Promedio
 															</TableHead>
 															<TableHead className="text-right font-bold">
 																Total
@@ -1557,7 +1557,7 @@ function RouteComponent() {
 										<div>
 											<CardTitle className="flex items-center gap-2">
 												<CalendarDays className="h-5 w-5" />
-												Facturado del Mes vs Esperado
+												Cobrado del Mes vs Esperado
 											</CardTitle>
 											<CardDescription>
 												Compara lo cobrado en el mes contra lo esperado según
@@ -1625,7 +1625,7 @@ function RouteComponent() {
 									)}
 									{facturacionMesQuery.isError && (
 										<div className="py-4 text-center text-destructive text-sm">
-											Error al cargar datos
+											Error al cargar datos.
 										</div>
 									)}
 									{facturacionMesData &&
@@ -1758,7 +1758,7 @@ function RouteComponent() {
 											</div>
 										) : reinversionLiquidacionesQuery.isError ? (
 											<div className="py-4 text-center text-destructive text-sm">
-												Error al cargar datos
+												Error al cargar datos.
 											</div>
 										) : reinversionData ? (
 											(() => {
@@ -1811,7 +1811,7 @@ function RouteComponent() {
 																</TableRow>
 															))}
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Total Reinvertido</TableCell>
+																<TableCell>Total </TableCell>
 																<TableCell className="text-right">
 																	{dash(totales.capital)}
 																</TableCell>
@@ -1840,7 +1840,7 @@ function RouteComponent() {
 											</div>
 										) : reinversionLiquidacionesQuery.isError ? (
 											<div className="py-4 text-center text-destructive text-sm">
-												Error al cargar datos
+												Error al cargar datos.
 											</div>
 										) : reinversionData ? (
 											(() => {
@@ -1958,7 +1958,7 @@ function RouteComponent() {
 													<Table>
 														<TableHeader>
 															<TableRow>
-																<TableHead>Grupo</TableHead>
+																<TableHead>Tipo</TableHead>
 																<TableHead className="text-right">
 																	Interés
 																</TableHead>
@@ -2142,12 +2142,12 @@ function RouteComponent() {
 												</p>
 											) : flujoPorInversionistaQuery.isError ? (
 												<p className="py-4 text-center text-destructive text-sm">
-													Error al cargar desglose por inversionista
+													Error al cargar desglose por inversionista.
 												</p>
 											) : !flujoPorInversionistaData?.porInversionista
 													?.length ? (
 												<p className="py-4 text-center text-muted-foreground text-sm">
-													Sin datos para el período seleccionado
+													No hay datos para el período seleccionado.
 												</p>
 											) : (
 												<Table>
@@ -2158,7 +2158,7 @@ function RouteComponent() {
 																Reinversión
 															</TableHead>
 															<TableHead className="text-right">
-																A Recibir
+																Total a Recibir
 															</TableHead>
 															<TableHead className="text-right">
 																Total
@@ -2427,7 +2427,7 @@ function RouteComponent() {
 								<CardContent className="space-y-4">
 									{puntoEquilibrioQuery.isPending && (
 										<p className="text-muted-foreground text-sm">
-											Cargando reporte...
+											Cargando...
 										</p>
 									)}
 									{puntoEquilibrioQuery.isError && (
@@ -2688,7 +2688,7 @@ function RouteComponent() {
 																	Colocación (Q)
 																</TableHead>
 																<TableHead className="text-right">
-																	# Col.
+																	Colocados
 																</TableHead>
 																<TableHead className="text-right">
 																	Facturación (Q)
@@ -2697,7 +2697,7 @@ function RouteComponent() {
 																	Cartera Activa (Q)
 																</TableHead>
 																<TableHead className="text-right">
-																	# Activos
+																	Activos
 																</TableHead>
 																<TableHead className="text-right">
 																	Mora 30 (Q)

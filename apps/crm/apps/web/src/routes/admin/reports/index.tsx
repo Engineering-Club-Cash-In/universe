@@ -33,7 +33,6 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { PeriodDatePicker } from "@/components/reports/period-date-picker";
 import { ReportCard } from "@/components/reports/report-card";
 import { ScenarioModal } from "@/components/reports/scenario-modal";
@@ -247,10 +246,6 @@ function formatDateInput(date: Date) {
 		month: "2-digit",
 		day: "2-digit",
 	}).format(date);
-}
-
-function dateFromInput(value: string) {
-	return new Date(`${value}T12:00:00`);
 }
 
 // Fecha legible en zona Guatemala, p.ej. "17 jun 2026".
@@ -2598,16 +2593,16 @@ function RouteComponent() {
 										<FilterField label="Período">
 											<Select
 												value={equilibrioPeriodo}
-												onValueChange={(v) =>
-													setEquilibrioPeriodo(
-														v as
-															| "anio"
-															| "trimestre"
-															| "mes"
-															| "semana"
-															| "dia",
-													)
-												}
+												onValueChange={(v) => {
+													const p = v as
+														| "anio"
+														| "trimestre"
+														| "mes"
+														| "semana"
+														| "dia";
+													setEquilibrioPeriodo(p);
+													setEquilibrioRange(getDefaultRangeForPeriodo(p));
+												}}
 											>
 												<SelectTrigger className="w-[140px]">
 													<SelectValue placeholder="Período" />
@@ -2623,26 +2618,13 @@ function RouteComponent() {
 										</FilterField>
 
 										<FilterField label="Rango">
-											<DateRangeFilter
-												dateRange={
-													equilibrioRange.fechaInicio &&
-													equilibrioRange.fechaFin
-														? {
-																from: dateFromInput(
-																	equilibrioRange.fechaInicio,
-																),
-																to: dateFromInput(equilibrioRange.fechaFin),
-															}
-														: undefined
+											<PeriodDatePicker
+												periodo={equilibrioPeriodo}
+												fechaInicio={equilibrioRange.fechaInicio}
+												fechaFin={equilibrioRange.fechaFin}
+												onChange={(fechaInicio, fechaFin) =>
+													setEquilibrioRange({ fechaInicio, fechaFin })
 												}
-												onDateRangeChange={(range) => {
-													if (range?.from && range?.to) {
-														setEquilibrioRange({
-															fechaInicio: formatDateInput(range.from),
-															fechaFin: formatDateInput(range.to),
-														});
-													}
-												}}
 											/>
 										</FilterField>
 									</div>

@@ -81,7 +81,7 @@ export type MontoACobrarRow = {
 	total_seguro: string;
 	total_gps: string;
 	total_membresias: string;
-	mora_promedio: string;
+	total_mora: string;
 };
 
 export type MontoACobrarPeriodoRow = {
@@ -93,8 +93,10 @@ export type MontoACobrarPeriodoRow = {
 	total_seguro: string;
 	total_gps: string;
 	total_membresias: string;
-	mora_promedio: string;
+	total_mora: string;
 	mora_count: number;
+	total_credits: number;
+	credits_con_mora: number;
 	acum_total_cuota: string;
 	acum_total_interes: string;
 	acum_total_iva: string;
@@ -236,7 +238,7 @@ export function transformMontoACobrar(
 		total_seguro: money(num(r.total_seguro) * col),
 		total_gps: money(num(r.total_gps) * col),
 		total_membresias: money(num(r.total_membresias) * col),
-		mora_promedio: money(num(r.mora_promedio) * mora),
+		total_mora: money(num(r.total_mora) * mora),
 	}));
 }
 

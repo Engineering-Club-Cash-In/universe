@@ -77,6 +77,14 @@ export async function getMontoACobrarPeriodo({
   fechaFin: string;
 }) {
   const pg = sql.raw(toPostgresPeriod[periodo]);
+  const pgIntervalMap: Record<Periodo, string> = {
+    anio: "1 year",
+    trimestre: "3 months",
+    mes: "1 month",
+    semana: "1 week",
+    dia: "1 day",
+  };
+  const pgInterval = sql.raw(`interval '${pgIntervalMap[periodo]}'`);
 
   const result = await db.execute(sql`
     WITH
@@ -130,13 +138,20 @@ export async function getMontoACobrarPeriodo({
         COALESCE(cap_anterior.total_restante, c.capital::numeric)       AS cap_ant,
         MAX(mora_real.cuotas_atrasadas)                                 AS cuotas_atrasadas,
         CASE WHEN MAX(mora_real.cuotas_atrasadas) > 0
-             THEN COALESCE(MAX(m.monto_mora::numeric), 0)
+             THEN COALESCE(MAX(hist_mora.monto_mora), 0)
              ELSE 0 END                                                 AS mora_val
       FROM pagos_en_rango p
       INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
       INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
       INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
-      LEFT JOIN cartera.moras_credito m ON m.credito_id = c.credito_id AND m.activa = true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(mh.monto_nuevo, 0) AS monto_mora
+        FROM cartera.moras_historial mh
+        WHERE mh.credito_id = c.credito_id
+          AND (mh.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') < DATE_TRUNC(${pg}, p.fecha_venc::timestamp) + ${pgInterval}
+        ORDER BY mh.fecha DESC
+        LIMIT 1
+      ) hist_mora ON true
       LEFT JOIN LATERAL (
         SELECT pc_a.total_restante::numeric AS total_restante
         FROM cartera.pagos_credito pc_a
@@ -291,8 +306,10 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN seguro      ELSE 0 END), 0)               AS total_seguro,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN gps         ELSE 0 END), 0)               AS total_gps,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN mem         ELSE 0 END), 0)               AS total_membresias,
-      AVG(CASE WHEN cuotas_atrasadas > 0 AND NOT excluido_mora THEN mora_val END)                AS mora_promedio,
+      COALESCE(SUM(mora_val) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)       AS total_mora,
       COALESCE(SUM(cuotas_atrasadas) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)::int AS mora_count,
+      COUNT(credito_id)::int                                                                    AS total_credits,
+      COUNT(credito_id) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora)::int          AS credits_con_mora,
       COALESCE(SUM(CASE
         WHEN excluido_mora     THEN 0
         WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant)

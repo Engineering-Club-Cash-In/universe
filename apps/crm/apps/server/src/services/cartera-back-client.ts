@@ -218,8 +218,10 @@ export type MontoACobrarPeriodoRow = {
 	total_seguro: string;
 	total_gps: string;
 	total_membresias: string;
-	mora_promedio: string;
+	total_mora: string;
 	mora_count: number;
+	total_credits: number;
+	credits_con_mora: number;
 	acum_total_cuota: string;
 	acum_total_interes: string;
 	acum_total_iva: string;

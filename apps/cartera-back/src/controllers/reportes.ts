@@ -1282,6 +1282,7 @@ export async function getCuotasPorFecha({
       JOIN cartera.cuotas_credito qc_prev ON pc_prev.cuota_id = qc_prev.cuota_id
       WHERE qc_prev.credito_id = c.credito_id
         AND qc_prev.numero_cuota = c.numero_cuota - 1
+        AND qc_prev.numero_cuota > 0
         AND pc_prev."paymentFalse" = false
     ) prev_pag ON true
     LEFT JOIN LATERAL (
@@ -1298,7 +1299,14 @@ export async function getCuotasPorFecha({
         SUM(pc.abono_seguro::numeric)     AS abono_seguro,
         SUM(pc.abono_gps::numeric)        AS abono_gps,
         SUM(pc.membresias_pago::numeric)  AS membresias_pagada,
-        SUM(pc.monto_aplicado::numeric)   AS total_pagado
+        SUM(
+          COALESCE(pc.abono_capital::numeric, 0)
+          + COALESCE(pc.abono_interes::numeric, 0)
+          + COALESCE(pc.abono_iva_12::numeric, 0)
+          + COALESCE(pc.abono_seguro::numeric, 0)
+          + COALESCE(pc.abono_gps::numeric, 0)
+          + COALESCE(pc.membresias_pago::numeric, 0)
+        ) AS total_pagado
       FROM cartera.pagos_credito pc
       WHERE pc.cuota_id = c.cuota_id
         AND pc."paymentFalse" = false

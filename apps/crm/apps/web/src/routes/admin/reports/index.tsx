@@ -15,7 +15,7 @@ import {
 	TrendingUp,
 	Wallet,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
 	Bar,
 	BarChart,
@@ -395,6 +395,27 @@ function SimularButton({ onClick }: { onClick: () => void }) {
 			<Sparkles className="h-3.5 w-3.5 text-purple-500" />
 			Simular
 		</Button>
+	);
+}
+
+// Un control de filtro con su etiqueta encima. Da jerarquía a las barras de
+// filtros: cada control dice qué controla, agrupados visualmente.
+function FilterField({
+	label,
+	className,
+	children,
+}: {
+	label: string;
+	className?: string;
+	children: ReactNode;
+}) {
+	return (
+		<div className={`flex flex-col gap-1.5 ${className ?? ""}`}>
+			<span className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+				{label}
+			</span>
+			{children}
+		</div>
 	);
 }
 
@@ -1216,7 +1237,7 @@ function RouteComponent() {
 							{/* Reporte: Monto a Cobrarse por Período */}
 							<Card>
 								<CardHeader>
-									<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+									<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
 										<div className="flex items-center gap-2">
 											<CalendarDays className="h-5 w-5 text-blue-500" />
 											<div>
@@ -1227,8 +1248,11 @@ function RouteComponent() {
 												</CardDescription>
 											</div>
 										</div>
-										<div className="flex flex-wrap items-center gap-2">
-											<SimularButton onClick={() => setScenarioOpen("monto")} />
+										<SimularButton onClick={() => setScenarioOpen("monto")} />
+									</div>
+
+									<div className="mt-4 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-lg border bg-muted/30 px-4 py-3">
+										<FilterField label="Período">
 											<Select
 												value={montoCobrarPeriodo}
 												onValueChange={(v) => {
@@ -1253,6 +1277,9 @@ function RouteComponent() {
 													<SelectItem value="anio">Año</SelectItem>
 												</SelectContent>
 											</Select>
+										</FilterField>
+
+										<FilterField label="Rango">
 											<PeriodDatePicker
 												periodo={montoCobrarPeriodo}
 												fechaInicio={montoCobrarRange.fechaInicio}
@@ -1261,6 +1288,9 @@ function RouteComponent() {
 													setMontoCobrarRange({ fechaInicio, fechaFin })
 												}
 											/>
+										</FilterField>
+
+										<FilterField label="Vista" className="sm:ml-auto">
 											<Select
 												value={montoCobrarAcumulado ? "acumulado" : "periodo"}
 												onValueChange={(v) =>
@@ -1275,7 +1305,7 @@ function RouteComponent() {
 													<SelectItem value="acumulado">Acumulado</SelectItem>
 												</SelectContent>
 											</Select>
-										</div>
+										</FilterField>
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-6">
@@ -1468,17 +1498,20 @@ function RouteComponent() {
 																		{formatCurrency(membresias)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		<div>
-																			{formatCurrency(row.total_mora)}
+																		<div>{formatCurrency(row.total_mora)}</div>
+																		<div
+																			className="text-muted-foreground text-xs"
+																			title="% de créditos del período con mora activa"
+																		>
+																			{row.total_credits > 0
+																				? (
+																						(row.credits_con_mora /
+																							row.total_credits) *
+																						100
+																					).toFixed(1)
+																				: "0.0"}
+																			%
 																		</div>
-																																																																								<div
-																																					className="text-muted-foreground text-xs"
-																																					title="% de créditos del período con mora activa"
-																																				>
-																																					{row.total_credits > 0
-																																						? ((row.credits_con_mora / row.total_credits) * 100).toFixed(1)
-																																						: "0.0"}%
-																																				</div>
 																	</TableCell>
 																	<TableCell className="text-right font-bold">
 																		{formatCurrency(total)}
@@ -1701,7 +1734,7 @@ function RouteComponent() {
 																		formatCurrency(totalEsperado)
 																	) : (
 																		<span className="text-base text-muted-foreground">
-																			Sin meta
+																			Por definir
 																		</span>
 																	)}
 																</p>
@@ -1711,14 +1744,22 @@ function RouteComponent() {
 																	Avance
 																</p>
 																<p className="font-bold text-2xl">
-																	{pct.toFixed(1)}%
+																	{totalEsperado > 0 ? (
+																		`${pct.toFixed(1)}%`
+																	) : (
+																		<span className="text-base text-muted-foreground">
+																			—
+																		</span>
+																	)}
 																</p>
 															</div>
 														</div>
-														<ProgressBar
-															value={totalCobrado}
-															max={totalEsperado}
-														/>
+														{totalEsperado > 0 && (
+															<ProgressBar
+																value={totalCobrado}
+																max={totalEsperado}
+															/>
+														)}
 													</div>
 
 													{/* Desglose por rubro */}
@@ -2515,7 +2556,7 @@ function RouteComponent() {
 							{/* Cobertura de Colocación vs Meta */}
 							<Card>
 								<CardHeader>
-									<div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+									<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
 										<div className="flex items-center gap-2">
 											<TrendingUp className="h-5 w-5 text-green-500" />
 											<div>
@@ -2526,7 +2567,7 @@ function RouteComponent() {
 												</CardDescription>
 											</div>
 										</div>
-										<div className="flex flex-wrap items-center gap-2">
+										<div className="flex items-center gap-2">
 											<SimularButton
 												onClick={() => setScenarioOpen("cobertura")}
 											/>
@@ -2539,6 +2580,11 @@ function RouteComponent() {
 												<Target className="h-3.5 w-3.5" />
 												Configurar metas
 											</Button>
+										</div>
+									</div>
+
+									<div className="mt-4 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-lg border bg-muted/30 px-4 py-3">
+										<FilterField label="Período">
 											<Select
 												value={equilibrioPeriodo}
 												onValueChange={(v) =>
@@ -2563,6 +2609,9 @@ function RouteComponent() {
 													<SelectItem value="anio">Año</SelectItem>
 												</SelectContent>
 											</Select>
+										</FilterField>
+
+										<FilterField label="Rango">
 											<DateRangeFilter
 												dateRange={
 													equilibrioRange.fechaInicio &&
@@ -2584,7 +2633,7 @@ function RouteComponent() {
 													}
 												}}
 											/>
-										</div>
+										</FilterField>
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-4">

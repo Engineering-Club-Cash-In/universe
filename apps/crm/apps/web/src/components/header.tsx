@@ -513,7 +513,7 @@ function MobileNav({
 					<SheetHeader className="shrink-0 border-b">
 						<SheetTitle>Menú</SheetTitle>
 					</SheetHeader>
-					<nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3">
+					<nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-3">
 						{!session && (
 							<Link to="/" className={MOBILE_LINK_CLASS}>
 								<LayoutDashboard />

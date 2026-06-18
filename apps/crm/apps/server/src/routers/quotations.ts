@@ -165,6 +165,9 @@ export const quotationsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			const vehicleCondition =
+				input.vehicleType === "nuevo" ? "new" : input.vehicleCondition;
+
 			// Validar acceso a cotizaciones
 			const userRole = context.userRole;
 			if (!canManageQuotations(userRole)) {
@@ -243,7 +246,7 @@ export const quotationsRouter = {
 					vehicleLine: vehicleData.line || null,
 					vehicleModel: vehicleData.model || null,
 					vehicleType: input.vehicleType,
-					vehicleCondition: input.vehicleCondition,
+					vehicleCondition,
 					vehicleOrigin: input.vehicleOrigin,
 					vehicleValue: input.vehicleValue.toString(),
 					insuredAmount: input.insuredAmount.toString(),

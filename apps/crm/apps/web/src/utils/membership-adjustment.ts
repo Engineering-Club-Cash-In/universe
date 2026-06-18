@@ -65,7 +65,10 @@ function getCategory(
 		return "Sobre vehículo (hasta 50%)";
 
 	const vehicleType = normalize(input.vehicleType);
-	const isNew = input.condition ? input.condition === "new" : input.isNew;
+	const isLegacyNewType = vehicleType === "nuevo";
+	const isNew = input.condition
+		? input.condition === "new" || isLegacyNewType
+		: input.isNew || isLegacyNewType;
 	if (isNew) {
 		if (NEW_COMMERCIAL_TYPES.has(vehicleType)) {
 			return "Nuevo (camión, microbus, panel, uber o similar)";

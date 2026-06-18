@@ -67,6 +67,19 @@ describe("getMembershipAdjustment", () => {
 		expect(result.percentage).toBe(31.25);
 	});
 
+	test("legacy Nuevo vehicle type is treated as new even with used condition", () => {
+		const result = getMembershipAdjustment({
+			creditType: "autocompra",
+			insuredAmount: 100000,
+			vehicleType: "nuevo",
+			condition: "used",
+			origin: "agencia",
+		});
+
+		expect(result.category).toBe("Nuevo (sedán, SUV, pickup)");
+		expect(result.percentage).toBe(18.75);
+	});
+
 	test("uses used agency category from non-rodado origin", () => {
 		const result = getMembershipAdjustment({
 			creditType: "autocompra",

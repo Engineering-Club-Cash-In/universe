@@ -18,19 +18,40 @@ const RANGE_PRESETS: { key: PresetKey; label: string }[] = [
 
 export const DEFAULT_PRESET: PresetKey = "3m";
 
+/** Año/mes de hoy en zona Guatemala (evita corrimientos por la TZ del navegador). */
+function gtYearMonth(): { year: number; month: number } {
+	const parts = new Intl.DateTimeFormat("en-CA", {
+		timeZone: GUATEMALA_TZ,
+		year: "numeric",
+		month: "2-digit",
+	}).formatToParts(new Date());
+	const num = (type: string) =>
+		Number(parts.find((p) => p.type === type)?.value);
+	return { year: num("year"), month: num("month") };
+}
+
+/** Instante de medianoche en Guatemala (UTC-6) para el Y-M-D dado. */
+function gtMidnight(year: number, month: number, day: number): Date {
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return new Date(`${year}-${pad(month)}-${pad(day)}T06:00:00.000Z`);
+}
+
 /** Rango [desde, hasta] correspondiente a un preset (hoy como fin). */
 export function rangeForPreset(key: PresetKey): DateRange {
 	const today = new Date();
 	switch (key) {
-		case "month":
-			return {
-				from: new Date(today.getFullYear(), today.getMonth(), 1),
-				to: today,
-			};
+		case "month": {
+			// Inicio = 1° del mes actual EN GUATEMALA (no en la TZ del navegador),
+			// para que coincida con la serialización en zona Guatemala del caller.
+			const { year, month } = gtYearMonth();
+			return { from: gtMidnight(year, month, 1), to: today };
+		}
 		case "6m":
 			return { from: subMonths(today, 6), to: today };
-		case "ytd":
-			return { from: new Date(today.getFullYear(), 0, 1), to: today };
+		case "ytd": {
+			const { year } = gtYearMonth();
+			return { from: gtMidnight(year, 1, 1), to: today };
+		}
 		default:
 			// "3m"
 			return { from: subMonths(today, 3), to: today };

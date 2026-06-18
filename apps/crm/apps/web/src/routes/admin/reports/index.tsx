@@ -496,13 +496,12 @@ function RouteComponent() {
 	const [equilibrioPeriodo, setEquilibrioPeriodo] = useState<
 		"anio" | "trimestre" | "mes" | "semana" | "dia"
 	>("mes");
-	const [equilibrioRange, setEquilibrioRange] = useState(() => {
-		const today = formatDateInput(new Date());
-		const start = new Date();
-		start.setMonth(start.getMonth() - 5);
-		start.setDate(1);
-		return { fechaInicio: formatDateInput(start), fechaFin: today };
-	});
+	// Alineado al período por defecto ("mes") y a un solo año: el PeriodDatePicker
+	// en modo mes tiene un único selector de año, así que un rango que cruce de año
+	// (p.ej. "últimos 6 meses" en enero) se renderizaría/editaría mal.
+	const [equilibrioRange, setEquilibrioRange] = useState(() =>
+		getDefaultRangeForPeriodo("mes"),
+	);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const userRole = userProfile.data?.role;

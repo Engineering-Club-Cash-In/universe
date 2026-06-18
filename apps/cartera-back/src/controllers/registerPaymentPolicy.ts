@@ -67,6 +67,59 @@ export const getSpecialPaymentInstallmentFields = () => ({
   pagado: true,
 });
 
+// Tolerancia de un centavo al comparar montos de pago contra cero.
+export const DESTINO_SOBRESCRIBIBLE_TOLERANCE = 0.01;
+
+/** Subconjunto de una fila de pago necesario para decidir si es sobrescribible. */
+export type DestinoSobrescribibleRow = {
+  validationStatus?: string | null;
+  monto_aplicado?: BigInput | null;
+  abono_capital?: BigInput | null;
+  abono_interes?: BigInput | null;
+  abono_iva_12?: BigInput | null;
+  abono_seguro?: BigInput | null;
+  abono_gps?: BigInput | null;
+  membresias_pago?: BigInput | null;
+};
+
+/**
+ * ¿La fila de pago elegida como `existingPago` se puede SOBRESCRIBIR (UPDATE) al
+ * cerrar la cuota, sin destruir plata real?
+ *
+ * El cierre de una cuota hace `UPDATE pagos_credito SET <pagoData> WHERE
+ * pago_id = existingPago`. Eso es seguro SOLO si la fila destino es desechable:
+ *
+ *  - El placeholder `no_required` importado de SIFCO (su único propósito es
+ *    portar los `*_restante`; no representa plata aplicada), o
+ *  - Una fila "vacía": `monto_aplicado ≈ 0` Y todos los `abono_*` ≈ 0 (p.ej. una
+ *    fila estructural sin rubros de cuota).
+ *
+ * Cuando el placeholder `no_required` ya fue consumido por un parcial previo,
+ * `existingPago` cae al fallback `allExistingPagos[0]` = la fila REAL más vieja
+ * (con `abono_interes` validado, posiblemente ya facturado). Sobrescribirla
+ * borraría ese pago. En ese caso esta función devuelve `false` y el caller debe
+ * INSERTAR una fila de cierre nueva en vez de hacer UPDATE.
+ */
+export const esDestinoSobrescribible = (
+  pago: DestinoSobrescribibleRow
+): boolean => {
+  if (pago.validationStatus === "no_required") return true;
+
+  const tol = new Big(DESTINO_SOBRESCRIBIBLE_TOLERANCE);
+  const casiCero = (v: BigInput | null | undefined) =>
+    new Big(v ?? 0).abs().lte(tol);
+
+  return (
+    casiCero(pago.monto_aplicado) &&
+    casiCero(pago.abono_capital) &&
+    casiCero(pago.abono_interes) &&
+    casiCero(pago.abono_iva_12) &&
+    casiCero(pago.abono_seguro) &&
+    casiCero(pago.abono_gps) &&
+    casiCero(pago.membresias_pago)
+  );
+};
+
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;

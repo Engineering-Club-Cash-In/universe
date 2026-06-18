@@ -267,7 +267,12 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 				numeroSifco: sql<string>`COALESCE(${latestCarteraReference.numeroCreditoSifco}, ${opportunities.numeroSifco}, '')`,
 				cuotaSeguro: opportunities.seguro,
 				montoCredito: opportunities.value,
-				cuotaCredito: latestQuotation.monthlyPayment,
+				// Cuota de la cotización; si no hay cotización enlazada, se usa la
+				// cuota mensual guardada en la oportunidad (el flujo de cierre usa
+				// esa cuando no encuentra cotización).
+				cuotaCredito: sql<
+					string | null
+				>`COALESCE(${latestQuotation.monthlyPayment}, ${opportunities.cuotaMensual})`,
 				fechaCierre: opportunities.actualCloseDate,
 				// Día del mes en que paga (1-31), tomado de la oportunidad.
 				diaPago: opportunities.diaPagoMensual,

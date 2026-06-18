@@ -85,6 +85,14 @@ export type DestinoSobrescribibleRow = {
   abono_seguro?: BigInput | null;
   abono_gps?: BigInput | null;
   membresias_pago?: BigInput | null;
+  abono_interes_ci?: BigInput | null;
+  abono_iva_ci?: BigInput | null;
+  // Buckets de plata que un pago de solo mora/otros/convenio (insertarPago /
+  // getSpecialPaymentInstallmentFields) lleva con `monto_aplicado` y `abono_*`
+  // en 0 — hay que contarlos o el cierre los machacaría. `otros` es TEXT.
+  mora?: BigInput | null;
+  pagoConvenio?: BigInput | null;
+  otros?: string | number | null;
 };
 
 /**
@@ -96,8 +104,10 @@ export type DestinoSobrescribibleRow = {
  *
  *  - El placeholder `no_required` importado de SIFCO (su único propósito es
  *    portar los `*_restante`; no representa plata aplicada), o
- *  - Una fila "vacía": `monto_aplicado ≈ 0` Y todos los `abono_*` ≈ 0 (p.ej. una
- *    fila estructural sin rubros de cuota).
+ *  - Una fila "vacía": SIN plata en NINGÚN bucket — `monto_aplicado`, todos los
+ *    `abono_*`, y también `mora`, `pagoConvenio` y `otros` ≈ 0. (Un pago de solo
+ *    mora/otros/convenio lleva `monto_aplicado`/`abono_*` en 0 pero plata en
+ *    esos otros campos; si no se contaran, el cierre lo machacaría.)
  *
  * Cuando el placeholder `no_required` ya fue consumido por un parcial previo,
  * `existingPago` cae al fallback `allExistingPagos[0]` = la fila REAL más vieja
@@ -114,6 +124,13 @@ export const esDestinoSobrescribible = (
   // Estricto (`lt`, no `lte`): un Q0.01 exacto es un pago real, no "vacío".
   const casiCero = (v: BigInput | null | undefined) =>
     new Big(v ?? 0).abs().lt(tol);
+  // `otros` es TEXT y puede venir null/''/no-numérico → parsear con guard.
+  const otrosCasiCero = (v: string | number | null | undefined) => {
+    if (v == null) return true;
+    const s = String(v).trim();
+    if (s === "" || !/^-?\d+(\.\d+)?$/.test(s)) return true;
+    return new Big(s).abs().lt(tol);
+  };
 
   return (
     casiCero(pago.monto_aplicado) &&
@@ -122,7 +139,13 @@ export const esDestinoSobrescribible = (
     casiCero(pago.abono_iva_12) &&
     casiCero(pago.abono_seguro) &&
     casiCero(pago.abono_gps) &&
-    casiCero(pago.membresias_pago)
+    casiCero(pago.membresias_pago) &&
+    casiCero(pago.abono_interes_ci) &&
+    casiCero(pago.abono_iva_ci) &&
+    // Plata real fuera de los abono_* de cuota: mora, convenio y otros.
+    casiCero(pago.mora) &&
+    casiCero(pago.pagoConvenio) &&
+    otrosCasiCero(pago.otros)
   );
 };
 

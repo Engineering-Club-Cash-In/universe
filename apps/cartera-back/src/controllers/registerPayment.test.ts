@@ -407,6 +407,41 @@ describe("esDestinoSobrescribible", () => {
       })
     ).toBe(false);
   });
+
+  it("un pago de solo MORA (monto_aplicado/abono_* en 0) NO es sobrescribible", () => {
+    // Codex P2: insertarPago crea filas mora/otros con monto_aplicado:0 y
+    // abono_* en 0 pero plata en mora. No debe tratarse como vacío.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "pending",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        mora: "150.00",
+      })
+    ).toBe(false);
+  });
+
+  it("un pago de solo OTROS (TEXT con monto) NO es sobrescribible", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "pending",
+        monto_aplicado: "0",
+        abono_interes: "0",
+        otros: "300.00",
+      })
+    ).toBe(false);
+  });
+
+  it("una fila con `otros` vacío/no-numérico SÍ puede ser vacía", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        otros: "",
+      })
+    ).toBe(true);
+  });
 });
 
 // Réplica pura del árbol de decisión insert-vs-update del cierre en

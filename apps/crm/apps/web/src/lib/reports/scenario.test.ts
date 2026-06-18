@@ -84,13 +84,14 @@ describe("transformFacturacion", () => {
 		esperado: { meta_mensual: "1000" },
 	};
 
-	test("efectividad +100% escala todos los rubros proporcionalmente", () => {
+	test("efectividad +100% escala rubros de ingreso proporcionalmente, mora sin cambio", () => {
 		const out = transformFacturacion(
 			data,
 			params({ efectividadDeltaPct: 100 }),
 		);
 		expect(out.cobrado.interes).toBe("800.00");
-		expect(out.cobrado.mora).toBe("200.00");
+		// mora no sube — moraReduccionPct=0 → moraFactor=1 → sin cambio
+		expect(out.cobrado.mora).toBe("100.00");
 	});
 
 	test("efectividad +50% aplica la mitad del factor", () => {
@@ -106,25 +107,30 @@ describe("transformFacturacion", () => {
 		expect(out.esperado.meta_mensual).toBe("1000");
 	});
 
-	test("efectividad negativa no cancela reducción de mora válida", () => {
+	test("bajar mora 100% reduce mora a 0 y sube rubros de ingreso", () => {
 		const out = transformFacturacion(
 			data,
 			params({ moraReduccionPct: 100, efectividadDeltaPct: -100 }),
 		);
-		// close=clamp01(0+1)=1 → factor=2 → interes=800
+		// mora baja a 0 (moraFactor=0)
+		expect(out.cobrado.mora).toBe("0.00");
+		// close=clamp01(0+1)=1 → factor=2 → interes sube
 		expect(out.cobrado.interes).toBe("800.00");
 	});
 
-	test("total cobrado > meta (gap<=0) devuelve datos sin modificar", () => {
+	test("total cobrado > meta (gap<=0) aún aplica moraFactor a mora", () => {
 		const over: FacturacionMesResponse = {
-			cobrado: { interes: "1100", membresias: "0", seguro_gps: "0", royalti: "0", mora: "0", otros: "0" },
+			cobrado: { interes: "1100", membresias: "0", seguro_gps: "0", royalti: "0", mora: "100", otros: "0" },
 			esperado: { meta_mensual: "1000" },
 		};
 		const out = transformFacturacion(
 			over,
-			params({ efectividadDeltaPct: 100 }),
+			params({ moraReduccionPct: 50 }),
 		);
+		// gap<=0 → interes sin escalar
 		expect(out.cobrado.interes).toBe("1100");
+		// mora sí se reduce (moraFactor=0.5)
+		expect(out.cobrado.mora).toBe("50.00");
 	});
 });
 

@@ -1044,6 +1044,7 @@ function QuoterPage() {
 		vehicleContext?: {
 			creditType?: "autocompra" | "sobre_vehiculo";
 			condition?: "new" | "used";
+			isInterno?: boolean;
 			origin?: string | null;
 		},
 	) => {
@@ -1092,8 +1093,9 @@ function QuoterPage() {
 				"membershipAdjustmentPercentage",
 				membershipAdjustment.percentage,
 			);
+			const shouldUseInterno = vehicleContext?.isInterno ?? isInterno;
 
-			if (isInterno) {
+			if (shouldUseInterno) {
 				// Crédito interno: solo seguro base, sin membresía ni GPS
 				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
 				quoterForm.setFieldValue("baseMembershipCost", 0);
@@ -1115,16 +1117,18 @@ function QuoterPage() {
 			quoterForm.setFieldValue("rcdpCost", result.rcdpCost);
 
 			// Recalcular después de actualizar
-			setTimeout(() => recalculate(), 100);
+			setTimeout(() => recalculate(shouldUseInterno), 100);
 		} catch (error) {
-		console.error("Error al obtener costo de seguro:", error);
-	}
+			console.error("Error al obtener costo de seguro:", error);
+		}
 	};
 
 	const applyCreditTypeChange = async (
 		creditType: QuotationFormValues["creditType"],
 	) => {
 		quoterForm.setFieldValue("creditType", creditType);
+
+		const shouldUseInterno = creditType === "sobre_vehiculo" ? false : isInterno;
 
 		if (creditType === "sobre_vehiculo") {
 			setIsInterno(false);
@@ -1145,16 +1149,17 @@ function QuoterPage() {
 				{
 					creditType,
 					condition: quoterForm.getFieldValue("vehicleCondition"),
+					isInterno: shouldUseInterno,
 					origin: quoterForm.getFieldValue("vehicleOrigin"),
 				},
 			);
 		}
 
-		setTimeout(() => recalculate(), 100);
+		setTimeout(() => recalculate(shouldUseInterno), 100);
 	};
 
 	// Función para recalcular cuando cambian los valores (según Excel)
-	const recalculate = () => {
+	const recalculate = (isInternoOverride = isInterno) => {
 		const values = quoterForm.state.values;
 
 		const result = calculateQuotation({
@@ -1168,7 +1173,7 @@ function QuoterPage() {
 			transferCost: Number(values.transferCost),
 			royaltyPercentage: Number(values.royaltyPercentage),
 			rcdpCost: Number(values.rcdpCost),
-			isInterno,
+			isInterno: isInternoOverride,
 		});
 
 		quoterForm.setFieldValue("royalty", result.calculatedRoyalty);
@@ -1709,11 +1714,12 @@ function QuoterPage() {
 														updateInsuranceCost(
 															insuredAmount,
 															quoterForm.state.values.vehicleType,
+															{ isInterno: false },
 														);
 													}
 												}
-												setTimeout(() => recalculate(), 100);
-											}}
+											setTimeout(() => recalculate(value), 100);
+										}}
 										/>
 										<Label
 											htmlFor="isInterno"

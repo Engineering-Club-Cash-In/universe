@@ -887,6 +887,8 @@ function QuoterPage() {
 				vehicleLine: value.vehicleLine,
 				vehicleModel: value.vehicleModel,
 				vehicleType: value.vehicleType,
+				vehicleCondition: value.vehicleCondition,
+				vehicleOrigin: value.vehicleOrigin,
 				vehicleValue: Number(value.vehicleValue),
 				insuredAmount: Number(value.insuredAmount),
 				downPayment: Number(value.downPayment),
@@ -1241,6 +1243,10 @@ function QuoterPage() {
 
 			if (quotations && quotations.length > 0) {
 				const q = quotations[0]; // La más reciente
+				const savedVehicleContext = q as typeof q & {
+					vehicleCondition?: QuotationFormValues["vehicleCondition"] | null;
+					vehicleOrigin?: QuotationFormValues["vehicleOrigin"] | null;
+				};
 				const linkedVehicle = q.vehicleId
 					? (vehiclesQuery.data?.data?.find(
 							(vehicle) => vehicle.id === q.vehicleId,
@@ -1260,6 +1266,14 @@ function QuoterPage() {
 				if (linkedVehicle) {
 					applyVehicleConditionAndOrigin(linkedVehicle);
 				} else {
+					quoterForm.setFieldValue(
+						"vehicleCondition",
+						savedVehicleContext.vehicleCondition ?? "used",
+					);
+					quoterForm.setFieldValue(
+						"vehicleOrigin",
+						savedVehicleContext.vehicleOrigin ?? "agencia",
+					);
 					setVehicleConditionLocked(false);
 				}
 				quoterForm.setFieldValue("vehicleValue", Number(q.vehicleValue) || 0);

@@ -117,6 +117,10 @@ export const quotationsRouter = {
 						"microbus_36plus",
 					])
 					.default("particular"),
+				vehicleCondition: z.enum(["new", "used"]).default("used"),
+				vehicleOrigin: z
+					.enum(["agencia", "rodado", "importado", "subasta", "otro"])
+					.default("agencia"),
 				creditType: z
 					.enum(["autocompra", "sobre_vehiculo"])
 					.default("autocompra"),
@@ -239,6 +243,8 @@ export const quotationsRouter = {
 					vehicleLine: vehicleData.line || null,
 					vehicleModel: vehicleData.model || null,
 					vehicleType: input.vehicleType,
+					vehicleCondition: input.vehicleCondition,
+					vehicleOrigin: input.vehicleOrigin,
 					vehicleValue: input.vehicleValue.toString(),
 					insuredAmount: input.insuredAmount.toString(),
 					downPayment: input.downPayment.toString(),

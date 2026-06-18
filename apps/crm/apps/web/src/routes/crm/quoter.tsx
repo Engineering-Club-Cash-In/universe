@@ -823,58 +823,60 @@ function QuoterPage() {
 	});
 
 	// Form
+	const defaultQuotationValues: QuotationFormValues = {
+		opportunityId: "",
+		vehicleId: "",
+		creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
+		vehicleBrand: "",
+		vehicleLine: "",
+		vehicleModel: "",
+		vehicleType: "particular" as const,
+		vehicleCondition: "used" as const,
+		vehicleOrigin: "agencia" as const,
+		vehicleValue: 0,
+		insuredAmount: 0,
+		downPayment: 0,
+		termMonths: 60,
+		interestRate: 1.5, // default autocompra; sobre_vehiculo usa 3
+		insuranceCost: 0,
+		gpsCost: GPS_COST,
+		transferCost: 545, // 395 + 150 según Excel
+		adminCost: 0,
+		baseMembershipCost: 0,
+		membershipCost: 0,
+		membershipAdjustmentCategory: "",
+		membershipAdjustmentPercentage: 0,
+		// Gastos adicionales para detalle de crédito
+		freelanceCost: 0,
+		freelancePercentage: 0,
+		royalty: 0,
+		royaltyPercentage: 4.0,
+		inspectionCost: 0,
+		finesCost: 0,
+		keyCopyCost: 0,
+		keyCopyDiffCost: 0,
+		circulationTaxCost: 0,
+		vehicleTransferCost: 0,
+		mobileGuaranteeCost: 400,
+		licensePlatesCost: 0,
+		leasingContractCost: 400,
+		collectionAuthCost: 0,
+		legalCost: 0,
+		// Gastos específicos de Autocompras
+		appointmentCost: 150,
+		addressVerificationCost: 395,
+		// Interés calculado automáticamente
+		interestCost: 0,
+		// Gastos extra (separados de los principales)
+		extraGpsCost: 0,
+		extraInsuranceCost: 0,
+		extraMembershipCost: 0,
+		extraAdminCost: 600,
+		rcdpCost: 0,
+	};
+
 	const quoterForm = useForm({
-		defaultValues: {
-			opportunityId: "",
-			vehicleId: "",
-			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
-			vehicleBrand: "",
-			vehicleLine: "",
-			vehicleModel: "",
-			vehicleType: "particular" as const,
-			vehicleCondition: "used" as const,
-			vehicleOrigin: "agencia" as const,
-			vehicleValue: 0,
-			insuredAmount: 0,
-			downPayment: 0,
-			termMonths: 60,
-			interestRate: 1.5, // default autocompra; sobre_vehiculo usa 3
-			insuranceCost: 0,
-			gpsCost: GPS_COST,
-			transferCost: 545, // 395 + 150 según Excel
-			adminCost: 0,
-			baseMembershipCost: 0,
-			membershipCost: 0,
-			membershipAdjustmentCategory: "",
-			membershipAdjustmentPercentage: 0,
-			// Gastos adicionales para detalle de crédito
-			freelanceCost: 0,
-			freelancePercentage: 0,
-			royalty: 0,
-			royaltyPercentage: 4.0,
-			inspectionCost: 0,
-			finesCost: 0,
-			keyCopyCost: 0,
-			keyCopyDiffCost: 0,
-			circulationTaxCost: 0,
-			vehicleTransferCost: 0,
-			mobileGuaranteeCost: 400,
-			licensePlatesCost: 0,
-			leasingContractCost: 400,
-			collectionAuthCost: 0,
-			legalCost: 0,
-			// Gastos específicos de Autocompras
-			appointmentCost: 150,
-			addressVerificationCost: 395,
-			// Interés calculado automáticamente
-			interestCost: 0,
-			// Gastos extra (separados de los principales)
-			extraGpsCost: 0,
-			extraInsuranceCost: 0,
-			extraMembershipCost: 0,
-			extraAdminCost: 600,
-			rcdpCost: 0,
-		},
+		defaultValues: defaultQuotationValues,
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
 				opportunityId: value.opportunityId || undefined,

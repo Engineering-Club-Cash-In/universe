@@ -148,7 +148,7 @@ export async function getMontoACobrarPeriodo({
         SELECT COALESCE(mh.monto_nuevo, 0) AS monto_mora
         FROM cartera.moras_historial mh
         WHERE mh.credito_id = c.credito_id
-          AND mh.fecha < DATE_TRUNC(${pg}, p.fecha_venc::timestamp) + ${pgInterval}
+          AND (mh.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') < DATE_TRUNC(${pg}, p.fecha_venc::timestamp) + ${pgInterval}
         ORDER BY mh.fecha DESC
         LIMIT 1
       ) hist_mora ON true

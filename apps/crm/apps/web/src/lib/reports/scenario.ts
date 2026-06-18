@@ -171,6 +171,19 @@ export type ReinversionLiquidacionesResponse = {
 	};
 	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
 	pagosExtras: { abonos_capital: string; cancelaciones: string };
+	/** Desglose por inversionista (desde liquidaciones): reinversión y a recibir. */
+	porInversionista: {
+		inversionista_id: number;
+		nombre: string;
+		tipo_reinversion: string;
+		reinversion_capital: string;
+		reinversion_interes: string;
+		reinversion: string;
+		a_recibir: string;
+		monto_aportado: string;
+	}[];
+	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
+	comprasMes: { tipo: string; cantidad: number; monto: string }[];
 	cantidad_liquidaciones: number;
 };
 

@@ -834,8 +834,105 @@ export async function getReinversionLiquidaciones({
     (cancelExtraRows.rows[0] as Record<string, unknown>)?.total ?? 0
   );
 
+  // Desglose por inversionista (desde las liquidaciones del mes):
+  //   - reinversion_capital / reinversion_interes / reinversion (total)
+  //   - a_recibir = SUM(total_cuota)
+  //   - monto_aportado = lo que le quedó al inversionista tras la liquidación
+  const porInvRows = await db.execute(sql`
+    SELECT
+      l.inversionista_id,
+      i.nombre,
+      COALESCE(i.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
+      COALESCE(SUM(l.reinversion_capital::numeric), 0) AS reinversion_capital,
+      COALESCE(SUM(l.reinversion_interes::numeric), 0) AS reinversion_interes,
+      COALESCE(SUM(l.reinversion_total::numeric), 0)   AS reinversion,
+      COALESCE(SUM(l.total_cuota::numeric), 0)         AS a_recibir
+    FROM cartera.liquidaciones l
+    JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    GROUP BY l.inversionista_id, i.nombre, i.tipo_reinversion
+    ORDER BY i.nombre
+  `);
+
+  // Monto aportado que le quedó al inversionista DESPUÉS de la liquidación
+  // (sin reinversiones), desde historico_liquidaciones_espejo.
+  // ⚠️ Mayo 2026 fue la primera vez que se usó y el histórico quedó CON la
+  // reinversión sumada; para ese mes se descuenta la reinversión.
+  const montoAportadoRows = await db.execute(sql`
+    SELECT
+      h.inversionista_id,
+      COALESCE(SUM(h.monto_aportado::numeric), 0) AS monto_aportado
+    FROM cartera.historico_liquidaciones_espejo h
+    JOIN cartera.liquidaciones l ON l.liquidacion_id = h.liquidacion_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    GROUP BY h.inversionista_id
+  `);
+  const montoAportadoPorInv = new Map<number, number>();
+  for (const r of montoAportadoRows.rows as Record<string, unknown>[]) {
+    montoAportadoPorInv.set(
+      Number(r.inversionista_id),
+      Number(r.monto_aportado ?? 0)
+    );
+  }
+  const esMayo2026 = anio === 2026 && mes === 5;
+
+  const porInversionista = (porInvRows.rows as Record<string, unknown>[]).map(
+    (r) => {
+      const id = Number(r.inversionista_id);
+      const reinversion = Number(r.reinversion ?? 0);
+      const montoHist = montoAportadoPorInv.get(id) ?? 0;
+      const montoAportado = esMayo2026 ? montoHist - reinversion : montoHist;
+      return {
+        inversionista_id: id,
+        nombre: String(r.nombre),
+        tipo_reinversion: String(r.tipo_reinversion ?? "sin_reinversion"),
+        reinversion_capital: Number(r.reinversion_capital ?? 0).toFixed(2),
+        reinversion_interes: Number(r.reinversion_interes ?? 0).toFixed(2),
+        reinversion: reinversion.toFixed(2),
+        a_recibir: Number(r.a_recibir ?? 0).toFixed(2),
+        monto_aportado: montoAportado.toFixed(2),
+      };
+    }
+  ).filter(
+    // La liquidación manda: si no aportó nada (todo en cero), no se muestra.
+    (p) =>
+      Number(p.reinversion) !== 0 ||
+      Number(p.a_recibir) !== 0 ||
+      Number(p.monto_aportado) !== 0
+  );
+
+  // Compras del mes: solo operación de compra (no reinversión) y solo las
+  // COMPLETADAS (status = 'completado'); las pendientes no se cuentan. La fecha
+  // efectiva prioriza fecha_completada y cae a updated_at cuando es NULL
+  // (columna nueva, registros viejos) — mismo criterio que utils/comprasAjuste.ts.
+  const fechaCompra = sql`COALESCE(c.fecha_completada, c.updated_at)`;
+  const comprasRows = await db.execute(sql`
+    SELECT
+      COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo,
+      COUNT(DISTINCT (c.inversionista_id, ${fechaCompra}))::int AS cantidad,
+      COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
+    FROM cartera.compras_credito_inversionista c
+    WHERE c.tipo_operacion = 'compra_cartera'
+      AND c.status = 'completado'
+      AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    GROUP BY c.tipo_reinversion
+    ORDER BY monto DESC
+  `);
+  const comprasMes = (comprasRows.rows as Record<string, unknown>[]).map(
+    (r) => ({
+      tipo: String(r.tipo ?? "sin_reinversion"),
+      cantidad: Number(r.cantidad ?? 0),
+      monto: Number(r.monto ?? 0).toFixed(2),
+    })
+  );
+
   return {
     porTipo,
+    porInversionista,
+    comprasMes,
     interesNeto: {
       conFactura: {
         interes: conFactura.interes.toFixed(2),

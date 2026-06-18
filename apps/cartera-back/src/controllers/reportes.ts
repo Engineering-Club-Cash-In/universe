@@ -799,27 +799,48 @@ export async function getReinversionLiquidaciones({
 
   // Interés de CUBE: no se almacena en liquidaciones sino que se deriva de los
   // registros de inversionistas no-CUBE en pagos_credito_inversionistas_espejo.
-  // Por crédito+liquidación se agrupa la participación e interés de todos los
-  // inversionistas no-CUBE, y el interés de CUBE es:
   //   interes_cube = total_inv_interes × (100 - total_inv_pct) / total_inv_pct
+  // `porcentaje_participacion` es un split por inversionista guardado por fila de
+  // pago (snapshot del momento). Se agrupa a nivel de cuota en dos pasos:
+  //   1. (credito, liquidacion, cuota, inversionista): colapsa pagos PARCIALES de
+  //      la misma cuota tomando el porcentaje UNA sola vez (MAX) y sumando el
+  //      interés. Evita inflar el porcentaje (dos parciales al 80% darían 160% y
+  //      romperían el cálculo al caer en el filtro `< 100`).
+  //   2. (credito, liquidacion, cuota): suma la participación de los distintos
+  //      inversionistas no-CUBE dentro de la cuota. Agrupar por cuota (y no por
+  //      crédito) mantiene el cálculo correcto aun si la participación de un
+  //      inversionista cambia entre cuotas (reasignación): cada cuota usa su
+  //      propio porcentaje.
   const cubeRows = await db.execute(sql`
-    WITH por_credito_liq AS (
+    WITH por_inv_cuota AS (
       SELECT
         pe.credito_id,
         pe.liquidacion_id,
-        COALESCE(SUM(pe.abono_interes::numeric), 0)             AS total_inv_interes,
-        COALESCE(SUM(pe.porcentaje_participacion::numeric), 0)  AS total_inv_pct
+        pe.cuota,
+        pe.inversionista_id,
+        COALESCE(SUM(pe.abono_interes::numeric), 0)         AS inv_interes,
+        MAX(pe.porcentaje_participacion::numeric)           AS inv_pct
       FROM cartera.pagos_credito_inversionistas_espejo pe
       JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
       WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
         AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
         AND pe.porcentaje_participacion::numeric > 0
-      GROUP BY pe.credito_id, pe.liquidacion_id
+      GROUP BY pe.credito_id, pe.liquidacion_id, pe.cuota, pe.inversionista_id
+    ),
+    por_cuota AS (
+      SELECT
+        credito_id,
+        liquidacion_id,
+        cuota,
+        SUM(inv_interes) AS total_inv_interes,
+        SUM(inv_pct)     AS total_inv_pct
+      FROM por_inv_cuota
+      GROUP BY credito_id, liquidacion_id, cuota
     )
     SELECT COALESCE(SUM(
       total_inv_interes * (100 - total_inv_pct) / total_inv_pct
     ), 0) AS interes_cube
-    FROM por_credito_liq
+    FROM por_cuota
     WHERE total_inv_pct > 0 AND total_inv_pct < 100
   `);
   const interesCube = Number(

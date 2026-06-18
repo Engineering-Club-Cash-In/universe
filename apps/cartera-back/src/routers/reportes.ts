@@ -264,7 +264,7 @@ export const reportesRouter = new Elysia().use(authMiddleware)
 
   .get("/reportes/cuotas-por-fecha", async ({ query, set }) => {
     try {
-      const { fecha_inicio, fecha_fin, email_asesor } = query as Record<string, string>;
+      const { fecha_inicio, fecha_fin, asesor_id } = query as Record<string, string>;
       if (!fecha_inicio || !fecha_fin) {
         set.status = 400;
         return { error: "fecha_inicio y fecha_fin son requeridos" };
@@ -276,7 +276,7 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       const data = await getCuotasPorFecha({
         fechaInicio: fecha_inicio,
         fechaFin: fecha_fin,
-        emailAsesor: email_asesor,
+        asesorId: asesor_id ? Number(asesor_id) : undefined,
       });
       set.status = 200;
       return { ok: true, data };

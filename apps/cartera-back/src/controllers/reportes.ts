@@ -1204,14 +1204,14 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
 export async function getCuotasPorFecha({
   fechaInicio,
   fechaFin,
-  emailAsesor,
+  asesorId,
 }: {
   fechaInicio: string;
   fechaFin: string;
-  emailAsesor?: string;
+  asesorId?: number;
 }) {
-  const asesorFilter = emailAsesor
-    ? sql`AND a.email_cash_in = ${emailAsesor}`
+  const asesorFilter = asesorId
+    ? sql`AND cr.asesor_id = ${asesorId}`
     : sql``;
 
   const result = await db.execute(sql`
@@ -1270,6 +1270,7 @@ export async function getCuotasPorFecha({
       COALESCE(pag.abono_iva, 0)                      AS iva_pagado,
       COALESCE(pag.abono_seguro, 0)                   AS seguro_pagado,
       COALESCE(pag.abono_gps, 0)                      AS gps_pagado,
+      COALESCE(pag.membresias_pagada, 0)              AS membresias_pagado,
       COALESCE(pag.total_pagado, 0)                   AS total_pagado
     FROM cartera.cuotas_credito c
     JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
@@ -1281,26 +1282,30 @@ export async function getCuotasPorFecha({
       JOIN cartera.cuotas_credito qc_prev ON pc_prev.cuota_id = qc_prev.cuota_id
       WHERE qc_prev.credito_id = c.credito_id
         AND qc_prev.numero_cuota = c.numero_cuota - 1
+        AND pc_prev."paymentFalse" = false
     ) prev_pag ON true
     LEFT JOIN LATERAL (
       SELECT MAX(pc_curr.total_restante::numeric) AS total_restante
       FROM cartera.pagos_credito pc_curr
       WHERE pc_curr.cuota_id = c.cuota_id
+        AND pc_curr."paymentFalse" = false
     ) curr_pag ON true
     LEFT JOIN LATERAL (
       SELECT
-        SUM(pc.abono_capital::numeric)  AS abono_capital,
-        SUM(pc.abono_interes::numeric)  AS abono_interes,
-        SUM(pc.abono_iva_12::numeric)   AS abono_iva,
-        SUM(pc.abono_seguro::numeric)   AS abono_seguro,
-        SUM(pc.abono_gps::numeric)      AS abono_gps,
-        SUM(pc.monto_aplicado::numeric) AS total_pagado
+        SUM(pc.abono_capital::numeric)    AS abono_capital,
+        SUM(pc.abono_interes::numeric)    AS abono_interes,
+        SUM(pc.abono_iva_12::numeric)     AS abono_iva,
+        SUM(pc.abono_seguro::numeric)     AS abono_seguro,
+        SUM(pc.abono_gps::numeric)        AS abono_gps,
+        SUM(pc.membresias_pago::numeric)  AS membresias_pagada,
+        SUM(pc.monto_aplicado::numeric)   AS total_pagado
       FROM cartera.pagos_credito pc
       WHERE pc.cuota_id = c.cuota_id
         AND pc."paymentFalse" = false
     ) pag ON true
     WHERE c.fecha_vencimiento::date >= ${fechaInicio}::date
       AND c.fecha_vencimiento::date <= ${fechaFin}::date
+      AND c.numero_cuota > 0
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
       ${asesorFilter}
     ORDER BY c.fecha_vencimiento ASC, cr.numero_credito_sifco ASC

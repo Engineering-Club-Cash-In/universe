@@ -232,6 +232,7 @@ export type CuotaPorFechaRow = {
 	iva_pagado: string;
 	seguro_pagado: string;
 	gps_pagado: string;
+	membresias_pagado: string;
 	total_pagado: string;
 };
 
@@ -1570,12 +1571,12 @@ export class CarteraBackClient {
 	async getCuotasPorFecha(params: {
 		fechaInicio: string;
 		fechaFin: string;
-		emailAsesor?: string;
+		asesorId?: number;
 	}): Promise<CuotaPorFechaRow[]> {
 		const qp = new URLSearchParams({
 			fecha_inicio: params.fechaInicio,
 			fecha_fin: params.fechaFin,
-			...(params.emailAsesor ? { email_asesor: params.emailAsesor } : {}),
+			...(params.asesorId ? { asesor_id: String(params.asesorId) } : {}),
 		});
 
 		const response = await this.request<{ ok: boolean; data: CuotaPorFechaRow[] }>(

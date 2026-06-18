@@ -528,8 +528,8 @@ function TabCuotasPorFecha({
 		"cobros/reportes/cuotas/fechaFin",
 		hoyInit,
 	);
-	const [emailAsesor, setEmailAsesor] = usePersistedState<string>(
-		"cobros/reportes/cuotas/emailAsesor",
+	const [asesorId, setAsesorId] = usePersistedState<string>(
+		"cobros/reportes/cuotas/asesorId",
 		"",
 	);
 	const [filtroEstado, setFiltroEstado] = usePersistedState<string>(
@@ -553,7 +553,7 @@ function TabCuotasPorFecha({
 			input: {
 				fechaInicio,
 				fechaFin,
-				emailAsesor: canSeeAll ? (emailAsesor || undefined) : undefined,
+				asesorId: canSeeAll ? (asesorId ? Number(asesorId) : undefined) : undefined,
 			},
 		}),
 		enabled: !!session && !!fechaInicio && !!fechaFin,
@@ -661,8 +661,8 @@ function TabCuotasPorFecha({
 					<div className="flex flex-col gap-1">
 						<Label className="text-xs">Asesor</Label>
 						<Select
-							value={emailAsesor}
-							onValueChange={(v) => setEmailAsesor(v === "todos" ? "" : v)}
+							value={asesorId}
+							onValueChange={(v) => setAsesorId(v === "todos" ? "" : v)}
 						>
 							<SelectTrigger className="w-48">
 								<SelectValue placeholder="Todos los asesores" />
@@ -671,7 +671,7 @@ function TabCuotasPorFecha({
 								<SelectItem value="todos">Todos</SelectItem>
 								{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
 								{(asesoresData as any)?.asesores?.map((a: any) => (
-									<SelectItem key={a.asesorId} value={a.email}>
+									<SelectItem key={a.asesorId} value={String(a.asesorId)}>
 										{a.nombre}
 									</SelectItem>
 								))}

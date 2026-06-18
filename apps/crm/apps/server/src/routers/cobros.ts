@@ -3965,34 +3965,23 @@ export const cobrosRouter = {
 			z.object({
 				fechaInicio: z.string(),
 				fechaFin: z.string(),
-				emailAsesor: z.string().optional(),
+				asesorId: z.number().optional(),
 			}),
 		)
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			if (!isCarteraBackEnabled()) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Integración con cartera-back no está habilitada",
 				});
 			}
 
-			// Supervisores/admins pueden filtrar por asesor; el resto queda
-			// restringido a sus propios créditos.
-			const emailAsesor = PERMISSIONS.canAssignCobros(context.userRole)
-				? input.emailAsesor
-				: context.user?.email;
-
 			const rows = await carteraBackClient.getCuotasPorFecha({
 				fechaInicio: input.fechaInicio,
 				fechaFin: input.fechaFin,
-				emailAsesor,
+				asesorId: input.asesorId,
 			});
 
-			const rowsMapped = rows.map((r) => ({
-				...r,
-				// Membresías no tiene abono propio: si la cuota está pagada se toma
-				// el monto esperado; de lo contrario se reporta como Q0.
-				membresias_pagado: r.pagado ? r.membresias_esperado : "0",
-			}));
+			const rowsMapped = rows.map((r) => ({ ...r }));
 
 			let capitalEsp = 0;
 			let interesEsp = 0;

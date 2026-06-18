@@ -109,12 +109,6 @@ function sanitizeCSVCell(value: string): string {
 }
 
 function RouteComponent() {
-	const [dateRange, setDateRange] = useState<DateRange | undefined>(
-		getDefaultDateRange,
-	);
-	const [pageSize, setPageSize] = useState(25);
-	const [page, setPage] = useState(0);
-
 	const {
 		data: session,
 		error: sessionError,
@@ -151,6 +145,30 @@ function RouteComponent() {
 		navigate,
 	]);
 
+	if (isPending) {
+		return (
+			<div className="flex h-96 items-center justify-center text-muted-foreground">
+				Cargando...
+			</div>
+		);
+	}
+
+	if (!canAccess) return null;
+
+	return (
+		<div className="container mx-auto space-y-6 p-6">
+			<PorcentajeEfectividadContent />
+		</div>
+	);
+}
+
+export function PorcentajeEfectividadContent() {
+	const [dateRange, setDateRange] = useState<DateRange | undefined>(
+		getDefaultDateRange,
+	);
+	const [pageSize, setPageSize] = useState(25);
+	const [page, setPage] = useState(0);
+
 	const input =
 		dateRange?.from && dateRange?.to
 			? {
@@ -163,23 +181,13 @@ function RouteComponent() {
 		...orpc.getReportePorcentajeEfectividad.queryOptions({
 			input: input ?? { startDate: "", endDate: "" },
 		}),
-		enabled: canAccess && !!input,
+		enabled: !!input,
 	});
 
 	// Reiniciar página al recibir datos nuevos
 	useEffect(() => {
 		setPage(0);
 	}, [reportQuery.data]);
-
-	if (isPending) {
-		return (
-			<div className="flex h-96 items-center justify-center text-muted-foreground">
-				Cargando...
-			</div>
-		);
-	}
-
-	if (!canAccess) return null;
 
 	const data = reportQuery.data;
 	const isLoading = reportQuery.isLoading;
@@ -236,7 +244,7 @@ function RouteComponent() {
 	const chartHeight = Math.max(280, chartData.length * BAR_HEIGHT_PX);
 
 	return (
-		<div className="container mx-auto space-y-6 p-6">
+		<div className="space-y-6">
 			<div>
 				<h1 className="font-bold text-3xl tracking-tight">
 					Porcentaje Efectividad

@@ -9,15 +9,13 @@ import {
 	Calculator,
 	Car,
 	ChevronDown,
-	Clock,
 	Database,
 	FileText,
 	Gavel,
-	Key,
 	Landmark,
 	LayoutDashboard,
+	Menu,
 	MessageSquare,
-	Percent,
 	Scale,
 	Settings,
 	Target,
@@ -25,6 +23,7 @@ import {
 	UserCircle,
 	Users,
 } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { logo } from "@/assets";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
@@ -39,6 +38,13 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import {
+	Sheet,
+	SheetContent,
+	SheetHeader,
+	SheetTitle,
+	SheetTrigger,
+} from "./ui/sheet";
 import UserMenu from "./user-menu";
 
 export default function Header() {
@@ -57,7 +63,10 @@ export default function Header() {
 	return (
 		<div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
 			<div className="flex h-16 items-center px-6">
-				<div className="flex items-center gap-8">
+				<div className="flex items-center gap-3 md:gap-8">
+					{/* Mobile menu (hamburguesa) */}
+					<MobileNav session={!!session} userRole={userRole} />
+
 					{/* Logo */}
 					<Link
 						to="/"
@@ -69,8 +78,8 @@ export default function Header() {
 						</span>
 					</Link>
 
-					{/* Navigation */}
-					<nav className="flex items-center gap-1">
+					{/* Navigation (desktop) */}
+					<nav className="hidden items-center gap-1 md:flex">
 						{!session && (
 							<Button variant="ghost" size="sm" asChild>
 								<Link to="/">
@@ -152,48 +161,17 @@ export default function Header() {
 										</>
 									)}
 									{userRole &&
-										PERMISSIONS.canAccessTiempoCierreReport(userRole) && (
+										(PERMISSIONS.canAccessTiempoCierreReport(userRole) ||
+											PERMISSIONS.canAccessPorcentajeEfectividadReport(
+												userRole,
+											) ||
+											PERMISSIONS.canAccessMetaColocacionReport(userRole)) && (
 											<>
 												<DropdownMenuSeparator />
 												<DropdownMenuItem asChild>
-													<Link
-														to="/crm/reportes/tiempo-cierre"
-														className="cursor-pointer"
-													>
-														<Clock className="mr-2 h-4 w-4" />
-														Tiempo Cierre Crédito
-													</Link>
-												</DropdownMenuItem>
-											</>
-										)}
-									{userRole &&
-										PERMISSIONS.canAccessPorcentajeEfectividadReport(
-											userRole,
-										) && (
-											<>
-												<DropdownMenuSeparator />
-												<DropdownMenuItem asChild>
-													<Link
-														to="/crm/reportes/porcentaje-efectividad"
-														className="cursor-pointer"
-													>
-														<Percent className="mr-2 h-4 w-4" />
-														Porcentaje Efectividad
-													</Link>
-												</DropdownMenuItem>
-											</>
-										)}
-									{userRole &&
-										PERMISSIONS.canAccessMetaColocacionReport(userRole) && (
-											<>
-												<DropdownMenuSeparator />
-												<DropdownMenuItem asChild>
-													<Link
-														to="/crm/reportes/meta-colocacion"
-														className="cursor-pointer"
-													>
-														<Target className="mr-2 h-4 w-4" />
-														Meta Colocación
+													<Link to="/crm/reportes" className="cursor-pointer">
+														<FileText className="mr-2 h-4 w-4" />
+														Reportes
 													</Link>
 												</DropdownMenuItem>
 											</>
@@ -448,27 +426,12 @@ export default function Header() {
 														Usuarios
 													</Link>
 												</DropdownMenuItem>
-												<DropdownMenuItem asChild>
-													<Link to="/admin/import" className="cursor-pointer">
-														<Database className="mr-2 h-4 w-4" />
-														Importación
-													</Link>
-												</DropdownMenuItem>
-												<DropdownMenuItem asChild>
-													<Link
-														to="/crm/admin/miniagent"
-														className="cursor-pointer"
-													>
-														<Key className="mr-2 h-4 w-4" />
-														MiniAgent
-													</Link>
-												</DropdownMenuItem>
-												<DropdownMenuItem asChild>
-													<Link to="/admin/settings" className="cursor-pointer">
-														<Settings className="mr-2 h-4 w-4" />
-														Configuración
-													</Link>
-												</DropdownMenuItem>
+												{/* "Importación", "MiniAgent" y "Configuración"
+												    ocultos a propósito. Las rutas y páginas
+												    (/admin/import, /crm/admin/miniagent,
+												    /admin/settings) se conservan por si se quieren
+												    reutilizar; para volver a mostrarlas, reañadir
+												    aquí sus DropdownMenuItem. */}
 											</>
 										)}
 										<DropdownMenuItem asChild>
@@ -490,6 +453,252 @@ export default function Header() {
 					<UserMenu />
 				</div>
 			</div>
+		</div>
+	);
+}
+
+const MOBILE_LINK_CLASS =
+	"flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground";
+
+function MobileSection({
+	label,
+	children,
+}: {
+	label: string;
+	children: ReactNode;
+}) {
+	return (
+		<div className="mt-2 flex flex-col">
+			<p className="px-3 pt-2 pb-1 font-medium text-muted-foreground text-xs uppercase tracking-wider">
+				{label}
+			</p>
+			{children}
+		</div>
+	);
+}
+
+// Menú de navegación para mobile (hamburguesa + drawer). Mismas opciones y
+// permisos que el nav de escritorio, en lista vertical. Se cierra solo al navegar.
+function MobileNav({
+	session,
+	userRole,
+}: {
+	session: boolean;
+	userRole: string | undefined;
+}) {
+	const [open, setOpen] = useState(false);
+	const router = useRouterState();
+	const pathname = router.location.pathname;
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: cerrar el drawer cuando cambia la ruta
+	useEffect(() => {
+		setOpen(false);
+	}, [pathname]);
+
+	const ventasReports =
+		!!userRole &&
+		(PERMISSIONS.canAccessTiempoCierreReport(userRole) ||
+			PERMISSIONS.canAccessPorcentajeEfectividadReport(userRole) ||
+			PERMISSIONS.canAccessMetaColocacionReport(userRole));
+
+	return (
+		<div className="md:hidden">
+			<Sheet open={open} onOpenChange={setOpen}>
+				<SheetTrigger asChild>
+					<Button variant="ghost" size="icon" aria-label="Abrir menú">
+						<Menu className="h-5 w-5" />
+					</Button>
+				</SheetTrigger>
+				<SheetContent
+					side="left"
+					className="flex h-dvh max-h-dvh w-72 flex-col gap-0 overflow-hidden p-0"
+				>
+					<SheetHeader className="shrink-0 border-b">
+						<SheetTitle>Menú</SheetTitle>
+					</SheetHeader>
+					<nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-3">
+						{!session && (
+							<Link to="/" className={MOBILE_LINK_CLASS}>
+								<LayoutDashboard />
+								Inicio
+							</Link>
+						)}
+
+						{session && (
+							<>
+								<Link to="/dashboard" className={MOBILE_LINK_CLASS}>
+									<LayoutDashboard />
+									Tablero
+								</Link>
+
+								{userRole && PERMISSIONS.canAccessCRM(userRole) && (
+									<MobileSection label="Ventas">
+										<Link to="/crm/leads" className={MOBILE_LINK_CLASS}>
+											<UserCircle />
+											Prospectos
+										</Link>
+										<Link to="/crm/opportunities" className={MOBILE_LINK_CLASS}>
+											<TrendingUp />
+											Oportunidades
+										</Link>
+										<Link to="/crm/companies" className={MOBILE_LINK_CLASS}>
+											<Building2 />
+											Empresas
+										</Link>
+										<Link to="/crm/vendors" className={MOBILE_LINK_CLASS}>
+											<UserCircle />
+											Vendedores
+										</Link>
+										<Link to="/crm/quoter" className={MOBILE_LINK_CLASS}>
+											<Calculator />
+											Cotizador
+										</Link>
+										{PERMISSIONS.canAccessWhatsApp(userRole) && (
+											<Link to="/crm/whatsapp" className={MOBILE_LINK_CLASS}>
+												<MessageSquare />
+												WhatsApp
+											</Link>
+										)}
+										{ventasReports && (
+											<Link to="/crm/reportes" className={MOBILE_LINK_CLASS}>
+												<FileText />
+												Reportes
+											</Link>
+										)}
+									</MobileSection>
+								)}
+
+								{userRole && PERMISSIONS.canAccessClients(userRole) && (
+									<Link to="/crm/clients" className={MOBILE_LINK_CLASS}>
+										<Users />
+										Clientes
+									</Link>
+								)}
+
+								{userRole && PERMISSIONS.canAccessVehicles(userRole) && (
+									<MobileSection label="Vehículos">
+										<Link
+											to="/vehicles"
+											search={{
+												vehicleId: undefined,
+												inspectionId: undefined,
+												tab: undefined,
+											}}
+											className={MOBILE_LINK_CLASS}
+										>
+											<Car />
+											Inventario
+										</Link>
+										<Link
+											to="/vehicles/auction-vehicles"
+											className={MOBILE_LINK_CLASS}
+										>
+											<Gavel />
+											Carros en Remate
+										</Link>
+									</MobileSection>
+								)}
+
+								{userRole && PERMISSIONS.canAccessCobros(userRole) && (
+									<MobileSection label="Cobros">
+										<Link to="/cobros" className={MOBILE_LINK_CLASS}>
+											<Banknote />
+											Dashboard
+										</Link>
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>
+												<Target />
+												Metas de Mora
+											</Link>
+										)}
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link to="/cobros/reportes" className={MOBILE_LINK_CLASS}>
+												<BarChart3 />
+												Reportes
+											</Link>
+										)}
+									</MobileSection>
+								)}
+
+								{userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
+									<Link to="/crm/analysis" className={MOBILE_LINK_CLASS}>
+										<BarChart3 />
+										Análisis
+									</Link>
+								)}
+
+								{userRole && PERMISSIONS.canAccessJuridico(userRole) && (
+									<MobileSection label="Jurídico">
+										<Link to="/juridico" className={MOBILE_LINK_CLASS}>
+											<Scale />
+											Gestión jurídica
+										</Link>
+										<Link
+											to="/juridico/dashboard"
+											className={MOBILE_LINK_CLASS}
+										>
+											<LayoutDashboard />
+											Dashboard
+										</Link>
+										<Link
+											to="/juridico/dashboard-data"
+											className={MOBILE_LINK_CLASS}
+										>
+											<Database />
+											Carga de datos
+										</Link>
+									</MobileSection>
+								)}
+
+								{userRole && PERMISSIONS.canAccessInvestments(userRole) && (
+									<MobileSection label="Inversiones">
+										<Link to="/inversiones" className={MOBILE_LINK_CLASS}>
+											<Target />
+											Leads
+										</Link>
+										<Link
+											to="/inversiones/liquidaciones"
+											className={MOBILE_LINK_CLASS}
+										>
+											<Landmark />
+											Inversionistas
+										</Link>
+									</MobileSection>
+								)}
+
+								{userRole && PERMISSIONS.canAccessAccounting(userRole) && (
+									<MobileSection label="Contabilidad">
+										<Link
+											to="/accounting/pay-investors"
+											className={MOBILE_LINK_CLASS}
+										>
+											<Banknote />
+											Pagar Inversionistas
+										</Link>
+									</MobileSection>
+								)}
+
+								{userRole &&
+									(PERMISSIONS.canAccessAdmin(userRole) ||
+										PERMISSIONS.canAccessClosedCreditsReport(userRole)) && (
+										<MobileSection label="Admin">
+											{PERMISSIONS.canAccessAdmin(userRole) && (
+												<Link to="/admin/users" className={MOBILE_LINK_CLASS}>
+													<Users />
+													Usuarios
+												</Link>
+											)}
+											<Link to="/admin/reports" className={MOBILE_LINK_CLASS}>
+												<FileText />
+												Reportes
+											</Link>
+										</MobileSection>
+									)}
+							</>
+						)}
+					</nav>
+				</SheetContent>
+			</Sheet>
 		</div>
 	);
 }

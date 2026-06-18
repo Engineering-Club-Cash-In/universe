@@ -987,3 +987,94 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
     agingHistorico: agingHistorico.rows,
   };
 }
+
+type BucketAcc = { cantidad: number; sumaCapital: number; sumaMora: number };
+type BucketsAcc = { mora_30: BucketAcc; mora_60: BucketAcc; mora_90: BucketAcc; mora_120_plus: BucketAcc };
+
+function emptyBuckets(): BucketsAcc {
+  return {
+    mora_30: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+    mora_60: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+    mora_90: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+    mora_120_plus: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
+  };
+}
+
+function serializeBuckets(b: BucketsAcc) {
+  const fmt = (n: number) => n.toFixed(2);
+  const totalCantidad = b.mora_30.cantidad + b.mora_60.cantidad + b.mora_90.cantidad + b.mora_120_plus.cantidad;
+  const totalMora = b.mora_30.sumaMora + b.mora_60.sumaMora + b.mora_90.sumaMora + b.mora_120_plus.sumaMora;
+  return {
+    mora_30: { cantidad: b.mora_30.cantidad, sumaCapital: fmt(b.mora_30.sumaCapital), sumaMora: fmt(b.mora_30.sumaMora) },
+    mora_60: { cantidad: b.mora_60.cantidad, sumaCapital: fmt(b.mora_60.sumaCapital), sumaMora: fmt(b.mora_60.sumaMora) },
+    mora_90: { cantidad: b.mora_90.cantidad, sumaCapital: fmt(b.mora_90.sumaCapital), sumaMora: fmt(b.mora_90.sumaMora) },
+    mora_120_plus: { cantidad: b.mora_120_plus.cantidad, sumaCapital: fmt(b.mora_120_plus.sumaCapital), sumaMora: fmt(b.mora_120_plus.sumaMora) },
+    totalEnMora: { cantidad: totalCantidad, sumaMora: fmt(totalMora) },
+  };
+}
+
+export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?: string } = {}) {
+  const rows = await db.execute<{
+    asesor_id: number;
+    nombre: string;
+    email_asesor: string | null;
+    bucket: keyof BucketsAcc;
+    cantidad: number;
+    suma_capital: string;
+    suma_mora: string;
+  }>(sql`
+    SELECT
+      a.asesor_id,
+      a.nombre,
+      a.email_cash_in         AS email_asesor,
+      CASE
+        WHEN m.cuotas_atrasadas >= 4 THEN 'mora_120_plus'
+        WHEN m.cuotas_atrasadas = 3  THEN 'mora_90'
+        WHEN m.cuotas_atrasadas = 2  THEN 'mora_60'
+        ELSE                              'mora_30'
+      END                             AS bucket,
+      COUNT(*)::int                   AS cantidad,
+      COALESCE(SUM(c.capital::numeric), 0)    AS suma_capital,
+      COALESCE(SUM(m.monto_mora::numeric), 0) AS suma_mora
+    FROM cartera.moras_credito m
+    INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
+    INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
+    WHERE m.activa           = true
+      AND m.cuotas_atrasadas > 0
+      AND c."statusCredit"   IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      ${emailCobrador ? sql`AND a.email_cash_in = ${emailCobrador}` : sql``}
+    GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
+  `);
+
+  const totalAcc = emptyBuckets();
+  const asesorMap = new Map<number, { asesorId: number; nombre: string; email: string; acc: BucketsAcc }>();
+
+  for (const row of rows.rows) {
+    const bucket = row.bucket;
+    const cantidad = row.cantidad;
+    const sumaCapital = Number(row.suma_capital);
+    const sumaMora = Number(row.suma_mora);
+
+    totalAcc[bucket].cantidad += cantidad;
+    totalAcc[bucket].sumaCapital += sumaCapital;
+    totalAcc[bucket].sumaMora += sumaMora;
+
+    if (!asesorMap.has(row.asesor_id)) {
+      asesorMap.set(row.asesor_id, { asesorId: row.asesor_id, nombre: row.nombre, email: row.email_asesor ?? "", acc: emptyBuckets() });
+    }
+    const entry = asesorMap.get(row.asesor_id)!;
+    entry.acc[bucket].cantidad += cantidad;
+    entry.acc[bucket].sumaCapital += sumaCapital;
+    entry.acc[bucket].sumaMora += sumaMora;
+  }
+
+  const porAsesor = Array.from(asesorMap.values())
+    .sort((a, b) => {
+      const tA = a.acc.mora_30.sumaMora + a.acc.mora_60.sumaMora + a.acc.mora_90.sumaMora + a.acc.mora_120_plus.sumaMora;
+      const tB = b.acc.mora_30.sumaMora + b.acc.mora_60.sumaMora + b.acc.mora_90.sumaMora + b.acc.mora_120_plus.sumaMora;
+      return tB - tA;
+    })
+    .map((e) => ({ asesorId: e.asesorId, nombre: e.nombre, email: e.email, ...serializeBuckets(e.acc) }));
+
+  return { totales: serializeBuckets(totalAcc), porAsesor };
+}

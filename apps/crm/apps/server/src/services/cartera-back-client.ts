@@ -332,6 +332,25 @@ export type ComparativoHistoricoResponse = {
 	agingHistorico: ({ periodo: string } & MoraAgingBucket)[];
 };
 
+export type MoraBucketResult = {
+	cantidad: number;
+	sumaCapital: string;
+	sumaMora: string;
+};
+
+export type MoraTotales = {
+	mora_30: MoraBucketResult;
+	mora_60: MoraBucketResult;
+	mora_90: MoraBucketResult;
+	mora_120_plus: MoraBucketResult;
+	totalEnMora: { cantidad: number; sumaMora: string };
+};
+
+export type MoraByEtapaYAsesorResponse = {
+	totales: MoraTotales;
+	porAsesor: ({ asesorId: number; nombre: string; email: string } & MoraTotales)[];
+};
+
 // ============================================================================
 // HTTP CLIENT
 // ============================================================================
@@ -1487,6 +1506,21 @@ export class CarteraBackClient {
 		});
 		return this.request<FlujoCuotasPorInversionistaResponse>(
 			`/reportes/flujo-cuotas-inversiones/por-inversionista?${qp}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	// ========================================================================
+	// REPORTES
+	// ========================================================================
+
+	async getMoraByEtapaYAsesor(params?: { emailCobrador?: string }) {
+		const queryParams = new URLSearchParams();
+		if (params?.emailCobrador) queryParams.set("email_cobrador", params.emailCobrador);
+		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
+		return this.request<MoraByEtapaYAsesorResponse>(
+			`/reportes/mora-por-etapa-asesor${qs}`,
 			{ method: "GET" },
 			true,
 		);

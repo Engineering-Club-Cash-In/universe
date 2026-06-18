@@ -3957,13 +3957,15 @@ export const cobrosRouter = {
 		}),
 
 	// ========================================================================
-	// PAGOS ESPERADOS (COBROS)
+	// CUOTAS POR FECHA (reemplaza Pagos Esperados + Pagos No Recibidos)
 	// ========================================================================
 
-	getPagosEsperadosCobros: cobrosSupervisorProcedure
+	getCuotasPorFecha: cobrosSupervisorProcedure
 		.input(
 			z.object({
-				temporalidad: z.enum(["hoy", "semana", "quincena", "mes"]),
+				fechaInicio: z.string(),
+				fechaFin: z.string(),
+				asesorId: z.number().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -3973,159 +3975,53 @@ export const cobrosRouter = {
 				});
 			}
 
-			const pad = (n: number) => n.toString().padStart(2, "0");
-
-			const diasAdelanteMap: Record<typeof input.temporalidad, number> = {
-				hoy: 0,
-				semana: 6,
-				quincena: 14,
-				mes: 29,
-			};
-			const diasAdelante = diasAdelanteMap[input.temporalidad];
-
-			// Las fechas de negocio son días calendario de Guatemala (UTC-6). Si el
-			// server corre en UTC, usar getFullYear/getMonth/getDate directo desplaza
-			// "hoy" un día entre las 00:00 y 05:59 UTC. Anclamos en la fecha GT y
-			// hacemos la aritmética de días sobre esos componentes en UTC puro.
-			const fechaInicio = toDateStrGT(new Date());
-			const [anioGT, mesGT, diaGT] = fechaInicio.split("-").map(Number);
-			const fechaFinUTC = new Date(
-				Date.UTC(anioGT, mesGT - 1, diaGT + diasAdelante),
-			);
-			const fechaFin = `${fechaFinUTC.getUTCFullYear()}-${pad(fechaFinUTC.getUTCMonth() + 1)}-${pad(fechaFinUTC.getUTCDate())}`;
-
-			const desglose = await carteraBackClient.getMontoACobrar({
-				periodo: "dia",
-				fechaInicio,
-				fechaFin,
+			const rows = await carteraBackClient.getCuotasPorFecha({
+				fechaInicio: input.fechaInicio,
+				fechaFin: input.fechaFin,
+				asesorId: input.asesorId,
 			});
 
-			// Ojo: en cartera-back `total_cuota` ES el capital de las cuotas
-			// (mismo criterio que el reporte de monto-a-cobrar existente, que lo
-			// etiqueta "Capital" y calcula el total sumando todos los rubros).
-			let totalCapital = 0;
-			let totalInteres = 0;
-			let totalIva = 0;
-			let totalSeguro = 0;
-			let totalGps = 0;
-			let totalMembresias = 0;
-			let totalRoyalti = 0;
-			let cantidadCuotas = 0;
+			const rowsMapped = rows.map((r) => ({ ...r }));
 
-			for (const row of desglose) {
-				totalCapital += Number.parseFloat(row.total_cuota);
-				totalInteres += Number.parseFloat(row.total_interes);
-				totalIva += Number.parseFloat(row.total_iva);
-				totalSeguro += Number.parseFloat(row.total_seguro);
-				totalGps += Number.parseFloat(row.total_gps);
-				totalMembresias += Number.parseFloat(row.total_membresias);
-				totalRoyalti += Number.parseFloat(row.total_royalti);
-				cantidadCuotas += row.cuotas_count;
+			let capitalEsp = 0;
+			let interesEsp = 0;
+			let ivaEsp = 0;
+			let seguroEsp = 0;
+			let gpsEsp = 0;
+			let membresiasEsp = 0;
+			let totalEsp = 0;
+			let totalPag = 0;
+			let cuotasTotal = 0;
+			let cuotasPagadas = 0;
+
+			for (const r of rowsMapped) {
+				capitalEsp += Number(r.capital_esperado);
+				interesEsp += Number(r.interes_esperado);
+				ivaEsp += Number(r.iva_esperado);
+				seguroEsp += Number(r.seguro_esperado);
+				gpsEsp += Number(r.gps_esperado);
+				membresiasEsp += Number(r.membresias_esperado);
+				totalEsp += Number(r.total_esperado);
+				totalPag += Number(r.total_pagado);
+				cuotasTotal++;
+				if (r.pagado) cuotasPagadas++;
 			}
 
-			const totalACobrar =
-				totalCapital +
-				totalInteres +
-				totalIva +
-				totalSeguro +
-				totalGps +
-				totalMembresias +
-				totalRoyalti;
-
 			return {
-				fechaInicio,
-				fechaFin,
-				temporalidad: input.temporalidad,
-				desglose,
+				rows: rowsMapped,
 				totales: {
-					capital: totalCapital.toFixed(2),
-					interes: totalInteres.toFixed(2),
-					iva: totalIva.toFixed(2),
-					seguro: totalSeguro.toFixed(2),
-					gps: totalGps.toFixed(2),
-					membresias: totalMembresias.toFixed(2),
-					royalti: totalRoyalti.toFixed(2),
-					totalCuota: totalACobrar.toFixed(2),
-					cantidadCuotas,
+					capitalEsp: capitalEsp.toFixed(2),
+					interesEsp: interesEsp.toFixed(2),
+					ivaEsp: ivaEsp.toFixed(2),
+					seguroEsp: seguroEsp.toFixed(2),
+					gpsEsp: gpsEsp.toFixed(2),
+					membresiasEsp: membresiasEsp.toFixed(2),
+					totalEsp: totalEsp.toFixed(2),
+					totalPag: totalPag.toFixed(2),
+					totalPendiente: (totalEsp - totalPag).toFixed(2),
+					cuotasTotal,
+					cuotasPagadas,
 				},
-			};
-		}),
-
-	// ========================================================================
-	// PAGOS NO RECIBIDOS
-	// ========================================================================
-
-	getPagosNoRecibidos: cobrosSupervisorProcedure
-		.input(
-			z.object({
-				emailCobrador: z.string().optional(),
-				capitalMin: z.number().optional(),
-				capitalMax: z.number().optional(),
-				cuotasAtrasadasMin: z.number().min(1).optional(),
-				cuotasAtrasadasMax: z.number().min(1).optional(),
-				fechaDesde: z.string().optional(),
-				fechaHasta: z.string().optional(),
-				page: z.number().min(1).default(1),
-				pageSize: z.number().min(1).max(100).default(25),
-			}),
-		)
-		.handler(async ({ input }) => {
-			if (!isCarteraBackEnabled()) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Integración con cartera-back no está habilitada",
-				});
-			}
-
-			// mes=0 trae TODOS los créditos sin filtrar por mes (mismo criterio
-			// que getTodosLosCreditos); con el mes actual cartera-back devuelve
-			// solo el snapshot mensual y el listado sale vacío.
-			const creditos = await obtenerTodasLasPaginasCreditos({
-				mes: 0,
-				anio: new Date().getFullYear(),
-				estado: "ACTIVO",
-				email_cobrador: input.emailCobrador,
-				capital_min: input.capitalMin,
-				capital_max: input.capitalMax,
-				fecha_desde: input.fechaDesde,
-				fecha_hasta: input.fechaHasta,
-			});
-
-			const minCuotas = input.cuotasAtrasadasMin ?? 1;
-
-			const todosOverdue = creditos.filter((item) => {
-				const cuotasAtrasadas = item.mora?.cuotas_atrasadas ?? 0;
-				if (cuotasAtrasadas < minCuotas) return false;
-				if (
-					input.cuotasAtrasadasMax !== undefined &&
-					cuotasAtrasadas > input.cuotasAtrasadasMax
-				)
-					return false;
-				return true;
-			});
-
-			const total = todosOverdue.length;
-			const totalPages = Math.max(1, Math.ceil(total / input.pageSize));
-			const start = (input.page - 1) * input.pageSize;
-			const pageData = todosOverdue.slice(start, start + input.pageSize);
-
-			const items = pageData.map((item) => ({
-				sifco: item.creditos.numero_credito_sifco,
-				clienteNombre: item.usuarios.nombre,
-				asesorNombre: item.asesores?.nombre ?? "Sin asesor",
-				cuotasAtrasadas: item.mora?.cuotas_atrasadas ?? 0,
-				montoMora: item.mora?.monto_mora ?? "0",
-				capital: item.proxima_cuota?.capital_restante ?? item.creditos.capital,
-				cuotaMensual: item.creditos.cuota,
-				proximaFechaVencimiento: item.proxima_cuota?.fecha_vencimiento ?? null,
-				tipoCredito: item.creditos.tipoCredito ?? null,
-			}));
-
-			return {
-				data: items,
-				total,
-				page: input.page,
-				pageSize: input.pageSize,
-				totalPages,
 			};
 		}),
 

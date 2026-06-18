@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+﻿import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	Activity,
@@ -1962,8 +1962,9 @@ function RouteComponent() {
 										(() => {
 											const cf = reinversionData.interesNeto.conFactura;
 											const sf = reinversionData.interesNeto.sinFactura;
+											const cube = reinversionData.interesNeto.cube;
 											const totalInteres =
-												Number(cf.interes) + Number(sf.interes);
+												Number(cf.interes) + Number(sf.interes) + Number(cube.interes);
 											const totalIva = Number(cf.iva);
 											const totalIsr = Number(sf.isr);
 											const totalNeto = Number(cf.neto) + Number(sf.neto);
@@ -2020,6 +2021,14 @@ function RouteComponent() {
 																<TableCell className="text-right font-semibold">
 																	{dash(sf.neto)}
 																</TableCell>
+															</TableRow>
+
+															<TableRow>
+																<TableCell>CUBE</TableCell>
+																<TableCell className="text-right">{dash(cube.interes)}</TableCell>
+																<TableCell className="text-right text-muted-foreground">—</TableCell>
+																<TableCell className="text-right text-muted-foreground">—</TableCell>
+																<TableCell className="text-right text-muted-foreground">—</TableCell>
 															</TableRow>
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total</TableCell>

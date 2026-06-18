@@ -795,51 +795,32 @@ export async function getReinversionLiquidaciones({
     }
   }
 
-  // Interés de CUBE: no se almacena en liquidaciones sino que se deriva de los
-  // registros de inversionistas no-CUBE en pagos_credito_inversionistas_espejo.
-  //   interes_cube = total_inv_interes × (100 - total_inv_pct) / total_inv_pct
-  // `porcentaje_participacion` es un split por inversionista guardado por fila de
-  // pago (snapshot del momento). Se agrupa a nivel de cuota en dos pasos:
-  //   1. (credito, liquidacion, cuota, inversionista): colapsa pagos PARCIALES de
-  //      la misma cuota tomando el porcentaje UNA sola vez (MAX) y sumando el
-  //      interés. Evita inflar el porcentaje (dos parciales al 80% darían 160% y
-  //      romperían el cálculo al caer en el filtro `< 100`).
-  //   2. (credito, liquidacion, cuota): suma la participación de los distintos
-  //      inversionistas no-CUBE dentro de la cuota. Agrupar por cuota (y no por
-  //      crédito) mantiene el cálculo correcto aun si la participación de un
-  //      inversionista cambia entre cuotas (reasignación): cada cuota usa su
-  //      propio porcentaje.
+  // Interés de CUBE: no se almacena como tal sino que se deriva de las filas de
+  // los inversionistas no-CUBE en pagos_credito_inversionistas_espejo. Para una
+  // fila con interés `abono_interes` y participación `porcentaje_participacion`,
+  // el interés que le corresponde a CUBE (el complemento) es:
+  //   interes_cube = abono_interes × (100 - porcentaje_participacion) / porcentaje_participacion
+  // El cálculo se hace POR FILA, así
+  // que no hay que combinar inversionistas por cuota. Calcular por fila además:
+  //   - maneja pagos parciales (cada parcial aporta su complemento y se suman);
+  //   - usa el porcentaje del snapshot de cada fila, por lo que sigue siendo
+  //     correcto si la participación cambia entre cuotas (reasignación).
+  // Se excluye la propia CUBE (inversionista_id 86) para no contar sus filas como
+  // si fueran de un inversionista no-CUBE, y se omiten las filas al 100% (sin
+  // complemento) y al 0% (evita división por cero).
   const cubeRows = await db.execute(sql`
-    WITH por_inv_cuota AS (
-      SELECT
-        pe.credito_id,
-        pe.liquidacion_id,
-        pe.cuota,
-        pe.inversionista_id,
-        COALESCE(SUM(pe.abono_interes::numeric), 0)         AS inv_interes,
-        MAX(pe.porcentaje_participacion::numeric)           AS inv_pct
-      FROM cartera.pagos_credito_inversionistas_espejo pe
-      JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
-      WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
-        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-        AND pe.porcentaje_participacion::numeric > 0
-      GROUP BY pe.credito_id, pe.liquidacion_id, pe.cuota, pe.inversionista_id
-    ),
-    por_cuota AS (
-      SELECT
-        credito_id,
-        liquidacion_id,
-        cuota,
-        SUM(inv_interes) AS total_inv_interes,
-        SUM(inv_pct)     AS total_inv_pct
-      FROM por_inv_cuota
-      GROUP BY credito_id, liquidacion_id, cuota
-    )
     SELECT COALESCE(SUM(
-      total_inv_interes * (100 - total_inv_pct) / total_inv_pct
+      pe.abono_interes::numeric
+        * (100 - pe.porcentaje_participacion::numeric)
+        / pe.porcentaje_participacion::numeric
     ), 0) AS interes_cube
-    FROM por_cuota
-    WHERE total_inv_pct > 0 AND total_inv_pct < 100
+    FROM cartera.pagos_credito_inversionistas_espejo pe
+    JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+      AND pe.inversionista_id <> 86
+      AND pe.porcentaje_participacion::numeric > 0
+      AND pe.porcentaje_participacion::numeric < 100
   `);
   const interesCube = Number(
     (cubeRows.rows[0] as Record<string, unknown>)?.interes_cube ?? 0

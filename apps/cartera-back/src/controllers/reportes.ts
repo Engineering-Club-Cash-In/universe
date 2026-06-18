@@ -390,11 +390,12 @@ export async function getCobradoDelMesSnapshot({
   const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
   const result = await db.execute(sql`
     SELECT
-      COALESCE(SUM(capital_total::numeric), 0)          AS cobrado_capital,
       COALESCE(SUM(interes_cube::numeric), 0)           AS cobrado_interes,
       COALESCE(SUM(membresia::numeric), 0)              AS cobrado_membresias,
       COALESCE(SUM(servicios_seguro_gps::numeric), 0)   AS cobrado_seguro_gps,
-      COALESCE(SUM(royalty::numeric), 0)                AS cobrado_royalti
+      COALESCE(SUM(royalty::numeric), 0)                AS cobrado_royalti,
+      COALESCE(SUM(mora_cube::numeric), 0)              AS cobrado_mora,
+      COALESCE(SUM(otros_ingresos::numeric), 0)         AS cobrado_otros
     FROM cartera.facturacion_snapshot_diario
     WHERE fecha >= ${inicioMes}::date
       AND fecha < (${inicioMes}::date + INTERVAL '1 month')
@@ -402,11 +403,12 @@ export async function getCobradoDelMesSnapshot({
 
   const row = result.rows[0] as Record<string, unknown> | undefined;
   return {
-    cobrado_capital: String(row?.cobrado_capital ?? "0"),
     cobrado_interes: String(row?.cobrado_interes ?? "0"),
     cobrado_membresias: String(row?.cobrado_membresias ?? "0"),
     cobrado_seguro_gps: String(row?.cobrado_seguro_gps ?? "0"),
     cobrado_royalti: String(row?.cobrado_royalti ?? "0"),
+    cobrado_mora: String(row?.cobrado_mora ?? "0"),
+    cobrado_otros: String(row?.cobrado_otros ?? "0"),
   };
 }
 

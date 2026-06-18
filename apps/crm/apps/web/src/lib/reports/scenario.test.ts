@@ -69,16 +69,17 @@ describe("transformMontoACobrar", () => {
 });
 
 describe("transformFacturacion", () => {
-	// totalCobrado=500 (400+100), meta_mensual=1000, gap=500
+	// totalCobrado=500 (interes=400, mora=100), meta_mensual=1000, gap=500
 	// factor con close=1: 1 + 500/500 = 2
 	// factor con close=0.5: 1 + 250/500 = 1.5
 	const data: FacturacionMesResponse = {
 		cobrado: {
-			capital: "400",
-			interes: "100",
+			interes: "400",
 			membresias: "0",
 			seguro_gps: "0",
 			royalti: "0",
+			mora: "100",
+			otros: "0",
 		},
 		esperado: { meta_mensual: "1000" },
 	};
@@ -88,13 +89,13 @@ describe("transformFacturacion", () => {
 			data,
 			params({ efectividadDeltaPct: 100 }),
 		);
-		expect(out.cobrado.capital).toBe("800.00");
-		expect(out.cobrado.interes).toBe("200.00");
+		expect(out.cobrado.interes).toBe("800.00");
+		expect(out.cobrado.mora).toBe("200.00");
 	});
 
 	test("efectividad +50% aplica la mitad del factor", () => {
 		const out = transformFacturacion(data, params({ efectividadDeltaPct: 50 }));
-		expect(out.cobrado.capital).toBe("600.00");
+		expect(out.cobrado.interes).toBe("600.00");
 	});
 
 	test("esperado no cambia", () => {
@@ -110,20 +111,20 @@ describe("transformFacturacion", () => {
 			data,
 			params({ moraReduccionPct: 100, efectividadDeltaPct: -100 }),
 		);
-		// close=clamp01(0+1)=1 → factor=2 → capital=800
-		expect(out.cobrado.capital).toBe("800.00");
+		// close=clamp01(0+1)=1 → factor=2 → interes=800
+		expect(out.cobrado.interes).toBe("800.00");
 	});
 
 	test("total cobrado > meta (gap<=0) devuelve datos sin modificar", () => {
 		const over: FacturacionMesResponse = {
-			cobrado: { capital: "1100", interes: "100", membresias: "0", seguro_gps: "0", royalti: "0" },
+			cobrado: { interes: "1100", membresias: "0", seguro_gps: "0", royalti: "0", mora: "0", otros: "0" },
 			esperado: { meta_mensual: "1000" },
 		};
 		const out = transformFacturacion(
 			over,
 			params({ efectividadDeltaPct: 100 }),
 		);
-		expect(out.cobrado.capital).toBe("1100");
+		expect(out.cobrado.interes).toBe("1100");
 	});
 });
 

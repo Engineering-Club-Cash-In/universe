@@ -72,11 +72,12 @@ export const facturacionConfig: ScenarioReportConfig<FacturacionMesResponse> = {
 	usaMetodoCuota: false,
 	transform: transformFacturacion,
 	summarize: (data) => [
-		{ concepto: "Capital", valor: num(data.cobrado.capital) },
 		{ concepto: "Interés", valor: num(data.cobrado.interes) },
 		{ concepto: "Membresías", valor: num(data.cobrado.membresias) },
 		{ concepto: "Seguro + GPS", valor: num(data.cobrado.seguro_gps) },
 		{ concepto: "Royaltí", valor: num(data.cobrado.royalti) },
+		{ concepto: "Mora", valor: num(data.cobrado.mora) },
+		{ concepto: "Otros", valor: num(data.cobrado.otros) },
 	],
 };
 

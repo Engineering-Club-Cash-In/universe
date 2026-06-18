@@ -106,11 +106,12 @@ export type MontoACobrarPeriodoRow = {
 };
 
 export type FacturacionMesRubro = {
-	capital: string;
 	interes: string;
 	membresias: string;
 	seguro_gps: string;
 	royalti: string;
+	mora: string;
+	otros: string;
 };
 
 export type FacturacionMesResponse = {
@@ -252,11 +253,12 @@ export function transformFacturacion(
 ): FacturacionMesResponse {
 	const close = gapClose(p);
 	const rubros: (keyof FacturacionMesRubro)[] = [
-		"capital",
 		"interes",
 		"membresias",
 		"seguro_gps",
 		"royalti",
+		"mora",
+		"otros",
 	];
 	const totalCobrado = rubros.reduce((acc, k) => acc + num(data.cobrado[k]), 0);
 	const totalEsperado = num(data.esperado.meta_mensual);

@@ -352,6 +352,23 @@ describe("esDestinoSobrescribible", () => {
     ).toBe(true);
   });
 
+  it("un pago real de EXACTAMENTE Q0.01 NO es sobrescribible (numeric(2) es exacto)", () => {
+    // Codex P2: con `lte(0.01)` un parcial de un centavo se trataba como vacío
+    // y el cierre lo machacaba. Debe contar como pago real.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "validated",
+        monto_aplicado: "0.01",
+        abono_capital: "0",
+        abono_interes: "0.01",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "0",
+      })
+    ).toBe(false);
+  });
+
   it("un pago REAL (con abono_interes validado) NO es sobrescribible", () => {
     // Caso crédito 217: fila validated con interés real ya facturado.
     expect(

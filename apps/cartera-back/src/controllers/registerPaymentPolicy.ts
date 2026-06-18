@@ -67,7 +67,12 @@ export const getSpecialPaymentInstallmentFields = () => ({
   pagado: true,
 });
 
-// Tolerancia de un centavo al comparar montos de pago contra cero.
+// Umbral para considerar un monto "cero". Las columnas monetarias son
+// numeric(2), así que el mínimo pago real representable es Q0.01: una fila se
+// considera vacía solo si cada monto es ESTRICTAMENTE menor a un centavo (i.e.
+// 0.00). Un Q0.01 es un pago real y NO debe tratarse como sobrescribible (con
+// `lte` el cierre lo machacaría, reintroduciendo la pérdida para parciales de
+// un centavo).
 export const DESTINO_SOBRESCRIBIBLE_TOLERANCE = 0.01;
 
 /** Subconjunto de una fila de pago necesario para decidir si es sobrescribible. */
@@ -106,8 +111,9 @@ export const esDestinoSobrescribible = (
   if (pago.validationStatus === "no_required") return true;
 
   const tol = new Big(DESTINO_SOBRESCRIBIBLE_TOLERANCE);
+  // Estricto (`lt`, no `lte`): un Q0.01 exacto es un pago real, no "vacío".
   const casiCero = (v: BigInput | null | undefined) =>
-    new Big(v ?? 0).abs().lte(tol);
+    new Big(v ?? 0).abs().lt(tol);
 
   return (
     casiCero(pago.monto_aplicado) &&

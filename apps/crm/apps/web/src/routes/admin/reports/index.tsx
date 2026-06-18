@@ -112,15 +112,15 @@ const COLORS = {
 // Se omiten `reinversion_interes` ("solo interés", no se usa) y `sin_reinversion`.
 const REINVERSION_MODALIDADES: { tipo: string; label: string }[] = [
 	{ tipo: "reinversion_capital", label: "Reinversión de Capital" },
-	{ tipo: "reinversion_total", label: "Reinversión Total" },
+	{ tipo: "reinversion_total", label: "Interés compuesto" },
 	{ tipo: "reinversion_variable", label: "Reinversión Variable" },
 	{
 		tipo: "reinversion_excedente",
-		label: "Reinversión Excedente",
+		label: "Reinversión Excedente (monto fijo a recibir)",
 	},
 	{
 		tipo: "reinversion_combinada",
-		label: "Reinversión Combinada",
+		label: "Reinversión Combinada (combinaciones de modalidades)",
 	},
 ];
 
@@ -217,7 +217,6 @@ const MONTO_COBRAR_LABELS: Record<keyof typeof MONTO_COBRAR_COLORS, string> = {
 	total_seguro: "Seguro",
 	total_gps: "GPS",
 	total_membresias: "Membresías",
-	total_royalti: "Royalty",
 };
 
 const GUATEMALA_TIME_ZONE = "America/Guatemala";

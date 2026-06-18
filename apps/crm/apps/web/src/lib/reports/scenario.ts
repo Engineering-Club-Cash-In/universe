@@ -106,11 +106,12 @@ export type MontoACobrarPeriodoRow = {
 };
 
 export type FacturacionMesRubro = {
-	capital: string;
 	interes: string;
 	membresias: string;
 	seguro_gps: string;
 	royalti: string;
+	mora: string;
+	otros: string;
 };
 
 export type FacturacionMesResponse = {
@@ -251,22 +252,28 @@ export function transformFacturacion(
 	p: ScenarioParams,
 ): FacturacionMesResponse {
 	const close = gapClose(p);
+	// mora se excluye del upscale proporcional: menos morosidad → menos ingreso
+	// por mora, por lo que sigue moraFactor (dirección opuesta a los otros rubros).
 	const rubros: (keyof FacturacionMesRubro)[] = [
-		"capital",
 		"interes",
 		"membresias",
 		"seguro_gps",
 		"royalti",
+		"otros",
 	];
-	const totalCobrado = rubros.reduce((acc, k) => acc + num(data.cobrado[k]), 0);
+	const totalCobrado =
+		rubros.reduce((acc, k) => acc + num(data.cobrado[k]), 0) +
+		num(data.cobrado.mora);
 	const totalEsperado = num(data.esperado.meta_mensual);
 	const gap = totalEsperado - totalCobrado;
-	if (gap <= 0 || totalCobrado === 0) {
-		return data;
-	}
-	// Distribuir el cierre de brecha proporcionalmente a cada rubro
-	const factor = 1 + (gap * close) / totalCobrado;
 	const cobrado = { ...data.cobrado };
+	// mora siempre baja con moraFactor, independientemente del gap
+	cobrado.mora = money(num(data.cobrado.mora) * moraFactor(p));
+	if (gap <= 0 || totalCobrado === 0) {
+		return { cobrado, esperado: data.esperado };
+	}
+	// Distribuir el cierre de brecha proporcionalmente entre los rubros de ingreso
+	const factor = 1 + (gap * close) / totalCobrado;
 	for (const k of rubros) {
 		cobrado[k] = money(num(data.cobrado[k]) * factor);
 	}

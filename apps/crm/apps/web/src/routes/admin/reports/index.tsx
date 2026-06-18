@@ -212,11 +212,12 @@ function coberturaLabel(cobertura: string | null): string {
 
 const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] =
 	[
-		{ key: "capital", label: "Capital" },
 		{ key: "interes", label: "Interés" },
 		{ key: "membresias", label: "Membresías" },
 		{ key: "seguro_gps", label: "Seguro + GPS" },
 		{ key: "royalti", label: "Royaltí" },
+		{ key: "mora", label: "Mora" },
+		{ key: "otros", label: "Otros" },
 	];
 
 const MONTO_COBRAR_COLORS = {

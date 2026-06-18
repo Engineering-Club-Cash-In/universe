@@ -184,11 +184,12 @@ class SimpleCache {
 // ============================================================================
 
 export type FacturacionMesRubro = {
-	capital: string;
 	interes: string;
 	membresias: string;
 	seguro_gps: string;
 	royalti: string;
+	mora: string;
+	otros: string;
 };
 
 export type FacturacionMesResponse = {
@@ -1483,11 +1484,12 @@ export class CarteraBackClient {
 
 		const [cobradoResult, esperadoResult] = await Promise.all([
 			this.request<{
-				cobrado_capital?: string;
 				cobrado_interes?: string;
 				cobrado_membresias?: string;
 				cobrado_seguro_gps?: string;
 				cobrado_royalti?: string;
+				cobrado_mora?: string;
+				cobrado_otros?: string;
 			}>(`/reportes/facturacion-mes-cobrado?${qp}`, { method: "GET" }, true),
 			this.request<{
 				meta_mensual?: string;
@@ -1495,11 +1497,12 @@ export class CarteraBackClient {
 		]);
 
 		const cobrado: FacturacionMesRubro = {
-			capital: cobradoResult.cobrado_capital ?? "0",
 			interes: cobradoResult.cobrado_interes ?? "0",
 			membresias: cobradoResult.cobrado_membresias ?? "0",
 			seguro_gps: cobradoResult.cobrado_seguro_gps ?? "0",
 			royalti: cobradoResult.cobrado_royalti ?? "0",
+			mora: cobradoResult.cobrado_mora ?? "0",
+			otros: cobradoResult.cobrado_otros ?? "0",
 		};
 
 		return { cobrado, esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" } };

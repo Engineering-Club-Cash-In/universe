@@ -509,11 +509,14 @@ function MobileNav({
 						<Menu className="h-5 w-5" />
 					</Button>
 				</SheetTrigger>
-				<SheetContent side="left" className="flex w-72 flex-col gap-0 p-0">
+				<SheetContent
+					side="left"
+					className="flex h-dvh max-h-dvh w-72 flex-col gap-0 overflow-hidden p-0"
+				>
 					<SheetHeader className="shrink-0 border-b">
 						<SheetTitle>Menú</SheetTitle>
 					</SheetHeader>
-					<nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-3">
+					<nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-3">
 						{!session && (
 							<Link to="/" className={MOBILE_LINK_CLASS}>
 								<LayoutDashboard />

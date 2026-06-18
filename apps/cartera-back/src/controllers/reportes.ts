@@ -797,6 +797,35 @@ export async function getReinversionLiquidaciones({
     }
   }
 
+  // Interés de CUBE: no se almacena en liquidaciones sino que se deriva de los
+  // registros de inversionistas no-CUBE en pagos_credito_inversionistas_espejo.
+  // Por crédito+liquidación se agrupa la participación e interés de todos los
+  // inversionistas no-CUBE, y el interés de CUBE es:
+  //   interes_cube = total_inv_interes × (100 - total_inv_pct) / total_inv_pct
+  const cubeRows = await db.execute(sql`
+    WITH por_credito_liq AS (
+      SELECT
+        pe.credito_id,
+        pe.liquidacion_id,
+        COALESCE(SUM(pe.abono_interes::numeric), 0)             AS total_inv_interes,
+        COALESCE(SUM(pe.porcentaje_participacion::numeric), 0)  AS total_inv_pct
+      FROM cartera.pagos_credito_inversionistas_espejo pe
+      JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+      WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+        AND pe.porcentaje_participacion::numeric > 0
+      GROUP BY pe.credito_id, pe.liquidacion_id
+    )
+    SELECT COALESCE(SUM(
+      total_inv_interes * (100 - total_inv_pct) / total_inv_pct
+    ), 0) AS interes_cube
+    FROM por_credito_liq
+    WHERE total_inv_pct > 0 AND total_inv_pct < 100
+  `);
+  const interesCube = Number(
+    (cubeRows.rows[0] as Record<string, unknown>)?.interes_cube ?? 0
+  );
+
   // Pagos extras recibidos (abonos a capital / cancelaciones) que fluyen desde
   // las liquidaciones del mes: liquidación → pago espejo → abono.
   // Cada abono se cuenta una sola vez (DISTINCT) aunque tenga varios pagos espejo.
@@ -962,6 +991,9 @@ export async function getReinversionLiquidaciones({
         interes: sinFactura.interes.toFixed(2),
         isr: sinFactura.isr.toFixed(2),
         neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
+      },
+      cube: {
+        interes: interesCube.toFixed(2),
       },
     },
     pagosExtras: {

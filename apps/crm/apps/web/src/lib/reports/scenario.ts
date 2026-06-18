@@ -106,15 +106,14 @@ export type MontoACobrarPeriodoRow = {
 export type FacturacionMesRubro = {
 	capital: string;
 	interes: string;
-	iva: string;
-	seguro: string;
-	gps: string;
 	membresias: string;
+	seguro_gps: string;
+	royalti: string;
 };
 
 export type FacturacionMesResponse = {
 	cobrado: FacturacionMesRubro;
-	esperado: FacturacionMesRubro;
+	esperado: { meta_mensual: string };
 };
 
 export type FlujoCuotasRubro = {
@@ -240,19 +239,21 @@ export function transformFacturacion(
 	const rubros: (keyof FacturacionMesRubro)[] = [
 		"capital",
 		"interes",
-		"iva",
-		"seguro",
-		"gps",
 		"membresias",
+		"seguro_gps",
+		"royalti",
 	];
+	const totalCobrado = rubros.reduce((acc, k) => acc + num(data.cobrado[k]), 0);
+	const totalEsperado = num(data.esperado.meta_mensual);
+	const gap = totalEsperado - totalCobrado;
+	if (gap <= 0 || totalCobrado === 0) {
+		return data;
+	}
+	// Distribuir el cierre de brecha proporcionalmente a cada rubro
+	const factor = 1 + (gap * close) / totalCobrado;
 	const cobrado = { ...data.cobrado };
 	for (const k of rubros) {
-		const c = num(data.cobrado[k]);
-		const e = num(data.esperado[k]);
-		// Solo cerramos brechas positivas (esperado > cobrado). Si ya está
-		// sobre-cobrado (c >= e), se preserva el monto real intacto.
-		const gap = e - c;
-		cobrado[k] = money(gap > 0 ? c + gap * close : c);
+		cobrado[k] = money(num(data.cobrado[k]) * factor);
 	}
 	return { cobrado, esperado: data.esperado };
 }

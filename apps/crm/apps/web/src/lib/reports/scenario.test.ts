@@ -69,36 +69,32 @@ describe("transformMontoACobrar", () => {
 });
 
 describe("transformFacturacion", () => {
+	// totalCobrado=500 (400+100), meta_mensual=1000, gap=500
+	// factor con close=1: 1 + 500/500 = 2
+	// factor con close=0.5: 1 + 250/500 = 1.5
 	const data: FacturacionMesResponse = {
 		cobrado: {
-			capital: "800",
+			capital: "400",
 			interes: "100",
-			iva: "12",
-			seguro: "0",
-			gps: "0",
 			membresias: "0",
+			seguro_gps: "0",
+			royalti: "0",
 		},
-		esperado: {
-			capital: "1000",
-			interes: "100",
-			iva: "12",
-			seguro: "0",
-			gps: "0",
-			membresias: "0",
-		},
+		esperado: { meta_mensual: "1000" },
 	};
 
-	test("efectividad +100% iguala cobrado a esperado", () => {
+	test("efectividad +100% escala todos los rubros proporcionalmente", () => {
 		const out = transformFacturacion(
 			data,
 			params({ efectividadDeltaPct: 100 }),
 		);
-		expect(out.cobrado.capital).toBe("1000.00");
+		expect(out.cobrado.capital).toBe("800.00");
+		expect(out.cobrado.interes).toBe("200.00");
 	});
 
-	test("efectividad +50% cierra la mitad de la brecha", () => {
+	test("efectividad +50% aplica la mitad del factor", () => {
 		const out = transformFacturacion(data, params({ efectividadDeltaPct: 50 }));
-		expect(out.cobrado.capital).toBe("900.00");
+		expect(out.cobrado.capital).toBe("600.00");
 	});
 
 	test("esperado no cambia", () => {
@@ -106,29 +102,28 @@ describe("transformFacturacion", () => {
 			data,
 			params({ efectividadDeltaPct: 100 }),
 		);
-		expect(out.esperado.capital).toBe("1000");
+		expect(out.esperado.meta_mensual).toBe("1000");
 	});
 
 	test("efectividad negativa no cancela reducción de mora válida", () => {
-		// mora=100 debería cerrar el 100% de la brecha aunque efectividad=-100
 		const out = transformFacturacion(
 			data,
 			params({ moraReduccionPct: 100, efectividadDeltaPct: -100 }),
 		);
-		// capital: cobrado=800, esperado=1000, brecha=200, close=clamp01(0+1)=1 → 1000
-		expect(out.cobrado.capital).toBe("1000.00");
+		// close=clamp01(0+1)=1 → factor=2 → capital=800
+		expect(out.cobrado.capital).toBe("800.00");
 	});
 
-	test("rubro sobre-cobrado (cobrado > esperado) se preserva intacto", () => {
+	test("total cobrado > meta (gap<=0) devuelve datos sin modificar", () => {
 		const over: FacturacionMesResponse = {
-			cobrado: { ...data.cobrado, interes: "150" },
-			esperado: { ...data.esperado, interes: "100" },
+			cobrado: { capital: "1100", interes: "100", membresias: "0", seguro_gps: "0", royalti: "0" },
+			esperado: { meta_mensual: "1000" },
 		};
 		const out = transformFacturacion(
 			over,
 			params({ efectividadDeltaPct: 100 }),
 		);
-		expect(out.cobrado.interes).toBe("150.00");
+		expect(out.cobrado.capital).toBe("1100");
 	});
 });
 

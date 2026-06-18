@@ -361,6 +361,58 @@ export async function getCobradoDelMes({
   };
 }
 
+export async function getCobradoDelMesSnapshot({
+  mes,
+  anio,
+}: {
+  mes: number;
+  anio: number;
+}) {
+  // Filtramos por rango de fecha (no por anio/mes) porque esas columnas helper
+  // pueden venir NULL en filas importadas → quedarían fuera del SUM.
+  const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
+  const result = await db.execute(sql`
+    SELECT
+      COALESCE(SUM(capital_total::numeric), 0)          AS cobrado_capital,
+      COALESCE(SUM(interes_cube::numeric), 0)           AS cobrado_interes,
+      COALESCE(SUM(membresia::numeric), 0)              AS cobrado_membresias,
+      COALESCE(SUM(servicios_seguro_gps::numeric), 0)   AS cobrado_seguro_gps,
+      COALESCE(SUM(royalty::numeric), 0)                AS cobrado_royalti
+    FROM cartera.facturacion_snapshot_diario
+    WHERE fecha >= ${inicioMes}::date
+      AND fecha < (${inicioMes}::date + INTERVAL '1 month')
+  `);
+
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  return {
+    cobrado_capital: String(row?.cobrado_capital ?? "0"),
+    cobrado_interes: String(row?.cobrado_interes ?? "0"),
+    cobrado_membresias: String(row?.cobrado_membresias ?? "0"),
+    cobrado_seguro_gps: String(row?.cobrado_seguro_gps ?? "0"),
+    cobrado_royalti: String(row?.cobrado_royalti ?? "0"),
+  };
+}
+
+export async function getEsperadoDelMesMeta({
+  mes,
+  anio,
+}: {
+  mes: number;
+  anio: number;
+}) {
+  const result = await db.execute(sql`
+    SELECT meta_mensual
+    FROM cartera.metas_facturacion
+    WHERE anio = ${anio} AND mes = ${mes}
+    LIMIT 1
+  `);
+
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  return {
+    meta_mensual: String(row?.meta_mensual ?? "0"),
+  };
+}
+
 export async function getFlujoCuotasInversiones({
   fechaInicio,
   fechaFin,

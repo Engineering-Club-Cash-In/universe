@@ -2184,20 +2184,6 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
-									{quoterForm.state.values.membershipAdjustmentCategory ? (
-										<p className="text-muted-foreground text-xs">
-											Membresía: ajuste automático {""}
-											{quoterForm.state.values.membershipAdjustmentPercentage.toFixed(
-												2,
-											)}
-											% por {quoterForm.state.values.membershipAdjustmentCategory}.
-											 Original: Q
-											{quoterForm.state.values.baseMembershipCost.toFixed(2)} /
-											 Inflada: Q
-											{quoterForm.state.values.extraMembershipCost.toFixed(2)}.
-										</p>
-									) : null}
-
 									<quoterForm.Field name="gpsCost">
 										{(field) => (
 											<div>

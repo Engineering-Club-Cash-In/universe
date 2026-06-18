@@ -753,7 +753,9 @@ export async function getReinversionLiquidaciones({
   // Cancelaciones manuales: pagos del espejo (>= Q2,000) liquidados en el mes que
   // NO quedaron registrados en abonos_capital (abono_capital_id IS NULL) y cuyo
   // inversionista ya no tiene posición en el crédito (monto_aportado = 0 o ya no
-  // existe la fila en creditos_inversionistas_espejo). Se suman a las formales.
+  // existe la fila en creditos_inversionistas_espejo). Se excluyen créditos ACTIVO:
+  // un saldo en 0 sobre un crédito vigente es anómalo / pago normal, no cancelación.
+  // Se suman a las formales.
   const cancelExtraRows = await db.execute(sql`
     SELECT COALESCE(SUM(t.abono), 0) AS total
     FROM (
@@ -763,6 +765,7 @@ export async function getReinversionLiquidaciones({
         bool_and(ce.id IS NULL)                        AS sin_fila
       FROM cartera.pagos_credito_inversionistas_espejo pe
       JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+      JOIN cartera.creditos cr ON cr.credito_id = pe.credito_id
       LEFT JOIN cartera.creditos_inversionistas_espejo ce
         ON ce.credito_id = pe.credito_id
        AND ce.inversionista_id = pe.inversionista_id
@@ -770,6 +773,7 @@ export async function getReinversionLiquidaciones({
         AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
         AND pe.abono_capital::numeric >= 2000
         AND pe.abono_capital_id IS NULL
+        AND cr."statusCredit" <> 'ACTIVO'
       GROUP BY pe.credito_id, pe.inversionista_id
     ) t
     WHERE t.monto_aportado = 0 OR t.sin_fila

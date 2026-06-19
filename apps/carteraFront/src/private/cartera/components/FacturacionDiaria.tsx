@@ -26,12 +26,14 @@ import {
   guardarCeldasSnapshot,
   desbloquearDiaSnapshot,
   getAuditoriaSnapshot,
+  getDetalleSnapshot,
   upsertMetaFacturacion,
   type GastoAdministrativo,
   type IngresoCarro,
   type MetaFacturacion,
   type SnapshotDiario,
   type AuditoriaSnapshot,
+  type DetalleSnapshotRow,
 } from "../services/facturacionDiaria.services";
 import { useAuth } from "@/Provider/authProvider";
 
@@ -62,7 +64,9 @@ const SNAP_KEY = "facturacion-snapshots";
 
 // ───────────── grupos de columnas (colapsables) ─────────────
 type Col = { k: string; l: string };
-type Grupo = { key: string; label: string; total: Col; detalle: Col[] };
+// rubro: si está, el TOTAL del grupo es clickeable y abre el modal de desglose
+// (crédito nuevo vs pago) de ese rubro/día. Capital/Mora no llevan (son solo pago).
+type Grupo = { key: string; label: string; total: Col; detalle: Col[]; rubro?: string };
 
 const productos = (prefix: string): Col[] => [
   { k: `${prefix}_autocompras`, l: "Autocompras" },
@@ -75,16 +79,19 @@ const productos = (prefix: string): Col[] => [
 
 const GRUPOS: Grupo[] = [
   { key: "capital", label: "Capital", total: { k: "capital_total", l: "Capital total" }, detalle: productos("cap") },
-  { key: "interes", label: "Interés", total: { k: "interes_cube", l: "Interés Cube" }, detalle: productos("int") },
-  { key: "membresia", label: "Membresía", total: { k: "membresia", l: "Membresía" }, detalle: productos("mem") },
+  { key: "interes", label: "Interés", rubro: "INTERES", total: { k: "interes_cube", l: "Interés Cube" }, detalle: productos("int") },
+  { key: "membresia", label: "Membresía", rubro: "MEMBRESIA", total: { k: "membresia", l: "Membresía" }, detalle: productos("mem") },
   {
     key: "otros",
     label: "Otros ingresos",
+    rubro: "OTROS",
     total: { k: "otros_ingresos", l: "Otros ingresos" },
     detalle: [...productos("oi"), { k: "administrativos", l: "Administrativos" }, { k: "otros_cobros", l: "Otros cobros" }],
   },
   { key: "mora", label: "Mora", total: { k: "mora_cube", l: "Mora Cube" }, detalle: productos("mora") },
-  { key: "royalty", label: "Royalty", total: { k: "royalty", l: "Royalty" }, detalle: productos("roy") },
+  { key: "royalty", label: "Royalty", rubro: "ROYALTY", total: { k: "royalty", l: "Royalty" }, detalle: productos("roy") },
+  { key: "seguro", label: "Seguro", rubro: "SEGURO", total: { k: "seguro_total", l: "Seguro total" }, detalle: productos("seg") },
+  { key: "gps", label: "GPS", rubro: "GPS", total: { k: "gps_total", l: "GPS total" }, detalle: productos("gps") },
   {
     key: "totales",
     label: "Totales / Acumulados",
@@ -135,6 +142,22 @@ export function FacturacionDiaria() {
   const [desbloquearTarget, setDesbloquearTarget] = useState<string | null>(null);
   // modal de historial de cambios (auditoría)
   const [historialOpen, setHistorialOpen] = useState(false);
+  // modal de desglose por origen (crédito nuevo vs pago): {fecha, rubro, label} | null
+  const [detalleTarget, setDetalleTarget] = useState<{ fecha: string; rubro: string; label: string } | null>(null);
+  const [detalleRows, setDetalleRows] = useState<DetalleSnapshotRow[]>([]);
+  const [detalleLoading, setDetalleLoading] = useState(false);
+
+  useEffect(() => {
+    if (!detalleTarget) return;
+    let ignore = false; // evita que una respuesta vieja pise a una más nueva
+    setDetalleLoading(true);
+    setDetalleRows([]);
+    getDetalleSnapshot(detalleTarget.fecha, detalleTarget.rubro)
+      .then((r) => { if (!ignore) setDetalleRows(r.data ?? []); })
+      .catch(() => { if (!ignore) setDetalleRows([]); })
+      .finally(() => { if (!ignore) setDetalleLoading(false); });
+    return () => { ignore = true; };
+  }, [detalleTarget]);
   const histQuery = useQuery({
     queryKey: ["facturacion-auditoria"],
     queryFn: () => getAuditoriaSnapshot({ limit: 300 }),
@@ -442,8 +465,18 @@ export function FacturacionDiaria() {
                       colsDe(g).map((c) => (
                         <td
                           key={`${row.id}-${c.k}`}
+                          onClick={
+                            c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k) && !row.bloqueado
+                              ? () => setDetalleTarget({ fecha: row.fecha, rubro: g.rubro as string, label: g.label })
+                              : undefined
+                          }
+                          title={c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k) && !row.bloqueado ? "Ver desglose crédito nuevo vs pago" : undefined}
                           className={`px-3 py-2 text-right tabular-nums border-r border-gray-50 whitespace-nowrap ${
                             c.k === g.total.k ? "bg-blue-50/60 font-semibold text-blue-900" : "text-gray-700"
+                          }${
+                            c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k) && !row.bloqueado
+                              ? " cursor-pointer hover:bg-blue-100 underline decoration-dotted underline-offset-2"
+                              : ""
                           }`}
                         >
                           {esCeldaEditable(row.fecha, c.k) ? (
@@ -495,6 +528,94 @@ export function FacturacionDiaria() {
         {/* Secciones de registro */}
         <RegistrosManuales mes={Number(fechaFin.slice(5, 7))} anio={Number(fechaFin.slice(0, 4))} />
       </div>
+
+      {/* Modal de desglose por origen (crédito nuevo vs pago) */}
+      {detalleTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setDetalleTarget(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-blue-50 rounded-t-xl">
+              <div>
+                <h3 className="text-base font-bold text-blue-900">Desglose · {detalleTarget.label}</h3>
+                <p className="text-xs text-gray-600">Crédito nuevo vs pago · {detalleTarget.fecha}</p>
+              </div>
+              <button
+                onClick={() => setDetalleTarget(null)}
+                className="text-gray-500 hover:text-gray-800 text-xl leading-none"
+                aria-label="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 bg-white">
+              {detalleLoading ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Loader2 className="h-6 w-6 animate-spin inline" />
+                </div>
+              ) : detalleRows.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Sin datos para este día</div>
+              ) : (
+                (() => {
+                  const PROD_LABEL: Record<string, string> = {
+                    autocompras: "Autocompras",
+                    sobre_vehiculo: "Sobre vehículo",
+                    nuevo_autocompras: "Nuevo Autocompras",
+                    hipotecario: "Hipotecario",
+                    extra_financiamiento: "Extra financ.",
+                    reestructura: "Reestructura",
+                    sin_producto: "Sin producto",
+                  };
+                  const ORDER = ["autocompras", "sobre_vehiculo", "nuevo_autocompras", "hipotecario", "extra_financiamiento", "reestructura", "sin_producto"];
+                  const piv: Record<string, { nuevo: number; pago: number }> = {};
+                  for (const r of detalleRows) {
+                    (piv[r.producto] ??= { nuevo: 0, pago: 0 });
+                    if (r.origen === "nuevo") piv[r.producto].nuevo += Number(r.monto_total) || 0;
+                    else piv[r.producto].pago += Number(r.monto_total) || 0;
+                  }
+                  const prods = ORDER.filter((p) => piv[p] && (piv[p].nuevo || piv[p].pago));
+                  const tn = prods.reduce((s, p) => s + piv[p].nuevo, 0);
+                  const tp = prods.reduce((s, p) => s + piv[p].pago, 0);
+                  return (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-blue-50 text-blue-900">
+                          <th className="text-left font-semibold py-2 px-2 rounded-l">Producto</th>
+                          <th className="text-right font-semibold py-2 px-2">Crédito nuevo</th>
+                          <th className="text-right font-semibold py-2 px-2">Pago</th>
+                          <th className="text-right font-semibold py-2 px-2 rounded-r">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prods.map((p) => (
+                          <tr key={p} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-2 px-2 text-gray-800">{PROD_LABEL[p] ?? p}</td>
+                            <td className="text-right tabular-nums py-2 px-2 text-emerald-700">{nf.format(piv[p].nuevo)}</td>
+                            <td className="text-right tabular-nums py-2 px-2 text-slate-600">{nf.format(piv[p].pago)}</td>
+                            <td className="text-right tabular-nums py-2 px-2 font-semibold text-blue-900">{nf.format(piv[p].nuevo + piv[p].pago)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="font-bold text-blue-900 border-t-2 border-blue-200 bg-blue-50/60">
+                          <td className="py-2 px-2">TOTAL</td>
+                          <td className="text-right tabular-nums py-2 px-2 text-emerald-800">{nf.format(tn)}</td>
+                          <td className="text-right tabular-nums py-2 px-2 text-slate-700">{nf.format(tp)}</td>
+                          <td className="text-right tabular-nums py-2 px-2">{nf.format(tn + tp)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  );
+                })()
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de historial de cambios (auditoría) */}
       {historialOpen && (

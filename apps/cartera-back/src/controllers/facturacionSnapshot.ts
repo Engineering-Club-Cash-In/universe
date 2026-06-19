@@ -178,6 +178,10 @@ const RUBRO_PREFIX: Record<string, string> = {
   OTROS: "oi",
   MORA: "mora",
   ROYALTY: "roy",
+  // Seguro/GPS también van por categoría (además del combinado servicios_seguro_gps).
+  // En el loop del desglose se tratan aparte (no caen en el totalCol genérico).
+  SEGURO: "seg",
+  GPS: "gps",
 };
 
 // categoría BD -> producto Excel (sufijo). "__NUEVO__" usa el patrón nuevo_<prefijo>_autocompras.
@@ -241,9 +245,33 @@ export async function generarSnapshotDiario(fecha: string) {
     LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
     LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
     WHERE fd.fecha_aplicado_gt = ${fecha}::date
-      -- una fila de PAGO huérfana (credito/usuario borrado) no debe sumar al
-      -- total; las GENÉRICAS (pago_id NULL) sí entran.
-      AND (fd.pago_id IS NULL OR p.pago_id IS NOT NULL)
+      -- Filas de PAGO: el pago debe existir (no huérfano por credito/usuario
+      -- borrado) y, MISMO CRITERIO QUE EL EXCEL (getPagosConInversionistas que
+      -- llena "Reuniones diarias"): el crédito debe estar en un estado contable
+      -- (excluye CAIDO y demás) y el pago en un validation_status contable. Si no,
+      -- el desglose contaba pagos facturados sobre créditos caídos que el Excel
+      -- excluye → diferencia (p.ej. capital nuevo 06-16). Las GENÉRICAS (pago_id
+      -- NULL) no tienen crédito asociado → entran igual.
+      AND (
+        fd.pago_id IS NULL OR (
+          p.pago_id IS NOT NULL
+          AND c."statusCredit" IN
+            ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+          AND p.validation_status IN
+            ('validated','pending','reset','capital','capital_validated')
+        )
+      )
+      -- Las GENÉRICAS de ORIGINACIÓN (alta de crédito nuevo) SÍ alimentan sus rubros:
+      -- la cuota 0 de INTERÉS y MEMBRESÍA del vehículo nuevo DEBE SUMAR (decisión del
+      -- negocio), igual que otros/royalty/seguro. Solo se excluyen del desglose:
+      --   • CAPITAL → se calcula del pci (bloque 1.5), no del desglose.
+      --   • MORA → un crédito nuevo no genera mora genérica.
+      -- ⚠️ Con esto interés/membresía dejan de cuadrar con el Excel (que manda la
+      --    cuota 0 a administrativos) — decisión explícita: en el sistema la cuota 0 suma.
+      AND NOT (
+        fd.pago_id IS NULL
+        AND fd.rubro::text IN ('CAPITAL','MORA')
+      )
     GROUP BY COALESCE(u.categoria, fd.categoria), fd.rubro
   `);
   for (const r of (desg as any).rows ?? []) {
@@ -251,9 +279,19 @@ export async function generarSnapshotDiario(fecha: string) {
     const rubro = r.rubro as string;
     const total = r.total;
     if (rubro === "SEGURO" || rubro === "GPS") {
-      add("servicios_seguro_gps", total);
+      add("servicios_seguro_gps", total); // combinado, INTACTO para conta
+      // + segmentación por categoría (igual que membresía/interés)
+      const pfx = rubro === "SEGURO" ? "seg" : "gps";
+      add(rubro === "SEGURO" ? "seguro_total" : "gps_total", total);
+      add(colProducto(pfx, cat), total);
       continue;
     }
+    // 💰 CAPITAL NO se toma del desglose: se jala del pci (pagos aplicados) en el
+    //    bloque 1.5 de abajo. cofidi escribe la fila CAPITAL solo si el capital de
+    //    CUBE > 0 al FACTURAR; si entra al pci DESPUÉS de facturar, la fila no se
+    //    escribe y el desglose sub-cuenta capital (gap vs el Excel). Por eso el
+    //    capital se calcula desde los pagos aplicados, igual que "Reuniones diarias".
+    if (rubro === "CAPITAL") continue;
     const prefix = RUBRO_PREFIX[rubro];
     if (!prefix) continue;
     // total por rubro (columna *_cube / total)
@@ -271,6 +309,32 @@ export async function generarSnapshotDiario(fecha: string) {
         : "mora_cube"; // MORA
     add(totalCol, total);
     add(colProducto(prefix, cat), total);
+  }
+
+  // 1.5) 💰 CAPITAL del día = capital de CUBE desde pagos_credito_inversionistas
+  //      (pci) de los pagos APLICADOS hoy — MISMA fuente que el Excel "Reuniones
+  //      diarias" (getPagosConInversionistas). Se reparte por usuario.categoria
+  //      (igual que el resto). Resuelve el desfase pci↔facturación: el desglose
+  //      escribe la fila CAPITAL solo si el capital de CUBE existe al facturar, y a
+  //      veces el capital entra al pci después → la fila falta y el desglose
+  //      sub-cuenta. Tomándolo de los pagos aplicados cuadra al centavo con el Excel.
+  const capPci = await db.execute(sql`
+    SELECT u.categoria AS categoria, SUM(pci.abono_capital) AS cap
+    FROM cartera.pagos_credito p
+    JOIN cartera.creditos c ON c.credito_id = p.credito_id
+    JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+    JOIN cartera.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
+    JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+    WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
+      AND p.validation_status IN ('validated','pending','reset','capital','capital_validated')
+      AND c."statusCredit" IN
+        ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+      AND UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
+    GROUP BY u.categoria
+  `);
+  for (const r of (capPci as any).rows ?? []) {
+    add("capital_total", r.cap);
+    add(colProducto("cap", r.categoria as string), r.cap);
   }
 
   // 2) Royalty del día = SOLO lo REALMENTE facturado (rubro ROYALTY del desglose,
@@ -392,6 +456,8 @@ export async function generarSnapshotDiario(fecha: string) {
     otros_cobros: f2(otros_cobros),
     mora_cube: f2(mora_cube),
     royalty: f2(royalty),
+    seguro_total: f2(g("seguro_total")),
+    gps_total: f2(g("gps_total")),
     facturacion: f2(facturacion),
     facturacion_acumulado: f2(facturacion_acumulado),
     servicios_seguro_gps: f2(servicios),
@@ -430,6 +496,83 @@ export async function generarSnapshotDiario(fecha: string) {
       set: setObj,
     })
     .returning();
+
+  // ───────────── tabla intermedia: detalle por ORIGEN (nuevo vs pago) ─────────────
+  //   Para que conta vea la diferencia que hoy hace a mano. Cubre TODOS los rubros.
+  //   - INTERÉS/MEMBRESÍA/SEGURO/GPS/OTROS/MORA/ROYALTY/INVERSIONISTAS: del desglose
+  //     (genérica = 'nuevo' originación; con pago = 'pago').
+  //   - CAPITAL: NO del desglose (el desglose sub-cuenta capital); se toma de pci de
+  //     CUBE por pago aplicado, MISMA fuente que la columna capital_total → reconcilia.
+  //     Capital siempre es 'pago' (no hay originación de capital).
+  //   trim() en la categoría para igualar colProducto (la data trae espacios/variantes).
+  //   Best-effort: si falla (p.ej. tabla aún no migrada, o race del índice único),
+  //   NO rompe el snapshot ya guardado. Días bloqueados retornan arriba (backfill aparte).
+  try {
+    await db.execute(sql`DELETE FROM cartera.facturacion_snapshot_detalle WHERE fecha = ${fecha}::date`);
+    await db.execute(sql`
+      INSERT INTO cartera.facturacion_snapshot_detalle
+        (fecha, rubro, producto, origen, monto_total, monto_iva)
+      SELECT ${fecha}::date, fd.rubro,
+        CASE lower(trim(COALESCE(u.categoria, fd.categoria)))
+          WHEN 'cv vehículo' THEN 'autocompras'
+          WHEN 'cv vehículo nuevo' THEN 'nuevo_autocompras'
+          WHEN 'vehículo' THEN 'sobre_vehiculo'
+          WHEN 'hipotecario' THEN 'hipotecario'
+          ELSE 'sin_producto'
+        END,
+        CASE WHEN fd.pago_id IS NULL THEN 'nuevo' ELSE 'pago' END,
+        SUM(fd.monto_total), SUM(fd.monto_iva)
+      FROM cartera.facturacion_desglose fd
+      LEFT JOIN cartera.pagos_credito p ON p.pago_id   = fd.pago_id
+      LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
+      LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
+      WHERE fd.fecha_aplicado_gt = ${fecha}::date
+        AND fd.rubro::text <> 'CAPITAL'                            -- capital se toma del pci (abajo)
+        AND NOT (fd.pago_id IS NULL AND fd.rubro::text = 'MORA')   -- mora genérica fuera (= snapshot)
+        AND (
+          fd.pago_id IS NULL
+          -- INTERES_INVERSIONISTAS reconcilia con facturacion_inversionistas (bloque 4),
+          -- que suma el desglose SIN filtro de estado/validation → acá tampoco se filtra.
+          OR fd.rubro::text = 'INTERES_INVERSIONISTAS'
+          OR (
+            p.pago_id IS NOT NULL
+            AND c."statusCredit" IN
+              ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+            AND p.validation_status IN
+              ('validated','pending','reset','capital','capital_validated')
+          )
+        )
+      GROUP BY fd.rubro, 3, 4
+    `);
+    // CAPITAL desde pci de CUBE (igual que capital_total) → reconcilia con el snapshot
+    await db.execute(sql`
+      INSERT INTO cartera.facturacion_snapshot_detalle
+        (fecha, rubro, producto, origen, monto_total, monto_iva)
+      SELECT ${fecha}::date, 'CAPITAL'::cartera.rubro_facturacion,
+        CASE lower(trim(u.categoria))
+          WHEN 'cv vehículo' THEN 'autocompras'
+          WHEN 'cv vehículo nuevo' THEN 'nuevo_autocompras'
+          WHEN 'vehículo' THEN 'sobre_vehiculo'
+          WHEN 'hipotecario' THEN 'hipotecario'
+          ELSE 'sin_producto'
+        END,
+        'pago', SUM(pci.abono_capital), 0
+      FROM cartera.pagos_credito p
+      JOIN cartera.creditos c ON c.credito_id = p.credito_id
+      JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+      JOIN cartera.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
+      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+      WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
+        AND p.validation_status IN ('validated','pending','reset','capital','capital_validated')
+        AND c."statusCredit" IN
+          ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+        AND UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
+      GROUP BY 3
+      HAVING SUM(pci.abono_capital) <> 0
+    `);
+  } catch (e) {
+    console.error(`⚠️ detalle snapshot ${fecha} no se pudo poblar (best-effort):`, e);
+  }
 
   return { success: true, data: saved };
 }
@@ -538,6 +681,25 @@ export async function regenerarSnapshotRango(
 // ============================================================================
 // 📥 EXPORTAR A EXCEL (diseño tipo Reuniones diarias, con logo y totales)
 // ============================================================================
+// 📋 Detalle por ORIGEN (crédito nuevo vs pago) de un día — alimenta el modal del
+//    front y la hoja "Desglose" del Excel. Lee facturacion_snapshot_detalle.
+//    Opcional: filtrar por rubro (para el modal de un rubro puntual).
+export async function listarDetalleSnapshot(params: {
+  fecha: string;
+  rubro?: string;
+}) {
+  const { fecha, rubro } = params;
+  const res = await db.execute(sql`
+    SELECT rubro::text AS rubro, producto, origen,
+           monto_total::float8 AS monto_total, monto_iva::float8 AS monto_iva
+    FROM cartera.facturacion_snapshot_detalle
+    WHERE fecha = ${fecha}::date
+      ${rubro ? sql`AND rubro::text = ${rubro}` : sql``}
+    ORDER BY rubro, producto, origen
+  `);
+  return { success: true, data: (res as any).rows ?? [] };
+}
+
 const prodCols = (p: string) => [
   { k: `${p}_autocompras`, l: "Autocompras" },
   { k: `${p}_sobre_vehiculo`, l: "Sobre vehículo" },
@@ -558,6 +720,8 @@ const EXCEL_GRUPOS: { label: string; color: string; cols: { k: string; l: string
   },
   { label: "Mora", color: "FF1D4ED8", cols: [...prodCols("mora"), { k: "mora_cube", l: "Mora Cube" }] },
   { label: "Royalty", color: "FF2563EB", cols: [...prodCols("roy"), { k: "royalty", l: "Royalty" }] },
+  { label: "Seguro", color: "FF1D4ED8", cols: [...prodCols("seg"), { k: "seguro_total", l: "Seguro total" }] },
+  { label: "GPS", color: "FF2563EB", cols: [...prodCols("gps"), { k: "gps_total", l: "GPS total" }] },
   {
     label: "Totales / Acumulados",
     color: "FF0F766E",
@@ -716,6 +880,97 @@ export async function generarExcelFacturacionDiaria(
 
   ws.getRow(HEADER_GROUP_ROW).height = 22;
   ws.getRow(HEADER_COL_ROW).height = 30;
+
+  // ───────────── Hoja "Desglose nuevo vs pago" ─────────────
+  //   Para conta: por cada día y rubro, el desglose por producto en crédito nuevo
+  //   vs pago, RESPETANDO el orden del reporte y con filas en blanco entre rubros
+  //   y días para que se lea cómodo. Fuente: facturacion_snapshot_detalle.
+  // Días BLOQUEADOS (editados a mano / forzados): el detalle viene del desglose y
+  //   NO reconcilia con el total forzado → se EXCLUYEN del Desglose (Codex P2 #933).
+  const det = await db.execute(sql`
+    SELECT fecha::text AS fecha, rubro::text AS rubro, producto, origen,
+           monto_total::float8 AS monto
+    FROM cartera.facturacion_snapshot_detalle
+    WHERE fecha BETWEEN ${fechaInicio}::date AND ${fechaFin}::date
+      AND fecha NOT IN (
+        SELECT fecha FROM cartera.facturacion_snapshot_diario WHERE bloqueado = true
+      )
+  `);
+  const idx: Record<string, Record<string, Record<string, { nuevo: number; pago: number }>>> = {};
+  for (const x of (det as any).rows ?? []) {
+    const f = x.fecha as string, rb = x.rubro as string, p = x.producto as string;
+    (idx[f] ??= {});
+    (idx[f][rb] ??= {});
+    (idx[f][rb][p] ??= { nuevo: 0, pago: 0 });
+    if (x.origen === "nuevo") idx[f][rb][p].nuevo += Number(x.monto) || 0;
+    else idx[f][rb][p].pago += Number(x.monto) || 0;
+  }
+  const RUBRO_ORDER = ["CAPITAL", "INTERES", "MEMBRESIA", "OTROS", "MORA", "ROYALTY", "SEGURO", "GPS", "INTERES_INVERSIONISTAS"];
+  const RUBRO_LABEL: Record<string, string> = { CAPITAL: "Capital", INTERES: "Interés", MEMBRESIA: "Membresía", OTROS: "Otros ingresos", MORA: "Mora", ROYALTY: "Royalty", SEGURO: "Seguro", GPS: "GPS", INTERES_INVERSIONISTAS: "Inversionistas" };
+  const PROD_ORDER = ["autocompras", "sobre_vehiculo", "nuevo_autocompras", "hipotecario", "extra_financiamiento", "reestructura", "sin_producto"];
+  const PROD_LABEL: Record<string, string> = { autocompras: "Autocompras", sobre_vehiculo: "Sobre vehículo", nuevo_autocompras: "Nuevo Autocompras", hipotecario: "Hipotecario", extra_financiamiento: "Extra financ.", reestructura: "Reestructura", sin_producto: "Sin producto" };
+
+  const ds = wb.addWorksheet("Desglose nuevo vs pago");
+  ds.columns = [
+    { key: "fecha", width: 13 },
+    { key: "rubro", width: 16 },
+    { key: "producto", width: 20 },
+    { key: "nuevo", width: 16 },
+    { key: "pago", width: 16 },
+    { key: "total", width: 16 },
+  ];
+  ds.mergeCells(1, 1, 1, 6);
+  const dT = ds.getCell(1, 1);
+  dT.value = `Desglose crédito nuevo vs pago  ·  ${fechaInicio ?? "—"} a ${fechaFin ?? "—"}`;
+  dT.font = { bold: true, size: 14, color: { argb: "FF1E3A8A" } };
+  const dh = ds.getRow(3);
+  ["Fecha", "Rubro", "Producto", "Crédito nuevo", "Pago", "Total"].forEach((h, i) => {
+    const c = dh.getCell(i + 1);
+    c.value = h;
+    c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    c.alignment = { horizontal: i < 3 ? "left" : "right", vertical: "middle" };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } };
+    c.border = border;
+  });
+  dh.height = 22;
+
+  let dr = 4;
+  for (const f of Object.keys(idx).sort()) {
+    for (const rb of RUBRO_ORDER) {
+      const prods = idx[f]?.[rb];
+      if (!prods) continue;
+      const firstRow = dr;
+      let sn = 0, sp = 0;
+      for (const p of PROD_ORDER) {
+        const v = prods[p];
+        if (!v || (v.nuevo === 0 && v.pago === 0)) continue;
+        const row = ds.getRow(dr);
+        row.getCell(1).value = dr === firstRow ? f : "";
+        row.getCell(2).value = dr === firstRow ? (RUBRO_LABEL[rb] ?? rb) : "";
+        row.getCell(3).value = PROD_LABEL[p] ?? p;
+        row.getCell(4).value = v.nuevo;
+        row.getCell(5).value = v.pago;
+        row.getCell(6).value = v.nuevo + v.pago;
+        for (const cc of [4, 5, 6]) row.getCell(cc).numFmt = "#,##0.00";
+        sn += v.nuevo; sp += v.pago;
+        dr++;
+      }
+      if (dr === firstRow) continue; // rubro sin movimiento
+      const sub = ds.getRow(dr);
+      sub.getCell(3).value = `Subtotal ${RUBRO_LABEL[rb] ?? rb}`;
+      sub.getCell(4).value = sn;
+      sub.getCell(5).value = sp;
+      sub.getCell(6).value = sn + sp;
+      for (let cc = 1; cc <= 6; cc++) {
+        const c = sub.getCell(cc);
+        if (cc >= 4) c.numFmt = "#,##0.00";
+        c.font = { bold: true, color: { argb: "FF1E3A8A" } };
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF6FF" } };
+      }
+      dr += 2; // subtotal + fila en blanco (espacio entre rubros)
+    }
+    dr++; // espacio extra entre días
+  }
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);

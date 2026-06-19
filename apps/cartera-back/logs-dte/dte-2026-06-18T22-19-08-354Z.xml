@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dte:GTDocumento xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:cfc="http://www.sat.gob.gt/dte/fel/CompCambiaria/0.1.0" xmlns:cno="http://www.sat.gob.gt/face2/ComplementoReferenciaNota/0.1.0" xmlns:cex="http://www.sat.gob.gt/face2/ComplementoExportaciones/0.1.0" xmlns:cfe="http://www.sat.gob.gt/face2/ComplementoFacturaEspecial/0.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="0.1" xmlns:dte="http://www.sat.gob.gt/dte/fel/0.2.0">
+  <dte:SAT ClaseDocumento="dte">
+    <dte:DTE ID="DatosCertificados">
+      <dte:DatosEmision ID="DatosEmision">
+        <dte:DatosGenerales Tipo="FCAM" FechaHoraEmision="2026-06-18T16:19:08" CodigoMoneda="GTQ"/>
+        <dte:Emisor NITEmisor="98766430" NombreEmisor="CUBE INVESTMENTS, SOCIEDAD ANONIMA" CodigoEstablecimiento="1" NombreComercial="CASH-IN" AfiliacionIVA="GEN">
+          <dte:DireccionEmisor>
+            <dte:Direccion>3 AVENIDA Zona 13 COLONIA LOMAS DE PAMPLONA A 13-78, Guatemala, Guatemala</dte:Direccion>
+            <dte:CodigoPostal>01013</dte:CodigoPostal>
+            <dte:Municipio>Guatemala</dte:Municipio>
+            <dte:Departamento>Guatemala</dte:Departamento>
+            <dte:Pais>GT</dte:Pais>
+          </dte:DireccionEmisor>
+        </dte:Emisor>
+        <dte:Receptor IDReceptor="69188602" NombreReceptor="TÍXTA,RAMOS,,BERTHA,FIDELIA"/>
+        <dte:Frases>
+          <dte:Frase TipoFrase="1" CodigoEscenario="3" NumeroResolucion="6130294202615373132" FechaResolucion="2026-04-29"/>
+        </dte:Frases>
+        <dte:Items>
+          <dte:Item NumeroLinea="1" BienOServicio="B">
+            <dte:Cantidad>1</dte:Cantidad>
+            <dte:UnidadMedida>UND</dte:UnidadMedida>
+            <dte:Descripcion>CARGO POR SERVICIOS</dte:Descripcion>
+            <dte:PrecioUnitario>168.00</dte:PrecioUnitario>
+            <dte:Precio>168.00</dte:Precio>
+            <dte:Descuento>0.000000</dte:Descuento>
+            <dte:Impuestos>
+              <dte:Impuesto>
+                <dte:NombreCorto>IVA</dte:NombreCorto>
+                <dte:CodigoUnidadGravable>1</dte:CodigoUnidadGravable>
+                <dte:MontoGravable>150.00</dte:MontoGravable>
+                <dte:MontoImpuesto>18.00</dte:MontoImpuesto>
+              </dte:Impuesto>
+            </dte:Impuestos>
+            <dte:Total>168.00</dte:Total>
+          </dte:Item>
+        </dte:Items>
+        <dte:Totales>
+          <dte:TotalImpuestos>
+            <dte:TotalImpuesto NombreCorto="IVA" TotalMontoImpuesto="18.00"/>
+          </dte:TotalImpuestos>
+          <dte:GranTotal>168.00</dte:GranTotal>
+        </dte:Totales>
+        <dte:Complementos>
+          <dte:Complemento IDComplemento="abonosFacturaCambiaria" NombreComplemento="RetencionesFacturaCambiaria" URIComplemento="http://www.sat.gob.gt/dte/fel/CompCambiaria/0.1.0">
+            <cfc:AbonosFacturaCambiaria Version="1">
+              <cfc:Abono>
+                <cfc:NumeroAbono>1</cfc:NumeroAbono>
+                <cfc:FechaVencimiento>2026-06-18</cfc:FechaVencimiento>
+                <cfc:MontoAbono>168.00</cfc:MontoAbono>
+              </cfc:Abono>
+            </cfc:AbonosFacturaCambiaria>
+          </dte:Complemento>
+        </dte:Complementos>
+      </dte:DatosEmision>
+    </dte:DTE>
+  </dte:SAT>
+</dte:GTDocumento>

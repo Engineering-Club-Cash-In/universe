@@ -311,9 +311,25 @@ export async function getMontoACobrarPeriodo({
         AND fd.fecha_aplicado_gt >= ${fechaInicio}::date
         AND fd.fecha_aplicado_gt <= ${fechaFin}::date
       GROUP BY DATE_TRUNC(${pg}, fd.fecha_aplicado_gt::timestamp)
+    ),
+    -- ENFOQUE ALTERNATIVO (en evaluación A/B, NO reemplaza al anterior): interés a
+    -- inversionistas tomado de pagos_credito_inversionistas (interés + IVA), solo de
+    -- inversionistas externos (permite_distribucion = false → se ignoran los nuestros),
+    -- agrupado por fecha_pago en zona Guatemala.
+    inv_pagos_por_bucket AS (
+      SELECT
+        DATE_TRUNC(${pg}, (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::timestamp) AS pagos_bucket,
+        COALESCE(SUM(pci.abono_interes::numeric + pci.abono_iva_12::numeric), 0)        AS total_interes_inversionista_pagos
+      FROM cartera.pagos_credito_inversionistas pci
+      WHERE pci.inversionista_id IN (
+        SELECT inversionista_id FROM cartera.inversionistas WHERE permite_distribucion = false
+      )
+        AND (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::date >= ${fechaInicio}::date
+        AND (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::date <= ${fechaFin}::date
+      GROUP BY DATE_TRUNC(${pg}, (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::timestamp)
     )
     SELECT
-      COALESCE(per_bucket_credit.bucket, ib.inv_bucket) AS bucket,
+      COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket) AS bucket,
       COALESCE(SUM(cuotas_count), 0)::int                                                        AS cuotas_count,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END), 0)               AS total_cuota,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN interes     ELSE 0 END), 0)               AS total_interes,
@@ -353,14 +369,19 @@ export async function getMontoACobrarPeriodo({
       -- en ese bucket. Acumulado: suma corrida hasta el bucket (el último bucket = gran
       -- total, igual que como la fila Total lee el acumulado de los demás rubros).
       COALESCE(MAX(ib.total_interes_inversionista), 0)                                            AS total_interes_inversionista,
-      COALESCE(SUM(COALESCE(MAX(ib.total_interes_inversionista), 0)) OVER (ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket)), 0)   AS acum_total_interes_inversionista
-    -- FULL JOIN: el resultado se arma desde la unión de buckets de ambas fuentes, para
-    -- que un período con facturación a inversionistas pero SIN cuotas pendientes
-    -- (posible en vista día/semana) no se pierda al subestimar la columna.
+      COALESCE(SUM(COALESCE(MAX(ib.total_interes_inversionista), 0)) OVER (ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket)), 0)   AS acum_total_interes_inversionista,
+      -- ENFOQUE ALTERNATIVO (A/B): interés a inversionistas desde pagos_credito_inversionistas
+      -- (interés + IVA). Mismo tratamiento por período / acumulado que el enfoque anterior.
+      COALESCE(MAX(ip.total_interes_inversionista_pagos), 0)                                      AS total_interes_inversionista_pagos,
+      COALESCE(SUM(COALESCE(MAX(ip.total_interes_inversionista_pagos), 0)) OVER (ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket)), 0)   AS acum_total_interes_inversionista_pagos
+    -- FULL JOIN: el resultado se arma desde la unión de buckets de las fuentes, para que un
+    -- período con facturación/pagos a inversionistas pero SIN cuotas pendientes (posible en
+    -- vista día/semana) no se pierda ni subestime las columnas.
     FROM per_bucket_credit
     FULL JOIN inv_por_bucket ib ON ib.inv_bucket = per_bucket_credit.bucket
-    GROUP BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket)
-    ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket) ASC
+    FULL JOIN inv_pagos_por_bucket ip ON ip.pagos_bucket = COALESCE(per_bucket_credit.bucket, ib.inv_bucket)
+    GROUP BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket)
+    ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket) ASC
   `);
 
   return result.rows;

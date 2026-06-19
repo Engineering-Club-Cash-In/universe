@@ -340,6 +340,26 @@ export async function generarSnapshotDiario(fecha: string) {
     add(colProducto("cap", r.categoria as string), r.cap);
   }
 
+  // 1.6) 🏷️ OI por producto = MODELO CONTA. En el Excel "Reuniones diarias" las columnas
+  //      "Otros ingresos" por categoría (oi_<producto>) incluyen TODA la originación del
+  //      crédito nuevo —la cuota 0 de interés/membresía/seguro/otros—, no solo el rubro
+  //      OTROS. Esas genéricas se excluyeron de los rubros (bloque 1, van a administrativos)
+  //      pero el DETALLE por producto de OI sí las lleva, para que calce con conta.
+  //      ⚠️ Esto NO toca los totales: otros_ingresos sigue = administrativos + otros_cobros
+  //      (ver bloque 5). Solo distribuye la originación en las columnas oi_<producto>.
+  //      La categoría de las genéricas vive en fd.categoria (resuelta por NIT al facturar).
+  const oiNuevo = await db.execute(sql`
+    SELECT fd.categoria AS categoria, SUM(fd.monto_total) AS total
+    FROM cartera.facturacion_desglose fd
+    WHERE fd.fecha_aplicado_gt = ${fecha}::date
+      AND fd.pago_id IS NULL
+      AND fd.rubro::text IN ('INTERES','MEMBRESIA','SEGURO','GPS','OTROS')
+    GROUP BY fd.categoria
+  `);
+  for (const r of (oiNuevo as any).rows ?? []) {
+    add(colProducto("oi", r.categoria as string), r.total);
+  }
+
   // 2) Royalty del día = SOLO lo REALMENTE facturado (rubro ROYALTY del desglose,
   //    ya sumado en el bloque 1). Decisión de diseño: NO se usa creditos.royalti de
   //    respaldo — lo facturado es la fuente correcta (creditos.royalti difería de

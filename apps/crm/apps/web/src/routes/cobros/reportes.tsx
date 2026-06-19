@@ -913,8 +913,6 @@ const colsDescuentos: ColumnDef<DescuentoRow>[] = [
 	{ accessorKey: "garantiaMobiliaria", header: "Garantía mob.", cell: ({ row }) => fmtDesc(row.original.garantiaMobiliaria) },
 	{ accessorKey: "placas", header: "Placas", cell: ({ row }) => fmtDesc(row.original.placas) },
 	{ accessorKey: "contratoLeasing", header: "Cto. leasing", cell: ({ row }) => fmtDesc(row.original.contratoLeasing) },
-	{ accessorKey: "autenticaCobranza", header: "Auténtica", cell: ({ row }) => fmtDesc(row.original.autenticaCobranza) },
-	{ accessorKey: "nombramiento", header: "Nombramiento", cell: ({ row }) => fmtDesc(row.original.nombramiento) },
 	{ accessorKey: "verificacionDireccion", header: "Verif. dirección", cell: ({ row }) => fmtDesc(row.original.verificacionDireccion) },
 	{ accessorKey: "traspasoVehiculo", header: "Traspaso", cell: ({ row }) => fmtDesc(row.original.traspasoVehiculo) },
 	{ accessorKey: "intereses", header: "Intereses", cell: ({ row }) => fmtDesc(row.original.intereses) },
@@ -925,8 +923,6 @@ const colsDescuentos: ColumnDef<DescuentoRow>[] = [
 	{ accessorKey: "gastosAdmin", header: "Gastos admin", cell: ({ row }) => fmtDesc(row.original.gastosAdmin) },
 	{ accessorKey: "freelance", header: "Free Lance", cell: ({ row }) => fmtDesc(row.original.freelance) },
 	{ accessorKey: "royalty", header: "Royalty", cell: ({ row }) => fmtDesc(row.original.royalty) },
-	{ accessorKey: "inspeccion", header: "Inspección", cell: ({ row }) => fmtDesc(row.original.inspeccion) },
-	{ accessorKey: "gastosLegales", header: "Gastos legales", cell: ({ row }) => fmtDesc(row.original.gastosLegales) },
 	{
 		accessorKey: "totalDescuentos",
 		header: "Total",
@@ -938,10 +934,8 @@ const colsDescuentos: ColumnDef<DescuentoRow>[] = [
 
 function TabDescuentos({
 	session,
-	canSeeAll,
 }: {
 	session: ReturnType<typeof authClient.useSession>["data"];
-	canSeeAll: boolean;
 }) {
 	const [search, setSearch] = usePersistedState<string>(
 		"cobros/reportes/desc/search",
@@ -990,14 +984,14 @@ function TabDescuentos({
 				/>
 			</div>
 
-			<div className="w-full overflow-x-auto">
-				<DataTable
-					columns={colsDescuentos}
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					data={(data as any)?.data ?? []}
-					isLoading={isLoading}
-					hideSearch
-					serverPagination={
+			<DataTable
+				columns={colsDescuentos}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				data={(data as any)?.data ?? []}
+				isLoading={isLoading}
+				hideSearch
+				stickyFirstColumn
+				serverPagination={
 						data
 							? // eslint-disable-next-line @typescript-eslint/no-explicit-any
 								{
@@ -1010,7 +1004,6 @@ function TabDescuentos({
 							: undefined
 					}
 				/>
-			</div>
 		</div>
 	);
 }
@@ -1037,7 +1030,7 @@ function RouteComponent() {
 	}
 
 	return (
-		<div className="space-y-6 p-6">
+		<div className="min-w-0 space-y-6 p-6">
 			<div className="flex items-center gap-2">
 				<BarChart3 className="h-6 w-6 text-blue-600" />
 				<h1 className="font-bold text-2xl">Reportes de Cobros</h1>
@@ -1066,7 +1059,7 @@ function RouteComponent() {
 					<TabCuotasPorFecha session={session} canSeeAll={canSeeAll} />
 				</TabsContent>
 				<TabsContent value="descuentos" className="mt-6">
-					<TabDescuentos session={session} canSeeAll={canSeeAll} />
+					<TabDescuentos session={session} />
 				</TabsContent>
 			</Tabs>
 		</div>

@@ -805,84 +805,74 @@ type DescuentoRow = {
 	sifco: string;
 	clienteNombre: string;
 	asesorNombre: string;
+	multas: string;
+	copiaDeLlave: string;
+	diferenciaCopia: string;
+	impuestoCirculacion: string;
+	garantiaMobiliaria: string;
+	placas: string;
+	contratoLeasing: string;
+	autenticaCobranza: string;
+	nombramiento: string;
+	verificacionDireccion: string;
+	traspasoVehiculo: string;
+	intereses: string;
+	rcdp: string;
 	gps: string;
 	seguro: string;
-	membresias: string;
-	otros: string;
-	rubros: { nombre: string; monto: string }[];
-	rubrosTotal: string;
+	membresia: string;
+	gastosAdmin: string;
 	totalDescuentos: string;
-	capital: string;
-	tipoCredito: string | null;
 };
+
+function fmtDesc(v: string) {
+	const n = Number.parseFloat(v);
+	if (!n || n <= 0) return <span className="text-muted-foreground">—</span>;
+	return <span>{fmtQ(n)}</span>;
+}
 
 const colsDescuentos: ColumnDef<DescuentoRow>[] = [
 	{
-		accessorKey: "sifco",
-		header: "Crédito",
+		id: "creditoCliente",
+		header: "Crédito / Cliente",
 		cell: ({ row }) => (
-			<Link
-				to="/cobros/$id"
-				params={{ id: row.original.sifco }}
-				search={{ tipo: "contrato" }}
-				className="font-mono text-blue-600 text-xs hover:underline"
-			>
-				{row.original.sifco}
-			</Link>
+			<div className="flex flex-col gap-0.5">
+				<Link
+					to="/cobros/$id"
+					params={{ id: row.original.sifco }}
+					search={{ tipo: "contrato" }}
+					className="font-mono text-blue-600 text-xs hover:underline"
+				>
+					{row.original.sifco}
+				</Link>
+				<span className="text-muted-foreground text-xs">
+					{row.original.clienteNombre}
+				</span>
+			</div>
 		),
 	},
-	{ accessorKey: "clienteNombre", header: "Cliente" },
-	{ accessorKey: "asesorNombre", header: "Asesor" },
-	{
-		accessorKey: "capital",
-		header: "Capital",
-		cell: ({ row }) => fmtQ(row.original.capital),
-	},
-	{
-		accessorKey: "gps",
-		header: "GPS",
-		cell: ({ row }) => fmtQ(row.original.gps),
-	},
-	{
-		accessorKey: "seguro",
-		header: "Seguro",
-		cell: ({ row }) => fmtQ(row.original.seguro),
-	},
-	{
-		accessorKey: "membresias",
-		header: "Membresías",
-		cell: ({ row }) => fmtQ(row.original.membresias),
-	},
-	{
-		accessorKey: "otros",
-		header: "Otros",
-		cell: ({ row }) => fmtQ(row.original.otros),
-	},
-	{
-		accessorKey: "rubrosTotal",
-		header: "Rubros Extra",
-		cell: ({ row }) => {
-			const monto = fmtQ(row.original.rubrosTotal);
-			if (Number.parseFloat(row.original.rubrosTotal) <= 0)
-				return <span className="text-muted-foreground">—</span>;
-			return (
-				<div
-					title={row.original.rubros
-						.map((r) => `${r.nombre}: ${fmtQ(r.monto)}`)
-						.join("\n")}
-				>
-					{monto}
-				</div>
-			);
-		},
-	},
+	{ accessorKey: "multas", header: "Multas", cell: ({ row }) => fmtDesc(row.original.multas) },
+	{ accessorKey: "copiaDeLlave", header: "Copia llave", cell: ({ row }) => fmtDesc(row.original.copiaDeLlave) },
+	{ accessorKey: "diferenciaCopia", header: "Dif. copia", cell: ({ row }) => fmtDesc(row.original.diferenciaCopia) },
+	{ accessorKey: "impuestoCirculacion", header: "Imp. circulación", cell: ({ row }) => fmtDesc(row.original.impuestoCirculacion) },
+	{ accessorKey: "garantiaMobiliaria", header: "Garantía mob.", cell: ({ row }) => fmtDesc(row.original.garantiaMobiliaria) },
+	{ accessorKey: "placas", header: "Placas", cell: ({ row }) => fmtDesc(row.original.placas) },
+	{ accessorKey: "contratoLeasing", header: "Cto. leasing", cell: ({ row }) => fmtDesc(row.original.contratoLeasing) },
+	{ accessorKey: "autenticaCobranza", header: "Auténtica", cell: ({ row }) => fmtDesc(row.original.autenticaCobranza) },
+	{ accessorKey: "nombramiento", header: "Nombramiento", cell: ({ row }) => fmtDesc(row.original.nombramiento) },
+	{ accessorKey: "verificacionDireccion", header: "Verif. dirección", cell: ({ row }) => fmtDesc(row.original.verificacionDireccion) },
+	{ accessorKey: "traspasoVehiculo", header: "Traspaso", cell: ({ row }) => fmtDesc(row.original.traspasoVehiculo) },
+	{ accessorKey: "intereses", header: "Intereses", cell: ({ row }) => fmtDesc(row.original.intereses) },
+	{ accessorKey: "rcdp", header: "RCDP", cell: ({ row }) => fmtDesc(row.original.rcdp) },
+	{ accessorKey: "gps", header: "GPS", cell: ({ row }) => fmtDesc(row.original.gps) },
+	{ accessorKey: "seguro", header: "Seguro", cell: ({ row }) => fmtDesc(row.original.seguro) },
+	{ accessorKey: "membresia", header: "Membresía", cell: ({ row }) => fmtDesc(row.original.membresia) },
+	{ accessorKey: "gastosAdmin", header: "Gastos admin", cell: ({ row }) => fmtDesc(row.original.gastosAdmin) },
 	{
 		accessorKey: "totalDescuentos",
-		header: "Total Descuentos",
+		header: "Total",
 		cell: ({ row }) => (
-			<span className="font-semibold">
-				{fmtQ(row.original.totalDescuentos)}
-			</span>
+			<span className="font-semibold">{fmtQ(row.original.totalDescuentos)}</span>
 		),
 	},
 ];
@@ -894,10 +884,11 @@ function TabDescuentos({
 	session: ReturnType<typeof authClient.useSession>["data"];
 	canSeeAll: boolean;
 }) {
-	const [emailAsesor, setEmailAsesor] = usePersistedState<string>(
-		"cobros/reportes/desc/emailAsesor",
+	const [search, setSearch] = usePersistedState<string>(
+		"cobros/reportes/desc/search",
 		"",
 	);
+	const [debouncedSearch, setDebouncedSearch] = useState(search);
 	const [page, setPage] = usePersistedState<number>(
 		"cobros/reportes/desc/page",
 		1,
@@ -907,18 +898,9 @@ function TabDescuentos({
 		25,
 	);
 
-	const emailCobrador = canSeeAll
-		? emailAsesor || undefined
-		: (session?.user?.email ?? undefined);
-
-	const { data: asesoresData } = useQuery({
-		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
-		enabled: !!session && canSeeAll,
-	});
-
 	const { data, isLoading } = useQuery({
 		...orpc.getDescuentosCRM.queryOptions({
-			input: { page, pageSize, emailCobrador },
+			input: { page, pageSize, search: debouncedSearch || undefined },
 		}),
 		enabled: !!session,
 		staleTime: 5 * 60 * 1000,
@@ -931,51 +913,45 @@ function TabDescuentos({
 				<h2 className="font-semibold text-xl">Descuentos por Crédito</h2>
 			</div>
 
-			{canSeeAll && (
-				<div className="flex flex-col gap-1">
-					<Label className="text-xs">Asesor</Label>
-					<Select
-						value={emailAsesor}
-						onValueChange={(v) => {
-							setEmailAsesor(v === "todos" ? "" : v);
-							setPage(1);
-						}}
-					>
-						<SelectTrigger className="w-52">
-							<SelectValue placeholder="Todos los asesores" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="todos">Todos</SelectItem>
-							{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-							{(asesoresData as any)?.asesores?.map((a: any) => (
-								<SelectItem key={a.asesorId} value={a.email}>
-									{a.nombre}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				</div>
-			)}
+			<div className="flex flex-col gap-1">
+				<Label className="text-xs">Buscar por crédito o cliente</Label>
+				<Input
+					className="max-w-sm"
+					placeholder="CRM-... o nombre del cliente"
+					value={search}
+					onChange={(e) => {
+						setSearch(e.target.value);
+						setPage(1);
+						clearTimeout((window as any)._descSearch);
+						(window as any)._descSearch = setTimeout(
+							() => setDebouncedSearch(e.target.value),
+							400,
+						);
+					}}
+				/>
+			</div>
 
-			<DataTable
-				columns={colsDescuentos}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				data={(data as any)?.data ?? []}
-				isLoading={isLoading}
-				hideSearch
-				serverPagination={
-					data
-						? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-							{
-								page: (data as any).page,
-								pageSize: (data as any).pageSize,
-								totalPages: (data as any).totalPages,
-								totalItems: (data as any).total,
-								onPageChange: setPage,
-							}
-						: undefined
-				}
-			/>
+			<div className="w-full overflow-x-auto">
+				<DataTable
+					columns={colsDescuentos}
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					data={(data as any)?.data ?? []}
+					isLoading={isLoading}
+					hideSearch
+					serverPagination={
+						data
+							? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+								{
+									page: (data as any).page,
+									pageSize: (data as any).pageSize,
+									totalPages: (data as any).totalPages,
+									totalItems: (data as any).total,
+									onPageChange: setPage,
+								}
+							: undefined
+					}
+				/>
+			</div>
 		</div>
 	);
 }

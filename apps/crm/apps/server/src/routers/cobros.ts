@@ -4079,12 +4079,31 @@ export const cobrosRouter = {
 				if (searchCond) conditions.push(searchCond);
 			}
 
-			const rows = await db
+			const totalSql = sql<number>`(
+				COALESCE(${latestQuotations.finesCost}::numeric, 0) +
+				COALESCE(${latestQuotations.keyCopyCost}::numeric, 0) +
+				COALESCE(${latestQuotations.keyCopyDiffCost}::numeric, 0) +
+				COALESCE(${latestQuotations.circulationTaxCost}::numeric, 0) +
+				COALESCE(${latestQuotations.mobileGuaranteeCost}::numeric, 0) +
+				COALESCE(${latestQuotations.licensePlatesCost}::numeric, 0) +
+				COALESCE(${latestQuotations.leasingContractCost}::numeric, 0) +
+				COALESCE(${latestQuotations.collectionAuthCost}::numeric, 0) +
+				COALESCE(${latestQuotations.appointmentCost}::numeric, 0) +
+				COALESCE(${latestQuotations.addressVerificationCost}::numeric, 0) +
+				COALESCE(${latestQuotations.vehicleTransferCost}::numeric, 0) +
+				COALESCE(${latestQuotations.interestCost}::numeric, 0) +
+				COALESCE(${latestQuotations.rcdpCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraGpsCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraInsuranceCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraMembershipCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraAdminCost}::numeric, 0)
+			)`;
+
+			const baseQuery = db
 				.select({
 					sifco: opportunities.numeroSifco,
 					leadFirstName: leads.firstName,
 					leadLastName: leads.lastName,
-					asesorNombre: asesorUser.name,
 					finesCost: latestQuotations.finesCost,
 					keyCopyCost: latestQuotations.keyCopyCost,
 					keyCopyDiffCost: latestQuotations.keyCopyDiffCost,
@@ -4102,6 +4121,7 @@ export const cobrosRouter = {
 					extraInsuranceCost: latestQuotations.extraInsuranceCost,
 					extraMembershipCost: latestQuotations.extraMembershipCost,
 					extraAdminCost: latestQuotations.extraAdminCost,
+					totalDescuentos: totalSql,
 				})
 				.from(latestQuotations)
 				.innerJoin(
@@ -4110,74 +4130,57 @@ export const cobrosRouter = {
 				)
 				.innerJoin(asesorUser, eq(opportunities.assignedTo, asesorUser.id))
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
-				.where(and(...conditions));
+				.where(and(...conditions, sql`${totalSql} > 0`));
 
-			const n = (v: string | null | undefined) =>
-				Number.parseFloat(v || "0") || 0;
-			const fmt = (v: number) => v.toFixed(2);
+			const [[{ total }], rows] = await Promise.all([
+				db
+					.select({ total: count() })
+					.from(latestQuotations)
+					.innerJoin(
+						opportunities,
+						eq(latestQuotations.opportunityId, opportunities.id),
+					)
+					.innerJoin(asesorUser, eq(opportunities.assignedTo, asesorUser.id))
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(and(...conditions, sql`${totalSql} > 0`)),
+				baseQuery
+					.orderBy(desc(opportunities.createdAt))
+					.limit(input.pageSize)
+					.offset((input.page - 1) * input.pageSize),
+			]);
 
-			const todos = rows
-				.map((row) => {
-					const multas = n(row.finesCost);
-					const copiaDeLlave = n(row.keyCopyCost);
-					const diferenciaCopia = n(row.keyCopyDiffCost);
-					const impuestoCirculacion = n(row.circulationTaxCost);
-					const garantiaMobiliaria = n(row.mobileGuaranteeCost);
-					const placas = n(row.licensePlatesCost);
-					const contratoLeasing = n(row.leasingContractCost);
-					const autenticaCobranza = n(row.collectionAuthCost);
-					const nombramiento = n(row.appointmentCost);
-					const verificacionDireccion = n(row.addressVerificationCost);
-					const traspasoVehiculo = n(row.vehicleTransferCost);
-					const intereses = n(row.interestCost);
-					const rcdp = n(row.rcdpCost);
-					const gps = n(row.extraGpsCost);
-					const seguro = n(row.extraInsuranceCost);
-					const membresia = n(row.extraMembershipCost);
-					const gastosAdmin = n(row.extraAdminCost);
+			const fmt = (v: string | null | undefined) =>
+				Number.parseFloat(v || "0").toFixed(2);
 
-					const totalDescuentos =
-						multas + copiaDeLlave + diferenciaCopia + impuestoCirculacion +
-						garantiaMobiliaria + placas + contratoLeasing + autenticaCobranza +
-						nombramiento + verificacionDireccion + traspasoVehiculo +
-						intereses + rcdp + gps + seguro + membresia + gastosAdmin;
+			const pageData = rows.map((row) => {
+				const clienteNombre =
+					[row.leadFirstName, row.leadLastName].filter(Boolean).join(" ") ||
+					"Sin cliente";
+				return {
+					sifco: row.sifco ?? "",
+					clienteNombre,
+					multas: fmt(row.finesCost),
+					copiaDeLlave: fmt(row.keyCopyCost),
+					diferenciaCopia: fmt(row.keyCopyDiffCost),
+					impuestoCirculacion: fmt(row.circulationTaxCost),
+					garantiaMobiliaria: fmt(row.mobileGuaranteeCost),
+					placas: fmt(row.licensePlatesCost),
+					contratoLeasing: fmt(row.leasingContractCost),
+					autenticaCobranza: fmt(row.collectionAuthCost),
+					nombramiento: fmt(row.appointmentCost),
+					verificacionDireccion: fmt(row.addressVerificationCost),
+					traspasoVehiculo: fmt(row.vehicleTransferCost),
+					intereses: fmt(row.interestCost),
+					rcdp: fmt(row.rcdpCost),
+					gps: fmt(row.extraGpsCost),
+					seguro: fmt(row.extraInsuranceCost),
+					membresia: fmt(row.extraMembershipCost),
+					gastosAdmin: fmt(row.extraAdminCost),
+					totalDescuentos: Number(row.totalDescuentos).toFixed(2),
+				};
+			});
 
-					if (totalDescuentos <= 0) return null;
-
-					const clienteNombre =
-						[row.leadFirstName, row.leadLastName].filter(Boolean).join(" ") ||
-						"Sin cliente";
-
-					return {
-						sifco: row.sifco ?? "",
-						clienteNombre,
-						asesorNombre: row.asesorNombre ?? "Sin asesor",
-						multas: fmt(multas),
-						copiaDeLlave: fmt(copiaDeLlave),
-						diferenciaCopia: fmt(diferenciaCopia),
-						impuestoCirculacion: fmt(impuestoCirculacion),
-						garantiaMobiliaria: fmt(garantiaMobiliaria),
-						placas: fmt(placas),
-						contratoLeasing: fmt(contratoLeasing),
-						autenticaCobranza: fmt(autenticaCobranza),
-						nombramiento: fmt(nombramiento),
-						verificacionDireccion: fmt(verificacionDireccion),
-						traspasoVehiculo: fmt(traspasoVehiculo),
-						intereses: fmt(intereses),
-						rcdp: fmt(rcdp),
-						gps: fmt(gps),
-						seguro: fmt(seguro),
-						membresia: fmt(membresia),
-						gastosAdmin: fmt(gastosAdmin),
-						totalDescuentos: fmt(totalDescuentos),
-					};
-				})
-				.filter((v): v is NonNullable<typeof v> => v !== null);
-
-			const total = todos.length;
 			const totalPages = Math.max(1, Math.ceil(total / input.pageSize));
-			const start = (input.page - 1) * input.pageSize;
-			const pageData = todos.slice(start, start + input.pageSize);
 
 			return {
 				data: pageData,

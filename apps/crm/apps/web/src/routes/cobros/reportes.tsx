@@ -365,6 +365,26 @@ function rangeForPreset(p: QuickPeriod): { start: string; end: string } {
 	return monthRangeGT();
 }
 
+// Modo inicial para sesiones previas a `modoFecha`: si las fechas guardadas
+// coinciden con un preset, se restaura ese preset; si son un rango propio, se
+// abre en "personalizado" para no perder el filtro del usuario.
+function inferModoFechaInicial(): FechaMode {
+	try {
+		const fiRaw = sessionStorage.getItem("cobros/reportes/cuotas/fechaInicio");
+		const ffRaw = sessionStorage.getItem("cobros/reportes/cuotas/fechaFin");
+		if (!fiRaw || !ffRaw) return "hoy";
+		const fi = JSON.parse(fiRaw) as string;
+		const ff = JSON.parse(ffRaw) as string;
+		for (const p of Object.keys(QUICK_LABELS) as QuickPeriod[]) {
+			const r = rangeForPreset(p);
+			if (fi === r.start && ff === r.end) return p;
+		}
+		return "personalizado";
+	} catch {
+		return "hoy";
+	}
+}
+
 type CuotaFila = {
 	cuota_id: number;
 	fecha_vencimiento: string;
@@ -540,7 +560,7 @@ function TabCuotasPorFecha({
 	// "personalizado" se usan (y editan) las fechas guardadas.
 	const [modoFecha, setModoFecha] = usePersistedState<FechaMode>(
 		"cobros/reportes/cuotas/modoFecha",
-		"hoy",
+		inferModoFechaInicial(),
 	);
 	const [fechaInicioCustom, setFechaInicioCustom] = usePersistedState<string>(
 		"cobros/reportes/cuotas/fechaInicio",

@@ -2132,7 +2132,7 @@ function RouteComponent() {
 															</TableRow>
 
 															<TableRow>
-																<TableCell>CUBE</TableCell>
+																<TableCell>Residuo CUBE</TableCell>
 																<TableCell className="text-right">{dash(cube.interes)}</TableCell>
 																<TableCell className="text-right">{dash(cube.iva)}</TableCell>
 																<TableCell className="text-right text-muted-foreground">—</TableCell>

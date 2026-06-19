@@ -366,10 +366,26 @@ export async function generarSnapshotDiario(fecha: string) {
   //    contabilidad) y el respaldo causaba doble conteo. Crédito sin royalty
   //    facturado genérico → no suma royalty (0).
 
-  // 3) Gastos administrativos del día
+  // 3) "Administrativos" = ORIGINACIÓN de créditos nuevos (cuota 0). MODELO CONTA.
+  //    GREATEST entre DOS fuentes (cada una puede tener ítems que la otra no):
+  //      (a) GENÉRICAS del desglose (pago_id NULL: int/mem/seg/gps/otros) = la facturación
+  //          REAL de los DTE, que NO se atrasa e incluye las genéricas MANUALES de
+  //          /facturar-generico (que no escriben gastos_administrativos);
+  //      (b) gastos_administrativos = preserva ajustes admin MANUALES del UI (ItemsManuales)
+  //          que no llevan DTE.
+  //    GREATEST cubre el lag del CRM (p.ej. 06-18: desglose 35,637 vs gastos 8,231 → 35,637,
+  //    no se cae facturación) y a la vez NO bota los ítems manuales (cuando gastos > desglose).
+  //    No se usa solo gastos_administrativos (se atrasaba → regresión) ni solo el desglose
+  //    (botaba el admin manual → P2 Codex). Caso raro no cubierto: ambos caminos manuales el
+  //    mismo día (sub-cuenta leve; no se ha visto en la data).
   const adm = await db.execute(sql`
-    SELECT COALESCE(SUM(monto), 0) AS total
-    FROM cartera.gastos_administrativos WHERE fecha = ${fecha}::date
+    SELECT GREATEST(
+      COALESCE((SELECT SUM(monto_total) FROM cartera.facturacion_desglose
+                WHERE fecha_aplicado_gt = ${fecha}::date AND pago_id IS NULL
+                  AND rubro::text IN ('INTERES','MEMBRESIA','SEGURO','GPS','OTROS')), 0),
+      COALESCE((SELECT SUM(monto) FROM cartera.gastos_administrativos
+                WHERE fecha = ${fecha}::date), 0)
+    ) AS total
   `);
   const administrativos = new Big((adm as any).rows?.[0]?.total || 0);
 

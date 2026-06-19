@@ -297,10 +297,10 @@ export async function getMontoACobrarPeriodo({
       FROM calc_acum
       GROUP BY DATE_TRUNC(${pg}, bucket::timestamp), credito_id
     ),
-    -- Interés facturado a inversionistas: rubro INTERES_INVERSIONISTAS del desglose
-    -- (con IVA incluido), agrupado por fecha en que se aplicó (fecha_aplicado_gt).
-    -- Es facturado REAL —otra fuente que el esperado de las cuotas— por eso se muestra
-    -- aparte y NO se suma al Total de la fila.
+    -- Interés facturado a inversionistas: rubro INTERES_INVERSIONISTAS del desglose,
+    -- NETO (monto_total - monto_iva), agrupado por la fecha en que se aplicó
+    -- (fecha_aplicado_gt). Es facturado REAL —otra fuente que el esperado de las
+    -- cuotas— por eso se muestra aparte y NO se suma al Total de la fila.
     inv_por_bucket AS (
       SELECT
         DATE_TRUNC(${pg}, fd.fecha_aplicado_gt::timestamp)        AS inv_bucket,
@@ -313,7 +313,7 @@ export async function getMontoACobrarPeriodo({
       GROUP BY DATE_TRUNC(${pg}, fd.fecha_aplicado_gt::timestamp)
     )
     SELECT
-      bucket,
+      COALESCE(per_bucket_credit.bucket, ib.inv_bucket) AS bucket,
       COALESCE(SUM(cuotas_count), 0)::int                                                        AS cuotas_count,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END), 0)               AS total_cuota,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN interes     ELSE 0 END), 0)               AS total_interes,
@@ -353,11 +353,14 @@ export async function getMontoACobrarPeriodo({
       -- en ese bucket. Acumulado: suma corrida hasta el bucket (el último bucket = gran
       -- total, igual que como la fila Total lee el acumulado de los demás rubros).
       COALESCE(MAX(ib.total_interes_inversionista), 0)                                            AS total_interes_inversionista,
-      COALESCE(SUM(COALESCE(MAX(ib.total_interes_inversionista), 0)) OVER (ORDER BY bucket), 0)   AS acum_total_interes_inversionista
+      COALESCE(SUM(COALESCE(MAX(ib.total_interes_inversionista), 0)) OVER (ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket)), 0)   AS acum_total_interes_inversionista
+    -- FULL JOIN: el resultado se arma desde la unión de buckets de ambas fuentes, para
+    -- que un período con facturación a inversionistas pero SIN cuotas pendientes
+    -- (posible en vista día/semana) no se pierda al subestimar la columna.
     FROM per_bucket_credit
-    LEFT JOIN inv_por_bucket ib ON ib.inv_bucket = bucket
-    GROUP BY bucket
-    ORDER BY bucket ASC
+    FULL JOIN inv_por_bucket ib ON ib.inv_bucket = per_bucket_credit.bucket
+    GROUP BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket)
+    ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket) ASC
   `);
 
   return result.rows;

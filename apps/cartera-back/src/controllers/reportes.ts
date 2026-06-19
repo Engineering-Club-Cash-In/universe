@@ -996,6 +996,8 @@ export async function getReinversionLiquidaciones({
       },
       cube: {
         interes: interesCube.toFixed(2),
+        iva: (interesCube * 0.12).toFixed(2),
+        neto: (interesCube * 1.12).toFixed(2),
       },
     },
     pagosExtras: {

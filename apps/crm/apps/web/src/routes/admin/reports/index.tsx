@@ -2051,9 +2051,10 @@ function RouteComponent() {
 											const cube = reinversionData.interesNeto.cube;
 											const totalInteres =
 												Number(cf.interes) + Number(sf.interes) + Number(cube.interes);
-											const totalIva = Number(cf.iva);
+											const totalIva = Number(cf.iva) + Number(cube.iva);
 											const totalIsr = Number(sf.isr);
-											const totalNeto = Number(cf.neto) + Number(sf.neto);
+											const totalNeto =
+												Number(cf.neto) + Number(sf.neto) + Number(cube.neto);
 											return (
 												<div className={SECCION_REPORTE_CLASS}>
 													<p className="mb-2 font-semibold text-sm">
@@ -2112,9 +2113,9 @@ function RouteComponent() {
 															<TableRow>
 																<TableCell>CUBE</TableCell>
 																<TableCell className="text-right">{dash(cube.interes)}</TableCell>
+																<TableCell className="text-right">{dash(cube.iva)}</TableCell>
 																<TableCell className="text-right text-muted-foreground">—</TableCell>
-																<TableCell className="text-right text-muted-foreground">—</TableCell>
-																<TableCell className="text-right text-muted-foreground">—</TableCell>
+																<TableCell className="text-right font-semibold">{dash(cube.neto)}</TableCell>
 															</TableRow>
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total</TableCell>

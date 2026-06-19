@@ -1,0 +1,19 @@
+meta {
+  name: 04 Listar tokens de cliente
+  type: http
+  seq: 5
+}
+
+get {
+  url: https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/token-users
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer dev-secret
+}
+
+settings {
+  encodeUrl: true
+}

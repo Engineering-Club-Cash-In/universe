@@ -45,7 +45,7 @@ describe("admin router", () => {
           errorUsers: [{ identifier: 100_000_002, reason: "CUI no es válido." }],
         }),
         getPaymentTokenStatement: async () => ({ transactions: [] }),
-        reviewTransfer: async (payload: { reference: string | number; status: "APPROVED" | "REJECTED" }) => ({ reference: payload.reference, status: payload.status }),
+        reviewTransfer: async (payload: { reference: number; status: "APPROVED" | "REJECTED" }) => ({ reference: payload.reference, status: payload.status }),
       } as never,
       cartera: {} as never,
       paymentTokens: {

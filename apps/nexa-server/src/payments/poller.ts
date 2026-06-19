@@ -4,7 +4,7 @@ import type { PaymentTransactionRepository, TokenUserRepository } from "./reposi
 
 interface NexaPaymentClient {
   getPaymentTokenStatement(date: string): Promise<{ transactions: TokenTransaction[] }>;
-  reviewTransfer(payload: { id: string; reference: string | number; status: ReviewTransferStatus }): Promise<unknown>;
+  reviewTransfer(payload: { id: number; reference: number; status: ReviewTransferStatus }): Promise<unknown>;
 }
 
 export async function pollPaymentTokenDate(options: {
@@ -36,7 +36,7 @@ export async function pollPaymentTokenDate(options: {
 
     if (!tokenUser) {
       await options.transactions.markRejected(stored.id, "Token no asociado a credito");
-      await options.nexa.reviewTransfer({ id: reference, reference, status: "REJECTED" });
+      await safeReviewTransfer(options.nexa, transaction, "REJECTED");
       result.rejected++;
       continue;
     }
@@ -45,11 +45,11 @@ export async function pollPaymentTokenDate(options: {
       const carteraResult = await options.cartera.applyNexaPayment({ creditoId: tokenUser.creditoId, transaction });
       if (carteraResult.status === "APPLIED") {
         await options.transactions.markApplied(stored.id, carteraResult.paymentId);
-        await options.nexa.reviewTransfer({ id: reference, reference, status: "APPROVED" });
+        await safeReviewTransfer(options.nexa, transaction, "APPROVED");
         result.applied++;
       } else {
         await options.transactions.markRejected(stored.id, carteraResult.reason);
-        await options.nexa.reviewTransfer({ id: reference, reference, status: "REJECTED" });
+        await safeReviewTransfer(options.nexa, transaction, "REJECTED");
         result.rejected++;
       }
     } catch (error) {
@@ -59,4 +59,40 @@ export async function pollPaymentTokenDate(options: {
   }
 
   return result;
+}
+
+async function safeReviewTransfer(
+  nexa: Pick<NexaPaymentClient, "reviewTransfer">,
+  transaction: TokenTransaction,
+  status: ReviewTransferStatus,
+) {
+  const reviewId = toOptionalNexaReviewNumber(transaction.transactionId);
+  if (reviewId === null) return;
+
+  try {
+    await nexa.reviewTransfer({
+      id: reviewId,
+      reference: toNexaReviewNumber(transaction.reference),
+      status,
+    });
+  } catch (error) {
+    // Statement polling can apply local payments even when Nexa has no reviewable transfer id.
+  }
+}
+
+function toOptionalNexaReviewNumber(value: string | number) {
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+
+  const numberValue = Number(trimmed);
+  if (!Number.isFinite(numberValue)) return null;
+  return numberValue;
+}
+
+function toNexaReviewNumber(value: string | number) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) {
+    throw new Error(`Nexa review reference must be numeric: ${value}`);
+  }
+  return numberValue;
 }

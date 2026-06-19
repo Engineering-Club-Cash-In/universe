@@ -37,9 +37,9 @@ describe("NexaClient", () => {
       },
     });
 
-    const response = await client.reviewTransfer({ id: "99", reference: 1234, status: "APPROVED" });
+    const response = await client.reviewTransfer({ id: 99, reference: 1234, status: "APPROVED" });
 
-    expect(body).toEqual({ id: "99", reference: 1234, status: "APPROVED" });
+    expect(body).toEqual({ id: 99, reference: 1234, status: "APPROVED" });
     expect(response.status).toBe("APPROVED");
   });
 });

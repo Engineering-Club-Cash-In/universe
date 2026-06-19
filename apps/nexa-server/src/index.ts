@@ -4,6 +4,7 @@ import { createApp } from "./app";
 import { loadConfig } from "./config";
 import { createDependencies } from "./dependencies";
 import { startPaymentPolling } from "./jobs/scheduler";
+import { appVersion } from "./version";
 
 const config = loadConfig();
 const deps = createDependencies(config);
@@ -21,4 +22,4 @@ startPaymentPolling({
 
 serve({ port: config.port, fetch: app.fetch });
 
-console.log(`Nexa server listening on :${config.port}`);
+console.log(`Nexa server listening on :${config.port} (${appVersion})`);

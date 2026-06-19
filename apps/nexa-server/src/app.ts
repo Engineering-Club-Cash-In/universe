@@ -3,12 +3,13 @@ import type { AppConfig } from "./config";
 import { createDependencies, type AppDependencies } from "./dependencies";
 import { createAdminRouter } from "./routes/admin";
 import { renderTestConsole } from "./ui/test-console";
+import { appVersion } from "./version";
 import { createPaymentTokenWebhookRouter } from "./webhooks/payment-token";
 
 export function createApp(config: AppConfig, deps: AppDependencies = createDependencies(config)) {
   const app = new Hono();
 
-  app.get("/health", (c) => c.json({ ok: true }));
+  app.get("/health", (c) => c.json({ ok: true, version: appVersion }));
   app.get("/ui", (c) => c.html(renderTestConsole()));
   app.route("/", createPaymentTokenWebhookRouter({
     flowId: config.nexaWebhookFlowId,

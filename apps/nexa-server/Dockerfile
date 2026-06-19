@@ -1,21 +1,21 @@
-FROM oven/bun:1.3.10-alpine AS base
-WORKDIR /app
+FROM oven/bun:1.3.12-alpine AS base
+WORKDIR /app/apps/nexa-server
 
 FROM base AS deps
-COPY package.json pnpm-lock.yaml bun.lock ./
-COPY apps/nexa-server/package.json apps/nexa-server/package.json
-RUN bun install --frozen-lockfile
+COPY apps/nexa-server/package.json ./
+RUN bun install
+
+FROM base AS prod-deps
+COPY apps/nexa-server/package.json ./
+RUN bun install --production
 
 FROM deps AS build
-COPY apps/nexa-server apps/nexa-server
-WORKDIR /app/apps/nexa-server
-RUN bun run check-types
+COPY apps/nexa-server ./
+RUN ./node_modules/.bin/tsc --noEmit
 
 FROM base AS runner
 ENV NODE_ENV=production
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/apps/nexa-server ./apps/nexa-server
-WORKDIR /app/apps/nexa-server
+COPY --from=prod-deps /app/apps/nexa-server/node_modules ./node_modules
+COPY --from=build /app/apps/nexa-server ./
 EXPOSE 7010
 CMD ["bun", "run", "src/index.ts"]

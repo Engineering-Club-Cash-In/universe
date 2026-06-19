@@ -7,18 +7,21 @@ import {
 } from "./schemas";
 
 type Fetch = (request: Request) => Promise<Response>;
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 export class NexaClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly bearerToken: string;
   private readonly fetch: Fetch;
+  private readonly timeoutMs: number;
 
-  constructor(options: { baseUrl: string; apiKey: string; bearerToken: string; fetch?: Fetch }) {
+  constructor(options: { baseUrl: string; apiKey: string; bearerToken: string; fetch?: Fetch; timeoutMs?: number }) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.apiKey = options.apiKey;
     this.bearerToken = options.bearerToken;
     this.fetch = options.fetch ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   async createPaymentToken(payload: { account: number | string; name: string }) {
@@ -57,7 +60,7 @@ export class NexaClient {
     return paymentTokenStatementResponseSchema.parse(await response.json());
   }
 
-  async reviewTransfer(payload: { id: string; reference: string | number; status: ReviewTransferStatus }) {
+  async reviewTransfer(payload: { id: number; reference: number; status: ReviewTransferStatus }) {
     const response = await this.request("/api/v1/open-api-nexa/payment-token/transfers/review", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -69,6 +72,7 @@ export class NexaClient {
   private async request(path: string, init: RequestInit) {
     const request = new Request(`${this.baseUrl}${path}`, {
       ...init,
+      signal: init.signal ?? AbortSignal.timeout(this.timeoutMs),
       headers: {
         "Content-Type": "application/json",
         apikey: this.apiKey,

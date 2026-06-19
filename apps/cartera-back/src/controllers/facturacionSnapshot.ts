@@ -261,16 +261,19 @@ export async function generarSnapshotDiario(fecha: string) {
             ('validated','pending','reset','capital','capital_validated')
         )
       )
-      -- Las GENÉRICAS de ORIGINACIÓN (alta de crédito nuevo) SÍ alimentan sus rubros:
-      -- la cuota 0 de INTERÉS y MEMBRESÍA del vehículo nuevo DEBE SUMAR (decisión del
-      -- negocio), igual que otros/royalty/seguro. Solo se excluyen del desglose:
-      --   • CAPITAL → se calcula del pci (bloque 1.5), no del desglose.
-      --   • MORA → un crédito nuevo no genera mora genérica.
-      -- ⚠️ Con esto interés/membresía dejan de cuadrar con el Excel (que manda la
-      --    cuota 0 a administrativos) — decisión explícita: en el sistema la cuota 0 suma.
-      AND NOT (
-        fd.pago_id IS NULL
-        AND fd.rubro::text IN ('CAPITAL','MORA')
+      -- MODELO CONTA (2026-06-19): la CUOTA 0 (originación de crédito nuevo) NO va a
+      -- sus rubros — va a ADMINISTRATIVOS. El CRM ya la guarda en gastos_administrativos
+      -- (los MISMOS cargos: "Cuota 0"=interés+membresía, "Seguro y Gastos Adm."=seguro,
+      -- "Contrato/Traspaso/Garantía"=otros), así que sumarla también en el desglose la
+      -- DUPLICABA (rubro + administrativos). Por eso las GENÉRICAS (pago_id NULL) se
+      -- EXCLUYEN de interés/membresía/otros/seguro/gps → esos rubros = SOLO PAGOS, igual
+      -- que el Excel "Reuniones diarias" (Otros ingresos = Administrativos + Otros cobros).
+      -- También se excluyen CAPITAL (sale del pci, bloque 1.5) y MORA (un crédito nuevo
+      -- no genera mora). ÚNICA genérica que SÍ suma en su rubro: ROYALTY (conta lo deja
+      -- aparte de administrativos — "todo menos royalti").
+      AND (
+        fd.pago_id IS NOT NULL
+        OR fd.rubro::text = 'ROYALTY'
       )
     GROUP BY COALESCE(u.categoria, fd.categoria), fd.rubro
   `);
@@ -369,14 +372,20 @@ export async function generarSnapshotDiario(fecha: string) {
   `);
   const factInv = new Big((inv as any).rows?.[0]?.total || 0);
 
-  // 5) Totales derivados del día
-  const interes_cube = g("interes_cube");
-  const membresia = g("membresia");
-  const otros_ingresos = g("otros_ingresos");
+  // 5) Totales derivados del día (MODELO CONTA, 2026-06-19)
+  //    interés/membresía/otros/servicios = SOLO PAGOS (las genéricas/cuota 0 se
+  //    excluyeron en el bloque 1 y viven en administrativos). Otros ingresos =
+  //    Administrativos (originación de créditos nuevos) + Otros cobros (otros de pagos),
+  //    igual que el Excel: "Otros ingresos = Administrativos + Otros cobros". La cuota 0
+  //    entra a facturación UNA sola vez, vía administrativos dentro de otros_ingresos.
+  const interes_cube = g("interes_cube"); // solo pagos
+  const membresia = g("membresia"); // solo pagos
+  const otros_pagos = g("otros_ingresos"); // OTROS de pagos (genéricas ya excluidas)
   const mora_cube = g("mora_cube");
   const royalty = g("royalty");
-  const servicios = g("servicios_seguro_gps");
-  const otros_cobros = otros_ingresos.minus(administrativos);
+  const servicios = g("servicios_seguro_gps"); // solo pagos
+  const otros_ingresos = administrativos.plus(otros_pagos);
+  const otros_cobros = otros_pagos; // = otros_ingresos − administrativos
   const facturacion = royalty
     .plus(mora_cube)
     .plus(otros_ingresos)

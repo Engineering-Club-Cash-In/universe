@@ -47,6 +47,8 @@ interface DataTableProps<TData, TValue> {
 	hideSearch?: boolean;
 	pageSizeOptions?: number[];
 	tableContainerClass?: string;
+	stickyFirstColumn?: boolean;
+	stickyHeader?: boolean;
 }
 
 export function DataTable<TData, TValue>({
@@ -63,6 +65,8 @@ export function DataTable<TData, TValue>({
 	hideSearch,
 	pageSizeOptions = [10, 20, 30, 40, 50],
 	tableContainerClass,
+	stickyFirstColumn,
+	stickyHeader,
 }: DataTableProps<TData, TValue>) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -107,7 +111,7 @@ export function DataTable<TData, TValue>({
 	});
 
 	return (
-		<div className="space-y-4">
+		<div className="w-full min-w-0 space-y-4">
 			{(!hideSearch || filterContent || extraSearch) && (
 				<div className="flex flex-col gap-4">
 					{(!hideSearch || extraSearch) && (
@@ -134,14 +138,17 @@ export function DataTable<TData, TValue>({
 				</div>
 			)}
 
-			<div className={`overflow-hidden rounded-md border${tableContainerClass ? ` ${tableContainerClass}` : ""}`}>
+			<div className={`w-full overflow-x-auto rounded-md border${tableContainerClass ? ` ${tableContainerClass}` : ""}`}>
 				<Table>
 					<TableHeader>
 						{table.getHeaderGroups().map((headerGroup) => (
 							<TableRow key={headerGroup.id}>
-								{headerGroup.headers.map((header) => {
+								{headerGroup.headers.map((header, idx) => {
 									return (
-										<TableHead key={header.id}>
+										<TableHead
+											key={header.id}
+											className={stickyFirstColumn && idx === 0 ? "sticky left-0 z-20 bg-background shadow-[1px_0_0_0_hsl(var(--border))]" : ""}
+										>
 											{header.isPlaceholder
 												? null
 												: flexRender(
@@ -179,8 +186,11 @@ export function DataTable<TData, TValue>({
 									}
 									onClick={() => onRowClick?.(row.original)}
 								>
-									{row.getVisibleCells().map((cell) => (
-										<TableCell key={cell.id}>
+									{row.getVisibleCells().map((cell, idx) => (
+										<TableCell
+											key={cell.id}
+											className={stickyFirstColumn && idx === 0 ? "sticky left-0 z-10 bg-background shadow-[1px_0_0_0_hsl(var(--border))]" : ""}
+										>
 											{flexRender(
 												cell.column.columnDef.cell,
 												cell.getContext(),

@@ -9,6 +9,7 @@ import {
   getSnapshotsDiarios,
   guardarCeldasSnapshot,
   listarAuditoriaSnapshot,
+  listarDetalleSnapshot,
   regenerarSnapshotRango,
 } from "../controllers/facturacionSnapshot";
 
@@ -212,6 +213,29 @@ export const facturacionSnapshotRouter = new Elysia({
         fechaInicio: t.Optional(t.String()),
         fechaFin: t.Optional(t.String()),
         limit: t.Optional(t.String()),
+      }),
+    }
+  )
+
+  // GET - Detalle por origen (crédito nuevo vs pago) de un día (para el modal).
+  //       ?fecha=YYYY-MM-DD&rubro=INTERES (rubro opcional)
+  .get(
+    "/detalle",
+    async ({ query, set }: any) => {
+      try {
+        return await listarDetalleSnapshot({
+          fecha: query.fecha,
+          rubro: query.rubro,
+        });
+      } catch (error) {
+        set.status = 500;
+        return { success: false, message: "Error obteniendo el detalle", error: String(error) };
+      }
+    },
+    {
+      query: t.Object({
+        fecha: t.String(),
+        rubro: t.Optional(t.String()),
       }),
     }
   )

@@ -203,3 +203,24 @@ export const getAuditoriaSnapshot = async (params?: {
   );
   return data;
 };
+
+// ───────────── Detalle por origen (crédito nuevo vs pago) ─────────────
+export interface DetalleSnapshotRow {
+  rubro: string;
+  producto: string; // autocompras | nuevo_autocompras | sobre_vehiculo | hipotecario | ...
+  origen: "nuevo" | "pago";
+  monto_total: number;
+  monto_iva: number;
+}
+
+// Trae el desglose nuevo/pago de un día (opcionalmente de un rubro) para el modal.
+export const getDetalleSnapshot = async (
+  fecha: string,
+  rubro?: string
+): Promise<{ success: boolean; data: DetalleSnapshotRow[] }> => {
+  const { data } = await api.get(
+    `${API_URL}/api/facturacion-snapshot/detalle`,
+    { params: { fecha, rubro } }
+  );
+  return data;
+};

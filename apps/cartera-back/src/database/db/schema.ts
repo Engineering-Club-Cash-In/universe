@@ -291,23 +291,34 @@
     })
   );
 
-  export const moras_credito = customSchema.table("moras_credito", {
-    mora_id: serial("mora_id").primaryKey(),
-    credito_id: integer("credito_id")
-      .notNull()
-      .references(() => creditos.credito_id, { onDelete: "cascade" }),
-    activa: boolean("activa").notNull().default(true),
-    porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
-      .notNull()
-      .default("1.12"),
-    monto_mora: numeric("monto_mora", { precision: 18, scale: 2 })
-      .notNull()
-      .default("0"),
-    cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
+  export const moras_credito = customSchema.table(
+    "moras_credito",
+    {
+      mora_id: serial("mora_id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      activa: boolean("activa").notNull().default(true),
+      porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
+        .notNull()
+        .default("1.12"),
+      monto_mora: numeric("monto_mora", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
 
-    created_at: timestamp("created_at").defaultNow(),
-    updated_at: timestamp("updated_at").defaultNow(),
-  });
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      // Garantiza UNA sola mora activa por crédito. Bloquea a nivel BD la
+      // condición de carrera de procesarMoras corriendo en paralelo (varias
+      // réplicas) que insertaba filas activa=true duplicadas e inflaba el total.
+      uniqueIndex("moras_credito_uq_activa")
+        .on(t.credito_id)
+        .where(sql`${t.activa} = true`),
+    ]
+  );
   export const moras_condonaciones = customSchema.table("moras_condonaciones", {
     condonacion_id: serial("condonacion_id").primaryKey(),
     credito_id: integer("credito_id")

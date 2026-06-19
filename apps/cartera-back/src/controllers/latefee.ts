@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
-import { db } from "../database";
+import { client, db } from "../database";
 import { asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
@@ -490,10 +490,27 @@ export async function updateMora({
  *    - Update the credit status to "MOROSO".
  * 5. Log every step for debugging and monitoring.
  */
+// Clave fija para el advisory lock de procesarMoras (cualquier int estable sirve).
+const PROCESAR_MORAS_LOCK_KEY = 728193;
+
 export async function procesarMoras() {
   const zona = "America/Guatemala";
 
+  // 🔒 Lock entre instancias: con varias réplicas del back, todas agendan el cron
+  // (23:59 GT) y corrían EN PARALELO leyendo el mismo estado viejo → duplicaban
+  // eventos en moras_historial y, peor, filas activa=true en moras_credito.
+  // Tomamos un advisory lock en una conexión dedicada; si otra corrida ya lo tiene,
+  // se omite esta. (El índice único parcial moras_credito_uq_activa es el respaldo duro.)
+  const lockConn = await client.connect();
+  let lockHeld = false;
   try {
+    const _lk = await lockConn.query("SELECT pg_try_advisory_lock($1) AS ok", [PROCESAR_MORAS_LOCK_KEY]);
+    lockHeld = _lk.rows[0]?.ok === true;
+    if (!lockHeld) {
+      console.log("[MORA] ⏭️  Otra instancia ya está procesando moras; se omite esta corrida.");
+      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0 };
+    }
+
     const hoy = toZonedTime(new Date(), zona);
     hoy.setHours(0, 0, 0, 0);
 
@@ -622,16 +639,27 @@ export async function procesarMoras() {
 
       if (!moraActual) {
         // CREACION
-        const [insertada] = await db
-          .insert(moras_credito)
-          .values({
-            credito_id: creditoId,
-            monto_mora: moraNuevaStr,
-            cuotas_atrasadas: cuotasAtrasadas,
-            activa: true,
-            porcentaje_mora: "1.12",
-          })
-          .returning();
+        let insertada;
+        try {
+          [insertada] = await db
+            .insert(moras_credito)
+            .values({
+              credito_id: creditoId,
+              monto_mora: moraNuevaStr,
+              cuotas_atrasadas: cuotasAtrasadas,
+              activa: true,
+              porcentaje_mora: "1.12",
+            })
+            .returning();
+        } catch (e: any) {
+          // Índice único parcial moras_credito_uq_activa: otra corrida concurrente
+          // ya creó la mora activa de este crédito → omitir (no duplicar).
+          if (e?.code === "23505") {
+            console.log(`[SKIP] Credit #${creditoId} mora ya creada por otra instancia (índice único)`);
+            continue;
+          }
+          throw e;
+        }
 
         await db
           .update(creditos)
@@ -756,6 +784,15 @@ export async function procesarMoras() {
     console.error("[ERROR] Message:", error.message);
     console.error("[ERROR] Stack trace:", error.stack);
     throw error;
+  } finally {
+    if (lockHeld) {
+      try {
+        await lockConn.query("SELECT pg_advisory_unlock($1)", [PROCESAR_MORAS_LOCK_KEY]);
+      } catch {
+        /* el lock se libera solo al cerrar la sesión; no es crítico */
+      }
+    }
+    lockConn.release();
   }
 }
 

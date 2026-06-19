@@ -12,6 +12,13 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -158,28 +165,30 @@ export function MetaColocacionContent() {
 
 			{/* Selector mes/año */}
 			<div className="flex items-center gap-3">
-				<select
-					value={mes}
-					onChange={(e) => setMes(Number(e.target.value))}
-					className="rounded-md border bg-background px-3 py-1.5 text-sm"
-				>
-					{MESES.map((label, i) => (
-						<option key={label} value={i + 1}>
-							{label}
-						</option>
-					))}
-				</select>
-				<select
-					value={anio}
-					onChange={(e) => setAnio(Number(e.target.value))}
-					className="rounded-md border bg-background px-3 py-1.5 text-sm"
-				>
-					{anios.map((a) => (
-						<option key={a} value={a}>
-							{a}
-						</option>
-					))}
-				</select>
+				<Select value={String(mes)} onValueChange={(v) => setMes(Number(v))}>
+					<SelectTrigger className="w-36">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						{MESES.map((label, i) => (
+							<SelectItem key={label} value={String(i + 1)}>
+								{label}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+				<Select value={String(anio)} onValueChange={(v) => setAnio(Number(v))}>
+					<SelectTrigger className="w-24">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						{anios.map((a) => (
+							<SelectItem key={a} value={String(a)}>
+								{a}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
 			</div>
 
 			{/* KPI Cards */}
@@ -290,7 +299,9 @@ export function MetaColocacionContent() {
 							</div>
 							<p className="text-muted-foreground text-xs">
 								Faltante:{" "}
-								{formatCurrency(Math.max(0, Number(meta) - Number(realMonto ?? 0)))}
+								{formatCurrency(
+									Math.max(0, Number(meta) - Number(realMonto ?? 0)),
+								)}
 							</p>
 						</div>
 					</CardContent>

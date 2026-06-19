@@ -30,6 +30,10 @@ export interface ScenarioReportConfig<T> {
 	usaMetodoCuota: boolean;
 	transform: (base: T, p: ScenarioParams) => T;
 	summarize: (data: T) => SummaryRow[];
+	/** Aviso informativo cuando los datos limitan la simulación (ej: sin meta). */
+	getWarning?: (data: T) => string | null;
+	/** Override del hint por lever, específico para este reporte. */
+	leverDescriptions?: Partial<Record<Exclude<LeverKey, "metodo">, string>>;
 }
 
 const num = (v: string | number | null | undefined): number => {
@@ -65,19 +69,40 @@ export const montoACobrarConfig: ScenarioReportConfig<MontoACobrarRow[]> = {
 };
 
 export const facturacionConfig: ScenarioReportConfig<FacturacionMesResponse> = {
-	titulo: "Facturado del Mes vs Esperado",
+	titulo: "Cobrado del Mes vs Esperado",
 	descripcion:
 		"Estima cuánto más se cobraría al subir la efectividad o bajar la mora.",
 	levers: ["efectividad", "mora"],
 	usaMetodoCuota: false,
 	transform: transformFacturacion,
-	summarize: (data) => [
-		{ concepto: "Capital", valor: num(data.cobrado.capital) },
-		{ concepto: "Interés", valor: num(data.cobrado.interes) },
-		{ concepto: "Membresías", valor: num(data.cobrado.membresias) },
-		{ concepto: "Seguro + GPS", valor: num(data.cobrado.seguro_gps) },
-		{ concepto: "Royaltí", valor: num(data.cobrado.royalti) },
-	],
+	summarize: (data) => {
+		const totalCobrado =
+			num(data.cobrado.interes) +
+			num(data.cobrado.membresias) +
+			num(data.cobrado.seguro_gps) +
+			num(data.cobrado.royalti) +
+			num(data.cobrado.mora) +
+			num(data.cobrado.otros);
+		return [
+			{ concepto: "Interés", valor: num(data.cobrado.interes) },
+			{ concepto: "Membresías", valor: num(data.cobrado.membresias) },
+			{ concepto: "Seguro + GPS", valor: num(data.cobrado.seguro_gps) },
+			{ concepto: "Royaltí", valor: num(data.cobrado.royalti) },
+			{ concepto: "Mora", valor: num(data.cobrado.mora) },
+			{ concepto: "Otros", valor: num(data.cobrado.otros) },
+			{ concepto: "Total cobrado", valor: totalCobrado },
+			{ concepto: "Meta del mes", valor: num(data.esperado.meta_mensual) },
+		];
+	},
+	getWarning: (data) =>
+		num(data.esperado.meta_mensual) === 0
+			? "Sin meta del mes configurada, solo la palanca de mora tiene efecto. Configura la meta para simular efectividad de cobranza."
+			: null,
+	leverDescriptions: {
+		efectividad:
+			"Escala Interés, Membresías, Seguro+GPS, Royaltí y Otros para cerrar la brecha con la meta",
+		mora: "Reduce directamente los ingresos por mora, y también contribuye a cerrar la brecha en los demás rubros",
+	},
 };
 
 export const flujoCuotasConfig: ScenarioReportConfig<FlujoCuotasInversionesResponse> =

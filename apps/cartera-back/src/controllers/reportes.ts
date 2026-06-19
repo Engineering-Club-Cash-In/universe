@@ -390,11 +390,12 @@ export async function getCobradoDelMesSnapshot({
   const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
   const result = await db.execute(sql`
     SELECT
-      COALESCE(SUM(capital_total::numeric), 0)          AS cobrado_capital,
       COALESCE(SUM(interes_cube::numeric), 0)           AS cobrado_interes,
       COALESCE(SUM(membresia::numeric), 0)              AS cobrado_membresias,
       COALESCE(SUM(servicios_seguro_gps::numeric), 0)   AS cobrado_seguro_gps,
-      COALESCE(SUM(royalty::numeric), 0)                AS cobrado_royalti
+      COALESCE(SUM(royalty::numeric), 0)                AS cobrado_royalti,
+      COALESCE(SUM(mora_cube::numeric), 0)              AS cobrado_mora,
+      COALESCE(SUM(otros_ingresos::numeric), 0)         AS cobrado_otros
     FROM cartera.facturacion_snapshot_diario
     WHERE fecha >= ${inicioMes}::date
       AND fecha < (${inicioMes}::date + INTERVAL '1 month')
@@ -402,11 +403,12 @@ export async function getCobradoDelMesSnapshot({
 
   const row = result.rows[0] as Record<string, unknown> | undefined;
   return {
-    cobrado_capital: String(row?.cobrado_capital ?? "0"),
     cobrado_interes: String(row?.cobrado_interes ?? "0"),
     cobrado_membresias: String(row?.cobrado_membresias ?? "0"),
     cobrado_seguro_gps: String(row?.cobrado_seguro_gps ?? "0"),
     cobrado_royalti: String(row?.cobrado_royalti ?? "0"),
+    cobrado_mora: String(row?.cobrado_mora ?? "0"),
+    cobrado_otros: String(row?.cobrado_otros ?? "0"),
   };
 }
 
@@ -1199,4 +1201,125 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
     .map((e) => ({ asesorId: e.asesorId, nombre: e.nombre, email: e.email, ...serializeBuckets(e.acc) }));
 
   return { totales: serializeBuckets(totalAcc), porAsesor };
+}
+
+export async function getCuotasPorFecha({
+  fechaInicio,
+  fechaFin,
+  asesorId,
+}: {
+  fechaInicio: string;
+  fechaFin: string;
+  asesorId?: number;
+}) {
+  const asesorFilter = asesorId
+    ? sql`AND cr.asesor_id = ${asesorId}`
+    : sql``;
+
+  const result = await db.execute(sql`
+    SELECT
+      c.cuota_id,
+      c.numero_cuota,
+      c.fecha_vencimiento,
+      c.pagado,
+      cr.credito_id,
+      cr.numero_credito_sifco,
+      u.nombre            AS cliente_nombre,
+      a.nombre            AS asesor_nombre,
+      a.email_cash_in     AS asesor_email,
+      cr."statusCredit",
+      -- Capital from amortization: prev cuota total_restante - current cuota total_restante
+      CASE
+        WHEN prev_pag.total_restante IS NOT NULL AND curr_pag.total_restante IS NOT NULL
+        THEN prev_pag.total_restante - curr_pag.total_restante
+        ELSE COALESCE(cr.cuota::numeric
+          - cr.cuota_interes::numeric
+          - cr.iva_12::numeric
+          - COALESCE(cr.seguro_10_cuotas::numeric, 0)
+          - COALESCE(cr.gps::numeric, 0)
+          - COALESCE(cr.membresias_pago::numeric, 0), 0)
+      END AS capital_esperado,
+      -- Interes from amortization: (cuota - capital - seguro - gps - membresias) * 100/112
+      CASE
+        WHEN prev_pag.total_restante IS NOT NULL AND curr_pag.total_restante IS NOT NULL
+        THEN GREATEST(0, (
+          cr.cuota::numeric
+          - (prev_pag.total_restante - curr_pag.total_restante)
+          - COALESCE(cr.seguro_10_cuotas::numeric, 0)
+          - COALESCE(cr.gps::numeric, 0)
+          - COALESCE(cr.membresias_pago::numeric, 0)
+        ) * 100.0 / 112.0)
+        ELSE COALESCE(cr.cuota_interes::numeric, 0)
+      END AS interes_esperado,
+      -- IVA from amortization: (cuota - capital - seguro - gps - membresias) * 12/112
+      CASE
+        WHEN prev_pag.total_restante IS NOT NULL AND curr_pag.total_restante IS NOT NULL
+        THEN GREATEST(0, (
+          cr.cuota::numeric
+          - (prev_pag.total_restante - curr_pag.total_restante)
+          - COALESCE(cr.seguro_10_cuotas::numeric, 0)
+          - COALESCE(cr.gps::numeric, 0)
+          - COALESCE(cr.membresias_pago::numeric, 0)
+        ) * 12.0 / 112.0)
+        ELSE COALESCE(cr.iva_12::numeric, 0)
+      END AS iva_esperado,
+      COALESCE(cr.seguro_10_cuotas::numeric, 0)       AS seguro_esperado,
+      COALESCE(cr.gps::numeric, 0)                    AS gps_esperado,
+      COALESCE(cr.membresias_pago::numeric, 0)        AS membresias_esperado,
+      COALESCE(cr.cuota::numeric, 0)                  AS total_esperado,
+      COALESCE(pag.abono_capital, 0)                  AS capital_pagado,
+      COALESCE(pag.abono_interes, 0)                  AS interes_pagado,
+      COALESCE(pag.abono_iva, 0)                      AS iva_pagado,
+      COALESCE(pag.abono_seguro, 0)                   AS seguro_pagado,
+      COALESCE(pag.abono_gps, 0)                      AS gps_pagado,
+      COALESCE(pag.membresias_pagada, 0)              AS membresias_pagado,
+      COALESCE(pag.total_pagado, 0)                   AS total_pagado
+    FROM cartera.cuotas_credito c
+    JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+    JOIN cartera.usuarios u  ON cr.usuario_id = u.usuario_id
+    LEFT JOIN cartera.asesores a ON cr.asesor_id = a.asesor_id
+    LEFT JOIN LATERAL (
+      SELECT MAX(pc_prev.total_restante::numeric) AS total_restante
+      FROM cartera.pagos_credito pc_prev
+      JOIN cartera.cuotas_credito qc_prev ON pc_prev.cuota_id = qc_prev.cuota_id
+      WHERE qc_prev.credito_id = c.credito_id
+        AND qc_prev.numero_cuota = c.numero_cuota - 1
+        AND qc_prev.numero_cuota > 0
+        AND pc_prev."paymentFalse" = false
+    ) prev_pag ON true
+    LEFT JOIN LATERAL (
+      SELECT MAX(pc_curr.total_restante::numeric) AS total_restante
+      FROM cartera.pagos_credito pc_curr
+      WHERE pc_curr.cuota_id = c.cuota_id
+        AND pc_curr."paymentFalse" = false
+    ) curr_pag ON true
+    LEFT JOIN LATERAL (
+      SELECT
+        SUM(pc.abono_capital::numeric)    AS abono_capital,
+        SUM(pc.abono_interes::numeric)    AS abono_interes,
+        SUM(pc.abono_iva_12::numeric)     AS abono_iva,
+        SUM(pc.abono_seguro::numeric)     AS abono_seguro,
+        SUM(pc.abono_gps::numeric)        AS abono_gps,
+        SUM(pc.membresias_pago::numeric)  AS membresias_pagada,
+        SUM(
+          COALESCE(pc.abono_capital::numeric, 0)
+          + COALESCE(pc.abono_interes::numeric, 0)
+          + COALESCE(pc.abono_iva_12::numeric, 0)
+          + COALESCE(pc.abono_seguro::numeric, 0)
+          + COALESCE(pc.abono_gps::numeric, 0)
+          + COALESCE(pc.membresias_pago::numeric, 0)
+        ) AS total_pagado
+      FROM cartera.pagos_credito pc
+      WHERE pc.cuota_id = c.cuota_id
+        AND pc."paymentFalse" = false
+    ) pag ON true
+    WHERE c.fecha_vencimiento::date >= ${fechaInicio}::date
+      AND c.fecha_vencimiento::date <= ${fechaFin}::date
+      AND c.numero_cuota > 0
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      ${asesorFilter}
+    ORDER BY c.fecha_vencimiento ASC, cr.numero_credito_sifco ASC
+  `);
+
+  return result.rows;
 }

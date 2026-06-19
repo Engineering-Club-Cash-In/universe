@@ -184,11 +184,12 @@ class SimpleCache {
 // ============================================================================
 
 export type FacturacionMesRubro = {
-	capital: string;
 	interes: string;
 	membresias: string;
 	seguro_gps: string;
 	royalti: string;
+	mora: string;
+	otros: string;
 };
 
 export type FacturacionMesResponse = {
@@ -207,6 +208,33 @@ export type MontoACobrarRow = {
 	total_membresias: string;
 	total_royalti: string;
 	mora_promedio: string;
+};
+
+export type CuotaPorFechaRow = {
+	cuota_id: number;
+	numero_cuota: number;
+	fecha_vencimiento: string;
+	pagado: boolean;
+	credito_id: number;
+	numero_credito_sifco: string;
+	cliente_nombre: string;
+	asesor_nombre: string | null;
+	asesor_email: string | null;
+	statusCredit: string;
+	capital_esperado: string;
+	interes_esperado: string;
+	iva_esperado: string;
+	seguro_esperado: string;
+	gps_esperado: string;
+	membresias_esperado: string;
+	total_esperado: string;
+	capital_pagado: string;
+	interes_pagado: string;
+	iva_pagado: string;
+	seguro_pagado: string;
+	gps_pagado: string;
+	membresias_pagado: string;
+	total_pagado: string;
 };
 
 export type MontoACobrarPeriodoRow = {
@@ -1456,11 +1484,12 @@ export class CarteraBackClient {
 
 		const [cobradoResult, esperadoResult] = await Promise.all([
 			this.request<{
-				cobrado_capital?: string;
 				cobrado_interes?: string;
 				cobrado_membresias?: string;
 				cobrado_seguro_gps?: string;
 				cobrado_royalti?: string;
+				cobrado_mora?: string;
+				cobrado_otros?: string;
 			}>(`/reportes/facturacion-mes-cobrado?${qp}`, { method: "GET" }, true),
 			this.request<{
 				meta_mensual?: string;
@@ -1468,11 +1497,12 @@ export class CarteraBackClient {
 		]);
 
 		const cobrado: FacturacionMesRubro = {
-			capital: cobradoResult.cobrado_capital ?? "0",
 			interes: cobradoResult.cobrado_interes ?? "0",
 			membresias: cobradoResult.cobrado_membresias ?? "0",
 			seguro_gps: cobradoResult.cobrado_seguro_gps ?? "0",
 			royalti: cobradoResult.cobrado_royalti ?? "0",
+			mora: cobradoResult.cobrado_mora ?? "0",
+			otros: cobradoResult.cobrado_otros ?? "0",
 		};
 
 		return { cobrado, esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" } };
@@ -1539,6 +1569,26 @@ export class CarteraBackClient {
 			{ method: "GET" },
 			true,
 		);
+	}
+
+	async getCuotasPorFecha(params: {
+		fechaInicio: string;
+		fechaFin: string;
+		asesorId?: number;
+	}): Promise<CuotaPorFechaRow[]> {
+		const qp = new URLSearchParams({
+			fecha_inicio: params.fechaInicio,
+			fecha_fin: params.fechaFin,
+			...(params.asesorId ? { asesor_id: String(params.asesorId) } : {}),
+		});
+
+		const response = await this.request<{ ok: boolean; data: CuotaPorFechaRow[] }>(
+			`/reportes/cuotas-por-fecha?${qp}`,
+			{ method: "GET" },
+			false,
+		);
+
+		return response.data ?? [];
 	}
 
 	// ========================================================================

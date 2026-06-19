@@ -4069,11 +4069,7 @@ export const cobrosRouter = {
 				})
 				.from(quotations)
 				.where(isNotNull(quotations.opportunityId))
-				.orderBy(
-					quotations.opportunityId,
-					sql`CASE WHEN ${quotations.status} = 'accepted' THEN 0 ELSE 1 END`,
-					desc(quotations.createdAt),
-				)
+				.orderBy(quotations.opportunityId, desc(quotations.createdAt))
 				.as("lq");
 
 			const conditions = [isNotNull(opportunities.numeroSifco)];

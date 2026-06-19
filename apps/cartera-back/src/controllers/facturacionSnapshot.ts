@@ -527,9 +527,14 @@ export async function generarSnapshotDiario(fecha: string) {
       LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
       LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
       WHERE fd.fecha_aplicado_gt = ${fecha}::date
-        AND fd.rubro::text <> 'CAPITAL'
+        AND fd.rubro::text <> 'CAPITAL'                            -- capital se toma del pci (abajo)
+        AND NOT (fd.pago_id IS NULL AND fd.rubro::text = 'MORA')   -- mora genérica fuera (= snapshot)
         AND (
-          fd.pago_id IS NULL OR (
+          fd.pago_id IS NULL
+          -- INTERES_INVERSIONISTAS reconcilia con facturacion_inversionistas (bloque 4),
+          -- que suma el desglose SIN filtro de estado/validation → acá tampoco se filtra.
+          OR fd.rubro::text = 'INTERES_INVERSIONISTAS'
+          OR (
             p.pago_id IS NOT NULL
             AND c."statusCredit" IN
               ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')

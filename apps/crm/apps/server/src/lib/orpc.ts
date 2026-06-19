@@ -20,7 +20,7 @@ const requireAuth = o.middleware(async ({ context, next }) => {
 	});
 });
 
-const requireAdmin = o.middleware(async ({ context, next }) => {
+const getSessionUser = async (context: Context) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
 	}
@@ -31,293 +31,92 @@ const requireAdmin = o.middleware(async ({ context, next }) => {
 		.from(user)
 		.where(eq(user.id, userId))
 		.limit(1);
-	const userRole = userData[0]?.role;
+	const currentUser = userData[0];
 
-	if (!PERMISSIONS.canAccessAdmin(userRole)) {
-		throw new ORPCError("FORBIDDEN", { message: "Admin role required" });
-	}
+	return {
+		currentUser,
+		session: context.session,
+		userId,
+		userRole: currentUser?.role,
+	};
+};
 
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-		},
-	});
-});
+const requirePermission = (
+	canAccess: (role: string) => boolean,
+	message: string,
+) =>
+	o.middleware(async ({ context, next }) => {
+		const { currentUser, session, userId, userRole } = await getSessionUser(
+			context,
+		);
 
-const requireCrmAccess = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	if (!PERMISSIONS.canAccessClients(userRole)) {
-		throw new ORPCError("FORBIDDEN", { message: "CRM access role required" });
-	}
-
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
-
-const requireAnalyst = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	console.log("[requireAnalyst] userId:", userId);
-	console.log("[requireAnalyst] userData:", userData);
-	console.log("[requireAnalyst] userRole:", userRole);
-	console.log(
-		"[requireAnalyst] canAccessAnalysis:",
-		PERMISSIONS.canAccessAnalysis(userRole || ""),
-	);
-
-	if (!userRole || !PERMISSIONS.canAccessAnalysis(userRole)) {
-		console.log("[requireAnalyst] FORBIDDEN - userRole:", userRole);
-		throw new ORPCError("FORBIDDEN", { message: "Analyst role required" });
-	}
-
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
-
-const requireCrmOrCobros = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	if (
-		!PERMISSIONS.canAccessCRM(userRole) &&
-		!PERMISSIONS.canAccessCobros(userRole)
-	) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "CRM or Cobros access required",
-		});
-	}
-
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
-
-const requireCrmCobrosOrInvestments = o.middleware(
-	async ({ context, next }) => {
-		if (!context.session?.user) {
-			throw new ORPCError("UNAUTHORIZED");
-		}
-
-		const userId = context.session.user.id;
-		const userData = await db
-			.select()
-			.from(user)
-			.where(eq(user.id, userId))
-			.limit(1);
-		const userRole = userData[0]?.role;
-
-		if (
-			!PERMISSIONS.canAccessCRM(userRole) &&
-			!PERMISSIONS.canAccessCobros(userRole) &&
-			!PERMISSIONS.canAccessInvestments(userRole) &&
-			!PERMISSIONS.canAccessAccounting(userRole)
-		) {
-			throw new ORPCError("FORBIDDEN", {
-				message: "CRM, Cobros, Investments or Accounting access required",
-			});
+		if (!canAccess(userRole ?? "")) {
+			throw new ORPCError("FORBIDDEN", { message });
 		}
 
 		return next({
 			context: {
-				session: context.session,
-				user: userData[0],
+				...context,
+				session,
+				user: currentUser,
 				userId,
 				userRole,
 			},
 		});
-	},
+	});
+
+const requireAdmin = requirePermission(
+	PERMISSIONS.canAccessAdmin,
+	"Admin role required",
 );
 
-const requireCobros = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
+const requireCrmAccess = requirePermission(
+	PERMISSIONS.canAccessClients,
+	"CRM access role required",
+);
 
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
+const requireAnalyst = requirePermission(
+	PERMISSIONS.canAccessAnalysis,
+	"Analyst role required",
+);
 
-	if (!PERMISSIONS.canAccessCobros(userRole)) {
-		throw new ORPCError("FORBIDDEN", { message: "Cobros role required" });
-	}
+const requireCrmOrCobros = requirePermission(
+	(role) => PERMISSIONS.canAccessCRM(role) || PERMISSIONS.canAccessCobros(role),
+	"CRM or Cobros access required",
+);
 
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
+const requireCrmCobrosOrInvestments = requirePermission(
+	(role) =>
+		PERMISSIONS.canAccessCRM(role) ||
+		PERMISSIONS.canAccessCobros(role) ||
+		PERMISSIONS.canAccessInvestments(role) ||
+		PERMISSIONS.canAccessAccounting(role),
+	"CRM, Cobros, Investments or Accounting access required",
+);
 
-const requireCobrosSupervisor = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
+const requireCobros = requirePermission(
+	PERMISSIONS.canAccessCobros,
+	"Cobros role required",
+);
 
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
+const requireCobrosSupervisor = requirePermission(
+	PERMISSIONS.canAssignCobros,
+	"Cobros supervisor role required",
+);
 
-	if (!PERMISSIONS.canAssignCobros(userRole)) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "Cobros supervisor role required",
-		});
-	}
+const requireClosedCreditsReport = requirePermission(
+	PERMISSIONS.canAccessClosedCreditsReport,
+	"Closed credits report access required",
+);
 
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
+const requireTiempoCierreReport = requirePermission(
+	PERMISSIONS.canAccessTiempoCierreReport,
+	"Tiempo cierre report access required",
+);
 
-const requireClosedCreditsReport = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	if (!PERMISSIONS.canAccessClosedCreditsReport(userRole)) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "Closed credits report access required",
-		});
-	}
-
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
-
-const requireTiempoCierreReport = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	if (!PERMISSIONS.canAccessTiempoCierreReport(userRole)) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "Tiempo cierre report access required",
-		});
-	}
-
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
-const requirePorcentajeEfectividadReport = o.middleware(
-	async ({ context, next }) => {
-		if (!context.session?.user) {
-			throw new ORPCError("UNAUTHORIZED");
-		}
-
-		const userId = context.session.user.id;
-		const userData = await db
-			.select()
-			.from(user)
-			.where(eq(user.id, userId))
-			.limit(1);
-		const userRole = userData[0]?.role;
-
-		if (!PERMISSIONS.canAccessPorcentajeEfectividadReport(userRole)) {
-			throw new ORPCError("FORBIDDEN", {
-				message: "Porcentaje efectividad report access required",
-			});
-		}
-
-		return next({
-			context: {
-				session: context.session,
-				user: userData[0],
-				userId,
-				userRole,
-			},
-		});
-	},
+const requirePorcentajeEfectividadReport = requirePermission(
+	PERMISSIONS.canAccessPorcentajeEfectividadReport,
+	"Porcentaje efectividad report access required",
 );
 const requireMetaColocacionReport = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
@@ -342,35 +141,9 @@ const requireMetaColocacionReport = o.middleware(async ({ context, next }) => {
 	});
 });
 
-const requireViewOpportunityContracts = o.middleware(
-	async ({ context, next }) => {
-		if (!context.session?.user) {
-			throw new ORPCError("UNAUTHORIZED");
-		}
-
-		const userId = context.session.user.id;
-		const userData = await db
-			.select()
-			.from(user)
-			.where(eq(user.id, userId))
-			.limit(1);
-		const userRole = userData[0]?.role;
-
-		if (!PERMISSIONS.canViewOpportunityContracts(userRole)) {
-			throw new ORPCError("FORBIDDEN", {
-				message: "Cannot view opportunity contracts",
-			});
-		}
-
-		return next({
-			context: {
-				session: context.session,
-				user: userData[0],
-				userId,
-				userRole,
-			},
-		});
-	},
+const requireViewOpportunityContracts = requirePermission(
+	PERMISSIONS.canViewOpportunityContracts,
+	"Cannot view opportunity contracts",
 );
 
 const requireJuridico = o.middleware(async ({ context, next }) => {
@@ -404,153 +177,31 @@ const requireJuridico = o.middleware(async ({ context, next }) => {
 	});
 });
 
-const requireTallerAccess = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	if (!userRole || !PERMISSIONS.canAccessTaller(userRole)) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "Taller access required",
-		});
-	}
-
-	return next({
-		context: {
-			...context,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
+const requireTallerAccess = requirePermission(
+	PERMISSIONS.canAccessTaller,
+	"Taller access required",
+);
 
 // Middleware que permite acceso autenticado desde Taller O desde CRM por rol.
-const requireTallerOrCrm = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
+const requireTallerOrCrm = requirePermission(
+	(role) => PERMISSIONS.canAccessCRM(role) || PERMISSIONS.canAccessTaller(role),
+	"CRM or Taller access required",
+);
 
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-	const hasAccess =
-		!!userRole &&
-		(PERMISSIONS.canAccessCRM(userRole) ||
-			PERMISSIONS.canAccessTaller(userRole));
+const requireVehicleAccess = requirePermission(
+	PERMISSIONS.canAccessVehicles,
+	"Se requiere acceso a vehículos",
+);
 
-	if (!hasAccess) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "CRM or Taller access required",
-		});
-	}
+const requireInvestmentAccess = requirePermission(
+	PERMISSIONS.canAccessInvestments,
+	"Se requiere acceso al modulo de inversiones",
+);
 
-	return next({
-		context: {
-			...context,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
-
-const requireVehicleAccess = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	if (!userRole || !PERMISSIONS.canAccessVehicles(userRole)) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "Se requiere acceso a vehículos",
-		});
-	}
-
-	return next({
-		context: {
-			...context,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
-
-const requireInvestmentAccess = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	if (!PERMISSIONS.canAccessInvestments(userRole)) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "Se requiere acceso al modulo de inversiones",
-		});
-	}
-
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
-
-const requireInvestmentManager = o.middleware(async ({ context, next }) => {
-	if (!context.session?.user) {
-		throw new ORPCError("UNAUTHORIZED");
-	}
-	const userId = context.session.user.id;
-	const userData = await db
-		.select()
-		.from(user)
-		.where(eq(user.id, userId))
-		.limit(1);
-	const userRole = userData[0]?.role;
-
-	if (!PERMISSIONS.canValidateInvestmentFunds(userRole)) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "Se requiere rol de gerente de inversiones",
-		});
-	}
-
-	return next({
-		context: {
-			session: context.session,
-			user: userData[0],
-			userId,
-			userRole,
-		},
-	});
-});
+const requireInvestmentManager = requirePermission(
+	PERMISSIONS.canValidateInvestmentFunds,
+	"Se requiere rol de gerente de inversiones",
+);
 
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);

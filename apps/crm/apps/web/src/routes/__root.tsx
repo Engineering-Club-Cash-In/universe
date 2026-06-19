@@ -1,6 +1,3 @@
-import { createORPCClient } from "@orpc/client";
-import type { RouterClient } from "@orpc/server";
-import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import {
@@ -10,14 +7,12 @@ import {
 	useRouterState,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
-import { useState } from "react";
 import { logo } from "@/assets";
 import Header from "@/components/header";
 import Loader from "@/components/loader";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { link, type orpc } from "@/utils/orpc";
-import type { appRouter } from "../../../server/src/routers";
+import type { orpc } from "@/utils/orpc";
 import "../index.css";
 
 interface RouterAppContext {
@@ -55,11 +50,6 @@ function RootComponent() {
 	const location = useRouterState({ select: (s) => s.location });
 	const isPublicForm = location.pathname.startsWith("/formulario");
 
-	const [client] = useState<RouterClient<typeof appRouter>>(() =>
-		createORPCClient(link),
-	);
-	const [orpcUtils] = useState(() => createTanstackQueryUtils(client));
-
 	return (
 		<>
 			<HeadContent />
@@ -70,8 +60,10 @@ function RootComponent() {
 				</div>
 				<Toaster richColors />
 			</ThemeProvider>
-			<TanStackRouterDevtools position="bottom-left" />
-			<ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
+			{import.meta.env.DEV && <TanStackRouterDevtools position="bottom-left" />}
+			{import.meta.env.DEV && (
+				<ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
+			)}
 		</>
 	);
 }

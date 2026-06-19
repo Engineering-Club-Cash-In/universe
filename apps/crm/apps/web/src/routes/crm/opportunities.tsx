@@ -42,7 +42,6 @@ import {
 } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import invariant from "tiny-invariant";
 import { z } from "zod";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
@@ -151,7 +150,9 @@ function DraggableOpportunityCard({
 
 	useEffect(() => {
 		const element = ref.current;
-		invariant(element);
+		if (!element) {
+			throw new Error("Expected drag element");
+		}
 
 		return draggable({
 			element,
@@ -299,7 +300,9 @@ function DroppableStageColumn({
 
 	useEffect(() => {
 		const element = ref.current;
-		invariant(element);
+		if (!element) {
+			throw new Error("Expected drop target element");
+		}
 
 		return dropTargetForElements({
 			element,

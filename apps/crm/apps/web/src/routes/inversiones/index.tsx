@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import invariant from "tiny-invariant";
 import * as XLSX from "xlsx";
 import { RetreatStageConfirmDialog } from "@/components/investments/RetreatStageConfirmDialog";
 import { Badge } from "@/components/ui/badge";
@@ -123,7 +122,9 @@ function DraggableInvestmentCard({
 
 	useEffect(() => {
 		const element = ref.current;
-		invariant(element);
+		if (!element) {
+			throw new Error("Expected drag element");
+		}
 
 		return draggable({
 			element,
@@ -201,7 +202,9 @@ function DroppableInvestmentColumn({
 
 	useEffect(() => {
 		const element = ref.current;
-		invariant(element);
+		if (!element) {
+			throw new Error("Expected drop target element");
+		}
 
 		return dropTargetForElements({
 			element,

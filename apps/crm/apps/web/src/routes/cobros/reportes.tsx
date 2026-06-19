@@ -306,6 +306,7 @@ function TabMora({
 // ─── Cuotas por Fecha (Pagos Esperados) ─────────────────────────────────────
 
 type QuickPeriod = "hoy" | "semana" | "quincena" | "mes";
+type FechaMode = QuickPeriod | "personalizado";
 
 const QUICK_LABELS: Record<QuickPeriod, string> = {
 	hoy: "Hoy",
@@ -347,6 +348,21 @@ function monthRangeGT(): { start: string; end: string } {
 	const start = `${y}-${String(m).padStart(2, "0")}-01`;
 	const lastDay = new Date(Date.UTC(y, m, 0));
 	return { start, end: fmtDate(lastDay) };
+}
+
+// Rango calculado para un preset. Se recalcula en cada render, así "Hoy" /
+// "Esta Semana" siguen frescos aunque el usuario vuelva otro día.
+function rangeForPreset(p: QuickPeriod): { start: string; end: string } {
+	if (p === "hoy") {
+		const h = todayGT();
+		return { start: h, end: h };
+	}
+	if (p === "semana") return weekRangeGT();
+	if (p === "quincena") {
+		const h = todayGT();
+		return { start: h, end: addDaysGT(h, 14) };
+	}
+	return monthRangeGT();
 }
 
 type CuotaFila = {
@@ -520,11 +536,17 @@ function TabCuotasPorFecha({
 }) {
 	const hoyInit = todayGT();
 
-	const [fechaInicio, setFechaInicio] = usePersistedState<string>(
+	// El modo manda: si es un preset, las fechas se calculan al vuelo. Solo en
+	// "personalizado" se usan (y editan) las fechas guardadas.
+	const [modoFecha, setModoFecha] = usePersistedState<FechaMode>(
+		"cobros/reportes/cuotas/modoFecha",
+		"hoy",
+	);
+	const [fechaInicioCustom, setFechaInicioCustom] = usePersistedState<string>(
 		"cobros/reportes/cuotas/fechaInicio",
 		hoyInit,
 	);
-	const [fechaFin, setFechaFin] = usePersistedState<string>(
+	const [fechaFinCustom, setFechaFinCustom] = usePersistedState<string>(
 		"cobros/reportes/cuotas/fechaFin",
 		hoyInit,
 	);
@@ -536,6 +558,21 @@ function TabCuotasPorFecha({
 		"cobros/reportes/cuotas/filtroEstado",
 		"todos",
 	);
+
+	const esPersonalizado = modoFecha === "personalizado";
+	const { start: fechaInicio, end: fechaFin } = esPersonalizado
+		? { start: fechaInicioCustom, end: fechaFinCustom }
+		: rangeForPreset(modoFecha);
+
+	function activarPersonalizado() {
+		// Sembrar las fechas editables con el rango del preset actual.
+		if (!esPersonalizado) {
+			const r = rangeForPreset(modoFecha);
+			setFechaInicioCustom(r.start);
+			setFechaFinCustom(r.end);
+		}
+		setModoFecha("personalizado");
+	}
 
 	const { data: asesoresData } = useQuery({
 		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
@@ -573,37 +610,6 @@ function TabCuotasPorFecha({
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(data as any)?.rows ?? [];
 
-	const hoy = todayGT();
-	const activeQuick: QuickPeriod | null = (() => {
-		if (fechaInicio === hoy && fechaFin === hoy) return "hoy";
-		const { start: ws, end: we } = weekRangeGT();
-		if (fechaInicio === ws && fechaFin === we) return "semana";
-		if (fechaInicio === hoy && fechaFin === addDaysGT(hoy, 14)) return "quincena";
-		const { start: ms, end: me } = monthRangeGT();
-		if (fechaInicio === ms && fechaFin === me) return "mes";
-		return null;
-	})();
-
-	function applyQuick(period: QuickPeriod) {
-		if (period === "hoy") {
-			const h = todayGT();
-			setFechaInicio(h);
-			setFechaFin(h);
-		} else if (period === "semana") {
-			const { start, end } = weekRangeGT();
-			setFechaInicio(start);
-			setFechaFin(end);
-		} else if (period === "quincena") {
-			const h = todayGT();
-			setFechaInicio(h);
-			setFechaFin(addDaysGT(h, 14));
-		} else if (period === "mes") {
-			const { start, end } = monthRangeGT();
-			setFechaInicio(start);
-			setFechaFin(end);
-		}
-	}
-
 	function getEstado(row: CuotaFila): "pagado" | "parcial" | "pendiente" {
 		if (row.pagado) return "pagado";
 		if (Number(row.total_pagado) > 0) return "parcial";
@@ -622,96 +628,122 @@ function TabCuotasPorFecha({
 			</div>
 
 			{/* Filtros */}
-			<div className="flex flex-wrap items-end gap-3">
-				<div className="flex items-center gap-2">
-					{(Object.keys(QUICK_LABELS) as QuickPeriod[]).map((p) => (
-						<Button
-							key={p}
-							variant={activeQuick === p ? "default" : "outline"}
-							size="sm"
-							onClick={() => applyQuick(p)}
-						>
-							{QUICK_LABELS[p]}
-						</Button>
-					))}
+			<div className="space-y-3">
+				{/* Período — filtro principal */}
+				<div className="rounded-lg border bg-muted/30 p-3">
+					<div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+						<div className="flex flex-col gap-1.5">
+							<Label className="font-semibold text-xs">Período</Label>
+							<div className="flex flex-wrap items-center gap-1.5">
+								{(Object.keys(QUICK_LABELS) as QuickPeriod[]).map((p) => (
+									<Button
+										key={p}
+										variant={modoFecha === p ? "default" : "outline"}
+										size="sm"
+										onClick={() => setModoFecha(p)}
+									>
+										{QUICK_LABELS[p]}
+									</Button>
+								))}
+								<Button
+									variant={esPersonalizado ? "default" : "outline"}
+									size="sm"
+									onClick={activarPersonalizado}
+								>
+									Personalizado
+								</Button>
+							</div>
+						</div>
+
+						<div className="flex items-end gap-2">
+							<div className="flex flex-col gap-1">
+								<Label className="text-muted-foreground text-xs">Desde</Label>
+								<Input
+									type="date"
+									className="w-36"
+									value={fechaInicio}
+									disabled={!esPersonalizado}
+									onChange={(e) => setFechaInicioCustom(e.target.value)}
+								/>
+							</div>
+							<div className="flex flex-col gap-1">
+								<Label className="text-muted-foreground text-xs">Hasta</Label>
+								<Input
+									type="date"
+									className="w-36"
+									value={fechaFin}
+									disabled={!esPersonalizado}
+									onChange={(e) => setFechaFinCustom(e.target.value)}
+								/>
+							</div>
+						</div>
+
+						{!esPersonalizado && (
+							<p className="pb-2 text-muted-foreground text-xs">
+								Selecciona «Personalizado» para elegir fechas.
+							</p>
+						)}
+					</div>
 				</div>
 
-				<div className="flex items-end gap-2">
-					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Desde</Label>
-						<Input
-							type="date"
-							className="w-36"
-							value={fechaInicio}
-							onChange={(e) => setFechaInicio(e.target.value)}
-						/>
-					</div>
-					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Hasta</Label>
-						<Input
-							type="date"
-							className="w-36"
-							value={fechaFin}
-							onChange={(e) => setFechaFin(e.target.value)}
-						/>
-					</div>
-				</div>
+				{/* Filtros secundarios */}
+				<div className="flex flex-wrap items-end gap-3">
+					{canSeeAll && (
+						<div className="flex flex-col gap-1">
+							<Label className="text-xs">Asesor</Label>
+							<Select
+								value={asesorId}
+								onValueChange={(v) => setAsesorId(v === "todos" ? "" : v)}
+							>
+								<SelectTrigger className="w-48">
+									<SelectValue placeholder="Todos los asesores" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="todos">Todos</SelectItem>
+									{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+									{(asesoresData as any)?.asesores?.map((a: any) => (
+										<SelectItem key={a.asesorId} value={String(a.asesorId)}>
+											{a.nombre}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					)}
 
-				{canSeeAll && (
 					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Asesor</Label>
-						<Select
-							value={asesorId}
-							onValueChange={(v) => setAsesorId(v === "todos" ? "" : v)}
-						>
-							<SelectTrigger className="w-48">
-								<SelectValue placeholder="Todos los asesores" />
+						<Label className="text-xs">Estado</Label>
+						<Select value={filtroEstado} onValueChange={setFiltroEstado}>
+							<SelectTrigger className="w-36">
+								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="todos">Todos</SelectItem>
-								{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-								{(asesoresData as any)?.asesores?.map((a: any) => (
-									<SelectItem key={a.asesorId} value={String(a.asesorId)}>
-										{a.nombre}
-									</SelectItem>
-								))}
+								<SelectItem value="pagado">Pagado</SelectItem>
+								<SelectItem value="parcial">Parcial</SelectItem>
+								<SelectItem value="pendiente">Pendiente</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
-				)}
 
-				<div className="flex flex-col gap-1">
-					<Label className="text-xs">Estado</Label>
-					<Select value={filtroEstado} onValueChange={setFiltroEstado}>
-						<SelectTrigger className="w-36">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="todos">Todos</SelectItem>
-							<SelectItem value="pagado">Pagado</SelectItem>
-							<SelectItem value="parcial">Parcial</SelectItem>
-							<SelectItem value="pendiente">Pendiente</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-
-				<div className="ml-auto flex items-center gap-2">
-					{ultimaAct && (
-						<span className="text-muted-foreground text-xs">
-							Actualizado: {ultimaAct}
-						</span>
-					)}
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => refetch()}
-						disabled={isFetching}
-					>
-						<RefreshCw
-							className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
-						/>
-						Actualizar
-					</Button>
+					<div className="ml-auto flex items-center gap-2">
+						{ultimaAct && (
+							<span className="text-muted-foreground text-xs">
+								Actualizado: {ultimaAct}
+							</span>
+						)}
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => refetch()}
+							disabled={isFetching}
+						>
+							<RefreshCw
+								className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
+							/>
+							Actualizar
+						</Button>
+					</div>
 				</div>
 			</div>
 

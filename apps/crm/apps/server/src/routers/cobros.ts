@@ -4062,6 +4062,10 @@ export const cobrosRouter = {
 					extraInsuranceCost: quotations.extraInsuranceCost,
 					extraMembershipCost: quotations.extraMembershipCost,
 					extraAdminCost: quotations.extraAdminCost,
+					freelanceCost: quotations.freelanceCost,
+					royalty: quotations.royalty,
+					inspectionCost: quotations.inspectionCost,
+					legalCost: quotations.legalCost,
 				})
 				.from(quotations)
 				.where(isNotNull(quotations.opportunityId))
@@ -4096,7 +4100,11 @@ export const cobrosRouter = {
 				COALESCE(${latestQuotations.extraGpsCost}::numeric, 0) +
 				COALESCE(${latestQuotations.extraInsuranceCost}::numeric, 0) +
 				COALESCE(${latestQuotations.extraMembershipCost}::numeric, 0) +
-				COALESCE(${latestQuotations.extraAdminCost}::numeric, 0)
+				COALESCE(${latestQuotations.extraAdminCost}::numeric, 0) +
+				COALESCE(${latestQuotations.freelanceCost}::numeric, 0) +
+				COALESCE(${latestQuotations.royalty}::numeric, 0) +
+				COALESCE(${latestQuotations.inspectionCost}::numeric, 0) +
+				COALESCE(${latestQuotations.legalCost}::numeric, 0)
 			)`;
 
 			const baseQuery = db
@@ -4121,6 +4129,10 @@ export const cobrosRouter = {
 					extraInsuranceCost: latestQuotations.extraInsuranceCost,
 					extraMembershipCost: latestQuotations.extraMembershipCost,
 					extraAdminCost: latestQuotations.extraAdminCost,
+					freelanceCost: latestQuotations.freelanceCost,
+					royalty: latestQuotations.royalty,
+					inspectionCost: latestQuotations.inspectionCost,
+					legalCost: latestQuotations.legalCost,
 					totalDescuentos: totalSql,
 				})
 				.from(latestQuotations)
@@ -4176,6 +4188,10 @@ export const cobrosRouter = {
 					seguro: fmt(row.extraInsuranceCost),
 					membresia: fmt(row.extraMembershipCost),
 					gastosAdmin: fmt(row.extraAdminCost),
+					freelance: fmt(row.freelanceCost),
+					royalty: fmt(row.royalty),
+					inspeccion: fmt(row.inspectionCost),
+					gastosLegales: fmt(row.legalCost),
 					totalDescuentos: Number(row.totalDescuentos).toFixed(2),
 				};
 			});

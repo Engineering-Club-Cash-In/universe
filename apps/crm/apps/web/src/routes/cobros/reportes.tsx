@@ -804,7 +804,6 @@ function TabCuotasPorFecha({
 type DescuentoRow = {
 	sifco: string;
 	clienteNombre: string;
-	asesorNombre: string;
 	multas: string;
 	copiaDeLlave: string;
 	diferenciaCopia: string;
@@ -822,6 +821,10 @@ type DescuentoRow = {
 	seguro: string;
 	membresia: string;
 	gastosAdmin: string;
+	freelance: string;
+	royalty: string;
+	inspeccion: string;
+	gastosLegales: string;
 	totalDescuentos: string;
 };
 
@@ -868,6 +871,10 @@ const colsDescuentos: ColumnDef<DescuentoRow>[] = [
 	{ accessorKey: "seguro", header: "Seguro", cell: ({ row }) => fmtDesc(row.original.seguro) },
 	{ accessorKey: "membresia", header: "Membresía", cell: ({ row }) => fmtDesc(row.original.membresia) },
 	{ accessorKey: "gastosAdmin", header: "Gastos admin", cell: ({ row }) => fmtDesc(row.original.gastosAdmin) },
+	{ accessorKey: "freelance", header: "Free Lance", cell: ({ row }) => fmtDesc(row.original.freelance) },
+	{ accessorKey: "royalty", header: "Royalty", cell: ({ row }) => fmtDesc(row.original.royalty) },
+	{ accessorKey: "inspeccion", header: "Inspección", cell: ({ row }) => fmtDesc(row.original.inspeccion) },
+	{ accessorKey: "gastosLegales", header: "Gastos legales", cell: ({ row }) => fmtDesc(row.original.gastosLegales) },
 	{
 		accessorKey: "totalDescuentos",
 		header: "Total",

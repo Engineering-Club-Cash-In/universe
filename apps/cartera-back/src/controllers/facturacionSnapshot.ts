@@ -587,11 +587,15 @@ export async function generarSnapshotDiario(fecha: string) {
 }
 
 // ✅ Aplica SOLO carros + administrativos al snapshot de un día (sin recalcular
-//    los montos importados). Si el día no tiene fila, la genera primero.
-//    - administrativos = SUM(gastos del día); otros_cobros = otros_ingresos − administrativos
-//    - ingreso_carros = SUM(carros del día); acumulado_total = fact_acum + acum_servicios + carros MTD
-//    SÍ respeta el lock: administrativos y otros_cobros son EDITABLES (grupo Otros
-//    ingresos), así que en un día bloqueado NO debe pisarlos → salta días bloqueados.
+//    los montos importados de los rubros). Si el día no tiene fila, la genera primero.
+//    - administrativos = SUM(gastos del día)
+//    - otros_ingresos = administrativos + otros_cobros (MODELO CONTA: la originación va
+//      en administrativos; otros_cobros = otros de pagos, NO cambia con los gastos)
+//    - ingreso_carros = SUM(carros del día)
+//    Como administrativos entra ahora en otros_ingresos → facturación, tras el UPDATE se
+//    recalculan el total del día (recomputarTotalesDia) y los acumulados del mes
+//    (recomputarAcumuladosMes, carros incluidos) — si no, quedaban stale (P1 Codex #942).
+//    SÍ respeta el lock: en un día bloqueado NO se pisa nada → early return.
 export async function aplicarManualesEnSnapshotDia(fecha: string) {
   const existe = await db
     .select({ id: facturacion_snapshot_diario.id })
@@ -600,26 +604,35 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
     .limit(1);
   if (!existe.length) await generarSnapshotDiario(fecha); // día nuevo: sin montos que perder
 
+  // Día bloqueado: administrativos/otros_cobros son editables a mano → NO se pisan; y
+  // como nada cambia, tampoco hay que recalcular totales/acumulados.
+  const lockRes = await db.execute(sql`
+    SELECT bloqueado FROM cartera.facturacion_snapshot_diario WHERE fecha = ${fecha}::date
+  `);
+  if (((lockRes as any).rows ?? lockRes)[0]?.bloqueado === true) {
+    return { success: true, skipped: true, reason: "bloqueado" };
+  }
+
   await db.execute(sql`
     UPDATE cartera.facturacion_snapshot_diario s
     SET administrativos = COALESCE((
           SELECT SUM(monto) FROM cartera.gastos_administrativos g WHERE g.fecha = ${fecha}::date), 0),
-        otros_cobros = s.otros_ingresos - COALESCE((
+        -- MODELO CONTA: Otros ingresos = Administrativos (originación) + Otros cobros
+        -- (otros de pagos). otros_cobros NO depende de los gastos admin → se mantiene;
+        -- otros_ingresos se DERIVA.
+        otros_ingresos = s.otros_cobros + COALESCE((
           SELECT SUM(monto) FROM cartera.gastos_administrativos g WHERE g.fecha = ${fecha}::date), 0),
         ingreso_carros = COALESCE((
           SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
-        -- carros acumulado consistente con la suma corrida: días PREVIOS del mes
-        -- desde la columna del snapshot (incluye lo importado del Excel) + lo de HOY
-        -- desde la tabla de ingresos_carros.
-        acumulado_total = s.facturacion_acumulado + s.acum_servicios_seguro_gps
-          + COALESCE((SELECT SUM(d.ingreso_carros) FROM cartera.facturacion_snapshot_diario d
-                      WHERE d.fecha >= make_date(EXTRACT(YEAR FROM ${fecha}::date)::int, EXTRACT(MONTH FROM ${fecha}::date)::int, 1)
-                        AND d.fecha < ${fecha}::date), 0)
-          + COALESCE((SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
         updated_at = now()
     WHERE s.fecha = ${fecha}::date
-      AND s.bloqueado = false
   `);
+
+  // administrativos → otros_ingresos → facturación: propagar el cambio al total del día
+  // y a los acumulados del mes para que no queden stale (P1 Codex #942).
+  await recomputarTotalesDia(fecha);
+  const [y, m] = fecha.split("-").map(Number);
+  await recomputarAcumuladosMes(y, m);
   return { success: true };
 }
 

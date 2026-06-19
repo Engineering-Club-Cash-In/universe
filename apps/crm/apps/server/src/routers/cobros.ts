@@ -10,6 +10,7 @@ import {
 	gte,
 	ilike,
 	inArray,
+	isNotNull,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -37,6 +38,7 @@ import {
 	referenciasLead,
 	salesStages,
 } from "../db/schema/crm";
+import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import {
 	interpolar as interpolarPlantilla,
@@ -4034,69 +4036,167 @@ export const cobrosRouter = {
 			z.object({
 				page: z.number().min(1).default(1),
 				pageSize: z.number().min(1).max(100).default(25),
-				emailCobrador: z.string().optional(),
+				search: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
-			if (!isCarteraBackEnabled()) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Integración con cartera-back no está habilitada",
-				});
+			const asesorUser = user;
+
+			const latestQuotations = db
+				.selectDistinctOn([quotations.opportunityId], {
+					opportunityId: quotations.opportunityId,
+					finesCost: quotations.finesCost,
+					keyCopyCost: quotations.keyCopyCost,
+					keyCopyDiffCost: quotations.keyCopyDiffCost,
+					circulationTaxCost: quotations.circulationTaxCost,
+					mobileGuaranteeCost: quotations.mobileGuaranteeCost,
+					licensePlatesCost: quotations.licensePlatesCost,
+					leasingContractCost: quotations.leasingContractCost,
+					collectionAuthCost: quotations.collectionAuthCost,
+					appointmentCost: quotations.appointmentCost,
+					addressVerificationCost: quotations.addressVerificationCost,
+					vehicleTransferCost: quotations.vehicleTransferCost,
+					interestCost: quotations.interestCost,
+					rcdpCost: quotations.rcdpCost,
+					extraGpsCost: quotations.extraGpsCost,
+					extraInsuranceCost: quotations.extraInsuranceCost,
+					extraMembershipCost: quotations.extraMembershipCost,
+					extraAdminCost: quotations.extraAdminCost,
+					freelanceCost: quotations.freelanceCost,
+					royalty: quotations.royalty,
+					inspectionCost: quotations.inspectionCost,
+					legalCost: quotations.legalCost,
+				})
+				.from(quotations)
+				.where(isNotNull(quotations.opportunityId))
+				.orderBy(quotations.opportunityId, desc(quotations.createdAt))
+				.as("lq");
+
+			const conditions = [isNotNull(opportunities.numeroSifco)];
+			if (input.search) {
+				const term = `%${input.search}%`;
+				const searchCond = or(
+					ilike(opportunities.numeroSifco, term),
+					ilike(leads.firstName, term),
+					ilike(leads.lastName, term),
+				);
+				if (searchCond) conditions.push(searchCond);
 			}
 
-			const creditos = await obtenerTodasLasPaginasCreditos({
-				mes: 0,
-				anio: new Date().getFullYear(),
-				estado: "ACTIVO",
-				email_cobrador: input.emailCobrador,
+			const totalSql = sql<number>`(
+				COALESCE(${latestQuotations.finesCost}::numeric, 0) +
+				COALESCE(${latestQuotations.keyCopyCost}::numeric, 0) +
+				COALESCE(${latestQuotations.keyCopyDiffCost}::numeric, 0) +
+				COALESCE(${latestQuotations.circulationTaxCost}::numeric, 0) +
+				COALESCE(${latestQuotations.mobileGuaranteeCost}::numeric, 0) +
+				COALESCE(${latestQuotations.licensePlatesCost}::numeric, 0) +
+				COALESCE(${latestQuotations.leasingContractCost}::numeric, 0) +
+				COALESCE(${latestQuotations.collectionAuthCost}::numeric, 0) +
+				COALESCE(${latestQuotations.appointmentCost}::numeric, 0) +
+				COALESCE(${latestQuotations.addressVerificationCost}::numeric, 0) +
+				COALESCE(${latestQuotations.vehicleTransferCost}::numeric, 0) +
+				COALESCE(${latestQuotations.interestCost}::numeric, 0) +
+				COALESCE(${latestQuotations.rcdpCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraGpsCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraInsuranceCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraMembershipCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraAdminCost}::numeric, 0) +
+				COALESCE(${latestQuotations.freelanceCost}::numeric, 0) +
+				COALESCE(${latestQuotations.royalty}::numeric, 0) +
+				COALESCE(${latestQuotations.inspectionCost}::numeric, 0) +
+				COALESCE(${latestQuotations.legalCost}::numeric, 0)
+			)`;
+
+			const baseQuery = db
+				.select({
+					sifco: opportunities.numeroSifco,
+					leadFirstName: leads.firstName,
+					leadLastName: leads.lastName,
+					finesCost: latestQuotations.finesCost,
+					keyCopyCost: latestQuotations.keyCopyCost,
+					keyCopyDiffCost: latestQuotations.keyCopyDiffCost,
+					circulationTaxCost: latestQuotations.circulationTaxCost,
+					mobileGuaranteeCost: latestQuotations.mobileGuaranteeCost,
+					licensePlatesCost: latestQuotations.licensePlatesCost,
+					leasingContractCost: latestQuotations.leasingContractCost,
+					collectionAuthCost: latestQuotations.collectionAuthCost,
+					appointmentCost: latestQuotations.appointmentCost,
+					addressVerificationCost: latestQuotations.addressVerificationCost,
+					vehicleTransferCost: latestQuotations.vehicleTransferCost,
+					interestCost: latestQuotations.interestCost,
+					rcdpCost: latestQuotations.rcdpCost,
+					extraGpsCost: latestQuotations.extraGpsCost,
+					extraInsuranceCost: latestQuotations.extraInsuranceCost,
+					extraMembershipCost: latestQuotations.extraMembershipCost,
+					extraAdminCost: latestQuotations.extraAdminCost,
+					freelanceCost: latestQuotations.freelanceCost,
+					royalty: latestQuotations.royalty,
+					inspectionCost: latestQuotations.inspectionCost,
+					legalCost: latestQuotations.legalCost,
+					totalDescuentos: totalSql,
+				})
+				.from(latestQuotations)
+				.innerJoin(
+					opportunities,
+					eq(latestQuotations.opportunityId, opportunities.id),
+				)
+				.innerJoin(asesorUser, eq(opportunities.assignedTo, asesorUser.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(and(...conditions, sql`${totalSql} > 0`));
+
+			const [[{ total }], rows] = await Promise.all([
+				db
+					.select({ total: count() })
+					.from(latestQuotations)
+					.innerJoin(
+						opportunities,
+						eq(latestQuotations.opportunityId, opportunities.id),
+					)
+					.innerJoin(asesorUser, eq(opportunities.assignedTo, asesorUser.id))
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(and(...conditions, sql`${totalSql} > 0`)),
+				baseQuery
+					.orderBy(desc(opportunities.createdAt))
+					.limit(input.pageSize)
+					.offset((input.page - 1) * input.pageSize),
+			]);
+
+			const fmt = (v: string | null | undefined) =>
+				Number.parseFloat(v || "0").toFixed(2);
+
+			const pageData = rows.map((row) => {
+				const clienteNombre =
+					[row.leadFirstName, row.leadLastName].filter(Boolean).join(" ") ||
+					"Sin cliente";
+				return {
+					sifco: row.sifco ?? "",
+					clienteNombre,
+					multas: fmt(row.finesCost),
+					copiaDeLlave: fmt(row.keyCopyCost),
+					diferenciaCopia: fmt(row.keyCopyDiffCost),
+					impuestoCirculacion: fmt(row.circulationTaxCost),
+					garantiaMobiliaria: fmt(row.mobileGuaranteeCost),
+					placas: fmt(row.licensePlatesCost),
+					contratoLeasing: fmt(row.leasingContractCost),
+					autenticaCobranza: fmt(row.collectionAuthCost),
+					nombramiento: fmt(row.appointmentCost),
+					verificacionDireccion: fmt(row.addressVerificationCost),
+					traspasoVehiculo: fmt(row.vehicleTransferCost),
+					intereses: fmt(row.interestCost),
+					rcdp: fmt(row.rcdpCost),
+					gps: fmt(row.extraGpsCost),
+					seguro: fmt(row.extraInsuranceCost),
+					membresia: fmt(row.extraMembershipCost),
+					gastosAdmin: fmt(row.extraAdminCost),
+					freelance: fmt(row.freelanceCost),
+					royalty: fmt(row.royalty),
+					inspeccion: fmt(row.inspectionCost),
+					gastosLegales: fmt(row.legalCost),
+					totalDescuentos: Number(row.totalDescuentos).toFixed(2),
+				};
 			});
 
-			type RubroItem = { nombre_rubro: string; monto: string | number };
-
-			const todos = creditos
-				.map((item) => {
-					const cred = item.creditos;
-					const gps = Number.parseFloat(cred.gps || "0");
-					const seguro = Number.parseFloat(cred.seguro_10_cuotas || "0");
-					const membresias = Number.parseFloat(cred.membresias_pago || "0");
-					const otros = Number.parseFloat(cred.otros || "0");
-
-					const rubros = ((item.rubros as RubroItem[] | null) ?? []).map(
-						(r) => ({
-							nombre: r.nombre_rubro,
-							monto: Number.parseFloat(String(r.monto || "0")).toFixed(2),
-						}),
-					);
-					const rubrosTotal = rubros.reduce(
-						(s, r) => s + Number.parseFloat(r.monto),
-						0,
-					);
-
-					const totalDescuentos =
-						gps + seguro + membresias + otros + rubrosTotal;
-					if (totalDescuentos <= 0) return null;
-
-					return {
-						sifco: cred.numero_credito_sifco,
-						clienteNombre: item.usuarios.nombre,
-						asesorNombre: item.asesores?.nombre ?? "Sin asesor",
-						gps: gps.toFixed(2),
-						seguro: seguro.toFixed(2),
-						membresias: membresias.toFixed(2),
-						otros: otros.toFixed(2),
-						rubros,
-						rubrosTotal: rubrosTotal.toFixed(2),
-						totalDescuentos: totalDescuentos.toFixed(2),
-						capital: cred.capital,
-						tipoCredito: cred.tipoCredito ?? null,
-					};
-				})
-				.filter((v): v is NonNullable<typeof v> => v !== null);
-
-			const total = todos.length;
 			const totalPages = Math.max(1, Math.ceil(total / input.pageSize));
-			const start = (input.page - 1) * input.pageSize;
-			const pageData = todos.slice(start, start + input.pageSize);
 
 			return {
 				data: pageData,

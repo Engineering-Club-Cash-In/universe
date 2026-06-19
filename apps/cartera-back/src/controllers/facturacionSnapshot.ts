@@ -261,16 +261,19 @@ export async function generarSnapshotDiario(fecha: string) {
             ('validated','pending','reset','capital','capital_validated')
         )
       )
-      -- Las GENÉRICAS de ORIGINACIÓN (alta de crédito nuevo) SÍ alimentan sus rubros:
-      -- la cuota 0 de INTERÉS y MEMBRESÍA del vehículo nuevo DEBE SUMAR (decisión del
-      -- negocio), igual que otros/royalty/seguro. Solo se excluyen del desglose:
-      --   • CAPITAL → se calcula del pci (bloque 1.5), no del desglose.
-      --   • MORA → un crédito nuevo no genera mora genérica.
-      -- ⚠️ Con esto interés/membresía dejan de cuadrar con el Excel (que manda la
-      --    cuota 0 a administrativos) — decisión explícita: en el sistema la cuota 0 suma.
-      AND NOT (
-        fd.pago_id IS NULL
-        AND fd.rubro::text IN ('CAPITAL','MORA')
+      -- MODELO CONTA (2026-06-19): la CUOTA 0 (originación de crédito nuevo) NO va a
+      -- sus rubros — va a ADMINISTRATIVOS. El CRM ya la guarda en gastos_administrativos
+      -- (los MISMOS cargos: "Cuota 0"=interés+membresía, "Seguro y Gastos Adm."=seguro,
+      -- "Contrato/Traspaso/Garantía"=otros), así que sumarla también en el desglose la
+      -- DUPLICABA (rubro + administrativos). Por eso las GENÉRICAS (pago_id NULL) se
+      -- EXCLUYEN de interés/membresía/otros/seguro/gps → esos rubros = SOLO PAGOS, igual
+      -- que el Excel "Reuniones diarias" (Otros ingresos = Administrativos + Otros cobros).
+      -- También se excluyen CAPITAL (sale del pci, bloque 1.5) y MORA (un crédito nuevo
+      -- no genera mora). ÚNICA genérica que SÍ suma en su rubro: ROYALTY (conta lo deja
+      -- aparte de administrativos — "todo menos royalti").
+      AND (
+        fd.pago_id IS NOT NULL
+        OR fd.rubro::text = 'ROYALTY'
       )
     GROUP BY COALESCE(u.categoria, fd.categoria), fd.rubro
   `);
@@ -337,6 +340,26 @@ export async function generarSnapshotDiario(fecha: string) {
     add(colProducto("cap", r.categoria as string), r.cap);
   }
 
+  // 1.6) 🏷️ OI por producto = MODELO CONTA. En el Excel "Reuniones diarias" las columnas
+  //      "Otros ingresos" por categoría (oi_<producto>) incluyen TODA la originación del
+  //      crédito nuevo —la cuota 0 de interés/membresía/seguro/otros—, no solo el rubro
+  //      OTROS. Esas genéricas se excluyeron de los rubros (bloque 1, van a administrativos)
+  //      pero el DETALLE por producto de OI sí las lleva, para que calce con conta.
+  //      ⚠️ Esto NO toca los totales: otros_ingresos sigue = administrativos + otros_cobros
+  //      (ver bloque 5). Solo distribuye la originación en las columnas oi_<producto>.
+  //      La categoría de las genéricas vive en fd.categoria (resuelta por NIT al facturar).
+  const oiNuevo = await db.execute(sql`
+    SELECT fd.categoria AS categoria, SUM(fd.monto_total) AS total
+    FROM cartera.facturacion_desglose fd
+    WHERE fd.fecha_aplicado_gt = ${fecha}::date
+      AND fd.pago_id IS NULL
+      AND fd.rubro::text IN ('INTERES','MEMBRESIA','SEGURO','GPS','OTROS')
+    GROUP BY fd.categoria
+  `);
+  for (const r of (oiNuevo as any).rows ?? []) {
+    add(colProducto("oi", r.categoria as string), r.total);
+  }
+
   // 2) Royalty del día = SOLO lo REALMENTE facturado (rubro ROYALTY del desglose,
   //    ya sumado en el bloque 1). Decisión de diseño: NO se usa creditos.royalti de
   //    respaldo — lo facturado es la fuente correcta (creditos.royalti difería de
@@ -369,14 +392,20 @@ export async function generarSnapshotDiario(fecha: string) {
   `);
   const factInv = new Big((inv as any).rows?.[0]?.total || 0);
 
-  // 5) Totales derivados del día
-  const interes_cube = g("interes_cube");
-  const membresia = g("membresia");
-  const otros_ingresos = g("otros_ingresos");
+  // 5) Totales derivados del día (MODELO CONTA, 2026-06-19)
+  //    interés/membresía/otros/servicios = SOLO PAGOS (las genéricas/cuota 0 se
+  //    excluyeron en el bloque 1 y viven en administrativos). Otros ingresos =
+  //    Administrativos (originación de créditos nuevos) + Otros cobros (otros de pagos),
+  //    igual que el Excel: "Otros ingresos = Administrativos + Otros cobros". La cuota 0
+  //    entra a facturación UNA sola vez, vía administrativos dentro de otros_ingresos.
+  const interes_cube = g("interes_cube"); // solo pagos
+  const membresia = g("membresia"); // solo pagos
+  const otros_pagos = g("otros_ingresos"); // OTROS de pagos (genéricas ya excluidas)
   const mora_cube = g("mora_cube");
   const royalty = g("royalty");
-  const servicios = g("servicios_seguro_gps");
-  const otros_cobros = otros_ingresos.minus(administrativos);
+  const servicios = g("servicios_seguro_gps"); // solo pagos
+  const otros_ingresos = administrativos.plus(otros_pagos);
+  const otros_cobros = otros_pagos; // = otros_ingresos − administrativos
   const facturacion = royalty
     .plus(mora_cube)
     .plus(otros_ingresos)
@@ -578,11 +607,15 @@ export async function generarSnapshotDiario(fecha: string) {
 }
 
 // ✅ Aplica SOLO carros + administrativos al snapshot de un día (sin recalcular
-//    los montos importados). Si el día no tiene fila, la genera primero.
-//    - administrativos = SUM(gastos del día); otros_cobros = otros_ingresos − administrativos
-//    - ingreso_carros = SUM(carros del día); acumulado_total = fact_acum + acum_servicios + carros MTD
-//    SÍ respeta el lock: administrativos y otros_cobros son EDITABLES (grupo Otros
-//    ingresos), así que en un día bloqueado NO debe pisarlos → salta días bloqueados.
+//    los montos importados de los rubros). Si el día no tiene fila, la genera primero.
+//    - administrativos = SUM(gastos del día)
+//    - otros_ingresos = administrativos + otros_cobros (MODELO CONTA: la originación va
+//      en administrativos; otros_cobros = otros de pagos, NO cambia con los gastos)
+//    - ingreso_carros = SUM(carros del día)
+//    Como administrativos entra ahora en otros_ingresos → facturación, tras el UPDATE se
+//    recalculan el total del día (recomputarTotalesDia) y los acumulados del mes
+//    (recomputarAcumuladosMes, carros incluidos) — si no, quedaban stale (P1 Codex #942).
+//    SÍ respeta el lock: en un día bloqueado NO se pisa nada → early return.
 export async function aplicarManualesEnSnapshotDia(fecha: string) {
   const existe = await db
     .select({ id: facturacion_snapshot_diario.id })
@@ -591,26 +624,35 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
     .limit(1);
   if (!existe.length) await generarSnapshotDiario(fecha); // día nuevo: sin montos que perder
 
+  // Día bloqueado: administrativos/otros_cobros son editables a mano → NO se pisan; y
+  // como nada cambia, tampoco hay que recalcular totales/acumulados.
+  const lockRes = await db.execute(sql`
+    SELECT bloqueado FROM cartera.facturacion_snapshot_diario WHERE fecha = ${fecha}::date
+  `);
+  if (((lockRes as any).rows ?? lockRes)[0]?.bloqueado === true) {
+    return { success: true, skipped: true, reason: "bloqueado" };
+  }
+
   await db.execute(sql`
     UPDATE cartera.facturacion_snapshot_diario s
     SET administrativos = COALESCE((
           SELECT SUM(monto) FROM cartera.gastos_administrativos g WHERE g.fecha = ${fecha}::date), 0),
-        otros_cobros = s.otros_ingresos - COALESCE((
+        -- MODELO CONTA: Otros ingresos = Administrativos (originación) + Otros cobros
+        -- (otros de pagos). otros_cobros NO depende de los gastos admin → se mantiene;
+        -- otros_ingresos se DERIVA.
+        otros_ingresos = s.otros_cobros + COALESCE((
           SELECT SUM(monto) FROM cartera.gastos_administrativos g WHERE g.fecha = ${fecha}::date), 0),
         ingreso_carros = COALESCE((
           SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
-        -- carros acumulado consistente con la suma corrida: días PREVIOS del mes
-        -- desde la columna del snapshot (incluye lo importado del Excel) + lo de HOY
-        -- desde la tabla de ingresos_carros.
-        acumulado_total = s.facturacion_acumulado + s.acum_servicios_seguro_gps
-          + COALESCE((SELECT SUM(d.ingreso_carros) FROM cartera.facturacion_snapshot_diario d
-                      WHERE d.fecha >= make_date(EXTRACT(YEAR FROM ${fecha}::date)::int, EXTRACT(MONTH FROM ${fecha}::date)::int, 1)
-                        AND d.fecha < ${fecha}::date), 0)
-          + COALESCE((SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
         updated_at = now()
     WHERE s.fecha = ${fecha}::date
-      AND s.bloqueado = false
   `);
+
+  // administrativos → otros_ingresos → facturación: propagar el cambio al total del día
+  // y a los acumulados del mes para que no queden stale (P1 Codex #942).
+  await recomputarTotalesDia(fecha);
+  const [y, m] = fecha.split("-").map(Number);
+  await recomputarAcumuladosMes(y, m);
   return { success: true };
 }
 

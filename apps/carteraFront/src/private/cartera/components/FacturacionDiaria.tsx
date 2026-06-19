@@ -466,15 +466,15 @@ export function FacturacionDiaria() {
                         <td
                           key={`${row.id}-${c.k}`}
                           onClick={
-                            c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k)
+                            c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k) && !row.bloqueado
                               ? () => setDetalleTarget({ fecha: row.fecha, rubro: g.rubro as string, label: g.label })
                               : undefined
                           }
-                          title={c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k) ? "Ver desglose crédito nuevo vs pago" : undefined}
+                          title={c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k) && !row.bloqueado ? "Ver desglose crédito nuevo vs pago" : undefined}
                           className={`px-3 py-2 text-right tabular-nums border-r border-gray-50 whitespace-nowrap ${
                             c.k === g.total.k ? "bg-blue-50/60 font-semibold text-blue-900" : "text-gray-700"
                           }${
-                            c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k)
+                            c.k === g.total.k && g.rubro && !esCeldaEditable(row.fecha, c.k) && !row.bloqueado
                               ? " cursor-pointer hover:bg-blue-100 underline decoration-dotted underline-offset-2"
                               : ""
                           }`}

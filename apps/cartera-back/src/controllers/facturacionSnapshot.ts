@@ -880,11 +880,16 @@ export async function generarExcelFacturacionDiaria(
   //   Para conta: por cada día y rubro, el desglose por producto en crédito nuevo
   //   vs pago, RESPETANDO el orden del reporte y con filas en blanco entre rubros
   //   y días para que se lea cómodo. Fuente: facturacion_snapshot_detalle.
+  // Días BLOQUEADOS (editados a mano / forzados): el detalle viene del desglose y
+  //   NO reconcilia con el total forzado → se EXCLUYEN del Desglose (Codex P2 #933).
   const det = await db.execute(sql`
     SELECT fecha::text AS fecha, rubro::text AS rubro, producto, origen,
            monto_total::float8 AS monto
     FROM cartera.facturacion_snapshot_detalle
     WHERE fecha BETWEEN ${fechaInicio}::date AND ${fechaFin}::date
+      AND fecha NOT IN (
+        SELECT fecha FROM cartera.facturacion_snapshot_diario WHERE bloqueado = true
+      )
   `);
   const idx: Record<string, Record<string, Record<string, { nuevo: number; pago: number }>>> = {};
   for (const x of (det as any).rows ?? []) {

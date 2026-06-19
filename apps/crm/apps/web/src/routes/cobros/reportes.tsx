@@ -748,49 +748,49 @@ function TabCuotasPorFecha({
 			</div>
 
 			{/* Summary cards */}
-			<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-				<Card className="border-blue-200 bg-blue-50">
-					<CardHeader className="pb-2">
-						<CardTitle className="font-medium text-blue-700 text-sm">
+			<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+				<Card className="gap-1 border-blue-200 bg-blue-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-blue-700 text-xs">
 							Total Esperado
 						</CardTitle>
 					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-blue-800 text-xl">
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-blue-800 text-lg">
 							{fmtQ(totales?.totalEsp ?? "0")}
 						</div>
 					</CardContent>
 				</Card>
-				<Card className="border-green-200 bg-green-50">
-					<CardHeader className="pb-2">
-						<CardTitle className="font-medium text-green-700 text-sm">
+				<Card className="gap-1 border-green-200 bg-green-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-green-700 text-xs">
 							Total Pagado
 						</CardTitle>
 					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-green-700 text-xl">
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-green-700 text-lg">
 							{fmtQ(totales?.totalPag ?? "0")}
 						</div>
 					</CardContent>
 				</Card>
-				<Card className="border-red-200 bg-red-50">
-					<CardHeader className="pb-2">
-						<CardTitle className="font-medium text-red-700 text-sm">
+				<Card className="gap-1 border-red-200 bg-red-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-red-700 text-xs">
 							Total Pendiente
 						</CardTitle>
 					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-red-700 text-xl">
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-red-700 text-lg">
 							{fmtQ(totales?.totalPendiente ?? "0")}
 						</div>
 					</CardContent>
 				</Card>
-				<Card>
-					<CardHeader className="pb-2">
-						<CardTitle className="font-medium text-sm">Cuotas</CardTitle>
+				<Card className="gap-1 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-xs">Cuotas</CardTitle>
 					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-xl">
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-lg">
 							{totales?.cuotasPagadas ?? 0} / {totales?.cuotasTotal ?? 0}
 						</div>
 						<p className="text-muted-foreground text-xs">pagadas / total</p>
@@ -810,13 +810,13 @@ function TabCuotasPorFecha({
 						{ key: "membresiasEsp", label: "Membresías" },
 					] as const
 				).map((c) => (
-					<Card key={c.key} className="py-3">
-						<CardHeader className="px-4 pb-1 pt-0">
+					<Card key={c.key} className="gap-0.5 py-2.5">
+						<CardHeader className="px-3 pb-0 pt-0">
 							<CardTitle className="font-medium text-muted-foreground text-xs">
 								{c.label}
 							</CardTitle>
 						</CardHeader>
-						<CardContent className="px-4 pb-0">
+						<CardContent className="px-3 pb-0">
 							<div className="font-semibold text-sm">
 								{fmtQ(totales?.[c.key] ?? "0")}
 							</div>

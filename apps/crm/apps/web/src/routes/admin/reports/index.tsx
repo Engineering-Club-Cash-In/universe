@@ -377,6 +377,8 @@ function fillMissingPeriods(
 				acum_total_seguro: "0",
 				acum_total_gps: "0",
 				acum_total_membresias: "0",
+				total_interes_inversionista: "0",
+				acum_total_interes_inversionista: "0",
 			}
 		);
 	});
@@ -1434,6 +1436,9 @@ function RouteComponent() {
 																Membresías
 															</TableHead>
 															<TableHead className="text-right">
+																Interés Inv. (referencia)
+															</TableHead>
+															<TableHead className="text-right">
 																Total Mora
 															</TableHead>
 															<TableHead className="text-right font-bold">
@@ -1467,6 +1472,10 @@ function RouteComponent() {
 															const membresias = a
 																? row.acum_total_membresias
 																: row.total_membresias;
+															// Facturado real a inversionistas (neto). Por período: lo
+															const interesInversionista = a
+																? row.acum_total_interes_inversionista
+																: row.total_interes_inversionista;
 															const total =
 																Number.parseFloat(cuota) +
 																Number.parseFloat(interes) +
@@ -1502,6 +1511,9 @@ function RouteComponent() {
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(membresias)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(interesInversionista)}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		<div>{formatCurrency(row.total_mora)}</div>
@@ -1608,6 +1620,15 @@ function RouteComponent() {
 																				a
 																					? "acum_total_membresias"
 																					: "total_membresias",
+																			),
+																		)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_interes_inversionista"
+																					: "total_interes_inversionista",
 																			),
 																		)}
 																	</TableCell>

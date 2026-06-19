@@ -296,6 +296,21 @@ export async function getMontoACobrarPeriodo({
         COUNT(*)::int                           AS cuotas_count
       FROM calc_acum
       GROUP BY DATE_TRUNC(${pg}, bucket::timestamp), credito_id
+    ),
+    -- Interés facturado a inversionistas: rubro INTERES_INVERSIONISTAS del desglose
+    -- (con IVA incluido), agrupado por fecha en que se aplicó (fecha_aplicado_gt).
+    -- Es facturado REAL —otra fuente que el esperado de las cuotas— por eso se muestra
+    -- aparte y NO se suma al Total de la fila.
+    inv_por_bucket AS (
+      SELECT
+        DATE_TRUNC(${pg}, fd.fecha_aplicado_gt::timestamp)        AS inv_bucket,
+        COALESCE(SUM(fd.monto_total::numeric - fd.monto_iva::numeric), 0) AS total_interes_inversionista
+      FROM cartera.facturacion_desglose fd
+      WHERE fd.rubro::text = 'INTERES_INVERSIONISTAS'
+        AND fd.fecha_aplicado_gt IS NOT NULL
+        AND fd.fecha_aplicado_gt >= ${fechaInicio}::date
+        AND fd.fecha_aplicado_gt <= ${fechaFin}::date
+      GROUP BY DATE_TRUNC(${pg}, fd.fecha_aplicado_gt::timestamp)
     )
     SELECT
       bucket,
@@ -333,8 +348,14 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(CASE
         WHEN excluido_mora     THEN 0
         WHEN cuotas_atrasadas > 0 THEN acum_mem
-        ELSE mem END), 0)                                                                         AS acum_total_membresias
+        ELSE mem END), 0)                                                                         AS acum_total_membresias,
+      -- Interés a inversionistas (facturado REAL, neto sin IVA). Por período: lo facturado
+      -- en ese bucket. Acumulado: suma corrida hasta el bucket (el último bucket = gran
+      -- total, igual que como la fila Total lee el acumulado de los demás rubros).
+      COALESCE(MAX(ib.total_interes_inversionista), 0)                                            AS total_interes_inversionista,
+      COALESCE(SUM(COALESCE(MAX(ib.total_interes_inversionista), 0)) OVER (ORDER BY bucket), 0)   AS acum_total_interes_inversionista
     FROM per_bucket_credit
+    LEFT JOIN inv_por_bucket ib ON ib.inv_bucket = bucket
     GROUP BY bucket
     ORDER BY bucket ASC
   `);

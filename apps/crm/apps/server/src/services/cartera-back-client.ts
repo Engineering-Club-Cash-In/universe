@@ -256,6 +256,8 @@ export type MontoACobrarPeriodoRow = {
 	acum_total_seguro: string;
 	acum_total_gps: string;
 	acum_total_membresias: string;
+	total_interes_inversionista: string;
+	acum_total_interes_inversionista: string;
 };
 
 export type FlujoCuotasRubro = {

@@ -135,3 +135,10 @@ results_json/
 
 
 backups/
+
+# Logs de DTE (payloads SAT con datos de clientes: NIT, nombre, URLs de factura) — NUNCA commitear
+logs-dte/
+
+# Scripts temporales ad-hoc (QA/regen) en la raíz de cartera-back
+/_*.ts
+/_*.mjs

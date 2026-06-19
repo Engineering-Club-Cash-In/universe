@@ -1286,12 +1286,16 @@ export async function getCuotasPorFecha({
         AND qc_prev.numero_cuota = c.numero_cuota - 1
         AND qc_prev.numero_cuota > 0
         AND pc_prev."paymentFalse" = false
+        AND pc_prev.monto_aplicado IS NOT NULL
+        AND pc_prev.monto_aplicado::numeric > 0
     ) prev_pag ON true
     LEFT JOIN LATERAL (
       SELECT MAX(pc_curr.total_restante::numeric) AS total_restante
       FROM cartera.pagos_credito pc_curr
       WHERE pc_curr.cuota_id = c.cuota_id
         AND pc_curr."paymentFalse" = false
+        AND pc_curr.monto_aplicado IS NOT NULL
+        AND pc_curr.monto_aplicado::numeric > 0
     ) curr_pag ON true
     LEFT JOIN LATERAL (
       SELECT

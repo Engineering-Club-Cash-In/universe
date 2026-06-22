@@ -296,9 +296,40 @@ export async function getMontoACobrarPeriodo({
         COUNT(*)::int                           AS cuotas_count
       FROM calc_acum
       GROUP BY DATE_TRUNC(${pg}, bucket::timestamp), credito_id
+    ),
+    -- Interés facturado a inversionistas: rubro INTERES_INVERSIONISTAS del desglose,
+    -- NETO (monto_total - monto_iva), agrupado por la fecha en que se aplicó
+    -- (fecha_aplicado_gt). Es facturado REAL —otra fuente que el esperado de las
+    -- cuotas— por eso se muestra aparte y NO se suma al Total de la fila.
+    inv_por_bucket AS (
+      SELECT
+        DATE_TRUNC(${pg}, fd.fecha_aplicado_gt::timestamp)        AS inv_bucket,
+        COALESCE(SUM(fd.monto_total::numeric - fd.monto_iva::numeric), 0) AS total_interes_inversionista
+      FROM cartera.facturacion_desglose fd
+      WHERE fd.rubro::text = 'INTERES_INVERSIONISTAS'
+        AND fd.fecha_aplicado_gt IS NOT NULL
+        AND fd.fecha_aplicado_gt >= ${fechaInicio}::date
+        AND fd.fecha_aplicado_gt <= ${fechaFin}::date
+      GROUP BY DATE_TRUNC(${pg}, fd.fecha_aplicado_gt::timestamp)
+    ),
+    -- ENFOQUE ALTERNATIVO (en evaluación A/B, NO reemplaza al anterior): interés a
+    -- inversionistas tomado de pagos_credito_inversionistas (interés + IVA), solo de
+    -- inversionistas externos (permite_distribucion = false → se ignoran los nuestros),
+    -- agrupado por fecha_pago en zona Guatemala.
+    inv_pagos_por_bucket AS (
+      SELECT
+        DATE_TRUNC(${pg}, (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::timestamp) AS pagos_bucket,
+        COALESCE(SUM(pci.abono_interes::numeric + pci.abono_iva_12::numeric), 0)        AS total_interes_inversionista_pagos
+      FROM cartera.pagos_credito_inversionistas pci
+      WHERE pci.inversionista_id IN (
+        SELECT inversionista_id FROM cartera.inversionistas WHERE permite_distribucion = false
+      )
+        AND (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::date >= ${fechaInicio}::date
+        AND (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::date <= ${fechaFin}::date
+      GROUP BY DATE_TRUNC(${pg}, (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::timestamp)
     )
     SELECT
-      bucket,
+      COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket) AS bucket,
       COALESCE(SUM(cuotas_count), 0)::int                                                        AS cuotas_count,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END), 0)               AS total_cuota,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN interes     ELSE 0 END), 0)               AS total_interes,
@@ -333,10 +364,24 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(CASE
         WHEN excluido_mora     THEN 0
         WHEN cuotas_atrasadas > 0 THEN acum_mem
-        ELSE mem END), 0)                                                                         AS acum_total_membresias
+        ELSE mem END), 0)                                                                         AS acum_total_membresias,
+      -- Interés a inversionistas (facturado REAL, neto sin IVA). Por período: lo facturado
+      -- en ese bucket. Acumulado: suma corrida hasta el bucket (el último bucket = gran
+      -- total, igual que como la fila Total lee el acumulado de los demás rubros).
+      COALESCE(MAX(ib.total_interes_inversionista), 0)                                            AS total_interes_inversionista,
+      COALESCE(SUM(COALESCE(MAX(ib.total_interes_inversionista), 0)) OVER (ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket)), 0)   AS acum_total_interes_inversionista,
+      -- ENFOQUE ALTERNATIVO (A/B): interés a inversionistas desde pagos_credito_inversionistas
+      -- (interés + IVA). Mismo tratamiento por período / acumulado que el enfoque anterior.
+      COALESCE(MAX(ip.total_interes_inversionista_pagos), 0)                                      AS total_interes_inversionista_pagos,
+      COALESCE(SUM(COALESCE(MAX(ip.total_interes_inversionista_pagos), 0)) OVER (ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket)), 0)   AS acum_total_interes_inversionista_pagos
+    -- FULL JOIN: el resultado se arma desde la unión de buckets de las fuentes, para que un
+    -- período con facturación/pagos a inversionistas pero SIN cuotas pendientes (posible en
+    -- vista día/semana) no se pierda ni subestime las columnas.
     FROM per_bucket_credit
-    GROUP BY bucket
-    ORDER BY bucket ASC
+    FULL JOIN inv_por_bucket ib ON ib.inv_bucket = per_bucket_credit.bucket
+    FULL JOIN inv_pagos_por_bucket ip ON ip.pagos_bucket = COALESCE(per_bucket_credit.bucket, ib.inv_bucket)
+    GROUP BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket)
+    ORDER BY COALESCE(per_bucket_credit.bucket, ib.inv_bucket, ip.pagos_bucket) ASC
   `);
 
   return result.rows;
@@ -797,6 +842,37 @@ export async function getReinversionLiquidaciones({
     }
   }
 
+  // Interés de CUBE: no se almacena como tal sino que se deriva de las filas de
+  // los inversionistas no-CUBE en pagos_credito_inversionistas_espejo. Para una
+  // fila con interés `abono_interes` y participación `porcentaje_participacion`,
+  // el interés que le corresponde a CUBE (el complemento) es:
+  //   interes_cube = abono_interes × (100 - porcentaje_participacion) / porcentaje_participacion
+  // El cálculo se hace POR FILA, así
+  // que no hay que combinar inversionistas por cuota. Calcular por fila además:
+  //   - maneja pagos parciales (cada parcial aporta su complemento y se suman);
+  //   - usa el porcentaje del snapshot de cada fila, por lo que sigue siendo
+  //     correcto si la participación cambia entre cuotas (reasignación).
+  // Se excluye la propia CUBE (inversionista_id 86) para no contar sus filas como
+  // si fueran de un inversionista no-CUBE, y se omiten las filas al 100% (sin
+  // complemento) y al 0% (evita división por cero).
+  const cubeRows = await db.execute(sql`
+    SELECT COALESCE(SUM(
+      pe.abono_interes::numeric
+        * (100 - pe.porcentaje_participacion::numeric)
+        / pe.porcentaje_participacion::numeric
+    ), 0) AS interes_cube
+    FROM cartera.pagos_credito_inversionistas_espejo pe
+    JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+      AND pe.inversionista_id <> 86
+      AND pe.porcentaje_participacion::numeric > 0
+      AND pe.porcentaje_participacion::numeric < 100
+  `);
+  const interesCube = Number(
+    (cubeRows.rows[0] as Record<string, unknown>)?.interes_cube ?? 0
+  );
+
   // Pagos extras recibidos (abonos a capital / cancelaciones) que fluyen desde
   // las liquidaciones del mes: liquidación → pago espejo → abono.
   // Cada abono se cuenta una sola vez (DISTINCT) aunque tenga varios pagos espejo.
@@ -962,6 +1038,11 @@ export async function getReinversionLiquidaciones({
         interes: sinFactura.interes.toFixed(2),
         isr: sinFactura.isr.toFixed(2),
         neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
+      },
+      cube: {
+        interes: interesCube.toFixed(2),
+        iva: (interesCube * 0.12).toFixed(2),
+        neto: (interesCube * 1.12).toFixed(2),
       },
     },
     pagosExtras: {

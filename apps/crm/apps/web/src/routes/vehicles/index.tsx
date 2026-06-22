@@ -84,6 +84,11 @@ import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
 import { ROLES } from "@/lib/roles";
 import {
+	VEHICLE_ORIGIN_OPTIONS,
+	VEHICLE_TYPE_OPTIONS,
+	VEHICLE_USE_OPTIONS,
+} from "@/lib/vehicle-form-options";
+import {
 	renderInspectionStatusBadge,
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
@@ -2099,23 +2104,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar tipo" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Sedan">Sedan</SelectItem>
-											<SelectItem value="Hatchback">Hatchback</SelectItem>
-											<SelectItem value="SUV">SUV</SelectItem>
-											<SelectItem value="Pickup">Pickup</SelectItem>
-											<SelectItem value="Minivan">Minivan</SelectItem>
-											<SelectItem value="Deportivo">Deportivo</SelectItem>
-											<SelectItem value="Microbus">Microbus</SelectItem>
-											<SelectItem value="Bus hasta 20 pasajeros">
-												Bus hasta 20 pasajeros
-											</SelectItem>
-											<SelectItem value="Bus 21-35 pasajeros">
-												Bus 21-35 pasajeros
-											</SelectItem>
-											<SelectItem value="Bus más de 35 pasajeros">
-												Bus más de 35 pasajeros
-											</SelectItem>
-											<SelectItem value="Otro">Otro</SelectItem>
+											{VEHICLE_TYPE_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2131,8 +2124,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar origen" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Nacional">Nacional</SelectItem>
-											<SelectItem value="Importado">Importado</SelectItem>
+											{VEHICLE_ORIGIN_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2319,8 +2315,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Particular">Particular</SelectItem>
-											<SelectItem value="Comercial">Comercial</SelectItem>
+											{VEHICLE_USE_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2601,23 +2600,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar tipo" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Sedan">Sedan</SelectItem>
-											<SelectItem value="Hatchback">Hatchback</SelectItem>
-											<SelectItem value="SUV">SUV</SelectItem>
-											<SelectItem value="Pickup">Pickup</SelectItem>
-											<SelectItem value="Minivan">Minivan</SelectItem>
-											<SelectItem value="Deportivo">Deportivo</SelectItem>
-											<SelectItem value="Microbus">Microbus</SelectItem>
-											<SelectItem value="Bus hasta 20 pasajeros">
-												Bus hasta 20 pasajeros
-											</SelectItem>
-											<SelectItem value="Bus 21-35 pasajeros">
-												Bus 21-35 pasajeros
-											</SelectItem>
-											<SelectItem value="Bus más de 35 pasajeros">
-												Bus más de 35 pasajeros
-											</SelectItem>
-											<SelectItem value="Otro">Otro</SelectItem>
+											{VEHICLE_TYPE_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2633,8 +2620,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar origen" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Nacional">Nacional</SelectItem>
-											<SelectItem value="Importado">Importado</SelectItem>
+											{VEHICLE_ORIGIN_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2836,8 +2826,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar uso" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Particular">Particular</SelectItem>
-											<SelectItem value="Comercial">Comercial</SelectItem>
+											{VEHICLE_USE_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>

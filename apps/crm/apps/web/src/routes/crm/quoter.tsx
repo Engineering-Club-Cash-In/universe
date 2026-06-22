@@ -1045,7 +1045,7 @@ function QuoterPage() {
 	// Obtener costo de seguro automáticamente
 	const updateInsuranceCost = async (
 		insuredAmount: number,
-		vehicleType: string,
+		vehicleType: QuotationFormValues["vehicleType"],
 		vehicleContext?: {
 			creditType?: "autocompra" | "sobre_vehiculo";
 			condition?: "new" | "used";
@@ -1058,7 +1058,7 @@ function QuoterPage() {
 		try {
 			const result = await client.getInsuranceCost({
 				insuredAmount,
-				vehicleType: vehicleType as any,
+				vehicleType,
 			});
 
 			const baseInsuranceCost =
@@ -1485,8 +1485,8 @@ function QuoterPage() {
 		}
 
 		const values = quoterForm.state.values;
-		const selectedOpportunity = (opportunitiesQuery.data as any[] | undefined)?.find(
-			(opp: any) => opp.id === values.opportunityId,
+		const selectedOpportunity = opportunitiesQuery.data?.find(
+			(opp) => opp.id === values.opportunityId,
 		);
 		const clientName = selectedOpportunity
 			? formatQuotationClientName({
@@ -1590,7 +1590,7 @@ function QuoterPage() {
 										<Combobox
 											options={[
 												{ value: "none", label: "Sin oportunidad" },
-												...(opportunitiesQuery.data?.map((opp: any) => ({
+												...(opportunitiesQuery.data?.map((opp) => ({
 													value: opp.id,
 													label: `${opp.title} - ${opp.lead ? `${opp.lead.firstName} ${opp.lead.lastName}` : "Sin lead"} (${opp.creditType === "autocompra" ? "Autocompra" : "Sobre Vehículo"})`,
 												})) || []),
@@ -1601,30 +1601,30 @@ function QuoterPage() {
 												// Auto-seleccionar el tipo de crédito y cargar cotización/vehículo
 												if (value && value !== "none") {
 													const selectedOpp = opportunitiesQuery.data?.find(
-														(opp: any) => opp.id === value,
+														(opp) => opp.id === value,
 													);
-											if (selectedOpp?.creditType) {
-												quoterForm.setFieldValue(
-													"creditType",
-													selectedOpp.creditType,
-												);
-											}
+													if (selectedOpp?.creditType) {
+														quoterForm.setFieldValue(
+															"creditType",
+															selectedOpp.creditType,
+														);
+													}
 
-											// Intentar cargar cotización existente primero
-											const loadedExistingQuotation = await loadExistingQuotation(
-												value,
-												selectedOpp?.vehicle ?? undefined,
-											);
-											if (!loadedExistingQuotation) {
-												if (selectedOpp?.vehicle) {
-													await handleOpportunityVehicleSelect(
-														selectedOpp.vehicle,
+													// Intentar cargar cotización existente primero
+													const loadedExistingQuotation = await loadExistingQuotation(
+														value,
+														selectedOpp?.vehicle ?? undefined,
 													);
-												}
-												if (selectedOpp?.creditType) {
-													await applyCreditTypeChange(selectedOpp.creditType);
-												}
-											}
+													if (!loadedExistingQuotation) {
+														if (selectedOpp?.vehicle) {
+															await handleOpportunityVehicleSelect(
+																selectedOpp.vehicle,
+															);
+														}
+														if (selectedOpp?.creditType) {
+															await applyCreditTypeChange(selectedOpp.creditType);
+														}
+													}
 
 													// Guardar vehículo de la oportunidad para el combobox
 													if (selectedOpp?.vehicle?.id) {
@@ -1632,11 +1632,11 @@ function QuoterPage() {
 															value: selectedOpp.vehicle.id,
 															label: `${selectedOpp.vehicle.make} ${selectedOpp.vehicle.model} ${selectedOpp.vehicle.year} - ${selectedOpp.vehicle.licensePlate || ""}`,
 														});
-													}
-										} else {
-											// Limpiar vehículo de oportunidad cuando se deselecciona
-											setOpportunityVehicle(null);
-										}
+											} else {
+												// Limpiar vehículo de oportunidad cuando se deselecciona
+												setOpportunityVehicle(null);
+												setVehicleConditionLocked(false);
+											}
 											}}
 											onSearchChange={setOpportunitiesSearch}
 											isLoading={opportunitiesQuery.isFetching}
@@ -1652,7 +1652,7 @@ function QuoterPage() {
 										const hasOpportunity =
 											!!quoterForm.state.values.opportunityId;
 										const selectedOpp = opportunitiesQuery.data?.find(
-											(opp: any) =>
+											(opp) =>
 												opp.id === quoterForm.state.values.opportunityId,
 										);
 										const isDisabled =
@@ -1663,16 +1663,16 @@ function QuoterPage() {
 												<Label htmlFor={field.name} className="mb-2">
 													Tipo de Crédito
 												</Label>
-										<Select
-											value={field.state.value}
-											onValueChange={(value) => {
-												field.handleChange(
-													value as QuotationFormValues["creditType"],
-												);
-												void applyCreditTypeChange(
-													value as QuotationFormValues["creditType"],
-												);
-											}}
+												<Select
+													value={field.state.value}
+													onValueChange={(value) => {
+														field.handleChange(
+															value as QuotationFormValues["creditType"],
+														);
+														void applyCreditTypeChange(
+															value as QuotationFormValues["creditType"],
+														);
+													}}
 													disabled={isDisabled}
 												>
 													<SelectTrigger>
@@ -1855,18 +1855,23 @@ function QuoterPage() {
 												<Label htmlFor={field.name} className="mb-2">
 													Tipo de Vehículo
 												</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) => {
-														field.handleChange(value as any);
+											<Select
+												value={field.state.value}
+												onValueChange={(value) => {
+													field.handleChange(
+														value as QuotationFormValues["vehicleType"],
+													);
 
 														// Actualizar seguro cuando cambia el tipo
 														// Usar getFieldValue para obtener el valor actual (no stale)
-														const insuredAmount =
-															quoterForm.getFieldValue("insuredAmount") ?? 0;
-														if (insuredAmount > 0) {
-															updateInsuranceCost(insuredAmount, value);
-														}
+													const insuredAmount =
+														quoterForm.getFieldValue("insuredAmount") ?? 0;
+													if (insuredAmount > 0) {
+														updateInsuranceCost(
+															insuredAmount,
+															value as QuotationFormValues["vehicleType"],
+														);
+													}
 													}}
 												>
 													<SelectTrigger>
@@ -2462,11 +2467,11 @@ function QuoterPage() {
 															quotation.vehicleBrand,
 															quotation.vehicleLine,
 															quotation.vehicleModel,
-														]
-															.filter(Boolean)
-															.join(" "),
-														formatQuotationClientName(quotation as any),
-													)}
+													]
+														.filter(Boolean)
+														.join(" "),
+												formatQuotationClientName(quotation),
+											)}
 												</TableCell>
 												<TableCell>
 													Q
@@ -2571,7 +2576,7 @@ function QuotationDetailDialog({
 	const handleGeneratePdf = (clientVersion = false) => {
 		if (!quotationQuery.data) return;
 
-		const quotation = quotationQuery.data as any;
+		const quotation = quotationQuery.data;
 		const clientName = formatQuotationClientName(quotation);
 		const quotationData = {
 			clientName,
@@ -2591,7 +2596,7 @@ function QuotationDetailDialog({
 			transferCost: Number(quotation.transferCost || 0),
 			adminCost: Number(quotation.adminCost || 0),
 			membershipCost: Number(quotation.membershipCost || 0),
-			amortizationTable: quotation.amortizationTable.map((row: any) => ({
+			amortizationTable: quotation.amortizationTable.map((row) => ({
 				period: row.period,
 				initialBalance: row.initialBalance,
 				interestPlusVAT: row.interestPlusVAT,
@@ -2616,7 +2621,7 @@ function QuotationDetailDialog({
 		);
 	}
 
-	const quotation = quotationQuery.data as any;
+	const quotation = quotationQuery.data;
 	const clientName = formatQuotationClientName(quotation);
 	const vehicleLabel = formatVehicleWithClient(
 		[quotation.vehicleBrand, quotation.vehicleLine, quotation.vehicleModel]
@@ -2726,8 +2731,8 @@ function QuotationDetailDialog({
 								</TableHeader>
 								<TableBody>
 									{quotation.amortizationTable
-										?.filter((row: any) => row.period !== 0)
-										.map((row: any) => (
+										?.filter((row) => row.period !== 0)
+										.map((row) => (
 											<TableRow key={row.period}>
 												<TableCell>{row.period}</TableCell>
 												<TableCell>Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>

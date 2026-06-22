@@ -1,6 +1,6 @@
 export const DISBURSEMENT_SALE_LABEL = "Desembolso por venta";
 
-export function formatQuotationClientName(input: {
+export function formatQuotationClientName(input: object & {
 	leadFirstName?: string | null;
 	leadLastName?: string | null;
 	companyName?: string | null;

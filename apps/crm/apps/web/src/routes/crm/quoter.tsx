@@ -1339,13 +1339,16 @@ function QuoterPage() {
 				quoterForm.setFieldValue("vehicleModel", q.vehicleModel || "");
 				const vehicleTypeToUse = normalizeVehicleTypeForQuoter(q.vehicleType);
 				quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
-				const hasNonDefaultSavedContext =
-					savedVehicleContext.vehicleCondition === "new" ||
-					savedVehicleContext.vehicleOrigin !== "agencia";
-				if (
-					hasNonDefaultSavedContext ||
-					(savedVehicleContext.vehicleCondition && !linkedVehicle)
-				) {
+				const contextMigrationCutoff = new Date("2026-06-18T18:28:53.000Z");
+				const isMigratedDefaultContext =
+					!!linkedVehicle &&
+					new Date(q.createdAt) < contextMigrationCutoff &&
+					savedVehicleContext.vehicleCondition === "used" &&
+					savedVehicleContext.vehicleOrigin === "agencia";
+				const hasSavedContext =
+					!!savedVehicleContext.vehicleCondition ||
+					!!savedVehicleContext.vehicleOrigin;
+				if (hasSavedContext && !isMigratedDefaultContext) {
 					quoterForm.setFieldValue(
 						"vehicleCondition",
 						savedVehicleContext.vehicleCondition ?? "used",

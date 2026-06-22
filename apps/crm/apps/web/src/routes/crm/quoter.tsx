@@ -1339,9 +1339,16 @@ function QuoterPage() {
 				quoterForm.setFieldValue("vehicleModel", q.vehicleModel || "");
 				const vehicleTypeToUse = normalizeVehicleTypeForQuoter(q.vehicleType);
 				quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
-				if (linkedVehicle) {
-					applyVehicleConditionAndOrigin(linkedVehicle);
-				} else {
+				const contextMigrationCutoff = new Date("2026-06-18T16:46:51.000Z");
+				const isMigratedDefaultContext =
+					!!linkedVehicle &&
+					new Date(q.createdAt) < contextMigrationCutoff &&
+					savedVehicleContext.vehicleCondition === "used" &&
+					savedVehicleContext.vehicleOrigin === "agencia";
+				const hasSavedContext =
+					!!savedVehicleContext.vehicleCondition ||
+					!!savedVehicleContext.vehicleOrigin;
+				if (hasSavedContext && !isMigratedDefaultContext) {
 					quoterForm.setFieldValue(
 						"vehicleCondition",
 						savedVehicleContext.vehicleCondition ?? "used",
@@ -1350,6 +1357,11 @@ function QuoterPage() {
 						"vehicleOrigin",
 						savedVehicleContext.vehicleOrigin ?? "agencia",
 					);
+				} else if (linkedVehicle) {
+					applyVehicleConditionAndOrigin(linkedVehicle);
+				} else {
+					quoterForm.setFieldValue("vehicleCondition", "used");
+					quoterForm.setFieldValue("vehicleOrigin", "agencia");
 				}
 				quoterForm.setFieldValue("vehicleValue", Number(q.vehicleValue) || 0);
 				quoterForm.setFieldValue("insuredAmount", Number(q.insuredAmount) || 0);

@@ -85,7 +85,7 @@ import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUplo
 import { ROLES } from "@/lib/roles";
 import {
 	VEHICLE_BODY_TYPE_OPTIONS,
-	VEHICLE_ORIGIN_OPTIONS,
+	VEHICLE_PROVENANCE_OPTIONS,
 	VEHICLE_USE_OPTIONS,
 } from "@/lib/vehicle-form-options";
 import {
@@ -2124,7 +2124,7 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar origen" />
 										</SelectTrigger>
 										<SelectContent>
-											{VEHICLE_ORIGIN_OPTIONS.map((option) => (
+											{VEHICLE_PROVENANCE_OPTIONS.map((option) => (
 												<SelectItem key={option.value} value={option.value}>
 													{option.label}
 												</SelectItem>
@@ -2620,7 +2620,7 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar origen" />
 										</SelectTrigger>
 										<SelectContent>
-											{VEHICLE_ORIGIN_OPTIONS.map((option) => (
+											{VEHICLE_PROVENANCE_OPTIONS.map((option) => (
 												<SelectItem key={option.value} value={option.value}>
 													{option.label}
 												</SelectItem>

@@ -25,7 +25,12 @@ export const QUOTER_VEHICLE_TYPE_OPTIONS = [
 	{ value: "microbus_36plus", label: "Bus más de 35 pasajeros (RCDP)" },
 ] as const;
 
-export const VEHICLE_ORIGIN_OPTIONS = [
+export const VEHICLE_PROVENANCE_OPTIONS = [
+	{ value: "Nacional", label: "Nacional" },
+	{ value: "Importado", label: "Importado" },
+] as const;
+
+export const QUOTER_VEHICLE_ORIGIN_OPTIONS = [
 	{ value: "agencia", label: "Agencia" },
 	{ value: "rodado", label: "Rodado" },
 	{ value: "importado", label: "Importado" },

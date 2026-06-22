@@ -1,4 +1,11 @@
-import { jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+	jsonb,
+	pgEnum,
+	pgTable,
+	text,
+	timestamp,
+	uuid,
+} from "drizzle-orm/pg-core";
 import { coDebtors, leads, opportunities } from "./crm";
 
 export const whatsappLogStatusEnum = pgEnum("whatsapp_log_status", [
@@ -32,9 +39,10 @@ export const whatsappLogRecipients = pgTable("whatsapp_log_recipients", {
 	recipientName: text("recipient_name").notNull(),
 	phone: text("phone"),
 	message: text("message"),
-	contracts: jsonb("contracts").$type<
-		{ contractName: string; link: string | null; pdfLink?: string | null }[]
-	>(),
+	contracts:
+		jsonb("contracts").$type<
+			{ contractName: string; link: string | null; pdfLink?: string | null }[]
+		>(),
 	status: whatsappLogStatusEnum("status").notNull().default("pending"),
 	reason: text("reason"),
 	sentAt: timestamp("sent_at"),

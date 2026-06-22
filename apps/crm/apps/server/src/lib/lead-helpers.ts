@@ -29,10 +29,7 @@ export function getPublicLeadExistingOpportunityUpdates(
 		updates.creditType = incoming.creditType;
 	}
 
-	if (
-		incoming.campaign &&
-		incoming.campaign !== existingOpportunity.campaign
-	) {
+	if (incoming.campaign && incoming.campaign !== existingOpportunity.campaign) {
 		updates.campaign = incoming.campaign;
 	}
 

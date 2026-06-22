@@ -181,7 +181,10 @@ function AuctionsDashboard() {
 															Q
 															{Number(
 																latestInspection.marketValue,
-															).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+															).toLocaleString("es-GT", {
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															})}
 														</>
 													) : (
 														<span className="text-gray-400">N/A</span>
@@ -189,10 +192,20 @@ function AuctionsDashboard() {
 												</TableCell>
 												<TableCell>
 													Q
-													{Number(auction.auctionPrice).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+													{Number(auction.auctionPrice).toLocaleString(
+														"es-GT",
+														{
+															minimumFractionDigits: 2,
+															maximumFractionDigits: 2,
+														},
+													)}
 												</TableCell>
 												<TableCell className="font-medium text-red-600">
-													Q{Number(auction.lossValue).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+													Q
+													{Number(auction.lossValue).toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
 												</TableCell>
 												<TableCell>
 													{renderAuctionStatus(auction.auctionStatus)}
@@ -270,7 +283,8 @@ function AuctionsDashboard() {
 									<p className="font-medium text-green-600">
 										<strong>Precio Final de Venta:</strong> Q
 										{Number(selectedAuction.auctionPrice).toLocaleString(
-											"es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+											"es-GT",
+											{ minimumFractionDigits: 2, maximumFractionDigits: 2 },
 										)}
 									</p>
 								) : (
@@ -409,18 +423,28 @@ function AuctionsDashboard() {
 																	<strong>Valor mercado:</strong> Q
 																	{Number(
 																		inspection.marketValue,
-																	).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																	).toLocaleString("es-GT", {
+																		minimumFractionDigits: 2,
+																		maximumFractionDigits: 2,
+																	})}
 																</p>
 																<p>
 																	<strong>Valor comercial:</strong> Q
 																	{Number(
 																		inspection.suggestedCommercialValue,
-																	).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																	).toLocaleString("es-GT", {
+																		minimumFractionDigits: 2,
+																		maximumFractionDigits: 2,
+																	})}
 																</p>
 																<p>
 																	<strong>Valor bancario:</strong> Q
 																	{Number(inspection.bankValue).toLocaleString(
-																		"es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+																		"es-GT",
+																		{
+																			minimumFractionDigits: 2,
+																			maximumFractionDigits: 2,
+																		},
 																	)}
 																</p>
 																<p>
@@ -447,7 +471,10 @@ function AuctionsDashboard() {
 																				Q
 																				{Number(
 																					inspection.aiSuggestedValue,
-																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																				).toLocaleString("es-GT", {
+																					minimumFractionDigits: 2,
+																					maximumFractionDigits: 2,
+																				})}
 																			</p>
 																		</div>
 																		{inspection.aiReasoning && (
@@ -504,9 +531,15 @@ function AuctionsDashboard() {
 																				variant="outline"
 																				size="sm"
 																				className="h-6 px-2.5 text-[10px]"
-																				onClick={() => window.open(inspection.scannerResultUrl, "_blank")}
+																				onClick={() =>
+																					window.open(
+																						inspection.scannerResultUrl,
+																						"_blank",
+																					)
+																				}
 																			>
-																				<FileText className="mr-1.5 h-3 w-3" /> Abrir PDF
+																				<FileText className="mr-1.5 h-3 w-3" />{" "}
+																				Abrir PDF
 																			</Button>
 																		)}
 																	</span>

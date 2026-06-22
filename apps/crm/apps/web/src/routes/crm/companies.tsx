@@ -62,10 +62,10 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { PERMISSIONS } from "@/lib/roles";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/companies")({
@@ -84,11 +84,21 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [selectedCompany, setSelectedCompany] = useState<any>(null);
-	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/companies/searchTerm", "");
-	const [industryFilter, setIndustryFilter] = usePersistedState<string>("crm/companies/industryFilter", "all");
-	const [sizeFilter, setSizeFilter] = usePersistedState<string>("crm/companies/sizeFilter", "all");
+	const [searchTerm, setSearchTerm] = usePersistedState<string>(
+		"crm/companies/searchTerm",
+		"",
+	);
+	const [industryFilter, setIndustryFilter] = usePersistedState<string>(
+		"crm/companies/industryFilter",
+		"all",
+	);
+	const [sizeFilter, setSizeFilter] = usePersistedState<string>(
+		"crm/companies/sizeFilter",
+		"all",
+	);
 
-	const hasActiveFilters = searchTerm !== "" || industryFilter !== "all" || sizeFilter !== "all";
+	const hasActiveFilters =
+		searchTerm !== "" || industryFilter !== "all" || sizeFilter !== "all";
 	const resetFilters = () => {
 		setSearchTerm("");
 		setIndustryFilter("all");
@@ -790,11 +800,22 @@ function RouteComponent() {
 							</SelectContent>
 						</Select>
 						{hasActiveFilters && (
-							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={resetFilters}
+								className="shrink-0 text-muted-foreground"
+							>
 								<X className="mr-1 h-3 w-3" />
 								Limpiar filtros
 								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-									{[searchTerm !== "", industryFilter !== "all", sizeFilter !== "all"].filter(Boolean).length}
+									{
+										[
+											searchTerm !== "",
+											industryFilter !== "all",
+											sizeFilter !== "all",
+										].filter(Boolean).length
+									}
 								</Badge>
 							</Button>
 						)}

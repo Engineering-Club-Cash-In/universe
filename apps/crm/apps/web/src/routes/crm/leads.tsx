@@ -136,14 +136,29 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 	const [editingLead, setEditingLead] = useState<Lead | null>(null);
-	const [searchTerm, setSearchTerm] = usePersistedState("crm/leads/searchTerm", "");
+	const [searchTerm, setSearchTerm] = usePersistedState(
+		"crm/leads/searchTerm",
+		"",
+	);
 	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
-	const [dateRange, setDateRange] = usePersistedDateRange("crm/leads/dateRange");
-	const [statusFilter, setStatusFilter] = usePersistedState<string>("crm/leads/statusFilter", "all");
-	const [sourceFilter, setSourceFilter] = usePersistedState<string>("crm/leads/sourceFilter", "all");
+	const [dateRange, setDateRange] = usePersistedDateRange(
+		"crm/leads/dateRange",
+	);
+	const [statusFilter, setStatusFilter] = usePersistedState<string>(
+		"crm/leads/statusFilter",
+		"all",
+	);
+	const [sourceFilter, setSourceFilter] = usePersistedState<string>(
+		"crm/leads/sourceFilter",
+		"all",
+	);
 	const [page, setPage] = usePersistedState<number>("crm/leads/page", 0);
 
-	const hasActiveFilters = searchTerm !== "" || dateRange !== undefined || statusFilter !== "all" || sourceFilter !== "all";
+	const hasActiveFilters =
+		searchTerm !== "" ||
+		dateRange !== undefined ||
+		statusFilter !== "all" ||
+		sourceFilter !== "all";
 	const resetFilters = () => {
 		setSearchTerm("");
 		setDebouncedSearch("");
@@ -2033,11 +2048,23 @@ function RouteComponent() {
 							</SelectContent>
 						</Select>
 						{hasActiveFilters && (
-							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={resetFilters}
+								className="shrink-0 text-muted-foreground"
+							>
 								<X className="mr-1 h-3 w-3" />
 								Limpiar filtros
 								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-									{[searchTerm !== "", dateRange !== undefined, statusFilter !== "all", sourceFilter !== "all"].filter(Boolean).length}
+									{
+										[
+											searchTerm !== "",
+											dateRange !== undefined,
+											statusFilter !== "all",
+											sourceFilter !== "all",
+										].filter(Boolean).length
+									}
 								</Badge>
 							</Button>
 						)}

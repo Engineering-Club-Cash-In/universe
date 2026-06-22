@@ -7,8 +7,8 @@ import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
-import { getOnlyRenapInfoController } from "./bot";
 import { validarDpi } from "../utils/cui-validation";
+import { getOnlyRenapInfoController } from "./bot";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
@@ -186,10 +186,7 @@ export async function updateLeadByEmail(c: Context) {
 		if (dpi !== undefined && dpi.trim() !== "") {
 			const resultadoDpi = validarDpi(dpi);
 			if (!resultadoDpi.valid) {
-				return c.json(
-					{ success: false, error: resultadoDpi.error },
-					400,
-				);
+				return c.json({ success: false, error: resultadoDpi.error }, 400);
 			}
 		}
 
@@ -630,10 +627,7 @@ export async function createPortalRegisterLead(c: Context) {
 		// Validar DPI
 		const resultadoDpi = validarDpi(dpiRaw);
 		if (!resultadoDpi.valid) {
-			return c.json(
-				{ success: false, error: resultadoDpi.error },
-				400,
-			);
+			return c.json({ success: false, error: resultadoDpi.error }, 400);
 		}
 		const dpi = resultadoDpi.dpiLimpio;
 

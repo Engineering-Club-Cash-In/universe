@@ -16,17 +16,14 @@ import {
 	Users,
 	X,
 } from "lucide-react";
-import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
-import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
-import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { CapitalRangeFilter } from "@/components/cobros/capital-range-filter";
+import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
 import { DataTable } from "@/components/data-table";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
 	Card,
 	CardContent,
@@ -39,7 +36,10 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { getCobrosColumns } from "@/lib/cobros/columns";
 import { getPaymentDateRangeFilter } from "@/lib/cobros/payment-date-range-filter";
@@ -177,13 +177,21 @@ function EmbudoRow({
 						<div className="flex items-center justify-end gap-2">
 							<span className="text-muted-foreground text-xs">Mora:</span>
 							<span className="font-medium">
-								Q{Number(estadoStats.montoTotal || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								Q
+								{Number(estadoStats.montoTotal || 0).toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 							</span>
 						</div>
 						<div className="flex items-center justify-end gap-2">
 							<span className="text-muted-foreground text-xs">Capital:</span>
 							<span className="font-medium">
-								Q{Number(estadoStats.sumaCapital || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								Q
+								{Number(estadoStats.sumaCapital || 0).toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 							</span>
 						</div>
 					</div>
@@ -244,7 +252,11 @@ function EmbudoRow({
 											{caso.numeroCredito || "-"}
 										</td>
 										<td className="py-2 text-right tabular-nums">
-											Q{Number(caso.montoFinanciado || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+											Q
+											{Number(caso.montoFinanciado || 0).toLocaleString(
+												"es-GT",
+												{ minimumFractionDigits: 2, maximumFractionDigits: 2 },
+											)}
 										</td>
 										<td className="py-2 text-right text-red-600 tabular-nums">
 											{Number(caso.montoEnMora || 0) > 0
@@ -252,7 +264,11 @@ function EmbudoRow({
 												: "-"}
 										</td>
 										<td className="py-2 pr-3 text-right tabular-nums">
-											Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+											Q
+											{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
 										</td>
 									</tr>
 								))}
@@ -289,28 +305,60 @@ const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 	reclamo: "Reclamo",
 };
 
-
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
-	const [filtroTemporal, setFiltroTemporal] = usePersistedState<FiltroTemporal>("cobros/filtroTemporal", "hoy");
+	const [filtroTemporal, setFiltroTemporal] = usePersistedState<FiltroTemporal>(
+		"cobros/filtroTemporal",
+		"hoy",
+	);
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
-	const [filtroEtapa, setFiltroEtapa] = usePersistedState<string | null>("cobros/filtroEtapa", null);
-	const [filtroEtiquetas, setFiltroEtiquetas] = usePersistedState<string[]>("cobros/filtroEtiquetas", []);
+	const [filtroEtapa, setFiltroEtapa] = usePersistedState<string | null>(
+		"cobros/filtroEtapa",
+		null,
+	);
+	const [filtroEtiquetas, setFiltroEtiquetas] = usePersistedState<string[]>(
+		"cobros/filtroEtiquetas",
+		[],
+	);
 	const [page, setPage] = usePersistedState<number>("cobros/page", 1);
-	const [filterValue, setFilterValue] = usePersistedState<string>("cobros/filterValue", "");
+	const [filterValue, setFilterValue] = usePersistedState<string>(
+		"cobros/filterValue",
+		"",
+	);
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState(filterValue);
-	const [sifcoFilterValue, setSifcoFilterValue] = usePersistedState<string>("cobros/sifcoFilterValue", "");
-	const [debouncedSifcoFilterValue, setDebouncedSifcoFilterValue] = useState(sifcoFilterValue);
-	const [pageSize, setPageSize] = usePersistedState<number>("cobros/pageSize", 25);
+	const [sifcoFilterValue, setSifcoFilterValue] = usePersistedState<string>(
+		"cobros/sifcoFilterValue",
+		"",
+	);
+	const [debouncedSifcoFilterValue, setDebouncedSifcoFilterValue] =
+		useState(sifcoFilterValue);
+	const [pageSize, setPageSize] = usePersistedState<number>(
+		"cobros/pageSize",
+		25,
+	);
 	const [dateRange, setDateRange] = usePersistedDateRange("cobros/dateRange");
-	const [pickerRange, setPickerRange] = useState<DateRange | undefined>(dateRange);
-	const fechaDesde = dateRange?.from && dateRange?.to ? dateRange.from.toISOString().slice(0, 10) : undefined;
-	const fechaHasta = dateRange?.from && dateRange?.to ? dateRange.to.toISOString().slice(0, 10) : undefined;
+	const [pickerRange, setPickerRange] = useState<DateRange | undefined>(
+		dateRange,
+	);
+	const fechaDesde =
+		dateRange?.from && dateRange?.to
+			? dateRange.from.toISOString().slice(0, 10)
+			: undefined;
+	const fechaHasta =
+		dateRange?.from && dateRange?.to
+			? dateRange.to.toISOString().slice(0, 10)
+			: undefined;
 	const [fechaError, setFechaError] = useState<string | null>(null);
-	const [capitalMin, setCapitalMin] = usePersistedState<number | undefined>("cobros/capitalMin", undefined);
-	const [capitalMax, setCapitalMax] = usePersistedState<number | undefined>("cobros/capitalMax", undefined);
+	const [capitalMin, setCapitalMin] = usePersistedState<number | undefined>(
+		"cobros/capitalMin",
+		undefined,
+	);
+	const [capitalMax, setCapitalMax] = usePersistedState<number | undefined>(
+		"cobros/capitalMax",
+		undefined,
+	);
 
 	const hasActiveFilters =
 		filtroTemporal !== "hoy" ||
@@ -544,7 +592,13 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiquetas, filtroEtapa]);
+	}, [
+		creditosConDias,
+		filtroTemporal,
+		mostrarCompletadosIncobrables,
+		filtroEtiquetas,
+		filtroEtapa,
+	]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -695,7 +749,10 @@ function RouteComponent() {
 							Q
 							{stats
 								.reduce((sum, s) => sum + Number(s.montoTotal || 0), 0)
-								.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Suma de todos los montos en mora
@@ -715,7 +772,10 @@ function RouteComponent() {
 							Q
 							{stats
 								.reduce((sum, s) => sum + Number(s.sumaCapital || 0), 0)
-								.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Suma de todos los capitales
@@ -1128,8 +1188,8 @@ function RouteComponent() {
 													return;
 												}
 												setFechaError(null);
-												setDateRange(range);    // persiste y afecta la query
-												setPickerRange(range);  // actualiza display
+												setDateRange(range); // persiste y afecta la query
+												setPickerRange(range); // actualiza display
 												if (!range.from || !range.to) return;
 												setFiltroTemporal("todos");
 												setPage(1);
@@ -1232,11 +1292,30 @@ function RouteComponent() {
 								</div>
 								{hasActiveFilters && (
 									<div className="border-t pt-2">
-										<Button variant="ghost" size="sm" onClick={resetFilters} className="w-full text-muted-foreground">
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={resetFilters}
+											className="w-full text-muted-foreground"
+										>
 											<X className="mr-1 h-3 w-3" />
 											Limpiar filtros
-											<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-												{[filtroTemporal !== "hoy", filtroEtapa !== null, filtroEtiquetas.length > 0, filterValue !== "", sifcoFilterValue !== "", capitalMin !== undefined, capitalMax !== undefined, dateRange !== undefined].filter(Boolean).length}
+											<Badge
+												variant="secondary"
+												className="ml-1 h-4 px-1 text-xs"
+											>
+												{
+													[
+														filtroTemporal !== "hoy",
+														filtroEtapa !== null,
+														filtroEtiquetas.length > 0,
+														filterValue !== "",
+														sifcoFilterValue !== "",
+														capitalMin !== undefined,
+														capitalMax !== undefined,
+														dateRange !== undefined,
+													].filter(Boolean).length
+												}
 											</Badge>
 										</Button>
 									</div>

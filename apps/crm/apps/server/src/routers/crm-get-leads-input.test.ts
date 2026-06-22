@@ -4,8 +4,8 @@ import {
 	buildCarteraMatchedClientRows,
 	buildCarteraOnlyClientRow,
 	calculateCarteraClientStats,
-	getCurrentClientCreditsFromCartera,
 	getClientCreditSifcosFromCartera,
+	getCurrentClientCreditsFromCartera,
 	getLeadsInputSchema,
 } from "./crm";
 
@@ -153,18 +153,38 @@ describe("buildCarteraMatchedClientRows", () => {
 		const rows = buildCarteraMatchedClientRows({
 			lead,
 			leadOpportunities: [
-				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
-				{ id: "opp-2", numeroSifco: "SIFCO-2", value: "7000.00", isClosed: true },
+				{
+					id: "opp-1",
+					numeroSifco: "SIFCO-1",
+					value: "5000.00",
+					isClosed: true,
+				},
+				{
+					id: "opp-2",
+					numeroSifco: "SIFCO-2",
+					value: "7000.00",
+					isClosed: true,
+				},
 			],
 			creditAnalysis: null,
 			carteraCreditBySifco: new Map([
 				[
 					"SIFCO-1",
-					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-1",
+							deudatotal: "1200.00",
+						},
+					},
 				],
 				[
 					"SIFCO-2",
-					{ creditos: { numero_credito_sifco: "SIFCO-2", deudatotal: "3400.00" } },
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-2",
+							deudatotal: "3400.00",
+						},
+					},
 				],
 			]),
 		});
@@ -180,13 +200,23 @@ describe("buildCarteraMatchedClientRows", () => {
 		const [row] = buildCarteraMatchedClientRows({
 			lead,
 			leadOpportunities: [
-				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
+				{
+					id: "opp-1",
+					numeroSifco: "SIFCO-1",
+					value: "5000.00",
+					isClosed: true,
+				},
 			],
 			creditAnalysis: null,
 			carteraCreditBySifco: new Map([
 				[
 					"SIFCO-1",
-					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-1",
+							deudatotal: "1200.00",
+						},
+					},
 				],
 			]),
 		});
@@ -198,18 +228,38 @@ describe("buildCarteraMatchedClientRows", () => {
 		const rows = buildCarteraMatchedClientRows({
 			lead,
 			leadOpportunities: [
-				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
-				{ id: "opp-2", numeroSifco: "SIFCO-2", value: "7000.00", isClosed: true },
+				{
+					id: "opp-1",
+					numeroSifco: "SIFCO-1",
+					value: "5000.00",
+					isClosed: true,
+				},
+				{
+					id: "opp-2",
+					numeroSifco: "SIFCO-2",
+					value: "7000.00",
+					isClosed: true,
+				},
 			],
 			creditAnalysis: null,
 			carteraCreditBySifco: new Map([
 				[
 					"SIFCO-1",
-					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-1",
+							deudatotal: "1200.00",
+						},
+					},
 				],
 				[
 					"SIFCO-2",
-					{ creditos: { numero_credito_sifco: "SIFCO-2", deudatotal: "3400.00" } },
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-2",
+							deudatotal: "3400.00",
+						},
+					},
 				],
 			]),
 		});

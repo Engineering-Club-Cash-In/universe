@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
 	boolean,
 	check,
@@ -10,7 +11,6 @@ import {
 	timestamp,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 import { user } from "./auth";
 import { clients } from "./crm";
 import { vehicles } from "./vehicles";
@@ -341,24 +341,30 @@ export const metasMoraCobros = pgTable("metas_mora_cobros", {
 });
 
 // Seguimientos programados recurrentes para casos de cobros
-export const seguimientosProgramados = pgTable("seguimientos_programados", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	casoCobroId: uuid("caso_cobro_id")
-		.notNull()
-		.references(() => casosCobros.id, { onDelete: "cascade" }),
-	agenteId: text("agente_id")
-		.notNull()
-		.references(() => user.id),
-	metodoContacto: metodoContactoEnum("metodo_contacto").notNull(),
-	intervaloDias: integer("intervalo_dias").notNull(),
-	ocurrenciasMaximas: integer("ocurrencias_maximas"),
-	ocurrenciasRealizadas: integer("ocurrencias_realizadas").notNull().default(0),
-	fechaInicio: timestamp("fecha_inicio").notNull(),
-	fechaFin: timestamp("fecha_fin"),
-	presetOriginal: text("preset_original"),
-	activo: boolean("activo").default(true),
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (table) => [
-	check("intervalo_dias_positive", sql`${table.intervaloDias} > 0`),
-]);
+export const seguimientosProgramados = pgTable(
+	"seguimientos_programados",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		agenteId: text("agente_id")
+			.notNull()
+			.references(() => user.id),
+		metodoContacto: metodoContactoEnum("metodo_contacto").notNull(),
+		intervaloDias: integer("intervalo_dias").notNull(),
+		ocurrenciasMaximas: integer("ocurrencias_maximas"),
+		ocurrenciasRealizadas: integer("ocurrencias_realizadas")
+			.notNull()
+			.default(0),
+		fechaInicio: timestamp("fecha_inicio").notNull(),
+		fechaFin: timestamp("fecha_fin"),
+		presetOriginal: text("preset_original"),
+		activo: boolean("activo").default(true),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		check("intervalo_dias_positive", sql`${table.intervaloDias} > 0`),
+	],
+);

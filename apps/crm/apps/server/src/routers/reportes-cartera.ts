@@ -21,8 +21,8 @@ import {
 	type FacturacionMesResponse,
 	type FlujoCuotasInversionesResponse,
 	type FlujoCuotasPorInversionistaResponse,
-	type MontoACobrarRow,
 	type MontoACobrarPeriodoRow,
+	type MontoACobrarRow,
 	type ReinversionLiquidacionesResponse,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
@@ -450,8 +450,12 @@ export const reportesCarteraRouter = {
 				periodo: z
 					.enum(["anio", "trimestre", "mes", "semana", "dia"])
 					.default("mes"),
-				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
-				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaInicio: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
 			}),
 		)
 		.handler(async ({ input }): Promise<{ data: MontoACobrarPeriodoRow[] }> => {

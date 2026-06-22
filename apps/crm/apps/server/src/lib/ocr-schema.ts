@@ -89,11 +89,11 @@ export function mapOCRToVehicleForm(ocrData: VehicleRegistrationOCR) {
 		cylinders: ocrData.cylinders || "",
 		engineCC: ocrData.cc || "",
 		vehicleType: ocrData.vehicleType || "",
-		vehicleUse: ocrData.use?.toUpperCase().includes("PARTICULAR") 
-			? "Particular" 
-			: ocrData.use?.toUpperCase().includes("COMERCIAL") 
-			? "Comercial" 
-			: ocrData.use || "", // Fallback to raw if not matching common types
+		vehicleUse: ocrData.use?.toUpperCase().includes("PARTICULAR")
+			? "Particular"
+			: ocrData.use?.toUpperCase().includes("COMERCIAL")
+				? "Comercial"
+				: ocrData.use || "", // Fallback to raw if not matching common types
 		seats: ocrData.seats || "", // Número de asientos
 		// Default values for fields not in tarjeta de circulación
 		origin: "Nacional", // Default since it's a Guatemalan registration

@@ -4,7 +4,10 @@ import { z } from "zod";
 import { db } from "../db";
 import { quotations, vehicles } from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
-import { canManageAnyQuotation, canManageQuotations } from "../lib/quotation-permissions";
+import {
+	canManageAnyQuotation,
+	canManageQuotations,
+} from "../lib/quotation-permissions";
 import { ROLES } from "../lib/roles";
 
 /**
@@ -336,7 +339,10 @@ export const quotationsRouter = {
 
 			// Validar acceso
 			const userRole = context.userRole;
-			if (!canManageAnyQuotation(userRole) && quotation.salesUserId !== context.userId) {
+			if (
+				!canManageAnyQuotation(userRole) &&
+				quotation.salesUserId !== context.userId
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para ver esta cotización",
 				});

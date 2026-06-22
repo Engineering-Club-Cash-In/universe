@@ -138,7 +138,9 @@ export function DataTable<TData, TValue>({
 				</div>
 			)}
 
-			<div className={`w-full overflow-x-auto rounded-md border${tableContainerClass ? ` ${tableContainerClass}` : ""}`}>
+			<div
+				className={`w-full overflow-x-auto rounded-md border${tableContainerClass ? ` ${tableContainerClass}` : ""}`}
+			>
 				<Table>
 					<TableHeader>
 						{table.getHeaderGroups().map((headerGroup) => (
@@ -147,7 +149,11 @@ export function DataTable<TData, TValue>({
 									return (
 										<TableHead
 											key={header.id}
-											className={stickyFirstColumn && idx === 0 ? "sticky left-0 z-20 bg-background shadow-[1px_0_0_0_hsl(var(--border))]" : ""}
+											className={
+												stickyFirstColumn && idx === 0
+													? "sticky left-0 z-20 bg-background shadow-[1px_0_0_0_hsl(var(--border))]"
+													: ""
+											}
 										>
 											{header.isPlaceholder
 												? null
@@ -189,7 +195,11 @@ export function DataTable<TData, TValue>({
 									{row.getVisibleCells().map((cell, idx) => (
 										<TableCell
 											key={cell.id}
-											className={stickyFirstColumn && idx === 0 ? "sticky left-0 z-10 bg-background shadow-[1px_0_0_0_hsl(var(--border))]" : ""}
+											className={
+												stickyFirstColumn && idx === 0
+													? "sticky left-0 z-10 bg-background shadow-[1px_0_0_0_hsl(var(--border))]"
+													: ""
+											}
 										>
 											{flexRender(
 												cell.column.columnDef.cell,

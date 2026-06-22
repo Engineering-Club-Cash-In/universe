@@ -25,6 +25,11 @@ import {
 } from "../db/schema";
 import { isUniqueViolation } from "../lib/db-errors";
 import {
+	buildManualValuationData,
+	MANUAL_VALUATION_RESULT,
+	MANUAL_VALUATION_TECHNICIAN_NAME,
+} from "../lib/manual-valuation";
+import {
 	mapOCRToVehicleForm,
 	vehicleRegistrationOCRSchema,
 } from "../lib/ocr-schema";
@@ -36,6 +41,7 @@ import {
 	vehiclesProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS, ROLES } from "../lib/roles";
+import { canAccessSalesTeamActions } from "../lib/sales-permissions";
 import {
 	buildUploadPrefix,
 	deleteFileFromR2,
@@ -46,12 +52,6 @@ import {
 	prepareValuationContext,
 	vehicleValuationSchema,
 } from "../lib/valuation-schema";
-import {
-	buildManualValuationData,
-	MANUAL_VALUATION_RESULT,
-	MANUAL_VALUATION_TECHNICIAN_NAME,
-} from "../lib/manual-valuation";
-import { canAccessSalesTeamActions } from "../lib/sales-permissions";
 
 // Configuration Constants for Evidence Uploads
 const MAX_EVIDENCE_FILES_PER_ITEM = 10;
@@ -186,7 +186,10 @@ export const vehiclesRouter = {
 			const idsQueryBase = db
 				.select({ id: vehicles.id, createdAt: vehicles.createdAt })
 				.from(vehicles)
-				.leftJoin(vehicleInspections, eq(vehicles.id, vehicleInspections.vehicleId))
+				.leftJoin(
+					vehicleInspections,
+					eq(vehicles.id, vehicleInspections.vehicleId),
+				)
 				.groupBy(vehicles.id, vehicles.createdAt);
 
 			const countQueryBase = db
@@ -212,9 +215,9 @@ export const vehiclesRouter = {
 			const paginatedIds = await idsQuery
 				.where(whereClause)
 				.orderBy(
-				sql`CASE WHEN MAX(${vehicleInspections.inspectionDate}) IS NULL THEN 1 ELSE 0 END ASC`,
-				sql`COALESCE(MAX(${vehicleInspections.inspectionDate}), ${vehicles.createdAt}) DESC`,
-			)
+					sql`CASE WHEN MAX(${vehicleInspections.inspectionDate}) IS NULL THEN 1 ELSE 0 END ASC`,
+					sql`COALESCE(MAX(${vehicleInspections.inspectionDate}), ${vehicles.createdAt}) DESC`,
+				)
 				.limit(limit)
 				.offset(offset);
 
@@ -238,7 +241,10 @@ export const vehiclesRouter = {
 					eq(vehicles.id, vehicleInspections.vehicleId),
 				)
 				.where(or(...vehicleIdsArray.map((id) => eq(vehicles.id, id))))
-				.orderBy(desc(vehicleInspections.inspectionDate), desc(vehicles.createdAt));
+				.orderBy(
+					desc(vehicleInspections.inspectionDate),
+					desc(vehicles.createdAt),
+				);
 
 			// Get photos only for these vehicles
 			const allPhotos = await db
@@ -1060,7 +1066,7 @@ export const vehiclesRouter = {
 						),
 					)
 					.limit(1);
-				
+
 				foundVehicle = existingWithPlate[0] || null;
 			}
 
@@ -1080,7 +1086,7 @@ export const vehiclesRouter = {
 						),
 					)
 					.limit(1);
-				
+
 				foundVehicle = existingWithVin[0] || null;
 			}
 
@@ -1090,7 +1096,7 @@ export const vehiclesRouter = {
 					valid: false,
 					alreadyExists: true,
 					vehicle: foundVehicle,
-					message: `Vehículo registrado encontrado.`,
+					message: "Vehículo registrado encontrado.",
 				};
 			}
 
@@ -1282,7 +1288,8 @@ export const vehiclesRouter = {
 					// 1. Identify or create vehicle by ID - Sanitize blank IDs
 					let vehicleId: string;
 					const { id: rawId, ...vehicleData } = input.vehicle;
-					const vehicleInputId = rawId && rawId.trim() !== "" ? rawId : undefined;
+					const vehicleInputId =
+						rawId && rawId.trim() !== "" ? rawId : undefined;
 
 					if (vehicleInputId) {
 						// Try to update existing vehicle by ID
@@ -1294,7 +1301,7 @@ export const vehiclesRouter = {
 							})
 							.where(eq(vehicles.id, vehicleInputId))
 							.returning();
-						
+
 						if (updated) {
 							vehicleId = updated.id;
 						} else {

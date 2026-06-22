@@ -125,7 +125,13 @@ export function Combobox({
 							onSearchChange?.(value);
 						}}
 					/>
-					<CommandList style={maxListHeight ? { maxHeight: maxListHeight, overflowY: "auto" } : undefined}>
+					<CommandList
+						style={
+							maxListHeight
+								? { maxHeight: maxListHeight, overflowY: "auto" }
+								: undefined
+						}
+					>
 						{isLoading ? (
 							<div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
 								<Loader2 className="mr-2 h-4 w-4 animate-spin" />

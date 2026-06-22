@@ -108,8 +108,7 @@ type InvestmentOpportunityItem = Awaited<
 	ReturnType<typeof client.getInvestmentOpportunities>
 >[number];
 
-type InvestmentActiveStageId =
-	(typeof INVESTMENT_ACTIVE_STAGES)[number]["id"];
+type InvestmentActiveStageId = (typeof INVESTMENT_ACTIVE_STAGES)[number]["id"];
 
 // ─── Draggable Card ──────────────────────────────────────────────────────────
 
@@ -495,8 +494,7 @@ function RouteComponent() {
 			opportunityId: string;
 			expectedCurrentStage: InvestmentActiveStageId;
 			reason?: string;
-		}) =>
-			client.retreatInvestmentStage(data),
+		}) => client.retreatInvestmentStage(data),
 		onSuccess: () => {
 			toast.success("Etapa regresada correctamente");
 			setPendingRetreat(null);
@@ -558,10 +556,7 @@ function RouteComponent() {
 			return;
 		}
 
-		if (
-			advanceStageMutation.isPending ||
-			retreatStageMutation.isPending
-		) {
+		if (advanceStageMutation.isPending || retreatStageMutation.isPending) {
 			return;
 		}
 
@@ -591,7 +586,9 @@ function RouteComponent() {
 		if (!item) {
 			setPendingRetreat(null);
 			handleRefresh();
-			toast.error("La oportunidad ya no está disponible. Se recargó el tablero.");
+			toast.error(
+				"La oportunidad ya no está disponible. Se recargó el tablero.",
+			);
 			return;
 		}
 
@@ -818,7 +815,7 @@ function RouteComponent() {
 									</Button>
 								</div>
 							</div>
-							)}
+						)}
 						<div className="flex gap-4">
 							{INVESTMENT_ACTIVE_STAGES.map((stage) => (
 								<DroppableInvestmentColumn

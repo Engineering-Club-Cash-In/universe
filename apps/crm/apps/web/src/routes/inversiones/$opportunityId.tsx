@@ -18,11 +18,11 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { InvestmentCalculator } from "@/components/investments/InvestmentCalculator";
-import { RetreatStageConfirmDialog } from "@/components/investments/RetreatStageConfirmDialog";
 import { InvestmentContracts } from "@/components/investments/InvestmentContracts";
 import { InvestmentDocuments } from "@/components/investments/InvestmentDocuments";
 import { InvestmentInteractions } from "@/components/investments/InvestmentInteractions";
 import { InvestorProfile } from "@/components/investments/InvestorProfile";
+import { RetreatStageConfirmDialog } from "@/components/investments/RetreatStageConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,8 +66,7 @@ const STAGE_CONFIG = Object.fromEntries(
 
 const WON_STAGE_ID = "initial_onboarding_senior_handoff";
 
-type InvestmentActiveStageId =
-	(typeof INVESTMENT_ACTIVE_STAGES)[number]["id"];
+type InvestmentActiveStageId = (typeof INVESTMENT_ACTIVE_STAGES)[number]["id"];
 
 function formatUnknownStageLabel(stage: string | null | undefined): string {
 	if (!stage) return "Etapa desconocida";
@@ -233,7 +232,9 @@ function formatAuditDetails(
 			return (
 				<span>
 					{details.from ? (
-						<>De <strong>{formatInvestmentStage(str("from"))}</strong> a </>
+						<>
+							De <strong>{formatInvestmentStage(str("from"))}</strong> a{" "}
+						</>
 					) : null}
 					<strong>{formatInvestmentStage(str("to"))}</strong>
 				</span>
@@ -241,7 +242,8 @@ function formatAuditDetails(
 		case "marked_as_lost":
 			return (
 				<span>
-					Etapa anterior: <strong>{formatInvestmentStage(str("previousStage"))}</strong>
+					Etapa anterior:{" "}
+					<strong>{formatInvestmentStage(str("previousStage"))}</strong>
 					{details.reason ? <> — Razón: {str("reason")}</> : null}
 				</span>
 			);
@@ -249,7 +251,9 @@ function formatAuditDetails(
 			return (
 				<span>
 					Modalidad: <strong>{str("modality")}</strong>
-					{details.amount ? <> — Monto: Q{Number(details.amount).toLocaleString("es-GT")}</> : null}
+					{details.amount ? (
+						<> — Monto: Q{Number(details.amount).toLocaleString("es-GT")}</>
+					) : null}
 				</span>
 			);
 		case "scenario_accepted":
@@ -280,15 +284,13 @@ function formatAuditDetails(
 			return (
 				<span>
 					{details.completed ? "Completadas" : "Pendientes"}
-					{details.total != null ? <> — Total: {String(details.total)}</> : null}
+					{details.total != null ? (
+						<> — Total: {String(details.total)}</>
+					) : null}
 				</span>
 			);
 		case "non_advance_survey_submitted":
-			return (
-				<span>
-					Razón: {str("reason")}
-				</span>
-			);
+			return <span>Razón: {str("reason")}</span>;
 		default:
 			return (
 				<span>
@@ -393,7 +395,10 @@ function AuditLogTab({
 									</p>
 									{entry.details != null && (
 										<div className="mt-1 text-muted-foreground text-xs">
-											{formatAuditDetails(entry.action, entry.details as Record<string, unknown>)}
+											{formatAuditDetails(
+												entry.action,
+												entry.details as Record<string, unknown>,
+											)}
 										</div>
 									)}
 									<p className="mt-1 text-muted-foreground text-xs">
@@ -452,8 +457,7 @@ function RouteComponent() {
 			opportunityId: string;
 			expectedCurrentStage: InvestmentActiveStageId;
 			reason?: string;
-		}) =>
-			client.retreatInvestmentStage(data),
+		}) => client.retreatInvestmentStage(data),
 		onSuccess: () => {
 			toast.success("Etapa regresada correctamente");
 			setIsRetreatDialogOpen(false);
@@ -608,7 +612,7 @@ function RouteComponent() {
 									? "Regresando..."
 									: advanceMutation.isPending
 										? "Avanzando..."
-									: "Regresar Etapa"}
+										: "Regresar Etapa"}
 							</Button>
 						)}
 						{canAdvance && (

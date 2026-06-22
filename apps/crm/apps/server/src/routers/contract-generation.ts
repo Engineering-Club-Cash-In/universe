@@ -823,8 +823,7 @@ export const contractGenerationRouter = {
 						data: newData,
 						options: {
 							...contract.options,
-							isPlural:
-								(newData.deudoresAdicionales?.length ?? 0) > 0,
+							isPlural: (newData.deudoresAdicionales?.length ?? 0) > 0,
 						},
 					};
 				});

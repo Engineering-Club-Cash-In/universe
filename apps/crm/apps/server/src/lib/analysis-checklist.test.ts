@@ -100,11 +100,7 @@ describe("analysis checklist helpers", () => {
 						},
 					},
 				},
-				new Set([
-					"estados_cuenta_1",
-					"estados_cuenta_2",
-					"estados_cuenta_3",
-				]),
+				new Set(["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"]),
 				new Set(),
 			),
 		).toBe(true);

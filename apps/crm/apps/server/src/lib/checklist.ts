@@ -1,6 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db";
-import { analysisChecklists, opportunities, opportunityDocuments } from "../db/schema";
+import {
+	analysisChecklists,
+	opportunities,
+	opportunityDocuments,
+} from "../db/schema";
 
 /**
  * Updates the analysis checklist when a client document is uploaded

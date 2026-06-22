@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { RPCHandler } from "@orpc/server/fetch";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { type Context as HonoContext, Hono } from "hono";
+import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import {
@@ -852,7 +852,10 @@ app.get("/api/accounting/resumen-transferencias-excel", async (c) => {
 		const moneda = c.req.query("moneda");
 
 		if (!mes || !anio) {
-			return c.json({ error: "Los parámetros 'mes' y 'anio' son obligatorios" }, 400);
+			return c.json(
+				{ error: "Los parámetros 'mes' y 'anio' son obligatorios" },
+				400,
+			);
 		}
 
 		const monedaParam: "quetzales" | "dolar" | undefined =
@@ -1118,7 +1121,6 @@ function scheduleAtMidnightGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtMidnightGT();
-
 
 export default {
 	port: process.env.PORT || 3000,

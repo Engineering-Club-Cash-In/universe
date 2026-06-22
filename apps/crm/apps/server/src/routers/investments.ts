@@ -369,8 +369,7 @@ export const investmentsRouter = {
 
 			if (opp.stage !== input.expectedCurrentStage) {
 				throw new ORPCError("CONFLICT", {
-					message:
-						"La etapa cambió antes de confirmar. Recargue la pagina.",
+					message: "La etapa cambió antes de confirmar. Recargue la pagina.",
 				});
 			}
 
@@ -394,10 +393,7 @@ export const investmentsRouter = {
 				.where(
 					and(
 						eq(investmentOpportunities.id, opp.id),
-						eq(
-							investmentOpportunities.stage,
-							input.expectedCurrentStage,
-						),
+						eq(investmentOpportunities.stage, input.expectedCurrentStage),
 					),
 				)
 				.returning();

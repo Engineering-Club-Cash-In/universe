@@ -6,10 +6,13 @@ import { pgEnum } from "drizzle-orm/pg-core";
  * CRM doesn't own the related tables, but declaring the enums here prevents
  * drizzle-kit push from treating them as stray public objects to be dropped.
  */
-export const paymentValidationStatusEnum = pgEnum(
-	"payment_validation_status",
-	["no_required", "pending", "validated", "capital", "reset"],
-);
+export const paymentValidationStatusEnum = pgEnum("payment_validation_status", [
+	"no_required",
+	"pending",
+	"validated",
+	"capital",
+	"reset",
+]);
 
 export const estadoLiquidacionEnum = pgEnum("estado_liquidacion", [
 	"NO_LIQUIDADO",

@@ -371,13 +371,13 @@ export function OpportunityDocumentUpload({
 						{documents.map((doc) => (
 							<div
 								key={doc.id}
-								className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-lg border p-3"
+								className="flex flex-col justify-between gap-3 rounded-lg border p-3 sm:flex-row sm:items-center"
 							>
-								<div className="flex-1 min-w-0">
-									<p className="font-medium text-sm break-all whitespace-normal">
+								<div className="min-w-0 flex-1">
+									<p className="whitespace-normal break-all font-medium text-sm">
 										{getDocumentTypeLabel(doc.documentType)}
 									</p>
-									<p className="text-muted-foreground text-xs break-all whitespace-normal">
+									<p className="whitespace-normal break-all text-muted-foreground text-xs">
 										{doc.originalName || doc.filename || "Documento sin nombre"}{" "}
 										• {formatUploadedDate(doc.uploadedAt)}
 									</p>

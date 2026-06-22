@@ -56,8 +56,7 @@ export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 		cell: ({ row }) => {
 			const title = row.getValue("title") as string;
 			const analysisStatus = row.original.analysisStatus;
-			const closurePercentage =
-				row.original.stage?.closurePercentage ?? 0;
+			const closurePercentage = row.original.stage?.closurePercentage ?? 0;
 			const leadId = row.original.lead?.id;
 
 			return (
@@ -77,10 +76,7 @@ export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 						</Badge>
 					)}
 					{closurePercentage === 85 && leadId && (
-						<WhatsappLogBadge
-							opportunityId={row.original.id}
-							leadId={leadId}
-						/>
+						<WhatsappLogBadge opportunityId={row.original.id} leadId={leadId} />
 					)}
 				</div>
 			);
@@ -196,7 +192,11 @@ export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 			const numericValue = value ? Number.parseFloat(value) : null;
 			return numericValue !== null ? (
 				<span className="font-medium text-green-600 tabular-nums">
-					Q{numericValue.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+					Q
+					{numericValue.toLocaleString("es-GT", {
+						minimumFractionDigits: 2,
+						maximumFractionDigits: 2,
+					})}
 				</span>
 			) : (
 				<span className="text-muted-foreground">—</span>

@@ -13,7 +13,10 @@ import { cn } from "@/lib/utils";
 interface CapitalRangeFilterProps {
 	capitalMin: number | undefined;
 	capitalMax: number | undefined;
-	onCapitalRangeChange: (min: number | undefined, max: number | undefined) => void;
+	onCapitalRangeChange: (
+		min: number | undefined,
+		max: number | undefined,
+	) => void;
 	className?: string;
 }
 
@@ -63,9 +66,13 @@ export function CapitalRangeFilter({
 						<DollarSign className="mr-2 h-4 w-4" />
 						{hasFilter ? (
 							<span>
-								{capitalMin !== undefined ? formatCapital(capitalMin) : "Sin mín."}{" "}
+								{capitalMin !== undefined
+									? formatCapital(capitalMin)
+									: "Sin mín."}{" "}
 								—{" "}
-								{capitalMax !== undefined ? formatCapital(capitalMax) : "Sin máx."}
+								{capitalMax !== undefined
+									? formatCapital(capitalMax)
+									: "Sin máx."}
 							</span>
 						) : (
 							<span>Rango de Capital</span>
@@ -76,7 +83,10 @@ export function CapitalRangeFilter({
 					<div className="flex flex-col gap-3">
 						<p className="font-semibold text-sm">Filtrar por Capital</p>
 						<div className="flex flex-col gap-1">
-							<Label htmlFor="capital-min" className="text-xs text-muted-foreground">
+							<Label
+								htmlFor="capital-min"
+								className="text-muted-foreground text-xs"
+							>
 								Mínimo (Q)
 							</Label>
 							<Input
@@ -89,7 +99,10 @@ export function CapitalRangeFilter({
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<Label htmlFor="capital-max" className="text-xs text-muted-foreground">
+							<Label
+								htmlFor="capital-max"
+								className="text-muted-foreground text-xs"
+							>
 								Máximo (Q)
 							</Label>
 							<Input

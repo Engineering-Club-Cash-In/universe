@@ -91,11 +91,11 @@ function RouteComponent() {
 						<TabsTrigger value="tiempo">Tiempo Cierre Crédito</TabsTrigger>
 					)}
 					{canEfectividad && (
-						<TabsTrigger value="efectividad">Porcentaje Efectividad</TabsTrigger>
+						<TabsTrigger value="efectividad">
+							Porcentaje Efectividad
+						</TabsTrigger>
 					)}
-					{canMeta && (
-						<TabsTrigger value="meta">Meta Colocación</TabsTrigger>
-					)}
+					{canMeta && <TabsTrigger value="meta">Meta Colocación</TabsTrigger>}
 				</TabsList>
 
 				{canTiempo && (

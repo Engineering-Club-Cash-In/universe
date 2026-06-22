@@ -60,7 +60,7 @@ export function CurrencyInput({
 
 	return (
 		<div className="relative">
-			<span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+			<span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground text-sm">
 				{symbol}
 			</span>
 			<Input

@@ -75,10 +75,7 @@ function YearSelect({
 	const currentYear = new Date().getFullYear();
 	const years = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
 	return (
-		<Select
-			value={String(value)}
-			onValueChange={(v) => onChange(Number(v))}
-		>
+		<Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
 			<SelectTrigger className="w-[90px]">
 				<SelectValue />
 			</SelectTrigger>
@@ -101,10 +98,7 @@ function QuarterSelect({
 	onChange: (q: number) => void;
 }) {
 	return (
-		<Select
-			value={String(value)}
-			onValueChange={(v) => onChange(Number(v))}
-		>
+		<Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
 			<SelectTrigger className="w-[70px]">
 				<SelectValue />
 			</SelectTrigger>
@@ -126,10 +120,7 @@ function MonthSelect({
 	onChange: (m: number) => void;
 }) {
 	return (
-		<Select
-			value={String(value)}
-			onValueChange={(v) => onChange(Number(v))}
-		>
+		<Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
 			<SelectTrigger className="w-[120px]">
 				<SelectValue />
 			</SelectTrigger>
@@ -155,7 +146,7 @@ export function PeriodDatePicker({
 		const toYear = parseYear(fechaFin);
 		return (
 			<div className="flex items-center gap-1.5">
-				<CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+				<CalendarIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
 				<YearSelect
 					value={fromYear}
 					onChange={(y) => {
@@ -181,7 +172,7 @@ export function PeriodDatePicker({
 		const toQ = parseQuarter(fechaFin);
 		return (
 			<div className="flex items-center gap-1.5">
-				<CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+				<CalendarIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
 				<YearSelect
 					value={year}
 					onChange={(y) => {
@@ -222,7 +213,7 @@ export function PeriodDatePicker({
 		const toMonth = parseMonth(fechaFin);
 		return (
 			<div className="flex items-center gap-1.5">
-				<CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+				<CalendarIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
 				<YearSelect
 					value={year}
 					onChange={(y) => {
@@ -262,7 +253,7 @@ export function PeriodDatePicker({
 	const month = parseMonth(fechaInicio);
 	return (
 		<div className="flex items-center gap-1.5">
-			<CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+			<CalendarIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
 			<YearSelect
 				value={year}
 				onChange={(y) => {

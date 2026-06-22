@@ -2072,7 +2072,9 @@ function RouteComponent() {
 											const sf = reinversionData.interesNeto.sinFactura;
 											const cube = reinversionData.interesNeto.cube;
 											const totalInteres =
-												Number(cf.interes) + Number(sf.interes) + Number(cube.interes);
+												Number(cf.interes) +
+												Number(sf.interes) +
+												Number(cube.interes);
 											const totalIva = Number(cf.iva) + Number(cube.iva);
 											const totalIsr = Number(sf.isr);
 											const totalNeto =
@@ -2116,7 +2118,7 @@ function RouteComponent() {
 																	{dash(cf.neto)}
 																</TableCell>
 															</TableRow>
-															<TableRow>	
+															<TableRow>
 																<TableCell>Inversionista Sin Factura</TableCell>
 																<TableCell className="text-right">
 																	{dash(sf.interes)}
@@ -2134,10 +2136,18 @@ function RouteComponent() {
 
 															<TableRow>
 																<TableCell>Residuo CUBE</TableCell>
-																<TableCell className="text-right">{dash(cube.interes)}</TableCell>
-																<TableCell className="text-right">{dash(cube.iva)}</TableCell>
-																<TableCell className="text-right text-muted-foreground">—</TableCell>
-																<TableCell className="text-right font-semibold">{dash(cube.neto)}</TableCell>
+																<TableCell className="text-right">
+																	{dash(cube.interes)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{dash(cube.iva)}
+																</TableCell>
+																<TableCell className="text-right text-muted-foreground">
+																	—
+																</TableCell>
+																<TableCell className="text-right font-semibold">
+																	{dash(cube.neto)}
+																</TableCell>
 															</TableRow>
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total</TableCell>

@@ -52,7 +52,8 @@ export const cobrosSendLogs = pgTable(
 		// y respuesta cruda completa del proveedor para poder auditar/depurar
 		// sin tener que reconstruir nada desde los logs de stdout.
 		providerRequest: jsonb("provider_request").$type<Record<string, unknown>>(),
-		providerResponse: jsonb("provider_response").$type<Record<string, unknown>>(),
+		providerResponse:
+			jsonb("provider_response").$type<Record<string, unknown>>(),
 
 		// Resultado
 		status: cobrosSendStatusEnum("status").notNull(),

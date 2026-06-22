@@ -93,21 +93,22 @@ describe("getMembershipAdjustment", () => {
 		expect(result.percentage).toBe(55.47);
 	});
 
-	test.each(["rodado", "importado", "subasta"])(
-		"uses rodado category for origin %s",
-		(origin) => {
-			const result = getMembershipAdjustment({
-				creditType: "autocompra",
-				insuredAmount: 150000,
-				vehicleType: "particular",
-				isNew: false,
-				origin,
-			});
+	test.each([
+		"rodado",
+		"importado",
+		"subasta",
+	])("uses rodado category for origin %s", (origin) => {
+		const result = getMembershipAdjustment({
+			creditType: "autocompra",
+			insuredAmount: 150000,
+			vehicleType: "particular",
+			isNew: false,
+			origin,
+		});
 
-			expect(result.category).toBe("Rodado");
-			expect(result.percentage).toBe(70);
-		},
-	);
+		expect(result.category).toBe("Rodado");
+		expect(result.percentage).toBe(70);
+	});
 
 	test("uses sobre vehículo category before vehicle origin", () => {
 		const result = getMembershipAdjustment({

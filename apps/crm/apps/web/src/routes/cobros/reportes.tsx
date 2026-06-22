@@ -134,8 +134,13 @@ function TabMora({
 						// eslint-disable-next-line @typescript-eslint/no-explicit-any
 						const bucket = (data as any)?.totales?.[etapa.key];
 						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const totalMora = parseFloat((data as any)?.totales?.totalEnMora?.sumaMora ?? "0");
-						const pct = totalMora > 0 ? (parseFloat(bucket?.sumaMora ?? "0") / totalMora) * 100 : 0;
+						const totalMora = Number.parseFloat(
+							(data as any)?.totales?.totalEnMora?.sumaMora ?? "0",
+						);
+						const pct =
+							totalMora > 0
+								? (Number.parseFloat(bucket?.sumaMora ?? "0") / totalMora) * 100
+								: 0;
 						return (
 							<Card key={etapa.key}>
 								<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -151,7 +156,7 @@ function TabMora({
 									<p className="text-muted-foreground text-xs">
 										Capital: {fmtQ(bucket?.sumaCapital ?? "0")}
 									</p>
-									<p className="mt-1 font-medium text-xs text-muted-foreground">
+									<p className="mt-1 font-medium text-muted-foreground text-xs">
 										{pct.toFixed(1)}% del total en mora
 									</p>
 								</CardContent>
@@ -251,8 +256,17 @@ function TabMora({
 											</div>
 											{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
 											{(() => {
-												const totalMora = parseFloat((data as any)?.totales?.totalEnMora?.sumaMora ?? "0");
-												const pct = totalMora > 0 ? (parseFloat(asesor.totalEnMora?.sumaMora ?? "0") / totalMora) * 100 : 0;
+												const totalMora = Number.parseFloat(
+													(data as any)?.totales?.totalEnMora?.sumaMora ?? "0",
+												);
+												const pct =
+													totalMora > 0
+														? (Number.parseFloat(
+																asesor.totalEnMora?.sumaMora ?? "0",
+															) /
+																totalMora) *
+															100
+														: 0;
 												return pct > 0 ? (
 													<div className="font-medium text-muted-foreground text-xs">
 														{pct.toFixed(1)}%
@@ -421,7 +435,7 @@ function RubroCelda({
 		<div className="space-y-0.5 text-right">
 			<div className="text-muted-foreground text-xs">{fmtQ(esperado)}</div>
 			<div
-				className={`text-xs font-medium ${pagadoNum > 0 ? "text-green-600" : "text-muted-foreground/40"}`}
+				className={`font-medium text-xs ${pagadoNum > 0 ? "text-green-600" : "text-muted-foreground/40"}`}
 			>
 				{pagadoNum > 0 ? fmtQ(pagado) : "—"}
 			</div>
@@ -599,18 +613,16 @@ function TabCuotasPorFecha({
 		enabled: !!session && canSeeAll,
 	});
 
-	const {
-		data,
-		isLoading,
-		dataUpdatedAt,
-		refetch,
-		isFetching,
-	} = useQuery({
+	const { data, isLoading, dataUpdatedAt, refetch, isFetching } = useQuery({
 		...orpc.getCuotasPorFecha.queryOptions({
 			input: {
 				fechaInicio,
 				fechaFin,
-				asesorId: canSeeAll ? (asesorId ? Number(asesorId) : undefined) : undefined,
+				asesorId: canSeeAll
+					? asesorId
+						? Number(asesorId)
+						: undefined
+					: undefined,
 			},
 		}),
 		enabled: !!session && !!fechaInicio && !!fechaFin,
@@ -636,9 +648,10 @@ function TabCuotasPorFecha({
 		return "pendiente";
 	}
 
-	const filteredRows = filtroEstado === "todos"
-		? rows
-		: rows.filter((r) => getEstado(r) === filtroEstado);
+	const filteredRows =
+		filtroEstado === "todos"
+			? rows
+			: rows.filter((r) => getEstado(r) === filtroEstado);
 
 	return (
 		<div className="space-y-6">
@@ -770,7 +783,7 @@ function TabCuotasPorFecha({
 			{/* Summary cards */}
 			<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
 				<Card className="gap-1 border-blue-200 bg-blue-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-blue-700 text-xs">
 							Total Esperado
 						</CardTitle>
@@ -782,7 +795,7 @@ function TabCuotasPorFecha({
 					</CardContent>
 				</Card>
 				<Card className="gap-1 border-green-200 bg-green-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-green-700 text-xs">
 							Total Pagado
 						</CardTitle>
@@ -794,19 +807,19 @@ function TabCuotasPorFecha({
 					</CardContent>
 				</Card>
 				<Card className="gap-1 border-red-200 bg-red-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-red-700 text-xs">
 							Total Pendiente
 						</CardTitle>
 					</CardHeader>
 					<CardContent className="px-4 pb-0">
-						<div className="font-bold text-red-700 text-lg">
+						<div className="font-bold text-lg text-red-700">
 							{fmtQ(totales?.totalPendiente ?? "0")}
 						</div>
 					</CardContent>
 				</Card>
 				<Card className="gap-1 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-xs">Cuotas</CardTitle>
 					</CardHeader>
 					<CardContent className="px-4 pb-0">
@@ -831,7 +844,7 @@ function TabCuotasPorFecha({
 					] as const
 				).map((c) => (
 					<Card key={c.key} className="gap-0.5 py-2.5">
-						<CardHeader className="px-3 pb-0 pt-0">
+						<CardHeader className="px-3 pt-0 pb-0">
 							<CardTitle className="font-medium text-muted-foreground text-xs">
 								{c.label}
 							</CardTitle>
@@ -846,7 +859,11 @@ function TabCuotasPorFecha({
 			</div>
 
 			{/* Detail table */}
-			<DataTable columns={colsCuotas} data={filteredRows} isLoading={isLoading} />
+			<DataTable
+				columns={colsCuotas}
+				data={filteredRows}
+				isLoading={isLoading}
+			/>
 		</div>
 	);
 }
@@ -906,28 +923,98 @@ const colsDescuentos: ColumnDef<DescuentoRow>[] = [
 			</div>
 		),
 	},
-	{ accessorKey: "multas", header: "Multas", cell: ({ row }) => fmtDesc(row.original.multas) },
-	{ accessorKey: "copiaDeLlave", header: "Copia llave", cell: ({ row }) => fmtDesc(row.original.copiaDeLlave) },
-	{ accessorKey: "diferenciaCopia", header: "Dif. copia", cell: ({ row }) => fmtDesc(row.original.diferenciaCopia) },
-	{ accessorKey: "impuestoCirculacion", header: "Imp. circulación", cell: ({ row }) => fmtDesc(row.original.impuestoCirculacion) },
-	{ accessorKey: "garantiaMobiliaria", header: "Garantía mob.", cell: ({ row }) => fmtDesc(row.original.garantiaMobiliaria) },
-	{ accessorKey: "placas", header: "Placas", cell: ({ row }) => fmtDesc(row.original.placas) },
-	{ accessorKey: "contratoLeasing", header: "Cto. leasing", cell: ({ row }) => fmtDesc(row.original.contratoLeasing) },
-	{ accessorKey: "verificacionDireccion", header: "Verif. dirección", cell: ({ row }) => fmtDesc(row.original.verificacionDireccion) },
-	{ accessorKey: "traspasoVehiculo", header: "Traspaso", cell: ({ row }) => fmtDesc(row.original.traspasoVehiculo) },
-	{ accessorKey: "intereses", header: "Intereses", cell: ({ row }) => fmtDesc(row.original.intereses) },
-	{ accessorKey: "rcdp", header: "RCDP", cell: ({ row }) => fmtDesc(row.original.rcdp) },
-	{ accessorKey: "gps", header: "GPS", cell: ({ row }) => fmtDesc(row.original.gps) },
-	{ accessorKey: "seguro", header: "Seguro", cell: ({ row }) => fmtDesc(row.original.seguro) },
-	{ accessorKey: "membresia", header: "Membresía", cell: ({ row }) => fmtDesc(row.original.membresia) },
-	{ accessorKey: "gastosAdmin", header: "Gastos admin", cell: ({ row }) => fmtDesc(row.original.gastosAdmin) },
-	{ accessorKey: "freelance", header: "Free Lance", cell: ({ row }) => fmtDesc(row.original.freelance) },
-	{ accessorKey: "royalty", header: "Royalty", cell: ({ row }) => fmtDesc(row.original.royalty) },
+	{
+		accessorKey: "multas",
+		header: "Multas",
+		cell: ({ row }) => fmtDesc(row.original.multas),
+	},
+	{
+		accessorKey: "copiaDeLlave",
+		header: "Copia llave",
+		cell: ({ row }) => fmtDesc(row.original.copiaDeLlave),
+	},
+	{
+		accessorKey: "diferenciaCopia",
+		header: "Dif. copia",
+		cell: ({ row }) => fmtDesc(row.original.diferenciaCopia),
+	},
+	{
+		accessorKey: "impuestoCirculacion",
+		header: "Imp. circulación",
+		cell: ({ row }) => fmtDesc(row.original.impuestoCirculacion),
+	},
+	{
+		accessorKey: "garantiaMobiliaria",
+		header: "Garantía mob.",
+		cell: ({ row }) => fmtDesc(row.original.garantiaMobiliaria),
+	},
+	{
+		accessorKey: "placas",
+		header: "Placas",
+		cell: ({ row }) => fmtDesc(row.original.placas),
+	},
+	{
+		accessorKey: "contratoLeasing",
+		header: "Cto. leasing",
+		cell: ({ row }) => fmtDesc(row.original.contratoLeasing),
+	},
+	{
+		accessorKey: "verificacionDireccion",
+		header: "Verif. dirección",
+		cell: ({ row }) => fmtDesc(row.original.verificacionDireccion),
+	},
+	{
+		accessorKey: "traspasoVehiculo",
+		header: "Traspaso",
+		cell: ({ row }) => fmtDesc(row.original.traspasoVehiculo),
+	},
+	{
+		accessorKey: "intereses",
+		header: "Intereses",
+		cell: ({ row }) => fmtDesc(row.original.intereses),
+	},
+	{
+		accessorKey: "rcdp",
+		header: "RCDP",
+		cell: ({ row }) => fmtDesc(row.original.rcdp),
+	},
+	{
+		accessorKey: "gps",
+		header: "GPS",
+		cell: ({ row }) => fmtDesc(row.original.gps),
+	},
+	{
+		accessorKey: "seguro",
+		header: "Seguro",
+		cell: ({ row }) => fmtDesc(row.original.seguro),
+	},
+	{
+		accessorKey: "membresia",
+		header: "Membresía",
+		cell: ({ row }) => fmtDesc(row.original.membresia),
+	},
+	{
+		accessorKey: "gastosAdmin",
+		header: "Gastos admin",
+		cell: ({ row }) => fmtDesc(row.original.gastosAdmin),
+	},
+	{
+		accessorKey: "freelance",
+		header: "Free Lance",
+		cell: ({ row }) => fmtDesc(row.original.freelance),
+	},
+	{
+		accessorKey: "royalty",
+		header: "Royalty",
+		cell: ({ row }) => fmtDesc(row.original.royalty),
+	},
 	{
 		accessorKey: "totalDescuentos",
 		header: "Total",
 		cell: ({ row }) => (
-			<span className="font-semibold">{fmtQ(row.original.totalDescuentos)}</span>
+			<span className="font-semibold">
+				{fmtQ(row.original.totalDescuentos)}
+			</span>
 		),
 	},
 ];
@@ -992,18 +1079,18 @@ function TabDescuentos({
 				hideSearch
 				stickyFirstColumn
 				serverPagination={
-						data
-							? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-								{
-									page: (data as any).page,
-									pageSize: (data as any).pageSize,
-									totalPages: (data as any).totalPages,
-									totalItems: (data as any).total,
-									onPageChange: setPage,
-								}
-							: undefined
-					}
-				/>
+					data
+						? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+							{
+								page: (data as any).page,
+								pageSize: (data as any).pageSize,
+								totalPages: (data as any).totalPages,
+								totalItems: (data as any).total,
+								onPageChange: setPage,
+							}
+						: undefined
+				}
+			/>
 		</div>
 	);
 }

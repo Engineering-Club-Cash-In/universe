@@ -47,14 +47,18 @@ export function Inspection360View({ items }: Inspection360ViewProps) {
 		switch (status) {
 			case "GOOD":
 			case "OK":
-				return <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />;
+				return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-500" />;
 			case "REGULAR":
-				return <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />;
+				return (
+					<AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+				);
 			case "BAD":
 			case "LEGACY_BAD":
-				return <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />;
+				return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />;
 			case "NA":
-				return <MinusCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
+				return (
+					<MinusCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+				);
 			default:
 				return null;
 		}
@@ -82,15 +86,15 @@ export function Inspection360View({ items }: Inspection360ViewProps) {
 			{Object.entries(groupedItems).map(([area, areaItems]) => (
 				<div key={area}>
 					{/* Area subheader */}
-					<div className="flex items-center gap-2 mb-1.5">
-						<span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+					<div className="mb-1.5 flex items-center gap-2">
+						<span className="font-bold text-[10px] text-muted-foreground uppercase tracking-widest">
 							{area.replace(/_/g, " ")}
 						</span>
-						<div className="flex-1 h-px bg-border" />
+						<div className="h-px flex-1 bg-border" />
 					</div>
 
 					{/* Items 2-col grid */}
-					<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+					<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 						{areaItems.map((item, idx) => {
 							const { label, cls } = getStatusLabel(item.status);
 							const hasCompression =
@@ -109,23 +113,26 @@ export function Inspection360View({ items }: Inspection360ViewProps) {
 										)
 										.sort(
 											([a], [b]) =>
-												parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]),
+												Number.parseInt(a.split("_")[1]) -
+												Number.parseInt(b.split("_")[1]),
 										)
 								: [];
 
 							return (
 								<div
 									key={`${area}-${item.checkpoint}-${idx}`}
-									className="flex items-start justify-between gap-2 rounded-lg border bg-muted/20 hover:bg-muted/40 transition-colors px-3 py-2"
+									className="flex items-start justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2 transition-colors hover:bg-muted/40"
 								>
 									{/* Left: icon + name + optional extras */}
 									<div className="min-w-0 flex-1">
 										<div className="flex items-center gap-1.5">
 											{getStatusIcon(item.status)}
-											<span className="font-medium text-xs truncate">{item.checkpoint}</span>
+											<span className="truncate font-medium text-xs">
+												{item.checkpoint}
+											</span>
 										</div>
 										{item.comment && (
-											<p className="text-muted-foreground text-[10px] mt-0.5 ml-5 leading-snug line-clamp-2">
+											<p className="mt-0.5 ml-5 line-clamp-2 text-[10px] text-muted-foreground leading-snug">
 												{item.comment}
 											</p>
 										)}
@@ -134,9 +141,11 @@ export function Inspection360View({ items }: Inspection360ViewProps) {
 												{psiEntries.map(([key, value]) => (
 													<span
 														key={key}
-														className="inline-flex items-center gap-0.5 rounded bg-blue-50 border border-blue-100 px-1.5 py-0.5 font-mono text-[9px] text-blue-700"
+														className="inline-flex items-center gap-0.5 rounded border border-blue-100 bg-blue-50 px-1.5 py-0.5 font-mono text-[9px] text-blue-700"
 													>
-														<span className="font-semibold">C{key.split("_")[1]}</span>
+														<span className="font-semibold">
+															C{key.split("_")[1]}
+														</span>
 														<span className="text-blue-400">·</span>
 														{value} PSI
 													</span>
@@ -148,7 +157,7 @@ export function Inspection360View({ items }: Inspection360ViewProps) {
 									{/* Right: status badge */}
 									<span
 										className={cn(
-											"mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap",
+											"mt-0.5 shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 font-semibold text-[10px]",
 											cls,
 										)}
 									>

@@ -144,10 +144,9 @@ export const investorDocumentsRouter = {
 		}),
 
 	// Bancos — catálogo desde cartera-back
-	getBancosCartera: crmCobrosOrInvestmentsProcedure
-		.handler(async () => {
-			return carteraBackClient.getBancos();
-		}),
+	getBancosCartera: crmCobrosOrInvestmentsProcedure.handler(async () => {
+		return carteraBackClient.getBancos();
+	}),
 
 	// Editar inversionista — upsert en cartera-back + log
 	editarInversionista: crmCobrosOrInvestmentsProcedure
@@ -228,10 +227,7 @@ export const investorDocumentsRouter = {
 						context.session.user.name ?? context.session.user.email,
 				});
 			} catch (logError) {
-				console.error(
-					"Error al registrar log de cambio de status:",
-					logError,
-				);
+				console.error("Error al registrar log de cambio de status:", logError);
 			}
 
 			return { success: true, data: result };
@@ -298,7 +294,10 @@ export const investorDocumentsRouter = {
 			// 3. Si pidió compra de cartera, ejecutarla con el ID del nuevo inversionista
 			let compraResult = null;
 			if (input.hacerCompraCartera && input.montoCompraCartera) {
-				const tipoReinversionCompra: "sin_reinversion" | "reinversion_capital" | "reinversion_total" =
+				const tipoReinversionCompra:
+					| "sin_reinversion"
+					| "reinversion_capital"
+					| "reinversion_total" =
 					input.tipoReinversion === "reinversion_capital" ||
 					input.tipoReinversion === "reinversion_total"
 						? input.tipoReinversion

@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
-	leadSourceEnum,
+	type leadSourceEnum,
 	leads,
 	opportunities,
 	salesStages,
@@ -30,7 +30,13 @@ export async function getSalesUserWithLeastOpportunities() {
 			role: user.role,
 		})
 		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
+		.where(
+			and(
+				eq(user.role, "sales"),
+				eq(user.assignLeads, true),
+				eq(user.banned, false),
+			),
+		);
 
 	if (salesUsers.length === 0) {
 		return null;
@@ -84,7 +90,13 @@ export async function getSalesUserWithLeastLeads() {
 			role: user.role,
 		})
 		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
+		.where(
+			and(
+				eq(user.role, "sales"),
+				eq(user.assignLeads, true),
+				eq(user.banned, false),
+			),
+		);
 
 	if (salesUsers.length === 0) {
 		return null;
@@ -102,10 +114,7 @@ export async function getSalesUserWithLeastLeads() {
 		})
 		.from(leads)
 		.where(
-			and(
-				eq(leads.assignmentType, "auto"),
-				gte(leads.createdAt, startOfToday),
-			),
+			and(eq(leads.assignmentType, "auto"), gte(leads.createdAt, startOfToday)),
 		)
 		.groupBy(leads.assignedTo);
 
@@ -251,10 +260,7 @@ export async function createPublicLead(c: Context) {
 		if (hasDpi) {
 			const resultadoDpi = validarDpi(body.dpi);
 			if (!resultadoDpi.valid) {
-				return c.json(
-					{ success: false, error: resultadoDpi.error },
-					400,
-				);
+				return c.json({ success: false, error: resultadoDpi.error }, 400);
 			}
 			body.dpi = resultadoDpi.dpiLimpio;
 		}
@@ -273,8 +279,7 @@ export async function createPublicLead(c: Context) {
 		// --- Lead existente ---
 		if (existingLead) {
 			const source = body.source || existingLead.source || "website";
-			const campaign =
-				body.campaign || existingLead.campaign || undefined;
+			const campaign = body.campaign || existingLead.campaign || undefined;
 			let leadData = existingLead;
 
 			if (body.isRegister) {
@@ -302,11 +307,13 @@ export async function createPublicLead(c: Context) {
 				source,
 			);
 			if (existingOpportunity) {
-				const opportunityUpdates =
-					getPublicLeadExistingOpportunityUpdates(existingOpportunity, {
+				const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(
+					existingOpportunity,
+					{
 						campaign: body.campaign,
 						creditType,
-					});
+					},
+				);
 
 				if (Object.keys(opportunityUpdates).length > 0) {
 					await db

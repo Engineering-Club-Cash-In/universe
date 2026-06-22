@@ -63,7 +63,10 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 				queryKey: ["clientFormData", opportunityId],
 			});
 			setUpdatedKey(key);
-			setTimeout(() => setUpdatedKey((cur) => (cur === key ? null : cur)), 4000);
+			setTimeout(
+				() => setUpdatedKey((cur) => (cur === key ? null : cur)),
+				4000,
+			);
 			toast.success("Enlace generado exitosamente");
 		},
 		onError: () => {
@@ -227,7 +230,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 											)}
 										</div>
 										{updatedKey === key && (
-											<p className="flex items-center gap-1 text-green-600 text-xs font-medium">
+											<p className="flex items-center gap-1 font-medium text-green-600 text-xs">
 												<Check className="h-3 w-3" />
 												Enlace actualizado exitosamente
 											</p>
@@ -348,48 +351,54 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 				})}
 			</div>
 
-		<AlertDialog
-			open={!!confirmingKey}
-			onOpenChange={(open) => { if (!open) setConfirmingKey(null); }}
-		>
-			<AlertDialogContent>
-				<AlertDialogHeader>
-					<AlertDialogTitle>¿Generar nuevo enlace y borrar datos ingresados?</AlertDialogTitle>
-					<AlertDialogDescription asChild>
-						<div className="space-y-3 text-sm text-muted-foreground">
-							<p>
-								El formulario de{" "}
-								<span className="font-medium text-foreground">
-									{confirmingKey?.displayName}
-								</span>{" "}
-								ya tiene información ingresada. Al generar un nuevo enlace
-								se <span className="font-medium text-destructive">eliminarán todos los datos</span> que
-								el cliente había enviado y deberá volver a llenar el
-								formulario completo desde cero.
-							</p>
-							<p>Esta acción no se puede deshacer.</p>
-						</div>
-					</AlertDialogDescription>
-				</AlertDialogHeader>
-				<AlertDialogFooter>
-					<AlertDialogCancel>Cancelar</AlertDialogCancel>
-					<AlertDialogAction
-						className="bg-destructive hover:bg-destructive/90"
-						onClick={() => {
-							if (confirmingKey) {
-								generateMutation.mutate({
-									personType: confirmingKey.personType,
-									personId: confirmingKey.personId,
-								});
-								setConfirmingKey(null);
-							}
-						}}
-					>
-						Sí, borrar datos y generar nuevo enlace
-					</AlertDialogAction>
-				</AlertDialogFooter>
-			</AlertDialogContent>
-		</AlertDialog>
-	</div>
+			<AlertDialog
+				open={!!confirmingKey}
+				onOpenChange={(open) => {
+					if (!open) setConfirmingKey(null);
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>
+							¿Generar nuevo enlace y borrar datos ingresados?
+						</AlertDialogTitle>
+						<AlertDialogDescription asChild>
+							<div className="space-y-3 text-muted-foreground text-sm">
+								<p>
+									El formulario de{" "}
+									<span className="font-medium text-foreground">
+										{confirmingKey?.displayName}
+									</span>{" "}
+									ya tiene información ingresada. Al generar un nuevo enlace se{" "}
+									<span className="font-medium text-destructive">
+										eliminarán todos los datos
+									</span>{" "}
+									que el cliente había enviado y deberá volver a llenar el
+									formulario completo desde cero.
+								</p>
+								<p>Esta acción no se puede deshacer.</p>
+							</div>
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancelar</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-destructive hover:bg-destructive/90"
+							onClick={() => {
+								if (confirmingKey) {
+									generateMutation.mutate({
+										personType: confirmingKey.personType,
+										personId: confirmingKey.personId,
+									});
+									setConfirmingKey(null);
+								}
+							}}
+						>
+							Sí, borrar datos y generar nuevo enlace
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+		</div>
 	);
 }

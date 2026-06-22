@@ -651,10 +651,11 @@ function RouteComponent() {
 									</div>
 									<p className="font-bold text-lg text-orange-600">
 										Q
-										{(
-											caso.cuotaConvenio != null
-												? Number(caso.cuotaConvenio) + Number(caso.cuotaMensual || 0)
-												: Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)
+										{(caso.cuotaConvenio != null
+											? Number(caso.cuotaConvenio) +
+												Number(caso.cuotaMensual || 0)
+											: Number(caso.montoEnMora) +
+												Number(caso.cuotaMensual || 0)
 										).toLocaleString()}
 									</p>
 								</div>
@@ -750,10 +751,13 @@ function RouteComponent() {
 													Convenio:{" "}
 													<strong>
 														Q
-														{Number(caso.cuotaConvenio ?? 0).toLocaleString("es-GT", {
-															minimumFractionDigits: 2,
-															maximumFractionDigits: 2,
-														})}
+														{Number(caso.cuotaConvenio ?? 0).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</strong>
 												</span>
 												<span>+</span>
@@ -761,10 +765,13 @@ function RouteComponent() {
 													Cuota:{" "}
 													<strong>
 														Q
-														{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
-															minimumFractionDigits: 2,
-															maximumFractionDigits: 2,
-														})}
+														{Number(caso.cuotaMensual || 0).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</strong>
 												</span>
 											</div>

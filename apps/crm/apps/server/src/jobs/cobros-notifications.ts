@@ -10,7 +10,11 @@
 import { and, eq, gt, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
 
 import { db } from "../db";
-import { casosCobros, contactosCobros, seguimientosProgramados } from "../db/schema/cobros";
+import {
+	casosCobros,
+	contactosCobros,
+	seguimientosProgramados,
+} from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 
@@ -182,19 +186,26 @@ export async function procesarSeguimientosRecurrentes() {
 			[...SEGUIMIENTOS_LOCK],
 		);
 		if (!rows[0].acquired) {
-			console.log("[SeguimientosRecurrentes] Already running (distributed lock held), skipping");
+			console.log(
+				"[SeguimientosRecurrentes] Already running (distributed lock held), skipping",
+			);
 			return;
 		}
 		await _procesarSeguimientosRecurrentes(client);
 	} finally {
-		await client.query("SELECT pg_advisory_unlock($1, $2)", [...SEGUIMIENTOS_LOCK]);
+		await client.query("SELECT pg_advisory_unlock($1, $2)", [
+			...SEGUIMIENTOS_LOCK,
+		]);
 		client.release();
 	}
 }
 
 // Minimal interface so we don't need to import pg types directly.
 interface RawClient {
-	query<T extends object>(text: string, values?: unknown[]): Promise<{ rows: T[] }>;
+	query<T extends object>(
+		text: string,
+		values?: unknown[],
+	): Promise<{ rows: T[] }>;
 }
 
 async function _procesarSeguimientosRecurrentes(client: RawClient) {
@@ -218,61 +229,95 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 			responsableCobros: casosCobros.responsableCobros,
 		})
 		.from(seguimientosProgramados)
-		.innerJoin(casosCobros, eq(seguimientosProgramados.casoCobroId, casosCobros.id))
+		.innerJoin(
+			casosCobros,
+			eq(seguimientosProgramados.casoCobroId, casosCobros.id),
+		)
 		.where(eq(seguimientosProgramados.activo, true));
 
 	if (seguimientos.length === 0) {
-		console.log("[CobrosNotifications] procesarSeguimientosRecurrentes: 0 seguimientos activos, nada que procesar");
+		console.log(
+			"[CobrosNotifications] procesarSeguimientosRecurrentes: 0 seguimientos activos, nada que procesar",
+		);
 		return;
 	}
 
-	console.log(`[CobrosNotifications] procesarSeguimientosRecurrentes: ${seguimientos.length} seguimientos activos encontrados`);
+	console.log(
+		`[CobrosNotifications] procesarSeguimientosRecurrentes: ${seguimientos.length} seguimientos activos encontrados`,
+	);
 
 	// Categorize in JS — no DB roundtrip per row
 	const toDeactivateIds: string[] = [];
-	type SegRow = typeof seguimientos[number];
-	type ClaimRow = SegRow & { oldOcurrencias: number; newOcurrencias: number; proximaFecha: Date };
+	type SegRow = (typeof seguimientos)[number];
+	type ClaimRow = SegRow & {
+		oldOcurrencias: number;
+		newOcurrencias: number;
+		proximaFecha: Date;
+	};
 	const claimRows: ClaimRow[] = [];
 
 	for (const seg of seguimientos) {
 		// Datos corruptos — check constraint protege rows nuevos; esto cubre legacy.
-		if (seg.intervaloDias <= 0) { toDeactivateIds.push(seg.id); continue; }
-		if (seg.fechaFin && toDateStrGT(seg.fechaFin) < hoyStr) { toDeactivateIds.push(seg.id); continue; }
-		if (seg.ocurrenciasMaximas != null && seg.ocurrenciasRealizadas >= seg.ocurrenciasMaximas) {
-			toDeactivateIds.push(seg.id); continue;
+		if (seg.intervaloDias <= 0) {
+			toDeactivateIds.push(seg.id);
+			continue;
+		}
+		if (seg.fechaFin && toDateStrGT(seg.fechaFin) < hoyStr) {
+			toDeactivateIds.push(seg.id);
+			continue;
+		}
+		if (
+			seg.ocurrenciasMaximas != null &&
+			seg.ocurrenciasRealizadas >= seg.ocurrenciasMaximas
+		) {
+			toDeactivateIds.push(seg.id);
+			continue;
 		}
 
 		// Días transcurridos en zona GT — evita catch-up N-veces si el scheduler estuvo caído.
 		const diasTranscurridos = Math.floor(
-			(hoyMs - new Date(`${toDateStrGT(seg.fechaInicio)}T00:00:00`).getTime()) / 86_400_000,
+			(hoyMs - new Date(`${toDateStrGT(seg.fechaInicio)}T00:00:00`).getTime()) /
+				86_400_000,
 		);
 		if (diasTranscurridos < 0) continue;
 
 		// Largest k where fechaInicio + k*intervaloDias <= today
-		const ocurrenciasDebidas = Math.floor(diasTranscurridos / seg.intervaloDias);
+		const ocurrenciasDebidas = Math.floor(
+			diasTranscurridos / seg.intervaloDias,
+		);
 		if (ocurrenciasDebidas >= seg.ocurrenciasRealizadas) {
 			// Acotar al límite máximo: si el scheduler estuvo caído varios intervalos,
 			// ocurrenciasDebidas puede superar ocurrenciasMaximas y disparar una notificación extra.
-			const newOcurrencias = seg.ocurrenciasMaximas != null
-				? Math.min(ocurrenciasDebidas + 1, seg.ocurrenciasMaximas)
-				: ocurrenciasDebidas + 1;
+			const newOcurrencias =
+				seg.ocurrenciasMaximas != null
+					? Math.min(ocurrenciasDebidas + 1, seg.ocurrenciasMaximas)
+					: ocurrenciasDebidas + 1;
 			// Aritmética en ms — Guatemala no tiene DST.
 			const proximaFecha = new Date(
-				seg.fechaInicio.getTime() + seg.intervaloDias * newOcurrencias * 86_400_000,
+				seg.fechaInicio.getTime() +
+					seg.intervaloDias * newOcurrencias * 86_400_000,
 			);
-			claimRows.push({ ...seg, oldOcurrencias: seg.ocurrenciasRealizadas, newOcurrencias, proximaFecha });
+			claimRows.push({
+				...seg,
+				oldOcurrencias: seg.ocurrenciasRealizadas,
+				newOcurrencias,
+				proximaFecha,
+			});
 		}
 	}
 
 	// Query 2: batch deactivate (1 query vs N)
 	if (toDeactivateIds.length > 0) {
-		await db.update(seguimientosProgramados)
+		await db
+			.update(seguimientosProgramados)
 			.set({ activo: false, updatedAt: new Date() })
 			.where(inArray(seguimientosProgramados.id, toDeactivateIds));
 	}
 
 	if (claimRows.length === 0) {
-		console.log(`[SeguimientosRecurrentes] ${toDeactivateIds.length} desactivados, 0 a procesar`);
+		console.log(
+			`[SeguimientosRecurrentes] ${toDeactivateIds.length} desactivados, 0 a procesar`,
+		);
 		return;
 	}
 
@@ -280,11 +325,13 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 	// Sin transacción, un fallo entre el CAS y el insert de notificaciones consumía el contador
 	// permanentemente (el siguiente run lo saltaba) sin generar el recordatorio.
 	const casParams: unknown[] = [];
-	const casPh = claimRows.map((r, i) => {
-		const b = i * 3;
-		casParams.push(r.id, r.oldOcurrencias, r.newOcurrencias);
-		return `($${b + 1}::uuid, $${b + 2}::int, $${b + 3}::int)`;
-	}).join(", ");
+	const casPh = claimRows
+		.map((r, i) => {
+			const b = i * 3;
+			casParams.push(r.id, r.oldOcurrencias, r.newOcurrencias);
+			return `($${b + 1}::uuid, $${b + 2}::int, $${b + 3}::int)`;
+		})
+		.join(", ");
 
 	let claimed: ClaimRow[] = [];
 
@@ -305,7 +352,9 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 
 		if (claimed.length === 0) {
 			await client.query("COMMIT");
-			console.log("[SeguimientosRecurrentes] 0 claims ganados (runner concurrente los tomó)");
+			console.log(
+				"[SeguimientosRecurrentes] 0 claims ganados (runner concurrente los tomó)",
+			);
 			return;
 		}
 
@@ -343,19 +392,25 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 
 		// Query 5: batch insert notificaciones como raw SQL para permanecer en la misma transacción.
 		const notifParams: unknown[] = [];
-		const notifPh = claimed.map((r, i) => {
-			const b = i * 11;
-			notifParams.push(
-				"Nuevo seguimiento programado",
-				`Se ha programado automáticamente un contacto vía ${r.metodoContacto} para el crédito ${r.numeroCreditoSifco ?? r.casoCobroId.slice(0, 8)}`,
-				"reminder", "pending",
-				r.agenteId, "cobros", "cobros",
-				r.responsableCobros,
-				"collection_case", r.casoCobroId,
-				"cobros_detail",
-			);
-			return `($${b + 1}::text, $${b + 2}::text, $${b + 3}::notification_type, $${b + 4}::notification_status, $${b + 5}::text, $${b + 6}::user_role, $${b + 7}::user_role, $${b + 8}::text, $${b + 9}::notification_entity_type, $${b + 10}::uuid, $${b + 11}::notification_redirect_page)`;
-		}).join(", ");
+		const notifPh = claimed
+			.map((r, i) => {
+				const b = i * 11;
+				notifParams.push(
+					"Nuevo seguimiento programado",
+					`Se ha programado automáticamente un contacto vía ${r.metodoContacto} para el crédito ${r.numeroCreditoSifco ?? r.casoCobroId.slice(0, 8)}`,
+					"reminder",
+					"pending",
+					r.agenteId,
+					"cobros",
+					"cobros",
+					r.responsableCobros,
+					"collection_case",
+					r.casoCobroId,
+					"cobros_detail",
+				);
+				return `($${b + 1}::text, $${b + 2}::text, $${b + 3}::notification_type, $${b + 4}::notification_status, $${b + 5}::text, $${b + 6}::user_role, $${b + 7}::user_role, $${b + 8}::text, $${b + 9}::notification_entity_type, $${b + 10}::uuid, $${b + 11}::notification_redirect_page)`;
+			})
+			.join(", ");
 
 		await client.query(
 			`INSERT INTO notifications (titulo, descripcion, type, status, created_by, created_by_role, assigned_to_role, assigned_to, related_entity_type, related_entity_id, redirect_page)
@@ -370,7 +425,9 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 	}
 
 	for (const r of claimed) {
-		console.log(`[CobrosNotifications] ✅ Seguimiento disparado para caso ${r.casoCobroId} | próximo contacto: ${toDateStrGT(r.proximaFecha)}`);
+		console.log(
+			`[CobrosNotifications] ✅ Seguimiento disparado para caso ${r.casoCobroId} | próximo contacto: ${toDateStrGT(r.proximaFecha)}`,
+		);
 	}
 
 	console.log(

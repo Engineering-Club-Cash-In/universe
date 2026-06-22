@@ -18,6 +18,7 @@ import { InvestorStatusBadge } from "@/components/investments/InvestorStatusBadg
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import {
 	Dialog,
 	DialogContent,
@@ -26,7 +27,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -60,7 +60,8 @@ function LiquidacionesInversionistas() {
 	const [formNumeroCuenta, setFormNumeroCuenta] = useState("");
 	const [formMoneda, setFormMoneda] = useState("quetzales");
 	const [formEmiteFactura, setFormEmiteFactura] = useState(false);
-	const [formTipoReinversion, setFormTipoReinversion] = useState("sin_reinversion");
+	const [formTipoReinversion, setFormTipoReinversion] =
+		useState("sin_reinversion");
 	const [formMontoReinversion, setFormMontoReinversion] = useState("");
 	// Compra de cartera opcional
 	const [hacerCompra, setHacerCompra] = useState(false);
@@ -115,7 +116,7 @@ function LiquidacionesInversionistas() {
 			input: { page: 1, perPage: 100 },
 		}),
 		enabled: !!session,
-	})
+	});
 
 	const bancosQuery = useQuery({
 		...orpc.getBancosCartera.queryOptions({ input: undefined as never }),
@@ -292,20 +293,21 @@ function LiquidacionesInversionistas() {
 												Factura
 											</Badge>
 										)}
-										{inv.tipoReinversion && inv.tipoReinversion !== "sin_reinversion" && (
-											<Badge
-												variant="outline"
-												className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
-											>
-												{{
-													reinversion_capital: "Reinversión Capital",
-													reinversion_interes: "Reinversión Interés",
-													reinversion_total: "Reinversión Total",
-													reinversion_variable: "Reinversión Variable",
-													reinversion_combinada: "Reinversión Combinada",
-												}[inv.tipoReinversion as string] ?? "Reinversión"}
-											</Badge>
-										)}
+										{inv.tipoReinversion &&
+											inv.tipoReinversion !== "sin_reinversion" && (
+												<Badge
+													variant="outline"
+													className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
+												>
+													{{
+														reinversion_capital: "Reinversión Capital",
+														reinversion_interes: "Reinversión Interés",
+														reinversion_total: "Reinversión Total",
+														reinversion_variable: "Reinversión Variable",
+														reinversion_combinada: "Reinversión Combinada",
+													}[inv.tipoReinversion as string] ?? "Reinversión"}
+												</Badge>
+											)}
 										<InvestorStatusBadge
 											status={(inv as any).status}
 											size="sm"
@@ -372,19 +374,13 @@ function LiquidacionesInversionistas() {
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1.5">
 								<Label htmlFor="inv-banco">Banco</Label>
-								<Select
-									value={formBanco}
-									onValueChange={setFormBanco}
-								>
+								<Select value={formBanco} onValueChange={setFormBanco}>
 									<SelectTrigger id="inv-banco">
 										<SelectValue placeholder="Seleccionar banco..." />
 									</SelectTrigger>
 									<SelectContent>
 										{bancos.map((b: any) => (
-											<SelectItem
-												key={b.banco_id}
-												value={String(b.banco_id)}
-											>
+											<SelectItem key={b.banco_id} value={String(b.banco_id)}>
 												{b.nombre}
 											</SelectItem>
 										))}
@@ -459,11 +455,13 @@ function LiquidacionesInversionistas() {
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										<SelectItem value="sin_reinversion">
-											Tradicional
+										<SelectItem value="sin_reinversion">Tradicional</SelectItem>
+										<SelectItem value="reinversion_capital">
+											Reinversión Capital
 										</SelectItem>
-										<SelectItem value="reinversion_capital">Reinversión Capital</SelectItem>
-										<SelectItem value="reinversion_total">Interés Compuesto</SelectItem>
+										<SelectItem value="reinversion_total">
+											Interés Compuesto
+										</SelectItem>
 									</SelectContent>
 								</Select>
 							</div>
@@ -486,7 +484,7 @@ function LiquidacionesInversionistas() {
 						</div>
 
 						{/* Separador — Compra de cartera */}
-						<div className="rounded-lg border bg-muted/50 p-4 space-y-3">
+						<div className="space-y-3 rounded-lg border bg-muted/50 p-4">
 							<div className="flex items-center gap-2">
 								<Checkbox
 									id="inv-compra"
@@ -626,5 +624,5 @@ function LiquidacionesInversionistas() {
 				</DialogContent>
 			</Dialog>
 		</div>
-	)
+	);
 }

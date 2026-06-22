@@ -4,10 +4,10 @@ import { z } from "zod";
 import { db } from "../db";
 import { casosCobros, seguimientosProgramados } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
-import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { procesarSeguimientosRecurrentes } from "../jobs/cobros-notifications";
-import { PERMISSIONS } from "../lib/roles";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
+import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 
 async function recomputeProximoContacto(casoCobroId: string) {
 	const remaining = await db
@@ -24,7 +24,7 @@ async function recomputeProximoContacto(casoCobroId: string) {
 			and(
 				eq(seguimientosProgramados.casoCobroId, casoCobroId),
 				eq(seguimientosProgramados.activo, true),
-			)
+			),
 		)
 		.orderBy(asc(seguimientosProgramados.fechaInicio));
 
@@ -32,10 +32,12 @@ async function recomputeProximoContacto(casoCobroId: string) {
 	let nextMetodo: string | null = null;
 	for (const seg of remaining) {
 		const nextDate = new Date(
-			seg.fechaInicio.getTime() + seg.intervaloDias * seg.ocurrenciasRealizadas * 86_400_000,
+			seg.fechaInicio.getTime() +
+				seg.intervaloDias * seg.ocurrenciasRealizadas * 86_400_000,
 		);
 		const isTerminal =
-			(seg.ocurrenciasMaximas != null && seg.ocurrenciasRealizadas >= seg.ocurrenciasMaximas) ||
+			(seg.ocurrenciasMaximas != null &&
+				seg.ocurrenciasRealizadas >= seg.ocurrenciasMaximas) ||
 			(seg.fechaFin != null && nextDate > seg.fechaFin);
 		if (isTerminal) continue;
 		if (!nextContacto || nextDate < nextContacto) {
@@ -44,40 +46,55 @@ async function recomputeProximoContacto(casoCobroId: string) {
 		}
 	}
 
-	await db.update(casosCobros)
+	await db
+		.update(casosCobros)
 		.set({
 			proximoContacto: nextContacto,
-			metodoContactoProximo: nextMetodo as typeof casosCobros.$inferInsert["metodoContactoProximo"],
+			metodoContactoProximo:
+				nextMetodo as (typeof casosCobros.$inferInsert)["metodoContactoProximo"],
 			updatedAt: new Date(),
 		})
 		.where(eq(casosCobros.id, casoCobroId));
 }
 
 /** Verifica que el usuario tenga acceso al caso de cobro. Lanza FORBIDDEN si no. */
-async function verifyCaseAccess(casoCobroId: string, userId: string, userRole: string) {
+async function verifyCaseAccess(
+	casoCobroId: string,
+	userId: string,
+	userRole: string,
+) {
 	const [caso] = await db
-		.select({ id: casosCobros.id, responsableCobros: casosCobros.responsableCobros })
+		.select({
+			id: casosCobros.id,
+			responsableCobros: casosCobros.responsableCobros,
+		})
 		.from(casosCobros)
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
 
 	if (!caso) {
-		throw new ORPCError("NOT_FOUND", { message: "Caso de cobro no encontrado" });
+		throw new ORPCError("NOT_FOUND", {
+			message: "Caso de cobro no encontrado",
+		});
 	}
 
-	if (!PERMISSIONS.canViewAllCasosCobros(userRole) && caso.responsableCobros !== userId) {
-		throw new ORPCError("FORBIDDEN", { message: "No tienes acceso a este caso de cobro" });
+	if (
+		!PERMISSIONS.canViewAllCasosCobros(userRole) &&
+		caso.responsableCobros !== userId
+	) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "No tienes acceso a este caso de cobro",
+		});
 	}
 
 	return caso;
 }
 
 export const seguimientosRouter = {
-	runSeguimientosJob: cobrosSupervisorProcedure
-		.handler(async () => {
-			await procesarSeguimientosRecurrentes();
-			return { success: true };
-		}),
+	runSeguimientosJob: cobrosSupervisorProcedure.handler(async () => {
+		await procesarSeguimientosRecurrentes();
+		return { success: true };
+	}),
 
 	createSeguimiento: cobrosProcedure
 		.input(
@@ -93,12 +110,20 @@ export const seguimientosRouter = {
 				intervaloDias: z.number().int().min(1),
 				ocurrenciasMaximas: z.number().int().optional().nullable(),
 				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+				fechaFin: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/)
+					.optional()
+					.nullable(),
 				presetOriginal: z.string().optional().nullable(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			await verifyCaseAccess(input.casoCobroId, context.userId, context.userRole);
+			await verifyCaseAccess(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 
 			const result = await db
 				.insert(seguimientosProgramados)
@@ -137,7 +162,8 @@ export const seguimientosRouter = {
 
 				if (shouldUpdateProximo) {
 					ops.push(
-						db.update(casosCobros)
+						db
+							.update(casosCobros)
 							.set({
 								proximoContacto: fechaInicio,
 								metodoContactoProximo: input.metodoContacto,
@@ -164,7 +190,8 @@ export const seguimientosRouter = {
 							relatedEntityId: caso.id,
 							redirectPage: "cobros_detail",
 						}),
-						db.update(seguimientosProgramados)
+						db
+							.update(seguimientosProgramados)
 							.set({ ocurrenciasRealizadas: 1, updatedAt: new Date() })
 							.where(eq(seguimientosProgramados.id, result[0].id)),
 					);
@@ -183,7 +210,11 @@ export const seguimientosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			await verifyCaseAccess(input.casoCobroId, context.userId, context.userRole);
+			await verifyCaseAccess(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 
 			const seguimientos = await db
 				.select()
@@ -191,8 +222,8 @@ export const seguimientosRouter = {
 				.where(
 					and(
 						eq(seguimientosProgramados.casoCobroId, input.casoCobroId),
-						eq(seguimientosProgramados.activo, true)
-					)
+						eq(seguimientosProgramados.activo, true),
+					),
 				);
 			return seguimientos;
 		}),
@@ -212,10 +243,16 @@ export const seguimientosRouter = {
 				.limit(1);
 
 			if (!seguimiento) {
-				throw new ORPCError("NOT_FOUND", { message: "Seguimiento no encontrado" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "Seguimiento no encontrado",
+				});
 			}
 
-			await verifyCaseAccess(seguimiento.casoCobroId, context.userId, context.userRole);
+			await verifyCaseAccess(
+				seguimiento.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 
 			const result = await db
 				.update(seguimientosProgramados)
@@ -244,10 +281,16 @@ export const seguimientosRouter = {
 				.limit(1);
 
 			if (!seguimiento) {
-				throw new ORPCError("NOT_FOUND", { message: "Seguimiento no encontrado" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "Seguimiento no encontrado",
+				});
 			}
 
-			await verifyCaseAccess(seguimiento.casoCobroId, context.userId, context.userRole);
+			await verifyCaseAccess(
+				seguimiento.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 
 			const result = await db
 				.delete(seguimientosProgramados)

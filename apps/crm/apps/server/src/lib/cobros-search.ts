@@ -13,9 +13,15 @@ export function filterCobrosSearchResults<T extends CobrosSearchable>(
 	limit?: number,
 ) {
 	const query = normalizePlate(searchTerm);
-	if (!query) return { total: items.length, items: limit === undefined ? items : items.slice(offset, offset + limit) };
+	if (!query)
+		return {
+			total: items.length,
+			items: limit === undefined ? items : items.slice(offset, offset + limit),
+		};
 
-	const filtered = items.filter((item) => normalizePlate(item.vehiculoPlaca).includes(query));
+	const filtered = items.filter((item) =>
+		normalizePlate(item.vehiculoPlaca).includes(query),
+	);
 
 	return {
 		total: filtered.length,

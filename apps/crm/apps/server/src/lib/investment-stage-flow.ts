@@ -9,7 +9,10 @@ export const INVESTMENT_STAGE_FLOW = [
 	"initial_onboarding_senior_handoff",
 ] as const;
 
-export const INVESTMENT_STAGE_VALUES = [...INVESTMENT_STAGE_FLOW, "lost"] as const;
+export const INVESTMENT_STAGE_VALUES = [
+	...INVESTMENT_STAGE_FLOW,
+	"lost",
+] as const;
 
 export type InvestmentActiveStage = (typeof INVESTMENT_STAGE_FLOW)[number];
 export type InvestmentStageValue = (typeof INVESTMENT_STAGE_VALUES)[number];
@@ -19,7 +22,9 @@ export function getPreviousInvestmentStage(
 ): InvestmentActiveStage | null {
 	if (!stage || stage === "lost") return null;
 
-	const currentIndex = INVESTMENT_STAGE_FLOW.indexOf(stage as InvestmentActiveStage);
+	const currentIndex = INVESTMENT_STAGE_FLOW.indexOf(
+		stage as InvestmentActiveStage,
+	);
 	if (currentIndex <= 0) return null;
 
 	return INVESTMENT_STAGE_FLOW[currentIndex - 1];
@@ -30,7 +35,9 @@ export function getNextInvestmentStage(
 ): InvestmentActiveStage | null {
 	if (!stage || stage === "lost") return null;
 
-	const currentIndex = INVESTMENT_STAGE_FLOW.indexOf(stage as InvestmentActiveStage);
+	const currentIndex = INVESTMENT_STAGE_FLOW.indexOf(
+		stage as InvestmentActiveStage,
+	);
 	if (currentIndex === -1 || currentIndex >= INVESTMENT_STAGE_FLOW.length - 1) {
 		return null;
 	}

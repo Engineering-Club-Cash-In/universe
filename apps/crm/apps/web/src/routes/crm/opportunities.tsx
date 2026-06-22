@@ -83,6 +83,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import {
@@ -107,7 +108,6 @@ import {
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
 import { isVehicleAvailable } from "@/utils/constants";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 function formatLeadFullName(lead: {
@@ -397,7 +397,10 @@ function RouteComponent() {
 	const [selectedOpportunity, setSelectedOpportunity] =
 		useState<Opportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
-	const [stageFilter, setStageFilter] = usePersistedState<string>("crm/opportunities/stageFilter", "all");
+	const [stageFilter, setStageFilter] = usePersistedState<string>(
+		"crm/opportunities/stageFilter",
+		"all",
+	);
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 	const [stageChangeReason, setStageChangeReason] = useState<string>("");
@@ -405,10 +408,23 @@ function RouteComponent() {
 	const [debouncedLeadsSearch, setDebouncedLeadsSearch] = useState("");
 	const [vehiclesSearch, setVehiclesSearch] = useState("");
 	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
-	const [showLostOpportunities, setShowLostOpportunities] = usePersistedState<boolean>("crm/opportunities/showLostOpportunities", false);
-	const [boardSearch, setBoardSearch] = usePersistedState<string>("crm/opportunities/boardSearch", "");
-	const [salespersonFilter, setSalespersonFilter] = usePersistedState<string>("crm/opportunities/salespersonFilter", "all");
-	const [sourceFilter, setSourceFilter] = usePersistedState<string>("crm/opportunities/sourceFilter", "all");
+	const [showLostOpportunities, setShowLostOpportunities] =
+		usePersistedState<boolean>(
+			"crm/opportunities/showLostOpportunities",
+			false,
+		);
+	const [boardSearch, setBoardSearch] = usePersistedState<string>(
+		"crm/opportunities/boardSearch",
+		"",
+	);
+	const [salespersonFilter, setSalespersonFilter] = usePersistedState<string>(
+		"crm/opportunities/salespersonFilter",
+		"all",
+	);
+	const [sourceFilter, setSourceFilter] = usePersistedState<string>(
+		"crm/opportunities/sourceFilter",
+		"all",
+	);
 	const debouncedBoardSearch = useDeferredValue(boardSearch);
 	// View toggle: "kanban" or "table" - persist in localStorage
 	const [viewMode, setViewMode] = useState<"kanban" | "table">(() => {
@@ -419,7 +435,10 @@ function RouteComponent() {
 		return "kanban";
 	});
 	// Filtro por etapa (stage ID) para vista tabla
-	const [stageIdFilter, setStageIdFilter] = usePersistedState<string>("crm/opportunities/stageIdFilter", "all");
+	const [stageIdFilter, setStageIdFilter] = usePersistedState<string>(
+		"crm/opportunities/stageIdFilter",
+		"all",
+	);
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
@@ -436,8 +455,14 @@ function RouteComponent() {
 	});
 
 	// Month/year filter for placed amounts alignment with dashboard
-	const [month, setMonth] = usePersistedState<number>("crm/opportunities/month", new Date().getMonth() + 1);
-	const [year, setYear] = usePersistedState<number>("crm/opportunities/year", new Date().getFullYear());
+	const [month, setMonth] = usePersistedState<number>(
+		"crm/opportunities/month",
+		new Date().getMonth() + 1,
+	);
+	const [year, setYear] = usePersistedState<number>(
+		"crm/opportunities/year",
+		new Date().getFullYear(),
+	);
 
 	const hasActiveFilters =
 		stageFilter !== "all" ||
@@ -501,7 +526,9 @@ function RouteComponent() {
 	const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 	const [deleteReason, setDeleteReason] = useState("");
 	const [reassignConfirmOpen, setReassignConfirmOpen] = useState(false);
-	const [pendingReassignUserId, setPendingReassignUserId] = useState<string | null>(null);
+	const [pendingReassignUserId, setPendingReassignUserId] = useState<
+		string | null
+	>(null);
 
 	// State for confirm contracts signed modal
 	const [confirmSignedModalOpen, setConfirmSignedModalOpen] = useState(false);
@@ -567,8 +594,7 @@ function RouteComponent() {
 
 			await queryClient.invalidateQueries({
 				predicate: (q) =>
-					q.queryKey[0] === "getOpportunities" ||
-					q.queryKey[0] === "getLeads",
+					q.queryKey[0] === "getOpportunities" || q.queryKey[0] === "getLeads",
 			});
 
 			if (selectedOpportunity?.id === variables.opportunityId) {
@@ -1821,11 +1847,25 @@ function RouteComponent() {
 						{showLostOpportunities ? "Ocultando perdidas" : "Mostrar perdidas"}
 					</Button>
 					{hasActiveFilters && (
-						<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={resetFilters}
+							className="shrink-0 text-muted-foreground"
+						>
 							<X className="mr-1 h-3 w-3" />
 							Limpiar filtros
 							<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-								{[stageFilter !== "all", showLostOpportunities, boardSearch !== "", salespersonFilter !== "all", sourceFilter !== "all", stageIdFilter !== "all"].filter(Boolean).length}
+								{
+									[
+										stageFilter !== "all",
+										showLostOpportunities,
+										boardSearch !== "",
+										salespersonFilter !== "all",
+										sourceFilter !== "all",
+										stageIdFilter !== "all",
+									].filter(Boolean).length
+								}
 							</Badge>
 						</Button>
 					)}
@@ -2377,7 +2417,8 @@ function RouteComponent() {
 									{(() => {
 										const canReassign =
 											canFilterBySalesperson &&
-											(selectedOpportunity.stage?.closurePercentage ?? 100) <= 30;
+											(selectedOpportunity.stage?.closurePercentage ?? 100) <=
+												30;
 										if (canReassign) {
 											return (
 												<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
@@ -3677,8 +3718,9 @@ function RouteComponent() {
 							<p className="text-amber-700">
 								Se asignará{" "}
 								<strong>
-									{crmUsersQuery.data?.find((u) => u.id === pendingReassignUserId)
-										?.name ?? "el asesor seleccionado"}
+									{crmUsersQuery.data?.find(
+										(u) => u.id === pendingReassignUserId,
+									)?.name ?? "el asesor seleccionado"}
 								</strong>{" "}
 								como responsable de la oportunidad{" "}
 								<strong>{selectedOpportunity?.title}</strong>.
@@ -3696,8 +3738,9 @@ function RouteComponent() {
 									</strong>{" "}
 									también será reasignado automáticamente al mismo asesor{" "}
 									<strong>
-									{crmUsersQuery.data?.find((u) => u.id === pendingReassignUserId)
-										?.name ?? "el asesor seleccionado"}
+										{crmUsersQuery.data?.find(
+											(u) => u.id === pendingReassignUserId,
+										)?.name ?? "el asesor seleccionado"}
 									</strong>{" "}
 								</p>
 							)}

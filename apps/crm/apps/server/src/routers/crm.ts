@@ -60,9 +60,7 @@ import {
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
-import {
-	getGuatemalaMonthWindow,
-} from "../lib/guatemala-month-window";
+import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -239,10 +237,7 @@ export async function getCurrentClientCreditsFromCartera(
 	fetchCredits: ClientCreditFetcher = (params) =>
 		carteraBackClient.getAllCreditos(params),
 ) {
-	return getClientCreditsFromCartera(
-		fetchCredits,
-		{ mes: 0, anio: 0 },
-	);
+	return getClientCreditsFromCartera(fetchCredits, { mes: 0, anio: 0 });
 }
 
 function splitFullName(fullName: string | null | undefined) {

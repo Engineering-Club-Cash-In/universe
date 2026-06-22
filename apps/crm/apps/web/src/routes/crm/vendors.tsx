@@ -83,8 +83,14 @@ const vendorSchema = z.object({
 type VendorFormData = z.infer<typeof vendorSchema>;
 
 function VendorsPage() {
-	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/vendors/searchTerm", "");
-	const [vendorTypeFilter, setVendorTypeFilter] = usePersistedState<string>("crm/vendors/vendorTypeFilter", "all");
+	const [searchTerm, setSearchTerm] = usePersistedState<string>(
+		"crm/vendors/searchTerm",
+		"",
+	);
+	const [vendorTypeFilter, setVendorTypeFilter] = usePersistedState<string>(
+		"crm/vendors/vendorTypeFilter",
+		"all",
+	);
 
 	const hasActiveFilters = searchTerm !== "" || vendorTypeFilter !== "all";
 	const resetFilters = () => {
@@ -404,11 +410,20 @@ function VendorsPage() {
 							</SelectContent>
 						</Select>
 						{hasActiveFilters && (
-							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={resetFilters}
+								className="shrink-0 text-muted-foreground"
+							>
 								<X className="mr-1 h-3 w-3" />
 								Limpiar filtros
 								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-									{[searchTerm !== "", vendorTypeFilter !== "all"].filter(Boolean).length}
+									{
+										[searchTerm !== "", vendorTypeFilter !== "all"].filter(
+											Boolean,
+										).length
+									}
 								</Badge>
 							</Button>
 						)}

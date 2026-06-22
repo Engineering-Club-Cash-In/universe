@@ -12,7 +12,7 @@ export const getVehicleByCodigoController = async (numero_sifco: string) => {
 	try {
 		const result = await db
 			.select({
-					vehicle: {
+				vehicle: {
 					id: vehicles.id,
 					make: vehicles.make,
 					model: vehicles.model,
@@ -36,8 +36,10 @@ export const getVehicleByCodigoController = async (numero_sifco: string) => {
 			.from(opportunities)
 			.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 			.where(
-				and(eq(opportunities.numeroSifco, numero_sifco), 
-				inArray(opportunities.status, ["won", "migrate"]),),
+				and(
+					eq(opportunities.numeroSifco, numero_sifco),
+					inArray(opportunities.status, ["won", "migrate"]),
+				),
 			)
 			.orderBy(desc(opportunities.updatedAt))
 			.limit(1)

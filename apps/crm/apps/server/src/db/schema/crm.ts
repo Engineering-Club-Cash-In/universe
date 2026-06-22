@@ -61,10 +61,7 @@ export const creditTypeEnum = pgEnum("credit_type", [
 	"autocompra",
 	"sobre_vehiculo",
 ]);
-export const assignmentTypeEnum = pgEnum("assignment_type", [
-	"auto",
-	"manual",
-]);
+export const assignmentTypeEnum = pgEnum("assignment_type", ["auto", "manual"]);
 export const creditCategoryEnum = pgEnum("credit_category", [
 	"Contraseña",
 	"CV Vehículo",

@@ -64,10 +64,7 @@ function normalizeParamsForTemplate(
 		];
 	}
 
-	return [
-		...params,
-		...new Array(templateParamCount - params.length).fill(""),
-	];
+	return [...params, ...new Array(templateParamCount - params.length).fill("")];
 }
 
 export function getSimpletechClient(): SimpleTechClient | null {
@@ -349,10 +346,7 @@ export async function sendWhatsappTemplateBatch(params: {
 		for (const r of result.results ?? []) {
 			const rDigits = toDigits(String(r.number));
 			for (let i = 0; i < normalized.length; i++) {
-				if (
-					!used[i] &&
-					toDigits(normalized[i].phoneNormalized) === rDigits
-				) {
+				if (!used[i] && toDigits(normalized[i].phoneNormalized) === rDigits) {
 					matchByIdx[i] = {
 						templateMessageId: r.templateMessageId ?? "",
 						error: r.error ?? "",

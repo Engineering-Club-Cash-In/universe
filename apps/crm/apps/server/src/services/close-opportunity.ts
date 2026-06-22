@@ -948,7 +948,9 @@ async function createCredit(
 			capital: Number.parseFloat(opportunity.value as string),
 			porcentaje_interes: Number.parseFloat(opportunity.tasaInteres as string),
 			plazo: opportunity.numeroCuotas as number,
-			cuota: params.cuotaMensual ? Number(params.cuotaMensual) : Number.parseFloat(opportunity.cuotaMensual as string),
+			cuota: params.cuotaMensual
+				? Number(params.cuotaMensual)
+				: Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
@@ -1291,9 +1293,7 @@ export async function closeOpportunity(
 		// Validate NIT against cartera-back before proceeding
 		if (opportunity.nit) {
 			const nitLimpio = opportunity.nit.replace(/[-\s]/g, "").toUpperCase();
-			console.log(
-				`[CloseOpportunity] Validating NIT: ${nitLimpio}`,
-			);
+			console.log(`[CloseOpportunity] Validating NIT: ${nitLimpio}`);
 
 			if (nitLimpio.length < 5 && nitLimpio !== "CF") {
 				return {
@@ -1326,7 +1326,8 @@ export async function closeOpportunity(
 				console.error("[CloseOpportunity] Error validating NIT:", error);
 				return {
 					success: false,
-					error: `No se pudo validar el NIT contra SAT. Intenta de nuevo o verifica la conexión con cartera.`,
+					error:
+						"No se pudo validar el NIT contra SAT. Intenta de nuevo o verifica la conexión con cartera.",
 				};
 			}
 		}
@@ -1334,7 +1335,6 @@ export async function closeOpportunity(
 		// Generate unique SIFCO credit number using UUID
 		const numeroSifco = generateNumeroSifco();
 		console.log(`[CloseOpportunity] Generated numero SIFCO: ${numeroSifco}`);
-
 
 		//  Get the latest quotation for invoicing (async - doesn't block)
 		const quotation = await getLatestApprovedQuotation(opportunityId);
@@ -1348,7 +1348,9 @@ export async function closeOpportunity(
 			lead,
 			numeroSifco,
 			userId,
-			cuotaMensual: quotation?.monthlyPayment ? String(quotation.monthlyPayment) : undefined,
+			cuotaMensual: quotation?.monthlyPayment
+				? String(quotation.monthlyPayment)
+				: undefined,
 			isVehicleOwned: vehicleData?.isOwned ?? false,
 			// Enviar info del vehículo para que llegue en el correo de cartera
 			vehiculo_marca: vehicleData?.make ?? undefined,
@@ -1356,7 +1358,11 @@ export async function closeOpportunity(
 			vehiculo_modelo: vehicleData?.year ? String(vehicleData.year) : undefined,
 			vehiculo_placa: vehicleData?.licensePlate ?? undefined,
 			vehiculo_vin: vehicleData?.vinNumber ?? undefined,
-			monto_asegurado: quotation?.insuredAmount ? Number(quotation.insuredAmount) : quotation?.value ? Number(quotation.value) : undefined,
+			monto_asegurado: quotation?.insuredAmount
+				? Number(quotation.insuredAmount)
+				: quotation?.value
+					? Number(quotation.value)
+					: undefined,
 		});
 
 		if (!creditResult.success) {
@@ -1366,7 +1372,6 @@ export async function closeOpportunity(
 					creditResult.error || "Error al crear el crédito en cartera-back",
 			};
 		}
-
 
 		// 3. Generate invoices in background (fire-and-forget)
 		// This runs asynchronously after the credit is created

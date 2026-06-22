@@ -9,10 +9,7 @@ import {
 	whatsappLogs,
 } from "../db/schema/whatsapp-logs";
 import { crmProcedure } from "../lib/orpc";
-import {
-	getSimpletechClient,
-	sendWhatsappTemplate,
-} from "../lib/simpletech";
+import { getSimpletechClient, sendWhatsappTemplate } from "../lib/simpletech";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 
 const R2_LEGAL_DOCS_BUCKET_NAME =
@@ -20,9 +17,7 @@ const R2_LEGAL_DOCS_BUCKET_NAME =
 	process.env.R2_BUCKET_NAME_LEGAL_DOCS ||
 	"legal-documents";
 
-async function resolvePdfUrl(
-	pdfLink: string | null,
-): Promise<string | null> {
+async function resolvePdfUrl(pdfLink: string | null): Promise<string | null> {
 	if (!pdfLink) return null;
 	if (pdfLink.startsWith("http")) return pdfLink;
 	try {
@@ -95,13 +90,9 @@ export async function sendContractLinksToLead(params: {
 			pdfLink: generatedLegalContracts.pdfLink,
 		})
 		.from(generatedLegalContracts)
-		.where(
-			eq(generatedLegalContracts.opportunityId, params.opportunityId),
-		);
+		.where(eq(generatedLegalContracts.opportunityId, params.opportunityId));
 
-	const leadName = lead
-		? `${lead.firstName} ${lead.lastName}`
-		: "Cliente";
+	const leadName = lead ? `${lead.firstName} ${lead.lastName}` : "Cliente";
 
 	// Resolver URLs firmadas de los PDFs
 	const resolvedPdfLinks = await Promise.all(
@@ -122,10 +113,7 @@ export async function sendContractLinksToLead(params: {
 		recipientContracts.every((c) => c.link);
 
 	const leadMessage = allLinksReady
-		? buildContractLinksMessage(
-				leadName,
-				recipientContracts as ContractLink[],
-			)
+		? buildContractLinksMessage(leadName, recipientContracts as ContractLink[])
 		: null;
 
 	// Crear log padre
@@ -149,15 +137,13 @@ export async function sendContractLinksToLead(params: {
 	} else if (contracts.length === 0) {
 		leadReason = "No hay contratos asociados";
 	} else if (!allLinksReady) {
-		leadReason =
-			"No todos los contratos tienen link de firma para el cliente";
+		leadReason = "No todos los contratos tienen link de firma para el cliente";
 	} else if (!lead?.phone) {
 		leadReason = "El lead no tiene teléfono registrado";
 	} else {
 		// Todo OK — intentar enviar
 		leadStatus = "failed";
 		leadReason = "No enviado por el momento";
-
 	}
 
 	// Insertar destinatario lead
@@ -170,7 +156,7 @@ export async function sendContractLinksToLead(params: {
 		contracts: recipientContracts,
 		status: leadStatus,
 		reason: leadReason,
-		sentAt:  undefined,
+		sentAt: undefined,
 	});
 
 	// Cofirmantes: mismos contratos pero siempre sin links
@@ -270,16 +256,10 @@ export const messagingRouter = {
 			const contracts = await db
 				.select({
 					contractName: generatedLegalContracts.contractName,
-					clientSigningLink:
-						generatedLegalContracts.clientSigningLink,
+					clientSigningLink: generatedLegalContracts.clientSigningLink,
 				})
 				.from(generatedLegalContracts)
-				.where(
-					eq(
-						generatedLegalContracts.opportunityId,
-						input.opportunityId,
-					),
-				);
+				.where(eq(generatedLegalContracts.opportunityId, input.opportunityId));
 
 			const mapped = contracts.map((c) => ({
 				contractName: c.contractName,
@@ -299,8 +279,7 @@ export const messagingRouter = {
 					validContracts.length > 0
 						? buildContractLinksMessage(clientName, validContracts)
 						: null,
-				allContractsHaveLink:
-					validContracts.length === contracts.length,
+				allContractsHaveLink: validContracts.length === contracts.length,
 			};
 		}),
 
@@ -317,12 +296,10 @@ export const messagingRouter = {
 			const logs = await db
 				.select()
 				.from(whatsappLogs)
-				.where(
-					eq(whatsappLogs.opportunityId, input.opportunityId),
-				);
+				.where(eq(whatsappLogs.opportunityId, input.opportunityId));
 
 			if (logs.length === 0) {
-				return null; 
+				return null;
 			}
 
 			const log = logs[0];
@@ -336,7 +313,11 @@ export const messagingRouter = {
 			const recipientsWithUrls = await Promise.all(
 				recipients.map(async (r) => {
 					const contracts = r.contracts as
-						| { contractName: string; link: string | null; pdfLink?: string | null }[]
+						| {
+								contractName: string;
+								link: string | null;
+								pdfLink?: string | null;
+						  }[]
 						| null;
 					if (!contracts) return r;
 
@@ -423,9 +404,7 @@ export const messagingRouter = {
 				message,
 				logPrefix: "[SimpleTech][manual]",
 			});
-			const status: "sent" | "failed" = sendResult.success
-				? "sent"
-				: "failed";
+			const status: "sent" | "failed" = sendResult.success ? "sent" : "failed";
 			const reason: string | null = sendResult.success
 				? null
 				: (sendResult.error ?? "Error desconocido al enviar");

@@ -133,9 +133,7 @@ export const adminRouter = {
 				name: z.string().min(1, "Name is required"),
 				email: z.string().email("Invalid email address"),
 				password: z.string().min(8, "Password must be at least 8 characters"),
-				role: z
-					.enum(USER_ROLE_VALUES)
-					.default("sales"),
+				role: z.enum(USER_ROLE_VALUES).default("sales"),
 			}),
 		)
 		.handler(async ({ input, context: _ }) => {

@@ -300,9 +300,7 @@ function SubirBoletaDialog({
 
 		const invalid = incomingArr.find((f) => !ACCEPTED_BOLETA_MIMES.has(f.type));
 		if (invalid) {
-			toast.error(
-				`Tipo no soportado: ${invalid.name}. Solo PDF, PNG o JPG.`,
-			);
+			toast.error(`Tipo no soportado: ${invalid.name}. Solo PDF, PNG o JPG.`);
 			return;
 		}
 
@@ -403,7 +401,11 @@ function SubirBoletaDialog({
 				<DialogHeader>
 					<DialogTitle>Subir Boleta</DialogTitle>
 					<DialogDescription>
-						{inv.nombre} — {formatCurrency(inv.total_a_recibir_con_reinversion, inv.currencySymbol)}
+						{inv.nombre} —{" "}
+						{formatCurrency(
+							inv.total_a_recibir_con_reinversion,
+							inv.currencySymbol,
+						)}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -598,7 +600,8 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 
 function CuentasExtraIndicator({ cuentas }: { cuentas: CuentaExtra[] }) {
 	const count = cuentas.length;
-	const label = count === 1 ? "1 cuenta adicional" : `${count} cuentas adicionales`;
+	const label =
+		count === 1 ? "1 cuenta adicional" : `${count} cuentas adicionales`;
 
 	return (
 		<Popover>
@@ -750,11 +753,23 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 
 				{/* Detalle financiero + tags */}
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 pt-3 pb-1.5">
-					<DetailItem label="Cap" value={formatCurrency(inv.total_abono_capital, inv.currencySymbol)} />
-					<DetailItem label="Int" value={formatCurrency(inv.total_abono_interes, inv.currencySymbol)} />
-					<DetailItem label="IVA" value={formatCurrency(inv.total_abono_iva, inv.currencySymbol)} />
+					<DetailItem
+						label="Cap"
+						value={formatCurrency(inv.total_abono_capital, inv.currencySymbol)}
+					/>
+					<DetailItem
+						label="Int"
+						value={formatCurrency(inv.total_abono_interes, inv.currencySymbol)}
+					/>
+					<DetailItem
+						label="IVA"
+						value={formatCurrency(inv.total_abono_iva, inv.currencySymbol)}
+					/>
 					{Number.parseFloat(inv.total_isr) > 0 && (
-						<DetailItem label="ISR" value={formatCurrency(inv.total_isr, inv.currencySymbol)} />
+						<DetailItem
+							label="ISR"
+							value={formatCurrency(inv.total_isr, inv.currencySymbol)}
+						/>
 					)}
 					{inv.emite_factura && (
 						<span className="text-[10px] text-muted-foreground/40">
@@ -803,7 +818,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 							</Button>
 							<Button
 								size="sm"
-								className="h-8 flex-1 gap-1.5 bg-emerald-600 text-xs text-white shadow-sm hover:bg-emerald-700"
+								className="h-8 flex-1 gap-1.5 bg-emerald-600 text-white text-xs shadow-sm hover:bg-emerald-700"
 								disabled={liquidateMutation.isPending}
 								onClick={() =>
 									liquidateMutation.mutate({
@@ -823,7 +838,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 						<div className="flex flex-col gap-2">
 							<Button
 								size="sm"
-								className="h-9 w-full gap-1.5 bg-emerald-600 text-xs text-white shadow-sm hover:bg-emerald-700"
+								className="h-9 w-full gap-1.5 bg-emerald-600 text-white text-xs shadow-sm hover:bg-emerald-700"
 								disabled={liquidateMutation.isPending}
 								onClick={() => setDialogOpen(true)}
 							>
@@ -832,7 +847,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 							</Button>
 							<Button
 								size="sm"
-								className="h-9 w-full gap-1.5 bg-amber-600 text-xs text-white shadow-sm hover:bg-amber-700"
+								className="h-9 w-full gap-1.5 bg-amber-600 text-white text-xs shadow-sm hover:bg-amber-700"
 								disabled={liquidateMutation.isPending}
 								onClick={() => setConfirmLiquidarSinBoletaOpen(true)}
 							>

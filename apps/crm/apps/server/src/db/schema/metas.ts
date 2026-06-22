@@ -27,7 +27,9 @@ export const metasMensuales = pgTable(
 		monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
 		descripcion: text("descripcion"),
 		createdAt: timestamp("created_at").defaultNow(),
-		updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => new Date()),
 	},
 	(t) => ({ uniqueTipoAnioMes: unique().on(t.tipo, t.anio, t.mes) }),
 );

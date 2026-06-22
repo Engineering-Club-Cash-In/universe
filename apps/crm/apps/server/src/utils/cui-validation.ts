@@ -88,7 +88,9 @@ export function normalizarYValidarDpi(dpi: string): string {
  * Valida un DPI y retorna el resultado estructurado.
  * Útil para distinguir entre éxito y error.
  */
-export function validarDpi(dpi: string): { valid: true; dpiLimpio: string } | { valid: false; error: string } {
+export function validarDpi(
+	dpi: string,
+): { valid: true; dpiLimpio: string } | { valid: false; error: string } {
 	const dpiLimpio = dpi.replace(/\s/g, "");
 
 	if (dpiLimpio.length !== 13) {
@@ -96,7 +98,11 @@ export function validarDpi(dpi: string): { valid: true; dpiLimpio: string } | { 
 	}
 
 	if (!cuiValido(dpiLimpio)) {
-		return { valid: false, error: "DPI inválido, el número no corresponde a un CUI guatemalteco válido" };
+		return {
+			valid: false,
+			error:
+				"DPI inválido, el número no corresponde a un CUI guatemalteco válido",
+		};
 	}
 
 	return { valid: true, dpiLimpio };

@@ -12,8 +12,8 @@ import {
 	BarChart,
 	CartesianGrid,
 	Legend,
-	ResponsiveContainer,
 	Tooltip as RechartsTooltip,
+	ResponsiveContainer,
 	XAxis,
 	YAxis,
 } from "recharts";
@@ -28,12 +28,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
 	Table,
 	TableBody,
 	TableCell,
@@ -41,6 +35,12 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
 	cuotaIlustrativa,
 	DEFAULT_SCENARIO_PARAMS,
@@ -120,9 +120,7 @@ function LeverSlider({
 						>
 							<Info className="h-3.5 w-3.5 text-muted-foreground" />
 						</TooltipTrigger>
-						<TooltipContent className="max-w-56 text-xs">
-							{hint}
-						</TooltipContent>
+						<TooltipContent className="max-w-56 text-xs">{hint}</TooltipContent>
 					</Tooltip>
 				</TooltipProvider>
 			</div>

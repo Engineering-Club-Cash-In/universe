@@ -4,7 +4,10 @@ import { z } from "zod";
 import { db } from "../db";
 import { creditChecks } from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
-import { canAccessSalesTeamActions, canManageAnySalesOwnedRecord } from "../lib/sales-permissions";
+import {
+	canAccessSalesTeamActions,
+	canManageAnySalesOwnedRecord,
+} from "../lib/sales-permissions";
 
 export const checksRouter = {
 	// Crear nuevo cheque/transferencia

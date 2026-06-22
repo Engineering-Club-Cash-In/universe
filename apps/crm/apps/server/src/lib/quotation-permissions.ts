@@ -7,6 +7,8 @@ export function canManageQuotations(role: string | null | undefined): boolean {
 	return canAccessSalesTeamActions(role);
 }
 
-export function canManageAnyQuotation(role: string | null | undefined): boolean {
+export function canManageAnyQuotation(
+	role: string | null | undefined,
+): boolean {
 	return canManageAnySalesOwnedRecord(role);
 }

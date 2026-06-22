@@ -173,13 +173,21 @@ export function DisbursementView({
 							Monto a desembolsar
 						</span>
 						<p className="font-bold text-2xl text-green-600">
-							Q{amountToFinance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+							Q
+							{amountToFinance.toLocaleString("es-GT", {
+								minimumFractionDigits: 2,
+								maximumFractionDigits: 2,
+							})}
 						</p>
 					</div>
 					<div className="rounded-lg border bg-muted/30 p-4">
 						<span className="text-muted-foreground text-xs">Gastos</span>
 						<p className="font-bold text-2xl text-orange-600">
-							Q{gastos.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+							Q
+							{gastos.toLocaleString("es-GT", {
+								minimumFractionDigits: 2,
+								maximumFractionDigits: 2,
+							})}
 						</p>
 					</div>
 				</div>
@@ -201,12 +209,12 @@ export function DisbursementView({
 						{disbursementQuery.data!.documents.map((doc: DisbursementDoc) => (
 							<div
 								key={doc.id}
-								className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-md border bg-background px-4 py-3"
+								className="flex flex-col justify-between gap-3 rounded-md border bg-background px-4 py-3 sm:flex-row sm:items-center"
 							>
 								<div className="flex min-w-0 flex-1 items-center gap-3">
 									<FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
 									<div className="min-w-0 flex-1">
-										<p className="font-medium text-sm break-all whitespace-normal">
+										<p className="whitespace-normal break-all font-medium text-sm">
 											{doc.originalName}
 										</p>
 										<p className="text-muted-foreground text-xs">

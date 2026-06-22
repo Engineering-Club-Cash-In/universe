@@ -37,10 +37,10 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { getRoleLabel, ROLES } from "@/lib/roles";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
 export const Route = createFileRoute("/notifications")({
@@ -247,7 +247,10 @@ function NotificationsPage() {
 	const isAdmin = userRole === ROLES.ADMIN;
 	const isSalesSupervisor = userRole === ROLES.SALES_SUPERVISOR;
 
-	const [statusFilter, setStatusFilter] = usePersistedState<string>("notifications/statusFilter", "all");
+	const [statusFilter, setStatusFilter] = usePersistedState<string>(
+		"notifications/statusFilter",
+		"all",
+	);
 
 	const hasActiveFilters = statusFilter !== "all";
 	const resetFilters = () => {
@@ -570,7 +573,12 @@ function NotificationsPage() {
 					</SelectContent>
 				</Select>
 				{hasActiveFilters && (
-					<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={resetFilters}
+						className="shrink-0 text-muted-foreground"
+					>
 						<X className="mr-1 h-3 w-3" />
 						Limpiar filtros
 						<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">

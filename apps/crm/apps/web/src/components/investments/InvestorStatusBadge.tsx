@@ -40,14 +40,10 @@ export function InvestorStatusBadge({
 	return (
 		<span
 			className={`inline-flex items-center gap-1.5 rounded-full border font-semibold shadow-sm ${config.className} ${
-				isSmall
-					? "px-2 py-0.5 text-[10px]"
-					: "px-2.5 py-0.5 text-xs"
+				isSmall ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-0.5 text-xs"
 			}`}
 		>
-			<span
-				className={`relative flex ${isSmall ? "h-1.5 w-1.5" : "h-2 w-2"}`}
-			>
+			<span className={`relative flex ${isSmall ? "h-1.5 w-1.5" : "h-2 w-2"}`}>
 				{status === "pendiente_devolucion" && (
 					<span
 						className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${config.dotClassName}`}

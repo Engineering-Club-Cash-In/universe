@@ -35,7 +35,6 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Card,
 	CardContent,
@@ -43,6 +42,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -82,12 +82,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { ROLES } from "@/lib/roles";
+import {
+	VEHICLE_ORIGIN_OPTIONS,
+	VEHICLE_TYPE_OPTIONS,
+	VEHICLE_USE_OPTIONS,
+} from "@/lib/vehicle-form-options";
 import {
 	renderInspectionStatusBadge,
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 // Helper para renderizar el badge del estado del vehículo
@@ -140,13 +145,25 @@ function VehiclesDashboard() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const search = useSearch({ from: "/vehicles/" });
-	const [searchTerm, setSearchTerm] = usePersistedState<string>("vehicles/searchTerm", "");
+	const [searchTerm, setSearchTerm] = usePersistedState<string>(
+		"vehicles/searchTerm",
+		"",
+	);
 	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
-	const [filterStatus, setFilterStatus] = usePersistedState<string>("vehicles/filterStatus", "all");
-	const [filterOwnership, setFilterOwnership] = usePersistedState<string>("vehicles/filterOwnership", "all");
+	const [filterStatus, setFilterStatus] = usePersistedState<string>(
+		"vehicles/filterStatus",
+		"all",
+	);
+	const [filterOwnership, setFilterOwnership] = usePersistedState<string>(
+		"vehicles/filterOwnership",
+		"all",
+	);
 	const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 	const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-	const [activeTab, setActiveTab] = usePersistedState<string>("vehicles/activeTab", "general");
+	const [activeTab, setActiveTab] = usePersistedState<string>(
+		"vehicles/activeTab",
+		"general",
+	);
 	const [page, setPage] = usePersistedState<number>("vehicles/page", 0);
 	const pageSize = 20;
 
@@ -177,10 +194,20 @@ function VehiclesDashboard() {
 				offset: page * pageSize,
 				query: debouncedSearch || undefined,
 				status: filterStatus !== "all" ? filterStatus : undefined,
-				ownership: filterOwnership !== "all" ? (filterOwnership as "owned" | "not_owned") : undefined,
+				ownership:
+					filterOwnership !== "all"
+						? (filterOwnership as "owned" | "not_owned")
+						: undefined,
 			},
 		}),
-		queryKey: ["getVehicles", page, pageSize, debouncedSearch, filterStatus, filterOwnership],
+		queryKey: [
+			"getVehicles",
+			page,
+			pageSize,
+			debouncedSearch,
+			filterStatus,
+			filterOwnership,
+		],
 		placeholderData: keepPreviousData,
 	});
 	const { data: statistics } = useQuery(
@@ -320,9 +347,14 @@ function VehiclesDashboard() {
 	const [selectedEvidence, setSelectedEvidence] = useState<any[]>([]);
 	const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
 	const [evidenceItemName, setEvidenceItemName] = useState("");
-	const [photoCategoryFilter, setPhotoCategoryFilter] = usePersistedState<string>("vehicles/photoCategoryFilter", "all");
+	const [photoCategoryFilter, setPhotoCategoryFilter] =
+		usePersistedState<string>("vehicles/photoCategoryFilter", "all");
 
-	const hasActiveFilters = searchTerm !== "" || filterStatus !== "all" || filterOwnership !== "all" || photoCategoryFilter !== "all";
+	const hasActiveFilters =
+		searchTerm !== "" ||
+		filterStatus !== "all" ||
+		filterOwnership !== "all" ||
+		photoCategoryFilter !== "all";
 	const resetFilters = () => {
 		setSearchTerm("");
 		setFilterStatus("all");
@@ -608,7 +640,10 @@ function VehiclesDashboard() {
 											variant="ghost"
 											size="sm"
 											className={`rounded-none rounded-l-md px-3 text-xs ${filterOwnership === "all" ? "bg-muted font-semibold" : ""}`}
-											onClick={() => { setFilterOwnership("all"); setPage(0); }}
+											onClick={() => {
+												setFilterOwnership("all");
+												setPage(0);
+											}}
 										>
 											Todos
 										</Button>
@@ -617,8 +652,15 @@ function VehiclesDashboard() {
 											variant="ghost"
 											size="sm"
 											className={`rounded-none border-x px-3 text-xs ${filterOwnership === "owned" ? "font-semibold" : ""}`}
-											style={filterOwnership === "owned" ? { backgroundColor: "#4E57EA15", color: "#4E57EA" } : {}}
-											onClick={() => { setFilterOwnership("owned"); setPage(0); }}
+											style={
+												filterOwnership === "owned"
+													? { backgroundColor: "#4E57EA15", color: "#4E57EA" }
+													: {}
+											}
+											onClick={() => {
+												setFilterOwnership("owned");
+												setPage(0);
+											}}
 										>
 											Cash In
 										</Button>
@@ -627,17 +669,35 @@ function VehiclesDashboard() {
 											variant="ghost"
 											size="sm"
 											className={`rounded-none rounded-r-md px-3 text-xs ${filterOwnership === "not_owned" ? "bg-muted font-semibold" : ""}`}
-											onClick={() => { setFilterOwnership("not_owned"); setPage(0); }}
+											onClick={() => {
+												setFilterOwnership("not_owned");
+												setPage(0);
+											}}
 										>
 											Externos
 										</Button>
 									</div>
 									{hasActiveFilters && (
-										<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={resetFilters}
+											className="shrink-0 text-muted-foreground"
+										>
 											<X className="mr-1 h-3 w-3" />
 											Limpiar filtros
-											<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-												{[searchTerm !== "", filterStatus !== "all", filterOwnership !== "all", photoCategoryFilter !== "all"].filter(Boolean).length}
+											<Badge
+												variant="secondary"
+												className="ml-1 h-4 px-1 text-xs"
+											>
+												{
+													[
+														searchTerm !== "",
+														filterStatus !== "all",
+														filterOwnership !== "all",
+														photoCategoryFilter !== "all",
+													].filter(Boolean).length
+												}
 											</Badge>
 										</Button>
 									)}
@@ -675,7 +735,15 @@ function VehiclesDashboard() {
 															<div className="flex items-center gap-2 font-medium">
 																{vehicle.make} {vehicle.model}
 																{vehicle.isOwned && (
-																	<Badge variant="outline" className="text-xs" style={{ borderColor: "#4E57EA50", backgroundColor: "#4E57EA15", color: "#4E57EA" }}>
+																	<Badge
+																		variant="outline"
+																		className="text-xs"
+																		style={{
+																			borderColor: "#4E57EA50",
+																			backgroundColor: "#4E57EA15",
+																			color: "#4E57EA",
+																		}}
+																	>
 																		CashIn
 																	</Badge>
 																)}
@@ -698,7 +766,10 @@ function VehiclesDashboard() {
 																		Q
 																		{Number(
 																			latestInspection.suggestedCommercialValue,
-																		).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																		).toLocaleString("es-GT", {
+																			minimumFractionDigits: 2,
+																			maximumFractionDigits: 2,
+																		})}
 																	</div>
 																	<div
 																		className={
@@ -983,7 +1054,10 @@ function VehiclesDashboard() {
 												<span className="font-medium">Valor Comercial: </span>Q
 												{Number(
 													auctionInspection.suggestedCommercialValue,
-												).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+												).toLocaleString("es-GT", {
+													minimumFractionDigits: 2,
+													maximumFractionDigits: 2,
+												})}
 											</p>
 											{auctionPrice !== null && auctionPrice > 0 && (
 												<p
@@ -1000,7 +1074,10 @@ function VehiclesDashboard() {
 														Number(auctionInspection.suggestedCommercialValue) -
 															auctionPrice,
 														0,
-													).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+													).toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
 												</p>
 											)}
 										</div>
@@ -1297,7 +1374,10 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.marketValue,
-																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																				).toLocaleString("es-GT", {
+																					minimumFractionDigits: 2,
+																					maximumFractionDigits: 2,
+																				})}
 																			</div>
 																			<div className="font-medium text-muted-foreground">
 																				Valor comercial sugerido:
@@ -1306,7 +1386,10 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.suggestedCommercialValue,
-																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																				).toLocaleString("es-GT", {
+																					minimumFractionDigits: 2,
+																					maximumFractionDigits: 2,
+																				})}
 																			</div>
 																			<div className="text-pretty font-medium text-muted-foreground">
 																				Valor actual condición:
@@ -1315,7 +1398,10 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.currentConditionValue,
-																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																				).toLocaleString("es-GT", {
+																					minimumFractionDigits: 2,
+																					maximumFractionDigits: 2,
+																				})}
 																			</div>
 																		</div>
 
@@ -1337,7 +1423,10 @@ function VehiclesDashboard() {
 																							Q
 																							{Number(
 																								inspection.aiSuggestedValue,
-																							).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																							).toLocaleString("es-GT", {
+																								minimumFractionDigits: 2,
+																								maximumFractionDigits: 2,
+																							})}
 																						</p>
 																					</div>
 																					<div className="flex flex-col items-end">
@@ -1368,16 +1457,24 @@ function VehiclesDashboard() {
 																				</span>
 																				<div className="flex items-center gap-6">
 																					<span className="font-medium">
-																						{inspection.scannerUsed ? "Sí" : "No"}
+																						{inspection.scannerUsed
+																							? "Sí"
+																							: "No"}
 																					</span>
 																					{inspection.scannerResultUrl && (
 																						<Button
 																							variant="outline"
 																							size="sm"
 																							className="h-6 px-2.5 text-[10px]"
-																							onClick={() => window.open(inspection.scannerResultUrl, "_blank")}
+																							onClick={() =>
+																								window.open(
+																									inspection.scannerResultUrl,
+																									"_blank",
+																								)
+																							}
 																						>
-																							<FileText className="mr-1.5 h-3 w-3" /> Ver Reporte
+																							<FileText className="mr-1.5 h-3 w-3" />{" "}
+																							Ver Reporte
 																						</Button>
 																					)}
 																				</div>
@@ -1681,22 +1778,22 @@ function VehiclesDashboard() {
 																														<Camera className="h-4 w-4" />
 																													</Button>
 																												)}
-																										<Badge
-																											variant={
-																												!item.checked
-																													? "default"
-																													: item.checked &&
-																															item.severity ===
-																																"critical"
-																														? "destructive"
-																														: "secondary"
-																											}
-																											className="h-5 shrink-0 px-1.5 text-[10px]"
-																										>
-																											{!item.checked
-																												? "Cumple"
-																												: "No cumple"}
-																										</Badge>
+																											<Badge
+																												variant={
+																													!item.checked
+																														? "default"
+																														: item.checked &&
+																																item.severity ===
+																																	"critical"
+																															? "destructive"
+																															: "secondary"
+																												}
+																												className="h-5 shrink-0 px-1.5 text-[10px]"
+																											>
+																												{!item.checked
+																													? "Cumple"
+																													: "No cumple"}
+																											</Badge>
 																										</div>
 																									</div>
 																								),
@@ -1996,7 +2093,8 @@ function VehiclesDashboard() {
 							Registrar Vehículo Nuevo
 						</DialogTitle>
 						<DialogDescription>
-							Los campos con * son requeridos. El resto puede completarse después.
+							Los campos con * son requeridos. El resto puede completarse
+							después.
 						</DialogDescription>
 					</DialogHeader>
 
@@ -2099,23 +2197,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar tipo" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Sedan">Sedan</SelectItem>
-											<SelectItem value="Hatchback">Hatchback</SelectItem>
-											<SelectItem value="SUV">SUV</SelectItem>
-											<SelectItem value="Pickup">Pickup</SelectItem>
-											<SelectItem value="Minivan">Minivan</SelectItem>
-											<SelectItem value="Deportivo">Deportivo</SelectItem>
-											<SelectItem value="Microbus">Microbus</SelectItem>
-											<SelectItem value="Bus hasta 20 pasajeros">
-												Bus hasta 20 pasajeros
-											</SelectItem>
-											<SelectItem value="Bus 21-35 pasajeros">
-												Bus 21-35 pasajeros
-											</SelectItem>
-											<SelectItem value="Bus más de 35 pasajeros">
-												Bus más de 35 pasajeros
-											</SelectItem>
-											<SelectItem value="Otro">Otro</SelectItem>
+											{VEHICLE_TYPE_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2131,8 +2217,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar origen" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Nacional">Nacional</SelectItem>
-											<SelectItem value="Importado">Importado</SelectItem>
+											{VEHICLE_ORIGIN_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2141,7 +2230,9 @@ function VehiclesDashboard() {
 
 						{/* Identificación y Mecánica */}
 						<div className="space-y-3">
-							<h4 className="font-medium text-muted-foreground text-sm">Identificación y Mecánica</h4>
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Identificación y Mecánica
+							</h4>
 							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="licensePlate">Placa</Label>
@@ -2245,7 +2336,9 @@ function VehiclesDashboard() {
 
 						{/* Datos para Contratos */}
 						<div className="space-y-3">
-							<h4 className="font-medium text-muted-foreground text-sm">Datos para Contratos</h4>
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Datos para Contratos
+							</h4>
 							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="seats">Asientos</Label>
@@ -2319,8 +2412,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Particular">Particular</SelectItem>
-											<SelectItem value="Comercial">Comercial</SelectItem>
+											{VEHICLE_USE_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2601,23 +2697,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar tipo" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Sedan">Sedan</SelectItem>
-											<SelectItem value="Hatchback">Hatchback</SelectItem>
-											<SelectItem value="SUV">SUV</SelectItem>
-											<SelectItem value="Pickup">Pickup</SelectItem>
-											<SelectItem value="Minivan">Minivan</SelectItem>
-											<SelectItem value="Deportivo">Deportivo</SelectItem>
-											<SelectItem value="Microbus">Microbus</SelectItem>
-											<SelectItem value="Bus hasta 20 pasajeros">
-												Bus hasta 20 pasajeros
-											</SelectItem>
-											<SelectItem value="Bus 21-35 pasajeros">
-												Bus 21-35 pasajeros
-											</SelectItem>
-											<SelectItem value="Bus más de 35 pasajeros">
-												Bus más de 35 pasajeros
-											</SelectItem>
-											<SelectItem value="Otro">Otro</SelectItem>
+											{VEHICLE_TYPE_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2633,8 +2717,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar origen" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Nacional">Nacional</SelectItem>
-											<SelectItem value="Importado">Importado</SelectItem>
+											{VEHICLE_ORIGIN_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -2836,8 +2923,11 @@ function VehiclesDashboard() {
 											<SelectValue placeholder="Seleccionar uso" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="Particular">Particular</SelectItem>
-											<SelectItem value="Comercial">Comercial</SelectItem>
+											{VEHICLE_USE_OPTIONS.map((option) => (
+												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
 										</SelectContent>
 									</Select>
 								</div>

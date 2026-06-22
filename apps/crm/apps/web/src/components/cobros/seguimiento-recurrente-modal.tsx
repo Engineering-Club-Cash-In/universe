@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import {
 	Dialog,
 	DialogContent,
@@ -8,8 +9,9 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/react-datepicker";
 import {
 	Select,
 	SelectContent,
@@ -17,9 +19,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { client, orpc } from "@/utils/orpc";
-import { DatePicker } from "@/components/ui/react-datepicker";
 
 function toLocalDateStr(date: Date): string {
 	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -131,19 +131,17 @@ export function SeguimientoRecurrenteModal({
 								<SelectItem value="llamada">Llamada</SelectItem>
 								<SelectItem value="whatsapp">WhatsApp</SelectItem>
 								<SelectItem value="email">Email</SelectItem>
-								<SelectItem value="visita_domicilio">Visita a Domicilio</SelectItem>
+								<SelectItem value="visita_domicilio">
+									Visita a Domicilio
+								</SelectItem>
 								<SelectItem value="carta_notarial">Carta Notarial</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
 					<div className="space-y-2">
 						<Label>Fecha de Inicio</Label>
-						<DatePicker
-							date={fechaInicio}
-							onDateChange={setFechaInicio}
-						/>
+						<DatePicker date={fechaInicio} onDateChange={setFechaInicio} />
 					</div>
-
 
 					<div className="space-y-2">
 						<Label>Fecha Final</Label>

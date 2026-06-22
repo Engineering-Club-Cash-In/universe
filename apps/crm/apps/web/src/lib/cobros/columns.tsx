@@ -1,8 +1,8 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
+import { ContactoQuickAction } from "@/components/cobros/contacto-quick-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ContactoQuickAction } from "@/components/cobros/contacto-quick-action";
 import { parseFechaLocal } from "@/lib/date-utils";
 
 const ESTADOS_MORA_CTA = new Set([
@@ -127,287 +127,292 @@ export function getCobrosColumns({
 	const mostrarCtaContacto = !!filtroEtapa && ESTADOS_MORA_CTA.has(filtroEtapa);
 
 	return [
-	{
-		accessorKey: "fechaProximoPago",
-		header: ({ column }) => {
-			return (
-				<Button
-					variant="ghost"
-					onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-				>
-					Fecha de Pago
-					<ArrowUpDown className="ml-2 h-4 w-4" />
-				</Button>
-			);
-		},
-		cell: ({ row }) => {
-			const fecha = row.getValue("fechaProximoPago") as string | null;
-			const dias = row.original.diasHastaPago;
-			const numeroCredito = row.original.numeroCredito;
-
-			const fechaFormateada = fecha
-				? parseFechaLocal(fecha).toLocaleDateString("es-GT", {
-						day: "2-digit",
-						month: "short",
-						year: "numeric",
-					})
-				: null;
-
-			let diasClassName = "text-xs mt-0.5";
-			let diasText = "";
-
-			if (dias === null) {
-				// sin texto secundario
-			} else if (dias === 0) {
-				diasClassName += " text-red-600 font-semibold";
-				diasText = "¡Hoy!";
-			} else if (dias < 0) {
-				diasClassName += " text-red-700 font-semibold";
-				diasText = `${Math.abs(dias)} días vencido`;
-			} else if (dias <= 3) {
-				diasClassName += " text-orange-600";
-				diasText = `en ${dias} días`;
-			} else if (dias <= 7) {
-				diasClassName += " text-yellow-600";
-				diasText = `en ${dias} días`;
-			} else {
-				diasClassName += " text-muted-foreground";
-				diasText = `en ${dias} días`;
-			}
-
-			return (
-				<div className="flex items-center gap-2">
-					<div className="font-medium">
-						{fechaFormateada ? (
-							<div>{fechaFormateada}</div>
-						) : (
-							<div className="text-gray-500">Sin fecha definida</div>
-						)}
-						{diasText && <div className={diasClassName}>{diasText}</div>}
-					</div>
-					{mostrarCtaContacto && numeroCredito && (
-						<ContactoQuickAction numeroCredito={numeroCredito} />
-					)}
-				</div>
-			);
-		},
-	},
-	{
-		accessorKey: "clienteNombre",
-		header: ({ column }) => {
-			return (
-				<Button
-					variant="ghost"
-					onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-				>
-					Cliente / Crédito
-					<ArrowUpDown className="ml-2 h-4 w-4" />
-				</Button>
-			);
-		},
-		cell: ({ row }) => {
-			const nombre = row.getValue("clienteNombre") as string;
-			const numero = row.original.numeroCredito;
-			const isPool = row.original.isPool;
-			return (
-				<div className="flex min-w-0 max-w-[320px] flex-col gap-0.5">
-					<div className="flex items-center gap-2">
-						<span className="truncate font-medium">{nombre}</span>
-						{isPool && (
-							<Badge
-								variant="secondary"
-								className="shrink-0 bg-indigo-100 text-indigo-800 text-xs"
-							>
-								Pool
-							</Badge>
-						)}
-					</div>
-					<span
-						className="truncate font-mono text-muted-foreground text-xs"
-						title={numero || undefined}
-					>
-						{numero ? truncarCredito(numero) : "—"}
-					</span>
-				</div>
-			);
-		},
-	},
-	{
-		accessorKey: "responsableCobros",
-		header: ({ column }) => (
-			<Button
-				variant="ghost"
-				onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-			>
-				Asesor
-				<ArrowUpDown className="ml-2 h-4 w-4" />
-			</Button>
-		),
-		cell: ({ row }) => {
-			const asesor = row.getValue("responsableCobros") as string | null;
-			if (!asesor)
+		{
+			accessorKey: "fechaProximoPago",
+			header: ({ column }) => {
 				return (
-					<span className="text-muted-foreground text-xs">Sin asignar</span>
+					<Button
+						variant="ghost"
+						onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+					>
+						Fecha de Pago
+						<ArrowUpDown className="ml-2 h-4 w-4" />
+					</Button>
 				);
-			return <span className="font-medium text-sm">{asesor}</span>;
-		},
-	},
-	{
-		id: "vehiculo",
-		accessorFn: (row) =>
-			`${row.vehiculoMarca} ${row.vehiculoModelo} ${row.vehiculoYear} ${row.vehiculoPlaca}`,
-		header: "Vehículo",
-		cell: ({ row }) => {
-			const { vehiculoMarca, vehiculoModelo, vehiculoYear, vehiculoPlaca } =
-				row.original;
-			const esPlaceholder = esVehiculoPlaceholder(
-				vehiculoMarca,
-				vehiculoModelo,
-			);
-			const placaLimpia = vehiculoPlaca?.trim();
-			const tienePlaca = placaLimpia && placaLimpia !== "-" && placaLimpia !== "";
+			},
+			cell: ({ row }) => {
+				const fecha = row.getValue("fechaProximoPago") as string | null;
+				const dias = row.original.diasHastaPago;
+				const numeroCredito = row.original.numeroCredito;
 
-			if (esPlaceholder && !tienePlaca) {
-				return <span className="text-muted-foreground">—</span>;
-			}
+				const fechaFormateada = fecha
+					? parseFechaLocal(fecha).toLocaleDateString("es-GT", {
+							day: "2-digit",
+							month: "short",
+							year: "numeric",
+						})
+					: null;
 
-			return (
-				<div className="flex min-w-0 max-w-[180px] flex-col gap-0.5">
-					<span className="whitespace-normal break-words font-medium text-sm leading-tight">
-						{esPlaceholder
-							? "Sin datos"
-							: `${vehiculoMarca} ${vehiculoModelo} ${vehiculoYear ?? ""}`.trim()}
-					</span>
-					{tienePlaca && (
-						<span className="font-mono text-muted-foreground text-xs">
-							{placaLimpia}
-						</span>
-					)}
-				</div>
-			);
+				let diasClassName = "text-xs mt-0.5";
+				let diasText = "";
+
+				if (dias === null) {
+					// sin texto secundario
+				} else if (dias === 0) {
+					diasClassName += " text-red-600 font-semibold";
+					diasText = "¡Hoy!";
+				} else if (dias < 0) {
+					diasClassName += " text-red-700 font-semibold";
+					diasText = `${Math.abs(dias)} días vencido`;
+				} else if (dias <= 3) {
+					diasClassName += " text-orange-600";
+					diasText = `en ${dias} días`;
+				} else if (dias <= 7) {
+					diasClassName += " text-yellow-600";
+					diasText = `en ${dias} días`;
+				} else {
+					diasClassName += " text-muted-foreground";
+					diasText = `en ${dias} días`;
+				}
+
+				return (
+					<div className="flex items-center gap-2">
+						<div className="font-medium">
+							{fechaFormateada ? (
+								<div>{fechaFormateada}</div>
+							) : (
+								<div className="text-gray-500">Sin fecha definida</div>
+							)}
+							{diasText && <div className={diasClassName}>{diasText}</div>}
+						</div>
+						{mostrarCtaContacto && numeroCredito && (
+							<ContactoQuickAction numeroCredito={numeroCredito} />
+						)}
+					</div>
+				);
+			},
 		},
-	},
-	{
-		accessorKey: "montoEnMora",
-		header: ({ column }) => {
-			return (
-				<div className="text-right">
+		{
+			accessorKey: "clienteNombre",
+			header: ({ column }) => {
+				return (
 					<Button
 						variant="ghost"
 						onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
 					>
-						Monto en Mora
+						Cliente / Crédito
 						<ArrowUpDown className="ml-2 h-4 w-4" />
 					</Button>
-				</div>
-			);
-		},
-		cell: ({ row }) => {
-			const monto = Number.parseFloat(row.getValue("montoEnMora"));
-			const formatted = new Intl.NumberFormat("es-GT", {
-				style: "currency",
-				currency: "GTQ",
-				minimumFractionDigits: 2,
-				maximumFractionDigits: 2,
-			}).format(monto);
-
-			return (
-				<div
-					className={`font-medium tabular-nums ${monto > 0 ? "text-right" : "text-center"}`}
-				>
-					{monto > 0 ? formatted : "-"}
-				</div>
-			);
-		},
-	},
-	{
-		accessorKey: "montoFinanciado",
-		header: ({ column }) => {
-			return (
-				<div className="text-right">
-					<Button
-						variant="ghost"
-						onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-					>
-						Capital
-						<ArrowUpDown className="ml-2 h-4 w-4" />
-					</Button>
-				</div>
-			);
-		},
-		cell: ({ row }) => {
-			const monto = Number.parseFloat(row.getValue("montoFinanciado"));
-			const formatted = new Intl.NumberFormat("es-GT", {
-				style: "currency",
-				currency: "GTQ",
-				minimumFractionDigits: 2,
-				maximumFractionDigits: 2,
-			}).format(monto);
-
-			return (
-				<div
-					className={`font-medium tabular-nums ${monto > 0 ? "text-right" : "text-center"}`}
-				>
-					{monto > 0 ? formatted : "-"}
-				</div>
-			);
-		},
-		sortingFn: (rowA, rowB) => {
-			const a = Number.parseFloat(rowA.getValue("montoFinanciado"));
-			const b = Number.parseFloat(rowB.getValue("montoFinanciado"));
-			return a - b;
-		},
-	},
-	{
-		id: "etiquetas",
-		accessorKey: "etiquetas",
-		header: ({ column }) => (
-			<Button
-				variant="ghost"
-				onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-			>
-				Etiquetas
-				<ArrowUpDown className="ml-2 h-4 w-4" />
-			</Button>
-		),
-		cell: ({ row }) => {
-			const etiquetas = row.original.etiquetas;
-			if (!etiquetas || etiquetas.length === 0)
-				return <span className="text-muted-foreground text-xs">—</span>;
-			return (
-				<div className="flex flex-wrap gap-1">
-					{etiquetas.map((etiqueta) => (
-						<Badge
-							key={etiqueta}
-							className={`text-xs ${ETIQUETA_COLORS[etiqueta] || "bg-gray-100 text-gray-800"}`}
+				);
+			},
+			cell: ({ row }) => {
+				const nombre = row.getValue("clienteNombre") as string;
+				const numero = row.original.numeroCredito;
+				const isPool = row.original.isPool;
+				return (
+					<div className="flex min-w-0 max-w-[320px] flex-col gap-0.5">
+						<div className="flex items-center gap-2">
+							<span className="truncate font-medium">{nombre}</span>
+							{isPool && (
+								<Badge
+									variant="secondary"
+									className="shrink-0 bg-indigo-100 text-indigo-800 text-xs"
+								>
+									Pool
+								</Badge>
+							)}
+						</div>
+						<span
+							className="truncate font-mono text-muted-foreground text-xs"
+							title={numero || undefined}
 						>
-							{ETIQUETA_LABELS[etiqueta] || etiqueta}
-						</Badge>
-					))}
-				</div>
-			);
+							{numero ? truncarCredito(numero) : "—"}
+						</span>
+					</div>
+				);
+			},
 		},
-		sortingFn: (rowA, rowB) => {
-			const a = rowA.original.etiquetas?.length ?? 0;
-			const b = rowB.original.etiquetas?.length ?? 0;
-			return a - b;
+		{
+			accessorKey: "responsableCobros",
+			header: ({ column }) => (
+				<Button
+					variant="ghost"
+					onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+				>
+					Asesor
+					<ArrowUpDown className="ml-2 h-4 w-4" />
+				</Button>
+			),
+			cell: ({ row }) => {
+				const asesor = row.getValue("responsableCobros") as string | null;
+				if (!asesor)
+					return (
+						<span className="text-muted-foreground text-xs">Sin asignar</span>
+					);
+				return <span className="font-medium text-sm">{asesor}</span>;
+			},
 		},
-	},
-	{
-		id: "estado",
-		accessorFn: (row) =>
-			row.estadoContrato === "activo"
-				? row.estadoMora || "al_dia"
-				: row.estadoContrato,
-		header: "Estado",
-		cell: ({ row }) => {
-			const estadoVisual =
-				row.original.estadoContrato === "activo"
-					? row.original.estadoMora || "al_dia"
-					: row.original.estadoContrato;
-			return getEstadoBadge(estadoVisual);
+		{
+			id: "vehiculo",
+			accessorFn: (row) =>
+				`${row.vehiculoMarca} ${row.vehiculoModelo} ${row.vehiculoYear} ${row.vehiculoPlaca}`,
+			header: "Vehículo",
+			cell: ({ row }) => {
+				const { vehiculoMarca, vehiculoModelo, vehiculoYear, vehiculoPlaca } =
+					row.original;
+				const esPlaceholder = esVehiculoPlaceholder(
+					vehiculoMarca,
+					vehiculoModelo,
+				);
+				const placaLimpia = vehiculoPlaca?.trim();
+				const tienePlaca =
+					placaLimpia && placaLimpia !== "-" && placaLimpia !== "";
+
+				if (esPlaceholder && !tienePlaca) {
+					return <span className="text-muted-foreground">—</span>;
+				}
+
+				return (
+					<div className="flex min-w-0 max-w-[180px] flex-col gap-0.5">
+						<span className="whitespace-normal break-words font-medium text-sm leading-tight">
+							{esPlaceholder
+								? "Sin datos"
+								: `${vehiculoMarca} ${vehiculoModelo} ${vehiculoYear ?? ""}`.trim()}
+						</span>
+						{tienePlaca && (
+							<span className="font-mono text-muted-foreground text-xs">
+								{placaLimpia}
+							</span>
+						)}
+					</div>
+				);
+			},
 		},
-	},
+		{
+			accessorKey: "montoEnMora",
+			header: ({ column }) => {
+				return (
+					<div className="text-right">
+						<Button
+							variant="ghost"
+							onClick={() =>
+								column.toggleSorting(column.getIsSorted() === "asc")
+							}
+						>
+							Monto en Mora
+							<ArrowUpDown className="ml-2 h-4 w-4" />
+						</Button>
+					</div>
+				);
+			},
+			cell: ({ row }) => {
+				const monto = Number.parseFloat(row.getValue("montoEnMora"));
+				const formatted = new Intl.NumberFormat("es-GT", {
+					style: "currency",
+					currency: "GTQ",
+					minimumFractionDigits: 2,
+					maximumFractionDigits: 2,
+				}).format(monto);
+
+				return (
+					<div
+						className={`font-medium tabular-nums ${monto > 0 ? "text-right" : "text-center"}`}
+					>
+						{monto > 0 ? formatted : "-"}
+					</div>
+				);
+			},
+		},
+		{
+			accessorKey: "montoFinanciado",
+			header: ({ column }) => {
+				return (
+					<div className="text-right">
+						<Button
+							variant="ghost"
+							onClick={() =>
+								column.toggleSorting(column.getIsSorted() === "asc")
+							}
+						>
+							Capital
+							<ArrowUpDown className="ml-2 h-4 w-4" />
+						</Button>
+					</div>
+				);
+			},
+			cell: ({ row }) => {
+				const monto = Number.parseFloat(row.getValue("montoFinanciado"));
+				const formatted = new Intl.NumberFormat("es-GT", {
+					style: "currency",
+					currency: "GTQ",
+					minimumFractionDigits: 2,
+					maximumFractionDigits: 2,
+				}).format(monto);
+
+				return (
+					<div
+						className={`font-medium tabular-nums ${monto > 0 ? "text-right" : "text-center"}`}
+					>
+						{monto > 0 ? formatted : "-"}
+					</div>
+				);
+			},
+			sortingFn: (rowA, rowB) => {
+				const a = Number.parseFloat(rowA.getValue("montoFinanciado"));
+				const b = Number.parseFloat(rowB.getValue("montoFinanciado"));
+				return a - b;
+			},
+		},
+		{
+			id: "etiquetas",
+			accessorKey: "etiquetas",
+			header: ({ column }) => (
+				<Button
+					variant="ghost"
+					onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+				>
+					Etiquetas
+					<ArrowUpDown className="ml-2 h-4 w-4" />
+				</Button>
+			),
+			cell: ({ row }) => {
+				const etiquetas = row.original.etiquetas;
+				if (!etiquetas || etiquetas.length === 0)
+					return <span className="text-muted-foreground text-xs">—</span>;
+				return (
+					<div className="flex flex-wrap gap-1">
+						{etiquetas.map((etiqueta) => (
+							<Badge
+								key={etiqueta}
+								className={`text-xs ${ETIQUETA_COLORS[etiqueta] || "bg-gray-100 text-gray-800"}`}
+							>
+								{ETIQUETA_LABELS[etiqueta] || etiqueta}
+							</Badge>
+						))}
+					</div>
+				);
+			},
+			sortingFn: (rowA, rowB) => {
+				const a = rowA.original.etiquetas?.length ?? 0;
+				const b = rowB.original.etiquetas?.length ?? 0;
+				return a - b;
+			},
+		},
+		{
+			id: "estado",
+			accessorFn: (row) =>
+				row.estadoContrato === "activo"
+					? row.estadoMora || "al_dia"
+					: row.estadoContrato,
+			header: "Estado",
+			cell: ({ row }) => {
+				const estadoVisual =
+					row.original.estadoContrato === "activo"
+						? row.original.estadoMora || "al_dia"
+						: row.original.estadoContrato;
+				return getEstadoBadge(estadoVisual);
+			},
+		},
 	];
 }
 

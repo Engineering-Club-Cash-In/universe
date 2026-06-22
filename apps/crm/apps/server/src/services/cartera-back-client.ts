@@ -396,7 +396,11 @@ export type MoraTotales = {
 
 export type MoraByEtapaYAsesorResponse = {
 	totales: MoraTotales;
-	porAsesor: ({ asesorId: number; nombre: string; email: string } & MoraTotales)[];
+	porAsesor: ({
+		asesorId: number;
+		nombre: string;
+		email: string;
+	} & MoraTotales)[];
 };
 
 // ============================================================================
@@ -1510,7 +1514,10 @@ export class CarteraBackClient {
 			otros: cobradoResult.cobrado_otros ?? "0",
 		};
 
-		return { cobrado, esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" } };
+		return {
+			cobrado,
+			esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" },
+		};
 	}
 
 	async getFlujoCuotasInversiones(params: {
@@ -1567,7 +1574,8 @@ export class CarteraBackClient {
 
 	async getMoraByEtapaYAsesor(params?: { emailCobrador?: string }) {
 		const queryParams = new URLSearchParams();
-		if (params?.emailCobrador) queryParams.set("email_cobrador", params.emailCobrador);
+		if (params?.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
 		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
 		return this.request<MoraByEtapaYAsesorResponse>(
 			`/reportes/mora-por-etapa-asesor${qs}`,
@@ -1587,11 +1595,10 @@ export class CarteraBackClient {
 			...(params.asesorId ? { asesor_id: String(params.asesorId) } : {}),
 		});
 
-		const response = await this.request<{ ok: boolean; data: CuotaPorFechaRow[] }>(
-			`/reportes/cuotas-por-fecha?${qp}`,
-			{ method: "GET" },
-			false,
-		);
+		const response = await this.request<{
+			ok: boolean;
+			data: CuotaPorFechaRow[];
+		}>(`/reportes/cuotas-por-fecha?${qp}`, { method: "GET" }, false);
 
 		return response.data ?? [];
 	}

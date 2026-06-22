@@ -120,13 +120,17 @@ describe("transformFacturacion", () => {
 
 	test("total cobrado > meta (gap<=0) aún aplica moraFactor a mora", () => {
 		const over: FacturacionMesResponse = {
-			cobrado: { interes: "1100", membresias: "0", seguro_gps: "0", royalti: "0", mora: "100", otros: "0" },
+			cobrado: {
+				interes: "1100",
+				membresias: "0",
+				seguro_gps: "0",
+				royalti: "0",
+				mora: "100",
+				otros: "0",
+			},
 			esperado: { meta_mensual: "1000" },
 		};
-		const out = transformFacturacion(
-			over,
-			params({ moraReduccionPct: 50 }),
-		);
+		const out = transformFacturacion(over, params({ moraReduccionPct: 50 }));
 		// gap<=0 → interes sin escalar
 		expect(out.cobrado.interes).toBe("1100");
 		// mora sí se reduce (moraFactor=0.5)

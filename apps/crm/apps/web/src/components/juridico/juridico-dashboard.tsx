@@ -13,7 +13,6 @@ import {
 	XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { z } from "zod";
 import {
 	CartesianGrid,
 	Line,
@@ -23,6 +22,7 @@ import {
 	XAxis,
 	YAxis,
 } from "recharts";
+import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,36 +35,57 @@ import {
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import {
-	Tabs,
-	TabsContent,
-	TabsList,
-	TabsTrigger,
-} from "@/components/ui/tabs";
-import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-export const SPANISH_MONTHS = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-const SPANISH_SHORT_MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+export const SPANISH_MONTHS = [
+	"Enero",
+	"Febrero",
+	"Marzo",
+	"Abril",
+	"Mayo",
+	"Junio",
+	"Julio",
+	"Agosto",
+	"Septiembre",
+	"Octubre",
+	"Noviembre",
+	"Diciembre",
+];
+const SPANISH_SHORT_MONTHS = [
+	"Ene",
+	"Feb",
+	"Mar",
+	"Abr",
+	"May",
+	"Jun",
+	"Jul",
+	"Ago",
+	"Sep",
+	"Oct",
+	"Nov",
+	"Dic",
+];
 
 const getNextMonthLabel = (currentLabel: string) => {
 	const parts = currentLabel?.split(" ") || [];
 	if (parts.length < 2) return currentLabel || "Enero 2026";
-	
+
 	const month = parts[0];
-	const year = parseInt(parts[1]);
-	
+	const year = Number.parseInt(parts[1]);
+
 	const index = SPANISH_MONTHS.indexOf(month);
 	if (index === -1) return currentLabel;
-	
+
 	const nextIndex = (index + 1) % 12;
 	const nextYear = nextIndex === 0 ? year + 1 : year;
-	
+
 	return `${SPANISH_MONTHS[nextIndex]} ${nextYear}`;
 };
 
@@ -281,7 +302,9 @@ const juridicoDashboardMetricSchema = z.object({
 	label: z.string().min(1),
 	helper: z.string().optional(),
 	changeText: z.string().optional(),
-	changeTone: z.enum(["neutral", "positive", "warning", "danger"]).default("neutral"),
+	changeTone: z
+		.enum(["neutral", "positive", "warning", "danger"])
+		.default("neutral"),
 });
 
 const juridicoDashboardTrendPointSchema = z.object({
@@ -336,19 +359,29 @@ function normalizePeriod(label: string) {
 }
 
 const SPANISH_MONTHS_MAP: Record<string, number> = {
-	enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
-	julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11
+	enero: 0,
+	febrero: 1,
+	marzo: 2,
+	abril: 3,
+	mayo: 4,
+	junio: 5,
+	julio: 6,
+	agosto: 7,
+	septiembre: 8,
+	octubre: 9,
+	noviembre: 10,
+	diciembre: 11,
 };
 
 function sortHistory(history: JuridicoDashboardSinglePayload[]) {
 	return [...history].sort((a, b) => {
 		const labelA = a.header.periodLabel.toLowerCase();
 		const labelB = b.header.periodLabel.toLowerCase();
-		
+
 		// Robust year parsing (find any 4-digit number)
-		const yearA = parseInt(labelA.match(/\d{4}/)?.[0] || "0");
-		const yearB = parseInt(labelB.match(/\d{4}/)?.[0] || "0");
-		
+		const yearA = Number.parseInt(labelA.match(/\d{4}/)?.[0] || "0");
+		const yearB = Number.parseInt(labelB.match(/\d{4}/)?.[0] || "0");
+
 		if (yearA !== yearB) return yearA - yearB;
 
 		// Robust month parsing (find if any month key is present in the label)
@@ -364,7 +397,7 @@ function sortHistory(history: JuridicoDashboardSinglePayload[]) {
 
 		const monthA = findMonth(labelA);
 		const monthB = findMonth(labelB);
-		
+
 		return monthA - monthB;
 	});
 }
@@ -404,8 +437,10 @@ export function JuridicoDashboardView({
 	const hasHistory = history.length > 1;
 
 	// Use the latest period by default if none selected
-	const latestPeriod = history[history.length - 1] || (Array.isArray(rawPayload) ? null : rawPayload);
-	
+	const latestPeriod =
+		history[history.length - 1] ||
+		(Array.isArray(rawPayload) ? null : rawPayload);
+
 	if (!latestPeriod) {
 		return (
 			<Card className="border-dashed">
@@ -418,13 +453,13 @@ export function JuridicoDashboardView({
 			</Card>
 		);
 	}
-	
+
 	const normalizedActive = activePeriod ? normalizePeriod(activePeriod) : null;
-	const selectedSnapshot =
-		normalizedActive
-			? history.find((h) => normalizePeriod(h.header.periodLabel) === normalizedActive) ||
-				latestPeriod
-			: latestPeriod;
+	const selectedSnapshot = normalizedActive
+		? history.find(
+				(h) => normalizePeriod(h.header.periodLabel) === normalizedActive,
+			) || latestPeriod
+		: latestPeriod;
 
 	return (
 		<div className="space-y-6">
@@ -439,14 +474,19 @@ export function JuridicoDashboardView({
 									</div>
 									<div>
 										<CardTitle>{selectedSnapshot.header.title}</CardTitle>
-										<CardDescription>{selectedSnapshot.header.subtitle}</CardDescription>
+										<CardDescription>
+											{selectedSnapshot.header.subtitle}
+										</CardDescription>
 									</div>
 								</div>
 							</div>
 							<div className="flex items-center gap-2">
 								{hasHistory && (
 									<Select
-										value={activePeriod || normalizePeriod(latestPeriod.header.periodLabel)}
+										value={
+											activePeriod ||
+											normalizePeriod(latestPeriod.header.periodLabel)
+										}
 										onValueChange={(val) => setActivePeriod(val)}
 									>
 										<SelectTrigger className="h-8 w-[180px] bg-background">
@@ -454,8 +494,8 @@ export function JuridicoDashboardView({
 										</SelectTrigger>
 										<SelectContent>
 											{history.map((h) => (
-												<SelectItem 
-													key={h.header.periodLabel} 
+												<SelectItem
+													key={h.header.periodLabel}
 													value={normalizePeriod(h.header.periodLabel)}
 												>
 													{h.header.periodLabel}
@@ -536,7 +576,9 @@ export function JuridicoDashboardView({
 							<div key={step.label} className="space-y-2">
 								<div className="flex items-center justify-between text-sm">
 									<span className="text-muted-foreground">{step.label}</span>
-									<span className="font-medium">{step.value.toLocaleString()}</span>
+									<span className="font-medium">
+										{step.value.toLocaleString()}
+									</span>
 								</div>
 								<div className="flex items-center gap-3">
 									<Progress value={step.pct} className="h-2.5" />
@@ -568,14 +610,19 @@ export function JuridicoDashboardView({
 					</CardHeader>
 					<CardContent className="h-[280px]">
 						<ResponsiveContainer width="100%" height="100%">
-							<LineChart data={latestPeriod.trend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+							<LineChart
+								data={latestPeriod.trend}
+								margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+							>
 								<CartesianGrid strokeDasharray="3 3" vertical={false} />
 								<XAxis dataKey="label" tickLine={false} axisLine={false} />
 								<YAxis
 									yAxisId="money"
 									tickLine={false}
 									axisLine={false}
-									tickFormatter={(value) => `Q${Number(value).toLocaleString()}`}
+									tickFormatter={(value) =>
+										`Q${Number(value).toLocaleString()}`
+									}
 									width={90}
 								/>
 								<YAxis
@@ -732,13 +779,15 @@ export function JuridicoDashboardEditor({
 		snapshot?.periodLabel || JURIDICO_DASHBOARD_TEMPLATE.periodLabel,
 	);
 	const [notes, setNotes] = useState(
-		(snapshot?.notes || JURIDICO_DASHBOARD_TEMPLATE.notes || "").split(
-			"<!--DASHBOARD_HISTORY:",
-		)[0].trim(),
+		(snapshot?.notes || JURIDICO_DASHBOARD_TEMPLATE.notes || "")
+			.split("<!--DASHBOARD_HISTORY:")[0]
+			.trim(),
 	);
 	const [payload, setPayload] =
 		useState<JuridicoDashboardSinglePayload>(initialPayload);
-	const [rawJson, setRawJson] = useState(() => JSON.stringify(initialPayload, null, 2));
+	const [rawJson, setRawJson] = useState(() =>
+		JSON.stringify(initialPayload, null, 2),
+	);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [parseError, setParseError] = useState<string | null>(null);
 	const [sectionsPresence, setSectionsPresence] = useState({
@@ -755,7 +804,7 @@ export function JuridicoDashboardEditor({
 
 	useEffect(() => {
 		if (!snapshot) return;
-		
+
 		// If payload is array, take latest for current editor state
 		const rawPayload = snapshot.payload;
 		const history = sortHistory(
@@ -763,8 +812,9 @@ export function JuridicoDashboardEditor({
 				Boolean,
 			) as JuridicoDashboardSinglePayload[],
 		);
-		const latest = history[history.length - 1] || JURIDICO_DASHBOARD_TEMPLATE.payload;
-		
+		const latest =
+			history[history.length - 1] || JURIDICO_DASHBOARD_TEMPLATE.payload;
+
 		// Priority: Payload header label correctly reflects the content
 		setPeriodLabel(latest?.header?.periodLabel || snapshot.periodLabel || "");
 		setNotes(snapshot.notes || "");
@@ -782,15 +832,37 @@ export function JuridicoDashboardEditor({
 
 				// Track actual validity for indicators
 				setSectionsPresence({
-					header: juridicoDashboardSinglePayloadSchema.shape.header.safeParse(currentPayload.header).success,
-					metrics: z.array(juridicoDashboardMetricSchema).min(4).max(6).safeParse(currentPayload.metrics).success,
-					trend: z.array(juridicoDashboardTrendPointSchema).min(1).max(12).safeParse(currentPayload.trend).success,
-					funnel: z.array(juridicoDashboardFunnelStepSchema).min(3).max(6).safeParse(currentPayload.funnel).success,
-					orders: z.array(juridicoDashboardOrderSchema).max(20).safeParse(currentPayload.orders).success,
-					quality: z.array(juridicoDashboardQualityItemSchema).min(1).max(5).safeParse(currentPayload.quality).success,
+					header: juridicoDashboardSinglePayloadSchema.shape.header.safeParse(
+						currentPayload.header,
+					).success,
+					metrics: z
+						.array(juridicoDashboardMetricSchema)
+						.min(4)
+						.max(6)
+						.safeParse(currentPayload.metrics).success,
+					trend: z
+						.array(juridicoDashboardTrendPointSchema)
+						.min(1)
+						.max(12)
+						.safeParse(currentPayload.trend).success,
+					funnel: z
+						.array(juridicoDashboardFunnelStepSchema)
+						.min(3)
+						.max(6)
+						.safeParse(currentPayload.funnel).success,
+					orders: z
+						.array(juridicoDashboardOrderSchema)
+						.max(20)
+						.safeParse(currentPayload.orders).success,
+					quality: z
+						.array(juridicoDashboardQualityItemSchema)
+						.min(1)
+						.max(5)
+						.safeParse(currentPayload.quality).success,
 				});
 
-				const result = juridicoDashboardSinglePayloadSchema.safeParse(currentPayload);
+				const result =
+					juridicoDashboardSinglePayloadSchema.safeParse(currentPayload);
 				if (!result.success) {
 					// Humanize Zod errors
 					const humanErrors = result.error.issues.map((issue) => {
@@ -834,7 +906,9 @@ export function JuridicoDashboardEditor({
 		const historyList = (
 			Array.isArray(rawPayload) ? rawPayload : [rawPayload]
 		).filter(Boolean) as JuridicoDashboardSinglePayload[];
-		const base = historyList[historyList.length - 1] || JURIDICO_DASHBOARD_TEMPLATE.payload;
+		const base =
+			historyList[historyList.length - 1] ||
+			JURIDICO_DASHBOARD_TEMPLATE.payload;
 
 		const nextPeriodHeader = getNextMonthLabel(base.header.periodLabel);
 		const lastTrend = base.trend || [];
@@ -844,7 +918,7 @@ export function JuridicoDashboardEditor({
 		// Shift trend: keep last 6, add new one
 		const newTrend = [
 			...lastTrend.slice(1),
-			{ label: nextTrendLabel, collectedAmount: 0, casesIntervened: 0 }
+			{ label: nextTrendLabel, collectedAmount: 0, casesIntervened: 0 },
 		];
 
 		const cleanPayload: JuridicoDashboardSinglePayload = {
@@ -860,7 +934,7 @@ export function JuridicoDashboardEditor({
 			orders: [],
 			quality: base.quality.map((q) => ({ ...q, pct: 0 })),
 		};
-		
+
 		setPeriodLabel(nextPeriodHeader);
 		setNotes("");
 		setPayload(cleanPayload);
@@ -969,7 +1043,9 @@ export function JuridicoDashboardEditor({
 	const removeOrder = (index: number) => {
 		syncPayload((current) => ({
 			...current,
-			orders: current.orders.filter((_, currentIndex) => currentIndex !== index),
+			orders: current.orders.filter(
+				(_, currentIndex) => currentIndex !== index,
+			),
 		}));
 	};
 
@@ -1011,7 +1087,7 @@ export function JuridicoDashboardEditor({
 		const history = (
 			Array.isArray(rawPayload) ? rawPayload : rawPayload ? [rawPayload] : []
 		) as JuridicoDashboardSinglePayload[];
-		
+
 		// Priority: Use the label from the JSON content to avoid mismatches
 		const currentPeriodLabel = parsedData.header.periodLabel || periodLabel;
 		const normalizedCurrent = normalizePeriod(currentPeriodLabel);
@@ -1027,11 +1103,14 @@ export function JuridicoDashboardEditor({
 
 		// Remove existing record if same period (Normalized)
 		const otherHistory = history.filter(
-			(h: any) => normalizePeriod(h.header.periodLabel) !== normalizedCurrent
+			(h: any) => normalizePeriod(h.header.periodLabel) !== normalizedCurrent,
 		);
 
 		// Append new record and keep last 12, then SORT chronologically
-		const updatedHistory = sortHistory([...otherHistory, currentSnapshot]).slice(-12);
+		const updatedHistory = sortHistory([
+			...otherHistory,
+			currentSnapshot,
+		]).slice(-12);
 
 		setParseError(null);
 		await onSave({
@@ -1099,8 +1178,11 @@ export function JuridicoDashboardEditor({
 				<h3 className="font-medium text-sm">Métricas principales (4 a 6)</h3>
 				<div className="grid gap-3 sm:grid-cols-2">
 					{payload?.metrics?.map((metric, index: number) => (
-						<div key={`${metric.label}-${index}`} className="grid gap-2 rounded-lg border p-3">
-							<div className="font-medium text-xs text-muted-foreground">
+						<div
+							key={`${metric.label}-${index}`}
+							className="grid gap-2 rounded-lg border p-3"
+						>
+							<div className="font-medium text-muted-foreground text-xs">
 								{metric.label}
 							</div>
 							<Input
@@ -1283,7 +1365,7 @@ export function JuridicoDashboardEditor({
 						key={`${item.label}-${index}`}
 						className="grid gap-2 rounded-lg border p-3 md:grid-cols-2"
 					>
-						<div className="flex items-center text-xs text-muted-foreground">
+						<div className="flex items-center text-muted-foreground text-xs">
 							{item.label}
 						</div>
 						<Input
@@ -1310,53 +1392,55 @@ export function JuridicoDashboardEditor({
 							Gestión de historial y snapshots mensuales.
 						</CardDescription>
 					</div>
-					<Button 
-						variant="outline" 
-						size="sm" 
+					<Button
+						variant="outline"
+						size="sm"
 						className="gap-2 border-primary/20 text-primary hover:bg-primary/5"
 						onClick={handleNewMonth}
 					>
-						<PlusCircle className="h-4 w-4" />
-						+ Nuevo Mes
+						<PlusCircle className="h-4 w-4" />+ Nuevo Mes
 					</Button>
 				</CardHeader>
 				<CardContent className="space-y-4">
 					<div className="space-y-2">
 						<div className="flex items-center justify-between font-medium text-sm">
 							<label htmlFor="periodLabel">Período visible</label>
-							{Array.isArray(snapshot?.payload) && snapshot.payload.length > 0 && (
-								<Select
-									value={periodLabel}
-									onValueChange={(val) => {
-										const history =
-											snapshot.payload as JuridicoDashboardSinglePayload[];
-										const selected = history.find(
-											(m) => normalizePeriod(m.header.periodLabel) === normalizePeriod(val)
-										);
-										if (selected) {
-											setPayload(selected);
-											setRawJson(JSON.stringify(selected, null, 2));
-											setPeriodLabel(selected.header.periodLabel);
-										}
-									}}
-								>
-									<SelectTrigger className="h-7 w-[160px] text-xs">
-										<SelectValue placeholder="Editar existente..." />
-									</SelectTrigger>
-									<SelectContent>
-										{sortHistory(
-											snapshot.payload as JuridicoDashboardSinglePayload[],
-										).map((m) => (
-											<SelectItem 
-												key={m.header.periodLabel} 
-												value={m.header.periodLabel}
-											>
-												{m.header.periodLabel}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							)}
+							{Array.isArray(snapshot?.payload) &&
+								snapshot.payload.length > 0 && (
+									<Select
+										value={periodLabel}
+										onValueChange={(val) => {
+											const history =
+												snapshot.payload as JuridicoDashboardSinglePayload[];
+											const selected = history.find(
+												(m) =>
+													normalizePeriod(m.header.periodLabel) ===
+													normalizePeriod(val),
+											);
+											if (selected) {
+												setPayload(selected);
+												setRawJson(JSON.stringify(selected, null, 2));
+												setPeriodLabel(selected.header.periodLabel);
+											}
+										}}
+									>
+										<SelectTrigger className="h-7 w-[160px] text-xs">
+											<SelectValue placeholder="Editar existente..." />
+										</SelectTrigger>
+										<SelectContent>
+											{sortHistory(
+												snapshot.payload as JuridicoDashboardSinglePayload[],
+											).map((m) => (
+												<SelectItem
+													key={m.header.periodLabel}
+													value={m.header.periodLabel}
+												>
+													{m.header.periodLabel}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								)}
 						</div>
 						<Input
 							id="periodLabel"
@@ -1399,7 +1483,10 @@ export function JuridicoDashboardEditor({
 								Copiar plantilla JSON
 							</Button>
 						) : null}
-						<Button onClick={handleSave} disabled={isSaving || !periodLabel.trim()}>
+						<Button
+							onClick={handleSave}
+							disabled={isSaving || !periodLabel.trim()}
+						>
 							{isSaving ? "Publicando..." : "Publicar dashboard"}
 						</Button>
 					</div>

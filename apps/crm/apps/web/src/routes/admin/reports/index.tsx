@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+﻿import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	Activity,
@@ -377,6 +377,10 @@ function fillMissingPeriods(
 				acum_total_seguro: "0",
 				acum_total_gps: "0",
 				acum_total_membresias: "0",
+				total_interes_inversionista: "0",
+				acum_total_interes_inversionista: "0",
+				total_interes_inversionista_pagos: "0",
+				acum_total_interes_inversionista_pagos: "0",
 			}
 		);
 	});
@@ -1434,6 +1438,9 @@ function RouteComponent() {
 																Membresías
 															</TableHead>
 															<TableHead className="text-right">
+																Interés Inv. (referencia)
+															</TableHead>
+															<TableHead className="text-right">
 																Total Mora
 															</TableHead>
 															<TableHead className="text-right font-bold">
@@ -1467,6 +1474,9 @@ function RouteComponent() {
 															const membresias = a
 																? row.acum_total_membresias
 																: row.total_membresias;
+															const interesInversionistaPagos = a
+																? row.acum_total_interes_inversionista_pagos
+																: row.total_interes_inversionista_pagos;
 															const total =
 																Number.parseFloat(cuota) +
 																Number.parseFloat(interes) +
@@ -1502,6 +1512,9 @@ function RouteComponent() {
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(membresias)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(interesInversionistaPagos)}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		<div>{formatCurrency(row.total_mora)}</div>
@@ -1608,6 +1621,15 @@ function RouteComponent() {
 																				a
 																					? "acum_total_membresias"
 																					: "total_membresias",
+																			),
+																		)}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatCurrency(
+																			val(
+																				a
+																					? "acum_total_interes_inversionista_pagos"
+																					: "total_interes_inversionista_pagos",
 																			),
 																		)}
 																	</TableCell>
@@ -2048,11 +2070,13 @@ function RouteComponent() {
 										(() => {
 											const cf = reinversionData.interesNeto.conFactura;
 											const sf = reinversionData.interesNeto.sinFactura;
+											const cube = reinversionData.interesNeto.cube;
 											const totalInteres =
-												Number(cf.interes) + Number(sf.interes);
-											const totalIva = Number(cf.iva);
+												Number(cf.interes) + Number(sf.interes) + Number(cube.interes);
+											const totalIva = Number(cf.iva) + Number(cube.iva);
 											const totalIsr = Number(sf.isr);
-											const totalNeto = Number(cf.neto) + Number(sf.neto);
+											const totalNeto =
+												Number(cf.neto) + Number(sf.neto) + Number(cube.neto);
 											return (
 												<div className={SECCION_REPORTE_CLASS}>
 													<p className="mb-2 font-semibold text-sm">
@@ -2078,7 +2102,7 @@ function RouteComponent() {
 														</TableHeader>
 														<TableBody>
 															<TableRow>
-																<TableCell>Con Factura</TableCell>
+																<TableCell>Inversionista Con Factura</TableCell>
 																<TableCell className="text-right">
 																	{dash(cf.interes)}
 																</TableCell>
@@ -2092,8 +2116,8 @@ function RouteComponent() {
 																	{dash(cf.neto)}
 																</TableCell>
 															</TableRow>
-															<TableRow>
-																<TableCell>Sin Factura</TableCell>
+															<TableRow>	
+																<TableCell>Inversionista Sin Factura</TableCell>
 																<TableCell className="text-right">
 																	{dash(sf.interes)}
 																</TableCell>
@@ -2106,6 +2130,14 @@ function RouteComponent() {
 																<TableCell className="text-right font-semibold">
 																	{dash(sf.neto)}
 																</TableCell>
+															</TableRow>
+
+															<TableRow>
+																<TableCell>Residuo CUBE</TableCell>
+																<TableCell className="text-right">{dash(cube.interes)}</TableCell>
+																<TableCell className="text-right">{dash(cube.iva)}</TableCell>
+																<TableCell className="text-right text-muted-foreground">—</TableCell>
+																<TableCell className="text-right font-semibold">{dash(cube.neto)}</TableCell>
 															</TableRow>
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total</TableCell>

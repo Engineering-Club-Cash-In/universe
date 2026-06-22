@@ -65,6 +65,11 @@ import {
 	generateAmortizationTable,
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
+import {
+	DISBURSEMENT_SALE_LABEL,
+	formatQuotationClientName,
+	formatVehicleWithClient,
+} from "@/lib/quotation-display";
 import { PERMISSIONS } from "@/lib/roles";
 import {
 	QUOTER_VEHICLE_ORIGIN_OPTIONS,
@@ -202,7 +207,7 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 	},
 	{
 		name: "inspection",
-		label: "Inspección",
+		label: DISBURSEMENT_SALE_LABEL,
 		type: "fixed",
 		valueField: "inspectionCost",
 		creditType: "all",
@@ -1480,12 +1485,23 @@ function QuoterPage() {
 		}
 
 		const values = quoterForm.state.values;
+		const selectedOpportunity = (opportunitiesQuery.data as any[] | undefined)?.find(
+			(opp: any) => opp.id === values.opportunityId,
+		);
+		const clientName = selectedOpportunity
+			? formatQuotationClientName({
+					leadFirstName: selectedOpportunity.lead?.firstName,
+					leadLastName: selectedOpportunity.lead?.lastName,
+					companyName: selectedOpportunity.company?.name,
+				})
+			: null;
 		const downPaymentPercentage =
 			values.vehicleValue > 0
 				? (values.downPayment / values.vehicleValue) * 100
 				: 0;
 
 		return {
+			clientName,
 			vehicleBrand: values.vehicleBrand,
 			vehicleLine: values.vehicleLine,
 			vehicleModel: values.vehicleModel,
@@ -2441,8 +2457,16 @@ function QuoterPage() {
 													)}
 												</TableCell>
 												<TableCell>
-													{quotation.vehicleBrand} {quotation.vehicleLine}{" "}
-													{quotation.vehicleModel}
+													{formatVehicleWithClient(
+														[
+															quotation.vehicleBrand,
+															quotation.vehicleLine,
+															quotation.vehicleModel,
+														]
+															.filter(Boolean)
+															.join(" "),
+														formatQuotationClientName(quotation as any),
+													)}
 												</TableCell>
 												<TableCell>
 													Q
@@ -2547,8 +2571,10 @@ function QuotationDetailDialog({
 	const handleGeneratePdf = (clientVersion = false) => {
 		if (!quotationQuery.data) return;
 
-		const quotation = quotationQuery.data;
+		const quotation = quotationQuery.data as any;
+		const clientName = formatQuotationClientName(quotation);
 		const quotationData = {
+			clientName,
 			vehicleBrand: quotation.vehicleBrand,
 			vehicleLine: quotation.vehicleLine,
 			vehicleModel: quotation.vehicleModel,
@@ -2590,7 +2616,14 @@ function QuotationDetailDialog({
 		);
 	}
 
-	const quotation = quotationQuery.data;
+	const quotation = quotationQuery.data as any;
+	const clientName = formatQuotationClientName(quotation);
+	const vehicleLabel = formatVehicleWithClient(
+		[quotation.vehicleBrand, quotation.vehicleLine, quotation.vehicleModel]
+			.filter(Boolean)
+			.join(" "),
+		clientName,
+	);
 
 	return (
 		<Dialog open={isOpen} onOpenChange={onClose}>
@@ -2599,10 +2632,7 @@ function QuotationDetailDialog({
 					<div className="flex items-center justify-between">
 						<div>
 							<DialogTitle>Detalle de Cotización</DialogTitle>
-							<DialogDescription>
-								{quotation.vehicleBrand} {quotation.vehicleLine}{" "}
-								{quotation.vehicleModel}
-							</DialogDescription>
+							<DialogDescription>{vehicleLabel}</DialogDescription>
 						</div>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>

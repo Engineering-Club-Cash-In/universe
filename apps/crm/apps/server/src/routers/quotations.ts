@@ -2,10 +2,39 @@ import { ORPCError } from "@orpc/server";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { quotations, vehicles } from "../db/schema";
+import {
+	companies,
+	leads,
+	opportunities,
+	quotations,
+	vehicles,
+} from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
-import { canManageAnyQuotation, canManageQuotations } from "../lib/quotation-permissions";
-import { ROLES } from "../lib/roles";
+import {
+	canManageAnyQuotation,
+	canManageQuotations,
+} from "../lib/quotation-permissions";
+
+function flattenQuotationClient(row: {
+	quotation: typeof quotations.$inferSelect;
+	leadFirstName: string | null;
+	leadLastName: string | null;
+	companyName: string | null;
+}) {
+	return {
+		...row.quotation,
+		leadFirstName: row.leadFirstName,
+		leadLastName: row.leadLastName,
+		companyName: row.companyName,
+	};
+}
+
+const quotationClientSelect = {
+	quotation: quotations,
+	leadFirstName: leads.firstName,
+	leadLastName: leads.lastName,
+	companyName: companies.name,
+};
 
 /**
  * Calcula la cuota mensual usando la fórmula PMT de Excel
@@ -303,30 +332,40 @@ export const quotationsRouter = {
 		// Admin y supervisión ven todas; ventas solo las suyas
 		if (canManageAnyQuotation(userRole)) {
 			const result = await db
-				.select()
+				.select(quotationClientSelect)
 				.from(quotations)
+				.leftJoin(opportunities, eq(quotations.opportunityId, opportunities.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.orderBy(desc(quotations.createdAt));
-			return result;
+			return result.map(flattenQuotationClient);
 		}
 
 		const result = await db
-			.select()
+			.select(quotationClientSelect)
 			.from(quotations)
+			.leftJoin(opportunities, eq(quotations.opportunityId, opportunities.id))
+			.leftJoin(leads, eq(opportunities.leadId, leads.id))
+			.leftJoin(companies, eq(opportunities.companyId, companies.id))
 			.where(eq(quotations.salesUserId, context.userId))
 			.orderBy(desc(quotations.createdAt));
 
-		return result;
+		return result.map(flattenQuotationClient);
 	}),
 
 	// Obtener cotización por ID con tabla de amortización
 	getQuotationById: crmProcedure
 		.input(z.object({ quotationId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const [quotation] = await db
-				.select()
+			const [row] = await db
+				.select(quotationClientSelect)
 				.from(quotations)
+				.leftJoin(opportunities, eq(quotations.opportunityId, opportunities.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.where(eq(quotations.id, input.quotationId))
 				.limit(1);
+			const quotation = row ? flattenQuotationClient(row) : null;
 
 			if (!quotation) {
 				throw new ORPCError("NOT_FOUND", {
@@ -336,7 +375,10 @@ export const quotationsRouter = {
 
 			// Validar acceso
 			const userRole = context.userRole;
-			if (!canManageAnyQuotation(userRole) && quotation.salesUserId !== context.userId) {
+			if (
+				!canManageAnyQuotation(userRole) &&
+				quotation.salesUserId !== context.userId
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para ver esta cotización",
 				});
@@ -409,12 +451,15 @@ export const quotationsRouter = {
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input }) => {
 			const result = await db
-				.select()
+				.select(quotationClientSelect)
 				.from(quotations)
+				.leftJoin(opportunities, eq(quotations.opportunityId, opportunities.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.where(eq(quotations.opportunityId, input.opportunityId))
 				.orderBy(desc(quotations.createdAt));
 
-			return result;
+			return result.map(flattenQuotationClient);
 		}),
 
 	// Eliminar cotización

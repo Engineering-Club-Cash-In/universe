@@ -60,6 +60,7 @@ import {
 	generateAmortizationTable,
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
+import { DISBURSEMENT_SALE_LABEL } from "@/lib/quotation-display";
 import type { IOpportunity } from "@/routes/crm/opportunities";
 import { client } from "@/utils/orpc";
 
@@ -460,7 +461,7 @@ export function CreditDetailView({
 			);
 			if (inspeccionValue > 0)
 				rubrosArray.push({
-					nombre_rubro: "Inspección",
+					nombre_rubro: DISBURSEMENT_SALE_LABEL,
 					monto: inspeccionValue,
 				});
 
@@ -1575,7 +1576,7 @@ export function CreditDetailView({
 												</TableCell>
 											</TableRow>
 											<TableRow>
-												<TableCell>Inspección</TableCell>
+												<TableCell>{DISBURSEMENT_SALE_LABEL}</TableCell>
 												<TableCell className="text-center">
 													<Badge
 														variant={inspeccion > 0 ? "default" : "outline"}
@@ -3026,7 +3027,7 @@ export function CreditDetailView({
 														Number.parseFloat(quotation.inspectionCost) > 0 && (
 															<div>
 																<Label className="text-muted-foreground text-xs">
-																	Inspección
+																	{DISBURSEMENT_SALE_LABEL}
 																</Label>
 																<p className="font-medium">
 																	{formatCurrency(quotation.inspectionCost)}

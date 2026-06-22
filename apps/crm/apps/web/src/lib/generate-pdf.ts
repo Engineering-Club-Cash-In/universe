@@ -62,6 +62,7 @@ export function generateAmortizationTable(
 
 // Define an interface for the quotation data
 interface QuotationData {
+	clientName?: string | null;
 	vehicleBrand: string | null;
 	vehicleLine: string | null;
 	vehicleModel: string | null;
@@ -121,11 +122,17 @@ export function generateQuotationPdf(
 	doc.text("Modelo:", 140, 45);
 	doc.setFont("helvetica", "bold");
 	doc.text(quotation.vehicleModel || "", 162, 45);
+	if (quotation.clientName) {
+		doc.setFont("helvetica", "normal");
+		doc.text("Cliente:", 14, 53);
+		doc.setFont("helvetica", "bold");
+		doc.text(quotation.clientName, 35, 53);
+	}
 
 	// Financial Summary - Left Column
 	doc.setFont("helvetica", "normal");
 	doc.setFontSize(11);
-	let y = 60;
+	let y = quotation.clientName ? 68 : 60;
 	const leftCol = 14;
 	const leftValueCol = 70; // Increased spacing for longer labels
 	const rightCol = 110;

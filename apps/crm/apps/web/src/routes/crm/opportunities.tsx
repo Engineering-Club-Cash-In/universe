@@ -100,6 +100,10 @@ import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
+import {
+	formatQuotationClientName,
+	formatVehicleWithClient,
+} from "@/lib/quotation-display";
 import { getRoleLabel, PERMISSIONS, ROLES } from "@/lib/roles";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
@@ -2646,15 +2650,22 @@ function RouteComponent() {
 													{opportunityQuotationsQuery.data.map(
 														(quotation: any) => (
 															<div
-																key={quotation.id}
-																className="flex items-center justify-between rounded-md border bg-background p-3"
-															>
-																<div className="flex flex-col gap-1">
-																	<span className="font-medium text-sm">
-																		{quotation.vehicleBrand}{" "}
-																		{quotation.vehicleLine}{" "}
-																		{quotation.vehicleModel}
-																	</span>
+													key={quotation.id}
+													className="flex items-center justify-between rounded-md border bg-background p-3"
+												>
+													<div className="flex flex-col gap-1">
+														<span className="font-medium text-sm">
+															{formatVehicleWithClient(
+																[
+																	quotation.vehicleBrand,
+																	quotation.vehicleLine,
+																	quotation.vehicleModel,
+																]
+																	.filter(Boolean)
+																	.join(" "),
+																formatQuotationClientName(quotation),
+															)}
+														</span>
 																	<span className="text-muted-foreground text-xs">
 																		Q
 																		{Number(

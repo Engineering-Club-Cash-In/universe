@@ -68,6 +68,7 @@ import {
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
 import { getLeadSourceLabel } from "../lib/lead-sources";
+import { getStageVehicleRequirementError } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -1976,6 +1977,24 @@ export const crmRouter = {
 
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+				const effectiveVehicleId =
+					input.vehicleId !== undefined
+						? input.vehicleId
+						: currentOpportunity[0].vehicleId;
+				const vehicleRequirementError =
+					input.stageId !== currentOpportunity[0].stageId
+						? getStageVehicleRequirementError(
+								fromPercentage,
+								toPercentage,
+								effectiveVehicleId,
+							)
+						: null;
+
+				if (vehicleRequirementError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: vehicleRequirementError,
+					});
+				}
 
 				// Validate credit detail approval when moving from <=40% to >=50%
 				if (fromPercentage <= 40 && toPercentage >= 50) {

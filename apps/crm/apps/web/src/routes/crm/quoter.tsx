@@ -66,6 +66,10 @@ import {
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
 import { PERMISSIONS } from "@/lib/roles";
+import {
+	QUOTER_VEHICLE_ORIGIN_OPTIONS,
+	QUOTER_VEHICLE_TYPE_OPTIONS,
+} from "@/lib/vehicle-form-options";
 import { client, orpc } from "@/utils/orpc";
 
 const searchSchema = z.object({
@@ -1850,26 +1854,13 @@ function QuoterPage() {
 													<SelectTrigger>
 														<SelectValue placeholder="Seleccionar tipo..." />
 													</SelectTrigger>
-													<SelectContent>
-														<SelectItem value="particular">
-															Particular
-														</SelectItem>
-														<SelectItem value="uber">UBER</SelectItem>
-														<SelectItem value="pickup">Pick Up</SelectItem>
-														<SelectItem value="nuevo">Nuevo</SelectItem>
-														<SelectItem value="panel">Panel</SelectItem>
-														<SelectItem value="camion">Camión</SelectItem>
-														<SelectItem value="microbus">Microbus</SelectItem>
-														<SelectItem value="microbus_20">
-															Bus hasta 20 pasajeros (RCDP)
-														</SelectItem>
-														<SelectItem value="microbus_35">
-															Bus 21-35 pasajeros (RCDP)
-														</SelectItem>
-														<SelectItem value="microbus_36plus">
-															Bus más de 35 pasajeros (RCDP)
-														</SelectItem>
-													</SelectContent>
+											<SelectContent>
+												{QUOTER_VEHICLE_TYPE_OPTIONS.map((option) => (
+													<SelectItem key={option.value} value={option.value}>
+														{option.label}
+													</SelectItem>
+												))}
+											</SelectContent>
 												</Select>
 											</div>
 										)}
@@ -1948,13 +1939,13 @@ function QuoterPage() {
 															<SelectTrigger>
 																<SelectValue placeholder="Seleccionar origen..." />
 															</SelectTrigger>
-															<SelectContent>
-																<SelectItem value="agencia">Agencia</SelectItem>
-																<SelectItem value="rodado">Rodado</SelectItem>
-																<SelectItem value="importado">Importado</SelectItem>
-																<SelectItem value="subasta">Subasta</SelectItem>
-																<SelectItem value="otro">Otro</SelectItem>
-															</SelectContent>
+												<SelectContent>
+													{QUOTER_VEHICLE_ORIGIN_OPTIONS.map((option) => (
+														<SelectItem key={option.value} value={option.value}>
+															{option.label}
+														</SelectItem>
+													))}
+												</SelectContent>
 														</Select>
 													</div>
 												);

@@ -258,8 +258,6 @@ export type MontoACobrarPeriodoRow = {
 	acum_total_membresias: string;
 	total_interes_inversionista: string;
 	acum_total_interes_inversionista: string;
-	total_interes_inversionista_pagos: string;
-	acum_total_interes_inversionista_pagos: string;
 };
 
 export type FlujoCuotasRubro = {

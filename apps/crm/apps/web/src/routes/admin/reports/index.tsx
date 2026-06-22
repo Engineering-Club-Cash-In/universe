@@ -379,8 +379,6 @@ function fillMissingPeriods(
 				acum_total_membresias: "0",
 				total_interes_inversionista: "0",
 				acum_total_interes_inversionista: "0",
-				total_interes_inversionista_pagos: "0",
-				acum_total_interes_inversionista_pagos: "0",
 			}
 		);
 	});
@@ -1474,9 +1472,9 @@ function RouteComponent() {
 															const membresias = a
 																? row.acum_total_membresias
 																: row.total_membresias;
-															const interesInversionistaPagos = a
-																? row.acum_total_interes_inversionista_pagos
-																: row.total_interes_inversionista_pagos;
+															const interesInversionista = a
+																? row.acum_total_interes_inversionista
+																: row.total_interes_inversionista;
 															const total =
 																Number.parseFloat(cuota) +
 																Number.parseFloat(interes) +
@@ -1514,7 +1512,7 @@ function RouteComponent() {
 																		{formatCurrency(membresias)}
 																	</TableCell>
 																	<TableCell className="text-right">
-																		{formatCurrency(interesInversionistaPagos)}
+																		{formatCurrency(interesInversionista)}
 																	</TableCell>
 																	<TableCell className="text-right">
 																		<div>{formatCurrency(row.total_mora)}</div>
@@ -1628,8 +1626,8 @@ function RouteComponent() {
 																		{formatCurrency(
 																			val(
 																				a
-																					? "acum_total_interes_inversionista_pagos"
-																					: "total_interes_inversionista_pagos",
+																					? "acum_total_interes_inversionista"
+																					: "total_interes_inversionista",
 																			),
 																		)}
 																	</TableCell>

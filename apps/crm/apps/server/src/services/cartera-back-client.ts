@@ -256,6 +256,10 @@ export type MontoACobrarPeriodoRow = {
 	acum_total_seguro: string;
 	acum_total_gps: string;
 	acum_total_membresias: string;
+	total_interes_inversionista: string;
+	acum_total_interes_inversionista: string;
+	total_interes_inversionista_pagos: string;
+	acum_total_interes_inversionista_pagos: string;
 };
 
 export type FlujoCuotasRubro = {
@@ -316,6 +320,7 @@ export type ReinversionLiquidacionesResponse = {
 	interesNeto: {
 		conFactura: { interes: string; iva: string; neto: string };
 		sinFactura: { interes: string; isr: string; neto: string };
+		cube: { interes: string; iva: string; neto: string };
 	};
 	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
 	pagosExtras: { abonos_capital: string; cancelaciones: string };

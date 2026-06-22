@@ -801,13 +801,13 @@ function QuoterPage() {
 		mutationFn: async (values: any) => {
 			return await client.createQuotation(values);
 		},
-			onSuccess: () => {
-				toast.success("Cotización creada exitosamente");
-				queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
-				quoterForm.reset();
-				setIsInterno(false);
-				setOpportunityVehicle(null);
-				setCalculatedValues({
+		onSuccess: () => {
+			toast.success("Cotización creada exitosamente");
+			queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
+			quoterForm.reset();
+			setIsInterno(false);
+			setOpportunityVehicle(null);
+			setCalculatedValues({
 				amountToFinance: 0,
 				totalFinanced: 0,
 				monthlyPayment: 0,
@@ -1033,9 +1033,8 @@ function QuoterPage() {
 	}) => {
 		if (!vehicle) return null;
 
-		const vehicleCondition: QuotationFormValues["vehicleCondition"] = vehicle.isNew
-			? "new"
-			: "used";
+		const vehicleCondition: QuotationFormValues["vehicleCondition"] =
+			vehicle.isNew ? "new" : "used";
 		const vehicleOrigin = normalizeVehicleOrigin(vehicle.origin);
 		quoterForm.setFieldValue("vehicleCondition", vehicleCondition);
 		quoterForm.setFieldValue("vehicleOrigin", vehicleOrigin);
@@ -1133,7 +1132,8 @@ function QuoterPage() {
 	) => {
 		quoterForm.setFieldValue("creditType", creditType);
 
-		const shouldUseInterno = creditType === "sobre_vehiculo" ? false : isInterno;
+		const shouldUseInterno =
+			creditType === "sobre_vehiculo" ? false : isInterno;
 
 		if (creditType === "sobre_vehiculo") {
 			setIsInterno(false);
@@ -1278,7 +1278,9 @@ function QuoterPage() {
 			quoterForm.setFieldValue("vehicleBrand", vehicle.make);
 			quoterForm.setFieldValue("vehicleLine", vehicle.model);
 			quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
-			const vehicleTypeToUse = normalizeVehicleTypeForQuoter(vehicle.vehicleType);
+			const vehicleTypeToUse = normalizeVehicleTypeForQuoter(
+				vehicle.vehicleType,
+			);
 			quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
 			const vehicleContext = applyVehicleConditionAndOrigin(vehicle);
 
@@ -1356,13 +1358,11 @@ function QuoterPage() {
 						"vehicleOrigin",
 						savedVehicleContext.vehicleOrigin ?? "agencia",
 					);
-					setVehicleConditionLocked(false);
 				} else if (linkedVehicle) {
 					applyVehicleConditionAndOrigin(linkedVehicle);
 				} else {
 					quoterForm.setFieldValue("vehicleCondition", "used");
 					quoterForm.setFieldValue("vehicleOrigin", "agencia");
-					setVehicleConditionLocked(false);
 				}
 				quoterForm.setFieldValue("vehicleValue", Number(q.vehicleValue) || 0);
 				quoterForm.setFieldValue("insuredAmount", Number(q.insuredAmount) || 0);
@@ -1611,10 +1611,11 @@ function QuoterPage() {
 													}
 
 													// Intentar cargar cotización existente primero
-													const loadedExistingQuotation = await loadExistingQuotation(
-														value,
-														selectedOpp?.vehicle ?? undefined,
-													);
+													const loadedExistingQuotation =
+														await loadExistingQuotation(
+															value,
+															selectedOpp?.vehicle ?? undefined,
+														);
 													if (!loadedExistingQuotation) {
 														if (selectedOpp?.vehicle) {
 															await handleOpportunityVehicleSelect(
@@ -1622,7 +1623,9 @@ function QuoterPage() {
 															);
 														}
 														if (selectedOpp?.creditType) {
-															await applyCreditTypeChange(selectedOpp.creditType);
+															await applyCreditTypeChange(
+																selectedOpp.creditType,
+															);
 														}
 													}
 
@@ -1632,11 +1635,11 @@ function QuoterPage() {
 															value: selectedOpp.vehicle.id,
 															label: `${selectedOpp.vehicle.make} ${selectedOpp.vehicle.model} ${selectedOpp.vehicle.year} - ${selectedOpp.vehicle.licensePlate || ""}`,
 														});
-											} else {
-												// Limpiar vehículo de oportunidad cuando se deselecciona
-												setOpportunityVehicle(null);
-												setVehicleConditionLocked(false);
-											}
+													}
+												} else {
+													// Limpiar vehículo de oportunidad cuando se deselecciona
+													setOpportunityVehicle(null);
+												}
 											}}
 											onSearchChange={setOpportunitiesSearch}
 											isLoading={opportunitiesQuery.isFetching}
@@ -1652,8 +1655,7 @@ function QuoterPage() {
 										const hasOpportunity =
 											!!quoterForm.state.values.opportunityId;
 										const selectedOpp = opportunitiesQuery.data?.find(
-											(opp) =>
-												opp.id === quoterForm.state.values.opportunityId,
+											(opp) => opp.id === quoterForm.state.values.opportunityId,
 										);
 										const isDisabled =
 											hasOpportunity && !!selectedOpp?.creditType;
@@ -1747,8 +1749,8 @@ function QuoterPage() {
 														);
 													}
 												}
-											setTimeout(() => recalculate(value), 100);
-										}}
+												setTimeout(() => recalculate(value), 100);
+											}}
 										/>
 										<Label
 											htmlFor="isInterno"
@@ -1855,35 +1857,38 @@ function QuoterPage() {
 												<Label htmlFor={field.name} className="mb-2">
 													Tipo de Vehículo
 												</Label>
-											<Select
-												value={field.state.value}
-												onValueChange={(value) => {
-													field.handleChange(
-														value as QuotationFormValues["vehicleType"],
-													);
+												<Select
+													value={field.state.value}
+													onValueChange={(value) => {
+														field.handleChange(
+															value as QuotationFormValues["vehicleType"],
+														);
 
 														// Actualizar seguro cuando cambia el tipo
 														// Usar getFieldValue para obtener el valor actual (no stale)
-													const insuredAmount =
-														quoterForm.getFieldValue("insuredAmount") ?? 0;
-													if (insuredAmount > 0) {
-														updateInsuranceCost(
-															insuredAmount,
-															value as QuotationFormValues["vehicleType"],
-														);
-													}
+														const insuredAmount =
+															quoterForm.getFieldValue("insuredAmount") ?? 0;
+														if (insuredAmount > 0) {
+															updateInsuranceCost(
+																insuredAmount,
+																value as QuotationFormValues["vehicleType"],
+															);
+														}
 													}}
 												>
 													<SelectTrigger>
 														<SelectValue placeholder="Seleccionar tipo..." />
 													</SelectTrigger>
-											<SelectContent>
-												{QUOTER_VEHICLE_TYPE_OPTIONS.map((option) => (
-													<SelectItem key={option.value} value={option.value}>
-														{option.label}
-													</SelectItem>
-												))}
-											</SelectContent>
+													<SelectContent>
+														{QUOTER_VEHICLE_TYPE_OPTIONS.map((option) => (
+															<SelectItem
+																key={option.value}
+																value={option.value}
+															>
+																{option.label}
+															</SelectItem>
+														))}
+													</SelectContent>
 												</Select>
 											</div>
 										)}
@@ -1897,20 +1902,24 @@ function QuoterPage() {
 														<Label htmlFor={field.name} className="mb-2">
 															Condición
 														</Label>
-																	<Select
+														<Select
 															value={field.state.value}
 															onValueChange={(value) => {
 																const condition = value as "new" | "used";
 																field.handleChange(condition);
 																const insuredAmount =
-																	quoterForm.getFieldValue("insuredAmount") ?? 0;
+																	quoterForm.getFieldValue("insuredAmount") ??
+																	0;
 																if (insuredAmount > 0) {
 																	updateInsuranceCost(
 																		insuredAmount,
 																		quoterForm.state.values.vehicleType,
 																		{
 																			condition,
-																			origin: quoterForm.getFieldValue("vehicleOrigin"),
+																			origin:
+																				quoterForm.getFieldValue(
+																					"vehicleOrigin",
+																				),
 																		},
 																	);
 																}
@@ -1936,21 +1945,24 @@ function QuoterPage() {
 														<Label htmlFor={field.name} className="mb-2">
 															Origen
 														</Label>
-																	<Select
+														<Select
 															value={field.state.value}
 															onValueChange={(value) => {
 																const origin =
 																	value as QuotationFormValues["vehicleOrigin"];
 																field.handleChange(origin);
 																const insuredAmount =
-																	quoterForm.getFieldValue("insuredAmount") ?? 0;
+																	quoterForm.getFieldValue("insuredAmount") ??
+																	0;
 																if (insuredAmount > 0) {
 																	updateInsuranceCost(
 																		insuredAmount,
 																		quoterForm.state.values.vehicleType,
 																		{
 																			condition:
-																				quoterForm.getFieldValue("vehicleCondition"),
+																				quoterForm.getFieldValue(
+																					"vehicleCondition",
+																				),
 																			origin,
 																		},
 																	);
@@ -1960,13 +1972,16 @@ function QuoterPage() {
 															<SelectTrigger>
 																<SelectValue placeholder="Seleccionar origen..." />
 															</SelectTrigger>
-												<SelectContent>
-													{QUOTER_VEHICLE_ORIGIN_OPTIONS.map((option) => (
-														<SelectItem key={option.value} value={option.value}>
-															{option.label}
-														</SelectItem>
-													))}
-												</SelectContent>
+															<SelectContent>
+																{QUOTER_VEHICLE_ORIGIN_OPTIONS.map((option) => (
+																	<SelectItem
+																		key={option.value}
+																		value={option.value}
+																	>
+																		{option.label}
+																	</SelectItem>
+																))}
+															</SelectContent>
 														</Select>
 													</div>
 												);
@@ -2403,16 +2418,32 @@ function QuoterPage() {
 																{row.period}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																Q
+																{row.initialBalance.toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.interestPlusVAT.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																Q
+																{row.interestPlusVAT.toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.principal.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																Q
+																{row.principal.toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.finalBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																Q
+																{row.finalBalance.toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
 															</TableCell>
 														</TableRow>
 													))}
@@ -2467,11 +2498,11 @@ function QuoterPage() {
 															quotation.vehicleBrand,
 															quotation.vehicleLine,
 															quotation.vehicleModel,
-													]
-														.filter(Boolean)
-														.join(" "),
-												formatQuotationClientName(quotation),
-											)}
+														]
+															.filter(Boolean)
+															.join(" "),
+														formatQuotationClientName(quotation),
+													)}
 												</TableCell>
 												<TableCell>
 													Q
@@ -2735,10 +2766,34 @@ function QuotationDetailDialog({
 										.map((row) => (
 											<TableRow key={row.period}>
 												<TableCell>{row.period}</TableCell>
-												<TableCell>Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-												<TableCell>Q{row.interestPlusVAT.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-												<TableCell>Q{row.principal.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-												<TableCell>Q{row.finalBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+												<TableCell>
+													Q
+													{row.initialBalance.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</TableCell>
+												<TableCell>
+													Q
+													{row.interestPlusVAT.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</TableCell>
+												<TableCell>
+													Q
+													{row.principal.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</TableCell>
+												<TableCell>
+													Q
+													{row.finalBalance.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</TableCell>
 											</TableRow>
 										))}
 								</TableBody>

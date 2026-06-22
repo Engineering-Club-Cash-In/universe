@@ -773,7 +773,6 @@ function QuoterPage() {
 		value: string;
 		label: string;
 	} | null>(null);
-	const [vehicleConditionLocked, setVehicleConditionLocked] = useState(false);
 
 	// Estado del formulario
 	const [calculatedValues, setCalculatedValues] = useState({
@@ -799,7 +798,6 @@ function QuoterPage() {
 				quoterForm.reset();
 				setIsInterno(false);
 				setOpportunityVehicle(null);
-				setVehicleConditionLocked(false);
 				setCalculatedValues({
 				amountToFinance: 0,
 				totalFinanced: 0,
@@ -1032,8 +1030,6 @@ function QuoterPage() {
 		const vehicleOrigin = normalizeVehicleOrigin(vehicle.origin);
 		quoterForm.setFieldValue("vehicleCondition", vehicleCondition);
 		quoterForm.setFieldValue("vehicleOrigin", vehicleOrigin);
-		setVehicleConditionLocked(true);
-
 		return { condition: vehicleCondition, origin: vehicleOrigin };
 	};
 
@@ -1350,7 +1346,6 @@ function QuoterPage() {
 						"vehicleOrigin",
 						savedVehicleContext.vehicleOrigin ?? "agencia",
 					);
-					setVehicleConditionLocked(false);
 				}
 				quoterForm.setFieldValue("vehicleValue", Number(q.vehicleValue) || 0);
 				quoterForm.setFieldValue("insuredAmount", Number(q.insuredAmount) || 0);
@@ -1613,7 +1608,6 @@ function QuoterPage() {
 										} else {
 											// Limpiar vehículo de oportunidad cuando se deselecciona
 											setOpportunityVehicle(null);
-											setVehicleConditionLocked(false);
 										}
 											}}
 											onSearchChange={setOpportunitiesSearch}
@@ -1883,8 +1877,7 @@ function QuoterPage() {
 														<Label htmlFor={field.name} className="mb-2">
 															Condición
 														</Label>
-														<Select
-															disabled={vehicleConditionLocked}
+																	<Select
 															value={field.state.value}
 															onValueChange={(value) => {
 																const condition = value as "new" | "used";
@@ -1923,8 +1916,7 @@ function QuoterPage() {
 														<Label htmlFor={field.name} className="mb-2">
 															Origen
 														</Label>
-														<Select
-															disabled={vehicleConditionLocked}
+																	<Select
 															value={field.state.value}
 															onValueChange={(value) => {
 																const origin =

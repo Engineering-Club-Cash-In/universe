@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
 	QUOTER_VEHICLE_TYPE_OPTIONS,
 	VEHICLE_BODY_TYPE_OPTIONS,
-	VEHICLE_ORIGIN_OPTIONS,
+	QUOTER_VEHICLE_ORIGIN_OPTIONS,
+	VEHICLE_PROVENANCE_OPTIONS,
 	VEHICLE_USE_OPTIONS,
 } from "./vehicle-form-options";
 
@@ -11,7 +12,11 @@ describe("vehicle form options", () => {
 		expect(VEHICLE_BODY_TYPE_OPTIONS.map((option) => option.value)).toContain("Sedan");
 		expect(VEHICLE_BODY_TYPE_OPTIONS.map((option) => option.value)).toContain("SUV");
 		expect(QUOTER_VEHICLE_TYPE_OPTIONS.map((option) => option.value)).toContain("particular");
-		expect(VEHICLE_ORIGIN_OPTIONS.map((option) => option.value)).toEqual([
+		expect(VEHICLE_PROVENANCE_OPTIONS.map((option) => option.value)).toEqual([
+			"Nacional",
+			"Importado",
+		]);
+		expect(QUOTER_VEHICLE_ORIGIN_OPTIONS.map((option) => option.value)).toEqual([
 			"agencia",
 			"rodado",
 			"importado",

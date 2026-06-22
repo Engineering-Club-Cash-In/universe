@@ -67,8 +67,8 @@ import {
 } from "@/lib/generate-pdf";
 import { PERMISSIONS } from "@/lib/roles";
 import {
+	QUOTER_VEHICLE_ORIGIN_OPTIONS,
 	QUOTER_VEHICLE_TYPE_OPTIONS,
-	VEHICLE_ORIGIN_OPTIONS,
 } from "@/lib/vehicle-form-options";
 import { client, orpc } from "@/utils/orpc";
 
@@ -1940,7 +1940,7 @@ function QuoterPage() {
 																<SelectValue placeholder="Seleccionar origen..." />
 															</SelectTrigger>
 												<SelectContent>
-													{VEHICLE_ORIGIN_OPTIONS.map((option) => (
+													{QUOTER_VEHICLE_ORIGIN_OPTIONS.map((option) => (
 														<SelectItem key={option.value} value={option.value}>
 															{option.label}
 														</SelectItem>

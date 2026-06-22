@@ -1339,7 +1339,7 @@ function QuoterPage() {
 				quoterForm.setFieldValue("vehicleModel", q.vehicleModel || "");
 				const vehicleTypeToUse = normalizeVehicleTypeForQuoter(q.vehicleType);
 				quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
-				const contextMigrationCutoff = new Date("2026-06-18T18:28:53.000Z");
+				const contextMigrationCutoff = new Date("2026-06-18T16:46:51.000Z");
 				const isMigratedDefaultContext =
 					!!linkedVehicle &&
 					new Date(q.createdAt) < contextMigrationCutoff &&

@@ -9,6 +9,8 @@ import {
   getSpecialPaymentCuotaId,
   getSpecialPaymentInstallmentFields,
   shouldApplyStaleZeroRestanteAdjustment,
+  shouldRejectMismatchedInstallmentSelection,
+  shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
@@ -66,6 +68,54 @@ describe("register payment", () => {
         installmentAmountApplied: 100,
       })
     ).toBe(true);
+  });
+
+  it("rechaza validar un pago normal sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+        mora: "0.00",
+        otros: "0",
+        pagoConvenio: "0",
+      })
+    ).toBe(true);
+  });
+
+  it("permite validar filas especiales sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "reset",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+      })
+    ).toBe(false);
+
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+        mora: "25.00",
+      })
+    ).toBe(false);
+  });
+
+  it("rechaza request con cuotaApagar distinta al objeto numero_cuota enviado", () => {
+    expect(
+      shouldRejectMismatchedInstallmentSelection({
+        requestedInstallment: 5,
+        selectedInstallment: 10,
+      })
+    ).toBe(true);
+
+    expect(
+      shouldRejectMismatchedInstallmentSelection({
+        requestedInstallment: 5,
+        selectedInstallment: 5,
+      })
+    ).toBe(false);
   });
 
   it("aplica el ajuste de restantes en cero a la primera cuota procesada aunque el request venga adelantado", () => {

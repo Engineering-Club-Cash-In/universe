@@ -29,6 +29,8 @@ import {
   getSpecialPaymentCuotaId,
   recomputeCreditAfterCapital,
   shouldApplyStaleZeroRestanteAdjustment,
+  shouldRejectMismatchedInstallmentSelection,
+  shouldRejectZeroAppliedNormalValidation,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
@@ -537,6 +539,25 @@ export const insertPayment = async ({ body, set }: any) => {
       fecha_boleta,
       origen_pago,
     } = parseResult.data;
+
+    const selectedInstallment = body?.numero_cuota?.numero_cuota;
+    if (
+      shouldRejectMismatchedInstallmentSelection({
+        requestedInstallment: cuotaApagar,
+        selectedInstallment:
+          typeof selectedInstallment === "number" ? selectedInstallment : null,
+      })
+    ) {
+      set.status = 400;
+      return {
+        message: "Validation failed",
+        errors: {
+          cuotaApagar: [
+            `La cuota solicitada (${cuotaApagar}) no coincide con la cuota seleccionada (${selectedInstallment})`,
+          ],
+        },
+      };
+    }
 
     // 🔒 LOCK PESIMISTA POR CRÉDITO
     // Serializa los pagos concurrentes del MISMO crédito. Sin esto, dos pagos
@@ -2216,6 +2237,21 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       };
     }
 
+    if (
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: pago.validationStatus,
+        nextValidationStatus: "validated",
+        montoAplicado: pago.monto_aplicado,
+        mora: pago.mora,
+        otros: pago.otros,
+        pagoConvenio: pago.pagoConvenio,
+      })
+    ) {
+      throw new Error(
+        `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`
+      );
+    }
+
     // 2. CARGAR EL CRÉDITO
     // (lo necesitamos tanto para evaluar si la cuota cierra como para
     // actualizar capital/deuda en ambas ramas).
@@ -3043,6 +3079,22 @@ export async function aplicarMontoAPago(pago_id: number, monto: number, fecha_pa
 
     if (!pago) {
       return { success: false, message: `Pago ${pago_id} no encontrado` };
+    }
+
+    if (
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: pago.validationStatus,
+        nextValidationStatus: validationStatus,
+        montoAplicado: monto,
+        mora: pago.mora,
+        otros: pago.otros,
+        pagoConvenio: pago.pagoConvenio,
+      })
+    ) {
+      return {
+        success: false,
+        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
+      };
     }
 
     // 2. Obtener restantes del pago

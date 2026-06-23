@@ -15,6 +15,8 @@ import {
   BookUser,
   ListChecks,
   Loader2,
+  Upload,
+  ArrowLeft,
 } from "lucide-react";
 import { useCatalogs } from "../hooks/catalogs";
 import { User as UserIcon } from "lucide-react";
@@ -328,41 +330,58 @@ export function CreditForm() {
         </CardHeader>
         <CardContent className="flex-1 flex flex-col justify-center">
           {/* Barra superior: toggle insoluto + carga masiva */}
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            {!bulkMode && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            {!bulkMode ? (
               <div className="flex flex-col gap-1.5">
                 <label
                   htmlFor="esInsoluto"
-                  className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5"
+                  className="inline-flex w-fit cursor-pointer select-none items-center gap-2.5"
                 >
-                  <input
-                    id="esInsoluto"
-                    name="esInsoluto"
-                    type="checkbox"
-                    checked={esInsoluto}
-                    onChange={(e) => formik.setFieldValue("esInsoluto", e.target.checked)}
-                    className="h-4 w-4 accent-amber-600"
-                  />
-                  <span className="text-sm font-medium text-amber-800">
+                  <span className="relative inline-flex h-5 w-9 shrink-0 items-center">
+                    <input
+                      id="esInsoluto"
+                      name="esInsoluto"
+                      type="checkbox"
+                      checked={esInsoluto}
+                      onChange={(e) =>
+                        formik.setFieldValue("esInsoluto", e.target.checked)
+                      }
+                      className="peer sr-only"
+                    />
+                    <span className="absolute inset-0 rounded-full bg-gray-300 transition-colors peer-checked:bg-amber-500" />
+                    <span className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+                  </span>
+                  <span className="text-sm font-medium text-gray-700">
                     Crédito insoluto
                   </span>
                 </label>
                 {esInsoluto && (
-                  <p className="text-xs text-amber-700">
+                  <p className="text-xs text-amber-600">
                     Sin interés ni cargos · se crea INCOBRABLE · cuota = capital / plazo ·
                     se asigna a Cube Investments S.A. (100% Cash In) · No. SIFCO automático.
                   </p>
                 )}
               </div>
+            ) : (
+              <span className="text-sm font-semibold text-gray-500">
+                Carga masiva de insolutos
+              </span>
             )}
-            <Button
+            <button
               type="button"
-              variant="outline"
               onClick={() => setBulkMode((b) => !b)}
-              className="ml-auto gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50"
             >
-              {bulkMode ? "← Volver al formulario" : "Cargar varios (insolutos)"}
-            </Button>
+              {bulkMode ? (
+                <>
+                  <ArrowLeft className="h-4 w-4" /> Volver al formulario
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" /> Cargar varios insolutos
+                </>
+              )}
+            </button>
           </div>
 
           {bulkMode ? (

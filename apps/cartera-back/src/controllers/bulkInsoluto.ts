@@ -116,8 +116,8 @@ const validarDatosFila = (
     errores.push(`capital inválido: "${String(data.capital)}"`);
 
   const plazo = Number(data.plazo);
-  if (!Number.isInteger(plazo) || plazo < 1)
-    errores.push(`plazo inválido: "${String(data.plazo)}"`);
+  if (!Number.isInteger(plazo) || plazo < 1 || plazo > 360)
+    errores.push(`plazo inválido: "${String(data.plazo)}" (debe ser un entero entre 1 y 360)`);
 
   return {
     fila: data.fila,

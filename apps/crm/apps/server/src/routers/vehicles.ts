@@ -98,6 +98,37 @@ const normalizeManualValuationAmount = (
 	return sanitized;
 };
 
+export const createNewVehicleInputSchema = z.object({
+	// Campos básicos requeridos (conocidos desde proforma)
+	make: z.string(),
+	model: z.string(),
+	year: z.number(),
+	color: z.string(),
+	vehicleType: z.string(),
+	// Campos opcionales (llegan después del dealer)
+	licensePlate: z.string().optional(),
+	vinNumber: z.string().optional(),
+	motorNumber: z.string().optional(),
+	milesMileage: z.number().nullable().optional(),
+	kmMileage: z.number().optional().default(0),
+	origin: z.string().optional(),
+	cylinders: z.string().optional(),
+	engineCC: z.string().optional(),
+	fuelType: z.string().optional(),
+	transmission: z.string().optional(),
+	companyId: z.string().nullable().optional(),
+	status: z.string().optional().default("pending"),
+	vehicleIsNew: z.boolean().optional().default(true),
+	isOwned: z.boolean().optional().default(false),
+	// Campos para contratos legales
+	seats: z.number().nullable().optional(),
+	doors: z.number().nullable().optional(),
+	axles: z.number().nullable().optional().default(2),
+	vehicleUse: z.string().nullable().optional(),
+	series: z.string().nullable().optional(),
+	iscvCode: z.string().nullable().optional(),
+});
+
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
 	getAll: vehiclesProcedure
@@ -463,38 +494,7 @@ export const vehiclesRouter = {
 
 	// Create new vehicle (for brand new vehicles from dealer - minimal required fields)
 	createNewVehicle: protectedProcedure
-		.input(
-			z.object({
-				// Campos básicos requeridos (conocidos desde proforma)
-				make: z.string(),
-				model: z.string(),
-				year: z.number(),
-				color: z.string(),
-				vehicleType: z.string(),
-				// Campos opcionales (llegan después del dealer)
-				licensePlate: z.string().optional(),
-				vinNumber: z.string().optional(),
-				motorNumber: z.string().optional(),
-				milesMileage: z.number().nullable().optional(),
-				kmMileage: z.number().optional().default(0),
-				origin: z.string().optional(),
-				cylinders: z.string().optional(),
-				engineCC: z.string().optional(),
-				fuelType: z.string().optional(),
-				transmission: z.string().optional(),
-				companyId: z.string().nullable().optional(),
-				status: z.string().optional().default("pending"),
-				vehicleIsNew: z.boolean().optional().default(false),
-				isOwned: z.boolean().optional().default(false),
-				// Campos para contratos legales
-				seats: z.number().nullable().optional(),
-				doors: z.number().nullable().optional(),
-				axles: z.number().nullable().optional().default(2),
-				vehicleUse: z.string().nullable().optional(),
-				series: z.string().nullable().optional(),
-				iscvCode: z.string().nullable().optional(),
-			}),
-		)
+		.input(createNewVehicleInputSchema)
 		.handler(async ({ input }) => {
 			try {
 				const { vehicleIsNew, ...vehicleInput } = input;
@@ -1078,7 +1078,7 @@ export const vehiclesRouter = {
 						),
 					)
 					.limit(1);
-				
+
 				foundVehicle = existingWithPlate[0] || null;
 			}
 
@@ -1098,7 +1098,7 @@ export const vehiclesRouter = {
 						),
 					)
 					.limit(1);
-				
+
 				foundVehicle = existingWithVin[0] || null;
 			}
 
@@ -1312,7 +1312,7 @@ export const vehiclesRouter = {
 							})
 							.where(eq(vehicles.id, vehicleInputId))
 							.returning();
-						
+
 						if (updated) {
 							vehicleId = updated.id;
 						} else {

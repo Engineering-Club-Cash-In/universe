@@ -4,11 +4,13 @@ import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
   esDestinoSobrescribible,
+  getApplyPaymentHttpStatus,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
   getSpecialPaymentCuotaId,
   getSpecialPaymentInstallmentFields,
   shouldApplyStaleZeroRestanteAdjustment,
+  shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
@@ -66,6 +68,56 @@ describe("register payment", () => {
         installmentAmountApplied: 100,
       })
     ).toBe(true);
+  });
+
+  it("rechaza validar un pago normal sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+        mora: "0.00",
+        otros: "0",
+        pagoConvenio: "0",
+      })
+    ).toBe(true);
+  });
+
+  it("rechaza revalidar un pago normal sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0",
+        mora: "0",
+        otros: "0",
+        pagoConvenio: "0",
+      })
+    ).toBe(true);
+  });
+
+  it("permite validar filas especiales sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "reset",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+      })
+    ).toBe(false);
+
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+        mora: "25.00",
+      })
+    ).toBe(false);
+  });
+
+  it("mapea rechazos de regla de negocio de aplicar pago a HTTP 400", () => {
+    expect(getApplyPaymentHttpStatus({ success: false })).toBe(400);
+    expect(getApplyPaymentHttpStatus({ success: true })).toBe(200);
   });
 
   it("aplica el ajuste de restantes en cero a la primera cuota procesada aunque el request venga adelantado", () => {

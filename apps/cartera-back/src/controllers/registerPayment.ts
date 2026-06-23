@@ -29,6 +29,7 @@ import {
   getSpecialPaymentCuotaId,
   recomputeCreditAfterCapital,
   shouldApplyStaleZeroRestanteAdjustment,
+  shouldRejectZeroAppliedNormalValidation,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
@@ -2216,6 +2217,23 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       };
     }
 
+    if (
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: pago.validationStatus,
+        nextValidationStatus: "validated",
+        montoAplicado: pago.monto_aplicado,
+        mora: pago.mora,
+        otros: pago.otros,
+        pagoConvenio: pago.pagoConvenio,
+      })
+    ) {
+      return {
+        success: false,
+        applied: false,
+        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
+      };
+    }
+
     // 2. CARGAR EL CRÉDITO
     // (lo necesitamos tanto para evaluar si la cuota cierra como para
     // actualizar capital/deuda en ambas ramas).
@@ -3131,6 +3149,22 @@ export async function aplicarMontoAPago(pago_id: number, monto: number, fecha_pa
 
     const nuevo_monto_aplicado = totalPagado;
     const nuevo_monto_boleta = new Big(monto);
+
+    if (
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: pago.validationStatus,
+        nextValidationStatus: validationStatus,
+        montoAplicado: nuevo_monto_aplicado,
+        mora: pago.mora,
+        otros: pago.otros,
+        pagoConvenio: pago.pagoConvenio,
+      })
+    ) {
+      return {
+        success: false,
+        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
+      };
+    }
 
     // Fecha de pago: si viene, usarla; sino, fecha actual en hora Guatemala
     let fechaPago: Date;

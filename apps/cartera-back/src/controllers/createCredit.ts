@@ -14,7 +14,7 @@ import {
 import { findOrCreateAdvisorByName, getAsesorConMenorCarga } from "./advisor";
 import { findOrCreateUserByName } from "./users";
 import { sendNewCreditNotification } from "@cci/email";
-import { eq, and } from "drizzle-orm";
+import { eq, and, like } from "drizzle-orm";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -49,6 +49,15 @@ interface ValidationResult {
   };
 }
 
+type StatusCreditValue =
+  | "ACTIVO"
+  | "CANCELADO"
+  | "INCOBRABLE"
+  | "PENDIENTE_CANCELACION"
+  | "MOROSO"
+  | "EN_CONVENIO"
+  | "CAIDO";
+
 interface CreditDataForInsert {
   usuario_id: number;
   otros: string;
@@ -74,6 +83,7 @@ interface CreditDataForInsert {
   tipoCredito: string;
   mora: string;
   is_vehiculo_propio: boolean;
+  statusCredit: StatusCreditValue;
 }
 
 interface NewCredit {
@@ -180,7 +190,11 @@ const creditSchema = z.object({
   reserva: z.number().min(0),
   asesor_id: z.number().int().positive().optional(),
   is_vehiculo_propio: z.boolean().optional().default(false),
-  
+
+  // Crédito insoluto: puro capital, sin cargos, se crea INCOBRABLE y se asigna a
+  // Cube (inversionista interno) al 100% cash-in. El server fuerza estos valores.
+  esInsoluto: z.boolean().optional().default(false),
+
   // Campos opcionales de dirección
   direccion: z.string().max(300).optional().nullable(),
   municipio: z.string().max(100).optional().nullable(),
@@ -220,6 +234,61 @@ const creditSchema = z.object({
     .optional()
     .default([]),
 });
+
+// ========================================
+// CRÉDITO INSOLUTO
+// ========================================
+
+// Inversionista interno "Cube Investments S.A.". Los insolutos existentes
+// (insoluto-1, insoluto-2) se asignan a este inversionista al 100% cash-in.
+const CUBE_INVERSIONISTA_ID = 86;
+
+// Devuelve el siguiente correlativo 'insoluto-N' leyendo el máximo N actual.
+// Sin sequence: si dos creaciones simultáneas chocan, el UNIQUE de
+// numero_credito_sifco rechaza la segunda (500) y se reintenta. La concurrencia
+// es prácticamente nula (pocos admins, no crean dos insolutos a la vez).
+const getNextInsolutoSifco = async (executor: DbExecutor): Promise<string> => {
+  const rows = await executor
+    .select({ numero: creditos.numero_credito_sifco })
+    .from(creditos)
+    .where(like(creditos.numero_credito_sifco, "insoluto-%"));
+
+  let maxN = 0;
+  for (const row of rows) {
+    const match = /^insoluto-(\d+)$/.exec(row.numero ?? "");
+    if (match) maxN = Math.max(maxN, Number(match[1]));
+  }
+  return `insoluto-${maxN + 1}`;
+};
+
+// Un insoluto es un crédito de puro capital: sin interés ni cargos, asignado al
+// inversionista interno (Cube) al 100% cash-in. Forzamos esos valores en el
+// server para que no dependan de lo que mande el front. La cuota se calcula como
+// capital / plazo (el usuario solo define capital y plazo).
+const applyInsolutoDefaults = (data: CreditData): CreditData => {
+  const cuota = Number(new Big(data.capital).div(data.plazo).round(2));
+  return {
+    ...data,
+    porcentaje_interes: 0,
+    seguro_10_cuotas: 0,
+    gps: 0,
+    membresias_pago: 0,
+    royalti: 0,
+    porcentaje_royalti: 0,
+    otros: 0,
+    reserva: 0,
+    cuota,
+    rubros: [],
+    inversionistas: [
+      {
+        inversionista_id: CUBE_INVERSIONISTA_ID,
+        monto_aportado: data.capital,
+        porcentaje_cash_in: 100,
+        porcentaje_inversion: 0,
+      },
+    ],
+  };
+};
 
 // ========================================
 // 1. VALIDACIONES
@@ -311,10 +380,15 @@ const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecut
       (inv: Inversionista) => Number(inv.porcentaje_inversion) > 1
     ) ? "Pool" : "Individual";
 
+  // Insoluto: el número SIFCO no es real, se genera como 'insoluto-N'.
+  const numero_credito_sifco = creditData.esInsoluto
+    ? await getNextInsolutoSifco(executor)
+    : creditData.numero_credito_sifco;
+
   const creditDataForInsert: CreditDataForInsert = {
     usuario_id: user.usuario_id,
     otros: creditData.otros?.toString() ?? "0",
-    numero_credito_sifco: creditData.numero_credito_sifco,
+    numero_credito_sifco,
     capital: capital.toString(),
     porcentaje_interes: porcentaje_interes.toString(),
     cuota: creditData.cuota.toString(),
@@ -336,6 +410,8 @@ const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecut
     tipoCredito: "Nuevo",
     mora: "0",
     is_vehiculo_propio: creditData.is_vehiculo_propio ?? false,
+    // Insoluto se crea directo en INCOBRABLE para que no genere mora (sí es cobrable).
+    statusCredit: creditData.esInsoluto ? "INCOBRABLE" : "ACTIVO",
   };
 
   console.log("Credit data to insert:", creditDataForInsert);
@@ -831,8 +907,18 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
     }
     console.log("[INSERT CREDIT] Schema validation PASSED");
 
-    const creditData = parseResult.data;
+    let creditData = parseResult.data;
     console.log("[INSERT CREDIT] Parsed creditData:", JSON.stringify(creditData, null, 2));
+
+    // 1.b Insoluto: forzar valores server-side (puro capital, sin cargos, Cube 100% cash-in).
+    if (creditData.esInsoluto) {
+      if (!(creditData.capital > 0)) {
+        set.status = 400;
+        return { message: "El capital de un crédito insoluto debe ser mayor a 0." };
+      }
+      creditData = applyInsolutoDefaults(creditData);
+      console.log("[INSERT CREDIT] Insoluto: valores forzados:", JSON.stringify(creditData, null, 2));
+    }
 
     // 2. Validar datos del crédito
     console.log("[INSERT CREDIT] Step 2: Validating credit data (business rules)...");
@@ -918,7 +1004,7 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
       await sendNewCreditNotification({
         to: adminEmails,
         clientName: creditData.usuario,
-        creditNumber: creditData.numero_credito_sifco,
+        creditNumber: creditDataForInsert.numero_credito_sifco,
         capital: creditData.capital.toFixed(2),
         plazo: creditData.plazo,
         cuota: creditData.cuota.toFixed(2),

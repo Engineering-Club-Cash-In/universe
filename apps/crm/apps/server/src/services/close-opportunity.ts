@@ -185,6 +185,7 @@ interface QuotationDataForBilling {
 	insuredAmount: string | null; // Monto asegurado (para correo)
 	value: string | null; // Valor del vehículo (para correo)
 	monthlyPayment: string | null; // Cuota mensual (para asegurar el valor que es)
+	insuranceProvider: string | null; // Aseguradora elegida (gyt | universales)
 }
 
 /** Parámetros para generación de facturas en background */
@@ -397,6 +398,13 @@ async function logInvoiceSyncOperation(
 /**
  * Obtiene la última cotización aprobada de una oportunidad
  */
+/** Mapea el provider interno (gyt | universales) a la etiqueta de aseguradora. */
+function aseguradoraLabel(
+	provider: string | null | undefined,
+): "GyT" | "Universales" {
+	return provider === "gyt" ? "GyT" : "Universales";
+}
+
 async function getLatestApprovedQuotation(
 	opportunityId: string,
 ): Promise<QuotationDataForBilling | null> {
@@ -415,6 +423,7 @@ async function getLatestApprovedQuotation(
 				insuredAmount: quotations.insuredAmount,
 				value: quotations.vehicleValue,
 				monthlyPayment: quotations.monthlyPayment,
+				insuranceProvider: quotations.insuranceProvider,
 			})
 			.from(quotations)
 			.where(eq(quotations.opportunityId, opportunityId))
@@ -960,6 +969,7 @@ async function createCredit(
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,
 			gps: gps,
+			aseguradora: aseguradoraLabel(opportunity.insuranceProvider),
 			categoria: opportunity.categoria ?? undefined,
 			nit: cleanNit(opportunity.nit),
 			royalti: royalti,
@@ -1177,6 +1187,11 @@ export async function closeOpportunity(
 				diaPagoMensual: opportunities.diaPagoMensual,
 				seguro: opportunities.seguro,
 				gps: opportunities.gps,
+				insuranceProvider: opportunities.insuranceProvider,
+				customerInsuranceCost: opportunities.customerInsuranceCost,
+				internalInsuranceCost: opportunities.internalInsuranceCost,
+				insuranceSavingsToMembership:
+					opportunities.insuranceSavingsToMembership,
 				categoria: opportunities.categoria,
 				nit: opportunities.nit,
 				royalti: opportunities.royalti,
@@ -1345,6 +1360,20 @@ export async function closeOpportunity(
 		console.log(
 			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
 		);
+
+		// Estampar la aseguradora elegida (fuente: cotización) en la oportunidad,
+		// para que viaje a cartera y quede consistente en el CRM.
+		const insuranceProvider =
+			quotation?.insuranceProvider ??
+			opportunity.insuranceProvider ??
+			"universales";
+		if (insuranceProvider !== opportunity.insuranceProvider) {
+			await db
+				.update(opportunities)
+				.set({ insuranceProvider })
+				.where(eq(opportunities.id, opportunityId));
+			opportunity.insuranceProvider = insuranceProvider;
+		}
 
 		//  Create credit in cartera-back
 		const creditResult = await createCredit({

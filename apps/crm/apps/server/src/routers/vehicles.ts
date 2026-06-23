@@ -66,6 +66,26 @@ const ALLOWED_MIME_TYPES = [
 const MANUAL_VALUATION_COMMA_DECIMAL_PATTERN = /^\d+,\d+$/;
 const MANUAL_VALUATION_THOUSANDS_PATTERN = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
 const MANUAL_VALUATION_PLAIN_NUMBER_PATTERN = /^\d+(\.\d+)?$/;
+const NEW_AGENCY_BLOCKED_ORIGINS = new Set(["importado", "rodado"]);
+
+export function isValidVehicleConditionOrigin(
+	isNew: boolean,
+	origin: string | null | undefined,
+) {
+	return !(
+		isNew && origin && NEW_AGENCY_BLOCKED_ORIGINS.has(origin.trim().toLowerCase())
+	);
+}
+
+export function mergeVehicleConditionOrigin(
+	current: { isNew: boolean; origin: string | null },
+	patch: { isNew?: boolean; origin?: string | null },
+) {
+	return {
+		isNew: patch.isNew ?? current.isNew,
+		origin: "origin" in patch ? patch.origin : current.origin,
+	};
+}
 
 const normalizeManualValuationAmount = (
 	value: string,
@@ -498,10 +518,7 @@ export const vehiclesRouter = {
 		.handler(async ({ input }) => {
 			try {
 				const { vehicleIsNew, ...vehicleInput } = input;
-				if (
-					vehicleIsNew &&
-					vehicleInput.origin?.trim().toLowerCase() === "importado"
-				) {
+				if (!isValidVehicleConditionOrigin(vehicleIsNew, vehicleInput.origin)) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: "Un vehículo nuevo de agencia no puede ser importado/rodado",
 					});
@@ -570,13 +587,31 @@ export const vehiclesRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			try {
-				if (
-					input.data.isNew &&
-					input.data.origin?.trim().toLowerCase() === "importado"
-				) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: "Un vehículo nuevo de agencia no puede ser importado/rodado",
-					});
+				if (input.data.isNew !== undefined || input.data.origin !== undefined) {
+					const [currentVehicle] = await db
+						.select({ isNew: vehicles.isNew, origin: vehicles.origin })
+						.from(vehicles)
+						.where(eq(vehicles.id, input.id))
+						.limit(1);
+
+					if (currentVehicle) {
+						const conditionOrigin = mergeVehicleConditionOrigin(
+							currentVehicle,
+							input.data,
+						);
+
+						if (
+							!isValidVehicleConditionOrigin(
+								conditionOrigin.isNew,
+								conditionOrigin.origin,
+							)
+						) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Un vehículo nuevo de agencia no puede ser importado/rodado",
+							});
+						}
+					}
 				}
 				if (
 					input.data.status &&

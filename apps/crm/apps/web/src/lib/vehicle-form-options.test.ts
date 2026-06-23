@@ -35,10 +35,12 @@ describe("vehicle form options", () => {
 		]);
 	});
 
-	test("allows used national and imported vehicles but not new imported vehicles", () => {
+	test("allows used imported/rodado vehicles but rejects new imported/rodado vehicles", () => {
 		expect(isValidVehicleConditionOrigin(false, "Nacional")).toBe(true);
 		expect(isValidVehicleConditionOrigin(false, "Importado")).toBe(true);
+		expect(isValidVehicleConditionOrigin(false, "Rodado")).toBe(true);
 		expect(isValidVehicleConditionOrigin(true, "Nacional")).toBe(true);
 		expect(isValidVehicleConditionOrigin(true, "Importado")).toBe(false);
+		expect(isValidVehicleConditionOrigin(true, "Rodado")).toBe(false);
 	});
 });

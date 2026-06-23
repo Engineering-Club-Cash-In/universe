@@ -35,8 +35,10 @@ export const VEHICLE_CONDITION_OPTIONS = [
 	{ value: true, label: "Nuevo de agencia" },
 ] as const;
 
+const NEW_AGENCY_BLOCKED_ORIGINS = new Set(["importado", "rodado"]);
+
 export function isValidVehicleConditionOrigin(isNew: boolean, origin: string) {
-	return !(isNew && origin.trim().toLowerCase() === "importado");
+	return !(isNew && NEW_AGENCY_BLOCKED_ORIGINS.has(origin.trim().toLowerCase()));
 }
 
 export const QUOTER_VEHICLE_ORIGIN_OPTIONS = [

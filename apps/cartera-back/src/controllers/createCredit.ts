@@ -882,6 +882,87 @@ const insertPayments = async (
 };
 
 // ========================================
+// NÚCLEO REUTILIZABLE DE CREACIÓN
+// ========================================
+
+// Inserta el crédito + relacionados, genera fechas, cuotas y pagos dentro del
+// executor dado (normalmente una transacción). Lo usan tanto el alta individual
+// como la carga masiva de insolutos.
+export const createCreditCore = async (
+  creditData: CreditData,
+  executor: DbExecutor
+) => {
+  const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } =
+    await insertCreditAndRelated(creditData, executor);
+
+  // día <= 20 → pago el 15, día > 20 → pago el 30
+  const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
+  const fechas = generatePaymentDates(creditData.plazo, diaPago);
+
+  const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
+    newCredit.credito_id,
+    creditData.plazo,
+    fechas,
+    executor
+  );
+
+  await insertPayments(
+    creditData,
+    newCredit,
+    creditDataForInsert,
+    total_monto_cash_in,
+    total_iva_cash_in,
+    cuotaInicial,
+    cuotasInsertadas,
+    fechas,
+    executor
+  );
+
+  return { newCredit, creditDataForInsert };
+};
+
+// Construye el CreditData de un insoluto a partir de los datos mínimos de una
+// fila de carga masiva. El resto de valores los fuerza applyInsolutoDefaults
+// (cargos en 0, Cube 100% cash-in, cuota = capital / plazo).
+export const buildInsolutoCreditData = (input: {
+  usuario: string;
+  nit?: string;
+  categoria: string;
+  asesor_id: number;
+  capital: number;
+  plazo: number;
+  observaciones?: string;
+}): CreditData => {
+  const base: CreditData = {
+    usuario: input.usuario,
+    numero_credito_sifco: "",
+    capital: input.capital,
+    porcentaje_interes: 0,
+    seguro_10_cuotas: 0,
+    gps: 0,
+    observaciones: input.observaciones ?? "",
+    no_poliza: "",
+    como_se_entero: "",
+    plazo: input.plazo,
+    cuota: 0,
+    dia_pago_mensual: 15,
+    membresias_pago: 0,
+    porcentaje_royalti: 0,
+    royalti: 0,
+    categoria: input.categoria,
+    nit: input.nit ?? "",
+    otros: 0,
+    reserva: 0,
+    asesor_id: input.asesor_id,
+    is_vehiculo_propio: false,
+    inversionistas: [],
+    rubros: [],
+    esInsoluto: true,
+  };
+  return applyInsolutoDefaults(base);
+};
+
+// ========================================
 // FUNCIÓN PRINCIPAL
 // ========================================
 
@@ -929,46 +1010,9 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
     }
     console.log("[INSERT CREDIT] Business validation PASSED");
 
-    const { newCredit, creditDataForInsert } = await db.transaction(async (tx) => {
-      // 3. Insertar crédito y datos relacionados
-      console.log("[INSERT CREDIT] Step 3: Inserting credit and related data...");
-      const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } =
-        await insertCreditAndRelated(creditData, tx);
-      console.log("[INSERT CREDIT] Credit inserted, credito_id:", newCredit.credito_id);
-      console.log("[INSERT CREDIT] creditDataForInsert:", JSON.stringify(creditDataForInsert, null, 2));
-
-      // 4. Generar fechas de pago (día <= 20 → pago el 15, día > 20 → pago el 30)
-      const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
-      const fechas = generatePaymentDates(creditData.plazo, diaPago);
-      console.log("[INSERT CREDIT] Generated", fechas.length, "payment dates");
-
-      // 5. Insertar cuotas
-      console.log("[INSERT CREDIT] Step 5: Inserting installments...");
-      const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
-        newCredit.credito_id,
-        creditData.plazo,
-        fechas,
-        tx
-      );
-      console.log("[INSERT CREDIT] Installments inserted, cuotaInicial:", cuotaInicial, "total cuotas:", cuotasInsertadas.length);
-
-      // 6. Insertar pagos
-      console.log("[INSERT CREDIT] Step 6: Inserting payments...");
-      await insertPayments(
-        creditData,
-        newCredit,
-        creditDataForInsert,
-        total_monto_cash_in,
-        total_iva_cash_in,
-        cuotaInicial,
-        cuotasInsertadas,
-        fechas,
-        tx
-      );
-      console.log("[INSERT CREDIT] Payments inserted successfully");
-
-      return { newCredit, creditDataForInsert };
-    });
+    const { newCredit, creditDataForInsert } = await db.transaction((tx) =>
+      createCreditCore(creditData, tx)
+    );
 
     // 7. Notificar a todos los admins por email
     console.log("[INSERT CREDIT] Step 7: Sending email notifications...");

@@ -100,6 +100,57 @@ export const createCredit = async (data: CreditFormValues): Promise<any> => {
   const res = await api.post(`${API_URL}/newCredit`, data);
   return res.data;
 };
+
+// ===== Carga masiva de créditos insolutos =====
+export interface FilaInsoluto {
+  fila: number;
+  cliente: string;
+  nit: string;
+  categoria: string;
+  asesor: string;
+  asesor_id: number;
+  capital: number;
+  plazo: number;
+  observaciones: string;
+  valido: boolean;
+  error?: string;
+}
+
+export const descargarPlantillaInsolutos = async (): Promise<{
+  archivoBase64: string;
+  filename: string;
+}> => {
+  const res = await api.get(`${API_URL}/insolutos/plantilla`);
+  return res.data;
+};
+
+export const validarInsolutosExcel = async (
+  archivoBase64: string
+): Promise<{
+  formatoOk: boolean;
+  error?: string;
+  filas?: FilaInsoluto[];
+  resumen?: { total: number; validas: number; invalidas: number };
+}> => {
+  const res = await api.post(`${API_URL}/insolutos/validar`, { archivoBase64 });
+  return res.data;
+};
+
+export const cargarInsolutos = async (
+  filas: FilaInsoluto[]
+): Promise<{
+  resultados: {
+    fila: number;
+    cliente: string;
+    success: boolean;
+    numero_credito_sifco?: string;
+    error?: string;
+  }[];
+  resumen: { total: number; creados: number; fallidos: number };
+}> => {
+  const res = await api.post(`${API_URL}/insolutos/cargar`, { filas });
+  return res.data;
+};
 export interface Credito {
   credito_id: number;
   usuario_id: number;

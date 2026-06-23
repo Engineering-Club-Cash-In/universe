@@ -19,6 +19,7 @@ import {
 import { useCatalogs } from "../hooks/catalogs";
 import { User as UserIcon } from "lucide-react";
 import { OtrosField } from "./rubros";
+import { BulkInsolutoUpload } from "./BulkInsolutoUpload";
 import React from "react";
 
 /** Fecha por defecto según tipo de inversión */
@@ -246,6 +247,8 @@ const FORM_SECTIONS: {
 
 export function CreditForm() {
   const formik = useCreditForm();
+  // Modo carga masiva de insolutos (reemplaza el formulario por el wizard)
+  const [bulkMode, setBulkMode] = React.useState(false);
   // Define the type for an investor
   type Investor = { inversionista_id: number; nombre: string };
 
@@ -324,35 +327,56 @@ export function CreditForm() {
           </span>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col justify-center">
+          {/* Barra superior: toggle insoluto + carga masiva */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            {!bulkMode && (
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="esInsoluto"
+                  className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5"
+                >
+                  <input
+                    id="esInsoluto"
+                    name="esInsoluto"
+                    type="checkbox"
+                    checked={esInsoluto}
+                    onChange={(e) => formik.setFieldValue("esInsoluto", e.target.checked)}
+                    className="h-4 w-4 accent-amber-600"
+                  />
+                  <span className="text-sm font-medium text-amber-800">
+                    Crédito insoluto
+                  </span>
+                </label>
+                {esInsoluto && (
+                  <p className="text-xs text-amber-700">
+                    Sin interés ni cargos · se crea INCOBRABLE · cuota = capital / plazo ·
+                    se asigna a Cube Investments S.A. (100% Cash In) · No. SIFCO automático.
+                  </p>
+                )}
+              </div>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setBulkMode((b) => !b)}
+              className="ml-auto gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+            >
+              {bulkMode ? "← Volver al formulario" : "Cargar varios (insolutos)"}
+            </Button>
+          </div>
+
+          {bulkMode ? (
+            <BulkInsolutoUpload
+              onFinish={() => {
+                setBulkMode(false);
+                formik.resetForm();
+              }}
+            />
+          ) : (
           <form
             onSubmit={formik.handleSubmit}
             className="flex-1 flex flex-col gap-5"
           >
-            {/* Toggle crédito insoluto */}
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="esInsoluto"
-                className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5"
-              >
-                <input
-                  id="esInsoluto"
-                  name="esInsoluto"
-                  type="checkbox"
-                  checked={esInsoluto}
-                  onChange={(e) => formik.setFieldValue("esInsoluto", e.target.checked)}
-                  className="h-4 w-4 accent-amber-600"
-                />
-                <span className="text-sm font-medium text-amber-800">
-                  Crédito insoluto 
-                </span>
-              </label>
-              {esInsoluto && (
-                <p className="text-xs text-amber-700">
-                  Sin interés ni cargos · se crea INCOBRABLE · cuota = capital / plazo ·
-                  se asigna a Cube Investments S.A. (100% Cash In) · No. SIFCO automático.
-                </p>
-              )}
-            </div>
             {(() => {
               const renderField = (field: FieldDef) => {
                 if (field.name === "categoria") {
@@ -813,6 +837,7 @@ export function CreditForm() {
               )}
             </Button>
           </form>
+          )}
         </CardContent>
       </Card>
     </div>

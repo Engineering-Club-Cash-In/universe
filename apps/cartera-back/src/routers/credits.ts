@@ -39,6 +39,11 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
+import {
+  generarPlantillaInsolutos,
+  validarInsolutosExcel,
+  cargarInsolutos,
+} from "../controllers/bulkInsoluto";
 import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
@@ -105,6 +110,30 @@ export const creditRouter = new Elysia()
   }
   return result;
 })
+  // ===== Carga masiva de créditos insolutos =====
+  // Paso 1: descargar plantilla Excel (base64)
+  .get("/insolutos/plantilla", () => ({
+    archivoBase64: generarPlantillaInsolutos(),
+    filename: "plantilla_insolutos.xlsx",
+  }))
+  // Paso 2: subir Excel y validar formato + datos
+  .post("/insolutos/validar", async ({ body, set }) => {
+    const { archivoBase64 } = (body ?? {}) as { archivoBase64?: string };
+    if (!archivoBase64) {
+      set.status = 400;
+      return { formatoOk: false, error: "Falta el archivo." };
+    }
+    return await validarInsolutosExcel(archivoBase64);
+  })
+  // Paso 3: cargar las filas válidas (crea cada insoluto, reporta fallos)
+  .post("/insolutos/cargar", async ({ body, set }) => {
+    const { filas } = (body ?? {}) as { filas?: unknown };
+    if (!Array.isArray(filas) || filas.length === 0) {
+      set.status = 400;
+      return { error: "No hay filas para cargar." };
+    }
+    return await cargarInsolutos(filas as Parameters<typeof cargarInsolutos>[0]);
+  })
   .post("/updateCredit", updateCredit)
   .post("/calculate-investor-quotas", calculateInvestorQuotas)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX

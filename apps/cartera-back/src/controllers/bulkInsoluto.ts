@@ -68,6 +68,72 @@ export const generarPlantillaInsolutos = (): string => {
   return buf.toString("base64");
 };
 
+// Carga catálogos (asesores + categorías) para matching por nombre normalizado.
+const cargarCatalogos = async () => {
+  const asesoresDb = await db
+    .select({ asesor_id: asesores.asesor_id, nombre: asesores.nombre })
+    .from(asesores);
+  return {
+    asesorPorNombre: new Map(asesoresDb.map((a) => [norm(a.nombre), a])),
+    categoriaPorNombre: new Map(CATEGORIAS.map((c) => [norm(c), c])),
+  };
+};
+
+type Catalogos = Awaited<ReturnType<typeof cargarCatalogos>>;
+
+// Valida y normaliza una fila contra los catálogos. Resuelve la categoría y el
+// asesor canónicos EN EL SERVIDOR (no se confía en lo que mande el cliente).
+const validarDatosFila = (
+  data: {
+    fila: number;
+    cliente: unknown;
+    nit?: unknown;
+    categoria: unknown;
+    asesor: unknown;
+    capital: unknown;
+    plazo: unknown;
+    observaciones?: unknown;
+  },
+  { asesorPorNombre, categoriaPorNombre }: Catalogos
+): FilaInsoluto => {
+  const cliente = String(data.cliente ?? "").trim();
+  const nit = String(data.nit ?? "").trim();
+  const categoriaRaw = String(data.categoria ?? "").trim();
+  const asesorRaw = String(data.asesor ?? "").trim();
+  const observaciones = String(data.observaciones ?? "").trim();
+
+  const errores: string[] = [];
+  if (!cliente) errores.push("cliente vacío");
+
+  const categoria = categoriaPorNombre.get(norm(categoriaRaw));
+  if (!categoria) errores.push(`categoría inválida: "${categoriaRaw}"`);
+
+  const asesor = asesorPorNombre.get(norm(asesorRaw));
+  if (!asesor) errores.push(`asesor no encontrado: "${asesorRaw}"`);
+
+  const capital = Number(data.capital);
+  if (!Number.isFinite(capital) || capital <= 0)
+    errores.push(`capital inválido: "${String(data.capital)}"`);
+
+  const plazo = Number(data.plazo);
+  if (!Number.isInteger(plazo) || plazo < 1)
+    errores.push(`plazo inválido: "${String(data.plazo)}"`);
+
+  return {
+    fila: data.fila,
+    cliente,
+    nit,
+    categoria: categoria ?? categoriaRaw,
+    asesor: asesor?.nombre ?? asesorRaw,
+    asesor_id: asesor?.asesor_id ?? 0,
+    capital: Number.isFinite(capital) ? capital : 0,
+    plazo: Number.isInteger(plazo) ? plazo : 0,
+    observaciones,
+    valido: errores.length === 0,
+    error: errores.length ? errores.join("; ") : undefined,
+  };
+};
+
 // ========================================
 // PASO 2: validar formato + datos
 // ========================================
@@ -97,12 +163,7 @@ export const validarInsolutosExcel = async (archivoBase64: string) => {
     };
   }
 
-  // Catálogos para matching por nombre normalizado
-  const asesoresDb = await db
-    .select({ asesor_id: asesores.asesor_id, nombre: asesores.nombre })
-    .from(asesores);
-  const asesorPorNombre = new Map(asesoresDb.map((a) => [norm(a.nombre), a]));
-  const categoriaPorNombre = new Map(CATEGORIAS.map((c) => [norm(c), c]));
+  const catalogos = await cargarCatalogos();
 
   // Lee una columna por nombre normalizado (tolera acentos/espacios/mayúsculas en el header)
   const getCol = (row: Record<string, unknown>, name: string) => {
@@ -110,46 +171,21 @@ export const validarInsolutosExcel = async (archivoBase64: string) => {
     return key ? row[key] : "";
   };
 
-  const filas: FilaInsoluto[] = rows.map((row, i) => {
-    const cliente = String(getCol(row, "cliente") ?? "").trim();
-    const nit = String(getCol(row, "nit") ?? "").trim();
-    const categoriaRaw = String(getCol(row, "categoria") ?? "").trim();
-    const asesorRaw = String(getCol(row, "asesor") ?? "").trim();
-    const capitalRaw = getCol(row, "capital");
-    const plazoRaw = getCol(row, "plazo");
-    const observaciones = String(getCol(row, "observaciones") ?? "").trim();
-
-    const errores: string[] = [];
-    if (!cliente) errores.push("cliente vacío");
-
-    const categoria = categoriaPorNombre.get(norm(categoriaRaw));
-    if (!categoria) errores.push(`categoría inválida: "${categoriaRaw}"`);
-
-    const asesor = asesorPorNombre.get(norm(asesorRaw));
-    if (!asesor) errores.push(`asesor no encontrado: "${asesorRaw}"`);
-
-    const capital = Number(capitalRaw);
-    if (!Number.isFinite(capital) || capital <= 0)
-      errores.push(`capital inválido: "${capitalRaw}"`);
-
-    const plazo = Number(plazoRaw);
-    if (!Number.isInteger(plazo) || plazo < 1)
-      errores.push(`plazo inválido: "${plazoRaw}"`);
-
-    return {
-      fila: i + 1,
-      cliente,
-      nit,
-      categoria: categoria ?? categoriaRaw,
-      asesor: asesor?.nombre ?? asesorRaw,
-      asesor_id: asesor?.asesor_id ?? 0,
-      capital: Number.isFinite(capital) ? capital : 0,
-      plazo: Number.isInteger(plazo) ? plazo : 0,
-      observaciones,
-      valido: errores.length === 0,
-      error: errores.length ? errores.join("; ") : undefined,
-    };
-  });
+  const filas: FilaInsoluto[] = rows.map((row, i) =>
+    validarDatosFila(
+      {
+        fila: i + 1,
+        cliente: getCol(row, "cliente"),
+        nit: getCol(row, "nit"),
+        categoria: getCol(row, "categoria"),
+        asesor: getCol(row, "asesor"),
+        capital: getCol(row, "capital"),
+        plazo: getCol(row, "plazo"),
+        observaciones: getCol(row, "observaciones"),
+      },
+      catalogos
+    )
+  );
 
   return {
     formatoOk: true,
@@ -174,7 +210,27 @@ export const cargarInsolutos = async (filas: FilaInsoluto[]) => {
     error?: string;
   }[] = [];
 
-  for (const f of filas) {
+  // Re-validamos SIEMPRE en el servidor: no se confía en el flag `valido` ni en
+  // el asesor_id/capital/categoría que mande el cliente. Se re-resuelven contra
+  // los catálogos, evitando que un payload manipulado cree créditos inválidos.
+  const catalogos = await cargarCatalogos();
+
+  for (let i = 0; i < filas.length; i++) {
+    const entrada = filas[i] ?? ({} as Partial<FilaInsoluto>);
+    const f = validarDatosFila(
+      {
+        fila: entrada.fila ?? i + 1,
+        cliente: entrada.cliente,
+        nit: entrada.nit,
+        categoria: entrada.categoria,
+        asesor: entrada.asesor,
+        capital: entrada.capital,
+        plazo: entrada.plazo,
+        observaciones: entrada.observaciones,
+      },
+      catalogos
+    );
+
     if (!f.valido) {
       resultados.push({
         fila: f.fila,

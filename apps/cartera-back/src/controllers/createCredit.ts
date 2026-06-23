@@ -813,7 +813,17 @@ const insertPayments = async (
     // Calcular abono a capital del MES
     // Cuota = Interés + IVA + Seguro + GPS + Membresías + Abono a Capital
     const montosExtras = interesMes.plus(ivaMes).plus(abonoSeguro).plus(abonoGps).plus(abonoMembresias);
-    const abonoCapital = cuotaMensual.minus(montosExtras);
+    const esUltimaCuota = i === cuotasInsertadas.length - 1;
+    // En insolutos la última cuota absorbe el redondeo de capital/plazo para que
+    // la suma de capital cierre exacto (el centavo sobrante va en la última).
+    const abonoCapital =
+      creditData.esInsoluto && esUltimaCuota
+        ? capitalEnMemoria
+        : cuotaMensual.minus(montosExtras);
+    const cuotaDelMes =
+      creditData.esInsoluto && esUltimaCuota
+        ? abonoCapital.plus(montosExtras)
+        : cuotaMensual;
 
     // Restar el abono del capital en memoria
     capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
@@ -839,7 +849,7 @@ const insertPayments = async (
       abono_iva_ci: "0",
       abono_seguro:  "0",
       abono_gps:  "0",
-      pago_del_mes: cuotaMensual.toString(),
+      pago_del_mes: cuotaDelMes.toString(),
       monto_boleta: "0",
       fecha_vencimiento: cuota.fecha_vencimiento,
       renuevo_o_nuevo: "",

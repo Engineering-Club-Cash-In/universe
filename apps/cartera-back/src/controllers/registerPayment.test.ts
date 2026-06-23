@@ -9,7 +9,6 @@ import {
   getSpecialPaymentCuotaId,
   getSpecialPaymentInstallmentFields,
   shouldApplyStaleZeroRestanteAdjustment,
-  shouldRejectMismatchedInstallmentSelection,
   shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
@@ -98,22 +97,6 @@ describe("register payment", () => {
         nextValidationStatus: "validated",
         montoAplicado: "0.00",
         mora: "25.00",
-      })
-    ).toBe(false);
-  });
-
-  it("rechaza request con cuotaApagar distinta al objeto numero_cuota enviado", () => {
-    expect(
-      shouldRejectMismatchedInstallmentSelection({
-        requestedInstallment: 5,
-        selectedInstallment: 10,
-      })
-    ).toBe(true);
-
-    expect(
-      shouldRejectMismatchedInstallmentSelection({
-        requestedInstallment: 5,
-        selectedInstallment: 5,
       })
     ).toBe(false);
   });

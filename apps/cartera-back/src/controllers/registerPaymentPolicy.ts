@@ -55,17 +55,6 @@ export const shouldRejectZeroAppliedNormalValidation = ({
   );
 };
 
-export const shouldRejectMismatchedInstallmentSelection = ({
-  requestedInstallment,
-  selectedInstallment,
-}: {
-  requestedInstallment?: number | null;
-  selectedInstallment?: number | null;
-}) =>
-  selectedInstallment != null &&
-  requestedInstallment != null &&
-  selectedInstallment !== requestedInstallment;
-
 export const shouldApplyStaleZeroRestanteAdjustment = ({
   hasExistingPayment,
   isFirstProcessedInstallment,

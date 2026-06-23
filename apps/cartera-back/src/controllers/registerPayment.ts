@@ -29,7 +29,6 @@ import {
   getSpecialPaymentCuotaId,
   recomputeCreditAfterCapital,
   shouldApplyStaleZeroRestanteAdjustment,
-  shouldRejectMismatchedInstallmentSelection,
   shouldRejectZeroAppliedNormalValidation,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
@@ -539,25 +538,6 @@ export const insertPayment = async ({ body, set }: any) => {
       fecha_boleta,
       origen_pago,
     } = parseResult.data;
-
-    const selectedInstallment = body?.numero_cuota?.numero_cuota;
-    if (
-      shouldRejectMismatchedInstallmentSelection({
-        requestedInstallment: cuotaApagar,
-        selectedInstallment:
-          typeof selectedInstallment === "number" ? selectedInstallment : null,
-      })
-    ) {
-      set.status = 400;
-      return {
-        message: "Validation failed",
-        errors: {
-          cuotaApagar: [
-            `La cuota solicitada (${cuotaApagar}) no coincide con la cuota seleccionada (${selectedInstallment})`,
-          ],
-        },
-      };
-    }
 
     // 🔒 LOCK PESIMISTA POR CRÉDITO
     // Serializa los pagos concurrentes del MISMO crédito. Sin esto, dos pagos

@@ -55,6 +55,9 @@ export const shouldRejectZeroAppliedNormalValidation = ({
   );
 };
 
+export const getApplyPaymentHttpStatus = (result: { success?: boolean }) =>
+  result.success === false ? 400 : 200;
+
 export const shouldApplyStaleZeroRestanteAdjustment = ({
   hasExistingPayment,
   isFirstProcessedInstallment,

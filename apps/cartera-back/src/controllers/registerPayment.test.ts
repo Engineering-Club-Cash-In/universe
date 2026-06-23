@@ -4,6 +4,7 @@ import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
   esDestinoSobrescribible,
+  getApplyPaymentHttpStatus,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
   getSpecialPaymentCuotaId,
@@ -99,6 +100,11 @@ describe("register payment", () => {
         mora: "25.00",
       })
     ).toBe(false);
+  });
+
+  it("mapea rechazos de regla de negocio de aplicar pago a HTTP 400", () => {
+    expect(getApplyPaymentHttpStatus({ success: false })).toBe(400);
+    expect(getApplyPaymentHttpStatus({ success: true })).toBe(200);
   });
 
   it("aplica el ajuste de restantes en cero a la primera cuota procesada aunque el request venga adelantado", () => {

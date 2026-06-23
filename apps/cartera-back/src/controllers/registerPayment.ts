@@ -2227,9 +2227,11 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         pagoConvenio: pago.pagoConvenio,
       })
     ) {
-      throw new Error(
-        `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`
-      );
+      return {
+        success: false,
+        applied: false,
+        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
+      };
     }
 
     // 2. CARGAR EL CRÉDITO

@@ -484,6 +484,7 @@ export const vehiclesRouter = {
 				transmission: z.string().optional(),
 				companyId: z.string().nullable().optional(),
 				status: z.string().optional().default("pending"),
+				vehicleIsNew: z.boolean().optional().default(false),
 				isOwned: z.boolean().optional().default(false),
 				// Campos para contratos legales
 				seats: z.number().nullable().optional(),
@@ -496,12 +497,13 @@ export const vehiclesRouter = {
 		)
 		.handler(async ({ input }) => {
 			try {
+				const { vehicleIsNew, ...vehicleInput } = input;
 				const [newVehicle] = await db
 					.insert(vehicles)
 					.values({
-						...input,
-						isNew: true, // Siempre es vehículo nuevo
-						kmMileage: input.kmMileage ?? 0, // Default 0 para nuevos
+						...vehicleInput,
+						isNew: vehicleIsNew,
+						kmMileage: vehicleInput.kmMileage ?? 0, // Default 0 para nuevos
 					} as NewVehicle)
 					.returning();
 

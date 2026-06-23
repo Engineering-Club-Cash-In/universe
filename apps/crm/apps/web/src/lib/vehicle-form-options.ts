@@ -30,6 +30,11 @@ export const VEHICLE_PROVENANCE_OPTIONS = [
 	{ value: "Importado", label: "Importado" },
 ] as const;
 
+export const VEHICLE_CONDITION_OPTIONS = [
+	{ value: false, label: "Usado / rodado" },
+	{ value: true, label: "Nuevo de agencia" },
+] as const;
+
 export const QUOTER_VEHICLE_ORIGIN_OPTIONS = [
 	{ value: "agencia", label: "Agencia" },
 	{ value: "rodado", label: "Rodado" },

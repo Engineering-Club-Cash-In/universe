@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	QUOTER_VEHICLE_TYPE_OPTIONS,
 	VEHICLE_BODY_TYPE_OPTIONS,
+	VEHICLE_CONDITION_OPTIONS,
 	QUOTER_VEHICLE_ORIGIN_OPTIONS,
 	VEHICLE_PROVENANCE_OPTIONS,
 	VEHICLE_USE_OPTIONS,
@@ -26,6 +27,10 @@ describe("vehicle form options", () => {
 		expect(VEHICLE_USE_OPTIONS.map((option) => option.value)).toEqual([
 			"Particular",
 			"Comercial",
+		]);
+		expect(VEHICLE_CONDITION_OPTIONS).toEqual([
+			{ value: false, label: "Usado / rodado" },
+			{ value: true, label: "Nuevo de agencia" },
 		]);
 	});
 });

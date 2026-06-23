@@ -85,6 +85,7 @@ import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUplo
 import { ROLES } from "@/lib/roles";
 import {
 	VEHICLE_BODY_TYPE_OPTIONS,
+	VEHICLE_CONDITION_OPTIONS,
 	VEHICLE_PROVENANCE_OPTIONS,
 	VEHICLE_USE_OPTIONS,
 } from "@/lib/vehicle-form-options";
@@ -311,6 +312,7 @@ function VehiclesDashboard() {
 		fuelType: "",
 		transmission: "",
 		kmMileage: 0,
+		isNew: false,
 		isOwned: false,
 		// Datos técnicos para contratos
 		seats: null as number | null,
@@ -359,6 +361,7 @@ function VehiclesDashboard() {
 				fuelType: data.fuelType || undefined,
 				transmission: data.transmission || undefined,
 				kmMileage: data.kmMileage ?? undefined,
+				vehicleIsNew: data.isNew,
 				isOwned: data.isOwned,
 				seats: data.seats ?? undefined,
 				doors: data.doors ?? undefined,
@@ -368,7 +371,7 @@ function VehiclesDashboard() {
 				iscvCode: data.iscvCode || undefined,
 			}),
 		onSuccess: () => {
-			toast.success("Vehículo nuevo creado exitosamente");
+			toast.success("Vehículo creado exitosamente");
 			queryClient.invalidateQueries({ queryKey: ["getVehicles"] });
 			queryClient.invalidateQueries({ queryKey: ["getVehicleStatistics"] });
 			setIsNewVehicleOpen(false);
@@ -385,6 +388,7 @@ function VehiclesDashboard() {
 				fuelType: "",
 				transmission: "",
 				kmMileage: 0,
+				isNew: false,
 				isOwned: false,
 				seats: null,
 				doors: null,
@@ -449,6 +453,7 @@ function VehiclesDashboard() {
 					fuelType: data.fuelType || null,
 					transmission: data.transmission || null,
 					kmMileage: data.kmMileage,
+					isNew: data.isNew,
 					isOwned: data.isOwned,
 					status: data.status,
 					// Campos para contratos legales
@@ -497,7 +502,7 @@ function VehiclesDashboard() {
 				<h1 className="font-bold text-4xl">Panel de Vehículos</h1>
 				<Button onClick={() => setIsNewVehicleOpen(true)}>
 					<Plus className="mr-2 h-4 w-4" />
-					Nuevo Vehículo
+					Registrar Vehículo
 				</Button>
 			</div>
 
@@ -1992,16 +1997,16 @@ function VehiclesDashboard() {
 				</DialogContent>
 			</Dialog>
 
-			{/* Dialog para crear vehículo nuevo */}
+			{/* Dialog para crear vehículo */}
 			<Dialog open={isNewVehicleOpen} onOpenChange={setIsNewVehicleOpen}>
 				<DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle className="flex items-center gap-2">
 							<Sparkles className="h-5 w-5 text-blue-500" />
-							Registrar Vehículo Nuevo
+							Registrar Vehículo
 						</DialogTitle>
 						<DialogDescription>
-							Los campos con * son requeridos. El resto puede completarse después.
+							Selecciona si es usado/rodado o nuevo de agencia. Los campos con * son requeridos.
 						</DialogDescription>
 					</DialogHeader>
 
@@ -2106,6 +2111,29 @@ function VehiclesDashboard() {
 										<SelectContent>
 											{VEHICLE_BODY_TYPE_OPTIONS.map((option) => (
 												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="vehicleCondition">Condición *</Label>
+									<Select
+										value={String(newVehicleForm.isNew)}
+										onValueChange={(value) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												isNew: value === "true",
+											})
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar condición" />
+										</SelectTrigger>
+										<SelectContent>
+											{VEHICLE_CONDITION_OPTIONS.map((option) => (
+												<SelectItem key={String(option.value)} value={String(option.value)}>
 													{option.label}
 												</SelectItem>
 											))}
@@ -2602,6 +2630,29 @@ function VehiclesDashboard() {
 										<SelectContent>
 											{VEHICLE_BODY_TYPE_OPTIONS.map((option) => (
 												<SelectItem key={option.value} value={option.value}>
+													{option.label}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-vehicleCondition">Condición *</Label>
+									<Select
+										value={String(editVehicleForm.isNew)}
+										onValueChange={(value) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												isNew: value === "true",
+											})
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar condición" />
+										</SelectTrigger>
+										<SelectContent>
+											{VEHICLE_CONDITION_OPTIONS.map((option) => (
+												<SelectItem key={String(option.value)} value={String(option.value)}>
 													{option.label}
 												</SelectItem>
 											))}

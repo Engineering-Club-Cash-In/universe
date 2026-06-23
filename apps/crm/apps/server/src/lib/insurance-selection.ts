@@ -72,6 +72,7 @@ export function selectInsuranceProvider(
 
 	if (
 		gytCost != null &&
+		gytCost < universalesCost &&
 		qualifiesForGyt(input.insuredAmount, input.vehicleType)
 	) {
 		const savings = roundMoney(Math.max(universalesCost - gytCost, 0));
@@ -119,18 +120,18 @@ export function buildServerInsurancePersistence(
 	const customerInsuranceCost = roundMoney(
 		input.customerInsuranceCost ?? selection.customerInsuranceCost,
 	);
-	const internalInsuranceCost = selection.internalInsuranceCost;
-	const savings = roundMoney(
-		Math.max(customerInsuranceCost - internalInsuranceCost, 0),
-	);
 
 	return normalizeInsuranceBreakdown({
 		selection: {
 			provider: selection.provider,
 			customerInsuranceCost,
-			internalInsuranceCost,
-			insuranceSavingsToMembership: savings,
-			effectiveMembershipCost: roundMoney(input.membershipCost + savings),
+			internalInsuranceCost: selection.internalInsuranceCost,
+			// El ahorro sale de los precios de seguro (universales - gyt), NO del
+			// monto bundle del cotizador (que ya incluye la membresía).
+			insuranceSavingsToMembership: selection.insuranceSavingsToMembership,
+			// La membresía ya trae el ahorro incorporado desde el front
+			// (getInsuranceCost). No lo volvemos a sumar para no contarlo dos veces.
+			effectiveMembershipCost: roundMoney(input.membershipCost),
 		},
 	});
 }

@@ -1,10 +1,13 @@
 import { sql } from "drizzle-orm";
 import * as XLSX from "xlsx";
+import { getFileBuffer } from "../lib/storage";
 import { db } from "./index";
 import { gytInsuranceCosts } from "./schema";
 
-const DEFAULT_WORKBOOK_PATH =
-	"/home/lralda/Downloads/LISTADO DE PRECIOS Y COMPARATIVO - CASH IN - Junio 2026 Final.xlsx";
+// Key del Excel de tarifas GyT en R2 (bucket por defecto de storage).
+// Subir el archivo a R2 bajo esta key, o sobreescribir con GYT_INSURANCE_XLSX_KEY.
+const DEFAULT_WORKBOOK_KEY =
+	"Precios junio 2026 (valor Universales actualizado).xlsx";
 
 type GytInsuranceRow = {
 	price: number;
@@ -53,9 +56,10 @@ function readGytRows(
 }
 
 async function seedGytInsurance() {
-	const workbookPath =
-		process.env.GYT_INSURANCE_XLSX_PATH ?? DEFAULT_WORKBOOK_PATH;
-	const workbook = XLSX.readFile(workbookPath);
+	const workbookKey =
+		process.env.GYT_INSURANCE_XLSX_KEY ?? DEFAULT_WORKBOOK_KEY;
+	const buffer = await getFileBuffer(workbookKey);
+	const workbook = XLSX.read(buffer, { type: "buffer" });
 	const automovilRows = readGytRows(
 		workbook,
 		"AUTOMOVIL - CAMIONETA",
@@ -96,7 +100,9 @@ async function seedGytInsurance() {
 		processed++;
 	}
 
-	console.log(`Tarifas GyT cargadas: ${processed} filas desde ${workbookPath}`);
+	console.log(
+		`Tarifas GyT cargadas: ${processed} filas desde R2 (${workbookKey})`,
+	);
 }
 
 seedGytInsurance()

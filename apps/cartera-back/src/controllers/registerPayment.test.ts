@@ -83,6 +83,19 @@ describe("register payment", () => {
     ).toBe(true);
   });
 
+  it("rechaza revalidar un pago normal sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0",
+        mora: "0",
+        otros: "0",
+        pagoConvenio: "0",
+      })
+    ).toBe(true);
+  });
+
   it("permite validar filas especiales sin monto aplicado", () => {
     expect(
       shouldRejectZeroAppliedNormalValidation({

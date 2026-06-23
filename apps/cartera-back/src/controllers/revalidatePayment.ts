@@ -5,6 +5,7 @@ import { db } from "../database";
 import { pagos_credito, creditos } from "../database/db";
 import { insertPagosCreditoInversionistasV2 } from "./payments";
 import { esPagoAplicado } from "../utils/paymentStatus";
+import { shouldRejectZeroAppliedNormalValidation } from "./registerPaymentPolicy";
 
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
@@ -54,6 +55,22 @@ export const revalidatePayment = async ({ body, set }: any) => {
       
       if (esPagoAplicado(pago.validationStatus)) {
         throw new Error(`Payment ${pago_id} is already validated`);
+      }
+
+      if (
+        shouldRejectZeroAppliedNormalValidation({
+          validationStatus: pago.validationStatus,
+          nextValidationStatus: "validated",
+          montoAplicado: pago.monto_aplicado,
+          mora: pago.mora,
+          otros: pago.otros,
+          pagoConvenio: pago.pagoConvenio,
+        })
+      ) {
+        return {
+          success: false,
+          message: `No se puede revalidar el pago ${pago_id}: monto_aplicado es 0.00`,
+        };
       }
 
       console.log(`✅ Pago encontrado (Pendiente)`);
@@ -153,6 +170,11 @@ export const revalidatePayment = async ({ body, set }: any) => {
         cuota: credito.cuota
       };
     });
+
+    if ("success" in result && result.success === false) {
+      set.status = 400;
+      return result;
+    }
 
     // 8️⃣ EJECUTAR INVERSIONISTAS (fuera de la transacción para usar la función existente o asegurar que los registros se vean en la otra conexión)
     // El insertPagosCreditoInversionistasV2 ya maneja su propia forma de inserción.

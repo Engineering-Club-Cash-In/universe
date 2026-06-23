@@ -14,10 +14,14 @@ import {
   Calendar,
   BookUser,
   ListChecks,
+  Loader2,
+  Upload,
+  ArrowLeft,
 } from "lucide-react";
 import { useCatalogs } from "../hooks/catalogs";
 import { User as UserIcon } from "lucide-react";
 import { OtrosField } from "./rubros";
+import { BulkInsolutoUpload } from "./BulkInsolutoUpload";
 import React from "react";
 
 /** Fecha por defecto según tipo de inversión */
@@ -194,8 +198,59 @@ const fields = [
   },
 ];
 
+type FieldDef = {
+  name: string;
+  label: string;
+  type: string;
+  icon: React.ReactNode;
+};
+
+const fieldsByName = Object.fromEntries(
+  fields.map((f) => [f.name, f])
+) as Record<string, FieldDef>;
+
+// Agrupación del formulario en secciones para ordenar tantos campos.
+const FORM_SECTIONS: {
+  title: string;
+  fields: string[];
+  collapsible?: boolean;
+}[] = [
+  { title: "Cliente", fields: ["usuario", "nit", "categoria", "asesor_id"] },
+  {
+    title: "Crédito",
+    fields: [
+      "numero_credito_sifco",
+      "capital",
+      "porcentaje_interes",
+      "plazo",
+      "cuota",
+      "dia_pago_mensual",
+      "observaciones",
+    ],
+  },
+  {
+    title: "Cargos",
+    fields: [
+      "seguro_10_cuotas",
+      "gps",
+      "membresias_pago",
+      "royalti",
+      "porcentaje_royalti",
+      "otros",
+      "reserva",
+    ],
+  },
+  {
+    title: "Dirección (opcional)",
+    fields: ["direccion", "municipio", "departamento", "codigo_postal", "pais"],
+    collapsible: true,
+  },
+];
+
 export function CreditForm() {
   const formik = useCreditForm();
+  // Modo carga masiva de insolutos (reemplaza el formulario por el wizard)
+  const [bulkMode, setBulkMode] = React.useState(false);
   // Define the type for an investor
   type Investor = { inversionista_id: number; nombre: string };
 
@@ -206,6 +261,7 @@ export function CreditForm() {
   };
   const reservaEditadoPorUsuario = React.useRef(false);
   React.useEffect(() => {
+    if (formik.values.esInsoluto) return; // insoluto: reserva forzada a 0 (ver efecto de abajo)
     // Solo actualiza reserva si el usuario NO la editó manualmente o la dejó vacía
     if (
       !reservaEditadoPorUsuario.current ||
@@ -220,24 +276,128 @@ export function CreditForm() {
     }
     // eslint-disable-next-line
   }, [formik.values.seguro_10_cuotas]);
+
+  // Campos que el backend fuerza cuando el crédito es insoluto. En el front los
+  // mostramos pero BLOQUEADOS, para que el usuario vea qué valor van a tomar.
+  const esInsoluto = formik.values.esInsoluto === true;
+  const FORCED_INSOLUTO_FIELDS = React.useMemo(
+    () =>
+      new Set<string>([
+        "numero_credito_sifco",
+        "porcentaje_interes",
+        "seguro_10_cuotas",
+        "gps",
+        "membresias_pago",
+        "otros",
+        "royalti",
+        "porcentaje_royalti",
+        "reserva",
+        "cuota",
+      ]),
+    []
+  );
+  const isForced = (name: string) => esInsoluto && FORCED_INSOLUTO_FIELDS.has(name);
+
+  // Insoluto: todos los cargos a 0 y cuota = capital / plazo (en vivo).
+  React.useEffect(() => {
+    if (!esInsoluto) return;
+    const cap = Number(formik.values.capital) || 0;
+    const plz = Number(formik.values.plazo) || 1;
+    const cuota = plz > 0 ? Math.round((cap / plz) * 100) / 100 : 0;
+    formik.setFieldValue("porcentaje_interes", 0);
+    formik.setFieldValue("seguro_10_cuotas", 0);
+    formik.setFieldValue("gps", 0);
+    formik.setFieldValue("membresias_pago", 0);
+    formik.setFieldValue("royalti", 0);
+    formik.setFieldValue("porcentaje_royalti", 0);
+    formik.setFieldValue("otros", 0);
+    formik.setFieldValue("reserva", 0);
+    formik.setFieldValue("cuota", cuota);
+    formik.setFieldValue("numero_credito_sifco", "");
+    formik.setFieldValue("inversionistas", []);
+    // eslint-disable-next-line
+  }, [esInsoluto, formik.values.capital, formik.values.plazo]);
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <h1 className="text-4xl font-extrabold text-blue-700 text-center mb-6 drop-shadow-md w-full">
         Registro de Crédito
       </h1>
-      <Card className="w-full max-w-[900px] mx-2 flex flex-col shadow-2xl border-2 border-blue-100 rounded-3xl bg-white/90 backdrop-blur-sm">
+      <Card className="w-full max-w-[1120px] mx-2 flex flex-col shadow-2xl border-2 border-blue-100 rounded-3xl bg-white/90 backdrop-blur-sm">
         <CardHeader className="pb-0 flex flex-col items-center gap-2">
           <span className="flex items-center justify-center bg-blue-100 rounded-full w-14 h-14 mb-1 shadow">
             <CreditCard className="text-blue-600 w-8 h-8" />
           </span>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col justify-center">
+          {/* Barra superior: toggle insoluto + carga masiva */}
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            {!bulkMode ? (
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="esInsoluto"
+                  className="inline-flex w-fit cursor-pointer select-none items-center gap-2.5"
+                >
+                  <span className="relative inline-flex h-5 w-9 shrink-0 items-center">
+                    <input
+                      id="esInsoluto"
+                      name="esInsoluto"
+                      type="checkbox"
+                      checked={esInsoluto}
+                      onChange={(e) =>
+                        formik.setFieldValue("esInsoluto", e.target.checked)
+                      }
+                      className="peer sr-only"
+                    />
+                    <span className="absolute inset-0 rounded-full bg-gray-300 transition-colors peer-checked:bg-amber-500" />
+                    <span className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+                  </span>
+                  <span className="text-sm font-medium text-gray-700">
+                    Crédito insoluto
+                  </span>
+                </label>
+                {esInsoluto && (
+                  <p className="text-xs text-amber-600">
+                    Sin interés ni cargos · se crea INCOBRABLE · cuota = capital / plazo ·
+                    se asigna a Cube Investments S.A. (100% Cash In) · No. SIFCO automático.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <span className="text-sm font-semibold text-gray-500">
+                Carga masiva de insolutos
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setBulkMode((b) => !b)}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50"
+            >
+              {bulkMode ? (
+                <>
+                  <ArrowLeft className="h-4 w-4" /> Volver al formulario
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" /> Cargar varios insolutos
+                </>
+              )}
+            </button>
+          </div>
+
+          {bulkMode ? (
+            <BulkInsolutoUpload
+              onFinish={() => {
+                setBulkMode(false);
+                formik.resetForm();
+              }}
+            />
+          ) : (
           <form
             onSubmit={formik.handleSubmit}
             className="flex-1 flex flex-col gap-5"
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {fields.map((field) => {
+            {(() => {
+              const renderField = (field: FieldDef) => {
                 if (field.name === "categoria") {
                   return (
                     <div key={field.name} className="grid gap-1 w-full">
@@ -323,13 +483,17 @@ export function CreditForm() {
                         name="reserva"
                         type="number"
                         value={formik.values.reserva}
+                        disabled={esInsoluto}
                         onChange={(e) => {
                           // Marca como manualmente editado SOLO si el valor es distinto a la fórmula
                           reservaEditadoPorUsuario.current = true;
                           formik.handleChange(e);
                         }}
                         onBlur={formik.handleBlur}
-                        className="w-full border rounded-lg px-3 py-2 bg-white text-gray-900"
+                        className={[
+                          "w-full border rounded-lg px-3 py-2 text-gray-900",
+                          esInsoluto ? "bg-gray-100 cursor-not-allowed" : "bg-white",
+                        ].join(" ")}
                       />
                       {formik.errors.reserva && formik.touched.reserva && (
                         <div className="text-red-500 text-xs">
@@ -343,6 +507,22 @@ export function CreditForm() {
                   );
                 }
                 if (field.name === "otros") {
+                  if (esInsoluto) {
+                    return (
+                      <div key={field.name} className="grid gap-1 w-full">
+                        <Label className="text-gray-900 font-medium mb-1 flex items-center">
+                          {field.icon}
+                          {field.label}
+                        </Label>
+                        <Input
+                          type="number"
+                          value={0}
+                          disabled
+                          className="w-full border rounded-lg px-3 py-2 bg-gray-100 text-gray-900 cursor-not-allowed"
+                        />
+                      </div>
+                    );
+                  }
                   return <OtrosField key={field.name} formik={formik} />;
                 }
                 // Prevent rendering Input for fields whose value is an array (like inversionistas)
@@ -364,7 +544,16 @@ export function CreditForm() {
                       value={value as any}
                       onChange={formik.handleChange}
                       onBlur={formik.handleBlur}
-                      className="w-full border rounded-lg px-3 py-2 bg-white text-gray-900"
+                      disabled={isForced(field.name)}
+                      placeholder={
+                        isForced(field.name) && field.name === "numero_credito_sifco"
+                          ? "Se genera automáticamente: insoluto-N"
+                          : undefined
+                      }
+                      className={[
+                        "w-full border rounded-lg px-3 py-2 text-gray-900",
+                        isForced(field.name) ? "bg-gray-100 cursor-not-allowed" : "bg-white",
+                      ].join(" ")}
                     />
                     {formik.errors[field.name as keyof typeof formik.values] &&
                       formik.touched[
@@ -383,8 +572,37 @@ export function CreditForm() {
                       )}
                   </div>
                 );
-              })}
-            </div>
+              };
+              return FORM_SECTIONS.map((section) => {
+                const grid = (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
+                    {section.fields.map((name) => renderField(fieldsByName[name]))}
+                  </div>
+                );
+                return (
+                  <section key={section.title} className="flex flex-col gap-3">
+                    {section.collapsible ? (
+                      <details className="group rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3">
+                        <summary className="flex cursor-pointer list-none items-center gap-2 text-base font-bold text-blue-700">
+                          <span className="text-blue-400 transition-transform group-open:rotate-90">
+                            ▶
+                          </span>
+                          {section.title}
+                        </summary>
+                        <div className="mt-4">{grid}</div>
+                      </details>
+                    ) : (
+                      <>
+                        <h2 className="border-b border-blue-100 pb-1 text-base font-bold text-blue-700">
+                          {section.title}
+                        </h2>
+                        {grid}
+                      </>
+                    )}
+                  </section>
+                );
+              });
+            })()}
 
             {/* Sección de inversionistas */}
             <div className="flex flex-col gap-4 border-t pt-6">
@@ -392,7 +610,16 @@ export function CreditForm() {
                 Inversionistas
               </Label>
 
-              {formik.values.inversionistas.map((inv, index) => (
+              {esInsoluto && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                  Crédito insoluto: se asigna automáticamente a{" "}
+                  <strong>Cube Investments S.A.</strong> con 100% Cash In. No se
+                  editan inversionistas.
+                </div>
+              )}
+
+              {!esInsoluto &&
+                formik.values.inversionistas.map((inv, index) => (
                 <div
                   key={index}
                   className="grid grid-cols-1 md:grid-cols-2 gap-4 border rounded-xl p-4 bg-blue-50"
@@ -569,31 +796,39 @@ export function CreditForm() {
                 </div>
               ))}
 
-              <Button
-                type="button"
-                onClick={() => {
-                    const tipoDefault = "compra_cartera" as const;
-                  formik.setFieldValue("inversionistas", [
-                    ...formik.values.inversionistas,
-                    {
-                      inversionista_id: 0,
-                      monto_aportado: 0,
-                      porcentaje_cash_in: 0,
-                      porcentaje_inversion: 100,
-                      tipo_inversion: tipoDefault,
-                      fecha_inicio_participacion: getDefaultFechaInicio(tipoDefault),
-                    },
-                  ]);
-                }}
-                className="w-fit bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl shadow"
-              >
-                + Agregar Inversionista
-              </Button>
+              {!esInsoluto && (
+                <Button
+                  type="button"
+                  onClick={() => {
+                      const tipoDefault = "compra_cartera" as const;
+                    formik.setFieldValue("inversionistas", [
+                      ...formik.values.inversionistas,
+                      {
+                        inversionista_id: 0,
+                        monto_aportado: 0,
+                        porcentaje_cash_in: 0,
+                        porcentaje_inversion: 100,
+                        tipo_inversion: tipoDefault,
+                        fecha_inicio_participacion: getDefaultFechaInicio(tipoDefault),
+                      },
+                    ]);
+                  }}
+                  className="w-fit bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl shadow"
+                >
+                  + Agregar Inversionista
+                </Button>
+              )}
             </div>
             <Button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-4 rounded-xl text-lg shadow transition"
+              disabled={formik.isSubmitting}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-4 rounded-xl text-lg shadow transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={(e) => {
+                // Evita doble envío (clicks repetidos) mientras se está creando
+                if (formik.isSubmitting) {
+                  e.preventDefault();
+                  return;
+                }
                 // Detener el submit si hay errores
                 if (!formik.isValid && Object.keys(formik.errors).length > 0) {
                   e.preventDefault();
@@ -611,9 +846,17 @@ export function CreditForm() {
                 console.log("Es válido:", formik.isValid);
               }}
             >
-              Enviar
+              {formik.isSubmitting ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Creando…
+                </>
+              ) : (
+                "Enviar"
+              )}
             </Button>
           </form>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -79,7 +79,7 @@ function App() {
         <Route
           path="realizarCredito"
           element={
-            <RoleRoute allowedRoles={["ADMIN"]}>
+            <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
               <CreditForm />
             </RoleRoute>
           }

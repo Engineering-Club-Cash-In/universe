@@ -31,9 +31,13 @@ export const VEHICLE_PROVENANCE_OPTIONS = [
 ] as const;
 
 export const VEHICLE_CONDITION_OPTIONS = [
-	{ value: false, label: "Usado / rodado" },
+	{ value: false, label: "Usado" },
 	{ value: true, label: "Nuevo de agencia" },
 ] as const;
+
+export function isValidVehicleConditionOrigin(isNew: boolean, origin: string) {
+	return !(isNew && origin.trim().toLowerCase() === "importado");
+}
 
 export const QUOTER_VEHICLE_ORIGIN_OPTIONS = [
 	{ value: "agencia", label: "Agencia" },

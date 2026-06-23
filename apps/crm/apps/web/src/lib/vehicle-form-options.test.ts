@@ -6,6 +6,7 @@ import {
 	QUOTER_VEHICLE_ORIGIN_OPTIONS,
 	VEHICLE_PROVENANCE_OPTIONS,
 	VEHICLE_USE_OPTIONS,
+	isValidVehicleConditionOrigin,
 } from "./vehicle-form-options";
 
 describe("vehicle form options", () => {
@@ -29,8 +30,15 @@ describe("vehicle form options", () => {
 			"Comercial",
 		]);
 		expect(VEHICLE_CONDITION_OPTIONS).toEqual([
-			{ value: false, label: "Usado / rodado" },
+			{ value: false, label: "Usado" },
 			{ value: true, label: "Nuevo de agencia" },
 		]);
+	});
+
+	test("allows used national and imported vehicles but not new imported vehicles", () => {
+		expect(isValidVehicleConditionOrigin(false, "Nacional")).toBe(true);
+		expect(isValidVehicleConditionOrigin(false, "Importado")).toBe(true);
+		expect(isValidVehicleConditionOrigin(true, "Nacional")).toBe(true);
+		expect(isValidVehicleConditionOrigin(true, "Importado")).toBe(false);
 	});
 });

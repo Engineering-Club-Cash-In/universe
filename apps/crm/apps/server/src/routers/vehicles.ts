@@ -498,6 +498,14 @@ export const vehiclesRouter = {
 		.handler(async ({ input }) => {
 			try {
 				const { vehicleIsNew, ...vehicleInput } = input;
+				if (
+					vehicleIsNew &&
+					vehicleInput.origin?.trim().toLowerCase() === "importado"
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Un vehículo nuevo de agencia no puede ser importado/rodado",
+					});
+				}
 				const [newVehicle] = await db
 					.insert(vehicles)
 					.values({
@@ -562,6 +570,14 @@ export const vehiclesRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			try {
+				if (
+					input.data.isNew &&
+					input.data.origin?.trim().toLowerCase() === "importado"
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Un vehículo nuevo de agencia no puede ser importado/rodado",
+					});
+				}
 				if (
 					input.data.status &&
 					!PERMISSIONS.canManageTallerVehicleStatus(context.userRole) &&

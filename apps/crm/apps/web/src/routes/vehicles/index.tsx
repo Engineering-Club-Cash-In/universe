@@ -84,6 +84,7 @@ import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
 import { ROLES } from "@/lib/roles";
 import {
+	isValidVehicleConditionOrigin,
 	VEHICLE_BODY_TYPE_OPTIONS,
 	VEHICLE_CONDITION_OPTIONS,
 	VEHICLE_PROVENANCE_OPTIONS,
@@ -2022,6 +2023,17 @@ function VehiclesDashboard() {
 								toast.error("Por favor completa todos los campos requeridos");
 								return;
 							}
+							if (
+								!isValidVehicleConditionOrigin(
+									newVehicleForm.isNew,
+									newVehicleForm.origin,
+								)
+							) {
+								toast.error(
+									"Un vehículo nuevo de agencia no puede ser importado/rodado",
+								);
+								return;
+							}
 							createNewVehicleMutation.mutate(newVehicleForm);
 						}}
 						className="space-y-5"
@@ -2453,6 +2465,17 @@ function VehiclesDashboard() {
 								!editVehicleForm.vehicleType
 							) {
 								toast.error("Por favor completa todos los campos requeridos");
+								return;
+							}
+							if (
+								!isValidVehicleConditionOrigin(
+									editVehicleForm.isNew,
+									editVehicleForm.origin,
+								)
+							) {
+								toast.error(
+									"Un vehículo nuevo de agencia no puede ser importado/rodado",
+								);
 								return;
 							}
 							updateVehicleMutation.mutate(editVehicleForm);

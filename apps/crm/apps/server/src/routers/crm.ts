@@ -3456,7 +3456,19 @@ export const crmRouter = {
 				.filter((s): s is string => Boolean(s));
 
 			// Enriquecer SOLO la página con datos del CRM.
-			// 1) Oportunidades cuyo numeroSifco está en la página -> sifco -> leadId
+			// 1) Oportunidades cuyo numeroSifco está en la página -> sifco -> leadId.
+			// En vistas acotadas se aplica el MISMO alcance (leadId/assignedTo): como
+			// numeroSifco no es único en el CRM, sin esto un SIFCO compartido por dos
+			// oportunidades podría enlazar el crédito a un lead fuera del alcance y
+			// exponer datos CRM de otro cliente.
+			const matchingOppsConditions = [
+				inArray(opportunities.numeroSifco, pageSifcos),
+			];
+			if (input.leadId) {
+				matchingOppsConditions.push(eq(opportunities.leadId, input.leadId));
+			} else if (context.userRole === "sales") {
+				matchingOppsConditions.push(eq(leads.assignedTo, context.userId));
+			}
 			const matchingOpps =
 				pageSifcos.length > 0
 					? await db
@@ -3465,7 +3477,8 @@ export const crmRouter = {
 								leadId: opportunities.leadId,
 							})
 							.from(opportunities)
-							.where(inArray(opportunities.numeroSifco, pageSifcos))
+							.leftJoin(leads, eq(opportunities.leadId, leads.id))
+							.where(and(...matchingOppsConditions))
 					: [];
 
 			const sifcoToLeadId = new Map<string, string>();

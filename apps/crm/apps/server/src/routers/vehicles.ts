@@ -66,6 +66,26 @@ const ALLOWED_MIME_TYPES = [
 const MANUAL_VALUATION_COMMA_DECIMAL_PATTERN = /^\d+,\d+$/;
 const MANUAL_VALUATION_THOUSANDS_PATTERN = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
 const MANUAL_VALUATION_PLAIN_NUMBER_PATTERN = /^\d+(\.\d+)?$/;
+const NEW_AGENCY_BLOCKED_ORIGINS = new Set(["importado", "rodado"]);
+
+export function isValidVehicleConditionOrigin(
+	isNew: boolean,
+	origin: string | null | undefined,
+) {
+	return !(
+		isNew && origin && NEW_AGENCY_BLOCKED_ORIGINS.has(origin.trim().toLowerCase())
+	);
+}
+
+export function mergeVehicleConditionOrigin(
+	current: { isNew: boolean; origin: string | null },
+	patch: { isNew?: boolean; origin?: string | null },
+) {
+	return {
+		isNew: patch.isNew ?? current.isNew,
+		origin: "origin" in patch ? patch.origin : current.origin,
+	};
+}
 
 const normalizeManualValuationAmount = (
 	value: string,
@@ -97,6 +117,37 @@ const normalizeManualValuationAmount = (
 
 	return sanitized;
 };
+
+export const createNewVehicleInputSchema = z.object({
+	// Campos básicos requeridos (conocidos desde proforma)
+	make: z.string(),
+	model: z.string(),
+	year: z.number(),
+	color: z.string(),
+	vehicleType: z.string(),
+	// Campos opcionales (llegan después del dealer)
+	licensePlate: z.string().optional(),
+	vinNumber: z.string().optional(),
+	motorNumber: z.string().optional(),
+	milesMileage: z.number().nullable().optional(),
+	kmMileage: z.number().optional().default(0),
+	origin: z.string().optional(),
+	cylinders: z.string().optional(),
+	engineCC: z.string().optional(),
+	fuelType: z.string().optional(),
+	transmission: z.string().optional(),
+	companyId: z.string().nullable().optional(),
+	status: z.string().optional().default("pending"),
+	vehicleIsNew: z.boolean().optional().default(true),
+	isOwned: z.boolean().optional().default(false),
+	// Campos para contratos legales
+	seats: z.number().nullable().optional(),
+	doors: z.number().nullable().optional(),
+	axles: z.number().nullable().optional().default(2),
+	vehicleUse: z.string().nullable().optional(),
+	series: z.string().nullable().optional(),
+	iscvCode: z.string().nullable().optional(),
+});
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
@@ -463,45 +514,21 @@ export const vehiclesRouter = {
 
 	// Create new vehicle (for brand new vehicles from dealer - minimal required fields)
 	createNewVehicle: protectedProcedure
-		.input(
-			z.object({
-				// Campos básicos requeridos (conocidos desde proforma)
-				make: z.string(),
-				model: z.string(),
-				year: z.number(),
-				color: z.string(),
-				vehicleType: z.string(),
-				// Campos opcionales (llegan después del dealer)
-				licensePlate: z.string().optional(),
-				vinNumber: z.string().optional(),
-				motorNumber: z.string().optional(),
-				milesMileage: z.number().nullable().optional(),
-				kmMileage: z.number().optional().default(0),
-				origin: z.string().optional(),
-				cylinders: z.string().optional(),
-				engineCC: z.string().optional(),
-				fuelType: z.string().optional(),
-				transmission: z.string().optional(),
-				companyId: z.string().nullable().optional(),
-				status: z.string().optional().default("pending"),
-				isOwned: z.boolean().optional().default(false),
-				// Campos para contratos legales
-				seats: z.number().nullable().optional(),
-				doors: z.number().nullable().optional(),
-				axles: z.number().nullable().optional().default(2),
-				vehicleUse: z.string().nullable().optional(),
-				series: z.string().nullable().optional(),
-				iscvCode: z.string().nullable().optional(),
-			}),
-		)
+		.input(createNewVehicleInputSchema)
 		.handler(async ({ input }) => {
 			try {
+				const { vehicleIsNew, ...vehicleInput } = input;
+				if (!isValidVehicleConditionOrigin(vehicleIsNew, vehicleInput.origin)) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Un vehículo nuevo de agencia no puede ser importado/rodado",
+					});
+				}
 				const [newVehicle] = await db
 					.insert(vehicles)
 					.values({
-						...input,
-						isNew: true, // Siempre es vehículo nuevo
-						kmMileage: input.kmMileage ?? 0, // Default 0 para nuevos
+						...vehicleInput,
+						isNew: vehicleIsNew,
+						kmMileage: vehicleInput.kmMileage ?? 0, // Default 0 para nuevos
 					} as NewVehicle)
 					.returning();
 
@@ -560,6 +587,32 @@ export const vehiclesRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			try {
+				if (input.data.isNew !== undefined || input.data.origin !== undefined) {
+					const [currentVehicle] = await db
+						.select({ isNew: vehicles.isNew, origin: vehicles.origin })
+						.from(vehicles)
+						.where(eq(vehicles.id, input.id))
+						.limit(1);
+
+					if (currentVehicle) {
+						const conditionOrigin = mergeVehicleConditionOrigin(
+							currentVehicle,
+							input.data,
+						);
+
+						if (
+							!isValidVehicleConditionOrigin(
+								conditionOrigin.isNew,
+								conditionOrigin.origin,
+							)
+						) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Un vehículo nuevo de agencia no puede ser importado/rodado",
+							});
+						}
+					}
+				}
 				if (
 					input.data.status &&
 					!PERMISSIONS.canManageTallerVehicleStatus(context.userRole) &&
@@ -1060,7 +1113,7 @@ export const vehiclesRouter = {
 						),
 					)
 					.limit(1);
-				
+
 				foundVehicle = existingWithPlate[0] || null;
 			}
 
@@ -1080,7 +1133,7 @@ export const vehiclesRouter = {
 						),
 					)
 					.limit(1);
-				
+
 				foundVehicle = existingWithVin[0] || null;
 			}
 
@@ -1294,7 +1347,7 @@ export const vehiclesRouter = {
 							})
 							.where(eq(vehicles.id, vehicleInputId))
 							.returning();
-						
+
 						if (updated) {
 							vehicleId = updated.id;
 						} else {

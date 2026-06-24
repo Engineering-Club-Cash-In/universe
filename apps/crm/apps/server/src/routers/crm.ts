@@ -3389,15 +3389,21 @@ export const crmRouter = {
 			//  - rol sales: solo los créditos de los leads asignados al asesor
 			let scopedSifcos: string[] | undefined;
 			if (input.leadId) {
+				// Un asesor solo puede abrir leads asignados a él: sin este check, un
+				// sales podría pasar ?idLead=<uuid ajeno> y ver datos de un cliente
+				// que no le corresponde. Admin/supervisor pueden ver cualquiera.
+				const leadConditions = [
+					eq(opportunities.leadId, input.leadId),
+					isNotNull(opportunities.numeroSifco),
+				];
+				if (context.userRole === "sales") {
+					leadConditions.push(eq(leads.assignedTo, context.userId));
+				}
 				const opps = await db
 					.select({ numeroSifco: opportunities.numeroSifco })
 					.from(opportunities)
-					.where(
-						and(
-							eq(opportunities.leadId, input.leadId),
-							isNotNull(opportunities.numeroSifco),
-						),
-					);
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(and(...leadConditions));
 				scopedSifcos = opps
 					.map((o) => o.numeroSifco)
 					.filter((s): s is string => Boolean(s));

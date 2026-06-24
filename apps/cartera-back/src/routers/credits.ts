@@ -183,6 +183,7 @@ export const creditRouter = new Elysia()
     capital_min,
     capital_max,
     estados_credito,
+    aseguradora_id,      // 🆕 NUEVO
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -310,6 +311,13 @@ export const creditRouter = new Elysia()
     return { message: `Estado de crédito inválido: ${estadosCreditoParsed.invalid}` };
   }
 
+  // 🆕 Aseguradora
+  const aseguradoraIdNum = aseguradora_id ? Number(aseguradora_id) : undefined;
+  if (aseguradora_id && isNaN(aseguradoraIdNum!)) {
+    set.status = 400;
+    return { message: "Parámetro 'aseguradora_id' debe ser un número válido." };
+  }
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -354,7 +362,8 @@ export const creditRouter = new Elysia()
         numerosCreditoSifcoArray,
         capitalMinParam,
         capitalMaxParam,
-        estadosCreditoParsed?.values
+        estadosCreditoParsed?.values,
+        aseguradoraIdNum
       );
       set.status = 200;
       return result;
@@ -398,6 +407,7 @@ export const creditRouter = new Elysia()
         capital_min,
         capital_max,
         estados_credito,
+        aseguradora_id,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -463,7 +473,8 @@ export const creditRouter = new Elysia()
           sifcosLimpios,
           capital_min,
           capital_max,
-          estadosCreditoParsed?.values
+          estadosCreditoParsed?.values,
+          aseguradora_id
         );
         set.status = 200;
         return result;
@@ -510,6 +521,7 @@ export const creditRouter = new Elysia()
         capital_min: t.Optional(t.Number()),
         capital_max: t.Optional(t.Number()),
         estados_credito: t.Optional(t.Array(t.String())),
+        aseguradora_id: t.Optional(t.Number()),
       }),
     }
   )

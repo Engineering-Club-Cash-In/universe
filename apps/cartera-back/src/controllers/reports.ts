@@ -299,6 +299,7 @@ export async function getCreditosWithUserByMesAnioExcel(
     { header: "Total Inversión IVA", key: "total_inversion_iva", width: 20 },
 
     // Inversionistas (ahora estáticos)
+    { header: "Aseguradora", key: "aseguradora", width: 25 },
     { header: "Inversionista Nombre", key: "inv_nombre", width: 25 },
     { header: "Monto Aportado", key: "inv_aportado", width: 15 },
     { header: "Monto CashIn", key: "inv_cashin", width: 15 },
@@ -378,6 +379,7 @@ export async function getCreditosWithUserByMesAnioExcel(
       total_cash_in_iva: item.resumen.total_cash_in_iva,
       total_inversion_monto: item.resumen.total_inversion_monto,
       total_inversion_iva: item.resumen.total_inversion_iva,
+      aseguradora: item.aseguradora || "--",
     };
 
     const inversionistas = item.inversionistas || [];

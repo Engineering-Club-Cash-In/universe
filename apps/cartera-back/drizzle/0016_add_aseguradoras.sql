@@ -8,6 +8,11 @@ CREATE TABLE IF NOT EXISTS cartera.aseguradoras (
   created_at timestamp NOT NULL DEFAULT now()
 );
 
+-- Unicidad case-insensitive: el UNIQUE(nombre) es case-sensitive en Postgres y
+-- permitiría 'GyT' y 'gyt' a la vez. Este índice funcional lo evita.
+CREATE UNIQUE INDEX IF NOT EXISTS aseguradoras_nombre_lower_uq
+  ON cartera.aseguradoras (LOWER(nombre));
+
 ALTER TABLE cartera.creditos
   ADD COLUMN IF NOT EXISTS aseguradora_id integer REFERENCES cartera.aseguradoras(id);
 

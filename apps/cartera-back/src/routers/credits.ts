@@ -337,6 +337,7 @@ export const creditRouter = new Elysia()
         proximidad_pago: proximidadPagoParam,
         is_vehiculo_propio: isVehiculoPropioParam,
         inversionista_ids: inversionistaIdsArray,
+        aseguradora_id: aseguradoraIdNum,
         excel: true,
       });
       set.status = 200;
@@ -448,6 +449,7 @@ export const creditRouter = new Elysia()
             proximidad_pago,
             is_vehiculo_propio,
             inversionista_ids,
+            aseguradora_id,
             excel: true,
           });
           set.status = 200;

@@ -641,24 +641,28 @@ function RouteComponent() {
 						</p>
 					</CardContent>
 				</Card>
-				<Card>
-					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="font-medium text-sm">Valor Total</CardTitle>
-						<Banknote className="h-4 w-4 text-purple-500" />
-					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-2xl">
-							Q
-							{(statsQuery.data?.totalValue ?? 0).toLocaleString("es-GT", {
-								minimumFractionDigits: 2,
-								maximumFractionDigits: 2,
-							})}
-						</div>
-						<p className="text-muted-foreground text-xs">
-							Deuda total en cartera vigente
-						</p>
-					</CardContent>
-				</Card>
+				{/* "Valor Total" es global; se oculta a los vendedores (no hay un
+				    agregado acotado a su cartera, mostraría Q0.00 engañoso). */}
+				{userProfile.data.role !== "sales" && (
+					<Card>
+						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+							<CardTitle className="font-medium text-sm">Valor Total</CardTitle>
+							<Banknote className="h-4 w-4 text-purple-500" />
+						</CardHeader>
+						<CardContent>
+							<div className="font-bold text-2xl">
+								Q
+								{(statsQuery.data?.totalValue ?? 0).toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
+							</div>
+							<p className="text-muted-foreground text-xs">
+								Deuda total en cartera vigente
+							</p>
+						</CardContent>
+					</Card>
+				)}
 			</div>
 
 			<Card>

@@ -3422,6 +3422,19 @@ export const crmRouter = {
 				return { data: [], total: 0, limit, offset };
 			}
 
+			// Búsqueda por SIFCO exacto dentro de una vista acotada (sales/leadId):
+			// cartera-back prioriza la lista `numeros_credito_sifco` sobre el SIFCO
+			// único, así que NO se mandan ambos. Si el SIFCO buscado está en el
+			// alcance, se manda solo ese (sin la lista); si no, no hay resultado.
+			// La búsqueda por nombre sí va siempre a cartera junto al alcance (AND).
+			let effectiveSifcos = scopedSifcos;
+			if (sifcoExacto && scopedSifcos) {
+				if (!scopedSifcos.includes(sifcoExacto)) {
+					return { data: [], total: 0, limit, offset };
+				}
+				effectiveSifcos = undefined;
+			}
+
 			// Traer SOLO la ventana visible desde cartera. El nombre y el SIFCO se
 			// filtran en el origen (cartera); el alcance sales/leadId va por SIFCOs.
 			const { credits, total } = await getClientCreditsPageFromCartera({
@@ -3429,7 +3442,7 @@ export const crmRouter = {
 				limit,
 				nombreUsuario,
 				sifcoExacto,
-				sifcos: scopedSifcos,
+				sifcos: effectiveSifcos,
 			});
 
 			const pageSifcos = credits
@@ -3624,12 +3637,12 @@ export const crmRouter = {
 				.map((o) => o.numeroSifco)
 				.filter((s): s is string => Boolean(s));
 			if (scopedSifcos.length === 0) {
-				return { totalClients: 0, totalValue: 0 };
+				return { totalClients: 0, totalValue: null };
 			}
 		}
 
-		// Total de clientes vigentes: el helper con limit=0 solo suma los
-		// totalCount de los 3 estados (no recolecta filas).
+		// Total de clientes vigentes: el helper con limit=0 solo hace una sonda de
+		// conteo contra cartera (estado ACTIVO ya incluye los 3 vigentes).
 		const { total } = await getClientCreditsPageFromCartera({
 			offset: 0,
 			limit: 0,
@@ -3638,9 +3651,10 @@ export const crmRouter = {
 
 		// Valor total: stats agregadas de cartera (suma de capital de la cartera
 		// activa). Solo para vistas globales; para asesores no hay un agregado
-		// barato acotado, así que se omite.
-		let totalValue = 0;
+		// barato acotado, así que se devuelve null y el front oculta la tarjeta.
+		let totalValue: number | null = null;
 		if (context.userRole !== "sales") {
+			totalValue = 0;
 			try {
 				const stats = await carteraBackClient.getStats();
 				totalValue = Object.values(stats.porCuotasAtrasadas).reduce(

@@ -641,12 +641,15 @@ function RouteComponent() {
 						</p>
 					</CardContent>
 				</Card>
-				{/* "Valor Total" es global; se oculta a los vendedores (no hay un
-				    agregado acotado a su cartera, mostraría Q0.00 engañoso). */}
+				{/* Capital de la cartera activa (suma de capital vía /stats). Es
+				    global; se oculta a los vendedores (no hay un agregado acotado a
+				    su cartera, mostraría Q0.00 engañoso). */}
 				{userProfile.data.role !== "sales" && (
 					<Card>
 						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-							<CardTitle className="font-medium text-sm">Valor Total</CardTitle>
+							<CardTitle className="font-medium text-sm">
+								Capital en cartera
+							</CardTitle>
 							<Banknote className="h-4 w-4 text-purple-500" />
 						</CardHeader>
 						<CardContent>
@@ -658,7 +661,7 @@ function RouteComponent() {
 								})}
 							</div>
 							<p className="text-muted-foreground text-xs">
-								Deuda total en cartera vigente
+								Capital de créditos activos
 							</p>
 						</CardContent>
 					</Card>

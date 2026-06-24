@@ -203,6 +203,11 @@
     // true = crédito solo-interés: la cuota cubre interés + IVA + seguro + GPS +
     // membresía, sin amortizar capital. El capital se paga vía abonos/pago final.
     no_amortiza_capital: boolean("no_amortiza_capital").notNull().default(false),
+    // FK opcional a la aseguradora que cubre este crédito.
+    // Se resuelve con LEFT JOIN en getAllCredits → campo `aseguradora` en la respuesta.
+    aseguradora_id: integer("aseguradora_id").references(() => aseguradoras.id, {
+      onDelete: "set null",
+    }),
   });
   export const historial_devolucion_credito = customSchema.table("historial_devolucion_credito", {
     id: serial("id").primaryKey(),
@@ -1760,4 +1765,17 @@
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+  });
+
+  // ============================================
+  // TABLA: aseguradoras
+  //   Catálogo de aseguradoras vinculadas a créditos.
+  //   Cada crédito puede tener como máximo una aseguradora (FK nullable).
+  // ============================================
+  export const aseguradoras = customSchema.table("aseguradoras", {
+    id: serial("id").primaryKey(),
+    nombre: varchar("nombre", { length: 200 }).notNull().unique(),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   });

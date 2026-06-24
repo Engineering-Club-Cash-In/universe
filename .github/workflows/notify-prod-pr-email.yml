@@ -1,0 +1,149 @@
+name: Notificar pase a producción
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  email-jhairo:
+    name: Email a Jhairo
+    if: github.event.pull_request.head.ref == 'develop' && github.event.pull_request.base.ref == 'main' && (github.event.action != 'closed' || github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      PR_EVENT_ACTION: ${{ github.event.action }}
+      PR_MERGED: ${{ github.event.pull_request.merged }}
+      EMAIL_TO: jhairo.n@clubcashin.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generar resumen del pase a producción
+        id: summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/prod-notify
+
+          gh pr view "$PR_NUMBER" \
+            --json number,title,url,author,body,baseRefName,headRefName,commits,files,updatedAt \
+            > /tmp/prod-notify/pr.json
+
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          data = json.loads(Path('/tmp/prod-notify/pr.json').read_text())
+          commits = data.get('commits') or []
+          files = data.get('files') or []
+          body = (data.get('body') or '').strip()
+          event_action = os.environ.get('PR_EVENT_ACTION', '')
+          merged = os.environ.get('PR_MERGED', '').lower() == 'true'
+          status = 'Producción mergeada / deploy en curso' if merged else 'PR de pase a producción abierto/actualizado'
+
+          def esc(s):
+              return str(s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+          lines = []
+          lines.append("<h2>🚀 Pase a producción: develop → main</h2>")
+          lines.append(f"<p><strong>Estado:</strong> {esc(status)}</p>")
+          lines.append(f"<p><strong>Evento GitHub:</strong> {esc(event_action)}</p>")
+          lines.append(f"<p><strong>PR:</strong> <a href='{esc(data['url'])}'>#{data['number']} — {esc(data['title'])}</a></p>")
+          lines.append(f"<p><strong>Autor:</strong> {esc((data.get('author') or {}).get('login'))}</p>")
+          lines.append(f"<p><strong>Ramas:</strong> {esc(data.get('headRefName'))} → {esc(data.get('baseRefName'))}</p>")
+          lines.append(f"<p><strong>Actualizado:</strong> {esc(data.get('updatedAt'))}</p>")
+
+          if body:
+              lines.append('<h3>Resumen del PR</h3>')
+              lines.append('<pre style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">' + esc(body[:6000]) + '</pre>')
+
+          lines.append(f"<h3>Commits incluidos ({len(commits)})</h3>")
+          if commits:
+              lines.append('<ul>')
+              for c in commits[:80]:
+                  msg = (c.get('messageHeadline') or '').strip()
+                  oid = (c.get('oid') or '')[:7]
+                  lines.append(f"<li><code>{esc(oid)}</code> {esc(msg)}</li>")
+              if len(commits) > 80:
+                  lines.append(f"<li>… {len(commits) - 80} commits más</li>")
+              lines.append('</ul>')
+          else:
+              lines.append('<p>Sin commits listados por GitHub.</p>')
+
+          lines.append(f"<h3>Archivos cambiados ({len(files)})</h3>")
+          if files:
+              lines.append('<ul>')
+              for f in files[:120]:
+                  path = f.get('path') or ''
+                  additions = f.get('additions', 0)
+                  deletions = f.get('deletions', 0)
+                  lines.append(f"<li><code>{esc(path)}</code> (+{additions}/-{deletions})</li>")
+              if len(files) > 120:
+                  lines.append(f"<li>… {len(files) - 120} archivos más</li>")
+              lines.append('</ul>')
+          else:
+              lines.append('<p>Sin archivos listados por GitHub.</p>')
+
+          lines.append('<hr>')
+          lines.append('<p>Este aviso se envía automáticamente cuando se abre o actualiza un PR de <code>develop</code> hacia <code>main</code>.</p>')
+
+          text = []
+          text.append('Pase a producción: develop → main')
+          text.append(f"PR: #{data['number']} — {data['title']}")
+          text.append(f"URL: {data['url']}")
+          text.append(f"Autor: {(data.get('author') or {}).get('login')}")
+          text.append('')
+          if body:
+              text.append('Resumen del PR:')
+              text.append(body[:6000])
+              text.append('')
+          text.append(f"Commits incluidos ({len(commits)}):")
+          for c in commits[:80]:
+              text.append(f"- {(c.get('oid') or '')[:7]} {(c.get('messageHeadline') or '').strip()}")
+          if len(commits) > 80:
+              text.append(f"- … {len(commits) - 80} commits más")
+          text.append('')
+          text.append(f"Archivos cambiados ({len(files)}):")
+          for f in files[:120]:
+              text.append(f"- {f.get('path')} (+{f.get('additions', 0)}/-{f.get('deletions', 0)})")
+          if len(files) > 120:
+              text.append(f"- … {len(files) - 120} archivos más")
+
+          Path('/tmp/prod-notify/body.html').write_text('\n'.join(lines), encoding='utf-8')
+          Path('/tmp/prod-notify/body.txt').write_text('\n'.join(text), encoding='utf-8')
+          PY
+
+          prefix="✅ Producción mergeada"
+          if [ "${PR_MERGED}" != "true" ]; then
+            prefix="🚀 Pase a producción"
+          fi
+          {
+            echo 'subject<<EOF'
+            echo "${prefix}: ${PR_TITLE} (#${PR_NUMBER})"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Enviar email a Jhairo
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: luis.r@clubcashin.com
+          password: ${{ secrets.PROD_NOTIFY_SMTP_PASSWORD }}
+          from: Luis Ralda <luis.r@clubcashin.com>
+          to: ${{ env.EMAIL_TO }}
+          subject: ${{ steps.summary.outputs.subject }}
+          html_body: file:///tmp/prod-notify/body.html
+          body: file:///tmp/prod-notify/body.txt

@@ -259,13 +259,14 @@ export async function getCurrentClientCreditsFromCartera(
 const CARTERA_PAGE_FETCH_SIZE = 100;
 
 /**
- * Trae SOLO la ventana [offset, offset+limit) del portafolio vigente, tratando
- * los estados ACTIVO/MOROSO/EN_CONVENIO como una lista concatenada. Evita bajar
- * toda la cartera: pide a cartera-back únicamente las páginas que la ventana
- * toca y usa el `totalCount` que ya devuelve `getAllCreditos` para el total.
+ * Trae SOLO la ventana [offset, offset+limit) del portafolio vigente.
  *
- * Cuando la ventana ya está completa, los estados restantes se consultan con una
- * sonda mínima (perPage=1) solo para acumular el conteo total.
+ * En cartera-back, `estado: "ACTIVO"` SIN `cuotas_atrasadas` ya devuelve
+ * `statusCredit IN ('ACTIVO','MOROSO','EN_CONVENIO')` — es decir, todos los
+ * créditos vigentes en una sola consulta (ver apps/cartera-back credits.ts).
+ * Por eso NO se itera por estado: una sola corriente paginada, sin doble conteo
+ * ni filas duplicadas. Pide solo las páginas que la ventana toca y usa el
+ * `totalCount` que ya devuelve `getAllCreditos`.
  */
 export async function getClientCreditsPageFromCartera(
 	params: {
@@ -282,6 +283,8 @@ export async function getClientCreditsPageFromCartera(
 	const filtros = {
 		mes: 0,
 		anio: 0,
+		// ACTIVO (sin cuotas_atrasadas) = ACTIVO + MOROSO + EN_CONVENIO en origen.
+		estado: "ACTIVO" as ClientCreditCarteraStatus,
 		...(params.nombreUsuario ? { nombre_usuario: params.nombreUsuario } : {}),
 		...(params.sifcoExacto ? { numero_credito_sifco: params.sifcoExacto } : {}),
 		...(params.sifcos && params.sifcos.length > 0
@@ -289,56 +292,34 @@ export async function getClientCreditsPageFromCartera(
 			: {}),
 	};
 
+	// Solo se necesita el conteo (p. ej. para las stats): sonda mínima.
+	if (params.limit <= 0) {
+		const probe = await fetchCredits({ ...filtros, page: 1, perPage: 1 });
+		return { credits: [], total: probe.totalCount ?? probe.data.length };
+	}
+
 	const credits: CarteraClientCredit[] = [];
-	let total = 0;
-	let skip = Math.max(0, params.offset);
-	let need = Math.max(0, params.limit);
+	let need = params.limit;
+	let cursor = Math.max(0, params.offset);
+	let page = Math.floor(cursor / perPage) + 1;
+	let resp = await fetchCredits({ ...filtros, page, perPage });
+	const total = resp.totalCount ?? resp.data.length;
 
-	for (const estado of CLIENT_CREDIT_CARTERA_STATUSES) {
-		if (need <= 0) {
-			// La ventana ya está completa: solo necesitamos el conteo de este
-			// estado para el total.
-			const probe = await fetchCredits({
-				...filtros,
-				estado,
-				page: 1,
-				perPage: 1,
-			});
-			total += probe.totalCount ?? probe.data.length;
-			continue;
+	// Recolectar desde `cursor` hasta agotar `need` o el total.
+	while (need > 0 && cursor < total) {
+		const pageStart = (page - 1) * perPage;
+		const slice = resp.data.slice(
+			cursor - pageStart,
+			cursor - pageStart + need,
+		);
+		if (slice.length === 0) break;
+		credits.push(...slice);
+		need -= slice.length;
+		cursor += slice.length;
+		if (need > 0 && cursor < total) {
+			page += 1;
+			resp = await fetchCredits({ ...filtros, page, perPage });
 		}
-
-		// La ventana puede caer en este estado. Arrancamos en la página que
-		// contiene el índice local `skip`.
-		let localStart = skip;
-		let page = Math.floor(localStart / perPage) + 1;
-		let resp = await fetchCredits({ ...filtros, estado, page, perPage });
-		const count = resp.totalCount ?? resp.data.length;
-		total += count;
-
-		if (localStart >= count) {
-			// La ventana todavía no llega a este estado; lo saltamos completo.
-			skip = localStart - count;
-			continue;
-		}
-
-		// Recolectar desde `localStart` hasta agotar `need` o el estado.
-		while (need > 0 && localStart < count) {
-			const pageStart = (page - 1) * perPage;
-			const slice = resp.data.slice(
-				localStart - pageStart,
-				localStart - pageStart + need,
-			);
-			if (slice.length === 0) break;
-			credits.push(...slice);
-			need -= slice.length;
-			localStart += slice.length;
-			if (need > 0 && localStart < count) {
-				page += 1;
-				resp = await fetchCredits({ ...filtros, estado, page, perPage });
-			}
-		}
-		skip = 0;
 	}
 
 	return { credits, total };

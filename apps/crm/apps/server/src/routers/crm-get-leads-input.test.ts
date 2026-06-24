@@ -273,9 +273,10 @@ describe("buildCarteraMatchedClientRows", () => {
 });
 
 describe("getClientCreditsPageFromCartera", () => {
-	// Fetcher falso: cada estado tiene `counts[estado]` créditos y devuelve la
-	// página pedida + el totalCount, igual que cartera-back.
-	const buildFetcher = (counts: Record<string, number>) => {
+	// Fetcher falso de cartera-back: `estado: "ACTIVO"` ya devuelve todos los
+	// vigentes, así que el helper solo debe consultar ese estado. Devuelve la
+	// página pedida + el totalCount.
+	const buildFetcher = (total: number) => {
 		const calls: Array<{ estado: string; page: number; perPage: number }> = [];
 		const fetchCredits = async (params: {
 			estado: string;
@@ -287,18 +288,15 @@ describe("getClientCreditsPageFromCartera", () => {
 				page: params.page,
 				perPage: params.perPage,
 			});
-			const count = counts[params.estado] ?? 0;
 			const start = (params.page - 1) * params.perPage;
 			const data = [];
-			for (let i = start; i < Math.min(start + params.perPage, count); i++) {
-				data.push({
-					creditos: { numero_credito_sifco: `${params.estado}-${i}` },
-				});
+			for (let i = start; i < Math.min(start + params.perPage, total); i++) {
+				data.push({ creditos: { numero_credito_sifco: `SIFCO-${i}` } });
 			}
 			return {
 				data,
-				totalCount: count,
-				totalPages: Math.max(1, Math.ceil(count / params.perPage)),
+				totalCount: total,
+				totalPages: Math.max(1, Math.ceil(total / params.perPage)),
 			};
 		};
 		return { fetchCredits, calls };
@@ -308,41 +306,48 @@ describe("getClientCreditsPageFromCartera", () => {
 		credits: Array<{ creditos?: { numero_credito_sifco?: string | null } }>,
 	) => credits.map((c) => c.creditos?.numero_credito_sifco);
 
-	test("returns only the requested window within ACTIVO and totals all states", async () => {
-		const { fetchCredits, calls } = buildFetcher({
-			ACTIVO: 5,
-			MOROSO: 4,
-			EN_CONVENIO: 3,
-		});
+	test("returns only the requested window and consulta solo ACTIVO", async () => {
+		const { fetchCredits, calls } = buildFetcher(250);
 
 		const { credits, total } = await getClientCreditsPageFromCartera(
 			{ offset: 0, limit: 2 },
 			fetchCredits,
 		);
 
-		expect(sifcosDe(credits)).toEqual(["ACTIVO-0", "ACTIVO-1"]);
-		expect(total).toBe(12);
-		// ACTIVO se pide con página real; los demás solo se sondean (perPage=1).
-		const moroso = calls.find((c) => c.estado === "MOROSO");
-		const convenio = calls.find((c) => c.estado === "EN_CONVENIO");
-		expect(moroso?.perPage).toBe(1);
-		expect(convenio?.perPage).toBe(1);
+		expect(sifcosDe(credits)).toEqual(["SIFCO-0", "SIFCO-1"]);
+		expect(total).toBe(250);
+		// Nunca debe iterar MOROSO/EN_CONVENIO (cartera ya los incluye en ACTIVO).
+		expect(calls.every((c) => c.estado === "ACTIVO")).toBe(true);
 	});
 
-	test("stitches the window across the ACTIVO -> MOROSO boundary", async () => {
-		const { fetchCredits } = buildFetcher({
-			ACTIVO: 2,
-			MOROSO: 3,
-			EN_CONVENIO: 0,
-		});
+	test("paginates across cartera pages (perPage=100)", async () => {
+		const { fetchCredits, calls } = buildFetcher(250);
 
+		// Ventana 90..109 cruza el borde de página 1 (0-99) a página 2 (100-199).
 		const { credits, total } = await getClientCreditsPageFromCartera(
-			{ offset: 1, limit: 3 },
+			{ offset: 90, limit: 20 },
 			fetchCredits,
 		);
 
-		expect(sifcosDe(credits)).toEqual(["ACTIVO-1", "MOROSO-0", "MOROSO-1"]);
-		expect(total).toBe(5);
+		expect(total).toBe(250);
+		expect(credits).toHaveLength(20);
+		expect(sifcosDe(credits)[0]).toBe("SIFCO-90");
+		expect(sifcosDe(credits).at(-1)).toBe("SIFCO-109");
+		expect(calls.map((c) => c.page)).toEqual([1, 2]);
+	});
+
+	test("con limit<=0 solo cuenta (sonda), sin recolectar filas", async () => {
+		const { fetchCredits, calls } = buildFetcher(42);
+
+		const { credits, total } = await getClientCreditsPageFromCartera(
+			{ offset: 0, limit: 0 },
+			fetchCredits,
+		);
+
+		expect(credits).toEqual([]);
+		expect(total).toBe(42);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].perPage).toBe(1);
 	});
 
 	test("passes filters through to the fetcher", async () => {

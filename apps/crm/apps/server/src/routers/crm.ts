@@ -60,9 +60,7 @@ import {
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
-import {
-	getGuatemalaMonthWindow,
-} from "../lib/guatemala-month-window";
+import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -104,6 +102,21 @@ type ClientCreditFetcher = (params: {
 	perPage: number;
 }) => Promise<{
 	data: CarteraClientCredit[];
+	totalPages?: number | null;
+}>;
+
+type ClientCreditPageFetcher = (params: {
+	mes: number;
+	anio: number;
+	estado: ClientCreditCarteraStatus;
+	page: number;
+	perPage: number;
+	nombre_usuario?: string;
+	numero_credito_sifco?: string;
+	numeros_credito_sifco?: string[];
+}) => Promise<{
+	data: CarteraClientCredit[];
+	totalCount?: number | null;
 	totalPages?: number | null;
 }>;
 
@@ -239,10 +252,95 @@ export async function getCurrentClientCreditsFromCartera(
 	fetchCredits: ClientCreditFetcher = (params) =>
 		carteraBackClient.getAllCreditos(params),
 ) {
-	return getClientCreditsFromCartera(
-		fetchCredits,
-		{ mes: 0, anio: 0 },
-	);
+	return getClientCreditsFromCartera(fetchCredits, { mes: 0, anio: 0 });
+}
+
+const CARTERA_PAGE_FETCH_SIZE = 100;
+
+/**
+ * Trae SOLO la ventana [offset, offset+limit) del portafolio vigente, tratando
+ * los estados ACTIVO/MOROSO/EN_CONVENIO como una lista concatenada. Evita bajar
+ * toda la cartera: pide a cartera-back únicamente las páginas que la ventana
+ * toca y usa el `totalCount` que ya devuelve `getAllCreditos` para el total.
+ *
+ * Cuando la ventana ya está completa, los estados restantes se consultan con una
+ * sonda mínima (perPage=1) solo para acumular el conteo total.
+ */
+export async function getClientCreditsPageFromCartera(
+	params: {
+		offset: number;
+		limit: number;
+		nombreUsuario?: string;
+		sifcoExacto?: string;
+		sifcos?: string[];
+	},
+	fetchCredits: ClientCreditPageFetcher = (p) =>
+		carteraBackClient.getAllCreditos(p),
+): Promise<{ credits: CarteraClientCredit[]; total: number }> {
+	const perPage = CARTERA_PAGE_FETCH_SIZE;
+	const filtros = {
+		mes: 0,
+		anio: 0,
+		...(params.nombreUsuario ? { nombre_usuario: params.nombreUsuario } : {}),
+		...(params.sifcoExacto ? { numero_credito_sifco: params.sifcoExacto } : {}),
+		...(params.sifcos && params.sifcos.length > 0
+			? { numeros_credito_sifco: params.sifcos }
+			: {}),
+	};
+
+	const credits: CarteraClientCredit[] = [];
+	let total = 0;
+	let skip = Math.max(0, params.offset);
+	let need = Math.max(0, params.limit);
+
+	for (const estado of CLIENT_CREDIT_CARTERA_STATUSES) {
+		if (need <= 0) {
+			// La ventana ya está completa: solo necesitamos el conteo de este
+			// estado para el total.
+			const probe = await fetchCredits({
+				...filtros,
+				estado,
+				page: 1,
+				perPage: 1,
+			});
+			total += probe.totalCount ?? probe.data.length;
+			continue;
+		}
+
+		// La ventana puede caer en este estado. Arrancamos en la página que
+		// contiene el índice local `skip`.
+		let localStart = skip;
+		let page = Math.floor(localStart / perPage) + 1;
+		let resp = await fetchCredits({ ...filtros, estado, page, perPage });
+		const count = resp.totalCount ?? resp.data.length;
+		total += count;
+
+		if (localStart >= count) {
+			// La ventana todavía no llega a este estado; lo saltamos completo.
+			skip = localStart - count;
+			continue;
+		}
+
+		// Recolectar desde `localStart` hasta agotar `need` o el estado.
+		while (need > 0 && localStart < count) {
+			const pageStart = (page - 1) * perPage;
+			const slice = resp.data.slice(
+				localStart - pageStart,
+				localStart - pageStart + need,
+			);
+			if (slice.length === 0) break;
+			credits.push(...slice);
+			need -= slice.length;
+			localStart += slice.length;
+			if (need > 0 && localStart < count) {
+				page += 1;
+				resp = await fetchCredits({ ...filtros, estado, page, perPage });
+			}
+		}
+		skip = 0;
+	}
+
+	return { credits, total };
 }
 
 function splitFullName(fullName: string | null | undefined) {
@@ -342,38 +440,6 @@ export function buildCarteraMatchedClientRows(params: {
 	}
 
 	return rows;
-}
-
-export function calculateCarteraClientStats(params: {
-	carteraCredits: CarteraClientCredit[];
-	matchedSifcos: Set<string>;
-	uniqueLeadCount: number;
-	scopedOpportunityCount: number;
-	userRole: string | null | undefined;
-}) {
-	const visibleCredits =
-		params.userRole === "sales"
-			? params.carteraCredits.filter((credit) => {
-					const sifco = credit.creditos?.numero_credito_sifco?.trim();
-					return sifco ? params.matchedSifcos.has(sifco) : false;
-				})
-			: params.carteraCredits;
-
-	return {
-		totalClients:
-			params.userRole === "sales"
-				? params.matchedSifcos.size
-				: params.carteraCredits.length,
-		totalClosedOpportunities: params.scopedOpportunityCount,
-		totalValue: visibleCredits.reduce(
-			(sum, credit) => sum + getCarteraCreditAmount(credit),
-			0,
-		),
-		missingCrmCount:
-			params.userRole === "sales"
-				? 0
-				: Math.max(0, params.carteraCredits.length - params.matchedSifcos.size),
-	};
 }
 
 export const getLeadsInputSchema = z.object({
@@ -3321,117 +3387,141 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { limit, offset, search } = input;
+			const { limit, offset } = input;
+			const searchValue = input.search?.trim();
+			// Solo se busca por nombre o por No. SIFCO (no email ni teléfono). El
+			// filtro lo hace cartera: nombre vía nombre_usuario y, si el término es
+			// solo dígitos (largo), como SIFCO exacto.
+			const looksLikeSifco =
+				!!searchValue && /^\d{6,}$/.test(searchValue.replace(/\s/g, ""));
+			const nombreUsuario =
+				searchValue && !looksLikeSifco ? searchValue : undefined;
+			const sifcoExacto = looksLikeSifco
+				? searchValue?.replace(/\s/g, "")
+				: undefined;
 
-			const carteraCredits = await getCurrentClientCreditsFromCartera();
-			const clientCreditSifcos = carteraCredits
-				.map((row) => row.creditos?.numero_credito_sifco?.trim())
-				.filter((sifco): sifco is string => Boolean(sifco));
-			const carteraCreditBySifco = new Map(
-				carteraCredits
-					.map(
-						(row) => [row.creditos?.numero_credito_sifco?.trim(), row] as const,
-					)
-					.filter((entry): entry is readonly [string, CarteraClientCredit] =>
-						Boolean(entry[0]),
-					),
-			);
-
-			if (clientCreditSifcos.length === 0) {
-				return {
-					data: [],
-					total: 0,
-					limit,
-					offset,
-				};
-			}
-
-			// Find leads with at least one credit currently active, overdue, or in agreement in cartera.
-			const leadsWithClientCredits = await db
-				.selectDistinct({ leadId: opportunities.leadId })
-				.from(opportunities)
-				.where(
-					and(
-						isNotNull(opportunities.leadId),
-						inArray(opportunities.numeroSifco, clientCreditSifcos),
-					),
-				);
-
-			const clientLeadIds = leadsWithClientCredits
-				.map((r) => r.leadId)
-				.filter((id): id is string => id !== null);
-
-			// Build conditions for the main query
-			const conditions: any[] = [];
-			if (clientLeadIds.length > 0) {
-				conditions.push(
-					sql`${leads.id} IN (${sql.join(
-						clientLeadIds.map((id) => sql`${id}`),
-						sql`, `,
-					)})`,
-				);
-			} else {
-				conditions.push(sql`false`);
-			}
-
-			// Filter by user if not admin/sales_supervisor
-			if (context.userRole === "sales") {
-				conditions.push(eq(leads.assignedTo, context.userId));
-			}
-
-			// Filter by specific lead ID
+			// Vistas acotadas: en lugar de bajar toda la cartera, resolvemos en la
+			// DB local los SIFCOs relevantes y se los pasamos a cartera para que
+			// pagine solo ese subconjunto.
+			//  - leadId: solo los créditos de ese lead (modal de detalle)
+			//  - rol sales: solo los créditos de los leads asignados al asesor
+			let scopedSifcos: string[] | undefined;
 			if (input.leadId) {
-				conditions.push(eq(leads.id, input.leadId));
+				const opps = await db
+					.select({ numeroSifco: opportunities.numeroSifco })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.leadId, input.leadId),
+							isNotNull(opportunities.numeroSifco),
+						),
+					);
+				scopedSifcos = opps
+					.map((o) => o.numeroSifco)
+					.filter((s): s is string => Boolean(s));
+			} else if (context.userRole === "sales") {
+				const opps = await db
+					.select({ numeroSifco: opportunities.numeroSifco })
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(
+						and(
+							eq(leads.assignedTo, context.userId),
+							isNotNull(opportunities.numeroSifco),
+						),
+					);
+				scopedSifcos = opps
+					.map((o) => o.numeroSifco)
+					.filter((s): s is string => Boolean(s));
 			}
 
-			const whereClause = and(...conditions);
+			// Vista acotada sin créditos => nada que mostrar (no consultar cartera).
+			if (scopedSifcos && scopedSifcos.length === 0) {
+				return { data: [], total: 0, limit, offset };
+			}
 
-			// Get paginated leads
-			const clientLeads = await db
-				.select({
-					id: leads.id,
-					firstName: leads.firstName,
-					middleName: leads.middleName,
-					lastName: leads.lastName,
-					secondLastName: leads.secondLastName,
-					email: leads.email,
-					phone: leads.phone,
-					dpi: leads.dpi,
-					nit: leads.nit,
-					age: leads.age,
-					clientType: leads.clientType,
-					maritalStatus: leads.maritalStatus,
-					dependents: leads.dependents,
-					monthlyIncome: leads.monthlyIncome,
-					loanAmount: leads.loanAmount,
-					occupation: leads.occupation,
-					workTime: leads.workTime,
-					ownsHome: leads.ownsHome,
-					ownsVehicle: leads.ownsVehicle,
-					hasCreditCard: leads.hasCreditCard,
-					jobTitle: leads.jobTitle,
-					direccion: leads.direccion,
-					departamento: leads.departamento,
-					municipio: leads.municipio,
-					zona: leads.zona,
-					assignedTo: leads.assignedTo,
-					createdAt: leads.createdAt,
-					updatedAt: leads.updatedAt,
-					assignedUser: {
-						id: user.id,
-						name: user.name,
-					},
-				})
-				.from(leads)
-				.leftJoin(user, eq(leads.assignedTo, user.id))
-				.where(whereClause)
-				.orderBy(desc(leads.createdAt));
+			// Traer SOLO la ventana visible desde cartera. El nombre y el SIFCO se
+			// filtran en el origen (cartera); el alcance sales/leadId va por SIFCOs.
+			const { credits, total } = await getClientCreditsPageFromCartera({
+				offset,
+				limit,
+				nombreUsuario,
+				sifcoExacto,
+				sifcos: scopedSifcos,
+			});
 
-			// Now get the opportunities for each lead
-			const leadIds = clientLeads.map((l) => l.id);
+			const pageSifcos = credits
+				.map((c) => c.creditos?.numero_credito_sifco?.trim())
+				.filter((s): s is string => Boolean(s));
 
+			// Enriquecer SOLO la página con datos del CRM.
+			// 1) Oportunidades cuyo numeroSifco está en la página -> sifco -> leadId
+			const matchingOpps =
+				pageSifcos.length > 0
+					? await db
+							.select({
+								numeroSifco: opportunities.numeroSifco,
+								leadId: opportunities.leadId,
+							})
+							.from(opportunities)
+							.where(inArray(opportunities.numeroSifco, pageSifcos))
+					: [];
+
+			const sifcoToLeadId = new Map<string, string>();
+			for (const o of matchingOpps) {
+				if (o.numeroSifco && o.leadId && !sifcoToLeadId.has(o.numeroSifco)) {
+					sifcoToLeadId.set(o.numeroSifco, o.leadId);
+				}
+			}
+			const matchedLeadIds = Array.from(new Set(sifcoToLeadId.values()));
+
+			// 2) Datos completos de esos leads
+			const leadsData =
+				matchedLeadIds.length > 0
+					? await db
+							.select({
+								id: leads.id,
+								firstName: leads.firstName,
+								middleName: leads.middleName,
+								lastName: leads.lastName,
+								secondLastName: leads.secondLastName,
+								email: leads.email,
+								phone: leads.phone,
+								dpi: leads.dpi,
+								nit: leads.nit,
+								age: leads.age,
+								clientType: leads.clientType,
+								maritalStatus: leads.maritalStatus,
+								dependents: leads.dependents,
+								monthlyIncome: leads.monthlyIncome,
+								loanAmount: leads.loanAmount,
+								occupation: leads.occupation,
+								workTime: leads.workTime,
+								ownsHome: leads.ownsHome,
+								ownsVehicle: leads.ownsVehicle,
+								hasCreditCard: leads.hasCreditCard,
+								jobTitle: leads.jobTitle,
+								direccion: leads.direccion,
+								departamento: leads.departamento,
+								municipio: leads.municipio,
+								zona: leads.zona,
+								assignedTo: leads.assignedTo,
+								createdAt: leads.createdAt,
+								updatedAt: leads.updatedAt,
+								assignedUser: {
+									id: user.id,
+									name: user.name,
+								},
+							})
+							.from(leads)
+							.leftJoin(user, eq(leads.assignedTo, user.id))
+							.where(inArray(leads.id, matchedLeadIds))
+					: [];
+			const leadById = new Map(leadsData.map((l) => [l.id, l]));
+
+			// 3) Todas las oportunidades de esos leads (para la lista del row)
 			const leadsOpportunities =
-				leadIds.length > 0
+				matchedLeadIds.length > 0
 					? await db
 							.select({
 								id: opportunities.id,
@@ -3451,16 +3541,10 @@ export const crmRouter = {
 							})
 							.from(opportunities)
 							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-							.where(
-								sql`${opportunities.leadId} IN (${sql.join(
-									leadIds.map((id) => sql`${id}`),
-									sql`, `,
-								)})`,
-							)
+							.where(inArray(opportunities.leadId, matchedLeadIds))
 							.orderBy(desc(opportunities.createdAt))
 					: [];
 
-			// Group opportunities by lead
 			const opportunitiesByLead = leadsOpportunities.reduce(
 				(acc, opp) => {
 					const leadId = opp.leadId;
@@ -3477,9 +3561,9 @@ export const crmRouter = {
 							status: opp.status,
 							createdAt: opp.createdAt,
 							stage: opp.stage,
-							isClosed:
-								opp.numeroSifco != null &&
-								clientCreditSifcos.includes(opp.numeroSifco),
+							// Una oportunidad cuenta como "colocada" cuando tiene número
+							// SIFCO (se generó al desembolsar el crédito en cartera).
+							isClosed: opp.numeroSifco != null,
 						});
 					}
 					return acc;
@@ -3487,9 +3571,9 @@ export const crmRouter = {
 				{} as Record<string, any[]>,
 			);
 
-			// Get credit analysis for each lead
+			// 4) Análisis de crédito de esos leads
 			const creditAnalysisByLead =
-				leadIds.length > 0
+				matchedLeadIds.length > 0
 					? await db
 							.select({
 								leadId: creditAnalysis.leadId,
@@ -3503,15 +3587,8 @@ export const crmRouter = {
 								analyzedAt: creditAnalysis.analyzedAt,
 							})
 							.from(creditAnalysis)
-							.where(
-								sql`${creditAnalysis.leadId} IN (${sql.join(
-									leadIds.map((id) => sql`${id}`),
-									sql`, `,
-								)})`,
-							)
+							.where(inArray(creditAnalysis.leadId, matchedLeadIds))
 					: [];
-
-			// Map credit analysis by lead ID
 			const creditAnalysisMap = creditAnalysisByLead.reduce(
 				(acc, ca) => {
 					if (ca.leadId) {
@@ -3522,127 +3599,79 @@ export const crmRouter = {
 				{} as Record<string, (typeof creditAnalysisByLead)[0]>,
 			);
 
-			// Combine leads with their opportunities and credit analysis
-			const crmRows = clientLeads.flatMap((lead) => {
-				const leadOpportunities = opportunitiesByLead[lead.id] || [];
-				return buildCarteraMatchedClientRows({
-					lead,
-					leadOpportunities,
-					creditAnalysis: creditAnalysisMap[lead.id] || null,
-					carteraCreditBySifco,
-				});
+			// 5) Construir filas en el orden en que cartera devolvió los créditos.
+			const data = credits.flatMap<
+				MatchedClientRow | ReturnType<typeof buildCarteraOnlyClientRow>
+			>((credit) => {
+				const sifco = credit.creditos?.numero_credito_sifco?.trim();
+				if (!sifco) return [];
+				const leadId = sifcoToLeadId.get(sifco);
+				const lead = leadId ? leadById.get(leadId) : undefined;
+				if (leadId && lead) {
+					return buildCarteraMatchedClientRows({
+						lead,
+						leadOpportunities: opportunitiesByLead[leadId] || [],
+						creditAnalysis: creditAnalysisMap[leadId] || null,
+						carteraCreditBySifco: new Map([[sifco, credit]]),
+					});
+				}
+				// Sin match CRM: las filas "sólo cartera" no aplican en vistas acotadas.
+				if (scopedSifcos) return [];
+				return [buildCarteraOnlyClientRow(credit)];
 			});
-			const matchedSifcos = new Set(
-				crmRows
-					.map((row) => row.carteraCredit?.numeroSifco)
-					.filter((sifco): sifco is string => Boolean(sifco)),
-			);
 
-			const carteraOnlyRows = carteraCredits
-				.filter((credit) => {
-					const sifco = credit.creditos?.numero_credito_sifco?.trim();
-					return sifco && !matchedSifcos.has(sifco);
-				})
-				.map(buildCarteraOnlyClientRow);
-
-			const searchValue = search?.trim().toLowerCase();
-			const fromDate = input.dateFrom ? new Date(input.dateFrom) : null;
-			const toDate = input.dateTo ? new Date(input.dateTo) : null;
-			if (toDate) toDate.setHours(23, 59, 59, 999);
-
-			const visibleCarteraOnlyRows =
-				input.leadId || context.userRole === "sales" ? [] : carteraOnlyRows;
-			const allRows = [...crmRows, ...visibleCarteraOnlyRows]
-				.filter((row) => {
-					if (!searchValue) return true;
-					return [
-						row.firstName,
-						(row as any).middleName,
-						row.lastName,
-						(row as any).secondLastName,
-						row.email,
-						row.phone,
-						row.dpi,
-						(row as any).nit,
-						(row as any).carteraCredit?.numeroSifco,
-					]
-						.filter(Boolean)
-						.some((value) => String(value).toLowerCase().includes(searchValue));
-				})
-				.filter((row) => {
-					if (fromDate && row.createdAt < fromDate) return false;
-					if (toDate && row.createdAt > toDate) return false;
-					return true;
-				})
-				.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-
-			const data = allRows.slice(offset, offset + limit);
-
-			return {
-				data,
-				total: allRows.length,
-				limit,
-				offset,
-			};
+			return { data, total, limit, offset };
 		}),
 
-	// Estadísticas de leads como clientes (totales globales, no paginados)
+	// Estadísticas de clientes (baratas: no barren toda la cartera).
 	getLeadsAsClientsStats: crmProcedure.handler(async ({ context }) => {
-		const carteraCredits = await getCurrentClientCreditsFromCartera();
-		const clientCreditSifcos = carteraCredits
-			.map((row) => row.creditos?.numero_credito_sifco?.trim())
-			.filter((sifco): sifco is string => Boolean(sifco));
-
-		if (clientCreditSifcos.length === 0) {
-			return {
-				totalClients: 0,
-				totalClosedOpportunities: 0,
-				totalValue: 0,
-				missingCrmCount: 0,
-			};
+		// Para asesores la vista está acotada a sus créditos.
+		let scopedSifcos: string[] | undefined;
+		if (context.userRole === "sales") {
+			const opps = await db
+				.select({ numeroSifco: opportunities.numeroSifco })
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(
+					and(
+						eq(leads.assignedTo, context.userId),
+						isNotNull(opportunities.numeroSifco),
+					),
+				);
+			scopedSifcos = opps
+				.map((o) => o.numeroSifco)
+				.filter((s): s is string => Boolean(s));
+			if (scopedSifcos.length === 0) {
+				return { totalClients: 0, totalValue: 0 };
+			}
 		}
 
-		const clientCreditOpportunityCondition = and(
-			isNotNull(opportunities.leadId),
-			inArray(opportunities.numeroSifco, clientCreditSifcos),
-		);
-
-		const clientCreditOpportunitiesData = await db
-			.select({
-				leadId: opportunities.leadId,
-				numeroSifco: opportunities.numeroSifco,
-				value: opportunities.value,
-			})
-			.from(opportunities)
-			.leftJoin(leads, eq(opportunities.leadId, leads.id))
-			.where(
-				context.userRole === "sales"
-					? and(
-							clientCreditOpportunityCondition,
-							eq(leads.assignedTo, context.userId),
-						)
-					: clientCreditOpportunityCondition,
-			);
-
-		// Calculate stats
-		const uniqueLeadIds = new Set(
-			clientCreditOpportunitiesData
-				.map((o) => o.leadId)
-				.filter((id): id is string => id !== null),
-		);
-		const matchedSifcos = new Set(
-			clientCreditOpportunitiesData
-				.map((o: any) => o.numeroSifco)
-				.filter((sifco: unknown): sifco is string => typeof sifco === "string"),
-		);
-
-		return calculateCarteraClientStats({
-			carteraCredits,
-			matchedSifcos,
-			uniqueLeadCount: uniqueLeadIds.size,
-			scopedOpportunityCount: clientCreditOpportunitiesData.length,
-			userRole: context.userRole,
+		// Total de clientes vigentes: el helper con limit=0 solo suma los
+		// totalCount de los 3 estados (no recolecta filas).
+		const { total } = await getClientCreditsPageFromCartera({
+			offset: 0,
+			limit: 0,
+			sifcos: scopedSifcos,
 		});
+
+		// Valor total: stats agregadas de cartera (suma de capital de la cartera
+		// activa). Solo para vistas globales; para asesores no hay un agregado
+		// barato acotado, así que se omite.
+		let totalValue = 0;
+		if (context.userRole !== "sales") {
+			try {
+				const stats = await carteraBackClient.getStats();
+				totalValue = Object.values(stats.porCuotasAtrasadas).reduce(
+					(sum, bucket) =>
+						sum + (Number.parseFloat(bucket?.sumaCapital ?? "0") || 0),
+					0,
+				);
+			} catch (error) {
+				console.error("[getLeadsAsClientsStats] getStats falló:", error);
+			}
+		}
+
+		return { totalClients: total, totalValue };
 	}),
 
 	createClient: crmProcedure

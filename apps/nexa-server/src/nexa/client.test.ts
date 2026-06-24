@@ -8,7 +8,8 @@ describe("NexaClient", () => {
       baseUrl: "https://nexa.example",
       apiKey: "api-key",
       bearerToken: "bearer-token",
-      fetch: async (request) => {
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
         requests.push(request);
         return Response.json({ users: [{ id: 10, token: "1234567000000001" }], errorUsers: [] }, { status: 200 });
       },
@@ -31,7 +32,8 @@ describe("NexaClient", () => {
       baseUrl: "https://nexa.example/",
       apiKey: "api-key",
       bearerToken: "bearer-token",
-      fetch: async (request) => {
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
         body = await request.json();
         return Response.json({ reference: 1234, status: "APPROVED" });
       },
@@ -41,5 +43,29 @@ describe("NexaClient", () => {
 
     expect(body).toEqual({ id: 99, reference: 1234, status: "APPROVED" });
     expect(response.status).toBe("APPROVED");
+  });
+
+  test("passes Bun TLS client certificate options when configured", async () => {
+    let tls: unknown;
+    const client = new NexaClient({
+      baseUrl: "https://nexa.example",
+      apiKey: "api-key",
+      bearerToken: "bearer-token",
+      tls: {
+        certPath: "/certs/nexa/cashin-nexa-uat-client.crt",
+        keyPath: "/certs/nexa/cashin-nexa-uat-client.key",
+      },
+      fetch: async (_input, init) => {
+        tls = init.tls;
+        return Response.json({ transactions: [] });
+      },
+    });
+
+    await client.getPaymentTokenStatement("2026-06-24");
+
+    expect(tls).toMatchObject({
+      cert: expect.any(Blob),
+      key: expect.any(Blob),
+    });
   });
 });

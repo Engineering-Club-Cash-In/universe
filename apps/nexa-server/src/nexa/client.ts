@@ -6,8 +6,21 @@ import {
   type ReviewTransferStatus,
 } from "./schemas";
 
-type Fetch = (request: Request) => Promise<Response>;
+type BunTlsFetchOptions = {
+  cert: Blob;
+  key: Blob;
+  ca?: Blob;
+};
+
+type BunFetchInit = RequestInit & { tls?: BunTlsFetchOptions };
+type Fetch = (input: RequestInfo | URL, init: BunFetchInit) => Promise<Response>;
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+type NexaClientTlsOptions = {
+  certPath: string;
+  keyPath: string;
+  caPath?: string;
+};
 
 export class NexaClient {
   private readonly baseUrl: string;
@@ -15,13 +28,19 @@ export class NexaClient {
   private readonly bearerToken: string;
   private readonly fetch: Fetch;
   private readonly timeoutMs: number;
+  private readonly tls?: BunTlsFetchOptions;
 
-  constructor(options: { baseUrl: string; apiKey: string; bearerToken: string; fetch?: Fetch; timeoutMs?: number }) {
+  constructor(options: { baseUrl: string; apiKey: string; bearerToken: string; fetch?: Fetch; timeoutMs?: number; tls?: NexaClientTlsOptions }) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.apiKey = options.apiKey;
     this.bearerToken = options.bearerToken;
-    this.fetch = options.fetch ?? fetch;
+    this.fetch = options.fetch ?? ((input, init) => fetch(input, init as RequestInit));
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.tls = options.tls ? {
+      cert: Bun.file(options.tls.certPath),
+      key: Bun.file(options.tls.keyPath),
+      ca: options.tls.caPath ? Bun.file(options.tls.caPath) : undefined,
+    } : undefined;
   }
 
   async createPaymentToken(payload: { account: number | string; name: string }) {
@@ -70,17 +89,18 @@ export class NexaClient {
   }
 
   private async request(path: string, init: RequestInit) {
-    const request = new Request(`${this.baseUrl}${path}`, {
+    const requestInit: BunFetchInit = {
       ...init,
       signal: init.signal ?? AbortSignal.timeout(this.timeoutMs),
+      tls: this.tls,
       headers: {
         "Content-Type": "application/json",
         apikey: this.apiKey,
         Authorization: `Bearer ${this.bearerToken}`,
         ...init.headers,
       },
-    });
-    const response = await this.fetch(request);
+    };
+    const response = await this.fetch(`${this.baseUrl}${path}`, requestInit);
 
     if (!response.ok) {
       const text = await response.text();

@@ -1,1 +1,1 @@
-export const appVersion = "nexa-server-2026-06-12-webhook-debug-2";
+export const appVersion = "nexa-server-2026-06-24-mtls-no-polling";

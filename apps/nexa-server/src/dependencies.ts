@@ -7,7 +7,18 @@ import { MockCarteraPaymentClient } from "./payments/mock-cartera-client";
 
 export function createDependencies(config: AppConfig) {
   const db = createDb(config.databaseUrl);
-  const nexa = new NexaClient({ baseUrl: config.nexaBaseUrl, apiKey: config.nexaApiKey, bearerToken: config.nexaBearerToken });
+  const nexa = new NexaClient({
+    baseUrl: config.nexaBaseUrl,
+    apiKey: config.nexaApiKey,
+    bearerToken: config.nexaBearerToken,
+    tls: config.nexaClientCertPath && config.nexaClientKeyPath
+      ? {
+        certPath: config.nexaClientCertPath,
+        keyPath: config.nexaClientKeyPath,
+        caPath: config.nexaCaCertPath,
+      }
+      : undefined,
+  });
   const mockCredits = new MockCreditRepository(db);
   const cartera = config.mockCartera
     ? new MockCarteraPaymentClient(mockCredits)

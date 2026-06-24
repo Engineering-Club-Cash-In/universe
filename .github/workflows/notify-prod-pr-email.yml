@@ -1,0 +1,192 @@
+name: Notificar pase a producción
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  email-jhairo:
+    name: Email a Jhairo
+    if: github.event.pull_request.head.ref == 'develop' && github.event.pull_request.base.ref == 'main' && (github.event.action != 'closed' || github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      PR_EVENT_ACTION: ${{ github.event.action }}
+      PR_MERGED: ${{ github.event.pull_request.merged }}
+      EMAIL_TO: jhairo.n@clubcashin.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generar resumen del pase a producción
+        id: summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/prod-notify
+          python3 -m pip install --quiet markdown 2>/dev/null || true
+
+          gh pr view "$PR_NUMBER" \
+            --json number,title,url,author,body,baseRefName,headRefName,commits,files,updatedAt \
+            > /tmp/prod-notify/pr.json
+
+          python3 <<'PY'
+          import json
+          import os
+          import re
+          from collections import defaultdict
+          from pathlib import Path
+
+          data = json.loads(Path('/tmp/prod-notify/pr.json').read_text())
+          commits = data.get('commits') or []
+          files = data.get('files') or []
+          body = (data.get('body') or '').strip()
+          merged = os.environ.get('PR_MERGED', '').lower() == 'true'
+          status = 'Producción mergeada / deploy en curso' if merged else 'PR de pase a producción abierto/actualizado'
+
+          def esc(s):
+              return str(s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+          # ---- diffstat agregado ----
+          total_add = sum(int(f.get('additions') or 0) for f in files)
+          total_del = sum(int(f.get('deletions') or 0) for f in files)
+          groups = defaultdict(lambda: [0, 0, 0])  # [archivos, +, -]
+          for f in files:
+              path = f.get('path') or ''
+              seg = path.split('/', 1)[0] if path else '(raíz)'
+              g = groups[seg]
+              g[0] += 1
+              g[1] += int(f.get('additions') or 0)
+              g[2] += int(f.get('deletions') or 0)
+          top_groups = sorted(groups.items(), key=lambda kv: kv[1][1] + kv[1][2], reverse=True)[:10]
+
+          def fallback_summary():
+              # Sin descripción en el PR: resumen mínimo desde los encabezados de commit.
+              lines = ['### 📝 Cambios incluidos (sin descripción en el PR)', '']
+              for c in commits[:30]:
+                  h = (c.get('messageHeadline') or '').strip()
+                  if h:
+                      lines.append('- ' + h)
+              if len(commits) > 30:
+                  lines.append('- … %d commits más (ver el PR)' % (len(commits) - 30))
+              return '\n'.join(lines)
+
+          # Marcadores de la plantilla pase-a-produccion.md. Si alguno sigue presente,
+          # el autor abrió el PR con la plantilla pero NO la completó.
+          TEMPLATE_PLACEHOLDERS = [
+              '[breve descripción de las áreas tocadas]',
+              '[Área / Módulo]',
+              '[Otra área]',
+              '[Qué cambió, en una línea]',
+          ]
+
+          def strip_comments(b):
+              # quita los comentarios guía <!-- ... --> de la plantilla
+              return re.sub(r'<!--.*?-->', '', b, flags=re.DOTALL).strip()
+
+          def is_unfilled_template(b):
+              cleaned = strip_comments(b)
+              return any(ph in cleaned for ph in TEMPLATE_PLACEHOLDERS)
+
+          # El correo usa la descripción del PR tal cual; cae al resumen de commits
+          # si está vacía o si es la plantilla sin completar.
+          if body and is_unfilled_template(body):
+              summary_md = fallback_summary()
+              source_label = 'automáticamente desde los commits (la plantilla del PR quedó sin completar)'
+          elif body:
+              summary_md = strip_comments(body)
+              source_label = 'a partir de la descripción del PR'
+          else:
+              summary_md = fallback_summary()
+              source_label = 'automáticamente desde los commits (el PR no tenía descripción)'
+
+          def md_to_html(md_text):
+              try:
+                  import markdown as _md
+                  return _md.markdown(md_text, extensions=['tables', 'fenced_code', 'sane_lists'])
+              except Exception:
+                  return ('<pre style="white-space: pre-wrap; font-family: ui-monospace, '
+                          'SFMono-Regular, Menlo, monospace;">' + esc(md_text) + '</pre>')
+
+          # ---------------- HTML ----------------
+          lines = []
+          lines.append("<h2>🚀 Pase a producción: develop → main</h2>")
+          lines.append(f"<p><strong>Estado:</strong> {esc(status)}</p>")
+          lines.append(f"<p><strong>PR:</strong> <a href='{esc(data['url'])}'>#{data['number']} — {esc(data['title'])}</a></p>")
+          lines.append(f"<p><strong>Autor:</strong> {esc((data.get('author') or {}).get('login'))}</p>")
+          lines.append(f"<p><strong>Ramas:</strong> {esc(data.get('headRefName'))} → {esc(data.get('baseRefName'))}</p>")
+          lines.append(f"<p><strong>Actualizado:</strong> {esc(data.get('updatedAt'))}</p>")
+          lines.append(f"<p><strong>Totales:</strong> {len(commits)} commits · {len(files)} archivos · +{total_add} / -{total_del}</p>")
+          lines.append('<hr>')
+          lines.append('<h3>Resumen del pase</h3>')
+          lines.append(md_to_html(summary_md))
+          lines.append('<hr>')
+          lines.append('<h3>Cambios por área (archivos)</h3>')
+          if top_groups:
+              lines.append('<table cellpadding="4" style="border-collapse: collapse;">')
+              lines.append('<tr><th align="left">Área</th><th align="right">Archivos</th><th align="right">+ / -</th></tr>')
+              for seg, (n, add, dele) in top_groups:
+                  lines.append(f"<tr><td><code>{esc(seg)}</code></td><td align='right'>{n}</td><td align='right'>+{add} / -{dele}</td></tr>")
+              lines.append('</table>')
+              if len(groups) > len(top_groups):
+                  lines.append(f"<p><em>… {len(groups) - len(top_groups)} áreas más</em></p>")
+          lines.append(f"<p style='color:#888'><em>Resumen {esc(source_label)}. "
+                       f"El detalle completo de commits y archivos está en <a href='{esc(data['url'])}'>el PR</a>.</em></p>")
+          lines.append('<hr>')
+          lines.append('<p>Este aviso se envía automáticamente cuando se abre o actualiza un PR de '
+                       '<code>develop</code> hacia <code>main</code>.</p>')
+
+          # ---------------- Texto plano ----------------
+          text = []
+          text.append('Pase a producción: develop → main')
+          text.append(f"PR: #{data['number']} — {data['title']}")
+          text.append(f"URL: {data['url']}")
+          text.append(f"Autor: {(data.get('author') or {}).get('login')}")
+          text.append(f"Totales: {len(commits)} commits · {len(files)} archivos · +{total_add} / -{total_del}")
+          text.append('')
+          text.append('Resumen del pase:')
+          text.append(summary_md)
+          text.append('')
+          text.append('Cambios por área (archivos):')
+          for seg, (n, add, dele) in top_groups:
+              text.append(f"- {seg}: {n} archivos (+{add}/-{dele})")
+          text.append('')
+          text.append(f"Resumen {source_label}. Detalle completo en el PR.")
+
+          Path('/tmp/prod-notify/body.html').write_text('\n'.join(lines), encoding='utf-8')
+          Path('/tmp/prod-notify/body.txt').write_text('\n'.join(text), encoding='utf-8')
+          PY
+
+          prefix="✅ Producción mergeada"
+          if [ "${PR_MERGED}" != "true" ]; then
+            prefix="🚀 Pase a producción"
+          fi
+          {
+            echo 'subject<<EOF'
+            echo "${prefix}: ${PR_TITLE} (#${PR_NUMBER})"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Enviar email a Jhairo
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: luis.r@clubcashin.com
+          password: ${{ secrets.PROD_NOTIFY_SMTP_PASSWORD }}
+          from: Luis Ralda <luis.r@clubcashin.com>
+          to: ${{ env.EMAIL_TO }}
+          subject: ${{ steps.summary.outputs.subject }}
+          html_body: file:///tmp/prod-notify/body.html
+          body: file:///tmp/prod-notify/body.txt

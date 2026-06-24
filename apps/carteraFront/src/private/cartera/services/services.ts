@@ -396,6 +396,8 @@ export interface InversionistaEspejo {
 export interface CreditoUsuarioPago {
   creditos: Credito;
   usuarios: Usuario;
+  /** Aseguradora vinculada al crédito (nombre, null si no tiene). */
+  aseguradora?: string | null;
   inversionistas: AporteInversionista[];
   creditos_inversionistas_espejo?: InversionistaEspejo[];
   resumen: ResumenCreditos;

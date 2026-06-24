@@ -218,6 +218,7 @@ export async function getCreditosWithUserByMesAnioExcel(
     proximidad_pago?: "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH";
     is_vehiculo_propio?: boolean;
     inversionista_ids?: number[];
+    aseguradora_id?: number;
     excel?: boolean;
   }
 ) {
@@ -240,7 +241,11 @@ export async function getCreditosWithUserByMesAnioExcel(
     rest.inversionista_ids,
     undefined, // fecha_desde
     undefined, // fecha_hasta
-    rest.numeros_credito_sifco
+    rest.numeros_credito_sifco,
+    undefined, // capital_min
+    undefined, // capital_max
+    undefined, // estados_credito
+    rest.aseguradora_id
   );
 
   if (!excel) return result; // si no piden excel, devolvemos JSON normal

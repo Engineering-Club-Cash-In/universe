@@ -788,7 +788,6 @@ export async function getCreditosWithUserByMesAnio(
   }
 
   if (aseguradora_id !== undefined) {
-    console.log(`🔎 Filtrando por aseguradora_id: ${aseguradora_id}`);
     conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
   }
 

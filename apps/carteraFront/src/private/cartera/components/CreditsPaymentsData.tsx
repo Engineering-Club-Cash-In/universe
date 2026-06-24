@@ -1301,9 +1301,9 @@ function MobileView({
                 🚗 V. Cash-In
               </span>
             )}
-            {item.creditos.aseguradora && (
+            {item.aseguradora && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#15803d', border: '1px solid rgba(22,163,74,0.25)' }}>
-                🛡️ {item.creditos.aseguradora}
+                🛡️ {item.aseguradora}
               </span>
             )}
           </p>
@@ -1622,9 +1622,9 @@ function DesktopView({
                         🚗 V. Cash-In
                       </span>
                     )}
-                    {item.creditos.aseguradora && (
+                    {item.aseguradora && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#15803d', border: '1px solid rgba(22,163,74,0.25)' }}>
-                        🛡️ {item.creditos.aseguradora}
+                        🛡️ {item.aseguradora}
                       </span>
                     )}
                   </div>

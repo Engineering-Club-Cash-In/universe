@@ -498,6 +498,20 @@ export interface ResumenCreditos {
   total_inversionistas_iva: string;
 }
 
+// ============================================================
+// Aseguradoras — GET /aseguradoras
+// ============================================================
+export interface Aseguradora {
+  id: number;
+  nombre: string;
+}
+
+export const getAseguradoras = async (): Promise<Aseguradora[]> => {
+  const BACK_URL = import.meta.env.VITE_BACK_URL || "";
+  const res = await api.get(`${BACK_URL}/aseguradoras`);
+  return res.data.data;
+};
+
 export const getCreditosPaginados = async (params: {
   mes: number;
   anio: number;
@@ -511,6 +525,7 @@ export const getCreditosPaginados = async (params: {
   nombre_usuario?: string;
   is_vehiculo_propio?: boolean;
   inversionista_ids?: string;
+  aseguradora_id?: number;
 }): Promise<GetCreditosResponse> => {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
   const response = await api.get(`${BACK_URL}/getAllCredits`, {
@@ -538,6 +553,9 @@ export const getCreditosPaginados = async (params: {
       }),
       ...(params.inversionista_ids && {
         inversionista_ids: params.inversionista_ids,
+      }),
+      ...(params.aseguradora_id && {
+        aseguradora_id: params.aseguradora_id,
       }),
     },
   });

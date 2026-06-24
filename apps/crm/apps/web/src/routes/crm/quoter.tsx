@@ -1196,12 +1196,16 @@ function QuoterPage() {
 					quoterForm.setFieldValue("downPayment", downPayment);
 				}
 
-				// Actualizar seguro y membresía
+				// Actualizar seguro y membresía. Pasamos isNew/origin del vehículo
+				// seleccionado explícitamente: el form state (vehicleId) que usa
+				// updateInsuranceCost para resolver el vehículo recién se seteó y
+				// puede estar stale, lo que clasificaría mal la membresía.
 				updateInsuranceCost(
 					isSobreVehiculo
 						? quoterForm.state.values.insuredAmount || numericValue
 						: numericValue,
 					quoterForm.state.values.vehicleType,
+					{ isNew: vehicle.isNew, origin: vehicle.origin },
 				);
 			}
 		}

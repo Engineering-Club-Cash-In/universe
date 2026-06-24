@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 import { z } from "zod";
 import {
 	OpportunityDetailModal,
@@ -168,6 +169,52 @@ const getCarteraStatusClassName = (status?: string | null) => {
 			return "bg-muted text-muted-foreground";
 	}
 };
+
+// Genera y descarga un Excel (.xlsx) de la base de clientes para marketing
+function downloadClientsExcel(
+	rows: Array<{
+		nombre: string;
+		telefono: string;
+		correo: string;
+		valorVehiculo: string;
+	}>,
+) {
+	const headers = ["Nombre", "Teléfono", "Correo", "Valor del vehículo"];
+	const body = rows.map((r) => {
+		// El valor va como número para que Excel lo trate como tal (ordenar/sumar).
+		const num = Number(r.valorVehiculo);
+		const valor =
+			r.valorVehiculo && Number.isFinite(num) ? num : r.valorVehiculo;
+		return [r.nombre, r.telefono, r.correo, valor];
+	});
+	const matrix = [headers, ...body];
+	const worksheet = XLSX.utils.aoa_to_sheet(matrix);
+
+	// Ancho de cada columna según el contenido más largo (con piso y techo).
+	worksheet["!cols"] = headers.map((header, col) => {
+		const maxLen = matrix.reduce((max, row) => {
+			const cell = row[col];
+			return Math.max(max, cell == null ? 0 : String(cell).length);
+		}, header.length);
+		return { wch: Math.min(Math.max(maxLen + 2, 12), 60) };
+	});
+
+	// Formato de miles/decimales para la columna "Valor del vehículo" (D).
+	for (let i = 0; i < body.length; i++) {
+		const ref = XLSX.utils.encode_cell({ r: i + 1, c: 3 });
+		const cell = worksheet[ref];
+		if (cell && typeof cell.v === "number") {
+			cell.z = "#,##0.00";
+		}
+	}
+
+	const workbook = XLSX.utils.book_new();
+	XLSX.utils.book_append_sheet(workbook, worksheet, "Clientes");
+	XLSX.writeFile(
+		workbook,
+		`clientes-${new Date().toISOString().slice(0, 10)}.xlsx`,
+	);
+}
 
 // Type definition for credit analysis
 type CreditAnalysisData = {
@@ -491,6 +538,22 @@ function RouteComponent() {
 		},
 	});
 
+	// Export de la base de clientes (CRM) para marketing/lookalike
+	const exportMutation = useMutation({
+		mutationFn: () => client.exportClientsForMarketing(),
+		onSuccess: (result) => {
+			if (!result.data.length) {
+				toast.info("No hay clientes para exportar");
+				return;
+			}
+			downloadClientsExcel(result.data);
+			toast.success(`${result.total} clientes exportados`);
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "Error al exportar la base");
+		},
+	});
+
 	const handleStartEditContact = () => {
 		if (!selectedClient) return;
 		setEditForm({
@@ -536,11 +599,28 @@ function RouteComponent() {
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
-			<div>
-				<h1 className="font-bold text-3xl">Cartera de Clientes</h1>
-				<p className="text-muted-foreground">
-					Créditos vigentes de cartera enriquecidos con CRM cuando existe match
-				</p>
+			<div className="flex flex-wrap items-start justify-between gap-4">
+				<div>
+					<h1 className="font-bold text-3xl">Cartera de Clientes</h1>
+					<p className="text-muted-foreground">
+						Créditos vigentes de cartera enriquecidos con CRM cuando existe
+						match
+					</p>
+				</div>
+				{PERMISSIONS.canExportReports(userProfile.data.role) && (
+					<Button
+						variant="outline"
+						onClick={() => exportMutation.mutate()}
+						disabled={exportMutation.isPending}
+					>
+						{exportMutation.isPending ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Download className="mr-2 h-4 w-4" />
+						)}
+						Descargar base de clientes
+					</Button>
+				)}
 			</div>
 
 			{/* Summary Stats */}
@@ -548,7 +628,7 @@ function RouteComponent() {
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="font-medium text-sm">
-							Total de Clientes
+							Total de Créditos
 						</CardTitle>
 						<HandshakeIcon className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>

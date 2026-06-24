@@ -50,6 +50,7 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
+import { quotations } from "../db/schema/quotations";
 import {
 	carryForwardAnalysisChecklistVerificationState,
 	hasStaleAnalysisChecklistDocumentState,
@@ -3672,6 +3673,81 @@ export const crmRouter = {
 		}
 
 		return { totalClients: total, totalValue };
+	}),
+
+	// Export para marketing (base lookalike): CRM-only, sin verificar cartera.
+	// Una fila por cliente (lead) que alguna vez cerró crédito (oportunidad con
+	// numeroSifco). Valor del vehículo = insured_amount de la cotización más
+	// reciente de su oportunidad más reciente; si no hay cotización, opp.value.
+	exportClientsForMarketing: crmProcedure.handler(async ({ context }) => {
+		if (!PERMISSIONS.canExportReports(context.userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "No tienes permiso para exportar la base de clientes",
+			});
+		}
+
+		// Oportunidades que se volvieron crédito (tienen numeroSifco), con su lead.
+		const rows = await db
+			.select({
+				oppId: opportunities.id,
+				leadId: opportunities.leadId,
+				value: opportunities.value,
+				createdAt: opportunities.createdAt,
+				firstName: leads.firstName,
+				middleName: leads.middleName,
+				lastName: leads.lastName,
+				secondLastName: leads.secondLastName,
+				phone: leads.phone,
+				email: leads.email,
+			})
+			.from(opportunities)
+			.innerJoin(leads, eq(opportunities.leadId, leads.id))
+			.where(isNotNull(opportunities.numeroSifco))
+			// Más reciente en cerrarse primero (fecha de cierre; createdAt si falta).
+			.orderBy(
+				sql`coalesce(${opportunities.actualCloseDate}, ${opportunities.createdAt}) desc`,
+			);
+
+		// Una fila por lead: su oportunidad más reciente en cerrarse (el stream ya
+		// viene ordenado por fecha de cierre desc, así que la primera gana).
+		const latestByLead = new Map<string, (typeof rows)[number]>();
+		for (const row of rows) {
+			if (row.leadId && !latestByLead.has(row.leadId)) {
+				latestByLead.set(row.leadId, row);
+			}
+		}
+		const selected = Array.from(latestByLead.values());
+
+		// Valor del vehículo: insured_amount de la cotización más reciente por opp.
+		const oppIds = selected.map((r) => r.oppId);
+		const insuredByOpp = new Map<string, string>();
+		if (oppIds.length > 0) {
+			const quotes = await db
+				.select({
+					opportunityId: quotations.opportunityId,
+					insuredAmount: quotations.insuredAmount,
+					createdAt: quotations.createdAt,
+				})
+				.from(quotations)
+				.where(inArray(quotations.opportunityId, oppIds))
+				.orderBy(desc(quotations.createdAt));
+			for (const q of quotes) {
+				if (q.opportunityId && !insuredByOpp.has(q.opportunityId)) {
+					insuredByOpp.set(q.opportunityId, q.insuredAmount);
+				}
+			}
+		}
+
+		const data = selected.map((r) => ({
+			nombre: [r.firstName, r.middleName, r.lastName, r.secondLastName]
+				.filter((p) => p?.trim())
+				.join(" "),
+			telefono: r.phone ?? "",
+			correo: r.email ?? "",
+			valorVehiculo: insuredByOpp.get(r.oppId) ?? r.value ?? "",
+		}));
+
+		return { data, total: data.length };
 	}),
 
 	createClient: crmProcedure

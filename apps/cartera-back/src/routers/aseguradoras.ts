@@ -8,6 +8,19 @@ import {
 } from "../controllers/aseguradoras";
 import { authMiddleware } from "./midleware";
 
+// Gate server-side: el módulo /seguros es ADMIN-only en el front (App.tsx),
+// así que el resumen (expone montos por aseguradora) y las mutaciones deben
+// exigir ADMIN aquí también; authMiddleware solo autentica. El catálogo
+// (GET /aseguradoras) queda abierto porque lo usa el filtro de Créditos.
+const requireAdmin = (user: { role?: string } | undefined, set: { status?: number }): boolean => {
+  if (!user || user.role !== "ADMIN") {
+    set.status = 403;
+    return false;
+  }
+  return true;
+};
+const NO_AUTORIZADO = { message: "[ERROR] No autorizado (requiere ADMIN)" };
+
 export const aseguradorasRouter = new Elysia()
   .use(authMiddleware)
   /**
@@ -34,7 +47,8 @@ export const aseguradorasRouter = new Elysia()
    */
   .get(
     "/aseguradoras/resumen",
-    async ({ query, set }) => {
+    async ({ query, set, user }) => {
+      if (!requireAdmin(user, set)) return NO_AUTORIZADO;
       try {
         if (query.excel === "true") {
           const buf = await resumenAseguradorasExcel();
@@ -70,7 +84,8 @@ export const aseguradorasRouter = new Elysia()
    */
   .post(
     "/aseguradoras",
-    async ({ body, set }) => {
+    async ({ body, set, user }) => {
+      if (!requireAdmin(user, set)) return NO_AUTORIZADO;
       try {
         const result = await crearAseguradora(body.nombre);
         if (!result.success) {
@@ -99,7 +114,8 @@ export const aseguradorasRouter = new Elysia()
    */
   .post(
     "/creditos/cambiar-aseguradora",
-    async ({ body, set }) => {
+    async ({ body, set, user }) => {
+      if (!requireAdmin(user, set)) return NO_AUTORIZADO;
       try {
         const result = await cambiarAseguradoraCredito(
           body.credito_id,

@@ -363,14 +363,14 @@ function CreditosTable({
                       <td className="py-2 px-3">
                         <Badge
                           className={
-                            row.resumen.statusCredit === "ACTIVO"
+                            row.creditos.statusCredit === "ACTIVO"
                               ? "bg-green-100 text-green-800 border-green-300"
-                              : row.resumen.statusCredit === "CANCELADO"
+                              : row.creditos.statusCredit === "CANCELADO"
                               ? "bg-slate-100 text-slate-700 border-slate-300"
                               : "bg-amber-100 text-amber-800 border-amber-300"
                           }
                         >
-                          {row.resumen.statusCredit}
+                          {row.creditos.statusCredit}
                         </Badge>
                       </td>
                       <td className="py-2 px-3 text-slate-700">

@@ -157,6 +157,7 @@ export interface SendNewCreditNotificationParams {
   vehiculoVin?: string;
   montoAsegurado?: number;
   opportunityId?: string;
+  aseguradora?: string;
 }
 
 export const sendNewCreditNotification = async ({
@@ -176,6 +177,7 @@ export const sendNewCreditNotification = async ({
   vehiculoVin,
   montoAsegurado,
   opportunityId,
+  aseguradora,
 }: SendNewCreditNotificationParams) => {
   try {
     const validEmails = to.filter((email) => {
@@ -207,6 +209,7 @@ export const sendNewCreditNotification = async ({
         vehiculoVin,
         montoAsegurado,
         opportunityId,
+        aseguradora,
       }),
     });
 

@@ -136,6 +136,13 @@
   }
   // 2. Créditos
 
+  // Catálogo de aseguradoras (GyT, Universales, futuras). El crédito enlaza aquí.
+  export const aseguradoras = customSchema.table("aseguradoras", {
+    id: serial("id").primaryKey(),
+    nombre: varchar("nombre", { length: 100 }).notNull().unique(),
+    created_at: timestamp("created_at").notNull().defaultNow(),
+  });
+
   export const creditos = customSchema.table("creditos", {
     credito_id: serial("credito_id").primaryKey(),
     usuario_id: integer("usuario_id").notNull(),
@@ -165,6 +172,9 @@
     gps: numeric("gps", { precision: 18, scale: 2 }).notNull(),
     observaciones: text("observaciones").notNull(),
     no_poliza: varchar("no_poliza").notNull(),
+    aseguradora_id: integer("aseguradora_id").references(
+      () => aseguradoras.id,
+    ),
     como_se_entero: varchar("como_se_entero", { length: 100 }).notNull(),
     asesor_id: integer("asesor_id")
       .notNull()

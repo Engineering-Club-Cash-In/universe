@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 import { db } from "../database";
 import { aseguradoras, creditos } from "../database/db/schema";
 import ExcelJS from "exceljs";
@@ -114,14 +114,27 @@ export async function crearAseguradora(
     return { success: true, data: existing.rows[0] };
   }
 
-  // Insertar nueva
+  // Insertar nueva (idempotente ante carrera: el UNIQUE de nombre)
   const inserted = await executor.execute<{ id: number; nombre: string }>(sql`
     INSERT INTO ${aseguradoras} (nombre)
     VALUES (${nombreTrim})
+    ON CONFLICT (nombre) DO NOTHING
     RETURNING id, nombre
   `);
 
-  return { success: true, data: inserted.rows[0] };
+  if (inserted.rows.length > 0) {
+    return { success: true, data: inserted.rows[0] };
+  }
+
+  // Otro proceso la insertó en paralelo: re-buscar.
+  const reselect = await executor.execute<{ id: number; nombre: string }>(sql`
+    SELECT id, nombre
+    FROM ${aseguradoras}
+    WHERE LOWER(nombre) = LOWER(${nombreTrim})
+    LIMIT 1
+  `);
+
+  return { success: true, data: reselect.rows[0] };
 }
 
 // ─── cambiarAseguradoraCredito ─────────────────────────────────────────────────

@@ -374,7 +374,7 @@ function CreditosTable({
                         </Badge>
                       </td>
                       <td className="py-2 px-3 text-slate-700">
-                        {(row as unknown as { aseguradora?: string }).aseguradora ?? (
+                        {row.aseguradora ?? (
                           <span className="text-slate-400 italic text-xs">Sin asignar</span>
                         )}
                       </td>

@@ -114,27 +114,31 @@ export async function crearAseguradora(
     return { success: true, data: existing.rows[0] };
   }
 
-  // Insertar nueva (idempotente ante carrera: el UNIQUE de nombre)
-  const inserted = await executor.execute<{ id: number; nombre: string }>(sql`
-    INSERT INTO ${aseguradoras} (nombre)
-    VALUES (${nombreTrim})
-    ON CONFLICT (nombre) DO NOTHING
-    RETURNING id, nombre
-  `);
-
-  if (inserted.rows.length > 0) {
+  // Insertar nueva. Si choca por unicidad (UNIQUE(nombre) o el índice funcional
+  // LOWER(nombre) que evita 'GyT'/'gyt'), otra request la creó en paralelo →
+  // devolver la existente. No usamos ON CONFLICT para no depender de cuál índice
+  // dispara y para que el código no falle si el índice funcional aún no se aplicó.
+  try {
+    const inserted = await executor.execute<{ id: number; nombre: string }>(sql`
+      INSERT INTO ${aseguradoras} (nombre)
+      VALUES (${nombreTrim})
+      RETURNING id, nombre
+    `);
     return { success: true, data: inserted.rows[0] };
+  } catch (error) {
+    if ((error as { code?: string })?.code === "23505") {
+      const reselect = await executor.execute<{ id: number; nombre: string }>(sql`
+        SELECT id, nombre
+        FROM ${aseguradoras}
+        WHERE LOWER(nombre) = LOWER(${nombreTrim})
+        LIMIT 1
+      `);
+      if (reselect.rows.length > 0) {
+        return { success: true, data: reselect.rows[0] };
+      }
+    }
+    throw error;
   }
-
-  // Otro proceso la insertó en paralelo: re-buscar.
-  const reselect = await executor.execute<{ id: number; nombre: string }>(sql`
-    SELECT id, nombre
-    FROM ${aseguradoras}
-    WHERE LOWER(nombre) = LOWER(${nombreTrim})
-    LIMIT 1
-  `);
-
-  return { success: true, data: reselect.rows[0] };
 }
 
 // ─── cambiarAseguradoraCredito ─────────────────────────────────────────────────

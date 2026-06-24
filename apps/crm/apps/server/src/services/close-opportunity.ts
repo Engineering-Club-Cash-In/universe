@@ -5,7 +5,7 @@
  */
 
 import crypto from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -426,12 +426,7 @@ async function getLatestApprovedQuotation(
 				insuranceProvider: quotations.insuranceProvider,
 			})
 			.from(quotations)
-			.where(
-				and(
-					eq(quotations.opportunityId, opportunityId),
-					eq(quotations.status, "accepted"),
-				),
-			)
+			.where(eq(quotations.opportunityId, opportunityId))
 			.orderBy(desc(quotations.createdAt))
 			.limit(1);
 

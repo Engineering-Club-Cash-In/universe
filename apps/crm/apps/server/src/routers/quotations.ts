@@ -2,10 +2,57 @@ import { ORPCError } from "@orpc/server";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { quotations, vehicles } from "../db/schema";
+import {
+	companies,
+	leads,
+	opportunities,
+	quotations,
+	vehicles,
+} from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
-import { canManageAnyQuotation, canManageQuotations } from "../lib/quotation-permissions";
-import { ROLES } from "../lib/roles";
+import {
+	canManageAnyQuotation,
+	canManageQuotations,
+} from "../lib/quotation-permissions";
+
+type Simplify<T> = { [K in keyof T]: T[K] };
+
+type QuotationWithClient = Simplify<
+	typeof quotations.$inferSelect & {
+		leadFirstName: string | null;
+		leadLastName: string | null;
+		companyName: string | null;
+	}
+>;
+
+type QuotationWithClientAndAmortization = QuotationWithClient & {
+	amortizationTable: AmortizationRow[];
+};
+
+const quotationWithClientOutput = z.custom<QuotationWithClient>();
+const quotationWithClientAndAmortizationOutput =
+	z.custom<QuotationWithClientAndAmortization>();
+
+function flattenQuotationClient(row: {
+	quotation: typeof quotations.$inferSelect;
+	leadFirstName: string | null;
+	leadLastName: string | null;
+	companyName: string | null;
+}): QuotationWithClient {
+	return {
+		...row.quotation,
+		leadFirstName: row.leadFirstName,
+		leadLastName: row.leadLastName,
+		companyName: row.companyName,
+	};
+}
+
+const quotationClientSelect = {
+	quotation: quotations,
+	leadFirstName: leads.firstName,
+	leadLastName: leads.lastName,
+	companyName: companies.name,
+};
 
 /**
  * Calcula la cuota mensual usando la fórmula PMT de Excel
@@ -297,65 +344,86 @@ export const quotationsRouter = {
 		}),
 
 	// Obtener cotizaciones del usuario
-	getQuotations: crmProcedure.handler(async ({ context }) => {
-		const userRole = context.userRole;
+	getQuotations: crmProcedure.output(z.array(quotationWithClientOutput)).handler(
+		async ({ context }): Promise<QuotationWithClient[]> => {
+			const userRole = context.userRole;
 
-		// Admin y supervisión ven todas; ventas solo las suyas
-		if (canManageAnyQuotation(userRole)) {
+			// Admin y supervisión ven todas; ventas solo las suyas
+			if (canManageAnyQuotation(userRole)) {
+				const result = await db
+					.select(quotationClientSelect)
+					.from(quotations)
+					.leftJoin(opportunities, eq(quotations.opportunityId, opportunities.id))
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(companies, eq(opportunities.companyId, companies.id))
+					.orderBy(desc(quotations.createdAt));
+				return result.map(flattenQuotationClient);
+			}
+
 			const result = await db
-				.select()
+				.select(quotationClientSelect)
 				.from(quotations)
+				.leftJoin(opportunities, eq(quotations.opportunityId, opportunities.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(companies, eq(opportunities.companyId, companies.id))
+				.where(eq(quotations.salesUserId, context.userId))
 				.orderBy(desc(quotations.createdAt));
-			return result;
-		}
 
-		const result = await db
-			.select()
-			.from(quotations)
-			.where(eq(quotations.salesUserId, context.userId))
-			.orderBy(desc(quotations.createdAt));
-
-		return result;
-	}),
+			return result.map(flattenQuotationClient);
+		},
+	),
 
 	// Obtener cotización por ID con tabla de amortización
 	getQuotationById: crmProcedure
 		.input(z.object({ quotationId: z.string().uuid() }))
-		.handler(async ({ input, context }) => {
-			const [quotation] = await db
-				.select()
-				.from(quotations)
-				.where(eq(quotations.id, input.quotationId))
-				.limit(1);
+		.output(quotationWithClientAndAmortizationOutput)
+		.handler(
+			async ({
+				input,
+				context,
+			}): Promise<QuotationWithClientAndAmortization> => {
+				const [row] = await db
+					.select(quotationClientSelect)
+					.from(quotations)
+					.leftJoin(opportunities, eq(quotations.opportunityId, opportunities.id))
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(companies, eq(opportunities.companyId, companies.id))
+					.where(eq(quotations.id, input.quotationId))
+					.limit(1);
+				const quotation = row ? flattenQuotationClient(row) : null;
 
-			if (!quotation) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Cotización no encontrada",
-				});
-			}
+				if (!quotation) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Cotización no encontrada",
+					});
+				}
 
-			// Validar acceso
-			const userRole = context.userRole;
-			if (!canManageAnyQuotation(userRole) && quotation.salesUserId !== context.userId) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permiso para ver esta cotización",
-				});
-			}
+				// Validar acceso
+				const userRole = context.userRole;
+				if (
+					!canManageAnyQuotation(userRole) &&
+					quotation.salesUserId !== context.userId
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para ver esta cotización",
+					});
+				}
 
-			// Generar tabla de amortización
-			const amortizationTable = generateAmortizationTable(
-				Number(quotation.totalFinanced),
-				Number(quotation.interestRate),
-				quotation.termMonths,
-				Number(quotation.insuranceCost),
-				Number(quotation.gpsCost),
-			);
+				// Generar tabla de amortización
+				const amortizationTable = generateAmortizationTable(
+					Number(quotation.totalFinanced),
+					Number(quotation.interestRate),
+					quotation.termMonths,
+					Number(quotation.insuranceCost),
+					Number(quotation.gpsCost),
+				);
 
-			return {
-				...quotation,
-				amortizationTable,
-			};
-		}),
+				return {
+					...quotation,
+					amortizationTable,
+				};
+			},
+		),
 
 	// Actualizar cotización
 	updateQuotation: crmProcedure
@@ -407,14 +475,18 @@ export const quotationsRouter = {
 	// Listar cotizaciones por oportunidad
 	listQuotationsByOpportunity: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.output(z.array(quotationWithClientOutput))
+		.handler(async ({ input }): Promise<QuotationWithClient[]> => {
 			const result = await db
-				.select()
+				.select(quotationClientSelect)
 				.from(quotations)
+				.leftJoin(opportunities, eq(quotations.opportunityId, opportunities.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.where(eq(quotations.opportunityId, input.opportunityId))
 				.orderBy(desc(quotations.createdAt));
 
-			return result;
+			return result.map(flattenQuotationClient);
 		}),
 
 	// Eliminar cotización

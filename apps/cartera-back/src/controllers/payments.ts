@@ -26,7 +26,11 @@ import {
 import { updateMora } from "./latefee";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
-import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
+import {
+  calcularSplitInteresPci,
+  aplicarResiduoCube,
+  type InvSplitRow,
+} from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 
 // ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
@@ -1697,6 +1701,168 @@ interface GetPagosOptions {
   fechaBoletaInicio?: string;
   fechaBoletaFin?: string;
 }
+// ── Tipos para el armado del array `inversionistas` del reporte ──────────────
+// Shape de cada fila pci tal como la trae la subconsulta SQL de
+// getPagosConInversionistas (json_build_object). Es también el shape de SALIDA.
+export type ReportInvRow = {
+  inversionistaId: number;
+  nombreInversionista: string;
+  emiteFactura: boolean;
+  abonoCapital: string | number | null;
+  abonoInteres: string | number | null;
+  abonoIva: string | number | null;
+  isr: string | number | null;
+  cuotaPago: string | number | null;
+  montoAportado: string | number | null;
+  porcentajeParticipacion: string | number | null;
+};
+
+// creditos_inversionistas del crédito (para simular parciales sin filas pci).
+export type ReportCreditoInv = {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura?: boolean | null;
+  porcentaje_participacion_inversionista: string | number;
+  porcentaje_cash_in: string | number;
+  monto_aportado: string | number;
+};
+
+const round2Str = (b: Big) => b.round(2).toString();
+
+/**
+ * 🧮 Arma el array `inversionistas` de UN pago para el reporte JSON, reflejando
+ * el interés COMPLETO del pago (= la facturación):
+ *   - Si el pago YA tiene filas pci (`pciRows`) → se usan como base.
+ *   - Si NO tiene (parcial: la cuota no se completó pero el pago SÍ se facturó)
+ *     → se simula el split con `calcularSplitInteresPci` usando los
+ *       `creditos_inversionistas` del crédito + `pago.abono_interes/iva`.
+ *   - En AMBOS casos se aplica `aplicarResiduoCube`: el residuo (full − Σsplit,
+ *     que corresponde al cash_in de los no-CUBE) se suma a la fila de CUBE, o se
+ *     crea la fila de CUBE si no existía.
+ *
+ * Función PURA (sin DB) → testeable en aislamiento. NO toca abono_capital ni la
+ * parte de los inversionistas no-CUBE; solo ajusta/crea la fila de CUBE.
+ *
+ * Invariante: Σ(salida.abonoInteres) === round2(pago.abono_interes).
+ *
+ * ⚠️ Limitación conocida (compra de cartera + parcial): si para simular un
+ *    parcial se quiere prorratear por compra de cartera, pasar `factorInteresPorInv`
+ *    (de `calcularFactoresProrrateoInteresV2`). Hoy el reporte NO lo provee para
+ *    parciales (camino regular), así que un parcial de un crédito con compra
+ *    pendiente se simula con el reparto regular; el residuo de CUBE igual cuadra
+ *    el total del pago, pero el reparto entre el comprador y CUBE puede no
+ *    coincidir al centavo con la facturación prorrateada de ese caso particular.
+ */
+export function armarInversionistasPago(args: {
+  pago: { abono_interes: string | number | null; abono_iva_12: string | number | null; cuota?: string | number | null };
+  pciRows: ReportInvRow[] | null | undefined;
+  creditoInvs: ReportCreditoInv[];
+  cubeId: number;
+  factorInteresPorInv?: Map<number, Big> | null;
+}): ReportInvRow[] {
+  const { pago, pciRows, creditoInvs, cubeId, factorInteresPorInv } = args;
+
+  const pagoAbonoInteres = new Big(pago.abono_interes ?? 0);
+  const pagoAbonoIva = new Big(pago.abono_iva_12 ?? 0);
+
+  const tienePci = Array.isArray(pciRows) && pciRows.length > 0;
+
+  // 1) Construir el split base (InvSplitRow[]) y un índice de metadatos por inv
+  //    para reconstruir la fila final con el mismo shape del reporte.
+  let baseSplit: InvSplitRow[];
+  // meta: datos no-monetarios de cada inversionista (nombre, emiteFactura, etc.)
+  const meta = new Map<number, Partial<ReportInvRow>>();
+
+  if (tienePci) {
+    baseSplit = pciRows!.map((row) => {
+      meta.set(row.inversionistaId, row);
+      return {
+        inversionista_id: row.inversionistaId,
+        abono_interes: new Big(row.abonoInteres ?? 0),
+        abono_iva_12: new Big(row.abonoIva ?? 0),
+      };
+    });
+  } else {
+    // Parcial: simular el reparto con los creditos_inversionistas del crédito.
+    baseSplit = calcularSplitInteresPci({
+      inversionistas: creditoInvs.map((ci) => ({
+        inversionista_id: ci.inversionista_id,
+        nombre: ci.nombre,
+        porcentaje_participacion_inversionista: ci.porcentaje_participacion_inversionista ?? 0,
+        porcentaje_cash_in: ci.porcentaje_cash_in ?? 0,
+        monto_aportado: ci.monto_aportado ?? 0,
+      })),
+      pagoAbonoInteres,
+      pagoAbonoIva,
+      factorInteresPorInv: factorInteresPorInv ?? null,
+    });
+    for (const ci of creditoInvs) {
+      meta.set(ci.inversionista_id, {
+        inversionistaId: ci.inversionista_id,
+        nombreInversionista: ci.nombre,
+        emiteFactura: ci.emite_factura ?? false,
+        // En parciales no hay capital pci (la cuota no se completó).
+        abonoCapital: "0",
+        cuotaPago: pago.cuota ?? "0",
+        montoAportado: ci.monto_aportado ?? null,
+        porcentajeParticipacion:
+          ci.inversionista_id === cubeId
+            ? ci.porcentaje_cash_in ?? null
+            : ci.porcentaje_participacion_inversionista ?? null,
+      });
+    }
+  }
+
+  // 2) Aplicar el residuo de CUBE (suma a CUBE existente o crea la fila CUBE).
+  const ajustado = aplicarResiduoCube({
+    split: baseSplit,
+    pagoAbonoInteres,
+    pagoAbonoIva,
+    cubeInversionistaId: cubeId,
+  });
+
+  // 3) Reconstruir el array final con el shape EXACTO del reporte.
+  return ajustado.map((s) => {
+    const m = meta.get(s.inversionista_id);
+    const interesStr = round2Str(s.abono_interes);
+    const ivaStr = round2Str(s.abono_iva_12);
+    const isrStr = round2Str(s.abono_interes.times("0.05"));
+
+    if (m) {
+      // Fila ya existente (pci real o simulada): conserva sus metadatos,
+      // sobreescribe los montos de interés/iva/isr con los valores ajustados.
+      return {
+        inversionistaId: s.inversionista_id,
+        nombreInversionista: m.nombreInversionista ?? "",
+        emiteFactura: m.emiteFactura ?? false,
+        abonoCapital: m.abonoCapital ?? "0",
+        abonoInteres: interesStr,
+        abonoIva: ivaStr,
+        isr: isrStr,
+        cuotaPago: m.cuotaPago ?? (pago.cuota ?? "0"),
+        montoAportado: m.montoAportado ?? null,
+        porcentajeParticipacion: m.porcentajeParticipacion ?? null,
+      };
+    }
+
+    // Fila de CUBE creada por aplicarResiduoCube (no estaba en el split base).
+    // Intentar enriquecer con los datos del crédito si CUBE figura en creditoInvs.
+    const cubeCi = creditoInvs.find((ci) => ci.inversionista_id === s.inversionista_id);
+    return {
+      inversionistaId: s.inversionista_id,
+      nombreInversionista: cubeCi?.nombre ?? "Cube Investments S.A.",
+      emiteFactura: cubeCi?.emite_factura ?? false,
+      abonoCapital: "0",
+      abonoInteres: interesStr,
+      abonoIva: ivaStr,
+      isr: isrStr,
+      cuotaPago: pago.cuota ?? "0",
+      montoAportado: cubeCi?.monto_aportado ?? null,
+      porcentajeParticipacion: cubeCi?.porcentaje_cash_in ?? null,
+    };
+  });
+}
+
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
  * - Incluye los nuevos campos del pago: mora, otros, reserva, membresías, observaciones.
@@ -1830,6 +1996,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     const query = sql`
       SELECT
         p.pago_id AS "pagoId",
+        p.credito_id AS "creditoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
         TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
@@ -1997,8 +2164,98 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
 
     const result = await db.execute(query);
 
+    // ── 🆕 Ajuste de interés COMPLETO por pago (= la facturación) ───────────────
+    // El reporte debe reflejar, por inversionista, el interés que SE FACTURÓ:
+    //   • residuo de CUBE (cash_in de los no-CUBE absorbido por CUBE), y
+    //   • PARCIALES: pagos cuya cuota no se completó → NO tienen filas en
+    //     pagos_credito_inversionistas, pero SÍ se facturaron. Se simulan desde
+    //     los creditos_inversionistas del crédito.
+    // Cálculo al vuelo (NO escribe pci ni espejo). Ver armarInversionistasPago.
+
+    // 1) cubeId: resolverlo UNA vez por nombre (fallback al CUBE_ID conocido).
+    let cubeId = CUBE_ID;
+    try {
+      const cubeRow = await db.execute(sql`
+        SELECT i.inversionista_id AS "id"
+        FROM cartera.inversionistas i
+        WHERE i.nombre ILIKE '%cube%'
+        ORDER BY i.inversionista_id ASC
+        LIMIT 1
+      `);
+      const resolved = Number(cubeRow.rows?.[0]?.id);
+      if (Number.isFinite(resolved) && resolved > 0) cubeId = resolved;
+    } catch (e) {
+      console.warn("⚠️ No se pudo resolver cubeId por nombre; uso CUBE_ID por defecto:", e);
+    }
+
+    // 2) creditos_inversionistas de TODOS los créditos de la página (para simular
+    //    parciales). Una sola query; se agrupa por credito_id.
+    const creditoIds = Array.from(
+      new Set(
+        result.rows
+          .map((r: any) => Number(r.creditoId))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+    const creditoInvsByCredito = new Map<number, ReportCreditoInv[]>();
+    if (creditoIds.length > 0) {
+      const ciResult = await db.execute(sql`
+        SELECT
+          ci.credito_id AS "creditoId",
+          ci.inversionista_id AS "inversionistaId",
+          i.nombre AS "nombre",
+          i.emite_factura AS "emiteFactura",
+          ci.porcentaje_participacion_inversionista AS "porcentajeParticipacion",
+          ci.porcentaje_cash_in AS "porcentajeCashIn",
+          ci.monto_aportado AS "montoAportado"
+        FROM cartera.creditos_inversionistas ci
+        INNER JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+        WHERE ci.credito_id IN (${sql.join(creditoIds.map((id) => sql`${id}`), sql`, `)})
+      `);
+      for (const row of ciResult.rows as any[]) {
+        const cid = Number(row.creditoId);
+        const arr = creditoInvsByCredito.get(cid) ?? [];
+        arr.push({
+          inversionista_id: Number(row.inversionistaId),
+          nombre: row.nombre ?? "",
+          emite_factura: row.emiteFactura ?? false,
+          porcentaje_participacion_inversionista: row.porcentajeParticipacion ?? 0,
+          porcentaje_cash_in: row.porcentajeCashIn ?? 0,
+          monto_aportado: row.montoAportado ?? 0,
+        });
+        creditoInvsByCredito.set(cid, arr);
+      }
+    }
+
+    // Parser robusto del array de inversionistas (json_agg → array | string).
+    const parseInvs = (raw: any): ReportInvRow[] =>
+      Array.isArray(raw)
+        ? raw
+        : JSON.parse(typeof raw === "string" ? raw : "[]");
+
     // 🧠 Transformación final del resultado
-    const data = result.rows.map((r) => ({
+    const data = result.rows.map((r) => {
+      const creditoInvs = creditoInvsByCredito.get(Number(r.creditoId)) ?? [];
+      const pciRows = parseInvs(r.inversionistas);
+
+      // Si el pago no tiene interés facturado, no hay nada que repartir/ajustar:
+      // se conserva el array original (evita simular filas con interés 0).
+      const tieneInteres = new Big((r.abono_interes as any) ?? 0).gt(0);
+
+      const inversionistasFinal = tieneInteres
+        ? armarInversionistasPago({
+            pago: {
+              abono_interes: r.abono_interes as any,
+              abono_iva_12: r.abono_iva_12 as any,
+              cuota: r.cuotaMonto as any,
+            },
+            pciRows: pciRows.length > 0 ? pciRows : null,
+            creditoInvs,
+            cubeId,
+          })
+        : pciRows;
+
+      return {
       pagoId: r.pagoId,
       montoBoleta: r.montoBoleta,
       numeroAutorizacion: r.numeroAutorizacion,
@@ -2033,18 +2290,15 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       pendienteFacturar: r.pendienteFacturar ?? false,
       cuota: r.cuota,
       usuario: r.usuario,
-      inversionistas: Array.isArray(r.inversionistas)
-        ? r.inversionistas
-        : JSON.parse(
-            typeof r.inversionistas === "string" ? r.inversionistas : "[]"
-          ),
+      inversionistas: inversionistasFinal,
       boletas: Array.isArray(r.boletas)
         ? r.boletas
         : JSON.parse(
             typeof r.boletas === "string" ? r.boletas : "[]"
           ),
       cancelacion: r.cancelacion ?? null,
-    }));
+      };
+    });
 
     interface TotalesGenerales {
       totalAbonoCapital: number;

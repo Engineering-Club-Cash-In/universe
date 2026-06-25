@@ -180,7 +180,7 @@ mock.module("../utils/comprasAjuste", () => ({
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
 
-const { calcularYRegistrarPagosEspejo } = await import("./payments");
+const { calcularYRegistrarPagosEspejo, armarInversionistasPago } = await import("./payments");
 
 describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
   beforeEach(() => {
@@ -474,5 +474,146 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(0);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// armarInversionistasPago: arma el array `inversionistas` de un pago en el
+// reporte getPagosConInversionistas reflejando el interés COMPLETO (facturación):
+//   • pago con pci real → usa pci + residuo de CUBE
+//   • pago sin pci (parcial) → simula con creditoInvs + residuo de CUBE
+//   • CUBE ausente → crea la línea CUBE con el residuo
+// Invariante central: Σ(inversionistas.abonoInteres) === round2(pago.abono_interes)
+// ────────────────────────────────────────────────────────────────────────────
+const round2Num = (n: number) => Number(new Big(n).round(2).toString());
+const sumInteres = (arr: any[]) =>
+  arr.reduce((acc, r) => acc.plus(new Big(r.abonoInteres ?? 0)), new Big(0));
+
+describe("armarInversionistasPago (residuo CUBE + simulación de parciales)", () => {
+  it("caso 1: pago CON pci real → usa pci y le suma el residuo a CUBE", () => {
+    // Pago con interés 683.82. pci real reparte Brenda 266.80 + CUBE 302.66 (Σ=569.46),
+    // residuo (30% cash_in de Brenda) = 114.36 va a CUBE.
+    const pago = { abono_interes: "683.82", abono_iva_12: "0", cuota: "1000.00" };
+    const pciRows = [
+      {
+        inversionistaId: 1,
+        nombreInversionista: "Brenda",
+        emiteFactura: false,
+        abonoCapital: "500.00",
+        abonoInteres: "266.80",
+        abonoIva: "0",
+        isr: "13.34",
+        cuotaPago: "1000.00",
+        montoAportado: "25324.90",
+        porcentajeParticipacion: "70",
+      },
+      {
+        inversionistaId: 86,
+        nombreInversionista: "Cube Investments S.A.",
+        emiteFactura: false,
+        abonoCapital: "300.00",
+        abonoInteres: "302.66",
+        abonoIva: "0",
+        isr: "15.13",
+        cuotaPago: "1000.00",
+        montoAportado: "20108.92",
+        porcentajeParticipacion: "100",
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pago,
+      pciRows,
+      creditoInvs: [],
+      cubeId: 86,
+    });
+
+    // Brenda NO se toca (su parte queda igual)
+    const brenda = out.find((r: any) => r.inversionistaId === 1)!;
+    expect(round2Num(Number(brenda.abonoInteres))).toBe(266.80);
+
+    // CUBE recibe su parte + el residuo
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(round2Num(Number(cube.abonoInteres))).toBeCloseTo(417.02, 2); // 302.66 + 114.36
+
+    // INVARIANTE: Σ abonoInteres === round2(pago.abono_interes)
+    expect(round2Num(Number(sumInteres(out).toString()))).toBe(683.82);
+  });
+
+  it("caso 2: pago SIN pci (parcial) → simula con creditoInvs y aplica residuo", () => {
+    // No hay filas pci (cuota incompleta) pero el pago SÍ se facturó (abono_interes>0).
+    // Se simula con los creditos_inversionistas del crédito + residuo de CUBE.
+    const pago = { abono_interes: "683.82", abono_iva_12: "0", cuota: "1000.00" };
+    const creditoInvs = [
+      {
+        inversionista_id: 1,
+        nombre: "Brenda",
+        emite_factura: false,
+        porcentaje_participacion_inversionista: 70,
+        porcentaje_cash_in: 30,
+        monto_aportado: "25324.90",
+      },
+      {
+        inversionista_id: 86,
+        nombre: "Cube Investments S.A.",
+        emite_factura: false,
+        porcentaje_participacion_inversionista: 0,
+        porcentaje_cash_in: 100,
+        monto_aportado: "20108.92",
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pago,
+      pciRows: null,
+      creditoInvs,
+      cubeId: 86,
+    });
+
+    // Aparecen ambos inversionistas simulados
+    expect(out.find((r: any) => r.inversionistaId === 1)).toBeDefined();
+    expect(out.find((r: any) => r.inversionistaId === 86)).toBeDefined();
+
+    // En parciales no hay capital pci → abonoCapital = 0
+    const brenda = out.find((r: any) => r.inversionistaId === 1)!;
+    expect(round2Num(Number(brenda.abonoCapital))).toBe(0);
+
+    // INVARIANTE: Σ abonoInteres === round2(pago.abono_interes)
+    expect(round2Num(Number(sumInteres(out).toString()))).toBe(683.82);
+  });
+
+  it("caso 3: CUBE ausente del split → crea la línea CUBE con el residuo", () => {
+    // pci real sin CUBE; el residuo del interés debe crear una fila CUBE nueva.
+    const pago = { abono_interes: "572.96", abono_iva_12: "0", cuota: "1000.00" };
+    const pciRows = [
+      {
+        inversionistaId: 20,
+        nombreInversionista: "Inversor X",
+        emiteFactura: false,
+        abonoCapital: "400.00",
+        abonoInteres: "458.37",
+        abonoIva: "0",
+        isr: "22.92",
+        cuotaPago: "1000.00",
+        montoAportado: "10000.00",
+        porcentajeParticipacion: "80",
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pago,
+      pciRows,
+      creditoInvs: [],
+      cubeId: 86,
+    });
+
+    // Se crea la línea de CUBE con el residuo (572.96 - 458.37 = 114.59)
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(cube).toBeDefined();
+    expect(cube.nombreInversionista.toLowerCase()).toContain("cube");
+    expect(round2Num(Number(cube.abonoInteres))).toBeCloseTo(114.59, 2);
+
+    // INVARIANTE: Σ abonoInteres === round2(pago.abono_interes)
+    expect(round2Num(Number(sumInteres(out).toString()))).toBe(572.96);
   });
 });

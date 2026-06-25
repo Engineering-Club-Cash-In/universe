@@ -478,33 +478,28 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// armarInversionistasPago: arma el array `inversionistas` de un pago en el
-// reporte getPagosConInversionistas reflejando el interés COMPLETO (facturación):
-//   • pago con pci real → usa pci + residuo de CUBE
-//   • pago sin pci (parcial) → simula con creditoInvs + residuo de CUBE
-//   • CUBE ausente → crea la línea CUBE con el residuo
-// Invariante central: Σ(inversionistas.abonoInteres) === round2(pago.abono_interes)
+// armarInversionistasPago: lee el interés de CUBE del desglose (rubro INTERES)
+// y reemplaza (o crea) la fila de CUBE, dejando los no-CUBE intactos.
+//   • con desglose → CUBE del desglose, no-CUBE del pci sin cambio
+//   • sin desglose → fallback: pci tal cual (pagos pre-facturación)
+//   • parciales (sin pci) → solo aparece CUBE; otros se difieren
 // ────────────────────────────────────────────────────────────────────────────
 const round2Num = (n: number) => Number(new Big(n).round(2).toString());
-const sumInteres = (arr: any[]) =>
-  arr.reduce((acc, r) => acc.plus(new Big(r.abonoInteres ?? 0)), new Big(0));
 
-describe("armarInversionistasPago (residuo CUBE + simulación de parciales)", () => {
-  it("caso 1: pago CON pci real → usa pci y le suma el residuo a CUBE", () => {
-    // Pago con interés 683.82. pci real reparte Brenda 266.80 + CUBE 302.66 (Σ=569.46),
-    // residuo (30% cash_in de Brenda) = 114.36 va a CUBE.
-    const pago = { abono_interes: "683.82", abono_iva_12: "0", cuota: "1000.00" };
+describe("armarInversionistasPago (interés CUBE del desglose)", () => {
+  it("caso 1: CUBE en pci → reemplaza el interés de CUBE con el del desglose; InvA intacto", () => {
+    // desglose net = 78.4 - 8.4 = 70; CUBE pci tenía 50 → se reemplaza a 70.
     const pciRows = [
       {
         inversionistaId: 1,
-        nombreInversionista: "Brenda",
+        nombreInversionista: "InvA",
         emiteFactura: false,
         abonoCapital: "500.00",
-        abonoInteres: "266.80",
-        abonoIva: "0",
-        isr: "13.34",
+        abonoInteres: "100",
+        abonoIva: "12",
+        isr: "5",
         cuotaPago: "1000.00",
-        montoAportado: "25324.90",
+        montoAportado: "25000",
         porcentajeParticipacion: "70",
       },
       {
@@ -512,108 +507,165 @@ describe("armarInversionistasPago (residuo CUBE + simulación de parciales)", ()
         nombreInversionista: "Cube Investments S.A.",
         emiteFactura: false,
         abonoCapital: "300.00",
-        abonoInteres: "302.66",
-        abonoIva: "0",
-        isr: "15.13",
+        abonoInteres: "50",
+        abonoIva: "6",
+        isr: "2.5",
         cuotaPago: "1000.00",
-        montoAportado: "20108.92",
+        montoAportado: "20000",
         porcentajeParticipacion: "100",
       },
     ];
 
     const out = armarInversionistasPago({
-      pago,
       pciRows,
-      creditoInvs: [],
       cubeId: 86,
+      desgloseCubeInteres: { total: new Big("78.4"), iva: new Big("8.4") },
     });
 
-    // Brenda NO se toca (su parte queda igual)
-    const brenda = out.find((r: any) => r.inversionistaId === 1)!;
-    expect(round2Num(Number(brenda.abonoInteres))).toBe(266.80);
+    // InvA no se toca
+    const invA = out.find((r: any) => r.inversionistaId === 1)!;
+    expect(invA.abonoInteres).toBe("100");
+    expect(invA.abonoIva).toBe("12");
 
-    // CUBE recibe su parte + el residuo
+    // CUBE reemplazado con los valores del desglose
     const cube = out.find((r: any) => r.inversionistaId === 86)!;
-    expect(round2Num(Number(cube.abonoInteres))).toBeCloseTo(417.02, 2); // 302.66 + 114.36
-
-    // INVARIANTE: Σ abonoInteres === round2(pago.abono_interes)
-    expect(round2Num(Number(sumInteres(out).toString()))).toBe(683.82);
+    expect(cube.abonoInteres).toBe("70");
+    expect(cube.abonoIva).toBe("8.4");
   });
 
-  it("caso 2: pago SIN pci (parcial) → simula con creditoInvs y aplica residuo", () => {
-    // No hay filas pci (cuota incompleta) pero el pago SÍ se facturó (abono_interes>0).
-    // Se simula con los creditos_inversionistas del crédito + residuo de CUBE.
-    const pago = { abono_interes: "683.82", abono_iva_12: "0", cuota: "1000.00" };
-    const creditoInvs = [
-      {
-        inversionista_id: 1,
-        nombre: "Brenda",
-        emite_factura: false,
-        porcentaje_participacion_inversionista: 70,
-        porcentaje_cash_in: 30,
-        monto_aportado: "25324.90",
-      },
-      {
-        inversionista_id: 86,
-        nombre: "Cube Investments S.A.",
-        emite_factura: false,
-        porcentaje_participacion_inversionista: 0,
-        porcentaje_cash_in: 100,
-        monto_aportado: "20108.92",
-      },
-    ];
-
-    const out = armarInversionistasPago({
-      pago,
-      pciRows: null,
-      creditoInvs,
-      cubeId: 86,
-    });
-
-    // Aparecen ambos inversionistas simulados
-    expect(out.find((r: any) => r.inversionistaId === 1)).toBeDefined();
-    expect(out.find((r: any) => r.inversionistaId === 86)).toBeDefined();
-
-    // En parciales no hay capital pci → abonoCapital = 0
-    const brenda = out.find((r: any) => r.inversionistaId === 1)!;
-    expect(round2Num(Number(brenda.abonoCapital))).toBe(0);
-
-    // INVARIANTE: Σ abonoInteres === round2(pago.abono_interes)
-    expect(round2Num(Number(sumInteres(out).toString()))).toBe(683.82);
-  });
-
-  it("caso 3: CUBE ausente del split → crea la línea CUBE con el residuo", () => {
-    // pci real sin CUBE; el residuo del interés debe crear una fila CUBE nueva.
-    const pago = { abono_interes: "572.96", abono_iva_12: "0", cuota: "1000.00" };
+  it("caso 6 (isr): isr de CUBE = round2(net × 0.05); net 70 → isr 3.5", () => {
     const pciRows = [
       {
-        inversionistaId: 20,
-        nombreInversionista: "Inversor X",
+        inversionistaId: 86,
+        nombreInversionista: "Cube Investments S.A.",
         emiteFactura: false,
-        abonoCapital: "400.00",
-        abonoInteres: "458.37",
-        abonoIva: "0",
-        isr: "22.92",
+        abonoCapital: "0",
+        abonoInteres: "50",
+        abonoIva: "6",
+        isr: "2.5",
         cuotaPago: "1000.00",
-        montoAportado: "10000.00",
-        porcentajeParticipacion: "80",
+        montoAportado: null,
+        porcentajeParticipacion: null,
       },
     ];
 
     const out = armarInversionistasPago({
-      pago,
       pciRows,
-      creditoInvs: [],
       cubeId: 86,
+      desgloseCubeInteres: { total: new Big("78.4"), iva: new Big("8.4") },
     });
 
-    // Se crea la línea de CUBE con el residuo (572.96 - 458.37 = 114.59)
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(cube.isr).toBe("3.5"); // 70 * 0.05 = 3.5
+  });
+
+  it("caso 2: CUBE NO en pci → crea fila CUBE nueva con el desglose", () => {
+    // desglose net = 16.8 - 1.8 = 15
+    const pciRows = [
+      {
+        inversionistaId: 1,
+        nombreInversionista: "InvA",
+        emiteFactura: false,
+        abonoCapital: "500.00",
+        abonoInteres: "100",
+        abonoIva: "12",
+        isr: "5",
+        cuotaPago: "1000.00",
+        montoAportado: "25000",
+        porcentajeParticipacion: "70",
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("16.8"), iva: new Big("1.8") },
+      cubeMeta: { nombreInversionista: "Cube Investments S.A.", emiteFactura: true },
+    });
+
+    expect(out).toHaveLength(2);
     const cube = out.find((r: any) => r.inversionistaId === 86)!;
     expect(cube).toBeDefined();
-    expect(cube.nombreInversionista.toLowerCase()).toContain("cube");
-    expect(round2Num(Number(cube.abonoInteres))).toBeCloseTo(114.59, 2);
+    expect(cube.abonoInteres).toBe("15");
+    expect(cube.emiteFactura).toBe(true);
+  });
 
-    // INVARIANTE: Σ abonoInteres === round2(pago.abono_interes)
-    expect(round2Num(Number(sumInteres(out).toString()))).toBe(572.96);
+  it("caso 3: parcial (sin pci) → solo aparece CUBE del desglose; otros inversionistas diferidos", () => {
+    // desglose net = 22.4 - 2.4 = 20
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("22.4"), iva: new Big("2.4") },
+    });
+
+    expect(out).toHaveLength(1);
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(cube).toBeDefined();
+    expect(cube.abonoInteres).toBe("20");
+  });
+
+  it("caso 4: sin desglose (fallback) → devuelve pci tal cual, sin cambios", () => {
+    const pciRows = [
+      {
+        inversionistaId: 1,
+        nombreInversionista: "InvA",
+        emiteFactura: false,
+        abonoCapital: "0",
+        abonoInteres: "100",
+        abonoIva: "0",
+        isr: "5",
+        cuotaPago: "0",
+        montoAportado: null,
+        porcentajeParticipacion: null,
+      },
+      {
+        inversionistaId: 86,
+        nombreInversionista: "Cube Investments S.A.",
+        emiteFactura: false,
+        abonoCapital: "0",
+        abonoInteres: "50",
+        abonoIva: "0",
+        isr: "2.5",
+        cuotaPago: "0",
+        montoAportado: null,
+        porcentajeParticipacion: null,
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: null,
+    });
+
+    // Debe ser el mismo array sin modificación
+    expect(out).toBe(pciRows);
+  });
+
+  it("caso 5: desglose CUBE ~0 y CUBE no en pci → no agrega fila vacía", () => {
+    const pciRows = [
+      {
+        inversionistaId: 1,
+        nombreInversionista: "InvA",
+        emiteFactura: false,
+        abonoCapital: "0",
+        abonoInteres: "100",
+        abonoIva: "0",
+        isr: "5",
+        cuotaPago: "0",
+        montoAportado: null,
+        porcentajeParticipacion: null,
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("0"), iva: new Big("0") },
+    });
+
+    // Solo InvA, no se agrega CUBE vacío
+    expect(out).toHaveLength(1);
+    expect(out.find((r: any) => r.inversionistaId === 86)).toBeUndefined();
   });
 });

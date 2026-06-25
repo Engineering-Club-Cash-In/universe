@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import Big from "big.js";
-import { aplicarResiduoCube, calcularSplitInteresPci } from "./splitInteresPci";
+import { calcularSplitInteresPci } from "./splitInteresPci";
 
 const round2 = (b: Big) => Number(b.round(2).toString());
 
@@ -38,35 +38,3 @@ describe("calcularSplitInteresPci (regular)", () => {
   });
 });
 
-describe("aplicarResiduoCube", () => {
-  it("caso 1: CUBE ya está → le suma el residuo", () => {
-    const out = aplicarResiduoCube({
-      pagoAbonoInteres: new Big("3621.08"), pagoAbonoIva: new Big("0"), cubeInversionistaId: 86,
-      split: [
-        { inversionista_id: 10, abono_interes: new Big("2391.77"), abono_iva_12: new Big("0") },
-        { inversionista_id: 11, abono_interes: new Big("4.04"), abono_iva_12: new Big("0") },
-        { inversionista_id: 86, abono_interes: new Big("801.46"), abono_iva_12: new Big("0") },
-      ],
-    });
-    const cube = out.find(r => r.inversionista_id === 86)!;
-    expect(Number(cube.abono_interes.round(2).toString())).toBeCloseTo(1225.27, 2); // 801.46 + 423.81
-    const suma = out.reduce((a, r) => a.plus(r.abono_interes), new Big(0));
-    expect(Number(suma.round(2).toString())).toBe(3621.08); // = full
-  });
-
-  it("caso 2: CUBE no está → crea la línea CUBE con el residuo", () => {
-    const out = aplicarResiduoCube({
-      pagoAbonoInteres: new Big("572.96"), pagoAbonoIva: new Big("0"), cubeInversionistaId: 86,
-      split: [{ inversionista_id: 20, abono_interes: new Big("458.37"), abono_iva_12: new Big("0") }],
-    });
-    expect(out).toHaveLength(2);
-    const cube = out.find(r => r.inversionista_id === 86)!;
-    expect(Number(cube.abono_interes.round(2).toString())).toBeCloseTo(114.59, 2);
-  });
-
-  it("sin residuo (Σ = full) → no cambia", () => {
-    const split = [{ inversionista_id: 30, abono_interes: new Big("100"), abono_iva_12: new Big("0") }];
-    const out = aplicarResiduoCube({ pagoAbonoInteres: new Big("100"), pagoAbonoIva: new Big("0"), cubeInversionistaId: 86, split });
-    expect(out).toHaveLength(1);
-  });
-});

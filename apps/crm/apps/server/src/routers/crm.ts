@@ -2235,13 +2235,21 @@ export const crmRouter = {
 			const vehicleChanged =
 				input.vehicleId !== undefined &&
 				input.vehicleId !== currentOpportunity[0].vehicleId;
+			const currentInsuranceProvider =
+				currentOpportunity[0].insuranceProvider ?? "universales";
 			const insuranceFallback =
 				seguro !== undefined
 					? {
-							insuranceProvider: "universales",
+							insuranceProvider: currentInsuranceProvider,
 							customerInsuranceCost: String(seguro),
-							internalInsuranceCost: String(seguro),
-							insuranceSavingsToMembership: "0",
+							internalInsuranceCost:
+								currentInsuranceProvider === "gyt"
+									? currentOpportunity[0].internalInsuranceCost
+									: String(seguro),
+							insuranceSavingsToMembership:
+								currentInsuranceProvider === "gyt"
+									? currentOpportunity[0].insuranceSavingsToMembership
+									: "0",
 						}
 					: {};
 

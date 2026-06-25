@@ -99,6 +99,17 @@ const parseStatusCreditList = (values: string[] | undefined) => {
   }
   return { values: values.filter(isStatusCredit) };
 };
+// Gate de rol server-side para la carga masiva de insolutos (crea créditos).
+// authMiddleware solo autentica; acá exigimos ADMIN/CONTA (igual que /realizarCredito).
+const requireInsolutoRole = (user: any, set: any): boolean => {
+  if (!user || !["ADMIN", "CONTA"].includes(user.role)) {
+    set.status = 403;
+    return false;
+  }
+  return true;
+};
+const INSOLUTO_NO_AUTORIZADO = { error: "No autorizado (requiere ADMIN o CONTA)." };
+
 export const creditRouter = new Elysia()
  
 .use(authMiddleware)
@@ -110,14 +121,18 @@ export const creditRouter = new Elysia()
   }
   return result;
 })
-  // ===== Carga masiva de créditos insolutos =====
+  // ===== Carga masiva de créditos insolutos (solo ADMIN/CONTA) =====
   // Paso 1: descargar plantilla Excel (base64)
-  .get("/insolutos/plantilla", () => ({
-    archivoBase64: generarPlantillaInsolutos(),
-    filename: "plantilla_insolutos.xlsx",
-  }))
+  .get("/insolutos/plantilla", ({ set, user }) => {
+    if (!requireInsolutoRole(user, set)) return INSOLUTO_NO_AUTORIZADO;
+    return {
+      archivoBase64: generarPlantillaInsolutos(),
+      filename: "plantilla_insolutos.xlsx",
+    };
+  })
   // Paso 2: subir Excel y validar formato + datos
-  .post("/insolutos/validar", async ({ body, set }) => {
+  .post("/insolutos/validar", async ({ body, set, user }) => {
+    if (!requireInsolutoRole(user, set)) return INSOLUTO_NO_AUTORIZADO;
     const { archivoBase64 } = (body ?? {}) as { archivoBase64?: string };
     if (!archivoBase64) {
       set.status = 400;
@@ -126,7 +141,8 @@ export const creditRouter = new Elysia()
     return await validarInsolutosExcel(archivoBase64);
   })
   // Paso 3: cargar las filas válidas (crea cada insoluto, reporta fallos)
-  .post("/insolutos/cargar", async ({ body, set }) => {
+  .post("/insolutos/cargar", async ({ body, set, user }) => {
+    if (!requireInsolutoRole(user, set)) return INSOLUTO_NO_AUTORIZADO;
     const { filas } = (body ?? {}) as { filas?: unknown };
     if (!Array.isArray(filas) || filas.length === 0) {
       set.status = 400;

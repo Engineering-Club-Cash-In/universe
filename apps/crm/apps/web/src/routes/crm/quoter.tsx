@@ -134,6 +134,11 @@ interface QuotationFormValues {
 	termMonths: number;
 	interestRate: number;
 	insuranceCost: number;
+	insuranceProvider: "universales" | "gyt";
+	customerInsuranceCost: number;
+	internalInsuranceCost: number;
+	excelCurrentInsuranceCost: number;
+	insuranceSavingsToMembership: number;
 	gpsCost: number;
 	transferCost: number;
 	adminCost: number;
@@ -848,6 +853,11 @@ function QuoterPage() {
 		termMonths: 60,
 		interestRate: 1.5, // default autocompra; sobre_vehiculo usa 3
 		insuranceCost: 0,
+		insuranceProvider: "universales",
+		customerInsuranceCost: 0,
+		internalInsuranceCost: 0,
+		excelCurrentInsuranceCost: 0,
+		insuranceSavingsToMembership: 0,
 		gpsCost: GPS_COST,
 		transferCost: 545, // 395 + 150 según Excel
 		adminCost: 0,
@@ -903,6 +913,12 @@ function QuoterPage() {
 				termMonths: Number(value.termMonths),
 				interestRate: Number(value.interestRate),
 				insuranceCost: Number(value.insuranceCost),
+				insuranceProvider: value.insuranceProvider,
+				customerInsuranceCost: Number(value.customerInsuranceCost),
+				internalInsuranceCost: Number(value.internalInsuranceCost),
+				insuranceSavingsToMembership: Number(
+					value.insuranceSavingsToMembership,
+				),
 				gpsCost: Number(value.gpsCost),
 				transferCost: Number(value.transferCost),
 				adminCost: Number(value.adminCost),
@@ -1063,7 +1079,7 @@ function QuoterPage() {
 			const baseInsuranceCost =
 				Math.round(result.baseInsuranceCost * 100) / 100;
 			const rawMembershipCostBeforeAdjustment =
-				Math.round(result.membershipCost * 100) / 100;
+				Math.round(result.effectiveMembershipCost * 100) / 100;
 			quoterForm.setFieldValue(
 				"baseMembershipCost",
 				rawMembershipCostBeforeAdjustment,
@@ -1097,11 +1113,29 @@ function QuoterPage() {
 				"membershipAdjustmentPercentage",
 				membershipAdjustment.percentage,
 			);
+			quoterForm.setFieldValue("insuranceProvider", result.provider);
+			quoterForm.setFieldValue(
+				"customerInsuranceCost",
+				Math.round(result.customerInsuranceCost * 100) / 100,
+			);
+			quoterForm.setFieldValue(
+				"internalInsuranceCost",
+				Math.round(result.internalInsuranceCost * 100) / 100,
+			);
+			quoterForm.setFieldValue(
+				"excelCurrentInsuranceCost",
+				Math.round((result.excelCurrentInsuranceCost ?? 0) * 100) / 100,
+			);
+			quoterForm.setFieldValue(
+				"insuranceSavingsToMembership",
+				Math.round(result.insuranceSavingsToMembership * 100) / 100,
+			);
 			const shouldUseInterno = vehicleContext?.isInterno ?? isInterno;
 
 			if (shouldUseInterno) {
 				// Crédito interno: solo seguro base, sin membresía ni GPS
 				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("customerInsuranceCost", baseInsuranceCost);
 				quoterForm.setFieldValue("baseMembershipCost", 0);
 				quoterForm.setFieldValue("membershipCost", 0);
 				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
@@ -1114,6 +1148,7 @@ function QuoterPage() {
 					Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
 
 				quoterForm.setFieldValue("insuranceCost", insuranceCost);
+				quoterForm.setFieldValue("customerInsuranceCost", insuranceCost);
 				quoterForm.setFieldValue("membershipCost", netMembershipCost);
 				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
 				quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
@@ -1300,7 +1335,10 @@ function QuoterPage() {
 					quoterForm.setFieldValue("downPayment", downPayment);
 				}
 
-				// Actualizar seguro y membresía
+				// Actualizar seguro y membresía. Pasamos isNew/origin del vehículo
+				// seleccionado explícitamente: el form state (vehicleId) que usa
+				// updateInsuranceCost para resolver el vehículo recién se seteó y
+				// puede estar stale, lo que clasificaría mal la membresía.
 				updateInsuranceCost(
 					isSobreVehiculo
 						? quoterForm.state.values.insuredAmount || numericValue
@@ -1378,6 +1416,22 @@ function QuoterPage() {
 
 				// Costos básicos
 				quoterForm.setFieldValue("insuranceCost", Number(q.insuranceCost) || 0);
+				quoterForm.setFieldValue(
+					"insuranceProvider",
+					(q.insuranceProvider as "universales" | "gyt") || "universales",
+				);
+				quoterForm.setFieldValue(
+					"customerInsuranceCost",
+					Number(q.customerInsuranceCost) || Number(q.insuranceCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"internalInsuranceCost",
+					Number(q.internalInsuranceCost) || Number(q.insuranceCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"insuranceSavingsToMembership",
+					Number(q.insuranceSavingsToMembership) || 0,
+				);
 				quoterForm.setFieldValue("gpsCost", Number(q.gpsCost) || 0);
 				quoterForm.setFieldValue("transferCost", Number(q.transferCost) || 0);
 				quoterForm.setFieldValue("adminCost", Number(q.adminCost) || 0);
@@ -2217,6 +2271,37 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
+									{quoterForm.state.values.insuranceProvider === "gyt" ? (
+										<p className="text-muted-foreground text-xs">
+											Seguro: GyT. Actual Excel: Q
+											{quoterForm.state.values.excelCurrentInsuranceCost.toFixed(
+												2,
+											)}{" "}
+											/ CRM: Q
+											{quoterForm.state.values.customerInsuranceCost.toFixed(2)}{" "}
+											/ GyT: Q
+											{quoterForm.state.values.internalInsuranceCost.toFixed(2)}
+											. Diferencia a membresía: Q
+											{quoterForm.state.values.insuranceSavingsToMembership.toFixed(
+												2,
+											)}
+											.
+										</p>
+									) : (
+										<p className="text-muted-foreground text-xs">
+											Seguro: Universales
+										</p>
+									)}
+									{quoterForm.state.values.membershipAdjustmentCategory ? (
+										<p className="text-muted-foreground text-xs">
+											Membresía: ajuste automático {""}
+											{quoterForm.state.values.membershipAdjustmentPercentage.toFixed(
+												2,
+											)}
+											% por {quoterForm.state.values.membershipAdjustmentCategory}.
+										</p>
+									) : null}
+
 									<quoterForm.Field name="gpsCost">
 										{(field) => (
 											<div>

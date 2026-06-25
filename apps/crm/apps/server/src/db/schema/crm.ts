@@ -61,10 +61,7 @@ export const creditTypeEnum = pgEnum("credit_type", [
 	"autocompra",
 	"sobre_vehiculo",
 ]);
-export const assignmentTypeEnum = pgEnum("assignment_type", [
-	"auto",
-	"manual",
-]);
+export const assignmentTypeEnum = pgEnum("assignment_type", ["auto", "manual"]);
 export const creditCategoryEnum = pgEnum("credit_category", [
 	"Contraseña",
 	"CV Vehículo",
@@ -325,6 +322,23 @@ export const opportunities = pgTable("opportunities", {
 	// Additional fields
 	seguro: decimal("seguro", { precision: 12, scale: 2 }), // Insurance amount
 	gps: decimal("gps", { precision: 12, scale: 2 }), // GPS amount
+	insuranceProvider: text("insurance_provider")
+		.notNull()
+		.default("universales"),
+	customerInsuranceCost: decimal("customer_insurance_cost", {
+		precision: 16,
+		scale: 8,
+	}),
+	internalInsuranceCost: decimal("internal_insurance_cost", {
+		precision: 16,
+		scale: 8,
+	}),
+	insuranceSavingsToMembership: decimal("insurance_savings_to_membership", {
+		precision: 16,
+		scale: 8,
+	})
+		.notNull()
+		.default("0"),
 	categoria: creditCategoryEnum("categoria"), // Credit category
 	nit: text("nit"), // Tax identification number
 	royalti: decimal("royalti", { precision: 12, scale: 2 }), // Royalty amount

@@ -2,6 +2,7 @@ import Big from "big.js";
 import z from "zod";
 import { db } from "../database";
 import {
+  aseguradoras,
   creditos,
   creditos_rubros_otros,
   creditos_inversionistas,
@@ -14,7 +15,7 @@ import {
 import { findOrCreateAdvisorByName, getAsesorConMenorCarga } from "./advisor";
 import { findOrCreateUserByName } from "./users";
 import { sendNewCreditNotification } from "@cci/email";
-import { eq, and, like } from "drizzle-orm";
+import { eq, and, like, sql } from "drizzle-orm";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -71,6 +72,7 @@ interface CreditDataForInsert {
   gps: string;
   observaciones: string;
   no_poliza: string;
+  aseguradora_id?: number;
   asesor_id: number;
   como_se_entero: string; 
   plazo: number;
@@ -177,7 +179,8 @@ const creditSchema = z.object({
   gps: z.number().min(0),
   observaciones: z.string().max(1000),
   no_poliza: z.string().max(1000),
-  como_se_entero: z.string().max(100), 
+  aseguradora: z.string().max(100).optional().nullable(),
+  como_se_entero: z.string().max(100),
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
   dia_pago_mensual: z.number().int().min(1).max(31),
@@ -336,6 +339,44 @@ const validateCreditData = (creditData: CreditData, set: SetContext): Validation
 // 2. INSERCIÓN DE CRÉDITO Y RELACIONADOS
 // ========================================
 
+/**
+ * Busca la aseguradora por nombre y, si no existe, la crea (find-or-create).
+ * El CRM manda 'GyT' o 'Universales'; queda extensible a más aseguradoras.
+ */
+export const findOrCreateAseguradora = async (
+  nombre: string,
+  executor: DbExecutor = db,
+): Promise<number> => {
+  const nombreLimpio = nombre.trim();
+
+  const [existing] = await executor
+    .select({ id: aseguradoras.id })
+    .from(aseguradoras)
+    .where(sql`lower(${aseguradoras.nombre}) = lower(${nombreLimpio})`)
+    .limit(1);
+  if (existing) return existing.id;
+
+  const [created] = await executor
+    .insert(aseguradoras)
+    .values({ nombre: nombreLimpio })
+    .onConflictDoNothing()
+    .returning({ id: aseguradoras.id });
+  if (created) return created.id;
+
+  // Otro proceso la insertó en paralelo: re-buscar.
+  const [row] = await executor
+    .select({ id: aseguradoras.id })
+    .from(aseguradoras)
+    .where(sql`lower(${aseguradoras.nombre}) = lower(${nombreLimpio})`)
+    .limit(1);
+  if (!row) {
+    throw new Error(
+      `No se pudo resolver la aseguradora "${nombreLimpio}" tras conflicto`,
+    );
+  }
+  return row.id;
+};
+
 const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecutor = db): Promise<{
   newCredit: NewCredit;
   creditDataForInsert: CreditDataForInsert;
@@ -380,6 +421,15 @@ const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecut
       (inv: Inversionista) => Number(inv.porcentaje_inversion) > 1
     ) ? "Pool" : "Individual";
 
+  // Aseguradora (find-or-create). Si el CRM no la manda, queda NULL.
+  let aseguradora_id: number | undefined;
+  if (creditData.aseguradora) {
+    aseguradora_id = await findOrCreateAseguradora(
+      creditData.aseguradora,
+      executor,
+    );
+  }
+
   // Insoluto: el número SIFCO no es real, se genera como 'insoluto-N'.
   const numero_credito_sifco = creditData.esInsoluto
     ? await getNextInsolutoSifco(executor)
@@ -398,6 +448,7 @@ const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecut
     gps: creditData.gps.toString(),
     observaciones: creditData.observaciones ?? "0",
     no_poliza: creditData.no_poliza ?? "",
+    aseguradora_id,
     como_se_entero: creditData.como_se_entero ?? "",
     asesor_id: asesor_id,
     plazo: creditData.plazo,
@@ -1071,6 +1122,7 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
         vehiculoVin: creditData.vehiculo_vin ?? undefined,
         montoAsegurado: creditData.monto_asegurado ?? undefined,
         opportunityId: creditData.opportunity_id ?? undefined,
+        aseguradora: creditData.aseguradora ?? undefined,
       });
       console.log("[INSERT CREDIT] Email notification sent successfully");
     } catch (emailErr) {

@@ -70,7 +70,9 @@ mock.module("@cci/email", () => ({
   sendNewCreditNotification: mock(() => Promise.resolve()),
 }));
 
-const { insertCredit } = await import("./createCredit");
+const { insertCredit, findOrCreateAseguradora } = await import("./createCredit");
+
+type Executor = Parameters<typeof findOrCreateAseguradora>[1];
 
 const validCreditBody = {
   usuario: "Cliente prueba",
@@ -119,5 +121,69 @@ describe("insertCredit", () => {
     expect(globalInsertCalls).toBe(0);
     expect(txInsertCalls).toBeGreaterThan(0);
     expect(set.status).toBe(500);
+  });
+});
+
+describe("findOrCreateAseguradora", () => {
+  it("devuelve el id existente sin insertar", async () => {
+    const executor = {
+      select: () => ({
+        from: () => ({
+          where: () => ({ limit: () => Promise.resolve([{ id: 7 }]) }),
+        }),
+      }),
+      insert: () => {
+        throw new Error("no debería insertar si ya existe");
+      },
+    } as unknown as Executor;
+
+    const id = await findOrCreateAseguradora("GyT", executor);
+    expect(id).toBe(7);
+  });
+
+  it("crea y devuelve el id nuevo cuando no existe", async () => {
+    const executor = {
+      select: () => ({
+        from: () => ({
+          where: () => ({ limit: () => Promise.resolve([]) }),
+        }),
+      }),
+      insert: () => ({
+        values: () => ({
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([{ id: 42 }]),
+          }),
+        }),
+      }),
+    } as unknown as Executor;
+
+    const id = await findOrCreateAseguradora("MAPFRE", executor);
+    expect(id).toBe(42);
+  });
+
+  it("re-busca cuando el insert choca por carrera (onConflictDoNothing)", async () => {
+    let selectCount = 0;
+    const executor = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => {
+              selectCount += 1;
+              return Promise.resolve(selectCount === 1 ? [] : [{ id: 99 }]);
+            },
+          }),
+        }),
+      }),
+      insert: () => ({
+        values: () => ({
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([]),
+          }),
+        }),
+      }),
+    } as unknown as Executor;
+
+    const id = await findOrCreateAseguradora("Universales", executor);
+    expect(id).toBe(99);
   });
 });

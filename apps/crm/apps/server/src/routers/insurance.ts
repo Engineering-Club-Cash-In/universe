@@ -1,7 +1,8 @@
 import { lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { insuranceCosts } from "../db/schema";
+import { gytInsuranceCosts, insuranceCosts } from "../db/schema";
+import { selectInsuranceProvider } from "../lib/insurance-selection";
 import { publicProcedure } from "../lib/orpc";
 
 /** Tipos de bus RCDP */
@@ -33,13 +34,19 @@ function isBusType(vehicleType: string): boolean {
  * - Seguro base = panelCamionMicrobus + RCDP/3
  * - Membresía = membership × 1.1
  */
-async function getInsuranceCost(
+export async function getInsuranceCost(
 	insuredAmount: number,
 	vehicleType: string,
 ): Promise<{
 	baseInsuranceCost: number;
 	membershipCost: number;
 	rcdpCost: number;
+	provider: "universales" | "gyt";
+	customerInsuranceCost: number;
+	internalInsuranceCost: number;
+	insuranceSavingsToMembership: number;
+	effectiveMembershipCost: number;
+	excelCurrentInsuranceCost: number | null;
 }> {
 	// Buscar el registro más cercano (VLOOKUP con aproximación)
 	const [result] = await db
@@ -58,11 +65,38 @@ async function getInsuranceCost(
 			.limit(1);
 
 		if (!minResult)
-			return { baseInsuranceCost: 0, membershipCost: 0, rcdpCost: 0 };
-		return calculateCosts(minResult, vehicleType);
+			return {
+				baseInsuranceCost: 0,
+				membershipCost: 0,
+				rcdpCost: 0,
+				provider: "universales",
+				customerInsuranceCost: 0,
+				internalInsuranceCost: 0,
+				insuranceSavingsToMembership: 0,
+				effectiveMembershipCost: 0,
+				excelCurrentInsuranceCost: null,
+			};
+		return calculateCostsWithProvider(
+			minResult,
+			null,
+			insuredAmount,
+			vehicleType,
+		);
 	}
 
-	return calculateCosts(result, vehicleType);
+	const [gytResult] = await db
+		.select()
+		.from(gytInsuranceCosts)
+		.where(lte(gytInsuranceCosts.price, insuredAmount))
+		.orderBy(sql`${gytInsuranceCosts.price} DESC`)
+		.limit(1);
+
+	return calculateCostsWithProvider(
+		result,
+		gytResult ?? null,
+		insuredAmount,
+		vehicleType,
+	);
 }
 
 /** Calcular costos de seguro y membresía según tipo de vehículo */
@@ -111,6 +145,66 @@ function calculateCosts(
 		baseInsuranceCost: baseInsurance,
 		membershipCost: membershipCost,
 		rcdpCost: rcdpCost,
+	};
+}
+
+function getGytValues(
+	result: typeof gytInsuranceCosts.$inferSelect | null,
+	vehicleType: string,
+): { gytCost: number | null; excelCurrentCost: number | null } {
+	if (!result) return { gytCost: null, excelCurrentCost: null };
+
+	const normalizedType = vehicleType.toLowerCase();
+	if (["particular", "nuevo"].includes(normalizedType)) {
+		return {
+			gytCost:
+				result.automovilCamioneta == null
+					? null
+					: Number(result.automovilCamioneta),
+			excelCurrentCost:
+				result.currentAutomovilCamioneta == null
+					? null
+					: Number(result.currentAutomovilCamioneta),
+		};
+	}
+
+	return { gytCost: null, excelCurrentCost: null };
+}
+
+function calculateCostsWithProvider(
+	result: typeof insuranceCosts.$inferSelect,
+	gytResult: typeof gytInsuranceCosts.$inferSelect | null,
+	insuredAmount: number,
+	vehicleType: string,
+): {
+	baseInsuranceCost: number;
+	membershipCost: number;
+	rcdpCost: number;
+	provider: "universales" | "gyt";
+	customerInsuranceCost: number;
+	internalInsuranceCost: number;
+	insuranceSavingsToMembership: number;
+	effectiveMembershipCost: number;
+	excelCurrentInsuranceCost: number | null;
+} {
+	const costs = calculateCosts(result, vehicleType);
+	const gytValues = getGytValues(gytResult, vehicleType);
+	const selection = selectInsuranceProvider({
+		insuredAmount,
+		vehicleType,
+		universalesCost: costs.baseInsuranceCost,
+		gytCost: gytValues.gytCost,
+		membershipCost: costs.membershipCost,
+	});
+
+	return {
+		...costs,
+		provider: selection.provider,
+		customerInsuranceCost: selection.customerInsuranceCost,
+		internalInsuranceCost: selection.internalInsuranceCost,
+		insuranceSavingsToMembership: selection.insuranceSavingsToMembership,
+		effectiveMembershipCost: selection.effectiveMembershipCost,
+		excelCurrentInsuranceCost: gytValues.excelCurrentCost,
 	};
 }
 

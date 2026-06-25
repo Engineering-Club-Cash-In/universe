@@ -5,7 +5,7 @@
  */
 
 import crypto from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -100,6 +100,10 @@ interface OpportunityData {
 	diaPagoMensual: number | null;
 	// Additional fields
 	seguro: string | null;
+	customerInsuranceCost?: string | null;
+	internalInsuranceCost?: string | null;
+	insuranceProvider?: string | null;
+	insuranceSavingsToMembership?: string | null;
 	gps: string | null;
 	categoria: string | null;
 	nit: string | null;
@@ -181,6 +185,7 @@ interface QuotationDataForBilling {
 	insuredAmount: string | null; // Monto asegurado (para correo)
 	value: string | null; // Valor del vehículo (para correo)
 	monthlyPayment: string | null; // Cuota mensual (para asegurar el valor que es)
+	insuranceProvider: string | null; // Aseguradora elegida (gyt | universales)
 }
 
 /** Parámetros para generación de facturas en background */
@@ -393,6 +398,13 @@ async function logInvoiceSyncOperation(
 /**
  * Obtiene la última cotización aprobada de una oportunidad
  */
+/** Mapea el provider interno (gyt | universales) a la etiqueta de aseguradora. */
+function aseguradoraLabel(
+	provider: string | null | undefined,
+): "GyT" | "Universales" {
+	return provider === "gyt" ? "GyT" : "Universales";
+}
+
 async function getLatestApprovedQuotation(
 	opportunityId: string,
 ): Promise<QuotationDataForBilling | null> {
@@ -411,9 +423,15 @@ async function getLatestApprovedQuotation(
 				insuredAmount: quotations.insuredAmount,
 				value: quotations.vehicleValue,
 				monthlyPayment: quotations.monthlyPayment,
+				insuranceProvider: quotations.insuranceProvider,
 			})
 			.from(quotations)
-			.where(eq(quotations.opportunityId, opportunityId))
+			.where(
+				and(
+					eq(quotations.opportunityId, opportunityId),
+					eq(quotations.status, "accepted"),
+				),
+			)
 			.orderBy(desc(quotations.createdAt))
 			.limit(1);
 
@@ -907,9 +925,9 @@ async function createCredit(
 		);
 
 		// Parse all values from opportunity
-		const seguro = opportunity.seguro
-			? Number.parseFloat(opportunity.seguro)
-			: undefined;
+		const seguroCliente =
+			opportunity.customerInsuranceCost ?? opportunity.seguro;
+		const seguro = seguroCliente ? Number.parseFloat(seguroCliente) : undefined;
 		const gps = opportunity.gps
 			? Number.parseFloat(opportunity.gps)
 			: undefined;
@@ -948,12 +966,15 @@ async function createCredit(
 			capital: Number.parseFloat(opportunity.value as string),
 			porcentaje_interes: Number.parseFloat(opportunity.tasaInteres as string),
 			plazo: opportunity.numeroCuotas as number,
-			cuota: params.cuotaMensual ? Number(params.cuotaMensual) : Number.parseFloat(opportunity.cuotaMensual as string),
+			cuota: params.cuotaMensual
+				? Number(params.cuotaMensual)
+				: Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,
 			gps: gps,
+			aseguradora: aseguradoraLabel(opportunity.insuranceProvider),
 			categoria: opportunity.categoria ?? undefined,
 			nit: cleanNit(opportunity.nit),
 			royalti: royalti,
@@ -1171,6 +1192,11 @@ export async function closeOpportunity(
 				diaPagoMensual: opportunities.diaPagoMensual,
 				seguro: opportunities.seguro,
 				gps: opportunities.gps,
+				insuranceProvider: opportunities.insuranceProvider,
+				customerInsuranceCost: opportunities.customerInsuranceCost,
+				internalInsuranceCost: opportunities.internalInsuranceCost,
+				insuranceSavingsToMembership:
+					opportunities.insuranceSavingsToMembership,
 				categoria: opportunities.categoria,
 				nit: opportunities.nit,
 				royalti: opportunities.royalti,
@@ -1291,9 +1317,7 @@ export async function closeOpportunity(
 		// Validate NIT against cartera-back before proceeding
 		if (opportunity.nit) {
 			const nitLimpio = opportunity.nit.replace(/[-\s]/g, "").toUpperCase();
-			console.log(
-				`[CloseOpportunity] Validating NIT: ${nitLimpio}`,
-			);
+			console.log(`[CloseOpportunity] Validating NIT: ${nitLimpio}`);
 
 			if (nitLimpio.length < 5 && nitLimpio !== "CF") {
 				return {
@@ -1326,7 +1350,8 @@ export async function closeOpportunity(
 				console.error("[CloseOpportunity] Error validating NIT:", error);
 				return {
 					success: false,
-					error: `No se pudo validar el NIT contra SAT. Intenta de nuevo o verifica la conexión con cartera.`,
+					error:
+						"No se pudo validar el NIT contra SAT. Intenta de nuevo o verifica la conexión con cartera.",
 				};
 			}
 		}
@@ -1335,12 +1360,25 @@ export async function closeOpportunity(
 		const numeroSifco = generateNumeroSifco();
 		console.log(`[CloseOpportunity] Generated numero SIFCO: ${numeroSifco}`);
 
-
 		//  Get the latest quotation for invoicing (async - doesn't block)
 		const quotation = await getLatestApprovedQuotation(opportunityId);
 		console.log(
 			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
 		);
+
+		// Estampar la aseguradora elegida (fuente: cotización) en la oportunidad,
+		// para que viaje a cartera y quede consistente en el CRM.
+		const insuranceProvider =
+			quotation?.insuranceProvider ??
+			opportunity.insuranceProvider ??
+			"universales";
+		if (insuranceProvider !== opportunity.insuranceProvider) {
+			await db
+				.update(opportunities)
+				.set({ insuranceProvider })
+				.where(eq(opportunities.id, opportunityId));
+			opportunity.insuranceProvider = insuranceProvider;
+		}
 
 		//  Create credit in cartera-back
 		const creditResult = await createCredit({
@@ -1348,7 +1386,9 @@ export async function closeOpportunity(
 			lead,
 			numeroSifco,
 			userId,
-			cuotaMensual: quotation?.monthlyPayment ? String(quotation.monthlyPayment) : undefined,
+			cuotaMensual: quotation?.monthlyPayment
+				? String(quotation.monthlyPayment)
+				: undefined,
 			isVehicleOwned: vehicleData?.isOwned ?? false,
 			// Enviar info del vehículo para que llegue en el correo de cartera
 			vehiculo_marca: vehicleData?.make ?? undefined,
@@ -1356,7 +1396,11 @@ export async function closeOpportunity(
 			vehiculo_modelo: vehicleData?.year ? String(vehicleData.year) : undefined,
 			vehiculo_placa: vehicleData?.licensePlate ?? undefined,
 			vehiculo_vin: vehicleData?.vinNumber ?? undefined,
-			monto_asegurado: quotation?.insuredAmount ? Number(quotation.insuredAmount) : quotation?.value ? Number(quotation.value) : undefined,
+			monto_asegurado: quotation?.insuredAmount
+				? Number(quotation.insuredAmount)
+				: quotation?.value
+					? Number(quotation.value)
+					: undefined,
 		});
 
 		if (!creditResult.success) {
@@ -1366,7 +1410,6 @@ export async function closeOpportunity(
 					creditResult.error || "Error al crear el crédito en cartera-back",
 			};
 		}
-
 
 		// 3. Generate invoices in background (fire-and-forget)
 		// This runs asynchronously after the credit is created

@@ -306,7 +306,10 @@ function formatBucket(bucket: string, periodo: string): string {
 		}).format(date);
 	}
 	if (periodo === "semana") {
-		return `Sem ${new Intl.DateTimeFormat("es-GT", { day: "2-digit", month: "short" }).format(date)}`;
+		return `Sem ${new Intl.DateTimeFormat("es-GT", {
+			day: "2-digit",
+			month: "short",
+		}).format(date)}`;
 	}
 	if (periodo === "trimestre") {
 		const q = Math.ceil((date.getMonth() + 1) / 3);
@@ -330,7 +333,9 @@ function fillMissingPeriods(
 	if (periodo !== "semana" && periodo !== "dia") return data;
 
 	const toKey = (d: Date) =>
-		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+			d.getDate(),
+		).padStart(2, "0")}`;
 
 	const dataMap = new Map(data.map((row) => [row.bucket.slice(0, 10), row]));
 
@@ -1065,7 +1070,9 @@ function RouteComponent() {
 									value={formatCurrency(
 										dashboardData.data?.carteraActiva.montoTotal || 0,
 									)}
-									description={`${dashboardData.data?.carteraActiva.totalContratos || 0} contratos activos`}
+									description={`${
+										dashboardData.data?.carteraActiva.totalContratos || 0
+									} contratos activos`}
 									icon={Wallet}
 								/>
 								<ReportCard
@@ -2070,7 +2077,9 @@ function RouteComponent() {
 											const sf = reinversionData.interesNeto.sinFactura;
 											const cube = reinversionData.interesNeto.cube;
 											const totalInteres =
-												Number(cf.interes) + Number(sf.interes) + Number(cube.interes);
+												Number(cf.interes) +
+												Number(sf.interes) +
+												Number(cube.interes);
 											const totalIva = Number(cf.iva) + Number(cube.iva);
 											const totalIsr = Number(sf.isr);
 											const totalNeto =
@@ -2114,7 +2123,7 @@ function RouteComponent() {
 																	{dash(cf.neto)}
 																</TableCell>
 															</TableRow>
-															<TableRow>	
+															<TableRow>
 																<TableCell>Inversionista Sin Factura</TableCell>
 																<TableCell className="text-right">
 																	{dash(sf.interes)}
@@ -2132,10 +2141,18 @@ function RouteComponent() {
 
 															<TableRow>
 																<TableCell>Residuo CUBE</TableCell>
-																<TableCell className="text-right">{dash(cube.interes)}</TableCell>
-																<TableCell className="text-right">{dash(cube.iva)}</TableCell>
-																<TableCell className="text-right text-muted-foreground">—</TableCell>
-																<TableCell className="text-right font-semibold">{dash(cube.neto)}</TableCell>
+																<TableCell className="text-right">
+																	{dash(cube.interes)}
+																</TableCell>
+																<TableCell className="text-right">
+																	{dash(cube.iva)}
+																</TableCell>
+																<TableCell className="text-right text-muted-foreground">
+																	—
+																</TableCell>
+																<TableCell className="text-right font-semibold">
+																	{dash(cube.neto)}
+																</TableCell>
 															</TableRow>
 															<TableRow className="border-t-2 bg-muted/50 font-bold">
 																<TableCell>Total</TableCell>
@@ -2383,7 +2400,11 @@ function RouteComponent() {
 																					: [...prev, tipo],
 																			)
 																		}
-																		className={`rounded border px-2 py-0.5 text-xs transition-colors ${activo ? "bg-muted font-medium text-foreground" : "text-muted-foreground"}`}
+																		className={`rounded border px-2 py-0.5 text-xs transition-colors ${
+																			activo
+																				? "bg-muted font-medium text-foreground"
+																				: "text-muted-foreground"
+																		}`}
 																	>
 																		{MODALIDAD_LABEL[tipo] ?? tipo}
 																	</button>
@@ -2423,7 +2444,12 @@ function RouteComponent() {
 																		</TableCell>
 																		<TableCell>
 																			<span
-																				className={`inline-block rounded border px-1.5 py-0.5 font-normal text-[10px] ${MODALIDAD_CHIP_CLASS[row.tipo_reinversion] ?? "border-muted-foreground/30 text-muted-foreground"}`}
+																				className={`inline-block rounded border px-1.5 py-0.5 font-normal text-[10px] ${
+																					MODALIDAD_CHIP_CLASS[
+																						row.tipo_reinversion
+																					] ??
+																					"border-muted-foreground/30 text-muted-foreground"
+																				}`}
 																			>
 																				{MODALIDAD_LABEL[
 																					row.tipo_reinversion
@@ -2515,7 +2541,7 @@ function RouteComponent() {
 															placeholder="0"
 															value={
 																focusedMes === mes
-																	? (editMetas[mes] ?? "")
+																	? editMetas[mes] ?? ""
 																	: editMetas[mes] && Number(editMetas[mes]) > 0
 																		? Number(editMetas[mes]).toLocaleString(
 																				"es-GT",

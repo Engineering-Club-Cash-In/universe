@@ -2143,7 +2143,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           ci.monto_aportado AS "montoAportado"
         FROM cartera.creditos_inversionistas ci
         INNER JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
-        WHERE ci.credito_id IN (${sql.join(creditoIds.map((id) => sql`${id}`), sql`, `)})
+        WHERE ci.credito_id = ANY(${"{" + creditoIds.join(",") + "}"}::bigint[])
       `);
       for (const row of ciResult.rows as any[]) {
         const cid = Number(row.creditoId);
@@ -2171,7 +2171,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
                SUM(fd.monto_total)::numeric AS "total",
                SUM(fd.monto_iva)::numeric   AS "iva"
         FROM cartera.facturacion_desglose fd
-        WHERE fd.pago_id IN (${sql.join(pagoIds.map((id) => sql`${id}`), sql`, `)})
+        WHERE fd.pago_id = ANY(${"{" + pagoIds.join(",") + "}"}::bigint[])
           AND fd.rubro::text = 'INTERES'
         GROUP BY fd.pago_id
       `);

@@ -515,7 +515,7 @@ export function ListaCreditosPagos() {
         </label>
 
         {/* Filtro por Estado */}
-        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+        <div className="flex flex-wrap items-center gap-2 col-span-full">
           <AlertCircle className="w-4 h-4 text-blue-700" />
           <span className="text-sm font-semibold text-blue-800 mr-1">Estado:</span>
           {estados.map((est) => (

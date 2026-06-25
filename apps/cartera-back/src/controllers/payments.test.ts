@@ -180,7 +180,7 @@ mock.module("../utils/comprasAjuste", () => ({
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
 
-const { calcularYRegistrarPagosEspejo } = await import("./payments");
+const { calcularYRegistrarPagosEspejo, armarInversionistasPago } = await import("./payments");
 
 describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
   beforeEach(() => {
@@ -474,5 +474,198 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(0);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// armarInversionistasPago: lee el interés de CUBE del desglose (rubro INTERES)
+// y reemplaza (o crea) la fila de CUBE, dejando los no-CUBE intactos.
+//   • con desglose → CUBE del desglose, no-CUBE del pci sin cambio
+//   • sin desglose → fallback: pci tal cual (pagos pre-facturación)
+//   • parciales (sin pci) → solo aparece CUBE; otros se difieren
+// ────────────────────────────────────────────────────────────────────────────
+const round2Num = (n: number) => Number(new Big(n).round(2).toString());
+
+describe("armarInversionistasPago (interés CUBE del desglose)", () => {
+  it("caso 1: CUBE en pci → reemplaza el interés de CUBE con el del desglose; InvA intacto", () => {
+    // desglose net = 78.4 - 8.4 = 70; CUBE pci tenía 50 → se reemplaza a 70.
+    const pciRows = [
+      {
+        inversionistaId: 1,
+        nombreInversionista: "InvA",
+        emiteFactura: false,
+        abonoCapital: "500.00",
+        abonoInteres: "100",
+        abonoIva: "12",
+        isr: "5",
+        cuotaPago: "1000.00",
+        montoAportado: "25000",
+        porcentajeParticipacion: "70",
+      },
+      {
+        inversionistaId: 86,
+        nombreInversionista: "Cube Investments S.A.",
+        emiteFactura: false,
+        abonoCapital: "300.00",
+        abonoInteres: "50",
+        abonoIva: "6",
+        isr: "2.5",
+        cuotaPago: "1000.00",
+        montoAportado: "20000",
+        porcentajeParticipacion: "100",
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("78.4"), iva: new Big("8.4") },
+    });
+
+    // InvA no se toca
+    const invA = out.find((r: any) => r.inversionistaId === 1)!;
+    expect(invA.abonoInteres).toBe("100");
+    expect(invA.abonoIva).toBe("12");
+
+    // CUBE reemplazado con los valores del desglose (formato toFixed(2))
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(cube.abonoInteres).toBe("70.00");
+    expect(cube.abonoIva).toBe("8.40");
+  });
+
+  it("caso 6 (isr): isr de CUBE = round2(net × 0.05); net 70 → isr 3.5", () => {
+    const pciRows = [
+      {
+        inversionistaId: 86,
+        nombreInversionista: "Cube Investments S.A.",
+        emiteFactura: false,
+        abonoCapital: "0",
+        abonoInteres: "50",
+        abonoIva: "6",
+        isr: "2.5",
+        cuotaPago: "1000.00",
+        montoAportado: null,
+        porcentajeParticipacion: null,
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("78.4"), iva: new Big("8.4") },
+    });
+
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(cube.isr).toBe("3.50"); // 70 * 0.05 = 3.5, formatted as toFixed(2)
+  });
+
+  it("caso 2: CUBE NO en pci → crea fila CUBE nueva con el desglose", () => {
+    // desglose net = 16.8 - 1.8 = 15
+    const pciRows = [
+      {
+        inversionistaId: 1,
+        nombreInversionista: "InvA",
+        emiteFactura: false,
+        abonoCapital: "500.00",
+        abonoInteres: "100",
+        abonoIva: "12",
+        isr: "5",
+        cuotaPago: "1000.00",
+        montoAportado: "25000",
+        porcentajeParticipacion: "70",
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("16.8"), iva: new Big("1.8") },
+      cubeMeta: { nombreInversionista: "Cube Investments S.A.", emiteFactura: true },
+    });
+
+    expect(out).toHaveLength(2);
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(cube).toBeDefined();
+    expect(cube.abonoInteres).toBe("15.00");
+    expect(cube.emiteFactura).toBe(true);
+  });
+
+  it("caso 3: parcial (sin pci) → solo aparece CUBE del desglose; otros inversionistas diferidos", () => {
+    // desglose net = 22.4 - 2.4 = 20
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("22.4"), iva: new Big("2.4") },
+    });
+
+    expect(out).toHaveLength(1);
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(cube).toBeDefined();
+    expect(cube.abonoInteres).toBe("20.00");
+  });
+
+  it("caso 4: sin desglose (fallback) → devuelve pci tal cual, sin cambios", () => {
+    const pciRows = [
+      {
+        inversionistaId: 1,
+        nombreInversionista: "InvA",
+        emiteFactura: false,
+        abonoCapital: "0",
+        abonoInteres: "100",
+        abonoIva: "0",
+        isr: "5",
+        cuotaPago: "0",
+        montoAportado: null,
+        porcentajeParticipacion: null,
+      },
+      {
+        inversionistaId: 86,
+        nombreInversionista: "Cube Investments S.A.",
+        emiteFactura: false,
+        abonoCapital: "0",
+        abonoInteres: "50",
+        abonoIva: "0",
+        isr: "2.5",
+        cuotaPago: "0",
+        montoAportado: null,
+        porcentajeParticipacion: null,
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: null,
+    });
+
+    // Debe ser el mismo array sin modificación
+    expect(out).toBe(pciRows);
+  });
+
+  it("caso 5: desglose CUBE ~0 y CUBE no en pci → no agrega fila vacía", () => {
+    const pciRows = [
+      {
+        inversionistaId: 1,
+        nombreInversionista: "InvA",
+        emiteFactura: false,
+        abonoCapital: "0",
+        abonoInteres: "100",
+        abonoIva: "0",
+        isr: "5",
+        cuotaPago: "0",
+        montoAportado: null,
+        porcentajeParticipacion: null,
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("0"), iva: new Big("0") },
+    });
+
+    // Solo InvA, no se agrega CUBE vacío
+    expect(out).toHaveLength(1);
+    expect(out.find((r: any) => r.inversionistaId === 86)).toBeUndefined();
   });
 });

@@ -26,6 +26,7 @@ import {
 import { updateMora } from "./latefee";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
+import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 
 // ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
@@ -1145,6 +1146,21 @@ export async function insertPagosCreditoInversionistasV2(
   const pagoAbonoIva = new Big(currentPago.abono_iva_12 ?? 0);
 
   // 6. Calcular distribución por inversionista
+  // 6a. Split de interés/IVA delegado a la función pura (comportamiento idéntico al anterior).
+  const splitInteres = calcularSplitInteresPci({
+    inversionistas: inversionistasWithName.map((inv) => ({
+      inversionista_id: inv.inversionista_id,
+      nombre: inv.nombre,
+      porcentaje_participacion_inversionista: inv.porcentaje_participacion_inversionista ?? 0,
+      porcentaje_cash_in: inv.porcentaje_cash_in ?? 0,
+      monto_aportado: inv.monto_aportado ?? 0,
+    })),
+    pagoAbonoInteres,
+    pagoAbonoIva,
+    factorInteresPorInv,
+  });
+  const splitPorInv = new Map(splitInteres.map((s) => [s.inversionista_id, s]));
+
   const inserts = [];
   for (const inv of inversionistasWithName) {
     const isCube =
@@ -1155,28 +1171,13 @@ export async function insertPagosCreditoInversionistasV2(
     // Porcentaje general: base_calculo / SUM(monto_aportado)
     const porcentajeGeneral = montoBaseCalculoV2.div(sumMontosAportados);
 
-    // Porcentaje de participación según tipo (dividir entre 100 porque se guarda como %)
-    const porcentajeParticipacion = isCube
-      ? new Big(inv.porcentaje_cash_in ?? 0).div(100)
-      : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
-
     // Capital: SIEMPRE por porcentaje general (sin cambios respecto al flujo original).
     const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
 
-    // Interés / IVA:
-    //   • Con compra de cartera pendiente (factorInteresPorInv != null) → PRORRATEADO
-    //     por ventanas antes/después (mismo criterio que la facturación, sin residuo a CUBE).
-    //   • Sin compra → fórmula de siempre: participación × porcentaje general.
-    let abonoInteresInv: Big;
-    let abonoIvaInv: Big;
-    if (factorInteresPorInv) {
-      const f = factorInteresPorInv.get(inv.inversionista_id) ?? new Big(0);
-      abonoInteresInv = pagoAbonoInteres.times(f);
-      abonoIvaInv = pagoAbonoIva.times(f);
-    } else {
-      abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
-      abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
-    }
+    // Interés / IVA: resultado de la función pura.
+    const split = splitPorInv.get(inv.inversionista_id)!;
+    const abonoInteresInv = split.abono_interes;
+    const abonoIvaInv = split.abono_iva_12;
 
     // Solo actualizar monto_aportado si hubo abono a capital
     if (abonoCapitalInv.gt(0)) {
@@ -1696,15 +1697,92 @@ interface GetPagosOptions {
   fechaBoletaInicio?: string;
   fechaBoletaFin?: string;
 }
+// ── Tipos para el armado del array `inversionistas` del reporte ──────────────
+// Shape de cada fila pci tal como la trae la subconsulta SQL de
+// getPagosConInversionistas (json_build_object). Es también el shape de SALIDA.
+export type ReportInvRow = {
+  inversionistaId: number;
+  nombreInversionista: string;
+  emiteFactura: boolean;
+  abonoCapital: string | number | null;
+  abonoInteres: string | number | null;
+  abonoIva: string | number | null;
+  isr: string | number | null;
+  cuotaPago: string | number | null;
+  montoAportado: string | number | null;
+  porcentajeParticipacion: string | number | null;
+};
+
+// creditos_inversionistas del crédito (para simular parciales sin filas pci).
+export type ReportCreditoInv = {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura?: boolean | null;
+  porcentaje_participacion_inversionista: string | number;
+  porcentaje_cash_in: string | number;
+  monto_aportado: string | number;
+};
+
+
+/**
+ * 🧮 Arma el array `inversionistas` de UN pago para el reporte JSON, reflejando
+ * el interés facturado de CUBE leído del desglose:
+ *   - CUBE: su interés = el del desglose (rubro INTERES, CON IVA). Reemplaza la
+ *     fila CUBE del pci (si existía) o crea una nueva.
+ *   - Inversionistas no-CUBE: del pci, SIN CAMBIO.
+ *   - Parciales (sin filas pci): solo aparece CUBE del desglose; los demás
+ *     inversionistas se difieren hasta que la cuota se complete.
+ *   - Sin desglose (pagos pre-facturación / pendientes): fallback → conservar el
+ *     array pci tal cual (comportamiento previo).
+ *
+ * Función PURA (sin DB) → testeable en aislamiento. NO toca abono_capital ni la
+ * parte de los inversionistas no-CUBE; solo ajusta/crea la fila de CUBE.
+ *
+ * Invariante (cuotas completas): Σ(salida.abonoInteres) =
+ *   Σ(no-CUBE pci) + (desglose CUBE net) = el interés facturado del pago.
+ */
+export function armarInversionistasPago(args: {
+  pciRows: ReportInvRow[] | null | undefined;
+  cubeId: number;
+  desgloseCubeInteres: { total: Big; iva: Big } | null; // del desglose rubro INTERES (monto_total CON iva, monto_iva)
+  cubeMeta?: Partial<ReportInvRow> | null;              // metadatos de CUBE (de creditos_inversionistas) si CUBE no está en pci
+  cuota?: string | number | null;
+}): ReportInvRow[] {
+  const rows = Array.isArray(args.pciRows) ? args.pciRows : [];
+  const noCube = rows.filter((r) => r.inversionistaId !== args.cubeId);
+  const pciCube = rows.find((r) => r.inversionistaId === args.cubeId) ?? null;
+
+  // Sin desglose → fallback: conservar el pci tal cual.
+  if (!args.desgloseCubeInteres) return rows;
+
+  const cubeNet = args.desgloseCubeInteres.total.minus(args.desgloseCubeInteres.iva);
+  const cubeIva = args.desgloseCubeInteres.iva;
+
+  // Desglose CUBE ~0: cuando el desglose es ~0 y CUBE ya estaba en pci, la fila de
+  // CUBE se reemplaza a 0 a propósito (el desglose es la fuente de verdad); si CUBE
+  // no estaba en pci tampoco se agrega fila vacía.
+  if (cubeNet.abs().lte(new Big("0.005")) && !pciCube) return noCube;
+
+  const cubeRow: ReportInvRow = {
+    inversionistaId: args.cubeId,
+    nombreInversionista: pciCube?.nombreInversionista ?? args.cubeMeta?.nombreInversionista ?? "Cube Investments S.A.",
+    emiteFactura: pciCube?.emiteFactura ?? args.cubeMeta?.emiteFactura ?? false,
+    abonoCapital: pciCube?.abonoCapital ?? "0",
+    abonoInteres: cubeNet.round(2).toFixed(2),
+    abonoIva: cubeIva.round(2).toFixed(2),
+    isr: cubeNet.times("0.05").round(2).toFixed(2),
+    cuotaPago: pciCube?.cuotaPago ?? (args.cuota ?? "0"),
+    montoAportado: pciCube?.montoAportado ?? args.cubeMeta?.montoAportado ?? null,
+    porcentajeParticipacion: pciCube?.porcentajeParticipacion ?? args.cubeMeta?.porcentajeParticipacion ?? null,
+  };
+  return [...noCube, cubeRow];
+}
+
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
  * - Incluye los nuevos campos del pago: mora, otros, reserva, membresías, observaciones.
  * - Usa subconsultas JSON para traer toda la info relacionada en una sola query.
  * - Si un pago no tiene registro en pagos_credito_inversionistas, igual aparece con inversionistas = [].
- */
-/**
- * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios e inversionistas.
- * Incluye los abonos principales y campos adicionales de pago (mora, otros, reserva, membresías, observaciones).
  */
 export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
   const {
@@ -1765,14 +1843,34 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     }
 
     if (inversionistaId) {
-      whereClauses.push(`
-        EXISTS (
-          SELECT 1
-          FROM cartera.pagos_credito_inversionistas pci2
-          WHERE pci2.pago_id = p.pago_id
-          AND pci2.inversionista_id = '${inversionistaId}'
-        )
-      `);
+      if (Number(inversionistaId) === CUBE_ID) {
+        // Para CUBE, el rubro INTERES del desglose ES de CUBE aunque no haya fila pci
+        // (pagos parciales en los que CUBE recibe 100% del interés vía desglose).
+        // Incluir esos pagos con OR EXISTS sobre facturacion_desglose.
+        whereClauses.push(`(
+          EXISTS (
+            SELECT 1
+            FROM cartera.pagos_credito_inversionistas pci2
+            WHERE pci2.pago_id = p.pago_id
+            AND pci2.inversionista_id = '${inversionistaId}'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM cartera.facturacion_desglose fd_cube
+            WHERE fd_cube.pago_id = p.pago_id
+            AND fd_cube.rubro::text = 'INTERES'
+          )
+        )`);
+      } else {
+        whereClauses.push(`
+          EXISTS (
+            SELECT 1
+            FROM cartera.pagos_credito_inversionistas pci2
+            WHERE pci2.pago_id = p.pago_id
+            AND pci2.inversionista_id = '${inversionistaId}'
+          )
+        `);
+      }
     }
 
     // 🏷️ Filtros de crédito
@@ -1829,6 +1927,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     const query = sql`
       SELECT
         p.pago_id AS "pagoId",
+        p.credito_id AS "creditoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
         TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
@@ -1996,8 +2095,131 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
 
     const result = await db.execute(query);
 
+    // ── 🆕 Ajuste de interés COMPLETO por pago (= la facturación) ───────────────
+    // El reporte debe reflejar, por inversionista, el interés que SE FACTURÓ:
+    //   • residuo de CUBE (cash_in de los no-CUBE absorbido por CUBE), y
+    //   • PARCIALES: pagos cuya cuota no se completó → NO tienen filas en
+    //     pagos_credito_inversionistas, pero SÍ se facturaron. Se simulan desde
+    //     los creditos_inversionistas del crédito.
+    // Cálculo al vuelo (NO escribe pci ni espejo). Ver armarInversionistasPago.
+
+    // 1) cubeId: resolverlo UNA vez por nombre canónico (fallback al CUBE_ID conocido).
+    //    Usar UPPER(TRIM(...)) LIKE '%CUBE INVESTMENTS%' para evitar falsos positivos
+    //    si otro inversionista tuviera "cube" en el nombre con id menor a 86.
+    let cubeId = CUBE_ID;
+    try {
+      const cubeRow = await db.execute(sql`
+        SELECT i.inversionista_id AS "id"
+        FROM cartera.inversionistas i
+        WHERE UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
+        ORDER BY i.inversionista_id ASC
+        LIMIT 1
+      `);
+      const resolved = Number(cubeRow.rows?.[0]?.id);
+      if (Number.isFinite(resolved) && resolved > 0) cubeId = resolved;
+    } catch (e) {
+      console.warn("⚠️ No se pudo resolver cubeId por nombre; uso CUBE_ID por defecto:", e);
+    }
+
+    // 2) creditos_inversionistas de TODOS los créditos de la página (para simular
+    //    parciales). Una sola query; se agrupa por credito_id.
+    const creditoIds = Array.from(
+      new Set(
+        result.rows
+          .map((r: any) => Number(r.creditoId))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+    const creditoInvsByCredito = new Map<number, ReportCreditoInv[]>();
+    if (creditoIds.length > 0) {
+      const ciResult = await db.execute(sql`
+        SELECT
+          ci.credito_id AS "creditoId",
+          ci.inversionista_id AS "inversionistaId",
+          i.nombre AS "nombre",
+          i.emite_factura AS "emiteFactura",
+          ci.porcentaje_participacion_inversionista AS "porcentajeParticipacion",
+          ci.porcentaje_cash_in AS "porcentajeCashIn",
+          ci.monto_aportado AS "montoAportado"
+        FROM cartera.creditos_inversionistas ci
+        INNER JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+        WHERE ci.credito_id = ANY(${"{" + creditoIds.join(",") + "}"}::bigint[])
+      `);
+      for (const row of ciResult.rows as any[]) {
+        const cid = Number(row.creditoId);
+        const arr = creditoInvsByCredito.get(cid) ?? [];
+        arr.push({
+          inversionista_id: Number(row.inversionistaId),
+          nombre: row.nombre ?? "",
+          emite_factura: row.emiteFactura ?? false,
+          porcentaje_participacion_inversionista: row.porcentajeParticipacion ?? 0,
+          porcentaje_cash_in: row.porcentajeCashIn ?? 0,
+          monto_aportado: row.montoAportado ?? 0,
+        });
+        creditoInvsByCredito.set(cid, arr);
+      }
+    }
+
+    // 3) Interés de CUBE del desglose (rubro INTERES) para los pagos de la página.
+    //    Una sola query batch; se usa en armarInversionistasPago para reemplazar la
+    //    fila de CUBE (en lugar de calcular un residuo).
+    const desgloseCubeByPago = new Map<number, { total: Big; iva: Big }>();
+    const pagoIds = Array.from(new Set(result.rows.map((r: any) => Number(r.pagoId)).filter((id) => Number.isFinite(id) && id > 0)));
+    if (pagoIds.length > 0) {
+      const dq = await db.execute(sql`
+        SELECT fd.pago_id AS "pagoId",
+               SUM(fd.monto_total)::numeric AS "total",
+               SUM(fd.monto_iva)::numeric   AS "iva"
+        FROM cartera.facturacion_desglose fd
+        WHERE fd.pago_id = ANY(${"{" + pagoIds.join(",") + "}"}::bigint[])
+          AND fd.rubro::text = 'INTERES'
+        GROUP BY fd.pago_id
+      `);
+      for (const row of dq.rows as any[]) {
+        desgloseCubeByPago.set(Number(row.pagoId), { total: new Big(row.total ?? 0), iva: new Big(row.iva ?? 0) });
+      }
+    }
+
+    // Parser robusto del array de inversionistas (json_agg → array | string).
+    const parseInvs = (raw: any): ReportInvRow[] =>
+      Array.isArray(raw)
+        ? raw
+        : JSON.parse(typeof raw === "string" ? raw : "[]");
+
     // 🧠 Transformación final del resultado
-    const data = result.rows.map((r) => ({
+    const data = result.rows.map((r) => {
+      const creditoInvs = creditoInvsByCredito.get(Number(r.creditoId)) ?? [];
+      const pciRows = parseInvs(r.inversionistas);
+
+      // Si el pago no tiene interés facturado, no hay nada que repartir/ajustar:
+      // se conserva el array original (evita simular filas con interés 0).
+      // Acoplamiento: si p.abono_interes=0 pero existiera desglose INTERES, la fila
+      // de CUBE se suprimiría; en la práctica no ocurre (el desglose solo existe cuando
+      // el pago tiene interés registrado).
+      const tieneInteres = new Big((r.abono_interes as any) ?? 0).gt(0);
+
+      // cubeMeta: metadatos de CUBE del crédito (para enriquecer si CUBE no estaba en pci).
+      const cubeInvRow = creditoInvs.find((ci) => ci.inversionista_id === cubeId);
+      const cubeMeta: Partial<ReportInvRow> | null = cubeInvRow
+        ? {
+            nombreInversionista: cubeInvRow.nombre,
+            emiteFactura: cubeInvRow.emite_factura ?? false,
+            montoAportado: cubeInvRow.monto_aportado ?? null,
+            porcentajeParticipacion: cubeInvRow.porcentaje_cash_in ?? null,
+          }
+        : null;
+
+      const inversionistasFinal = tieneInteres
+        ? armarInversionistasPago({
+            pciRows: pciRows.length > 0 ? pciRows : null,
+            cubeId,
+            desgloseCubeInteres: desgloseCubeByPago.get(Number(r.pagoId)) ?? null,
+            cubeMeta,
+            cuota: r.cuotaMonto as any,
+          })
+        : pciRows;
+
+      return {
       pagoId: r.pagoId,
       montoBoleta: r.montoBoleta,
       numeroAutorizacion: r.numeroAutorizacion,
@@ -2032,18 +2254,15 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       pendienteFacturar: r.pendienteFacturar ?? false,
       cuota: r.cuota,
       usuario: r.usuario,
-      inversionistas: Array.isArray(r.inversionistas)
-        ? r.inversionistas
-        : JSON.parse(
-            typeof r.inversionistas === "string" ? r.inversionistas : "[]"
-          ),
+      inversionistas: inversionistasFinal,
       boletas: Array.isArray(r.boletas)
         ? r.boletas
         : JSON.parse(
             typeof r.boletas === "string" ? r.boletas : "[]"
           ),
       cancelacion: r.cancelacion ?? null,
-    }));
+      };
+    });
 
     interface TotalesGenerales {
       totalAbonoCapital: number;
@@ -2125,7 +2344,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         .round(2)
         .toNumber(),
     };
-    // 💰 Totales de inversionistas (desde pagos_credito_inversionistas)
+    // 💰 Totales de inversionistas (desde pagos_credito_inversionistas).
+    // CUBE usa pci como los demás; el interés se corrige desde el desglose abajo.
     const totalesInvQuery = sql`
       SELECT
         i.inversionista_id AS "inversionistaId",
@@ -2161,6 +2381,80 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       totalIsr: new Big(r.totalIsr).round(2).toNumber(),
       totalMontoAportado: new Big(r.totalMontoAportado).round(2).toNumber(),
     }));
+
+    // 💰 FIX: la fila de CUBE en el resumen debe reflejar el desglose (rubro INTERES),
+    // igual que el detalle per-pago (armarInversionistasPago). El pci crudo de CUBE NO
+    // incluye el residuo ni los parciales, por eso se reemplaza desde el desglose aquí.
+    // Los inversionistas no-CUBE quedan intactos (siguen saliendo del pci).
+    //
+    // Solo ajustamos cuando el filtro NO sea un inversionista distinto a CUBE:
+    //   - Sin filtro → ajustar (CUBE debe aparecer con el desglose).
+    //   - Filtro == cubeId → ajustar (el usuario pide ver a CUBE).
+    //   - Filtro == otro id → NO ajustar (CUBE no aparece; el filtro ya lo excluyó).
+    const cubeEnResumen = !inversionistaId || Number(inversionistaId) === cubeId;
+    if (cubeEnResumen) {
+      // cubeNet/cubeIva = desglose INTERES (pagos CON desglose)
+      //                  + pci de CUBE (pagos SIN desglose) — espeja el fallback del detalle.
+      // Pagos filtrados materializados en la CTE "pf" para reusar whereSQL una sola vez.
+      const cubeInteres = await db.execute(sql`
+        WITH pf AS (
+          SELECT p.pago_id
+          FROM cartera.pagos_credito p
+          INNER JOIN cartera.creditos c ON c.credito_id = p.credito_id
+          INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+          ${sql.raw(whereSQL)}
+        )
+        SELECT
+          COALESCE((SELECT SUM(fd.monto_total - fd.monto_iva)
+                    FROM cartera.facturacion_desglose fd
+                    WHERE fd.rubro::text='INTERES' AND fd.pago_id IN (SELECT pago_id FROM pf)), 0)
+          + COALESCE((SELECT SUM(pci.abono_interes::numeric)
+                      FROM cartera.pagos_credito_inversionistas pci
+                      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+                      WHERE (UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%' OR i.inversionista_id = ${CUBE_ID})
+                        AND pci.pago_id IN (SELECT pago_id FROM pf)
+                        AND NOT EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd2
+                                         WHERE fd2.pago_id = pci.pago_id AND fd2.rubro::text='INTERES')), 0)
+          AS "net",
+          COALESCE((SELECT SUM(fd.monto_iva)
+                    FROM cartera.facturacion_desglose fd
+                    WHERE fd.rubro::text='INTERES' AND fd.pago_id IN (SELECT pago_id FROM pf)), 0)
+          + COALESCE((SELECT SUM(pci.abono_iva_12::numeric)
+                      FROM cartera.pagos_credito_inversionistas pci
+                      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+                      WHERE (UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%' OR i.inversionista_id = ${CUBE_ID})
+                        AND pci.pago_id IN (SELECT pago_id FROM pf)
+                        AND NOT EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd2
+                                         WHERE fd2.pago_id = pci.pago_id AND fd2.rubro::text='INTERES')), 0)
+          AS "iva"
+      `);
+      const cubeNet = new Big((cubeInteres.rows?.[0] as any)?.net ?? 0);
+      const cubeIva = new Big((cubeInteres.rows?.[0] as any)?.iva ?? 0);
+
+      const cubeIdx = totalesInversionistas.findIndex((r) => r.inversionistaId === cubeId);
+      if (cubeIdx >= 0) {
+        // Reemplazar solo el interés/IVA/ISR de CUBE; capital y montoAportado sin cambio.
+        totalesInversionistas[cubeIdx] = {
+          ...totalesInversionistas[cubeIdx],
+          totalAbonoInteres: cubeNet.round(2).toNumber(),
+          totalAbonoIva: cubeIva.round(2).toNumber(),
+          totalIsr: cubeNet.times("0.05").round(2).toNumber(),
+        };
+      } else if (cubeNet.gt("0.005")) {
+        // CUBE no estaba en pci (todo su interés vino de parciales sin pci) pero sí
+        // tiene desglose → agregar la fila para que no desaparezca del resumen.
+        totalesInversionistas.push({
+          inversionistaId: cubeId,
+          nombreInversionista: "Cube Investments S.A.",
+          emiteFactura: false,
+          totalAbonoCapital: 0,
+          totalAbonoInteres: cubeNet.round(2).toNumber(),
+          totalAbonoIva: cubeIva.round(2).toNumber(),
+          totalIsr: cubeNet.times("0.05").round(2).toNumber(),
+          totalMontoAportado: 0,
+        });
+      }
+    }
 
     return {
       success: true,

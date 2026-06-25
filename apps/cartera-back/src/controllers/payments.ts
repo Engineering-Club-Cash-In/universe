@@ -26,6 +26,7 @@ import {
 import { updateMora } from "./latefee";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
+import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 
 // ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
@@ -1145,6 +1146,21 @@ export async function insertPagosCreditoInversionistasV2(
   const pagoAbonoIva = new Big(currentPago.abono_iva_12 ?? 0);
 
   // 6. Calcular distribución por inversionista
+  // 6a. Split de interés/IVA delegado a la función pura (comportamiento idéntico al anterior).
+  const splitInteres = calcularSplitInteresPci({
+    inversionistas: inversionistasWithName.map((inv) => ({
+      inversionista_id: inv.inversionista_id,
+      nombre: inv.nombre,
+      porcentaje_participacion_inversionista: inv.porcentaje_participacion_inversionista ?? 0,
+      porcentaje_cash_in: inv.porcentaje_cash_in ?? 0,
+      monto_aportado: inv.monto_aportado ?? 0,
+    })),
+    pagoAbonoInteres,
+    pagoAbonoIva,
+    factorInteresPorInv,
+  });
+  const splitPorInv = new Map(splitInteres.map((s) => [s.inversionista_id, s]));
+
   const inserts = [];
   for (const inv of inversionistasWithName) {
     const isCube =
@@ -1155,28 +1171,13 @@ export async function insertPagosCreditoInversionistasV2(
     // Porcentaje general: base_calculo / SUM(monto_aportado)
     const porcentajeGeneral = montoBaseCalculoV2.div(sumMontosAportados);
 
-    // Porcentaje de participación según tipo (dividir entre 100 porque se guarda como %)
-    const porcentajeParticipacion = isCube
-      ? new Big(inv.porcentaje_cash_in ?? 0).div(100)
-      : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
-
     // Capital: SIEMPRE por porcentaje general (sin cambios respecto al flujo original).
     const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
 
-    // Interés / IVA:
-    //   • Con compra de cartera pendiente (factorInteresPorInv != null) → PRORRATEADO
-    //     por ventanas antes/después (mismo criterio que la facturación, sin residuo a CUBE).
-    //   • Sin compra → fórmula de siempre: participación × porcentaje general.
-    let abonoInteresInv: Big;
-    let abonoIvaInv: Big;
-    if (factorInteresPorInv) {
-      const f = factorInteresPorInv.get(inv.inversionista_id) ?? new Big(0);
-      abonoInteresInv = pagoAbonoInteres.times(f);
-      abonoIvaInv = pagoAbonoIva.times(f);
-    } else {
-      abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
-      abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
-    }
+    // Interés / IVA: resultado de la función pura.
+    const split = splitPorInv.get(inv.inversionista_id)!;
+    const abonoInteresInv = split.abono_interes;
+    const abonoIvaInv = split.abono_iva_12;
 
     // Solo actualizar monto_aportado si hubo abono a capital
     if (abonoCapitalInv.gt(0)) {

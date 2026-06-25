@@ -428,8 +428,7 @@ async function getLatestApprovedQuotation(
 			.from(quotations)
 			.where(
 				and(
-					eq(quotations.opportunityId, opportunityId),
-					eq(quotations.status, "accepted"),
+					eq(quotations.opportunityId, opportunityId)
 				),
 			)
 			.orderBy(desc(quotations.createdAt))

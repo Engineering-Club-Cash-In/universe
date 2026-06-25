@@ -53,6 +53,8 @@ export const quotations = pgTable("quotations", {
 	vehicleLine: text("vehicle_line"),
 	vehicleModel: text("vehicle_model"),
 	vehicleType: vehicleTypeEnum("vehicle_type").notNull().default("particular"),
+	vehicleCondition: text("vehicle_condition").notNull().default("used"),
+	vehicleOrigin: text("vehicle_origin").notNull().default("agencia"),
 	vehicleValue: decimal("vehicle_value", { precision: 14, scale: 2 }).notNull(),
 	insuredAmount: decimal("insured_amount", {
 		precision: 14,

@@ -100,6 +100,57 @@ export const createCredit = async (data: CreditFormValues): Promise<any> => {
   const res = await api.post(`${API_URL}/newCredit`, data);
   return res.data;
 };
+
+// ===== Carga masiva de créditos insolutos =====
+export interface FilaInsoluto {
+  fila: number;
+  cliente: string;
+  nit: string;
+  categoria: string;
+  asesor: string;
+  asesor_id: number;
+  capital: number;
+  plazo: number;
+  observaciones: string;
+  valido: boolean;
+  error?: string;
+}
+
+export const descargarPlantillaInsolutos = async (): Promise<{
+  archivoBase64: string;
+  filename: string;
+}> => {
+  const res = await api.get(`${API_URL}/insolutos/plantilla`);
+  return res.data;
+};
+
+export const validarInsolutosExcel = async (
+  archivoBase64: string
+): Promise<{
+  formatoOk: boolean;
+  error?: string;
+  filas?: FilaInsoluto[];
+  resumen?: { total: number; validas: number; invalidas: number };
+}> => {
+  const res = await api.post(`${API_URL}/insolutos/validar`, { archivoBase64 });
+  return res.data;
+};
+
+export const cargarInsolutos = async (
+  filas: FilaInsoluto[]
+): Promise<{
+  resultados: {
+    fila: number;
+    cliente: string;
+    success: boolean;
+    numero_credito_sifco?: string;
+    error?: string;
+  }[];
+  resumen: { total: number; creados: number; fallidos: number };
+}> => {
+  const res = await api.post(`${API_URL}/insolutos/cargar`, { filas });
+  return res.data;
+};
 export interface Credito {
   credito_id: number;
   usuario_id: number;
@@ -345,6 +396,8 @@ export interface InversionistaEspejo {
 export interface CreditoUsuarioPago {
   creditos: Credito;
   usuarios: Usuario;
+  /** Aseguradora vinculada al crédito (nombre, null si no tiene). */
+  aseguradora?: string | null;
   inversionistas: AporteInversionista[];
   creditos_inversionistas_espejo?: InversionistaEspejo[];
   resumen: ResumenCreditos;
@@ -447,6 +500,20 @@ export interface ResumenCreditos {
   total_inversionistas_iva: string;
 }
 
+// ============================================================
+// Aseguradoras — GET /aseguradoras
+// ============================================================
+export interface Aseguradora {
+  id: number;
+  nombre: string;
+}
+
+export const getAseguradoras = async (): Promise<Aseguradora[]> => {
+  const BACK_URL = import.meta.env.VITE_BACK_URL || "";
+  const res = await api.get(`${BACK_URL}/aseguradoras`);
+  return res.data.data;
+};
+
 export const getCreditosPaginados = async (params: {
   mes: number;
   anio: number;
@@ -460,6 +527,7 @@ export const getCreditosPaginados = async (params: {
   nombre_usuario?: string;
   is_vehiculo_propio?: boolean;
   inversionista_ids?: string;
+  aseguradora_id?: number;
 }): Promise<GetCreditosResponse> => {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
   const response = await api.get(`${BACK_URL}/getAllCredits`, {
@@ -487,6 +555,9 @@ export const getCreditosPaginados = async (params: {
       }),
       ...(params.inversionista_ids && {
         inversionista_ids: params.inversionista_ids,
+      }),
+      ...(params.aseguradora_id && {
+        aseguradora_id: params.aseguradora_id,
       }),
     },
   });

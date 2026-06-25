@@ -22,6 +22,8 @@ import {
 	type FlujoCuotasInversionesResponse,
 	type FlujoCuotasPorInversionistaResponse,
 	type MontoACobrarRow,
+	type MontoACobrarPeriodoRow,
+	type ReinversionLiquidacionesResponse,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 
@@ -439,6 +441,36 @@ export const reportesCarteraRouter = {
 		}),
 
 	// ========================================================================
+	// REPORTE: MONTO A COBRARSE POR PERÍODO (lógica cartera web, con acumulado)
+	// ========================================================================
+
+	getMontoACobrarPeriodo: adminProcedure
+		.input(
+			z.object({
+				periodo: z
+					.enum(["anio", "trimestre", "mes", "semana", "dia"])
+					.default("mes"),
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido"),
+			}),
+		)
+		.handler(async ({ input }): Promise<{ data: MontoACobrarPeriodoRow[] }> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			const data = await carteraBackClient.getMontoACobrarPeriodo({
+				periodo: input.periodo,
+				fechaInicio: input.fechaInicio,
+				fechaFin: input.fechaFin,
+			});
+
+			return { data };
+		}),
+
+	// ========================================================================
 	// REPORTE: FACTURADO DEL MES VS ESPERADO
 	// ========================================================================
 
@@ -483,6 +515,26 @@ export const reportesCarteraRouter = {
 			return carteraBackClient.getFlujoCuotasInversiones({
 				fechaInicio: input.fechaInicio,
 				fechaFin: input.fechaFin,
+			});
+		}),
+
+	getReinversionLiquidaciones: adminProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2020),
+			}),
+		)
+		.handler(async ({ input }): Promise<ReinversionLiquidacionesResponse> => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getReinversionLiquidaciones({
+				mes: input.mes,
+				anio: input.anio,
 			});
 		}),
 

@@ -178,6 +178,10 @@ const RUBRO_PREFIX: Record<string, string> = {
   OTROS: "oi",
   MORA: "mora",
   ROYALTY: "roy",
+  // Seguro/GPS también van por categoría (además del combinado servicios_seguro_gps).
+  // En el loop del desglose se tratan aparte (no caen en el totalCol genérico).
+  SEGURO: "seg",
+  GPS: "gps",
 };
 
 // categoría BD -> producto Excel (sufijo). "__NUEVO__" usa el patrón nuevo_<prefijo>_autocompras.
@@ -241,9 +245,36 @@ export async function generarSnapshotDiario(fecha: string) {
     LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
     LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
     WHERE fd.fecha_aplicado_gt = ${fecha}::date
-      -- una fila de PAGO huérfana (credito/usuario borrado) no debe sumar al
-      -- total; las GENÉRICAS (pago_id NULL) sí entran.
-      AND (fd.pago_id IS NULL OR p.pago_id IS NOT NULL)
+      -- Filas de PAGO: el pago debe existir (no huérfano por credito/usuario
+      -- borrado) y, MISMO CRITERIO QUE EL EXCEL (getPagosConInversionistas que
+      -- llena "Reuniones diarias"): el crédito debe estar en un estado contable
+      -- (excluye CAIDO y demás) y el pago en un validation_status contable. Si no,
+      -- el desglose contaba pagos facturados sobre créditos caídos que el Excel
+      -- excluye → diferencia (p.ej. capital nuevo 06-16). Las GENÉRICAS (pago_id
+      -- NULL) no tienen crédito asociado → entran igual.
+      AND (
+        fd.pago_id IS NULL OR (
+          p.pago_id IS NOT NULL
+          AND c."statusCredit" IN
+            ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+          AND p.validation_status IN
+            ('validated','pending','reset','capital','capital_validated')
+        )
+      )
+      -- MODELO CONTA (2026-06-19): la CUOTA 0 (originación de crédito nuevo) NO va a
+      -- sus rubros — va a ADMINISTRATIVOS. El CRM ya la guarda en gastos_administrativos
+      -- (los MISMOS cargos: "Cuota 0"=interés+membresía, "Seguro y Gastos Adm."=seguro,
+      -- "Contrato/Traspaso/Garantía"=otros), así que sumarla también en el desglose la
+      -- DUPLICABA (rubro + administrativos). Por eso las GENÉRICAS (pago_id NULL) se
+      -- EXCLUYEN de interés/membresía/otros/seguro/gps → esos rubros = SOLO PAGOS, igual
+      -- que el Excel "Reuniones diarias" (Otros ingresos = Administrativos + Otros cobros).
+      -- También se excluyen CAPITAL (sale del pci, bloque 1.5) y MORA (un crédito nuevo
+      -- no genera mora). ÚNICA genérica que SÍ suma en su rubro: ROYALTY (conta lo deja
+      -- aparte de administrativos — "todo menos royalti").
+      AND (
+        fd.pago_id IS NOT NULL
+        OR fd.rubro::text = 'ROYALTY'
+      )
     GROUP BY COALESCE(u.categoria, fd.categoria), fd.rubro
   `);
   for (const r of (desg as any).rows ?? []) {
@@ -251,9 +282,19 @@ export async function generarSnapshotDiario(fecha: string) {
     const rubro = r.rubro as string;
     const total = r.total;
     if (rubro === "SEGURO" || rubro === "GPS") {
-      add("servicios_seguro_gps", total);
+      add("servicios_seguro_gps", total); // combinado, INTACTO para conta
+      // + segmentación por categoría (igual que membresía/interés)
+      const pfx = rubro === "SEGURO" ? "seg" : "gps";
+      add(rubro === "SEGURO" ? "seguro_total" : "gps_total", total);
+      add(colProducto(pfx, cat), total);
       continue;
     }
+    // 💰 CAPITAL NO se toma del desglose: se jala del pci (pagos aplicados) en el
+    //    bloque 1.5 de abajo. cofidi escribe la fila CAPITAL solo si el capital de
+    //    CUBE > 0 al FACTURAR; si entra al pci DESPUÉS de facturar, la fila no se
+    //    escribe y el desglose sub-cuenta capital (gap vs el Excel). Por eso el
+    //    capital se calcula desde los pagos aplicados, igual que "Reuniones diarias".
+    if (rubro === "CAPITAL") continue;
     const prefix = RUBRO_PREFIX[rubro];
     if (!prefix) continue;
     // total por rubro (columna *_cube / total)
@@ -273,16 +314,73 @@ export async function generarSnapshotDiario(fecha: string) {
     add(colProducto(prefix, cat), total);
   }
 
+  // 1.5) 💰 CAPITAL del día = capital de CUBE desde pagos_credito_inversionistas
+  //      (pci) de los pagos APLICADOS hoy — MISMA fuente que el Excel "Reuniones
+  //      diarias" (getPagosConInversionistas). Se reparte por usuario.categoria
+  //      (igual que el resto). Resuelve el desfase pci↔facturación: el desglose
+  //      escribe la fila CAPITAL solo si el capital de CUBE existe al facturar, y a
+  //      veces el capital entra al pci después → la fila falta y el desglose
+  //      sub-cuenta. Tomándolo de los pagos aplicados cuadra al centavo con el Excel.
+  const capPci = await db.execute(sql`
+    SELECT u.categoria AS categoria, SUM(pci.abono_capital) AS cap
+    FROM cartera.pagos_credito p
+    JOIN cartera.creditos c ON c.credito_id = p.credito_id
+    JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+    JOIN cartera.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
+    JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+    WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
+      AND p.validation_status IN ('validated','pending','reset','capital','capital_validated')
+      AND c."statusCredit" IN
+        ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+      AND UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
+    GROUP BY u.categoria
+  `);
+  for (const r of (capPci as any).rows ?? []) {
+    add("capital_total", r.cap);
+    add(colProducto("cap", r.categoria as string), r.cap);
+  }
+
+  // 1.6) 🏷️ OI por producto = MODELO CONTA. En el Excel "Reuniones diarias" las columnas
+  //      "Otros ingresos" por categoría (oi_<producto>) incluyen TODA la originación del
+  //      crédito nuevo —la cuota 0 de interés/membresía/seguro/otros—, no solo el rubro
+  //      OTROS. Esas genéricas se excluyeron de los rubros (bloque 1, van a administrativos)
+  //      pero el DETALLE por producto de OI sí las lleva, para que calce con conta.
+  //      ⚠️ Esto NO toca los totales: otros_ingresos sigue = administrativos + otros_cobros
+  //      (ver bloque 5). Solo distribuye la originación en las columnas oi_<producto>.
+  //      La categoría de las genéricas vive en fd.categoria (resuelta por NIT al facturar).
+  const oiNuevo = await db.execute(sql`
+    SELECT fd.categoria AS categoria, SUM(fd.monto_total) AS total
+    FROM cartera.facturacion_desglose fd
+    WHERE fd.fecha_aplicado_gt = ${fecha}::date
+      AND fd.pago_id IS NULL
+      AND fd.rubro::text IN ('INTERES','MEMBRESIA','SEGURO','GPS','OTROS')
+    GROUP BY fd.categoria
+  `);
+  for (const r of (oiNuevo as any).rows ?? []) {
+    add(colProducto("oi", r.categoria as string), r.total);
+  }
+
   // 2) Royalty del día = SOLO lo REALMENTE facturado (rubro ROYALTY del desglose,
   //    ya sumado en el bloque 1). Decisión de diseño: NO se usa creditos.royalti de
   //    respaldo — lo facturado es la fuente correcta (creditos.royalti difería de
   //    contabilidad) y el respaldo causaba doble conteo. Crédito sin royalty
   //    facturado genérico → no suma royalty (0).
 
-  // 3) Gastos administrativos del día
+  // 3) "Administrativos" = ORIGINACIÓN de créditos nuevos (cuota 0). MODELO CONTA.
+  //    Fuente = las GENÉRICAS del desglose (pago_id NULL: int/mem/seg/gps/otros) = la
+  //    facturación REAL de los DTE: no se atrasa, incluye las genéricas MANUALES de
+  //    /facturar-generico, y cuadra con oi_* (bloque 1.6) y con conta.
+  //    NO se usa `gastos_administrativos`: es un espejo del CRM que se atrasa y, además,
+  //    mezcla esos espejos con ajustes manuales del UI ItemsManuales SIN un discriminador
+  //    de origen → no se puede deduplicar el espejo y conservar lo manual de forma fiable
+  //    (GREATEST botaba el manual cuando el DTE era mayor — P2 Codex #945). Decisión de
+  //    negocio: los ajustes admin que se quieran en el reporte deben FACTURARSE (DTE →
+  //    desglose). Verificado: gastos_administrativos solo tenía cargos del CRM (sin manuales).
   const adm = await db.execute(sql`
-    SELECT COALESCE(SUM(monto), 0) AS total
-    FROM cartera.gastos_administrativos WHERE fecha = ${fecha}::date
+    SELECT COALESCE(SUM(monto_total), 0) AS total
+    FROM cartera.facturacion_desglose
+    WHERE fecha_aplicado_gt = ${fecha}::date AND pago_id IS NULL
+      AND rubro::text IN ('INTERES','MEMBRESIA','SEGURO','GPS','OTROS')
   `);
   const administrativos = new Big((adm as any).rows?.[0]?.total || 0);
 
@@ -305,14 +403,20 @@ export async function generarSnapshotDiario(fecha: string) {
   `);
   const factInv = new Big((inv as any).rows?.[0]?.total || 0);
 
-  // 5) Totales derivados del día
-  const interes_cube = g("interes_cube");
-  const membresia = g("membresia");
-  const otros_ingresos = g("otros_ingresos");
+  // 5) Totales derivados del día (MODELO CONTA, 2026-06-19)
+  //    interés/membresía/otros/servicios = SOLO PAGOS (las genéricas/cuota 0 se
+  //    excluyeron en el bloque 1 y viven en administrativos). Otros ingresos =
+  //    Administrativos (originación de créditos nuevos) + Otros cobros (otros de pagos),
+  //    igual que el Excel: "Otros ingresos = Administrativos + Otros cobros". La cuota 0
+  //    entra a facturación UNA sola vez, vía administrativos dentro de otros_ingresos.
+  const interes_cube = g("interes_cube"); // solo pagos
+  const membresia = g("membresia"); // solo pagos
+  const otros_pagos = g("otros_ingresos"); // OTROS de pagos (genéricas ya excluidas)
   const mora_cube = g("mora_cube");
   const royalty = g("royalty");
-  const servicios = g("servicios_seguro_gps");
-  const otros_cobros = otros_ingresos.minus(administrativos);
+  const servicios = g("servicios_seguro_gps"); // solo pagos
+  const otros_ingresos = administrativos.plus(otros_pagos);
+  const otros_cobros = otros_pagos; // = otros_ingresos − administrativos
   const facturacion = royalty
     .plus(mora_cube)
     .plus(otros_ingresos)
@@ -392,6 +496,8 @@ export async function generarSnapshotDiario(fecha: string) {
     otros_cobros: f2(otros_cobros),
     mora_cube: f2(mora_cube),
     royalty: f2(royalty),
+    seguro_total: f2(g("seguro_total")),
+    gps_total: f2(g("gps_total")),
     facturacion: f2(facturacion),
     facturacion_acumulado: f2(facturacion_acumulado),
     servicios_seguro_gps: f2(servicios),
@@ -431,43 +537,127 @@ export async function generarSnapshotDiario(fecha: string) {
     })
     .returning();
 
+  // ───────────── tabla intermedia: detalle por ORIGEN (nuevo vs pago) ─────────────
+  //   Para que conta vea la diferencia que hoy hace a mano. Cubre TODOS los rubros.
+  //   - INTERÉS/MEMBRESÍA/SEGURO/GPS/OTROS/MORA/ROYALTY/INVERSIONISTAS: del desglose
+  //     (genérica = 'nuevo' originación; con pago = 'pago').
+  //   - CAPITAL: NO del desglose (el desglose sub-cuenta capital); se toma de pci de
+  //     CUBE por pago aplicado, MISMA fuente que la columna capital_total → reconcilia.
+  //     Capital siempre es 'pago' (no hay originación de capital).
+  //   trim() en la categoría para igualar colProducto (la data trae espacios/variantes).
+  //   Best-effort: si falla (p.ej. tabla aún no migrada, o race del índice único),
+  //   NO rompe el snapshot ya guardado. Días bloqueados retornan arriba (backfill aparte).
+  try {
+    await db.execute(sql`DELETE FROM cartera.facturacion_snapshot_detalle WHERE fecha = ${fecha}::date`);
+    await db.execute(sql`
+      INSERT INTO cartera.facturacion_snapshot_detalle
+        (fecha, rubro, producto, origen, monto_total, monto_iva)
+      SELECT ${fecha}::date, fd.rubro,
+        CASE lower(trim(COALESCE(u.categoria, fd.categoria)))
+          WHEN 'cv vehículo' THEN 'autocompras'
+          WHEN 'cv vehículo nuevo' THEN 'nuevo_autocompras'
+          WHEN 'vehículo' THEN 'sobre_vehiculo'
+          WHEN 'hipotecario' THEN 'hipotecario'
+          ELSE 'sin_producto'
+        END,
+        CASE WHEN fd.pago_id IS NULL THEN 'nuevo' ELSE 'pago' END,
+        SUM(fd.monto_total), SUM(fd.monto_iva)
+      FROM cartera.facturacion_desglose fd
+      LEFT JOIN cartera.pagos_credito p ON p.pago_id   = fd.pago_id
+      LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
+      LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
+      WHERE fd.fecha_aplicado_gt = ${fecha}::date
+        AND fd.rubro::text <> 'CAPITAL'                            -- capital se toma del pci (abajo)
+        AND NOT (fd.pago_id IS NULL AND fd.rubro::text = 'MORA')   -- mora genérica fuera (= snapshot)
+        AND (
+          fd.pago_id IS NULL
+          -- INTERES_INVERSIONISTAS reconcilia con facturacion_inversionistas (bloque 4),
+          -- que suma el desglose SIN filtro de estado/validation → acá tampoco se filtra.
+          OR fd.rubro::text = 'INTERES_INVERSIONISTAS'
+          OR (
+            p.pago_id IS NOT NULL
+            AND c."statusCredit" IN
+              ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+            AND p.validation_status IN
+              ('validated','pending','reset','capital','capital_validated')
+          )
+        )
+      GROUP BY fd.rubro, 3, 4
+    `);
+    // CAPITAL desde pci de CUBE (igual que capital_total) → reconcilia con el snapshot
+    await db.execute(sql`
+      INSERT INTO cartera.facturacion_snapshot_detalle
+        (fecha, rubro, producto, origen, monto_total, monto_iva)
+      SELECT ${fecha}::date, 'CAPITAL'::cartera.rubro_facturacion,
+        CASE lower(trim(u.categoria))
+          WHEN 'cv vehículo' THEN 'autocompras'
+          WHEN 'cv vehículo nuevo' THEN 'nuevo_autocompras'
+          WHEN 'vehículo' THEN 'sobre_vehiculo'
+          WHEN 'hipotecario' THEN 'hipotecario'
+          ELSE 'sin_producto'
+        END,
+        'pago', SUM(pci.abono_capital), 0
+      FROM cartera.pagos_credito p
+      JOIN cartera.creditos c ON c.credito_id = p.credito_id
+      JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+      JOIN cartera.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
+      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+      WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
+        AND p.validation_status IN ('validated','pending','reset','capital','capital_validated')
+        AND c."statusCredit" IN
+          ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+        AND UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
+      GROUP BY 3
+      HAVING SUM(pci.abono_capital) <> 0
+    `);
+  } catch (e) {
+    console.error(`⚠️ detalle snapshot ${fecha} no se pudo poblar (best-effort):`, e);
+  }
+
   return { success: true, data: saved };
 }
 
-// ✅ Aplica SOLO carros + administrativos al snapshot de un día (sin recalcular
-//    los montos importados). Si el día no tiene fila, la genera primero.
-//    - administrativos = SUM(gastos del día); otros_cobros = otros_ingresos − administrativos
-//    - ingreso_carros = SUM(carros del día); acumulado_total = fact_acum + acum_servicios + carros MTD
-//    SÍ respeta el lock: administrativos y otros_cobros son EDITABLES (grupo Otros
-//    ingresos), así que en un día bloqueado NO debe pisarlos → salta días bloqueados.
+// ✅ Refresca un día tras cambios "manuales": cierre de crédito nuevo (que escribe genéricas
+//    en el desglose) o ingreso de carros. Como administrativos/oi_*/otros derivan del
+//    DESGLOSE (igual que los rubros — ver bloque 3), NO se puede recalcular admin desde
+//    gastos_administrativos sin pisar el valor correcto del desglose (P2 Codex #945). Por eso:
+//    - Día CON desglose (del sistema) → regen completo (generarSnapshotDiario, respeta el
+//      lock) + recomputar acumulados del mes → admin/oi_*/otros/facturación al día (también
+//      arregla P2 "Refresh OI product columns" de Codex #942).
+//    - Día SIN desglose (importado del Excel) → NO se recalculan rubros/admin (se preservan
+//      los montos importados); solo se refrescan los carros del día.
 export async function aplicarManualesEnSnapshotDia(fecha: string) {
+  const [y, m] = fecha.split("-").map(Number);
+  const hayDesglose = await db.execute(sql`
+    SELECT 1 FROM cartera.facturacion_desglose WHERE fecha_aplicado_gt = ${fecha}::date LIMIT 1
+  `);
+  if (((hayDesglose as any).rows ?? []).length > 0) {
+    // Día del sistema: rubros + administrativos + oi_* + otros + capital derivan del
+    // desglose/pci → un regen completo deja todo consistente (y respeta el lock).
+    const r = await generarSnapshotDiario(fecha);
+    if ((r as any).skipped) return r; // día bloqueado
+    await recomputarAcumuladosMes(y, m);
+    return { success: true };
+  }
+  // Día importado (sin desglose): solo carros, sin pisar rubros/admin importados.
   const existe = await db
     .select({ id: facturacion_snapshot_diario.id })
     .from(facturacion_snapshot_diario)
     .where(eq(facturacion_snapshot_diario.fecha, fecha))
     .limit(1);
-  if (!existe.length) await generarSnapshotDiario(fecha); // día nuevo: sin montos que perder
-
+  if (!existe.length) {
+    await generarSnapshotDiario(fecha);
+    await recomputarAcumuladosMes(y, m);
+    return { success: true };
+  }
   await db.execute(sql`
-    UPDATE cartera.facturacion_snapshot_diario s
-    SET administrativos = COALESCE((
-          SELECT SUM(monto) FROM cartera.gastos_administrativos g WHERE g.fecha = ${fecha}::date), 0),
-        otros_cobros = s.otros_ingresos - COALESCE((
-          SELECT SUM(monto) FROM cartera.gastos_administrativos g WHERE g.fecha = ${fecha}::date), 0),
-        ingreso_carros = COALESCE((
-          SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
-        -- carros acumulado consistente con la suma corrida: días PREVIOS del mes
-        -- desde la columna del snapshot (incluye lo importado del Excel) + lo de HOY
-        -- desde la tabla de ingresos_carros.
-        acumulado_total = s.facturacion_acumulado + s.acum_servicios_seguro_gps
-          + COALESCE((SELECT SUM(d.ingreso_carros) FROM cartera.facturacion_snapshot_diario d
-                      WHERE d.fecha >= make_date(EXTRACT(YEAR FROM ${fecha}::date)::int, EXTRACT(MONTH FROM ${fecha}::date)::int, 1)
-                        AND d.fecha < ${fecha}::date), 0)
-          + COALESCE((SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
-        updated_at = now()
-    WHERE s.fecha = ${fecha}::date
-      AND s.bloqueado = false
+    UPDATE cartera.facturacion_snapshot_diario SET
+      ingreso_carros = COALESCE((
+        SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
+      updated_at = now()
+    WHERE fecha = ${fecha}::date AND bloqueado = false
   `);
+  await recomputarAcumuladosMes(y, m);
   return { success: true };
 }
 
@@ -538,6 +728,25 @@ export async function regenerarSnapshotRango(
 // ============================================================================
 // 📥 EXPORTAR A EXCEL (diseño tipo Reuniones diarias, con logo y totales)
 // ============================================================================
+// 📋 Detalle por ORIGEN (crédito nuevo vs pago) de un día — alimenta el modal del
+//    front y la hoja "Desglose" del Excel. Lee facturacion_snapshot_detalle.
+//    Opcional: filtrar por rubro (para el modal de un rubro puntual).
+export async function listarDetalleSnapshot(params: {
+  fecha: string;
+  rubro?: string;
+}) {
+  const { fecha, rubro } = params;
+  const res = await db.execute(sql`
+    SELECT rubro::text AS rubro, producto, origen,
+           monto_total::float8 AS monto_total, monto_iva::float8 AS monto_iva
+    FROM cartera.facturacion_snapshot_detalle
+    WHERE fecha = ${fecha}::date
+      ${rubro ? sql`AND rubro::text = ${rubro}` : sql``}
+    ORDER BY rubro, producto, origen
+  `);
+  return { success: true, data: (res as any).rows ?? [] };
+}
+
 const prodCols = (p: string) => [
   { k: `${p}_autocompras`, l: "Autocompras" },
   { k: `${p}_sobre_vehiculo`, l: "Sobre vehículo" },
@@ -558,6 +767,8 @@ const EXCEL_GRUPOS: { label: string; color: string; cols: { k: string; l: string
   },
   { label: "Mora", color: "FF1D4ED8", cols: [...prodCols("mora"), { k: "mora_cube", l: "Mora Cube" }] },
   { label: "Royalty", color: "FF2563EB", cols: [...prodCols("roy"), { k: "royalty", l: "Royalty" }] },
+  { label: "Seguro", color: "FF1D4ED8", cols: [...prodCols("seg"), { k: "seguro_total", l: "Seguro total" }] },
+  { label: "GPS", color: "FF2563EB", cols: [...prodCols("gps"), { k: "gps_total", l: "GPS total" }] },
   {
     label: "Totales / Acumulados",
     color: "FF0F766E",
@@ -716,6 +927,97 @@ export async function generarExcelFacturacionDiaria(
 
   ws.getRow(HEADER_GROUP_ROW).height = 22;
   ws.getRow(HEADER_COL_ROW).height = 30;
+
+  // ───────────── Hoja "Desglose nuevo vs pago" ─────────────
+  //   Para conta: por cada día y rubro, el desglose por producto en crédito nuevo
+  //   vs pago, RESPETANDO el orden del reporte y con filas en blanco entre rubros
+  //   y días para que se lea cómodo. Fuente: facturacion_snapshot_detalle.
+  // Días BLOQUEADOS (editados a mano / forzados): el detalle viene del desglose y
+  //   NO reconcilia con el total forzado → se EXCLUYEN del Desglose (Codex P2 #933).
+  const det = await db.execute(sql`
+    SELECT fecha::text AS fecha, rubro::text AS rubro, producto, origen,
+           monto_total::float8 AS monto
+    FROM cartera.facturacion_snapshot_detalle
+    WHERE fecha BETWEEN ${fechaInicio}::date AND ${fechaFin}::date
+      AND fecha NOT IN (
+        SELECT fecha FROM cartera.facturacion_snapshot_diario WHERE bloqueado = true
+      )
+  `);
+  const idx: Record<string, Record<string, Record<string, { nuevo: number; pago: number }>>> = {};
+  for (const x of (det as any).rows ?? []) {
+    const f = x.fecha as string, rb = x.rubro as string, p = x.producto as string;
+    (idx[f] ??= {});
+    (idx[f][rb] ??= {});
+    (idx[f][rb][p] ??= { nuevo: 0, pago: 0 });
+    if (x.origen === "nuevo") idx[f][rb][p].nuevo += Number(x.monto) || 0;
+    else idx[f][rb][p].pago += Number(x.monto) || 0;
+  }
+  const RUBRO_ORDER = ["CAPITAL", "INTERES", "MEMBRESIA", "OTROS", "MORA", "ROYALTY", "SEGURO", "GPS", "INTERES_INVERSIONISTAS"];
+  const RUBRO_LABEL: Record<string, string> = { CAPITAL: "Capital", INTERES: "Interés", MEMBRESIA: "Membresía", OTROS: "Otros ingresos", MORA: "Mora", ROYALTY: "Royalty", SEGURO: "Seguro", GPS: "GPS", INTERES_INVERSIONISTAS: "Inversionistas" };
+  const PROD_ORDER = ["autocompras", "sobre_vehiculo", "nuevo_autocompras", "hipotecario", "extra_financiamiento", "reestructura", "sin_producto"];
+  const PROD_LABEL: Record<string, string> = { autocompras: "Autocompras", sobre_vehiculo: "Sobre vehículo", nuevo_autocompras: "Nuevo Autocompras", hipotecario: "Hipotecario", extra_financiamiento: "Extra financ.", reestructura: "Reestructura", sin_producto: "Sin producto" };
+
+  const ds = wb.addWorksheet("Desglose nuevo vs pago");
+  ds.columns = [
+    { key: "fecha", width: 13 },
+    { key: "rubro", width: 16 },
+    { key: "producto", width: 20 },
+    { key: "nuevo", width: 16 },
+    { key: "pago", width: 16 },
+    { key: "total", width: 16 },
+  ];
+  ds.mergeCells(1, 1, 1, 6);
+  const dT = ds.getCell(1, 1);
+  dT.value = `Desglose crédito nuevo vs pago  ·  ${fechaInicio ?? "—"} a ${fechaFin ?? "—"}`;
+  dT.font = { bold: true, size: 14, color: { argb: "FF1E3A8A" } };
+  const dh = ds.getRow(3);
+  ["Fecha", "Rubro", "Producto", "Crédito nuevo", "Pago", "Total"].forEach((h, i) => {
+    const c = dh.getCell(i + 1);
+    c.value = h;
+    c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    c.alignment = { horizontal: i < 3 ? "left" : "right", vertical: "middle" };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } };
+    c.border = border;
+  });
+  dh.height = 22;
+
+  let dr = 4;
+  for (const f of Object.keys(idx).sort()) {
+    for (const rb of RUBRO_ORDER) {
+      const prods = idx[f]?.[rb];
+      if (!prods) continue;
+      const firstRow = dr;
+      let sn = 0, sp = 0;
+      for (const p of PROD_ORDER) {
+        const v = prods[p];
+        if (!v || (v.nuevo === 0 && v.pago === 0)) continue;
+        const row = ds.getRow(dr);
+        row.getCell(1).value = dr === firstRow ? f : "";
+        row.getCell(2).value = dr === firstRow ? (RUBRO_LABEL[rb] ?? rb) : "";
+        row.getCell(3).value = PROD_LABEL[p] ?? p;
+        row.getCell(4).value = v.nuevo;
+        row.getCell(5).value = v.pago;
+        row.getCell(6).value = v.nuevo + v.pago;
+        for (const cc of [4, 5, 6]) row.getCell(cc).numFmt = "#,##0.00";
+        sn += v.nuevo; sp += v.pago;
+        dr++;
+      }
+      if (dr === firstRow) continue; // rubro sin movimiento
+      const sub = ds.getRow(dr);
+      sub.getCell(3).value = `Subtotal ${RUBRO_LABEL[rb] ?? rb}`;
+      sub.getCell(4).value = sn;
+      sub.getCell(5).value = sp;
+      sub.getCell(6).value = sn + sp;
+      for (let cc = 1; cc <= 6; cc++) {
+        const c = sub.getCell(cc);
+        if (cc >= 4) c.numFmt = "#,##0.00";
+        c.font = { bold: true, color: { argb: "FF1E3A8A" } };
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF6FF" } };
+      }
+      dr += 2; // subtotal + fila en blanco (espacio entre rubros)
+    }
+    dr++; // espacio extra entre días
+  }
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);

@@ -39,6 +39,7 @@ import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminImportRouteImport } from './routes/admin/import'
 import { Route as AccountingPayInvestorsRouteImport } from './routes/accounting/pay-investors'
 import { Route as InversionesLiquidacionesIndexRouteImport } from './routes/inversiones/liquidaciones.index'
+import { Route as CrmReportesIndexRouteImport } from './routes/crm/reportes/index'
 import { Route as CrmAnalysisIndexRouteImport } from './routes/crm/analysis/index'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
 import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juridico/generate.$opportunityId'
@@ -201,6 +202,11 @@ const InversionesLiquidacionesIndexRoute =
     path: '/inversiones/liquidaciones/',
     getParentRoute: () => rootRouteImport,
   } as any)
+const CrmReportesIndexRoute = CrmReportesIndexRouteImport.update({
+  id: '/crm/reportes/',
+  path: '/crm/reportes/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CrmAnalysisIndexRoute = CrmAnalysisIndexRouteImport.update({
   id: '/crm/analysis/',
   path: '/crm/analysis/',
@@ -291,6 +297,7 @@ export interface FileRoutesByFullPath {
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/crm/reportes/': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -332,6 +339,7 @@ export interface FileRoutesByTo {
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports': typeof AdminReportsIndexRoute
   '/crm/analysis': typeof CrmAnalysisIndexRoute
+  '/crm/reportes': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRoutesById {
@@ -374,6 +382,7 @@ export interface FileRoutesById {
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/crm/reportes/': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRouteTypes {
@@ -417,6 +426,7 @@ export interface FileRouteTypes {
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/crm/reportes/'
     | '/inversiones/liquidaciones/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -458,6 +468,7 @@ export interface FileRouteTypes {
     | '/juridico/generate/$opportunityId'
     | '/admin/reports'
     | '/crm/analysis'
+    | '/crm/reportes'
     | '/inversiones/liquidaciones'
   id:
     | '__root__'
@@ -499,6 +510,7 @@ export interface FileRouteTypes {
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/crm/reportes/'
     | '/inversiones/liquidaciones/'
   fileRoutesById: FileRoutesById
 }
@@ -541,6 +553,7 @@ export interface RootRouteChildren {
   JuridicoGenerateOpportunityIdRoute: typeof JuridicoGenerateOpportunityIdRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
   CrmAnalysisIndexRoute: typeof CrmAnalysisIndexRoute
+  CrmReportesIndexRoute: typeof CrmReportesIndexRoute
   InversionesLiquidacionesIndexRoute: typeof InversionesLiquidacionesIndexRoute
 }
 
@@ -756,6 +769,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InversionesLiquidacionesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/crm/reportes/': {
+      id: '/crm/reportes/'
+      path: '/crm/reportes'
+      fullPath: '/crm/reportes/'
+      preLoaderRoute: typeof CrmReportesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
@@ -862,6 +882,7 @@ const rootRouteChildren: RootRouteChildren = {
   JuridicoGenerateOpportunityIdRoute: JuridicoGenerateOpportunityIdRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,
   CrmAnalysisIndexRoute: CrmAnalysisIndexRoute,
+  CrmReportesIndexRoute: CrmReportesIndexRoute,
   InversionesLiquidacionesIndexRoute: InversionesLiquidacionesIndexRoute,
 }
 export const routeTree = rootRouteImport

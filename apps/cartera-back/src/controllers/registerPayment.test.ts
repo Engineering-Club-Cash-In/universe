@@ -3,11 +3,14 @@ import Big from "big.js";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
+  esDestinoSobrescribible,
+  getApplyPaymentHttpStatus,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
   getSpecialPaymentCuotaId,
   getSpecialPaymentInstallmentFields,
   shouldApplyStaleZeroRestanteAdjustment,
+  shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
@@ -65,6 +68,56 @@ describe("register payment", () => {
         installmentAmountApplied: 100,
       })
     ).toBe(true);
+  });
+
+  it("rechaza validar un pago normal sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+        mora: "0.00",
+        otros: "0",
+        pagoConvenio: "0",
+      })
+    ).toBe(true);
+  });
+
+  it("rechaza revalidar un pago normal sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0",
+        mora: "0",
+        otros: "0",
+        pagoConvenio: "0",
+      })
+    ).toBe(true);
+  });
+
+  it("permite validar filas especiales sin monto aplicado", () => {
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "reset",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+      })
+    ).toBe(false);
+
+    expect(
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: "pending",
+        nextValidationStatus: "validated",
+        montoAplicado: "0.00",
+        mora: "25.00",
+      })
+    ).toBe(false);
+  });
+
+  it("mapea rechazos de regla de negocio de aplicar pago a HTTP 400", () => {
+    expect(getApplyPaymentHttpStatus({ success: false })).toBe(400);
+    expect(getApplyPaymentHttpStatus({ success: true })).toBe(200);
   });
 
   it("aplica el ajuste de restantes en cero a la primera cuota procesada aunque el request venga adelantado", () => {
@@ -303,6 +356,298 @@ describe("regresión: mora/otros no debe colapsar el saldo de la cuota", () => {
       hermanosIva: 0,
     });
     expect(saldo.saldoRealCuota.toFixed(2)).toBe("1000.00");
+  });
+});
+
+// Bug crédito 217 / cuota #8: el placeholder `no_required` de la cuota YA fue
+// consumido por un parcial anterior (esa fila pasó a `validated` con
+// `abono_interes` real, ya facturado). Al llegar el pago que CIERRA la cuota,
+// `pagoOriginal` (no_required) es undefined y `existingPago` cae al fallback
+// `allExistingPagos[0]` = la fila REAL más vieja. El cierre hacía UPDATE sobre
+// esa fila, BORRANDO un pago de interés validado/facturado. El fix: el cierre
+// solo puede UPDATE-ar un destino realmente desechable; si no, INSERTA fila nueva.
+describe("esDestinoSobrescribible", () => {
+  it("el placeholder no_required SIEMPRE es sobrescribible (aunque trajera saldos)", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+      })
+    ).toBe(true);
+  });
+
+  it("una fila vacía (monto_aplicado≈0 y todos los abono_* ≈0) es sobrescribible", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "pending",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "0",
+      })
+    ).toBe(true);
+  });
+
+  it("tolera centavos de ruido al medir 'vacío'", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "validated",
+        monto_aplicado: "0.00",
+        abono_capital: "0.005",
+        abono_interes: "0",
+      })
+    ).toBe(true);
+  });
+
+  it("un pago real de EXACTAMENTE Q0.01 NO es sobrescribible (numeric(2) es exacto)", () => {
+    // Codex P2: con `lte(0.01)` un parcial de un centavo se trataba como vacío
+    // y el cierre lo machacaba. Debe contar como pago real.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "validated",
+        monto_aplicado: "0.01",
+        abono_capital: "0",
+        abono_interes: "0.01",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "0",
+      })
+    ).toBe(false);
+  });
+
+  it("un pago REAL (con abono_interes validado) NO es sobrescribible", () => {
+    // Caso crédito 217: fila validated con interés real ya facturado.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "validated",
+        monto_aplicado: "1151.00",
+        abono_capital: "0",
+        abono_interes: "1027.68",
+        abono_iva_12: "123.32",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "0",
+      })
+    ).toBe(false);
+  });
+
+  it("una fila con monto_aplicado real pero rubros en 0 NO es sobrescribible", () => {
+    // p.ej. fila solo-mora/otros con plata aplicada: no la queremos pisar.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "validated",
+        monto_aplicado: "200.00",
+        abono_capital: "0",
+        abono_interes: "0",
+      })
+    ).toBe(false);
+  });
+
+  it("una fila con solo abono_capital real NO es sobrescribible", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "pending",
+        monto_aplicado: "0",
+        abono_capital: "500.00",
+        abono_interes: "0",
+      })
+    ).toBe(false);
+  });
+
+  it("un pago de solo MORA (monto_aplicado/abono_* en 0) NO es sobrescribible", () => {
+    // Codex P2: insertarPago crea filas mora/otros con monto_aplicado:0 y
+    // abono_* en 0 pero plata en mora. No debe tratarse como vacío.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "pending",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        mora: "150.00",
+      })
+    ).toBe(false);
+  });
+
+  it("un pago de solo OTROS (TEXT con monto) NO es sobrescribible", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "pending",
+        monto_aplicado: "0",
+        abono_interes: "0",
+        otros: "300.00",
+      })
+    ).toBe(false);
+  });
+
+  it("una fila con `otros` vacío/no-numérico SÍ puede ser vacía", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        otros: "",
+      })
+    ).toBe(true);
+  });
+});
+
+// Réplica pura del árbol de decisión insert-vs-update del cierre en
+// `insertPayment` (registerPayment.ts ~1378): NO toca DB; modela exactamente la
+// rama elegida y el conjunto de filas resultante de la cuota, para asegurar que
+// (a) la fila real preexistente nunca se sobrescribe, (b) se INSERTA una fila de
+// cierre, y (c) no se pierde ni se duplica plata en la cuota.
+type FilaCuota = {
+  pago_id: number;
+  validationStatus: string;
+  monto_aplicado: string;
+  abono_capital: string;
+  abono_interes: string;
+  abono_iva_12: string;
+};
+
+const sumaRubrosCuota = (filas: FilaCuota[]) =>
+  filas
+    .reduce(
+      (acc, f) =>
+        acc
+          .plus(new Big(f.abono_capital))
+          .plus(new Big(f.abono_interes))
+          .plus(new Big(f.abono_iva_12)),
+      new Big(0)
+    )
+    .toFixed(2);
+
+/**
+ * Aplica la decisión de cierre tal como lo hace el controlador:
+ *  - pagado && destinoSobrescribible → UPDATE sobre existingPago.
+ *  - pagado && !destinoSobrescribible → INSERT fila de cierre nueva.
+ *  - !pagado → INSERT parcial.
+ * Devuelve el nuevo set de filas de la cuota.
+ */
+const aplicarDecisionCierre = (
+  filas: FilaCuota[],
+  existingPagoId: number,
+  pagoData: {
+    pagado: boolean;
+    abono_capital: string;
+    abono_interes: string;
+    abono_iva_12: string;
+    monto_aplicado: string;
+  }
+): FilaCuota[] => {
+  const existing = filas.find((f) => f.pago_id === existingPagoId)!;
+  const sobrescribible = esDestinoSobrescribible(existing);
+  const nuevaFila: FilaCuota = {
+    pago_id: Math.max(...filas.map((f) => f.pago_id)) + 1,
+    validationStatus: "pending",
+    monto_aplicado: pagoData.monto_aplicado,
+    abono_capital: pagoData.abono_capital,
+    abono_interes: pagoData.abono_interes,
+    abono_iva_12: pagoData.abono_iva_12,
+  };
+
+  if (pagoData.pagado && sobrescribible) {
+    return filas.map((f) =>
+      f.pago_id === existingPagoId
+        ? {
+            ...f,
+            validationStatus: "pending",
+            monto_aplicado: pagoData.monto_aplicado,
+            abono_capital: pagoData.abono_capital,
+            abono_interes: pagoData.abono_interes,
+            abono_iva_12: pagoData.abono_iva_12,
+          }
+        : f
+    );
+  }
+  // INSERT (cierre-nuevo o parcial): se preservan todas las filas previas.
+  return [...filas, nuevaFila];
+};
+
+describe("cierre de cuota: no sobrescribe un pago real cuando el no_required ya fue consumido", () => {
+  it("INSERTA una fila de cierre y conserva la fila validated preexistente (crédito 217 / cuota 8)", () => {
+    // Estado: el placeholder no_required YA fue consumido por un parcial → no
+    // existe fila no_required; queda una fila `validated` con interés real
+    // (Q1151 ya facturado) y la cuota aún tiene capital pendiente.
+    const filasPrevias: FilaCuota[] = [
+      {
+        pago_id: 5001, // fila REAL (parcial validado de interés, ya facturado)
+        validationStatus: "validated",
+        monto_aplicado: "1151.00",
+        abono_capital: "0",
+        abono_interes: "1027.68",
+        abono_iva_12: "123.32",
+      },
+    ];
+    // existingPago cae al fallback allExistingPagos[0] = la fila real 5001.
+    const existingPagoId = 5001;
+    expect(esDestinoSobrescribible(filasPrevias[0])).toBe(false);
+
+    // Pago que CIERRA la cuota: cubre el capital faltante (cuota = 2151).
+    const pagoData = {
+      pagado: true,
+      abono_capital: "1000.00",
+      abono_interes: "0",
+      abono_iva_12: "0",
+      monto_aplicado: "1000.00",
+    };
+
+    const resultado = aplicarDecisionCierre(
+      filasPrevias,
+      existingPagoId,
+      pagoData
+    );
+
+    // (a) la fila validated preexistente NO se modificó.
+    const filaPreexistente = resultado.find((f) => f.pago_id === 5001)!;
+    expect(filaPreexistente.validationStatus).toBe("validated");
+    expect(filaPreexistente.abono_interes).toBe("1027.68");
+    expect(filaPreexistente.monto_aplicado).toBe("1151.00");
+
+    // (b) se INSERTÓ una fila nueva de cierre.
+    expect(resultado).toHaveLength(2);
+    const filaCierre = resultado.find((f) => f.pago_id !== 5001)!;
+    expect(filaCierre.abono_capital).toBe("1000.00");
+
+    // (c) Σ de rubros de la cuota = composición real (1151 previo + 1000 cierre
+    //     = 2151), sin perder ni duplicar plata.
+    expect(sumaRubrosCuota(resultado)).toBe("2151.00");
+  });
+
+  it("comportamiento intacto: con placeholder no_required vivo el cierre hace UPDATE (no inserta)", () => {
+    // Caso normal: existe el placeholder no_required (sin rubros). El cierre lo
+    // sobrescribe (UPDATE) → NO crece el número de filas.
+    const filasPrevias: FilaCuota[] = [
+      {
+        pago_id: 7001, // placeholder no_required (pago_id == cuota_id típicamente)
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+      },
+    ];
+    const pagoData = {
+      pagado: true,
+      abono_capital: "1900.00",
+      abono_interes: "224.11",
+      abono_iva_12: "26.89",
+      monto_aplicado: "2151.00",
+    };
+
+    const resultado = aplicarDecisionCierre(filasPrevias, 7001, pagoData);
+
+    // UPDATE: misma cantidad de filas, el placeholder ahora trae el cierre.
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].pago_id).toBe(7001);
+    expect(resultado[0].validationStatus).toBe("pending");
+    expect(resultado[0].abono_capital).toBe("1900.00");
+    expect(sumaRubrosCuota(resultado)).toBe("2151.00");
   });
 });
 

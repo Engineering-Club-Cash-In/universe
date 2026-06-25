@@ -9,7 +9,8 @@ export interface MembershipAdjustmentInput {
 	creditType: "autocompra" | "sobre_vehiculo";
 	insuredAmount: number;
 	vehicleType: string;
-	isNew: boolean;
+	isNew?: boolean;
+	condition?: "new" | "used";
 	origin?: string | null;
 }
 
@@ -57,15 +58,23 @@ function getRangeIndex(insuredAmount: number): 0 | 1 | 2 {
 	return 2;
 }
 
-function getCategory(input: MembershipAdjustmentInput): MembershipAdjustmentCategory {
-	if (input.creditType === "sobre_vehiculo") return "Sobre vehículo (hasta 50%)";
+function getCategory(
+	input: MembershipAdjustmentInput,
+): MembershipAdjustmentCategory {
+	if (input.creditType === "sobre_vehiculo")
+		return "Sobre vehículo (hasta 50%)";
 
 	const vehicleType = normalize(input.vehicleType);
-	if (input.isNew) {
+	const isLegacyNewType = vehicleType === "nuevo";
+	const isNew = input.condition
+		? input.condition === "new" || isLegacyNewType
+		: input.isNew || isLegacyNewType;
+	if (isNew) {
 		if (NEW_COMMERCIAL_TYPES.has(vehicleType)) {
 			return "Nuevo (camión, microbus, panel, uber o similar)";
 		}
-		if (NEW_PERSONAL_TYPES.has(vehicleType)) return "Nuevo (sedán, SUV, pickup)";
+		if (NEW_PERSONAL_TYPES.has(vehicleType))
+			return "Nuevo (sedán, SUV, pickup)";
 		return "Nuevo (sedán, SUV, pickup)";
 	}
 

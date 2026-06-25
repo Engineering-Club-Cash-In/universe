@@ -39,6 +39,11 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
+import {
+  generarPlantillaInsolutos,
+  validarInsolutosExcel,
+  cargarInsolutos,
+} from "../controllers/bulkInsoluto";
 import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
@@ -94,6 +99,17 @@ const parseStatusCreditList = (values: string[] | undefined) => {
   }
   return { values: values.filter(isStatusCredit) };
 };
+// Gate de rol server-side para la carga masiva de insolutos (crea créditos).
+// authMiddleware solo autentica; acá exigimos ADMIN/CONTA (igual que /realizarCredito).
+const requireInsolutoRole = (user: any, set: any): boolean => {
+  if (!user || !["ADMIN", "CONTA"].includes(user.role)) {
+    set.status = 403;
+    return false;
+  }
+  return true;
+};
+const INSOLUTO_NO_AUTORIZADO = { error: "No autorizado (requiere ADMIN o CONTA)." };
+
 export const creditRouter = new Elysia()
  
 .use(authMiddleware)
@@ -105,6 +121,35 @@ export const creditRouter = new Elysia()
   }
   return result;
 })
+  // ===== Carga masiva de créditos insolutos (solo ADMIN/CONTA) =====
+  // Paso 1: descargar plantilla Excel (base64)
+  .get("/insolutos/plantilla", ({ set, user }) => {
+    if (!requireInsolutoRole(user, set)) return INSOLUTO_NO_AUTORIZADO;
+    return {
+      archivoBase64: generarPlantillaInsolutos(),
+      filename: "plantilla_insolutos.xlsx",
+    };
+  })
+  // Paso 2: subir Excel y validar formato + datos
+  .post("/insolutos/validar", async ({ body, set, user }) => {
+    if (!requireInsolutoRole(user, set)) return INSOLUTO_NO_AUTORIZADO;
+    const { archivoBase64 } = (body ?? {}) as { archivoBase64?: string };
+    if (!archivoBase64) {
+      set.status = 400;
+      return { formatoOk: false, error: "Falta el archivo." };
+    }
+    return await validarInsolutosExcel(archivoBase64);
+  })
+  // Paso 3: cargar las filas válidas (crea cada insoluto, reporta fallos)
+  .post("/insolutos/cargar", async ({ body, set, user }) => {
+    if (!requireInsolutoRole(user, set)) return INSOLUTO_NO_AUTORIZADO;
+    const { filas } = (body ?? {}) as { filas?: unknown };
+    if (!Array.isArray(filas) || filas.length === 0) {
+      set.status = 400;
+      return { error: "No hay filas para cargar." };
+    }
+    return await cargarInsolutos(filas as Parameters<typeof cargarInsolutos>[0]);
+  })
   .post("/updateCredit", updateCredit)
   .post("/calculate-investor-quotas", calculateInvestorQuotas)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
@@ -154,6 +199,7 @@ export const creditRouter = new Elysia()
     capital_min,
     capital_max,
     estados_credito,
+    aseguradora_id,      // 🆕 NUEVO
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -281,6 +327,13 @@ export const creditRouter = new Elysia()
     return { message: `Estado de crédito inválido: ${estadosCreditoParsed.invalid}` };
   }
 
+  // 🆕 Aseguradora
+  const aseguradoraIdNum = aseguradora_id ? Number(aseguradora_id) : undefined;
+  if (aseguradora_id && isNaN(aseguradoraIdNum!)) {
+    set.status = 400;
+    return { message: "Parámetro 'aseguradora_id' debe ser un número válido." };
+  }
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -300,6 +353,7 @@ export const creditRouter = new Elysia()
         proximidad_pago: proximidadPagoParam,
         is_vehiculo_propio: isVehiculoPropioParam,
         inversionista_ids: inversionistaIdsArray,
+        aseguradora_id: aseguradoraIdNum,
         excel: true,
       });
       set.status = 200;
@@ -325,7 +379,8 @@ export const creditRouter = new Elysia()
         numerosCreditoSifcoArray,
         capitalMinParam,
         capitalMaxParam,
-        estadosCreditoParsed?.values
+        estadosCreditoParsed?.values,
+        aseguradoraIdNum
       );
       set.status = 200;
       return result;
@@ -369,6 +424,7 @@ export const creditRouter = new Elysia()
         capital_min,
         capital_max,
         estados_credito,
+        aseguradora_id,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -409,6 +465,7 @@ export const creditRouter = new Elysia()
             proximidad_pago,
             is_vehiculo_propio,
             inversionista_ids,
+            aseguradora_id,
             excel: true,
           });
           set.status = 200;
@@ -434,7 +491,8 @@ export const creditRouter = new Elysia()
           sifcosLimpios,
           capital_min,
           capital_max,
-          estadosCreditoParsed?.values
+          estadosCreditoParsed?.values,
+          aseguradora_id
         );
         set.status = 200;
         return result;
@@ -481,6 +539,7 @@ export const creditRouter = new Elysia()
         capital_min: t.Optional(t.Number()),
         capital_max: t.Optional(t.Number()),
         estados_credito: t.Optional(t.Array(t.String())),
+        aseguradora_id: t.Optional(t.Number()),
       }),
     }
   )

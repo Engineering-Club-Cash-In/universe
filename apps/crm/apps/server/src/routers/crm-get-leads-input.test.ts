@@ -3,9 +3,9 @@ import { leadSourceEnum } from "../db/schema/crm";
 import {
 	buildCarteraMatchedClientRows,
 	buildCarteraOnlyClientRow,
-	calculateCarteraClientStats,
-	getCurrentClientCreditsFromCartera,
 	getClientCreditSifcosFromCartera,
+	getClientCreditsPageFromCartera,
+	getCurrentClientCreditsFromCartera,
 	getLeadsInputSchema,
 } from "./crm";
 
@@ -153,18 +153,38 @@ describe("buildCarteraMatchedClientRows", () => {
 		const rows = buildCarteraMatchedClientRows({
 			lead,
 			leadOpportunities: [
-				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
-				{ id: "opp-2", numeroSifco: "SIFCO-2", value: "7000.00", isClosed: true },
+				{
+					id: "opp-1",
+					numeroSifco: "SIFCO-1",
+					value: "5000.00",
+					isClosed: true,
+				},
+				{
+					id: "opp-2",
+					numeroSifco: "SIFCO-2",
+					value: "7000.00",
+					isClosed: true,
+				},
 			],
 			creditAnalysis: null,
 			carteraCreditBySifco: new Map([
 				[
 					"SIFCO-1",
-					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-1",
+							deudatotal: "1200.00",
+						},
+					},
 				],
 				[
 					"SIFCO-2",
-					{ creditos: { numero_credito_sifco: "SIFCO-2", deudatotal: "3400.00" } },
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-2",
+							deudatotal: "3400.00",
+						},
+					},
 				],
 			]),
 		});
@@ -180,69 +200,178 @@ describe("buildCarteraMatchedClientRows", () => {
 		const [row] = buildCarteraMatchedClientRows({
 			lead,
 			leadOpportunities: [
-				{ id: "opp-1", numeroSifco: "SIFCO-1", value: "5000.00", isClosed: true },
+				{
+					id: "opp-1",
+					numeroSifco: "SIFCO-1",
+					value: "5000.00",
+					isClosed: true,
+				},
 			],
 			creditAnalysis: null,
 			carteraCreditBySifco: new Map([
 				[
 					"SIFCO-1",
-					{ creditos: { numero_credito_sifco: "SIFCO-1", deudatotal: "1200.00" } },
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-1",
+							deudatotal: "1200.00",
+						},
+					},
 				],
 			]),
 		});
 
 		expect(row.totalClosedValue).toBe(1200);
 	});
+
+	test("includes all lead opportunities in each matched client detail row", () => {
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{
+					id: "opp-1",
+					numeroSifco: "SIFCO-1",
+					value: "5000.00",
+					isClosed: true,
+				},
+				{
+					id: "opp-2",
+					numeroSifco: "SIFCO-2",
+					value: "7000.00",
+					isClosed: true,
+				},
+			],
+			creditAnalysis: null,
+			carteraCreditBySifco: new Map([
+				[
+					"SIFCO-1",
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-1",
+							deudatotal: "1200.00",
+						},
+					},
+				],
+				[
+					"SIFCO-2",
+					{
+						creditos: {
+							numero_credito_sifco: "SIFCO-2",
+							deudatotal: "3400.00",
+						},
+					},
+				],
+			]),
+		});
+
+		expect(rows[0].carteraCredit?.numeroSifco).toBe("SIFCO-1");
+		expect(rows[0].opportunities.map((opp) => opp.id)).toEqual([
+			"opp-1",
+			"opp-2",
+		]);
+	});
 });
 
-describe("calculateCarteraClientStats", () => {
-	test("scopes sales total value to matched assigned SIFCOs", () => {
-		const stats = calculateCarteraClientStats({
-			carteraCredits: [
-				{ creditos: { numero_credito_sifco: "A-1", deudatotal: "100.00" } },
-				{ creditos: { numero_credito_sifco: "B-1", deudatotal: "900.00" } },
-			],
-			matchedSifcos: new Set(["A-1"]),
-			uniqueLeadCount: 1,
-			scopedOpportunityCount: 1,
-			userRole: "sales",
-		});
+describe("getClientCreditsPageFromCartera", () => {
+	// Fetcher falso de cartera-back: `estado: "ACTIVO"` ya devuelve todos los
+	// vigentes, así que el helper solo debe consultar ese estado. Devuelve la
+	// página pedida + el totalCount.
+	const buildFetcher = (total: number) => {
+		const calls: Array<{ estado: string; page: number; perPage: number }> = [];
+		const fetchCredits = async (params: {
+			estado: string;
+			page: number;
+			perPage: number;
+		}) => {
+			calls.push({
+				estado: params.estado,
+				page: params.page,
+				perPage: params.perPage,
+			});
+			const start = (params.page - 1) * params.perPage;
+			const data = [];
+			for (let i = start; i < Math.min(start + params.perPage, total); i++) {
+				data.push({ creditos: { numero_credito_sifco: `SIFCO-${i}` } });
+			}
+			return {
+				data,
+				totalCount: total,
+				totalPages: Math.max(1, Math.ceil(total / params.perPage)),
+			};
+		};
+		return { fetchCredits, calls };
+	};
 
-		expect(stats.totalClients).toBe(1);
-		expect(stats.totalClosedOpportunities).toBe(1);
-		expect(stats.totalValue).toBe(100);
-		expect(stats.missingCrmCount).toBe(0);
+	const sifcosDe = (
+		credits: Array<{ creditos?: { numero_credito_sifco?: string | null } }>,
+	) => credits.map((c) => c.creditos?.numero_credito_sifco);
+
+	test("returns only the requested window and consulta solo ACTIVO", async () => {
+		const { fetchCredits, calls } = buildFetcher(250);
+
+		const { credits, total } = await getClientCreditsPageFromCartera(
+			{ offset: 0, limit: 2 },
+			fetchCredits,
+		);
+
+		expect(sifcosDe(credits)).toEqual(["SIFCO-0", "SIFCO-1"]);
+		expect(total).toBe(250);
+		// Nunca debe iterar MOROSO/EN_CONVENIO (cartera ya los incluye en ACTIVO).
+		expect(calls.every((c) => c.estado === "ACTIVO")).toBe(true);
 	});
 
-	test("counts sales clients by matched cartera credits", () => {
-		const stats = calculateCarteraClientStats({
-			carteraCredits: [
-				{ creditos: { numero_credito_sifco: "A-1", deudatotal: "100.00" } },
-				{ creditos: { numero_credito_sifco: "A-2", deudatotal: "200.00" } },
-			],
-			matchedSifcos: new Set(["A-1", "A-2"]),
-			uniqueLeadCount: 1,
-			scopedOpportunityCount: 2,
-			userRole: "sales",
-		});
+	test("paginates across cartera pages (perPage=100)", async () => {
+		const { fetchCredits, calls } = buildFetcher(250);
 
-		expect(stats.totalClients).toBe(2);
+		// Ventana 90..109 cruza el borde de página 1 (0-99) a página 2 (100-199).
+		const { credits, total } = await getClientCreditsPageFromCartera(
+			{ offset: 90, limit: 20 },
+			fetchCredits,
+		);
+
+		expect(total).toBe(250);
+		expect(credits).toHaveLength(20);
+		expect(sifcosDe(credits)[0]).toBe("SIFCO-90");
+		expect(sifcosDe(credits).at(-1)).toBe("SIFCO-109");
+		expect(calls.map((c) => c.page)).toEqual([1, 2]);
 	});
 
-	test("uses full cartera totals for non-sales users", () => {
-		const stats = calculateCarteraClientStats({
-			carteraCredits: [
-				{ creditos: { numero_credito_sifco: "A-1", deudatotal: "100.00" } },
-				{ creditos: { numero_credito_sifco: "B-1", capital: "900.00" } },
-			],
-			matchedSifcos: new Set(["A-1"]),
-			uniqueLeadCount: 1,
-			scopedOpportunityCount: 1,
-			userRole: "admin",
-		});
+	test("con limit<=0 solo cuenta (sonda), sin recolectar filas", async () => {
+		const { fetchCredits, calls } = buildFetcher(42);
 
-		expect(stats.totalClients).toBe(2);
-		expect(stats.totalValue).toBe(1000);
-		expect(stats.missingCrmCount).toBe(1);
+		const { credits, total } = await getClientCreditsPageFromCartera(
+			{ offset: 0, limit: 0 },
+			fetchCredits,
+		);
+
+		expect(credits).toEqual([]);
+		expect(total).toBe(42);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].perPage).toBe(1);
+	});
+
+	test("passes filters through to the fetcher", async () => {
+		const received: Array<{
+			nombre_usuario?: string;
+			numeros_credito_sifco?: string[];
+		}> = [];
+		const fetchCredits = async (params: {
+			estado: string;
+			page: number;
+			perPage: number;
+			nombre_usuario?: string;
+			numeros_credito_sifco?: string[];
+		}) => {
+			received.push(params);
+			return { data: [], totalCount: 0, totalPages: 1 };
+		};
+
+		await getClientCreditsPageFromCartera(
+			{ offset: 0, limit: 10, nombreUsuario: "Juan", sifcos: ["X-1", "X-2"] },
+			fetchCredits,
+		);
+
+		expect(received[0]?.nombre_usuario).toBe("Juan");
+		expect(received[0]?.numeros_credito_sifco).toEqual(["X-1", "X-2"]);
 	});
 });

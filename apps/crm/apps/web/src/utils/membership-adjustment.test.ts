@@ -44,7 +44,7 @@ describe("getMembershipAdjustment", () => {
 			creditType: "autocompra",
 			insuredAmount: 100000,
 			vehicleType: "microbus",
-			isNew: true,
+			condition: "new",
 			origin: null,
 		});
 
@@ -52,6 +52,32 @@ describe("getMembershipAdjustment", () => {
 			"Nuevo (camión, microbus, panel, uber o similar)",
 		);
 		expect(result.percentage).toBe(25);
+	});
+
+	test("manual used microbus can be simulated as used agency", () => {
+		const result = getMembershipAdjustment({
+			creditType: "autocompra",
+			insuredAmount: 100000,
+			vehicleType: "microbus",
+			condition: "used",
+			origin: "agencia",
+		});
+
+		expect(result.category).toBe("Usado agencia");
+		expect(result.percentage).toBe(31.25);
+	});
+
+	test("legacy Nuevo vehicle type is treated as new even with used condition", () => {
+		const result = getMembershipAdjustment({
+			creditType: "autocompra",
+			insuredAmount: 100000,
+			vehicleType: "nuevo",
+			condition: "used",
+			origin: "agencia",
+		});
+
+		expect(result.category).toBe("Nuevo (sedán, SUV, pickup)");
+		expect(result.percentage).toBe(18.75);
 	});
 
 	test("uses used agency category from non-rodado origin", () => {

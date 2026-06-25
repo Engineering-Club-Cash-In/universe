@@ -12,6 +12,13 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -86,10 +93,6 @@ function RouteComponent() {
 	const isPending =
 		sessionPending || userProfile.isPending || (!session && !sessionError);
 
-	const now = nowGT();
-	const [mes, setMes] = useState<number>(now.getUTCMonth() + 1);
-	const [anio, setAnio] = useState<number>(now.getUTCFullYear());
-
 	useEffect(() => {
 		if (
 			shouldRedirectToLogin({
@@ -112,11 +115,6 @@ function RouteComponent() {
 		navigate,
 	]);
 
-	const reportQuery = useQuery({
-		...orpc.getReporteMetaColocacion.queryOptions({ input: { anio, mes } }),
-		enabled: canAccess,
-	});
-
 	if (isPending) {
 		return (
 			<div className="flex h-96 items-center justify-center text-muted-foreground">
@@ -126,6 +124,22 @@ function RouteComponent() {
 	}
 
 	if (!canAccess) return null;
+
+	return (
+		<div className="container mx-auto max-w-5xl space-y-6 p-6">
+			<MetaColocacionContent />
+		</div>
+	);
+}
+
+export function MetaColocacionContent() {
+	const now = nowGT();
+	const [mes, setMes] = useState<number>(now.getUTCMonth() + 1);
+	const [anio, setAnio] = useState<number>(now.getUTCFullYear());
+
+	const reportQuery = useQuery(
+		orpc.getReporteMetaColocacion.queryOptions({ input: { anio, mes } }),
+	);
 
 	const data = reportQuery.data;
 	const isLoading = reportQuery.isLoading;
@@ -139,7 +153,7 @@ function RouteComponent() {
 	const porColaborador = data?.porColaborador ?? [];
 
 	return (
-		<div className="container mx-auto max-w-5xl space-y-6 p-6">
+		<div className="space-y-6">
 			{/* Header */}
 			<div>
 				<h1 className="font-bold text-2xl">Meta de Colocación</h1>
@@ -151,28 +165,30 @@ function RouteComponent() {
 
 			{/* Selector mes/año */}
 			<div className="flex items-center gap-3">
-				<select
-					value={mes}
-					onChange={(e) => setMes(Number(e.target.value))}
-					className="rounded-md border bg-background px-3 py-1.5 text-sm"
-				>
-					{MESES.map((label, i) => (
-						<option key={label} value={i + 1}>
-							{label}
-						</option>
-					))}
-				</select>
-				<select
-					value={anio}
-					onChange={(e) => setAnio(Number(e.target.value))}
-					className="rounded-md border bg-background px-3 py-1.5 text-sm"
-				>
-					{anios.map((a) => (
-						<option key={a} value={a}>
-							{a}
-						</option>
-					))}
-				</select>
+				<Select value={String(mes)} onValueChange={(v) => setMes(Number(v))}>
+					<SelectTrigger className="w-36">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						{MESES.map((label, i) => (
+							<SelectItem key={label} value={String(i + 1)}>
+								{label}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+				<Select value={String(anio)} onValueChange={(v) => setAnio(Number(v))}>
+					<SelectTrigger className="w-24">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						{anios.map((a) => (
+							<SelectItem key={a} value={String(a)}>
+								{a}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
 			</div>
 
 			{/* KPI Cards */}
@@ -283,7 +299,9 @@ function RouteComponent() {
 							</div>
 							<p className="text-muted-foreground text-xs">
 								Faltante:{" "}
-								{formatCurrency(Math.max(0, Number(meta) - Number(realMonto ?? 0)))}
+								{formatCurrency(
+									Math.max(0, Number(meta) - Number(realMonto ?? 0)),
+								)}
 							</p>
 						</div>
 					</CardContent>

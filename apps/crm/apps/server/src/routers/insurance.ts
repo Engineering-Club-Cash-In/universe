@@ -155,7 +155,7 @@ function getGytValues(
 	if (!result) return { gytCost: null, excelCurrentCost: null };
 
 	const normalizedType = vehicleType.toLowerCase();
-	if (["particular", "uber", "nuevo"].includes(normalizedType)) {
+	if (["particular", "nuevo"].includes(normalizedType)) {
 		return {
 			gytCost:
 				result.automovilCamioneta == null
@@ -165,17 +165,6 @@ function getGytValues(
 				result.currentAutomovilCamioneta == null
 					? null
 					: Number(result.currentAutomovilCamioneta),
-		};
-	}
-	if (
-		["microbus", "microbus_20", "microbus_35", "microbus_36plus"].includes(
-			normalizedType,
-		)
-	) {
-		return {
-			gytCost: result.microbus == null ? null : Number(result.microbus),
-			excelCurrentCost:
-				result.currentMicrobus == null ? null : Number(result.currentMicrobus),
 		};
 	}
 

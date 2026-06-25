@@ -172,9 +172,6 @@
     gps: numeric("gps", { precision: 18, scale: 2 }).notNull(),
     observaciones: text("observaciones").notNull(),
     no_poliza: varchar("no_poliza").notNull(),
-    aseguradora_id: integer("aseguradora_id").references(
-      () => aseguradoras.id,
-    ),
     como_se_entero: varchar("como_se_entero", { length: 100 }).notNull(),
     asesor_id: integer("asesor_id")
       .notNull()
@@ -213,6 +210,11 @@
     // true = crédito solo-interés: la cuota cubre interés + IVA + seguro + GPS +
     // membresía, sin amortizar capital. El capital se paga vía abonos/pago final.
     no_amortiza_capital: boolean("no_amortiza_capital").notNull().default(false),
+    // FK opcional a la aseguradora que cubre este crédito.
+    // Se resuelve con LEFT JOIN en getAllCredits → campo `aseguradora` en la respuesta.
+    aseguradora_id: integer("aseguradora_id").references(() => aseguradoras.id, {
+      onDelete: "set null",
+    }),
   });
   export const historial_devolucion_credito = customSchema.table("historial_devolucion_credito", {
     id: serial("id").primaryKey(),
@@ -301,23 +303,34 @@
     })
   );
 
-  export const moras_credito = customSchema.table("moras_credito", {
-    mora_id: serial("mora_id").primaryKey(),
-    credito_id: integer("credito_id")
-      .notNull()
-      .references(() => creditos.credito_id, { onDelete: "cascade" }),
-    activa: boolean("activa").notNull().default(true),
-    porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
-      .notNull()
-      .default("1.12"),
-    monto_mora: numeric("monto_mora", { precision: 18, scale: 2 })
-      .notNull()
-      .default("0"),
-    cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
+  export const moras_credito = customSchema.table(
+    "moras_credito",
+    {
+      mora_id: serial("mora_id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      activa: boolean("activa").notNull().default(true),
+      porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
+        .notNull()
+        .default("1.12"),
+      monto_mora: numeric("monto_mora", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
 
-    created_at: timestamp("created_at").defaultNow(),
-    updated_at: timestamp("updated_at").defaultNow(),
-  });
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      // Garantiza UNA sola mora activa por crédito. Bloquea a nivel BD la
+      // condición de carrera de procesarMoras corriendo en paralelo (varias
+      // réplicas) que insertaba filas activa=true duplicadas e inflaba el total.
+      uniqueIndex("moras_credito_uq_activa")
+        .on(t.credito_id)
+        .where(sql`${t.activa} = true`),
+    ]
+  );
   export const moras_condonaciones = customSchema.table("moras_condonaciones", {
     condonacion_id: serial("condonacion_id").primaryKey(),
     credito_id: integer("credito_id")
@@ -1332,6 +1345,24 @@
       roy_reestructura: numeric("roy_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
       royalty: numeric("royalty", { precision: 18, scale: 2 }).notNull().default("0"),
 
+      // 🛡️ Seguro por categoría (segmentación; el COMBINADO sigue en servicios_seguro_gps)
+      seg_autocompras: numeric("seg_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      seg_sobre_vehiculo: numeric("seg_sobre_vehiculo", { precision: 18, scale: 2 }).notNull().default("0"),
+      nuevo_seg_autocompras: numeric("nuevo_seg_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      seg_hipotecario: numeric("seg_hipotecario", { precision: 18, scale: 2 }).notNull().default("0"),
+      seg_extra_financiamiento: numeric("seg_extra_financiamiento", { precision: 18, scale: 2 }).notNull().default("0"),
+      seg_reestructura: numeric("seg_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
+      seguro_total: numeric("seguro_total", { precision: 18, scale: 2 }).notNull().default("0"),
+
+      // 📍 GPS por categoría (segmentación; el COMBINADO sigue en servicios_seguro_gps)
+      gps_autocompras: numeric("gps_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      gps_sobre_vehiculo: numeric("gps_sobre_vehiculo", { precision: 18, scale: 2 }).notNull().default("0"),
+      nuevo_gps_autocompras: numeric("nuevo_gps_autocompras", { precision: 18, scale: 2 }).notNull().default("0"),
+      gps_hipotecario: numeric("gps_hipotecario", { precision: 18, scale: 2 }).notNull().default("0"),
+      gps_extra_financiamiento: numeric("gps_extra_financiamiento", { precision: 18, scale: 2 }).notNull().default("0"),
+      gps_reestructura: numeric("gps_reestructura", { precision: 18, scale: 2 }).notNull().default("0"),
+      gps_total: numeric("gps_total", { precision: 18, scale: 2 }).notNull().default("0"),
+
       // 📊 Totales / acumulados (AT–BE)
       facturacion: numeric("facturacion", { precision: 18, scale: 2 }).notNull().default("0"),
       facturacion_acumulado: numeric("facturacion_acumulado", { precision: 18, scale: 2 }).notNull().default("0"),
@@ -1363,6 +1394,37 @@
     },
     (table) => ({
       uqFecha: uniqueIndex("uq_facturacion_snapshot_diario_fecha").on(table.fecha),
+    })
+  );
+
+  // 🧾 TABLA: facturacion_snapshot_detalle
+  //    Desglose del snapshot por ORIGEN (crédito nuevo vs pago) para que conta vea
+  //    la diferencia que hoy calcula a mano. 1 fila por (fecha, rubro, producto,
+  //    origen). Se DERIVA de facturacion_desglose en generarSnapshotDiario
+  //    (origen = pago_id IS NULL → 'nuevo' [originación]; si no → 'pago').
+  //    NO afecta los totales del snapshot ni las fórmulas del Excel: es una vista
+  //    de control adicional (~60–70 filas/día).
+  export const facturacion_snapshot_detalle = customSchema.table(
+    "facturacion_snapshot_detalle",
+    {
+      id: serial("id").primaryKey(),
+      fecha: date("fecha").notNull(),
+      rubro: rubroFacturacionEnum("rubro").notNull(),
+      // producto: autocompras|sobre_vehiculo|nuevo_autocompras|hipotecario|extra_financiamiento|reestructura|sin_producto
+      producto: varchar("producto", { length: 40 }).notNull(),
+      origen: varchar("origen", { length: 10 }).notNull(), // 'nuevo' (originación) | 'pago'
+      monto_total: numeric("monto_total", { precision: 18, scale: 2 }).notNull().default("0"),
+      monto_iva: numeric("monto_iva", { precision: 18, scale: 2 }).notNull().default("0"),
+      created_at: timestamp("created_at").defaultNow().notNull(),
+    },
+    (table) => ({
+      uqDetalle: uniqueIndex("uq_facturacion_snapshot_detalle").on(
+        table.fecha,
+        table.rubro,
+        table.producto,
+        table.origen
+      ),
+      idxFecha: index("idx_facturacion_snapshot_detalle_fecha").on(table.fecha),
     })
   );
 

@@ -22,12 +22,14 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
+  esDestinoSobrescribible,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
   getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
   recomputeCreditAfterCapital,
   shouldApplyStaleZeroRestanteAdjustment,
+  shouldRejectZeroAppliedNormalValidation,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
@@ -911,7 +913,20 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         // normal del loop. `aplicadoPrevioCuota`/`interesPrevioCuota` los
         // reusa la red de seguridad de más abajo.
         const TOLERANCIA_CENTAVO = new Big(0.01);
-        const pagoIdEnVuelo = existingPago?.pago.pago_id ?? -1;
+        // ¿`existingPago` es una fila desechable que el cierre puede SOBRESCRIBIR
+        // (placeholder `no_required` o fila vacía), o es un pago REAL que cayó al
+        // fallback `allExistingPagos[0]` porque el `no_required` ya fue consumido?
+        // De esto depende todo: si NO es sobrescribible, el cierre INSERTA una
+        // fila nueva (no la pisa) y, por lo mismo, `existingPago` es un hermano
+        // REAL que SÍ debe contarse. Solo lo excluimos del set de hermanos cuando
+        // realmente lo vamos a UPDATE-ar (i.e. cuando es sobrescribible); si no,
+        // contar sus rubros evita re-aplicar interés/IVA/etc.
+        const destinoSobrescribible = existingPago
+          ? esDestinoSobrescribible(existingPago.pago)
+          : false;
+        const pagoIdEnVuelo = destinoSobrescribible
+          ? existingPago!.pago.pago_id
+          : -1;
         const pagosHermanos = await db
           .select({
             pago_id: pagos_credito.pago_id,
@@ -1362,7 +1377,11 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           console.log("cuota_id:", cuota);
           console.log("pagoInsertado:", pagoData);
           if (pagoData) {
-            if (pagoData.pagado) {
+            if (pagoData.pagado && destinoSobrescribible) {
+              // ── CIERRE sobre fila DESECHABLE (UPDATE) ──────────────────────
+              // `existingPago` es el placeholder `no_required` o una fila vacía:
+              // pisarla con el pago de cierre no destruye plata. Comportamiento
+              // histórico para el caso normal.
               cuotas_completas++;
               console.log(
                 `✅ Cuota ${cuota.cuotas_credito.numero_cuota} PAGADA COMPLETAMENTE`
@@ -1402,7 +1421,133 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 );
               }
 
-             
+
+            } else if (pagoData.pagado) {
+              // ── CIERRE sin fila desechable (INSERT de fila de cierre) ──────
+              // El placeholder `no_required` ya fue consumido por un parcial
+              // previo, así que `existingPago` cayó al fallback = una fila REAL
+              // (con interés/IVA ya validado, posiblemente facturado).
+              // Sobrescribirla destruiría ese pago (caso crédito 217 / cuota 8).
+              // En su lugar INSERTAMOS una fila nueva de cierre (igual que un
+              // parcial pero `pagado: true` y restantes en 0). El UPDATE masivo
+              // de abajo marca toda la cuota como pagada.
+              cuotas_completas++;
+              console.log(
+                `✅ Cuota ${cuota.cuotas_credito.numero_cuota} PAGADA COMPLETAMENTE (fila de cierre NUEVA: el destino existente es un pago real y no se sobrescribe)`
+              );
+
+              const guatemalaTimeString = new Date().toLocaleString("en-US", {
+                timeZone: "America/Guatemala",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              });
+              const [datePart, timePart] = guatemalaTimeString.split(", ");
+              const [month, day, year] = datePart.split("/");
+              const fechaGuatemala = new Date(
+                `${year}-${month}-${day}T${timePart}`
+              );
+
+              [pagoInsertado] = await db
+                .insert(pagos_credito)
+                .values({
+                  // Campos requeridos del input
+                  cuota_id: cuota.cuotas_credito.cuota_id,
+                  renuevo_o_nuevo: pagoData.renuevo_o_nuevo,
+                  credito_id: pagoData.credito_id,
+                  // Campos que vienen del crédito/cuota
+                  cuota: credito.cuota,
+                  cuota_interes: credito.cuota_interes,
+                  fecha_pago: fechaGuatemala,
+                  fecha_vencimiento: cuota.cuotas_credito.fecha_vencimiento
+                    ? new Date(
+                        cuota.cuotas_credito.fecha_vencimiento
+                      ).toISOString()
+                    : undefined,
+
+                  // Abonos (calculados según lógica de distribución)
+                  abono_capital: pagoData.abono_capital,
+                  abono_interes: pagoData.abono_interes,
+                  abono_iva_12: pagoData.abono_iva_12,
+                  abono_interes_ci: pagoData.abono_interes_ci,
+                  abono_iva_ci: pagoData.abono_iva_ci,
+                  abono_seguro: pagoData.abono_seguro,
+                  abono_gps: pagoData.abono_gps,
+                  pago_del_mes: pagoData.pago_del_mes,
+
+                  // Restantes en 0: esta fila cierra la cuota.
+                  capital_restante: "0",
+                  interes_restante: "0",
+                  iva_12_restante: "0",
+                  seguro_restante: "0",
+                  gps_restante: "0",
+                  total_restante:
+                    pagoSaldoVigente?.pago.total_restante ??
+                    credito.capital ??
+                    "0",
+
+                  // Membresías
+                  membresias: "0",
+                  membresias_pago: pagoData.membresias_pago,
+                  membresias_mes: pagoData.membresias_mes,
+
+                  // Campos adicionales del input
+                  llamada: pagoData.llamada || "",
+                  otros: pagoData.otros,
+                  mora: pagoData.mora,
+                  monto_boleta_cuota: montoBoleta.toString(),
+                  monto_boleta: montoBoleta.toString(),
+                  observaciones: pagoData.observaciones,
+
+                  // Seguros y GPS
+                  seguro_total: pagoData.seguro_total,
+                  seguro_facturado: pagoData.seguro_facturado,
+                  gps_facturado: pagoData.gps_facturado,
+                  reserva: pagoData.reserva,
+
+                  // Campos de estado: fila de cierre (pagado:true, pending hasta
+                  // que contabilidad valida).
+                  pagado: true,
+                  facturacion: pagoData.facturacion || "si",
+                  mes_pagado: pagoData.mes_pagado,
+                  paymentFalse: pagoData.paymentFalse || false,
+                  validationStatus: "pending",
+                  banco_id: pagoData.banco_id || null,
+                  numeroAutorizacion: pagoData.numeroAutorizacion || null,
+                  registerBy: pagoData.registerBy,
+                  pagoConvenio: montoConvenio.toString() || "0",
+                  fecha_boleta: pagoData.fecha_boleta,
+                  monto_aplicado: pagoData.monto_aplicado,
+                  // Paridad con la rama UPDATE de cierre (que persiste pagoData
+                  // completo): conservar el origen del pago en la fila de cierre.
+                  origen_pago: pagoData.origen_pago,
+                })
+                .returning();
+
+              // Marcar TODA la cuota como pagada (igual que la rama UPDATE).
+              await db
+                .update(pagos_credito)
+                .set({ pagado: true })
+                .where(
+                  eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id)
+                );
+
+              if (
+                pagoInsertado?.pago_id &&
+                urlCompletas &&
+                urlCompletas.length > 0
+              ) {
+                await db.insert(boletas).values(
+                  urlCompletas.map((url) => ({
+                    pago_id: pagoInsertado!.pago_id,
+                    url_boleta: url,
+                  }))
+                );
+              }
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
@@ -2069,6 +2214,23 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         success: true,
         applied: false,
         message: "Pago validado, crédito cancelado correctamente",
+      };
+    }
+
+    if (
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: pago.validationStatus,
+        nextValidationStatus: "validated",
+        montoAplicado: pago.monto_aplicado,
+        mora: pago.mora,
+        otros: pago.otros,
+        pagoConvenio: pago.pagoConvenio,
+      })
+    ) {
+      return {
+        success: false,
+        applied: false,
+        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
       };
     }
 
@@ -2987,6 +3149,22 @@ export async function aplicarMontoAPago(pago_id: number, monto: number, fecha_pa
 
     const nuevo_monto_aplicado = totalPagado;
     const nuevo_monto_boleta = new Big(monto);
+
+    if (
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: pago.validationStatus,
+        nextValidationStatus: validationStatus,
+        montoAplicado: nuevo_monto_aplicado,
+        mora: pago.mora,
+        otros: pago.otros,
+        pagoConvenio: pago.pagoConvenio,
+      })
+    ) {
+      return {
+        success: false,
+        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
+      };
+    }
 
     // Fecha de pago: si viene, usarla; sino, fecha actual en hora Guatemala
     let fechaPago: Date;

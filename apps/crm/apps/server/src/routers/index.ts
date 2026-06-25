@@ -83,6 +83,7 @@ export const crmAppRouter = {
 	getClientsStats: crmRouter.getClientsStats,
 	getLeadsAsClients: crmRouter.getLeadsAsClients,
 	getLeadsAsClientsStats: crmRouter.getLeadsAsClientsStats,
+	exportClientsForMarketing: crmRouter.exportClientsForMarketing,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,
@@ -171,8 +172,7 @@ export const cobrosAppRouter = {
 
 	// CRM Cobros — nuevas vistas
 	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
-	getPagosEsperadosCobros: cobrosRouter.getPagosEsperadosCobros,
-	getPagosNoRecibidos: cobrosRouter.getPagosNoRecibidos,
+	getCuotasPorFecha: cobrosRouter.getCuotasPorFecha,
 	getDescuentosCRM: cobrosRouter.getDescuentosCRM,
 
 	// Seguimientos programados
@@ -341,9 +341,13 @@ export const reportsAppRouter = {
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
 	getMontoACobrar: reportesCarteraRouter.getMontoACobrar,
+	getMontoACobrarPeriodo: reportesCarteraRouter.getMontoACobrarPeriodo,
 	getFacturacionMes: reportesCarteraRouter.getFacturacionMes,
 	getFlujoCuotasInversiones: reportesCarteraRouter.getFlujoCuotasInversiones,
-	getFlujoCuotasPorInversionista: reportesCarteraRouter.getFlujoCuotasPorInversionista,
+	getReinversionLiquidaciones:
+		reportesCarteraRouter.getReinversionLiquidaciones,
+	getFlujoCuotasPorInversionista:
+		reportesCarteraRouter.getFlujoCuotasPorInversionista,
 	getComparativoHistorico: reportesCarteraRouter.getComparativoHistorico,
 	getMetas: reportesCarteraRouter.getMetas,
 	upsertMeta: reportesCarteraRouter.upsertMeta,

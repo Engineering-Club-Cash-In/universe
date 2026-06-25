@@ -35,13 +35,8 @@ export interface NormalizedInsuranceBreakdown {
 	insuranceSavingsToMembership: string;
 }
 
-const VEHICLE_GYT_TYPES = new Set(["particular", "uber", "nuevo"]);
-const MICROBUS_GYT_TYPES = new Set([
-	"microbus",
-	"microbus_20",
-	"microbus_35",
-	"microbus_36plus",
-]);
+const GYT_MIN_INSURED_AMOUNT = 257000;
+const VEHICLE_GYT_TYPES = new Set(["particular", "nuevo"]);
 
 export function roundMoney(value: number): number {
 	return Math.round(value * 100) / 100;
@@ -58,8 +53,9 @@ function normalizeVehicleType(vehicleType: string): string {
 function qualifiesForGyt(insuredAmount: number, vehicleType: string): boolean {
 	const normalizedType = normalizeVehicleType(vehicleType);
 
-	if (VEHICLE_GYT_TYPES.has(normalizedType)) return insuredAmount >= 189000;
-	if (MICROBUS_GYT_TYPES.has(normalizedType)) return insuredAmount >= 125000;
+	if (VEHICLE_GYT_TYPES.has(normalizedType)) {
+		return insuredAmount > GYT_MIN_INSURED_AMOUNT;
+	}
 
 	return false;
 }

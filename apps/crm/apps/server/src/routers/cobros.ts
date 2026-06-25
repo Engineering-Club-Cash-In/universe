@@ -10,6 +10,7 @@ import {
 	gte,
 	ilike,
 	inArray,
+	isNotNull,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -37,6 +38,7 @@ import {
 	referenciasLead,
 	salesStages,
 } from "../db/schema/crm";
+import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import {
 	interpolar as interpolarPlantilla,
@@ -3951,159 +3953,21 @@ export const cobrosRouter = {
 				});
 			}
 
-			// Traer cartera completa (mes=0 = todos los créditos)
-			const creditos = await obtenerTodasLasPaginasCreditos({
-				mes: 0,
-				anio: new Date().getFullYear(),
-				estado: "ACTIVO",
-				email_cobrador: input?.emailCobrador,
+			return carteraBackClient.getMoraByEtapaYAsesor({
+				emailCobrador: input?.emailCobrador,
 			});
-
-			type BucketAcc = {
-				cantidad: number;
-				sumaCapital: number;
-				sumaMora: number;
-			};
-			type BucketsAcc = {
-				mora_30: BucketAcc;
-				mora_60: BucketAcc;
-				mora_90: BucketAcc;
-				mora_120_plus: BucketAcc;
-			};
-			const emptyBuckets = (): BucketsAcc => ({
-				mora_30: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
-				mora_60: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
-				mora_90: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
-				mora_120_plus: { cantidad: 0, sumaCapital: 0, sumaMora: 0 },
-			});
-
-			const serializeBuckets = (b: BucketsAcc) => {
-				const fmt = (v: number) => v.toFixed(2);
-				const totalCantidad =
-					b.mora_30.cantidad +
-					b.mora_60.cantidad +
-					b.mora_90.cantidad +
-					b.mora_120_plus.cantidad;
-				const totalMora =
-					b.mora_30.sumaMora +
-					b.mora_60.sumaMora +
-					b.mora_90.sumaMora +
-					b.mora_120_plus.sumaMora;
-				return {
-					mora_30: {
-						cantidad: b.mora_30.cantidad,
-						sumaCapital: fmt(b.mora_30.sumaCapital),
-						sumaMora: fmt(b.mora_30.sumaMora),
-					},
-					mora_60: {
-						cantidad: b.mora_60.cantidad,
-						sumaCapital: fmt(b.mora_60.sumaCapital),
-						sumaMora: fmt(b.mora_60.sumaMora),
-					},
-					mora_90: {
-						cantidad: b.mora_90.cantidad,
-						sumaCapital: fmt(b.mora_90.sumaCapital),
-						sumaMora: fmt(b.mora_90.sumaMora),
-					},
-					mora_120_plus: {
-						cantidad: b.mora_120_plus.cantidad,
-						sumaCapital: fmt(b.mora_120_plus.sumaCapital),
-						sumaMora: fmt(b.mora_120_plus.sumaMora),
-					},
-					totalEnMora: { cantidad: totalCantidad, sumaMora: fmt(totalMora) },
-				};
-			};
-
-			const acumuladoTotal = emptyBuckets();
-
-			type AsesorEntry = {
-				asesorId: number;
-				nombre: string;
-				email: string;
-				buckets: BucketsAcc;
-			};
-			const porAsesorMap = new Map<string, AsesorEntry>();
-
-			const addToBucket = (
-				acc: BucketsAcc,
-				cuotasAtrasadas: number,
-				capital: number,
-				mora: number,
-			) => {
-				const key =
-					cuotasAtrasadas >= 4
-						? "mora_120_plus"
-						: cuotasAtrasadas === 3
-							? "mora_90"
-							: cuotasAtrasadas === 2
-								? "mora_60"
-								: "mora_30";
-				acc[key].cantidad += 1;
-				acc[key].sumaCapital += capital;
-				acc[key].sumaMora += mora;
-			};
-
-			for (const item of creditos) {
-				const cuotasAtrasadas = item.mora?.cuotas_atrasadas ?? 0;
-				if (cuotasAtrasadas < 1) continue;
-
-				const capital = Number.parseFloat(
-					(item.creditos.capital as string) || "0",
-				);
-				const montoMora = Number.parseFloat(item.mora?.monto_mora ?? "0");
-
-				addToBucket(acumuladoTotal, cuotasAtrasadas, capital, montoMora);
-
-				// Agrupar por asesor usando emailCashIn del crédito mismo
-				const emailAsesor = item.asesores?.emailCashIn ?? "sin_asesor";
-				const nombreAsesor = item.asesores?.nombre ?? "Sin asesor";
-				const asesorId = item.asesores?.asesor_id ?? 0;
-
-				let entry = porAsesorMap.get(emailAsesor);
-				if (!entry) {
-					entry = {
-						asesorId,
-						nombre: nombreAsesor,
-						email: emailAsesor,
-						buckets: emptyBuckets(),
-					};
-					porAsesorMap.set(emailAsesor, entry);
-				}
-				addToBucket(entry.buckets, cuotasAtrasadas, capital, montoMora);
-			}
-
-			const porAsesor = Array.from(porAsesorMap.values())
-				.sort((a, b) => {
-					const totalA =
-						a.buckets.mora_30.sumaMora +
-						a.buckets.mora_60.sumaMora +
-						a.buckets.mora_90.sumaMora +
-						a.buckets.mora_120_plus.sumaMora;
-					const totalB =
-						b.buckets.mora_30.sumaMora +
-						b.buckets.mora_60.sumaMora +
-						b.buckets.mora_90.sumaMora +
-						b.buckets.mora_120_plus.sumaMora;
-					return totalB - totalA;
-				})
-				.map((e) => ({
-					asesorId: e.asesorId,
-					nombre: e.nombre,
-					email: e.email,
-					...serializeBuckets(e.buckets),
-				}));
-
-			return { totales: serializeBuckets(acumuladoTotal), porAsesor };
 		}),
 
 	// ========================================================================
-	// PAGOS ESPERADOS (COBROS)
+	// CUOTAS POR FECHA (reemplaza Pagos Esperados + Pagos No Recibidos)
 	// ========================================================================
 
-	getPagosEsperadosCobros: cobrosSupervisorProcedure
+	getCuotasPorFecha: cobrosSupervisorProcedure
 		.input(
 			z.object({
-				temporalidad: z.enum(["hoy", "semana", "quincena", "mes"]),
+				fechaInicio: z.string(),
+				fechaFin: z.string(),
+				asesorId: z.number().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -4113,159 +3977,53 @@ export const cobrosRouter = {
 				});
 			}
 
-			const pad = (n: number) => n.toString().padStart(2, "0");
-
-			const diasAdelanteMap: Record<typeof input.temporalidad, number> = {
-				hoy: 0,
-				semana: 6,
-				quincena: 14,
-				mes: 29,
-			};
-			const diasAdelante = diasAdelanteMap[input.temporalidad];
-
-			// Las fechas de negocio son días calendario de Guatemala (UTC-6). Si el
-			// server corre en UTC, usar getFullYear/getMonth/getDate directo desplaza
-			// "hoy" un día entre las 00:00 y 05:59 UTC. Anclamos en la fecha GT y
-			// hacemos la aritmética de días sobre esos componentes en UTC puro.
-			const fechaInicio = toDateStrGT(new Date());
-			const [anioGT, mesGT, diaGT] = fechaInicio.split("-").map(Number);
-			const fechaFinUTC = new Date(
-				Date.UTC(anioGT, mesGT - 1, diaGT + diasAdelante),
-			);
-			const fechaFin = `${fechaFinUTC.getUTCFullYear()}-${pad(fechaFinUTC.getUTCMonth() + 1)}-${pad(fechaFinUTC.getUTCDate())}`;
-
-			const desglose = await carteraBackClient.getMontoACobrar({
-				periodo: "dia",
-				fechaInicio,
-				fechaFin,
+			const rows = await carteraBackClient.getCuotasPorFecha({
+				fechaInicio: input.fechaInicio,
+				fechaFin: input.fechaFin,
+				asesorId: input.asesorId,
 			});
 
-			// Ojo: en cartera-back `total_cuota` ES el capital de las cuotas
-			// (mismo criterio que el reporte de monto-a-cobrar existente, que lo
-			// etiqueta "Capital" y calcula el total sumando todos los rubros).
-			let totalCapital = 0;
-			let totalInteres = 0;
-			let totalIva = 0;
-			let totalSeguro = 0;
-			let totalGps = 0;
-			let totalMembresias = 0;
-			let totalRoyalti = 0;
-			let cantidadCuotas = 0;
+			const rowsMapped = rows.map((r) => ({ ...r }));
 
-			for (const row of desglose) {
-				totalCapital += Number.parseFloat(row.total_cuota);
-				totalInteres += Number.parseFloat(row.total_interes);
-				totalIva += Number.parseFloat(row.total_iva);
-				totalSeguro += Number.parseFloat(row.total_seguro);
-				totalGps += Number.parseFloat(row.total_gps);
-				totalMembresias += Number.parseFloat(row.total_membresias);
-				totalRoyalti += Number.parseFloat(row.total_royalti);
-				cantidadCuotas += row.cuotas_count;
+			let capitalEsp = 0;
+			let interesEsp = 0;
+			let ivaEsp = 0;
+			let seguroEsp = 0;
+			let gpsEsp = 0;
+			let membresiasEsp = 0;
+			let totalEsp = 0;
+			let totalPag = 0;
+			let cuotasTotal = 0;
+			let cuotasPagadas = 0;
+
+			for (const r of rowsMapped) {
+				capitalEsp += Number(r.capital_esperado);
+				interesEsp += Number(r.interes_esperado);
+				ivaEsp += Number(r.iva_esperado);
+				seguroEsp += Number(r.seguro_esperado);
+				gpsEsp += Number(r.gps_esperado);
+				membresiasEsp += Number(r.membresias_esperado);
+				totalEsp += Number(r.total_esperado);
+				totalPag += Number(r.total_pagado);
+				cuotasTotal++;
+				if (r.pagado) cuotasPagadas++;
 			}
 
-			const totalACobrar =
-				totalCapital +
-				totalInteres +
-				totalIva +
-				totalSeguro +
-				totalGps +
-				totalMembresias +
-				totalRoyalti;
-
 			return {
-				fechaInicio,
-				fechaFin,
-				temporalidad: input.temporalidad,
-				desglose,
+				rows: rowsMapped,
 				totales: {
-					capital: totalCapital.toFixed(2),
-					interes: totalInteres.toFixed(2),
-					iva: totalIva.toFixed(2),
-					seguro: totalSeguro.toFixed(2),
-					gps: totalGps.toFixed(2),
-					membresias: totalMembresias.toFixed(2),
-					royalti: totalRoyalti.toFixed(2),
-					totalCuota: totalACobrar.toFixed(2),
-					cantidadCuotas,
+					capitalEsp: capitalEsp.toFixed(2),
+					interesEsp: interesEsp.toFixed(2),
+					ivaEsp: ivaEsp.toFixed(2),
+					seguroEsp: seguroEsp.toFixed(2),
+					gpsEsp: gpsEsp.toFixed(2),
+					membresiasEsp: membresiasEsp.toFixed(2),
+					totalEsp: totalEsp.toFixed(2),
+					totalPag: totalPag.toFixed(2),
+					totalPendiente: (totalEsp - totalPag).toFixed(2),
+					cuotasTotal,
+					cuotasPagadas,
 				},
-			};
-		}),
-
-	// ========================================================================
-	// PAGOS NO RECIBIDOS
-	// ========================================================================
-
-	getPagosNoRecibidos: cobrosSupervisorProcedure
-		.input(
-			z.object({
-				emailCobrador: z.string().optional(),
-				capitalMin: z.number().optional(),
-				capitalMax: z.number().optional(),
-				cuotasAtrasadasMin: z.number().min(1).optional(),
-				cuotasAtrasadasMax: z.number().min(1).optional(),
-				fechaDesde: z.string().optional(),
-				fechaHasta: z.string().optional(),
-				page: z.number().min(1).default(1),
-				pageSize: z.number().min(1).max(100).default(25),
-			}),
-		)
-		.handler(async ({ input }) => {
-			if (!isCarteraBackEnabled()) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Integración con cartera-back no está habilitada",
-				});
-			}
-
-			// mes=0 trae TODOS los créditos sin filtrar por mes (mismo criterio
-			// que getTodosLosCreditos); con el mes actual cartera-back devuelve
-			// solo el snapshot mensual y el listado sale vacío.
-			const creditos = await obtenerTodasLasPaginasCreditos({
-				mes: 0,
-				anio: new Date().getFullYear(),
-				estado: "ACTIVO",
-				email_cobrador: input.emailCobrador,
-				capital_min: input.capitalMin,
-				capital_max: input.capitalMax,
-				fecha_desde: input.fechaDesde,
-				fecha_hasta: input.fechaHasta,
-			});
-
-			const minCuotas = input.cuotasAtrasadasMin ?? 1;
-
-			const todosOverdue = creditos.filter((item) => {
-				const cuotasAtrasadas = item.mora?.cuotas_atrasadas ?? 0;
-				if (cuotasAtrasadas < minCuotas) return false;
-				if (
-					input.cuotasAtrasadasMax !== undefined &&
-					cuotasAtrasadas > input.cuotasAtrasadasMax
-				)
-					return false;
-				return true;
-			});
-
-			const total = todosOverdue.length;
-			const totalPages = Math.max(1, Math.ceil(total / input.pageSize));
-			const start = (input.page - 1) * input.pageSize;
-			const pageData = todosOverdue.slice(start, start + input.pageSize);
-
-			const items = pageData.map((item) => ({
-				sifco: item.creditos.numero_credito_sifco,
-				clienteNombre: item.usuarios.nombre,
-				asesorNombre: item.asesores?.nombre ?? "Sin asesor",
-				cuotasAtrasadas: item.mora?.cuotas_atrasadas ?? 0,
-				montoMora: item.mora?.monto_mora ?? "0",
-				capital: item.proxima_cuota?.capital_restante ?? item.creditos.capital,
-				cuotaMensual: item.creditos.cuota,
-				proximaFechaVencimiento: item.proxima_cuota?.fecha_vencimiento ?? null,
-				tipoCredito: item.creditos.tipoCredito ?? null,
-			}));
-
-			return {
-				data: items,
-				total,
-				page: input.page,
-				pageSize: input.pageSize,
-				totalPages,
 			};
 		}),
 
@@ -4278,69 +4036,167 @@ export const cobrosRouter = {
 			z.object({
 				page: z.number().min(1).default(1),
 				pageSize: z.number().min(1).max(100).default(25),
-				emailCobrador: z.string().optional(),
+				search: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
-			if (!isCarteraBackEnabled()) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Integración con cartera-back no está habilitada",
-				});
+			const asesorUser = user;
+
+			const latestQuotations = db
+				.selectDistinctOn([quotations.opportunityId], {
+					opportunityId: quotations.opportunityId,
+					finesCost: quotations.finesCost,
+					keyCopyCost: quotations.keyCopyCost,
+					keyCopyDiffCost: quotations.keyCopyDiffCost,
+					circulationTaxCost: quotations.circulationTaxCost,
+					mobileGuaranteeCost: quotations.mobileGuaranteeCost,
+					licensePlatesCost: quotations.licensePlatesCost,
+					leasingContractCost: quotations.leasingContractCost,
+					collectionAuthCost: quotations.collectionAuthCost,
+					appointmentCost: quotations.appointmentCost,
+					addressVerificationCost: quotations.addressVerificationCost,
+					vehicleTransferCost: quotations.vehicleTransferCost,
+					interestCost: quotations.interestCost,
+					rcdpCost: quotations.rcdpCost,
+					extraGpsCost: quotations.extraGpsCost,
+					extraInsuranceCost: quotations.extraInsuranceCost,
+					extraMembershipCost: quotations.extraMembershipCost,
+					extraAdminCost: quotations.extraAdminCost,
+					freelanceCost: quotations.freelanceCost,
+					royalty: quotations.royalty,
+					inspectionCost: quotations.inspectionCost,
+					legalCost: quotations.legalCost,
+				})
+				.from(quotations)
+				.where(isNotNull(quotations.opportunityId))
+				.orderBy(quotations.opportunityId, desc(quotations.createdAt))
+				.as("lq");
+
+			const conditions = [isNotNull(opportunities.numeroSifco)];
+			if (input.search) {
+				const term = `%${input.search}%`;
+				const searchCond = or(
+					ilike(opportunities.numeroSifco, term),
+					ilike(leads.firstName, term),
+					ilike(leads.lastName, term),
+				);
+				if (searchCond) conditions.push(searchCond);
 			}
 
-			const creditos = await obtenerTodasLasPaginasCreditos({
-				mes: 0,
-				anio: new Date().getFullYear(),
-				estado: "ACTIVO",
-				email_cobrador: input.emailCobrador,
+			const totalSql = sql<number>`(
+				COALESCE(${latestQuotations.finesCost}::numeric, 0) +
+				COALESCE(${latestQuotations.keyCopyCost}::numeric, 0) +
+				COALESCE(${latestQuotations.keyCopyDiffCost}::numeric, 0) +
+				COALESCE(${latestQuotations.circulationTaxCost}::numeric, 0) +
+				COALESCE(${latestQuotations.mobileGuaranteeCost}::numeric, 0) +
+				COALESCE(${latestQuotations.licensePlatesCost}::numeric, 0) +
+				COALESCE(${latestQuotations.leasingContractCost}::numeric, 0) +
+				COALESCE(${latestQuotations.collectionAuthCost}::numeric, 0) +
+				COALESCE(${latestQuotations.appointmentCost}::numeric, 0) +
+				COALESCE(${latestQuotations.addressVerificationCost}::numeric, 0) +
+				COALESCE(${latestQuotations.vehicleTransferCost}::numeric, 0) +
+				COALESCE(${latestQuotations.interestCost}::numeric, 0) +
+				COALESCE(${latestQuotations.rcdpCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraGpsCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraInsuranceCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraMembershipCost}::numeric, 0) +
+				COALESCE(${latestQuotations.extraAdminCost}::numeric, 0) +
+				COALESCE(${latestQuotations.freelanceCost}::numeric, 0) +
+				COALESCE(${latestQuotations.royalty}::numeric, 0) +
+				COALESCE(${latestQuotations.inspectionCost}::numeric, 0) +
+				COALESCE(${latestQuotations.legalCost}::numeric, 0)
+			)`;
+
+			const baseQuery = db
+				.select({
+					sifco: opportunities.numeroSifco,
+					leadFirstName: leads.firstName,
+					leadLastName: leads.lastName,
+					finesCost: latestQuotations.finesCost,
+					keyCopyCost: latestQuotations.keyCopyCost,
+					keyCopyDiffCost: latestQuotations.keyCopyDiffCost,
+					circulationTaxCost: latestQuotations.circulationTaxCost,
+					mobileGuaranteeCost: latestQuotations.mobileGuaranteeCost,
+					licensePlatesCost: latestQuotations.licensePlatesCost,
+					leasingContractCost: latestQuotations.leasingContractCost,
+					collectionAuthCost: latestQuotations.collectionAuthCost,
+					appointmentCost: latestQuotations.appointmentCost,
+					addressVerificationCost: latestQuotations.addressVerificationCost,
+					vehicleTransferCost: latestQuotations.vehicleTransferCost,
+					interestCost: latestQuotations.interestCost,
+					rcdpCost: latestQuotations.rcdpCost,
+					extraGpsCost: latestQuotations.extraGpsCost,
+					extraInsuranceCost: latestQuotations.extraInsuranceCost,
+					extraMembershipCost: latestQuotations.extraMembershipCost,
+					extraAdminCost: latestQuotations.extraAdminCost,
+					freelanceCost: latestQuotations.freelanceCost,
+					royalty: latestQuotations.royalty,
+					inspectionCost: latestQuotations.inspectionCost,
+					legalCost: latestQuotations.legalCost,
+					totalDescuentos: totalSql,
+				})
+				.from(latestQuotations)
+				.innerJoin(
+					opportunities,
+					eq(latestQuotations.opportunityId, opportunities.id),
+				)
+				.innerJoin(asesorUser, eq(opportunities.assignedTo, asesorUser.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(and(...conditions, sql`${totalSql} > 0`));
+
+			const [[{ total }], rows] = await Promise.all([
+				db
+					.select({ total: count() })
+					.from(latestQuotations)
+					.innerJoin(
+						opportunities,
+						eq(latestQuotations.opportunityId, opportunities.id),
+					)
+					.innerJoin(asesorUser, eq(opportunities.assignedTo, asesorUser.id))
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(and(...conditions, sql`${totalSql} > 0`)),
+				baseQuery
+					.orderBy(desc(opportunities.createdAt))
+					.limit(input.pageSize)
+					.offset((input.page - 1) * input.pageSize),
+			]);
+
+			const fmt = (v: string | null | undefined) =>
+				Number.parseFloat(v || "0").toFixed(2);
+
+			const pageData = rows.map((row) => {
+				const clienteNombre =
+					[row.leadFirstName, row.leadLastName].filter(Boolean).join(" ") ||
+					"Sin cliente";
+				return {
+					sifco: row.sifco ?? "",
+					clienteNombre,
+					multas: fmt(row.finesCost),
+					copiaDeLlave: fmt(row.keyCopyCost),
+					diferenciaCopia: fmt(row.keyCopyDiffCost),
+					impuestoCirculacion: fmt(row.circulationTaxCost),
+					garantiaMobiliaria: fmt(row.mobileGuaranteeCost),
+					placas: fmt(row.licensePlatesCost),
+					contratoLeasing: fmt(row.leasingContractCost),
+					autenticaCobranza: fmt(row.collectionAuthCost),
+					nombramiento: fmt(row.appointmentCost),
+					verificacionDireccion: fmt(row.addressVerificationCost),
+					traspasoVehiculo: fmt(row.vehicleTransferCost),
+					intereses: fmt(row.interestCost),
+					rcdp: fmt(row.rcdpCost),
+					gps: fmt(row.extraGpsCost),
+					seguro: fmt(row.extraInsuranceCost),
+					membresia: fmt(row.extraMembershipCost),
+					gastosAdmin: fmt(row.extraAdminCost),
+					freelance: fmt(row.freelanceCost),
+					royalty: fmt(row.royalty),
+					inspeccion: fmt(row.inspectionCost),
+					gastosLegales: fmt(row.legalCost),
+					totalDescuentos: Number(row.totalDescuentos).toFixed(2),
+				};
 			});
 
-			type RubroItem = { nombre_rubro: string; monto: string | number };
-
-			const todos = creditos
-				.map((item) => {
-					const cred = item.creditos;
-					const gps = Number.parseFloat(cred.gps || "0");
-					const seguro = Number.parseFloat(cred.seguro_10_cuotas || "0");
-					const membresias = Number.parseFloat(cred.membresias_pago || "0");
-					const otros = Number.parseFloat(cred.otros || "0");
-
-					const rubros = ((item.rubros as RubroItem[] | null) ?? []).map(
-						(r) => ({
-							nombre: r.nombre_rubro,
-							monto: Number.parseFloat(String(r.monto || "0")).toFixed(2),
-						}),
-					);
-					const rubrosTotal = rubros.reduce(
-						(s, r) => s + Number.parseFloat(r.monto),
-						0,
-					);
-
-					const totalDescuentos =
-						gps + seguro + membresias + otros + rubrosTotal;
-					if (totalDescuentos <= 0) return null;
-
-					return {
-						sifco: cred.numero_credito_sifco,
-						clienteNombre: item.usuarios.nombre,
-						asesorNombre: item.asesores?.nombre ?? "Sin asesor",
-						gps: gps.toFixed(2),
-						seguro: seguro.toFixed(2),
-						membresias: membresias.toFixed(2),
-						otros: otros.toFixed(2),
-						rubros,
-						rubrosTotal: rubrosTotal.toFixed(2),
-						totalDescuentos: totalDescuentos.toFixed(2),
-						capital: cred.capital,
-						tipoCredito: cred.tipoCredito ?? null,
-					};
-				})
-				.filter((v): v is NonNullable<typeof v> => v !== null);
-
-			const total = todos.length;
 			const totalPages = Math.max(1, Math.ceil(total / input.pageSize));
-			const start = (input.page - 1) * input.pageSize;
-			const pageData = todos.slice(start, start + input.pageSize);
 
 			return {
 				data: pageData,

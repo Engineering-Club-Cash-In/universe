@@ -6,12 +6,12 @@ import {
 } from "./insurance-selection";
 
 describe("selectInsuranceProvider", () => {
-	test("keeps Universales for particular below Q189,000", () => {
+	test("keeps Universales for eligible vehicle at Q257,000 or below", () => {
 		const result = selectInsuranceProvider({
-			insuredAmount: 188000,
+			insuredAmount: 257000,
 			vehicleType: "particular",
 			universalesCost: 582.76,
-			gytCost: 583.3,
+			gytCost: 500,
 			membershipCost: 100,
 		});
 
@@ -20,9 +20,9 @@ describe("selectInsuranceProvider", () => {
 		expect(result.insuranceSavingsToMembership).toBe(0);
 	});
 
-	test("uses GyT for particular from Q189,000 when cheaper", () => {
+	test("uses GyT for particular over Q257,000 when cheaper", () => {
 		const result = selectInsuranceProvider({
-			insuredAmount: 189000,
+			insuredAmount: 257000.01,
 			vehicleType: "particular",
 			universalesCost: 585.86,
 			gytCost: 584.96,
@@ -36,21 +36,35 @@ describe("selectInsuranceProvider", () => {
 		expect(result.effectiveMembershipCost).toBeCloseTo(100.9, 2);
 	});
 
-	test.each([
-		"particular",
-		"uber",
-		"nuevo",
-	])("uses GyT for %s from Q189,000 when cheaper", (vehicleType) => {
+	test.each(["particular", "nuevo"])(
+		"uses GyT for %s over Q257,000 when cheaper",
+		(vehicleType) => {
+			const result = selectInsuranceProvider({
+				insuredAmount: 257000.01,
+				vehicleType,
+				universalesCost: 585.86,
+				gytCost: 584.96,
+				membershipCost: 100,
+			});
+
+			expect(result.provider).toBe("gyt");
+		},
+	);
+
+	test.each(["uber", "pickup", "microbus", "microbus_20", "microbus_35", "microbus_36plus"])(
+		"keeps Universales for excluded type %s even when over threshold and cheaper",
+		(vehicleType) => {
 		const result = selectInsuranceProvider({
-			insuredAmount: 189000,
+			insuredAmount: 300000,
 			vehicleType,
-			universalesCost: 585.86,
-			gytCost: 584.96,
+			universalesCost: 900,
+			gytCost: 700,
 			membershipCost: 100,
 		});
 
-		expect(result.provider).toBe("gyt");
-	});
+		expect(result.provider).toBe("universales");
+		},
+	);
 
 	test("never uses GyT for pickup", () => {
 		const result = selectInsuranceProvider({
@@ -62,49 +76,6 @@ describe("selectInsuranceProvider", () => {
 		});
 
 		expect(result.provider).toBe("universales");
-	});
-
-	test("keeps Universales for microbus below Q125,000", () => {
-		const result = selectInsuranceProvider({
-			insuredAmount: 124000,
-			vehicleType: "microbus",
-			universalesCost: 776.51,
-			gytCost: 778.34,
-			membershipCost: 100,
-		});
-
-		expect(result.provider).toBe("universales");
-	});
-
-	test("uses GyT for microbus from Q125,000 when cheaper", () => {
-		const result = selectInsuranceProvider({
-			insuredAmount: 125000,
-			vehicleType: "microbus",
-			universalesCost: 782.78,
-			gytCost: 781.78,
-			membershipCost: 100,
-		});
-
-		expect(result.provider).toBe("gyt");
-		expect(result.customerInsuranceCost).toBe(782.78);
-		expect(result.insuranceSavingsToMembership).toBeCloseTo(1, 2);
-	});
-
-	test.each([
-		"microbus",
-		"microbus_20",
-		"microbus_35",
-		"microbus_36plus",
-	])("uses GyT for %s from Q125,000 when cheaper", (vehicleType) => {
-		const result = selectInsuranceProvider({
-			insuredAmount: 125000,
-			vehicleType,
-			universalesCost: 782.78,
-			gytCost: 781.78,
-			membershipCost: 100,
-		});
-
-		expect(result.provider).toBe("gyt");
 	});
 
 	test.each([
@@ -125,7 +96,7 @@ describe("selectInsuranceProvider", () => {
 
 	test("keeps Universales in the approved range when GyT is NOT cheaper", () => {
 		const result = selectInsuranceProvider({
-			insuredAmount: 189000,
+			insuredAmount: 300000,
 			vehicleType: "particular",
 			universalesCost: 584,
 			gytCost: 585,
@@ -140,10 +111,10 @@ describe("selectInsuranceProvider", () => {
 });
 
 describe("normalizeInsuranceBreakdown", () => {
-	test("returns DB-safe values for GyT selection", () => {
+		test("returns DB-safe values for GyT selection", () => {
 		const result = normalizeInsuranceBreakdown({
 			selection: selectInsuranceProvider({
-				insuredAmount: 189000,
+				insuredAmount: 300000,
 				vehicleType: "particular",
 				universalesCost: 585.86,
 				gytCost: 584.96,
@@ -159,7 +130,7 @@ describe("normalizeInsuranceBreakdown", () => {
 	test("returns DB-safe values for Universales selection", () => {
 		const result = normalizeInsuranceBreakdown({
 			selection: selectInsuranceProvider({
-				insuredAmount: 188000,
+				insuredAmount: 257000,
 				vehicleType: "particular",
 				universalesCost: 582.76,
 				gytCost: 583.3,
@@ -176,7 +147,7 @@ describe("normalizeInsuranceBreakdown", () => {
 describe("buildServerInsurancePersistence", () => {
 	test("ignores manipulated client breakdown and persists server-calculated values", () => {
 		const result = buildServerInsurancePersistence({
-			insuredAmount: 189000,
+			insuredAmount: 300000,
 			vehicleType: "particular",
 			universalesCost: 585.86,
 			gytCost: 584.96,
@@ -200,7 +171,7 @@ describe("buildServerInsurancePersistence", () => {
 
 	test("uses visible quoter insurance as customer amount when provided", () => {
 		const result = buildServerInsurancePersistence({
-			insuredAmount: 189000,
+			insuredAmount: 300000,
 			vehicleType: "particular",
 			universalesCost: 550.1,
 			gytCost: 540,
@@ -223,7 +194,7 @@ describe("buildServerInsurancePersistence", () => {
 		// base + membresía en customerInsuranceCost (762). El server NO debe calcular
 		// el ahorro del bundle (762-580) ni volver a sumarlo a la membresía.
 		const result = buildServerInsurancePersistence({
-			insuredAmount: 189000,
+			insuredAmount: 300000,
 			vehicleType: "particular",
 			universalesCost: 600,
 			gytCost: 580,

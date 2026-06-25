@@ -114,9 +114,10 @@ function esVehiculoPlaceholder(marca: string, modelo: string): boolean {
 
 interface GetColumnsOptions {
 	/**
-	 * Etapa de mora actualmente filtrada en la tabla. Cuando coincide con un
-	 * estado de mora (mora_30/60/90/120+), se muestra el CTA de contacto rápido
-	 * en la primera columna.
+	 * Etapa de mora actualmente filtrada en la tabla. Si el filtro ya es un
+	 * estado de mora (mora_30/60/90/120+), el CTA de contacto rápido se muestra
+	 * en TODAS las filas (no hace falta revisar una por una). Si no, se decide
+	 * por fila según el estado de mora propio de cada crédito.
 	 */
 	filtroEtapa: string | null;
 }
@@ -124,7 +125,7 @@ interface GetColumnsOptions {
 export function getCobrosColumns({
 	filtroEtapa,
 }: GetColumnsOptions): ColumnDef<ContratoCobranza>[] {
-	const mostrarCtaContacto = !!filtroEtapa && ESTADOS_MORA_CTA.has(filtroEtapa);
+	const filtroEsMora = !!filtroEtapa && ESTADOS_MORA_CTA.has(filtroEtapa);
 
 	return [
 	{
@@ -144,6 +145,15 @@ export function getCobrosColumns({
 			const fecha = row.getValue("fechaProximoPago") as string | null;
 			const dias = row.original.diasHastaPago;
 			const numeroCredito = row.original.numeroCredito;
+
+			// Si el filtro ya es un estado de mora, el botón va en todas las filas
+			// (cortocircuita sin revisar la fila). Si no, se muestra solo en las
+			// filas cuyo propio estado (estadoMora) es de mora.
+			const mostrarCtaContacto =
+				filtroEsMora ||
+				(row.original.estadoContrato === "activo" &&
+					!!row.original.estadoMora &&
+					ESTADOS_MORA_CTA.has(row.original.estadoMora));
 
 			const fechaFormateada = fecha
 				? parseFechaLocal(fecha).toLocaleDateString("es-GT", {

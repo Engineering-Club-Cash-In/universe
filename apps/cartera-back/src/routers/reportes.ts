@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { getCobradoDelMes, getColocacionPorPeriodo, getComparativoHistorico, getEsperadoDelMes, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar } from "../controllers/reportes";
+import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMoraByEtapaYAsesor, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -16,6 +16,12 @@ function validarPeriodo(periodo: string | undefined, set: { status: number }): P
   return p as PeriodoValido;
 }
 
+function fechaValida(s: string): boolean {
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
 export const reportesRouter = new Elysia().use(authMiddleware)
 
   .get("/reportes/monto-cobrar", async ({ query, set }) => {
@@ -29,6 +35,14 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+      }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
       const data = await getMontoACobrar({ periodo: p, fechaInicio, fechaFin });
@@ -36,6 +50,37 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return { data };
     } catch (error) {
       console.error("[/reportes/monto-cobrar]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/monto-cobrar-periodo", async ({ query, set }) => {
+    try {
+      const { periodo, fechaInicio, fechaFin } = query as Record<string, string>;
+      if (!fechaInicio || !fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+      }
+      const p = validarPeriodo(periodo, set);
+      if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
+      const data = await getMontoACobrarPeriodo({ periodo: p, fechaInicio, fechaFin });
+      set.status = 200;
+      return { data };
+    } catch (error) {
+      console.error("[/reportes/monto-cobrar-periodo]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }
@@ -50,7 +95,7 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "mes y anio son requeridos y deben ser válidos" };
       }
-      const data = await getCobradoDelMes({ mes: m, anio: a });
+      const data = await getCobradoDelMesSnapshot({ mes: m, anio: a });
       set.status = 200;
       return data;
     } catch (error) {
@@ -71,11 +116,38 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
       }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
+      }
       const data = await getFlujoCuotasInversiones({ fechaInicio, fechaFin });
       set.status = 200;
       return data;
     } catch (error) {
       console.error("[/reportes/flujo-cuotas-inversiones]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/reinversion-liquidaciones", async ({ query, set }) => {
+    try {
+      const { mes, anio } = query as Record<string, string>;
+      const m = Number(mes);
+      const a = Number(anio);
+      if (!m || !a || m < 1 || m > 12 || a < 2020) {
+        set.status = 400;
+        return { error: "mes y anio son requeridos y deben ser válidos" };
+      }
+      const data = await getReinversionLiquidaciones({ mes: m, anio: a });
+      set.status = 200;
+      return data;
+    } catch (error) {
+      console.error("[/reportes/reinversion-liquidaciones]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }
@@ -91,6 +163,14 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
         set.status = 400;
         return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const data = await getFlujoCuotasPorInversionista({ fechaInicio, fechaFin });
       set.status = 200;
@@ -111,7 +191,7 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "mes y anio son requeridos y deben ser válidos" };
       }
-      const data = await getEsperadoDelMes({ mes: m, anio: a });
+      const data = await getEsperadoDelMesMeta({ mes: m, anio: a });
       set.status = 200;
       return data;
     } catch (error) {
@@ -127,6 +207,18 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       if (!fechaInicio || !fechaFin) {
         set.status = 400;
         return { error: "fechaInicio y fechaFin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fechaInicio) || !FECHA_REGEX.test(fechaFin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      if (!fechaValida(fechaInicio) || !fechaValida(fechaFin)) {
+        set.status = 400;
+        return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+      }
+      if (fechaInicio > fechaFin) {
+        set.status = 400;
+        return { error: "fechaInicio debe ser menor o igual a fechaFin" };
       }
       const p = validarPeriodo(periodo, set);
       if (!p) return { error: "periodo inválido. Valores: anio, trimestre, mes, semana, dia" };
@@ -152,6 +244,44 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/comparativo-historico]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/mora-por-etapa-asesor", async ({ query, set }) => {
+    try {
+      const { email_cobrador } = query as Record<string, string>;
+      const data = await getMoraByEtapaYAsesor({ emailCobrador: email_cobrador });
+      set.status = 200;
+      return data;
+    } catch (error) {
+      console.error("[/reportes/mora-por-etapa-asesor]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/cuotas-por-fecha", async ({ query, set }) => {
+    try {
+      const { fecha_inicio, fecha_fin, asesor_id } = query as Record<string, string>;
+      if (!fecha_inicio || !fecha_fin) {
+        set.status = 400;
+        return { error: "fecha_inicio y fecha_fin son requeridos" };
+      }
+      if (!FECHA_REGEX.test(fecha_inicio) || !FECHA_REGEX.test(fecha_fin)) {
+        set.status = 400;
+        return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+      }
+      const data = await getCuotasPorFecha({
+        fechaInicio: fecha_inicio,
+        fechaFin: fecha_fin,
+        asesorId: asesor_id ? Number(asesor_id) : undefined,
+      });
+      set.status = 200;
+      return { ok: true, data };
+    } catch (error) {
+      console.error("[/reportes/cuotas-por-fecha]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

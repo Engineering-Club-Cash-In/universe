@@ -8,7 +8,6 @@ import {
 	TrendingDown,
 } from "lucide-react";
 import { useState } from "react";
-import { CapitalRangeFilter } from "@/components/cobros/capital-range-filter";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +21,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
@@ -305,228 +303,317 @@ function TabMora({
 	);
 }
 
-// ─── Pagos Esperados ────────────────────────────────────────────────────────
+// ─── Cuotas por Fecha (Pagos Esperados) ─────────────────────────────────────
 
-type Temporalidad = "hoy" | "semana" | "quincena" | "mes";
+type QuickPeriod = "hoy" | "semana" | "quincena" | "mes";
+type FechaMode = QuickPeriod | "personalizado";
 
-const TEMPORALIDAD_LABELS: Record<Temporalidad, string> = {
+const QUICK_LABELS: Record<QuickPeriod, string> = {
 	hoy: "Hoy",
 	semana: "Esta Semana",
 	quincena: "Esta Quincena",
 	mes: "Este Mes",
 };
 
-const RUBROS = [
-	{ key: "totalCuota" as const, label: "Total a Cobrar", highlight: true },
-	{ key: "capital" as const, label: "Capital" },
-	{ key: "interes" as const, label: "Interés" },
-	{ key: "iva" as const, label: "IVA" },
-	{ key: "seguro" as const, label: "Seguro" },
-	{ key: "gps" as const, label: "GPS" },
-	{ key: "membresias" as const, label: "Membresías" },
-	{ key: "royalti" as const, label: "Royaltí" },
-];
-
-type DesgloseDia = {
-	bucket: string;
-	cuotas_count: number;
-	total_cuota: string;
-	total_interes: string;
-	total_iva: string;
-	total_seguro: string;
-	total_gps: string;
-	total_membresias: string;
-	total_royalti: string;
-};
-
-// Buckets date-only se parsean como mediodía local para evitar que el
-// offset de zona horaria los desplace al día anterior.
-function fmtBucketDia(bucket: string) {
-	const date = new Date(bucket.length === 10 ? `${bucket}T12:00:00` : bucket);
-	return date.toLocaleDateString("es-GT", {
-		weekday: "short",
-		day: "2-digit",
-		month: "short",
-	});
+function todayGT(): string {
+	return new Intl.DateTimeFormat("en-CA", {
+		timeZone: "America/Guatemala",
+	}).format(new Date());
 }
 
-// `total_cuota` de cartera-back es el capital; el total a cobrar de la fila
-// es la suma de rubros (mismo criterio que el reporte monto-a-cobrar).
-function totalDeFila(row: DesgloseDia) {
+function addDaysGT(dateStr: string, n: number): string {
+	const [y, m, d] = dateStr.split("-").map(Number);
+	const dt = new Date(Date.UTC(y, m - 1, d + n));
+	return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+function fmtDate(dt: Date): string {
+	return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+function weekRangeGT(): { start: string; end: string } {
+	const h = todayGT();
+	const [y, m, d] = h.split("-").map(Number);
+	const dt = new Date(Date.UTC(y, m - 1, d));
+	const dow = dt.getUTCDay(); // 0=Dom, 1=Lun ... 6=Sab
+	const daysFromMon = dow === 0 ? 6 : dow - 1;
+	const monday = new Date(Date.UTC(y, m - 1, d - daysFromMon));
+	const sunday = new Date(Date.UTC(y, m - 1, d - daysFromMon + 6));
+	return { start: fmtDate(monday), end: fmtDate(sunday) };
+}
+
+function monthRangeGT(): { start: string; end: string } {
+	const h = todayGT();
+	const [y, m] = h.split("-").map(Number);
+	const start = `${y}-${String(m).padStart(2, "0")}-01`;
+	const lastDay = new Date(Date.UTC(y, m, 0));
+	return { start, end: fmtDate(lastDay) };
+}
+
+// Rango calculado para un preset. Se recalcula en cada render, así "Hoy" /
+// "Esta Semana" siguen frescos aunque el usuario vuelva otro día.
+function rangeForPreset(p: QuickPeriod): { start: string; end: string } {
+	if (p === "hoy") {
+		const h = todayGT();
+		return { start: h, end: h };
+	}
+	if (p === "semana") return weekRangeGT();
+	if (p === "quincena") {
+		const h = todayGT();
+		return { start: h, end: addDaysGT(h, 14) };
+	}
+	return monthRangeGT();
+}
+
+// Modo inicial para sesiones previas a `modoFecha`: si las fechas guardadas
+// coinciden con un preset, se restaura ese preset; si son un rango propio, se
+// abre en "personalizado" para no perder el filtro del usuario.
+function inferModoFechaInicial(): FechaMode {
+	try {
+		const fiRaw = sessionStorage.getItem("cobros/reportes/cuotas/fechaInicio");
+		const ffRaw = sessionStorage.getItem("cobros/reportes/cuotas/fechaFin");
+		if (!fiRaw || !ffRaw) return "hoy";
+		const fi = JSON.parse(fiRaw) as string;
+		const ff = JSON.parse(ffRaw) as string;
+		for (const p of Object.keys(QUICK_LABELS) as QuickPeriod[]) {
+			const r = rangeForPreset(p);
+			if (fi === r.start && ff === r.end) return p;
+		}
+		return "personalizado";
+	} catch {
+		return "hoy";
+	}
+}
+
+type CuotaFila = {
+	cuota_id: number;
+	fecha_vencimiento: string;
+	pagado: boolean;
+	numero_credito_sifco: string;
+	cliente_nombre: string;
+	asesor_nombre: string | null;
+	statusCredit: string;
+	capital_esperado: string;
+	interes_esperado: string;
+	iva_esperado: string;
+	seguro_esperado: string;
+	gps_esperado: string;
+	membresias_esperado: string;
+	total_esperado: string;
+	capital_pagado: string;
+	interes_pagado: string;
+	iva_pagado: string;
+	seguro_pagado: string;
+	gps_pagado: string;
+	total_pagado: string;
+	membresias_pagado: string;
+};
+
+function RubroCelda({
+	esperado,
+	pagado,
+}: {
+	esperado: string;
+	pagado: string;
+}) {
+	const pagadoNum = Number(pagado);
 	return (
-		Number.parseFloat(row.total_cuota) +
-		Number.parseFloat(row.total_interes) +
-		Number.parseFloat(row.total_iva) +
-		Number.parseFloat(row.total_seguro) +
-		Number.parseFloat(row.total_gps) +
-		Number.parseFloat(row.total_membresias) +
-		Number.parseFloat(row.total_royalti)
+		<div className="space-y-0.5 text-right">
+			<div className="text-muted-foreground text-xs">{fmtQ(esperado)}</div>
+			<div
+				className={`text-xs font-medium ${pagadoNum > 0 ? "text-green-600" : "text-muted-foreground/40"}`}
+			>
+				{pagadoNum > 0 ? fmtQ(pagado) : "—"}
+			</div>
+		</div>
 	);
 }
 
-type PagoNoRecibido = {
-	sifco: string;
-	clienteNombre: string;
-	asesorNombre: string;
-	cuotasAtrasadas: number;
-	montoMora: string;
-	capital: string;
-	cuotaMensual: string;
-	proximaFechaVencimiento: string | null;
-	tipoCredito: string | null;
-};
-
-function getMoraBadge(cuotas: number) {
-	if (cuotas >= 4)
-		return <Badge className="bg-red-300 text-red-950">Mora 120+</Badge>;
-	if (cuotas === 3)
-		return <Badge className="bg-red-100 text-red-800">Mora 90</Badge>;
-	if (cuotas === 2)
-		return <Badge className="bg-orange-100 text-orange-800">Mora 60</Badge>;
-	return <Badge className="bg-yellow-100 text-yellow-800">Mora 30</Badge>;
+function EstadoBadge({ row }: { row: CuotaFila }) {
+	if (row.pagado)
+		return <Badge className="bg-green-100 text-green-800">Pagado</Badge>;
+	if (Number(row.total_pagado) > 0)
+		return <Badge className="bg-yellow-100 text-yellow-800">Parcial</Badge>;
+	return <Badge className="bg-red-100 text-red-800">Pendiente</Badge>;
 }
 
-const colsPagos: ColumnDef<PagoNoRecibido>[] = [
+const colsCuotas: ColumnDef<CuotaFila>[] = [
 	{
-		accessorKey: "sifco",
-		header: "Crédito",
+		accessorKey: "numero_credito_sifco",
+		header: "Crédito / Cliente",
 		cell: ({ row }) => (
-			<Link
-				to="/cobros/$id"
-				params={{ id: row.original.sifco }}
-				search={{ tipo: "contrato" }}
-				className="font-mono text-blue-600 text-xs hover:underline"
-			>
-				{row.original.sifco}
-			</Link>
-		),
-	},
-	{ accessorKey: "clienteNombre", header: "Cliente" },
-	{ accessorKey: "asesorNombre", header: "Asesor" },
-	{
-		accessorKey: "cuotasAtrasadas",
-		header: "Cuotas Atrasadas",
-		cell: ({ row }) => getMoraBadge(row.original.cuotasAtrasadas),
-	},
-	{
-		accessorKey: "montoMora",
-		header: "Monto Mora",
-		cell: ({ row }) => (
-			<span className="font-medium text-red-700">
-				{fmtQ(row.original.montoMora)}
-			</span>
+			<div className="flex flex-col gap-0.5">
+				<Link
+					to="/cobros/$id"
+					params={{ id: row.original.numero_credito_sifco }}
+					search={{ tipo: "contrato" }}
+					className="font-mono text-blue-600 text-xs hover:underline"
+				>
+					{row.original.numero_credito_sifco}
+				</Link>
+				<span className="text-muted-foreground text-xs">
+					{row.original.cliente_nombre}
+				</span>
+			</div>
 		),
 	},
 	{
-		accessorKey: "capital",
-		header: "Capital Restante",
-		cell: ({ row }) => fmtQ(row.original.capital),
+		accessorKey: "asesor_nombre",
+		header: "Asesor",
+		cell: ({ row }) => row.original.asesor_nombre ?? "—",
 	},
 	{
-		accessorKey: "cuotaMensual",
-		header: "Cuota Mensual",
-		cell: ({ row }) => fmtQ(row.original.cuotaMensual),
-	},
-	{
-		accessorKey: "proximaFechaVencimiento",
-		header: "Próx. Vencimiento",
+		accessorKey: "fecha_vencimiento",
+		header: "Fecha Venc.",
 		cell: ({ row }) =>
-			row.original.proximaFechaVencimiento
-				? new Date(
-						`${row.original.proximaFechaVencimiento}T00:00:00`,
-					).toLocaleDateString("es-GT")
-				: "—",
+			new Date(`${row.original.fecha_vencimiento}T12:00:00`).toLocaleDateString(
+				"es-GT",
+			),
+	},
+	{
+		accessorKey: "capital_esperado",
+		header: "Capital",
+		cell: ({ row }) => (
+			<RubroCelda
+				esperado={row.original.capital_esperado}
+				pagado={row.original.capital_pagado}
+			/>
+		),
+	},
+	{
+		accessorKey: "interes_esperado",
+		header: "Interés",
+		cell: ({ row }) => (
+			<RubroCelda
+				esperado={row.original.interes_esperado}
+				pagado={row.original.interes_pagado}
+			/>
+		),
+	},
+	{
+		accessorKey: "iva_esperado",
+		header: "IVA 12%",
+		cell: ({ row }) => (
+			<RubroCelda
+				esperado={row.original.iva_esperado}
+				pagado={row.original.iva_pagado}
+			/>
+		),
+	},
+	{
+		accessorKey: "seguro_esperado",
+		header: "Seguro",
+		cell: ({ row }) => (
+			<RubroCelda
+				esperado={row.original.seguro_esperado}
+				pagado={row.original.seguro_pagado}
+			/>
+		),
+	},
+	{
+		accessorKey: "gps_esperado",
+		header: "GPS",
+		cell: ({ row }) => (
+			<RubroCelda
+				esperado={row.original.gps_esperado}
+				pagado={row.original.gps_pagado}
+			/>
+		),
+	},
+	{
+		accessorKey: "membresias_esperado",
+		header: "Membresías",
+		cell: ({ row }) => (
+			<RubroCelda
+				esperado={row.original.membresias_esperado}
+				pagado={row.original.membresias_pagado}
+			/>
+		),
+	},
+	{
+		accessorKey: "total_esperado",
+		header: "Total",
+		cell: ({ row }) => (
+			<RubroCelda
+				esperado={row.original.total_esperado}
+				pagado={row.original.total_pagado}
+			/>
+		),
+	},
+	{
+		id: "estado",
+		header: "Estado",
+		cell: ({ row }) => <EstadoBadge row={row.original} />,
 	},
 ];
 
-function TabPagos({
+function TabCuotasPorFecha({
 	session,
 	canSeeAll,
 }: {
 	session: ReturnType<typeof authClient.useSession>["data"];
 	canSeeAll: boolean;
 }) {
-	const [temporalidad, setTemporalidad] = usePersistedState<Temporalidad>(
-		"cobros/reportes/temporalidad",
-		"hoy",
+	const hoyInit = todayGT();
+
+	// El modo manda: si es un preset, las fechas se calculan al vuelo. Solo en
+	// "personalizado" se usan (y editan) las fechas guardadas.
+	const [modoFecha, setModoFecha] = usePersistedState<FechaMode>(
+		"cobros/reportes/cuotas/modoFecha",
+		inferModoFechaInicial(),
 	);
-	const [emailAsesor, setEmailAsesor] = usePersistedState<string>(
-		"cobros/reportes/pagos/emailAsesor",
+	const [fechaInicioCustom, setFechaInicioCustom] = usePersistedState<string>(
+		"cobros/reportes/cuotas/fechaInicio",
+		hoyInit,
+	);
+	const [fechaFinCustom, setFechaFinCustom] = usePersistedState<string>(
+		"cobros/reportes/cuotas/fechaFin",
+		hoyInit,
+	);
+	const [asesorId, setAsesorId] = usePersistedState<string>(
+		"cobros/reportes/cuotas/asesorId",
 		"",
 	);
-	const [capitalMin, setCapitalMin] = usePersistedState<number | undefined>(
-		"cobros/reportes/pagos/capitalMin",
-		undefined,
-	);
-	const [capitalMax, setCapitalMax] = usePersistedState<number | undefined>(
-		"cobros/reportes/pagos/capitalMax",
-		undefined,
-	);
-	const [cuotasMin, setCuotasMin] = usePersistedState<string>(
-		"cobros/reportes/pagos/cuotasMin",
-		"",
-	);
-	const [cuotasMax, setCuotasMax] = usePersistedState<string>(
-		"cobros/reportes/pagos/cuotasMax",
-		"",
-	);
-	const [fechaDesde, setFechaDesde] = usePersistedState<string>(
-		"cobros/reportes/pagos/fechaDesde",
-		"",
-	);
-	const [fechaHasta, setFechaHasta] = usePersistedState<string>(
-		"cobros/reportes/pagos/fechaHasta",
-		"",
-	);
-	const [page, setPage] = usePersistedState<number>(
-		"cobros/reportes/pagos/page",
-		1,
-	);
-	const [pageSize] = usePersistedState<number>(
-		"cobros/reportes/pagos/pageSize",
-		25,
+	const [filtroEstado, setFiltroEstado] = usePersistedState<string>(
+		"cobros/reportes/cuotas/filtroEstado",
+		"todos",
 	);
 
-	const emailCobrador = canSeeAll
-		? emailAsesor || undefined
-		: (session?.user?.email ?? undefined);
+	const esPersonalizado = modoFecha === "personalizado";
+	const { start: fechaInicio, end: fechaFin } = esPersonalizado
+		? { start: fechaInicioCustom, end: fechaFinCustom }
+		: rangeForPreset(modoFecha);
 
-	const {
-		data: resumenData,
-		isLoading: resumenLoading,
-		dataUpdatedAt,
-		refetch: refetchResumen,
-		isFetching: resumenFetching,
-	} = useQuery({
-		...orpc.getPagosEsperadosCobros.queryOptions({ input: { temporalidad } }),
-		enabled: !!session,
-		staleTime: 5 * 60 * 1000,
-	});
+	function activarPersonalizado() {
+		// Sembrar las fechas editables con el rango del preset actual.
+		if (!esPersonalizado) {
+			const r = rangeForPreset(modoFecha);
+			setFechaInicioCustom(r.start);
+			setFechaFinCustom(r.end);
+		}
+		setModoFecha("personalizado");
+	}
 
 	const { data: asesoresData } = useQuery({
 		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
 		enabled: !!session && canSeeAll,
 	});
 
-	const { data: noRecibidosData, isLoading: noRecibidosLoading } = useQuery({
-		...orpc.getPagosNoRecibidos.queryOptions({
+	const {
+		data,
+		isLoading,
+		dataUpdatedAt,
+		refetch,
+		isFetching,
+	} = useQuery({
+		...orpc.getCuotasPorFecha.queryOptions({
 			input: {
-				emailCobrador,
-				capitalMin,
-				capitalMax,
-				cuotasAtrasadasMin: cuotasMin
-					? Number.parseInt(cuotasMin, 10)
-					: undefined,
-				cuotasAtrasadasMax: cuotasMax
-					? Number.parseInt(cuotasMax, 10)
-					: undefined,
-				fechaDesde: fechaDesde || undefined,
-				fechaHasta: fechaHasta || undefined,
-				page,
-				pageSize,
+				fechaInicio,
+				fechaFin,
+				asesorId: canSeeAll ? (asesorId ? Number(asesorId) : undefined) : undefined,
 			},
 		}),
-		enabled: !!session,
+		enabled: !!session && !!fechaInicio && !!fechaFin,
 		staleTime: 5 * 60 * 1000,
 	});
 
@@ -537,6 +624,22 @@ function TabPagos({
 			})
 		: null;
 
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const totales = (data as any)?.totales;
+	const rows: CuotaFila[] =
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(data as any)?.rows ?? [];
+
+	function getEstado(row: CuotaFila): "pagado" | "parcial" | "pendiente" {
+		if (row.pagado) return "pagado";
+		if (Number(row.total_pagado) > 0) return "parcial";
+		return "pendiente";
+	}
+
+	const filteredRows = filtroEstado === "todos"
+		? rows
+		: rows.filter((r) => getEstado(r) === filtroEstado);
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center gap-2">
@@ -544,277 +647,206 @@ function TabPagos({
 				<h2 className="font-semibold text-xl">Pagos Esperados</h2>
 			</div>
 
-			{/* Período selector */}
-			<div className="flex flex-wrap items-center gap-2">
-				<span className="font-medium text-sm">Período:</span>
-				{(Object.keys(TEMPORALIDAD_LABELS) as Temporalidad[]).map((t) => (
-					<Button
-						key={t}
-						variant={temporalidad === t ? "default" : "outline"}
-						size="sm"
-						onClick={() => setTemporalidad(t)}
-					>
-						{TEMPORALIDAD_LABELS[t]}
-					</Button>
-				))}
-				<div className="ml-auto flex items-center gap-2">
-					{ultimaAct && (
-						<span className="text-muted-foreground text-xs">
-							Actualizado: {ultimaAct}
-						</span>
-					)}
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => refetchResumen()}
-						disabled={resumenFetching}
-					>
-						<RefreshCw
-							className={`mr-2 h-4 w-4 ${resumenFetching ? "animate-spin" : ""}`}
-						/>
-						Actualizar
-					</Button>
-				</div>
-			</div>
-
-			{resumenLoading ? (
-				<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-					{RUBROS.map((r) => (
-						<Card key={r.key}>
-							<CardContent className="pt-6">
-								<div className="h-10 animate-pulse rounded bg-muted" />
-							</CardContent>
-						</Card>
-					))}
-				</div>
-			) : (
-				<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-					{RUBROS.map((r) => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const value = (resumenData as any)?.totales?.[r.key] as
-							| string
-							| number
-							| undefined;
-						return (
-							<Card
-								key={r.key}
-								className={r.highlight ? "border-blue-200 bg-blue-50" : ""}
-							>
-								<CardHeader className="pb-2">
-									<CardTitle
-										className={`font-medium text-sm ${r.highlight ? "text-blue-700" : ""}`}
+			{/* Filtros */}
+			<div className="space-y-3">
+				{/* Período — filtro principal */}
+				<div className="rounded-lg border bg-muted/30 p-3">
+					<div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+						<div className="flex flex-col gap-1.5">
+							<Label className="font-semibold text-xs">Período</Label>
+							<div className="flex flex-wrap items-center gap-1.5">
+								{(Object.keys(QUICK_LABELS) as QuickPeriod[]).map((p) => (
+									<Button
+										key={p}
+										variant={modoFecha === p ? "default" : "outline"}
+										size="sm"
+										onClick={() => setModoFecha(p)}
 									>
-										{r.label}
-									</CardTitle>
-								</CardHeader>
-								<CardContent>
-									<div
-										className={`font-bold text-xl ${r.highlight ? "text-blue-800" : ""}`}
-									>
-										{fmtQ(String(value ?? "0"))}
-									</div>
-								</CardContent>
-							</Card>
-						);
-					})}
-					<Card>
-						<CardHeader className="pb-2">
-							<CardTitle className="font-medium text-sm">
-								Cant. Cuotas
-							</CardTitle>
-						</CardHeader>
-						{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-						<CardContent>
-							<div className="font-bold text-xl">
-								{(resumenData as any)?.totales?.cantidadCuotas ?? 0}
+										{QUICK_LABELS[p]}
+									</Button>
+								))}
+								<Button
+									variant={esPersonalizado ? "default" : "outline"}
+									size="sm"
+									onClick={activarPersonalizado}
+								>
+									Personalizado
+								</Button>
 							</div>
-						</CardContent>
-					</Card>
-				</div>
-			)}
-
-			{!!resumenData && (
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				<p className="text-muted-foreground text-xs">
-					Período: {(resumenData as any).fechaInicio} →{" "}
-					{(resumenData as any).fechaFin}
-				</p>
-			)}
-
-			{(() => {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				const desglose = ((resumenData as any)?.desglose ??
-					[]) as DesgloseDia[];
-				if (temporalidad === "hoy" || desglose.length <= 1) return null;
-				return (
-					<div>
-						<h3 className="mb-3 font-semibold text-base">Desglose por Día</h3>
-						<div className="overflow-x-auto rounded-lg border">
-							<table className="w-full text-sm">
-								<thead className="bg-muted/50">
-									<tr>
-										<th className="px-4 py-3 text-left font-semibold">Fecha</th>
-										<th className="px-4 py-3 text-right font-semibold">
-											Cuotas
-										</th>
-										<th className="px-4 py-3 text-right font-semibold">
-											Capital
-										</th>
-										<th className="px-4 py-3 text-right font-semibold">
-											Interés
-										</th>
-										<th className="px-4 py-3 text-right font-semibold">IVA</th>
-										<th className="px-4 py-3 text-right font-semibold">
-											Total a Cobrar
-										</th>
-									</tr>
-								</thead>
-								<tbody>
-									{desglose.map((row) => (
-										<tr key={row.bucket} className="border-t hover:bg-muted/30">
-											<td className="px-4 py-3 font-medium">
-												{fmtBucketDia(row.bucket)}
-											</td>
-											<td className="px-4 py-3 text-right">
-												{row.cuotas_count}
-											</td>
-											<td className="px-4 py-3 text-right">
-												{fmtQ(row.total_cuota)}
-											</td>
-											<td className="px-4 py-3 text-right">
-												{fmtQ(row.total_interes)}
-											</td>
-											<td className="px-4 py-3 text-right">
-												{fmtQ(row.total_iva)}
-											</td>
-											<td className="px-4 py-3 text-right font-medium">
-												{fmtQ(totalDeFila(row))}
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
 						</div>
+
+						<div className="flex items-end gap-2">
+							<div className="flex flex-col gap-1">
+								<Label className="text-muted-foreground text-xs">Desde</Label>
+								<Input
+									type="date"
+									className="w-36"
+									value={fechaInicio}
+									disabled={!esPersonalizado}
+									onChange={(e) => setFechaInicioCustom(e.target.value)}
+								/>
+							</div>
+							<div className="flex flex-col gap-1">
+								<Label className="text-muted-foreground text-xs">Hasta</Label>
+								<Input
+									type="date"
+									className="w-36"
+									value={fechaFin}
+									disabled={!esPersonalizado}
+									onChange={(e) => setFechaFinCustom(e.target.value)}
+								/>
+							</div>
+						</div>
+
+						{!esPersonalizado && (
+							<p className="pb-2 text-muted-foreground text-xs">
+								Selecciona «Personalizado» para elegir fechas.
+							</p>
+						)}
 					</div>
-				);
-			})()}
+				</div>
 
-			<Separator />
+				{/* Filtros secundarios */}
+				<div className="flex flex-wrap items-end gap-3">
+					{canSeeAll && (
+						<div className="flex flex-col gap-1">
+							<Label className="text-xs">Asesor</Label>
+							<Select
+								value={asesorId}
+								onValueChange={(v) => setAsesorId(v === "todos" ? "" : v)}
+							>
+								<SelectTrigger className="w-48">
+									<SelectValue placeholder="Todos los asesores" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="todos">Todos</SelectItem>
+									{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+									{(asesoresData as any)?.asesores?.map((a: any) => (
+										<SelectItem key={a.asesorId} value={String(a.asesorId)}>
+											{a.nombre}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					)}
 
-			<h3 className="font-semibold text-base">Pagos No Recibidos</h3>
-
-			<div className="flex flex-wrap items-end gap-4">
-				{canSeeAll && (
 					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Asesor</Label>
-						<Select
-							value={emailAsesor}
-							onValueChange={(v) => {
-								setEmailAsesor(v === "todos" ? "" : v);
-								setPage(1);
-							}}
-						>
-							<SelectTrigger className="w-52">
-								<SelectValue placeholder="Todos los asesores" />
+						<Label className="text-xs">Estado</Label>
+						<Select value={filtroEstado} onValueChange={setFiltroEstado}>
+							<SelectTrigger className="w-36">
+								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="todos">Todos</SelectItem>
-								{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-								{(asesoresData as any)?.asesores?.map((a: any) => (
-									<SelectItem key={a.asesorId} value={a.email}>
-										{a.nombre}
-									</SelectItem>
-								))}
+								<SelectItem value="pagado">Pagado</SelectItem>
+								<SelectItem value="parcial">Parcial</SelectItem>
+								<SelectItem value="pendiente">Pendiente</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
-				)}
-				<CapitalRangeFilter
-					capitalMin={capitalMin}
-					capitalMax={capitalMax}
-					onCapitalRangeChange={(min, max) => {
-						setCapitalMin(min);
-						setCapitalMax(max);
-						setPage(1);
-					}}
-				/>
-				<div className="flex items-end gap-2">
-					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Cuotas atrasadas mín.</Label>
-						<Input
-							type="number"
-							min={1}
-							className="w-24"
-							placeholder="1"
-							value={cuotasMin}
-							onChange={(e) => {
-								setCuotasMin(e.target.value);
-								setPage(1);
-							}}
-						/>
-					</div>
-					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Cuotas atrasadas máx.</Label>
-						<Input
-							type="number"
-							min={1}
-							className="w-24"
-							placeholder="—"
-							value={cuotasMax}
-							onChange={(e) => {
-								setCuotasMax(e.target.value);
-								setPage(1);
-							}}
-						/>
-					</div>
-				</div>
-				<div className="flex items-end gap-2">
-					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Fecha pago desde</Label>
-						<Input
-							type="date"
-							className="w-40"
-							value={fechaDesde}
-							onChange={(e) => {
-								setFechaDesde(e.target.value);
-								setPage(1);
-							}}
-						/>
-					</div>
-					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Fecha pago hasta</Label>
-						<Input
-							type="date"
-							className="w-40"
-							value={fechaHasta}
-							onChange={(e) => {
-								setFechaHasta(e.target.value);
-								setPage(1);
-							}}
-						/>
+
+					<div className="ml-auto flex items-center gap-2">
+						{ultimaAct && (
+							<span className="text-muted-foreground text-xs">
+								Actualizado: {ultimaAct}
+							</span>
+						)}
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => refetch()}
+							disabled={isFetching}
+						>
+							<RefreshCw
+								className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
+							/>
+							Actualizar
+						</Button>
 					</div>
 				</div>
 			</div>
 
-			<DataTable
-				columns={colsPagos}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				data={(noRecibidosData as any)?.data ?? []}
-				isLoading={noRecibidosLoading}
-				hideSearch
-				serverPagination={
-					noRecibidosData
-						? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-							{
-								page: (noRecibidosData as any).page,
-								pageSize: (noRecibidosData as any).pageSize,
-								totalPages: (noRecibidosData as any).totalPages,
-								totalItems: (noRecibidosData as any).total,
-								onPageChange: setPage,
-							}
-						: undefined
-				}
-			/>
+			{/* Summary cards */}
+			<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+				<Card className="gap-1 border-blue-200 bg-blue-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-blue-700 text-xs">
+							Total Esperado
+						</CardTitle>
+					</CardHeader>
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-blue-800 text-lg">
+							{fmtQ(totales?.totalEsp ?? "0")}
+						</div>
+					</CardContent>
+				</Card>
+				<Card className="gap-1 border-green-200 bg-green-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-green-700 text-xs">
+							Total Pagado
+						</CardTitle>
+					</CardHeader>
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-green-700 text-lg">
+							{fmtQ(totales?.totalPag ?? "0")}
+						</div>
+					</CardContent>
+				</Card>
+				<Card className="gap-1 border-red-200 bg-red-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-red-700 text-xs">
+							Total Pendiente
+						</CardTitle>
+					</CardHeader>
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-red-700 text-lg">
+							{fmtQ(totales?.totalPendiente ?? "0")}
+						</div>
+					</CardContent>
+				</Card>
+				<Card className="gap-1 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-xs">Cuotas</CardTitle>
+					</CardHeader>
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-lg">
+							{totales?.cuotasPagadas ?? 0} / {totales?.cuotasTotal ?? 0}
+						</div>
+						<p className="text-muted-foreground text-xs">pagadas / total</p>
+					</CardContent>
+				</Card>
+			</div>
+
+			{/* Rubro breakdown cards */}
+			<div className="grid grid-cols-3 gap-3 md:grid-cols-6">
+				{(
+					[
+						{ key: "capitalEsp", label: "Capital" },
+						{ key: "interesEsp", label: "Interés" },
+						{ key: "ivaEsp", label: "IVA 12%" },
+						{ key: "seguroEsp", label: "Seguro" },
+						{ key: "gpsEsp", label: "GPS" },
+						{ key: "membresiasEsp", label: "Membresías" },
+					] as const
+				).map((c) => (
+					<Card key={c.key} className="gap-0.5 py-2.5">
+						<CardHeader className="px-3 pb-0 pt-0">
+							<CardTitle className="font-medium text-muted-foreground text-xs">
+								{c.label}
+							</CardTitle>
+						</CardHeader>
+						<CardContent className="px-3 pb-0">
+							<div className="font-semibold text-sm">
+								{fmtQ(totales?.[c.key] ?? "0")}
+							</div>
+						</CardContent>
+					</Card>
+				))}
+			</div>
+
+			{/* Detail table */}
+			<DataTable columns={colsCuotas} data={filteredRows} isLoading={isLoading} />
 		</div>
 	);
 }
@@ -824,100 +856,92 @@ function TabPagos({
 type DescuentoRow = {
 	sifco: string;
 	clienteNombre: string;
-	asesorNombre: string;
+	multas: string;
+	copiaDeLlave: string;
+	diferenciaCopia: string;
+	impuestoCirculacion: string;
+	garantiaMobiliaria: string;
+	placas: string;
+	contratoLeasing: string;
+	autenticaCobranza: string;
+	nombramiento: string;
+	verificacionDireccion: string;
+	traspasoVehiculo: string;
+	intereses: string;
+	rcdp: string;
 	gps: string;
 	seguro: string;
-	membresias: string;
-	otros: string;
-	rubros: { nombre: string; monto: string }[];
-	rubrosTotal: string;
+	membresia: string;
+	gastosAdmin: string;
+	freelance: string;
+	royalty: string;
+	inspeccion: string;
+	gastosLegales: string;
 	totalDescuentos: string;
-	capital: string;
-	tipoCredito: string | null;
 };
+
+function fmtDesc(v: string) {
+	const n = Number.parseFloat(v);
+	if (!n || n <= 0) return <span className="text-muted-foreground">—</span>;
+	return <span>{fmtQ(n)}</span>;
+}
 
 const colsDescuentos: ColumnDef<DescuentoRow>[] = [
 	{
-		accessorKey: "sifco",
-		header: "Crédito",
+		id: "creditoCliente",
+		header: "Crédito / Cliente",
 		cell: ({ row }) => (
-			<Link
-				to="/cobros/$id"
-				params={{ id: row.original.sifco }}
-				search={{ tipo: "contrato" }}
-				className="font-mono text-blue-600 text-xs hover:underline"
-			>
-				{row.original.sifco}
-			</Link>
+			<div className="flex flex-col gap-0.5">
+				<Link
+					to="/cobros/$id"
+					params={{ id: row.original.sifco }}
+					search={{ tipo: "contrato" }}
+					className="font-mono text-blue-600 text-xs hover:underline"
+				>
+					{row.original.sifco}
+				</Link>
+				<span className="text-muted-foreground text-xs">
+					{row.original.clienteNombre}
+				</span>
+			</div>
 		),
 	},
-	{ accessorKey: "clienteNombre", header: "Cliente" },
-	{ accessorKey: "asesorNombre", header: "Asesor" },
-	{
-		accessorKey: "capital",
-		header: "Capital",
-		cell: ({ row }) => fmtQ(row.original.capital),
-	},
-	{
-		accessorKey: "gps",
-		header: "GPS",
-		cell: ({ row }) => fmtQ(row.original.gps),
-	},
-	{
-		accessorKey: "seguro",
-		header: "Seguro",
-		cell: ({ row }) => fmtQ(row.original.seguro),
-	},
-	{
-		accessorKey: "membresias",
-		header: "Membresías",
-		cell: ({ row }) => fmtQ(row.original.membresias),
-	},
-	{
-		accessorKey: "otros",
-		header: "Otros",
-		cell: ({ row }) => fmtQ(row.original.otros),
-	},
-	{
-		accessorKey: "rubrosTotal",
-		header: "Rubros Extra",
-		cell: ({ row }) => {
-			const monto = fmtQ(row.original.rubrosTotal);
-			if (Number.parseFloat(row.original.rubrosTotal) <= 0)
-				return <span className="text-muted-foreground">—</span>;
-			return (
-				<div
-					title={row.original.rubros
-						.map((r) => `${r.nombre}: ${fmtQ(r.monto)}`)
-						.join("\n")}
-				>
-					{monto}
-				</div>
-			);
-		},
-	},
+	{ accessorKey: "multas", header: "Multas", cell: ({ row }) => fmtDesc(row.original.multas) },
+	{ accessorKey: "copiaDeLlave", header: "Copia llave", cell: ({ row }) => fmtDesc(row.original.copiaDeLlave) },
+	{ accessorKey: "diferenciaCopia", header: "Dif. copia", cell: ({ row }) => fmtDesc(row.original.diferenciaCopia) },
+	{ accessorKey: "impuestoCirculacion", header: "Imp. circulación", cell: ({ row }) => fmtDesc(row.original.impuestoCirculacion) },
+	{ accessorKey: "garantiaMobiliaria", header: "Garantía mob.", cell: ({ row }) => fmtDesc(row.original.garantiaMobiliaria) },
+	{ accessorKey: "placas", header: "Placas", cell: ({ row }) => fmtDesc(row.original.placas) },
+	{ accessorKey: "contratoLeasing", header: "Cto. leasing", cell: ({ row }) => fmtDesc(row.original.contratoLeasing) },
+	{ accessorKey: "verificacionDireccion", header: "Verif. dirección", cell: ({ row }) => fmtDesc(row.original.verificacionDireccion) },
+	{ accessorKey: "traspasoVehiculo", header: "Traspaso", cell: ({ row }) => fmtDesc(row.original.traspasoVehiculo) },
+	{ accessorKey: "intereses", header: "Intereses", cell: ({ row }) => fmtDesc(row.original.intereses) },
+	{ accessorKey: "rcdp", header: "RCDP", cell: ({ row }) => fmtDesc(row.original.rcdp) },
+	{ accessorKey: "gps", header: "GPS", cell: ({ row }) => fmtDesc(row.original.gps) },
+	{ accessorKey: "seguro", header: "Seguro", cell: ({ row }) => fmtDesc(row.original.seguro) },
+	{ accessorKey: "membresia", header: "Membresía", cell: ({ row }) => fmtDesc(row.original.membresia) },
+	{ accessorKey: "gastosAdmin", header: "Gastos admin", cell: ({ row }) => fmtDesc(row.original.gastosAdmin) },
+	{ accessorKey: "freelance", header: "Free Lance", cell: ({ row }) => fmtDesc(row.original.freelance) },
+	{ accessorKey: "royalty", header: "Royalty", cell: ({ row }) => fmtDesc(row.original.royalty) },
 	{
 		accessorKey: "totalDescuentos",
-		header: "Total Descuentos",
+		header: "Total",
 		cell: ({ row }) => (
-			<span className="font-semibold">
-				{fmtQ(row.original.totalDescuentos)}
-			</span>
+			<span className="font-semibold">{fmtQ(row.original.totalDescuentos)}</span>
 		),
 	},
 ];
 
 function TabDescuentos({
 	session,
-	canSeeAll,
 }: {
 	session: ReturnType<typeof authClient.useSession>["data"];
-	canSeeAll: boolean;
 }) {
-	const [emailAsesor, setEmailAsesor] = usePersistedState<string>(
-		"cobros/reportes/desc/emailAsesor",
+	const [search, setSearch] = usePersistedState<string>(
+		"cobros/reportes/desc/search",
 		"",
 	);
+	const [debouncedSearch, setDebouncedSearch] = useState(search);
 	const [page, setPage] = usePersistedState<number>(
 		"cobros/reportes/desc/page",
 		1,
@@ -927,18 +951,9 @@ function TabDescuentos({
 		25,
 	);
 
-	const emailCobrador = canSeeAll
-		? emailAsesor || undefined
-		: (session?.user?.email ?? undefined);
-
-	const { data: asesoresData } = useQuery({
-		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
-		enabled: !!session && canSeeAll,
-	});
-
 	const { data, isLoading } = useQuery({
 		...orpc.getDescuentosCRM.queryOptions({
-			input: { page, pageSize, emailCobrador },
+			input: { page, pageSize, search: debouncedSearch || undefined },
 		}),
 		enabled: !!session,
 		staleTime: 5 * 60 * 1000,
@@ -951,31 +966,23 @@ function TabDescuentos({
 				<h2 className="font-semibold text-xl">Descuentos por Crédito</h2>
 			</div>
 
-			{canSeeAll && (
-				<div className="flex flex-col gap-1">
-					<Label className="text-xs">Asesor</Label>
-					<Select
-						value={emailAsesor}
-						onValueChange={(v) => {
-							setEmailAsesor(v === "todos" ? "" : v);
-							setPage(1);
-						}}
-					>
-						<SelectTrigger className="w-52">
-							<SelectValue placeholder="Todos los asesores" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="todos">Todos</SelectItem>
-							{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-							{(asesoresData as any)?.asesores?.map((a: any) => (
-								<SelectItem key={a.asesorId} value={a.email}>
-									{a.nombre}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				</div>
-			)}
+			<div className="flex flex-col gap-1">
+				<Label className="text-xs">Buscar por crédito o cliente</Label>
+				<Input
+					className="max-w-sm"
+					placeholder="CRM-... o nombre del cliente"
+					value={search}
+					onChange={(e) => {
+						setSearch(e.target.value);
+						setPage(1);
+						clearTimeout((window as any)._descSearch);
+						(window as any)._descSearch = setTimeout(
+							() => setDebouncedSearch(e.target.value),
+							400,
+						);
+					}}
+				/>
+			</div>
 
 			<DataTable
 				columns={colsDescuentos}
@@ -983,19 +990,20 @@ function TabDescuentos({
 				data={(data as any)?.data ?? []}
 				isLoading={isLoading}
 				hideSearch
+				stickyFirstColumn
 				serverPagination={
-					data
-						? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-							{
-								page: (data as any).page,
-								pageSize: (data as any).pageSize,
-								totalPages: (data as any).totalPages,
-								totalItems: (data as any).total,
-								onPageChange: setPage,
-							}
-						: undefined
-				}
-			/>
+						data
+							? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+								{
+									page: (data as any).page,
+									pageSize: (data as any).pageSize,
+									totalPages: (data as any).totalPages,
+									totalItems: (data as any).total,
+									onPageChange: setPage,
+								}
+							: undefined
+					}
+				/>
 		</div>
 	);
 }
@@ -1022,7 +1030,7 @@ function RouteComponent() {
 	}
 
 	return (
-		<div className="space-y-6 p-6">
+		<div className="min-w-0 space-y-6 p-6">
 			<div className="flex items-center gap-2">
 				<BarChart3 className="h-6 w-6 text-blue-600" />
 				<h1 className="font-bold text-2xl">Reportes de Cobros</h1>
@@ -1048,10 +1056,10 @@ function RouteComponent() {
 					<TabMora session={session} canSeeAll={canSeeAll} />
 				</TabsContent>
 				<TabsContent value="pagos" className="mt-6">
-					<TabPagos session={session} canSeeAll={canSeeAll} />
+					<TabCuotasPorFecha session={session} canSeeAll={canSeeAll} />
 				</TabsContent>
 				<TabsContent value="descuentos" className="mt-6">
-					<TabDescuentos session={session} canSeeAll={canSeeAll} />
+					<TabDescuentos session={session} />
 				</TabsContent>
 			</Tabs>
 		</div>

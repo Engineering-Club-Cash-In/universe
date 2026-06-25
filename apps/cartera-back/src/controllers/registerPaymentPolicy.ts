@@ -21,6 +21,43 @@ export const shouldMarkInstallmentPaymentPaid = ({
   hasExistingInstallmentPayment &&
   Number(installmentAmountApplied) > 0;
 
+export const shouldRejectZeroAppliedNormalValidation = ({
+  validationStatus,
+  nextValidationStatus,
+  montoAplicado,
+  mora = 0,
+  otros = 0,
+  pagoConvenio = 0,
+}: {
+  validationStatus?: string | null;
+  nextValidationStatus?: string | null;
+  montoAplicado?: BigInput | null;
+  mora?: BigInput | null;
+  otros?: string | number | null;
+  pagoConvenio?: BigInput | null;
+}) => {
+  if (nextValidationStatus !== "validated") return false;
+  if (["capital", "capital_validated", "reset"].includes(validationStatus ?? "")) {
+    return false;
+  }
+
+  const numericText = (v: string | number | null | undefined) => {
+    if (v == null) return "0";
+    const s = String(v).trim();
+    return /^-?\d+(\.\d+)?$/.test(s) ? s : "0";
+  };
+
+  return (
+    new Big(montoAplicado ?? 0).eq(0) &&
+    new Big(mora ?? 0).eq(0) &&
+    new Big(numericText(otros)).eq(0) &&
+    new Big(pagoConvenio ?? 0).eq(0)
+  );
+};
+
+export const getApplyPaymentHttpStatus = (result: { success?: boolean }) =>
+  result.success === false ? 400 : 200;
+
 export const shouldApplyStaleZeroRestanteAdjustment = ({
   hasExistingPayment,
   isFirstProcessedInstallment,
@@ -66,6 +103,88 @@ export const getSpecialPaymentInstallmentFields = () => ({
   montoAplicado: 0,
   pagado: true,
 });
+
+// Umbral para considerar un monto "cero". Las columnas monetarias son
+// numeric(2), así que el mínimo pago real representable es Q0.01: una fila se
+// considera vacía solo si cada monto es ESTRICTAMENTE menor a un centavo (i.e.
+// 0.00). Un Q0.01 es un pago real y NO debe tratarse como sobrescribible (con
+// `lte` el cierre lo machacaría, reintroduciendo la pérdida para parciales de
+// un centavo).
+export const DESTINO_SOBRESCRIBIBLE_TOLERANCE = 0.01;
+
+/** Subconjunto de una fila de pago necesario para decidir si es sobrescribible. */
+export type DestinoSobrescribibleRow = {
+  validationStatus?: string | null;
+  monto_aplicado?: BigInput | null;
+  abono_capital?: BigInput | null;
+  abono_interes?: BigInput | null;
+  abono_iva_12?: BigInput | null;
+  abono_seguro?: BigInput | null;
+  abono_gps?: BigInput | null;
+  membresias_pago?: BigInput | null;
+  abono_interes_ci?: BigInput | null;
+  abono_iva_ci?: BigInput | null;
+  // Buckets de plata que un pago de solo mora/otros/convenio (insertarPago /
+  // getSpecialPaymentInstallmentFields) lleva con `monto_aplicado` y `abono_*`
+  // en 0 — hay que contarlos o el cierre los machacaría. `otros` es TEXT.
+  mora?: BigInput | null;
+  pagoConvenio?: BigInput | null;
+  otros?: string | number | null;
+};
+
+/**
+ * ¿La fila de pago elegida como `existingPago` se puede SOBRESCRIBIR (UPDATE) al
+ * cerrar la cuota, sin destruir plata real?
+ *
+ * El cierre de una cuota hace `UPDATE pagos_credito SET <pagoData> WHERE
+ * pago_id = existingPago`. Eso es seguro SOLO si la fila destino es desechable:
+ *
+ *  - El placeholder `no_required` importado de SIFCO (su único propósito es
+ *    portar los `*_restante`; no representa plata aplicada), o
+ *  - Una fila "vacía": SIN plata en NINGÚN bucket — `monto_aplicado`, todos los
+ *    `abono_*`, y también `mora`, `pagoConvenio` y `otros` ≈ 0. (Un pago de solo
+ *    mora/otros/convenio lleva `monto_aplicado`/`abono_*` en 0 pero plata en
+ *    esos otros campos; si no se contaran, el cierre lo machacaría.)
+ *
+ * Cuando el placeholder `no_required` ya fue consumido por un parcial previo,
+ * `existingPago` cae al fallback `allExistingPagos[0]` = la fila REAL más vieja
+ * (con `abono_interes` validado, posiblemente ya facturado). Sobrescribirla
+ * borraría ese pago. En ese caso esta función devuelve `false` y el caller debe
+ * INSERTAR una fila de cierre nueva en vez de hacer UPDATE.
+ */
+export const esDestinoSobrescribible = (
+  pago: DestinoSobrescribibleRow
+): boolean => {
+  if (pago.validationStatus === "no_required") return true;
+
+  const tol = new Big(DESTINO_SOBRESCRIBIBLE_TOLERANCE);
+  // Estricto (`lt`, no `lte`): un Q0.01 exacto es un pago real, no "vacío".
+  const casiCero = (v: BigInput | null | undefined) =>
+    new Big(v ?? 0).abs().lt(tol);
+  // `otros` es TEXT y puede venir null/''/no-numérico → parsear con guard.
+  const otrosCasiCero = (v: string | number | null | undefined) => {
+    if (v == null) return true;
+    const s = String(v).trim();
+    if (s === "" || !/^-?\d+(\.\d+)?$/.test(s)) return true;
+    return new Big(s).abs().lt(tol);
+  };
+
+  return (
+    casiCero(pago.monto_aplicado) &&
+    casiCero(pago.abono_capital) &&
+    casiCero(pago.abono_interes) &&
+    casiCero(pago.abono_iva_12) &&
+    casiCero(pago.abono_seguro) &&
+    casiCero(pago.abono_gps) &&
+    casiCero(pago.membresias_pago) &&
+    casiCero(pago.abono_interes_ci) &&
+    casiCero(pago.abono_iva_ci) &&
+    // Plata real fuera de los abono_* de cuota: mora, convenio y otros.
+    casiCero(pago.mora) &&
+    casiCero(pago.pagoConvenio) &&
+    otrosCasiCero(pago.otros)
+  );
+};
 
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */

@@ -81,22 +81,44 @@ export type MontoACobrarRow = {
 	total_seguro: string;
 	total_gps: string;
 	total_membresias: string;
-	total_royalti: string;
-	mora_promedio: string;
+	total_mora: string;
+};
+
+export type MontoACobrarPeriodoRow = {
+	bucket: string;
+	cuotas_count: number;
+	total_cuota: string;
+	total_interes: string;
+	total_iva: string;
+	total_seguro: string;
+	total_gps: string;
+	total_membresias: string;
+	total_mora: string;
+	mora_count: number;
+	total_credits: number;
+	credits_con_mora: number;
+	acum_total_cuota: string;
+	acum_total_interes: string;
+	acum_total_iva: string;
+	acum_total_seguro: string;
+	acum_total_gps: string;
+	acum_total_membresias: string;
+	total_interes_inversionista: string;
+	acum_total_interes_inversionista: string;
 };
 
 export type FacturacionMesRubro = {
-	capital: string;
 	interes: string;
-	iva: string;
-	seguro: string;
-	gps: string;
 	membresias: string;
+	seguro_gps: string;
+	royalti: string;
+	mora: string;
+	otros: string;
 };
 
 export type FacturacionMesResponse = {
 	cobrado: FacturacionMesRubro;
-	esperado: FacturacionMesRubro;
+	esperado: { meta_mensual: string };
 };
 
 export type FlujoCuotasRubro = {
@@ -121,6 +143,54 @@ export type FlujoCuotasInversionesResponse = {
 		})[];
 	};
 	pagosExtras: { abonos_capital: string; cancelaciones: string };
+};
+
+export type ReinversionLiquidacionesResponse = {
+	/**
+	 * Por modalidad (`tipo_reinversion`), campos crudos de la liquidación:
+	 * - `reinversion_total` → sección "Cuotas → Reinversión".
+	 * - `total_capital` / `total_interes` / `total_iva` / `total_isr` / `total_cuota`
+	 *   → sección "Cuotas → A Recibir".
+	 */
+	porTipo: Record<
+		string,
+		{
+			reinversion_capital: string;
+			reinversion_interes: string;
+			reinversion_total: string;
+			total_capital: string;
+			total_interes: string;
+			total_iva: string;
+			total_isr: string;
+			total_cuota: string;
+		}
+	>;
+	/**
+	 * Interés neto agrupado por si el inversionista emite factura:
+	 * - `conFactura`: neto = interés + IVA.
+	 * - `sinFactura`: neto = interés − ISR.
+	 */
+	interesNeto: {
+		conFactura: { interes: string; iva: string; neto: string };
+		sinFactura: { interes: string; isr: string; neto: string };
+		cube: { interes: string; iva: string; neto: string };
+	};
+	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
+	pagosExtras: { abonos_capital: string; cancelaciones: string };
+	/** Desglose por inversionista (desde liquidaciones): reinversión y a recibir. */
+	porInversionista: {
+		inversionista_id: number;
+		nombre: string;
+		tipo_reinversion: string;
+		reinversion_capital: string;
+		reinversion_interes: string;
+		reinversion: string;
+		a_recibir: string;
+		monto_aportado: string;
+	}[];
+	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
+	comprasMes: { tipo: string; cantidad: number; monto: string }[];
+	cantidad_liquidaciones: number;
 };
 
 export type PuntoEquilibrioRow = {
@@ -172,8 +242,7 @@ export function transformMontoACobrar(
 		total_seguro: money(num(r.total_seguro) * col),
 		total_gps: money(num(r.total_gps) * col),
 		total_membresias: money(num(r.total_membresias) * col),
-		total_royalti: money(num(r.total_royalti) * col),
-		mora_promedio: money(num(r.mora_promedio) * mora),
+		total_mora: money(num(r.total_mora) * mora),
 	}));
 }
 
@@ -186,22 +255,30 @@ export function transformFacturacion(
 	p: ScenarioParams,
 ): FacturacionMesResponse {
 	const close = gapClose(p);
+	// mora se excluye del upscale proporcional: menos morosidad → menos ingreso
+	// por mora, por lo que sigue moraFactor (dirección opuesta a los otros rubros).
 	const rubros: (keyof FacturacionMesRubro)[] = [
-		"capital",
 		"interes",
-		"iva",
-		"seguro",
-		"gps",
 		"membresias",
+		"seguro_gps",
+		"royalti",
+		"otros",
 	];
+	const totalCobrado =
+		rubros.reduce((acc, k) => acc + num(data.cobrado[k]), 0) +
+		num(data.cobrado.mora);
+	const totalEsperado = num(data.esperado.meta_mensual);
+	const gap = totalEsperado - totalCobrado;
 	const cobrado = { ...data.cobrado };
+	// mora siempre baja con moraFactor, independientemente del gap
+	cobrado.mora = money(num(data.cobrado.mora) * moraFactor(p));
+	if (gap <= 0 || totalCobrado === 0) {
+		return { cobrado, esperado: data.esperado };
+	}
+	// Distribuir el cierre de brecha proporcionalmente entre los rubros de ingreso
+	const factor = 1 + (gap * close) / totalCobrado;
 	for (const k of rubros) {
-		const c = num(data.cobrado[k]);
-		const e = num(data.esperado[k]);
-		// Solo cerramos brechas positivas (esperado > cobrado). Si ya está
-		// sobre-cobrado (c >= e), se preserva el monto real intacto.
-		const gap = e - c;
-		cobrado[k] = money(gap > 0 ? c + gap * close : c);
+		cobrado[k] = money(num(data.cobrado[k]) * factor);
 	}
 	return { cobrado, esperado: data.esperado };
 }

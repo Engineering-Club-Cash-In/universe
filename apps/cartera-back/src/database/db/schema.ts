@@ -136,6 +136,13 @@
   }
   // 2. Créditos
 
+  // Catálogo de aseguradoras (GyT, Universales, futuras). El crédito enlaza aquí.
+  export const aseguradoras = customSchema.table("aseguradoras", {
+    id: serial("id").primaryKey(),
+    nombre: varchar("nombre", { length: 100 }).notNull().unique(),
+    created_at: timestamp("created_at").notNull().defaultNow(),
+  });
+
   export const creditos = customSchema.table("creditos", {
     credito_id: serial("credito_id").primaryKey(),
     usuario_id: integer("usuario_id").notNull(),
@@ -1765,17 +1772,4 @@
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
-  });
-
-  // ============================================
-  // TABLA: aseguradoras
-  //   Catálogo de aseguradoras vinculadas a créditos.
-  //   Cada crédito puede tener como máximo una aseguradora (FK nullable).
-  // ============================================
-  export const aseguradoras = customSchema.table("aseguradoras", {
-    id: serial("id").primaryKey(),
-    nombre: varchar("nombre", { length: 200 }).notNull().unique(),
-    created_at: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
   });

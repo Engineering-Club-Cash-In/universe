@@ -134,6 +134,7 @@ export interface CreateCreditoParams {
 	fecha_creacion?: string;
 	observaciones?: string;
 	no_poliza?: string;
+	aseguradora?: string;
 	// Nuevos campos adicionales
 	categoria?: string;
 	nit?: string;
@@ -195,6 +196,7 @@ export async function createCreditoInCarteraBack(
 			gps: params.gps ?? 0,
 			observaciones: params.observaciones,
 			no_poliza: params.no_poliza || "",
+			aseguradora: params.aseguradora,
 			direccion: params.direccion || "",
 			// Nuevos campos adicionales
 			categoria: params.categoria,

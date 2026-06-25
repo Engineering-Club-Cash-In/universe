@@ -28,6 +28,7 @@ interface NewCreditEmailProps {
   vehiculoVin?: string;
   montoAsegurado?: number;
   opportunityId?: string;
+  aseguradora?: string;
 }
 
 const main = {
@@ -146,6 +147,7 @@ export const NewCreditEmail = ({
   vehiculoVin,
   montoAsegurado,
   opportunityId,
+  aseguradora,
 }: NewCreditEmailProps) => {
   const hasVehicleInfo = vehiculoMarca || vehiculoLinea || vehiculoModelo || vehiculoPlaca || vehiculoVin;
   const oportunidadUrl = `https://crm.s3.devteamatcci.site/crm/opportunities?opportunityId=${opportunityId}&tab=create`;
@@ -172,6 +174,9 @@ export const NewCreditEmail = ({
             <Text style={detailItem}><strong>Plazo:</strong> {plazo} meses</Text>
             <Text style={detailItem}><strong>Cuota:</strong> {currencySymbol}{cuota}</Text>
             <Text style={detailItem}><strong>Tasa de Interés:</strong> {interestRate}%</Text>
+            {aseguradora && (
+              <Text style={detailItem}><strong>Aseguradora:</strong> {aseguradora}</Text>
+            )}
           </Section>
 
           {investors.length > 0 && (

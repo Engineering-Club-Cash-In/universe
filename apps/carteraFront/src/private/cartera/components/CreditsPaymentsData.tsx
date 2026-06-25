@@ -15,7 +15,7 @@ import {
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, FileCheck, CheckCircle2, DollarSign } from "lucide-react";
+import { Eye, Pencil, XCircle, FileCheck, CheckCircle2, DollarSign, ShieldCheck } from "lucide-react";
 
 import {
   Table,
@@ -1302,8 +1302,9 @@ function MobileView({
               </span>
             )}
             {item.aseguradora && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#15803d', border: '1px solid rgba(22,163,74,0.25)' }}>
-                🛡️ {item.aseguradora}
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
+                {item.aseguradora}
               </span>
             )}
           </p>
@@ -1623,8 +1624,9 @@ function DesktopView({
                       </span>
                     )}
                     {item.aseguradora && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#15803d', border: '1px solid rgba(22,163,74,0.25)' }}>
-                        🛡️ {item.aseguradora}
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                        <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
+                        {item.aseguradora}
                       </span>
                     )}
                   </div>

@@ -1471,6 +1471,11 @@ export const crmRouter = {
 				// Additional credit fields
 				seguro: opportunities.seguro,
 				gps: opportunities.gps,
+				insuranceProvider: opportunities.insuranceProvider,
+				customerInsuranceCost: opportunities.customerInsuranceCost,
+				internalInsuranceCost: opportunities.internalInsuranceCost,
+				insuranceSavingsToMembership:
+					opportunities.insuranceSavingsToMembership,
 				categoria: opportunities.categoria,
 				nit: opportunities.nit,
 				royalti: opportunities.royalti,
@@ -2230,6 +2235,23 @@ export const crmRouter = {
 			const vehicleChanged =
 				input.vehicleId !== undefined &&
 				input.vehicleId !== currentOpportunity[0].vehicleId;
+			const currentInsuranceProvider =
+				currentOpportunity[0].insuranceProvider ?? "universales";
+			const insuranceFallback =
+				seguro !== undefined
+					? {
+							insuranceProvider: currentInsuranceProvider,
+							customerInsuranceCost: String(seguro),
+							internalInsuranceCost:
+								currentInsuranceProvider === "gyt"
+									? currentOpportunity[0].internalInsuranceCost
+									: String(seguro),
+							insuranceSavingsToMembership:
+								currentInsuranceProvider === "gyt"
+									? currentOpportunity[0].insuranceSavingsToMembership
+									: "0",
+						}
+					: {};
 
 			// Check if this is an override (sales moving from analysis stage)
 			let isOverride = false;
@@ -2282,6 +2304,7 @@ export const crmRouter = {
 					}),
 					// Convert numeric fields to strings for decimal columns
 					...(seguro !== undefined && { seguro: String(seguro) }),
+					...insuranceFallback,
 					...(gps !== undefined && { gps: String(gps) }),
 					...(royalti !== undefined && { royalti: String(royalti) }),
 					...(porcentajeRoyalti !== undefined && {

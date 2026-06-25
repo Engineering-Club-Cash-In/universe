@@ -129,6 +129,7 @@ interface CreditDetailViewProps {
 		transferCost: string;
 		adminCost: string;
 		membershipCost: string;
+		insuranceProvider?: string | null;
 		// Campos nuevos - opcionales para compatibilidad con cotizaciones antiguas
 		freelanceCost?: string | null;
 		freelancePercentage?: string | null;
@@ -657,6 +658,8 @@ export function CreditDetailView({
 	// Usar los campos extra* que se guardaron desde el cotizador
 	const gps = Number.parseFloat(quotation?.extraGpsCost || "0");
 	const seguro = Number.parseFloat(quotation?.extraInsuranceCost || "0");
+	const insuranceProviderLabel =
+		quotation?.insuranceProvider === "gyt" ? "GyT" : "Universales";
 	const membresia = Number.parseFloat(quotation?.extraMembershipCost || "0");
 	const gastosAdminBase = Number.parseFloat(quotation?.extraAdminCost || "600");
 	const interesAnticipado = Number.parseFloat(quotation?.interestCost || "0");
@@ -1606,7 +1609,14 @@ export function CreditDetailView({
 												</TableCell>
 											</TableRow>
 											<TableRow>
-												<TableCell>Seguro INREXSA</TableCell>
+												<TableCell>
+													<div className="flex items-center gap-2">
+														<span>Seguro</span>
+														<Badge variant="outline" className="text-xs">
+															{insuranceProviderLabel}
+														</Badge>
+													</div>
+												</TableCell>
 												<TableCell className="text-center">
 													<Badge
 														variant={seguro > 0 ? "default" : "outline"}
@@ -2215,7 +2225,12 @@ export function CreditDetailView({
 										</TableRow>
 										<TableRow>
 											<TableCell className="py-2">
-												Cuotas de seguro (12 cuotas anuales)
+												<div className="flex items-center gap-2">
+													<span>Cuotas de seguro (12 cuotas anuales)</span>
+													<Badge variant="outline" className="text-xs">
+														{insuranceProviderLabel}
+													</Badge>
+												</div>
 											</TableCell>
 											<TableCell className="py-2 text-right">
 												{seguro > 0 ? formatCurrency(seguro) : "Q -"}

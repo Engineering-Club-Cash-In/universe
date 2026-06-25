@@ -14,6 +14,7 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:seed": "bun run src/db/seed.ts",
+		"db:seed:gyt": "bun run src/db/seed-gyt-insurance.ts",
 		"db:clear": "bun run src/db/clear.ts",
 		"db:migrate-prod": "bun run src/db/migrate-config-to-prod.ts",
 		"push": "bash ./deployServer.sh"
@@ -42,6 +43,7 @@
 		"drizzle-orm": "^0.44.2",
 		"hono": "^4.8.2",
 		"pg": "^8.14.1",
+		"xlsx": "^0.18.5",
 		"zod": "^3.23.8"
 	},
 	"devDependencies": {

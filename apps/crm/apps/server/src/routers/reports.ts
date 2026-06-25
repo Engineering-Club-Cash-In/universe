@@ -266,6 +266,7 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 				clienteNombre: sql<string>`COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.middleName}, ${leads.lastName}, ${leads.secondLastName})), ''), ${latestClient.contactPerson}, '')`,
 				numeroSifco: sql<string>`COALESCE(${latestCarteraReference.numeroCreditoSifco}, ${opportunities.numeroSifco}, '')`,
 				cuotaSeguro: opportunities.seguro,
+				insuranceProvider: opportunities.insuranceProvider,
 				montoCredito: opportunities.value,
 				// Cuota de la cotización; si no hay cotización enlazada, se usa la
 				// cuota mensual guardada en la oportunidad (el flujo de cierre usa

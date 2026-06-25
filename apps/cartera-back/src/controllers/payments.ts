@@ -1759,7 +1759,7 @@ export function armarInversionistasPago(args: {
   const cubeIva = args.desgloseCubeInteres.iva;
 
   // Desglose CUBE ~0 y CUBE no estaba en pci → no agregar fila vacía.
-  if (cubeNet.abs().lte(0.005) && !pciCube) return noCube;
+  if (cubeNet.abs().lte(new Big("0.005")) && !pciCube) return noCube;
 
   const cubeRow: ReportInvRow = {
     inversionistaId: args.cubeId,

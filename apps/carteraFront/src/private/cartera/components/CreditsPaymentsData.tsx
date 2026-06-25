@@ -15,7 +15,7 @@ import {
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, FileCheck, CheckCircle2, DollarSign } from "lucide-react";
+import { Eye, Pencil, XCircle, FileCheck, CheckCircle2, DollarSign, ShieldCheck } from "lucide-react";
 
 import {
   Table,
@@ -51,16 +51,6 @@ import { Switch } from "@/components/ui/switch";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
 import { toast } from "sonner";
 import { ModalCaidoCredit } from "./ModalCaidoCredit";
-
-// Logos de aseguradoras (archivos en public/aseguradoras/). Key = nombre en minúsculas.
-const ASEGURADORA_LOGOS: Record<string, string> = {
-  gyt: "/aseguradoras/gyt.png",
-  universales: "/aseguradoras/universales.png",
-};
-function aseguradoraLogo(nombre?: string | null): string | undefined {
-  if (!nombre) return undefined;
-  return ASEGURADORA_LOGOS[nombre.trim().toLowerCase()];
-}
 
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -1312,16 +1302,8 @@ function MobileView({
               </span>
             )}
             {item.aseguradora && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-white text-slate-700 border border-slate-200">
-                {aseguradoraLogo(item.aseguradora) ? (
-                  <img
-                    src={aseguradoraLogo(item.aseguradora)}
-                    alt={item.aseguradora}
-                    className="h-4 w-auto max-w-[44px] object-contain rounded-sm"
-                  />
-                ) : (
-                  <span>🛡️</span>
-                )}
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
                 {item.aseguradora}
               </span>
             )}
@@ -1642,16 +1624,8 @@ function DesktopView({
                       </span>
                     )}
                     {item.aseguradora && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-white text-slate-700 border border-slate-200">
-                        {aseguradoraLogo(item.aseguradora) ? (
-                          <img
-                            src={aseguradoraLogo(item.aseguradora)}
-                            alt={item.aseguradora}
-                            className="h-4 w-auto max-w-[44px] object-contain rounded-sm"
-                          />
-                        ) : (
-                          <span>🛡️</span>
-                        )}
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                        <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
                         {item.aseguradora}
                       </span>
                     )}

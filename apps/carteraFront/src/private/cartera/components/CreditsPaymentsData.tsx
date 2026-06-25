@@ -52,6 +52,16 @@ import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/p
 import { toast } from "sonner";
 import { ModalCaidoCredit } from "./ModalCaidoCredit";
 
+// Logos de aseguradoras (archivos en public/aseguradoras/). Key = nombre en minúsculas.
+const ASEGURADORA_LOGOS: Record<string, string> = {
+  gyt: "/aseguradoras/gyt.png",
+  universales: "/aseguradoras/universales.png",
+};
+function aseguradoraLogo(nombre?: string | null): string | undefined {
+  if (!nombre) return undefined;
+  return ASEGURADORA_LOGOS[nombre.trim().toLowerCase()];
+}
+
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
@@ -1302,8 +1312,17 @@ function MobileView({
               </span>
             )}
             {item.aseguradora && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#15803d', border: '1px solid rgba(22,163,74,0.25)' }}>
-                🛡️ {item.aseguradora}
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-white text-slate-700 border border-slate-200">
+                {aseguradoraLogo(item.aseguradora) ? (
+                  <img
+                    src={aseguradoraLogo(item.aseguradora)}
+                    alt={item.aseguradora}
+                    className="h-4 w-auto max-w-[44px] object-contain rounded-sm"
+                  />
+                ) : (
+                  <span>🛡️</span>
+                )}
+                {item.aseguradora}
               </span>
             )}
           </p>
@@ -1623,8 +1642,17 @@ function DesktopView({
                       </span>
                     )}
                     {item.aseguradora && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#15803d', border: '1px solid rgba(22,163,74,0.25)' }}>
-                        🛡️ {item.aseguradora}
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-white text-slate-700 border border-slate-200">
+                        {aseguradoraLogo(item.aseguradora) ? (
+                          <img
+                            src={aseguradoraLogo(item.aseguradora)}
+                            alt={item.aseguradora}
+                            className="h-4 w-auto max-w-[44px] object-contain rounded-sm"
+                          />
+                        ) : (
+                          <span>🛡️</span>
+                        )}
+                        {item.aseguradora}
                       </span>
                     )}
                   </div>

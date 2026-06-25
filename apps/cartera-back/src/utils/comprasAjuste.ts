@@ -23,13 +23,21 @@ export interface AjusteCompras {
 }
 
 /**
- * Calcula los ajustes de compras de cartera para un inversionista+crédito.
+ * Calcula los ajustes de compras de cartera y reinversiones para un inversionista+crédito.
  *
- * montoRestarValidacion: compras cuyo created_at es POSTERIOR al último histórico;
- *   addInvestorToCredit ya actualizó el espejo pero el histórico aún no las refleja.
+ * Tanto compra_cartera como reinversion inflan el monto_aportado del espejo (ambas son
+ * transferencias Cube→inversionista que viven en compras_credito_inversionista), pero se
+ * tratan distinto en el cálculo del interés:
  *
- * montoRestarCalculo: Caso 2 (pendientes) y Caso 3 (completadas en el período o después);
- *   reducen la base sobre la que se calcula el interés.
+ * montoRestarValidacion: operaciones (compra_cartera Y reinversion) cuyo created_at es
+ *   POSTERIOR al último histórico; ya actualizaron el espejo pero el histórico aún no las
+ *   refleja → se restan para que el cuadre espejo-vs-histórico sea justo.
+ *
+ * montoRestarCalculo: reduce la base sobre la que se calcula el interés.
+ *   - Caso 2: pendientes (compra_cartera y reinversion) → restar (no generan aún).
+ *   - Caso 3: SOLO compra_cartera completada en el período o después → restar (paga el mes
+ *     siguiente). La reinversión completada NO se difiere: cobra interés completo desde su
+ *     fecha (retroactiva), así que no se resta de la base.
  *   Si periodoMes/periodoAnio no se proveen, montoRestarCalculo queda en 0.
  */
 export async function calcularAjusteCompras(
@@ -43,6 +51,7 @@ export async function calcularAjusteCompras(
     .select({
       monto_aportado: compras_credito_inversionista.monto_aportado,
       status: compras_credito_inversionista.status,
+      tipo_operacion: compras_credito_inversionista.tipo_operacion,
       fecha_completada: compras_credito_inversionista.fecha_completada,
       updated_at: compras_credito_inversionista.updated_at,
       created_at: compras_credito_inversionista.created_at,
@@ -52,7 +61,7 @@ export async function calcularAjusteCompras(
       and(
         eq(compras_credito_inversionista.credito_id, credito_id),
         eq(compras_credito_inversionista.inversionista_id, inversionista_id),
-        inArray(compras_credito_inversionista.tipo_operacion, ["compra_cartera"]), // Hay que volver a ponerlo para que acepte reinversiones
+        inArray(compras_credito_inversionista.tipo_operacion, ["compra_cartera", "reinversion"]),
       ),
     )
     .orderBy(desc(compras_credito_inversionista.updated_at));
@@ -64,8 +73,8 @@ export async function calcularAjusteCompras(
     const montoCompra = new Big(compra.monto_aportado);
     if (montoCompra.eq(0)) continue;
 
-    // Validación: compras creadas después del histórico ya actualizaron el espejo
-    // pero el histórico no las refleja — restar para que la comparación sea justa.
+    // Validación: compras/reinversiones creadas después del histórico ya actualizaron el
+    // espejo pero el histórico no las refleja — restar para que la comparación sea justa.
     const createdAt = compra.created_at ? new Date(compra.created_at) : null;
     if (lastHistoricoFecha && createdAt && createdAt > lastHistoricoFecha) {
       montoRestarValidacion = montoRestarValidacion.plus(montoCompra);
@@ -79,7 +88,9 @@ export async function calcularAjusteCompras(
       compra.status === "pendiente_reinversion";
 
     if (esPendiente) {
-      // Caso 2: pendiente → restar de cálculo
+      // Caso 2: pendiente (compra de cartera o reinversión) → restar de cálculo:
+      // todavía no se acepta, así que no genera interés aún. La reinversión pendiente
+      // queda "ignorada" por esta vía (a la vez se resta del cuadre arriba).
       montoRestarCalculo = montoRestarCalculo.plus(montoCompra);
     } else if (
       compra.status === "completado" &&
@@ -94,8 +105,10 @@ export async function calcularAjusteCompras(
         (fechaEfectiva.getFullYear() === periodoAnio &&
           fechaEfectiva.getMonth() >= periodoMes);
 
-      if (esDelPeriodoODespues) {
-        // Caso 3: completada en el período o después → restar de cálculo
+      if (esDelPeriodoODespues && compra.tipo_operacion === "compra_cartera") {
+        // Caso 3: SOLO compra de cartera completada en el período o después → restar de
+        // cálculo (paga el mes siguiente). Una REINVERSIÓN completada NO se difiere: cobra
+        // interés completo desde su fecha (retroactiva), por eso se excluye de la base aquí.
         montoRestarCalculo = montoRestarCalculo.plus(montoCompra);
         // Caso 1: completada antes del período → cálculo usa monto completo (no restar)
       }

@@ -1843,14 +1843,34 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     }
 
     if (inversionistaId) {
-      whereClauses.push(`
-        EXISTS (
-          SELECT 1
-          FROM cartera.pagos_credito_inversionistas pci2
-          WHERE pci2.pago_id = p.pago_id
-          AND pci2.inversionista_id = '${inversionistaId}'
-        )
-      `);
+      if (Number(inversionistaId) === CUBE_ID) {
+        // Para CUBE, el rubro INTERES del desglose ES de CUBE aunque no haya fila pci
+        // (pagos parciales en los que CUBE recibe 100% del interés vía desglose).
+        // Incluir esos pagos con OR EXISTS sobre facturacion_desglose.
+        whereClauses.push(`(
+          EXISTS (
+            SELECT 1
+            FROM cartera.pagos_credito_inversionistas pci2
+            WHERE pci2.pago_id = p.pago_id
+            AND pci2.inversionista_id = '${inversionistaId}'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM cartera.facturacion_desglose fd_cube
+            WHERE fd_cube.pago_id = p.pago_id
+            AND fd_cube.rubro::text = 'INTERES'
+          )
+        )`);
+      } else {
+        whereClauses.push(`
+          EXISTS (
+            SELECT 1
+            FROM cartera.pagos_credito_inversionistas pci2
+            WHERE pci2.pago_id = p.pago_id
+            AND pci2.inversionista_id = '${inversionistaId}'
+          )
+        `);
+      }
     }
 
     // 🏷️ Filtros de crédito
@@ -2373,24 +2393,43 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     //   - Filtro == otro id → NO ajustar (CUBE no aparece; el filtro ya lo excluyó).
     const cubeEnResumen = !inversionistaId || Number(inversionistaId) === cubeId;
     if (cubeEnResumen) {
-      // Suma del desglose INTERES sobre TODOS los pagos filtrados (mismos criterios
-      // que la query principal), usando whereSQL dentro de un subquery de pago_ids.
-      const cubeInteresDesglose = await db.execute(sql`
+      // cubeNet/cubeIva = desglose INTERES (pagos CON desglose)
+      //                  + pci de CUBE (pagos SIN desglose) — espeja el fallback del detalle.
+      // Pagos filtrados materializados en la CTE "pf" para reusar whereSQL una sola vez.
+      const cubeInteres = await db.execute(sql`
+        WITH pf AS (
+          SELECT p.pago_id
+          FROM cartera.pagos_credito p
+          INNER JOIN cartera.creditos c ON c.credito_id = p.credito_id
+          INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+          ${sql.raw(whereSQL)}
+        )
         SELECT
-          COALESCE(SUM(fd.monto_total - fd.monto_iva), 0) AS "net",
-          COALESCE(SUM(fd.monto_iva), 0)                  AS "iva"
-        FROM cartera.facturacion_desglose fd
-        WHERE fd.rubro::text = 'INTERES'
-          AND fd.pago_id IN (
-            SELECT p.pago_id
-            FROM cartera.pagos_credito p
-            INNER JOIN cartera.creditos c ON c.credito_id = p.credito_id
-            INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-            ${sql.raw(whereSQL)}
-          )
+          COALESCE((SELECT SUM(fd.monto_total - fd.monto_iva)
+                    FROM cartera.facturacion_desglose fd
+                    WHERE fd.rubro::text='INTERES' AND fd.pago_id IN (SELECT pago_id FROM pf)), 0)
+          + COALESCE((SELECT SUM(pci.abono_interes::numeric)
+                      FROM cartera.pagos_credito_inversionistas pci
+                      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+                      WHERE (UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%' OR i.inversionista_id = ${CUBE_ID})
+                        AND pci.pago_id IN (SELECT pago_id FROM pf)
+                        AND NOT EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd2
+                                         WHERE fd2.pago_id = pci.pago_id AND fd2.rubro::text='INTERES')), 0)
+          AS "net",
+          COALESCE((SELECT SUM(fd.monto_iva)
+                    FROM cartera.facturacion_desglose fd
+                    WHERE fd.rubro::text='INTERES' AND fd.pago_id IN (SELECT pago_id FROM pf)), 0)
+          + COALESCE((SELECT SUM(pci.abono_iva_12::numeric)
+                      FROM cartera.pagos_credito_inversionistas pci
+                      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+                      WHERE (UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%' OR i.inversionista_id = ${CUBE_ID})
+                        AND pci.pago_id IN (SELECT pago_id FROM pf)
+                        AND NOT EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd2
+                                         WHERE fd2.pago_id = pci.pago_id AND fd2.rubro::text='INTERES')), 0)
+          AS "iva"
       `);
-      const cubeNet = new Big((cubeInteresDesglose.rows?.[0] as any)?.net ?? 0);
-      const cubeIva = new Big((cubeInteresDesglose.rows?.[0] as any)?.iva ?? 0);
+      const cubeNet = new Big((cubeInteres.rows?.[0] as any)?.net ?? 0);
+      const cubeIva = new Big((cubeInteres.rows?.[0] as any)?.iva ?? 0);
 
       const cubeIdx = totalesInversionistas.findIndex((r) => r.inversionistaId === cubeId);
       if (cubeIdx >= 0) {

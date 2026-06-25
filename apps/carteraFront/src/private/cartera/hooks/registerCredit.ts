@@ -27,6 +27,10 @@ export const creditSchema = z.object({
   otros: z.number().min(0),
   reserva: z.number().min(0),
 
+  // Crédito insoluto: puro capital, sin cargos, INCOBRABLE, asignado a Cube.
+  // El backend fuerza los valores; el front solo muestra/bloquea los campos.
+  esInsoluto: z.boolean().optional().default(false),
+
   // Campos opcionales de dirección del usuario
   direccion: z.string().max(300).optional().nullable(),
   municipio: z.string().max(100).optional().nullable(),
@@ -100,6 +104,7 @@ export function useCreditForm(initialValues?: Partial<CreditFormValues>) {
       nit: "",
       otros: 0,
       reserva: 0,
+      esInsoluto: false,
       direccion: "",
       municipio: "",
       departamento: "",

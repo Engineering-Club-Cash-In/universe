@@ -21,6 +21,43 @@ export const shouldMarkInstallmentPaymentPaid = ({
   hasExistingInstallmentPayment &&
   Number(installmentAmountApplied) > 0;
 
+export const shouldRejectZeroAppliedNormalValidation = ({
+  validationStatus,
+  nextValidationStatus,
+  montoAplicado,
+  mora = 0,
+  otros = 0,
+  pagoConvenio = 0,
+}: {
+  validationStatus?: string | null;
+  nextValidationStatus?: string | null;
+  montoAplicado?: BigInput | null;
+  mora?: BigInput | null;
+  otros?: string | number | null;
+  pagoConvenio?: BigInput | null;
+}) => {
+  if (nextValidationStatus !== "validated") return false;
+  if (["capital", "capital_validated", "reset"].includes(validationStatus ?? "")) {
+    return false;
+  }
+
+  const numericText = (v: string | number | null | undefined) => {
+    if (v == null) return "0";
+    const s = String(v).trim();
+    return /^-?\d+(\.\d+)?$/.test(s) ? s : "0";
+  };
+
+  return (
+    new Big(montoAplicado ?? 0).eq(0) &&
+    new Big(mora ?? 0).eq(0) &&
+    new Big(numericText(otros)).eq(0) &&
+    new Big(pagoConvenio ?? 0).eq(0)
+  );
+};
+
+export const getApplyPaymentHttpStatus = (result: { success?: boolean }) =>
+  result.success === false ? 400 : 200;
+
 export const shouldApplyStaleZeroRestanteAdjustment = ({
   hasExistingPayment,
   isFirstProcessedInstallment,

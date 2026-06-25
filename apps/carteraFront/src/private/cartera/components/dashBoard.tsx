@@ -18,6 +18,7 @@ import {
   Clock,
   Wallet,
   PiggyBank,
+  Shield,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
@@ -115,6 +116,13 @@ const menuSections: MenuSection[] = [
         label: "Devolución Cube",
         icon: <Briefcase className="h-4 w-4" />,
         path: "/devolucion-cube",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "seguros",
+        label: "Seguros",
+        icon: <Shield className="h-4 w-4" />,
+        path: "/seguros",
         roles: ["ADMIN"],
       },
     ],

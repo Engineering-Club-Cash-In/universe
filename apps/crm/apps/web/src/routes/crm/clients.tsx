@@ -27,12 +27,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 import { z } from "zod";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
 } from "@/components/opportunity-detail-modal";
-import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,7 +65,6 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
@@ -171,6 +170,52 @@ const getCarteraStatusClassName = (status?: string | null) => {
 	}
 };
 
+// Genera y descarga un Excel (.xlsx) de la base de clientes para marketing
+function downloadClientsExcel(
+	rows: Array<{
+		nombre: string;
+		telefono: string;
+		correo: string;
+		valorVehiculo: string;
+	}>,
+) {
+	const headers = ["Nombre", "Teléfono", "Correo", "Valor del vehículo"];
+	const body = rows.map((r) => {
+		// El valor va como número para que Excel lo trate como tal (ordenar/sumar).
+		const num = Number(r.valorVehiculo);
+		const valor =
+			r.valorVehiculo && Number.isFinite(num) ? num : r.valorVehiculo;
+		return [r.nombre, r.telefono, r.correo, valor];
+	});
+	const matrix = [headers, ...body];
+	const worksheet = XLSX.utils.aoa_to_sheet(matrix);
+
+	// Ancho de cada columna según el contenido más largo (con piso y techo).
+	worksheet["!cols"] = headers.map((header, col) => {
+		const maxLen = matrix.reduce((max, row) => {
+			const cell = row[col];
+			return Math.max(max, cell == null ? 0 : String(cell).length);
+		}, header.length);
+		return { wch: Math.min(Math.max(maxLen + 2, 12), 60) };
+	});
+
+	// Formato de miles/decimales para la columna "Valor del vehículo" (D).
+	for (let i = 0; i < body.length; i++) {
+		const ref = XLSX.utils.encode_cell({ r: i + 1, c: 3 });
+		const cell = worksheet[ref];
+		if (cell && typeof cell.v === "number") {
+			cell.z = "#,##0.00";
+		}
+	}
+
+	const workbook = XLSX.utils.book_new();
+	XLSX.utils.book_append_sheet(workbook, worksheet, "Clientes");
+	XLSX.writeFile(
+		workbook,
+		`clientes-${new Date().toISOString().slice(0, 10)}.xlsx`,
+	);
+}
+
 // Type definition for credit analysis
 type CreditAnalysisData = {
 	leadId: string;
@@ -259,17 +304,13 @@ function RouteComponent() {
 		"",
 	);
 	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
-	const [dateRange, setDateRange] = usePersistedDateRange(
-		"crm/clients/dateRange",
-	);
 	const [page, setPage] = usePersistedState<number>("crm/clients/page", 0);
 	const pageSize = 20;
 
-	const hasActiveFilters = searchTerm !== "" || dateRange !== undefined;
+	const hasActiveFilters = searchTerm !== "";
 	const resetFilters = () => {
 		setSearchTerm("");
 		setDebouncedSearch("");
-		setDateRange(undefined);
 		setPage(0);
 	};
 
@@ -422,8 +463,6 @@ function RouteComponent() {
 				limit: pageSize,
 				offset: page * pageSize,
 				search: debouncedSearch || undefined,
-				dateFrom: dateRange?.from?.toISOString(),
-				dateTo: dateRange?.to?.toISOString(),
 			},
 		}),
 		enabled:
@@ -437,8 +476,6 @@ function RouteComponent() {
 			page,
 			pageSize,
 			debouncedSearch,
-			dateRange?.from?.toISOString(),
-			dateRange?.to?.toISOString(),
 		],
 	});
 
@@ -501,6 +538,22 @@ function RouteComponent() {
 		},
 	});
 
+	// Export de la base de clientes (CRM) para marketing/lookalike
+	const exportMutation = useMutation({
+		mutationFn: () => client.exportClientsForMarketing(),
+		onSuccess: (result) => {
+			if (!result.data.length) {
+				toast.info("No hay clientes para exportar");
+				return;
+			}
+			downloadClientsExcel(result.data);
+			toast.success(`${result.total} clientes exportados`);
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "Error al exportar la base");
+		},
+	});
+
 	const handleStartEditContact = () => {
 		if (!selectedClient) return;
 		setEditForm({
@@ -546,19 +599,36 @@ function RouteComponent() {
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
-			<div>
-				<h1 className="font-bold text-3xl">Cartera de Clientes</h1>
-				<p className="text-muted-foreground">
-					Créditos vigentes de cartera enriquecidos con CRM cuando existe match
-				</p>
+			<div className="flex flex-wrap items-start justify-between gap-4">
+				<div>
+					<h1 className="font-bold text-3xl">Cartera de Clientes</h1>
+					<p className="text-muted-foreground">
+						Créditos vigentes de cartera enriquecidos con CRM cuando existe
+						match
+					</p>
+				</div>
+				{PERMISSIONS.canExportReports(userProfile.data.role) && (
+					<Button
+						variant="outline"
+						onClick={() => exportMutation.mutate()}
+						disabled={exportMutation.isPending}
+					>
+						{exportMutation.isPending ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Download className="mr-2 h-4 w-4" />
+						)}
+						Descargar base de clientes
+					</Button>
+				)}
 			</div>
 
 			{/* Summary Stats */}
-			<div className="grid gap-4 md:grid-cols-3">
+			<div className="grid gap-4 md:grid-cols-2">
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="font-medium text-sm">
-							Total de Clientes
+							Total de Créditos
 						</CardTitle>
 						<HandshakeIcon className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
@@ -571,38 +641,31 @@ function RouteComponent() {
 						</p>
 					</CardContent>
 				</Card>
-				<Card>
-					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="font-medium text-sm">Con CRM</CardTitle>
-						<CheckCircle2 className="h-4 w-4 text-green-500" />
-					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-2xl">
-							{statsQuery.data?.totalClosedOpportunities ?? 0}
-						</div>
-						<p className="text-muted-foreground text-xs">
-							Créditos con oportunidad enlazada
-						</p>
-					</CardContent>
-				</Card>
-				<Card>
-					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="font-medium text-sm">Valor Total</CardTitle>
-						<Banknote className="h-4 w-4 text-purple-500" />
-					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-2xl">
-							Q
-							{(statsQuery.data?.totalValue ?? 0).toLocaleString("es-GT", {
-								minimumFractionDigits: 2,
-								maximumFractionDigits: 2,
-							})}
-						</div>
-						<p className="text-muted-foreground text-xs">
-							Deuda total en cartera vigente
-						</p>
-					</CardContent>
-				</Card>
+				{/* Capital de la cartera activa (suma de capital vía /stats). Es
+				    global; se oculta a los vendedores (no hay un agregado acotado a
+				    su cartera, mostraría Q0.00 engañoso). */}
+				{userProfile.data.role !== "sales" && (
+					<Card>
+						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+							<CardTitle className="font-medium text-sm">
+								Capital en cartera
+							</CardTitle>
+							<Banknote className="h-4 w-4 text-purple-500" />
+						</CardHeader>
+						<CardContent>
+							<div className="font-bold text-2xl">
+								Q
+								{(statsQuery.data?.totalValue ?? 0).toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
+							</div>
+							<p className="text-muted-foreground text-xs">
+								Capital de créditos activos
+							</p>
+						</CardContent>
+					</Card>
+				)}
 			</div>
 
 			<Card>
@@ -623,19 +686,12 @@ function RouteComponent() {
 						<div className="relative max-w-md flex-1">
 							<Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
 							<Input
-								placeholder="Buscar por nombre, NIT, SIFCO, email o teléfono..."
+								placeholder="Buscar por nombre o No. SIFCO..."
 								value={searchTerm}
 								onChange={(e) => setSearchTerm(e.target.value)}
 								className="pl-8"
 							/>
 						</div>
-						<DateRangeFilter
-							dateRange={dateRange}
-							onDateRangeChange={(range) => {
-								setDateRange(range);
-								setPage(0);
-							}}
-						/>
 						{hasActiveFilters && (
 							<Button
 								variant="ghost"
@@ -645,12 +701,6 @@ function RouteComponent() {
 							>
 								<X className="mr-1 h-3 w-3" />
 								Limpiar filtros
-								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-									{
-										[searchTerm !== "", dateRange !== undefined].filter(Boolean)
-											.length
-									}
-								</Badge>
 							</Button>
 						)}
 					</div>

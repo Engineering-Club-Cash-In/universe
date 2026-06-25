@@ -24,6 +24,7 @@ import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 import { esPagoAplicado } from "../utils/paymentStatus";
+import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -537,7 +538,7 @@ export const paymentRouter = new Elysia()
       // Aplicar el pago
       const resultado = await aplicarPagoAlCredito(pagoId);
 
-      set.status = 200;
+      set.status = getApplyPaymentHttpStatus(resultado);
       return resultado;
 
     } catch (error) {

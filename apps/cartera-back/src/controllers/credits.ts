@@ -1,5 +1,6 @@
 import { db } from "../database/index";
 import {
+  aseguradoras,
   asesores,
   bad_debts,
   boletas,
@@ -559,6 +560,8 @@ export interface CreditoConInfo {
     fecha_inicio_participacion?: string;
   }[];
   fecha_inicio?: string | null;
+  /** Nombre de la aseguradora vinculada al crédito (null si no tiene). */
+  aseguradora?: string | null;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -612,7 +615,8 @@ export async function getCreditosWithUserByMesAnio(
   numeros_credito_sifco?: string[],
   capital_min?: number,
   capital_max?: number,
-  estados_credito?: StatusCredit[]
+  estados_credito?: StatusCredit[],
+  aseguradora_id?: number
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -783,6 +787,10 @@ export async function getCreditosWithUserByMesAnio(
     conditions.push(sql`${creditos.capital}::numeric <= ${capital_max}`);
   }
 
+  if (aseguradora_id !== undefined) {
+    conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
+  }
+
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 
   let rows: any[] = [];
@@ -794,6 +802,7 @@ export async function getCreditosWithUserByMesAnio(
         usuarios,
         asesores,
         moras_credito,
+        aseguradora_nombre: aseguradoras.nombre,
       })
       .from(creditos)
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
@@ -804,7 +813,8 @@ export async function getCreditosWithUserByMesAnio(
           eq(creditos.credito_id, moras_credito.credito_id),
           eq(moras_credito.activa, true) // 🔥 Solo moras activas
         )
-      );
+      )
+      .leftJoin(aseguradoras, eq(creditos.aseguradora_id, aseguradoras.id));
 
     // 🔥 JOIN con cuotas_credito si filtramos por proximidad
     if (needsProximidadJoin) {
@@ -1182,6 +1192,7 @@ export async function getCreditosWithUserByMesAnio(
           deuda_total_con_mora,
           proxima_cuota,
           fecha_inicio,
+          aseguradora: row.aseguradora_nombre ?? null,
         });
       }
     });

@@ -40,6 +40,9 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   // Filtro por inversionistas (multi-select)
   const [inversionistaIds, setInversionistaIds] = usePersistedState<number[]>("cartera/credits/inversionistaIds", []);
 
+  // Filtro por aseguradora
+  const [aseguradoraId, setAseguradoraId] = usePersistedState<number | undefined>("cartera/credits/aseguradoraId", undefined);
+
   // Estado local del input (lo que escribe el usuario)
   const [nombreUsuarioInput, setNombreUsuarioInput] = usePersistedState<string>("cartera/credits/nombreUsuarioInput", "");
   // Estado que realmente dispara la búsqueda
@@ -59,6 +62,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
       nombreUsuario, // 👈 Este es el que realmente busca
       isVehiculoPropio,
       inversionistaIds,
+      aseguradoraId,
     ],
     queryFn: () =>
       getCreditosPaginados({
@@ -73,6 +77,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
         nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,
         is_vehiculo_propio: isVehiculoPropio,
         inversionista_ids: inversionistaIds.length > 0 ? inversionistaIds.join(",") : undefined,
+        aseguradora_id: aseguradoraId,
       }),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
@@ -102,6 +107,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
       nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,
       is_vehiculo_propio: isVehiculoPropio,
       inversionista_ids: inversionistaIds.length > 0 ? inversionistaIds.join(",") : undefined,
+      aseguradora_id: aseguradoraId,
     });
   };
 
@@ -137,6 +143,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setAsesorId(options?.initialAsesorId);
     setIsVehiculoPropio(undefined);
     setInversionistaIds([]);
+    setAseguradoraId(undefined);
     setEstado("ACTIVO");
     setPage(1);
   };
@@ -148,6 +155,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     estado !== "ACTIVO" ||
     isVehiculoPropio !== undefined ||
     inversionistaIds.length > 0 ||
+    aseguradoraId !== undefined ||
     asesorId !== options?.initialAsesorId;
 
   const estados = [
@@ -211,5 +219,8 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     // Filtro inversionistas
     inversionistaIds,
     setInversionistaIds,
+    // Filtro aseguradora
+    aseguradoraId,
+    setAseguradoraId,
   };
 }

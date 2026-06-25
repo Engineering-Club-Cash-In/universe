@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
 	QUOTER_VEHICLE_TYPE_OPTIONS,
 	VEHICLE_BODY_TYPE_OPTIONS,
+	VEHICLE_CONDITION_OPTIONS,
 	QUOTER_VEHICLE_ORIGIN_OPTIONS,
 	VEHICLE_PROVENANCE_OPTIONS,
 	VEHICLE_USE_OPTIONS,
+	isValidVehicleConditionOrigin,
 } from "./vehicle-form-options";
 
 describe("vehicle form options", () => {
@@ -27,5 +29,18 @@ describe("vehicle form options", () => {
 			"Particular",
 			"Comercial",
 		]);
+		expect(VEHICLE_CONDITION_OPTIONS).toEqual([
+			{ value: false, label: "Usado" },
+			{ value: true, label: "Nuevo de agencia" },
+		]);
+	});
+
+	test("allows used imported/rodado vehicles but rejects new imported/rodado vehicles", () => {
+		expect(isValidVehicleConditionOrigin(false, "Nacional")).toBe(true);
+		expect(isValidVehicleConditionOrigin(false, "Importado")).toBe(true);
+		expect(isValidVehicleConditionOrigin(false, "Rodado")).toBe(true);
+		expect(isValidVehicleConditionOrigin(true, "Nacional")).toBe(true);
+		expect(isValidVehicleConditionOrigin(true, "Importado")).toBe(false);
+		expect(isValidVehicleConditionOrigin(true, "Rodado")).toBe(false);
 	});
 });

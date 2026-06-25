@@ -32,7 +32,8 @@ import { AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ModalEditCredit } from "./ModalEditCredit";
 import { useCatalogs } from "../hooks/catalogs";
-import type { Investor } from "../services/services";
+import type { Investor, Aseguradora } from "../services/services";
+import { getAseguradoras } from "../services/services";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModalCancelCredit } from "./modalCreditCancel";
 import { openReportInNewTab, useActivateCredit, useToggleCancelacionActivo } from "../hooks/cancelCredit";
@@ -95,6 +96,8 @@ export function ListaCreditosPagos() {
     setIsVehiculoPropio,
     inversionistaIds,
     setInversionistaIds,
+    aseguradoraId,
+    setAseguradoraId,
     clearAllFilters,
     hasActiveFilters,
   } = useCreditosPaginadosWithFilters({
@@ -109,6 +112,14 @@ export function ListaCreditosPagos() {
   const [selectedCreditFechaInicio, setSelectedCreditFechaInicio] = useState<{ sifco: string; fechaActual: string | null } | null>(null);
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
+
+  // Aseguradoras para el filtro
+  const [aseguradoras, setAseguradoras] = useState<Aseguradora[]>([]);
+  React.useEffect(() => {
+    getAseguradoras()
+      .then(setAseguradoras)
+      .catch(() => setAseguradoras([]));
+  }, []);
 
   const estadoSeleccionado = useMemo(
     () => estados.find((e) => e.value === estado),
@@ -478,8 +489,33 @@ export function ListaCreditosPagos() {
           )}
         </label>
 
+        {/* Filtro por Aseguradora */}
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <FileCheck className="w-5 h-5 shrink-0" />
+          <select
+            id="aseguradora"
+            name="aseguradora"
+            value={aseguradoraId ?? ""}
+            onChange={(e) => {
+              const newValue = e.target.value
+                ? Number(e.target.value)
+                : undefined;
+              setAseguradoraId(newValue);
+              setPage(1);
+            }}
+            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
+          >
+            <option value="">Todas las aseguradoras</option>
+            {aseguradoras.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+
         {/* Filtro por Estado */}
-        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+        <div className="flex flex-wrap items-center gap-2 col-span-full">
           <AlertCircle className="w-4 h-4 text-blue-700" />
           <span className="text-sm font-semibold text-blue-800 mr-1">Estado:</span>
           {estados.map((est) => (
@@ -613,7 +649,7 @@ export function ListaCreditosPagos() {
               <X className="w-4 h-4" />
               Limpiar filtros
               <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
-                {[creditoSifco !== "", nombreUsuarioInput !== "", isAdmin && asesorId !== undefined, estado !== "ACTIVO", isVehiculoPropio !== undefined, inversionistaIds.length > 0].filter(Boolean).length}
+                {[creditoSifco !== "", nombreUsuarioInput !== "", isAdmin && asesorId !== undefined, estado !== "ACTIVO", isVehiculoPropio !== undefined, inversionistaIds.length > 0, aseguradoraId !== undefined].filter(Boolean).length}
               </Badge>
             </Button>
           )}
@@ -1265,6 +1301,11 @@ function MobileView({
                 🚗 V. Cash-In
               </span>
             )}
+            {item.aseguradora && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#15803d', border: '1px solid rgba(22,163,74,0.25)' }}>
+                🛡️ {item.aseguradora}
+              </span>
+            )}
           </p>
           <p className="text-sm text-gray-700">
             <strong>Capital:</strong> Q
@@ -1579,6 +1620,11 @@ function DesktopView({
                     {item.creditos.is_vehiculo_propio && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(78,87,234,0.1)', color: '#4E57EA', border: '1px solid rgba(78,87,234,0.25)' }}>
                         🚗 V. Cash-In
+                      </span>
+                    )}
+                    {item.aseguradora && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#15803d', border: '1px solid rgba(22,163,74,0.25)' }}>
+                        🛡️ {item.aseguradora}
                       </span>
                     )}
                   </div>

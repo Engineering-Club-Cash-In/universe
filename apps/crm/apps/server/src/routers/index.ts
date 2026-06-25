@@ -83,6 +83,7 @@ export const crmAppRouter = {
 	getClientsStats: crmRouter.getClientsStats,
 	getLeadsAsClients: crmRouter.getLeadsAsClients,
 	getLeadsAsClientsStats: crmRouter.getLeadsAsClientsStats,
+	exportClientsForMarketing: crmRouter.exportClientsForMarketing,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,

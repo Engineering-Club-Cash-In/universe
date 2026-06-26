@@ -973,7 +973,12 @@ async function createCredit(
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,
 			gps: gps,
-			aseguradora: aseguradoraLabel(opportunity.insuranceProvider),
+			// Si la aseguradora elegida es GyT, en cartera SIEMPRE se manda como
+			// Universales. El resto del flujo (CRM, cotización) conserva el valor real.
+			aseguradora:
+				opportunity.insuranceProvider === "gyt"
+					? "Universales"
+					: aseguradoraLabel(opportunity.insuranceProvider),
 			categoria: opportunity.categoria ?? undefined,
 			nit: cleanNit(opportunity.nit),
 			royalti: royalti,

@@ -8748,7 +8748,9 @@ export async function simularInversionista(
       // Calculamos cuántas cuotas quedan: desde max_liquidado+1 hasta plazo-1
       // Usamos el saldo actual del crédito y las cuotas restantes para cuota francesa
       const maxLiq = ultimaCuotaLiquidadaPorCredito.get(ci.credito_id!) ?? -1;
-      const cuotasRestantes = ci.plazo! - maxLiq;
+      // Cuotas van 1..plazo. Si nunca liquidó (maxLiq=-1) quedan todas (plazo).
+      // Si liquidó hasta maxLiq quedan plazo - maxLiq.
+      const cuotasRestantes = maxLiq < 0 ? ci.plazo! : ci.plazo! - maxLiq;
       if (cuotasRestantes > 0 && saldoCredito.gt(0)) {
         const r = tasaMensual.toNumber();
         const n = cuotasRestantes;
@@ -8957,6 +8959,9 @@ export async function simularInversionista(
       : new Big(0);
     const tasaMensualFicticio = tasaFicticio.div(100);
 
+    // Map auxiliar para evitar O(n²) en los loops que buscan ciOrig por credito_id
+    const creditosDeInvMap = new Map(creditosDeInv.map((ci) => [ci.credito_id, ci]));
+
     // 2. Recopilar depósitos por tipo y fecha (YYYY-MM).
     //    Para reinversion_combinada cada crédito espejo tiene su propio tipo_reinversion_espejo.
     //    Para los demás tipos, todos los créditos se acumulan bajo el mismo tipo.
@@ -8980,7 +8985,7 @@ export async function simularInversionista(
 
     if (esVariableOExcedente) {
       for (const cr of creditosSimulados) {
-        const ciOrig = creditosDeInv.find((c) => c.credito_id === cr.credito_id)!;
+        const ciOrig = creditosDeInvMap.get(cr.credito_id!)!;
         const tipoEspejo =
           tipoReinvGlobal === "reinversion_combinada"
             ? (ciOrig.tipo_reinversion_espejo ?? "sin_reinversion")

@@ -8522,6 +8522,57 @@ export async function getCreditosEspejoPendientes(
 // SIMULACIÓN: Proyección de pagos futuros de un inversionista
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * Cuota proyectada de la simulación. Los campos `_raw_*` son valores de cálculo
+ * en `Big` (quetzales, sin formatear) usados internamente; se eliminan con
+ * `stripRaw` antes de devolver la respuesta. Los campos formateados (string)
+ * son los de presentación, ya convertidos a la moneda del inversionista.
+ */
+type CuotaProyectada = {
+  numero_cuota: number;
+  fecha_vencimiento: string | null;
+  abono_capital: string | number;
+  abono_interes: string | number;
+  abono_iva: string | number;
+  abono_isr: string | number;
+  monto_neto: string | number;
+  _raw_capital: Big;
+  _raw_interes: Big;
+  _raw_iva: Big;
+  _raw_isr: Big;
+  _raw_monto_neto: Big;
+  _raw_bruto: Big;
+  reinvierte_capital: boolean;
+  reinvierte_interes: boolean;
+};
+
+/**
+ * Cap mensual de reinversión repartido proporcionalmente sobre una cuota.
+ *
+ * El monto fijo de reinversión (`cap`) es un límite MENSUAL sobre el bruto de
+ * todos los créditos que pagan ese mes, no por crédito. Cada cuota toma la
+ * fracción `bruto / totalMes` del cap efectivo `min(cap, totalMes)`.
+ *
+ * Devuelve { reinvierte, recibe } donde reinvierte + recibe = bruto.
+ *   - reinversion_variable: el inversionista RECIBE el excedente (bruto - cap).
+ *   - reinversion_excedente: el inversionista RECIBE el cap; reinvierte el resto.
+ *
+ * Misma fórmula que usan la segunda pasada (monto_neto) y el depósito ficticio,
+ * para que ambos no diverjan.
+ */
+function repartirCapMensual(
+  bruto: Big,
+  totalMes: Big,
+  cap: Big
+): { reinvierte: Big; recibe: Big } {
+  if (totalMes.lte(0)) return { reinvierte: new Big(0), recibe: new Big(0) };
+  const capEfectivo = cap.lt(totalMes) ? cap : totalMes;
+  const proporcion = bruto.div(totalMes);
+  const parteCap = proporcion.times(capEfectivo).round(2);
+  const parteExcedente = bruto.minus(parteCap);
+  return { reinvierte: parteCap, recibe: parteExcedente };
+}
+
 export async function simularInversionista(
   inversionista_id: number,
   mesLiquidacion?: { mes: number; anio: number }
@@ -8568,8 +8619,9 @@ export async function simularInversionista(
     .where(
       and(
         eq(creditos_inversionistas_espejo.inversionista_id, inv.inversionista_id),
-        inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]),
-        ne(creditos_inversionistas_espejo.status, "pendiente_compra_cartera")
+        inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"])
+        // NOTA: NO se filtra por pendiente_compra_cartera aquí. Esos créditos
+        // están enlazados en creditos_inversionistas_espejo y deben proyectarse.
       )
     );
 
@@ -8771,7 +8823,7 @@ export async function simularInversionista(
     let sub_isr = new Big(0);
     let sub_neto = new Big(0);
 
-    const cuotas_proyectadas = cuotas.map((cuota) => {
+    const cuotas_proyectadas: CuotaProyectada[] = cuotas.map((cuota): CuotaProyectada => {
       // Saldo agotado → inversionista ya no tiene participación en este crédito
       if (saldoActual.lte(0)) {
         return {
@@ -8958,7 +9010,7 @@ export async function simularInversionista(
       for (const cuota of cr.cuotas_proyectadas) {
         if (!cuota.fecha_vencimiento) continue;
         const key = (cuota.fecha_vencimiento as string).slice(0, 7);
-        const bruto = (cuota as any)._raw_bruto as Big;
+        const bruto = cuota._raw_bruto;
         brutoPorMes.set(key, (brutoPorMes.get(key) ?? new Big(0)).plus(bruto));
       }
     }
@@ -8971,32 +9023,24 @@ export async function simularInversionista(
         let nuevoNeto: Big;
         if (tipoEfectivo !== "reinversion_variable" && tipoEfectivo !== "reinversion_excedente") {
           // Este crédito no usa cap → su monto_neto ya es correcto del primer pass
-          nuevoNeto = (cuota as any)._raw_monto_neto as Big;
+          nuevoNeto = cuota._raw_monto_neto;
         } else {
           if (!cuota.fecha_vencimiento) {
             nuevoNeto = new Big(0);
           } else {
             const key = (cuota.fecha_vencimiento as string).slice(0, 7);
-            const bruto = (cuota as any)._raw_bruto as Big;
+            const bruto = cuota._raw_bruto;
             const totalMes = brutoPorMes.get(key) ?? new Big(0);
-            if (totalMes.lte(0)) {
-              nuevoNeto = new Big(0);
-            } else if (tipoEfectivo === "reinversion_variable") {
-              const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
-              const reinvierte = bruto.div(totalMes).times(capEfectivo).round(2);
-              nuevoNeto = bruto.minus(reinvierte);
-            } else {
-              // reinversion_excedente: recibe el cap proporcional
-              const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
-              nuevoNeto = bruto.div(totalMes).times(capEfectivo).round(2);
-            }
-            (cuota as any)._raw_monto_neto = nuevoNeto;
-            (cuota as any).monto_neto = formatValue(nuevoNeto.toString());
+            const { reinvierte, recibe } = repartirCapMensual(bruto, totalMes, montoReinvGlobal);
+            // variable: recibe el excedente; excedente: recibe el cap proporcional.
+            nuevoNeto = tipoEfectivo === "reinversion_variable" ? recibe : reinvierte;
+            cuota._raw_monto_neto = nuevoNeto;
+            cuota.monto_neto = formatValue(nuevoNeto.toString());
           }
         }
         nuevoSubNeto = nuevoSubNeto.plus(nuevoNeto);
       }
-      (cr.subtotal as any).total_monto_neto = formatValue(nuevoSubNeto.round(2).toString());
+      cr.subtotal.total_monto_neto = formatValue(nuevoSubNeto.round(2).toString());
       gt_neto = gt_neto.plus(nuevoSubNeto);
     }
   }
@@ -9080,10 +9124,10 @@ export async function simularInversionista(
         for (const cuota of cr.cuotas_proyectadas) {
           if (!cuota.fecha_vencimiento) continue;
           const key = (cuota.fecha_vencimiento as string).slice(0, 7);
-          const cap = (cuota as any)._raw_capital as Big;
-          const intBruto = (cuota as any)._raw_interes as Big;
-          const iva = (cuota as any)._raw_iva as Big;
-          const isr = (cuota as any)._raw_isr as Big;
+          const cap = cuota._raw_capital;
+          const intBruto = cuota._raw_interes;
+          const iva = cuota._raw_iva;
+          const isr = cuota._raw_isr;
           const interesNeto = inv.emite_factura ? intBruto.plus(iva) : intBruto.minus(isr);
           const prev = totalBrutoPorMes.get(key) ?? new Big(0);
           totalBrutoPorMes.set(key, prev.plus(cap).plus(interesNeto));
@@ -9109,10 +9153,10 @@ export async function simularInversionista(
         if (!cuota.fecha_vencimiento) continue;
         const key = (cuota.fecha_vencimiento as string).slice(0, 7); // "YYYY-MM"
 
-        const cap = (cuota as any)._raw_capital as Big;
-        const intBruto = (cuota as any)._raw_interes as Big;
-        const iva = (cuota as any)._raw_iva as Big;
-        const isr = (cuota as any)._raw_isr as Big;
+        const cap = cuota._raw_capital;
+        const intBruto = cuota._raw_interes;
+        const iva = cuota._raw_iva;
+        const isr = cuota._raw_isr;
         const interesNeto = inv.emite_factura
           ? intBruto.plus(iva)
           : intBruto.minus(isr);
@@ -9129,25 +9173,17 @@ export async function simularInversionista(
             deposito = cap.plus(interesNeto);
             break;
           case "reinversion_variable": {
-            // El cap mensual aplica sobre el total de todos los créditos ese mes.
-            // Distribuimos proporcionalmente: aporte_credito / total_mes × min(total_mes, cap)
+            // variable: se reinvierte el cap mensual (repartido proporcional); recibe el excedente.
             const totalMes = totalBrutoPorMes.get(key) ?? new Big(0);
             const totalCuota = cap.plus(interesNeto);
-            if (totalMes.gt(0)) {
-              const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
-              deposito = totalCuota.div(totalMes).times(capEfectivo).round(2);
-            }
+            deposito = repartirCapMensual(totalCuota, totalMes, montoReinvGlobal).reinvierte;
             break;
           }
           case "reinversion_excedente": {
-            // Excedente = total_mes − min(total_mes, cap), distribuido proporcionalmente
+            // excedente: recibe el cap mensual; se reinvierte el excedente (repartido proporcional).
             const totalMes = totalBrutoPorMes.get(key) ?? new Big(0);
             const totalCuota = cap.plus(interesNeto);
-            if (totalMes.gt(0)) {
-              const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
-              const excedenteMes = totalMes.minus(capEfectivo);
-              deposito = totalCuota.div(totalMes).times(excedenteMes).round(2);
-            }
+            deposito = repartirCapMensual(totalCuota, totalMes, montoReinvGlobal).recibe;
             break;
           }
           default:
@@ -9344,12 +9380,20 @@ export async function simularInversionista(
   // ─── FIN CRÉDITO FICTICIO ────────────────────────────────────────────────────
 
   // Eliminar campos internos _raw_* de las cuotas proyectadas antes de retornar
-  const stripRaw = (cuotas: typeof creditosSimulados[number]["cuotas_proyectadas"]) =>
-    cuotas.map(({ _raw_capital, _raw_interes, _raw_iva, _raw_isr, _raw_monto_neto, _raw_bruto, ...rest }: any) => rest);
+  const stripRaw = (cuotas: CuotaProyectada[]) =>
+    cuotas.map(({ _raw_capital, _raw_interes, _raw_iva, _raw_isr, _raw_monto_neto, _raw_bruto, ...rest }) => rest);
 
   // Si se pidió un mes específico, filtrar cuotas_proyectadas a ese mes/año
   // y recalcular subtotales y totales solo con esas cuotas
-  let creditosFinales: typeof creditosSimulados = creditosSimulados.map((cr) => ({
+  // Tras stripRaw las cuotas pierden los campos _raw_*, así que el tipo de salida
+  // difiere de creditosSimulados (que sí los tiene). Inferimos desde el map.
+  type CreditoFinal = Omit<typeof creditosSimulados[number], "cuotas_proyectadas"> & {
+    cuotas_proyectadas: Omit<
+      CuotaProyectada,
+      "_raw_capital" | "_raw_interes" | "_raw_iva" | "_raw_isr" | "_raw_monto_neto" | "_raw_bruto"
+    >[];
+  };
+  let creditosFinales: CreditoFinal[] = creditosSimulados.map((cr) => ({
     ...cr,
     cuotas_proyectadas: stripRaw(cr.cuotas_proyectadas),
   }));
@@ -9388,11 +9432,11 @@ export async function simularInversionista(
         });
 
         // Usar _raw_* para evitar doble conversión USD en inversionistas con moneda=dolares
-        const s_cap = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_capital as Big), new Big(0));
-        const s_int = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_interes as Big), new Big(0));
-        const s_iva = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_iva as Big), new Big(0));
-        const s_isr = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_isr as Big), new Big(0));
-        const s_net = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_monto_neto as Big), new Big(0));
+        const s_cap = cuotasFiltradas.reduce((acc, c) => acc.plus(c._raw_capital), new Big(0));
+        const s_int = cuotasFiltradas.reduce((acc, c) => acc.plus(c._raw_interes), new Big(0));
+        const s_iva = cuotasFiltradas.reduce((acc, c) => acc.plus(c._raw_iva), new Big(0));
+        const s_isr = cuotasFiltradas.reduce((acc, c) => acc.plus(c._raw_isr), new Big(0));
+        const s_net = cuotasFiltradas.reduce((acc, c) => acc.plus(c._raw_monto_neto), new Big(0));
 
         f_capital = f_capital.plus(s_cap);
         f_interes = f_interes.plus(s_int);
@@ -9454,7 +9498,7 @@ export async function simularInversionista(
         _raw_creditos: new Big(0),
         creditos: [],
       };
-      const rawNeto = (cuota as any)._raw_monto_neto as Big;
+      const rawNeto = cuota._raw_monto_neto;
       existing.creditos.push({
         credito_id: cr.credito_id,
         numero_credito_sifco: cr.numero_credito_sifco,

@@ -8748,7 +8748,7 @@ export async function simularInversionista(
       // Calculamos cuántas cuotas quedan: desde max_liquidado+1 hasta plazo-1
       // Usamos el saldo actual del crédito y las cuotas restantes para cuota francesa
       const maxLiq = ultimaCuotaLiquidadaPorCredito.get(ci.credito_id!) ?? -1;
-      const cuotasRestantes = ci.plazo! - maxLiq - 1;
+      const cuotasRestantes = ci.plazo! - maxLiq;
       if (cuotasRestantes > 0 && saldoCredito.gt(0)) {
         const r = tasaMensual.toNumber();
         const n = cuotasRestantes;
@@ -8778,6 +8778,7 @@ export async function simularInversionista(
           _raw_interes: new Big(0),
           _raw_iva: new Big(0),
           _raw_isr: new Big(0),
+          _raw_monto_neto: new Big(0),
           reinvierte_capital: reinvierte_capital_credito,
           reinvierte_interes: reinvierte_interes_credito,
         };
@@ -8878,6 +8879,7 @@ export async function simularInversionista(
         _raw_interes: abono_interes.round(2),
         _raw_iva: abono_iva.round(2),
         _raw_isr: abono_isr.round(2),
+        _raw_monto_neto: monto_neto.round(2),
         reinvierte_capital: reinvierte_capital_credito,
         reinvierte_interes: reinvierte_interes_credito,
       };
@@ -8964,12 +8966,27 @@ export async function simularInversionista(
     // antes de aplicar el cap, para que el límite mensual aplique sobre el total y no por crédito.
     const totalBrutoPorMes = new Map<string, Big>(); // "YYYY-MM" → suma de (cap + interesNeto) de todos los créditos ese mes
 
-    const esVariableOExcedente =
-      tipoReinvGlobal === "reinversion_variable" ||
-      tipoReinvGlobal === "reinversion_excedente";
+    // Para reinversion_combinada también puede haber créditos espejo con tipo variable/excedente
+    const tiposVariableExcedente = new Set<string>();
+    if (tipoReinvGlobal === "reinversion_variable" || tipoReinvGlobal === "reinversion_excedente") {
+      tiposVariableExcedente.add(tipoReinvGlobal);
+    } else if (tipoReinvGlobal === "reinversion_combinada") {
+      for (const ci of creditosDeInv) {
+        const t = ci.tipo_reinversion_espejo ?? "sin_reinversion";
+        if (t === "reinversion_variable" || t === "reinversion_excedente") tiposVariableExcedente.add(t);
+      }
+    }
+    const esVariableOExcedente = tiposVariableExcedente.size > 0;
 
     if (esVariableOExcedente) {
       for (const cr of creditosSimulados) {
+        const ciOrig = creditosDeInv.find((c) => c.credito_id === cr.credito_id)!;
+        const tipoEspejo =
+          tipoReinvGlobal === "reinversion_combinada"
+            ? (ciOrig.tipo_reinversion_espejo ?? "sin_reinversion")
+            : tipoReinvGlobal;
+        if (tipoEspejo !== "reinversion_variable" && tipoEspejo !== "reinversion_excedente") continue;
+
         for (const cuota of cr.cuotas_proyectadas) {
           if (!cuota.fecha_vencimiento) continue;
           const key = (cuota.fecha_vencimiento as string).slice(0, 7);
@@ -9238,7 +9255,7 @@ export async function simularInversionista(
 
   // Eliminar campos internos _raw_* de las cuotas proyectadas antes de retornar
   const stripRaw = (cuotas: typeof creditosSimulados[number]["cuotas_proyectadas"]) =>
-    cuotas.map(({ _raw_capital, _raw_interes, _raw_iva, _raw_isr, ...rest }: any) => rest);
+    cuotas.map(({ _raw_capital, _raw_interes, _raw_iva, _raw_isr, _raw_monto_neto, ...rest }: any) => rest);
 
   // Si se pidió un mes específico, filtrar cuotas_proyectadas a ese mes/año
   // y recalcular subtotales y totales solo con esas cuotas
@@ -9280,11 +9297,12 @@ export async function simularInversionista(
           );
         });
 
-        const s_cap = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.abono_capital as number)), new Big(0));
-        const s_int = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.abono_interes as number)), new Big(0));
-        const s_iva = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.abono_iva as number)), new Big(0));
-        const s_isr = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.abono_isr as number)), new Big(0));
-        const s_net = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.monto_neto as number)), new Big(0));
+        // Usar _raw_* para evitar doble conversión USD en inversionistas con moneda=dolares
+        const s_cap = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_capital as Big), new Big(0));
+        const s_int = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_interes as Big), new Big(0));
+        const s_iva = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_iva as Big), new Big(0));
+        const s_isr = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_isr as Big), new Big(0));
+        const s_net = cuotasFiltradas.reduce((acc, c) => acc.plus((c as any)._raw_monto_neto as Big), new Big(0));
 
         f_capital = f_capital.plus(s_cap);
         f_interes = f_interes.plus(s_int);

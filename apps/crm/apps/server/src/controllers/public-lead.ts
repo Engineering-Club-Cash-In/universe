@@ -235,6 +235,12 @@ export async function createPublicLead(c: Context) {
 	try {
 		const body = await c.req.json();
 
+		if (!body.firstName && body.fullName) {
+			const parts = (body.fullName as string).trim().split(/\s+/);
+			body.firstName = parts[0] ?? "";
+			body.lastName = parts.slice(1).join(" ") || parts[0] || "";
+		}
+
 		if (!body.firstName || !body.lastName || !body.email) {
 			return c.json(
 				{

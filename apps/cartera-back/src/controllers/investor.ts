@@ -8517,3 +8517,846 @@ export async function getCreditosEspejoPendientes(
 
   return { data: paginados, total, page, pageSize };
 }
+
+// ─────────────────────────────────────────────────────────────────
+// SIMULACIÓN: Proyección de pagos futuros de un inversionista
+// ─────────────────────────────────────────────────────────────────
+
+export async function simularInversionista(
+  inversionista_id: number,
+  mesLiquidacion?: { mes: number; anio: number }
+) {
+  // Query 1: verificar inversionista
+  const [inv] = await db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      nombre: inversionistas.nombre,
+      tipo_reinversion: inversionistas.tipo_reinversion,
+      moneda: inversionistas.moneda,
+      status: inversionistas.status,
+      emite_factura: inversionistas.emite_factura,
+      monto_reinversion: inversionistas.monto_reinversion,
+    })
+    .from(inversionistas)
+    .where(eq(inversionistas.inversionista_id, inversionista_id))
+    .limit(1);
+
+  if (!inv) throw new Error("Inversionista no encontrado");
+
+  const formatValue = (val: string | number | null | undefined) =>
+    inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val || 0);
+
+  // Query 2: créditos ACTIVOS del inversionista desde el ESPEJO (monto_aportado actualizado con compras)
+  const creditosDeInv = await db
+    .select({
+      credito_id: creditos_inversionistas_espejo.credito_id,
+      porcentaje_participacion_inversionista:
+        creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+      monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+      cuota_inversionista: creditos_inversionistas_espejo.cuota_inversionista,
+      tipo_reinversion_espejo: creditos_inversionistas_espejo.tipo_reinversion,
+      numero_credito_sifco: creditos.numero_credito_sifco,
+      capital: creditos.capital,
+      porcentaje_interes: creditos.porcentaje_interes,
+      plazo: creditos.plazo,
+      no_amortiza_capital: creditos.no_amortiza_capital,
+      nombre_cliente: usuarios.nombre,
+    })
+    .from(creditos_inversionistas_espejo)
+    .innerJoin(creditos, eq(creditos_inversionistas_espejo.credito_id, creditos.credito_id))
+    .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+    .where(
+      and(
+        eq(creditos_inversionistas_espejo.inversionista_id, inv.inversionista_id),
+        eq(creditos.statusCredit, "ACTIVO")
+      )
+    );
+
+  const emptyTotales = {
+    total_capital: 0,
+    total_interes: 0,
+    total_iva: 0,
+    total_isr: 0,
+    total_monto_neto: 0,
+    total_cuotas_pendientes: 0,
+    total_creditos_activos: 0,
+  };
+
+  if (creditosDeInv.length === 0) {
+    return {
+      inversionista_id: inv.inversionista_id,
+      nombre: inv.nombre,
+      tipo_reinversion: inv.tipo_reinversion,
+      moneda: inv.moneda,
+      emite_factura: inv.emite_factura,
+      mes_liquidacion: mesLiquidacion ?? null,
+      creditos: [],
+      totales: emptyTotales,
+      reinversion_proyectada: [],
+      desglose_acumulado: {
+        total_creditos: 0,
+        total_reinversion: 0,
+        total_acumulado: 0,
+        meses: [],
+      },
+    };
+  }
+
+  const creditoIds = creditosDeInv.map((c) => c.credito_id!);
+
+  // Query 3a: última cuota liquidada por crédito para este inversionista.
+  // La proyección empieza desde numero_cuota > max_liquidado por crédito,
+  // ignorando cuotas anteriores aunque no estén liquidadas (el deudor pagó pero
+  // el inversionista aún no recibió — se incluirán en la próxima liquidación).
+  const ultimaCuotaLiquidadaRows = await db
+    .select({
+      credito_id: pagos_credito.credito_id,
+      max_numero_cuota: sql<number>`MAX(${cuotas_credito.numero_cuota})`,
+    })
+    .from(pagos_credito_inversionistas_espejo)
+    .innerJoin(
+      pagos_credito,
+      eq(pagos_credito_inversionistas_espejo.pago_id, pagos_credito.pago_id)
+    )
+    .innerJoin(
+      cuotas_credito,
+      eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+    )
+    .where(
+      and(
+        eq(pagos_credito_inversionistas_espejo.inversionista_id, inv.inversionista_id),
+        isNotNull(pagos_credito_inversionistas_espejo.liquidacion_id),
+        inArray(pagos_credito.credito_id, creditoIds)
+      )
+    )
+    .groupBy(pagos_credito.credito_id);
+
+  // Map: credito_id → max numero_cuota ya liquidado (-1 si nunca se ha liquidado)
+  const ultimaCuotaLiquidadaPorCredito = new Map<number, number>();
+  for (const row of ultimaCuotaLiquidadaRows) {
+    if (row.credito_id !== null) {
+      ultimaCuotaLiquidadaPorCredito.set(row.credito_id, row.max_numero_cuota);
+    }
+  }
+
+  // Query 3: todas las cuotas del crédito con numero_cuota > última liquidada
+  // Se hace en memoria agrupando por credito_id para evitar OR por fila en SQL
+  const todasLasCuotas = await db
+    .select({
+      cuota_id: cuotas_credito.cuota_id,
+      credito_id: cuotas_credito.credito_id,
+      numero_cuota: cuotas_credito.numero_cuota,
+      fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+    })
+    .from(cuotas_credito)
+    .where(inArray(cuotas_credito.credito_id, creditoIds))
+    .orderBy(cuotas_credito.credito_id, cuotas_credito.numero_cuota);
+
+  const cuotasPendientes = todasLasCuotas.filter((c) => {
+    const maxLiquidado = ultimaCuotaLiquidadaPorCredito.get(c.credito_id!) ?? -1;
+    return c.numero_cuota! > maxLiquidado;
+  });
+
+  // Agrupar cuotas por credito_id
+  const cuotasPorCredito = new Map<number, typeof cuotasPendientes>();
+  for (const cuota of cuotasPendientes) {
+    const list = cuotasPorCredito.get(cuota.credito_id!) ?? [];
+    list.push(cuota);
+    cuotasPorCredito.set(cuota.credito_id!, list);
+  }
+
+  // Query 4: capital ya pagado del crédito completo (del deudor) para calcular el saldo
+  // del crédito al inicio de la proyección. Usamos los pagos_credito reales del deudor
+  // (no el espejo del inversionista) porque necesitamos el saldo del crédito completo
+  // para reconstruir la tabla de amortización francesa y calcular el capital correcto.
+  // Solo sumamos capital de pagos asociados a cuotas ya liquidadas al inversionista
+  // (numero_cuota <= max_liquidado), para que el saldo de inicio coincida con la última
+  // cuota liquidada al inversionista.
+  const capitalCreditoPagadoRaw = await db
+    .select({
+      credito_id: pagos_credito.credito_id,
+      abono_capital: pagos_credito.abono_capital,
+      numero_cuota: cuotas_credito.numero_cuota,
+    })
+    .from(pagos_credito)
+    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(inArray(pagos_credito.credito_id, creditoIds));
+
+  const saldoCreditoPorCredito = new Map<number, Big>();
+  for (const ci of creditosDeInv) {
+    saldoCreditoPorCredito.set(ci.credito_id!, new Big(ci.capital ?? 0));
+  }
+  for (const row of capitalCreditoPagadoRaw) {
+    const cid = row.credito_id!;
+    const maxLiquidado = ultimaCuotaLiquidadaPorCredito.get(cid) ?? -1;
+    if ((row.numero_cuota ?? 0) > maxLiquidado) continue;
+    const prev = saldoCreditoPorCredito.get(cid) ?? new Big(0);
+    saldoCreditoPorCredito.set(cid, prev.minus(new Big(row.abono_capital ?? 0)));
+  }
+
+  // Acumuladores globales
+  let gt_capital = new Big(0);
+  let gt_interes = new Big(0);
+  let gt_iva = new Big(0);
+  let gt_isr = new Big(0);
+  let gt_neto = new Big(0);
+  let gt_cuotas = 0;
+
+  // Para reinversion_variable / reinversion_excedente necesitamos monto_reinversion global
+  const montoReinvGlobal = new Big(inv.monto_reinversion ?? 0);
+
+  const creditosSimulados = creditosDeInv.map((ci) => {
+    const cuotas = cuotasPorCredito.get(ci.credito_id!) ?? [];
+
+    const pctInteres = new Big(ci.porcentaje_interes ?? 0);
+    const pctParticipacion = new Big(ci.porcentaje_participacion_inversionista ?? 0);
+    const capitalCredito = new Big(ci.capital ?? 0);
+    const montoAportado = new Big(ci.monto_aportado ?? 0);
+    // Factor de participación del inversionista en el capital total del crédito
+    const factorParticipacion = capitalCredito.gt(0)
+      ? montoAportado.div(capitalCredito)
+      : new Big(0);
+
+    // Tipo de reinversión efectivo para este crédito
+    // reinversion_combinada → usa el tipo_reinversion del espejo por crédito
+    const tipoReinvEfectivo =
+      inv.tipo_reinversion === "reinversion_combinada"
+        ? (ci.tipo_reinversion_espejo ?? "sin_reinversion")
+        : (inv.tipo_reinversion ?? "sin_reinversion");
+
+    // Flags por crédito para mostrar en el frontend
+    const reinvierte_capital_credito = ["reinversion_capital", "reinversion_total"].includes(tipoReinvEfectivo);
+    const reinvierte_interes_credito = ["reinversion_interes", "reinversion_total"].includes(tipoReinvEfectivo);
+
+    // Saldo del crédito completo al inicio de la proyección (después de la última cuota liquidada)
+    // Lo usamos para reconstruir la tabla de amortización francesa del crédito y calcular
+    // el capital correcto de cada cuota proyectada proporcional al monto del inversionista.
+    let saldoCredito = saldoCreditoPorCredito.get(ci.credito_id!) ?? capitalCredito;
+    if (saldoCredito.lt(0)) saldoCredito = new Big(0);
+
+    // Saldo del inversionista = saldo del crédito × factor de participación
+    let saldoActual = saldoCredito.times(factorParticipacion).round(2);
+    if (saldoActual.lt(0)) saldoActual = new Big(0);
+
+    // Cuota francesa del crédito completo (para calcular capital de cada cuota)
+    const tasaMensual = pctInteres.div(100);
+    const plazoTotal = new Big(ci.plazo ?? 0);
+    let cuotaTotalCredito = new Big(0);
+    if (!ci.no_amortiza_capital && plazoTotal.gt(0) && tasaMensual.gt(0) && capitalCredito.gt(0)) {
+      // cuota = P × r / (1 - (1+r)^-n)
+      // Calculamos cuántas cuotas quedan: desde max_liquidado+1 hasta plazo-1
+      // Usamos el saldo actual del crédito y las cuotas restantes para cuota francesa
+      const maxLiq = ultimaCuotaLiquidadaPorCredito.get(ci.credito_id!) ?? -1;
+      const cuotasRestantes = ci.plazo! - maxLiq - 1;
+      if (cuotasRestantes > 0 && saldoCredito.gt(0)) {
+        const r = tasaMensual.toNumber();
+        const n = cuotasRestantes;
+        const factor = 1 - Math.pow(1 + r, -n);
+        cuotaTotalCredito = saldoCredito.times(r / factor).round(2);
+      }
+    }
+
+    let sub_capital = new Big(0);
+    let sub_interes = new Big(0);
+    let sub_iva = new Big(0);
+    let sub_isr = new Big(0);
+    let sub_neto = new Big(0);
+
+    const cuotas_proyectadas = cuotas.map((cuota) => {
+      // Saldo agotado → inversionista ya no tiene participación en este crédito
+      if (saldoActual.lte(0)) {
+        return {
+          numero_cuota: cuota.numero_cuota,
+          fecha_vencimiento: cuota.fecha_vencimiento,
+          abono_capital: formatValue("0"),
+          abono_interes: formatValue("0"),
+          abono_iva: formatValue("0"),
+          abono_isr: formatValue("0"),
+          monto_neto: formatValue("0"),
+          reinvierte_capital: reinvierte_capital_credito,
+          reinvierte_interes: reinvierte_interes_credito,
+        };
+      }
+
+      // 1. Calcular capital e interés usando la amortización francesa del crédito completo
+      // El interés del inversionista = saldo_inversionista × tasa × (participación / 100)
+      // El capital del inversionista = capital_del_crédito_completo × factor_participación
+      const abono_interes = saldoActual.times(pctInteres).div(100).times(pctParticipacion).div(100).round(2);
+
+      let abono_capital: Big;
+
+      if (ci.no_amortiza_capital) {
+        abono_capital = new Big(0);
+      } else {
+        // Capital del crédito en esta cuota = cuota_crédito - interés_crédito
+        const interesCreditoCuota = saldoCredito.times(tasaMensual).round(2);
+        let capitalCreditoCuota = cuotaTotalCredito.minus(interesCreditoCuota);
+        if (capitalCreditoCuota.lt(0)) capitalCreditoCuota = new Big(0);
+        // Capital del inversionista = proporcional al capital del crédito
+        abono_capital = capitalCreditoCuota.times(factorParticipacion).round(2);
+        // Última cuota: capital no puede superar saldo del inversionista
+        if (abono_capital.gt(saldoActual)) {
+          abono_capital = saldoActual.round(2);
+        }
+      }
+
+      // 2. IVA / ISR sobre el interés
+      const abono_iva = inv.emite_factura
+        ? abono_interes.times(0.12).round(2)
+        : new Big(0);
+      const abono_isr = inv.emite_factura
+        ? new Big(0)
+        : abono_interes.times(0.07).round(2);
+
+      // interesTotal = lo que el inversionista recibe/reinvierte del interés (ya neto de impuesto)
+      const interesTotal = inv.emite_factura
+        ? abono_interes.plus(abono_iva)
+        : abono_interes.minus(abono_isr);
+
+      // 3. Avanzar saldos para la siguiente cuota
+      if (!ci.no_amortiza_capital) {
+        const capitalCreditoCuotaAvance = cuotaTotalCredito.minus(saldoCredito.times(tasaMensual)).round(2);
+        saldoCredito = saldoCredito.minus(capitalCreditoCuotaAvance);
+        if (saldoCredito.lt(0)) saldoCredito = new Big(0);
+        saldoActual = saldoActual.minus(abono_capital);
+        if (saldoActual.lt(0)) saldoActual = new Big(0);
+      }
+
+      // 4. monto_neto = lo que recibe en mano según tipo de reinversión
+      let monto_neto: Big;
+      switch (tipoReinvEfectivo) {
+        case "reinversion_capital":
+          // Solo recibe interés neto; capital va a reinversión (otro crédito)
+          monto_neto = interesTotal;
+          break;
+        case "reinversion_interes":
+          // Solo recibe capital; interés va a reinversión
+          monto_neto = abono_capital;
+          break;
+        case "reinversion_total":
+          // No recibe nada en mano; todo va a reinversión
+          monto_neto = new Big(0);
+          break;
+        case "reinversion_variable": {
+          // Recibe todo menos monto_reinvGlobal fijo que se reinvierte
+          const total = abono_capital.plus(interesTotal);
+          const reinvierte = montoReinvGlobal.gt(total) ? total : montoReinvGlobal;
+          monto_neto = total.minus(reinvierte);
+          break;
+        }
+        case "reinversion_excedente": {
+          // Recibe monto_reinvGlobal fijo; el sobrante se reinvierte
+          const total = abono_capital.plus(interesTotal);
+          monto_neto = montoReinvGlobal.gt(total) ? total : montoReinvGlobal;
+          break;
+        }
+        default:
+          // sin_reinversion: recibe capital + interés neto
+          monto_neto = abono_capital.plus(interesTotal);
+      }
+
+      sub_capital = sub_capital.plus(abono_capital);
+      sub_interes = sub_interes.plus(abono_interes);
+      sub_iva = sub_iva.plus(abono_iva);
+      sub_isr = sub_isr.plus(abono_isr);
+      sub_neto = sub_neto.plus(monto_neto);
+
+      return {
+        numero_cuota: cuota.numero_cuota,
+        fecha_vencimiento: cuota.fecha_vencimiento,
+        abono_capital: formatValue(abono_capital.round(2).toString()),
+        abono_interes: formatValue(abono_interes.round(2).toString()),
+        abono_iva: formatValue(abono_iva.round(2).toString()),
+        abono_isr: formatValue(abono_isr.round(2).toString()),
+        monto_neto: formatValue(monto_neto.round(2).toString()),
+        reinvierte_capital: reinvierte_capital_credito,
+        reinvierte_interes: reinvierte_interes_credito,
+      };
+    });
+
+    gt_capital = gt_capital.plus(sub_capital);
+    gt_interes = gt_interes.plus(sub_interes);
+    gt_iva = gt_iva.plus(sub_iva);
+    gt_isr = gt_isr.plus(sub_isr);
+    gt_neto = gt_neto.plus(sub_neto);
+    gt_cuotas += cuotas.length;
+
+    return {
+      credito_id: ci.credito_id,
+      numero_credito_sifco: ci.numero_credito_sifco,
+      nombre_cliente: ci.nombre_cliente ?? null,
+      capital: formatValue(ci.monto_aportado),
+      porcentaje_interes: Number(ci.porcentaje_interes ?? 0),
+      plazo: ci.plazo,
+      no_amortiza_capital: ci.no_amortiza_capital ?? false,
+      porcentaje_participacion: Number(ci.porcentaje_participacion_inversionista ?? 0),
+      monto_aportado: formatValue(ci.monto_aportado),
+      cuotas_proyectadas,
+      subtotal: {
+        total_capital: formatValue(sub_capital.round(2).toString()),
+        total_interes: formatValue(sub_interes.round(2).toString()),
+        total_iva: formatValue(sub_iva.round(2).toString()),
+        total_isr: formatValue(sub_isr.round(2).toString()),
+        total_monto_neto: formatValue(sub_neto.round(2).toString()),
+        cuotas_pendientes: cuotas.length,
+      },
+    };
+  });
+
+  // ─── CRÉDITO FICTICIO DE REINVERSIÓN ────────────────────────────────────────
+  // Proyectamos lo que generaría el capital reinvertido si se prestara a 60 meses.
+  // Se devuelve como campo separado (no en creditos[]) para que el frontend lo
+  // muestre como panel propio de acumulado/proyección.
+  type ReinversionProyectada = {
+    tipo: string; // "reinversion_capital" | "reinversion_interes" | etc.
+    tasa_promedio: number;
+    plazo: number;
+    total_reinvertido: number | string;
+    total_interes_generado: number | string;
+    total_a_recibir: number | string;
+    cuotas_por_mes: Array<{
+      fecha_vencimiento: string;
+      abono_capital: number | string;
+      abono_interes: number | string;
+      abono_iva: number | string;
+      abono_isr: number | string;
+      monto_neto: number | string;
+    }>;
+  };
+  const reinversionProyectada: ReinversionProyectada[] = [];
+  // Depósitos totales por mes (suma de todos los tipos) — para marcar "Reinvierte" en el desglose
+  // incluso en meses donde el ficticio aún no tiene cuota (ej. primer mes).
+  const depositosGlobalesPorMes = new Map<string, Big>();
+
+  const tipoReinvGlobal = inv.tipo_reinversion ?? "sin_reinversion";
+  const hayReinversion = tipoReinvGlobal !== "sin_reinversion";
+
+  if (hayReinversion && creditosSimulados.length > 0) {
+    // 1. Tasa promedio ponderada por monto_aportado
+    let sumaPonderada = new Big(0);
+    let sumaMontos = new Big(0);
+    for (const ci of creditosDeInv) {
+      const monto = new Big(ci.monto_aportado ?? 0);
+      const tasa = new Big(ci.porcentaje_interes ?? 0);
+      sumaPonderada = sumaPonderada.plus(monto.times(tasa));
+      sumaMontos = sumaMontos.plus(monto);
+    }
+    const tasaFicticio = sumaMontos.gt(0)
+      ? sumaPonderada.div(sumaMontos)
+      : new Big(0);
+    const tasaMensualFicticio = tasaFicticio.div(100);
+
+    // 2. Recopilar depósitos por tipo y fecha (YYYY-MM).
+    //    Para reinversion_combinada cada crédito espejo tiene su propio tipo_reinversion_espejo.
+    //    Para los demás tipos, todos los créditos se acumulan bajo el mismo tipo.
+    const depositosPorTipo = new Map<string, Map<string, Big>>(); // outer = tipo, inner = "YYYY-MM"
+
+    for (const cr of creditosSimulados) {
+      const ciOrig = creditosDeInv.find((c) => c.credito_id === cr.credito_id)!;
+      const tipoEfectivo =
+        tipoReinvGlobal === "reinversion_combinada"
+          ? (ciOrig.tipo_reinversion_espejo ?? "sin_reinversion")
+          : tipoReinvGlobal;
+
+      if (tipoEfectivo === "sin_reinversion") continue;
+
+      if (!depositosPorTipo.has(tipoEfectivo)) {
+        depositosPorTipo.set(tipoEfectivo, new Map<string, Big>());
+      }
+      const depositosMes = depositosPorTipo.get(tipoEfectivo)!;
+
+      for (const cuota of cr.cuotas_proyectadas) {
+        if (!cuota.fecha_vencimiento) continue;
+        const key = (cuota.fecha_vencimiento as string).slice(0, 7); // "YYYY-MM"
+
+        const cap = new Big(cuota.abono_capital as number);
+        const intBruto = new Big(cuota.abono_interes as number);
+        const iva = new Big(cuota.abono_iva as number);
+        const isr = new Big(cuota.abono_isr as number);
+        const interesNeto = inv.emite_factura
+          ? intBruto.plus(iva)
+          : intBruto.minus(isr);
+
+        let deposito = new Big(0);
+        switch (tipoEfectivo) {
+          case "reinversion_capital":
+            deposito = cap;
+            break;
+          case "reinversion_interes":
+            deposito = interesNeto;
+            break;
+          case "reinversion_total":
+            deposito = cap.plus(interesNeto);
+            break;
+          case "reinversion_variable": {
+            const total = cap.plus(interesNeto);
+            deposito = montoReinvGlobal.gt(total) ? total : montoReinvGlobal;
+            break;
+          }
+          case "reinversion_excedente": {
+            const total = cap.plus(interesNeto);
+            const recibe = montoReinvGlobal.gt(total) ? total : montoReinvGlobal;
+            deposito = total.minus(recibe);
+            break;
+          }
+          default:
+            deposito = new Big(0);
+        }
+
+        if (deposito.gt(0)) {
+          const prev = depositosMes.get(key) ?? new Big(0);
+          depositosMes.set(key, prev.plus(deposito));
+          const prevG = depositosGlobalesPorMes.get(key) ?? new Big(0);
+          depositosGlobalesPorMes.set(key, prevG.plus(deposito));
+        }
+      }
+    }
+
+    // Participación promedio ponderada del inversionista sobre sus créditos reales
+    let sumaPctPonderado = new Big(0);
+    let sumaMontosParticipacion = new Big(0);
+    for (const ci of creditosDeInv) {
+      const monto = new Big(ci.monto_aportado ?? 0);
+      const pct = new Big(ci.porcentaje_participacion_inversionista ?? 0);
+      sumaPctPonderado = sumaPctPonderado.plus(monto.times(pct));
+      sumaMontosParticipacion = sumaMontosParticipacion.plus(monto);
+    }
+    const pctParticipacionFicticio = sumaMontosParticipacion.gt(0)
+      ? sumaPctPonderado.div(sumaMontosParticipacion).round(4)
+      : new Big(100);
+
+    // Horizonte compartido: último mes de créditos reales
+    const todosMesesReales = new Set<string>();
+    for (const cr of creditosSimulados) {
+      for (const cuota of cr.cuotas_proyectadas) {
+        if (cuota.fecha_vencimiento)
+          todosMesesReales.add((cuota.fecha_vencimiento as string).slice(0, 7));
+      }
+    }
+    const mesesRealesArr = Array.from(todosMesesReales).sort();
+
+    // 3. Por cada tipo de reinversión, correr el algoritmo de saldo creciente
+    for (const [tipoEfectivo, depositosPorMes] of depositosPorTipo) {
+      if (depositosPorMes.size === 0) continue;
+
+      const mesesOrdenados = Array.from(depositosPorMes.keys()).sort();
+      const ultimoMesReal =
+        mesesRealesArr[mesesRealesArr.length - 1] ??
+        mesesOrdenados[mesesOrdenados.length - 1];
+      const [finYStr, finMStr] = ultimoMesReal.split("-");
+      const finY = Number(finYStr);
+      const finM = Number(finMStr);
+
+      // El ficticio empieza a generar cuotas en el mes SIGUIENTE al primer depósito.
+      // Razón: en el primer mes el capital llega pero aún no ha trabajado un mes completo.
+      const [fyStr, fmStr] = mesesOrdenados[0].split("-");
+      let startM = Number(fmStr) + 1;
+      let startY = Number(fyStr);
+      if (startM > 12) { startM = 1; startY++; }
+      // Acumular el depósito del primer mes antes de arrancar el loop
+      const primerMesKey = mesesOrdenados[0];
+      let saldoFicticio = depositosPorMes.get(primerMesKey) ?? new Big(0);
+
+      let cursY = startY;
+      let cursM = startM;
+
+      const r = tasaMensualFicticio.toNumber();
+
+      const cuotasFicticias: Array<{
+        fecha_vencimiento: string;
+        capital: Big;
+        interes: Big;
+        saldo_antes_deposito: Big;
+        deposito_mes: Big;
+        saldo_con_deposito: Big;
+        cuota_calculada: Big;
+        meses_restantes: number;
+      }> = [];
+
+      while (cursY < finY || (cursY === finY && cursM <= finM)) {
+        const mesKey = `${cursY}-${String(cursM).padStart(2, "0")}`;
+
+        // Primero sumar depósito de este mes (si hay), luego calcular cuota
+        const depositoMes = depositosPorMes.get(mesKey) ?? new Big(0);
+        const saldoAntes = saldoFicticio;
+        saldoFicticio = saldoFicticio.plus(depositoMes);
+        const saldoConDeposito = saldoFicticio;
+
+        const interesMes = saldoFicticio.times(tasaMensualFicticio).round(2);
+
+        if (saldoFicticio.lte(0)) {
+          cursM++; if (cursM > 12) { cursM = 1; cursY++; }
+          continue;
+        }
+
+        const mesesHastaFin = (finY - cursY) * 12 + (finM - cursM) + 1;
+        const n = Math.max(mesesHastaFin, 1);
+
+        let cuotaMes: Big;
+        if (r > 0) {
+          const factor = 1 - Math.pow(1 + r, -n);
+          cuotaMes = saldoFicticio.times(r / factor).round(2);
+        } else {
+          cuotaMes = saldoFicticio.div(n).round(2);
+        }
+
+        let capitalMes = cuotaMes.minus(interesMes);
+        if (capitalMes.lt(0)) capitalMes = new Big(0);
+        if (capitalMes.gt(saldoFicticio)) capitalMes = saldoFicticio.round(2);
+
+        saldoFicticio = saldoFicticio.minus(capitalMes);
+        if (saldoFicticio.lt(0)) saldoFicticio = new Big(0);
+
+        cuotasFicticias.push({
+          fecha_vencimiento: `${cursY}-${String(cursM).padStart(2, "0")}-01`,
+          capital: capitalMes,
+          interes: interesMes,
+          saldo_antes_deposito: saldoAntes,
+          deposito_mes: depositoMes,
+          saldo_con_deposito: saldoConDeposito,
+          cuota_calculada: cuotaMes,
+          meses_restantes: n,
+        });
+
+        cursM++; if (cursM > 12) { cursM = 1; cursY++; }
+      }
+
+      if (cuotasFicticias.length === 0) continue;
+
+      let fic_cap = new Big(0);
+      let fic_int = new Big(0);
+      let fic_iva = new Big(0);
+      let fic_isr = new Big(0);
+      let fic_neto = new Big(0);
+
+      const cuotasProyectadasFicticio = cuotasFicticias.map((cf, idx) => {
+        const ivaFic = inv.emite_factura ? cf.interes.times(0.12).round(2) : new Big(0);
+        const isrFic = inv.emite_factura ? new Big(0) : cf.interes.times(0.07).round(2);
+        const interesTotalFic = inv.emite_factura
+          ? cf.interes.plus(ivaFic)
+          : cf.interes.minus(isrFic);
+        const montoNetoFic = cf.capital.plus(interesTotalFic);
+
+        fic_cap = fic_cap.plus(cf.capital);
+        fic_int = fic_int.plus(cf.interes);
+        fic_iva = fic_iva.plus(ivaFic);
+        fic_isr = fic_isr.plus(isrFic);
+        fic_neto = fic_neto.plus(montoNetoFic);
+
+        return {
+          numero_cuota: idx + 1,
+          fecha_vencimiento: cf.fecha_vencimiento,
+          abono_capital: formatValue(cf.capital.round(2).toString()),
+          abono_interes: formatValue(cf.interes.round(2).toString()),
+          abono_iva: formatValue(ivaFic.round(2).toString()),
+          abono_isr: formatValue(isrFic.round(2).toString()),
+          monto_neto: formatValue(montoNetoFic.round(2).toString()),
+          // campos de validación
+          debug: {
+            saldo_antes_deposito: formatValue(cf.saldo_antes_deposito.round(2).toString()),
+            deposito_mes: formatValue(cf.deposito_mes.round(2).toString()),
+            saldo_con_deposito: formatValue(cf.saldo_con_deposito.round(2).toString()),
+            interes_sobre_saldo: formatValue(cf.interes.round(2).toString()),
+            cuota_calculada: formatValue(cf.cuota_calculada.round(2).toString()),
+            capital_cuota_minus_interes: formatValue(cf.capital.round(2).toString()),
+            saldo_despues: formatValue(cf.saldo_con_deposito.minus(cf.capital).round(2).toString()),
+            meses_restantes: cf.meses_restantes,
+            tasa_mensual: tasaMensualFicticio.round(6).toNumber(),
+            porcentaje_participacion: pctParticipacionFicticio.toNumber(),
+          },
+        };
+      });
+
+      const totalDepositado = Array.from(depositosPorMes.values()).reduce(
+        (a, b) => a.plus(b),
+        new Big(0)
+      );
+
+      reinversionProyectada.push({
+        tipo: tipoEfectivo,
+        tasa_promedio: tasaFicticio.round(4).toNumber(),
+        plazo: cuotasFicticias.length,
+        total_reinvertido: formatValue(totalDepositado.round(2).toString()),
+        total_interes_generado: formatValue(fic_int.round(2).toString()),
+        total_a_recibir: formatValue(fic_neto.round(2).toString()),
+        cuotas_por_mes: cuotasProyectadasFicticio.map((c) => ({
+          fecha_vencimiento: c.fecha_vencimiento,
+          abono_capital: c.abono_capital,
+          abono_interes: c.abono_interes,
+          abono_iva: c.abono_iva,
+          abono_isr: c.abono_isr,
+          monto_neto: c.monto_neto,
+        })),
+      });
+    }
+  }
+  // ─── FIN CRÉDITO FICTICIO ────────────────────────────────────────────────────
+
+  // Si se pidió un mes específico, filtrar cuotas_proyectadas a ese mes/año
+  // y recalcular subtotales y totales solo con esas cuotas
+  let creditosFinales = creditosSimulados;
+  let totalesFinales = {
+    total_capital: formatValue(gt_capital.round(2).toString()),
+    total_interes: formatValue(gt_interes.round(2).toString()),
+    total_iva: formatValue(gt_iva.round(2).toString()),
+    total_isr: formatValue(gt_isr.round(2).toString()),
+    total_monto_neto: formatValue(gt_neto.round(2).toString()),
+    total_cuotas_pendientes: gt_cuotas,
+    total_creditos_activos: creditosDeInv.length,
+  };
+
+  if (mesLiquidacion) {
+    // Liquidación de un mes liquida la cuota del mes anterior (vencimiento = mes - 1)
+    // Aritmética pura para evitar drift de timezone entre local y UTC
+    const mesBusqueda = mesLiquidacion.mes === 1 ? 12 : mesLiquidacion.mes - 1;
+    const anioBusqueda = mesLiquidacion.mes === 1 ? mesLiquidacion.anio - 1 : mesLiquidacion.anio;
+
+    let f_capital = new Big(0);
+    let f_interes = new Big(0);
+    let f_iva = new Big(0);
+    let f_isr = new Big(0);
+    let f_neto = new Big(0);
+    let f_cuotas = 0;
+
+    creditosFinales = creditosSimulados
+      .map((cr) => {
+        const cuotasFiltradas = cr.cuotas_proyectadas.filter((c) => {
+          if (!c.fecha_vencimiento) return false;
+          const d = new Date(c.fecha_vencimiento as string);
+          return (
+            d.getUTCMonth() + 1 === mesBusqueda &&
+            d.getUTCFullYear() === anioBusqueda
+          );
+        });
+
+        const s_cap = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.abono_capital as number)), new Big(0));
+        const s_int = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.abono_interes as number)), new Big(0));
+        const s_iva = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.abono_iva as number)), new Big(0));
+        const s_isr = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.abono_isr as number)), new Big(0));
+        const s_net = cuotasFiltradas.reduce((acc, c) => acc.plus(new Big(c.monto_neto as number)), new Big(0));
+
+        f_capital = f_capital.plus(s_cap);
+        f_interes = f_interes.plus(s_int);
+        f_iva = f_iva.plus(s_iva);
+        f_isr = f_isr.plus(s_isr);
+        f_neto = f_neto.plus(s_net);
+        f_cuotas += cuotasFiltradas.length;
+
+        return {
+          ...cr,
+          cuotas_proyectadas: cuotasFiltradas,
+          subtotal: {
+            total_capital: formatValue(s_cap.round(2).toString()),
+            total_interes: formatValue(s_int.round(2).toString()),
+            total_iva: formatValue(s_iva.round(2).toString()),
+            total_isr: formatValue(s_isr.round(2).toString()),
+            total_monto_neto: formatValue(s_net.round(2).toString()),
+            cuotas_pendientes: cuotasFiltradas.length,
+          },
+        };
+      })
+      .filter((cr) => cr.cuotas_proyectadas.length > 0);
+
+    totalesFinales = {
+      total_capital: formatValue(f_capital.round(2).toString()),
+      total_interes: formatValue(f_interes.round(2).toString()),
+      total_iva: formatValue(f_iva.round(2).toString()),
+      total_isr: formatValue(f_isr.round(2).toString()),
+      total_monto_neto: formatValue(f_neto.round(2).toString()),
+      total_cuotas_pendientes: f_cuotas,
+      total_creditos_activos: creditosFinales.length,
+    };
+  }
+
+  // ─── DESGLOSE ACUMULADO POR MES ─────────────────────────────────────────────
+  // Para cada mes en el horizonte de proyección, suma monto_neto de créditos reales
+  // + monto_neto del ficticio (si hay reinversión). Cada mes tiene su subtotal y
+  // el detalle de qué crédito aporta qué monto.
+  type DesgloseMes = {
+    mes: string; // "YYYY-MM"
+    total_creditos: number | string;
+    total_reinversion: number | string;
+    total_mes: number | string;
+    creditos: Array<{
+      credito_id: number;
+      numero_credito_sifco: string;
+      nombre_cliente: string | null;
+      monto_neto: number | string;
+    }>;
+  };
+
+  const desglosePorMes = new Map<string, DesgloseMes>();
+
+  // Acumular cuotas de créditos reales
+  for (const cr of creditosFinales) {
+    for (const cuota of cr.cuotas_proyectadas) {
+      if (!cuota.fecha_vencimiento) continue;
+      const mesKey = (cuota.fecha_vencimiento as string).slice(0, 7);
+      const existing = desglosePorMes.get(mesKey) ?? {
+        mes: mesKey,
+        total_creditos: 0,
+        total_reinversion: 0,
+        total_mes: 0,
+        creditos: [],
+      };
+      const neto = Number(cuota.monto_neto ?? 0);
+      existing.creditos.push({
+        credito_id: cr.credito_id,
+        numero_credito_sifco: cr.numero_credito_sifco,
+        nombre_cliente: cr.nombre_cliente,
+        monto_neto: cuota.monto_neto,
+      });
+      existing.total_creditos = formatValue(
+        new Big(existing.total_creditos as number).plus(neto).round(2).toString()
+      );
+      existing.total_mes = formatValue(
+        new Big(existing.total_mes as number).plus(neto).round(2).toString()
+      );
+      desglosePorMes.set(mesKey, existing);
+    }
+  }
+
+  // total_reinversion = cuánto va a reinversión de créditos reales ese mes (depósito real).
+  // Las cuotas ficticias son solo informativas (filas FICTICIO) y NO afectan total_reinversion ni total_mes.
+  for (const [mesKey, deposito] of depositosGlobalesPorMes) {
+    const existing = desglosePorMes.get(mesKey);
+    if (!existing) continue;
+    existing.total_reinversion = formatValue(deposito.round(2).toString());
+    existing.total_mes = formatValue(
+      new Big(existing.total_mes as number).plus(deposito).round(2).toString()
+    );
+    desglosePorMes.set(mesKey, existing);
+  }
+
+  const desglose = Array.from(desglosePorMes.values()).sort((a, b) =>
+    a.mes.localeCompare(b.mes)
+  );
+
+  // Acumulados globales del desglose
+  let acum_creditos = new Big(0);
+  let acum_reinversion = new Big(0);
+  let acum_total = new Big(0);
+  for (const d of desglose) {
+    acum_creditos = acum_creditos.plus(new Big(d.total_creditos as number));
+    acum_reinversion = acum_reinversion.plus(new Big(d.total_reinversion as number));
+    acum_total = acum_total.plus(new Big(d.total_mes as number));
+  }
+
+  return {
+    inversionista_id: inv.inversionista_id,
+    nombre: inv.nombre,
+    tipo_reinversion: inv.tipo_reinversion,
+    moneda: inv.moneda,
+    emite_factura: inv.emite_factura,
+    mes_liquidacion: mesLiquidacion ?? null,
+    creditos: creditosFinales,
+    totales: totalesFinales,
+    reinversion_proyectada: reinversionProyectada,
+    desglose_acumulado: {
+      total_creditos: formatValue(acum_creditos.round(2).toString()),
+      total_reinversion: formatValue(acum_reinversion.round(2).toString()),
+      total_acumulado: formatValue(acum_total.round(2).toString()),
+      meses: desglose,
+    },
+  };
+}

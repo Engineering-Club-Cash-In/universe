@@ -9055,7 +9055,7 @@ export async function simularInversionista(
     }
 
     for (const cr of creditosSimulados) {
-      const ciOrig = creditosDeInv.find((c) => c.credito_id === cr.credito_id)!;
+      const ciOrig = creditosDeInvMap.get(cr.credito_id)!;
       const tipoEfectivo =
         tipoReinvGlobal === "reinversion_combinada"
           ? (ciOrig.tipo_reinversion_espejo ?? "sin_reinversion")
@@ -9394,11 +9394,9 @@ export async function simularInversionista(
   // Para cada mes en el horizonte de proyección, suma monto_neto de créditos reales
   // + monto_neto del ficticio (si hay reinversión). Cada mes tiene su subtotal y
   // el detalle de qué crédito aporta qué monto.
-  type DesgloseMes = {
-    mes: string; // "YYYY-MM"
-    total_creditos: number | string;
-    total_reinversion: number | string;
-    total_mes: number | string;
+  type DesgloseMesRaw = {
+    mes: string;
+    _raw_creditos: Big;
     creditos: Array<{
       credito_id: number;
       numero_credito_sifco: string;
@@ -9407,7 +9405,7 @@ export async function simularInversionista(
     }>;
   };
 
-  const desglosePorMes = new Map<string, DesgloseMes>();
+  const desglosePorMes = new Map<string, DesgloseMesRaw>();
 
   // Acumular cuotas de créditos reales — siempre sobre la proyección completa (no filtrada)
   for (const cr of creditosSimulados) {
@@ -9416,9 +9414,7 @@ export async function simularInversionista(
       const mesKey = (cuota.fecha_vencimiento as string).slice(0, 7);
       const existing = desglosePorMes.get(mesKey) ?? {
         mes: mesKey,
-        total_creditos: 0,
-        total_reinversion: 0,
-        total_mes: 0,
+        _raw_creditos: new Big(0),
         creditos: [],
       };
       const rawNeto = (cuota as any)._raw_monto_neto as Big;
@@ -9428,41 +9424,31 @@ export async function simularInversionista(
         nombre_cliente: cr.nombre_cliente,
         monto_neto: cuota.monto_neto,
       });
-      existing.total_creditos = formatValue(
-        new Big(existing.total_creditos as number).plus(rawNeto).round(2).toString()
-      );
-      existing.total_mes = formatValue(
-        new Big(existing.total_mes as number).plus(rawNeto).round(2).toString()
-      );
+      existing._raw_creditos = existing._raw_creditos.plus(rawNeto);
       desglosePorMes.set(mesKey, existing);
     }
   }
 
-  // total_reinversion = cuánto va a reinversión de créditos reales ese mes (depósito real).
-  // Las cuotas ficticias son solo informativas (filas FICTICIO) y NO afectan total_reinversion ni total_mes.
-  for (const [mesKey, deposito] of depositosGlobalesPorMes) {
-    const existing = desglosePorMes.get(mesKey);
-    if (!existing) continue;
-    existing.total_reinversion = formatValue(deposito.round(2).toString());
-    existing.total_mes = formatValue(
-      new Big(existing.total_mes as number).plus(deposito).round(2).toString()
-    );
-    desglosePorMes.set(mesKey, existing);
-  }
-
-  const desglose = Array.from(desglosePorMes.values()).sort((a, b) =>
-    a.mes.localeCompare(b.mes)
-  );
-
-  // Acumulados globales del desglose
   let acum_creditos = new Big(0);
   let acum_reinversion = new Big(0);
   let acum_total = new Big(0);
-  for (const d of desglose) {
-    acum_creditos = acum_creditos.plus(new Big(d.total_creditos as number));
-    acum_reinversion = acum_reinversion.plus(new Big(d.total_reinversion as number));
-    acum_total = acum_total.plus(new Big(d.total_mes as number));
-  }
+
+  const desglose = Array.from(desglosePorMes.values())
+    .sort((a, b) => a.mes.localeCompare(b.mes))
+    .map((d) => {
+      const rawReinv = depositosGlobalesPorMes.get(d.mes) ?? new Big(0);
+      const rawTotal = d._raw_creditos.plus(rawReinv);
+      acum_creditos = acum_creditos.plus(d._raw_creditos);
+      acum_reinversion = acum_reinversion.plus(rawReinv);
+      acum_total = acum_total.plus(rawTotal);
+      return {
+        mes: d.mes,
+        total_creditos: formatValue(d._raw_creditos.round(2).toString()),
+        total_reinversion: formatValue(rawReinv.round(2).toString()),
+        total_mes: formatValue(rawTotal.round(2).toString()),
+        creditos: d.creditos,
+      };
+    });
 
   return {
     inversionista_id: inv.inversionista_id,

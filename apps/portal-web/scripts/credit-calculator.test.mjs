@@ -59,6 +59,39 @@ assertClose(
   "Q200k / 20% / 48 meses",
 );
 
+const beforeBoundary = calculatePublicCredit({
+  vehicleAmount: 50_000,
+  downPaymentPct: 20,
+  termMonths: 48,
+}).monthlyPayment;
+const afterBoundary = calculatePublicCredit({
+  vehicleAmount: 50_001,
+  downPaymentPct: 20,
+  termMonths: 48,
+}).monthlyPayment;
+assert.ok(
+  afterBoundary >= beforeBoundary,
+  `La cuota no debe bajar al cruzar Q50k: ${beforeBoundary} -> ${afterBoundary}`,
+);
+
+for (const termMonths of [12, 24, 36, 48, 60]) {
+  for (const downPaymentPct of [10, 15, 20, 25, 30]) {
+    let previousPayment = 0;
+    for (let vehicleAmount = 25_000; vehicleAmount <= 500_000; vehicleAmount += 1_000) {
+      const { monthlyPayment } = calculatePublicCredit({
+        vehicleAmount,
+        downPaymentPct,
+        termMonths,
+      });
+      assert.ok(
+        monthlyPayment >= previousPayment,
+        `La cuota debe ser monotónica para Q${vehicleAmount}, ${downPaymentPct}%, ${termMonths} meses`,
+      );
+      previousPayment = monthlyPayment;
+    }
+  }
+}
+
 const calculatorSource = readFileSync(
   "src/features/Marketplace/Sections/CalculatorCredit.tsx",
   "utf8",

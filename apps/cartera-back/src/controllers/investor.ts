@@ -8741,11 +8741,15 @@ export async function simularInversionista(
     let saldoActual = saldoCredito.times(factorParticipacion).round(2);
     if (saldoActual.lt(0)) saldoActual = new Big(0);
 
-    // Cuota francesa del crédito completo (para calcular capital de cada cuota)
+    // Cuota francesa del crédito completo (para calcular capital de cada cuota).
+    // El sistema real (calculateMonthlyPayment) usa tasa × 1.12 para incluir IVA
+    // en la amortización. Replicamos eso aquí para que el capital proyectado coincida
+    // con lo que el sistema liquida realmente.
     const tasaMensual = pctInteres.div(100);
+    const tasaMensualPMT = inv.emite_factura ? tasaMensual.times(1.12) : tasaMensual;
     const plazoTotal = new Big(ci.plazo ?? 0);
     let cuotaTotalCredito = new Big(0);
-    if (!ci.no_amortiza_capital && plazoTotal.gt(0) && tasaMensual.gt(0) && capitalCredito.gt(0)) {
+    if (!ci.no_amortiza_capital && plazoTotal.gt(0) && tasaMensualPMT.gt(0) && capitalCredito.gt(0)) {
       // cuota = P × r / (1 - (1+r)^-n)
       // Calculamos cuántas cuotas quedan: desde max_liquidado+1 hasta plazo-1
       // Usamos el saldo actual del crédito y las cuotas restantes para cuota francesa
@@ -8754,7 +8758,7 @@ export async function simularInversionista(
       // Si liquidó hasta maxLiq quedan plazo - maxLiq.
       const cuotasRestantes = maxLiq < 0 ? ci.plazo! : ci.plazo! - maxLiq;
       if (cuotasRestantes > 0 && saldoCredito.gt(0)) {
-        const r = tasaMensual.toNumber();
+        const r = tasaMensualPMT.toNumber();
         const n = cuotasRestantes;
         const factor = 1 - Math.pow(1 + r, -n);
         cuotaTotalCredito = saldoCredito.times(r / factor).round(2);
@@ -8799,8 +8803,8 @@ export async function simularInversionista(
       if (ci.no_amortiza_capital) {
         abono_capital = new Big(0);
       } else {
-        // Capital del crédito en esta cuota = cuota_crédito - interés_crédito
-        const interesCreditoCuota = saldoCredito.times(tasaMensual).round(2);
+        // Capital del crédito en esta cuota = cuota_crédito - interés_crédito (con IVA si factura)
+        const interesCreditoCuota = saldoCredito.times(tasaMensualPMT).round(2);
         let capitalCreditoCuota = cuotaTotalCredito.minus(interesCreditoCuota);
         if (capitalCreditoCuota.lt(0)) capitalCreditoCuota = new Big(0);
         // Capital del inversionista = proporcional al capital del crédito
@@ -8826,7 +8830,9 @@ export async function simularInversionista(
 
       // 3. Avanzar saldos para la siguiente cuota
       if (!ci.no_amortiza_capital) {
-        const capitalCreditoCuotaAvance = cuotaTotalCredito.minus(saldoCredito.times(tasaMensual)).round(2);
+        // El interés sobre el crédito completo usa tasaMensualPMT (con IVA si factura),
+        // igual que el PMT, para que capital = cuota - interés_PMT sea consistente.
+        const capitalCreditoCuotaAvance = cuotaTotalCredito.minus(saldoCredito.times(tasaMensualPMT)).round(2);
         saldoCredito = saldoCredito.minus(capitalCreditoCuotaAvance);
         if (saldoCredito.lt(0)) saldoCredito = new Big(0);
         saldoActual = saldoActual.minus(abono_capital);
@@ -8922,11 +8928,33 @@ export async function simularInversionista(
 
   // Segunda pasada: corregir monto_neto para reinversion_variable/excedente
   // El cap mensual aplica sobre el total de todos los créditos ese mes, no por crédito.
+  // También corre para reinversion_combinada si algún crédito espejo usa variable/excedente.
   const tipoParaSegundaPasada = inv.tipo_reinversion ?? "sin_reinversion";
-  if (tipoParaSegundaPasada === "reinversion_variable" || tipoParaSegundaPasada === "reinversion_excedente") {
-    // Acumular bruto total por mes
+  const necesitaSegundaPasada =
+    tipoParaSegundaPasada === "reinversion_variable" ||
+    tipoParaSegundaPasada === "reinversion_excedente" ||
+    (tipoParaSegundaPasada === "reinversion_combinada" &&
+      creditosDeInv.some(
+        (ci) =>
+          ci.tipo_reinversion_espejo === "reinversion_variable" ||
+          ci.tipo_reinversion_espejo === "reinversion_excedente"
+      ));
+  if (necesitaSegundaPasada) {
+    // Map credito_id → tipo efectivo para esta segunda pasada
+    const tipoEfectivoPorCredito = new Map<number, string>();
+    for (const ci of creditosDeInv) {
+      const t =
+        tipoParaSegundaPasada === "reinversion_combinada"
+          ? (ci.tipo_reinversion_espejo ?? "sin_reinversion")
+          : tipoParaSegundaPasada;
+      tipoEfectivoPorCredito.set(ci.credito_id!, t);
+    }
+
+    // Acumular bruto total por mes solo de créditos con tipo variable/excedente
     const brutoPorMes = new Map<string, Big>();
     for (const cr of creditosSimulados) {
+      const tipoEfectivo = tipoEfectivoPorCredito.get(cr.credito_id) ?? "sin_reinversion";
+      if (tipoEfectivo !== "reinversion_variable" && tipoEfectivo !== "reinversion_excedente") continue;
       for (const cuota of cr.cuotas_proyectadas) {
         if (!cuota.fecha_vencimiento) continue;
         const key = (cuota.fecha_vencimiento as string).slice(0, 7);
@@ -8937,26 +8965,35 @@ export async function simularInversionista(
     // Recalcular monto_neto y _raw_monto_neto proporcionalmente; recomputar gt_neto desde cero
     gt_neto = new Big(0);
     for (const cr of creditosSimulados) {
+      const tipoEfectivo = tipoEfectivoPorCredito.get(cr.credito_id) ?? "sin_reinversion";
       let nuevoSubNeto = new Big(0);
       for (const cuota of cr.cuotas_proyectadas) {
-        if (!cuota.fecha_vencimiento) continue;
-        const key = (cuota.fecha_vencimiento as string).slice(0, 7);
-        const bruto = (cuota as any)._raw_bruto as Big;
-        const totalMes = brutoPorMes.get(key) ?? new Big(0);
         let nuevoNeto: Big;
-        if (totalMes.lte(0)) {
-          nuevoNeto = new Big(0);
-        } else if (tipoParaSegundaPasada === "reinversion_variable") {
-          const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
-          const reinvierte = bruto.div(totalMes).times(capEfectivo).round(2);
-          nuevoNeto = bruto.minus(reinvierte);
+        if (tipoEfectivo !== "reinversion_variable" && tipoEfectivo !== "reinversion_excedente") {
+          // Este crédito no usa cap → su monto_neto ya es correcto del primer pass
+          nuevoNeto = (cuota as any)._raw_monto_neto as Big;
         } else {
-          // reinversion_excedente: recibe el cap proporcional
-          const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
-          nuevoNeto = bruto.div(totalMes).times(capEfectivo).round(2);
+          if (!cuota.fecha_vencimiento) {
+            nuevoNeto = new Big(0);
+          } else {
+            const key = (cuota.fecha_vencimiento as string).slice(0, 7);
+            const bruto = (cuota as any)._raw_bruto as Big;
+            const totalMes = brutoPorMes.get(key) ?? new Big(0);
+            if (totalMes.lte(0)) {
+              nuevoNeto = new Big(0);
+            } else if (tipoEfectivo === "reinversion_variable") {
+              const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
+              const reinvierte = bruto.div(totalMes).times(capEfectivo).round(2);
+              nuevoNeto = bruto.minus(reinvierte);
+            } else {
+              // reinversion_excedente: recibe el cap proporcional
+              const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
+              nuevoNeto = bruto.div(totalMes).times(capEfectivo).round(2);
+            }
+            (cuota as any)._raw_monto_neto = nuevoNeto;
+            (cuota as any).monto_neto = formatValue(nuevoNeto.toString());
+          }
         }
-        (cuota as any)._raw_monto_neto = nuevoNeto;
-        (cuota as any).monto_neto = formatValue(nuevoNeto.toString());
         nuevoSubNeto = nuevoSubNeto.plus(nuevoNeto);
       }
       (cr.subtotal as any).total_monto_neto = formatValue(nuevoSubNeto.round(2).toString());

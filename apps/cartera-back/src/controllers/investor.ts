@@ -8568,7 +8568,8 @@ export async function simularInversionista(
     .where(
       and(
         eq(creditos_inversionistas_espejo.inversionista_id, inv.inversionista_id),
-        eq(creditos.statusCredit, "ACTIVO")
+        eq(creditos.statusCredit, "ACTIVO"),
+        ne(creditos_inversionistas_espejo.status, "pendiente_compra_cartera")
       )
     );
 
@@ -8626,6 +8627,7 @@ export async function simularInversionista(
       and(
         eq(pagos_credito_inversionistas_espejo.inversionista_id, inv.inversionista_id),
         isNotNull(pagos_credito_inversionistas_espejo.liquidacion_id),
+        eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO"),
         inArray(pagos_credito.credito_id, creditoIds)
       )
     )
@@ -8781,6 +8783,7 @@ export async function simularInversionista(
           _raw_iva: new Big(0),
           _raw_isr: new Big(0),
           _raw_monto_neto: new Big(0),
+          _raw_bruto: new Big(0),
           reinvierte_capital: reinvierte_capital_credito,
           reinvierte_interes: reinvierte_interes_credito,
         };
@@ -8846,14 +8849,14 @@ export async function simularInversionista(
           monto_neto = new Big(0);
           break;
         case "reinversion_variable": {
-          // Recibe todo menos monto_reinvGlobal fijo que se reinvierte
+          // monto_neto se recalcula en segunda pasada con total mensual correcto
           const total = abono_capital.plus(interesTotal);
           const reinvierte = montoReinvGlobal.gt(total) ? total : montoReinvGlobal;
           monto_neto = total.minus(reinvierte);
           break;
         }
         case "reinversion_excedente": {
-          // Recibe monto_reinvGlobal fijo; el sobrante se reinvierte
+          // monto_neto se recalcula en segunda pasada con total mensual correcto
           const total = abono_capital.plus(interesTotal);
           monto_neto = montoReinvGlobal.gt(total) ? total : montoReinvGlobal;
           break;
@@ -8882,6 +8885,7 @@ export async function simularInversionista(
         _raw_iva: abono_iva.round(2),
         _raw_isr: abono_isr.round(2),
         _raw_monto_neto: monto_neto.round(2),
+        _raw_bruto: abono_capital.plus(interesTotal).round(2),
         reinvierte_capital: reinvierte_capital_credito,
         reinvierte_interes: reinvierte_interes_credito,
       };
@@ -8915,6 +8919,50 @@ export async function simularInversionista(
       },
     };
   });
+
+  // Segunda pasada: corregir monto_neto para reinversion_variable/excedente
+  // El cap mensual aplica sobre el total de todos los créditos ese mes, no por crédito.
+  const tipoParaSegundaPasada = inv.tipo_reinversion ?? "sin_reinversion";
+  if (tipoParaSegundaPasada === "reinversion_variable" || tipoParaSegundaPasada === "reinversion_excedente") {
+    // Acumular bruto total por mes
+    const brutoPorMes = new Map<string, Big>();
+    for (const cr of creditosSimulados) {
+      for (const cuota of cr.cuotas_proyectadas) {
+        if (!cuota.fecha_vencimiento) continue;
+        const key = (cuota.fecha_vencimiento as string).slice(0, 7);
+        const bruto = (cuota as any)._raw_bruto as Big;
+        brutoPorMes.set(key, (brutoPorMes.get(key) ?? new Big(0)).plus(bruto));
+      }
+    }
+    // Recalcular monto_neto y _raw_monto_neto proporcionalmente; recomputar gt_neto desde cero
+    gt_neto = new Big(0);
+    for (const cr of creditosSimulados) {
+      let nuevoSubNeto = new Big(0);
+      for (const cuota of cr.cuotas_proyectadas) {
+        if (!cuota.fecha_vencimiento) continue;
+        const key = (cuota.fecha_vencimiento as string).slice(0, 7);
+        const bruto = (cuota as any)._raw_bruto as Big;
+        const totalMes = brutoPorMes.get(key) ?? new Big(0);
+        let nuevoNeto: Big;
+        if (totalMes.lte(0)) {
+          nuevoNeto = new Big(0);
+        } else if (tipoParaSegundaPasada === "reinversion_variable") {
+          const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
+          const reinvierte = bruto.div(totalMes).times(capEfectivo).round(2);
+          nuevoNeto = bruto.minus(reinvierte);
+        } else {
+          // reinversion_excedente: recibe el cap proporcional
+          const capEfectivo = montoReinvGlobal.lt(totalMes) ? montoReinvGlobal : totalMes;
+          nuevoNeto = bruto.div(totalMes).times(capEfectivo).round(2);
+        }
+        (cuota as any)._raw_monto_neto = nuevoNeto;
+        (cuota as any).monto_neto = formatValue(nuevoNeto.toString());
+        nuevoSubNeto = nuevoSubNeto.plus(nuevoNeto);
+      }
+      (cr.subtotal as any).total_monto_neto = formatValue(nuevoSubNeto.round(2).toString());
+      gt_neto = gt_neto.plus(nuevoSubNeto);
+    }
+  }
 
   // ─── CRÉDITO FICTICIO DE REINVERSIÓN ────────────────────────────────────────
   // Proyectamos lo que generaría el capital reinvertido si se prestara a 60 meses.
@@ -9260,7 +9308,7 @@ export async function simularInversionista(
 
   // Eliminar campos internos _raw_* de las cuotas proyectadas antes de retornar
   const stripRaw = (cuotas: typeof creditosSimulados[number]["cuotas_proyectadas"]) =>
-    cuotas.map(({ _raw_capital, _raw_interes, _raw_iva, _raw_isr, _raw_monto_neto, ...rest }: any) => rest);
+    cuotas.map(({ _raw_capital, _raw_interes, _raw_iva, _raw_isr, _raw_monto_neto, _raw_bruto, ...rest }: any) => rest);
 
   // Si se pidió un mes específico, filtrar cuotas_proyectadas a ese mes/año
   // y recalcular subtotales y totales solo con esas cuotas
@@ -9373,7 +9421,7 @@ export async function simularInversionista(
         total_mes: 0,
         creditos: [],
       };
-      const neto = Number(cuota.monto_neto ?? 0);
+      const rawNeto = (cuota as any)._raw_monto_neto as Big;
       existing.creditos.push({
         credito_id: cr.credito_id,
         numero_credito_sifco: cr.numero_credito_sifco,
@@ -9381,10 +9429,10 @@ export async function simularInversionista(
         monto_neto: cuota.monto_neto,
       });
       existing.total_creditos = formatValue(
-        new Big(existing.total_creditos as number).plus(neto).round(2).toString()
+        new Big(existing.total_creditos as number).plus(rawNeto).round(2).toString()
       );
       existing.total_mes = formatValue(
-        new Big(existing.total_mes as number).plus(neto).round(2).toString()
+        new Big(existing.total_mes as number).plus(rawNeto).round(2).toString()
       );
       desglosePorMes.set(mesKey, existing);
     }

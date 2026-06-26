@@ -19,7 +19,7 @@ function RouteComponent() {
     <Page>
       <NavBar />
       <main className="pt-24 lg:pt-36">
-        <CalculatorCredit />
+        <CalculatorCredit standalone />
       </main>
     </Page>
   );

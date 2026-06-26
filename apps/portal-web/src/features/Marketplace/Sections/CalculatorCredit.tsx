@@ -3,7 +3,11 @@ import { useState } from "react";
 import { openWhatsApp, useIsMobile } from "@/hooks";
 import { calculatePublicCredit } from "../utils/creditCalculator";
 
-export const CalculatorCredit = () => {
+type CalculatorCreditProps = {
+  standalone?: boolean;
+};
+
+export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) => {
   const IMAGE = import.meta.env.VITE_IMAGE_URL + "/calculator.jpg";
 
   const [monto, setMonto] = useState<string>("");
@@ -51,9 +55,12 @@ export const CalculatorCredit = () => {
   };
 
   const resultado = calcularCredito();
+  const topMargin = standalone ? "mt-4 lg:mt-8" : "mt-12 lg:mt-64";
 
   return (
-    <section className="relative w-full mt-12 lg:mt-64 mb-16 lg:mb-30 flex px-8 lg:px-20">
+    <section
+      className={`relative w-full ${topMargin} mb-16 lg:mb-30 flex px-8 lg:px-20`}
+    >
       {/* Imagen a la izquierda */}
       <div className="relative w-[438px] shrink-0 hidden lg:block">
         <img

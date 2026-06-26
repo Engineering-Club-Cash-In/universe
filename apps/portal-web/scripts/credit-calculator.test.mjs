@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -58,5 +58,15 @@ assertClose(
   0.01,
   "Q200k / 20% / 48 meses",
 );
+
+const calculatorSource = readFileSync(
+  "src/features/Marketplace/Sections/CalculatorCredit.tsx",
+  "utf8",
+);
+const calculadoraRouteSource = readFileSync("src/routes/calculadora.tsx", "utf8");
+
+assert.match(calculatorSource, /standalone\?: boolean/);
+assert.match(calculatorSource, /standalone \? "mt-4 lg:mt-8" : "mt-12 lg:mt-64"/);
+assert.match(calculadoraRouteSource, /<CalculatorCredit standalone \/>/);
 
 console.log("Pruebas de calculadora de crédito OK");

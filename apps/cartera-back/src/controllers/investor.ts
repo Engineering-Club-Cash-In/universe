@@ -8568,7 +8568,7 @@ export async function simularInversionista(
     .where(
       and(
         eq(creditos_inversionistas_espejo.inversionista_id, inv.inversionista_id),
-        eq(creditos.statusCredit, "ACTIVO"),
+        inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]),
         ne(creditos_inversionistas_espejo.status, "pendiente_compra_cartera")
       )
     );

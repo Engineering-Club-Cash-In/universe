@@ -1,6 +1,7 @@
 import { Select, Input, Button } from "@/components";
 import { useState } from "react";
 import { openWhatsApp, useIsMobile } from "@/hooks";
+import { calculatePublicCredit } from "../utils/creditCalculator";
 
 export const CalculatorCredit = () => {
   const IMAGE = import.meta.env.VITE_IMAGE_URL + "/calculator.jpg";
@@ -28,7 +29,6 @@ export const CalculatorCredit = () => {
     { value: "60", label: "60 meses" },
   ];
 
-  // Calcular resultados
   const calcularCredito = () => {
     const montoNumero = Number.parseFloat(monto);
     const engancheNumero = Number.parseFloat(enganche);
@@ -38,22 +38,15 @@ export const CalculatorCredit = () => {
       return { interes: 0, pagoMensual: 0 };
     }
 
-    // Calcular monto de enganche
-    const montoEnganche = (montoNumero * engancheNumero) / 100;
-    const montoFinanciar = montoNumero - montoEnganche;
-
-    // Tasa de interés mensual: 1.5% + IVA (12%)
-    const tasaMensual = 1.5 / 100;
-    const tasaEfectiva = tasaMensual * 1.12;
-
-    // Calcular pago mensual usando fórmula de amortización (incluye IVA sobre interés)
-    const pagoMensual =
-      (montoFinanciar * tasaEfectiva * Math.pow(1 + tasaEfectiva, tiempoNumero)) /
-      (Math.pow(1 + tasaEfectiva, tiempoNumero) - 1);
+    const credito = calculatePublicCredit({
+      vehicleAmount: montoNumero,
+      downPaymentPct: engancheNumero,
+      termMonths: tiempoNumero,
+    });
 
     return {
-      interes: 1.5,
-      pagoMensual: Number.isNaN(pagoMensual) ? 0 : pagoMensual,
+      interes: credito.interestPct,
+      pagoMensual: credito.monthlyPayment,
     };
   };
 
@@ -196,7 +189,7 @@ export const CalculatorCredit = () => {
                     </div>
                   </div>
                   <p className="text-xs text-white/40 mt-3 text-center">
-                    *Esta calculadora es solo una referencia estimada y no refleja las condiciones finales del crédito.
+                    *Esta calculadora es una estimación referencial y puede variar según la evaluación y las condiciones finales del crédito.
                   </p>
                 </div>
                 <div className="w-full flex justify-center mt-2 lg:mt-6">

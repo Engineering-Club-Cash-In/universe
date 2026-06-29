@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight, Loader2, Search, TrendingUp, X } from "lucide-react";
-import { getInvestors, type InvestorResponse, type CreditoSimulado, type DesgloseMes, type ReinversionProyectada } from "../services/services";
+import { getInvestors, type InvestorResponse, type CreditoSimulado, type DesgloseMes } from "../services/services";
 import { useSimulacionInversionista } from "../hooks/useSimulacionInversionista";
 import { useQuery } from "@tanstack/react-query";
 
@@ -18,9 +18,9 @@ function formatQ(val: string | number | null | undefined, moneda?: string | null
 }
 
 function formatMesLabel(mesKey: string): string {
-  const [y, m] = mesKey.split("-");
-  const d = new Date(Number(y), Number(m) - 1, 1);
-  const label = d.toLocaleDateString("es-GT", { month: "long", year: "numeric" });
+  // UTC para ser consistente con el formateo de fechas de cuota (línea ~63)
+  const d = new Date(`${mesKey}-01T00:00:00Z`);
+  const label = d.toLocaleDateString("es-GT", { month: "long", year: "numeric", timeZone: "UTC" });
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
@@ -237,7 +237,7 @@ function FilaFicticio({ fic, moneda }: { fic: CuotaFicticioMes; moneda?: string 
                     </tr>
                     <tr className="bg-amber-50">
                       <td className="px-3 py-1.5 text-amber-600 text-xs italic" colSpan={2}>
-                        Reinicia el servidor backend para ver saldo, depósito y meses restantes
+                        Detalle de cálculo no disponible para esta cuota
                       </td>
                     </tr>
                   </>
@@ -310,8 +310,8 @@ function FilaMes({ mes, moneda, ficticiosMes }: {
               <span className="text-xs font-mono font-semibold text-slate-600">{fq(cr.monto_neto)}</span>
             </div>
           ))}
-          {ficticiosMes.map((fic) => (
-            <FilaFicticio key={fic.tipo} fic={fic} moneda={moneda} />
+          {ficticiosMes.map((fic, idx) => (
+            <FilaFicticio key={`${fic.tipo}-${idx}`} fic={fic} moneda={moneda} />
           ))
           }
         </div>

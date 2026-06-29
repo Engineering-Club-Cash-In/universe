@@ -340,7 +340,7 @@ export function ProyeccionInversionistas() {
 
   const investors: InvestorResponse[] = investorsData ?? [];
   // Backend siempre recibe sin mesLiquidacion — devuelve toda la proyección
-  const { data, isLoading, isError } = useSimulacionInversionista(selectedId, queryEnabled);
+  const { data, isLoading, isError, refetch } = useSimulacionInversionista(selectedId, queryEnabled);
 
   const sim = data?.data;
   const moneda = sim?.moneda;
@@ -402,8 +402,14 @@ export function ProyeccionInversionistas() {
   const handleGenerar = () => {
     if (!selectedId) return;
     setHastaFiltro(mesSeleccionado ? { mes: mesSeleccionado, anio: anioSeleccionado } : null);
-    setQueryEnabled(true);
     setMostrarCuotasDetalle(false);
+    if (queryEnabled) {
+      // Ya estaba habilitada (ej. reintento tras error): setQueryEnabled(true) sería
+      // no-op y React Query no re-ejecuta sin cambio de key → forzar con refetch().
+      refetch();
+    } else {
+      setQueryEnabled(true);
+    }
   };
 
   const handleSelect = (id: number) => {

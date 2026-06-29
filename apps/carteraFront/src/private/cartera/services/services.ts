@@ -4473,3 +4473,122 @@ export async function getCapitalInversionistas(
   );
   return res.data;
 }
+
+// ─── Proyección / Simulación de inversionista ───────────────────
+
+export interface CuotaSimulada {
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  abono_capital: number;
+  abono_interes: number;
+  abono_iva: number;
+  abono_isr: number;
+  monto_neto: number;
+  reinvierte_capital: boolean;
+  reinvierte_interes: boolean;
+}
+
+export interface CreditoSimulado {
+  credito_id: number;
+  numero_credito_sifco: string;
+  nombre_cliente: string | null;
+  capital: number;
+  porcentaje_interes: number;
+  plazo: number;
+  no_amortiza_capital: boolean;
+  porcentaje_participacion: number;
+  monto_aportado: number;
+  cuotas_proyectadas: CuotaSimulada[];
+  subtotal: {
+    total_capital: number;
+    total_interes: number;
+    total_iva: number;
+    total_isr: number;
+    total_monto_neto: number;
+    cuotas_pendientes: number;
+  };
+}
+
+export interface ReinversionProyectada {
+  tipo: string; // "reinversion_capital" | "reinversion_interes" | etc.
+  tasa_promedio: number;
+  plazo: number;
+  total_reinvertido: number;
+  total_interes_generado: number;
+  total_a_recibir: number;
+  cuotas_por_mes: Array<{
+    fecha_vencimiento: string;
+    abono_capital: number;
+    abono_interes: number;
+    abono_iva: number;
+    abono_isr: number;
+    monto_neto: number;
+    debug?: {
+      saldo_antes_deposito: number;
+      deposito_mes: number;
+      saldo_con_deposito: number;
+      interes_sobre_saldo: number;
+      cuota_calculada: number;
+      capital_cuota_minus_interes: number;
+      saldo_despues: number;
+      meses_restantes: number;
+      tasa_mensual: number;
+      porcentaje_participacion: number;
+    };
+  }>;
+}
+
+export interface DesgloseMes {
+  mes: string;
+  total_creditos: number;
+  total_reinversion: number;
+  total_mes: number;
+  creditos: Array<{
+    credito_id: number;
+    numero_credito_sifco: string;
+    nombre_cliente: string | null;
+    monto_neto: number;
+  }>;
+}
+
+export interface SimulacionInversionistaResponse {
+  success: boolean;
+  data: {
+    inversionista_id: number;
+    nombre: string;
+    tipo_reinversion: string | null;
+    moneda: string | null;
+    emite_factura: boolean;
+    mes_liquidacion: { mes: number; anio: number } | null;
+    creditos: CreditoSimulado[];
+    totales: {
+      total_capital: number;
+      total_interes: number;
+      total_iva: number;
+      total_isr: number;
+      total_monto_neto: number;
+      total_cuotas_pendientes: number;
+      total_creditos_activos: number;
+    };
+    reinversion_proyectada: ReinversionProyectada[];
+    desglose_acumulado: {
+      total_creditos: number;
+      total_reinversion: number;
+      total_acumulado: number;
+      meses: DesgloseMes[];
+    };
+  };
+}
+
+export async function getSimulacionInversionista(
+  inversionista_id: number,
+  mesLiquidacion?: { mes: number; anio: number }
+): Promise<SimulacionInversionistaResponse> {
+  const params = mesLiquidacion
+    ? `?mes=${mesLiquidacion.mes}&anio=${mesLiquidacion.anio}`
+    : "";
+  const res = await api.get<SimulacionInversionistaResponse>(
+    `${API_URL}/inversionistas/${inversionista_id}/simulacion${params}`
+  );
+  return res.data;
+}

@@ -37,25 +37,27 @@ export const MIN_RESERVA = 600;
 
 /**
  * Último recurso para el asesor "bucket" de créditos CRM sin asesor asignado.
- * Lo normal es resolverlo dinámicamente con resolveBucketAsesorId() (el asesor con
- * activo_para_creditos=false en cartera-back, es decir Gerencia). Esta constante solo
- * se usa si esa consulta falla. Antes el fallback directo era `?? 1` (Erik Rivas), que
+ * Lo normal es resolverlo dinámicamente con resolveBucketAsesorId() (el asesor llamado
+ * "Gerencia" en cartera-back). Esta constante solo se usa si esa consulta falla o si no
+ * existe Gerencia. Antes el fallback directo era `?? 1` (Erik Rivas), que
  * dejaba los créditos sin asesor invisibles para la reasignación en /creditos-crm.
  */
 export const GERENCIA_ASESOR_ID = 2;
 
 /**
- * Resuelve el asesor "bucket" para créditos CRM sin asesor: el primero marcado
- * activo_para_creditos=false en cartera-back (Gerencia, que NO entra al balanceo y
- * cuyos créditos se listan en /creditos-crm para reasignar). Solo se invoca cuando la
- * oportunidad no trae asesor. Si la consulta falla o no hay ninguno, cae a GERENCIA_ASESOR_ID.
+ * Resuelve el asesor "bucket" para créditos CRM sin asesor: ESPECÍFICAMENTE Gerencia
+ * (por nombre), igual que getCreditosCRM, que lista la cola de reasignación filtrando por
+ * nombre='Gerencia'. NO se usa "el primer asesor con activo_para_creditos=false": el flag
+ * puede excluir a varios asesores del balanceo, y si el crédito cayera en uno de esos NO
+ * aparecería en /creditos-crm para reasignarse. Solo se invoca cuando la oportunidad no
+ * trae asesor. Si la consulta falla o no existe Gerencia, cae a GERENCIA_ASESOR_ID.
  */
 async function resolveBucketAsesorId(): Promise<number> {
 	try {
 		const { data: advisors } = await carteraBackClient.getAdvisors();
-		const bucket =
-			advisors.find((a) => a.activo_para_creditos === false) ??
-			advisors.find((a) => a.nombre?.trim().toLowerCase() === "gerencia");
+		const bucket = advisors.find(
+			(a) => a.nombre?.trim().toLowerCase() === "gerencia",
+		);
 		return bucket?.asesor_id ?? GERENCIA_ASESOR_ID;
 	} catch (error) {
 		console.error(

@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getApiErrorMessage } from "@/lib/apiError";
 import { useMoras } from "../hooks/useLateFee";
 
 interface ModalCreateMoraProps {
@@ -83,8 +84,8 @@ const handleGuardar = () => {
       },
       onError: (err: any) => {
         // El back devuelve { success:false, message } con el motivo claro del rechazo
-        // (monto fuera de rango, status excluido, etc.).
-        const msg = err?.response?.data?.message || err?.message || JSON.stringify(err);
+        // (monto fuera de rango, status excluido, etc.). getApiErrorMessage centraliza la extracción.
+        const msg = getApiErrorMessage(err, "No se pudo crear mora");
         alert(`[ERROR] No se pudo crear mora\n\n${msg}`);
         mutationIdRef.current = null;
       }

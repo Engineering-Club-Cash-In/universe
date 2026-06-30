@@ -177,7 +177,11 @@ export async function createMora({
     // 🔥 VALIDACIÓN 4: guard de cordura del monto. "Absurdo" = mayor al capital total o
     // más de 10× la fórmula (atrapa errores tipo Q27,953.44 sobre un capital de Q40k/1 cuota).
     const montoBig = new Big(monto_mora);
-    const esAbsurdo = montoBig.gt(capitalBig) || (esperado.gt(0) ? montoBig.gt(esperado.times(10)) : true);
+    // Absurdo = más de 10× la fórmula (atrapa errores tipo Q27,953.44 sobre Q453.55 esperado).
+    // No se compara contra el capital directo: la fórmula correcta de un crédito con 90+ cuotas
+    // vencidas ya supera el capital y sería un falso positivo. Si la fórmula da 0 (capital 0),
+    // cualquier monto exige override.
+    const esAbsurdo = esperado.gt(0) ? montoBig.gt(esperado.times(10)) : true;
     if (esAbsurdo && !override) {
       console.log(`[${requestId}] ❌ RECHAZADO: monto ${monto_mora} fuera de rango (fórmula ${esperado.toFixed(2)})`);
       return {

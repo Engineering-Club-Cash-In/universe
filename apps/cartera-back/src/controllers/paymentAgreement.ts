@@ -1457,12 +1457,24 @@ export const updateConvenioStatus = async (
 
         console.log(`💰 Monto mora calculado: Q${montoMora.toFixed(2)}`);
 
-        // Crear la mora (esto también pone el crédito en MOROSO)
+        // El convenio se eliminó: sacar el crédito de EN_CONVENIO ANTES de recrear la mora.
+        // createMora ya NO escribe mora sobre estados excluidos (no des-castiga); si dejáramos
+        // EN_CONVENIO rechazaría la operación y el crédito quedaría huérfano (sin convenio,
+        // sin mora, nunca MOROSO).
+        await db
+          .update(creditos)
+          .set({ statusCredit: "MOROSO" })
+          .where(eq(creditos.credito_id, creditoId));
+
+        // Recrear la mora (monto = fórmula capital × 1.12% × cuotas). createMora reconfirma MOROSO.
         const resultMora = await createMora({
           credito_id: creditoId,
           monto_mora: Number(montoMora.toFixed(2)),
           cuotas_atrasadas: numCuotasAtrasadas,
         });
+        if (!resultMora.success) {
+          console.error("⚠️ createMora falló al eliminar convenio:", resultMora.message);
+        }
 
         console.log("✅ Resultado createMora:", resultMora);
       } else {

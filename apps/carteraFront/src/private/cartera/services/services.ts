@@ -1667,6 +1667,8 @@ export interface CreateMoraPayload {
   credito_id: number;
   monto_mora?: number;
   cuotas_atrasadas?: number;
+  override?: boolean; // forzar monto fuera de fórmula o crédito en estado excluido
+  motivo?: string; // requerido cuando override = true
 }
 
 export interface UpdateMoraPayload {

@@ -161,7 +161,35 @@ export async function createMora({
 
     const estadoExcluido = STATUS_EXCLUIDOS_MORA.includes(credito.statusCredit ?? "");
     const capitalBig = new Big(credito.capital || 0);
-    const esperado = capitalBig.times(0.0112).times(cuotas_atrasadas); // capital × 1.12% × cuotas
+
+    // 🔥 Conteo REAL de cuotas vencidas (derivado de cuotas_credito), NO el cuotas_atrasadas
+    // del request. Confiar en el valor enviado permitía inflarlo para esquivar el guard de
+    // cordura: p.ej. Q27,953.44 pasaba con cuotas_atrasadas: 7 porque el umbral se volvía
+    // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras (isOverdueInstallmentForMora).
+    const ovRes = await db.execute<any>(sql`
+      SELECT COUNT(*)::int AS n
+      FROM cartera.cuotas_credito cu
+      WHERE cu.credito_id = ${credito_id}
+        AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
+        AND cu.pagado = false
+        AND NOT EXISTS (
+          SELECT 1 FROM cartera.pagos_credito pc
+          WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
+            AND pc.validation_status IN ('validated', 'no_required'))`);
+    const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
+
+    // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
+    // (el caller no puede inflar el conteo para disparar el umbral del guard).
+    if (cuotas_atrasadas !== cuotasReales && !override) {
+      console.log(`[${requestId}] ❌ RECHAZADO: cuotas_atrasadas=${cuotas_atrasadas} ≠ vencidas reales=${cuotasReales}`);
+      return {
+        success: false,
+        message: `[ERROR] cuotas_atrasadas=${cuotas_atrasadas} no coincide con las cuotas vencidas reales (${cuotasReales}). Envía override:true + motivo si es intencional.`,
+      };
+    }
+
+    // La fórmula y el guard usan SIEMPRE las cuotas reales (no el valor no confiable del request).
+    const esperado = capitalBig.times(0.0112).times(cuotasReales); // capital × 1.12% × cuotas reales
 
     // 🔥 VALIDACIÓN 3: no escribir mora sobre créditos en estado excluido (EN_CONVENIO/
     // INCOBRABLE/CANCELADO/PENDIENTE_CANCELACION/CAIDO). Antes esto los volvía MOROSO
@@ -186,7 +214,7 @@ export async function createMora({
       console.log(`[${requestId}] ❌ RECHAZADO: monto ${monto_mora} fuera de rango (fórmula ${esperado.toFixed(2)})`);
       return {
         success: false,
-        message: `[ERROR] Monto Q${monto_mora} fuera de rango: la fórmula da Q${esperado.toFixed(2)} (capital Q${capitalBig.toFixed(2)} × 1.12% × ${cuotas_atrasadas}). Envía override:true + motivo si es intencional.`,
+        message: `[ERROR] Monto Q${monto_mora} fuera de rango: la fórmula da Q${esperado.toFixed(2)} (capital Q${capitalBig.toFixed(2)} × 1.12% × ${cuotasReales} cuotas reales). Envía override:true + motivo si es intencional.`,
       };
     }
 

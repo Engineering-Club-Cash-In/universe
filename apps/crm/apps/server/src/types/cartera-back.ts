@@ -483,6 +483,7 @@ export interface CarteraAsesor {
 	activo: boolean;
 	email: string;
 	is_active: boolean;
+	activo_para_creditos?: boolean; // 🔥 si false, es bucket (no entra al balanceo de créditos)
 }
 
 export interface CreateAsesorInput {

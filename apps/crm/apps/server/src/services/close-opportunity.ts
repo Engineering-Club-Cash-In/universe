@@ -35,6 +35,37 @@ import {
 /** Minimum reserve amount in Quetzales */
 export const MIN_RESERVA = 600;
 
+/**
+ * Último recurso para el asesor "bucket" de créditos CRM sin asesor asignado.
+ * Lo normal es resolverlo dinámicamente con resolveBucketAsesorId() (el asesor con
+ * activo_para_creditos=false en cartera-back, es decir Gerencia). Esta constante solo
+ * se usa si esa consulta falla. Antes el fallback directo era `?? 1` (Erik Rivas), que
+ * dejaba los créditos sin asesor invisibles para la reasignación en /creditos-crm.
+ */
+export const GERENCIA_ASESOR_ID = 2;
+
+/**
+ * Resuelve el asesor "bucket" para créditos CRM sin asesor: el primero marcado
+ * activo_para_creditos=false en cartera-back (Gerencia, que NO entra al balanceo y
+ * cuyos créditos se listan en /creditos-crm para reasignar). Solo se invoca cuando la
+ * oportunidad no trae asesor. Si la consulta falla o no hay ninguno, cae a GERENCIA_ASESOR_ID.
+ */
+async function resolveBucketAsesorId(): Promise<number> {
+	try {
+		const { data: advisors } = await carteraBackClient.getAdvisors();
+		const bucket =
+			advisors.find((a) => a.activo_para_creditos === false) ??
+			advisors.find((a) => a.nombre?.trim().toLowerCase() === "gerencia");
+		return bucket?.asesor_id ?? GERENCIA_ASESOR_ID;
+	} catch (error) {
+		console.error(
+			"[resolveBucketAsesorId] No se pudo resolver el asesor bucket; usando fallback:",
+			error,
+		);
+		return GERENCIA_ASESOR_ID;
+	}
+}
+
 /** Default postal code for Guatemala City */
 export const DEFAULT_CODIGO_POSTAL = "01001";
 
@@ -956,11 +987,15 @@ async function createCredit(
 			};
 		}
 
+		// Asesor: el de la oportunidad o, si viene sin asesor, el bucket "Gerencia"
+		// resuelto dinámicamente en cartera-back (no se asume un id fijo).
+		const asesorId = opportunity.asesorId ?? (await resolveBucketAsesorId());
+
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
 			userId,
 			usuario_id: `${lead.firstName} ${lead.middleName ?? ""} ${lead.lastName} ${lead.secondLastName ?? ""}`,
-			asesor_id: opportunity.asesorId ?? 1,
+			asesor_id: asesorId,
 			numero_credito_sifco: numeroSifco,
 			direccion: lead.direccion ?? undefined,
 			capital: Number.parseFloat(opportunity.value as string),

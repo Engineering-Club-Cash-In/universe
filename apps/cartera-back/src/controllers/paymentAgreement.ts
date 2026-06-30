@@ -1431,21 +1431,20 @@ export const updateConvenioStatus = async (
         return { success: false, message: "Crédito no encontrado" };
       }
 
-      // Contar cuotas atrasadas (vencidas y no pagadas)
-      const hoy = new Date().toISOString().slice(0, 10);
-
-      const cuotasAtrasadas = await db
-        .select({ cuota_id: cuotas_credito.cuota_id })
-        .from(cuotas_credito)
-        .where(
-          and(
-            eq(cuotas_credito.credito_id, creditoId),
-            eq(cuotas_credito.pagado, false),
-            lte(cuotas_credito.fecha_vencimiento, hoy)
-          )
-        );
-
-      const numCuotasAtrasadas = cuotasAtrasadas.length;
+      // Contar cuotas vencidas con la MISMA lógica que createMora/procesarMoras
+      // (< hoy GT, impaga, sin pago cubriente validated/no_required) para que el conteo
+      // coincida con el que recalcula createMora y no lo rechace por mismatch.
+      const ovRes = await db.execute<any>(sql`
+        SELECT COUNT(*)::int AS n
+        FROM cartera.cuotas_credito cu
+        WHERE cu.credito_id = ${creditoId}
+          AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
+          AND cu.pagado = false
+          AND NOT EXISTS (
+            SELECT 1 FROM cartera.pagos_credito pc
+            WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
+              AND pc.validation_status IN ('validated', 'no_required'))`);
+      const numCuotasAtrasadas = Number(ovRes.rows?.[0]?.n ?? 0);
 
       console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
 
@@ -1473,7 +1472,13 @@ export const updateConvenioStatus = async (
           cuotas_atrasadas: numCuotasAtrasadas,
         });
         if (!resultMora.success) {
-          console.error("⚠️ createMora falló al eliminar convenio:", resultMora.message);
+          // No tragar el fallo: el convenio ya se borró y el crédito quedó MOROSO; si la mora
+          // no se recreó hay que reportarlo (no devolver un success falso).
+          console.error("⚠️ createMora falló al recrear mora tras eliminar convenio:", resultMora.message);
+          return {
+            success: false,
+            message: `Convenio eliminado pero NO se pudo recrear la mora del crédito ${creditoId}: ${resultMora.message}`,
+          };
         }
 
         console.log("✅ Resultado createMora:", resultMora);

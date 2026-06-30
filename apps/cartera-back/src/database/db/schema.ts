@@ -891,6 +891,9 @@
     telefono: varchar("telefono", { length: 20 }), // 🔥 NUEVO CAMPO OPCIONAL
     activo: boolean("activo"),
     emailCashIn: varchar("email_cash_in", { length: 150 }), // 🔥 NUEVO CAMPO OPCIONAL
+    // 🔥 Si es false, el asesor NO entra al balanceo de carga al crear créditos
+    // (getAsesorConMenorCarga lo ignora). Reemplaza el hardcode nombre != 'Gerencia'.
+    activo_para_creditos: boolean("activo_para_creditos").notNull().default(true),
   });
 
   export const cuentasEmpresa = customSchema.table("cuentas_empresa", {

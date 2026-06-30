@@ -30,10 +30,13 @@ export const insertAdvisor = async ({ body, set }: any) => {
     const insertedAdvisors = await db
       .insert(asesores)
       .values(
-        asesoresToInsert.map(({ nombre, activo, telefono }) => ({ // 🔥 Agregado telefono
+        asesoresToInsert.map(({ nombre, activo, telefono, activo_para_creditos }) => ({ // 🔥 Agregado telefono
           nombre,
           telefono: telefono?.trim() || null, // 🔥 NUEVO: Limpia o pone null
           activo: typeof activo !== "undefined" ? activo : true,
+          // 🔥 default true: el asesor entra al balanceo salvo que se indique lo contrario.
+          // Solo un boolean explícito lo cambia (null/otros tipos caen a true; la columna es NOT NULL).
+          activo_para_creditos: typeof activo_para_creditos === "boolean" ? activo_para_creditos : true,
         }))
       )
       .returning();
@@ -141,6 +144,7 @@ export const getAdvisors = async ({ query, set }: any) => {
           nombre: asesores.nombre,
           telefono: asesores.telefono, // 🔥 NUEVO
           activo: asesores.activo,
+          activo_para_creditos: asesores.activo_para_creditos, // 🔥 flag balanceo
           email: platform_users.email,
           is_active: platform_users.is_active,
         })
@@ -163,6 +167,7 @@ export const getAdvisors = async ({ query, set }: any) => {
           nombre: asesores.nombre,
           telefono: asesores.telefono, // 🔥 NUEVO
           activo: asesores.activo,
+          activo_para_creditos: asesores.activo_para_creditos, // 🔥 flag balanceo
           email: platform_users.email,
           is_active: platform_users.is_active,
         })
@@ -184,6 +189,7 @@ export const getAdvisors = async ({ query, set }: any) => {
         nombre: asesores.nombre,
         telefono: asesores.telefono, // 🔥 NUEVO
         activo: asesores.activo,
+        activo_para_creditos: asesores.activo_para_creditos, // 🔥 flag balanceo
         email: platform_users.email,
         is_active: platform_users.is_active,
       })
@@ -214,7 +220,7 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
       return { message: "Debe proporcionar campos para actualizar." };
     }
 
-    const { nombre, telefono, activo, email, password } = body; // ✅ Ya tiene telefono
+    const { nombre, telefono, activo, email, password, activo_para_creditos } = body; // ✅ Ya tiene telefono
 
     // 1. Buscar el usuario en platform_users
     const [user] = await db
@@ -236,9 +242,10 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
     const updatedAdvisor = await db
       .update(asesores)
       .set({
-        ...(nombre !== undefined ? { nombre } : {}), 
+        ...(nombre !== undefined ? { nombre } : {}),
         ...(telefono !== undefined ? { telefono } : {}), // ✅ Ya tiene telefono
         ...(activo !== undefined ? { activo } : {}),
+        ...(activo_para_creditos !== undefined ? { activo_para_creditos } : {}), // 🔥 flag balanceo
       })
       .where(eq(asesores.asesor_id, user.asesor_id))
       .returning();
@@ -441,7 +448,8 @@ export async function getAsesorConMenorCarga(): Promise<number> {
       .where(
         and(
           eq(asesores.activo, true),
-          sql`${asesores.nombre} != 'Gerencia'`
+          // 🔥 Solo asesores marcados para recibir créditos (reemplaza el hardcode != 'Gerencia')
+          eq(asesores.activo_para_creditos, true)
         )
       );
 

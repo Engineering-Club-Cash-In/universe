@@ -1542,6 +1542,7 @@ export async function getResumenInversionistas(params?: {
   activo: boolean;
   telefono?: string | null;
   email?: string;
+  activo_para_creditos?: boolean; // 🔥 si false, no entra al balanceo al crear créditos
 }
 
 

@@ -25,6 +25,7 @@ export interface PlatformUser {
   profile?: {
     nombre?: string;
     telefono?: string; // 🔥 NUEVO
+    activo_para_creditos?: boolean; // 🔥 NUEVO: incluir en balanceo de créditos
   };
 }
 
@@ -51,6 +52,7 @@ export default function UsersManager() {
     email: "",
     password: "",
     activo: true,
+    activo_para_creditos: true, // 🔥 NUEVO
   });
 
   const handleOpen = (user?: PlatformUser) => {
@@ -65,6 +67,7 @@ export default function UsersManager() {
         email: user.email,
         password: "",
         activo: user.is_active,
+        activo_para_creditos: user.profile?.activo_para_creditos ?? true, // 🔥 NUEVO
       });
     } else {
       setEditing(null);
@@ -75,6 +78,7 @@ export default function UsersManager() {
         email: "",
         password: "",
         activo: true,
+        activo_para_creditos: true, // 🔥 NUEVO
       });
     }
     setIsOpen(true);
@@ -87,8 +91,8 @@ export default function UsersManager() {
         if (editing.role === "ASESOR") {
           await editAdvisor({ id: editing.id, advisor: form });
         } else if (editing.role === "CONTA") {
-          // 🔥 Para CONTA no enviamos telefono
-          const { telefono, ...contaForm } = form;
+          // 🔥 Para CONTA no enviamos telefono ni el flag de créditos
+          const { telefono, activo_para_creditos, ...contaForm } = form;
           await editConta({ contaId: editing.id, updates: contaForm });
         }
         window.alert(`✅ Usuario actualizado correctamente: ${form.nombre}`);
@@ -97,8 +101,8 @@ export default function UsersManager() {
         if (userType === "ASESOR") {
           await addAdvisor(form);
         } else {
-          // 🔥 Para CONTA no enviamos telefono
-          const { telefono, ...contaForm } = form;
+          // 🔥 Para CONTA no enviamos telefono ni el flag de créditos
+          const { telefono, activo_para_creditos, ...contaForm } = form;
           await addConta(contaForm);
         }
         window.alert(`✅ Usuario creado correctamente: ${form.nombre}`);
@@ -143,6 +147,7 @@ export default function UsersManager() {
                     <th className="p-2 text-left">Email</th>
                     <th className="p-2 text-left">Teléfono</th> {/* 🔥 NUEVA COLUMNA */}
                     <th className="p-2 text-left">Activo</th>
+                    <th className="p-2 text-left">Incluir créditos</th> {/* 🔥 NUEVA COLUMNA */}
                     <th className="p-2 text-center">Acciones</th>
                   </tr>
                 </thead>
@@ -168,12 +173,25 @@ export default function UsersManager() {
                       </td>
                       <td className="p-2">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          u.is_active 
-                            ? "bg-green-100 text-green-700" 
+                          u.is_active
+                            ? "bg-green-100 text-green-700"
                             : "bg-red-100 text-red-700"
                         }`}>
                           {u.is_active ? "Sí" : "No"}
                         </span>
+                      </td>
+                      <td className="p-2"> {/* 🔥 NUEVA CELDA: incluir en créditos */}
+                        {u.role === "ASESOR" ? (
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                            (u.profile?.activo_para_creditos ?? true)
+                              ? "bg-green-100 text-green-700"
+                              : "bg-yellow-100 text-yellow-700"
+                          }`}>
+                            {(u.profile?.activo_para_creditos ?? true) ? "Sí" : "No"}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-xs">N/A</span>
+                        )}
                       </td>
                       <td className="p-2 text-center">
                         <Button
@@ -332,7 +350,32 @@ export default function UsersManager() {
                   <option value="false">Inactivo</option>
                 </select>
               </div>
-              
+
+              {/* 🔥 NUEVO: Incluir en créditos (solo ASESORES) */}
+              {(userType === "ASESOR" || editing?.role === "ASESOR") && (
+                <div>
+                  <Label className="text-gray-700">
+                    Incluir en créditos{" "}
+                    <span className="text-gray-400 text-xs">
+                      (si es "No", no se le asignan créditos nuevos en el balanceo)
+                    </span>
+                  </Label>
+                  <select
+                    className="border rounded-md p-2 w-full text-black bg-white focus:ring-2 focus:ring-blue-500"
+                    value={form.activo_para_creditos ? "true" : "false"}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        activo_para_creditos: e.target.value === "true",
+                      })
+                    }
+                  >
+                    <option value="true">Sí</option>
+                    <option value="false">No</option>
+                  </select>
+                </div>
+              )}
+
               <Button
                 onClick={handleSubmit}
                 className="w-full bg-blue-600 text-white hover:bg-blue-700"

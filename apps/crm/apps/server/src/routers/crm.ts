@@ -2501,7 +2501,11 @@ export const crmRouter = {
 			}
 
 			// Build conditions
-			const conditions = [eq(opportunities.stageId, analysisStage[0].id)];
+			const conditions = [
+				eq(opportunities.stageId, analysisStage[0].id),
+				// Solo mostrar oportunidades abiertas (excluir perdidas, ganadas, etc.)
+				eq(opportunities.status, "open"),
+			];
 
 			// Search filter (name, license plate, opportunity ID)
 			if (search && search.trim() !== "") {

@@ -191,14 +191,17 @@ export async function createMora({
     // La fórmula y el guard usan SIEMPRE las cuotas reales (no el valor no confiable del request).
     const esperado = capitalBig.times(0.0112).times(cuotasReales); // capital × 1.12% × cuotas reales
 
-    // 🔥 VALIDACIÓN 3: no escribir mora sobre créditos en estado excluido (EN_CONVENIO/
-    // INCOBRABLE/CANCELADO/PENDIENTE_CANCELACION/CAIDO). Antes esto los volvía MOROSO
-    // (des-castigaba). Con override sí se permite, pero el status NUNCA se cambia.
-    if (estadoExcluido && !override) {
+    // 🔥 VALIDACIÓN 3: NUNCA escribir mora sobre créditos en estado excluido (EN_CONVENIO/
+    // INCOBRABLE/CANCELADO/PENDIENTE_CANCELACION/CAIDO) — ni con override. Castigados/cancelados
+    // no llevan mora; además el cron procesarMoras desactivaría esa mora en su corrida (la fila
+    // quedaría huérfana), así que el override sobre un excluido era transitorio e inútil. Para
+    // morar uno de estos hay que sacarlo del estado excluido primero (como hace el teardown de
+    // convenio, que lo pone MOROSO antes de llamar a createMora).
+    if (estadoExcluido) {
       console.log(`[${requestId}] ❌ RECHAZADO: status '${credito.statusCredit}' excluido de mora`);
       return {
         success: false,
-        message: `[ERROR] El crédito está en estado '${credito.statusCredit}' (excluido de mora). Envía override:true + motivo si es intencional (el status NO se cambiará).`,
+        message: `[ERROR] El crédito está en estado '${credito.statusCredit}' (excluido de mora): no se le puede registrar mora. Saca el crédito de ese estado primero si corresponde.`,
       };
     }
 
@@ -295,19 +298,14 @@ export async function createMora({
       console.log(`[${requestId}] ✅ Mora creada: ID=${newMora.mora_id}`);
     }
 
-    // Actualizar status a MOROSO SOLO si el crédito NO está en un estado excluido. No
-    // des-castigar un INCOBRABLE/CONVENIO/CANCELADO aunque venga con override (solo se
-    // registra la mora; el status se respeta).
-    if (!estadoExcluido) {
-      console.log(`[${requestId}] 🔄 Actualizando status a MOROSO...`);
-      await db
-        .update(creditos)
-        .set({ statusCredit: "MOROSO" })
-        .where(eq(creditos.credito_id, credito_id));
-      console.log(`[${requestId}] ✅ Status actualizado a MOROSO`);
-    } else {
-      console.log(`[${requestId}] ⏭️ Status '${credito.statusCredit}' excluido (override): NO se cambia a MOROSO`);
-    }
+    // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
+    // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
+    console.log(`[${requestId}] 🔄 Actualizando status a MOROSO...`);
+    await db
+      .update(creditos)
+      .set({ statusCredit: "MOROSO" })
+      .where(eq(creditos.credito_id, credito_id));
+    console.log(`[${requestId}] ✅ Status actualizado a MOROSO`);
 
     await registrarHistorialMora({
       credito_id,
@@ -336,7 +334,7 @@ export async function createMora({
     return {
       success: true,
       mora: newMora,
-      status: estadoExcluido ? credito.statusCredit : "MOROSO",
+      status: "MOROSO",
     };
 
   } catch (error) {

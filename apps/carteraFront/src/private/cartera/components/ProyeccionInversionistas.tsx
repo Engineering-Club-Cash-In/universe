@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, Loader2, Search, TrendingUp, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsUpDown, Loader2, Search, TrendingUp, X } from "lucide-react";
+import { Combobox, Transition } from "@headlessui/react";
 import { getInvestors, type InvestorResponse, type CreditoSimulado, type DesgloseMes } from "../services/services";
 import { useSimulacionInversionista } from "../hooks/useSimulacionInversionista";
 import { useQuery } from "@tanstack/react-query";
@@ -31,8 +32,12 @@ function CreditoDetalle({ cr, moneda }: { cr: CreditoSimulado; moneda?: string |
     <div className="border border-slate-200 rounded-xl overflow-hidden">
       <div className="bg-blue-50 px-4 py-3 flex items-center justify-between gap-2">
         <div>
-          <p className="font-semibold text-blue-900 text-sm">#{cr.numero_credito_sifco}</p>
-          {cr.nombre_cliente && <p className="text-xs text-blue-700">{cr.nombre_cliente}</p>}
+          <div className="flex items-center gap-2">
+            <p className="font-semibold text-blue-900 text-sm">{cr.nombre_cliente ?? "—"}</p>
+            <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5 font-medium">
+              {TIPO_LABELS[cr.tipo_reinversion] ?? cr.tipo_reinversion.replace(/_/g, " ")}
+            </span>
+          </div>
           <p className="text-xs text-slate-400">
             {fq(cr.capital)} · {cr.porcentaje_interes}% · {cr.porcentaje_participacion}% part.
           </p>
@@ -52,7 +57,8 @@ function CreditoDetalle({ cr, moneda }: { cr: CreditoSimulado; moneda?: string |
                 <th className="px-3 py-2 text-right text-slate-400 font-medium">Interés</th>
                 <th className="px-3 py-2 text-right text-slate-400 font-medium">IVA</th>
                 <th className="px-3 py-2 text-right text-slate-400 font-medium">ISR</th>
-                <th className="px-3 py-2 text-right text-slate-400 font-bold">Neto</th>
+                <th className="px-3 py-2 text-right text-slate-400 font-bold">Total recibido</th>
+                <th className="px-3 py-2 text-right text-slate-400 font-medium">Capital restante</th>
               </tr>
             </thead>
             <tbody>
@@ -68,6 +74,7 @@ function CreditoDetalle({ cr, moneda }: { cr: CreditoSimulado; moneda?: string |
                   <td className="px-3 py-1.5 text-right font-mono text-slate-600">{fq(c.abono_iva)}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-slate-600">{fq(c.abono_isr)}</td>
                   <td className="px-3 py-1.5 text-right font-mono font-semibold text-blue-800">{fq(c.monto_neto)}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-slate-500">{fq(c.saldo_actual)}</td>
                 </tr>
               ))}
             </tbody>
@@ -86,181 +93,83 @@ const TIPO_LABELS: Record<string, string> = {
   reinversion_excedente: "Reinv. Excedente",
 };
 
-type CuotaFicticioMes = {
-  tipo: string;
-  abono_capital: number;
-  abono_interes: number;
-  abono_iva: number;
-  abono_isr: number;
-  monto_neto: number;
-  debug?: {
-    saldo_antes_deposito: number;
-    deposito_mes: number;
-    saldo_con_deposito: number;
-    interes_sobre_saldo: number;
-    cuota_calculada: number;
-    capital_cuota_minus_interes: number;
-    saldo_despues: number;
-    meses_restantes: number;
-    tasa_mensual: number;
-    porcentaje_participacion: number;
-  };
+const TIPO_REINV_LABEL: Record<string, string> = {
+  sin_reinversion: "Tradicional",
+  reinversion_capital: "Reinv. Capital",
+  reinversion_total: "Interés Compuesto",
+  reinversion_interes: "Reinv. Interés",
+  reinversion_variable: "Variable",
+  reinversion_excedente: "Excedente",
+  reinversion_combinada: "Combinada",
 };
 
-function FilaFicticio({ fic, moneda }: { fic: CuotaFicticioMes; moneda?: string | null }) {
+function FilaCreditoMes({ cr, moneda }: { cr: DesgloseMes["creditos"][number]; moneda?: string | null }) {
   const [detalle, setDetalle] = useState(false);
   const fq = (v: number) => formatQ(v, moneda);
+  const esFicticio = cr.credito_id === -1;
+  const tipoLabel = cr.tipo_reinversion ? (TIPO_REINV_LABEL[cr.tipo_reinversion] ?? cr.tipo_reinversion) : null;
   return (
-    <div className="bg-amber-50 border-t border-amber-100">
-      <div className="flex items-center justify-between px-5 py-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-amber-700">
-            {TIPO_LABELS[fic.tipo] ?? fic.tipo.replace(/_/g, " ")}
-          </span>
-          <span className="text-xs bg-amber-200 text-amber-800 rounded-full px-1.5 py-0.5 font-semibold leading-none">FICTICIO</span>
-          <button
-            onClick={() => setDetalle((v) => !v)}
-            className="text-xs text-amber-500 hover:text-amber-700 underline underline-offset-2"
-          >
-            {detalle ? "ocultar" : "detalle"}
-          </button>
-        </div>
-        <span className="text-xs font-mono font-semibold text-amber-700">{fq(fic.monto_neto)}</span>
-      </div>
+    <div className={esFicticio ? "bg-amber-50" : "bg-white"}>
+      <button
+        onClick={() => setDetalle((v) => !v)}
+        className={`w-full grid grid-cols-[1fr_auto] items-center gap-6 px-5 py-2 text-left transition-colors ${esFicticio ? "hover:bg-amber-100" : "hover:bg-slate-50"}`}
+      >
+        <span className={`text-xs truncate flex items-center gap-1.5 ${esFicticio ? "text-amber-700 font-semibold" : "text-slate-600"}`}>
+          {esFicticio ? "↻ Reinversión (ficticio)" : (cr.nombre_cliente ?? "—")}
+          {tipoLabel && !esFicticio && (
+            <span className="shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide bg-blue-50 text-blue-500 border border-blue-100">{tipoLabel}</span>
+          )}
+        </span>
+        <span className={`text-xs font-mono text-right w-28 ${esFicticio ? "text-amber-600" : "text-slate-600"}`}>{fq(cr.saldo_actual)}</span>
+      </button>
       {detalle && (
-        <div className="mx-5 mb-2 space-y-2">
-          {/* Cuota desglosada */}
-          <div className="rounded-lg border border-amber-200 overflow-hidden">
-            <div className="bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 uppercase tracking-wide">Cuota</div>
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-amber-50">
-                  <th className="px-3 py-1.5 text-left text-amber-600 font-medium">Capital</th>
-                  <th className="px-3 py-1.5 text-left text-amber-600 font-medium">Interés</th>
-                  <th className="px-3 py-1.5 text-left text-amber-600 font-medium">IVA</th>
-                  <th className="px-3 py-1.5 text-left text-amber-600 font-medium">ISR</th>
-                  <th className="px-3 py-1.5 text-right text-amber-700 font-bold">Neto</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="bg-white">
-                  <td className="px-3 py-1.5 font-mono text-slate-600">{fq(fic.abono_capital)}</td>
-                  <td className="px-3 py-1.5 font-mono text-slate-600">{fq(fic.abono_interes)}</td>
-                  <td className="px-3 py-1.5 font-mono text-slate-600">{fq(fic.abono_iva)}</td>
-                  <td className="px-3 py-1.5 font-mono text-slate-600">{fq(fic.abono_isr)}</td>
-                  <td className="px-3 py-1.5 font-mono font-semibold text-amber-800 text-right">{fq(fic.monto_neto)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          {/* Cálculo interno — siempre visible para validación */}
-          <div className="rounded-lg border border-slate-200 overflow-hidden">
-            <div className="bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cálculo interno</div>
-            <table className="w-full text-xs">
-              <tbody className="divide-y divide-slate-100">
-                {fic.debug ? (
-                  <>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-400 text-xs italic" colSpan={2}>— Saldo —</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-500">Saldo mes anterior</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.debug.saldo_antes_deposito)}</td>
-                    </tr>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-500">+ Depósito este mes</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.debug.deposito_mes)}</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-600 font-semibold">= Saldo base (con depósito)</td>
-                      <td className="px-3 py-1.5 font-mono font-bold text-slate-800 text-right">{fq(fic.debug.saldo_con_deposito)}</td>
-                    </tr>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-400 text-xs italic" colSpan={2}>— Cuota francesa: saldo × r / (1 - (1+r)^-n) —</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-500">Tasa mensual (r)</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{(fic.debug.tasa_mensual * 100).toFixed(4)}%</td>
-                    </tr>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-500">Meses restantes (n)</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fic.debug.meses_restantes}</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-blue-600 font-semibold">Cuota calculada</td>
-                      <td className="px-3 py-1.5 font-mono font-bold text-blue-700 text-right">{fq(fic.debug.cuota_calculada)}</td>
-                    </tr>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-400 text-xs italic" colSpan={2}>— Desglose cuota —</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-500">Interés = saldo × r</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.debug.interes_sobre_saldo)}</td>
-                    </tr>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-500">Capital = cuota − interés</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.debug.capital_cuota_minus_interes)}</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-500">Saldo siguiente mes</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.debug.saldo_despues)}</td>
-                    </tr>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-400 text-xs italic" colSpan={2}>— Participación —</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-500">% participación inversionista</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fic.debug.porcentaje_participacion}%</td>
-                    </tr>
-                  </>
-                ) : (
-                  <>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-500">Capital amortizado</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.abono_capital)}</td>
-                    </tr>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-500">Interés bruto</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.abono_interes)}</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-500">IVA (12%)</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.abono_iva)}</td>
-                    </tr>
-                    <tr className="bg-slate-50">
-                      <td className="px-3 py-1.5 text-slate-500">ISR (7%)</td>
-                      <td className="px-3 py-1.5 font-mono text-slate-700 text-right">{fq(fic.abono_isr)}</td>
-                    </tr>
-                    <tr className="bg-white">
-                      <td className="px-3 py-1.5 text-slate-500">Cuota inversionista</td>
-                      <td className="px-3 py-1.5 font-mono font-semibold text-blue-700 text-right">{fq(fic.monto_neto)}</td>
-                    </tr>
-                    <tr className="bg-amber-50">
-                      <td className="px-3 py-1.5 text-amber-600 text-xs italic" colSpan={2}>
-                        Detalle de cálculo no disponible para esta cuota
-                      </td>
-                    </tr>
-                  </>
-                )}
-              </tbody>
-            </table>
-          </div>
+        <div className="mx-5 mb-2 rounded-lg border border-slate-200 overflow-hidden">
+          <div className="bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cuota</div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-slate-50">
+                <th className="px-3 py-1.5 text-left text-slate-500 font-medium">Capital</th>
+                <th className="px-3 py-1.5 text-left text-slate-500 font-medium">Interés</th>
+                <th className="px-3 py-1.5 text-left text-slate-500 font-medium">IVA</th>
+                <th className="px-3 py-1.5 text-left text-slate-500 font-medium">ISR</th>
+                <th className="px-3 py-1.5 text-right text-slate-700 font-bold">Neto</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 font-mono text-slate-600">{fq(cr.abono_capital)}</td>
+                <td className="px-3 py-1.5 font-mono text-slate-600">{fq(cr.abono_interes)}</td>
+                <td className="px-3 py-1.5 font-mono text-slate-600">{fq(cr.abono_iva)}</td>
+                <td className="px-3 py-1.5 font-mono text-slate-600">{fq(cr.abono_isr)}</td>
+                <td className="px-3 py-1.5 font-mono font-semibold text-blue-800 text-right">{fq(cr.monto_neto)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   );
 }
 
-function FilaMes({ mes, moneda, ficticiosMes }: {
+function FilaMes({ mes, moneda, tipoReinversion, montoReinvMensual, defaultExpanded = true }: {
   mes: DesgloseMes;
   moneda?: string | null;
-  ficticiosMes: CuotaFicticioMes[];
+  tipoReinversion?: string | null;
+  montoReinvMensual?: number;
+  defaultExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  useEffect(() => { setExpanded(defaultExpanded); }, [defaultExpanded]);
   const fq = (v: number) => formatQ(v, moneda);
-  const totalRecibe = Number(mes.total_creditos);
-  const totalReinv = Number(mes.total_reinversion);
-  const tieneReinversion = totalReinv > 0;
+  // Semántica alineada con el reporte de inversiones:
+  //   sinReinv = flujo bruto (cap + interés neto) = lo que recibiría SIN reinvertir
+  //   conReinv = lo que recibe en mano TRAS reinvertir
+  //   reinvertido = lo reinvertido (sinReinv − conReinv)
+  const totalSinReinv = Number(mes.total_sin_reinversion);
+  const totalConReinv = Number(mes.total_con_reinversion);
+  const totalReinvertido = Number(mes.total_reinversion);
+  const tieneReinversion = !!(tipoReinversion && tipoReinversion !== "sin_reinversion");
+  const esExcedente = tipoReinversion === "reinversion_excedente";
 
   return (
     <div className="rounded-xl border border-slate-200 overflow-hidden">
@@ -273,47 +182,50 @@ function FilaMes({ mes, moneda, ficticiosMes }: {
           {expanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
           <span className="font-semibold text-slate-700 text-sm">{formatMesLabel(mes.mes)}</span>
         </div>
-        <span className="font-bold font-mono text-blue-900 text-sm">{fq(mes.total_mes)}</span>
       </button>
 
-      {/* Totales del mes: recibe vs reinvierte — siempre visibles */}
-      <div className={`grid gap-px bg-slate-100 border-b border-slate-200 ${tieneReinversion ? "grid-cols-3" : "grid-cols-1"}`}>
+      {/* Totales del mes (semántica del reporte): Sin Reinversión (bruto) · Con Reinversión (recibe) ·
+          Reinversión (reinvertido) · Capital Restante */}
+      <div className={`grid gap-px bg-slate-100 border-b border-slate-200 ${tieneReinversion ? "grid-cols-4" : "grid-cols-2"}`}>
         <div className="bg-white px-4 py-1.5">
-          <p className="text-xs text-slate-400 uppercase tracking-wide">Recibe</p>
-          <p className="text-sm font-bold font-mono text-blue-800">{fq(totalRecibe)}</p>
+          <p className="text-xs text-slate-400 uppercase tracking-wide">Cuota Sin Reinversión</p>
+          <p className="text-sm font-bold font-mono text-blue-800">{fq(totalSinReinv)}</p>
         </div>
         {tieneReinversion && (
           <div className="bg-white px-4 py-1.5">
-            <p className="text-xs text-amber-500 uppercase tracking-wide">Reinvierte</p>
-            <p className="text-sm font-bold font-mono text-amber-700">{fq(totalReinv)}</p>
+            <p className="text-xs text-teal-600 uppercase tracking-wide">Cuota Con Reinversión</p>
+            <p className="text-sm font-bold font-mono text-teal-700">{fq(totalConReinv)}</p>
+            {esExcedente && montoReinvMensual != null && (
+              <p className="text-[10px] text-slate-400 font-mono">tope {fq(montoReinvMensual)}</p>
+            )}
           </div>
         )}
         {tieneReinversion && (
-          <div className="bg-blue-50 px-4 py-1.5">
-            <p className="text-xs text-blue-400 uppercase tracking-wide">Total mes</p>
-            <p className="text-sm font-bold font-mono text-blue-900">{fq(mes.total_mes)}</p>
+          <div className="bg-amber-50 px-4 py-1.5">
+            <p className="text-xs text-amber-500 uppercase tracking-wide">Reinversión</p>
+            <p className="text-sm font-bold font-mono text-amber-700">{fq(totalReinvertido)}</p>
           </div>
         )}
+        <div className="bg-white px-4 py-1.5">
+          <p className="text-xs text-slate-400 uppercase tracking-wide">Capital Restante</p>
+          <p className="text-sm font-bold font-mono text-slate-600">{fq(mes.total_capital_restante)}</p>
+        </div>
       </div>
 
       {/* Detalle créditos — colapsable */}
       {expanded && (
-        <div className="divide-y divide-slate-100">
-          {mes.creditos.map((cr) => (
-            <div key={cr.credito_id} className="flex items-center justify-between px-5 py-2 bg-white">
-              <div>
-                <span className="text-xs font-semibold text-blue-700">#{cr.numero_credito_sifco}</span>
-                {cr.nombre_cliente && (
-                  <span className="text-xs text-slate-500 ml-2">{cr.nombre_cliente}</span>
-                )}
-              </div>
-              <span className="text-xs font-mono font-semibold text-slate-600">{fq(cr.monto_neto)}</span>
+        <div>
+          {mes.creditos.length > 0 && (
+            <div className="grid grid-cols-[1fr_auto] items-center gap-6 px-5 py-1.5 bg-slate-50 border-b border-slate-100">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wide">Crédito</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wide text-right w-28">Capital restante</span>
             </div>
-          ))}
-          {ficticiosMes.map((fic, idx) => (
-            <FilaFicticio key={`${fic.tipo}-${idx}`} fic={fic} moneda={moneda} />
-          ))
-          }
+          )}
+          <div className="divide-y divide-slate-100">
+            {mes.creditos.map((cr) => (
+              <FilaCreditoMes key={cr.credito_id} cr={cr} moneda={moneda} />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -324,6 +236,7 @@ function FilaMes({ mes, moneda, ficticiosMes }: {
 export function ProyeccionInversionistas() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [queryEnabled, setQueryEnabled] = useState(false);
+  const [investorQuery, setInvestorQuery] = useState("");
 
   const currentYear = new Date().getFullYear();
   // hastaFiltro: filtro visual "hasta este mes" — no va al backend
@@ -331,6 +244,7 @@ export function ProyeccionInversionistas() {
   const [mesSeleccionado, setMesSeleccionado] = useState<number | null>(null);
   const [anioSeleccionado, setAnioSeleccionado] = useState<number>(currentYear);
   const [mostrarCuotasDetalle, setMostrarCuotasDetalle] = useState(false);
+  const [allExpanded, setAllExpanded] = useState(true);
 
   const { data: investorsData, isLoading: loadingInvestors } = useQuery({
     queryKey: ["investors"],
@@ -339,46 +253,21 @@ export function ProyeccionInversionistas() {
   });
 
   const investors: InvestorResponse[] = investorsData ?? [];
+  const filteredInvestors =
+    investorQuery === ""
+      ? investors
+      : investors.filter((inv) => inv.nombre.toLowerCase().includes(investorQuery.toLowerCase()));
   // Backend siempre recibe sin mesLiquidacion — devuelve toda la proyección
   const { data, isLoading, isError, refetch } = useSimulacionInversionista(selectedId, queryEnabled);
 
   const sim = data?.data;
   const moneda = sim?.moneda;
   const fq = (v: number) => formatQ(v, moneda);
-  const tieneReinversion = !!(sim?.reinversion_proyectada && sim.reinversion_proyectada.length > 0);
+  const tieneReinversion = !!(sim?.tipo_reinversion && sim.tipo_reinversion !== "sin_reinversion");
   const yearOptions = Array.from({ length: 7 }, (_, i) => currentYear - 1 + i);
 
-  // Índice: mesKey -> ficticios con detalle completo de cuota ese mes
-  const ficticiosPorMes = new Map<string, CuotaFicticioMes[]>();
-  if (sim?.reinversion_proyectada) {
-    for (const fic of sim.reinversion_proyectada) {
-      for (const cuota of fic.cuotas_por_mes) {
-        const mesKey = cuota.fecha_vencimiento.slice(0, 7);
-        const arr = ficticiosPorMes.get(mesKey) ?? [];
-        arr.push({
-          tipo: fic.tipo,
-          abono_capital: Number(cuota.abono_capital),
-          abono_interes: Number(cuota.abono_interes),
-          abono_iva: Number(cuota.abono_iva),
-          abono_isr: Number(cuota.abono_isr),
-          monto_neto: Number(cuota.monto_neto),
-          debug: cuota.debug ? {
-            saldo_antes_deposito: Number(cuota.debug.saldo_antes_deposito),
-            deposito_mes: Number(cuota.debug.deposito_mes),
-            saldo_con_deposito: Number(cuota.debug.saldo_con_deposito),
-            interes_sobre_saldo: Number(cuota.debug.interes_sobre_saldo),
-            cuota_calculada: Number(cuota.debug.cuota_calculada),
-            capital_cuota_minus_interes: Number(cuota.debug.capital_cuota_minus_interes),
-            saldo_despues: Number(cuota.debug.saldo_despues),
-            meses_restantes: cuota.debug.meses_restantes,
-            tasa_mensual: cuota.debug.tasa_mensual,
-            porcentaje_participacion: cuota.debug.porcentaje_participacion,
-          } : undefined,
-        });
-        ficticiosPorMes.set(mesKey, arr);
-      }
-    }
-  }
+  // El ficticio ahora viene integrado en cada mes del desglose (fila con credito_id=-1),
+  // ya no se renderiza como bloque aparte.
 
   // Filtrar meses del desglose: desde el primer mes disponible hasta el mes elegido.
   // El primer mes disponible = primer mes con cuotas pendientes (post última liquidación).
@@ -392,11 +281,11 @@ export function ProyeccionInversionistas() {
   // Recalcular totales acumulados sobre los meses filtrados
   const totalesFiltrados = mesesFiltrados.reduce(
     (acc, m) => ({
-      total_creditos: acc.total_creditos + Number(m.total_creditos),
+      total_sin_reinversion: acc.total_sin_reinversion + Number(m.total_sin_reinversion),
+      total_con_reinversion: acc.total_con_reinversion + Number(m.total_con_reinversion),
       total_reinversion: acc.total_reinversion + Number(m.total_reinversion),
-      total_acumulado: acc.total_acumulado + Number(m.total_mes),
     }),
-    { total_creditos: 0, total_reinversion: 0, total_acumulado: 0 }
+    { total_sin_reinversion: 0, total_con_reinversion: 0, total_reinversion: 0 }
   );
 
   const handleGenerar = () => {
@@ -447,16 +336,51 @@ export function ProyeccionInversionistas() {
                   <Loader2 className="h-4 w-4 animate-spin" /> Cargando...
                 </div>
               ) : (
-                <select
-                  className="w-full border border-blue-200 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  value={selectedId ?? ""}
-                  onChange={(e) => handleSelect(Number(e.target.value))}
-                >
-                  <option value="">Seleccionar inversionista...</option>
-                  {investors.map((inv) => (
-                    <option key={inv.inversionista_id} value={inv.inversionista_id}>{inv.nombre}</option>
-                  ))}
-                </select>
+                <Combobox value={selectedId} onChange={(id: number | null) => id && handleSelect(id)}>
+                  <div className="relative">
+                    <Combobox.Input
+                      className="w-full border border-blue-200 rounded-lg bg-blue-50 px-3 py-2 pr-9 text-sm text-blue-800 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      displayValue={(id: number | null) =>
+                        investors.find((i) => i.inversionista_id === id)?.nombre ?? ""
+                      }
+                      onChange={(e) => setInvestorQuery(e.target.value)}
+                      placeholder="Buscar inversionista..."
+                    />
+                    <Combobox.Button className="absolute right-2 top-2.5">
+                      <ChevronsUpDown className="w-4 h-4 text-blue-500" />
+                    </Combobox.Button>
+
+                    <Transition
+                      as={Fragment}
+                      leave="transition ease-in duration-100"
+                      leaveFrom="opacity-100"
+                      leaveTo="opacity-0"
+                      afterLeave={() => setInvestorQuery("")}
+                    >
+                      <Combobox.Options className="absolute z-50 mt-1 w-full rounded-lg border border-blue-200 bg-white shadow-xl max-h-60 overflow-auto">
+                        {filteredInvestors.length === 0 ? (
+                          <div className="px-4 py-3 text-center text-sm text-slate-400">
+                            No se encontró inversionista
+                          </div>
+                        ) : (
+                          filteredInvestors.map((inv) => (
+                            <Combobox.Option
+                              key={inv.inversionista_id}
+                              value={inv.inversionista_id}
+                              className={({ active }) =>
+                                `cursor-pointer px-4 py-2 text-sm transition-colors ${
+                                  active ? "bg-blue-50 text-blue-900" : "text-slate-700"
+                                }`
+                              }
+                            >
+                              {inv.nombre}
+                            </Combobox.Option>
+                          ))
+                        )}
+                      </Combobox.Options>
+                    </Transition>
+                  </div>
+                </Combobox>
               )}
             </div>
 
@@ -553,8 +477,8 @@ export function ProyeccionInversionistas() {
                   )}
                   <div className={`grid gap-4 ${tieneReinversion ? "grid-cols-3" : "grid-cols-2"}`}>
                     <div>
-                      <p className="text-xs text-blue-400 uppercase tracking-wide mb-1">Créditos reales</p>
-                      <p className="text-2xl font-bold font-mono">{fq(totalesFiltrados.total_creditos)}</p>
+                      <p className="text-xs text-blue-400 uppercase tracking-wide mb-1">Cuota Sin Reinversión</p>
+                      <p className="text-2xl font-bold font-mono">{fq(totalesFiltrados.total_sin_reinversion)}</p>
                     </div>
                     {tieneReinversion && (
                       <div>
@@ -563,16 +487,42 @@ export function ProyeccionInversionistas() {
                       </div>
                     )}
                     <div className="border-l border-blue-700 pl-4">
-                      <p className="text-xs text-blue-200 uppercase tracking-wide mb-1">Total a recibir</p>
-                      <p className="text-3xl font-bold font-mono">{fq(totalesFiltrados.total_acumulado)}</p>
+                      <p className="text-xs text-blue-200 uppercase tracking-wide mb-1">Cuota Con Reinversión</p>
+                      <p className="text-3xl font-bold font-mono">{fq(totalesFiltrados.total_con_reinversion)}</p>
+                    </div>
+                  </div>
+                  {/* Globales: monto aportado, capital invertido actual, cuánto falta */}
+                  <div className="grid grid-cols-3 gap-4 mt-5 pt-4 border-t border-blue-800">
+                    <div>
+                      <p className="text-xs text-blue-300 uppercase tracking-wide mb-1">Total Monto Aportado</p>
+                      <p className="text-lg font-bold font-mono">{fq(Number(sim.total_monto_aportado))}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-blue-300 uppercase tracking-wide mb-1">Capital Actual</p>
+                      <p className="text-lg font-bold font-mono">{fq(Number(sim.total_capital_actual))}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-blue-300 uppercase tracking-wide mb-1">Capital Restante</p>
+                      <p className="text-lg font-bold font-mono">{fq(Number(sim.capital_restante_global))}</p>
                     </div>
                   </div>
                 </div>
 
                 {/* ── DESGLOSE POR MES (siempre visible, sin colapso) ── */}
                 <div className="space-y-3">
+                  {mesesFiltrados.length > 0 && (
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => setAllExpanded((v) => !v)}
+                        className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors"
+                      >
+                        {allExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        {allExpanded ? "Colapsar todo" : "Expandir todo"}
+                      </button>
+                    </div>
+                  )}
                   {mesesFiltrados.map((mes) => (
-                    <FilaMes key={mes.mes} mes={mes} moneda={moneda} ficticiosMes={ficticiosPorMes.get(mes.mes) ?? []} />
+                    <FilaMes key={mes.mes} mes={mes} moneda={moneda} tipoReinversion={sim.tipo_reinversion} montoReinvMensual={Number(sim.monto_reinversion_mensual)} defaultExpanded={allExpanded} />
                   ))}
                 </div>
 

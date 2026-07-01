@@ -4484,6 +4484,8 @@ export interface CuotaSimulada {
   abono_iva: number;
   abono_isr: number;
   monto_neto: number;
+  mes_proyeccion: string;
+  saldo_actual: number;
   reinvierte_capital: boolean;
   reinvierte_interes: boolean;
 }
@@ -4498,6 +4500,7 @@ export interface CreditoSimulado {
   no_amortiza_capital: boolean;
   porcentaje_participacion: number;
   monto_aportado: number;
+  tipo_reinversion: string;
   cuotas_proyectadas: CuotaSimulada[];
   subtotal: {
     total_capital: number;
@@ -4543,11 +4546,21 @@ export interface DesgloseMes {
   total_creditos: number;
   total_reinversion: number;
   total_mes: number;
+  total_sin_reinversion: number;
+  total_con_reinversion: number;
+  total_capital_restante: number;
   creditos: Array<{
     credito_id: number;
     numero_credito_sifco: string;
     nombre_cliente: string | null;
+    tipo_reinversion: string | null;
     monto_neto: number;
+    reinversion: number;
+    saldo_actual: number;
+    abono_capital: number;
+    abono_interes: number;
+    abono_iva: number;
+    abono_isr: number;
   }>;
 }
 
@@ -4560,6 +4573,10 @@ export interface SimulacionInversionistaResponse {
     moneda: string | null;
     emite_factura: boolean;
     mes_liquidacion: { mes: number; anio: number } | null;
+    monto_reinversion_mensual: number;
+    total_monto_aportado: number;
+    total_capital_actual: number;
+    capital_restante_global: number;
     creditos: CreditoSimulado[];
     totales: {
       total_capital: number;

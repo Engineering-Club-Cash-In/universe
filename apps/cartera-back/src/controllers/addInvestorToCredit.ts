@@ -598,6 +598,47 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     let montoRestante = new Big(monto_aportado);
 
     // ================================================================
+    // GUARD: exclusividad excedente/variable (solo compra_cartera).
+    // La escalada a combinada backfillea los créditos existentes con la
+    // modalidad previa (X) e inserta los nuevos con la solicitada (Y). Si X y Y
+    // son las dos modalidades de monto fijo opuestas, quedaría un inversionista
+    // combinada con excedente Y variable a la vez, y getInvestorTotalsGlobales
+    // aplicaría el monto_reinversion único a ambos pools con sentidos opuestos.
+    // Se rechaza antes de tocar nada (misma regla que el modal y /asignar-reinversion).
+    // ================================================================
+    if (tipo_operacion === "compra_cartera" && tipo_reinversion) {
+      const [invActual] = await db
+        .select({ tipo_reinversion: inversionistas.tipo_reinversion })
+        .from(inversionistas)
+        .where(eq(inversionistas.inversionista_id, inversionista_id));
+      const X = invActual?.tipo_reinversion ?? null;
+      const Y = tipo_reinversion;
+      const debeEscalar = X !== "reinversion_combinada" && X !== Y;
+
+      const espejosExistentes = await db
+        .select({ tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion })
+        .from(creditos_inversionistas_espejo)
+        .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
+
+      // Modalidades por-crédito resultantes: existentes (NULL→backfill si escala)
+      // + la de los créditos nuevos (Y).
+      const modalidadesFinales = new Set<string | null>();
+      for (const e of espejosExistentes) {
+        modalidadesFinales.add(e.tipo_reinversion === null && debeEscalar ? X : e.tipo_reinversion);
+      }
+      modalidadesFinales.add(Y);
+
+      if (modalidadesFinales.has("reinversion_excedente") && modalidadesFinales.has("reinversion_variable")) {
+        set.status = 409;
+        return {
+          success: false,
+          message:
+            "No se puede mezclar Excedente y Variable en el mismo inversionista: el monto de reinversión es único (una modalidad recibe un monto fijo y la otra reinvierte un monto fijo).",
+        };
+      }
+    }
+
+    // ================================================================
     // PASO 3: ITERAR CRÉDITOS Y DISTRIBUIR MONTO
     // Todo dentro de una transacción para que si algo falla,
     // se haga rollback de TODOS los cambios.

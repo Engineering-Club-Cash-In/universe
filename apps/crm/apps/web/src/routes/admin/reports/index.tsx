@@ -3267,7 +3267,13 @@ function RouteComponent() {
 									</Select>
 								</div>
 								<Button
-									onClick={() => setProyeccionEnabled(true)}
+									onClick={() => {
+										if (proyeccionEnabled) {
+											simulacionQuery.refetch();
+										} else {
+											setProyeccionEnabled(true);
+										}
+									}}
 									disabled={!proyeccionInvId || simulacionQuery.isFetching}
 								>
 									{simulacionQuery.isFetching ? "Generando..." : "Generar proyección"}
@@ -3282,6 +3288,13 @@ function RouteComponent() {
 
 							{(simulacionQuery.data as SimulacionInversionistaResult | undefined)?.data && (() => {
 								const sim = (simulacionQuery.data as SimulacionInversionistaResult).data;
+								const fmtProyeccion = (v: number) =>
+									new Intl.NumberFormat("es-GT", {
+										style: "currency",
+										currency: sim.moneda === "dolares" ? "USD" : "GTQ",
+										minimumFractionDigits: 2,
+										maximumFractionDigits: 2,
+									}).format(v);
 								const limitKey = proyeccionMes
 									? `${proyeccionAnio}-${String(proyeccionMes).padStart(2, "0")}`
 									: `${proyeccionAnio}-12`;
@@ -3310,7 +3323,7 @@ function RouteComponent() {
 												</CardHeader>
 												<CardContent>
 													<p className="text-xl font-bold font-mono">
-														{formatCurrency(totales.sin_reinversion)}
+														{fmtProyeccion(totales.sin_reinversion)}
 													</p>
 												</CardContent>
 											</Card>
@@ -3322,7 +3335,7 @@ function RouteComponent() {
 												</CardHeader>
 												<CardContent>
 													<p className="text-xl font-bold font-mono text-amber-600">
-														{formatCurrency(totales.reinversion)}
+														{fmtProyeccion(totales.reinversion)}
 													</p>
 												</CardContent>
 											</Card>
@@ -3334,7 +3347,7 @@ function RouteComponent() {
 												</CardHeader>
 												<CardContent>
 													<p className="text-xl font-bold font-mono">
-														{formatCurrency(totales.con_reinversion)}
+														{fmtProyeccion(totales.con_reinversion)}
 													</p>
 												</CardContent>
 											</Card>
@@ -3346,7 +3359,7 @@ function RouteComponent() {
 												</CardHeader>
 												<CardContent>
 													<p className="text-xl font-bold font-mono">
-														{formatCurrency(ultimoMes?.total_capital_restante ?? 0)}
+														{fmtProyeccion(ultimoMes?.total_capital_restante ?? 0)}
 													</p>
 												</CardContent>
 											</Card>
@@ -3380,16 +3393,16 @@ function RouteComponent() {
 																<tr key={m.mes} className="border-b last:border-0 hover:bg-muted/30">
 																	<td className="px-4 py-2 capitalize">{label}</td>
 																	<td className="px-4 py-2 text-right font-mono">
-																		{formatCurrency(m.total_sin_reinversion)}
+																		{fmtProyeccion(m.total_sin_reinversion)}
 																	</td>
 																	<td className="px-4 py-2 text-right font-mono text-amber-600">
-																		{formatCurrency(m.total_reinversion)}
+																		{fmtProyeccion(m.total_reinversion)}
 																	</td>
 																	<td className="px-4 py-2 text-right font-mono">
-																		{formatCurrency(m.total_con_reinversion)}
+																		{fmtProyeccion(m.total_con_reinversion)}
 																	</td>
 																	<td className="px-4 py-2 text-right font-mono">
-																		{formatCurrency(m.total_capital_restante)}
+																		{fmtProyeccion(m.total_capital_restante)}
 																	</td>
 																</tr>
 															);

@@ -9396,8 +9396,11 @@ export async function simularInversionista(
         // - sin_reinversion / variable / excedente: amortización normal (capital sale)
         switch (tipoEfectivo) {
           case "reinversion_total":
+            // Capital Y interés reinvierten → saldo crece con el interés generado
+            saldoFicticio = saldoFicticio.plus(interesMes);
+            break;
           case "reinversion_capital":
-            // Capital no sale del pozo (reinvierte); saldo se mantiene (descontar 0)
+            // Solo capital reinvierte; interés sale → saldo no cambia
             break;
           case "reinversion_interes":
             // Interés vuelve al pozo; capital sale

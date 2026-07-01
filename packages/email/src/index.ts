@@ -242,6 +242,8 @@ export interface SendInvestorAddedToCreditsNotificationParams {
       | "reinversion_capital"
       | "reinversion_interes"
       | "reinversion_total"
+      | "reinversion_excedente"
+      | "reinversion_variable"
       | null;
   }>;
   currencySymbol?: string;
@@ -279,6 +281,8 @@ export const sendInvestorAddedToCreditsNotification = async ({
       reinversion_capital: "Reinversión Capital",
       reinversion_interes: "Reinversión de Interés",
       reinversion_total: "Interés Compuesto",
+      reinversion_excedente: "Reinversión Excedente",
+      reinversion_variable: "Reinversión Variable",
     };
 
     const filas = creditos

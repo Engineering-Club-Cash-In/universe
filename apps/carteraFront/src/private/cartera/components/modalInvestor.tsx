@@ -108,6 +108,14 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     });
   };
 
+  // El monto de reinversión es editable en variable, excedente y combinada
+  // (en combinada puede que haya que ajustar ese monto manualmente).
+  const tipoReinversion = watch("tipo_reinversion");
+  const montoEditable =
+    tipoReinversion === "reinversion_variable" ||
+    tipoReinversion === "reinversion_excedente" ||
+    tipoReinversion === "reinversion_combinada";
+
   if (!open) return null;
 
   return createPortal(
@@ -210,7 +218,11 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                     onChange: (e) => {
                       const prev = watch("tipo_reinversion") ?? "sin_reinversion";
                       const val = e.target.value;
-                      if (val !== "reinversion_variable" && val !== "reinversion_excedente") {
+                      if (
+                        val !== "reinversion_variable" &&
+                        val !== "reinversion_excedente" &&
+                        val !== "reinversion_combinada"
+                      ) {
                         setValue("monto_reinversion", 0);
                       }
                       if (val === "reinversion_combinada") {
@@ -243,7 +255,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             {/* Monto Reinversión */}
             <div>
               <label className="block text-sm text-blue-800 mb-1">
-                {watch("tipo_reinversion") === "reinversion_excedente"
+                {tipoReinversion === "reinversion_excedente"
                   ? "Monto a Recibir"
                   : "Monto Reinversión"}
               </label>
@@ -252,19 +264,15 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                 type="number"
                 step="any"
                 min={0}
-                disabled={
-                  watch("tipo_reinversion") !== "reinversion_variable" &&
-                  watch("tipo_reinversion") !== "reinversion_excedente"
-                }
+                disabled={!montoEditable}
                 className={`border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${
-                  watch("tipo_reinversion") !== "reinversion_variable" &&
-                  watch("tipo_reinversion") !== "reinversion_excedente"
+                  !montoEditable
                     ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                     : "bg-white text-blue-900 placeholder-gray-400"
                 }`}
                 placeholder="0.00"
               />
-              {watch("tipo_reinversion") === "reinversion_excedente" && (
+              {tipoReinversion === "reinversion_excedente" && (
                 <p className="mt-1 text-xs text-blue-600">
                   El inversionista recibe este monto fijo; el sobrante de su cuota se reinvierte.
                 </p>
@@ -337,6 +345,9 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
           }}
           inversionistaId={initialData.inversionista_id}
           inversionistaNombre={initialData.nombre}
+          // Monto del form (posiblemente sin guardar) para habilitar
+          // Excedente/Variable en el setup por primera vez.
+          montoReinversion={Number(watch("monto_reinversion") ?? 0)}
           onSaved={() => {
             // Guardar el inversionista con reinversion_combinada y cerrar todo
             const currentFormData = watch();

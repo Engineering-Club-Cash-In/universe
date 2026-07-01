@@ -694,6 +694,8 @@ export async function buildInversionistaWorkbook(
     zebra: "FFF9FBFF",
     total: "FFF0F9FF",
     gray:  "FF8C98B5",
+    // Resalte para filas con interés "partido" (cálculo dividido por compras)
+    partido: "FFFEF3C7",
   };
 
   const esDolares = inv.moneda === "dolares";
@@ -752,15 +754,38 @@ export async function buildInversionistaWorkbook(
   // ── tablas de datos
   const esCombinada = inv.reinversion === "reinversion_combinada";
   const labelMapR: Record<string, string> = {
-    reinversion_capital: "Reinversión Capital",
-    reinversion_interes: "Reinversión Interés",
-    reinversion_total:   "Interés Compuesto",
-    sin_reinversion:     "Tradicional",
+    reinversion_capital:   "Reinversión Capital",
+    reinversion_interes:   "Reinversión Interés",
+    reinversion_total:     "Interés Compuesto",
+    reinversion_excedente: "Reinversión Excedente",
+    reinversion_variable:  "Reinversión Variable",
+    sin_reinversion:       "Tradicional",
   };
 
   const grupos = esCombinada
-    ? ["reinversion_capital", "reinversion_interes", "reinversion_total", "sin_reinversion"]
+    ? ["reinversion_capital", "reinversion_interes", "reinversion_total", "reinversion_excedente", "reinversion_variable", "sin_reinversion"]
     : ["all"];
+
+  // Descripción de cada modalidad para mostrarla al lado del título del grupo.
+  // En excedente/variable se incluye el monto fijo definido para el inversionista
+  // (lo que recibe / lo que se reinvierte, según la modalidad).
+  const simboloMoneda = inv.moneda === "dolares" ? "$" : "Q";
+  // El cap (monto_reinversion) viene crudo de la DB en quetzales, pero los pagos
+  // que arman los pools ya vienen convertidos por resumeInvestor. Para dólares hay
+  // que convertir el cap con el mismo helper; si no, se compara Q contra USD.
+  const { formatToUSD: convMonedaCap } = await import("./currencyConverter");
+  const montoReinvNum = inv.moneda === "dolares"
+    ? convMonedaCap(inv.monto_reinversion ?? 0, inv.inversionista_id)
+    : toN(inv.monto_reinversion);
+  const montoReinvFmt = `${simboloMoneda}${montoReinvNum.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const descMapR: Record<string, string> = {
+    reinversion_capital:   "El inversionista recibe solo el interés; el capital abonado se reinvierte.",
+    reinversion_interes:   "El inversionista recibe el capital; el interés se reinvierte.",
+    reinversion_total:     "Se reinvierte todo (capital + interés): interés compuesto.",
+    reinversion_excedente: `El inversionista recibe ${montoReinvFmt} fijo; el sobrante se reinvierte.`,
+    reinversion_variable:  `Se reinvierte ${montoReinvFmt}; el resto lo recibe el inversionista.`,
+    sin_reinversion:       "El inversionista recibe capital + interés; no se reinvierte nada.",
+  };
 
   let row = 5;
   const groupTotalRows: number[] = [];
@@ -782,6 +807,18 @@ export async function buildInversionistaWorkbook(
       titleRow.getCell(2).value = labelMapR[grupo ?? ""] ?? "Sin tipo definido";
       titleRow.getCell(2).font = { bold: true, size: 11, color: { argb: CINV.white } };
       titleRow.getCell(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.blue } };
+
+      // Descripción de la modalidad al lado del título (con el monto en
+      // excedente/variable, para saber cuánto está definido que recibe/reinvierte).
+      const descGrupo = descMapR[grupo ?? ""] ?? "";
+      if (descGrupo) {
+        const descCell = titleRow.getCell(4);
+        descCell.value = descGrupo;
+        descCell.font = { italic: true, size: 10, color: { argb: CINV.slate } };
+        descCell.alignment = { horizontal: "left", vertical: "middle" };
+        ws.mergeCells(row, 4, row, Math.min(totalCols, 13));
+      }
+
       row += 1; // header va una fila debajo del título
     } else {
       row += 1; // en modo normal el header es directo en fila 6
@@ -928,7 +965,13 @@ export async function buildInversionistaWorkbook(
         rr.getCell(13 + offset).alignment = { horizontal: "right" };
         rr.getCell(15 + offset).alignment = { horizontal: "right" };
 
-        if (rowIdx % 2 === 0) {
+        // Resaltar en amarillo las filas cuyo interés se calculó partido por
+        // compras del mes; prevalece sobre el zebra.
+        if (pago.interes_partido) {
+          for (let c = 1; c <= totalCols; c++) {
+            rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.partido } };
+          }
+        } else if (rowIdx % 2 === 0) {
           for (let c = 1; c <= totalCols; c++) {
             rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.zebra } };
           }
@@ -1040,7 +1083,21 @@ export async function buildInversionistaWorkbook(
   const titleRow = ws.getRow(row);
   titleRow.getCell(1).value = "Totales de Reinversión";
   titleRow.getCell(1).font = { bold: true, size: 12, color: { argb: CINV.navy } };
-  
+
+  // Descripción de la modalidad del inversionista. En combinada la descripción
+  // va al lado de cada grupo; cuando NO es combinada, va aquí (con el monto en
+  // excedente/variable, para saber cuánto recibe/reinvierte).
+  if (!esCombinada) {
+    const descInv = descMapR[inv.reinversion] ?? "";
+    if (descInv) {
+      const descRow = ws.getRow(row + 1);
+      descRow.getCell(1).value = `${labelMapR[inv.reinversion] ?? ""}: ${descInv}`;
+      descRow.getCell(1).font = { italic: true, size: 10, color: { argb: CINV.slate } };
+      descRow.getCell(1).alignment = { horizontal: "left", vertical: "middle" };
+      ws.mergeCells(row + 1, 1, row + 1, Math.min(totalCols, 10));
+    }
+  }
+
   row += 2;
   const reinv: [string, number][] = [];
 
@@ -1049,6 +1106,10 @@ export async function buildInversionistaWorkbook(
     let reinvTot_cap = new Big(0);
     let reinvTot_int = new Big(0);
     let reinvInt_int = new Big(0);
+    // Pools de excedente/variable: cuota completa (cap + interés neto) de sus créditos.
+    // El monto reinvertido se calcula después con el monto_reinversion (igual que el backend).
+    let poolExcedente = new Big(0);
+    let poolVariable  = new Big(0);
 
     for (const cr of inv.creditos) {
       const tipo = cr.tipo_reinversion || "sin_reinversion";
@@ -1057,9 +1118,9 @@ export async function buildInversionistaWorkbook(
         const int = new Big(pago.abono_interes || 0);
         const iva = new Big(pago.abono_iva || 0);
         const isr = new Big(pago.isr || 0);
-        
-        const abonoGeneralInteres = inv.emite_factura 
-          ? int.plus(iva) 
+
+        const abonoGeneralInteres = inv.emite_factura
+          ? int.plus(iva)
           : int.minus(isr);
 
         if (tipo === "reinversion_capital") {
@@ -1072,9 +1133,23 @@ export async function buildInversionistaWorkbook(
         } else if (tipo === "reinversion_interes") {
           // `abonoGeneralInteres` YA es el interés neto; no re-descontar ISR.
           reinvInt_int = reinvInt_int.plus(abonoGeneralInteres);
+        } else if (tipo === "reinversion_excedente") {
+          poolExcedente = poolExcedente.plus(cap.plus(abonoGeneralInteres));
+        } else if (tipo === "reinversion_variable") {
+          poolVariable = poolVariable.plus(cap.plus(abonoGeneralInteres));
         }
       }
     }
+
+    // Excedente: el inversionista RECIBE el monto fijo; el sobrante del pool se reinvierte.
+    // Variable: el monto fijo es lo que se REINVIERTE del pool.
+    const montoReinv = new Big(montoReinvNum);
+    const reinvExcedente = poolExcedente.gt(0)
+      ? poolExcedente.minus(montoReinv.gt(poolExcedente) ? poolExcedente : montoReinv)
+      : new Big(0);
+    const reinvVariable = poolVariable.gt(0)
+      ? (montoReinv.gt(poolVariable) ? poolVariable : montoReinv)
+      : new Big(0);
 
     if (reinvCap_cap.gt(0)) {
       reinv.push(["Reinversión Capital (Abono Capital)", reinvCap_cap.toNumber()]);
@@ -1087,6 +1162,12 @@ export async function buildInversionistaWorkbook(
     }
     if (reinvInt_int.gt(0)) {
       reinv.push(["Reinversión Interés (Interés Neto)", reinvInt_int.toNumber()]);
+    }
+    if (reinvExcedente.gt(0)) {
+      reinv.push(["Reinversión Excedente (Sobrante)", reinvExcedente.toNumber()]);
+    }
+    if (reinvVariable.gt(0)) {
+      reinv.push(["Reinversión Variable", reinvVariable.toNumber()]);
     }
     reinv.push(["Total Reinversión", toN(sub.total_reinversion)]);
   } else {

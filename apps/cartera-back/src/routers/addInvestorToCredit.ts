@@ -24,6 +24,10 @@ export const addInvestorToCreditRouter = new Elysia()
           t.Literal("reinversion_capital"),
           t.Literal("reinversion_total"),
           t.Literal("sin_reinversion"),
+          // En sync con el enum del controller: excedente/variable se despliegan
+          // como créditos nuevos con esa modalidad al reinvertir en combinada.
+          t.Literal("reinversion_excedente"),
+          t.Literal("reinversion_variable"),
         ]),
       ),
       fecha_inicio_participacion: t.Optional(t.String()),

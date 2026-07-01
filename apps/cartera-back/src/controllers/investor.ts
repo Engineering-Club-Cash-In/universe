@@ -9066,14 +9066,15 @@ export async function simularInversionista(
       tipoEfectivoPorCredito.set(ci.credito_id!, t);
     }
 
-    // Acumular bruto total por mes solo de créditos con tipo variable/excedente
+    // Acumular bruto total por mes_proyeccion (posición) — igual que el desglose y el ficticio,
+    // para que cuotas atrasadas de meses distintos que caen en el mismo mes ancla compartan el cap.
     const brutoPorMes = new Map<string, Big>();
     for (const cr of creditosSimulados) {
       const tipoEfectivo = tipoEfectivoPorCredito.get(cr.credito_id) ?? "sin_reinversion";
       if (tipoEfectivo !== "reinversion_variable" && tipoEfectivo !== "reinversion_excedente") continue;
       for (const cuota of cr.cuotas_proyectadas) {
-        if (!cuota.fecha_vencimiento) continue;
-        const key = (cuota.fecha_vencimiento as string).slice(0, 7);
+        if (!cuota.mes_proyeccion) continue;
+        const key = cuota.mes_proyeccion;
         const bruto = cuota._raw_bruto;
         brutoPorMes.set(key, (brutoPorMes.get(key) ?? new Big(0)).plus(bruto));
       }
@@ -9089,10 +9090,10 @@ export async function simularInversionista(
           // Este crédito no usa cap → su monto_neto ya es correcto del primer pass
           nuevoNeto = cuota._raw_monto_neto;
         } else {
-          if (!cuota.fecha_vencimiento) {
+          if (!cuota.mes_proyeccion) {
             nuevoNeto = new Big(0);
           } else {
-            const key = (cuota.fecha_vencimiento as string).slice(0, 7);
+            const key = cuota.mes_proyeccion;
             const bruto = cuota._raw_bruto;
             const totalMes = brutoPorMes.get(key) ?? new Big(0);
             const { reinvierte, recibe } = repartirCapMensual(bruto, totalMes, montoReinvGlobal);
@@ -9730,8 +9731,7 @@ export async function simularInversionista(
       const rawReinv = d._raw_reinversion;
       const rawTotal = d._raw_creditos.plus(rawReinv);
       acum_creditos = acum_creditos.plus(d._raw_creditos);
-      // acum_reinversion se completa abajo tras calcular ficReinversion del ficticio
-      acum_total = acum_total.plus(rawTotal);
+      // acum_reinversion y acum_total se completan abajo tras calcular ficMontoNeto/ficReinversion
       let rawCapitalRestante = new Big(0);
       const creditos = Array.from(d.creditosMap.values()).map((c) => {
         rawCapitalRestante = rawCapitalRestante.plus(c._raw_saldo_actual);
@@ -9794,6 +9794,7 @@ export async function simularInversionista(
       acum_reinversion = acum_reinversion.plus(rawReinv).plus(ficReinversion);
       const rawConReinvConFic = d._raw_creditos.plus(ficMontoNeto);
       const rawSinReinvConFic = rawSinReinv.plus(ficMontoNeto).plus(ficReinversion);
+      acum_total = acum_total.plus(rawSinReinvConFic); // bruto total incluyendo ficticio
       const rawReinvConFic = rawReinv.plus(ficReinversion);
       const rawCapRestanteConFic = rawCapitalRestante.plus(ficSaldo);
       return {

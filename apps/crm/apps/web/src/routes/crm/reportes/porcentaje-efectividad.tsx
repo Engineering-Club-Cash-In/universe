@@ -260,8 +260,8 @@ export function PorcentajeEfectividadContent() {
 					Porcentaje Efectividad
 				</h1>
 				<p className="mt-1 text-muted-foreground">
-					Oportunidades creadas en el período y si alcanzaron cierre (90%+), con
-					resumen de conversión por fuente. Excluye oportunidades migradas.
+					Oportunidades creadas, cierres del período y conversión por fuente.
+					Excluye oportunidades migradas.
 				</p>
 			</div>
 
@@ -273,21 +273,21 @@ export function PorcentajeEfectividadContent() {
 			{/* ── Resumen estadístico ── */}
 			<div className="grid gap-4 md:grid-cols-3">
 				<ReportCard
-					title="Oportunidades Creadas"
+					title="Oportunidades abiertas"
 					value={isLoading ? "—" : (data?.total.totalOportunidades ?? 0)}
-					description="Total del período, sin migradas"
+					description="Creadas en el período, sin migradas"
 					icon={Activity}
 				/>
 				<ReportCard
-					title="Créditos Cerrados"
-					value={isLoading ? "—" : (data?.total.totalCerradas ?? 0)}
-					description="Oportunidades que alcanzaron etapa 90%+"
+					title="Cierres del período"
+					value={isLoading ? "—" : (data?.total.totalCierresPeriodo ?? 0)}
+					description="Primer cierre 90%+ en el rango"
 					icon={CheckCircle2}
 				/>
 				<ReportCard
 					title="Efectividad Global"
 					value={isLoading ? "—" : `${data?.total.porcentaje ?? 0}%`}
-					description="Tasa de conversión total del período"
+					description={`Cohorte creada: ${data?.total.totalCerradas ?? 0} cerradas`}
 					icon={Target}
 				/>
 			</div>

@@ -82,6 +82,19 @@ export function isPorcentajeEfectividadOpportunityStatusIncluded(
 	return status !== MIGRATED_OPPORTUNITY_STATUS;
 }
 
+export function isPorcentajeEfectividadPeriodCloseIncluded(
+	status: string | null,
+	firstClosedAt: Date,
+	start: Date,
+	end: Date,
+) {
+	return (
+		isPorcentajeEfectividadOpportunityStatusIncluded(status) &&
+		firstClosedAt >= start &&
+		firstClosedAt <= end
+	);
+}
+
 function parseGuatemalaDateRange(startDate: string, endDate: string) {
 	const start = new Date(`${startDate}T00:00:00.000-06:00`);
 	const end = new Date(`${endDate}T23:59:59.999-06:00`);
@@ -550,6 +563,23 @@ export const getReportePorcentajeEfectividad =
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("ever_closed");
 
+			const firstClosedStageDates = db
+				.select({
+					opportunityId: opportunityStageHistory.opportunityId,
+					firstClosedStageAt:
+						sql<Date>`MIN(${opportunityStageHistory.changedAt})`.as(
+							"first_closed_stage_at",
+						),
+				})
+				.from(opportunityStageHistory)
+				.innerJoin(
+					salesStages,
+					eq(opportunityStageHistory.toStageId, salesStages.id),
+				)
+				.where(gte(salesStages.closurePercentage, CLOSED_STAGE_THRESHOLD))
+				.groupBy(opportunityStageHistory.opportunityId)
+				.as("first_closed_stage_dates");
+
 			const baseWhere = and(
 				gte(opportunities.createdAt, start),
 				lte(opportunities.createdAt, end),
@@ -559,50 +589,66 @@ export const getReportePorcentajeEfectividad =
 			const totalCerradas = sql<number>`COUNT(${everClosed.opportunityId})`;
 			const porcentaje = sql<number>`ROUND(COUNT(${everClosed.opportunityId}) * 100.0 / NULLIF(COUNT(${opportunities.id}), 0), 1)`;
 
-			const [totalRows, porFuente, registrosRaw] = await Promise.all([
-				db
-					.select({
-						totalOportunidades: count(opportunities.id),
-						totalCerradas,
-						porcentaje,
-					})
-					.from(opportunities)
-					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
-					.where(baseWhere),
+			const [totalRows, periodCloseRows, porFuente, registrosRaw] =
+				await Promise.all([
+					db
+						.select({
+							totalOportunidades: count(opportunities.id),
+							totalCerradas,
+							porcentaje,
+						})
+						.from(opportunities)
+						.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+						.where(baseWhere),
 
-				db
-					.select({
-						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
-						totalOportunidades: count(opportunities.id),
-						totalCerradas,
-						porcentaje,
-					})
-					.from(opportunities)
-					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
-					.where(baseWhere)
-					.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
-					.orderBy(desc(count(opportunities.id))),
+					db
+						.select({ totalCierresPeriodo: count(opportunities.id) })
+						.from(firstClosedStageDates)
+						.innerJoin(
+							opportunities,
+							eq(firstClosedStageDates.opportunityId, opportunities.id),
+						)
+						.where(
+							and(
+								gte(firstClosedStageDates.firstClosedStageAt, start),
+								lte(firstClosedStageDates.firstClosedStageAt, end),
+								ne(opportunities.status, MIGRATED_OPPORTUNITY_STATUS),
+							),
+						),
 
-				db
-					.select({
-						id: opportunities.id,
-						createdAt: opportunities.createdAt,
-						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
-						nombre: sql<
-							string | null
-						>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
-						etapaNombre: salesStages.name,
-						etapaPorcentaje: salesStages.closurePercentage,
-						cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`,
-					})
-					.from(opportunities)
-					.leftJoin(leads, eq(opportunities.leadId, leads.id))
-					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
-					.where(baseWhere)
-					.orderBy(desc(opportunities.createdAt))
-					.limit(MAX_REPORT_ROWS + 1),
-			]);
+					db
+						.select({
+							source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+							totalOportunidades: count(opportunities.id),
+							totalCerradas,
+							porcentaje,
+						})
+						.from(opportunities)
+						.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+						.where(baseWhere)
+						.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
+						.orderBy(desc(count(opportunities.id))),
+
+					db
+						.select({
+							id: opportunities.id,
+							createdAt: opportunities.createdAt,
+							source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+							nombre: sql<
+								string | null
+							>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
+							etapaNombre: salesStages.name,
+							etapaPorcentaje: salesStages.closurePercentage,
+							cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`,
+						})
+						.from(opportunities)
+						.leftJoin(leads, eq(opportunities.leadId, leads.id))
+						.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+						.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+						.where(baseWhere)
+						.orderBy(desc(opportunities.createdAt))
+						.limit(MAX_REPORT_ROWS + 1),
+				]);
 
 			if (registrosRaw.length > MAX_REPORT_ROWS) {
 				throw new ORPCError("BAD_REQUEST", {
@@ -615,6 +661,8 @@ export const getReportePorcentajeEfectividad =
 				total: {
 					totalOportunidades: totalRows[0]?.totalOportunidades ?? 0,
 					totalCerradas: totalRows[0]?.totalCerradas ?? 0,
+					totalCierresPeriodo:
+						periodCloseRows[0]?.totalCierresPeriodo ?? 0,
 					porcentaje: totalRows[0]?.porcentaje ?? 0,
 				},
 				porFuente: porFuente.map((row) => ({

@@ -3,6 +3,7 @@ import {
 	CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
 	enforceClosedCreditReportLimit,
 	isClosedCreditReportCarteraStatusIncluded,
+	isPorcentajeEfectividadPeriodCloseIncluded,
 	isPorcentajeEfectividadOpportunityStatusIncluded,
 } from "./reports";
 
@@ -36,6 +37,38 @@ describe("isPorcentajeEfectividadOpportunityStatusIncluded", () => {
 		expect(isPorcentajeEfectividadOpportunityStatusIncluded("migrate")).toBe(
 			false,
 		);
+	});
+});
+
+describe("isPorcentajeEfectividadPeriodCloseIncluded", () => {
+	test("includes only first closes inside the selected period and excludes migrated opportunities", () => {
+		const start = new Date("2026-06-01T00:00:00.000-06:00");
+		const end = new Date("2026-06-30T23:59:59.999-06:00");
+
+		expect(
+			isPorcentajeEfectividadPeriodCloseIncluded(
+				"won",
+				new Date("2026-06-15T10:00:00.000-06:00"),
+				start,
+				end,
+			),
+		).toBe(true);
+		expect(
+			isPorcentajeEfectividadPeriodCloseIncluded(
+				"won",
+				new Date("2026-05-31T23:59:59.999-06:00"),
+				start,
+				end,
+			),
+		).toBe(false);
+		expect(
+			isPorcentajeEfectividadPeriodCloseIncluded(
+				"migrate",
+				new Date("2026-06-15T10:00:00.000-06:00"),
+				start,
+				end,
+			),
+		).toBe(false);
 	});
 });
 

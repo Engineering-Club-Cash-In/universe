@@ -345,6 +345,9 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
           }}
           inversionistaId={initialData.inversionista_id}
           inversionistaNombre={initialData.nombre}
+          // Monto del form (posiblemente sin guardar) para habilitar
+          // Excedente/Variable en el setup por primera vez.
+          montoReinversion={Number(watch("monto_reinversion") ?? 0)}
           onSaved={() => {
             // Guardar el inversionista con reinversion_combinada y cerrar todo
             const currentFormData = watch();

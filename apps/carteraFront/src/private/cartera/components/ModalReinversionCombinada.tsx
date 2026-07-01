@@ -11,6 +11,10 @@ interface ModalReinversionCombinadaProps {
   onClose: () => void;
   inversionistaId: number;
   inversionistaNombre: string;
+  // Monto de reinversión actual del form del inversionista (puede no estar
+  // guardado aún). Permite habilitar Excedente/Variable en el setup por primera
+  // vez, antes de persistir el monto en DB.
+  montoReinversion?: number;
   onSaved?: () => void;
 }
 
@@ -38,6 +42,7 @@ export function ModalReinversionCombinada({
   onClose,
   inversionistaId,
   inversionistaNombre,
+  montoReinversion,
   onSaved,
 }: ModalReinversionCombinadaProps) {
   const [page, setPage] = useState(1);
@@ -77,17 +82,19 @@ export function ModalReinversionCombinada({
     [inversionista]
   );
 
-  // Excedente y Variable son modalidades que normalmente no se usan. Solo se
-  // habilitan en la modal si el inversionista ya tiene monto de reinversión
-  // registrado en DB, o si algún crédito ya viene marcado con esos tipos.
+  // Excedente y Variable son modalidades que normalmente no se usan. Se habilitan
+  // si hay monto de reinversión: el del form actual (aunque no esté guardado, para
+  // el setup por primera vez) o el persistido en DB, o si algún crédito ya viene
+  // marcado con esos tipos.
   const habilitarExtras = useMemo(() => {
+    if (Number(montoReinversion ?? 0) > 0) return true;
     if (Number(inversionista?.monto_reinversion ?? 0) > 0) return true;
     return allCreditos.some(
       (c) =>
         c.tipo_reinversion === "reinversion_excedente" ||
         c.tipo_reinversion === "reinversion_variable"
     );
-  }, [inversionista, allCreditos]);
+  }, [montoReinversion, inversionista, allCreditos]);
 
   // Tipos que se muestran en el resumen y en el select según habilitación.
   const tiposDisponibles = useMemo(

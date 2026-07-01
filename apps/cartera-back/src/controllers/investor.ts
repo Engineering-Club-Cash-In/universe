@@ -33,7 +33,7 @@ import {
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
-import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
+import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -721,11 +721,12 @@ export const getInvestors = async ({ query, set }: any) => {
         : { message: "Inversionista no encontrado" };
     }
 
-    // Si no hay query, trae todos
+    // Si no hay query, trae todos ordenados alfabéticamente
     const rows = await db
       .select({ inversionista: inversionistas, documento: documentos_inversionista })
       .from(inversionistas)
-      .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id));
+      .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
+      .orderBy(asc(inversionistas.nombre));
 
     const all = await agruparInversionistasConDocumentos(rows);
     set.status = 200;

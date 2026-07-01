@@ -270,11 +270,14 @@ export function ProyeccionInversionistas() {
   // ya no se renderiza como bloque aparte.
 
   // Filtrar meses del desglose: desde el primer mes disponible hasta el mes elegido.
-  // El primer mes disponible = primer mes con cuotas pendientes (post última liquidación).
-  // Si no hay filtro de hasta-mes, mostrar todos.
+  // Si no hay mes específico, cortar en Diciembre del año seleccionado.
   const mesesFiltrados = sim?.desglose_acumulado.meses.filter((m) => {
-    if (!hastaFiltro) return true;
-    const limitKey = `${hastaFiltro.anio}-${String(hastaFiltro.mes).padStart(2, "0")}`;
+    if (hastaFiltro) {
+      const limitKey = `${hastaFiltro.anio}-${String(hastaFiltro.mes).padStart(2, "0")}`;
+      return m.mes <= limitKey;
+    }
+    // Sin mes específico: mostrar hasta Diciembre del año seleccionado
+    const limitKey = `${anioSeleccionado}-12`;
     return m.mes <= limitKey;
   }) ?? [];
 
@@ -491,19 +494,13 @@ export function ProyeccionInversionistas() {
                       <p className="text-3xl font-bold font-mono">{fq(totalesFiltrados.total_con_reinversion)}</p>
                     </div>
                   </div>
-                  {/* Globales: monto aportado, capital invertido actual, cuánto falta */}
-                  <div className="grid grid-cols-3 gap-4 mt-5 pt-4 border-t border-blue-800">
-                    <div>
-                      <p className="text-xs text-blue-300 uppercase tracking-wide mb-1">Total Monto Aportado</p>
-                      <p className="text-lg font-bold font-mono">{fq(Number(sim.total_monto_aportado))}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-blue-300 uppercase tracking-wide mb-1">Capital Actual</p>
-                      <p className="text-lg font-bold font-mono">{fq(Number(sim.total_capital_actual))}</p>
-                    </div>
+                  {/* Capital restante al final del período filtrado */}
+                  <div className="mt-5 pt-4 border-t border-blue-800">
                     <div>
                       <p className="text-xs text-blue-300 uppercase tracking-wide mb-1">Capital Restante</p>
-                      <p className="text-lg font-bold font-mono">{fq(Number(sim.capital_restante_global))}</p>
+                      <p className="text-lg font-bold font-mono">
+                        {fq(Number(mesesFiltrados.at(-1)?.total_capital_restante ?? sim.capital_restante_global))}
+                      </p>
                     </div>
                   </div>
                 </div>

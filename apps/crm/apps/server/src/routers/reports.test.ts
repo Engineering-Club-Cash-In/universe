@@ -3,6 +3,7 @@ import {
 	CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
 	enforceClosedCreditReportLimit,
 	isClosedCreditReportCarteraStatusIncluded,
+	isPorcentajeEfectividadOpportunityStatusIncluded,
 } from "./reports";
 
 describe("isClosedCreditReportCarteraStatusIncluded", () => {
@@ -20,6 +21,20 @@ describe("CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE", () => {
 	test("keeps status lookups on the GET path because bulk POST requires estado", () => {
 		expect(CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE).toBeLessThanOrEqual(
 			50,
+		);
+	});
+});
+
+describe("isPorcentajeEfectividadOpportunityStatusIncluded", () => {
+	test("excludes migrated opportunities from effectiveness report totals", () => {
+		expect(isPorcentajeEfectividadOpportunityStatusIncluded("open")).toBe(true);
+		expect(isPorcentajeEfectividadOpportunityStatusIncluded("won")).toBe(true);
+		expect(isPorcentajeEfectividadOpportunityStatusIncluded("lost")).toBe(true);
+		expect(isPorcentajeEfectividadOpportunityStatusIncluded("on_hold")).toBe(
+			true,
+		);
+		expect(isPorcentajeEfectividadOpportunityStatusIncluded("migrate")).toBe(
+			false,
 		);
 	});
 });

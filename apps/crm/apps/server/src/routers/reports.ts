@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, gte, lt, lte, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, lte, ne, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
@@ -56,6 +56,7 @@ const CLOSED_CREDIT_REPORT_CARTERA_STATUSES: StatusCreditEnum[] = [
 	"MOROSO",
 	"EN_CONVENIO",
 ];
+const MIGRATED_OPPORTUNITY_STATUS = "migrate";
 export const CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE = 50;
 
 export function isClosedCreditReportCarteraStatusIncluded(
@@ -73,6 +74,12 @@ export function enforceClosedCreditReportLimit<T>(rows: T[]) {
 				"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
 		});
 	}
+}
+
+export function isPorcentajeEfectividadOpportunityStatusIncluded(
+	status: string | null,
+) {
+	return status !== MIGRATED_OPPORTUNITY_STATUS;
 }
 
 function parseGuatemalaDateRange(startDate: string, endDate: string) {
@@ -546,6 +553,7 @@ export const getReportePorcentajeEfectividad =
 			const baseWhere = and(
 				gte(opportunities.createdAt, start),
 				lte(opportunities.createdAt, end),
+				ne(opportunities.status, MIGRATED_OPPORTUNITY_STATUS),
 			);
 
 			const totalCerradas = sql<number>`COUNT(${everClosed.opportunityId})`;

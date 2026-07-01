@@ -261,7 +261,7 @@ export function PorcentajeEfectividadContent() {
 				</h1>
 				<p className="mt-1 text-muted-foreground">
 					Oportunidades creadas en el período y si alcanzaron cierre (90%+), con
-					resumen de conversión por fuente.
+					resumen de conversión por fuente. Excluye oportunidades migradas.
 				</p>
 			</div>
 
@@ -275,7 +275,7 @@ export function PorcentajeEfectividadContent() {
 				<ReportCard
 					title="Oportunidades Creadas"
 					value={isLoading ? "—" : (data?.total.totalOportunidades ?? 0)}
-					description="Total en el período seleccionado"
+					description="Total del período, sin migradas"
 					icon={Activity}
 				/>
 				<ReportCard

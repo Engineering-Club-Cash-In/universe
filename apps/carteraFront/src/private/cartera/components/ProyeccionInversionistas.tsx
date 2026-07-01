@@ -252,7 +252,7 @@ export function ProyeccionInversionistas() {
     staleTime: 1000 * 60 * 10,
   });
 
-  const investors: InvestorResponse[] = (investorsData ?? []).slice().sort((a: InvestorResponse, b: InvestorResponse) => a.nombre.localeCompare(b.nombre, "es"));
+  const investors: InvestorResponse[] = investorsData ?? [];
   const filteredInvestors =
     investorQuery === ""
       ? investors

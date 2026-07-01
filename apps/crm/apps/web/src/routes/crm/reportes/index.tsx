@@ -69,38 +69,35 @@ function RouteComponent() {
 
 	if (!canAny) return null;
 
-	const defaultTab = canTiempo
-		? "tiempo"
+	const defaultTab = canMeta
+		? "meta"
 		: canEfectividad
 			? "efectividad"
-			: "meta";
+			: "tiempo";
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
 			<div>
 				<h1 className="font-bold text-3xl tracking-tight">Reportes</h1>
 				<p className="mt-1 text-muted-foreground">
-					Reportes de ventas: tiempo de cierre, efectividad y meta de
-					colocación.
+					Reportes de ventas: colocación, efectividad y tiempo de cierre.
 				</p>
 			</div>
 
 			<Tabs defaultValue={defaultTab} className="space-y-6">
 				<TabsList>
-					{canTiempo && (
-						<TabsTrigger value="tiempo">Tiempo Cierre Crédito</TabsTrigger>
-					)}
+					{canMeta && <TabsTrigger value="meta">Colocación</TabsTrigger>}
 					{canEfectividad && (
-						<TabsTrigger value="efectividad">Porcentaje Efectividad</TabsTrigger>
+						<TabsTrigger value="efectividad">Efectividad</TabsTrigger>
 					)}
-					{canMeta && (
-						<TabsTrigger value="meta">Meta Colocación</TabsTrigger>
+					{canTiempo && (
+						<TabsTrigger value="tiempo">Tiempo de cierre</TabsTrigger>
 					)}
 				</TabsList>
 
-				{canTiempo && (
-					<TabsContent value="tiempo" className="space-y-6">
-						<TiempoCierreContent />
+				{canMeta && (
+					<TabsContent value="meta" className="space-y-6">
+						<MetaColocacionContent />
 					</TabsContent>
 				)}
 				{canEfectividad && (
@@ -108,9 +105,9 @@ function RouteComponent() {
 						<PorcentajeEfectividadContent />
 					</TabsContent>
 				)}
-				{canMeta && (
-					<TabsContent value="meta" className="space-y-6">
-						<MetaColocacionContent />
+				{canTiempo && (
+					<TabsContent value="tiempo" className="space-y-6">
+						<TiempoCierreContent />
 					</TabsContent>
 				)}
 			</Tabs>

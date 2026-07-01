@@ -6,17 +6,18 @@ import { Button } from "@/components/ui/button";
 
 const GUATEMALA_TZ = "America/Guatemala";
 
-export type PresetKey = "month" | "3m" | "6m" | "ytd" | "custom";
+export type PresetKey = "month" | "lastMonth" | "3m" | "6m" | "ytd" | "custom";
 
 const RANGE_PRESETS: { key: PresetKey; label: string }[] = [
 	{ key: "month", label: "Este mes" },
+	{ key: "lastMonth", label: "Mes pasado" },
 	{ key: "3m", label: "Últimos 3 meses" },
 	{ key: "6m", label: "Últimos 6 meses" },
 	{ key: "ytd", label: "Este año" },
 	{ key: "custom", label: "Personalizado" },
 ];
 
-export const DEFAULT_PRESET: PresetKey = "3m";
+export const DEFAULT_PRESET: PresetKey = "month";
 
 /** Año/mes de hoy en zona Guatemala (evita corrimientos por la TZ del navegador). */
 function gtYearMonth(): { year: number; month: number } {
@@ -45,6 +46,13 @@ export function rangeForPreset(key: PresetKey): DateRange {
 			// para que coincida con la serialización en zona Guatemala del caller.
 			const { year, month } = gtYearMonth();
 			return { from: gtMidnight(year, month, 1), to: today };
+		}
+		case "lastMonth": {
+			const { year, month } = gtYearMonth();
+			const fromYear = month === 1 ? year - 1 : year;
+			const fromMonth = month === 1 ? 12 : month - 1;
+			const to = new Date(gtMidnight(year, month, 1).getTime() - 1);
+			return { from: gtMidnight(fromYear, fromMonth, 1), to };
 		}
 		case "6m":
 			return { from: subMonths(today, 6), to: today };

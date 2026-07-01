@@ -1652,7 +1652,7 @@ export class CarteraBackClient {
 		return this.request<SimulacionInversionistaResult>(
 			`/inversionistas/${inversionistaId}/simulacion${qs}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
 	}
 }

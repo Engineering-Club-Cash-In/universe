@@ -3301,6 +3301,15 @@ function RouteComponent() {
 								const meses = sim.desglose_acumulado.meses.filter(
 									(m) => m.mes <= limitKey,
 								);
+
+								if (meses.length === 0) {
+									return (
+										<p className="text-sm text-muted-foreground py-4 text-center">
+											No hay meses proyectados para el período seleccionado.
+										</p>
+									);
+								}
+
 								const ultimoMes = meses.at(-1);
 								const totales = meses.reduce(
 									(acc, m) => ({

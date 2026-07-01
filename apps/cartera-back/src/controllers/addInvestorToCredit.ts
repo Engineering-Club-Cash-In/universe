@@ -641,9 +641,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           X !== "reinversion_combinada" && X !== Y;
 
         if (debeEscalar) {
-          // ── Backfill: si X era "variable", usamos Y; sino, X ──
-          const valorBackfill =
-            X === "reinversion_variable" ? Y : X;
+          // ── Backfill: preservar SIEMPRE la modalidad previa (X) del
+          //    inversionista. variable/excedente ya son modalidades válidas
+          //    por-crédito dentro de una combinada, así que estampar los
+          //    créditos existentes con la modalidad nueva (Y) les cambiaría el
+          //    cálculo de reinversión. ──
+          const valorBackfill = X;
 
           // ── Global del inversionista → combinada ──
           await tx

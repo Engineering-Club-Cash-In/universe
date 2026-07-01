@@ -766,6 +766,20 @@ export async function buildInversionistaWorkbook(
     ? ["reinversion_capital", "reinversion_interes", "reinversion_total", "reinversion_excedente", "reinversion_variable", "sin_reinversion"]
     : ["all"];
 
+  // Descripción de cada modalidad para mostrarla al lado del título del grupo.
+  // En excedente/variable se incluye el monto fijo definido para el inversionista
+  // (lo que recibe / lo que se reinvierte, según la modalidad).
+  const simboloMoneda = inv.moneda === "dolares" ? "$" : "Q";
+  const montoReinvFmt = `${simboloMoneda}${toN(inv.monto_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const descMapR: Record<string, string> = {
+    reinversion_capital:   "El inversionista recibe solo el interés; el capital abonado se reinvierte.",
+    reinversion_interes:   "El inversionista recibe el capital; el interés se reinvierte.",
+    reinversion_total:     "Se reinvierte todo (capital + interés): interés compuesto.",
+    reinversion_excedente: `El inversionista recibe ${montoReinvFmt} fijo; el sobrante se reinvierte.`,
+    reinversion_variable:  `Se reinvierte ${montoReinvFmt}; el resto lo recibe el inversionista.`,
+    sin_reinversion:       "El inversionista recibe capital + interés; no se reinvierte nada.",
+  };
+
   let row = 5;
   const groupTotalRows: number[] = [];
 
@@ -786,6 +800,18 @@ export async function buildInversionistaWorkbook(
       titleRow.getCell(2).value = labelMapR[grupo ?? ""] ?? "Sin tipo definido";
       titleRow.getCell(2).font = { bold: true, size: 11, color: { argb: CINV.white } };
       titleRow.getCell(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.blue } };
+
+      // Descripción de la modalidad al lado del título (con el monto en
+      // excedente/variable, para saber cuánto está definido que recibe/reinvierte).
+      const descGrupo = descMapR[grupo ?? ""] ?? "";
+      if (descGrupo) {
+        const descCell = titleRow.getCell(4);
+        descCell.value = descGrupo;
+        descCell.font = { italic: true, size: 10, color: { argb: CINV.slate } };
+        descCell.alignment = { horizontal: "left", vertical: "middle" };
+        ws.mergeCells(row, 4, row, Math.min(totalCols, 13));
+      }
+
       row += 1; // header va una fila debajo del título
     } else {
       row += 1; // en modo normal el header es directo en fila 6
@@ -1050,7 +1076,21 @@ export async function buildInversionistaWorkbook(
   const titleRow = ws.getRow(row);
   titleRow.getCell(1).value = "Totales de Reinversión";
   titleRow.getCell(1).font = { bold: true, size: 12, color: { argb: CINV.navy } };
-  
+
+  // Descripción de la modalidad del inversionista. En combinada la descripción
+  // va al lado de cada grupo; cuando NO es combinada, va aquí (con el monto en
+  // excedente/variable, para saber cuánto recibe/reinvierte).
+  if (!esCombinada) {
+    const descInv = descMapR[inv.reinversion] ?? "";
+    if (descInv) {
+      const descRow = ws.getRow(row + 1);
+      descRow.getCell(1).value = `${labelMapR[inv.reinversion] ?? ""}: ${descInv}`;
+      descRow.getCell(1).font = { italic: true, size: 10, color: { argb: CINV.slate } };
+      descRow.getCell(1).alignment = { horizontal: "left", vertical: "middle" };
+      ws.mergeCells(row + 1, 1, row + 1, Math.min(totalCols, 10));
+    }
+  }
+
   row += 2;
   const reinv: [string, number][] = [];
 

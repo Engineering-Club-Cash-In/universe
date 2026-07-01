@@ -7,7 +7,10 @@ import {
 	investmentManagerProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
-import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	carteraBackClient,
+	type SimulacionInversionistaResult,
+} from "../services/cartera-back-client";
 
 export const investorDocumentsRouter = {
 	getInvestorRendimiento: crmCobrosOrInvestmentsProcedure
@@ -381,6 +384,26 @@ export const investorDocumentsRouter = {
 			});
 
 			return result;
+		}),
+
+	getInvestorsCartera: investmentManagerProcedure.handler(async () => {
+		const result = await carteraBackClient.getInvestors();
+		return result.data ?? [];
+	}),
+
+	getSimulacionInversionista: investmentManagerProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+				mes: z.number().int().min(1).max(12).optional(),
+				anio: z.number().int().min(1900).max(2100).optional(),
+			}),
+		)
+		.handler(async ({ input }): Promise<SimulacionInversionistaResult> => {
+			return carteraBackClient.getSimulacionInversionista(
+				input.inversionistaId,
+				{ mes: input.mes, anio: input.anio },
+			);
 		}),
 
 	// Solo manager/admin pueden ver el historial de actividad

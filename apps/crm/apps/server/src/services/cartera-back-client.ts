@@ -43,6 +43,37 @@ import {
 } from "./cartera-auth.service";
 
 // ============================================================================
+// TIPOS SIMULACIÓN INVERSIONISTA
+// ============================================================================
+
+export interface SimulacionInversionistaResult {
+	success: boolean;
+	data: {
+		inversionista_id: number;
+		nombre: string;
+		tipo_reinversion: string | null;
+		moneda: string | null;
+		emite_factura: boolean;
+		monto_reinversion_mensual: number;
+		total_monto_aportado: number;
+		total_capital_actual: number;
+		capital_restante_global: number;
+		desglose_acumulado: {
+			total_creditos: number;
+			total_reinversion: number;
+			total_acumulado: number;
+			meses: Array<{
+				mes: string;
+				total_sin_reinversion: number;
+				total_con_reinversion: number;
+				total_reinversion: number;
+				total_capital_restante: number;
+			}>;
+		};
+	};
+}
+
+// ============================================================================
 // CONFIGURATION
 // ============================================================================
 
@@ -1604,6 +1635,25 @@ export class CarteraBackClient {
 
 	invalidateCache(pattern?: string): void {
 		this.cache.invalidate(pattern);
+	}
+
+	// ========================================================================
+	// SIMULACIÓN INVERSIONISTA
+	// ========================================================================
+
+	async getSimulacionInversionista(
+		inversionistaId: number,
+		params?: { mes?: number; anio?: number },
+	): Promise<SimulacionInversionistaResult> {
+		const query = new URLSearchParams();
+		if (params?.mes !== undefined) query.set("mes", String(params.mes));
+		if (params?.anio !== undefined) query.set("anio", String(params.anio));
+		const qs = query.toString() ? `?${query}` : "";
+		return this.request<SimulacionInversionistaResult>(
+			`/inversionistas/${inversionistaId}/simulacion${qs}`,
+			{ method: "GET" },
+			true,
+		);
 	}
 }
 

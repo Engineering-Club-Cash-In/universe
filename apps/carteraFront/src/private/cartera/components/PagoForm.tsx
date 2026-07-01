@@ -424,7 +424,7 @@ export function PagoForm() {
       )}
     </div>
 
-    {permiteAbonoCapital && cuotaActualInfo?.pagada && !(cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0) && (
+    {permiteAbonoCapital  && !(cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0) && (
       <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-4 border-2 border-green-200 mt-2">
         <div className="flex items-center gap-2 mb-2">
           <DollarSign className="w-5 h-5 text-green-600" />

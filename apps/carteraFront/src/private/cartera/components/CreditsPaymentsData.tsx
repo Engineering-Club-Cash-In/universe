@@ -217,6 +217,8 @@ export function ListaCreditosPagos() {
       gps: credit.gps ?? 0,
       asesor_id: credit.asesor_id,
       formato_credito: credit.formato_credito ?? "",
+      permite_abono_capital: !!credit.permite_abono_capital,
+      no_amortiza_capital: !!credit.no_amortiza_capital,
       estado_devolucion: credit.estado_devolucion ?? "NO_APLICA",
       nombre: usuario?.nombre ?? (usuario?.nombres ? `${usuario.nombres} ${usuario.apellidos ?? ""}`.trim() : ""),
       nit: usuario?.nit ?? "",

@@ -101,15 +101,21 @@ async function registrarHistorialMora(params: {
 export async function createMora({
   credito_id,
   monto_mora,
-  cuotas_atrasadas = 0,
+  cuotas_atrasadas,
   origen = "API_MANUAL",
   motivo,
+  usuario_id,
+  usuario_email,
+  override = false,
 }: {
   credito_id: number;
   monto_mora?: number;
   cuotas_atrasadas?: number;
   origen?: MoraEventoOrigen;
   motivo?: string;
+  usuario_id?: number;
+  usuario_email?: string;
+  override?: boolean;
 }) {
   const requestId = `${credito_id}-${Date.now()}`;
 
@@ -127,11 +133,108 @@ export async function createMora({
     // 🔥 VALIDACIÓN 1: Monto debe ser mayor a 0
     if (!monto_mora || monto_mora <= 0) {
       console.log(`[${requestId}] ❌ RECHAZADO: Monto debe ser mayor a 0`);
-
       return {
         success: false,
         message: "[ERROR] Monto de mora debe ser mayor a 0",
       };
+    }
+
+    // 🔥 VALIDACIÓN 2: cuotas_atrasadas es obligatorio y >= 1. Una mora con monto>0 y
+    // cuotas=0 no cae en ningún bucket (30/60/90/120) de Mora Histórica y rompería el
+    // invariante mora_total = Σbuckets. Antes se default-eaba a 0 silenciosamente.
+    if (cuotas_atrasadas === undefined || cuotas_atrasadas === null || cuotas_atrasadas < 1) {
+      console.log(`[${requestId}] ❌ RECHAZADO: cuotas_atrasadas requerido (>=1)`);
+      return {
+        success: false,
+        message: "[ERROR] cuotas_atrasadas es requerido y debe ser >= 1",
+      };
+    }
+
+    // Traer el crédito una sola vez: capital (para validar + fotografiar) y status (para no des-castigar).
+    const [credito] = await db
+      .select({ capital: creditos.capital, statusCredit: creditos.statusCredit })
+      .from(creditos)
+      .where(eq(creditos.credito_id, credito_id));
+    if (!credito) {
+      return { success: false, message: `[ERROR] No se encontró crédito con credito_id=${credito_id}` };
+    }
+
+    const estadoExcluido = STATUS_EXCLUIDOS_MORA.includes(credito.statusCredit ?? "");
+    const capitalBig = new Big(credito.capital || 0);
+
+    // 🔥 Conteo REAL de cuotas vencidas (derivado de cuotas_credito), NO el cuotas_atrasadas
+    // del request. Confiar en el valor enviado permitía inflarlo para esquivar el guard de
+    // cordura: p.ej. Q27,953.44 pasaba con cuotas_atrasadas: 7 porque el umbral se volvía
+    // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras (isOverdueInstallmentForMora).
+    const ovRes = await db.execute<any>(sql`
+      SELECT COUNT(*)::int AS n
+      FROM cartera.cuotas_credito cu
+      WHERE cu.credito_id = ${credito_id}
+        AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
+        AND cu.pagado = false
+        AND NOT EXISTS (
+          SELECT 1 FROM cartera.pagos_credito pc
+          WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
+            AND pc.validation_status IN ('validated', 'no_required'))`);
+    const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
+
+    // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
+    // (el caller no puede inflar el conteo para disparar el umbral del guard).
+    if (cuotas_atrasadas !== cuotasReales && !override) {
+      console.log(`[${requestId}] ❌ RECHAZADO: cuotas_atrasadas=${cuotas_atrasadas} ≠ vencidas reales=${cuotasReales}`);
+      return {
+        success: false,
+        message: `[ERROR] cuotas_atrasadas=${cuotas_atrasadas} no coincide con las cuotas vencidas reales (${cuotasReales}). Envía override:true + motivo si es intencional.`,
+      };
+    }
+
+    // La fórmula y el guard usan SIEMPRE las cuotas reales (no el valor no confiable del request).
+    const esperado = capitalBig.times(0.0112).times(cuotasReales); // capital × 1.12% × cuotas reales
+
+    // 🔥 VALIDACIÓN 3: NUNCA escribir mora sobre créditos en estado excluido (EN_CONVENIO/
+    // INCOBRABLE/CANCELADO/PENDIENTE_CANCELACION/CAIDO) — ni con override. Castigados/cancelados
+    // no llevan mora; además el cron procesarMoras desactivaría esa mora en su corrida (la fila
+    // quedaría huérfana), así que el override sobre un excluido era transitorio e inútil. Para
+    // morar uno de estos hay que sacarlo del estado excluido primero (como hace el teardown de
+    // convenio, que lo pone MOROSO antes de llamar a createMora).
+    if (estadoExcluido) {
+      console.log(`[${requestId}] ❌ RECHAZADO: status '${credito.statusCredit}' excluido de mora`);
+      return {
+        success: false,
+        message: `[ERROR] El crédito está en estado '${credito.statusCredit}' (excluido de mora): no se le puede registrar mora. Saca el crédito de ese estado primero si corresponde.`,
+      };
+    }
+
+    // 🔥 VALIDACIÓN 4: guard de cordura del monto. "Absurdo" = mayor al capital total o
+    // más de 10× la fórmula (atrapa errores tipo Q27,953.44 sobre un capital de Q40k/1 cuota).
+    const montoBig = new Big(monto_mora);
+    // Absurdo = más de 10× la fórmula (atrapa errores tipo Q27,953.44 sobre Q453.55 esperado).
+    // No se compara contra el capital directo: la fórmula correcta de un crédito con 90+ cuotas
+    // vencidas ya supera el capital y sería un falso positivo. Si la fórmula da 0 (capital 0),
+    // cualquier monto exige override.
+    const esAbsurdo = esperado.gt(0) ? montoBig.gt(esperado.times(10)) : true;
+    if (esAbsurdo && !override) {
+      console.log(`[${requestId}] ❌ RECHAZADO: monto ${monto_mora} fuera de rango (fórmula ${esperado.toFixed(2)})`);
+      return {
+        success: false,
+        message: `[ERROR] Monto Q${monto_mora} fuera de rango: la fórmula da Q${esperado.toFixed(2)} (capital Q${capitalBig.toFixed(2)} × 1.12% × ${cuotasReales} cuotas reales). Envía override:true + motivo si es intencional.`,
+      };
+    }
+
+    // Cualquier override debe justificarse (rastro de auditoría).
+    if (override && (!motivo || !motivo.trim())) {
+      return { success: false, message: "[ERROR] override:true requiere 'motivo' (justificación)." };
+    }
+
+    // Identidad del que ejecuta: directo del token (usuario_id). Si el token no trae id,
+    // se resuelve por email. Best-effort: la atribución no debe bloquear la operación.
+    let usuarioId: number | undefined = usuario_id ?? undefined;
+    if (!usuarioId && usuario_email) {
+      const [u] = await db
+        .select({ id: platform_users.id })
+        .from(platform_users)
+        .where(eq(platform_users.email, usuario_email));
+      usuarioId = u?.id;
     }
 
     // 🔥 VERIFICAR SI YA EXISTE MORA ACTIVA (UPSERT)
@@ -195,14 +298,13 @@ export async function createMora({
       console.log(`[${requestId}] ✅ Mora creada: ID=${newMora.mora_id}`);
     }
 
-    // Actualizar status del crédito a MOROSO
+    // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
+    // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
     console.log(`[${requestId}] 🔄 Actualizando status a MOROSO...`);
-
     await db
       .update(creditos)
       .set({ statusCredit: "MOROSO" })
       .where(eq(creditos.credito_id, credito_id));
-
     console.log(`[${requestId}] ✅ Status actualizado a MOROSO`);
 
     await registrarHistorialMora({
@@ -214,7 +316,9 @@ export async function createMora({
       monto_nuevo: monto_mora,
       cuotas_atrasadas_anterior: cuotas_anteriores,
       cuotas_atrasadas_nuevas: cuotas_atrasadas,
+      capital_credito: credito.capital,
       porcentaje_mora: newMora.porcentaje_mora,
+      usuario_id: usuarioId,
       motivo,
     });
 

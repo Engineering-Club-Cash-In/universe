@@ -8,7 +8,6 @@ import {
   Download,
   Edit,
   Bell,
-  FileDown,
   FileSpreadsheet,
   Loader2,
   MoreVertical,
@@ -36,7 +35,6 @@ import {
   type InvestorPayload,
 } from "../services/services";
 import { useLiquidateByInvestor } from "../hooks/liquidateAllInvestor";
-import { useDownloadInvestorPDF } from "../hooks/downloadInvestorReport";
 import { useDownloadReporteNoLiquidados } from "../hooks/downloadReporteNoLiquidados";
 import { InvestorModal } from "./modalInvestor";
 import { useFalsePayments } from "../hooks/falsePayments";
@@ -449,7 +447,6 @@ export function TableInvestors() {
 
 
   const liquidateMutation = useLiquidateByInvestor();
-  const downloadPDF = useDownloadInvestorPDF();
   const downloadNoLiquidados = useDownloadReporteNoLiquidados();
   const [query, setQuery] = useState("");
 
@@ -1302,28 +1299,6 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               </DropdownMenuTrigger>
 
               <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-lg border border-gray-200 p-1 bg-white">
-                {/* Descargar PDF */}
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    downloadPDF.mutate({
-                      id: inv.inversionista_id,
-                      page: 1,
-                      perPage: perPage,
-                    });
-                  }}
-                  disabled={downloadPDF.isPending}
-                  className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-blue-50"
-                >
-                  {downloadPDF.isPending ? (
-                    <><Loader2 className="mr-2.5 h-4 w-4 animate-spin text-blue-500" /><span className="text-sm font-medium text-blue-600">Descargando…</span></>
-                  ) : (
-                    <><FileDown className="mr-2.5 h-4 w-4 text-blue-500" /><span className="text-sm font-medium text-gray-700">Descargar PDF</span></>
-                  )}
-                </DropdownMenuItem>
-
-                <DropdownMenuSeparator className="my-1" />
-
                 {/* Paso 1: Calcular Pagos */}
                 <DropdownMenuItem
                   onClick={(e) => {
@@ -1940,31 +1915,6 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
 
       {/* BOTONES CON VALIDACIONES */}
       <div className="flex flex-wrap gap-2 mb-2">
-        {/* Descargar PDF */}
-        <button
-          className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm"
-          disabled={Number(inv.subtotal?.total_cuota_sin_reinversion ?? 0) <= 0 || downloadPDF.isPending}
-          onClick={() =>
-            downloadPDF.mutate({
-              id: inv.inversionista_id,
-              page: 1,
-              perPage: perPage,
-            })
-          }
-        >
-          {downloadPDF.isPending ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>PDF...</span>
-            </>
-          ) : (
-            <>
-              <FileDown className="w-4 h-4" />
-              <span>PDF</span>
-            </>
-          )}
-        </button>
-
         {/* 🔥 PASO 1: Generar Pagos - SIEMPRE DISPONIBLE */}
         <button
           className="px-3 py-2 rounded-lg bg-purple-600 text-white text-xs font-semibold hover:bg-purple-700 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm"

@@ -770,7 +770,14 @@ export async function buildInversionistaWorkbook(
   // En excedente/variable se incluye el monto fijo definido para el inversionista
   // (lo que recibe / lo que se reinvierte, según la modalidad).
   const simboloMoneda = inv.moneda === "dolares" ? "$" : "Q";
-  const montoReinvFmt = `${simboloMoneda}${toN(inv.monto_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // El cap (monto_reinversion) viene crudo de la DB en quetzales, pero los pagos
+  // que arman los pools ya vienen convertidos por resumeInvestor. Para dólares hay
+  // que convertir el cap con el mismo helper; si no, se compara Q contra USD.
+  const { formatToUSD: convMonedaCap } = await import("./currencyConverter");
+  const montoReinvNum = inv.moneda === "dolares"
+    ? convMonedaCap(inv.monto_reinversion ?? 0, inv.inversionista_id)
+    : toN(inv.monto_reinversion);
+  const montoReinvFmt = `${simboloMoneda}${montoReinvNum.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const descMapR: Record<string, string> = {
     reinversion_capital:   "El inversionista recibe solo el interés; el capital abonado se reinvierte.",
     reinversion_interes:   "El inversionista recibe el capital; el interés se reinvierte.",
@@ -1136,7 +1143,7 @@ export async function buildInversionistaWorkbook(
 
     // Excedente: el inversionista RECIBE el monto fijo; el sobrante del pool se reinvierte.
     // Variable: el monto fijo es lo que se REINVIERTE del pool.
-    const montoReinv = new Big(toN(inv.monto_reinversion));
+    const montoReinv = new Big(montoReinvNum);
     const reinvExcedente = poolExcedente.gt(0)
       ? poolExcedente.minus(montoReinv.gt(poolExcedente) ? poolExcedente : montoReinv)
       : new Big(0);

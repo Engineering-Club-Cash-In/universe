@@ -165,6 +165,18 @@ export function ModalReinversionCombinada({
       return;
     }
 
+    // No permitir mezclar Excedente y Variable en el mismo inversionista: el
+    // monto_reinversion es único y significaría dos cosas opuestas a la vez
+    // (recibir un monto fijo vs reinvertir un monto fijo). Debe usarse solo una.
+    const tieneExcedente = todos.some((t) => t.tipo_reinversion === "reinversion_excedente");
+    const tieneVariable = todos.some((t) => t.tipo_reinversion === "reinversion_variable");
+    if (tieneExcedente && tieneVariable) {
+      toast.error(
+        "No se puede mezclar Excedente y Variable en el mismo inversionista. El monto de reinversión es único; usá solo una de las dos modalidades."
+      );
+      return;
+    }
+
     asignarReinversion(
       { inversionista_id: inversionistaId, asignaciones: todos },
       {

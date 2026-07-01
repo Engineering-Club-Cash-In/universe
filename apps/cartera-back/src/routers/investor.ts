@@ -642,6 +642,18 @@ export const inversionistasRouter = new Elysia()
 
     const inversionista = result.inversionistas[0];
 
+    // El reporte PDF (generarHTMLReporte) NO agrupa las modalidades excedente/
+    // variable de una reinversión combinada, así que dejaría esos créditos fuera
+    // del reporte. Está deprecado (el reporte vigente es el Excel), por eso se
+    // rechaza explícitamente para combinada en vez de generar un PDF incompleto.
+    if (inversionista.reinversion === "reinversion_combinada") {
+      set.status = 410;
+      return {
+        message:
+          "El reporte PDF no está disponible para inversionistas con reinversión combinada. Usá el reporte Excel.",
+      };
+    }
+
     // Totales desde getInvestorTotalsGlobales (espejos, no liquidados)
     const totales = await getInvestorTotalsGlobales(
       Number(id),

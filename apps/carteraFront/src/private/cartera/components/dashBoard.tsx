@@ -154,6 +154,13 @@ const menuSections: MenuSection[] = [
         path: "/sesiones-pendientes",
         roles: ["ADMIN"],
       },
+      {
+        key: "proyeccion-inversionistas",
+        label: "Proyección Liquidaciones",
+        icon: <CalendarSearch className="h-4 w-4" />,
+        path: "/proyeccion-inversionistas",
+        roles: ["ADMIN"],
+      },
     ],
   },
   {
@@ -264,13 +271,6 @@ const menuSections: MenuSection[] = [
         label: "Capital Inversionistas",
         icon: <TrendingUp className="h-4 w-4" />,
         path: "/capital-inversionistas",
-        roles: ["ADMIN"],
-      },
-      {
-        key: "proyeccion-inversionistas",
-        label: "Proyección Inversionistas",
-        icon: <CalendarSearch className="h-4 w-4" />,
-        path: "/proyeccion-inversionistas",
         roles: ["ADMIN"],
       },
     ],

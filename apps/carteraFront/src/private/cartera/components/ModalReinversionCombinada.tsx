@@ -14,10 +14,20 @@ interface ModalReinversionCombinadaProps {
   onSaved?: () => void;
 }
 
-const TIPOS_REINVERSION: { value: TipoReinversionEspejo; label: string; color: string }[] = [
-  { value: "sin_reinversion", label: "Sin Reinversión", color: "bg-gray-100 text-gray-700" },
-  { value: "reinversion_capital", label: "Capital", color: "bg-green-100 text-green-700" },
-  { value: "reinversion_total", label: "Interés Compuesto", color: "bg-purple-100 text-purple-700" },
+const TIPOS_REINVERSION: {
+  value: TipoReinversionEspejo;
+  label: string;
+  cardColor: string;
+  selectColor: string;
+  // Modalidades que solo se habilitan si el inversionista ya tiene monto de
+  // reinversión en DB (o algún crédito ya viene marcado con ese tipo).
+  extra?: boolean;
+}[] = [
+  { value: "sin_reinversion", label: "Sin Reinversión", cardColor: "bg-gray-100 text-gray-700", selectColor: "border-gray-300 bg-gray-50 text-gray-600" },
+  { value: "reinversion_capital", label: "Capital", cardColor: "bg-green-100 text-green-700", selectColor: "border-green-300 bg-green-50 text-green-700" },
+  { value: "reinversion_total", label: "Interés Compuesto", cardColor: "bg-purple-100 text-purple-700", selectColor: "border-purple-300 bg-purple-50 text-purple-700" },
+  { value: "reinversion_excedente", label: "Excedente", cardColor: "bg-blue-100 text-blue-700", selectColor: "border-blue-300 bg-blue-50 text-blue-700", extra: true },
+  { value: "reinversion_variable", label: "Variable", cardColor: "bg-amber-100 text-amber-700", selectColor: "border-amber-300 bg-amber-50 text-amber-700", extra: true },
 ];
 
 const ALL_CREDITS_PER_PAGE = 500;
@@ -55,12 +65,35 @@ export function ModalReinversionCombinada({
 
   const { mutate: asignarReinversion, isPending: isSaving } = useAsignarReinversion();
 
+  // Inversionista actual (para leer monto_reinversion y sus créditos)
+  const inversionista = useMemo(
+    () => data?.inversionistas?.find((i) => i.inversionista_id === inversionistaId) ?? null,
+    [data, inversionistaId]
+  );
+
   // Todos los créditos del inversionista actual
-  const allCreditos: CreditoInversionistaData[] = useMemo(() => {
-    if (!data?.inversionistas?.length) return [];
-    const inv = data.inversionistas.find((i) => i.inversionista_id === inversionistaId);
-    return inv?.creditos ?? [];
-  }, [data, inversionistaId]);
+  const allCreditos: CreditoInversionistaData[] = useMemo(
+    () => inversionista?.creditos ?? [],
+    [inversionista]
+  );
+
+  // Excedente y Variable son modalidades que normalmente no se usan. Solo se
+  // habilitan en la modal si el inversionista ya tiene monto de reinversión
+  // registrado en DB, o si algún crédito ya viene marcado con esos tipos.
+  const habilitarExtras = useMemo(() => {
+    if (Number(inversionista?.monto_reinversion ?? 0) > 0) return true;
+    return allCreditos.some(
+      (c) =>
+        c.tipo_reinversion === "reinversion_excedente" ||
+        c.tipo_reinversion === "reinversion_variable"
+    );
+  }, [inversionista, allCreditos]);
+
+  // Tipos que se muestran en el resumen y en el select según habilitación.
+  const tiposDisponibles = useMemo(
+    () => TIPOS_REINVERSION.filter((t) => !t.extra || habilitarExtras),
+    [habilitarExtras]
+  );
 
   // Filtro visual por búsqueda (no afecta totales)
   const creditosFiltrados = useMemo(() => {
@@ -81,11 +114,10 @@ export function ModalReinversionCombinada({
 
   // Resumen: contar por tipo y sumar montos — siempre sobre TODOS los créditos
   const resumen = useMemo(() => {
-    const counts: Record<string, { cantidad: number; monto: number }> = {
-      reinversion_capital: { cantidad: 0, monto: 0 },
-      reinversion_total: { cantidad: 0, monto: 0 },
-      sin_reinversion: { cantidad: 0, monto: 0 },
-    };
+    const counts: Record<string, { cantidad: number; monto: number }> = {};
+    TIPOS_REINVERSION.forEach((t) => {
+      counts[t.value] = { cantidad: 0, monto: 0 };
+    });
 
     allCreditos.forEach((cred) => {
       const espejoId = cred.credito_inversionista_espejo_id;
@@ -168,15 +200,18 @@ export function ModalReinversionCombinada({
 
         {/* Resumen por tipo */}
         <div className="px-6 py-3 border-b bg-gray-50">
-          <div className="grid grid-cols-3 gap-3">
-            {TIPOS_REINVERSION.map((tipo) => {
-              const data = resumen[tipo.value];
+          <div
+            className="grid gap-3"
+            style={{ gridTemplateColumns: `repeat(${tiposDisponibles.length}, minmax(0, 1fr))` }}
+          >
+            {tiposDisponibles.map((tipo) => {
+              const stat = resumen[tipo.value];
               return (
-                <div key={tipo.value} className={`rounded-lg px-3 py-2 ${tipo.color}`}>
+                <div key={tipo.value} className={`rounded-lg px-3 py-2 ${tipo.cardColor}`}>
                   <div className="text-xs font-medium opacity-75">{tipo.label}</div>
-                  <div className="text-lg font-bold">{data?.cantidad ?? 0} créditos</div>
+                  <div className="text-lg font-bold">{stat?.cantidad ?? 0} créditos</div>
                   <div className="text-xs">
-                    Q {(data?.monto ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    Q {(stat?.monto ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                   </div>
                 </div>
               );
@@ -218,6 +253,17 @@ export function ModalReinversionCombinada({
                 const espejoId = cred.credito_inversionista_espejo_id!;
                 const tipoOriginal = cred.tipo_reinversion ?? "sin_reinversion";
                 const tipoActual = asignaciones[espejoId] ?? tipoOriginal;
+                // Opciones del select: las disponibles + la actual si por algún
+                // motivo no estuviera (para no perder el valor del crédito).
+                const opcionesCredito = tiposDisponibles.some((t) => t.value === tipoActual)
+                  ? tiposDisponibles
+                  : [
+                      ...tiposDisponibles,
+                      ...TIPOS_REINVERSION.filter((t) => t.value === tipoActual),
+                    ];
+                const colorActual =
+                  (TIPOS_REINVERSION.find((t) => t.value === tipoActual) ?? TIPOS_REINVERSION[0])
+                    .selectColor;
                 return (
                   <div
                     key={espejoId}
@@ -252,17 +298,13 @@ export function ModalReinversionCombinada({
                       onChange={(e) =>
                         handleTipoChange(espejoId, e.target.value as TipoReinversionEspejo, tipoOriginal)
                       }
-                      className={`text-sm border rounded-lg px-3 py-1.5 font-medium transition ${
-                        tipoActual === "sin_reinversion"
-                          ? "border-gray-300 bg-gray-50 text-gray-600"
-                          : tipoActual === "reinversion_capital"
-                          ? "border-green-300 bg-green-50 text-green-700"
-                          : "border-purple-300 bg-purple-50 text-purple-700"
-                      }`}
+                      className={`text-sm border rounded-lg px-3 py-1.5 font-medium transition ${colorActual}`}
                     >
-                      <option value="sin_reinversion">Sin Reinversión</option>
-                      <option value="reinversion_capital">Capital</option>
-                      <option value="reinversion_total">Interés Compuesto</option>
+                      {opcionesCredito.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 );

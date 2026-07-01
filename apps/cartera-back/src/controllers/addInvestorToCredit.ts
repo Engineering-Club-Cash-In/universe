@@ -71,6 +71,11 @@ const addInvestorToCreditSchema = z.object({
       "reinversion_capital",
       "reinversion_interes",
       "reinversion_total",
+      // Modalidades que solo aplican cuando el inversionista es combinada: el
+      // sobrante del excedente / el monto del variable se reinvierten en un
+      // crédito nuevo con esa misma modalidad.
+      "reinversion_excedente",
+      "reinversion_variable",
     ])
     .optional(),
   // Se sigue aceptando por compatibilidad, pero YA NO se usa para actualizar

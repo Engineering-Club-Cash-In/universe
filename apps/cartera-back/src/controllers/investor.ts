@@ -174,6 +174,14 @@ async function consultarPagosInversionista(
       abono_capital: tabla.abono_capital,
       abono_interes: tabla.abono_interes,
       abono_iva_12: tabla.abono_iva_12,
+      // Desglose del interés cuando hubo compras en el mes (interés "partido").
+      // Solo existe en la tabla espejo; para original devolvemos null.
+      abono_interes_sin_compras: config.origen === "espejo"
+        ? (tabla as any).abono_interes_sin_compras
+        : sql<string | null>`null`,
+      abono_interes_con_compras: config.origen === "espejo"
+        ? (tabla as any).abono_interes_con_compras
+        : sql<string | null>`null`,
       fecha_pago: tabla.fecha_pago,
       porcentaje_participacion: tabla.porcentaje_participacion,
       abonoGeneralInteres: pagos_credito.abono_interes,
@@ -1377,6 +1385,10 @@ export async function resumeInvestor(
         total_reinv_tipo_capital: new Big(0),
         total_reinv_tipo_interes: new Big(0),
         total_reinv_tipo_total: new Big(0),
+        // Pools para combinada: cuota completa de los créditos que dentro de una
+        // combinada son excedente/variable (el ajuste global se aplica después).
+        total_cuota_excedente_combinada: new Big(0),
+        total_cuota_variable_combinada: new Big(0),
       };
 
       const formatValue = (val: string | number | null | undefined) =>
@@ -1494,7 +1506,7 @@ export async function resumeInvestor(
               const abono_interes = new Big(pago.abono_interes ?? 0);
               const abono_iva = new Big(pago.abono_iva_12 ?? 0);
               const isr = abono_interes.times(0.07);
-              const cuota = pago.cuota ?? 0;
+              const cuota = pago.cuota ?? 1;
               let cuota_inversor;
               let abonoGeneralInteres;
               let reinvCapital = new Big((pago as any).reinv_capital ?? 0);
@@ -1627,6 +1639,11 @@ export async function resumeInvestor(
                 abono_capital_detalle: (pago as any).abono_capital_id
                   ? abonosMap.get((pago as any).abono_capital_id) ?? null
                   : null,
+                // Interés "partido": hubo compras en el mes y el interés se
+                // calculó en dos partes (sin_compras + con_compras).
+                interes_partido:
+                  (pago as any).abono_interes_sin_compras != null ||
+                  (pago as any).abono_interes_con_compras != null,
               };
             });
 
@@ -1657,6 +1674,16 @@ export async function resumeInvestor(
           subtotal.total_reinv_tipo_capital = subtotal.total_reinv_tipo_capital.plus(total_reinv_tipo_capital);
           subtotal.total_reinv_tipo_interes = subtotal.total_reinv_tipo_interes.plus(total_reinv_tipo_interes);
           subtotal.total_reinv_tipo_total = subtotal.total_reinv_tipo_total.plus(total_reinv_tipo_total);
+
+          // Combinada: acumular la cuota completa de este crédito en su pool si es
+          // excedente/variable (su tipo es constante en todos sus pagos).
+          if (inv.reinversion === "reinversion_combinada") {
+            if (c.tipo_reinversion === "reinversion_excedente") {
+              subtotal.total_cuota_excedente_combinada = subtotal.total_cuota_excedente_combinada.plus(total_cuota);
+            } else if (c.tipo_reinversion === "reinversion_variable") {
+              subtotal.total_cuota_variable_combinada = subtotal.total_cuota_variable_combinada.plus(total_cuota);
+            }
+          }
 
           return {
             credito_id: c.credito_id,
@@ -1710,6 +1737,31 @@ export async function resumeInvestor(
         const recibe = montoRecibe.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoRecibe;
         subtotal.total_reinversion = subtotal.total_cuota.minus(recibe);
         subtotal.total_cuota = recibe;
+      }
+
+      // Combinada: aplicar excedente/variable sobre el pool de cada modalidad, con el
+      // mismo monto_reinversion. Es lo mismo que el crudo, solo que sumando únicamente
+      // los créditos que están en esa modalidad. La salida usa total_reinversion
+      // (total_cuota_con_reinversion = sin_reinversion − reinversion).
+      if (inv.reinversion === "reinversion_combinada") {
+        const monto = new Big(inv.monto_reinversion ?? 0);
+
+        // Excedente: el monto es lo que RECIBE del pool; el sobrante se reinvierte.
+        const poolExcedente = subtotal.total_cuota_excedente_combinada;
+        if (poolExcedente.gt(0)) {
+          const recibe = monto.gt(poolExcedente) ? poolExcedente : monto;
+          const sobrante = poolExcedente.minus(recibe);
+          subtotal.total_cuota = subtotal.total_cuota.minus(sobrante);
+          subtotal.total_reinversion = subtotal.total_reinversion.plus(sobrante);
+        }
+
+        // Variable: el monto es lo que se REINVIERTE del pool.
+        const poolVariable = subtotal.total_cuota_variable_combinada;
+        if (poolVariable.gt(0)) {
+          const reinv = monto.gt(poolVariable) ? poolVariable : monto;
+          subtotal.total_cuota = subtotal.total_cuota.minus(reinv);
+          subtotal.total_reinversion = subtotal.total_reinversion.plus(reinv);
+        }
       }
 
       // 🔹 Retornar estructura del inversionista
@@ -1954,6 +2006,16 @@ export async function getInvestorTotalsGlobales(
     total_reinv_tipo_capital: new Big(0),
     total_reinv_tipo_interes: new Big(0),
     total_reinv_tipo_total: new Big(0),
+    // Montos reinvertidos por excedente/variable dentro de una combinada (el
+    // sobrante del excedente y lo reinvertido del variable). Se despliegan como
+    // créditos nuevos con esa misma modalidad en la liquidación.
+    total_reinv_tipo_excedente: new Big(0),
+    total_reinv_tipo_variable: new Big(0),
+    // Pools para combinada: suma de la cuota completa de los créditos que dentro
+    // de una combinada son excedente/variable. El ajuste global (usando el
+    // monto_reinversion del inversionista) se aplica después del loop.
+    total_cuota_excedente_combinada: new Big(0),
+    total_cuota_variable_combinada: new Big(0),
   };
 
   // 7. Procesar TODOS los créditos del inversionista (sin queries adicionales)
@@ -2061,6 +2123,17 @@ export async function getInvestorTotalsGlobales(
       } else if (reinversionActual === "reinversion_total") {
         subtotal.total_reinv_tipo_total = subtotal.total_reinv_tipo_total.plus(montoReinvNetoPago);
       }
+
+      // Combinada: acumular la cuota completa de los créditos excedente/variable
+      // en su pool. Per-pago se calcularon como completos (cuota_inversor); el
+      // ajuste con monto_reinversion se hace después del loop.
+      if (inv.reinversion === "reinversion_combinada") {
+        if (reinversionActual === "reinversion_excedente") {
+          subtotal.total_cuota_excedente_combinada = subtotal.total_cuota_excedente_combinada.plus(cuota_inversor);
+        } else if (reinversionActual === "reinversion_variable") {
+          subtotal.total_cuota_variable_combinada = subtotal.total_cuota_variable_combinada.plus(cuota_inversor);
+        }
+      }
     }
 
     subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));
@@ -2082,6 +2155,32 @@ export async function getInvestorTotalsGlobales(
     const recibe = montoRecibe.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoRecibe;
     subtotal.total_reinversion = subtotal.total_cuota.minus(recibe);
     subtotal.total_cuota = recibe;
+  }
+
+  // Combinada: aplicar excedente/variable sobre el pool de cada modalidad, con el
+  // mismo monto_reinversion del inversionista. Es lo mismo que el crudo, solo que
+  // sumando únicamente los créditos que están en esa modalidad.
+  if (inv.reinversion === "reinversion_combinada") {
+    const monto = new Big(inv.monto_reinversion ?? 0);
+
+    // Excedente: el monto es lo que RECIBE del pool; el sobrante se reinvierte.
+    const poolExcedente = subtotal.total_cuota_excedente_combinada;
+    if (poolExcedente.gt(0)) {
+      const recibe = monto.gt(poolExcedente) ? poolExcedente : monto;
+      const sobrante = poolExcedente.minus(recibe);
+      subtotal.total_cuota = subtotal.total_cuota.minus(sobrante);
+      subtotal.total_reinversion = subtotal.total_reinversion.plus(sobrante);
+      subtotal.total_reinv_tipo_excedente = sobrante;
+    }
+
+    // Variable: el monto es lo que se REINVIERTE del pool.
+    const poolVariable = subtotal.total_cuota_variable_combinada;
+    if (poolVariable.gt(0)) {
+      const reinv = monto.gt(poolVariable) ? poolVariable : monto;
+      subtotal.total_cuota = subtotal.total_cuota.minus(reinv);
+      subtotal.total_reinversion = subtotal.total_reinversion.plus(reinv);
+      subtotal.total_reinv_tipo_variable = reinv;
+    }
   }
 
   // 7. Upsert en reinversiones
@@ -2137,6 +2236,8 @@ export async function getInvestorTotalsGlobales(
       total_reinv_tipo_capital: formatValue(subtotal.total_reinv_tipo_capital.round(2).toString()),
       total_reinv_tipo_interes: formatValue(subtotal.total_reinv_tipo_interes.round(2).toString()),
       total_reinv_tipo_total: formatValue(subtotal.total_reinv_tipo_total.round(2).toString()),
+      total_reinv_tipo_excedente: formatValue(subtotal.total_reinv_tipo_excedente.round(2).toString()),
+      total_reinv_tipo_variable: formatValue(subtotal.total_reinv_tipo_variable.round(2).toString()),
     },
   };
 }
@@ -3353,6 +3454,10 @@ export async function getInvestorMirrorSummary(
     total_reinversion_interes: new Big(0),
     total_reinversion:         new Big(0),
     total_cuota_sin_reinversion: new Big(0),
+    // Pools para combinada (ver getInvestorTotalsGlobales): cuota completa de los
+    // créditos que dentro de una combinada son excedente/variable.
+    total_cuota_excedente_combinada: new Big(0),
+    total_cuota_variable_combinada: new Big(0),
   };
 
   for (const credito of creditosEspejo) {
@@ -3436,6 +3541,16 @@ export async function getInvestorMirrorSummary(
       sg.total_reinversion         = sg.total_reinversion.plus(netReinvMirror);
       sg.total_reinversion_capital = sg.total_reinversion_capital.plus(reinvCapital);
       sg.total_reinversion_interes = sg.total_reinversion_interes.plus(netReinvIntMirror);
+
+      // Combinada: acumular la cuota completa de los créditos excedente/variable
+      // en su pool; el ajuste con monto_reinversion se hace después del loop.
+      if (inv.reinversion === "reinversion_combinada") {
+        if (reinversionActual === "reinversion_excedente") {
+          sg.total_cuota_excedente_combinada = sg.total_cuota_excedente_combinada.plus(cuota_inversor);
+        } else if (reinversionActual === "reinversion_variable") {
+          sg.total_cuota_variable_combinada = sg.total_cuota_variable_combinada.plus(cuota_inversor);
+        }
+      }
     }
 
     // 🔑 Saldo actual = monto_aportado_base - SUM(abono_capital de pagos espejo)
@@ -3458,6 +3573,30 @@ export async function getInvestorMirrorSummary(
     const recibe = montoRecibe.gt(sg.total_cuota) ? sg.total_cuota : montoRecibe;
     sg.total_reinversion = sg.total_cuota.minus(recibe);
     sg.total_cuota = recibe;
+  }
+
+  // Combinada: aplicar excedente/variable sobre el pool de cada modalidad, con el
+  // mismo monto_reinversion. Es lo mismo que el crudo, solo que sumando únicamente
+  // los créditos que están en esa modalidad.
+  if (inv.reinversion === "reinversion_combinada") {
+    const monto = new Big(inv.monto_reinversion ?? 0);
+
+    // Excedente: el monto es lo que RECIBE del pool; el sobrante se reinvierte.
+    const poolExcedente = sg.total_cuota_excedente_combinada;
+    if (poolExcedente.gt(0)) {
+      const recibe = monto.gt(poolExcedente) ? poolExcedente : monto;
+      const sobrante = poolExcedente.minus(recibe);
+      sg.total_cuota = sg.total_cuota.minus(sobrante);
+      sg.total_reinversion = sg.total_reinversion.plus(sobrante);
+    }
+
+    // Variable: el monto es lo que se REINVIERTE del pool.
+    const poolVariable = sg.total_cuota_variable_combinada;
+    if (poolVariable.gt(0)) {
+      const reinv = monto.gt(poolVariable) ? poolVariable : monto;
+      sg.total_cuota = sg.total_cuota.minus(reinv);
+      sg.total_reinversion = sg.total_reinversion.plus(reinv);
+    }
   }
 
   // ── PASO 5: Retornar datos del inversionista + subtotales globales ─────────
@@ -4034,19 +4173,30 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             console.log(`  📊 Moda porcentaje inversión: ${modaInversion}%, cash in: ${modaCashIn}%`);
 
             // Cuando la modalidad global es combinada, cada crédito reinvierte bajo su
-            // propia modalidad y el monto se reparte en hasta 3 llamadas (capital /
-            // interés / total). Si una llamada no encuentra candidatos compatibles,
-            // se aborta el resto (las anteriores ya quedaron committed).
-            type Modalidad = "reinversion_capital" | "reinversion_interes" | "reinversion_total";
+            // propia modalidad y el monto se reparte en hasta 5 llamadas (capital /
+            // interés / total / excedente / variable). El sobrante del excedente y el
+            // monto del variable van a créditos nuevos con esa misma modalidad. Si una
+            // llamada no encuentra candidatos compatibles, se aborta el resto (las
+            // anteriores ya quedaron committed).
+            type Modalidad =
+              | "reinversion_capital"
+              | "reinversion_interes"
+              | "reinversion_total"
+              | "reinversion_excedente"
+              | "reinversion_variable";
             const llamadasReinversion: { monto: number; tipo_reinversion?: Modalidad; etiqueta: string }[] = [];
 
             if (totalesResult.reinversion === "reinversion_combinada") {
               const montoCapital = Number(totales.total_reinv_tipo_capital ?? 0);
               const montoInteres = Number(totales.total_reinv_tipo_interes ?? 0);
               const montoTotal = Number(totales.total_reinv_tipo_total ?? 0);
+              const montoExcedente = Number(totales.total_reinv_tipo_excedente ?? 0);
+              const montoVariable = Number(totales.total_reinv_tipo_variable ?? 0);
               if (montoCapital > 0) llamadasReinversion.push({ monto: montoCapital, tipo_reinversion: "reinversion_capital", etiqueta: "capital" });
               if (montoInteres > 0) llamadasReinversion.push({ monto: montoInteres, tipo_reinversion: "reinversion_interes", etiqueta: "interés" });
               if (montoTotal > 0) llamadasReinversion.push({ monto: montoTotal, tipo_reinversion: "reinversion_total", etiqueta: "total" });
+              if (montoExcedente > 0) llamadasReinversion.push({ monto: montoExcedente, tipo_reinversion: "reinversion_excedente", etiqueta: "excedente" });
+              if (montoVariable > 0) llamadasReinversion.push({ monto: montoVariable, tipo_reinversion: "reinversion_variable", etiqueta: "variable" });
               console.log(`  📊 Modalidad combinada → ${llamadasReinversion.length} reinversión(es): ${llamadasReinversion.map(l => `${l.etiqueta}=Q${l.monto.toFixed(2)}`).join(", ")}`);
             } else {
               llamadasReinversion.push({ monto: Number(liquidacion.reinversion_total ?? 0), etiqueta: "global" });

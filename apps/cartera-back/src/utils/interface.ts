@@ -16,6 +16,9 @@ export interface PagoDetalle {
   tasaInteresInvesor: number;
   cuota: number;
   estado_liquidacion?: "LIQUIDADO" | "NO_LIQUIDADO";
+  // true cuando el interés del pago se calculó partido por compras del mes
+  // (abono_interes_sin_compras / _con_compras no nulos). Se resalta en el Excel.
+  interes_partido?: boolean;
 }
 
 export interface CreditoData {
@@ -70,6 +73,7 @@ export interface InversionistaReporte {
   nombre_inversionista: string;
   email: string | null;
   reinversion: string;
+  monto_reinversion?: string | number | null;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;

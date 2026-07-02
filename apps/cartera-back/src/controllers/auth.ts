@@ -1,5 +1,5 @@
  
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import { admins, asesores, conta_users, platform_users } from "../database/db";
 import { db } from "../database";
@@ -64,11 +64,12 @@ export async function createPlatformUserService(data: {
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto"; // ⚠️ ponelo en tu .env
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "supersecreto";
 export async function loginService(email: string, password: string) {
-  // 1. Buscar usuario por email
+  // 1. Buscar usuario por email (case/espacios-insensible: los asesores nuevos
+  // se guardan normalizados a minúsculas, los registros viejos pueden no estarlo)
   const [user] = await db
     .select()
     .from(platform_users)
-    .where(eq(platform_users.email, email))
+    .where(sql`LOWER(${platform_users.email}) = ${email.trim().toLowerCase()}`)
     .limit(1);
 
   if (!user) {

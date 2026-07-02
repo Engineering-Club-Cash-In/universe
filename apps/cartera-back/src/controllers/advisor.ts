@@ -4,9 +4,16 @@ import { asesores, creditos, moras_credito, platform_users, usuarios } from '../
 import { and, eq, like, or, sql } from 'drizzle-orm';
 import bcrypt from "bcrypt";
 import Big from 'big.js';
+
+// 🔥 Mismo valor normalizado (trim + minúsculas) para asesores.email_cash_in y platform_users.email:
+// los filtros de cobro (reportes.ts, /stats) comparan por igualdad exacta contra el email de sesión.
+// Whitespace-only o no-string → undefined (se rechaza en create y se ignora en update).
+const normalizeEmail = (email: unknown): string | undefined =>
+  typeof email === "string" ? email.trim().toLowerCase() || undefined : undefined;
+
 export const insertAdvisor = async ({ body, set }: any) => {
   try {
-    let asesoresToInsert = [];
+    let asesoresToInsert: any[] = [];
 
     // Permitir objeto único o array
     if (Array.isArray(body)) {
@@ -17,7 +24,7 @@ export const insertAdvisor = async ({ body, set }: any) => {
 
     // Validar que todos tengan nombre y correo
     const isValid = asesoresToInsert.every(
-      (a) => a.nombre && a.email && a.password
+      (a) => a.nombre && normalizeEmail(a.email) && a.password
     );
     if (!isValid || asesoresToInsert.length === 0) {
       set.status = 400;
@@ -26,36 +33,41 @@ export const insertAdvisor = async ({ body, set }: any) => {
       };
     }
 
-    // Insertar asesores
-    const insertedAdvisors = await db
-      .insert(asesores)
-      .values(
-        asesoresToInsert.map(({ nombre, activo, telefono, activo_para_creditos, email }) => ({ // 🔥 Agregado telefono
-          nombre,
-          telefono: telefono?.trim() || null, // 🔥 NUEVO: Limpia o pone null
-          // 🔥 Los reportes/correos de cobro leen asesores.email_cash_in, no platform_users.email
-          emailCashIn: email?.trim() || null,
-          activo: typeof activo !== "undefined" ? activo : true,
-          // 🔥 default true: el asesor entra al balanceo salvo que se indique lo contrario.
-          // Solo un boolean explícito lo cambia (null/otros tipos caen a true; la columna es NOT NULL).
-          activo_para_creditos: typeof activo_para_creditos === "boolean" ? activo_para_creditos : true,
-        }))
-      )
-      .returning();
+    // 🔥 Asesor + login en una sola transacción: sin ella, un fallo en platform_users
+    // (email duplicado UNIQUE) dejaba asesores huérfanos sin login que sí entraban al balanceo.
+    const insertedAdvisors = await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(asesores)
+        .values(
+          asesoresToInsert.map(({ nombre, activo, telefono, activo_para_creditos, email }) => ({ // 🔥 Agregado telefono
+            nombre,
+            telefono: telefono?.trim() || null, // 🔥 NUEVO: Limpia o pone null
+            // 🔥 Los reportes/correos de cobro leen asesores.email_cash_in, no platform_users.email
+            emailCashIn: normalizeEmail(email) || null,
+            activo: typeof activo !== "undefined" ? activo : true,
+            // 🔥 default true: el asesor entra al balanceo salvo que se indique lo contrario.
+            // Solo un boolean explícito lo cambia (null/otros tipos caen a true; la columna es NOT NULL).
+            activo_para_creditos: typeof activo_para_creditos === "boolean" ? activo_para_creditos : true,
+          }))
+        )
+        .returning();
 
-    // Insertar en platform_users (uno por cada asesor)
-    for (let i = 0; i < insertedAdvisors.length; i++) {
-      const asesor = insertedAdvisors[i];
-      const { email, password } = asesoresToInsert[i];
+      // Insertar en platform_users (uno por cada asesor)
+      for (let i = 0; i < inserted.length; i++) {
+        const asesor = inserted[i];
+        const { email, password } = asesoresToInsert[i];
 
-      await db.insert(platform_users).values({
-        email,
-        password_hash: await bcrypt.hash(password, 10),
-        role: "ASESOR",
-        is_active: true,
-        asesor_id: asesor.asesor_id,
-      });
-    }
+        await tx.insert(platform_users).values({
+          email: normalizeEmail(email)!,
+          password_hash: await bcrypt.hash(password, 10),
+          role: "ASESOR",
+          is_active: true,
+          asesor_id: asesor.asesor_id,
+        });
+      }
+
+      return inserted;
+    });
 
     set.status = 201;
     return insertedAdvisors;
@@ -223,6 +235,8 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
     }
 
     const { nombre, telefono, activo, email, password, activo_para_creditos } = body; // ✅ Ya tiene telefono
+    // 🔥 email normalizado UNA vez: el mismo valor va a asesores.email_cash_in y platform_users.email
+    const emailNorm = normalizeEmail(email);
 
     // 1. Buscar el usuario en platform_users
     const [user] = await db
@@ -239,35 +253,51 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
       set.status = 400;
       return { message: "El usuario no tiene un asesor_id asociado." };
     }
+    const asesorId = user.asesor_id;
 
-    // 2. Actualizar tabla asesores usando el asesor_id
-    const updatedAdvisor = await db
-      .update(asesores)
-      .set({
-        ...(nombre !== undefined ? { nombre } : {}),
-        ...(telefono !== undefined ? { telefono } : {}), // ✅ Ya tiene telefono
-        // 🔥 Mantener email_cash_in en sync con platform_users.email (lo leen los reportes de cobro)
-        ...(email ? { emailCashIn: email.trim() } : {}),
-        ...(activo !== undefined ? { activo } : {}),
-        ...(activo_para_creditos !== undefined ? { activo_para_creditos } : {}), // 🔥 flag balanceo
-      })
-      .where(eq(asesores.asesor_id, user.asesor_id))
-      .returning();
+    // 2. Cambios para asesores
+    const advisorChanges = {
+      ...(nombre !== undefined ? { nombre } : {}),
+      ...(telefono !== undefined ? { telefono } : {}), // ✅ Ya tiene telefono
+      // 🔥 Mantener email_cash_in en sync con platform_users.email (lo leen los reportes de cobro)
+      ...(emailNorm ? { emailCashIn: emailNorm } : {}),
+      ...(activo !== undefined ? { activo } : {}),
+      ...(activo_para_creditos !== undefined ? { activo_para_creditos } : {}), // 🔥 flag balanceo
+    };
 
     // 3. Preparar update para platform_users
     const updateUser: any = {};
-    if (email) updateUser.email = email;
+    if (emailNorm) updateUser.email = emailNorm;
     if (password) {
       updateUser.password_hash = await bcrypt.hash(password, 10);
     }
     if (typeof activo !== "undefined") updateUser.is_active = activo;
 
-    if (Object.keys(updateUser).length > 0) {
-      await db
-        .update(platform_users)
-        .set(updateUser)
-        .where(eq(platform_users.id, Number(id)));
-    }
+    // 🔥 Ambas tablas en una sola transacción: sin ella, un fallo en platform_users
+    // (email UNIQUE) dejaba email_cash_in ya cambiado y el login con el email viejo.
+    const updatedAdvisor = await db.transaction(async (tx) => {
+      // .set({}) vacío tira "No values to set" (ej. body solo con password)
+      const updated =
+        Object.keys(advisorChanges).length > 0
+          ? await tx
+              .update(asesores)
+              .set(advisorChanges)
+              .where(eq(asesores.asesor_id, asesorId))
+              .returning()
+          : await tx
+              .select()
+              .from(asesores)
+              .where(eq(asesores.asesor_id, asesorId));
+
+      if (Object.keys(updateUser).length > 0) {
+        await tx
+          .update(platform_users)
+          .set(updateUser)
+          .where(eq(platform_users.id, Number(id)));
+      }
+
+      return updated;
+    });
 
     set.status = 200;
     return {

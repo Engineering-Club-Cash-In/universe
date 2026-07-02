@@ -2819,7 +2819,8 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
     const platformUser = await db
       .select({ asesor_id: asesores.asesor_id })
       .from(asesores)
-      .where(eq(asesores.emailCashIn, email))
+      // 🔥 case/espacios-insensible: el email de sesión del CRM puede venir con otro casing
+      .where(sql`LOWER(${asesores.emailCashIn}) = ${email.trim().toLowerCase()}`)
       .limit(1);
 
     if (platformUser.length > 0 && platformUser[0].asesor_id) {

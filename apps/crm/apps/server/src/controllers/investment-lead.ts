@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -14,7 +14,6 @@ const INVESTMENT_ROLES = [
 	"investment_advisor_jr",
 	"investment_advisor_sr",
 	"investment_manager",
-	"admin",
 ] as const;
 
 type InvestmentLeadSource =
@@ -34,7 +33,7 @@ async function getAdvisorWithFewestLeads(): Promise<string> {
 		})
 		.from(user)
 		.leftJoin(investmentLeads, eq(investmentLeads.assignedTo, user.id))
-		.where(inArray(user.role, [...INVESTMENT_ROLES]))
+		.where(and(inArray(user.role, [...INVESTMENT_ROLES]), eq(user.assignLeads, true), eq(user.banned, false)))
 		.groupBy(user.id)
 		.orderBy(sql`lead_count asc`)
 		.limit(1);
@@ -70,48 +69,47 @@ export async function createInvestmentLeadWithOpportunity(
 	const { proposedAmount, assignedTo: inputAssignedTo, ...rest } = input;
 	const assignedTo = inputAssignedTo ?? performedBy;
 
-	const [lead] = await db
-		.insert(investmentLeads)
-		.values({
-			...rest,
-			assignedTo,
-			source: input.source ?? "website",
-			campaign: input.campaign,
-			proposedAmount: proposedAmount?.toString(),
-		})
-		.returning();
+	return await db.transaction(async (tx) => {
+		const [lead] = await tx
+			.insert(investmentLeads)
+			.values({
+				...rest,
+				assignedTo,
+				source: input.source ?? "website",
+				campaign: input.campaign,
+				proposedAmount: proposedAmount?.toString(),
+			})
+			.returning();
 
-	// Crear oportunidad automaticamente en etapa de recoleccion de datos
-	const [opportunity] = await db
-		.insert(investmentOpportunities)
-		.values({
-			investmentLeadId: lead.id,
-			assignedAdvisorId: assignedTo,
-			stage: "data_collection",
-			status: "open",
-		})
-		.returning();
+		const [opportunity] = await tx
+			.insert(investmentOpportunities)
+			.values({
+				investmentLeadId: lead.id,
+				assignedAdvisorId: assignedTo,
+				stage: "data_collection",
+				status: "open",
+			})
+			.returning();
 
-	// Registrar en auditoria
-	await db.insert(investmentAuditLog).values({
-		investmentOpportunityId: opportunity.id,
-		action: "lead_created",
-		details: {
-			leadId: lead.id,
-			source: input.source,
-			campaign: input.campaign,
-		},
-		performedBy,
+		await tx.insert(investmentAuditLog).values({
+			investmentOpportunityId: opportunity.id,
+			action: "lead_created",
+			details: {
+				leadId: lead.id,
+				source: input.source,
+				campaign: input.campaign,
+			},
+			performedBy,
+		});
+
+		await tx.insert(investmentStageHistory).values({
+			investmentOpportunityId: opportunity.id,
+			toStage: "data_collection",
+			changedBy: performedBy,
+		});
+
+		return { lead, opportunity };
 	});
-
-	// Registrar stage history
-	await db.insert(investmentStageHistory).values({
-		investmentOpportunityId: opportunity.id,
-		toStage: "data_collection",
-		changedBy: performedBy,
-	});
-
-	return { lead, opportunity };
 }
 
 export async function createInvestmentLeadController(c: Context) {
@@ -123,6 +121,64 @@ export async function createInvestmentLeadController(c: Context) {
 				{ success: false, error: "El campo 'name' es requerido" },
 				400,
 			);
+		}
+
+		if (body.email) {
+			const [existing] = await db
+				.select()
+				.from(investmentLeads)
+				.where(eq(investmentLeads.email, body.email))
+				.limit(1);
+
+			if (existing) {
+				const [activeOpp] = await db
+					.select({ id: investmentOpportunities.id })
+					.from(investmentOpportunities)
+					.where(
+						and(
+							eq(investmentOpportunities.investmentLeadId, existing.id),
+							eq(investmentOpportunities.status, "open"),
+						),
+					)
+					.limit(1);
+
+				if (!activeOpp) {
+					const advisorId = await getAdvisorWithFewestLeads();
+					await db.transaction(async (tx) => {
+						const [opportunity] = await tx
+							.insert(investmentOpportunities)
+							.values({
+								investmentLeadId: existing.id,
+								assignedAdvisorId: advisorId,
+								stage: "data_collection",
+								status: "open",
+							})
+							.returning();
+
+						await tx.insert(investmentAuditLog).values({
+							investmentOpportunityId: opportunity.id,
+							action: "lead_created",
+							details: {
+								leadId: existing.id,
+								source: body.source,
+								campaign: body.campaign,
+							},
+							performedBy: advisorId,
+						});
+
+						await tx.insert(investmentStageHistory).values({
+							investmentOpportunityId: opportunity.id,
+							toStage: "data_collection",
+							changedBy: advisorId,
+						});
+					});
+				}
+
+				return c.json(
+					{ success: true, data: { lead: existing }, message: "Lead ya existe" },
+					200,
+				);
+			}
 		}
 
 		// Asignar al asesor de inversión con menos leads

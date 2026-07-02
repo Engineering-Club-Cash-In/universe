@@ -4,12 +4,9 @@ import { asesores, creditos, moras_credito, platform_users, usuarios } from '../
 import { and, eq, like, or, sql } from 'drizzle-orm';
 import bcrypt from "bcrypt";
 import Big from 'big.js';
-
 // 🔥 Mismo valor normalizado (trim + minúsculas) para asesores.email_cash_in y platform_users.email:
 // los filtros de cobro (reportes.ts, /stats) comparan por igualdad exacta contra el email de sesión.
-// Whitespace-only o no-string → undefined (se rechaza en create y se ignora en update).
-const normalizeEmail = (email: unknown): string | undefined =>
-  typeof email === "string" ? email.trim().toLowerCase() || undefined : undefined;
+import { normalizeEmail } from '../utils/functions/email';
 
 export const insertAdvisor = async ({ body, set }: any) => {
   try {

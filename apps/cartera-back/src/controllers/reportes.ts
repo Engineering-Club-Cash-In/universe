@@ -1226,7 +1226,7 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
     INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
     INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
     WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
-      ${emailCobrador ? sql`AND a.email_cash_in = ${emailCobrador}` : sql``}
+      ${emailCobrador ? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))` : sql``}
     GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
   `);
 

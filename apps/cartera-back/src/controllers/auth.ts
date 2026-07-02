@@ -4,6 +4,9 @@ import bcrypt from "bcrypt";
 import { admins, asesores, conta_users, platform_users } from "../database/db";
 import { db } from "../database";
 import jwt from "jsonwebtoken";
+// 🔥 platform_users.email se guarda SIEMPRE normalizado (trim+minúsculas) en todos los
+// writers, para que el login case-insensitive nunca encuentre duplicados por casing
+import { normalizeEmail } from "../utils/functions/email";
 export async function createAdminService(data: {
   nombre: string;
   apellido: string;
@@ -20,14 +23,14 @@ export async function createAdminService(data: {
     .values({
       nombre: data.nombre,
       apellido: data.apellido,
-      email: data.email,
+      email: normalizeEmail(data.email)!,
       telefono: data.telefono ?? null,
     })
     .returning();
 
   // 3. Insertar en platform_users
   await db.insert(platform_users).values({
-    email: data.email,
+    email: normalizeEmail(data.email)!,
     password_hash: passwordHash,
     role: "ADMIN",
     admin_id: newAdmin.admin_id,
@@ -49,7 +52,7 @@ export async function createPlatformUserService(data: {
   const [newUser] = await db
     .insert(platform_users)
     .values({
-      email: data.email,
+      email: normalizeEmail(data.email)!,
       password_hash: passwordHash,
       role: data.role,
       admin_id: data.admin_id ?? null,
@@ -198,8 +201,8 @@ export async function createContaService(data: {
       const [newConta] = await tx
         .insert(conta_users)
         .values({
-          nombre: data.nombre, 
-          email: data.email,
+          nombre: data.nombre,
+          email: normalizeEmail(data.email)!,
           telefono: data.telefono ?? null,
         })
         .returning();
@@ -214,7 +217,7 @@ export async function createContaService(data: {
       const [newUser] = await tx
         .insert(platform_users)
         .values({
-          email: data.email,
+          email: normalizeEmail(data.email)!,
           password_hash: passwordHash,
           role: "CONTA",
           conta_id: newConta.conta_id,
@@ -259,8 +262,9 @@ export async function updateContaUserService(
       console.log("🔎 Usuario encontrado en platform_users:", user);
 
       // 2. Actualizar platform_users
+      const emailNorm = normalizeEmail(updates.email);
       const userUpdates: any = {};
-      if (updates.email) userUpdates.email = updates.email;
+      if (emailNorm) userUpdates.email = emailNorm;
       if (updates.password)
         userUpdates.password_hash = await bcrypt.hash(updates.password, 10);
       if (typeof updates.is_active !== "undefined")
@@ -278,7 +282,7 @@ export async function updateContaUserService(
       // 3. Actualizar conta_users usando el conta_id que trae platform_users
       const contaUpdates: any = {};
       if (updates.nombre) contaUpdates.nombre = updates.nombre;
-      if (updates.email) contaUpdates.email = updates.email;
+      if (emailNorm) contaUpdates.email = emailNorm;
 
       if (Object.keys(contaUpdates).length > 0 && user.conta_id) {
         await tx

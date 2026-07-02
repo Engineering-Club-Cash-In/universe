@@ -17,26 +17,28 @@ export async function createAdminService(data: {
   // 1. Hashear contraseña
   const passwordHash = await bcrypt.hash(data.password, 10);
 
-  // 2. Insertar admin
-  const [newAdmin] = await db
-    .insert(admins)
-    .values({
-      nombre: data.nombre,
-      apellido: data.apellido,
+  // 2+3. Admin + login en una sola transacción: un email duplicado en
+  // platform_users no debe dejar un admin huérfano sin login
+  return await db.transaction(async (tx) => {
+    const [newAdmin] = await tx
+      .insert(admins)
+      .values({
+        nombre: data.nombre,
+        apellido: data.apellido,
+        email: normalizeEmail(data.email)!,
+        telefono: data.telefono ?? null,
+      })
+      .returning();
+
+    await tx.insert(platform_users).values({
       email: normalizeEmail(data.email)!,
-      telefono: data.telefono ?? null,
-    })
-    .returning();
+      password_hash: passwordHash,
+      role: "ADMIN",
+      admin_id: newAdmin.admin_id,
+    });
 
-  // 3. Insertar en platform_users
-  await db.insert(platform_users).values({
-    email: normalizeEmail(data.email)!,
-    password_hash: passwordHash,
-    role: "ADMIN",
-    admin_id: newAdmin.admin_id,
+    return newAdmin;
   });
-
-  return newAdmin;
 }
 export async function createPlatformUserService(data: {
   email: string;

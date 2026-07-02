@@ -9,6 +9,7 @@ import type {
 	AppRouter,
 	disbursementRouter,
 	manualVehicleRouter,
+	proyeccionRouter,
 } from "../../../server/src/routers/index";
 
 type InvestmentsRouter =
@@ -76,7 +77,8 @@ export const link = new RPCLink({
 type MergedRouter = AppRouter &
 	typeof manualVehicleRouter &
 	InvestmentsRouter &
-	typeof disbursementRouter;
+	typeof disbursementRouter &
+	typeof proyeccionRouter;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

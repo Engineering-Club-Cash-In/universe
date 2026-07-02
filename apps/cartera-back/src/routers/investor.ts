@@ -33,6 +33,7 @@ import {
   auditMirrorPercentages,
   getCreditosEspejoPendientes,
   detectPagosHuerfanos,
+  simularInversionista,
 } from "../controllers/investor";
 import { ajustarPagosLiquidacion } from "../controllers/ajustarPagosLiquidacion";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
@@ -640,6 +641,18 @@ export const inversionistasRouter = new Elysia()
     }
 
     const inversionista = result.inversionistas[0];
+
+    // El reporte PDF (generarHTMLReporte) NO agrupa las modalidades excedente/
+    // variable de una reinversión combinada, así que dejaría esos créditos fuera
+    // del reporte. Está deprecado (el reporte vigente es el Excel), por eso se
+    // rechaza explícitamente para combinada en vez de generar un PDF incompleto.
+    if (inversionista.reinversion === "reinversion_combinada") {
+      set.status = 410;
+      return {
+        message:
+          "El reporte PDF no está disponible para inversionistas con reinversión combinada. Usá el reporte Excel.",
+      };
+    }
 
     // Totales desde getInvestorTotalsGlobales (espejos, no liquidados)
     const totales = await getInvestorTotalsGlobales(
@@ -2267,6 +2280,49 @@ export const inversionistasRouter = new Elysia()
           "o pendiente_revision, agrupados por inversionista. Soporta paginación (page, pageSize), " +
           "búsqueda por nombre (search), filtro por inversionista_id y filtro por statuses (coma separada).",
         tags: ["Inversionistas", "Espejos"],
+      },
+    }
+  )
+  .get(
+    "/inversionistas/:id/simulacion",
+    async ({ params, query, set }) => {
+      const inversionista_id = Number(params.id);
+      if (isNaN(inversionista_id) || inversionista_id < 1) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "El parámetro 'id' debe ser un número entero positivo.",
+        };
+      }
+      const mes = query.mes ? Number(query.mes) : undefined;
+      const anio = query.anio ? Number(query.anio) : undefined;
+      const mesLiquidacion =
+        mes && anio && mes >= 1 && mes <= 12 ? { mes, anio } : undefined;
+      try {
+        const result = await simularInversionista(inversionista_id, mesLiquidacion);
+        set.status = 200;
+        return { success: true, data: result };
+      } catch (error) {
+        console.error(`[GET /inversionistas/${params.id}/simulacion] Error:`, error);
+        const msg = error instanceof Error ? error.message : String(error);
+        set.status = msg.includes("no encontrado") ? 404 : 500;
+        return { success: false, message: msg };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      query: t.Object({
+        mes: t.Optional(t.String()),
+        anio: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Simula pagos futuros de un inversionista sobre sus créditos activos",
+        description:
+          "Proyecta las cuotas no pagadas de los créditos ACTIVOS del inversionista. " +
+          "Con ?mes=M&anio=A filtra a la cuota de ese mes específico por crédito. " +
+          "Calcula: abono_capital, abono_interes, IVA (12%), ISR (7%), monto_neto y flags de reinversión. " +
+          "Solo lectura — no modifica la base de datos.",
+        tags: ["Inversionistas"],
       },
     }
   );

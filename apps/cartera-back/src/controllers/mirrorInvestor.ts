@@ -672,6 +672,21 @@ export const asignarReinversionEspejo = async ({ body, set }: any) => {
       return { success: false, message: "Falta el inversionista_id" };
     }
 
+    // No permitir mezclar Excedente y Variable en el mismo inversionista: el
+    // monto_reinversion es único y significaría dos cosas opuestas a la vez
+    // (recibir un monto fijo vs reinvertir un monto fijo). Los créditos que no
+    // vienen en el payload quedan sin_reinversion, así que basta revisar los
+    // enviados. Se valida acá además del modal para cubrir callers directos/bulk.
+    const tieneExcedente = Array.isArray(asignaciones) && asignaciones.some((a: any) => a.tipo_reinversion === "reinversion_excedente");
+    const tieneVariable = Array.isArray(asignaciones) && asignaciones.some((a: any) => a.tipo_reinversion === "reinversion_variable");
+    if (tieneExcedente && tieneVariable) {
+      set.status = 400;
+      return {
+        success: false,
+        message: "No se puede mezclar Excedente y Variable en el mismo inversionista. El monto de reinversión es único; usá solo una de las dos modalidades.",
+      };
+    }
+
     const resultados: any[] = [];
     const omitidos: any[] = [];
     let idsActuales: number[] = [];

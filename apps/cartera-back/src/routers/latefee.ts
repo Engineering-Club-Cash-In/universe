@@ -29,9 +29,20 @@ export const morasRouter = new Elysia()
   /**
    * Crear una mora manualmente
    */
-  .post("/mora", async ({ body, set }) => {
+  .post("/mora", async ({ body, user, set }: any) => {
     try {
-      const result = await createMora(body);
+      // 'override' salta validaciones críticas (cuotas reales, guard del monto, estado
+      // excluido), así que solo ADMIN/CONTA pueden forzarlo — sin importar que el front
+      // muestre u oculte el checkbox, el API lo gatea server-side.
+      if (body?.override === true && !["ADMIN", "CONTA"].includes(user?.role)) {
+        set.status = 403;
+        return { success: false, message: "[ERROR] 'override' requiere rol ADMIN o CONTA." };
+      }
+      const result = await createMora({
+        ...body,
+        usuario_id: user?.id ?? user?.user_id,        // del token (JWT decodificado)
+        usuario_email: user?.email ?? user?.correo,    // fallback si el token no trae id
+      });
       set.status = result.success ? 201 : 400;
       return result;
     } catch (err) {
@@ -43,6 +54,8 @@ export const morasRouter = new Elysia()
       credito_id: t.Number(),
       monto_mora: t.Optional(t.Number()),
       cuotas_atrasadas: t.Optional(t.Number()),
+      override: t.Optional(t.Boolean()),
+      motivo: t.Optional(t.String()),
     })
   })
 

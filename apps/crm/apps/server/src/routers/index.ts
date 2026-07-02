@@ -376,6 +376,9 @@ export const reportsAppRouter = {
 	editarInversionista: investorDocumentsRouter.editarInversionista,
 	cambiarStatusInversionista:
 		investorDocumentsRouter.cambiarStatusInversionista,
+	getInvestorsCartera: investorDocumentsRouter.getInvestorsCartera,
+	getSimulacionInversionista:
+		investorDocumentsRouter.getSimulacionInversionista,
 
 	// Accounting routes (Contabilidad)
 	getResumenGlobalInversionistas:
@@ -430,6 +433,12 @@ export const disbursementRouter = {
 
 export const manualVehicleRouter = {
 	upsertManualVehicleValuation: vehiclesRouter.upsertManualValuation,
+};
+
+// Projection procedures exported separately to avoid TS7056 truncation
+export const proyeccionRouter = {
+	getInvestorsCartera: investorDocumentsRouter.getInvestorsCartera,
+	getSimulacionInversionista: investorDocumentsRouter.getSimulacionInversionista,
 };
 
 // Merged AppRouter type to avoid serialization limit

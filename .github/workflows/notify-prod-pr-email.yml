@@ -82,30 +82,16 @@ jobs:
                   lines.append('- … %d commits más (ver el PR)' % (len(commits) - 30))
               return '\n'.join(lines)
 
-          # Marcadores de la plantilla pase-a-produccion.md. Si alguno sigue presente,
-          # el autor abrió el PR con la plantilla pero NO la completó.
-          TEMPLATE_PLACEHOLDERS = [
-              '[breve descripción de las áreas tocadas]',
-              '[Área / Módulo]',
-              '[Otra área]',
-              '[Qué cambió, en una línea]',
-          ]
-
           def strip_comments(b):
-              # quita los comentarios guía <!-- ... --> de la plantilla
+              # quita sólo los comentarios guía <!-- ... --> de la plantilla,
+              # para que no se cuelen en el correo. Nada más se toca del body.
               return re.sub(r'<!--.*?-->', '', b, flags=re.DOTALL).strip()
 
-          def is_unfilled_template(b):
-              cleaned = strip_comments(b)
-              return any(ph in cleaned for ph in TEMPLATE_PLACEHOLDERS)
-
-          # El correo usa la descripción del PR tal cual; cae al resumen de commits
-          # si está vacía o si es la plantilla sin completar.
-          if body and is_unfilled_template(body):
-              summary_md = fallback_summary()
-              source_label = 'automáticamente desde los commits (la plantilla del PR quedó sin completar)'
-          elif body:
-              summary_md = strip_comments(body)
+          # Mostramos SIEMPRE la descripción del PR tal cual. Sólo si el PR viene
+          # sin descripción armamos un resumen mínimo desde los commits.
+          body_clean = strip_comments(body)
+          if body_clean:
+              summary_md = body_clean
               source_label = 'a partir de la descripción del PR'
           else:
               summary_md = fallback_summary()

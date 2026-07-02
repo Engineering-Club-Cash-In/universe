@@ -85,7 +85,36 @@ import {
 	montoACobrarConfig,
 } from "@/lib/reports/scenario-configs";
 import { PERMISSIONS } from "@/lib/roles";
+import { Combobox } from "@/components/ui/combobox";
 import { client, orpc, queryClient } from "@/utils/orpc";
+type SimulacionInversionistaResult = {
+	success: boolean;
+	data: {
+		inversionista_id: number;
+		nombre: string;
+		tipo_reinversion: string | null;
+		moneda: string | null;
+		emite_factura: boolean;
+		monto_reinversion_mensual: number;
+		total_monto_aportado: number;
+		total_capital_actual: number;
+		capital_restante_global: number;
+		desglose_acumulado: {
+			total_creditos: number;
+			total_reinversion: number;
+			total_acumulado: number;
+			meses: Array<{
+				mes: string;
+				total_sin_reinversion: number;
+				total_con_reinversion: number;
+				total_reinversion: number;
+				total_capital_restante: number;
+			}>;
+		};
+	};
+};
+
+type InversionistaItem = { inversionista_id: number; nombre: string };
 
 export const Route = createFileRoute("/admin/reports/")({
 	component: RouteComponent,
@@ -511,6 +540,13 @@ function RouteComponent() {
 		getDefaultRangeForPeriodo("mes"),
 	);
 
+	const [proyeccionInvId, setProyeccionInvId] = useState<number | null>(null);
+	const [proyeccionAnio, setProyeccionAnio] = useState<number>(
+		new Date().getFullYear(),
+	);
+	const [proyeccionMes, setProyeccionMes] = useState<number | null>(null);
+	const [proyeccionEnabled, setProyeccionEnabled] = useState(false);
+
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const userRole = userProfile.data?.role;
 	const isAdmin = userRole ? PERMISSIONS.canAccessAdmin(userRole) : false;
@@ -583,6 +619,21 @@ function RouteComponent() {
 	const reinversionData = reinversionLiquidacionesQuery.data as
 		| ReinversionLiquidacionesResponse
 		| undefined;
+
+	const investorsCarteraQuery = useQuery({
+		...orpc.getInvestorsCartera.queryOptions({ input: {} }),
+		enabled: isAdmin,
+		staleTime: 1000 * 60 * 10,
+	});
+
+	const simulacionQuery = useQuery({
+		...orpc.getSimulacionInversionista.queryOptions({
+			input: { inversionistaId: proyeccionInvId ?? 0, anio: proyeccionAnio },
+		}),
+		enabled: isAdmin && proyeccionEnabled && proyeccionInvId !== null,
+		staleTime: 1000 * 60 * 10,
+		placeholderData: undefined,
+	});
 
 	const comparativoQuery = useQuery({
 		...orpc.getComparativoHistorico.queryOptions({
@@ -1016,6 +1067,9 @@ function RouteComponent() {
 							<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
 							<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
 							<TabsTrigger value="colocacion">Colocación</TabsTrigger>
+							<TabsTrigger value="proyeccion-liquidaciones">
+								Proyección Liquidaciones
+							</TabsTrigger>
 						</TabsList>
 						{canAccessClosedCreditsReport && (
 							<TabsContent value="creditos" className="space-y-6">
@@ -3139,6 +3193,236 @@ function RouteComponent() {
 										})()}
 								</CardContent>
 							</Card>
+						</TabsContent>
+
+						{/* ── PROYECCIÓN LIQUIDACIONES ── */}
+						<TabsContent value="proyeccion-liquidaciones" className="space-y-6">
+							<div className="flex flex-wrap items-end gap-3">
+								<div className="flex flex-col gap-1">
+									<label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+										Inversionista
+									</label>
+									<Combobox
+										width="288px"
+										placeholder="Buscar inversionista..."
+										value={proyeccionInvId ? String(proyeccionInvId) : null}
+										options={((investorsCarteraQuery.data ?? []) as InversionistaItem[]).map(
+											(inv) => ({
+												value: String(inv.inversionista_id),
+												label: inv.nombre,
+											}),
+										)}
+										onChange={(v) => {
+											setProyeccionInvId(v ? Number(v) : null);
+											setProyeccionEnabled(false);
+										}}
+										isLoading={investorsCarteraQuery.isPending}
+									/>
+								</div>
+								<div className="flex flex-col gap-1">
+									<label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+										Hasta mes
+									</label>
+									<Select
+										value={proyeccionMes ? String(proyeccionMes) : "todos"}
+										onValueChange={(v) => {
+											setProyeccionMes(v === "todos" ? null : Number(v));
+											setProyeccionEnabled(false);
+										}}
+									>
+										<SelectTrigger className="w-36">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="todos">Todos los meses</SelectItem>
+											{MESES.map((label, i) => (
+												<SelectItem key={label} value={String(i + 1)}>
+													{label}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="flex flex-col gap-1">
+									<label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+										Año
+									</label>
+									<Select
+										value={String(proyeccionAnio)}
+										onValueChange={(v) => {
+											setProyeccionAnio(Number(v));
+											setProyeccionEnabled(false);
+										}}
+									>
+										<SelectTrigger className="w-28">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 1 + i).map((y) => (
+												<SelectItem key={y} value={String(y)}>
+													{y}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+								<Button
+									onClick={() => {
+										if (proyeccionEnabled) {
+											simulacionQuery.refetch();
+										} else {
+											setProyeccionEnabled(true);
+										}
+									}}
+									disabled={!proyeccionInvId || simulacionQuery.isFetching}
+								>
+									{simulacionQuery.isFetching ? "Generando..." : "Generar proyección"}
+								</Button>
+							</div>
+
+							{simulacionQuery.isError && (
+								<p className="text-sm text-destructive">
+									Error al cargar la proyección. Intenta de nuevo.
+								</p>
+							)}
+
+							{(simulacionQuery.data as SimulacionInversionistaResult | undefined)?.data && (() => {
+								const sim = (simulacionQuery.data as SimulacionInversionistaResult).data;
+								const fmtProyeccion = (v: number) =>
+									new Intl.NumberFormat("es-GT", {
+										style: "currency",
+										currency: sim.moneda === "dolares" ? "USD" : "GTQ",
+										minimumFractionDigits: 2,
+										maximumFractionDigits: 2,
+									}).format(v);
+								const limitKey = proyeccionMes
+									? `${proyeccionAnio}-${String(proyeccionMes).padStart(2, "0")}`
+									: `${proyeccionAnio}-12`;
+								const meses = sim.desglose_acumulado.meses.filter(
+									(m) => m.mes <= limitKey,
+								);
+
+								if (meses.length === 0) {
+									return (
+										<p className="text-sm text-muted-foreground py-4 text-center">
+											No hay meses proyectados para el período seleccionado.
+										</p>
+									);
+								}
+
+								const ultimoMes = meses.at(-1);
+								const totales = meses.reduce(
+									(acc, m) => ({
+										sin_reinversion: acc.sin_reinversion + Number(m.total_sin_reinversion),
+										con_reinversion: acc.con_reinversion + Number(m.total_con_reinversion),
+										reinversion: acc.reinversion + Number(m.total_reinversion),
+									}),
+									{ sin_reinversion: 0, con_reinversion: 0, reinversion: 0 },
+								);
+
+								return (
+									<div className="space-y-6">
+										{/* Tarjetas resumen */}
+										<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+											<Card>
+												<CardHeader className="pb-2">
+													<CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+														Cuota Sin Reinversión
+													</CardTitle>
+												</CardHeader>
+												<CardContent>
+													<p className="text-xl font-bold font-mono">
+														{fmtProyeccion(totales.sin_reinversion)}
+													</p>
+												</CardContent>
+											</Card>
+											<Card>
+												<CardHeader className="pb-2">
+													<CardTitle className="text-xs font-medium text-amber-600 uppercase tracking-wide">
+														Reinversión
+													</CardTitle>
+												</CardHeader>
+												<CardContent>
+													<p className="text-xl font-bold font-mono text-amber-600">
+														{fmtProyeccion(totales.reinversion)}
+													</p>
+												</CardContent>
+											</Card>
+											<Card>
+												<CardHeader className="pb-2">
+													<CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+														Cuota Con Reinversión
+													</CardTitle>
+												</CardHeader>
+												<CardContent>
+													<p className="text-xl font-bold font-mono">
+														{fmtProyeccion(totales.con_reinversion)}
+													</p>
+												</CardContent>
+											</Card>
+											<Card>
+												<CardHeader className="pb-2">
+													<CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+														Capital Restante
+													</CardTitle>
+												</CardHeader>
+												<CardContent>
+													<p className="text-xl font-bold font-mono">
+														{fmtProyeccion(ultimoMes?.total_capital_restante ?? 0)}
+													</p>
+												</CardContent>
+											</Card>
+										</div>
+
+										{/* Tabla por mes */}
+										<Card>
+											<CardHeader>
+												<CardTitle className="text-sm">Desglose mensual</CardTitle>
+											</CardHeader>
+											<CardContent className="p-0">
+												<table className="w-full text-sm">
+													<thead>
+														<tr className="border-b bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
+															<th className="px-4 py-2 text-left">Mes</th>
+															<th className="px-4 py-2 text-right">Sin reinversión</th>
+															<th className="px-4 py-2 text-right text-amber-600">Reinversión</th>
+															<th className="px-4 py-2 text-right">Con reinversión</th>
+															<th className="px-4 py-2 text-right">Capital restante</th>
+														</tr>
+													</thead>
+													<tbody>
+														{meses.map((m) => {
+															const fecha = new Date(`${m.mes}-01T00:00:00Z`);
+															const label = fecha.toLocaleDateString("es-GT", {
+																month: "long",
+																year: "numeric",
+																timeZone: "UTC",
+															});
+															return (
+																<tr key={m.mes} className="border-b last:border-0 hover:bg-muted/30">
+																	<td className="px-4 py-2 capitalize">{label}</td>
+																	<td className="px-4 py-2 text-right font-mono">
+																		{fmtProyeccion(m.total_sin_reinversion)}
+																	</td>
+																	<td className="px-4 py-2 text-right font-mono text-amber-600">
+																		{fmtProyeccion(m.total_reinversion)}
+																	</td>
+																	<td className="px-4 py-2 text-right font-mono">
+																		{fmtProyeccion(m.total_con_reinversion)}
+																	</td>
+																	<td className="px-4 py-2 text-right font-mono">
+																		{fmtProyeccion(m.total_capital_restante)}
+																	</td>
+																</tr>
+															);
+														})}
+													</tbody>
+												</table>
+											</CardContent>
+										</Card>
+									</div>
+								);
+							})()}
 						</TabsContent>
 					</Tabs>
 				</>

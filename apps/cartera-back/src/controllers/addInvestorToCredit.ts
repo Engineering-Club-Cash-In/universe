@@ -71,6 +71,11 @@ const addInvestorToCreditSchema = z.object({
       "reinversion_capital",
       "reinversion_interes",
       "reinversion_total",
+      // Modalidades que solo aplican cuando el inversionista es combinada: el
+      // sobrante del excedente / el monto del variable se reinvierten en un
+      // crédito nuevo con esa misma modalidad.
+      "reinversion_excedente",
+      "reinversion_variable",
     ])
     .optional(),
   // Se sigue aceptando por compatibilidad, pero YA NO se usa para actualizar
@@ -593,6 +598,47 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     let montoRestante = new Big(monto_aportado);
 
     // ================================================================
+    // GUARD: exclusividad excedente/variable (solo compra_cartera).
+    // La escalada a combinada backfillea los créditos existentes con la
+    // modalidad previa (X) e inserta los nuevos con la solicitada (Y). Si X y Y
+    // son las dos modalidades de monto fijo opuestas, quedaría un inversionista
+    // combinada con excedente Y variable a la vez, y getInvestorTotalsGlobales
+    // aplicaría el monto_reinversion único a ambos pools con sentidos opuestos.
+    // Se rechaza antes de tocar nada (misma regla que el modal y /asignar-reinversion).
+    // ================================================================
+    if (tipo_operacion === "compra_cartera" && tipo_reinversion) {
+      const [invActual] = await db
+        .select({ tipo_reinversion: inversionistas.tipo_reinversion })
+        .from(inversionistas)
+        .where(eq(inversionistas.inversionista_id, inversionista_id));
+      const X = invActual?.tipo_reinversion ?? null;
+      const Y = tipo_reinversion;
+      const debeEscalar = X !== "reinversion_combinada" && X !== Y;
+
+      const espejosExistentes = await db
+        .select({ tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion })
+        .from(creditos_inversionistas_espejo)
+        .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
+
+      // Modalidades por-crédito resultantes: existentes (NULL→backfill si escala)
+      // + la de los créditos nuevos (Y).
+      const modalidadesFinales = new Set<string | null>();
+      for (const e of espejosExistentes) {
+        modalidadesFinales.add(e.tipo_reinversion === null && debeEscalar ? X : e.tipo_reinversion);
+      }
+      modalidadesFinales.add(Y);
+
+      if (modalidadesFinales.has("reinversion_excedente") && modalidadesFinales.has("reinversion_variable")) {
+        set.status = 409;
+        return {
+          success: false,
+          message:
+            "No se puede mezclar Excedente y Variable en el mismo inversionista: el monto de reinversión es único (una modalidad recibe un monto fijo y la otra reinvierte un monto fijo).",
+        };
+      }
+    }
+
+    // ================================================================
     // PASO 3: ITERAR CRÉDITOS Y DISTRIBUIR MONTO
     // Todo dentro de una transacción para que si algo falla,
     // se haga rollback de TODOS los cambios.
@@ -636,9 +682,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           X !== "reinversion_combinada" && X !== Y;
 
         if (debeEscalar) {
-          // ── Backfill: si X era "variable", usamos Y; sino, X ──
-          const valorBackfill =
-            X === "reinversion_variable" ? Y : X;
+          // ── Backfill: preservar SIEMPRE la modalidad previa (X) del
+          //    inversionista. variable/excedente ya son modalidades válidas
+          //    por-crédito dentro de una combinada, así que estampar los
+          //    créditos existentes con la modalidad nueva (Y) les cambiaría el
+          //    cálculo de reinversión. ──
+          const valorBackfill = X;
 
           // ── Global del inversionista → combinada ──
           await tx

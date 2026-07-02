@@ -30,9 +30,11 @@ export const insertAdvisor = async ({ body, set }: any) => {
     const insertedAdvisors = await db
       .insert(asesores)
       .values(
-        asesoresToInsert.map(({ nombre, activo, telefono, activo_para_creditos }) => ({ // 🔥 Agregado telefono
+        asesoresToInsert.map(({ nombre, activo, telefono, activo_para_creditos, email }) => ({ // 🔥 Agregado telefono
           nombre,
           telefono: telefono?.trim() || null, // 🔥 NUEVO: Limpia o pone null
+          // 🔥 Los reportes/correos de cobro leen asesores.email_cash_in, no platform_users.email
+          emailCashIn: email?.trim() || null,
           activo: typeof activo !== "undefined" ? activo : true,
           // 🔥 default true: el asesor entra al balanceo salvo que se indique lo contrario.
           // Solo un boolean explícito lo cambia (null/otros tipos caen a true; la columna es NOT NULL).
@@ -244,6 +246,8 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
       .set({
         ...(nombre !== undefined ? { nombre } : {}),
         ...(telefono !== undefined ? { telefono } : {}), // ✅ Ya tiene telefono
+        // 🔥 Mantener email_cash_in en sync con platform_users.email (lo leen los reportes de cobro)
+        ...(email ? { emailCashIn: email.trim() } : {}),
         ...(activo !== undefined ? { activo } : {}),
         ...(activo_para_creditos !== undefined ? { activo_para_creditos } : {}), // 🔥 flag balanceo
       })

@@ -131,6 +131,49 @@ export async function createInvestmentLeadController(c: Context) {
 				.limit(1);
 
 			if (existing) {
+				const [activeOpp] = await db
+					.select({ id: investmentOpportunities.id })
+					.from(investmentOpportunities)
+					.where(
+						and(
+							eq(investmentOpportunities.investmentLeadId, existing.id),
+							eq(investmentOpportunities.status, "open"),
+						),
+					)
+					.limit(1);
+
+				if (!activeOpp) {
+					const advisorId = await getAdvisorWithFewestLeads();
+					await db.transaction(async (tx) => {
+						const [opportunity] = await tx
+							.insert(investmentOpportunities)
+							.values({
+								investmentLeadId: existing.id,
+								assignedAdvisorId: advisorId,
+								stage: "data_collection",
+								status: "open",
+							})
+							.returning();
+
+						await tx.insert(investmentAuditLog).values({
+							investmentOpportunityId: opportunity.id,
+							action: "lead_created",
+							details: {
+								leadId: existing.id,
+								source: body.source,
+								campaign: body.campaign,
+							},
+							performedBy: advisorId,
+						});
+
+						await tx.insert(investmentStageHistory).values({
+							investmentOpportunityId: opportunity.id,
+							toStage: "data_collection",
+							changedBy: advisorId,
+						});
+					});
+				}
+
 				return c.json(
 					{ success: true, data: { lead: existing }, message: "Lead ya existe" },
 					200,

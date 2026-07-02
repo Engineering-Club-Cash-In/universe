@@ -69,48 +69,47 @@ export async function createInvestmentLeadWithOpportunity(
 	const { proposedAmount, assignedTo: inputAssignedTo, ...rest } = input;
 	const assignedTo = inputAssignedTo ?? performedBy;
 
-	const [lead] = await db
-		.insert(investmentLeads)
-		.values({
-			...rest,
-			assignedTo,
-			source: input.source ?? "website",
-			campaign: input.campaign,
-			proposedAmount: proposedAmount?.toString(),
-		})
-		.returning();
+	return await db.transaction(async (tx) => {
+		const [lead] = await tx
+			.insert(investmentLeads)
+			.values({
+				...rest,
+				assignedTo,
+				source: input.source ?? "website",
+				campaign: input.campaign,
+				proposedAmount: proposedAmount?.toString(),
+			})
+			.returning();
 
-	// Crear oportunidad automaticamente en etapa de recoleccion de datos
-	const [opportunity] = await db
-		.insert(investmentOpportunities)
-		.values({
-			investmentLeadId: lead.id,
-			assignedAdvisorId: assignedTo,
-			stage: "data_collection",
-			status: "open",
-		})
-		.returning();
+		const [opportunity] = await tx
+			.insert(investmentOpportunities)
+			.values({
+				investmentLeadId: lead.id,
+				assignedAdvisorId: assignedTo,
+				stage: "data_collection",
+				status: "open",
+			})
+			.returning();
 
-	// Registrar en auditoria
-	await db.insert(investmentAuditLog).values({
-		investmentOpportunityId: opportunity.id,
-		action: "lead_created",
-		details: {
-			leadId: lead.id,
-			source: input.source,
-			campaign: input.campaign,
-		},
-		performedBy,
+		await tx.insert(investmentAuditLog).values({
+			investmentOpportunityId: opportunity.id,
+			action: "lead_created",
+			details: {
+				leadId: lead.id,
+				source: input.source,
+				campaign: input.campaign,
+			},
+			performedBy,
+		});
+
+		await tx.insert(investmentStageHistory).values({
+			investmentOpportunityId: opportunity.id,
+			toStage: "data_collection",
+			changedBy: performedBy,
+		});
+
+		return { lead, opportunity };
 	});
-
-	// Registrar stage history
-	await db.insert(investmentStageHistory).values({
-		investmentOpportunityId: opportunity.id,
-		toStage: "data_collection",
-		changedBy: performedBy,
-	});
-
-	return { lead, opportunity };
 }
 
 export async function createInvestmentLeadController(c: Context) {

@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -14,7 +14,6 @@ const INVESTMENT_ROLES = [
 	"investment_advisor_jr",
 	"investment_advisor_sr",
 	"investment_manager",
-	"admin",
 ] as const;
 
 type InvestmentLeadSource =
@@ -34,7 +33,7 @@ async function getAdvisorWithFewestLeads(): Promise<string> {
 		})
 		.from(user)
 		.leftJoin(investmentLeads, eq(investmentLeads.assignedTo, user.id))
-		.where(inArray(user.role, [...INVESTMENT_ROLES]))
+		.where(and(inArray(user.role, [...INVESTMENT_ROLES]), eq(user.assignLeads, true), eq(user.banned, false)))
 		.groupBy(user.id)
 		.orderBy(sql`lead_count asc`)
 		.limit(1);
@@ -123,6 +122,21 @@ export async function createInvestmentLeadController(c: Context) {
 				{ success: false, error: "El campo 'name' es requerido" },
 				400,
 			);
+		}
+
+		if (body.email) {
+			const [existing] = await db
+				.select()
+				.from(investmentLeads)
+				.where(eq(investmentLeads.email, body.email))
+				.limit(1);
+
+			if (existing) {
+				return c.json(
+					{ success: true, data: { lead: existing }, message: "Lead ya existe" },
+					200,
+				);
+			}
 		}
 
 		// Asignar al asesor de inversión con menos leads

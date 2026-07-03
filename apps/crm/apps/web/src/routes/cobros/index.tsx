@@ -969,14 +969,15 @@ function RouteComponent() {
 										? Number.parseFloat(statReal.porcentaje)
 										: undefined;
 
-									// Para mora_total, sumar todas las moras
+									// Para mora_total, sumar sólo moras activas
 									const porcentajeMoraTotal =
 										meta.categoria === "mora_total"
 											? stats
 													.filter(
 														(s) =>
 															s.estadoMora !== "al_dia" &&
-															s.estadoMora !== "completado",
+															s.estadoMora !== "completado" &&
+															s.estadoMora !== "incobrable",
 													)
 													.reduce(
 														(sum, s) =>

@@ -44,6 +44,7 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 } from "../lib/cobros-plantillas";
+import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
@@ -405,7 +406,7 @@ export const cobrosRouter = {
 					});
 
 					// Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera
-					const estatusStats = [
+					const estatusStats = recalculateCobrosCapitalPercentages([
 						{
 							estadoMora: "al_dia",
 							totalCases: statsResponse.porCuotasAtrasadas["0"]?.cantidad || 0,
@@ -472,7 +473,7 @@ export const cobrosRouter = {
 								statsResponse.porEstado.incobrable?.sumaCapital || "0",
 							porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
 						},
-					];
+					]);
 
 					console.log(
 						"[Cobros] Stats obtenidas desde endpoint /stats:",
@@ -630,10 +631,12 @@ export const cobrosRouter = {
 				);
 
 			return {
-				estatusStats: Object.entries(embudoStats).map(([estado, data]) => ({
-					estadoMora: estado,
-					...data,
-				})),
+				estatusStats: recalculateCobrosCapitalPercentages(
+					Object.entries(embudoStats).map(([estado, data]) => ({
+						estadoMora: estado,
+						...data,
+					})),
+				),
 				totalCasosAsignados: casosAsignados[0]?.count || 0,
 				efectividad: "0",
 				contactosHoy: contactosHoy[0]?.count || 0,

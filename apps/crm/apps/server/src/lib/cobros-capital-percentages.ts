@@ -6,8 +6,6 @@ const ACTIVE_ESTADOS = new Set([
 	"mora_120",
 ]);
 
-const CLOSED_ESTADOS = new Set(["incobrable", "completado"]);
-
 export type CobrosCapitalStats = {
 	estadoMora: string;
 	sumaCapital: string;
@@ -29,17 +27,12 @@ export function recalculateCobrosCapitalPercentages<T extends CobrosCapitalStats
 	stats: readonly T[],
 ) {
 	const activeTotal = capitalTotal(stats, ACTIVE_ESTADOS);
-	const closedTotal = capitalTotal(stats, CLOSED_ESTADOS);
 
 	return stats.map((stat) => {
 		if (ACTIVE_ESTADOS.has(stat.estadoMora)) {
 			return { ...stat, porcentaje: percentage(stat.sumaCapital, activeTotal) };
 		}
 
-		if (CLOSED_ESTADOS.has(stat.estadoMora)) {
-			return { ...stat, porcentaje: percentage(stat.sumaCapital, closedTotal) };
-		}
-
-		return { ...stat, porcentaje: "0" };
+		return stat;
 	});
 }

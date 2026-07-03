@@ -68,5 +68,7 @@ describe("cobros capital percentages", () => {
 		expect(porcentaje("mora_90")).toBeCloseTo(2.69, 2);
 		expect(porcentaje("mora_120")).toBeCloseTo(8.24, 2);
 		expect(moraTotal).toBeCloseTo(44.39, 2);
+		expect(porcentaje("incobrable")).toBe(48.9);
+		expect(porcentaje("completado")).toBe(51.1);
 	});
 });

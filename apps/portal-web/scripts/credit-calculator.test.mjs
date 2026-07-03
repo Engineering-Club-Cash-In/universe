@@ -106,6 +106,7 @@ const calculatorSource = readFileSync(
 const calculadoraRouteSource = readFileSync("src/routes/calculadora.tsx", "utf8");
 
 assert.match(calculatorSource, /standalone\?: boolean/);
+assert.match(calculatorSource, /useState<string>\("60"\)/);
 assert.match(calculatorSource, /standalone \? "mt-4 lg:mt-8" : "mt-12 lg:mt-64"/);
 assert.match(calculadoraRouteSource, /<CalculatorCredit standalone \/>/);
 

@@ -14,35 +14,80 @@ export interface PublicCreditResult {
 const MONTHLY_INTEREST_PCT = 1.5;
 const IVA_FACTOR = 1.12;
 
-const BASE_ADJUSTMENT_POINTS = [
-  { vehicleAmount: 25_000, factor: 0.47 },
-  { vehicleAmount: 50_000, factor: 0.29 },
-  { vehicleAmount: 75_000, factor: 0.225 },
-  { vehicleAmount: 100_000, factor: 0.195 },
-  { vehicleAmount: 150_000, factor: 0.165 },
-  { vehicleAmount: 200_000, factor: 0.145 },
-  { vehicleAmount: 300_000, factor: 0.13 },
-  { vehicleAmount: 400_000, factor: 0.12 },
-  { vehicleAmount: 500_000, factor: 0.115 },
-] as const;
+const REFERENCE_USED_IMPORTED_PRIVATE_COSTS = {
+  monthlyInsuranceAndMembershipPct: 0.00776,
+  monthlyGpsCost: 148.2,
+  transferCost: 545,
+  mobileGuaranteeCost: 400,
+  leasingContractCost: 400,
+  fixedAdminCost: 600,
+  royaltyPct: 4,
+  upfrontInterestPct: 1.78,
+} as const;
 
-function getInterpolatedBaseFactor(vehicleAmount: number) {
-  const firstPoint = BASE_ADJUSTMENT_POINTS[0];
-  const lastPoint = BASE_ADJUSTMENT_POINTS[BASE_ADJUSTMENT_POINTS.length - 1];
+function calculateLevelPayment(
+  principal: number,
+  monthlyRate: number,
+  termMonths: number,
+) {
+  if (monthlyRate === 0) return principal / termMonths;
 
-  if (vehicleAmount <= firstPoint.vehicleAmount) return firstPoint.factor;
-  if (vehicleAmount >= lastPoint.vehicleAmount) return lastPoint.factor;
+  const factor = (1 + monthlyRate) ** termMonths;
+  return (principal * monthlyRate * factor) / (factor - 1);
+}
 
-  const upperIndex = BASE_ADJUSTMENT_POINTS.findIndex(
-    (point) => vehicleAmount <= point.vehicleAmount,
+function calculateBaseMonthlyPayment(
+  vehicleAmount: number,
+  downPaymentPct: number,
+  termMonths: number,
+) {
+  const amountToFinance = vehicleAmount - (vehicleAmount * downPaymentPct) / 100;
+  const monthlyRate = (MONTHLY_INTEREST_PCT / 100) * IVA_FACTOR;
+
+  return calculateLevelPayment(amountToFinance, monthlyRate, termMonths);
+}
+
+function calculateUsedImportedPrivateReferencePayment(
+  vehicleAmount: number,
+  downPaymentPct: number,
+  termMonths: number,
+) {
+  const costs = REFERENCE_USED_IMPORTED_PRIVATE_COSTS;
+  const amountToFinance = vehicleAmount - (vehicleAmount * downPaymentPct) / 100;
+  const monthlyInsuranceAndMembership =
+    vehicleAmount * costs.monthlyInsuranceAndMembershipPct;
+
+  const intermediateBase =
+    amountToFinance +
+    costs.transferCost +
+    costs.mobileGuaranteeCost +
+    costs.leasingContractCost +
+    costs.fixedAdminCost +
+    costs.monthlyGpsCost +
+    monthlyInsuranceAndMembership;
+
+  const royalty = Math.ceil(intermediateBase * (costs.royaltyPct / 100));
+  const upfrontInterest = Math.ceil(
+    intermediateBase * (costs.upfrontInterestPct / 100),
   );
-  const lowerPoint = BASE_ADJUSTMENT_POINTS[upperIndex - 1];
-  const upperPoint = BASE_ADJUSTMENT_POINTS[upperIndex];
-  const progress =
-    (vehicleAmount - lowerPoint.vehicleAmount) /
-    (upperPoint.vehicleAmount - lowerPoint.vehicleAmount);
 
-  return lowerPoint.factor + (upperPoint.factor - lowerPoint.factor) * progress;
+  const adminCost =
+    costs.mobileGuaranteeCost +
+    royalty +
+    costs.leasingContractCost +
+    costs.fixedAdminCost +
+    upfrontInterest +
+    costs.monthlyGpsCost +
+    monthlyInsuranceAndMembership;
+
+  const totalFinanced = amountToFinance + costs.transferCost + adminCost;
+  const monthlyRate = (MONTHLY_INTEREST_PCT / 100) * IVA_FACTOR;
+
+  return (
+    calculateLevelPayment(totalFinanced, monthlyRate, termMonths) +
+    monthlyInsuranceAndMembership +
+    costs.monthlyGpsCost
+  );
 }
 
 export function getPublicAdjustmentFactor(
@@ -50,17 +95,21 @@ export function getPublicAdjustmentFactor(
   downPaymentPct: number,
   termMonths: number,
 ) {
-  const baseFactor = getInterpolatedBaseFactor(vehicleAmount);
+  const baseMonthlyPayment = calculateBaseMonthlyPayment(
+    vehicleAmount,
+    downPaymentPct,
+    termMonths,
+  );
 
-  const termAdjustment =
-    termMonths <= 12 ? -0.035 :
-    termMonths <= 24 ? -0.018 :
-    termMonths <= 36 ? 0 :
-    termMonths <= 48 ? 0.01 :
-    0.02;
+  if (!Number.isFinite(baseMonthlyPayment) || baseMonthlyPayment <= 0) return 0;
 
-  const downPaymentAdjustment = (downPaymentPct - 20) / 1500;
-  return Math.min(0.50, Math.max(0.07, baseFactor + termAdjustment + downPaymentAdjustment));
+  const referenceMonthlyPayment = calculateUsedImportedPrivateReferencePayment(
+    vehicleAmount,
+    downPaymentPct,
+    termMonths,
+  );
+
+  return referenceMonthlyPayment / baseMonthlyPayment - 1;
 }
 
 export function calculatePublicCredit({
@@ -77,11 +126,16 @@ export function calculatePublicCredit({
     };
   }
 
-  const amountToFinance = vehicleAmount - (vehicleAmount * downPaymentPct) / 100;
-  const monthlyRate = (MONTHLY_INTEREST_PCT / 100) * IVA_FACTOR;
-  const factor = (1 + monthlyRate) ** termMonths;
-  const baseMonthlyPayment = (amountToFinance * monthlyRate * factor) / (factor - 1);
-  const adjustmentFactor = getPublicAdjustmentFactor(vehicleAmount, downPaymentPct, termMonths);
+  const baseMonthlyPayment = calculateBaseMonthlyPayment(
+    vehicleAmount,
+    downPaymentPct,
+    termMonths,
+  );
+  const adjustmentFactor = getPublicAdjustmentFactor(
+    vehicleAmount,
+    downPaymentPct,
+    termMonths,
+  );
 
   return {
     interestPct: MONTHLY_INTEREST_PCT,

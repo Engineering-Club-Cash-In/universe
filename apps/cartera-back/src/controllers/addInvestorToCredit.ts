@@ -529,6 +529,24 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         const montoSolicitado =
           montoManualPorCredito.get(candidato.credito_id) ?? new Big(0);
 
+        // ── Guard 0: crédito sin proceso de devolución a Cube ──
+        // getCreditCandidates filtra por estado_devolucion = NO_APLICA. En
+        // manual saltamos ese filtro, así que lo replicamos: un crédito en
+        // PENDIENTE_AUTORIZACION / VERIFICADO / RECHAZADO se está devolviendo a
+        // Cube; asignarle un inversionista genera la doble asignación que
+        // liquidación (exitInvestor) provocaría después.
+        const estadoDevolucion =
+          candidato.credito_completo?.credito?.estado_devolucion;
+        if (estadoDevolucion && estadoDevolucion !== "NO_APLICA") {
+          violaciones.push({
+            credito_id: candidato.credito_id,
+            numero_credito_sifco: candidato.numero_credito_sifco,
+            razon: `El crédito está en proceso de devolución a Cube (estado ${estadoDevolucion}); no se puede reasignar manualmente`,
+            monto_solicitado: montoSolicitado.toString(),
+          });
+          continue;
+        }
+
         // ── Guard 1: espejo sin operación en curso ──
         // Un crédito pasa solo si TODAS sus filas de espejo están en
         // "completado" (o no tiene filas de espejo). Si alguna está en
@@ -581,7 +599,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         return {
           success: false,
           message:
-            "No se pudo crear la asignación manual: uno o más créditos no son elegibles (espejo con operación en curso, sin CUBE, o monto sobre el tope de CUBE)",
+            "No se pudo crear la asignación manual: uno o más créditos no son elegibles (en devolución a Cube, espejo con operación en curso, sin CUBE, o monto sobre el tope de CUBE)",
           violaciones,
         };
       }

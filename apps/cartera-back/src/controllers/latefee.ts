@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { client, db } from "../database";
-import { asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
+import { asesores, buckets_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -44,6 +44,34 @@ export function isOverdueInstallmentForMora(
   const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
 
   return isOverdue && isUnpaid && isEligible;
+}
+
+// ============================================================
+// 🪣 MOTOR DE BUCKETS (COBROS-02) — bucket derivado por estado + cuotas
+// ============================================================
+// B5 (Jurídico) y los estados fuera del funnel operativo se determinan por
+// statusCredit, NO por conteo de cuotas (esos créditos ya no llevan mora).
+export const STATUS_BUCKET_B5 = ["INCOBRABLE"]; // legal / jurídico
+export const STATUS_BUCKET_FUERA = [
+  "CANCELADO",
+  "PENDIENTE_CANCELACION",
+  "EN_CONVENIO",
+  "CAIDO",
+];
+
+/**
+ * Bucket de un crédito (0-5) según su estado y cuotas atrasadas.
+ * Devuelve `null` si el crédito está fuera del funnel operativo (no se trackea).
+ * B0=0, B1=1, B2=2, B3=3, B4=4, B5=>=5 (o INCOBRABLE/legal).
+ */
+export function bucketDeCredito(
+  status: string | null | undefined,
+  cuotasAtrasadas: number,
+): number | null {
+  if (status && STATUS_BUCKET_B5.includes(status)) return 5;
+  if (status && STATUS_BUCKET_FUERA.includes(status)) return null;
+  // ACTIVO / MOROSO → por cuotas
+  return Math.min(Math.max(cuotasAtrasadas, 0), 5);
 }
 
 /**
@@ -868,6 +896,97 @@ export async function procesarMoras() {
 
       desactivadas++;
       console.log(`[DEACTIVATE] Credit #${mora.credito_id} se puso al día → mora desactivada`);
+    }
+
+    // ============================================================
+    // 🪣 MOTOR DE BUCKETS (COBROS-02) — registrar transiciones de bucket
+    // ============================================================
+    // Paso ADITIVO: no toca el cálculo de mora. Detecta cambios de bucket
+    // (derivado de estado + cuotas) y los registra en `buckets_historial`.
+    // Si algo falla aquí, NO debe romper el proceso de mora (operación crítica).
+    try {
+      // status por crédito — ya viene en `cuotas` (el job lo cargó con JOIN)
+      const statusPorCredito = new Map<number, string>();
+      for (const c of cuotas) {
+        if (!statusPorCredito.has(c.credito_id)) {
+          statusPorCredito.set(c.credito_id, c.statusCredit);
+        }
+      }
+
+      // Último bucket registrado por crédito (para detectar el cambio).
+      const ultimoBucket = new Map<number, number>();
+      const ultimosRes = await lockConn.query(
+        `SELECT DISTINCT ON (credito_id) credito_id, bucket_nuevo
+           FROM cartera.buckets_historial
+          ORDER BY credito_id, fecha DESC`,
+      );
+      for (const row of ultimosRes.rows) {
+        ultimoBucket.set(Number(row.credito_id), Number(row.bucket_nuevo));
+      }
+
+      let bucketsSubidas = 0;
+      let bucketsBajadas = 0;
+
+      for (const [creditoId, status] of statusPorCredito) {
+        const cuotasAtrasadas = moraPorCredito[creditoId] ?? 0;
+        const bucketNuevo = bucketDeCredito(status, cuotasAtrasadas);
+        if (bucketNuevo === null) continue; // fuera del funnel operativo
+
+        const tieneHistorial = ultimoBucket.has(creditoId);
+        const bucketAnterior = ultimoBucket.get(creditoId) ?? 0;
+        if (bucketNuevo === bucketAnterior) continue; // sin cambio de bucket
+
+        const esSubida = bucketNuevo > bucketAnterior;
+
+        // Atribución (Opción B): en la BAJADA (cuenta curada) trazamos el pago
+        // que la mejoró (best-effort: último pago validado del crédito). El
+        // `asesor_id` se llenará cuando el NUEVO flujo de pago capture al asesor
+        // de forma estructurada (hoy pagos_credito.registerBy es texto libre).
+        let pagoId: number | null = null;
+        if (!esSubida) {
+          const [pago] = await db
+            .select({ pago_id: pagos_credito.pago_id })
+            .from(pagos_credito)
+            .where(
+              and(
+                eq(pagos_credito.credito_id, creditoId),
+                eq(pagos_credito.paymentFalse, false),
+                inArray(pagos_credito.validationStatus, [
+                  "validated",
+                  "no_required",
+                ]),
+              ),
+            )
+            .orderBy(desc(pagos_credito.pago_id))
+            .limit(1);
+          pagoId = pago?.pago_id ?? null;
+        }
+
+        await db.insert(buckets_historial).values({
+          credito_id: creditoId,
+          bucket_anterior: tieneHistorial ? bucketAnterior : null,
+          bucket_nuevo: bucketNuevo,
+          tipo_evento: esSubida ? "SUBIDA" : "BAJADA",
+          origen: "PROCESO_AUTO",
+          cuotas_atrasadas_nuevas: cuotasAtrasadas,
+          status_credito: status,
+          asesor_id: null, // Opción B: se llena con el nuevo flujo de pago
+          pago_id: pagoId,
+        });
+
+        ultimoBucket.set(creditoId, bucketNuevo);
+        if (esSubida) bucketsSubidas++;
+        else bucketsBajadas++;
+      }
+
+      console.log(
+        `[BUCKETS] Transiciones registradas — subidas: ${bucketsSubidas}, bajadas: ${bucketsBajadas}`,
+      );
+    } catch (bucketErr) {
+      console.error(
+        "[BUCKETS] ⚠️ Error registrando transiciones de bucket (el proceso de mora no se ve afectado):",
+        bucketErr,
+      );
     }
 
     console.log("\n╔════════════════════════════════════════════════════════════");

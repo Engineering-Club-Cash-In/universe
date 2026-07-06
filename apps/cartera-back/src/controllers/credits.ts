@@ -699,8 +699,16 @@ export async function getCreditosWithUserByMesAnio(
     }
 
     if (cuotas_atrasadas && cuotas_atrasadas > 0) {
-      console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
-      conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+      // Espejo de getCreditStats: los buckets 1-3 son exactos y el 4 (120+)
+      // es abierto, si no los créditos con 5+ cuotas atrasadas no aparecen
+      // al filtrar por Mora 120+.
+      if (cuotas_atrasadas >= 4) {
+        console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
+        conditions.push(gte(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+      } else {
+        console.log(`🔎 Filtrando por cuotas atrasadas = ${cuotas_atrasadas}`);
+        conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+      }
     }
 
     if (is_vehiculo_propio) {

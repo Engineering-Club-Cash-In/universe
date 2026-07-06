@@ -1,6 +1,6 @@
 import { generarHTMLReporte } from "../../controllers/investor";
 import { GetCreditDTO, InversionistaReporte } from "../interface";
-import puppeteer from "puppeteer";
+import { launchBrowser } from "./browser";
 import ExcelJS from "exceljs";
 import axios from "axios";
 import Big from "big.js";
@@ -68,15 +68,7 @@ export async function generarPDFBuffer(
   logoUrl: string = ""
 ): Promise<Buffer> {
   const html = generarHTMLReporte(inversionista, logoUrl);
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
   
@@ -103,15 +95,7 @@ export async function generarYSubirPDFInversionista(
 ): Promise<{ url: string; pdfBuffer: Buffer }> {
   const html = generarHTMLReporte(inversionista, logoUrl);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ],
-  });
+  const browser = await launchBrowser();
 
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });

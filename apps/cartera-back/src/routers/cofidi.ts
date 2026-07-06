@@ -4119,16 +4119,8 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     // ============================================
     console.log(`   🎨 Generando PDF...`);
 
-    const puppeteer = await import("puppeteer");
-    const browser = await puppeteer.default.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-      ],
-    });
+    const { launchBrowser } = await import("../utils/functions/browser");
+    const browser = await launchBrowser();
 
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });

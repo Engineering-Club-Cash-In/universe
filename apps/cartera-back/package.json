@@ -8,7 +8,8 @@
     "generate": "bunx drizzle-kit generate",
     "migrate": "NODE_ENV=LOCAL bunx drizzle-kit push",
     "push": "bash ./deploy.sh",
-    "push:dev": "bash ./deploy-dev.sh"
+    "push:dev": "bash ./deploy-dev.sh",
+    "smoke:puppeteer": "bun scripts/puppeteer-smoke.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.896.0",

@@ -36,27 +36,34 @@ function assertClose(actual, expected, tolerance, label) {
   );
 }
 
-assertClose(getPublicAdjustmentFactor(50_000, 20, 48), 0.3, 0.000001, "factor Q50k");
-assertClose(getPublicAdjustmentFactor(100_000, 20, 48), 0.205, 0.000001, "factor Q100k");
-assertClose(getPublicAdjustmentFactor(200_000, 20, 48), 0.155, 0.000001, "factor Q200k");
+assertClose(getPublicAdjustmentFactor(50_000, 20, 48), 0.562737, 0.000001, "factor Q50k");
+assertClose(getPublicAdjustmentFactor(100_000, 20, 48), 0.474328, 0.000001, "factor Q100k");
+assertClose(getPublicAdjustmentFactor(200_000, 20, 48), 0.430124, 0.000001, "factor Q200k");
 
 assertClose(
   calculatePublicCredit({ vehicleAmount: 50_000, downPaymentPct: 20, termMonths: 48 }).monthlyPayment,
-  1_586.82,
+  1_907.52,
   0.01,
   "Q50k / 20% / 48 meses",
 );
 assertClose(
   calculatePublicCredit({ vehicleAmount: 100_000, downPaymentPct: 20, termMonths: 48 }).monthlyPayment,
-  2_941.71,
+  3_599.21,
   0.01,
   "Q100k / 20% / 48 meses",
 );
 assertClose(
   calculatePublicCredit({ vehicleAmount: 200_000, downPaymentPct: 20, termMonths: 48 }).monthlyPayment,
-  5_639.30,
+  6_982.59,
   0.01,
   "Q200k / 20% / 48 meses",
+);
+
+assertClose(
+  calculatePublicCredit({ vehicleAmount: 150_000, downPaymentPct: 10, termMonths: 60 }).monthlyPayment,
+  5_199.94,
+  0.01,
+  "Q150k / 10% / 60 meses usado rodado particular",
 );
 
 const beforeBoundary = calculatePublicCredit({
@@ -99,6 +106,7 @@ const calculatorSource = readFileSync(
 const calculadoraRouteSource = readFileSync("src/routes/calculadora.tsx", "utf8");
 
 assert.match(calculatorSource, /standalone\?: boolean/);
+assert.match(calculatorSource, /useState<string>\("60"\)/);
 assert.match(calculatorSource, /standalone \? "mt-4 lg:mt-8" : "mt-12 lg:mt-64"/);
 assert.match(calculadoraRouteSource, /<CalculatorCredit standalone \/>/);
 

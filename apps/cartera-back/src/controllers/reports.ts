@@ -688,7 +688,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
   // 3️⃣ Generar PDF con Puppeteer (landscape para que quepan las columnas)
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
   });
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
@@ -1582,7 +1582,7 @@ export async function generateReciboPagoPDF(pagoId: number) {
   // 3️⃣ Generar PDF con Puppeteer
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
   });
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });

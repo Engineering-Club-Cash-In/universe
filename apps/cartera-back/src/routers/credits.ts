@@ -787,7 +787,7 @@ export const creditRouter = new Elysia()
       const html = renderCancelationHTML(data, logoUrl);
       const browser = await puppeteer.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
       });
       const pagePDF = await browser.newPage();
       await pagePDF.setContent(html, { waitUntil: "networkidle0" });
@@ -892,7 +892,7 @@ export const creditRouter = new Elysia()
 
       const browser = await puppeteer.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
       });
       const pagePDF = await browser.newPage();
       await pagePDF.setContent(html, { waitUntil: "networkidle0" });
@@ -996,7 +996,7 @@ export const creditRouter = new Elysia()
       const html = renderCostDetailHTMLPeach(data, process.env.LOGO_URL || "");
       const browser = await puppeteer.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
       });
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "networkidle0" });

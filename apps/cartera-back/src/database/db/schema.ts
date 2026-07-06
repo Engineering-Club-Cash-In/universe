@@ -393,6 +393,82 @@
     index("moras_historial_fecha_idx").on(table.fecha),
   ]);
 
+  // ============================================================
+  // 🪣 MOTOR DE BUCKETS (COBROS-02) — clasificación por etapa de mora
+  // ============================================================
+  // El bucket de un crédito es DERIVADO de sus cuotas atrasadas (no se
+  // materializa una fila por crédito): B0=0, B1=1, B2=2, B3=3, B4=4, B5=>=5.
+  // Los estados fuera del funnel operativo (INCOBRABLE/legal = B5, CANCELADO,
+  // EN_CONVENIO, etc.) se determinan por statusCredit, no por conteo de cuotas.
+  // Solo se persiste el HISTORIAL de transiciones + la asignación asesor↔bucket.
+
+  export const bucketEventoTipoEnum = customSchema.enum("bucket_evento_tipo", [
+    "SUBIDA",
+    "BAJADA",
+  ]);
+
+  export const bucketEventoOrigenEnum = customSchema.enum(
+    "bucket_evento_origen",
+    ["PROCESO_AUTO", "API_MANUAL"]
+  );
+
+  // Asignación asesor ↔ bucket (modelo POOL, muchos-a-muchos): un bucket con
+  // varios asesores y un asesor en varios buckets.
+  export const asesor_bucket = customSchema.table(
+    "asesor_bucket",
+    {
+      id: serial("id").primaryKey(),
+      asesor_id: integer("asesor_id")
+        .notNull()
+        .references(() => asesores.asesor_id, { onDelete: "cascade" }),
+      bucket: integer("bucket").notNull(), // 0-5
+      activo: boolean("activo").notNull().default(true),
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      uniqueIndex("asesor_bucket_uq").on(t.asesor_id, t.bucket),
+      index("asesor_bucket_bucket_idx").on(t.bucket),
+    ]
+  );
+
+  // Bitácora de transiciones de bucket (append-only). El bucket actual se deriva;
+  // aquí solo se registra CUÁNDO cambia (SUBIDA = empeora, BAJADA = mejora/cura).
+  export const buckets_historial = customSchema.table(
+    "buckets_historial",
+    {
+      historial_id: serial("historial_id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      bucket_anterior: integer("bucket_anterior"), // null en el primer registro
+      bucket_nuevo: integer("bucket_nuevo").notNull(),
+      tipo_evento: bucketEventoTipoEnum("tipo_evento").notNull(),
+      origen: bucketEventoOrigenEnum("origen").notNull().default("PROCESO_AUTO"),
+      cuotas_atrasadas_nuevas: integer("cuotas_atrasadas_nuevas")
+        .notNull()
+        .default(0),
+      status_credito: text("status_credito"), // status al momento (traza B5/legal)
+      // 🎯 Atribución para métricas: qué asesor gatilló la transición. Sobre todo
+      // en la BAJADA (cuenta curada) = el asesor que registró el pago, para que le
+      // cuente en su métrica. null en SUBIDA o mientras no se pueda resolver.
+      asesor_id: integer("asesor_id").references(() => asesores.asesor_id, {
+        onDelete: "set null",
+      }),
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id, {
+        onDelete: "set null",
+      }),
+      motivo: text("motivo"),
+      fecha: timestamp("fecha").defaultNow().notNull(),
+    },
+    (t) => [
+      index("buckets_historial_credito_idx").on(t.credito_id),
+      index("buckets_historial_fecha_idx").on(t.fecha),
+      index("buckets_historial_credito_fecha_idx").on(t.credito_id, t.fecha),
+      index("buckets_historial_asesor_idx").on(t.asesor_id),
+    ]
+  );
+
   export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros", {
     id: serial("id").primaryKey(),
     credito_id: integer("credito_id")

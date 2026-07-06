@@ -4,7 +4,7 @@ import {
   recibos_genericos,
   recibo_generico_montos,
 } from "../database/db";
-import puppeteer from "puppeteer";
+import { launchBrowser } from "../utils/functions/browser";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
@@ -331,10 +331,7 @@ export async function generateReciboGenericoPDF(reciboId: number) {
   </html>`;
 
   // Generar PDF con Puppeteer
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
   const pdfData = await page.pdf({

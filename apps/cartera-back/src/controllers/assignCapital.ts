@@ -182,8 +182,9 @@ export async function getCreditCandidates(
       eq(creditos.statusCredit, "ACTIVO"),
       sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
       lt(creditos.fecha_creacion, inicioMesGuateUTC),
-      // Excluir créditos con devolución a Cube pendiente o rechazada
-      notInArray(creditos.estado_devolucion, ["PENDIENTE_AUTORIZACION", "RECHAZADO"] as any)
+      // Solo créditos sin proceso de devolución a Cube (NO_APLICA).
+      // PENDIENTE_AUTORIZACION / VERIFICADO / RECHAZADO están en flujo de devolución.
+      eq(creditos.estado_devolucion, "NO_APLICA")
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
@@ -216,9 +217,10 @@ export async function getCreditCandidates(
         gt(creditos.porcentaje_interes, "0"),
         // Excluir créditos creados en el mes actual (fecha pre-calculada y optimizada)
         lt(creditos.fecha_creacion, inicioMesGuateUTC),
-        // Excluir créditos con devolución a Cube pendiente o rechazada:
-        // no deben ofrecerse a inversionistas.
-        notInArray(creditos.estado_devolucion, ["PENDIENTE_AUTORIZACION", "RECHAZADO"] as any)
+        // Solo créditos sin proceso de devolución a Cube.
+        // PENDIENTE_AUTORIZACION / VERIFICADO / RECHAZADO están en flujo de
+        // devolución a Cube; no deben ofrecerse a inversionistas.
+        eq(creditos.estado_devolucion, "NO_APLICA")
       )
     );
 

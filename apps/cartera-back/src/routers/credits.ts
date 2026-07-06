@@ -200,6 +200,7 @@ export const creditRouter = new Elysia()
     capital_max,
     estados_credito,
     aseguradora_id,      // 🆕 NUEVO
+    excluir_pagados_mes, // 🆕 NUEVO
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -334,6 +335,9 @@ export const creditRouter = new Elysia()
     return { message: "Parámetro 'aseguradora_id' debe ser un número válido." };
   }
 
+  // 🆕 Excluir créditos con su cuota actual ya pagada (default false)
+  const excluirPagadosMesParam = excluir_pagados_mes === "true" ? true : undefined;
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -354,6 +358,7 @@ export const creditRouter = new Elysia()
         is_vehiculo_propio: isVehiculoPropioParam,
         inversionista_ids: inversionistaIdsArray,
         aseguradora_id: aseguradoraIdNum,
+        excluir_pagados_mes: excluirPagadosMesParam,
         excel: true,
       });
       set.status = 200;
@@ -380,7 +385,8 @@ export const creditRouter = new Elysia()
         capitalMinParam,
         capitalMaxParam,
         estadosCreditoParsed?.values,
-        aseguradoraIdNum
+        aseguradoraIdNum,
+        excluirPagadosMesParam
       );
       set.status = 200;
       return result;
@@ -425,6 +431,7 @@ export const creditRouter = new Elysia()
         capital_max,
         estados_credito,
         aseguradora_id,
+        excluir_pagados_mes,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -466,6 +473,7 @@ export const creditRouter = new Elysia()
             is_vehiculo_propio,
             inversionista_ids,
             aseguradora_id,
+            excluir_pagados_mes,
             excel: true,
           });
           set.status = 200;
@@ -492,7 +500,8 @@ export const creditRouter = new Elysia()
           capital_min,
           capital_max,
           estadosCreditoParsed?.values,
-          aseguradora_id
+          aseguradora_id,
+          excluir_pagados_mes
         );
         set.status = 200;
         return result;
@@ -540,6 +549,7 @@ export const creditRouter = new Elysia()
         capital_max: t.Optional(t.Number()),
         estados_credito: t.Optional(t.Array(t.String())),
         aseguradora_id: t.Optional(t.Number()),
+        excluir_pagados_mes: t.Optional(t.Boolean()),
       }),
     }
   )

@@ -1011,15 +1011,17 @@ export const cobrosRouter = {
 							// Acceder a los datos anidados correctamente
 							const statusCredit = credito.creditos.statusCredit;
 							const cuotasAtrasadas = credito.mora?.cuotas_atrasadas ?? 0;
-							const cuotaMensual = Number(credito.creditos.cuota ?? 0);
 
 							// NOTA: Usamos aproximación (30 días por cuota) porque /getAllCredits
 							// NO retorna las fechas de vencimiento de las cuotas individuales.
 							// Solo /credito retorna el array completo con fechas para cálculo exacto.
 							const diasMora = cuotasAtrasadas * 30;
 
-							// Calcular monto en mora como: cuota mensual * cuotas atrasadas
-							const montoEnMora = cuotaMensual * cuotasAtrasadas;
+							// Monto en mora REAL: usamos moras_credito.monto_mora (capital × 1.12% ×
+							// cuotas) que /getAllCredits ya trae en `mora`, para que coincida con el
+							// embudo (/stats) y la pantalla de detalle (/credito). Antes se aproximaba
+							// `cuota × cuotas`, dando un número distinto al del detalle para el mismo crédito.
+							const montoEnMora = Number(credito.mora?.monto_mora ?? 0);
 
 							// Determinar estado de mora según statusCredit y días de mora
 							let estadoMora: string | null = null;

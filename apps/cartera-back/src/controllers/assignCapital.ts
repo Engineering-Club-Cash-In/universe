@@ -181,7 +181,9 @@ export async function getCreditCandidates(
     .where(and(
       eq(creditos.statusCredit, "ACTIVO"),
       sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
-      lt(creditos.fecha_creacion, inicioMesGuateUTC)
+      lt(creditos.fecha_creacion, inicioMesGuateUTC),
+      // Excluir créditos con devolución a Cube pendiente o rechazada
+      notInArray(creditos.estado_devolucion, ["PENDIENTE_AUTORIZACION", "RECHAZADO"] as any)
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
@@ -213,7 +215,10 @@ export async function getCreditCandidates(
         // Descartar créditos sin interés (0%)
         gt(creditos.porcentaje_interes, "0"),
         // Excluir créditos creados en el mes actual (fecha pre-calculada y optimizada)
-        lt(creditos.fecha_creacion, inicioMesGuateUTC)
+        lt(creditos.fecha_creacion, inicioMesGuateUTC),
+        // Excluir créditos con devolución a Cube pendiente o rechazada:
+        // no deben ofrecerse a inversionistas.
+        notInArray(creditos.estado_devolucion, ["PENDIENTE_AUTORIZACION", "RECHAZADO"] as any)
       )
     );
 

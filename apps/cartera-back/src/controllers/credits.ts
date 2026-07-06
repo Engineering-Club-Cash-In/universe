@@ -616,7 +616,8 @@ export async function getCreditosWithUserByMesAnio(
   capital_min?: number,
   capital_max?: number,
   estados_credito?: StatusCredit[],
-  aseguradora_id?: number
+  aseguradora_id?: number,
+  excluir_pagados_mes?: boolean
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -799,6 +800,32 @@ export async function getCreditosWithUserByMesAnio(
 
   if (aseguradora_id !== undefined) {
     conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
+  }
+
+  if (excluir_pagados_mes) {
+    console.log(`🔎 Excluyendo créditos con su cuota actual ya pagada`);
+    // Cuota actual = primera cuota con fecha_vencimiento >= hoy (mismo
+    // concepto que proxima_cuota). Se excluye el crédito solo si esa cuota
+    // está pagada (todas sus filas, por si hay duplicadas) Y no tiene mora
+    // activa; sin cuotas futuras no se excluye. Subconsulta correlacionada
+    // en vez de join para no multiplicar filas (paginación) y para que el
+    // COUNT herede la condición.
+    conditions.push(sql`NOT (
+      ${moras_credito.credito_id} IS NULL
+      AND COALESCE((
+        SELECT bool_and(COALESCE(cc.pagado, false))
+        FROM ${cuotas_credito} cc
+        WHERE cc.credito_id = ${creditos.credito_id}
+          AND cc.numero_cuota > 0
+          AND cc.fecha_vencimiento = (
+            SELECT MIN(cc2.fecha_vencimiento)
+            FROM ${cuotas_credito} cc2
+            WHERE cc2.credito_id = ${creditos.credito_id}
+              AND cc2.numero_cuota > 0
+              AND cc2.fecha_vencimiento >= ${hoyStr}::date
+          )
+      ), false)
+    )`);
   }
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;

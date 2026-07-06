@@ -12,7 +12,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
 
   const [monto, setMonto] = useState<string>("");
   const [enganche, setEnganche] = useState<string>("10");
-  const [tiempo, setTiempo] = useState<string>("12");
+  const [tiempo, setTiempo] = useState<string>("60");
   const isMobile = useIsMobile();
 
   // Opciones de enganche (porcentajes)

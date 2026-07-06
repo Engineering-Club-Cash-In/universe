@@ -213,6 +213,18 @@ export const completeEspejo = async ({ body, set, request }: any) => {
         // hora de Guatemala se hace al mostrar/consultar, no al guardar.
         const ahora = new Date();
 
+        // fecha_completada de la COMPRA de cartera: se ancla a la misma fecha
+        // que fecha_inicio_participacion (la elegida en el modal). Así ambos
+        // campos caen en el mismo mes y los cálculos de liquidación que datan
+        // la compra por fecha_completada (obtenerSumaComprasMesAnterior /
+        // MesActual, calcularAjusteCompras) coinciden con el mes de participación.
+        // Se ancla a mediodía para que la conversión a hora GT (UTC-6) no cruce
+        // la frontera de día. Si no vino fecha del modal, cae al instante real.
+        // La reinversión NO manda fecha_participacion → mantiene `ahora`.
+        const fechaCompletadaCompra = fecha_participacion
+          ? new Date(`${fecha_participacion}T12:00:00Z`)
+          : ahora;
+
         // Solo las compras de cartera quedan pendientes de facturar al
         // completarse. Las reinversiones no generan factura, así que
         // mantienen pendiente_facturar = false.
@@ -220,7 +232,7 @@ export const completeEspejo = async ({ body, set, request }: any) => {
           .update(compras_credito_inversionista)
           .set({
             status: "completado",
-            fecha_completada: ahora,
+            fecha_completada: fechaCompletadaCompra,
             pendiente_facturar: true,
             updated_at: ahora,
           })

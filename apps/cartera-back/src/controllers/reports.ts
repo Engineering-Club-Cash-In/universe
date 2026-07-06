@@ -1,11 +1,11 @@
 import ExcelJS from "exceljs";
-import puppeteer from "puppeteer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
 import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
+import { launchBrowser } from "../utils/functions/browser";
 import { db } from "../database";
 import { sql } from "drizzle-orm";
 import Big from "big.js";
@@ -686,10 +686,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
   </html>`;
 
   // 3️⃣ Generar PDF con Puppeteer (landscape para que quepan las columnas)
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
   const pdfData = await page.pdf({
@@ -1580,10 +1577,7 @@ export async function generateReciboPagoPDF(pagoId: number) {
   </html>`;
 
   // 3️⃣ Generar PDF con Puppeteer
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
   const pdfData = await page.pdf({

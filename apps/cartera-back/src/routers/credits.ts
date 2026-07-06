@@ -15,7 +15,7 @@ import {
 import { getCuotasPorDiaYAsesor, upsertEfectividadAsesores, getEfectividadAsesores } from "../controllers/paymentsByAdvisor";
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
-import puppeteer from "puppeteer";
+import { launchBrowser } from "../utils/functions/browser";
 import { promises as fs } from "fs";
 import {
   GetObjectCommand,
@@ -785,10 +785,7 @@ export const creditRouter = new Elysia()
     } else {
       const logoUrl = process.env.LOGO_URL || "";
       const html = renderCancelationHTML(data, logoUrl);
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      });
+      const browser = await launchBrowser();
       const pagePDF = await browser.newPage();
       await pagePDF.setContent(html, { waitUntil: "networkidle0" });
       const pdfData = await pagePDF.pdf({
@@ -890,10 +887,7 @@ export const creditRouter = new Elysia()
       const logoUrl = process.env.LOGO_URL || "";
       const html = renderCancelationHTMLDetailedGreen(data, logoUrl);
 
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      });
+      const browser = await launchBrowser();
       const pagePDF = await browser.newPage();
       await pagePDF.setContent(html, { waitUntil: "networkidle0" });
       const pdfData = await pagePDF.pdf({
@@ -994,10 +988,7 @@ export const creditRouter = new Elysia()
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     } else {
       const html = renderCostDetailHTMLPeach(data, process.env.LOGO_URL || "");
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      });
+      const browser = await launchBrowser();
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "networkidle0" });
       const pdfData = await page.pdf({

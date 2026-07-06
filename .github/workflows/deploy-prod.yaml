@@ -145,6 +145,12 @@ jobs:
           podman build -f "$FILE" "$CTX" \
             -t "$ECR_REGISTRY/$IMAGE:latest" \
             -t "$ECR_REGISTRY/$IMAGE:${{ github.sha }}"
+
+          if [ "${{ matrix.app }}" = "cartera-back" ]; then
+            echo "Running cartera-back Puppeteer smoke test inside the built image"
+            podman run --rm "$ECR_REGISTRY/$IMAGE:${{ github.sha }}" bun run smoke:puppeteer
+          fi
+
           podman push "$ECR_REGISTRY/$IMAGE:latest"
           podman push "$ECR_REGISTRY/$IMAGE:${{ github.sha }}"
 

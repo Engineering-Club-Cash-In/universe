@@ -92,11 +92,13 @@ const joins = sql`
 
 // Histórico paginado de transiciones de bucket, con filtros, joins y resumen.
 export async function getBucketsHistorial(a: BucketsHistorialArgs) {
-  // Clamp defensivo: evita OFFSET negativo / NaN si page/pageSize llegan inválidos.
-  const page = Number.isFinite(a.page) && (a.page as number) > 0 ? Math.floor(a.page as number) : 1;
-  const pageSize = Number.isFinite(a.pageSize) && (a.pageSize as number) > 0
-    ? Math.min(Math.floor(a.pageSize as number), 500)
-    : 20;
+  // Clamp defensivo: floor PRIMERO y mínimo 1 DESPUÉS (review Codex). Chequear
+  // >0 antes del floor dejaba pasar fraccionales: page=0.5 → floor 0 → OFFSET
+  // negativo (500 de PG); pageSize=0.5 → floor 0 → LIMIT 0 + totalPages Infinity.
+  const pageFloor = Math.floor(Number(a.page));
+  const page = Number.isFinite(pageFloor) && pageFloor > 0 ? pageFloor : 1;
+  const sizeFloor = Math.floor(Number(a.pageSize));
+  const pageSize = Number.isFinite(sizeFloor) && sizeFloor > 0 ? Math.min(sizeFloor, 500) : 20;
   const offset = (page - 1) * pageSize;
   const where = buildWhere(a);
 

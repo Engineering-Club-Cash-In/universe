@@ -86,25 +86,44 @@ export type BucketCatalogoCompleto = {
   estado_mora: string | null;
 };
 
+// Fallback B0-B5 — mismo seed seed que 0001_buckets_catalogo.sql +
+// 0003_buckets_estado_mora.sql. Usado SOLO si la query falla (ej. columna
+// `estado_mora` aún no existe porque la migración 0003 está pendiente en ese
+// ambiente): sin esto, GET /config/buckets devolvía 500 en vez de degradar,
+// a diferencia de los demás consumidores de getBucketsCatalogo() en credits.ts.
+const FALLBACK_BUCKETS_CATALOGO: BucketCatalogoCompleto[] = [
+  { numero: 0, prefijo: "B0", nombre: "Cartera Sana", descripcion: null, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], es_operativo: true, orden: 0, color: null, estado_mora: "al_dia" },
+  { numero: 1, prefijo: "B1", nombre: "Alerta Temprana", descripcion: null, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], es_operativo: true, orden: 1, color: null, estado_mora: "mora_30" },
+  { numero: 2, prefijo: "B2", nombre: "Gestión Activa", descripcion: null, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], es_operativo: true, orden: 2, color: null, estado_mora: "mora_60" },
+  { numero: 3, prefijo: "B3", nombre: "Rescate", descripcion: null, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], es_operativo: true, orden: 3, color: null, estado_mora: "mora_90" },
+  { numero: 4, prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", descripcion: null, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], es_operativo: true, orden: 4, color: null, estado_mora: "mora_120" },
+  { numero: 5, prefijo: "B5", nombre: "Jurídico", descripcion: null, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], es_operativo: false, orden: 5, color: null, estado_mora: "mora_120_plus" },
+];
+
 /** Catálogo dinámico de buckets (activos, ordenados) — fuente única para cartera-back y CRM. */
 export async function getBucketsCatalogo(): Promise<BucketCatalogoCompleto[]> {
-  return db
-    .select({
-      numero: buckets.numero,
-      prefijo: buckets.prefijo,
-      nombre: buckets.nombre,
-      descripcion: buckets.descripcion,
-      cuotas_min: buckets.cuotas_min,
-      cuotas_max: buckets.cuotas_max,
-      estados_incluidos: buckets.estados_incluidos,
-      es_operativo: buckets.es_operativo,
-      orden: buckets.orden,
-      color: buckets.color,
-      estado_mora: buckets.estado_mora,
-    })
-    .from(buckets)
-    .where(eq(buckets.activo, true))
-    .orderBy(buckets.orden);
+  try {
+    return await db
+      .select({
+        numero: buckets.numero,
+        prefijo: buckets.prefijo,
+        nombre: buckets.nombre,
+        descripcion: buckets.descripcion,
+        cuotas_min: buckets.cuotas_min,
+        cuotas_max: buckets.cuotas_max,
+        estados_incluidos: buckets.estados_incluidos,
+        es_operativo: buckets.es_operativo,
+        orden: buckets.orden,
+        color: buckets.color,
+        estado_mora: buckets.estado_mora,
+      })
+      .from(buckets)
+      .where(eq(buckets.activo, true))
+      .orderBy(buckets.orden);
+  } catch (err) {
+    console.error("❌ Error consultando catálogo de buckets, usando fallback:", err);
+    return FALLBACK_BUCKETS_CATALOGO;
+  }
 }
 
 /**

@@ -20,6 +20,16 @@ const NO_AUTORIZADO = {
   message: "[ERROR] No autorizado (requiere ADMIN o CONTA)",
 };
 
+// ¿Algún token del CSV NO pasa la validación? Rechazar en vez de descartar en
+// silencio (review Codex): `?bucket_nuevo=abc` sin esto devolvía el historial
+// completo, y un tipo_evento inválido revienta en el cast al enum de PG (500).
+const csvInvalido = (v: string | undefined, ok: (s: string) => boolean): boolean =>
+  !!v && v.split(",").map((s) => s.trim()).filter(Boolean).some((s) => !ok(s));
+
+const esBucket = (s: string) => /^[0-9]+$/.test(s);
+const TIPOS_EVENTO = ["INICIAL", "SUBIDA", "BAJADA"];
+const ORIGENES = ["PROCESO_AUTO", "API_MANUAL"];
+
 export const bucketsRouter = new Elysia()
   .use(authMiddleware)
 
@@ -41,6 +51,23 @@ export const bucketsRouter = new Elysia()
         if (pagoId !== undefined && (!Number.isInteger(pagoId) || pagoId <= 0)) {
           set.status = 400;
           return { success: false, message: "[ERROR] pago_id inválido" };
+        }
+        // CSVs y enums: cada token debe ser válido (no descartar en silencio).
+        if (csvInvalido(query.bucket_nuevo, esBucket)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] bucket_nuevo inválido (CSV de enteros, ej. 0,1,5)" };
+        }
+        if (csvInvalido(query.bucket_anterior, esBucket)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] bucket_anterior inválido (CSV de enteros, ej. 0,1,5)" };
+        }
+        if (csvInvalido(query.tipo_evento, (s) => TIPOS_EVENTO.includes(s))) {
+          set.status = 400;
+          return { success: false, message: `[ERROR] tipo_evento inválido (valores: ${TIPOS_EVENTO.join(", ")})` };
+        }
+        if (query.origen && !ORIGENES.includes(query.origen)) {
+          set.status = 400;
+          return { success: false, message: `[ERROR] origen inválido (valores: ${ORIGENES.join(", ")})` };
         }
         return await getBucketsHistorial({
           desde: query.desde,

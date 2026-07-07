@@ -374,4 +374,27 @@ describe("aggregateTiempoCierrePorTipoCanal", () => {
 			},
 		]);
 	});
+
+	test("coerces raw min and max days before returning channel subtotals", () => {
+		expect(
+			aggregateTiempoCierrePorTipoCanal([
+				{
+					source: "property",
+					totalCreditos: 1,
+					avgDias: 3.5,
+					totalDias: "3.5",
+					minDias: "3.5",
+					maxDias: "3.5",
+				},
+			]),
+		).toEqual([
+			{
+				tipoCanal: "Físico",
+				totalCreditos: 1,
+				avgDias: 3.5,
+				minDias: 3.5,
+				maxDias: 3.5,
+			},
+		]);
+	});
 });

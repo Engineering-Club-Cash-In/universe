@@ -161,8 +161,8 @@ type TiempoCierreFuenteRow = {
 	totalCreditos: number;
 	avgDias: number;
 	totalDias?: number | `${number}`;
-	minDias: number;
-	maxDias: number;
+	minDias: number | `${number}`;
+	maxDias: number | `${number}`;
 };
 
 export function aggregateTiempoCierrePorTipoCanal(
@@ -180,6 +180,8 @@ export function aggregateTiempoCierrePorTipoCanal(
 
 	for (const row of rows) {
 		const tipoCanal = getLeadSourceChannelType(row.source);
+		const minDias = Number(row.minDias);
+		const maxDias = Number(row.maxDias);
 		const total = totals.get(tipoCanal) ?? {
 			totalCreditos: 0,
 			totalDias: 0,
@@ -189,13 +191,9 @@ export function aggregateTiempoCierrePorTipoCanal(
 		total.totalCreditos += row.totalCreditos;
 		total.totalDias += Number(row.totalDias ?? row.avgDias * row.totalCreditos);
 		total.minDias =
-			total.minDias === null
-				? row.minDias
-				: Math.min(total.minDias, row.minDias);
+			total.minDias === null ? minDias : Math.min(total.minDias, minDias);
 		total.maxDias =
-			total.maxDias === null
-				? row.maxDias
-				: Math.max(total.maxDias, row.maxDias);
+			total.maxDias === null ? maxDias : Math.max(total.maxDias, maxDias);
 		totals.set(tipoCanal, total);
 	}
 

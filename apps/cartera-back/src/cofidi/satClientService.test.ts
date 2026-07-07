@@ -59,6 +59,24 @@ describe("parsearRespuestaCertificacion — serie/numero como strings", () => {
     expect(r.batch).toBe("09302093");
   });
 
+  it("falla ruidosamente si la certificación exitosa no trae ResponseData1", () => {
+    // El DTE ya quedó vivo en SAT; devolver '' solo movería el error a un
+    // TypeError indescifrable al parsear el XML certificado río abajo
+    const soapSinXml = soapCertificacion(
+      "3E722147", "123", "3E722147-0000-4000-8000-000000000000"
+    ).replace(/<ResponseData>[\s\S]*?<\/ResponseData>/, "");
+    expect(() => parsear(soapSinXml)).toThrow(/ResponseData1/);
+  });
+
+  it("rechaza un Identifier malformado (tags Batch repetidos)", () => {
+    // <Batch>A</Batch><Batch>B</Batch> parsea a ["A","B"] — truthy, y
+    // String() lo convertiría en "A,B" persistible como serie
+    const soapDoble = soapCertificacion(
+      "AAAA1111", "123", "AAAA1111-0000-4000-8000-000000000000"
+    ).replace("<Batch>AAAA1111</Batch>", "<Batch>AAAA1111</Batch><Batch>BBBB2222</Batch>");
+    expect(() => parsear(soapDoble)).toThrow(/malformada|incompleta/);
+  });
+
   it("sigue reportando el error cuando la certificación falla", () => {
     const soapError = soapCertificacion("X", "Y", "Z").replace(
       "<Result>true</Result>",

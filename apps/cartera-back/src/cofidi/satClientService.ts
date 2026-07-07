@@ -172,12 +172,23 @@ export class SATClientService {
       const serial = identifier['Serial'];
       const documentGUID = identifier['DocumentGUID'];
 
-      if (!batch || !serial || !documentGUID) {
-        throw new Error('Respuesta incompleta: falta Batch, Serial o DocumentGUID');
+      // typeof además de truthiness: tags repetidos o anidados llegan como
+      // array/objeto (truthy) y persistirían basura tipo '[object Object]'
+      if (
+        typeof batch !== 'string' || !batch ||
+        typeof serial !== 'string' || !serial ||
+        typeof documentGUID !== 'string' || !documentGUID
+      ) {
+        throw new Error('Respuesta incompleta o malformada: Batch, Serial o DocumentGUID inválido');
       }
 
-      const responseData = result['ResponseData'];
-      const xmlBase64 = responseData?.['ResponseData1'] || '';
+      const xmlBase64 = result['ResponseData']?.['ResponseData1'];
+      if (typeof xmlBase64 !== 'string' || !xmlBase64) {
+        // Sin el XML certificado no se puede generar PDF ni persistir la
+        // factura, pero el DTE YA quedó vivo en SAT: fallar aquí con causa
+        // clara en vez de dejar que parse('') truene río abajo
+        throw new Error('Certificación exitosa pero sin XML certificado (ResponseData1 vacío)');
+      }
 
       console.log('✅ Certificación exitosa:', {
         batch,
@@ -186,9 +197,9 @@ export class SATClientService {
       });
 
       return {
-        batch: String(batch),
-        serial: String(serial),
-        documentGUID: String(documentGUID),
+        batch,
+        serial,
+        documentGUID,
         xmlCertificado: xmlBase64
       };
 

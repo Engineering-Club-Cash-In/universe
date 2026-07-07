@@ -70,7 +70,11 @@ export class NITSoapClient {
       const parser = new XMLParser({
         ignoreAttributes: false,
         attributeNamePrefix: '@_',
-        trimValues: true
+        trimValues: true,
+        // parseTagValue: false — un nombre registrado puramente numérico se
+        // convertiría a número y perdería ceros iniciales (misma clase de bug
+        // que la serie Infinity en satClientService)
+        parseTagValue: false
       });
 
       const result = parser.parse(response.data);

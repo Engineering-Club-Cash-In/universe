@@ -4008,6 +4008,12 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     const parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: "@_",
+      // parseTagValue: false — valores de tag como NumeroAbono ("01"), montos
+      // en texto ("10.10") o el NIT del certificador deben llegar intactos al
+      // PDF; el parseo numérico los reformatea (misma clase de bug que la
+      // serie Infinity en satClientService). Los montos que se operan pasan
+      // por parseFloat() explícito.
+      parseTagValue: false,
     });
     const xmlParsed = parser.parse(resultado.xmlCertificado);
 

@@ -50,6 +50,23 @@ VALUES
 ON CONFLICT (numero) DO NOTHING;
 --> statement-breakpoint
 
+-- CHECK de rangos: el catálogo es EDITABLE — un rango invertido o negativo haría
+-- que bucketDeCredito no matchee y devuelva null EN SILENCIO (indistinguible de
+-- "fuera del funnel" → créditos desclasificados sin error). No previene gaps
+-- ENTRE filas (p.ej. borrar B2): ese riesgo queda documentado en el README.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'buckets_rango_ck'
+  ) THEN
+    ALTER TABLE cartera.buckets
+      ADD CONSTRAINT buckets_rango_ck CHECK (
+        cuotas_min >= 0 AND (cuotas_max IS NULL OR cuotas_max >= cuotas_min)
+      );
+  END IF;
+END$$;
+--> statement-breakpoint
+
 -- FK: asesor_bucket.bucket → buckets.numero -----------------------------------
 DO $$
 BEGIN

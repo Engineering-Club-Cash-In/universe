@@ -80,15 +80,63 @@ CREATE TABLE IF NOT EXISTS cartera.buckets_historial (
 );
 --> statement-breakpoint
 
-CREATE INDEX IF NOT EXISTS buckets_historial_credito_idx
-  ON cartera.buckets_historial (credito_id);
---> statement-breakpoint
 CREATE INDEX IF NOT EXISTS buckets_historial_fecha_idx
   ON cartera.buckets_historial (fecha);
 --> statement-breakpoint
--- Soporta el "último bucket por crédito" (DISTINCT ON credito_id ORDER BY fecha DESC).
+
+-- Higiene de versiones previas de ESTE script (por si ya se aplicó en algún
+-- ambiente): el índice compuesto viejo era ASC y CREATE INDEX IF NOT EXISTS lo
+-- dejaría vivo EN SILENCIO sin el DESC/tiebreaker; se detecta por definición y
+-- se rehace. El índice de solo credito_id quedó redundante (prefijo del compuesto).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname = 'cartera'
+      AND indexname = 'buckets_historial_credito_fecha_idx'
+      AND indexdef NOT LIKE '%fecha DESC%'
+  ) THEN
+    DROP INDEX cartera.buckets_historial_credito_fecha_idx;
+  END IF;
+END$$;
+--> statement-breakpoint
+DROP INDEX IF EXISTS cartera.buckets_historial_credito_idx;
+--> statement-breakpoint
+-- Sirve el "último bucket por crédito": DISTINCT ON (credito_id) ORDER BY
+-- credito_id, fecha DESC, historial_id DESC (el tiebreaker por historial_id
+-- hace determinista el empate de fecha — sin él, dos eventos con el mismo
+-- timestamp dejan indefinido el "último" y el motor podría registrar
+-- transiciones fantasma). El prefijo (credito_id) cubre las búsquedas por
+-- crédito: no hace falta un índice aparte de solo credito_id.
 CREATE INDEX IF NOT EXISTS buckets_historial_credito_fecha_idx
-  ON cartera.buckets_historial (credito_id, fecha);
+  ON cartera.buckets_historial (credito_id, fecha DESC, historial_id DESC);
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS buckets_historial_asesor_idx
   ON cartera.buckets_historial (asesor_id);
+--> statement-breakpoint
+
+-- Garantiza UNA sola línea base (INICIAL) por crédito. Respaldo duro a nivel BD
+-- contra la carrera de procesarMoras corriendo en paralelo (varias réplicas) —
+-- la misma lección que ya pagó moras_credito (moras_credito_uq_activa).
+CREATE UNIQUE INDEX IF NOT EXISTS buckets_historial_uq_inicial
+  ON cartera.buckets_historial (credito_id)
+  WHERE tipo_evento = 'INICIAL';
+--> statement-breakpoint
+
+-- CHECK de coherencia evento ↔ buckets: blinda la bitácora (que alimenta las
+-- métricas de incentivos) frente a escritores futuros vía API_MANUAL.
+-- Los guards IS NOT NULL son obligatorios: sin ellos, 'SUBIDA' con
+-- bucket_anterior NULL evaluaría a NULL y el CHECK lo dejaría pasar.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'buckets_historial_evento_coherente_ck'
+  ) THEN
+    ALTER TABLE cartera.buckets_historial
+      ADD CONSTRAINT buckets_historial_evento_coherente_ck CHECK (
+        (tipo_evento = 'INICIAL' AND bucket_anterior IS NULL)
+        OR (tipo_evento = 'SUBIDA' AND bucket_anterior IS NOT NULL AND bucket_nuevo > bucket_anterior)
+        OR (tipo_evento = 'BAJADA' AND bucket_anterior IS NOT NULL AND bucket_nuevo < bucket_anterior)
+      );
+  END IF;
+END$$;

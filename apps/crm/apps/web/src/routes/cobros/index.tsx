@@ -983,9 +983,13 @@ function RouteComponent() {
 									};
 
 									// Buscar el % real del embudo.
-									// La meta "mora_120" representa el objetivo de 120+ días: tras
-									// el split en B4 (mora_120, =4 cuotas) y B5 (mora_120_plus, 5+),
-									// hay que SUMAR ambos buckets para no subcontar el 120+.
+									// La meta "mora_120" representa el objetivo GLOBAL de 120+ días:
+									// tras el split en B4 (mora_120, =4 cuotas) y B5 (mora_120_plus,
+									// 5+), la meta SUMA ambos buckets para no subcontar el 120+.
+									// NOTA (intencional): los FILTROS de la tabla sí quedan separados
+									// —"Mora 120" trae solo =4 y "Mora 120+" solo 5+— porque son dos
+									// etapas de gestión distintas. La meta es agregada a propósito; no
+									// es un bug que el % de la meta no coincida con un solo filtro.
 									let porcentajeReal: number | undefined;
 									if (meta.categoria === "mora_total") {
 										porcentajeReal = undefined;

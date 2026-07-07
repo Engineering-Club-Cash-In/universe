@@ -30,10 +30,23 @@ const esBucket = (s: string) => /^[0-9]+$/.test(s);
 const TIPOS_EVENTO = ["INICIAL", "SUBIDA", "BAJADA"];
 const ORIGENES = ["PROCESO_AUTO", "API_MANUAL"];
 
-// Fecha YYYY-MM-DD real: el regex frena el formato (`abc`) y Date.parse frena
-// valores fuera de rango (`2026-13-45`) — ambos reventaban el ::date de PG (500).
-const esFecha = (s: string) =>
-  /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+// Fecha YYYY-MM-DD real, validada por ROUND-TRIP: se arma la fecha con los
+// componentes y se verifica que no se haya movido. Date.parse NO sirve aquí:
+// en Bun normaliza desbordes (2026-02-31 → 3 de marzo) y el ::date de PG sí
+// los rechaza → 500 (review Codex). El regex frena el formato ('abc').
+const esFecha = (s: string): boolean => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mes = Number(m[2]);
+  const dia = Number(m[3]);
+  const d = new Date(Date.UTC(y, mes - 1, dia));
+  return (
+    d.getUTCFullYear() === y &&
+    d.getUTCMonth() === mes - 1 &&
+    d.getUTCDate() === dia
+  );
+};
 
 export const bucketsRouter = new Elysia()
   .use(authMiddleware)

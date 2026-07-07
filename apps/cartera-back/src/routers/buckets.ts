@@ -30,6 +30,11 @@ const esBucket = (s: string) => /^[0-9]+$/.test(s);
 const TIPOS_EVENTO = ["INICIAL", "SUBIDA", "BAJADA"];
 const ORIGENES = ["PROCESO_AUTO", "API_MANUAL"];
 
+// Fecha YYYY-MM-DD real: el regex frena el formato (`abc`) y Date.parse frena
+// valores fuera de rango (`2026-13-45`) — ambos reventaban el ::date de PG (500).
+const esFecha = (s: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+
 export const bucketsRouter = new Elysia()
   .use(authMiddleware)
 
@@ -51,6 +56,15 @@ export const bucketsRouter = new Elysia()
         if (pagoId !== undefined && (!Number.isInteger(pagoId) || pagoId <= 0)) {
           set.status = 400;
           return { success: false, message: "[ERROR] pago_id inválido" };
+        }
+        // Fechas: validar ANTES del cast ::date de PG (review Codex).
+        if (query.desde && !esFecha(query.desde)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] desde inválida (formato YYYY-MM-DD)" };
+        }
+        if (query.hasta && !esFecha(query.hasta)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] hasta inválida (formato YYYY-MM-DD)" };
         }
         // CSVs y enums: cada token debe ser válido (no descartar en silencio).
         if (csvInvalido(query.bucket_nuevo, esBucket)) {

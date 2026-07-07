@@ -80,6 +80,8 @@ jobs:
           podman build -f apps/cartera-back/Dockerfile . \
             -t $ECR_REGISTRY/cartera-back-dev:latest \
             -t $ECR_REGISTRY/cartera-back-dev:${{ github.sha }}
+          echo "Running cartera-back Puppeteer smoke test inside the built image"
+          podman run --rm $ECR_REGISTRY/cartera-back-dev:${{ github.sha }} bun run smoke:puppeteer
           podman push $ECR_REGISTRY/cartera-back-dev:latest
           podman push $ECR_REGISTRY/cartera-back-dev:${{ github.sha }}
 

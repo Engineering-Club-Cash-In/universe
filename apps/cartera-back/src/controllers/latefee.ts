@@ -955,7 +955,7 @@ export async function procesarMoras() {
       const ultimosRes = await lockConn.query(
         `SELECT DISTINCT ON (credito_id) credito_id, bucket_nuevo
            FROM cartera.buckets_historial
-          ORDER BY credito_id, fecha DESC`,
+          ORDER BY credito_id, fecha DESC, historial_id DESC`,
       );
       for (const row of ultimosRes.rows) {
         ultimoBucket.set(Number(row.credito_id), Number(row.bucket_nuevo));

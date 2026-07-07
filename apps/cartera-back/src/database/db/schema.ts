@@ -494,10 +494,98 @@
       fecha: timestamp("fecha").defaultNow().notNull(),
     },
     (t) => [
-      index("buckets_historial_credito_idx").on(t.credito_id),
       index("buckets_historial_fecha_idx").on(t.fecha),
-      index("buckets_historial_credito_fecha_idx").on(t.credito_id, t.fecha),
+      // Sirve el "último bucket por crédito" (DISTINCT ON credito_id ORDER BY
+      // fecha DESC, historial_id DESC — el tiebreaker por historial_id hace
+      // determinista el empate de fecha). Su prefijo (credito_id) cubre también
+      // las búsquedas por crédito: no hace falta un índice aparte de credito_id.
+      index("buckets_historial_credito_fecha_idx").on(
+        t.credito_id,
+        t.fecha.desc(),
+        t.historial_id.desc()
+      ),
       index("buckets_historial_asesor_idx").on(t.asesor_id),
+      // Garantiza UNA sola línea base (INICIAL) por crédito. Respaldo duro a
+      // nivel BD contra la carrera de procesarMoras en paralelo — la misma
+      // lección que ya pagó moras_credito (ver moras_credito_uq_activa).
+      uniqueIndex("buckets_historial_uq_inicial")
+        .on(t.credito_id)
+        .where(sql`${t.tipo_evento} = 'INICIAL'`),
+      // NOTA: en la migración SQL además hay un CHECK de coherencia
+      // (INICIAL ⇒ bucket_anterior IS NULL; SUBIDA ⇒ sube; BAJADA ⇒ baja)
+      // que blinda la bitácora frente a escritores API_MANUAL futuros.
+    ]
+  );
+
+  // ============================================================
+  // 🗂️ ASIGNACIÓN CRÉDITO ↔ ASESOR (COBROS-02) — "cartera" del asesor
+  // ============================================================
+  // Dentro de un bucket hay VARIOS asesores (pool = `asesor_bucket`), pero cada
+  // crédito lo lleva UN asesor: su cartera. Aquí NO es cola compartida.
+  //
+  // ⚠️ DECISIÓN DE RAÍZ (2026-07-07): la asignación vive en `creditos.asesor_id`.
+  // NO hay tabla de estado aparte. En ESTA base el asesor del crédito ES el
+  // cobrador (el vendedor/originación vive en el CRM, no aquí), así que los
+  // reportes por asesor (paymentsByAdvisor, efectividad, embudo) DEBEN seguir
+  // al dueño actual — mantener uno viejo acreditaría pagos a quien ya no cobra.
+  //
+  // Cómo funcionará la reasignación (LÓGICA FUTURA, no implementada):
+  //  · crédito cambia de bucket → UPDATE cartera.creditos SET asesor_id = <elegible
+  //    del bucket nuevo> — ÚNICAMENTE ese campo, NADA más del crédito se toca —
+  //    + INSERT en `credito_asesor_historial` (la bitácora es obligatoria).
+  //  · asesor sale de un bucket → repartir su cartera entre los que quedan
+  //    (mismo par UPDATE asesor_id + INSERT bitácora por cada crédito).
+  //  · manual (supervisor/gerente) → mismo par, con origen=API_MANUAL,
+  //    usuario_id del que lo hizo y motivo.
+  // "Elegibles" = los de `asesor_bucket`. La "capacidad" por asesor+bucket es
+  // pieza futura (columna en asesor_bucket cuando toque; migración 0003).
+  //
+  // Otras decisiones tomadas:
+  //  - NO hay flag "principal" ni multiplicidad: 1 crédito → 1 asesor. El
+  //    "asesor de APOYO" (2º asesor) irá a futuro como FILTRO en el listado
+  //    (ver TODOS los créditos del bucket), no como fila/columna.
+  //  - El bucket NO se materializa (se deriva de `buckets_historial`); en la
+  //    bitácora va como SNAPSHOT (contexto del cambio).
+
+  export const creditoAsesorOrigenEnum = customSchema.enum(
+    "credito_asesor_origen",
+    ["PROCESO_AUTO", "API_MANUAL"] // automático (job) vs manual (supervisor)
+  );
+
+  // Bitácora de reasignaciones (append-only). Responde la auditoría del supervisor:
+  // quién llevaba (asesor_anterior), quién lleva (asesor_nuevo), por qué (motivo),
+  // cuándo (fecha) y quién lo hizo (usuario_id → platform_users, mismo patrón que
+  // moras_historial; NULL cuando origen=PROCESO_AUTO). El estado actual NO vive
+  // aquí: es `creditos.asesor_id` (ver decisión de raíz arriba).
+  export const credito_asesor_historial = customSchema.table(
+    "credito_asesor_historial",
+    {
+      historial_id: serial("historial_id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      asesor_anterior: integer("asesor_anterior").references(
+        () => asesores.asesor_id,
+        { onDelete: "set null" }
+      ), // null = primera asignación (siembra)
+      asesor_nuevo: integer("asesor_nuevo").references(
+        () => asesores.asesor_id,
+        { onDelete: "set null" }
+      ), // hoy siempre hay dueño (creditos.asesor_id es NOT NULL); nullable por si a futuro existe "desasignar"
+      bucket: integer("bucket").references(() => buckets.numero), // snapshot del bucket al momento
+      origen: creditoAsesorOrigenEnum("origen").notNull().default("PROCESO_AUTO"),
+      motivo: text("motivo"),
+      // Quién hizo el cambio (solo API_MANUAL); NULL en PROCESO_AUTO — el caso
+      // "sistema" ya lo expresa `origen`, no se duplica como string mágico.
+      usuario_id: integer("usuario_id").references(() => platform_users.id, {
+        onDelete: "set null",
+      }),
+      fecha: timestamp("fecha").defaultNow().notNull(),
+    },
+    (t) => [
+      index("credito_asesor_hist_credito_idx").on(t.credito_id),
+      index("credito_asesor_hist_fecha_idx").on(t.fecha),
+      index("credito_asesor_hist_asesor_nuevo_idx").on(t.asesor_nuevo),
     ]
   );
 

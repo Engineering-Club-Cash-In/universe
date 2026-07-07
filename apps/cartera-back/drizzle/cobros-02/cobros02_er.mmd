@@ -1,0 +1,13 @@
+%%{init: {"theme":"neutral", "themeVariables":{"fontSize":"20px"}}}%%
+erDiagram
+  ASESORES      ||--o{ CREDITOS                  : "asesor_id = cobrador (ROTA con bucket)"
+  ASESORES      ||--o{ ASESOR_BUCKET             : "pertenece"
+  BUCKETS       ||--o{ ASESOR_BUCKET             : "agrupa"
+  CREDITOS      ||--o{ BUCKETS_HISTORIAL         : "transiciona"
+  BUCKETS       ||--o{ BUCKETS_HISTORIAL         : "ant/nuevo"
+  ASESORES      ||--o{ BUCKETS_HISTORIAL         : "atribución"
+  PAGOS_CREDITO ||--o{ BUCKETS_HISTORIAL         : "curó"
+  CREDITOS      ||--o{ CREDITO_ASESOR_HISTORIAL  : "reasigna"
+  ASESORES      ||--o{ CREDITO_ASESOR_HISTORIAL  : "ant/nuevo"
+  BUCKETS       ||--o{ CREDITO_ASESOR_HISTORIAL  : "snapshot"
+  PLATFORM_USERS ||--o{ CREDITO_ASESOR_HISTORIAL : "quién (manual)"

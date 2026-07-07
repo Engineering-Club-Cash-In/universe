@@ -21,6 +21,10 @@ import { quotations } from "../db/schema/quotations";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
+	getLeadSourceChannelType,
+	type LeadSourceChannelType,
+} from "../lib/lead-sources";
+import {
 	closedCreditsReportProcedure,
 	metaColocacionReportProcedure,
 	porcentajeEfectividadReportProcedure,
@@ -30,6 +34,12 @@ import {
 import type { StatusCreditEnum } from "../types/cartera-back";
 
 const SECONDS_PER_DAY = 60 * 60 * 24;
+const CHANNEL_TYPE_ORDER: LeadSourceChannelType[] = [
+	"Físico",
+	"Pauta Digital",
+	"Orgánico Digital",
+	"Otros",
+];
 
 // Schema para filtros de fecha
 const dateRangeSchema = z.object({
@@ -93,6 +103,110 @@ export function isPorcentajeEfectividadPeriodCloseIncluded(
 		firstClosedAt >= start &&
 		firstClosedAt <= end
 	);
+}
+
+type EfectividadFuenteRow = {
+	source: string | null;
+	totalOportunidades: number;
+	totalCerradas: number;
+	porcentaje: number;
+};
+
+export function aggregateEfectividadPorTipoCanal(rows: EfectividadFuenteRow[]) {
+	const totals = new Map<
+		LeadSourceChannelType,
+		{ totalOportunidades: number; totalCerradas: number }
+	>();
+
+	for (const row of rows) {
+		const tipoCanal = getLeadSourceChannelType(row.source);
+		const total = totals.get(tipoCanal) ?? {
+			totalOportunidades: 0,
+			totalCerradas: 0,
+		};
+		total.totalOportunidades += row.totalOportunidades;
+		total.totalCerradas += row.totalCerradas;
+		totals.set(tipoCanal, total);
+	}
+
+	return CHANNEL_TYPE_ORDER.flatMap((tipoCanal) => {
+		const total = totals.get(tipoCanal);
+		if (!total) return [];
+		return [
+			{
+				tipoCanal,
+				totalOportunidades: total.totalOportunidades,
+				totalCerradas: total.totalCerradas,
+				porcentaje:
+					total.totalOportunidades > 0
+						? Math.round(
+								(total.totalCerradas * 1000) / total.totalOportunidades,
+							) / 10
+						: 0,
+			},
+		];
+	});
+}
+
+type TiempoCierreFuenteRow = {
+	source: string | null;
+	totalCreditos: number;
+	avgDias: number;
+	totalDias?: number;
+	minDias: number;
+	maxDias: number;
+};
+
+export function aggregateTiempoCierrePorTipoCanal(
+	rows: TiempoCierreFuenteRow[],
+) {
+	const totals = new Map<
+		LeadSourceChannelType,
+		{
+			totalCreditos: number;
+			totalDias: number;
+			minDias: number | null;
+			maxDias: number | null;
+		}
+	>();
+
+	for (const row of rows) {
+		const tipoCanal = getLeadSourceChannelType(row.source);
+		const total = totals.get(tipoCanal) ?? {
+			totalCreditos: 0,
+			totalDias: 0,
+			minDias: null,
+			maxDias: null,
+		};
+		total.totalCreditos += row.totalCreditos;
+		total.totalDias += row.totalDias ?? row.avgDias * row.totalCreditos;
+		total.minDias =
+			total.minDias === null
+				? row.minDias
+				: Math.min(total.minDias, row.minDias);
+		total.maxDias =
+			total.maxDias === null
+				? row.maxDias
+				: Math.max(total.maxDias, row.maxDias);
+		totals.set(tipoCanal, total);
+	}
+
+	return CHANNEL_TYPE_ORDER.flatMap((tipoCanal) => {
+		const total = totals.get(tipoCanal);
+		if (!total) return [];
+		return [
+			{
+				tipoCanal,
+				totalCreditos: total.totalCreditos,
+				avgDias:
+					total.totalCreditos > 0
+						? Math.round((total.totalDias * 10) / total.totalCreditos) / 10
+						: 0,
+				minDias: total.minDias ?? 0,
+				maxDias: total.maxDias ?? 0,
+			},
+		];
+	});
 }
 
 function parseGuatemalaDateRange(startDate: string, endDate: string) {
@@ -735,6 +849,19 @@ export const getReportePorcentajeEfectividad =
 				});
 			}
 
+			const porFuenteRows = buildPorcentajeEfectividadFuenteRows(
+				porFuente.map((row) => ({
+					source: row.source,
+					totalOportunidades: row.totalOportunidades,
+					totalCerradas: row.totalCerradas ?? 0,
+					porcentaje: row.porcentaje ?? 0,
+				})),
+				cierresPeriodoPorFuente.map((row) => ({
+					source: row.source,
+					totalCierresPeriodo: row.totalCierresPeriodo,
+				})),
+			);
+
 			return {
 				total: {
 					totalOportunidades: totalRows[0]?.totalOportunidades ?? 0,
@@ -742,18 +869,8 @@ export const getReportePorcentajeEfectividad =
 					totalCierresPeriodo: periodCloseRows[0]?.totalCierresPeriodo ?? 0,
 					porcentaje: totalRows[0]?.porcentaje ?? 0,
 				},
-				porFuente: buildPorcentajeEfectividadFuenteRows(
-					porFuente.map((row) => ({
-						source: row.source,
-						totalOportunidades: row.totalOportunidades,
-						totalCerradas: row.totalCerradas ?? 0,
-						porcentaje: row.porcentaje ?? 0,
-					})),
-					cierresPeriodoPorFuente.map((row) => ({
-						source: row.source,
-						totalCierresPeriodo: row.totalCierresPeriodo,
-					})),
-				),
+				porFuente: porFuenteRows,
+				porTipoCanal: aggregateEfectividadPorTipoCanal(porFuenteRows),
 				registros: registrosRaw.map((row) => ({
 					id: row.id,
 					createdAt: row.createdAt,
@@ -798,8 +915,9 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 
 		// Fallback a opportunities.createdAt cuando leadId es null (oportunidades
 		// vinculadas directamente a empresa sin prospecto previo).
+		const diasDesdeCreacionBase = sql<number>`EXTRACT(EPOCH FROM (${firstClosedStageDates.firstClosedStageAt} - COALESCE(${leads.createdAt}, ${opportunities.createdAt}))) / ${SECONDS_PER_DAY}`;
 		const diasDesdeCreacion = (fn: "AVG" | "MIN" | "MAX") =>
-			sql<number>`ROUND(${sql.raw(fn)}(EXTRACT(EPOCH FROM (${firstClosedStageDates.firstClosedStageAt} - COALESCE(${leads.createdAt}, ${opportunities.createdAt}))) / ${SECONDS_PER_DAY}), 1)`;
+			sql<number>`ROUND(${sql.raw(fn)}(${diasDesdeCreacionBase}), 1)`;
 
 		const baseWhere = and(
 			gte(firstClosedStageDates.firstClosedStageAt, start),
@@ -828,6 +946,7 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 					avgDias: diasDesdeCreacion("AVG"),
 					minDias: diasDesdeCreacion("MIN"),
 					maxDias: diasDesdeCreacion("MAX"),
+					totalDias: sql<number>`SUM(${diasDesdeCreacionBase})`,
 				})
 				.from(firstClosedStageDates)
 				.innerJoin(
@@ -840,6 +959,15 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 				.orderBy(desc(count())),
 		]);
 
+		const porFuenteRows = porFuente.map((row) => ({
+			source: row.source,
+			totalCreditos: row.totalCreditos,
+			avgDias: row.avgDias ?? 0,
+			totalDias: row.totalDias ?? 0,
+			minDias: row.minDias ?? 0,
+			maxDias: row.maxDias ?? 0,
+		}));
+
 		return {
 			total: {
 				totalCreditos: totalRows[0]?.totalCreditos ?? 0,
@@ -847,13 +975,8 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 				minDias: totalRows[0]?.minDias ?? 0,
 				maxDias: totalRows[0]?.maxDias ?? 0,
 			},
-			porFuente: porFuente.map((row) => ({
-				source: row.source,
-				totalCreditos: row.totalCreditos,
-				avgDias: row.avgDias ?? 0,
-				minDias: row.minDias ?? 0,
-				maxDias: row.maxDias ?? 0,
-			})),
+			porFuente: porFuenteRows,
+			porTipoCanal: aggregateTiempoCierrePorTipoCanal(porFuenteRows),
 		};
 	});
 

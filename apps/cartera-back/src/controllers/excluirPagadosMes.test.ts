@@ -14,10 +14,12 @@ if (!hasDb) {
   const { db } = await import("../database/index");
   const { getCreditosWithUserByMesAnio } = await import("./credits");
 
-  const hoyGuatemala = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
-  );
-  const hoyStr = hoyGuatemala.toISOString().slice(0, 10);
+  // sv-SE da YYYY-MM-DD directo y no depende del TZ del proceso (mismo
+  // cálculo canónico que usa el controller).
+  const hoyStr = new Date().toLocaleDateString("sv-SE", {
+    timeZone: "America/Guatemala",
+  });
+  const anioActual = Number(hoyStr.slice(0, 4));
 
   const toRows = (r: any) => (Array.isArray(r) ? r : (r.rows ?? []));
 
@@ -55,7 +57,7 @@ if (!hasDb) {
 
   async function totalPorSifco(sifco: string, excluir?: boolean) {
     const res = await getCreditosWithUserByMesAnio(
-      0, hoyGuatemala.getFullYear(), 1, 5, sifco, undefined,
+      0, anioActual, 1, 5, sifco, undefined,
       undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, excluir
@@ -66,13 +68,13 @@ if (!hasDb) {
   describe(`excluir_pagados_mes (integración, hoy=${hoyStr})`, () => {
     it("el totalCount con flag cuadra con un cross-check SQL independiente", async () => {
       const off = await getCreditosWithUserByMesAnio(
-        0, hoyGuatemala.getFullYear(), 1, 1, undefined, "ACTIVO",
+        0, anioActual, 1, 1, undefined, "ACTIVO",
         undefined, undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, undefined
       );
       const on = await getCreditosWithUserByMesAnio(
-        0, hoyGuatemala.getFullYear(), 1, 1, undefined, "ACTIVO",
+        0, anioActual, 1, 1, undefined, "ACTIVO",
         undefined, undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, true

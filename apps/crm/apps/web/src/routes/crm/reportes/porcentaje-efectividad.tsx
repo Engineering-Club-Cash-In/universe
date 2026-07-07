@@ -253,6 +253,7 @@ export function PorcentajeEfectividadContent() {
 		.sort((a, b) => b.porcentaje - a.porcentaje);
 
 	const chartHeight = Math.max(280, chartData.length * BAR_HEIGHT_PX);
+	const channelTypeData = data?.porTipoCanal ?? [];
 
 	return (
 		<div className="space-y-6">
@@ -353,6 +354,65 @@ export function PorcentajeEfectividadContent() {
 							</BarChart>
 						</ResponsiveContainer>
 					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle>Subtotales por tipo de canal</CardTitle>
+					<CardDescription>
+						Agrupación de fuentes para comparar efectividad por esfuerzo
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<Table>
+						<TableHeader>
+							<TableRow>
+								<TableHead>Tipo de canal</TableHead>
+								<TableHead className="text-right">Oportunidades</TableHead>
+								<TableHead className="text-right">Cerradas</TableHead>
+								<TableHead className="text-right">Efectividad</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{isLoading ? (
+								<TableRow>
+									<TableCell
+										colSpan={4}
+										className="py-8 text-center text-muted-foreground"
+									>
+										Cargando...
+									</TableCell>
+								</TableRow>
+							) : channelTypeData.length === 0 ? (
+								<TableRow>
+									<TableCell
+										colSpan={4}
+										className="py-8 text-center text-muted-foreground"
+									>
+										No hay datos para el período seleccionado
+									</TableCell>
+								</TableRow>
+							) : (
+								channelTypeData.map((row) => (
+									<TableRow key={row.tipoCanal}>
+										<TableCell className="font-medium">
+											{row.tipoCanal}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.totalOportunidades}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.totalCerradas}
+										</TableCell>
+										<TableCell className="text-right font-semibold">
+											{row.porcentaje}%
+										</TableCell>
+									</TableRow>
+								))
+							)}
+						</TableBody>
+					</Table>
 				</CardContent>
 			</Card>
 

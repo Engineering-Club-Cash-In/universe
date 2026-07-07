@@ -19,6 +19,27 @@ export const LEAD_SOURCE_LABELS = {
 } as const satisfies Record<string, string>;
 
 export type LeadSource = keyof typeof LEAD_SOURCE_LABELS;
+export type LeadSourceChannelType =
+	| "Físico"
+	| "Pauta Digital"
+	| "Orgánico Digital"
+	| "Otros";
+
+const LEAD_SOURCE_CHANNEL_TYPES = {
+	property: "Físico",
+	agency: "Físico",
+	google: "Pauta Digital",
+	meta: "Pauta Digital",
+	facebook: "Pauta Digital",
+	instagram: "Pauta Digital",
+	Whatsapp: "Pauta Digital",
+	website: "Orgánico Digital",
+	social_media: "Orgánico Digital",
+	recurrent: "Otros",
+	recurrent_active: "Otros",
+	other: "Otros",
+	referral: "Otros",
+} as const satisfies Partial<Record<LeadSource, LeadSourceChannelType>>;
 
 export const LEAD_SOURCE_OPTIONS = Object.entries(LEAD_SOURCE_LABELS).map(
 	([value, label]) => ({
@@ -51,6 +72,17 @@ export function getLeadSourceLabel(source: string | null | undefined): string {
 	if (!source) return "Sin fuente";
 	return (
 		LEAD_SOURCE_LABELS[source as keyof typeof LEAD_SOURCE_LABELS] ?? source
+	);
+}
+
+export function getLeadSourceChannelType(
+	source: string | null | undefined,
+): LeadSourceChannelType {
+	if (!source) return "Otros";
+	return (
+		LEAD_SOURCE_CHANNEL_TYPES[
+			source as keyof typeof LEAD_SOURCE_CHANNEL_TYPES
+		] ?? "Otros"
 	);
 }
 

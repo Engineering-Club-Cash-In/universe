@@ -79,6 +79,11 @@ export const bucketsRouter = new Elysia()
           set.status = 400;
           return { success: false, message: "[ERROR] hasta inválida (formato YYYY-MM-DD)" };
         }
+        // Rango invertido: sería un vacío silencioso — mejor avisar.
+        if (query.desde && query.hasta && query.desde > query.hasta) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] rango de fechas inválido (desde > hasta)" };
+        }
         // CSVs y enums: cada token debe ser válido (no descartar en silencio).
         if (csvInvalido(query.bucket_nuevo, esBucket)) {
           set.status = 400;

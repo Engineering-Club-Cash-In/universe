@@ -83,6 +83,25 @@ CREATE TABLE IF NOT EXISTS cartera.buckets_historial (
 CREATE INDEX IF NOT EXISTS buckets_historial_fecha_idx
   ON cartera.buckets_historial (fecha);
 --> statement-breakpoint
+
+-- Higiene de versiones previas de ESTE script (por si ya se aplicó en algún
+-- ambiente): el índice compuesto viejo era ASC y CREATE INDEX IF NOT EXISTS lo
+-- dejaría vivo EN SILENCIO sin el DESC/tiebreaker; se detecta por definición y
+-- se rehace. El índice de solo credito_id quedó redundante (prefijo del compuesto).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname = 'cartera'
+      AND indexname = 'buckets_historial_credito_fecha_idx'
+      AND indexdef NOT LIKE '%fecha DESC%'
+  ) THEN
+    DROP INDEX cartera.buckets_historial_credito_fecha_idx;
+  END IF;
+END$$;
+--> statement-breakpoint
+DROP INDEX IF EXISTS cartera.buckets_historial_credito_idx;
+--> statement-breakpoint
 -- Sirve el "último bucket por crédito": DISTINCT ON (credito_id) ORDER BY
 -- credito_id, fecha DESC, historial_id DESC (el tiebreaker por historial_id
 -- hace determinista el empate de fecha — sin él, dos eventos con el mismo

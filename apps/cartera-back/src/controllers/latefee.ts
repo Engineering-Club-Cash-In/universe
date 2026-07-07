@@ -961,9 +961,12 @@ export async function procesarMoras() {
         ultimoBucket.set(Number(row.credito_id), Number(row.bucket_nuevo));
       }
 
-      let bucketsIniciales = 0;
       let bucketsSubidas = 0;
       let bucketsBajadas = 0;
+      // Las líneas base se acumulan y se insertan en LOTE al final (la 1a
+      // corrida siembra ~todos los créditos del funnel: fila por fila serían
+      // miles de INSERTs secuenciales dentro del job).
+      const filasIniciales: (typeof buckets_historial.$inferInsert)[] = [];
 
       for (const [creditoId, status] of statusPorCredito) {
         const cuotasAtrasadas = moraPorCredito[creditoId] ?? 0;
@@ -973,7 +976,7 @@ export async function procesarMoras() {
         // Primera vez que vemos el crédito → sembrar la LÍNEA BASE (incluye B0).
         // `INICIAL` marca el punto de partida real; la salud la dice bucket_nuevo.
         if (!ultimoBucket.has(creditoId)) {
-          await db.insert(buckets_historial).values({
+          filasIniciales.push({
             credito_id: creditoId,
             bucket_anterior: null,
             bucket_nuevo: bucketNuevo,
@@ -986,7 +989,6 @@ export async function procesarMoras() {
             motivo: "Línea base — primer registro en el motor de buckets",
           });
           ultimoBucket.set(creditoId, bucketNuevo);
-          bucketsIniciales++;
           continue;
         }
 
@@ -1036,8 +1038,19 @@ export async function procesarMoras() {
         else bucketsBajadas++;
       }
 
+      // Siembra en LOTE (chunks). onConflictDoNothing se apoya en el unique
+      // parcial buckets_historial_uq_inicial: si otra réplica sembró el mismo
+      // crédito en paralelo, la fila duplicada se descarta sin reventar el lote.
+      const CHUNK_INICIALES = 500;
+      for (let i = 0; i < filasIniciales.length; i += CHUNK_INICIALES) {
+        await db
+          .insert(buckets_historial)
+          .values(filasIniciales.slice(i, i + CHUNK_INICIALES))
+          .onConflictDoNothing();
+      }
+
       console.log(
-        `[BUCKETS] Registros — iniciales: ${bucketsIniciales}, subidas: ${bucketsSubidas}, bajadas: ${bucketsBajadas}`,
+        `[BUCKETS] Registros — iniciales: ${filasIniciales.length}, subidas: ${bucketsSubidas}, bajadas: ${bucketsBajadas}`,
       );
       } // fin else (catálogo no vacío)
     } catch (bucketErr) {

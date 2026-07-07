@@ -45,7 +45,9 @@ import { bucketDeCredito, BucketCatalogo, getBucketsCatalogo } from "./latefee";
 // responde (DB caída, migración pendiente). Incluye `estados_incluidos` en B5
 // (mismo valor que el seed de 0001_buckets_catalogo.sql) para no perder la
 // regla INCOBRABLE→B5 de `bucketDeCredito` en este path degradado. `prefijo`/
-// `nombre` sintéticos para que la columna Bucket no quede en blanco.
+// `nombre`/`estado_mora` sintéticos (mismo seed de 0003) para que la columna
+// Bucket y el contrato de /stats (estadoMora/label/prefijo) no queden vacíos
+// en un ambiente degradado.
 const FALLBACK_BUCKETS_CUOTAS: {
   numero: number;
   cuotas_min: number;
@@ -53,13 +55,14 @@ const FALLBACK_BUCKETS_CUOTAS: {
   estados_incluidos: string[];
   prefijo: string;
   nombre: string;
+  estado_mora: string;
 }[] = [
-  { numero: 0, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], prefijo: "B0", nombre: "Cartera Sana" },
-  { numero: 1, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], prefijo: "B1", nombre: "Alerta Temprana" },
-  { numero: 2, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], prefijo: "B2", nombre: "Gestión Activa" },
-  { numero: 3, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], prefijo: "B3", nombre: "Rescate" },
-  { numero: 4, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], prefijo: "B4", nombre: "Última Instancia / Pre Jurídico" },
-  { numero: 5, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], prefijo: "B5", nombre: "Jurídico" },
+  { numero: 0, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], prefijo: "B0", nombre: "Cartera Sana", estado_mora: "al_dia" },
+  { numero: 1, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], prefijo: "B1", nombre: "Alerta Temprana", estado_mora: "mora_30" },
+  { numero: 2, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], prefijo: "B2", nombre: "Gestión Activa", estado_mora: "mora_60" },
+  { numero: 3, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], prefijo: "B3", nombre: "Rescate", estado_mora: "mora_90" },
+  { numero: 4, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", estado_mora: "mora_120" },
+  { numero: 5, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], prefijo: "B5", nombre: "Jurídico", estado_mora: "mora_120_plus" },
 ];
 
 
@@ -3017,6 +3020,9 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
           key: String(b.numero),
           min: b.cuotas_min,
           max: b.cuotas_max,
+          estadoMora: b.estado_mora,
+          label: b.nombre,
+          prefijo: b.prefijo,
         }));
 
   const statsPerCuotasAtrasadas: Record<string, CreditStats> = {};

@@ -2992,10 +2992,16 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
     prefijo?: string;
   };
 
-  const catalogoRows = await getBucketsCatalogo();
+  // Fallback: catálogo aún no sembrado (migración pendiente) O query falla
+  // (columna estado_mora sin aplicar, DB caída) — no tirar 500 en /stats,
+  // usar los rangos B0-B5 conocidos por una release.
+  let catalogoRows: Awaited<ReturnType<typeof getBucketsCatalogo>> = [];
+  try {
+    catalogoRows = await getBucketsCatalogo();
+  } catch (err) {
+    console.error("❌ Error cargando catálogo de buckets (stats):", err);
+  }
 
-  // Fallback: si el catálogo aún no está sembrado (migración pendiente),
-  // no vaciar el embudo — usar los rangos B0-B5 conocidos por una release.
   const statsBuckets: StatsBucketDef[] =
     catalogoRows.length > 0
       ? catalogoRows.map((b) => ({

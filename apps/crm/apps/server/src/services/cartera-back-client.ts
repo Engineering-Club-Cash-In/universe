@@ -736,6 +736,9 @@ export class CarteraBackClient {
 						...(params.capital_max !== undefined && {
 							capital_max: params.capital_max,
 						}),
+						...(params.excluir_pagados_mes && {
+							excluir_pagados_mes: true,
+						}),
 						excel: false,
 					}),
 				},
@@ -769,6 +772,9 @@ export class CarteraBackClient {
 				}),
 				...(params.capital_max !== undefined && {
 					capital_max: params.capital_max.toString(),
+				}),
+				...(params.excluir_pagados_mes && {
+					excluir_pagados_mes: "true",
 				}),
 				excel: "false",
 			});

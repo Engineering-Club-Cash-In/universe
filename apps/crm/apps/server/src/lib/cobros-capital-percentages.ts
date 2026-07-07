@@ -4,6 +4,7 @@ const ACTIVE_ESTADOS = new Set([
 	"mora_60",
 	"mora_90",
 	"mora_120",
+	"mora_120_plus",
 ]);
 
 export type CobrosCapitalStats = {

@@ -200,6 +200,8 @@ export const creditRouter = new Elysia()
     capital_max,
     estados_credito,
     aseguradora_id,      // 🆕 NUEVO
+    cuotas_min,          // 🆕 rango de cuotas atrasadas (min inclusivo)
+    cuotas_max,          // 🆕 rango de cuotas atrasadas (max inclusivo)
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -247,6 +249,12 @@ export const creditRouter = new Elysia()
   // 🆕 Cuotas atrasadas (número)
   const cuotasAtrasadasNum = cuotas_atrasadas ? Number(cuotas_atrasadas) : undefined;
 
+  // 🆕 Rango de cuotas atrasadas (aging). Undefined = no filtrar por ese extremo.
+  const cuotasMinNum =
+    cuotas_min !== undefined && cuotas_min !== "" ? Number(cuotas_min) : undefined;
+  const cuotasMaxNum =
+    cuotas_max !== undefined && cuotas_max !== "" ? Number(cuotas_max) : undefined;
+
   // 🆕 Proximidad de pago (enum)
   const proximidadPagoParam = proximidad_pago
     ? (String(proximidad_pago) as "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH")
@@ -282,6 +290,16 @@ export const creditRouter = new Elysia()
   if (cuotas_atrasadas && isNaN(cuotasAtrasadasNum!)) {
     set.status = 400;
     return { message: "Parámetro 'cuotas_atrasadas' debe ser un número válido." };
+  }
+
+  // 🆕 Validar rango de cuotas si se envía
+  if (cuotasMinNum !== undefined && isNaN(cuotasMinNum)) {
+    set.status = 400;
+    return { message: "Parámetro 'cuotas_min' debe ser un número válido." };
+  }
+  if (cuotasMaxNum !== undefined && isNaN(cuotasMaxNum)) {
+    set.status = 400;
+    return { message: "Parámetro 'cuotas_max' debe ser un número válido." };
   }
 
   // 🆕 Validar proximidad_pago si se envía
@@ -380,7 +398,9 @@ export const creditRouter = new Elysia()
         capitalMinParam,
         capitalMaxParam,
         estadosCreditoParsed?.values,
-        aseguradoraIdNum
+        aseguradoraIdNum,
+        cuotasMinNum,
+        cuotasMaxNum
       );
       set.status = 200;
       return result;
@@ -425,6 +445,8 @@ export const creditRouter = new Elysia()
         capital_max,
         estados_credito,
         aseguradora_id,
+        cuotas_min,
+        cuotas_max,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -492,7 +514,9 @@ export const creditRouter = new Elysia()
           capital_min,
           capital_max,
           estadosCreditoParsed?.values,
-          aseguradora_id
+          aseguradora_id,
+          cuotas_min,
+          cuotas_max
         );
         set.status = 200;
         return result;
@@ -540,6 +564,8 @@ export const creditRouter = new Elysia()
         capital_max: t.Optional(t.Number()),
         estados_credito: t.Optional(t.Array(t.String())),
         aseguradora_id: t.Optional(t.Number()),
+        cuotas_min: t.Optional(t.Number()),
+        cuotas_max: t.Optional(t.Number()),
       }),
     }
   )
@@ -1294,38 +1320,18 @@ export const creditRouter = new Elysia()
       200: t.Object({
         totalCreditos: t.Number(),
         efectividad: t.String(),
-        porCuotasAtrasadas: t.Object({
-          "0": t.Object({
+        // Record dinámico: acepta cualquier bucket ("0".."5" y futuros como "6")
+        // sin recortar keys. Antes era t.Object con claves fijas "0".."4", lo que
+        // hacía que Elysia strippeara el bucket "5" (mora_120_plus) del JSON.
+        porCuotasAtrasadas: t.Record(
+          t.String(),
+          t.Object({
             cantidad: t.Number(),
             porcentaje: t.String(),
             sumaCapital: t.String(),
             sumaMora: t.String(),
-          }),
-          "1": t.Object({
-            cantidad: t.Number(),
-            porcentaje: t.String(),
-            sumaCapital: t.String(),
-            sumaMora: t.String(),
-          }),
-          "2": t.Object({
-            cantidad: t.Number(),
-            porcentaje: t.String(),
-            sumaCapital: t.String(),
-            sumaMora: t.String(),
-          }),
-          "3": t.Object({
-            cantidad: t.Number(),
-            porcentaje: t.String(),
-            sumaCapital: t.String(),
-            sumaMora: t.String(),
-          }),
-          "4": t.Object({
-            cantidad: t.Number(),
-            porcentaje: t.String(),
-            sumaCapital: t.String(),
-            sumaMora: t.String(),
-          }),
-        }),
+          })
+        ),
         porEstado: t.Object({
           cancelado: t.Object({
             cantidad: t.Number(),

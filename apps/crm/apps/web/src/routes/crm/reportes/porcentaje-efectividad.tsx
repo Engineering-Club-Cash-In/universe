@@ -370,8 +370,10 @@ export function PorcentajeEfectividadContent() {
 							<TableRow>
 								<TableHead>Tipo de canal</TableHead>
 								<TableHead className="text-right">Oportunidades</TableHead>
-								<TableHead className="text-right">Cerradas</TableHead>
-								<TableHead className="text-right">Cierres período</TableHead>
+								<TableHead className="text-right">Cerradas (creadas)</TableHead>
+								<TableHead className="text-right">
+									Cierres del período
+								</TableHead>
 								<TableHead className="text-right">Efectividad</TableHead>
 							</TableRow>
 						</TableHeader>
@@ -434,7 +436,9 @@ export function PorcentajeEfectividadContent() {
 								<TableHead>Fuente</TableHead>
 								<TableHead className="text-right">Creadas</TableHead>
 								<TableHead className="text-right">Cerradas (creadas)</TableHead>
-								<TableHead className="text-right">Cierres período</TableHead>
+								<TableHead className="text-right">
+									Cierres del período
+								</TableHead>
 								<TableHead className="text-right">Efectividad</TableHead>
 							</TableRow>
 						</TableHeader>

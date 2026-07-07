@@ -718,8 +718,11 @@ export async function getCreditosWithUserByMesAnio(
       );
     }
 
-    // Filtro por rango de cuotas atrasadas. `esAlDia` (0..0) se resuelve arriba
-    // vía el estado (IN ('ACTIVO')); aquí sólo aplicamos cuando hay mora (min > 0).
+    // Filtro por rango de cuotas atrasadas (MORA_BUCKETS). Reemplaza el filtro
+    // escalar `cuotas_atrasadas` que COBROS-02 arreglaba con un hack `>= 4` solo
+    // para el 120+: el rango soporta B4 exacto (=4) y B5 abierto (>=5) de forma
+    // parametrizable. `esAlDia` (0..0) se resuelve arriba vía el estado; aquí
+    // sólo aplicamos cuando hay mora (min > 0).
     if (cuotasMinEff !== undefined && cuotasMinEff > 0) {
       conditions.push(gte(moras_credito.cuotas_atrasadas, cuotasMinEff));
       if (cuotasMaxEff !== undefined) {

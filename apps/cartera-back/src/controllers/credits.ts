@@ -699,8 +699,18 @@ export async function getCreditosWithUserByMesAnio(
     }
 
     if (cuotas_atrasadas && cuotas_atrasadas > 0) {
-      console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
-      conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+      // Mora 120+ es un bucket ABIERTO: `cuotas_atrasadas = 4` significa "4 o más",
+      // igual que el embudo (getCreditStats usa `>= 4` para ese bucket). Para 1/2/3
+      // (mora_30/60/90) cada etapa es un conteo exacto. Antes se usaba `eq` para todos,
+      // así que un crédito con 5+ cuotas se contaba en el embudo pero NO salía al
+      // filtrar la tabla por mora_120.
+      if (cuotas_atrasadas >= 4) {
+        console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
+        conditions.push(gte(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+      } else {
+        console.log(`🔎 Filtrando por cuotas atrasadas = ${cuotas_atrasadas}`);
+        conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+      }
     }
 
     if (is_vehiculo_propio) {

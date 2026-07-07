@@ -63,6 +63,7 @@ import {
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
+import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -1529,18 +1530,14 @@ function RouteComponent() {
 																	Vencimiento:
 																</span>
 																<br />
-																{new Date(
-																	cuota.fechaVencimiento,
-																).toLocaleDateString("es-GT")}
+																{formatFechaLocal(cuota.fechaVencimiento)}
 															</div>
 															{esPagada ? (
 																<div>
 																	<span className="font-medium">Pagado:</span>
 																	<br />
 																	{cuota.fechaPago
-																		? new Date(
-																				cuota.fechaPago,
-																			).toLocaleDateString("es-GT")
+																		? formatFechaLocal(cuota.fechaPago)
 																		: "Sin fecha"}
 																	<br />
 																	<span className="font-medium text-green-600">
@@ -1798,9 +1795,7 @@ function RouteComponent() {
 								<p className="text-muted-foreground text-sm">Fecha de Inicio</p>
 								<p className="font-medium">
 									{caso.fechaInicioCuota0
-										? new Date(caso.fechaInicioCuota0).toLocaleDateString(
-												"es-GT",
-											)
+										? formatFechaLocal(caso.fechaInicioCuota0)
 										: caso.fechaInicio
 											? new Date(caso.fechaInicio).toLocaleDateString("es-GT")
 											: "Sin fecha"}

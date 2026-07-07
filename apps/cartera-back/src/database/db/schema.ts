@@ -246,7 +246,14 @@
     fecha_liquidacion_inversionistas: timestamp("fecha_liquidacion_inversionistas"), // 👈 Cuándo se liquidó
 
     createdAt: timestamp("createdat").defaultNow(),
-  });
+  }, (table) => ({
+    // Soporta las subconsultas correlacionadas por crédito/fecha (filtro
+    // excluir_pagados_mes, próximas cuotas) sin seq scan por fila.
+    idxCreditoFecha: index("idx_cuotas_credito_credito_fecha").on(
+      table.credito_id,
+      table.fecha_vencimiento,
+    ),
+  }));
   // 📊 Cierre mensual de cartera — foto del estado por cada statusCredit.
   //    El job corre el día 5 de cada mes y `periodo` apunta al mes anterior (el que se cierra).
   //    `capital_total` = suma del campo capital (monto colocado) de los créditos en ese estado.

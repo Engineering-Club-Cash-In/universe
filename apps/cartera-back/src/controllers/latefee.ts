@@ -69,6 +69,45 @@ export type BucketCatalogo = {
 };
 
 /**
+ * Fila completa del catálogo `cartera.buckets` expuesta a consumidores
+ * externos (CRM vía API) — incluye el puente `estado_mora` (numero↔estadoMora).
+ */
+export type BucketCatalogoCompleto = {
+  numero: number;
+  prefijo: string;
+  nombre: string;
+  descripcion: string | null;
+  cuotas_min: number;
+  cuotas_max: number | null;
+  estados_incluidos: string[];
+  es_operativo: boolean;
+  orden: number;
+  color: string | null;
+  estado_mora: string | null;
+};
+
+/** Catálogo dinámico de buckets (activos, ordenados) — fuente única para cartera-back y CRM. */
+export async function getBucketsCatalogo(): Promise<BucketCatalogoCompleto[]> {
+  return db
+    .select({
+      numero: buckets.numero,
+      prefijo: buckets.prefijo,
+      nombre: buckets.nombre,
+      descripcion: buckets.descripcion,
+      cuotas_min: buckets.cuotas_min,
+      cuotas_max: buckets.cuotas_max,
+      estados_incluidos: buckets.estados_incluidos,
+      es_operativo: buckets.es_operativo,
+      orden: buckets.orden,
+      color: buckets.color,
+      estado_mora: buckets.estado_mora,
+    })
+    .from(buckets)
+    .where(eq(buckets.activo, true))
+    .orderBy(buckets.orden);
+}
+
+/**
  * Bucket de un crédito (0-5) resuelto contra el catálogo dinámico `catalogo`.
  * Orden: (1) estado fuera del funnel → null; (2) estado que fuerza un bucket
  * (p.ej. INCOBRABLE → B5 vía `estados_incluidos`); (3) rango de cuotas atrasadas.

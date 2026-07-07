@@ -39,7 +39,28 @@ import {
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
-import { MORA_BUCKETS } from "../config/moraBuckets";
+import { bucketDeCredito, BucketCatalogo, getBucketsCatalogo } from "./latefee";
+
+// Fallback B0-B5 — usado si el catálogo dinámico `cartera.buckets` no
+// responde (DB caída, migración pendiente). Incluye `estados_incluidos` en B5
+// (mismo valor que el seed de 0001_buckets_catalogo.sql) para no perder la
+// regla INCOBRABLE→B5 de `bucketDeCredito` en este path degradado. `prefijo`/
+// `nombre` sintéticos para que la columna Bucket no quede en blanco.
+const FALLBACK_BUCKETS_CUOTAS: {
+  numero: number;
+  cuotas_min: number;
+  cuotas_max: number | null;
+  estados_incluidos: string[];
+  prefijo: string;
+  nombre: string;
+}[] = [
+  { numero: 0, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], prefijo: "B0", nombre: "Cartera Sana" },
+  { numero: 1, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], prefijo: "B1", nombre: "Alerta Temprana" },
+  { numero: 2, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], prefijo: "B2", nombre: "Gestión Activa" },
+  { numero: 3, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], prefijo: "B3", nombre: "Rescate" },
+  { numero: 4, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], prefijo: "B4", nombre: "Última Instancia / Pre Jurídico" },
+  { numero: 5, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], prefijo: "B5", nombre: "Jurídico" },
+];
 
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -563,6 +584,13 @@ export interface CreditoConInfo {
   fecha_inicio?: string | null;
   /** Nombre de la aseguradora vinculada al crédito (null si no tiene). */
   aseguradora?: string | null;
+  /** Bucket de cobros actual (B0-B5), derivado del catálogo dinámico. null = fuera del funnel operativo. */
+  bucket?: {
+    numero: number;
+    prefijo: string;
+    nombre: string;
+    color: string | null;
+  } | null;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -718,11 +746,12 @@ export async function getCreditosWithUserByMesAnio(
       );
     }
 
-    // Filtro por rango de cuotas atrasadas (MORA_BUCKETS). Reemplaza el filtro
-    // escalar `cuotas_atrasadas` que COBROS-02 arreglaba con un hack `>= 4` solo
-    // para el 120+: el rango soporta B4 exacto (=4) y B5 abierto (>=5) de forma
-    // parametrizable. `esAlDia` (0..0) se resuelve arriba vía el estado; aquí
-    // sólo aplicamos cuando hay mora (min > 0).
+    // Filtro por rango de cuotas atrasadas (rangos definidos en el catálogo
+    // dinámico `cartera.buckets`). Reemplaza el filtro escalar `cuotas_atrasadas`
+    // que COBROS-02 arreglaba con un hack `>= 4` solo para el 120+: el rango
+    // soporta B4 exacto (=4) y B5 abierto (>=5) de forma parametrizable.
+    // `esAlDia` (0..0) se resuelve arriba vía el estado; aquí sólo aplicamos
+    // cuando hay mora (min > 0).
     if (cuotasMinEff !== undefined && cuotasMinEff > 0) {
       conditions.push(gte(moras_credito.cuotas_atrasadas, cuotasMinEff));
       if (cuotasMaxEff !== undefined) {
@@ -1033,6 +1062,65 @@ export async function getCreditosWithUserByMesAnio(
     }
   });
 
+  // 4️⃣.5 Catálogo de buckets (dinámico, cartera.buckets) — para derivar el
+  // bucket (B0-B5) de cada crédito. Mismo criterio que el motor de COBROS-02
+  // (bucketDeCredito en latefee.ts), pero sin tocar buckets_historial.
+  type BucketDisplay = {
+    numero: number;
+    prefijo: string;
+    nombre: string;
+    color: string | null;
+  };
+  let catalogoBuckets: BucketCatalogo[] = [];
+  const bucketDisplayMap = new Map<number, BucketDisplay>();
+
+  // Degradar a clasificación + display por cuotas (fallback) en vez de dejar
+  // `catalogoBuckets`/`bucketDisplayMap` vacíos — sin esto la columna Bucket
+  // sale en blanco aunque la clasificación por cuotas siga funcionando.
+  const aplicarFallbackBuckets = () => {
+    catalogoBuckets = FALLBACK_BUCKETS_CUOTAS.map((b) => ({
+      numero: b.numero,
+      cuotas_min: b.cuotas_min,
+      cuotas_max: b.cuotas_max,
+      estados_incluidos: b.estados_incluidos,
+    }));
+    FALLBACK_BUCKETS_CUOTAS.forEach((b) => {
+      bucketDisplayMap.set(b.numero, {
+        numero: b.numero,
+        prefijo: b.prefijo,
+        nombre: b.nombre,
+        color: null,
+      });
+    });
+  };
+
+  try {
+    const catalogoRows = await getBucketsCatalogo();
+
+    if (catalogoRows.length > 0) {
+      catalogoBuckets = catalogoRows.map((b) => ({
+        numero: b.numero,
+        cuotas_min: b.cuotas_min,
+        cuotas_max: b.cuotas_max,
+        estados_incluidos: b.estados_incluidos,
+      }));
+      catalogoRows.forEach((b) => {
+        bucketDisplayMap.set(b.numero, {
+          numero: b.numero,
+          prefijo: b.prefijo,
+          nombre: b.nombre,
+          color: b.color,
+        });
+      });
+    } else {
+      // Catálogo vacío (migración pendiente).
+      aplicarFallbackBuckets();
+    }
+  } catch (err) {
+    console.error("❌ Error cargando catálogo de buckets:", err);
+    aplicarFallbackBuckets();
+  }
+
   // 5️⃣ Próximas cuotas
   let proximasCuotasMap: Record<number, ProximaCuota> = {};
   if (creditosIds.length > 0) {
@@ -1210,6 +1298,14 @@ export async function getCreditosWithUserByMesAnio(
         const proxima_cuota = proximasCuotasMap[creditoId] || null;
         const fecha_inicio = fechaInicioMap[creditoId] || null;
 
+        const numeroBucket = bucketDeCredito(
+          row.creditos.statusCredit,
+          mora?.cuotas_atrasadas ?? 0,
+          catalogoBuckets,
+        );
+        const bucket =
+          numeroBucket == null ? null : bucketDisplayMap.get(numeroBucket) ?? null;
+
         creditosUnicos.set(creditoId, {
           creditos: row.creditos,
           usuarios: row.usuarios,
@@ -1225,6 +1321,7 @@ export async function getCreditosWithUserByMesAnio(
           proxima_cuota,
           fecha_inicio,
           aseguradora: row.aseguradora_nombre ?? null,
+          bucket,
         });
       }
     });
@@ -2821,18 +2918,20 @@ interface CreditStats {
   porcentaje: string;
   sumaCapital: string;
   sumaMora: string;
+  // Enriquecido desde el catálogo dinámico `cartera.buckets` — permite a
+  // consumidores (CRM) resolver el bucket sin mantener su propio mapeo
+  // numero↔estadoMora en código.
+  estadoMora?: string;
+  label?: string;
+  color?: string | null;
+  prefijo?: string;
 }
 
 interface CreditStatsResponse {
   totalCreditos: number;
   efectividad: string; // Porcentaje de créditos SIN cuotas atrasadas
-  porCuotasAtrasadas: {
-    "0": CreditStats;
-    "1": CreditStats;
-    "2": CreditStats;
-    "3": CreditStats;
-    "4": CreditStats;
-  };
+  // Record dinámico: keys = numero del bucket del catálogo ("0".."5" y futuros).
+  porCuotasAtrasadas: Record<string, CreditStats>;
   porEstado: {
     cancelado: CreditStats;
     incobrable: CreditStats;
@@ -2880,15 +2979,51 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
 
   const totalCreditosActivos = totalResult[0]?.total || 0;
 
-  // Estadísticas por cuotas atrasadas — buckets definidos en MORA_BUCKETS
-  // (fuente única). Agregar/mover una etapa se hace ahí, sin tocar este loop.
+  // Estadísticas por cuotas atrasadas — buckets definidos en el catálogo
+  // dinámico `cartera.buckets` (fuente única). Agregar/mover una etapa se hace
+  // ahí (fila en la tabla), sin tocar este loop.
+  type StatsBucketDef = {
+    key: string;
+    min: number;
+    max: number | null;
+    estadoMora?: string;
+    label?: string;
+    color?: string | null;
+    prefijo?: string;
+  };
+
+  const catalogoRows = await getBucketsCatalogo();
+
+  // Fallback: si el catálogo aún no está sembrado (migración pendiente),
+  // no vaciar el embudo — usar los rangos B0-B5 conocidos por una release.
+  const statsBuckets: StatsBucketDef[] =
+    catalogoRows.length > 0
+      ? catalogoRows.map((b) => ({
+          key: String(b.numero),
+          min: b.cuotas_min,
+          max: b.cuotas_max,
+          estadoMora: b.estado_mora ?? undefined,
+          label: b.nombre,
+          color: b.color,
+          prefijo: b.prefijo,
+        }))
+      : FALLBACK_BUCKETS_CUOTAS.map((b) => ({
+          key: String(b.numero),
+          min: b.cuotas_min,
+          max: b.cuotas_max,
+        }));
+
   const statsPerCuotasAtrasadas: Record<string, CreditStats> = {};
-  for (const b of MORA_BUCKETS) {
+  for (const b of statsBuckets) {
     statsPerCuotasAtrasadas[b.key] = {
       cantidad: 0,
       porcentaje: "0",
       sumaCapital: "0",
       sumaMora: "0",
+      estadoMora: b.estadoMora,
+      label: b.label,
+      color: b.color,
+      prefijo: b.prefijo,
     };
   }
 
@@ -2903,7 +3038,7 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
 
   let creditosSinAtraso = 0;
 
-  for (const b of MORA_BUCKETS) {
+  for (const b of statsBuckets) {
     // Condición SQL derivada del rango del bucket:
     //   max === null  → >= min (el "+")
     //   min === max   → = min (exacto)
@@ -2941,6 +3076,7 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
     }
 
     statsPerCuotasAtrasadas[b.key] = {
+      ...statsPerCuotasAtrasadas[b.key],
       cantidad,
       porcentaje,
       sumaCapital: result[0]?.sumaCapital || "0",

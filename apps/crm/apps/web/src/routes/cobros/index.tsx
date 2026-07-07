@@ -982,14 +982,36 @@ function RouteComponent() {
 										mora_120: "text-red-800",
 									};
 
-									// Buscar el % real del embudo
-									const statReal = stats.find((s) => {
-										if (meta.categoria === "mora_total") return false;
-										return s.estadoMora === meta.categoria;
-									});
-									const porcentajeReal = statReal
-										? Number.parseFloat(statReal.porcentaje)
-										: undefined;
+									// Buscar el % real del embudo.
+									// La meta "mora_120" representa el objetivo de 120+ días: tras
+									// el split en B4 (mora_120, =4 cuotas) y B5 (mora_120_plus, 5+),
+									// hay que SUMAR ambos buckets para no subcontar el 120+.
+									let porcentajeReal: number | undefined;
+									if (meta.categoria === "mora_total") {
+										porcentajeReal = undefined;
+									} else if (meta.categoria === "mora_120") {
+										// Sin ningún bucket 120/120+ (mes sin datos, o stats aún
+										// cargando/errored → []) → undefined para renderizar "—",
+										// no 0 (que se leería como "meta cumplida" en falso).
+										const buckets120 = stats.filter(
+											(s) =>
+												s.estadoMora === "mora_120" ||
+												s.estadoMora === "mora_120_plus",
+										);
+										porcentajeReal = buckets120.length
+											? buckets120.reduce(
+													(sum, s) => sum + Number.parseFloat(s.porcentaje || "0"),
+													0,
+												)
+											: undefined;
+									} else {
+										const statReal = stats.find(
+											(s) => s.estadoMora === meta.categoria,
+										);
+										porcentajeReal = statReal
+											? Number.parseFloat(statReal.porcentaje)
+											: undefined;
+									}
 
 									// Para mora_total, sumar sólo moras activas
 									const porcentajeMoraTotal =

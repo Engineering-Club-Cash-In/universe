@@ -16,6 +16,7 @@ import {
 	type estadoMoraEnum,
 } from "../db/schema/cobros";
 import { leads } from "../db/schema/crm";
+import { estadoMoraPorCuotas } from "../lib/moraBuckets";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import { createNotification } from "../routers/notifications";
 import type { StatusCreditEnum } from "../types/cartera-back";
@@ -29,23 +30,24 @@ type EstadoMoraEnum = (typeof estadoMoraEnum.enumValues)[number];
 // ============================================================================
 
 /**
- * Mapea el estado de cartera-back a estado de mora del CRM
+ * Mapea el estado de cartera-back a estado de mora del CRM.
+ *
+ * La etapa de aging se clasifica por CUOTAS ATRASADAS vía MORA_BUCKETS (misma
+ * fuente que el embudo, la tabla y los reportes), NO por días. Antes se usaba
+ * `diasMora` con cortes <=30/60/90/120, pero como los días exactos no equivalen
+ * a `cuotas * 30`, un crédito en el borde B4/B5 (ej. 4 cuotas con 125 días)
+ * quedaba clasificado distinto que en el resto de la vista. Ahora coincide.
  */
 function mapearEstadoMora(
-	diasMora: number,
+	cuotasAtrasadas: number,
 	statusCredit: StatusCreditEnum,
 ): EstadoMoraEnum {
 	// Si el crédito está cancelado o incobrable, usar esos estados
 	if (statusCredit === "CANCELADO") return "pagado";
 	if (statusCredit === "INCOBRABLE") return "incobrable";
 
-	// Mapear según días de mora
-	if (diasMora === 0) return "al_dia";
-	if (diasMora <= 30) return "mora_30";
-	if (diasMora <= 60) return "mora_60";
-	if (diasMora <= 90) return "mora_90";
-	if (diasMora <= 120) return "mora_120";
-	return "mora_120_plus";
+	// Etapa de aging por cuotas atrasadas (MORA_BUCKETS).
+	return estadoMoraPorCuotas(cuotasAtrasadas) as EstadoMoraEnum;
 }
 
 /**
@@ -254,11 +256,13 @@ export async function sincronizarCasosCobros(
 				);
 
 				// Calcular días de mora exactos usando la fecha de vencimiento
+				// (se sigue usando para diasMoraMaximo/UI; la ETAPA se deriva de cuotas).
 				const diasMora = calcularDiasMoraExactos(
 					creditoCompleto.cuotasAtrasadas || [],
 				);
+				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
 				const estadoMora = mapearEstadoMora(
-					diasMora,
+					cuotasAtrasadas,
 					creditoCompleto.credito.statusCredit,
 				);
 

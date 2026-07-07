@@ -199,18 +199,21 @@ describe("aggregateEfectividadPorTipoCanal", () => {
 				tipoCanal: "Pauta Digital",
 				totalOportunidades: 10,
 				totalCerradas: 5,
+				totalCierresPeriodo: 0,
 				porcentaje: 50,
 			},
 			{
 				tipoCanal: "Orgánico Digital",
 				totalOportunidades: 5,
 				totalCerradas: 2,
+				totalCierresPeriodo: 0,
 				porcentaje: 40,
 			},
 			{
 				tipoCanal: "Otros",
 				totalOportunidades: 2,
 				totalCerradas: 1,
+				totalCierresPeriodo: 0,
 				porcentaje: 50,
 			},
 		]);
@@ -237,7 +240,30 @@ describe("aggregateEfectividadPorTipoCanal", () => {
 				tipoCanal: "Pauta Digital",
 				totalOportunidades: 10,
 				totalCerradas: 5,
+				totalCierresPeriodo: 0,
 				porcentaje: 50,
+			},
+		]);
+	});
+
+	test("keeps period-only closes in channel subtotals", () => {
+		expect(
+			aggregateEfectividadPorTipoCanal([
+				{
+					source: "event",
+					totalOportunidades: 0,
+					totalCerradas: 0,
+					totalCierresPeriodo: "3",
+					porcentaje: 0,
+				},
+			]),
+		).toEqual([
+			{
+				tipoCanal: "Físico",
+				totalOportunidades: 0,
+				totalCerradas: 0,
+				totalCierresPeriodo: 3,
+				porcentaje: 0,
 			},
 		]);
 	});

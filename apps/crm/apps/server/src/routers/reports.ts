@@ -109,13 +109,18 @@ type EfectividadFuenteRow = {
 	source: string | null;
 	totalOportunidades: number;
 	totalCerradas: number | `${number}`;
+	totalCierresPeriodo?: number | `${number}`;
 	porcentaje: number;
 };
 
 export function aggregateEfectividadPorTipoCanal(rows: EfectividadFuenteRow[]) {
 	const totals = new Map<
 		LeadSourceChannelType,
-		{ totalOportunidades: number; totalCerradas: number }
+		{
+			totalOportunidades: number;
+			totalCerradas: number;
+			totalCierresPeriodo: number;
+		}
 	>();
 
 	for (const row of rows) {
@@ -123,9 +128,11 @@ export function aggregateEfectividadPorTipoCanal(rows: EfectividadFuenteRow[]) {
 		const total = totals.get(tipoCanal) ?? {
 			totalOportunidades: 0,
 			totalCerradas: 0,
+			totalCierresPeriodo: 0,
 		};
 		total.totalOportunidades += row.totalOportunidades;
 		total.totalCerradas += Number(row.totalCerradas);
+		total.totalCierresPeriodo += Number(row.totalCierresPeriodo ?? 0);
 		totals.set(tipoCanal, total);
 	}
 
@@ -137,6 +144,7 @@ export function aggregateEfectividadPorTipoCanal(rows: EfectividadFuenteRow[]) {
 				tipoCanal,
 				totalOportunidades: total.totalOportunidades,
 				totalCerradas: total.totalCerradas,
+				totalCierresPeriodo: total.totalCierresPeriodo,
 				porcentaje:
 					total.totalOportunidades > 0
 						? Math.round(

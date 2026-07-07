@@ -187,13 +187,13 @@ export function PorcentajeEfectividadContent() {
 		}),
 		enabled: !!input,
 	});
+	const data = reportQuery.data;
 
 	// Reiniciar página al recibir datos nuevos
 	useEffect(() => {
-		setPage(0);
-	}, [reportQuery.data]);
+		if (data) setPage(0);
+	}, [data]);
 
-	const data = reportQuery.data;
 	const isLoading = reportQuery.isLoading;
 
 	const allRegistros = data?.registros ?? [];
@@ -371,6 +371,7 @@ export function PorcentajeEfectividadContent() {
 								<TableHead>Tipo de canal</TableHead>
 								<TableHead className="text-right">Oportunidades</TableHead>
 								<TableHead className="text-right">Cerradas</TableHead>
+								<TableHead className="text-right">Cierres período</TableHead>
 								<TableHead className="text-right">Efectividad</TableHead>
 							</TableRow>
 						</TableHeader>
@@ -378,7 +379,7 @@ export function PorcentajeEfectividadContent() {
 							{isLoading ? (
 								<TableRow>
 									<TableCell
-										colSpan={4}
+										colSpan={5}
 										className="py-8 text-center text-muted-foreground"
 									>
 										Cargando...
@@ -387,7 +388,7 @@ export function PorcentajeEfectividadContent() {
 							) : channelTypeData.length === 0 ? (
 								<TableRow>
 									<TableCell
-										colSpan={4}
+										colSpan={5}
 										className="py-8 text-center text-muted-foreground"
 									>
 										No hay datos para el período seleccionado
@@ -404,6 +405,9 @@ export function PorcentajeEfectividadContent() {
 										</TableCell>
 										<TableCell className="text-right">
 											{row.totalCerradas}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.totalCierresPeriodo}
 										</TableCell>
 										<TableCell className="text-right font-semibold">
 											{row.porcentaje}%

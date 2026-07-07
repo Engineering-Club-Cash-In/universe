@@ -403,6 +403,7 @@
   // Solo se persiste el HISTORIAL de transiciones + la asignación asesor↔bucket.
 
   export const bucketEventoTipoEnum = customSchema.enum("bucket_evento_tipo", [
+    "INICIAL", // línea base: primer registro del crédito (punto de partida)
     "SUBIDA",
     "BAJADA",
   ]);
@@ -411,6 +412,30 @@
     "bucket_evento_origen",
     ["PROCESO_AUTO", "API_MANUAL"]
   );
+
+  // Catálogo de buckets (config dinámica). El "bucket actual" se DERIVA de aquí:
+  // (1) estados fuera del funnel → sin bucket; (2) estado que fuerza un bucket
+  // (INCOBRABLE → B5 vía `estados_incluidos`); (3) rango de cuotas atrasadas
+  // (`cuotas_min`..`cuotas_max`, max null = abierto → B5). Los nombres, prefijos,
+  // rangos, estados y colores se editan sin tocar código → filtros full dinámicos.
+  export const buckets = customSchema.table("buckets", {
+    numero: integer("numero").primaryKey(), // 0-5, clave estable que produce el job
+    prefijo: varchar("prefijo", { length: 8 }).notNull(), // "B0".."B5"
+    nombre: varchar("nombre", { length: 64 }).notNull(), // "Cartera Sana", "Alerta Temprana"...
+    descripcion: text("descripcion"),
+    cuotas_min: integer("cuotas_min").notNull(),
+    cuotas_max: integer("cuotas_max"), // null = abierto (B5 = 5..∞)
+    estados_incluidos: text("estados_incluidos")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`), // estados que FUERZAN este bucket (INCOBRABLE→B5)
+    es_operativo: boolean("es_operativo").notNull().default(true), // false = fuera del funnel (B5 jurídico)
+    orden: integer("orden").notNull().default(0),
+    color: varchar("color", { length: 16 }),
+    activo: boolean("activo").notNull().default(true),
+    created_at: timestamp("created_at").defaultNow(),
+    updated_at: timestamp("updated_at").defaultNow(),
+  });
 
   // Asignación asesor ↔ bucket (modelo POOL, muchos-a-muchos): un bucket con
   // varios asesores y un asesor en varios buckets.
@@ -421,7 +446,9 @@
       asesor_id: integer("asesor_id")
         .notNull()
         .references(() => asesores.asesor_id, { onDelete: "cascade" }),
-      bucket: integer("bucket").notNull(), // 0-5
+      bucket: integer("bucket")
+        .notNull()
+        .references(() => buckets.numero), // 0-5 (FK al catálogo)
       activo: boolean("activo").notNull().default(true),
       created_at: timestamp("created_at").defaultNow(),
       updated_at: timestamp("updated_at").defaultNow(),
@@ -433,7 +460,8 @@
   );
 
   // Bitácora de transiciones de bucket (append-only). El bucket actual se deriva;
-  // aquí solo se registra CUÁNDO cambia (SUBIDA = empeora, BAJADA = mejora/cura).
+  // aquí se registra el arranque (INICIAL = línea base, 1 por crédito la 1a vez)
+  // y CUÁNDO cambia (SUBIDA = empeora, BAJADA = mejora/cura).
   export const buckets_historial = customSchema.table(
     "buckets_historial",
     {
@@ -441,8 +469,12 @@
       credito_id: integer("credito_id")
         .notNull()
         .references(() => creditos.credito_id, { onDelete: "cascade" }),
-      bucket_anterior: integer("bucket_anterior"), // null en el primer registro
-      bucket_nuevo: integer("bucket_nuevo").notNull(),
+      bucket_anterior: integer("bucket_anterior").references(
+        () => buckets.numero
+      ), // null en el primer registro
+      bucket_nuevo: integer("bucket_nuevo")
+        .notNull()
+        .references(() => buckets.numero),
       tipo_evento: bucketEventoTipoEnum("tipo_evento").notNull(),
       origen: bucketEventoOrigenEnum("origen").notNull().default("PROCESO_AUTO"),
       cuotas_atrasadas_nuevas: integer("cuotas_atrasadas_nuevas")

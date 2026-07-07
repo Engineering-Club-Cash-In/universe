@@ -14,3 +14,4 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 | Archivo | Qué crea |
 |---|---|
 | `0000_motor_buckets.sql` | Motor de buckets: enums `bucket_evento_tipo`/`bucket_evento_origen`, tabla `buckets_historial` (transiciones) y `asesor_bucket` (asignación pool). |
+| `0001_buckets_catalogo.sql` | Catálogo dinámico `buckets` (nombre/prefijo/rangos/estados/color) + seed B0-B5 + FKs de `asesor_bucket.bucket` y `buckets_historial.bucket_(nuevo\|anterior)` al catálogo. |

@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+	buildPorcentajeEfectividadFuenteRows,
 	CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
 	enforceClosedCreditReportLimit,
 	isClosedCreditReportCarteraStatusIncluded,
-	isPorcentajeEfectividadPeriodCloseIncluded,
 	isPorcentajeEfectividadOpportunityStatusIncluded,
+	isPorcentajeEfectividadPeriodCloseIncluded,
 } from "./reports";
 
 describe("isClosedCreditReportCarteraStatusIncluded", () => {
@@ -69,6 +70,55 @@ describe("isPorcentajeEfectividadPeriodCloseIncluded", () => {
 				end,
 			),
 		).toBe(false);
+	});
+});
+
+describe("buildPorcentajeEfectividadFuenteRows", () => {
+	test("keeps cohort closes and period closes as separate per-source metrics", () => {
+		const rows = buildPorcentajeEfectividadFuenteRows(
+			[
+				{
+					source: "agency",
+					totalOportunidades: 25,
+					totalCerradas: 0,
+					porcentaje: 0,
+				},
+				{
+					source: "meta",
+					totalOportunidades: 108,
+					totalCerradas: 0,
+					porcentaje: 0,
+				},
+			],
+			[
+				{ source: "agency", totalCierresPeriodo: 11 },
+				{ source: "website", totalCierresPeriodo: 3 },
+			],
+		);
+
+		expect(rows).toEqual([
+			{
+				source: "meta",
+				totalOportunidades: 108,
+				totalCerradas: 0,
+				totalCierresPeriodo: 0,
+				porcentaje: 0,
+			},
+			{
+				source: "agency",
+				totalOportunidades: 25,
+				totalCerradas: 0,
+				totalCierresPeriodo: 11,
+				porcentaje: 0,
+			},
+			{
+				source: "website",
+				totalOportunidades: 0,
+				totalCerradas: 0,
+				totalCierresPeriodo: 3,
+				porcentaje: 0,
+			},
+		]);
 	});
 });
 

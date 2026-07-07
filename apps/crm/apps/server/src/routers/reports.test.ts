@@ -215,6 +215,32 @@ describe("aggregateEfectividadPorTipoCanal", () => {
 			},
 		]);
 	});
+
+	test("coerces raw closed counts before summing channel totals", () => {
+		expect(
+			aggregateEfectividadPorTipoCanal([
+				{
+					source: "google",
+					totalOportunidades: 3,
+					totalCerradas: "1",
+					porcentaje: 33.3,
+				},
+				{
+					source: "meta",
+					totalOportunidades: 7,
+					totalCerradas: "4",
+					porcentaje: 57.1,
+				},
+			]),
+		).toEqual([
+			{
+				tipoCanal: "Pauta Digital",
+				totalOportunidades: 10,
+				totalCerradas: 5,
+				porcentaje: 50,
+			},
+		]);
+	});
 });
 
 describe("aggregateTiempoCierrePorTipoCanal", () => {
@@ -277,6 +303,37 @@ describe("aggregateTiempoCierrePorTipoCanal", () => {
 					totalCreditos: 1,
 					avgDias: 1.2,
 					totalDias: 1.24,
+					minDias: 1,
+					maxDias: 2,
+				},
+			]),
+		).toEqual([
+			{
+				tipoCanal: "Físico",
+				totalCreditos: 3,
+				avgDias: 1.2,
+				minDias: 1,
+				maxDias: 2,
+			},
+		]);
+	});
+
+	test("coerces raw day totals before averaging channel totals", () => {
+		expect(
+			aggregateTiempoCierrePorTipoCanal([
+				{
+					source: "property",
+					totalCreditos: 2,
+					avgDias: 1.3,
+					totalDias: "2.5",
+					minDias: 1,
+					maxDias: 2,
+				},
+				{
+					source: "agency",
+					totalCreditos: 1,
+					avgDias: 1.2,
+					totalDias: "1.24",
 					minDias: 1,
 					maxDias: 2,
 				},

@@ -108,7 +108,7 @@ export function isPorcentajeEfectividadPeriodCloseIncluded(
 type EfectividadFuenteRow = {
 	source: string | null;
 	totalOportunidades: number;
-	totalCerradas: number;
+	totalCerradas: number | `${number}`;
 	porcentaje: number;
 };
 
@@ -125,7 +125,7 @@ export function aggregateEfectividadPorTipoCanal(rows: EfectividadFuenteRow[]) {
 			totalCerradas: 0,
 		};
 		total.totalOportunidades += row.totalOportunidades;
-		total.totalCerradas += row.totalCerradas;
+		total.totalCerradas += Number(row.totalCerradas);
 		totals.set(tipoCanal, total);
 	}
 
@@ -152,7 +152,7 @@ type TiempoCierreFuenteRow = {
 	source: string | null;
 	totalCreditos: number;
 	avgDias: number;
-	totalDias?: number;
+	totalDias?: number | `${number}`;
 	minDias: number;
 	maxDias: number;
 };
@@ -179,7 +179,7 @@ export function aggregateTiempoCierrePorTipoCanal(
 			maxDias: null,
 		};
 		total.totalCreditos += row.totalCreditos;
-		total.totalDias += row.totalDias ?? row.avgDias * row.totalCreditos;
+		total.totalDias += Number(row.totalDias ?? row.avgDias * row.totalCreditos);
 		total.minDias =
 			total.minDias === null
 				? row.minDias

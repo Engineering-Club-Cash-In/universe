@@ -432,6 +432,7 @@
     es_operativo: boolean("es_operativo").notNull().default(true), // false = fuera del funnel (B5 jurídico)
     orden: integer("orden").notNull().default(0),
     color: varchar("color", { length: 16 }),
+    estado_mora: varchar("estado_mora", { length: 24 }), // puente numero↔estadoMora (al_dia..mora_120_plus), consumido por CRM
     activo: boolean("activo").notNull().default(true),
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),

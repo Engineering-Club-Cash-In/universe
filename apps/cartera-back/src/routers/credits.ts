@@ -1334,6 +1334,12 @@ export const creditRouter = new Elysia()
             porcentaje: t.String(),
             sumaCapital: t.String(),
             sumaMora: t.String(),
+            // Enriquecido desde el catálogo dinámico `cartera.buckets` — el
+            // CRM lo usa para resolver estadoMora sin mantener su propio mapeo.
+            estadoMora: t.Optional(t.String()),
+            label: t.Optional(t.String()),
+            color: t.Optional(t.Union([t.String(), t.Null()])),
+            prefijo: t.Optional(t.String()),
           })
         ),
         porEstado: t.Object({

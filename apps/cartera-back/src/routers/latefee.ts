@@ -3,7 +3,7 @@ import { Elysia, t } from "elysia";
  
  
 import { authMiddleware } from "./midleware";
-import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras } from "../controllers/latefee";
+import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, getBucketsCatalogo } from "../controllers/latefee";
 import { getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, getMoraHistorialExcel } from "../controllers/moraHistorial";
 
 // Fecha de hoy en zona Guatemala (YYYY-MM-DD), para el corte por defecto del historial.
@@ -25,6 +25,25 @@ const NO_AUTORIZADO = { success: false, message: "[ERROR] No autorizado (requier
 
 export const morasRouter = new Elysia()
   .use(authMiddleware)
+
+  /**
+   * Catálogo dinámico de buckets de mora (B0-B5): rangos, nombres, colores y
+   * el puente estado_mora (numero↔estadoMora). Fuente única — CRM lo consume
+   * en vez de mantener su propio mapeo hardcoded.
+   */
+  .get("/config/buckets", async ({ set }) => {
+    try {
+      const data = await getBucketsCatalogo();
+      return { success: true, data };
+    } catch (error) {
+      set.status = 500;
+      return {
+        success: false,
+        message: "Error al obtener catálogo de buckets",
+        error: error instanceof Error ? error.message : "Error desconocido",
+      };
+    }
+  })
 
   /**
    * Crear una mora manualmente

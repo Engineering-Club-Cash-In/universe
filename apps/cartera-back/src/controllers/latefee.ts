@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { client, db } from "../database";
-import { asesores, buckets_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, usuarios } from "../database/db/schema";
+import { asesores, buckets, buckets_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -49,9 +49,10 @@ export function isOverdueInstallmentForMora(
 // ============================================================
 // 🪣 MOTOR DE BUCKETS (COBROS-02) — bucket derivado por estado + cuotas
 // ============================================================
-// B5 (Jurídico) y los estados fuera del funnel operativo se determinan por
-// statusCredit, NO por conteo de cuotas (esos créditos ya no llevan mora).
-export const STATUS_BUCKET_B5 = ["INCOBRABLE"]; // legal / jurídico
+// El bucket se DERIVA del catálogo dinámico `cartera.buckets` (nombres, rangos y
+// estados configurables → filtros full dinámicos). Lo único que queda en código
+// es la lista de estados FUERA del funnel operativo (Opción A): esos créditos ya
+// no llevan mora ni se trackean como bucket.
 export const STATUS_BUCKET_FUERA = [
   "CANCELADO",
   "PENDIENTE_CANCELACION",
@@ -59,19 +60,38 @@ export const STATUS_BUCKET_FUERA = [
   "CAIDO",
 ];
 
+// Fila del catálogo de buckets relevante para la derivación.
+export type BucketCatalogo = {
+  numero: number;
+  cuotas_min: number;
+  cuotas_max: number | null; // null = abierto (B5 = 5..∞)
+  estados_incluidos: string[];
+};
+
 /**
- * Bucket de un crédito (0-5) según su estado y cuotas atrasadas.
+ * Bucket de un crédito (0-5) resuelto contra el catálogo dinámico `catalogo`.
+ * Orden: (1) estado fuera del funnel → null; (2) estado que fuerza un bucket
+ * (p.ej. INCOBRABLE → B5 vía `estados_incluidos`); (3) rango de cuotas atrasadas.
  * Devuelve `null` si el crédito está fuera del funnel operativo (no se trackea).
- * B0=0, B1=1, B2=2, B3=3, B4=4, B5=>=5 (o INCOBRABLE/legal).
  */
 export function bucketDeCredito(
   status: string | null | undefined,
   cuotasAtrasadas: number,
+  catalogo: BucketCatalogo[],
 ): number | null {
-  if (status && STATUS_BUCKET_B5.includes(status)) return 5;
+  // (1) Fuera del funnel operativo (lista en código, Opción A).
   if (status && STATUS_BUCKET_FUERA.includes(status)) return null;
-  // ACTIVO / MOROSO → por cuotas
-  return Math.min(Math.max(cuotasAtrasadas, 0), 5);
+  // (2) Estado que fuerza un bucket (p.ej. INCOBRABLE → B5).
+  if (status) {
+    const porEstado = catalogo.find((b) => b.estados_incluidos.includes(status));
+    if (porEstado) return porEstado.numero;
+  }
+  // (3) Por rango de cuotas atrasadas (max null = abierto).
+  const cuotas = Math.max(cuotasAtrasadas, 0);
+  const porRango = catalogo.find(
+    (b) => cuotas >= b.cuotas_min && (b.cuotas_max == null || cuotas <= b.cuotas_max),
+  );
+  return porRango ? porRango.numero : null;
 }
 
 /**
@@ -905,6 +925,23 @@ export async function procesarMoras() {
     // (derivado de estado + cuotas) y los registra en `buckets_historial`.
     // Si algo falla aquí, NO debe romper el proceso de mora (operación crítica).
     try {
+      // Catálogo de buckets (config dinámica: nombres/rangos/estados). ~6 filas.
+      const catalogoBuckets: BucketCatalogo[] = await db
+        .select({
+          numero: buckets.numero,
+          cuotas_min: buckets.cuotas_min,
+          cuotas_max: buckets.cuotas_max,
+          estados_incluidos: buckets.estados_incluidos,
+        })
+        .from(buckets)
+        .where(eq(buckets.activo, true))
+        .orderBy(buckets.orden);
+
+      if (catalogoBuckets.length === 0) {
+        console.warn(
+          "[BUCKETS] ⚠️ Catálogo `cartera.buckets` vacío (¿migración/seed sin aplicar?) — se omite el registro de transiciones.",
+        );
+      } else {
       // status por crédito — ya viene en `cuotas` (el job lo cargó con JOIN)
       const statusPorCredito = new Map<number, string>();
       for (const c of cuotas) {
@@ -924,15 +961,35 @@ export async function procesarMoras() {
         ultimoBucket.set(Number(row.credito_id), Number(row.bucket_nuevo));
       }
 
+      let bucketsIniciales = 0;
       let bucketsSubidas = 0;
       let bucketsBajadas = 0;
 
       for (const [creditoId, status] of statusPorCredito) {
         const cuotasAtrasadas = moraPorCredito[creditoId] ?? 0;
-        const bucketNuevo = bucketDeCredito(status, cuotasAtrasadas);
+        const bucketNuevo = bucketDeCredito(status, cuotasAtrasadas, catalogoBuckets);
         if (bucketNuevo === null) continue; // fuera del funnel operativo
 
-        const tieneHistorial = ultimoBucket.has(creditoId);
+        // Primera vez que vemos el crédito → sembrar la LÍNEA BASE (incluye B0).
+        // `INICIAL` marca el punto de partida real; la salud la dice bucket_nuevo.
+        if (!ultimoBucket.has(creditoId)) {
+          await db.insert(buckets_historial).values({
+            credito_id: creditoId,
+            bucket_anterior: null,
+            bucket_nuevo: bucketNuevo,
+            tipo_evento: "INICIAL",
+            origen: "PROCESO_AUTO",
+            cuotas_atrasadas_nuevas: cuotasAtrasadas,
+            status_credito: status,
+            asesor_id: null,
+            pago_id: null,
+            motivo: "Línea base — primer registro en el motor de buckets",
+          });
+          ultimoBucket.set(creditoId, bucketNuevo);
+          bucketsIniciales++;
+          continue;
+        }
+
         const bucketAnterior = ultimoBucket.get(creditoId) ?? 0;
         if (bucketNuevo === bucketAnterior) continue; // sin cambio de bucket
 
@@ -964,7 +1021,7 @@ export async function procesarMoras() {
 
         await db.insert(buckets_historial).values({
           credito_id: creditoId,
-          bucket_anterior: tieneHistorial ? bucketAnterior : null,
+          bucket_anterior: bucketAnterior,
           bucket_nuevo: bucketNuevo,
           tipo_evento: esSubida ? "SUBIDA" : "BAJADA",
           origen: "PROCESO_AUTO",
@@ -980,8 +1037,9 @@ export async function procesarMoras() {
       }
 
       console.log(
-        `[BUCKETS] Transiciones registradas — subidas: ${bucketsSubidas}, bajadas: ${bucketsBajadas}`,
+        `[BUCKETS] Registros — iniciales: ${bucketsIniciales}, subidas: ${bucketsSubidas}, bajadas: ${bucketsBajadas}`,
       );
+      } // fin else (catálogo no vacío)
     } catch (bucketErr) {
       console.error(
         "[BUCKETS] ⚠️ Error registrando transiciones de bucket (el proceso de mora no se ve afectado):",

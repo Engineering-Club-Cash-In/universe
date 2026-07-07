@@ -52,6 +52,10 @@ import {
 	isTestModeEnabled,
 	TEST_EMAIL,
 } from "../lib/messaging-test-mode";
+import {
+	estadoMoraPorCuotas,
+	rangoCuotasPorEstadoMora,
+} from "../lib/moraBuckets";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
 	cobrosProcedure,
@@ -84,7 +88,8 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	anio: number;
 	page?: number;
 	perPage?: number;
-	cuotasAtrasadas?: number;
+	cuotasMin?: number;
+	cuotasMax?: number;
 	estado?:
 		| "ACTIVO"
 		| "CANCELADO"
@@ -114,8 +119,11 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		page: params.page,
 		perPage: params.perPage,
 		estado: estado,
-		...(params.cuotasAtrasadas !== undefined && {
-			cuotas_atrasadas: params.cuotasAtrasadas,
+		...(params.cuotasMin !== undefined && {
+			cuotas_min: params.cuotasMin,
+		}),
+		...(params.cuotasMax !== undefined && {
+			cuotas_max: params.cuotasMax,
 		}),
 		...(params.nombre_usuario !== undefined &&
 			params.nombre_usuario !== "" && {
@@ -458,6 +466,16 @@ export const cobrosRouter = {
 								statsResponse.porCuotasAtrasadas["4"]?.porcentaje || "0",
 						},
 						{
+							estadoMora: "mora_120_plus",
+							totalCases: statsResponse.porCuotasAtrasadas["5"]?.cantidad || 0,
+							montoTotal:
+								statsResponse.porCuotasAtrasadas["5"]?.sumaMora || "0",
+							sumaCapital:
+								statsResponse.porCuotasAtrasadas["5"]?.sumaCapital || "0",
+							porcentaje:
+								statsResponse.porCuotasAtrasadas["5"]?.porcentaje || "0",
+						},
+						{
 							estadoMora: "completado",
 							totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
 							montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
@@ -548,6 +566,12 @@ export const cobrosRouter = {
 					porcentaje: "0",
 				},
 				mora_120: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+				mora_120_plus: {
 					totalCases: 0,
 					montoTotal: "0",
 					sumaCapital: "0",
@@ -669,8 +693,11 @@ export const cobrosRouter = {
 					const mes = 0;
 					const anio = new Date().getFullYear();
 
-					// Mapear filtro de estadoMora a parámetros de cartera-back
-					let cuotasAtrasadas: number | undefined;
+					// Mapear filtro de estadoMora a parámetros de cartera-back.
+					// El rango de cuotas por etapa sale de MORA_BUCKETS (fuente única):
+					// agregar/mover una etapa se hace ahí, no aquí.
+					let cuotasMin: number | undefined;
+					let cuotasMax: number | undefined;
 					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
 					const searchTerm = input.searchTerm?.trim() || "";
 					const numeroSifcoExacto = input.numeroSifco?.trim() || "";
@@ -684,27 +711,6 @@ export const cobrosRouter = {
 
 					if (input.estadoMora) {
 						switch (input.estadoMora) {
-							case "al_dia":
-								cuotasAtrasadas = 0;
-								estadoCartera = "ACTIVO";
-								break;
-							case "mora_30":
-								cuotasAtrasadas = 1;
-								estadoCartera = "ACTIVO";
-								break;
-							case "mora_60":
-								cuotasAtrasadas = 2;
-								estadoCartera = "ACTIVO";
-								break;
-							case "mora_90":
-								cuotasAtrasadas = 3;
-								estadoCartera = "ACTIVO";
-								break;
-							case "mora_120":
-								// Más de 3 cuotas atrasadas (120+ días)
-								cuotasAtrasadas = 4;
-								estadoCartera = "ACTIVO";
-								break;
 							case "incobrable":
 								// Solo cambiar el estado, sin filtrar por cuotas
 								estadoCartera = "INCOBRABLE";
@@ -716,9 +722,16 @@ export const cobrosRouter = {
 							case "en_convenio":
 								estadoCartera = "EN_CONVENIO" as typeof estadoCartera;
 								break;
-							default:
-								// Sin filtro, mantener ACTIVO como predeterminado
+							default: {
+								// Etapas de aging (al_dia, mora_30/60/90/120, mora_120_plus):
+								// tomar el rango de cuotas de la config.
 								estadoCartera = "ACTIVO";
+								const rango = rangoCuotasPorEstadoMora(input.estadoMora);
+								if (rango) {
+									cuotasMin = rango.min;
+									cuotasMax = rango.max;
+								}
+							}
 						}
 					} else {
 						// Si no hay filtro, usar ACTIVO por defecto
@@ -726,7 +739,7 @@ export const cobrosRouter = {
 					}
 
 					console.log(
-						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}, etiquetas=${input.etiquetas?.join(",") || ""}`,
+						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasMin=${cuotasMin}, cuotasMax=${cuotasMax}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}, etiquetas=${input.etiquetas?.join(",") || ""}`,
 					);
 
 					// Si hay filtro de etiquetas, primero resolver en CRM la lista de
@@ -823,7 +836,8 @@ export const cobrosRouter = {
 									anio,
 									page: 1,
 									perPage: 50,
-									cuotasAtrasadas,
+									cuotasMin,
+									cuotasMax,
 									estado: estadoCartera,
 									time: input.time,
 									email_cobrador: input.emailCobrador,
@@ -868,7 +882,8 @@ export const cobrosRouter = {
 									anio,
 									page: 1,
 									perPage,
-									cuotasAtrasadas,
+									cuotasMin,
+									cuotasMax,
 									estado: estadoCartera,
 									time: input.time,
 									email_cobrador: input.emailCobrador,
@@ -887,7 +902,8 @@ export const cobrosRouter = {
 										anio,
 										page,
 										perPage,
-										cuotasAtrasadas,
+										cuotasMin,
+										cuotasMax,
 										estado: estadoCartera,
 										time: input.time,
 										email_cobrador: input.emailCobrador,
@@ -931,7 +947,8 @@ export const cobrosRouter = {
 								anio,
 								page: 1,
 								perPage: input.limit || 50,
-								cuotasAtrasadas,
+								cuotasMin,
+								cuotasMax,
 								estado: estadoCartera,
 								time: input.time,
 								email_cobrador: input.emailCobrador,
@@ -949,7 +966,8 @@ export const cobrosRouter = {
 							anio,
 							page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
 							perPage: input.limit || 50,
-							cuotasAtrasadas,
+							cuotasMin,
+							cuotasMax,
 							estado: estadoCartera,
 							time: input.time,
 							email_cobrador: input.emailCobrador,
@@ -1023,15 +1041,11 @@ export const cobrosRouter = {
 							// `cuota × cuotas`, dando un número distinto al del detalle para el mismo crédito.
 							const montoEnMora = Number(credito.mora?.monto_mora ?? 0);
 
-							// Determinar estado de mora según statusCredit y días de mora
+							// Determinar estado de mora según statusCredit y cuotas atrasadas
+							// (MORA_BUCKETS: 0=al_dia … 4=mora_120, 5+=mora_120_plus).
 							let estadoMora: string | null = null;
 							if (statusCredit === "EN_CONVENIO") estadoMora = "en_convenio";
-							else if (diasMora === 0) estadoMora = "al_dia";
-							else if (diasMora <= 30) estadoMora = "mora_30";
-							else if (diasMora <= 60) estadoMora = "mora_60";
-							else if (diasMora <= 90) estadoMora = "mora_90";
-							else if (diasMora <= 120) estadoMora = "mora_120";
-							else estadoMora = "mora_120_plus";
+							else estadoMora = estadoMoraPorCuotas(cuotasAtrasadas);
 
 							// Determinar estado del contrato según statusCredit
 							let estadoContrato = "activo";
@@ -2118,11 +2132,10 @@ export const cobrosRouter = {
 						? Number(creditoCompleto.moraActual)
 						: 0;
 
-					let estadoMora: (typeof estadoMoraEnum.enumValues)[number] = "al_dia";
-					if (cuotasAtrasadas === 1) estadoMora = "mora_30";
-					else if (cuotasAtrasadas === 2) estadoMora = "mora_60";
-					else if (cuotasAtrasadas === 3) estadoMora = "mora_90";
-					else if (cuotasAtrasadas >= 4) estadoMora = "mora_120";
+					// Etapa según cuotas atrasadas (MORA_BUCKETS: 4=mora_120, 5+=mora_120_plus)
+					const estadoMora = estadoMoraPorCuotas(
+						cuotasAtrasadas,
+					) as (typeof estadoMoraEnum.enumValues)[number];
 
 					const nuevosCasos = await db
 						.insert(casosCobros)
@@ -2179,10 +2192,8 @@ export const cobrosRouter = {
 				if (tieneConvenioActivo) {
 					estadoMora = "en_convenio";
 				} else if (tieneMoraActiva) {
-					if (cuotasAtrasadas === 1) estadoMora = "mora_30";
-					else if (cuotasAtrasadas === 2) estadoMora = "mora_60";
-					else if (cuotasAtrasadas === 3) estadoMora = "mora_90";
-					else if (cuotasAtrasadas >= 4) estadoMora = "mora_120";
+					// Etapa según cuotas (MORA_BUCKETS: 4=mora_120, 5+=mora_120_plus)
+					estadoMora = estadoMoraPorCuotas(cuotasAtrasadas);
 				}
 
 				// Día de pago: extraer desde la fecha_vencimiento de una cuota real
@@ -3236,40 +3247,27 @@ export const cobrosRouter = {
 				: context.user?.email;
 
 			// 1. Mapear estadoMora → params de cartera-back (mismo mapping que
-			// getTodosLosCreditos).
-			let cuotasAtrasadas: number | undefined;
+			// getTodosLosCreditos). El rango de cuotas por etapa sale de MORA_BUCKETS.
+			let cuotasMin: number | undefined;
+			let cuotasMax: number | undefined;
 			let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined =
 				"ACTIVO";
 			if (input.estadoMora) {
 				switch (input.estadoMora) {
-					case "al_dia":
-						cuotasAtrasadas = 0;
-						estadoCartera = "ACTIVO";
-						break;
-					case "mora_30":
-						cuotasAtrasadas = 1;
-						estadoCartera = "ACTIVO";
-						break;
-					case "mora_60":
-						cuotasAtrasadas = 2;
-						estadoCartera = "ACTIVO";
-						break;
-					case "mora_90":
-						cuotasAtrasadas = 3;
-						estadoCartera = "ACTIVO";
-						break;
-					case "mora_120":
-						cuotasAtrasadas = 4;
-						estadoCartera = "ACTIVO";
-						break;
 					case "incobrable":
 						estadoCartera = "INCOBRABLE";
 						break;
 					case "completado":
 						estadoCartera = "CANCELADO";
 						break;
-					default:
+					default: {
 						estadoCartera = "ACTIVO";
+						const rango = rangoCuotasPorEstadoMora(input.estadoMora);
+						if (rango) {
+							cuotasMin = rango.min;
+							cuotasMax = rango.max;
+						}
+					}
 				}
 			}
 
@@ -3416,7 +3414,8 @@ export const cobrosRouter = {
 						mes: 0,
 						anio: new Date().getFullYear(),
 						estado: estadoCartera,
-						cuotasAtrasadas,
+						cuotasMin,
+						cuotasMax,
 						// Mismo criterio que getTodosLosCreditos: si hay rango de fechas
 						// custom, ignoramos el preset `time` para que no se pisen.
 						time: input.fechaDesde || input.fechaHasta ? undefined : input.time,

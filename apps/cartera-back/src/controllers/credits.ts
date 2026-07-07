@@ -39,6 +39,7 @@ import {
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
+import { MORA_BUCKETS } from "../config/moraBuckets";
 
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -616,7 +617,12 @@ export async function getCreditosWithUserByMesAnio(
   capital_min?: number,
   capital_max?: number,
   estados_credito?: StatusCredit[],
-  aseguradora_id?: number
+  aseguradora_id?: number,
+  // Filtro por rango de cuotas atrasadas (aging). Reemplaza al escalar
+  // `cuotas_atrasadas` (que sólo hacía `= N`). Si se envían, tienen prioridad.
+  // `cuotas_max` undefined = sin tope (>= cuotas_min).
+  cuotas_min?: number,
+  cuotas_max?: number
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -661,10 +667,24 @@ export async function getCreditosWithUserByMesAnio(
       }
     }
 
+    // Rango efectivo de cuotas atrasadas. Prioriza el rango nuevo (cuotas_min/max);
+    // si sólo llega el escalar viejo `cuotas_atrasadas`, lo trata como min=max (=N).
+    const cuotasMinEff =
+      cuotas_min !== undefined ? cuotas_min : cuotas_atrasadas;
+    const cuotasMaxEff =
+      cuotas_max !== undefined
+        ? cuotas_max
+        : cuotas_min !== undefined
+          ? undefined // rango abierto (>= min) cuando se pidió min sin max
+          : cuotas_atrasadas; // escalar viejo => exacto
+
+    // "Al día" = exactamente 0 cuotas atrasadas.
+    const esAlDia = cuotasMinEff === 0 && cuotasMaxEff === 0;
+
     if (estado && estado.length > 0) {
       if (estado === "ACTIVO") {
         console.log(`🔎 Filtrando por estado: ACTIVO + MOROSO`);
-        if (cuotas_atrasadas == 0 ) {
+        if (esAlDia) {
           conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO')`);
         } else {
           conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')`);
@@ -698,18 +718,20 @@ export async function getCreditosWithUserByMesAnio(
       );
     }
 
-    if (cuotas_atrasadas && cuotas_atrasadas > 0) {
-      // Mora 120+ es un bucket ABIERTO: `cuotas_atrasadas = 4` significa "4 o más",
-      // igual que el embudo (getCreditStats usa `>= 4` para ese bucket). Para 1/2/3
-      // (mora_30/60/90) cada etapa es un conteo exacto. Antes se usaba `eq` para todos,
-      // así que un crédito con 5+ cuotas se contaba en el embudo pero NO salía al
-      // filtrar la tabla por mora_120.
-      if (cuotas_atrasadas >= 4) {
-        console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
-        conditions.push(gte(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+    // Filtro por rango de cuotas atrasadas (MORA_BUCKETS). Reemplaza el filtro
+    // escalar `cuotas_atrasadas` que COBROS-02 arreglaba con un hack `>= 4` solo
+    // para el 120+: el rango soporta B4 exacto (=4) y B5 abierto (>=5) de forma
+    // parametrizable. `esAlDia` (0..0) se resuelve arriba vía el estado; aquí
+    // sólo aplicamos cuando hay mora (min > 0).
+    if (cuotasMinEff !== undefined && cuotasMinEff > 0) {
+      conditions.push(gte(moras_credito.cuotas_atrasadas, cuotasMinEff));
+      if (cuotasMaxEff !== undefined) {
+        console.log(
+          `🔎 Filtrando por cuotas atrasadas entre ${cuotasMinEff} y ${cuotasMaxEff}`
+        );
+        conditions.push(lte(moras_credito.cuotas_atrasadas, cuotasMaxEff));
       } else {
-        console.log(`🔎 Filtrando por cuotas atrasadas = ${cuotas_atrasadas}`);
-        conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+        console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotasMinEff}`);
       }
     }
 
@@ -2858,14 +2880,17 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
 
   const totalCreditosActivos = totalResult[0]?.total || 0;
 
-  // Estadísticas por cuotas atrasadas (0, 1, 2, 3, 4) - Solo créditos ACTIVOS o MOROSOS
-  const statsPerCuotasAtrasadas: Record<string, CreditStats> = {
-    "0": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
-    "1": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
-    "2": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
-    "3": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
-    "4": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
-  };
+  // Estadísticas por cuotas atrasadas — buckets definidos en MORA_BUCKETS
+  // (fuente única). Agregar/mover una etapa se hace ahí, sin tocar este loop.
+  const statsPerCuotasAtrasadas: Record<string, CreditStats> = {};
+  for (const b of MORA_BUCKETS) {
+    statsPerCuotasAtrasadas[b.key] = {
+      cantidad: 0,
+      porcentaje: "0",
+      sumaCapital: "0",
+      sumaMora: "0",
+    };
+  }
 
   // Consulta para créditos activos/morosos con sus moras
   const baseConditionsActive = [
@@ -2878,7 +2903,18 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
 
   let creditosSinAtraso = 0;
 
-  for (const cuotasNum of [0, 1, 2, 3, 4]) {
+  for (const b of MORA_BUCKETS) {
+    // Condición SQL derivada del rango del bucket:
+    //   max === null  → >= min (el "+")
+    //   min === max   → = min (exacto)
+    //   min < max     → BETWEEN min AND max
+    const cuotasCond =
+      b.max === null
+        ? sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= ${b.min}`
+        : b.min === b.max
+          ? sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) = ${b.min}`
+          : sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) BETWEEN ${b.min} AND ${b.max}`;
+
     const result = await db
       .select({
         cantidad: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
@@ -2893,25 +2929,18 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
           eq(moras_credito.activa, true)
         )
       )
-      .where(
-        and(
-          ...baseConditionsActive,
-          cuotasNum === 4
-            ? sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= 4`
-            : sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) = ${cuotasNum}`
-        )
-      );
+      .where(and(...baseConditionsActive, cuotasCond));
 
     const cantidad = result[0]?.cantidad || 0;
-    const porcentaje = totalCreditosActivos > 0 
-      ? ((cantidad / totalCreditosActivos) * 100).toFixed(2) 
+    const porcentaje = totalCreditosActivos > 0
+      ? ((cantidad / totalCreditosActivos) * 100).toFixed(2)
       : "0";
 
-    if (cuotasNum === 0) {
+    if (b.min === 0 && b.max === 0) {
       creditosSinAtraso = cantidad;
     }
 
-    statsPerCuotasAtrasadas[cuotasNum.toString()] = {
+    statsPerCuotasAtrasadas[b.key] = {
       cantidad,
       porcentaje,
       sumaCapital: result[0]?.sumaCapital || "0",

@@ -568,6 +568,9 @@ export interface GetAllCreditsParams {
 	numeros_credito_sifco?: string[];
 	excel?: boolean;
 	cuotas_atrasadas?: number;
+	/** Rango de cuotas atrasadas (aging). `cuotas_max` undefined = sin tope (>= min). */
+	cuotas_min?: number;
+	cuotas_max?: number;
 	nombre_usuario?: string;
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 	email_cobrador?: string;

@@ -717,6 +717,12 @@ export class CarteraBackClient {
 						...(params.cuotas_atrasadas !== undefined && {
 							cuotas_atrasadas: params.cuotas_atrasadas,
 						}),
+						...(params.cuotas_min !== undefined && {
+							cuotas_min: params.cuotas_min,
+						}),
+						...(params.cuotas_max !== undefined && {
+							cuotas_max: params.cuotas_max,
+						}),
 						...(params.time && { proximidad_pago: params.time }),
 						...(params.nombre_usuario && {
 							nombre_usuario: params.nombre_usuario,
@@ -749,6 +755,12 @@ export class CarteraBackClient {
 				...(params.perPage && { perPage: params.perPage.toString() }),
 				...(params.cuotas_atrasadas !== undefined && {
 					cuotas_atrasadas: params.cuotas_atrasadas.toString(),
+				}),
+				...(params.cuotas_min !== undefined && {
+					cuotas_min: params.cuotas_min.toString(),
+				}),
+				...(params.cuotas_max !== undefined && {
+					cuotas_max: params.cuotas_max.toString(),
 				}),
 				...(params.time && { proximidad_pago: params.time }),
 				...(params.nombre_usuario && {

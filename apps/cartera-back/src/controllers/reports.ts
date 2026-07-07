@@ -215,6 +215,8 @@ export async function getCreditosWithUserByMesAnioExcel(
     nombre_usuario?: string;
     email_asesor?: string; // 🆕 NUEVO
     cuotas_atrasadas?: number; // 🆕 NUEVO
+    cuotas_min?: number; // 🆕 rango de cuotas atrasadas
+    cuotas_max?: number; // 🆕 rango de cuotas atrasadas
     proximidad_pago?: "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH";
     is_vehiculo_propio?: boolean;
     inversionista_ids?: number[];
@@ -245,7 +247,9 @@ export async function getCreditosWithUserByMesAnioExcel(
     undefined, // capital_min
     undefined, // capital_max
     undefined, // estados_credito
-    rest.aseguradora_id
+    rest.aseguradora_id,
+    rest.cuotas_min,
+    rest.cuotas_max
   );
 
   if (!excel) return result; // si no piden excel, devolvemos JSON normal

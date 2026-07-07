@@ -65,6 +65,11 @@ const ETAPAS = [
 		color: "bg-red-100 text-red-800",
 	},
 	{
+		key: "mora_120" as const,
+		label: "Mora 120",
+		color: "bg-red-200 text-red-900",
+	},
+	{
 		key: "mora_120_plus" as const,
 		label: "Mora 120+",
 		color: "bg-red-300 text-red-950",

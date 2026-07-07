@@ -29,6 +29,19 @@ export const bucketsRouter = new Elysia()
     async ({ query, set, user }: any) => {
       if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
       try {
+        // Validar filtros numéricos ANTES de llamar al controller: Number("abc")
+        // = NaN es falsy y buildWhere lo descartaría EN SILENCIO → un typo del
+        // cliente devolvería el historial completo en vez de un 400 (review Codex).
+        const creditoId = query.credito_id ? Number(query.credito_id) : undefined;
+        if (creditoId !== undefined && (!Number.isInteger(creditoId) || creditoId <= 0)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] credito_id inválido" };
+        }
+        const pagoId = query.pago_id ? Number(query.pago_id) : undefined;
+        if (pagoId !== undefined && (!Number.isInteger(pagoId) || pagoId <= 0)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] pago_id inválido" };
+        }
         return await getBucketsHistorial({
           desde: query.desde,
           hasta: query.hasta,
@@ -36,12 +49,12 @@ export const bucketsRouter = new Elysia()
           origen: query.origen,
           bucket_nuevo: query.bucket_nuevo,
           bucket_anterior: query.bucket_anterior,
-          credito_id: query.credito_id ? Number(query.credito_id) : undefined,
+          credito_id: creditoId,
           numero_credito_sifco: query.numero_credito_sifco,
           nombre_usuario: query.nombre_usuario,
           asesor: query.asesor,
           status_credito: query.status_credito,
-          pago_id: query.pago_id ? Number(query.pago_id) : undefined,
+          pago_id: pagoId,
           page: query.page ? Number(query.page) : 1,
           pageSize: query.pageSize ? Number(query.pageSize) : 20,
         });

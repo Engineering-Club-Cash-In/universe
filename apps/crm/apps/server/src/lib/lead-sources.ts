@@ -1,3 +1,6 @@
+export type LeadSource =
+	typeof import("../db/schema/crm").leadSourceEnum.enumValues[number];
+
 export const LEAD_SOURCE_LABELS = {
 	website: "Sitio Web",
 	referral: "Referencia",
@@ -16,9 +19,33 @@ export const LEAD_SOURCE_LABELS = {
 	property: "Predio",
 	recurrent: "Recurrente",
 	recurrent_active: "Recurrente Activo",
-} as const satisfies Record<string, string>;
+} as const satisfies Record<LeadSource, string>;
 
-export type LeadSource = keyof typeof LEAD_SOURCE_LABELS;
+export type LeadSourceChannelType =
+	| "Físico"
+	| "Pauta Digital"
+	| "Orgánico Digital"
+	| "Otros";
+
+export const LEAD_SOURCE_CHANNEL_TYPES = {
+	property: "Físico",
+	agency: "Físico",
+	cold_call: "Físico",
+	event: "Físico",
+	google: "Pauta Digital",
+	meta: "Pauta Digital",
+	facebook: "Pauta Digital",
+	instagram: "Pauta Digital",
+	Whatsapp: "Pauta Digital",
+	linkedin: "Pauta Digital",
+	website: "Orgánico Digital",
+	social_media: "Orgánico Digital",
+	email: "Orgánico Digital",
+	recurrent: "Otros",
+	recurrent_active: "Otros",
+	other: "Otros",
+	referral: "Otros",
+} as const satisfies Record<LeadSource, LeadSourceChannelType>;
 
 export const LEAD_SOURCE_OPTIONS = Object.entries(LEAD_SOURCE_LABELS).map(
 	([value, label]) => ({
@@ -52,6 +79,16 @@ export function getLeadSourceLabel(source: string | null | undefined): string {
 	return (
 		LEAD_SOURCE_LABELS[source as keyof typeof LEAD_SOURCE_LABELS] ?? source
 	);
+}
+
+export function getLeadSourceChannelType(
+	source: string | null | undefined,
+): LeadSourceChannelType {
+	if (!source) return "Otros";
+	if (Object.hasOwn(LEAD_SOURCE_CHANNEL_TYPES, source)) {
+		return LEAD_SOURCE_CHANNEL_TYPES[source as LeadSource];
+	}
+	return "Otros";
 }
 
 export function getLeadSourceBadgeClass(source: string): string {

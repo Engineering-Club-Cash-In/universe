@@ -13,16 +13,20 @@
 -- ============================================================================
 
 -- Enums ----------------------------------------------------------------------
--- Dirección de la transición de bucket.
+-- Tipo de evento: INICIAL = línea base (primer registro del crédito, punto de
+-- partida); SUBIDA = empeora; BAJADA = mejora/cura.
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
     WHERE t.typname = 'bucket_evento_tipo' AND n.nspname = 'cartera'
   ) THEN
-    CREATE TYPE cartera.bucket_evento_tipo AS ENUM ('SUBIDA', 'BAJADA');
+    CREATE TYPE cartera.bucket_evento_tipo AS ENUM ('INICIAL', 'SUBIDA', 'BAJADA');
   END IF;
 END$$;
+--> statement-breakpoint
+-- Por si el tipo ya existía sin 'INICIAL' (aplicado en una versión previa).
+ALTER TYPE cartera.bucket_evento_tipo ADD VALUE IF NOT EXISTS 'INICIAL';
 --> statement-breakpoint
 
 -- Origen del evento (hoy siempre PROCESO_AUTO; API_MANUAL para ajustes futuros).

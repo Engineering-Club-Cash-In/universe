@@ -1,5 +1,5 @@
 -- ============================================================================
--- COBROS-02 · Motor de Buckets — 0004_buckets_estado_mora
+-- COBROS-02 · Motor de Buckets — 0003_buckets_estado_mora
 -- ============================================================================
 -- Puente numero ↔ estadoMora: agrega la columna `estado_mora` al catálogo
 -- `cartera.buckets` para que sea la fuente única (antes vivía duplicada en

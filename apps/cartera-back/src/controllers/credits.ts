@@ -1,4 +1,5 @@
 import { db } from "../database/index";
+import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
 import {
   aseguradoras,
   asesores,
@@ -1600,6 +1601,7 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
         .returning({ cuota_id: cuotas_credito.cuota_id });
 
       // e) Actualizar crédito: INCOBRABLE, plazo 1, cuota = capital completo
+      await setCapitalSource(tx, "CASTIGO");
       await tx
         .update(creditos)
         .set({
@@ -1756,24 +1758,26 @@ export async function reiniciarCredito(
   creditId: number,
   montoIncobrable?: number
 ) {
-  await db
-    .update(creditos)
-    .set({
-      capital: "0",
-      deudatotal: montoIncobrable !== undefined ? String(montoIncobrable) : "0",
-      cuota_interes: "0",
-      cuota: "0",
-      iva_12: "0",
-      seguro_10_cuotas: "0",
-      gps: "0",
-      membresias_pago: "0",
-      membresias: "0",
-      porcentaje_royalti: "0",
-      royalti: "0",
-      otros: "0",
-      statusCredit: "ACTIVO",
-    })
-    .where(eq(creditos.credito_id, creditId));
+  await withCapitalContext(null, "REINICIO", null, (tx) =>
+    tx
+      .update(creditos)
+      .set({
+        capital: "0",
+        deudatotal: montoIncobrable !== undefined ? String(montoIncobrable) : "0",
+        cuota_interes: "0",
+        cuota: "0",
+        iva_12: "0",
+        seguro_10_cuotas: "0",
+        gps: "0",
+        membresias_pago: "0",
+        membresias: "0",
+        porcentaje_royalti: "0",
+        royalti: "0",
+        otros: "0",
+        statusCredit: "ACTIVO",
+      })
+      .where(eq(creditos.credito_id, creditId))
+  );
 }
 
 function construirUrlBoletas(url_boletas: string[], r2BaseUrl: string) {
@@ -2063,25 +2067,27 @@ export async function resetCredit({
       const capitalIncobrable = new Big(montoIncobrable!);
 
       // 16a. Actualizar crédito: capital = incobrable, lo demás en 0 (preservamos porcentaje_interes)
-      await db
-        .update(creditos)
-        .set({
-          capital: capitalIncobrable.toString(),
-          deudatotal: capitalIncobrable.toString(),
-          cuota_interes: "0",
-          cuota: capitalIncobrable.toString(),
-          iva_12: "0",
-          seguro_10_cuotas: "0",
-          gps: "0",
-          membresias_pago: "0",
-          membresias: "0",
-          porcentaje_royalti: "0",
-          royalti: "0",
-          otros: "0",
-          plazo: 1,
-          statusCredit: "INCOBRABLE",
-        })
-        .where(eq(creditos.credito_id, creditId));
+      await withCapitalContext(null, "CASTIGO", null, (tx) =>
+        tx
+          .update(creditos)
+          .set({
+            capital: capitalIncobrable.toString(),
+            deudatotal: capitalIncobrable.toString(),
+            cuota_interes: "0",
+            cuota: capitalIncobrable.toString(),
+            iva_12: "0",
+            seguro_10_cuotas: "0",
+            gps: "0",
+            membresias_pago: "0",
+            membresias: "0",
+            porcentaje_royalti: "0",
+            royalti: "0",
+            otros: "0",
+            plazo: 1,
+            statusCredit: "INCOBRABLE",
+          })
+          .where(eq(creditos.credito_id, creditId))
+      );
 
       // 16b. Crear cuota pendiente para el monto incobrable (correlativa)
       const [maxCuotaRowInc] = await db
@@ -2144,24 +2150,26 @@ export async function resetCredit({
       });
     } else {
       // CANCELADO: zerear todo (preservamos porcentaje_interes)
-      await db
-        .update(creditos)
-        .set({
-          capital: "0",
-          deudatotal: "0",
-          cuota_interes: "0",
-          cuota: "0",
-          iva_12: "0",
-          seguro_10_cuotas: "0",
-          gps: "0",
-          membresias_pago: "0",
-          membresias: "0",
-          porcentaje_royalti: "0",
-          royalti: "0",
-          otros: "0",
-          statusCredit: "CANCELADO",
-        })
-        .where(eq(creditos.credito_id, creditId));
+      await withCapitalContext(null, "CANCELACION", null, (tx) =>
+        tx
+          .update(creditos)
+          .set({
+            capital: "0",
+            deudatotal: "0",
+            cuota_interes: "0",
+            cuota: "0",
+            iva_12: "0",
+            seguro_10_cuotas: "0",
+            gps: "0",
+            membresias_pago: "0",
+            membresias: "0",
+            porcentaje_royalti: "0",
+            royalti: "0",
+            otros: "0",
+            statusCredit: "CANCELADO",
+          })
+          .where(eq(creditos.credito_id, creditId))
+      );
     }
 
     // 17. Retorno OK
@@ -2647,22 +2655,24 @@ export const mergeCreditosAndUpdate = async ({
       "💾 PASO 3: Actualizando crédito destino con valores consolidados..."
     );
 
-    const [creditoActualizado] = await db
-      .update(creditos)
-      .set({
-        capital: capitalTotal.toString(),
-        cuota: cuota_total.toString(),
-        cuota_interes: cuota_interes.toString(),
-        iva_12: iva_12.toString(),
-        deudatotal: deudatotal.toString(),
-        seguro_10_cuotas: seguro_total.toString(),
-        gps: gps_total.toString(),
-        membresias_pago: membresias_total.toString(),
-        membresias: membresias_total.toString(),
-        otros: otros_total.toString(),
-      })
-      .where(eq(creditos.credito_id, creditoDestino.credito_id))
-      .returning();
+    const [creditoActualizado] = await withCapitalContext(null, "MERGE", null, (tx) =>
+      tx
+        .update(creditos)
+        .set({
+          capital: capitalTotal.toString(),
+          cuota: cuota_total.toString(),
+          cuota_interes: cuota_interes.toString(),
+          iva_12: iva_12.toString(),
+          deudatotal: deudatotal.toString(),
+          seguro_10_cuotas: seguro_total.toString(),
+          gps: gps_total.toString(),
+          membresias_pago: membresias_total.toString(),
+          membresias: membresias_total.toString(),
+          otros: otros_total.toString(),
+        })
+        .where(eq(creditos.credito_id, creditoDestino.credito_id))
+        .returning()
+    );
 
     console.log(
       `   ✅ Crédito ${creditoDestino.numero_credito_sifco} actualizado exitosamente`

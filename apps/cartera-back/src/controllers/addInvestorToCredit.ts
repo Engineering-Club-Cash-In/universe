@@ -19,6 +19,10 @@ import {
   type CreditCandidate,
 } from "./assignCapital";
 import { sendInvestorAddedToCreditsNotification } from "@cci/email";
+import {
+  resolveModalidadFacturacionSpread,
+  type ModalidadFacturacionSpreadRow,
+} from "./modalidadFacturacion";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -47,6 +51,16 @@ const COMPRA_CARTERA_PENDIENTE_RECIPIENTS = {
 // ========================================
 const CUBE_INVESTMENT_ID = 86;
 
+// Error de negocio: una compra CON modalidad no se pudo colocar completa. Se
+// distingue del resto para hacer rollback y devolver 409 (no 500) con un
+// mensaje claro, en vez de dejar una compra parcial mal tarifada.
+class ModalidadMontoInsuficienteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ModalidadMontoInsuficienteError";
+  }
+}
+
 // ========================================
 // SCHEMA DE VALIDACIÓN
 // ========================================
@@ -64,6 +78,12 @@ const addInvestorToCreditSchema = z.object({
   monto_aportado: z.number().positive(),
   porcentaje_cash_in: z.number().min(0).max(100).optional(),
   porcentaje_inversion: z.number().min(0).max(100).optional(),
+  // Solo aplica cuando tipo_operacion === "compra_cartera". Si viene, el
+  // % Inversionista / % Cash In se calcula del catálogo (por monto_aportado)
+  // y SE IGNORAN porcentaje_cash_in / porcentaje_inversion si vinieran.
+  modalidad_facturacion: z
+    .enum(["p2p_directa", "factura_cube", "factura_cube_pequeno"])
+    .optional(),
   tipo_operacion: z.enum(["reinversion", "compra_cartera"]),
   tipo_reinversion: z
     .enum([
@@ -331,6 +351,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       monto_aportado,
       porcentaje_cash_in,
       porcentaje_inversion,
+      modalidad_facturacion,
       tipo_operacion,
       tipo_reinversion,
       // NOTA: fecha_inicio_participacion se sigue aceptando en el body pero
@@ -359,6 +380,45 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     }
 
     // ================================================================
+    // MODALIDAD DE FACTURACIÓN
+    // OPCIONAL a nivel backend (retrocompatible: el front todavía no la
+    // manda). Si VIENE, define el % Inversionista / % Cash In desde el bracket
+    // del catálogo (por monto_aportado) y esos valores MANDAN sobre cualquier
+    // porcentaje del request. Si NO viene, el flujo de porcentajes sigue como
+    // antes. Solo aplica a compra_cartera; en reinversión se rechaza si viene.
+    // ================================================================
+    if (tipo_operacion !== "compra_cartera" && modalidad_facturacion) {
+      set.status = 400;
+      return {
+        message: "Validation failed",
+        errors: {
+          modalidad_facturacion: [
+            "modalidad_facturacion solo aplica cuando tipo_operacion es 'compra_cartera'",
+          ],
+        },
+      };
+    }
+
+    let modalidadFacturacionSpreadRow: ModalidadFacturacionSpreadRow | null = null;
+    if (modalidad_facturacion) {
+      modalidadFacturacionSpreadRow = await resolveModalidadFacturacionSpread(
+        monto_aportado,
+        modalidad_facturacion,
+      );
+      if (!modalidadFacturacionSpreadRow) {
+        set.status = 400;
+        return {
+          message: "Validation failed",
+          errors: {
+            monto_aportado: [
+              `No existe un bracket de modalidad de facturación para el monto Q${monto_aportado}`,
+            ],
+          },
+        };
+      }
+    }
+
+    // ================================================================
     // PASO 2: GET INTERNO - OBTENER CRÉDITOS CANDIDATOS
     // Llama a getCreditCandidates() de assignCapital.ts que:
     //   - Trae créditos ACTIVOS de tipo Vehículo
@@ -382,6 +442,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     let candidatos: CreditCandidate[];
 
     if (esManual) {
+      // LIMITACIÓN CONOCIDA (modalidad + manual): el modo manual no pasa por
+      // getCreditCandidates, así que no aplica el filtro de "% incompatible". Si
+      // el operador elige a mano un crédito donde el inversionista ya participa,
+      // la compra reprecia su posición previa al spread nuevo. Hoy el CRM solo
+      // expone el modo automático; si se habilitara el manual con modalidad,
+      // habría que agregar aquí un guard equivalente al filtro automático.
       console.log("================================================================");
       console.log(`[addInvestorToCredit] MODO MANUAL: ${manual!.length} crédito(s) forzado(s)`);
 
@@ -414,15 +480,26 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
 
       candidatos = armados;
     } else {
+      // Porcentaje para el filtro de "% incompatible" de getCreditCandidates, que
+      // descarta un crédito solo si el inversionista ya participa ahí con un %
+      // DISTINTO. Con modalidad le pasamos el spread del catálogo (no el del
+      // request) para que descarte los que se repreciarían a otro spread; los de
+      // mismo % o no participados pasan. Como el spread trae decimales y los %
+      // previos suelen ser enteros, en la práctica descarta las posiciones
+      // previas (puede subir el "monto sin asignar"). Es intencional.
+      const porcentajeParaCandidatos = modalidadFacturacionSpreadRow
+        ? Number(modalidadFacturacionSpreadRow.spread)
+        : porcentaje_inversion;
+
       console.log("================================================================");
       console.log("[addInvestorToCredit] Llamando a getCreditCandidates con:");
       console.log(` - monto: ${monto_aportado}`);
       console.log(` - limit (minimo): ${minimo ?? "Sin límite"}`);
       console.log(` - inversionista_id: ${inversionista_id}`);
-      console.log(` - porcentaje_inversion: ${porcentaje_inversion}`);
+      console.log(` - porcentaje (filtro): ${porcentajeParaCandidatos}`);
       console.log("================================================================");
 
-      candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentaje_inversion);
+      candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentajeParaCandidatos);
 
       console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
       candidatos.forEach((c, i) => {
@@ -764,6 +841,25 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           ]),
         );
 
+        // ── Mapa de modalidad_facturacion actual por inversionista en el
+        //    espejo. Igual que arriba: al hacer nuke&rebuild, los inversionistas
+        //    que NO son el nuevo deben conservar lo que ya tenían. ──
+        const modalidadFacturacionActualPorInv = new Map<
+          number,
+          {
+            modalidad_facturacion: typeof creditos_inversionistas_espejo.$inferSelect.modalidad_facturacion;
+            modalidad_facturacion_spread_id: number | null;
+          }
+        >(
+          (espejoActual ?? []).map((e: any) => [
+            e.inversionista_id as number,
+            {
+              modalidad_facturacion: e.modalidad_facturacion ?? null,
+              modalidad_facturacion_spread_id: e.modalidad_facturacion_spread_id ?? null,
+            },
+          ]),
+        );
+
         // ── Extraer datos del crédito que necesitamos para recalcular ──
         // Estos vienen del GET, no hacemos queries adicionales
         const creditoData = {
@@ -834,6 +930,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         // ================================================================
         // PASO 3c: DETERMINAR PORCENTAJES DEL NUEVO INVERSIONISTA
         // Prioridad:
+        //   0. Si vino modalidad_facturacion → el spread del bracket manda
+        //      (ignora porcentaje_cash_in/porcentaje_inversion del request)
         //   1. Si se pasaron en el request → usar esos
         //   2. Si el inversionista YA EXISTE en ESTE crédito → jalar de ahí
         //   3. Si existe en CUALQUIER OTRO crédito → jalar de ahí
@@ -842,7 +940,10 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         let porcCashIn: Big;
         let porcInversion: Big;
 
-        if (porcentaje_cash_in !== undefined) {
+        if (modalidadFacturacionSpreadRow) {
+          porcInversion = new Big(modalidadFacturacionSpreadRow.spread);
+          porcCashIn = new Big(100).minus(porcInversion);
+        } else if (porcentaje_cash_in !== undefined) {
           // Porcentajes explícitos del request
           porcCashIn = new Big(porcentaje_cash_in);
           porcInversion = new Big(porcentaje_inversion ?? 80);
@@ -1061,6 +1162,24 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
                 tipoReinvActualPorInv.get(inv.inversionista_id) ??
                 null
               : tipoReinvActualPorInv.get(inv.inversionista_id) ?? null,
+          // Igual patrón que tipo_reinversion: solo el inversionista nuevo
+          // recibe la modalidad de esta operación; el resto conserva la suya.
+          modalidad_facturacion:
+            inv.inversionista_id === inversionista_id
+              ? modalidad_facturacion ??
+                modalidadFacturacionActualPorInv.get(inv.inversionista_id)
+                  ?.modalidad_facturacion ??
+                null
+              : modalidadFacturacionActualPorInv.get(inv.inversionista_id)
+                  ?.modalidad_facturacion ?? null,
+          modalidad_facturacion_spread_id:
+            inv.inversionista_id === inversionista_id
+              ? modalidadFacturacionSpreadRow?.id ??
+                modalidadFacturacionActualPorInv.get(inv.inversionista_id)
+                  ?.modalidad_facturacion_spread_id ??
+                null
+              : modalidadFacturacionActualPorInv.get(inv.inversionista_id)
+                  ?.modalidad_facturacion_spread_id ?? null,
           updated_at: new Date(),
         }));
 
@@ -1097,6 +1216,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             tipo_reinversion ??
             tipoReinvActualPorInv.get(inversionista_id) ??
             null,
+          modalidad_facturacion: modalidad_facturacion ?? null,
+          modalidad_facturacion_spread_id: modalidadFacturacionSpreadRow?.id ?? null,
           status: statusEspejo,
         });
 
@@ -1135,6 +1256,17 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
 
         console.log(
           `✅ Crédito ${numero_credito_sifco} - asignado Q${montoParaEsteCredito} - quedan Q${montoRestante}`,
+        );
+      }
+
+      // Compra CON modalidad = todo o nada. El spread/bracket se resolvió con el
+      // monto_aportado pedido; si no se colocó todo, el precio no correspondería
+      // a lo realmente colocado. Hacemos rollback (throw dentro de la tx) para
+      // que el operador ajuste el monto a lo que sí hay disponible en CUBE.
+      if (modalidad_facturacion && montoRestante.gt(0)) {
+        const distribuido = new Big(monto_aportado).minus(montoRestante);
+        throw new ModalidadMontoInsuficienteError(
+          `Solo hay Q${distribuido.toFixed(2)} disponibles de los Q${new Big(monto_aportado).toFixed(2)} solicitados. Una compra de cartera con modalidad de facturación debe colocarse completa; ajusta el monto e intenta de nuevo.`,
         );
       }
     });
@@ -1230,6 +1362,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       errores,
     };
   } catch (error) {
+    // Compra con modalidad que no se pudo colocar completa: es un caso de
+    // negocio esperado (409), no un error interno. La transacción ya hizo rollback.
+    if (error instanceof ModalidadMontoInsuficienteError) {
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
     console.error("[addInvestorToCredit] Error:", error);
     set.status = 500;
     return {

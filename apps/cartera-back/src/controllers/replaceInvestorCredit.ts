@@ -870,6 +870,9 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         .select({
           monto_aportado: compras_credito_inversionista.monto_aportado,
           tipo_reinversion: compras_credito_inversionista.tipo_reinversion,
+          modalidad_facturacion: compras_credito_inversionista.modalidad_facturacion,
+          modalidad_facturacion_spread_id:
+            compras_credito_inversionista.modalidad_facturacion_spread_id,
         })
         .from(compras_credito_inversionista)
         .where(
@@ -897,6 +900,17 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       const tipoReinversionOrigen =
         comprasPendientesOrigen.find((c) => c.tipo_reinversion != null)
           ?.tipo_reinversion ?? null;
+
+      // Modalidad de la compra pendiente del origen: se conserva para no perder
+      // la trazabilidad (etiqueta + FK) al reasignar. Ambos salen de la MISMA
+      // fila (se setean juntos) para no mezclar operaciones si hay varias.
+      const compraConModalidadOrigen = comprasPendientesOrigen.find(
+        (c) => c.modalidad_facturacion != null,
+      );
+      const modalidadFacturacionOrigen =
+        compraConModalidadOrigen?.modalidad_facturacion ?? null;
+      const modalidadFacturacionSpreadIdOrigen =
+        compraConModalidadOrigen?.modalidad_facturacion_spread_id ?? null;
 
       const montoPadreOrigen = new Big(invEnOrigen.monto_aportado);
       const montoEnOrigen = deltaPendienteOrigen.gt(0)
@@ -991,6 +1005,12 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
               creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
             fecha_inicio_participacion:
               creditos_inversionistas_espejo.fecha_inicio_participacion,
+            // Se lee para preservar la modalidad de los OTROS inversionistas en
+            // el nuke & rebuild del espejo (si no, se borraría a null).
+            modalidad_facturacion:
+              creditos_inversionistas_espejo.modalidad_facturacion,
+            modalidad_facturacion_spread_id:
+              creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
           })
           .from(creditos_inversionistas_espejo)
           .where(
@@ -1190,6 +1210,18 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             inv.inversionista_id === inversionista_id
               ? tipoReinversionOrigen
               : null,
+          // El reasignado hereda la modalidad (etiqueta + FK) del origen; los
+          // demás preservan la suya del espejo del destino.
+          modalidad_facturacion:
+            inv.inversionista_id === inversionista_id
+              ? modalidadFacturacionOrigen
+              : espejoPorInvDestino.get(inv.inversionista_id)
+                  ?.modalidad_facturacion ?? null,
+          modalidad_facturacion_spread_id:
+            inv.inversionista_id === inversionista_id
+              ? modalidadFacturacionSpreadIdOrigen
+              : espejoPorInvDestino.get(inv.inversionista_id)
+                  ?.modalidad_facturacion_spread_id ?? null,
           updated_at: new Date(),
         }));
 
@@ -1215,6 +1247,8 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           monto_aportado: montoAsignar.toString(),
           tipo_operacion,
           tipo_reinversion: tipoReinversionOrigen,
+          modalidad_facturacion: modalidadFacturacionOrigen,
+          modalidad_facturacion_spread_id: modalidadFacturacionSpreadIdOrigen,
           status: statusEspejo,
         });
 
@@ -1289,6 +1323,12 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
           fecha_inicio_participacion:
             creditos_inversionistas_espejo.fecha_inicio_participacion,
+          // Se lee para preservar la modalidad en el nuke & rebuild del origen
+          // (si no, se borraría a null).
+          modalidad_facturacion:
+            creditos_inversionistas_espejo.modalidad_facturacion,
+          modalidad_facturacion_spread_id:
+            creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
         })
         .from(creditos_inversionistas_espejo)
         .where(
@@ -1458,6 +1498,14 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       const dataEspejoOrigenConStatus = dataEspejoOrigenFinal.map((inv) => ({
         ...inv,
         status: "completado" as const,
+        // El inversionista reasignado ya salió del origen; los que quedan
+        // preservan su modalidad (si no, se borraría a null).
+        modalidad_facturacion:
+          espejoPorInvOrigen.get(inv.inversionista_id)?.modalidad_facturacion ??
+          null,
+        modalidad_facturacion_spread_id:
+          espejoPorInvOrigen.get(inv.inversionista_id)
+            ?.modalidad_facturacion_spread_id ?? null,
         updated_at: new Date(),
       }));
 

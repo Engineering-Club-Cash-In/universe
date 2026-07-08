@@ -1,6 +1,7 @@
 import { db } from "../database";
 import { creditos, historial_devolucion_credito, usuarios } from "../database/db/schema";
 import { eq, desc, sql, and, or, ilike, inArray } from "drizzle-orm";
+import { registrarCancelacionEspejo } from "./abonosCapital";
 
 export async function listPendingDevolucion({ query, set }: any) {
   try {
@@ -112,24 +113,48 @@ export async function aceptarDevolucion({ params, set }: any) {
       return { message: "El crédito no está en estado pendiente de autorización" };
     }
 
-    // Insertar log
-    await db.insert(historial_devolucion_credito).values({
-      credito_id: credito_id_num,
-      usuario_id: 1, // Placeholder para user_id autenticado
-      estado_anterior: currentCredit.estado_devolucion,
-      estado_nuevo: "VERIFICADO",
-      motivo: null, // Opcional para aprobación
-    });
+    // Todo o nada: cambio de estado + log + abonos de CANCELACIÓN en una transacción.
+    // Si falla el registro de abonos, se revierte también el cambio de estado.
+    const abonos = await db.transaction(async (tx) => {
+      // 1. Actualizar crédito de forma atómica: la transición solo aplica si el
+      //    crédito SIGUE en PENDIENTE_AUTORIZACION. Esto cierra la carrera de
+      //    doble-aceptación (el guard previo es un SELECT sin lock): dos requests
+      //    concurrentes serializan aquí y la segunda afecta 0 filas → aborta,
+      //    evitando registrar los abonos de CANCELACIÓN dos veces.
+      const actualizados = await tx
+        .update(creditos)
+        .set({ estado_devolucion: "VERIFICADO" })
+        .where(
+          and(
+            eq(creditos.credito_id, credito_id_num),
+            eq(creditos.estado_devolucion, "PENDIENTE_AUTORIZACION")
+          )
+        )
+        .returning({ credito_id: creditos.credito_id });
 
-    // Actualizar crédito
-    await db
-      .update(creditos)
-      .set({ estado_devolucion: "VERIFICADO" })
-      .where(eq(creditos.credito_id, credito_id_num));
+      if (actualizados.length === 0) {
+        throw new Error(
+          "El crédito ya no está en PENDIENTE_AUTORIZACION (posible doble aceptación concurrente)"
+        );
+      }
+
+      // 2. Insertar log
+      await tx.insert(historial_devolucion_credito).values({
+        credito_id: credito_id_num,
+        usuario_id: 1, // Placeholder para user_id autenticado
+        estado_anterior: currentCredit.estado_devolucion,
+        estado_nuevo: "VERIFICADO",
+        motivo: null, // Opcional para aprobación
+      });
+
+      // 3. Registrar la cancelación de capital: una fila por inversionista del espejo
+      return await registrarCancelacionEspejo(tx, credito_id_num);
+    });
 
     return {
       success: true,
       message: "Devolución aceptada y registrada correctamente",
+      abonos_cancelacion: abonos,
     };
   } catch (error) {
     console.error("[aceptarDevolucion] Error:", error);

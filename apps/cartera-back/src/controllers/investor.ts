@@ -4269,13 +4269,13 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                 request: {} as any,
               });
 
-              // Después de separar en exitInvestor, dejar estado_devolucion en NO_APLICA
+              // Después de separar en exitInvestor, dejar estado_devolucion en COMPLETADO
               await db
                 .update(creditos)
-                .set({ estado_devolucion: "NO_APLICA" })
+                .set({ estado_devolucion: "COMPLETADO" })
                 .where(inArray(creditos.credito_id, creditoIdsDevolucion));
 
-              console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a NO_APLICA:`, exitResultDevolucion);
+              console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a COMPLETADO:`, exitResultDevolucion);
             }
           }
 
@@ -4320,11 +4320,11 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           }
 
           // 5C) Regla de cierre: tras liquidar, cualquier estado de devolución
-          // del/los crédito(s) procesado(s) vuelve a NO_APLICA.
+          // del/los crédito(s) procesado(s) pasa a COMPLETADO.
           if (creditoIdsConPagos.length > 0) {
             await db
               .update(creditos)
-              .set({ estado_devolucion: "NO_APLICA" })
+              .set({ estado_devolucion: "COMPLETADO" })
               .where(
                 and(
                   inArray(creditos.credito_id, creditoIdsConPagos),
@@ -4333,7 +4333,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               );
 
             console.log(
-              `  ✅ Estado devolución reseteado a NO_APLICA en ${creditoIdsConPagos.length} crédito(s) procesado(s) en liquidación`
+              `  ✅ Estado devolución actualizado a COMPLETADO en ${creditoIdsConPagos.length} crédito(s) procesado(s) en liquidación`
             );
           }
         } catch (exitError) {

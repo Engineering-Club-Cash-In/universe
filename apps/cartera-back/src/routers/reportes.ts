@@ -251,8 +251,37 @@ export const reportesRouter = new Elysia().use(authMiddleware)
 
   .get("/reportes/mora-por-etapa-asesor", async ({ query, set }) => {
     try {
-      const { email_cobrador } = query as Record<string, string>;
-      const data = await getMoraByEtapaYAsesor({ emailCobrador: email_cobrador });
+      const { email_cobrador, fecha, asesores } = query as Record<string, string>;
+
+      if (fecha) {
+        if (!FECHA_REGEX.test(fecha)) {
+          set.status = 400;
+          return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
+        }
+        const hoy = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
+        if (fecha > hoy) {
+          set.status = 400;
+          return { error: "La fecha no puede ser futura" };
+        }
+      }
+
+      let asesoresIds: number[] | undefined;
+      if (asesores) {
+        asesoresIds = asesores
+          .split(",")
+          .map((s) => Number(s.trim()))
+          .filter((n) => Number.isInteger(n) && n > 0);
+        if (!asesoresIds.length) {
+          set.status = 400;
+          return { error: "Parámetro 'asesores' inválido" };
+        }
+      }
+
+      const data = await getMoraByEtapaYAsesor({
+        emailCobrador: email_cobrador,
+        fecha: fecha || undefined,
+        asesores: asesoresIds,
+      });
       set.status = 200;
       return data;
     } catch (error) {

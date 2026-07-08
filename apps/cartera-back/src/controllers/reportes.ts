@@ -1297,7 +1297,7 @@ export async function getMoraByEtapaYAsesor({
     FROM snap s
     INNER JOIN cartera.creditos c ON c.credito_id = s.credito_id
     INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
-    WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0
+    WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 AND s.cuotas > 0
       ${emailFilter}
       ${asesoresFilter}
     GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket

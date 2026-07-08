@@ -258,6 +258,10 @@ export const reportesRouter = new Elysia().use(authMiddleware)
           set.status = 400;
           return { error: "Formato de fecha inválido. Use YYYY-MM-DD" };
         }
+        if (!fechaValida(fecha)) {
+          set.status = 400;
+          return { error: "Fecha inválida. Verifique que el día exista en el mes." };
+        }
         const hoy = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
         if (fecha > hoy) {
           set.status = 400;

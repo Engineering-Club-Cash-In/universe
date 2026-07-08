@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
+import { setCapitalSource } from "../utils/withAuditContext";
 import { pagos_credito, creditos } from "../database/db";
 import { insertPagosCreditoInversionistasV2 } from "./payments";
 import { esPagoAplicado } from "../utils/paymentStatus";
@@ -143,6 +144,7 @@ export const revalidatePayment = async ({ body, set }: any) => {
 
       // 6️⃣ ACTUALIZAR EL CRÉDITO
       if (pago.credito_id !== null) {
+        await setCapitalSource(tx, "PAGO");
         await tx
           .update(creditos)
           .set({

@@ -30,6 +30,9 @@ export interface PlantillaMensaje {
   cuerpoWhastapp?: string;
 }
 
+export const COBROS_NO_REPLY_WARNING =
+  "*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+
 function toCapitalCase(str: string): string {
   return str
     .toLowerCase()
@@ -95,8 +98,15 @@ Agradecemos confirme la recepción de este mensaje.
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-    cuerpoWhastapp:
-      "Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.\n\nA continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL\n\nPor favor, envíe su boleta o comprobante de pago por este medio para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.\n\nAgradecemos confirme la recepción de este mensaje. Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.",
+    cuerpoWhastapp: `Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
+
+A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
+
+Por favor, envíe su boleta o comprobante de pago por este medio para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
+
+${COBROS_NO_REPLY_WARNING}
+
+Agradecemos confirme la recepción de este mensaje. Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
   },
   {
     id: "al_dia",
@@ -108,8 +118,11 @@ Tel: {telefonoAsesor}.`,
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-    cuerpoWhastapp:
-      "Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.\n\nAtentamente, {nombreAsesor} Tel: {telefonoAsesor}.",
+    cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
   },
   {
     id: "pre_mora",
@@ -125,8 +138,15 @@ SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-    cuerpoWhastapp:
-      "Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.\n\nSi tiene alguna duda por favor comunicarse por este medio.\n\nSI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.\n\nAtentamente, {nombreAsesor} Tel: {telefonoAsesor}.",
+    cuerpoWhastapp: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
+
+Si tiene alguna duda por favor comunicarse por este medio.
+
+SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
   },
   {
     id: "mora_30",
@@ -138,8 +158,11 @@ Tel: {telefonoAsesor}.`,
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-    cuerpoWhastapp:
-      "Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.\n\nAtentamente, {nombreAsesor} Tel: {telefonoAsesor}.",
+    cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
   },
   {
     id: "mora_60",
@@ -155,8 +178,13 @@ Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a to
 Atentamente,
 {nombreAsesor}
 Tel: {telefonoAsesor}`,
-    cuerpoWhastapp:
-      "Estimado/a {clienteNombre}, Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.\n\nSi no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.\n\nAtentamente, {nombreAsesor} Tel: {telefonoAsesor}",
+    cuerpoWhastapp: `Estimado/a {clienteNombre}, Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
+
+Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}`,
   },
   {
     id: "aviso_juridico",
@@ -168,8 +196,13 @@ Tel: {telefonoAsesor}`,
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 
 Favor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.`,
-    cuerpoWhastapp:
-      "Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.\n\nPor lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.\n\nFavor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.",
+    cuerpoWhastapp: `Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+
+Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
+
+${COBROS_NO_REPLY_WARNING}
+
+Favor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.`,
   },
 ];
 

@@ -27,6 +27,22 @@ describe("bank statement opportunity documents", () => {
 		expect(attachmentWriteIndex).toBeGreaterThan(successIndex);
 	});
 
+	test("persists opportunity attachments only after saving credit analysis", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+		const persistedAnalysisIndex = source.indexOf(
+			"fullAnalysis: JSON.stringify(analysis)",
+		);
+		const attachmentWriteIndex = source.indexOf(
+			"const { key } = await uploadFileToR2(",
+		);
+
+		expect(persistedAnalysisIndex).toBeGreaterThan(-1);
+		expect(attachmentWriteIndex).toBeGreaterThan(persistedAnalysisIndex);
+	});
+
 	test("requires upload role before enabling opportunity attachments", () => {
 		const source = readFileSync(
 			join(import.meta.dir, "../routers/bank-analysis.ts"),

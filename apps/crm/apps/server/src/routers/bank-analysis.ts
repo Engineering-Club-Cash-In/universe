@@ -358,6 +358,28 @@ export const bankAnalysisRouter = {
 					maxVariableDebtRatio: input.maxVariableDebtRatio,
 				});
 
+				// 7. Actualizar con los resultados del análisis exitoso
+				await db
+					.update(creditAnalysis)
+					.set({
+						fullAnalysis: JSON.stringify(analysis),
+						monthlyFixedIncome:
+							analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
+						monthlyVariableIncome:
+							analysis.promedio_mensual.promedio_ingresos_variables.toString(),
+						monthlyFixedExpenses:
+							analysis.promedio_mensual.promedio_gastos_fijos.toString(),
+						monthlyVariableExpenses:
+							analysis.promedio_mensual.promedio_gastos_variables.toString(),
+						economicAvailability:
+							analysis.promedio_mensual.disponibilidad_economica.toString(),
+						maxPayment: creditCapacity.maxPayment.toString(),
+						maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
+						analyzedAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(whereCondition);
+
 				if (opportunityForDocuments) {
 					const savedDocuments: { id: string; documentType: string }[] = [];
 					const savedKeys: string[] = [];
@@ -438,28 +460,6 @@ export const bankAnalysisRouter = {
 						});
 					}
 				}
-
-				// 7. Actualizar con los resultados del análisis exitoso
-				await db
-					.update(creditAnalysis)
-					.set({
-						fullAnalysis: JSON.stringify(analysis),
-						monthlyFixedIncome:
-							analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
-						monthlyVariableIncome:
-							analysis.promedio_mensual.promedio_ingresos_variables.toString(),
-						monthlyFixedExpenses:
-							analysis.promedio_mensual.promedio_gastos_fijos.toString(),
-						monthlyVariableExpenses:
-							analysis.promedio_mensual.promedio_gastos_variables.toString(),
-						economicAvailability:
-							analysis.promedio_mensual.disponibilidad_economica.toString(),
-						maxPayment: creditCapacity.maxPayment.toString(),
-						maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
-						analyzedAt: new Date(),
-						updatedAt: new Date(),
-					})
-					.where(whereCondition);
 
 				// 8. Retornar resultados
 				return {

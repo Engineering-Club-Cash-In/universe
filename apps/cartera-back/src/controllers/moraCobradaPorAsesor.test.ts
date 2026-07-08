@@ -49,5 +49,27 @@ if (!hasDb) {
       const filt = await getMoraCobradaPorAsesor({ mes: 6, anio: 2026, asesores: ids });
       expect(filt.porAsesor.every((a) => ids.includes(a.asesorId))).toBe(true);
     }, 20000);
+
+    it("mes sin pagos (futuro lejano) → sin asesores y total 0.00", async () => {
+      const r = await getMoraCobradaPorAsesor({ mes: 12, anio: 2035 });
+      expect(r.porAsesor).toEqual([]);
+      expect(r.totalCobrado).toBe("0.00");
+    }, 20000);
+
+    it("porAsesor viene ordenado de mayor a menor cobrado", async () => {
+      const r = await getMoraCobradaPorAsesor({ mes: 6, anio: 2026 });
+      const montos = r.porAsesor.map((a) => Number(a.cobrado));
+      const ordenado = [...montos].sort((x, y) => y - x);
+      expect(montos).toEqual(ordenado);
+    }, 20000);
+
+    it("totalCobrado y cobrado por asesor con formato de 2 decimales", async () => {
+      const r = await getMoraCobradaPorAsesor({ mes: 6, anio: 2026 });
+      expect(r.totalCobrado).toMatch(/^\d+\.\d{2}$/);
+      for (const a of r.porAsesor) {
+        expect(a.cobrado).toMatch(/^\d+\.\d{2}$/);
+        expect(Number(a.cobrado)).toBeGreaterThan(0);
+      }
+    }, 20000);
   });
 }

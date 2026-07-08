@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from "bun:test";
 
 mock.module("../database", () => ({
   db: {},
+  client: {},
 }));
 
 mock.module("./credits", () => ({

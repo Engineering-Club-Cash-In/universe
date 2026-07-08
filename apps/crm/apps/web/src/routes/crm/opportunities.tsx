@@ -2311,6 +2311,7 @@ function RouteComponent() {
 															to: "/crm/leads",
 															search: {
 																leadId: selectedOpportunity.lead?.id,
+																opportunityId: selectedOpportunity.id,
 															},
 														});
 													}}
@@ -2322,6 +2323,7 @@ function RouteComponent() {
 																to: "/crm/leads",
 																search: {
 																	leadId: selectedOpportunity.lead?.id,
+																	opportunityId: selectedOpportunity.id,
 																},
 															});
 														}

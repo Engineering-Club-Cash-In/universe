@@ -4,17 +4,30 @@ import { generateObject } from "ai";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { coDebtors, creditAnalysis, leads } from "../db/schema/crm";
+import { opportunityDocuments } from "../db/schema/documents";
+import {
+	coDebtors,
+	creditAnalysis,
+	leads,
+	opportunities,
+} from "../db/schema/crm";
 import {
 	BANK_ANALYSIS_PROMPT,
 	bankStatementAnalysisSchema,
 } from "../lib/bank-analysis-schema";
+import {
+	canAutoAttachBankStatementDocuments,
+	getBankStatementOpportunityDocumentType,
+} from "../lib/bank-statement-documents";
+import { updateChecklistForClientDocument } from "../lib/checklist";
 import { calculateCreditCapacity } from "../lib/financial-math";
 import { crmProcedure } from "../lib/orpc";
 import {
 	buildUploadPrefix,
 	deleteFileFromR2,
+	generateUniqueFilename,
 	getFileBuffer,
+	uploadFileToR2,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 
@@ -43,6 +56,7 @@ export const bankAnalysisRouter = {
 					termMonths: z.number().int().min(12).max(120).default(60),
 					maxDebtRatio: z.number().min(0).max(1).default(0.2),
 					maxVariableDebtRatio: z.number().min(0).max(1).default(0.2),
+					opportunityId: z.string().uuid().optional(),
 				})
 				.refine((data) => data.leadId || data.coDebtorId, {
 					message: "Debe proporcionar leadId o coDebtorId",
@@ -89,11 +103,58 @@ export const bankAnalysisRouter = {
 				}
 			}
 
+			let opportunityForDocuments:
+				| { id: string; vehicleId: string | null }
+				| undefined;
+
+			if (isForLead && input.opportunityId) {
+				const [opportunity] = await db
+					.select({
+						id: opportunities.id,
+						leadId: opportunities.leadId,
+						vehicleId: opportunities.vehicleId,
+						assignedTo: opportunities.assignedTo,
+					})
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+
+				if (!opportunity) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+
+				if (opportunity.leadId !== input.leadId) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "La oportunidad no pertenece al lead analizado",
+					});
+				}
+
+				if (
+					canAutoAttachBankStatementDocuments({
+						userRole: context.userRole,
+						userId: context.userId,
+						opportunityAssignedTo: opportunity.assignedTo,
+					})
+				) {
+					opportunityForDocuments = {
+						id: opportunity.id,
+						vehicleId: opportunity.vehicleId,
+					};
+				}
+			}
+
 			const uploadedKeys: string[] = [];
 
 			try {
 				// 2. Validar archivos: descargar de R2 y verificar formato PDF
-				const downloadedFiles: { name: string; buffer: Buffer }[] = [];
+				const downloadedFiles: {
+					name: string;
+					buffer: Buffer;
+					mimeType: string;
+					size: number;
+				}[] = [];
 				for (const file of input.files) {
 					const uploadedFile = await verifyUploadedDocumentInR2({
 						key: file.key,
@@ -115,7 +176,12 @@ export const bankAnalysisRouter = {
 						});
 					}
 
-					downloadedFiles.push({ name: file.name, buffer });
+					downloadedFiles.push({
+						name: file.name,
+						buffer,
+						mimeType: uploadedFile.mimeType,
+						size: uploadedFile.size,
+					});
 				}
 
 				// 3. Incremento atómico del contador para evitar race conditions
@@ -302,6 +368,86 @@ export const bankAnalysisRouter = {
 						updatedAt: new Date(),
 					})
 					.where(whereCondition);
+
+				if (opportunityForDocuments) {
+					const savedDocuments: { id: string; documentType: string }[] = [];
+					const savedKeys: string[] = [];
+
+					try {
+						for (const [index, file] of downloadedFiles.entries()) {
+							const documentType = getBankStatementOpportunityDocumentType(index);
+							if (!documentType) {
+								continue;
+							}
+
+							const uniqueFilename = generateUniqueFilename(file.name);
+							const { key } = await uploadFileToR2(
+								new Blob([new Uint8Array(file.buffer)], { type: file.mimeType }),
+								uniqueFilename,
+								opportunityForDocuments.id,
+							);
+							savedKeys.push(key);
+
+							const [newDocument] = await db
+								.insert(opportunityDocuments)
+								.values({
+									opportunityId: opportunityForDocuments.id,
+									filename: uniqueFilename,
+									originalName: file.name,
+									mimeType: file.mimeType,
+									size: file.size,
+									documentType,
+									description:
+										"Guardado automáticamente desde análisis de capacidad de pago",
+									uploadedBy: context.userId,
+									filePath: key,
+								})
+								.returning({ id: opportunityDocuments.id });
+
+							if (newDocument) {
+								savedDocuments.push({ id: newDocument.id, documentType });
+								await updateChecklistForClientDocument(
+									opportunityForDocuments.id,
+									documentType,
+									newDocument.id,
+									!!opportunityForDocuments.vehicleId,
+									opportunityForDocuments.vehicleId || undefined,
+								);
+							}
+						}
+					} catch (error) {
+						const cleanupResults = await Promise.allSettled([
+							...savedDocuments.map(({ id }) =>
+								db
+									.delete(opportunityDocuments)
+									.where(eq(opportunityDocuments.id, id)),
+							),
+							...savedKeys.map((key) => deleteFileFromR2(key)),
+						]);
+						const failedCleanups = cleanupResults.filter(
+							(result) => result.status === "rejected",
+						);
+						await Promise.allSettled(
+							savedDocuments.map(({ id, documentType }) =>
+								updateChecklistForClientDocument(
+									opportunityForDocuments.id,
+									documentType,
+									id,
+									!!opportunityForDocuments.vehicleId,
+									opportunityForDocuments.vehicleId || undefined,
+								),
+							),
+						);
+
+						console.error("Failed to save bank statement opportunity documents", {
+							opportunityId: opportunityForDocuments.id,
+							savedDocuments: savedDocuments.length,
+							savedFiles: savedKeys.length,
+							failedCleanups: failedCleanups.length,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
 
 				// 8. Retornar resultados
 				return {

@@ -38,12 +38,16 @@ export function validarCatalogoBuckets(
   }
 
   // Paso (2) de bucketDeCredito() resuelve por estados_incluidos con find()
-  // first-match: si el mismo status aparece en dos buckets, gana el primero
-  // por orden de array — mis-clasificación silenciosa, y reordenar el
-  // catálogo (sin tocar estados_incluidos) cambiaría el resultado.
+  // first-match: si el mismo status aparece en dos buckets DISTINTOS, gana el
+  // primero por orden de array — mis-clasificación silenciosa, y reordenar el
+  // catálogo (sin tocar estados_incluidos) cambiaría el resultado. Se
+  // deduplica por fila (`new Set`) antes de contar: un status repetido DENTRO
+  // de la misma fila (ej. estados_incluidos con un valor por error dos veces)
+  // no es ambigüedad real — bucketDeCredito lo resuelve igual sin importar
+  // cuántas veces aparezca, así que no debe tumbar un catálogo válido.
   const estadoABuckets = new Map<string, number[]>();
   for (const b of catalogo) {
-    for (const estado of b.estados_incluidos) {
+    for (const estado of new Set(b.estados_incluidos)) {
       const numeros = estadoABuckets.get(estado) ?? [];
       numeros.push(b.numero);
       estadoABuckets.set(estado, numeros);

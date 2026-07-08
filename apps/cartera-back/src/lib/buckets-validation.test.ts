@@ -103,6 +103,19 @@ describe("validarCatalogoBuckets", () => {
       problemas.some((p) => p.includes("INCOBRABLE") && p.includes("más de un bucket")),
     ).toBe(true);
   });
+
+  it("status repetido DENTRO de la misma fila no cuenta como conflicto", () => {
+    // ["INCOBRABLE", "INCOBRABLE"] en la MISMA fila (typo de siembra, no
+    // ambigüedad real) — bucketDeCredito lo resuelve igual sin importar
+    // cuántas veces aparezca el valor. Un catálogo válido no debe tumbarse
+    // por esto.
+    const catalogo = SEED_VALIDO.map((b) =>
+      b.numero === 5 ? { ...b, estados_incluidos: ["INCOBRABLE", "INCOBRABLE"] } : b,
+    );
+    const { ok, problemas } = validarCatalogoBuckets(catalogo);
+    expect(ok).toBe(true);
+    expect(problemas).toEqual([]);
+  });
 });
 
 describe("bucketDeCredito", () => {

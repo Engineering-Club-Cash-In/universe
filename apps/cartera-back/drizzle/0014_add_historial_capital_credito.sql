@@ -10,6 +10,13 @@
 --
 -- Si no viene fuente: INSERT => 'CREACION', UPDATE => 'SISTEMA'. Nunca se pierde
 -- un cambio aunque el write site no esté instrumentado.
+--
+-- ⚠️ APLICAR MANUALMENTE (mismo patrón que 0004 y demás triggers del repo):
+-- `drizzle-kit push` (script `migrate`) sincroniza SOLO el schema de schema.ts
+-- (crea la TABLA) pero NO ejecuta este .sql, así que la FUNCIÓN y el TRIGGER hay
+-- que aplicarlos a mano en cada base. Todo el archivo es idempotente
+-- (CREATE ... IF NOT EXISTS / CREATE OR REPLACE / DROP TRIGGER IF EXISTS), así que
+-- se puede re-correr sin riesgo. Ya aplicado en PROD y DEV.
 
 -- 1. Tabla de historial
 CREATE TABLE IF NOT EXISTS cartera.historial_capital_credito (

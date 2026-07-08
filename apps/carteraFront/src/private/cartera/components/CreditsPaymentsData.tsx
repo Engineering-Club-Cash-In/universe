@@ -1376,7 +1376,7 @@ function MobileView({
                 }}
                 title={item.bucket.nombre}
               >
-                {item.bucket.prefijo} · {item.bucket.nombre}
+                {item.bucket.nombre}
               </span>
             ) : (
               <span className="text-gray-400 text-xs">—</span>
@@ -1687,7 +1687,7 @@ function DesktopView({
                       }}
                       title={item.bucket.nombre}
                     >
-                      {item.bucket.prefijo} · {item.bucket.nombre}
+                      {item.bucket.nombre}
                     </span>
                   ) : (
                     <span className="text-gray-400 text-xs">—</span>

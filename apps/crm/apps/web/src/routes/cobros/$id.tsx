@@ -63,6 +63,10 @@ import {
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
+import {
+	bucketDeEstado,
+	useBucketsCatalogo,
+} from "@/lib/cobros/buckets-catalogo";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -203,6 +207,8 @@ function RouteComponent() {
 	const [isSeguimientoModalOpen, setIsSeguimientoModalOpen] = useState(false);
 
 	const queryClient = useQueryClient();
+
+	const bucketsCatalogo = useBucketsCatalogo();
 
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
@@ -470,20 +476,11 @@ function RouteComponent() {
 		setIsEditingVehicle(true);
 	};
 
-	const getEstadoBadge = (estado: string | null | undefined) => {
-		const colors: Record<string, string> = {
-			en_convenio: "bg-green-100 text-green-800",
-			mora_30: "bg-yellow-100 text-yellow-800",
-			mora_60: "bg-orange-100 text-orange-800",
-			mora_90: "bg-red-100 text-red-800",
-			mora_120: "bg-red-200 text-red-900",
-			pagado: "bg-green-100 text-green-800",
-			incobrable: "bg-gray-100 text-gray-800",
-		};
-		return estado
-			? (colors[estado] ?? "bg-gray-100 text-gray-800")
-			: "bg-gray-100 text-gray-800";
-	};
+	const getEstadoBadge = (estado: string | null | undefined) =>
+		bucketDeEstado(estado, bucketsCatalogo.data).colorClass;
+
+	const getEstadoLabel = (estado: string | null | undefined) =>
+		bucketDeEstado(estado, bucketsCatalogo.data).label;
 
 	const getMetodoIcon = (metodo: string) => {
 		switch (metodo) {
@@ -547,7 +544,7 @@ function RouteComponent() {
 					</div>
 				</div>
 				<Badge className={getEstadoBadge(caso.estadoMora || "")}>
-					{caso.estadoMora?.replace("_", " ")?.toUpperCase()}
+					{getEstadoLabel(caso.estadoMora || "")}
 				</Badge>
 			</div>
 
@@ -652,10 +649,11 @@ function RouteComponent() {
 									</div>
 									<p className="font-bold text-lg text-orange-600">
 										Q
-										{(
-											caso.cuotaConvenio != null
-												? Number(caso.cuotaConvenio) + Number(caso.cuotaMensual || 0)
-												: Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)
+										{(caso.cuotaConvenio != null
+											? Number(caso.cuotaConvenio) +
+												Number(caso.cuotaMensual || 0)
+											: Number(caso.montoEnMora) +
+												Number(caso.cuotaMensual || 0)
 										).toLocaleString()}
 									</p>
 								</div>
@@ -751,10 +749,13 @@ function RouteComponent() {
 													Convenio:{" "}
 													<strong>
 														Q
-														{Number(caso.cuotaConvenio ?? 0).toLocaleString("es-GT", {
-															minimumFractionDigits: 2,
-															maximumFractionDigits: 2,
-														})}
+														{Number(caso.cuotaConvenio ?? 0).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</strong>
 												</span>
 												<span>+</span>
@@ -762,10 +763,13 @@ function RouteComponent() {
 													Cuota:{" "}
 													<strong>
 														Q
-														{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
-															minimumFractionDigits: 2,
-															maximumFractionDigits: 2,
-														})}
+														{Number(caso.cuotaMensual || 0).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</strong>
 												</span>
 											</div>
@@ -1463,8 +1467,17 @@ function RouteComponent() {
 												cuotasPage * ITEMS_PER_PAGE,
 											)
 											.map((cuota) => {
-												const estadoBadge = getEstadoBadge(cuota.estadoMora);
+												// cuota.estadoMora es "pagado"/"pendiente" — estado de
+												// CUOTA, no el estadoMora de aging/status del crédito
+												// (al_dia/mora_30/.../en_convenio/incobrable). No pasa
+												// por bucketDeEstado: mezclar ambos dominios en
+												// DEFAULT_BUCKETS haría de ese catálogo un cajón de
+												// sastre, y "pendiente" caería en BUCKET_DESCONOCIDO.
 												const esPagada = cuota.estadoMora === "pagado";
+												const estadoBadge = esPagada
+													? "bg-green-100 text-green-800"
+													: "bg-yellow-100 text-yellow-800";
+												const estadoLabel = esPagada ? "Pagado" : "Pendiente";
 												const tieneMora = Number(cuota.montoMora) > 0;
 												const pagoConMora = esPagada && tieneMora; // Pagado pero con mora
 
@@ -1479,9 +1492,7 @@ function RouteComponent() {
 																	Cuota #{cuota.numeroCuota}
 																</span>
 																<Badge className={estadoBadge}>
-																	{cuota.estadoMora
-																		?.replace("_", " ")
-																		?.toUpperCase()}
+																	{estadoLabel}
 																</Badge>
 																{pagoConMora && (
 																	<Badge className="bg-orange-100 text-orange-800 text-xs dark:bg-orange-950/40 dark:text-orange-300">

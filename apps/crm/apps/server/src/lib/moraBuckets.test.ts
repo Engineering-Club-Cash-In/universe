@@ -23,11 +23,17 @@ describe("estadoMoraPorCuotas", () => {
 		// puede "pasar" solo porque el cache ya quedó poblado por uno anterior,
 		// no porque su propia lógica sea correcta.
 		__resetMoraBucketsCacheForTests();
+		// Sin implementación por defecto acá a propósito: un mockRejectedValue
+		// global sería el resultado de CUALQUIER llamada al spy hasta que un
+		// test lo sobreescriba, incluida una llamada que ocurra ANTES de esa
+		// sobreescritura (ej. un refresh en background disparado por un test
+		// previo) — esa promesa rechazada nadie la espera y queda como
+		// unhandled rejection. Cada test configura su propio mock.
 		getBucketsCatalogoSpy = spyOn(carteraBackClient, "getBucketsCatalogo");
-		getBucketsCatalogoSpy.mockRejectedValue(new Error("cartera-back down"));
 	});
 
 	test("falls back to al_dia for 0 cuotas atrasadas when catalogo fetch fails", () => {
+		getBucketsCatalogoSpy.mockRejectedValue(new Error("cartera-back down"));
 		expect(estadoMoraPorCuotas(0)).toBe("al_dia");
 	});
 

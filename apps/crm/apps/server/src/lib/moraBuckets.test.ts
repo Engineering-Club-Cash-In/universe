@@ -4,6 +4,7 @@ import {
 	__resetMoraBucketsCacheForTests,
 	estadoMoraPorCuotas,
 	getBucketsParaUI,
+	getBucketsParaUIAsync,
 	labelPorEstadoMora,
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
@@ -261,6 +262,65 @@ describe("getBucketsParaUI", () => {
 
 		expect(ui[ui.length - 1].estadoMora).toBe("al_dia");
 		expect(ui[0].estadoMora).toBe("mora_30");
+	});
+});
+
+describe("getBucketsParaUIAsync", () => {
+	let getBucketsCatalogoSpy: ReturnType<
+		typeof spyOn<typeof carteraBackClient, "getBucketsCatalogo">
+	>;
+
+	beforeEach(() => {
+		__resetMoraBucketsCacheForTests();
+		getBucketsCatalogoSpy = spyOn(carteraBackClient, "getBucketsCatalogo");
+	});
+
+	test("espera el primer refresh en cold-start: devuelve el catálogo dinámico, no el fallback estático", async () => {
+		// Sin este await, la primera llamada tras un restart del server (cache
+		// nunca poblado) devolvía MORA_BUCKETS (color: null, labels genéricos)
+		// aunque cartera-back esté sano — porque maybeRefreshInBackground()
+		// dispara el fetch sin esperarlo. getBucketsParaUIAsync SÍ espera
+		// cuando el cache está vacío.
+		const catalogo = buildCatalogoCompleto();
+		const conColores = catalogo.map((b) => ({
+			...b,
+			color: `#${b.numero}${b.numero}${b.numero}`,
+		}));
+		getBucketsCatalogoSpy.mockResolvedValue(conColores);
+
+		const ui = await getBucketsParaUIAsync();
+
+		expect(ui[0]).toEqual({
+			estadoMora: "al_dia",
+			label: "Cartera Sana",
+			prefijo: "B0",
+			color: "#000",
+			orden: 0,
+		});
+	});
+
+	test("cache ya poblado: responde directo sin esperar ningún refresh", async () => {
+		const catalogo = buildCatalogoCompleto();
+		getBucketsCatalogoSpy.mockResolvedValue(catalogo);
+		await refreshMoraBucketsCache();
+
+		const ui = await getBucketsParaUIAsync();
+
+		expect(ui[0].estadoMora).toBe("al_dia");
+	});
+
+	test("si el refresh falla en cold-start, cae al fallback estático sin colgarse", async () => {
+		getBucketsCatalogoSpy.mockRejectedValue(new Error("cartera-back down"));
+
+		const ui = await getBucketsParaUIAsync();
+
+		expect(ui[0]).toEqual({
+			estadoMora: "al_dia",
+			label: "Cartera Sana",
+			prefijo: "B0",
+			color: null,
+			orden: 0,
+		});
 	});
 });
 

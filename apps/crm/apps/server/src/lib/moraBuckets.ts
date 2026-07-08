@@ -231,14 +231,19 @@ let refreshInFlight: Promise<void> | null = null;
  * Dispara un refresh en background si el cache expiró, sin bloquear la
  * llamada actual. Deduplica: si ya hay un refresh en vuelo, no dispara otro
  * (evita N fetches concurrentes cuando N filas de una tabla llaman a este
- * módulo en el mismo tick con el cache recién expirado).
+ * módulo en el mismo tick con el cache recién expirado). Devuelve el
+ * refresh en vuelo (o `undefined` si el cache seguía vigente) para que
+ * callers async opcionalmente lo esperen — los callers síncronos existentes
+ * (hot paths como estadoMoraPorCuotas, llamados por fila en sync de casos)
+ * ignoran el retorno y siguen sin bloquear.
  */
-function maybeRefreshInBackground(): void {
+function maybeRefreshInBackground(): Promise<void> | undefined {
 	if (Date.now() - cachedAt > CACHE_TTL_MS && !refreshInFlight) {
 		refreshInFlight = refreshMoraBucketsCache().finally(() => {
 			refreshInFlight = null;
 		});
 	}
+	return refreshInFlight ?? undefined;
 }
 
 /** Rango { min, max } de cuotas atrasadas para una etapa. `undefined` si no aplica filtro por cuotas. */
@@ -276,14 +281,7 @@ export type BucketParaUI = {
 	orden: number;
 };
 
-/**
- * Catálogo de buckets para RENDER en la web (label/color/orden por etapa) —
- * evita que el frontend mantenga sus propias copias hardcodeadas. `color`
- * puede venir `null` (catálogo dinámico sin color asignado, o fallback
- * estático): la UI debe tener su propio default visual en ese caso.
- */
-export function getBucketsParaUI(): BucketParaUI[] {
-	maybeRefreshInBackground();
+function mapearBucketsParaUI(): BucketParaUI[] {
 	return activeBuckets()
 		.map((b) => ({
 			estadoMora: b.estadoMora,
@@ -293,4 +291,37 @@ export function getBucketsParaUI(): BucketParaUI[] {
 			orden: b.orden,
 		}))
 		.sort((a, b) => a.orden - b.orden);
+}
+
+/**
+ * Catálogo de buckets para RENDER en la web (label/color/orden por etapa) —
+ * evita que el frontend mantenga sus propias copias hardcodeadas. `color`
+ * puede venir `null` (catálogo dinámico sin color asignado, o fallback
+ * estático): la UI debe tener su propio default visual en ese caso.
+ *
+ * Síncrona a propósito — dispara el refresh en background sin esperarlo,
+ * igual que el resto de funciones de este módulo (estadoMoraPorCuotas, etc).
+ * Para el endpoint ORPC (async, sin hot path) usar getBucketsParaUIAsync().
+ */
+export function getBucketsParaUI(): BucketParaUI[] {
+	maybeRefreshInBackground();
+	return mapearBucketsParaUI();
+}
+
+/**
+ * Variante async de getBucketsParaUI() para callers que SÍ pueden esperar
+ * (el endpoint ORPC, no un hot path). Si el cache nunca se pobló
+ * (cold-start o recién reseteado), espera el primer refresh antes de
+ * responder — sin esto, el primer caller tras un restart del server recibe
+ * el fallback estático (color: null, labels genéricos) aunque cartera-back
+ * esté sano, porque maybeRefreshInBackground() no bloquea. Si el cache ya
+ * está poblado (aunque expirado), no espera — el refresh sigue en
+ * background y esta llamada usa el valor cacheado, igual que la síncrona.
+ */
+export async function getBucketsParaUIAsync(): Promise<BucketParaUI[]> {
+	const refresh = maybeRefreshInBackground();
+	if (dynamicBucketsCache === null && refresh) {
+		await refresh;
+	}
+	return mapearBucketsParaUI();
 }

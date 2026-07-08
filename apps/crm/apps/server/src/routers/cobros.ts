@@ -56,7 +56,7 @@ import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
 	ESTADOS_AGING_VALIDOS,
 	estadoMoraPorCuotas,
-	getBucketsParaUI,
+	getBucketsParaUIAsync,
 	MORA_BUCKETS,
 	rangoCuotasPorEstadoMora,
 } from "../lib/moraBuckets";
@@ -1518,7 +1518,7 @@ export const cobrosRouter = {
 	// Catálogo de buckets para render en la UI (label/color/orden por etapa) —
 	// evita que el frontend mantenga sus propias copias hardcodeadas.
 	getBucketsCatalogo: cobrosProcedure.handler(async () => {
-		return getBucketsParaUI();
+		return getBucketsParaUIAsync();
 	}),
 
 	// Obtener usuarios con rol de cobros para asignación

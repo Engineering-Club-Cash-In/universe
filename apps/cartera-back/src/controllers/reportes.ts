@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { db } from "../database";
 
 type Periodo = "anio" | "trimestre" | "mes" | "semana" | "dia";
@@ -27,8 +28,8 @@ export async function getMontoACobrar({
       SELECT DISTINCT
         DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp) AS bucket,
         cr.credito_id
-      FROM cartera.cuotas_credito c
-      JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+      JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
       WHERE c.pagado = false
         AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
         AND c.fecha_vencimiento >= ${fechaInicio}::date
@@ -39,7 +40,7 @@ export async function getMontoACobrar({
         bc.bucket,
         AVG(COALESCE(m.monto_mora::numeric, 0)) AS mora_promedio
       FROM bucket_creditos bc
-      LEFT JOIN cartera.moras_credito m ON m.credito_id = bc.credito_id AND m.activa = true
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m ON m.credito_id = bc.credito_id AND m.activa = true
       GROUP BY bc.bucket
     )
     SELECT
@@ -53,8 +54,8 @@ export async function getMontoACobrar({
       COALESCE(SUM(cr.membresias_pago::numeric), 0) AS total_membresias,
       COALESCE(SUM(cr.royalti::numeric / NULLIF(cr.plazo::numeric, 0)), 0) AS total_royalti,
       COALESCE(mpb.mora_promedio, 0) AS mora_promedio
-    FROM cartera.cuotas_credito c
-    JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+    FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
     JOIN mora_por_bucket mpb ON mpb.bucket = DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp)
     WHERE c.pagado = false
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
@@ -100,8 +101,8 @@ export async function getMontoACobrarPeriodo({
         COALESCE(MIN(pc.gps_restante::numeric)     FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.abono_gps::numeric)      FILTER (WHERE NOT pc."paymentFalse"), 0)  AS gps_restante,
         COALESCE(MIN(pc.membresias::numeric)       FILTER (WHERE NOT pc."paymentFalse"), 0) + COALESCE(SUM(pc.membresias_pago::numeric) FILTER (WHERE NOT pc."paymentFalse"), 0) AS membresias,
         SUM(COALESCE(pc.monto_boleta::numeric, 0))                                                                         AS monto_boleta
-      FROM cartera.pagos_credito pc
-      JOIN cartera.cuotas_credito q ON q.cuota_id = pc.cuota_id
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
+      JOIN ${SQL_CARTERA_SCHEMA}.cuotas_credito q ON q.cuota_id = pc.cuota_id
       WHERE q.fecha_vencimiento::date >= ${fechaInicio}::date
         AND q.fecha_vencimiento::date <= ${fechaFin}::date
       GROUP BY pc.credito_id, pc.cuota_id, q.fecha_vencimiento
@@ -119,7 +120,7 @@ export async function getMontoACobrarPeriodo({
         COALESCE(pc.gps_restante::numeric, 0)      + COALESCE(pc.abono_gps::numeric, 0)                 AS gps_restante,
         COALESCE(pc.membresias::numeric, 0)        + COALESCE(pc.membresias_pago::numeric, 0)           AS membresias,
         COALESCE(pc.monto_boleta::numeric, 0)                                                            AS monto_boleta
-      FROM cartera.pagos_credito pc
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
       WHERE pc."paymentFalse" = false
         AND pc.cuota_id IS NULL
         AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
@@ -141,12 +142,12 @@ export async function getMontoACobrarPeriodo({
              THEN COALESCE(MAX(hist_mora.monto_mora), 0)
              ELSE 0 END                                                 AS mora_val
       FROM pagos_en_rango p
-      INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
-      INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
-      INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON p.credito_id = c.credito_id
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON c.usuario_id = u.usuario_id
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON c.asesor_id = a.asesor_id
       LEFT JOIN LATERAL (
         SELECT COALESCE(mh.monto_nuevo, 0) AS monto_mora
-        FROM cartera.moras_historial mh
+        FROM ${SQL_CARTERA_SCHEMA}.moras_historial mh
         WHERE mh.credito_id = c.credito_id
           AND (mh.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') < DATE_TRUNC(${pg}, p.fecha_venc::timestamp) + ${pgInterval}
         ORDER BY mh.fecha DESC
@@ -154,8 +155,8 @@ export async function getMontoACobrarPeriodo({
       ) hist_mora ON true
       LEFT JOIN LATERAL (
         SELECT pc_a.total_restante::numeric AS total_restante
-        FROM cartera.pagos_credito pc_a
-        LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
+        FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc_a
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
         WHERE pc_a.credito_id = c.credito_id
           AND pc_a."paymentFalse" = false
           AND pc_a.total_restante IS NOT NULL
@@ -178,11 +179,11 @@ export async function getMontoACobrarPeriodo({
       ) cap_anterior ON true
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS cuotas_atrasadas
-        FROM cartera.cuotas_credito qc_mora
+        FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito qc_mora
         WHERE qc_mora.credito_id = c.credito_id
           AND qc_mora.fecha_vencimiento::date < p.fecha_venc::date
           AND NOT EXISTS (
-            SELECT 1 FROM cartera.pagos_credito pc_mora
+            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc_mora
             WHERE pc_mora.cuota_id = qc_mora.cuota_id
               AND pc_mora."paymentFalse" = false
               AND pc_mora.pagado = true
@@ -244,14 +245,14 @@ export async function getMontoACobrarPeriodo({
             COALESCE(MIN(pc_a.seguro_restante::numeric),  0) AS seguro_restante,
             COALESCE(MIN(pc_a.gps_restante::numeric),     0) AS gps_restante,
             COALESCE(MIN(pc_a.membresias::numeric),       0) AS membresias
-          FROM cartera.cuotas_credito q_a
-          LEFT JOIN cartera.pagos_credito pc_a
+          FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito q_a
+          LEFT JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito pc_a
             ON pc_a.cuota_id = q_a.cuota_id
             AND pc_a."paymentFalse" = false
           WHERE q_a.credito_id = calc.credito_id
             AND q_a.fecha_vencimiento::date < calc.bucket
             AND NOT EXISTS (
-              SELECT 1 FROM cartera.pagos_credito pc2
+              SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc2
               WHERE pc2.cuota_id = q_a.cuota_id
                 AND pc2."paymentFalse" = false
                 AND pc2.pagado = true
@@ -305,9 +306,9 @@ export async function getMontoACobrarPeriodo({
       SELECT
         DATE_TRUNC(${pg}, (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::timestamp) AS pagos_bucket,
         COALESCE(SUM(pci.abono_interes::numeric + pci.abono_iva_12::numeric), 0)        AS total_interes_inversionista
-      FROM cartera.pagos_credito_inversionistas pci
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci
       WHERE pci.inversionista_id IN (
-        SELECT inversionista_id FROM cartera.inversionistas WHERE permite_distribucion = false
+        SELECT inversionista_id FROM ${SQL_CARTERA_SCHEMA}.inversionistas WHERE permite_distribucion = false
       )
         AND (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::date >= ${fechaInicio}::date
         AND (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::date <= ${fechaFin}::date
@@ -384,8 +385,8 @@ export async function getCobradoDelMes({
       COALESCE(SUM(p.abono_seguro::numeric), 0) AS cobrado_seguro,
       COALESCE(SUM(p.abono_gps::numeric), 0) AS cobrado_gps,
       COALESCE(SUM(p.membresias_pago::numeric), 0) AS cobrado_membresias
-    FROM cartera.pagos_credito p
-    JOIN cartera.creditos cr ON p.credito_id = cr.credito_id
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON p.credito_id = cr.credito_id
     WHERE p.fecha_pago >= ${inicioMesUtc.toISOString()}::timestamptz
       AND p.fecha_pago < ${inicioMesSiguienteUtc.toISOString()}::timestamptz
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO', 'CANCELADO')
@@ -420,7 +421,7 @@ export async function getCobradoDelMesSnapshot({
       COALESCE(SUM(royalty::numeric), 0)                AS cobrado_royalti,
       COALESCE(SUM(mora_cube::numeric), 0)              AS cobrado_mora,
       COALESCE(SUM(otros_ingresos::numeric), 0)         AS cobrado_otros
-    FROM cartera.facturacion_snapshot_diario
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario
     WHERE fecha >= ${inicioMes}::date
       AND fecha < (${inicioMes}::date + INTERVAL '1 month')
   `);
@@ -445,7 +446,7 @@ export async function getEsperadoDelMesMeta({
 }) {
   const result = await db.execute(sql`
     SELECT meta_mensual
-    FROM cartera.metas_facturacion
+    FROM ${SQL_CARTERA_SCHEMA}.metas_facturacion
     WHERE anio = ${anio} AND mes = ${mes}
     LIMIT 1
   `);
@@ -476,11 +477,11 @@ export async function getFlujoCuotasInversiones({
       COALESCE(SUM(ci.monto_inversionista::numeric), 0) AS total_interes,
       COALESCE(SUM(ci.iva_inversionista::numeric), 0)   AS total_iva,
       MAX(i.monto_reinversion::numeric)                  AS monto_reinversion_inv
-    FROM cartera.cuotas_credito c
-    JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
-    JOIN cartera.creditos_inversionistas ci ON cr.credito_id = ci.credito_id
-    JOIN cartera.inversionistas i ON ci.inversionista_id = i.inversionista_id
-    LEFT JOIN cartera.creditos_inversionistas_espejo ce
+    FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci ON cr.credito_id = ci.credito_id
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON ci.inversionista_id = i.inversionista_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
       ON cr.credito_id = ce.credito_id AND ci.inversionista_id = ce.inversionista_id
     WHERE c.pagado = false
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
@@ -492,7 +493,7 @@ export async function getFlujoCuotasInversiones({
 
   const extrasRows = await db.execute(sql`
     SELECT tipo, COALESCE(SUM(monto::numeric), 0) AS total
-    FROM cartera.abonos_capital
+    FROM ${SQL_CARTERA_SCHEMA}.abonos_capital
     WHERE created_at::date >= ${fechaInicio}::date
       AND created_at::date <= ${fechaFin}::date
     GROUP BY tipo
@@ -618,11 +619,11 @@ export async function getFlujoCuotasPorInversionista({
       COALESCE(SUM(ci.monto_inversionista::numeric), 0) AS total_interes,
       COALESCE(SUM(ci.iva_inversionista::numeric), 0)   AS total_iva,
       MAX(i.monto_reinversion::numeric)                  AS monto_reinversion_inv
-    FROM cartera.cuotas_credito c
-    JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
-    JOIN cartera.creditos_inversionistas ci ON cr.credito_id = ci.credito_id
-    JOIN cartera.inversionistas i ON ci.inversionista_id = i.inversionista_id
-    LEFT JOIN cartera.creditos_inversionistas_espejo ce
+    FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci ON cr.credito_id = ci.credito_id
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON ci.inversionista_id = i.inversionista_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
       ON cr.credito_id = ce.credito_id AND ci.inversionista_id = ce.inversionista_id
     WHERE c.pagado = false
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
@@ -753,8 +754,8 @@ export async function getReinversionLiquidaciones({
       COALESCE(SUM(l.total_isr::numeric), 0)                AS total_isr,
       COALESCE(SUM(l.total_cuota::numeric), 0)              AS total_cuota,
       COUNT(*)::int                                          AS cantidad
-    FROM cartera.liquidaciones l
-    JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
+    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON l.inversionista_id = i.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     GROUP BY i.tipo_reinversion
@@ -802,7 +803,7 @@ export async function getReinversionLiquidaciones({
       COALESCE(SUM(l.total_interes::numeric), 0)   AS total_interes,
       COALESCE(SUM(l.total_iva::numeric), 0)       AS total_iva,
       COALESCE(SUM(l.total_isr::numeric), 0)       AS total_isr
-    FROM cartera.liquidaciones l
+    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     GROUP BY (l.total_isr::numeric > 0)
@@ -840,8 +841,8 @@ export async function getReinversionLiquidaciones({
         * (100 - pe.porcentaje_participacion::numeric)
         / pe.porcentaje_participacion::numeric
     ), 0) AS interes_cube
-    FROM cartera.pagos_credito_inversionistas_espejo pe
-    JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_espejo pe
+    JOIN ${SQL_CARTERA_SCHEMA}.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
       AND pe.inversionista_id <> 86
@@ -857,11 +858,11 @@ export async function getReinversionLiquidaciones({
   // Cada abono se cuenta una sola vez (DISTINCT) aunque tenga varios pagos espejo.
   const extrasRows = await db.execute(sql`
     SELECT a.tipo, COALESCE(SUM(a.monto::numeric), 0) AS total
-    FROM cartera.abonos_capital a
+    FROM ${SQL_CARTERA_SCHEMA}.abonos_capital a
     WHERE a.abono_id IN (
       SELECT DISTINCT e.abono_capital_id
-      FROM cartera.pagos_credito_inversionistas_espejo e
-      JOIN cartera.liquidaciones l ON l.liquidacion_id = e.liquidacion_id
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_espejo e
+      JOIN ${SQL_CARTERA_SCHEMA}.liquidaciones l ON l.liquidacion_id = e.liquidacion_id
       WHERE e.abono_capital_id IS NOT NULL
         AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
         AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
@@ -889,10 +890,10 @@ export async function getReinversionLiquidaciones({
         SUM(pe.abono_capital::numeric)                 AS abono,
         COALESCE(MAX(ce.monto_aportado::numeric), 0)   AS monto_aportado,
         bool_and(ce.id IS NULL)                        AS sin_fila
-      FROM cartera.pagos_credito_inversionistas_espejo pe
-      JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
-      JOIN cartera.creditos cr ON cr.credito_id = pe.credito_id
-      LEFT JOIN cartera.creditos_inversionistas_espejo ce
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_espejo pe
+      JOIN ${SQL_CARTERA_SCHEMA}.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+      JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON cr.credito_id = pe.credito_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
         ON ce.credito_id = pe.credito_id
        AND ce.inversionista_id = pe.inversionista_id
       WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
@@ -921,8 +922,8 @@ export async function getReinversionLiquidaciones({
       COALESCE(SUM(l.reinversion_interes::numeric), 0) AS reinversion_interes,
       COALESCE(SUM(l.reinversion_total::numeric), 0)   AS reinversion,
       COALESCE(SUM(l.total_cuota::numeric), 0)         AS a_recibir
-    FROM cartera.liquidaciones l
-    JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
+    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON l.inversionista_id = i.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     GROUP BY l.inversionista_id, i.nombre, i.tipo_reinversion
@@ -937,8 +938,8 @@ export async function getReinversionLiquidaciones({
     SELECT
       h.inversionista_id,
       COALESCE(SUM(h.monto_aportado::numeric), 0) AS monto_aportado
-    FROM cartera.historico_liquidaciones_espejo h
-    JOIN cartera.liquidaciones l ON l.liquidacion_id = h.liquidacion_id
+    FROM ${SQL_CARTERA_SCHEMA}.historico_liquidaciones_espejo h
+    JOIN ${SQL_CARTERA_SCHEMA}.liquidaciones l ON l.liquidacion_id = h.liquidacion_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     GROUP BY h.inversionista_id
@@ -987,7 +988,7 @@ export async function getReinversionLiquidaciones({
       COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo,
       COUNT(DISTINCT (c.inversionista_id, ${fechaCompra}))::int AS cantidad,
       COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
-    FROM cartera.compras_credito_inversionista c
+    FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista c
     WHERE c.tipo_operacion = 'compra_cartera'
       AND c.status = 'completado'
       AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
@@ -1052,8 +1053,8 @@ export async function getEsperadoDelMes({
       COALESCE(SUM(cr.seguro_10_cuotas::numeric), 0) AS esperado_seguro,
       COALESCE(SUM(cr.gps::numeric), 0) AS esperado_gps,
       COALESCE(SUM(cr.membresias_pago::numeric), 0) AS esperado_membresias
-    FROM cartera.cuotas_credito c
-    JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+    FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
     WHERE c.fecha_vencimiento >= ${inicioMes}::date
       AND c.fecha_vencimiento < ${inicioMesSiguiente}::date
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
@@ -1086,7 +1087,7 @@ export async function getColocacionPorPeriodo({
       DATE_TRUNC(${pg}, (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::timestamp) AS bucket,
       COUNT(cr.credito_id)::int AS cantidad_creditos,
       COALESCE(SUM(cr.capital::numeric), 0) AS total_colocacion
-    FROM cartera.creditos cr
+    FROM ${SQL_CARTERA_SCHEMA}.creditos cr
     WHERE (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::date >= ${fechaInicio}::date
       AND (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::date <= ${fechaFin}::date
     GROUP BY DATE_TRUNC(${pg}, (cr.fecha_creacion AT TIME ZONE 'America/Guatemala')::timestamp)
@@ -1107,7 +1108,7 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
     SELECT DISTINCT ON (mes)
       mes,
       acumulado_total AS cobrado
-    FROM cartera.facturacion_snapshot_diario
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario
     WHERE anio = ${anio}
     ORDER BY mes, fecha DESC
   `);
@@ -1119,7 +1120,7 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
       periodo AS mes,
       COALESCE(SUM(cantidad_creditos), 0)::int AS creditos_activos,
       COALESCE(SUM(capital_total::numeric), 0) AS cartera_activa
-    FROM cartera.cierre_mensual
+    FROM ${SQL_CARTERA_SCHEMA}.cierre_mensual
     WHERE periodo >= make_date(${anio}, 1, 1)
       AND periodo < make_date(${anio + 1}, 1, 1)
       AND status_credit IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
@@ -1138,7 +1139,7 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
       END AS bucket,
       COUNT(DISTINCT m.credito_id)::int AS cantidad_creditos,
       COALESCE(SUM(m.monto_mora::numeric), 0) AS monto_mora
-    FROM cartera.moras_credito m
+    FROM ${SQL_CARTERA_SCHEMA}.moras_credito m
     WHERE m.activa = true
     GROUP BY 1
   `);
@@ -1150,7 +1151,7 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
       bucket,
       cantidad_creditos,
       monto_mora
-    FROM cartera.cierre_mora_aging
+    FROM ${SQL_CARTERA_SCHEMA}.cierre_mora_aging
     WHERE periodo >= make_date(${anio}, 1, 1)
       AND periodo < make_date(${anio + 1}, 1, 1)
     ORDER BY periodo, bucket
@@ -1206,7 +1207,7 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
         credito_id,
         cuotas_atrasadas,
         monto_mora
-      FROM cartera.moras_credito
+      FROM ${SQL_CARTERA_SCHEMA}.moras_credito
       WHERE activa           = true
         AND cuotas_atrasadas > 0
       ORDER BY credito_id, mora_id DESC
@@ -1226,8 +1227,8 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
       COALESCE(SUM(c.capital::numeric), 0)    AS suma_capital,
       COALESCE(SUM(m.monto_mora::numeric), 0) AS suma_mora
     FROM mora_activa m
-    INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
-    INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = m.credito_id
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id  = c.asesor_id
     WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
       ${emailCobrador ? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))` : sql``}
     GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
@@ -1337,14 +1338,14 @@ export async function getCuotasPorFecha({
       COALESCE(pag.abono_gps, 0)                      AS gps_pagado,
       COALESCE(pag.membresias_pagada, 0)              AS membresias_pagado,
       COALESCE(pag.total_pagado, 0)                   AS total_pagado
-    FROM cartera.cuotas_credito c
-    JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
-    JOIN cartera.usuarios u  ON cr.usuario_id = u.usuario_id
-    LEFT JOIN cartera.asesores a ON cr.asesor_id = a.asesor_id
+    FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
+    JOIN ${SQL_CARTERA_SCHEMA}.usuarios u  ON cr.usuario_id = u.usuario_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON cr.asesor_id = a.asesor_id
     LEFT JOIN LATERAL (
       SELECT MAX(pc_prev.total_restante::numeric) AS total_restante
-      FROM cartera.pagos_credito pc_prev
-      JOIN cartera.cuotas_credito qc_prev ON pc_prev.cuota_id = qc_prev.cuota_id
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc_prev
+      JOIN ${SQL_CARTERA_SCHEMA}.cuotas_credito qc_prev ON pc_prev.cuota_id = qc_prev.cuota_id
       WHERE qc_prev.credito_id = c.credito_id
         AND qc_prev.numero_cuota = c.numero_cuota - 1
         AND qc_prev.numero_cuota > 0
@@ -1354,7 +1355,7 @@ export async function getCuotasPorFecha({
     ) prev_pag ON true
     LEFT JOIN LATERAL (
       SELECT MAX(pc_curr.total_restante::numeric) AS total_restante
-      FROM cartera.pagos_credito pc_curr
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc_curr
       WHERE pc_curr.cuota_id = c.cuota_id
         AND pc_curr."paymentFalse" = false
         AND pc_curr.monto_aplicado IS NOT NULL
@@ -1376,7 +1377,7 @@ export async function getCuotasPorFecha({
           + COALESCE(pc.abono_gps::numeric, 0)
           + COALESCE(pc.membresias_pago::numeric, 0)
         ) AS total_pagado
-      FROM cartera.pagos_credito pc
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
       WHERE pc.cuota_id = c.cuota_id
         AND pc."paymentFalse" = false
     ) pag ON true

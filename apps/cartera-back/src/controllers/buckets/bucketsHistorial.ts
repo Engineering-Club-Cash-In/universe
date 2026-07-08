@@ -1,4 +1,5 @@
 import { db } from "../../database";
+import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
 import { sql } from "drizzle-orm";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,13 +83,13 @@ function buildWhere(a: BucketsHistorialArgs) {
 // - buckets bn/ba: LEFT contra el catálogo (nombre/prefijo); ba puede ser null.
 // - asesores aa: LEFT, asesor de ATRIBUCIÓN del evento (h.asesor_id, la BAJADA curada).
 const joins = sql`
-  FROM cartera.buckets_historial h
-  INNER JOIN cartera.creditos c ON c.credito_id = h.credito_id
-  INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-  LEFT JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
-  LEFT JOIN cartera.buckets bn ON bn.numero = h.bucket_nuevo
-  LEFT JOIN cartera.buckets ba ON ba.numero = h.bucket_anterior
-  LEFT JOIN cartera.asesores aa ON aa.asesor_id = h.asesor_id`;
+  FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+  INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = h.credito_id
+  INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+  LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
+  LEFT JOIN ${SQL_CARTERA_SCHEMA}.buckets bn ON bn.numero = h.bucket_nuevo
+  LEFT JOIN ${SQL_CARTERA_SCHEMA}.buckets ba ON ba.numero = h.bucket_anterior
+  LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores aa ON aa.asesor_id = h.asesor_id`;
 
 // Histórico paginado de transiciones de bucket, con filtros, joins y resumen.
 export async function getBucketsHistorial(a: BucketsHistorialArgs) {
@@ -179,10 +180,10 @@ export async function getBucketsHistorialCredito({ credito_id }: { credito_id: n
       aa.nombre AS asesor_atribucion,
       h.pago_id,
       h.motivo
-    FROM cartera.buckets_historial h
-    LEFT JOIN cartera.buckets bn ON bn.numero = h.bucket_nuevo
-    LEFT JOIN cartera.buckets ba ON ba.numero = h.bucket_anterior
-    LEFT JOIN cartera.asesores aa ON aa.asesor_id = h.asesor_id
+    FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.buckets bn ON bn.numero = h.bucket_nuevo
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.buckets ba ON ba.numero = h.bucket_anterior
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores aa ON aa.asesor_id = h.asesor_id
     WHERE h.credito_id = ${credito_id}
     ORDER BY h.fecha DESC, h.historial_id DESC
   `);

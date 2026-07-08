@@ -1,4 +1,5 @@
 // app.ts (o donde declares tus rutas Elysia)
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
 import { USD_EXCHANGE_RATE } from "../utils/functions/const";
@@ -1281,9 +1282,9 @@ export async function resumeInvestor(
    tiene_boleta_pendiente: sql<boolean>`
       EXISTS (
         SELECT 1
-        FROM cartera.boletas_pago_inversionista
-        WHERE cartera.boletas_pago_inversionista.inversionista_id = ${inversionistas.inversionista_id}
-        AND cartera.boletas_pago_inversionista.estado = 'PENDIENTE'
+        FROM ${SQL_CARTERA_SCHEMA}.boletas_pago_inversionista
+        WHERE ${SQL_CARTERA_SCHEMA}.boletas_pago_inversionista.inversionista_id = ${inversionistas.inversionista_id}
+        AND ${SQL_CARTERA_SCHEMA}.boletas_pago_inversionista.estado = 'PENDIENTE'
       )
     `.as('tiene_boleta_pendiente'),
     })

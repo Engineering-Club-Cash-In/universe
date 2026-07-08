@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
 import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
@@ -1342,10 +1343,10 @@ export async function generateReciboPagoPDF(pagoId: number) {
       u.nombre AS usuario_nombre,
       u.nit AS usuario_nit,
       cq.numero_cuota
-    FROM cartera.pagos_credito p
-    INNER JOIN cartera.creditos c ON c.credito_id = p.credito_id
-    INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-    LEFT JOIN cartera.cuotas_credito cq ON cq.cuota_id = p.cuota_id
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.cuotas_credito cq ON cq.cuota_id = p.cuota_id
     WHERE p.pago_id = ${pagoId}
   `);
 
@@ -1703,7 +1704,7 @@ export async function getPagosByVencimiento({
                          ELSE ci_all.porcentaje_cash_in::numeric END) / 100.0
               ELSE 0
             END
-          FROM cartera.creditos_inversionistas ci_all
+          FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci_all
           WHERE ci_all.credito_id = p.credito_id
         ), 0) AS cash_in_pct
     ) cube_data ON true
@@ -1729,11 +1730,11 @@ export async function getPagosByVencimiento({
         SUM(COALESCE(pc.monto_aplicado::numeric, 0)) AS monto_aplicado,
         MIN(pc.fecha_vencimiento) AS fecha_vencimiento,
         BOOL_OR(pc.pagado) AS pagado
-      FROM cartera.pagos_credito pc
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
       WHERE pc.cuota_id IS NOT NULL
         AND pc.cuota_id IN (
           SELECT cuota_id 
-          FROM cartera.cuotas_credito 
+          FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito 
           WHERE fecha_vencimiento::date >= ${fechaInicio}::date 
             AND fecha_vencimiento::date <= ${fechaFin}::date
         )
@@ -1754,7 +1755,7 @@ export async function getPagosByVencimiento({
         COALESCE(pc.monto_aplicado::numeric, 0) AS monto_aplicado,
         pc.fecha_vencimiento,
         pc.pagado
-      FROM cartera.pagos_credito pc
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
       WHERE pc.cuota_id IS NULL
         AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
         AND pc.fecha_vencimiento::date <= ${fechaFin}::date
@@ -1777,8 +1778,8 @@ export async function getPagosByVencimiento({
   const lateralCapAnterior = sql`
     LEFT JOIN LATERAL (
       SELECT pc_a.total_restante::numeric AS total_restante
-      FROM cartera.pagos_credito pc_a
-      LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc_a
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
       WHERE pc_a.credito_id = c.credito_id
         AND pc_a."paymentFalse" = false
         AND pc_a.total_restante IS NOT NULL
@@ -1801,20 +1802,20 @@ export async function getPagosByVencimiento({
 
   const commonFromJoins = sql`
     FROM ${pagosDeduped}
-    INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
-    INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
-    INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
-    LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
-    LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON p.credito_id = c.credito_id
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON c.usuario_id = u.usuario_id
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON c.asesor_id = a.asesor_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.cuotas_credito q ON p.cuota_id = q.cuota_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int AS cuotas_atrasadas
-      FROM cartera.cuotas_credito qc_mora
+      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito qc_mora
       WHERE qc_mora.credito_id = c.credito_id
         AND qc_mora.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
         AND qc_mora.pagado = false
         AND NOT EXISTS (
           SELECT 1
-          FROM cartera.pagos_credito pc_mora
+          FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc_mora
           WHERE pc_mora.cuota_id = qc_mora.cuota_id
             AND pc_mora."paymentFalse" = false
             AND pc_mora.pagado = true
@@ -2053,13 +2054,13 @@ export async function getPagosByVencimiento({
           TO_CHAR(fecha_boleta, 'YYYY-MM-DD') AS fecha_boleta,
           TO_CHAR(fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
           numeroautorizacion AS numero_boleta
-        FROM cartera.pagos_credito
+        FROM ${SQL_CARTERA_SCHEMA}.pagos_credito
         WHERE credito_id = ANY(ARRAY[${sql.raw(creditoIds.join(","))}]::int[])
           AND validation_status IN ('validated', 'capital_validated')
           AND "paymentFalse" = false
           AND (
             (cuota_id IS NOT NULL AND cuota_id IN (
-              SELECT cuota_id FROM cartera.cuotas_credito
+              SELECT cuota_id FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito
               WHERE fecha_vencimiento::date >= ${fechaInicio}::date
                 AND fecha_vencimiento::date <= ${fechaFin}::date
             ))
@@ -2251,15 +2252,15 @@ export async function getPagosByVencimiento({
               COALESCE(MIN(pc_a.seguro_restante::numeric),  0) AS seguro_restante,
               COALESCE(MIN(pc_a.gps_restante::numeric),     0) AS gps_restante,
               COALESCE(MIN(pc_a.membresias::numeric),       0) AS membresias
-            FROM cartera.cuotas_credito q_a
-            LEFT JOIN cartera.pagos_credito pc_a
+            FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito q_a
+            LEFT JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito pc_a
               ON pc_a.cuota_id = q_a.cuota_id
               AND pc_a."paymentFalse" = false
             WHERE q_a.credito_id = calc.credito_id
               AND q_a.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
               AND q_a.pagado = false
               AND NOT EXISTS (
-                SELECT 1 FROM cartera.pagos_credito pc2
+                SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc2
                 WHERE pc2.cuota_id = q_a.cuota_id
                   AND pc2."paymentFalse" = false
                   AND pc2.pagado = true
@@ -2385,13 +2386,13 @@ export async function getAbonosDelMesPorCredito({
       TO_CHAR(fecha_boleta, 'YYYY-MM-DD') AS fecha_boleta,
       TO_CHAR(fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
       numeroautorizacion AS numero_boleta
-    FROM cartera.pagos_credito
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito
     WHERE credito_id = ${credito_id}
       AND validation_status IN ('validated', 'capital_validated')
       AND "paymentFalse" = false
       AND (
         (cuota_id IS NOT NULL AND cuota_id IN (
-          SELECT cuota_id FROM cartera.cuotas_credito
+          SELECT cuota_id FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito
           WHERE fecha_vencimiento::date >= ${fechaInicio}::date
             AND fecha_vencimiento::date <= ${fechaFin}::date
         ))
@@ -2422,9 +2423,9 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
         COALESCE(MIN(pc.membresias::numeric),        0) AS mem_r,
         MIN(c.cuota::numeric) AS cuota_c,
         ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) AS interes_cube
-      FROM cartera.cuotas_credito q
-      INNER JOIN cartera.creditos c ON c.credito_id = q.credito_id
-      LEFT JOIN cartera.pagos_credito pc
+      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito q
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = q.credito_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito pc
         ON pc.cuota_id = q.cuota_id
         AND pc."paymentFalse" = false
       LEFT JOIN LATERAL (
@@ -2446,7 +2447,7 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
                            ELSE ci_all.porcentaje_cash_in::numeric END) / 100.0
                 ELSE 0
               END
-            FROM cartera.creditos_inversionistas ci_all
+            FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci_all
             WHERE ci_all.credito_id = q.credito_id
           ), 0) AS cash_in_pct
       ) cube_data ON true
@@ -2455,7 +2456,7 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
         AND q.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
         AND q.pagado = false
         AND NOT EXISTS (
-          SELECT 1 FROM cartera.pagos_credito pc2
+          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc2
           WHERE pc2.cuota_id = q.cuota_id
             AND pc2."paymentFalse" = false
             AND pc2.pagado = true
@@ -2495,10 +2496,10 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
   const principal = Number(
     (await db.execute<any>(sql`
       SELECT GREATEST(c.capital::numeric - COALESCE((
-        SELECT SUM(abono_capital::numeric) FROM cartera.pagos_credito
+        SELECT SUM(abono_capital::numeric) FROM ${SQL_CARTERA_SCHEMA}.pagos_credito
         WHERE credito_id = ${credito_id} AND "paymentFalse" = false
       ), 0), 0) AS principal
-      FROM cartera.creditos c WHERE c.credito_id = ${credito_id}
+      FROM ${SQL_CARTERA_SCHEMA}.creditos c WHERE c.credito_id = ${credito_id}
     `)).rows[0]?.principal ?? 0
   );
 
@@ -2557,8 +2558,8 @@ export async function getCapitalInversionistas({
         WHEN bool_or(e.status <> 'completado') THEN 'compra de cartera pendiente'
         ELSE ''
       END AS comentario
-    FROM cartera.creditos_inversionistas_espejo e
-    JOIN cartera.inversionistas i
+    FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo e
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i
       ON i.inversionista_id = e.inversionista_id
     ${whereClause}
     GROUP BY i.inversionista_id, i.nombre, i.tipo_reinversion

@@ -1,4 +1,5 @@
 import { db } from "../database/index";
+import { CARTERA_SCHEMA, SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import {
   creditos,
   pagos_credito,
@@ -1850,13 +1851,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         whereClauses.push(`(
           EXISTS (
             SELECT 1
-            FROM cartera.pagos_credito_inversionistas pci2
+            FROM ${CARTERA_SCHEMA}.pagos_credito_inversionistas pci2
             WHERE pci2.pago_id = p.pago_id
             AND pci2.inversionista_id = '${inversionistaId}'
           )
           OR EXISTS (
             SELECT 1
-            FROM cartera.facturacion_desglose fd_cube
+            FROM ${CARTERA_SCHEMA}.facturacion_desglose fd_cube
             WHERE fd_cube.pago_id = p.pago_id
             AND fd_cube.rubro::text = 'INTERES'
           )
@@ -1865,7 +1866,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         whereClauses.push(`
           EXISTS (
             SELECT 1
-            FROM cartera.pagos_credito_inversionistas pci2
+            FROM ${CARTERA_SCHEMA}.pagos_credito_inversionistas pci2
             WHERE pci2.pago_id = p.pago_id
             AND pci2.inversionista_id = '${inversionistaId}'
           )
@@ -1913,9 +1914,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     // 🔢 Query para contar el total de registros (SIN LIMIT)
     const countQuery = sql`
       SELECT COUNT(*) as total
-      FROM cartera.pagos_credito p
-      LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
-      LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
       ${sql.raw(whereSQL)}
     `;
 
@@ -1990,7 +1991,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         --    (pendiente_facturar=true + tipo_operacion='compra_cartera').
         EXISTS (
           SELECT 1
-          FROM cartera.compras_credito_inversionista cci
+          FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista cci
           WHERE cci.credito_id = p.credito_id
             AND cci.pendiente_facturar = true
             AND cci.tipo_operacion = 'compra_cartera'
@@ -2003,7 +2004,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
             'numeroCuota', cq.numero_cuota,
             'fechaVencimiento', cq.fecha_vencimiento
           )
-          FROM cartera.cuotas_credito cq
+          FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cq
           WHERE cq.cuota_id = p.cuota_id
           LIMIT 1
         ) AS "cuota",
@@ -2032,9 +2033,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               'porcentajeParticipacion', ci.porcentaje_participacion_inversionista
             )
           )
-          FROM cartera.pagos_credito_inversionistas pci
-          LEFT JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
-          LEFT JOIN cartera.creditos_inversionistas ci
+          FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci
+          LEFT JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = pci.inversionista_id
+          LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci
             ON ci.credito_id = pci.credito_id
             AND ci.inversionista_id = pci.inversionista_id
           WHERE pci.pago_id = p.pago_id
@@ -2048,7 +2049,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               'urlBoleta', bol.url_boleta
             )
           )
-          FROM cartera.boletas bol
+          FROM ${SQL_CARTERA_SCHEMA}.boletas bol
           WHERE bol.pago_id = p.pago_id
         ), '[]'::json) AS "boletas",
 
@@ -2072,22 +2073,22 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
                   'monto', ma.monto
                 )
               )
-              FROM cartera.montos_adicionales ma
+              FROM ${SQL_CARTERA_SCHEMA}.montos_adicionales ma
               WHERE ma.credit_id = cc.credit_id
             ), '[]'::json)
           )
-          FROM cartera.credit_cancelations cc
+          FROM ${SQL_CARTERA_SCHEMA}.credit_cancelations cc
           WHERE cc.credit_id = p.credito_id
           ORDER BY cc.id DESC
           LIMIT 1
         ) ELSE NULL END AS "cancelacion"
 
-      FROM cartera.pagos_credito p
-      LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
-      LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-      LEFT JOIN cartera.bancos b ON b.banco_id = p.banco_id
-      LEFT JOIN cartera.cuentas_empresa ce ON ce.cuenta_id = p.cuenta_empresa_id
-      LEFT JOIN cartera.asesores ase ON ase.asesor_id = c.asesor_id
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.bancos b ON b.banco_id = p.banco_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.cuentas_empresa ce ON ce.cuenta_id = p.cuenta_empresa_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores ase ON ase.asesor_id = c.asesor_id
       ${sql.raw(whereSQL)}
       ORDER BY p.fecha_pago DESC
       LIMIT ${pageSize} OFFSET ${offset};
@@ -2110,7 +2111,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     try {
       const cubeRow = await db.execute(sql`
         SELECT i.inversionista_id AS "id"
-        FROM cartera.inversionistas i
+        FROM ${SQL_CARTERA_SCHEMA}.inversionistas i
         WHERE UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
         ORDER BY i.inversionista_id ASC
         LIMIT 1
@@ -2141,8 +2142,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           ci.porcentaje_participacion_inversionista AS "porcentajeParticipacion",
           ci.porcentaje_cash_in AS "porcentajeCashIn",
           ci.monto_aportado AS "montoAportado"
-        FROM cartera.creditos_inversionistas ci
-        INNER JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+        FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci
+        INNER JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = ci.inversionista_id
         WHERE ci.credito_id = ANY(${"{" + creditoIds.join(",") + "}"}::bigint[])
       `);
       for (const row of ciResult.rows as any[]) {
@@ -2170,7 +2171,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         SELECT fd.pago_id AS "pagoId",
                SUM(fd.monto_total)::numeric AS "total",
                SUM(fd.monto_iva)::numeric   AS "iva"
-        FROM cartera.facturacion_desglose fd
+        FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose fd
         WHERE fd.pago_id = ANY(${"{" + pagoIds.join(",") + "}"}::bigint[])
           AND fd.rubro::text = 'INTERES'
         GROUP BY fd.pago_id
@@ -2356,12 +2357,12 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         COALESCE(SUM(pci.abono_iva_12::numeric), 0) AS "totalAbonoIva",
         ROUND(COALESCE(SUM(pci.abono_interes::numeric), 0) * 0.05, 2) AS "totalIsr",
         COALESCE(SUM(ci.monto_aportado::numeric), 0) AS "totalMontoAportado"
-      FROM cartera.pagos_credito_inversionistas pci
-      INNER JOIN cartera.pagos_credito p ON p.pago_id = pci.pago_id
-      INNER JOIN cartera.creditos c ON c.credito_id = pci.credito_id
-      INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-      INNER JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
-      LEFT JOIN cartera.creditos_inversionistas ci
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito p ON p.pago_id = pci.pago_id
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = pci.credito_id
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = pci.inversionista_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci
         ON ci.credito_id = pci.credito_id
         AND ci.inversionista_id = pci.inversionista_id
       ${sql.raw(whereSQL)}
@@ -2399,32 +2400,32 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       const cubeInteres = await db.execute(sql`
         WITH pf AS (
           SELECT p.pago_id
-          FROM cartera.pagos_credito p
-          INNER JOIN cartera.creditos c ON c.credito_id = p.credito_id
-          INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+          FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+          INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
+          INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
           ${sql.raw(whereSQL)}
         )
         SELECT
           COALESCE((SELECT SUM(fd.monto_total - fd.monto_iva)
-                    FROM cartera.facturacion_desglose fd
+                    FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose fd
                     WHERE fd.rubro::text='INTERES' AND fd.pago_id IN (SELECT pago_id FROM pf)), 0)
           + COALESCE((SELECT SUM(pci.abono_interes::numeric)
-                      FROM cartera.pagos_credito_inversionistas pci
-                      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+                      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci
+                      JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = pci.inversionista_id
                       WHERE (UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%' OR i.inversionista_id = ${CUBE_ID})
                         AND pci.pago_id IN (SELECT pago_id FROM pf)
-                        AND NOT EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd2
+                        AND NOT EXISTS (SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose fd2
                                          WHERE fd2.pago_id = pci.pago_id AND fd2.rubro::text='INTERES')), 0)
           AS "net",
           COALESCE((SELECT SUM(fd.monto_iva)
-                    FROM cartera.facturacion_desglose fd
+                    FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose fd
                     WHERE fd.rubro::text='INTERES' AND fd.pago_id IN (SELECT pago_id FROM pf)), 0)
           + COALESCE((SELECT SUM(pci.abono_iva_12::numeric)
-                      FROM cartera.pagos_credito_inversionistas pci
-                      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+                      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci
+                      JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = pci.inversionista_id
                       WHERE (UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%' OR i.inversionista_id = ${CUBE_ID})
                         AND pci.pago_id IN (SELECT pago_id FROM pf)
-                        AND NOT EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd2
+                        AND NOT EXISTS (SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose fd2
                                          WHERE fd2.pago_id = pci.pago_id AND fd2.rubro::text='INTERES')), 0)
           AS "iva"
       `);

@@ -1,4 +1,5 @@
 import { db } from "../database/index";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import {
   asesores,
   convenio_cuotas,
@@ -64,10 +65,10 @@ export const getCuotasPorDiaYAsesor = async (
         pagado: sql<boolean>`
           CASE
             WHEN EXISTS (
-              SELECT 1 FROM cartera.pagos_credito pc
+              SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
               WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
             ) AND NOT EXISTS (
-              SELECT 1 FROM cartera.pagos_credito pc
+              SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
               WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
               AND pc.pagado = false
             ) THEN true

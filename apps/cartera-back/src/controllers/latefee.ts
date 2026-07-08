@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { client, db } from "../database";
-import { asesor_bucket, asesores, buckets, buckets_historial, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, usuarios } from "../database/db/schema";
+import { asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -301,12 +301,12 @@ export async function createMora({
     // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras (isOverdueInstallmentForMora).
     const ovRes = await db.execute<any>(sql`
       SELECT COUNT(*)::int AS n
-      FROM cartera.cuotas_credito cu
+      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
       WHERE cu.credito_id = ${credito_id}
         AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
         AND cu.pagado = false
         AND NOT EXISTS (
-          SELECT 1 FROM cartera.pagos_credito pc
+          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
           WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
             AND pc.validation_status IN ('validated', 'no_required'))`);
     const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
@@ -768,7 +768,7 @@ export async function procesarMoras() {
         asesor_id: creditos.asesor_id, // FASE 3: dueño actual (para reasignar por bucket)
         hasPaidPayment: sql<boolean>`EXISTS (
           SELECT 1
-          FROM cartera.pagos_credito pc
+          FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
           WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
             AND pc."paymentFalse" = false
             AND pc.pagado = true
@@ -1033,7 +1033,7 @@ export async function procesarMoras() {
 
       if (catalogoBuckets.length === 0) {
         console.warn(
-          "[BUCKETS] ⚠️ Catálogo `cartera.buckets` vacío (¿migración/seed sin aplicar?) — se omite el registro de transiciones.",
+          `[BUCKETS] ⚠️ Catálogo \`${CARTERA_SCHEMA}.buckets\` vacío (¿migración/seed sin aplicar?) — se omite el registro de transiciones.`,
         );
       } else {
       // status y asesor por crédito — ya vienen en `cuotas` (el job los cargó con JOIN)
@@ -1050,7 +1050,7 @@ export async function procesarMoras() {
       const ultimoBucket = new Map<number, number>();
       const ultimosRes = await lockConn.query(
         `SELECT DISTINCT ON (credito_id) credito_id, bucket_nuevo
-           FROM cartera.buckets_historial
+           FROM ${CARTERA_SCHEMA}.buckets_historial
           ORDER BY credito_id, fecha DESC, historial_id DESC`,
       );
       for (const row of ultimosRes.rows) {

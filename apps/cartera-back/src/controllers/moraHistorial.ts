@@ -1,4 +1,5 @@
 import { db } from "../database";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { sql } from "drizzle-orm";
 import ExcelJS from "exceljs";
 
@@ -34,7 +35,7 @@ const snapCte = (fecha: string) => sql`
         PARTITION BY h.credito_id
         ORDER BY (h.cuotas_atrasadas_nuevas > 0) DESC, h.fecha DESC, h.historial_id DESC
       ) AS cuotas
-    FROM cartera.moras_historial h
+    FROM ${SQL_CARTERA_SCHEMA}.moras_historial h
     -- Corte por DÍA Guatemala: fecha es timestamp UTC (defaultNow, session UTC) y el cron
     -- corre ~23:59 GT (≈06:00 UTC del día siguiente); comparar en GT evita correr esos
     -- eventos al día siguiente.
@@ -72,9 +73,9 @@ function buildSnapshotWhere(a: SnapshotArgs) {
 
 const snapFromJoins = sql`
   FROM snap s
-  INNER JOIN cartera.creditos c ON c.credito_id = s.credito_id
-  INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-  INNER JOIN cartera.asesores a ON a.asesor_id = c.asesor_id`;
+  INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = s.credito_id
+  INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+  INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id`;
 
 // Snapshot por crédito de la mora a una fecha, con totales y filtros.
 export async function getMoraHistorialSnapshot(a: SnapshotArgs) {
@@ -145,8 +146,8 @@ export async function getMoraTimeline({ desde, hasta, asesor, etapa }: { desde: 
     const names = asesor.split(",").map((n) => n.trim()).filter(Boolean);
     if (names.length) {
       asesorFilter = sql` AND h.credito_id IN (
-        SELECT c.credito_id FROM cartera.creditos c
-        INNER JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
+        SELECT c.credito_id FROM ${SQL_CARTERA_SCHEMA}.creditos c
+        INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
         WHERE (${sql.join(names.map((n) => sql`a.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})
       )`;
     }
@@ -172,7 +173,7 @@ export async function getMoraTimeline({ desde, hasta, asesor, etapa }: { desde: 
               PARTITION BY h.credito_id
               ORDER BY (h.cuotas_atrasadas_nuevas > 0) DESC, h.fecha DESC, h.historial_id DESC
             ) AS cuotas
-          FROM cartera.moras_historial h
+          FROM ${SQL_CARTERA_SCHEMA}.moras_historial h
           WHERE (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= d ${asesorFilter}
         ) hh
       ) s
@@ -201,8 +202,8 @@ export async function getMoraHistorialCredito({ credito_id }: { credito_id: numb
       h.cuotas_atrasadas_nuevas,
       h.motivo,
       pu.email AS usuario
-    FROM cartera.moras_historial h
-    LEFT JOIN cartera.platform_users pu ON pu.id = h.usuario_id
+    FROM ${SQL_CARTERA_SCHEMA}.moras_historial h
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.platform_users pu ON pu.id = h.usuario_id
     WHERE h.credito_id = ${credito_id}
     ORDER BY h.fecha DESC, h.historial_id DESC
   `);

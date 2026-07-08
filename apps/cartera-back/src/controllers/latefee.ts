@@ -6,6 +6,7 @@ import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
 import { stat } from "fs";
+import { validarCatalogoBuckets } from "../lib/buckets-validation";
 
 type MoraEventoTipo =
   | "CREACION"
@@ -49,42 +50,23 @@ export function isOverdueInstallmentForMora(
 // ============================================================
 // 🪣 MOTOR DE BUCKETS (COBROS-02) — bucket derivado por estado + cuotas
 // ============================================================
-// El bucket se DERIVA del catálogo dinámico `cartera.buckets` (nombres, rangos y
-// estados configurables → filtros full dinámicos). Lo único que queda en código
-// es la lista de estados FUERA del funnel operativo (Opción A): esos créditos ya
-// no llevan mora ni se trackean como bucket.
-export const STATUS_BUCKET_FUERA = [
-  "CANCELADO",
-  "PENDIENTE_CANCELACION",
-  "EN_CONVENIO",
-  "CAIDO",
-];
+// Tipos + bucketDeCredito() viven en lib/buckets-classification.ts (función
+// pura, sin dependencias de DB) para que buckets-validation.test.ts pueda
+// importarla sin pasar por este archivo: latefee.ts se importa en algún
+// bun test (payments.test.ts) vía `mock.module`, y Bun no tiene forma de
+// deshacer ese mock entre archivos de test en el mismo proceso — cualquier
+// test que importara latefee.ts real después vería el stub vacío en vez del
+// módulo real. Re-exportado acá para no romper a credits.ts y otros
+// consumidores existentes.
+import {
+  STATUS_BUCKET_FUERA,
+  bucketDeCredito,
+  type BucketCatalogo,
+  type BucketCatalogoCompleto,
+} from "../lib/buckets-classification";
 
-// Fila del catálogo de buckets relevante para la derivación.
-export type BucketCatalogo = {
-  numero: number;
-  cuotas_min: number;
-  cuotas_max: number | null; // null = abierto (B5 = 5..∞)
-  estados_incluidos: string[];
-};
-
-/**
- * Fila completa del catálogo `cartera.buckets` expuesta a consumidores
- * externos (CRM vía API) — incluye el puente `estado_mora` (numero↔estadoMora).
- */
-export type BucketCatalogoCompleto = {
-  numero: number;
-  prefijo: string;
-  nombre: string;
-  descripcion: string | null;
-  cuotas_min: number;
-  cuotas_max: number | null;
-  estados_incluidos: string[];
-  es_operativo: boolean;
-  orden: number;
-  color: string | null;
-  estado_mora: string | null;
-};
+export { STATUS_BUCKET_FUERA, bucketDeCredito };
+export type { BucketCatalogo, BucketCatalogoCompleto };
 
 // Fallback B0-B5 — mismo seed seed que 0001_buckets_catalogo.sql +
 // 0003_buckets_estado_mora.sql. Usado SOLO si la query falla (ej. columna
@@ -100,10 +82,23 @@ const FALLBACK_BUCKETS_CATALOGO: BucketCatalogoCompleto[] = [
   { numero: 5, prefijo: "B5", nombre: "Jurídico", descripcion: null, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], es_operativo: false, orden: 5, color: null, estado_mora: "mora_120_plus" },
 ];
 
-/** Catálogo dinámico de buckets (activos, ordenados) — fuente única para cartera-back y CRM. */
-export async function getBucketsCatalogo(): Promise<BucketCatalogoCompleto[]> {
+export type CatalogoBucketsResultado = {
+  catalogo: BucketCatalogoCompleto[];
+  /** true si `catalogo` es FALLBACK_BUCKETS_CATALOGO (DB inconsistente/caída), no la config real. */
+  esFallback: boolean;
+};
+
+/**
+ * Catálogo dinámico de buckets (activos, ordenados) — fuente única para
+ * cartera-back y CRM. Expone si el resultado es el fallback hardcoded para
+ * que consumidores que ESCRIBEN datos derivados (el motor de buckets, más
+ * abajo) puedan negarse a persistir con config potencialmente incorrecta —
+ * los consumidores de solo-lectura/presentación (credits.ts, router) usan
+ * getBucketsCatalogo() y aceptan degradar en silencio, como antes.
+ */
+export async function getBucketsCatalogoConEstado(): Promise<CatalogoBucketsResultado> {
   try {
-    return await db
+    const rows = await db
       .select({
         numero: buckets.numero,
         prefijo: buckets.prefijo,
@@ -120,36 +115,26 @@ export async function getBucketsCatalogo(): Promise<BucketCatalogoCompleto[]> {
       .from(buckets)
       .where(eq(buckets.activo, true))
       .orderBy(buckets.orden);
+
+    const { ok, problemas } = validarCatalogoBuckets(rows);
+    if (!ok) {
+      console.error(
+        `❌ Catálogo de buckets inconsistente, usando fallback: ${problemas.join(" | ")}`,
+      );
+      return { catalogo: FALLBACK_BUCKETS_CATALOGO, esFallback: true };
+    }
+
+    return { catalogo: rows, esFallback: false };
   } catch (err) {
     console.error("❌ Error consultando catálogo de buckets, usando fallback:", err);
-    return FALLBACK_BUCKETS_CATALOGO;
+    return { catalogo: FALLBACK_BUCKETS_CATALOGO, esFallback: true };
   }
 }
 
-/**
- * Bucket de un crédito (0-5) resuelto contra el catálogo dinámico `catalogo`.
- * Orden: (1) estado fuera del funnel → null; (2) estado que fuerza un bucket
- * (p.ej. INCOBRABLE → B5 vía `estados_incluidos`); (3) rango de cuotas atrasadas.
- * Devuelve `null` si el crédito está fuera del funnel operativo (no se trackea).
- */
-export function bucketDeCredito(
-  status: string | null | undefined,
-  cuotasAtrasadas: number,
-  catalogo: BucketCatalogo[],
-): number | null {
-  // (1) Fuera del funnel operativo (lista en código, Opción A).
-  if (status && STATUS_BUCKET_FUERA.includes(status)) return null;
-  // (2) Estado que fuerza un bucket (p.ej. INCOBRABLE → B5).
-  if (status) {
-    const porEstado = catalogo.find((b) => b.estados_incluidos.includes(status));
-    if (porEstado) return porEstado.numero;
-  }
-  // (3) Por rango de cuotas atrasadas (max null = abierto).
-  const cuotas = Math.max(cuotasAtrasadas, 0);
-  const porRango = catalogo.find(
-    (b) => cuotas >= b.cuotas_min && (b.cuotas_max == null || cuotas <= b.cuotas_max),
-  );
-  return porRango ? porRango.numero : null;
+/** Catálogo dinámico de buckets (activos, ordenados) — fuente única para cartera-back y CRM. */
+export async function getBucketsCatalogo(): Promise<BucketCatalogoCompleto[]> {
+  const { catalogo } = await getBucketsCatalogoConEstado();
+  return catalogo;
 }
 
 /**
@@ -1011,27 +996,42 @@ export async function procesarMoras() {
     // (derivado de estado + cuotas) y los registra en `buckets_historial`.
     // Si algo falla aquí, NO debe romper el proceso de mora (operación crítica).
     // Se devuelve en el resultado del job (útil para pruebas vía POST /moras/procesar).
-    const bucketsResumen = {
+    const bucketsResumen: {
+      iniciales: number;
+      subidas: number;
+      bajadas: number;
+      reasignados: number;
+      sinPoolDestino: number;
+      omitidoPorFallback: boolean;
+    } = {
       iniciales: 0,
       subidas: 0,
       bajadas: 0,
       reasignados: 0,
       sinPoolDestino: 0,
+      omitidoPorFallback: false,
     };
     try {
       // Catálogo de buckets (config dinámica: nombres/rangos/estados). ~6 filas.
-      const catalogoBuckets: BucketCatalogo[] = await db
-        .select({
-          numero: buckets.numero,
-          cuotas_min: buckets.cuotas_min,
-          cuotas_max: buckets.cuotas_max,
-          estados_incluidos: buckets.estados_incluidos,
-        })
-        .from(buckets)
-        .where(eq(buckets.activo, true))
-        .orderBy(buckets.orden);
+      // Comparte getBucketsCatalogoConEstado() con el endpoint de presentación
+      // en vez de una query propia: así el motor que ESCRIBE buckets_historial
+      // queda cubierto por validarCatalogoBuckets() — pero a diferencia de los
+      // consumidores de solo-lectura (credits.ts, router), que aceptan degradar
+      // en silencio a FALLBACK_BUCKETS_CATALOGO, este motor NO debe persistir
+      // transiciones calculadas con rangos hardcoded del seed cuando la config
+      // real difiere (rangos custom, migración a medias): eso dejaría historial
+      // de negocio contaminado con datos derivados de una config que nunca
+      // aplicó, sin más rastro que un console.error efímero. Se omite el paso
+      // completo y se reporta en bucketsResumen.omitidoPorFallback.
+      const { catalogo: catalogoBuckets, esFallback }: { catalogo: BucketCatalogo[]; esFallback: boolean } =
+        await getBucketsCatalogoConEstado();
 
-      if (catalogoBuckets.length === 0) {
+      if (esFallback) {
+        bucketsResumen.omitidoPorFallback = true;
+        console.warn(
+          `[BUCKETS] ⚠️ Catálogo \`${CARTERA_SCHEMA}.buckets\` inconsistente o inaccesible — se omite el registro de transiciones este ciclo (no se persiste historial con rangos de fallback).`,
+        );
+      } else if (catalogoBuckets.length === 0) {
         console.warn(
           `[BUCKETS] ⚠️ Catálogo \`${CARTERA_SCHEMA}.buckets\` vacío (¿migración/seed sin aplicar?) — se omite el registro de transiciones.`,
         );

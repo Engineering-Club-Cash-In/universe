@@ -43,7 +43,10 @@ export async function listModalidadFacturacionByMonto(
   montoAportado: number,
   executor: DbExecutor = db,
 ): Promise<{ data: ModalidadFacturacionSpreadRow[] }> {
-  const monto = String(montoAportado);
+  // Normalizamos a centavos: los brackets son contiguos a 2 decimales
+  // (…100000.00 / 100000.01…), así que un monto con 3+ decimales caería en el
+  // hueco entre ellos. Con toFixed(2) siempre cae en un bracket.
+  const monto = montoAportado.toFixed(2);
 
   const rows = await executor
     .select()
@@ -73,7 +76,9 @@ export async function resolveModalidadFacturacionSpread(
   modalidad: ModalidadFacturacion,
   executor: DbExecutor = db,
 ): Promise<ModalidadFacturacionSpreadRow | null> {
-  const monto = String(montoAportado);
+  // Normalizamos a centavos para no caer en el hueco entre brackets contiguos
+  // (ver listModalidadFacturacionByMonto).
+  const monto = montoAportado.toFixed(2);
 
   const [row] = await executor
     .select()

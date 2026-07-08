@@ -432,6 +432,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     let candidatos: CreditCandidate[];
 
     if (esManual) {
+      // LIMITACIÓN CONOCIDA (modalidad + manual): el modo manual no pasa por
+      // getCreditCandidates, así que no aplica el filtro de "% incompatible". Si
+      // el operador elige a mano un crédito donde el inversionista ya participa,
+      // la compra reprecia su posición previa al spread nuevo. Hoy el CRM solo
+      // expone el modo automático; si se habilitara el manual con modalidad,
+      // habría que agregar aquí un guard equivalente al filtro automático.
       console.log("================================================================");
       console.log(`[addInvestorToCredit] MODO MANUAL: ${manual!.length} crédito(s) forzado(s)`);
 
@@ -464,15 +470,26 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
 
       candidatos = armados;
     } else {
+      // Porcentaje para el filtro de "% incompatible" de getCreditCandidates, que
+      // descarta un crédito solo si el inversionista ya participa ahí con un %
+      // DISTINTO. Con modalidad le pasamos el spread del catálogo (no el del
+      // request) para que descarte los que se repreciarían a otro spread; los de
+      // mismo % o no participados pasan. Como el spread trae decimales y los %
+      // previos suelen ser enteros, en la práctica descarta las posiciones
+      // previas (puede subir el "monto sin asignar"). Es intencional.
+      const porcentajeParaCandidatos = modalidadFacturacionSpreadRow
+        ? Number(modalidadFacturacionSpreadRow.spread)
+        : porcentaje_inversion;
+
       console.log("================================================================");
       console.log("[addInvestorToCredit] Llamando a getCreditCandidates con:");
       console.log(` - monto: ${monto_aportado}`);
       console.log(` - limit (minimo): ${minimo ?? "Sin límite"}`);
       console.log(` - inversionista_id: ${inversionista_id}`);
-      console.log(` - porcentaje_inversion: ${porcentaje_inversion}`);
+      console.log(` - porcentaje (filtro): ${porcentajeParaCandidatos}`);
       console.log("================================================================");
 
-      candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentaje_inversion);
+      candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentajeParaCandidatos);
 
       console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
       candidatos.forEach((c, i) => {

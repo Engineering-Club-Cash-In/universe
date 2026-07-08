@@ -52,7 +52,8 @@
     "NO_APLICA",
     "PENDIENTE_AUTORIZACION",
     "VERIFICADO",
-    "RECHAZADO"
+    "RECHAZADO",
+    "COMPLETADO"
   ]);
 
   // 🧾 Rubros del desglose de facturación (lo que factura CUBE) para el reporte diario.

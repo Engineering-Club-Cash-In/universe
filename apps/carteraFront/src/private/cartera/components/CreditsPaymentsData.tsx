@@ -1360,6 +1360,28 @@ function MobileView({
                             : item.creditos.statusCredit}
             </span>
           </p>
+          <p className="text-sm text-gray-700 flex items-center gap-2">
+            <strong>Bucket:</strong>
+            {item.bucket ? (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border"
+                style={{
+                  backgroundColor: item.bucket.color
+                    ? `${item.bucket.color}1A`
+                    : "rgba(100,116,139,0.1)",
+                  color: item.bucket.color || "#475569",
+                  borderColor: item.bucket.color
+                    ? `${item.bucket.color}40`
+                    : "rgba(100,116,139,0.25)",
+                }}
+                title={item.bucket.nombre}
+              >
+                {item.bucket.prefijo} · {item.bucket.nombre}
+              </span>
+            ) : (
+              <span className="text-gray-400 text-xs">—</span>
+            )}
+          </p>
 
           {/* Acciones */}
           <div className="flex justify-center flex-wrap gap-2 mt-3">
@@ -1596,6 +1618,9 @@ function DesktopView({
               Cuota
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
+              Bucket
+            </TableHead>
+            <TableHead className="text-gray-900 font-bold text-center">
               Fecha de Creación
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
@@ -1647,6 +1672,27 @@ function DesktopView({
                     maximumFractionDigits: 2,
                   })}
                 </TableCell>
+                <TableCell className="text-center">
+                  {item.bucket ? (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border"
+                      style={{
+                        backgroundColor: item.bucket.color
+                          ? `${item.bucket.color}1A`
+                          : "rgba(100,116,139,0.1)",
+                        color: item.bucket.color || "#475569",
+                        borderColor: item.bucket.color
+                          ? `${item.bucket.color}40`
+                          : "rgba(100,116,139,0.25)",
+                      }}
+                      title={item.bucket.nombre}
+                    >
+                      {item.bucket.prefijo} · {item.bucket.nombre}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400 text-xs">—</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-indigo-700 font-bold text-center">
                   {item.creditos?.fecha_creacion
                     ? new Date(item.creditos.fecha_creacion).toLocaleDateString(
@@ -1680,7 +1726,7 @@ function DesktopView({
               {/* Row expandida con acciones + detalles */}
               {expandedRow === idx && (
                 <TableRow>
-                  <TableCell colSpan={6} className="p-0 bg-blue-50 rounded-b-2xl">
+                  <TableCell colSpan={7} className="p-0 bg-blue-50 rounded-b-2xl">
                     {/* Botones de acción */}
                     <div className="flex flex-wrap justify-center gap-2 px-6 py-4 border-b border-blue-100">
                         {(user?.role === "ADMIN" || user?.role === "ASESOR") && (

@@ -643,13 +643,18 @@ export interface CarteraStatsBucket {
 	porcentaje: string;
 	sumaCapital: string;
 	sumaMora: string;
+	/** Enriquecido desde el catálogo dinámico `cartera.buckets`. */
+	estadoMora?: string;
+	label?: string;
+	color?: string | null;
+	prefijo?: string;
 }
 
 export interface CarteraStatsResponse {
 	totalCreditos: number;
 	efectividad: string;
 	porCuotasAtrasadas: {
-		[key: string]: CarteraStatsBucket; // "0", "1", "2", "3", "4"+
+		[key: string]: CarteraStatsBucket; // "0".."5" y futuros
 	};
 	porEstado: {
 		cancelado?: CarteraStatsBucket;
@@ -659,6 +664,21 @@ export interface CarteraStatsResponse {
 
 export interface GetStatsParams {
 	email?: string; // Email del asesor para filtrar
+}
+
+/** Fila del catálogo dinámico `cartera.buckets` (B0-B5), expuesta vía GET /config/buckets. */
+export interface CarteraBucketCatalogo {
+	numero: number;
+	prefijo: string;
+	nombre: string;
+	descripcion: string | null;
+	cuotas_min: number;
+	cuotas_max: number | null;
+	estados_incluidos: string[];
+	es_operativo: boolean;
+	orden: number;
+	color: string | null;
+	estado_mora: string | null;
 }
 
 // ============================================================================

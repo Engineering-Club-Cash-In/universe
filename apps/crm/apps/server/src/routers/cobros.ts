@@ -413,68 +413,38 @@ export const cobrosRouter = {
 						email: input?.emailCobrador,
 					});
 
-					// Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera
+					// Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera.
+					// `estadoMora` viene del catálogo dinámico (cartera.buckets vía /stats
+					// enriquecido); el literal es solo fallback si el catálogo aún no lo trae.
+					// Se itera sobre las keys reales de `porCuotasAtrasadas` (no una lista
+					// fija "0".."5") para que un bucket nuevo o renumerado en el catálogo
+					// no quede excluido silenciosamente del embudo/porcentajes del CRM.
+					const FALLBACK_ESTADO_MORA_POR_KEY: Record<string, string> = {
+						"0": "al_dia",
+						"1": "mora_30",
+						"2": "mora_60",
+						"3": "mora_90",
+						"4": "mora_120",
+						"5": "mora_120_plus",
+					};
+					const cuotasKeys = Object.keys(
+						statsResponse.porCuotasAtrasadas,
+					).sort((a, b) => Number(a) - Number(b));
+
 					const estatusStats = recalculateCobrosCapitalPercentages([
-						{
-							estadoMora: "al_dia",
-							totalCases: statsResponse.porCuotasAtrasadas["0"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["0"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["0"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["0"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_30",
-							totalCases: statsResponse.porCuotasAtrasadas["1"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["1"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["1"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["1"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_60",
-							totalCases: statsResponse.porCuotasAtrasadas["2"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["2"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["2"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["2"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_90",
-							totalCases: statsResponse.porCuotasAtrasadas["3"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["3"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["3"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["3"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_120",
-							totalCases: statsResponse.porCuotasAtrasadas["4"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["4"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["4"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["4"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_120_plus",
-							totalCases: statsResponse.porCuotasAtrasadas["5"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["5"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["5"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["5"]?.porcentaje || "0",
-						},
+						...cuotasKeys.map((key) => {
+							const bucketStats = statsResponse.porCuotasAtrasadas[key];
+							return {
+								estadoMora:
+									bucketStats?.estadoMora ??
+									FALLBACK_ESTADO_MORA_POR_KEY[key] ??
+									"al_dia",
+								totalCases: bucketStats?.cantidad || 0,
+								montoTotal: bucketStats?.sumaMora || "0",
+								sumaCapital: bucketStats?.sumaCapital || "0",
+								porcentaje: bucketStats?.porcentaje || "0",
+							};
+						}),
 						{
 							estadoMora: "completado",
 							totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,

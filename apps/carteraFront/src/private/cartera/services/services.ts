@@ -393,6 +393,13 @@ export interface InversionistaEspejo {
   fecha_inicio_participacion?: string;
 }
 
+export interface CreditoBucket {
+  numero: number;
+  prefijo: string;
+  nombre: string;
+  color: string | null;
+}
+
 export interface CreditoUsuarioPago {
   creditos: Credito;
   usuarios: Usuario;
@@ -408,6 +415,8 @@ export interface CreditoUsuarioPago {
   rubros: Rubro[];
   mora: Mora | null;
   deuda_total_con_mora: string;
+  /** Bucket de cobros actual (B0-B5). null = fuera del funnel operativo. */
+  bucket?: CreditoBucket | null;
 }
 
 export interface Mora {

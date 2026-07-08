@@ -52,6 +52,22 @@ describe("estadoMoraPorCuotas", () => {
 		expect(estadoMoraPorCuotas(0)).toBe("al_dia");
 	});
 
+	test("rejects a status estado_mora (en_convenio/pagado/incobrable) on a bucket row, falls back to homólogo", async () => {
+		// "en_convenio" SÍ es válido en el pgEnum completo de 9 valores — pero
+		// es un estado de STATUS del crédito, no de aging por cuotas. Este
+		// bucket (B2, rango de 2 cuotas) no debería poder tener ese estado: si
+		// la whitelist usara ESTADOS_MORA_VALIDOS (los 9) en vez de
+		// ESTADOS_AGING_VALIDOS (los 6), esto pasaría sin filtro y un crédito
+		// con 2 cuotas atrasadas normales se clasificaría como "en_convenio".
+		getBucketsCatalogoSpy.mockResolvedValue(
+			buildCatalogoCompleto({ 2: "en_convenio" }),
+		);
+
+		await refreshMoraBucketsCache();
+
+		expect(estadoMoraPorCuotas(2)).toBe("mora_60");
+	});
+
 	test("rejects a partial catalogo (fewer buckets than the fallback), keeps previous cache", async () => {
 		// Catálogo con solo B0-B3: sin esto, un crédito con 5 cuotas atrasadas
 		// perdería cobertura y estadoMoraPorCuotas(5) caería al "al_dia" final

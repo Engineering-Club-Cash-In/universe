@@ -35,24 +35,18 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 ] as const;
 
 // `casos_cobros.estado_mora` es un pgEnum de 9 valores fijos en el CRM (ver
-// db/schema/cobros.ts). El catálogo de cartera-back (`buckets.estado_mora`) es
-// varchar(24) editable a mano — un admin puede escribir cualquier texto ahí.
-// Sin esta whitelist, ese texto libre se castea `as EstadoMoraEnum` en
-// sync-casos-cobros.ts y el INSERT/UPDATE revienta en Postgres con "invalid
-// input value for enum" (silencioso: cae al catch por-crédito, el caso
-// simplemente no se sincroniza). Solo se acepta un estado_mora del catálogo si
-// es uno de estos 9; si no, se usa el fallback homólogo por número de bucket.
-export const ESTADOS_MORA_VALIDOS = new Set([
-	"al_dia",
-	"en_convenio",
-	"mora_30",
-	"mora_60",
-	"mora_90",
-	"mora_120",
-	"mora_120_plus",
-	"pagado",
-	"incobrable",
-]);
+// db/schema/cobros.ts), pero el catálogo de cartera-back (`buckets.estado_mora`)
+// solo representa los 6 buckets de AGING (B0-B5) — `en_convenio`/`pagado`/
+// `incobrable` son estados de STATUS del crédito, resueltos aparte (ver
+// mapearEstadoMora en sync-casos-cobros.ts), nunca filas del catálogo de
+// buckets. Este set, derivado de MORA_BUCKETS en vez de repetir la lista a
+// mano, es la whitelist real para cualquier estado_mora que venga del
+// catálogo (varchar(24) editable a mano): aceptar un valor de status aquí
+// sería válido en el enum de Postgres pero semánticamente incorrecto — un
+// bucket de CUOTAS no debería poder tener un estado de status.
+export const ESTADOS_AGING_VALIDOS = new Set(
+	MORA_BUCKETS.map((b) => b.estadoMora),
+);
 
 /**
  * Cache en memoria de MORA_BUCKETS poblada desde el catálogo dinámico de
@@ -110,9 +104,12 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 		for (const b of [...catalogoConocido].sort((a, b) => a.orden - b.orden)) {
 			if (!porNumero.has(b.numero)) porNumero.set(b.numero, b);
 		}
-		// `estado_mora` null/inválido: la fila SÍ se conserva (numero conocido,
-		// solo falta el estado) usando el homólogo de MORA_BUCKETS — nunca se
-		// propaga un valor fuera del enum (revienta el INSERT/UPDATE en
+		// `estado_mora` null/inválido/de-status: la fila SÍ se conserva (numero
+		// conocido, solo falta un estado de aging válido) usando el homólogo de
+		// MORA_BUCKETS — nunca se propaga un valor fuera de ESTADOS_AGING_VALIDOS
+		// (un valor de status como "en_convenio" sería válido en el pgEnum
+		// completo pero semánticamente incorrecto para un bucket de CUOTAS, y un
+		// valor fuera del enum entero revienta el INSERT/UPDATE en
 		// sync-casos-cobros.ts).
 		const mapped = Array.from(porNumero.values())
 			.sort((a, b) => a.orden - b.orden)
@@ -121,7 +118,7 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 					(f) => f.key === String(b.numero),
 				)?.estadoMora as string;
 				const estadoMora =
-					b.estado_mora && ESTADOS_MORA_VALIDOS.has(b.estado_mora)
+					b.estado_mora && ESTADOS_AGING_VALIDOS.has(b.estado_mora)
 						? b.estado_mora
 						: fallbackEstado;
 				return {
@@ -140,6 +137,11 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 		const keysCubiertas = new Set(mapped.map((b) => b.key));
 		const faltantes = MORA_BUCKETS.filter((f) => !keysCubiertas.has(f.key));
 		if (faltantes.length > 0) {
+			// Actualiza cachedAt igual que el catch de abajo: sin esto, con el
+			// catálogo incompleto persistiendo (migración a medias, fila borrada
+			// sin restaurar), cada llamada síncrona siguiente reintentaría el
+			// fetch sin respetar el TTL, machacando cartera-back fila por fila.
+			cachedAt = Date.now();
 			console.error(
 				`[moraBuckets] Catálogo incompleto (faltan buckets: ${faltantes.map((f) => f.key).join(", ")}) — se mantiene fallback previo`,
 			);

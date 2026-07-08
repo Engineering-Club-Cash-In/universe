@@ -54,7 +54,7 @@ import {
 } from "../lib/messaging-test-mode";
 import {
 	estadoMoraPorCuotas,
-	ESTADOS_MORA_VALIDOS,
+	ESTADOS_AGING_VALIDOS,
 	MORA_BUCKETS,
 	rangoCuotasPorEstadoMora,
 } from "../lib/moraBuckets";
@@ -433,11 +433,13 @@ export const cobrosRouter = {
 							MORA_BUCKETS.find((b) => b.key === key)?.estadoMora ?? "al_dia";
 						// `estadoMora` de /stats viene del mismo catálogo varchar(24)
 						// editable a mano que valida moraBuckets.ts — se aplica la misma
-						// whitelist aquí (no se persiste, es solo dashboard, pero un valor
-						// fuera del enum no debería llegar al embudo ni al denominador).
+						// whitelist de AGING aquí (no ESTADOS_MORA_VALIDOS completo): estos
+						// son buckets de CUOTAS, no filas de status — un "en_convenio"/
+						// "pagado"/"incobrable" colado aquí sería válido en el enum pero
+						// semánticamente incorrecto para un bucket de aging.
 						const estadoMora =
 							bucketStats?.estadoMora &&
-							ESTADOS_MORA_VALIDOS.has(bucketStats.estadoMora)
+							ESTADOS_AGING_VALIDOS.has(bucketStats.estadoMora)
 								? bucketStats.estadoMora
 								: fallbackEstado;
 						return {

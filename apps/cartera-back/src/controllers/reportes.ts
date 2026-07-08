@@ -1317,6 +1317,59 @@ export async function getMoraByEtapaYAsesor({
   return { ...result, fecha, alcance: "historico" as const };
 }
 
+// Mora COBRADA por asesor en el período de cierre de un mes.
+// Período = [día 6 del mes, día 6 del mes siguiente) — alineado a que el cierre
+// corre el día 5. Suma cartera.pagos_credito.mora (lo efectivamente aplicado a
+// mora en cada pago), excluyendo pagos marcados como falsos.
+export async function getMoraCobradaPorAsesor({
+  mes,
+  anio,
+  asesores,
+  emailCobrador,
+}: {
+  mes: number;
+  anio: number;
+  asesores?: number[];
+  emailCobrador?: string;
+}) {
+  const mm = String(mes).padStart(2, "0");
+  const inicio = `${anio}-${mm}-06`;
+  const finMes = mes === 12 ? 1 : mes + 1;
+  const finAnio = mes === 12 ? anio + 1 : anio;
+  const fin = `${finAnio}-${String(finMes).padStart(2, "0")}-06`;
+
+  const emailFilter = emailCobrador
+    ? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))`
+    : sql``;
+  const asesoresFilter = asesores && asesores.length
+    ? sql`AND a.asesor_id IN (${sql.join(asesores.map((id) => sql`${id}`), sql`, `)})`
+    : sql``;
+
+  const rows = await db.execute<{ asesor_id: number; nombre: string; cobrado: string }>(sql`
+    SELECT
+      a.asesor_id,
+      a.nombre,
+      COALESCE(SUM(pc.mora::numeric), 0) AS cobrado
+    FROM cartera.pagos_credito pc
+    INNER JOIN cartera.creditos c ON c.credito_id = pc.credito_id
+    INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
+    WHERE pc.fecha_pago >= ${inicio}::timestamp
+      AND pc.fecha_pago <  ${fin}::timestamp
+      AND COALESCE(pc."paymentFalse", false) = false
+      ${emailFilter}
+      ${asesoresFilter}
+    GROUP BY a.asesor_id, a.nombre
+  `);
+
+  const porAsesor = rows.rows
+    .map((r) => ({ asesorId: r.asesor_id, nombre: r.nombre, cobrado: Number(r.cobrado).toFixed(2) }))
+    .filter((r) => Number(r.cobrado) !== 0)
+    .sort((x, y) => Number(y.cobrado) - Number(x.cobrado));
+  const totalCobrado = porAsesor.reduce((s, r) => s + Number(r.cobrado), 0).toFixed(2);
+
+  return { periodo: { inicio, fin }, porAsesor, totalCobrado };
+}
+
 export async function getCuotasPorFecha({
   fechaInicio,
   fechaFin,

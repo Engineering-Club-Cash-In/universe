@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../database";
+import { snapCte } from "./moraHistorial";
 
 type Periodo = "anio" | "trimestre" | "mes" | "semana" | "dia";
 
@@ -1189,60 +1190,27 @@ function serializeBuckets(b: BucketsAcc) {
   };
 }
 
-export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?: string } = {}) {
-  const rows = await db.execute<{
-    asesor_id: number;
-    nombre: string;
-    email_asesor: string | null;
-    bucket: keyof BucketsAcc;
-    cantidad: number;
-    suma_capital: string;
-    suma_mora: string;
-  }>(sql`
-    WITH mora_activa AS (
-      SELECT DISTINCT ON (credito_id)
-        credito_id,
-        cuotas_atrasadas,
-        monto_mora
-      FROM cartera.moras_credito
-      WHERE activa           = true
-        AND cuotas_atrasadas > 0
-      ORDER BY credito_id, mora_id DESC
-    )
-    SELECT
-      a.asesor_id,
-      a.nombre,
-      a.email_cash_in         AS email_asesor,
-      CASE
-        WHEN m.cuotas_atrasadas >= 4 THEN 'mora_120_plus'
-        WHEN m.cuotas_atrasadas = 3  THEN 'mora_90'
-        WHEN m.cuotas_atrasadas = 2  THEN 'mora_60'
-        ELSE                              'mora_30'
-      END                             AS bucket,
-      COUNT(*)::int                   AS cantidad,
-      COALESCE(SUM(c.capital::numeric), 0)    AS suma_capital,
-      COALESCE(SUM(m.monto_mora::numeric), 0) AS suma_mora
-    FROM mora_activa m
-    INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
-    INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
-    WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
-      ${emailCobrador ? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))` : sql``}
-    GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
-  `);
+type MoraRow = {
+  asesor_id: number;
+  nombre: string;
+  email_asesor: string | null;
+  bucket: keyof BucketsAcc;
+  cantidad: number;
+  suma_capital: string;
+  suma_mora: string;
+};
 
+function acumularBuckets(rows: MoraRow[]) {
   const totalAcc = emptyBuckets();
   const asesorMap = new Map<number, { asesorId: number; nombre: string; email: string; acc: BucketsAcc }>();
-
-  for (const row of rows.rows) {
+  for (const row of rows) {
     const bucket = row.bucket;
     const cantidad = row.cantidad;
     const sumaCapital = Number(row.suma_capital);
     const sumaMora = Number(row.suma_mora);
-
     totalAcc[bucket].cantidad += cantidad;
     totalAcc[bucket].sumaCapital += sumaCapital;
     totalAcc[bucket].sumaMora += sumaMora;
-
     if (!asesorMap.has(row.asesor_id)) {
       asesorMap.set(row.asesor_id, { asesorId: row.asesor_id, nombre: row.nombre, email: row.email_asesor ?? "", acc: emptyBuckets() });
     }
@@ -1251,7 +1219,6 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
     entry.acc[bucket].sumaCapital += sumaCapital;
     entry.acc[bucket].sumaMora += sumaMora;
   }
-
   const porAsesor = Array.from(asesorMap.values())
     .sort((a, b) => {
       const tA = a.acc.mora_30.sumaMora + a.acc.mora_60.sumaMora + a.acc.mora_90.sumaMora + a.acc.mora_120_plus.sumaMora;
@@ -1259,8 +1226,93 @@ export async function getMoraByEtapaYAsesor({ emailCobrador }: { emailCobrador?:
       return tB - tA;
     })
     .map((e) => ({ asesorId: e.asesorId, nombre: e.nombre, email: e.email, ...serializeBuckets(e.acc) }));
-
   return { totales: serializeBuckets(totalAcc), porAsesor };
+}
+
+function hoyGTStr(): string {
+  return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
+}
+
+export async function getMoraByEtapaYAsesor({
+  emailCobrador,
+  fecha,
+  asesores,
+}: { emailCobrador?: string; fecha?: string; asesores?: number[] } = {}) {
+  const hoy = hoyGTStr();
+  const usarHistorico = !!fecha && fecha < hoy;
+
+  const emailFilter = emailCobrador
+    ? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))`
+    : sql``;
+  const asesoresFilter = asesores && asesores.length
+    ? sql`AND a.asesor_id IN (${sql.join(asesores.map((id) => sql`${id}`), sql`, `)})`
+    : sql``;
+
+  if (!usarHistorico) {
+    const rows = await db.execute<MoraRow>(sql`
+      WITH mora_activa AS (
+        SELECT DISTINCT ON (credito_id)
+          credito_id, cuotas_atrasadas, monto_mora
+        FROM cartera.moras_credito
+        WHERE activa = true AND cuotas_atrasadas > 0
+        ORDER BY credito_id, mora_id DESC
+      )
+      SELECT
+        a.asesor_id, a.nombre, a.email_cash_in AS email_asesor,
+        CASE
+          WHEN m.cuotas_atrasadas >= 4 THEN 'mora_120_plus'
+          WHEN m.cuotas_atrasadas = 3  THEN 'mora_90'
+          WHEN m.cuotas_atrasadas = 2  THEN 'mora_60'
+          ELSE                              'mora_30'
+        END AS bucket,
+        COUNT(*)::int AS cantidad,
+        COALESCE(SUM(c.capital::numeric), 0) AS suma_capital,
+        COALESCE(SUM(m.monto_mora::numeric), 0) AS suma_mora
+      FROM mora_activa m
+      INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
+      INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
+      WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+        ${emailFilter}
+        ${asesoresFilter}
+      GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
+    `);
+    return { ...acumularBuckets(rows.rows), fecha: hoy, alcance: "live" as const };
+  }
+
+  const rows = await db.execute<MoraRow>(sql`
+    WITH ${snapCte(fecha!)}
+    SELECT
+      a.asesor_id, a.nombre, a.email_cash_in AS email_asesor,
+      CASE
+        WHEN s.cuotas >= 4 THEN 'mora_120_plus'
+        WHEN s.cuotas = 3  THEN 'mora_90'
+        WHEN s.cuotas = 2  THEN 'mora_60'
+        ELSE                    'mora_30'
+      END AS bucket,
+      COUNT(*)::int AS cantidad,
+      COALESCE(SUM(c.capital::numeric), 0) AS suma_capital,
+      COALESCE(SUM(s.monto), 0) AS suma_mora
+    FROM snap s
+    INNER JOIN cartera.creditos c ON c.credito_id = s.credito_id
+    INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
+    WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0
+      ${emailFilter}
+      ${asesoresFilter}
+    GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
+  `);
+
+  const result = acumularBuckets(rows.rows);
+  if (!result.porAsesor.length) {
+    const minRes = await db.execute<{ min_fecha: string | null }>(sql`
+      SELECT MIN((fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date)::text AS min_fecha
+      FROM cartera.moras_historial
+    `);
+    const minFecha = minRes.rows[0]?.min_fecha ?? null;
+    if (minFecha && fecha! < minFecha) {
+      return { ...result, fecha, alcance: "historico" as const, dataDisponibleDesde: minFecha };
+    }
+  }
+  return { ...result, fecha, alcance: "historico" as const };
 }
 
 export async function getCuotasPorFecha({

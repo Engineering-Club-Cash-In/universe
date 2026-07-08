@@ -427,6 +427,12 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
               creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
             fecha_inicio_participacion:
               creditos_inversionistas_espejo.fecha_inicio_participacion,
+            // Se lee para preservar la modalidad en el nuke & rebuild de abajo
+            // (si no, se borraría a null para los inversionistas que quedan).
+            modalidad_facturacion:
+              creditos_inversionistas_espejo.modalidad_facturacion,
+            modalidad_facturacion_spread_id:
+              creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
           })
           .from(creditos_inversionistas_espejo)
           .where(eq(creditos_inversionistas_espejo.credito_id, creditoId));
@@ -596,9 +602,17 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
         }
 
         // ── Espejo: agregar status="completado" + updated_at ──
+        // Se preserva la modalidad de cada inversionista (si no, se borraría a
+        // null en este nuke & rebuild).
         const dataEspejo = dataEspejoBase.map((inv) => ({
           ...inv,
           status: "completado" as const,
+          modalidad_facturacion:
+            espejoPorInv.get(inv.inversionista_id)?.modalidad_facturacion ??
+            null,
+          modalidad_facturacion_spread_id:
+            espejoPorInv.get(inv.inversionista_id)
+              ?.modalidad_facturacion_spread_id ?? null,
           updated_at: new Date(),
         }));
 

@@ -1,4 +1,5 @@
 import { and, eq, gte, inArray, isNull, lte, sql, sum } from "drizzle-orm";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { db } from "../database";
 import {
   pagos_credito,
@@ -1436,12 +1437,12 @@ export const updateConvenioStatus = async (
       // coincida con el que recalcula createMora y no lo rechace por mismatch.
       const ovRes = await db.execute<any>(sql`
         SELECT COUNT(*)::int AS n
-        FROM cartera.cuotas_credito cu
+        FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
         WHERE cu.credito_id = ${creditoId}
           AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
           AND cu.pagado = false
           AND NOT EXISTS (
-            SELECT 1 FROM cartera.pagos_credito pc
+            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
             WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
               AND pc.validation_status IN ('validated', 'no_required'))`);
       const numCuotasAtrasadas = Number(ovRes.rows?.[0]?.n ?? 0);

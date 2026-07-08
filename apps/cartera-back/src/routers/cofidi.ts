@@ -1,4 +1,5 @@
 // src/controllers/dte.controller.ts
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 
 import { Elysia, t } from "elysia";
 import jwt from "jsonwebtoken";
@@ -1915,8 +1916,8 @@ if (facturasExistentes.length > 0) {
         //    reparte y se guarda por inversionista). Solo guardamos lo de CUBE.
         const capCubeRes = await db.execute(sql`
           SELECT COALESCE(SUM(pci.abono_capital), 0) AS capital_cube
-          FROM cartera.pagos_credito_inversionistas pci
-          JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+          FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci
+          JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = pci.inversionista_id
           WHERE pci.pago_id = ${pago_id}
             AND UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
         `);
@@ -1931,8 +1932,8 @@ if (facturasExistentes.length > 0) {
         const invFacturadoRes = await db.execute(sql`
           SELECT COALESCE(SUM(pci.abono_interes + pci.abono_iva_12), 0) AS total,
                  COALESCE(SUM(pci.abono_iva_12), 0) AS iva
-          FROM cartera.pagos_credito_inversionistas pci
-          JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+          FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci
+          JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = pci.inversionista_id
           WHERE pci.pago_id = ${pago_id}
             AND UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
             AND i.emite_factura = false
@@ -1946,7 +1947,7 @@ if (facturasExistentes.length > 0) {
             AND NOT (
               ${pagoData.bandera_reinversion === true}
               AND EXISTS (
-                SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
+                SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo esp
                 WHERE esp.credito_id = ${pagoData.credito_id}
                   AND esp.inversionista_id = pci.inversionista_id
                   AND esp.status IN ('pendiente_reinversion', 'pendiente_compra_cartera')
@@ -1985,20 +1986,20 @@ if (facturasExistentes.length > 0) {
         await db.transaction(async (tx) => {
           // Reemplazar para que re-facturar no duplique ni deje rubros viejos.
           await tx.execute(
-            sql`DELETE FROM cartera.facturacion_desglose WHERE pago_id = ${pago_id}`
+            sql`DELETE FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose WHERE pago_id = ${pago_id}`
           );
           for (const r of rubrosDesglose) {
             await tx.execute(sql`
-              INSERT INTO cartera.facturacion_desglose
+              INSERT INTO ${SQL_CARTERA_SCHEMA}.facturacion_desglose
                 (pago_id, factura_id, rubro, monto_total, monto_iva, fecha_aplicado_gt)
               VALUES (
                 ${pago_id},
                 NULL,
-                ${r.rubro}::cartera.rubro_facturacion,
+                ${r.rubro}::${SQL_CARTERA_SCHEMA}.rubro_facturacion,
                 ${r.monto_total},
                 ${r.monto_iva},
                 (SELECT (COALESCE(pc.fecha_aplicado, pc.fecha_pago) AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date
-                   FROM cartera.pagos_credito pc WHERE pc.pago_id = ${pago_id})
+                   FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc WHERE pc.pago_id = ${pago_id})
               )
             `);
           }
@@ -2483,7 +2484,7 @@ if (facturasExistentes.length > 0) {
       //    Best-effort: la factura ya quedó anulada, esto no debe romper la respuesta.
       try {
         await db.execute(
-          sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${facturaAnulada.factura_id} AND pago_id IS NULL`
+          sql`DELETE FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose WHERE factura_id = ${facturaAnulada.factura_id} AND pago_id IS NULL`
         );
       } catch (limpiezaError) {
         console.error(
@@ -3351,11 +3352,11 @@ if (facturasExistentes.length > 0) {
             // Categoría del receptor: usuario (con créditos) por NIT; el del crédito más reciente.
             const catRes = await db.execute(sql`
               SELECT u.categoria
-              FROM cartera.usuarios u
+              FROM ${SQL_CARTERA_SCHEMA}.usuarios u
               WHERE upper(regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g'))
                   = upper(regexp_replace(${nitNormalizado}, '[^0-9A-Za-z]', '', 'g'))
-                AND EXISTS (SELECT 1 FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id)
-              ORDER BY (SELECT MAX(c.fecha_creacion) FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id) DESC NULLS LAST
+                AND EXISTS (SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.creditos c WHERE c.usuario_id = u.usuario_id)
+              ORDER BY (SELECT MAX(c.fecha_creacion) FROM ${SQL_CARTERA_SCHEMA}.creditos c WHERE c.usuario_id = u.usuario_id) DESC NULLS LAST
               LIMIT 1
             `);
             const categoria = (catRes as any).rows?.[0]?.categoria ?? null;
@@ -3370,7 +3371,7 @@ if (facturasExistentes.length > 0) {
             await db.transaction(async (tx) => {
               // Reemplazar para que re-facturar no duplique.
               await tx.execute(
-                sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${resultado.factura_id} AND pago_id IS NULL`
+                sql`DELETE FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose WHERE factura_id = ${resultado.factura_id} AND pago_id IS NULL`
               );
               for (const [rubro, montoBig] of Object.entries(porRubro)) {
                 if (montoBig.lte(0)) continue;
@@ -3378,19 +3379,19 @@ if (facturasExistentes.length > 0) {
                   calcularIvaExacto(parseFloat(montoBig.toFixed(2))).montoImpuesto
                 );
                 await tx.execute(sql`
-                  INSERT INTO cartera.facturacion_desglose
+                  INSERT INTO ${SQL_CARTERA_SCHEMA}.facturacion_desglose
                     (pago_id, factura_id, rubro, monto_total, monto_iva, fecha_aplicado_gt, categoria)
                   VALUES (
                     NULL,
                     ${resultado.factura_id},
-                    ${rubro}::cartera.rubro_facturacion,
+                    ${rubro}::${SQL_CARTERA_SCHEMA}.rubro_facturacion,
                     ${montoBig.toFixed(2)},
                     ${iva.toFixed(2)},
                     -- fecha_emision YA se guarda en hora Guatemala (certificarFacturaHelper
                     -- le resta 6h antes de persistir), así que se usa directo SIN volver a
                     -- convertir de UTC→GT (eso shifteaba las genéricas de 00:00–05:59 al día anterior).
                     (SELECT fecha_emision::date
-                       FROM cartera.facturas_electronicas WHERE factura_id = ${resultado.factura_id}),
+                       FROM ${SQL_CARTERA_SCHEMA}.facturas_electronicas WHERE factura_id = ${resultado.factura_id}),
                     ${categoria}
                   )
                 `);

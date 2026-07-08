@@ -1,4 +1,5 @@
 import { db } from "../database";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { creditos, historial_devolucion_credito, usuarios } from "../database/db/schema";
 import { eq, desc, sql, and, or, ilike, inArray } from "drizzle-orm";
 
@@ -53,7 +54,7 @@ export async function listPendingDevolucion({ query, set }: any) {
         estado_devolucion: creditos.estado_devolucion,
         motivo_contextual: sql<string | null>`(
           SELECT h.motivo
-          FROM cartera.historial_devolucion_credito h
+          FROM ${SQL_CARTERA_SCHEMA}.historial_devolucion_credito h
           WHERE h.credito_id = ${creditos.credito_id}
             AND h.estado_nuevo = ${creditos.estado_devolucion}
           ORDER BY h.created_at DESC

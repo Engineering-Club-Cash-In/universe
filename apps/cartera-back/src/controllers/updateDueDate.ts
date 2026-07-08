@@ -1,4 +1,5 @@
 import { eq, and, asc, desc } from "drizzle-orm";
+import { CARTERA_SCHEMA } from "../database/db/schema";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito, historial_cambio_fecha } from "../database/db";
 import z from "zod";
@@ -313,16 +314,16 @@ export const fixCreditosWithoutFebruary = async ({
       numero_credito_sifco: string;
     }>(
       `SELECT c.credito_id, c.numero_credito_sifco
-       FROM cartera.creditos c
+       FROM ${CARTERA_SCHEMA}.creditos c
        WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
          AND c.credito_id NOT IN (
            SELECT DISTINCT cc.credito_id
-           FROM cartera.cuotas_credito cc
+           FROM ${CARTERA_SCHEMA}.cuotas_credito cc
            WHERE EXTRACT(MONTH FROM cc.fecha_vencimiento::date) = 2
              AND EXTRACT(YEAR FROM cc.fecha_vencimiento::date) = ${anio}
          )
          AND EXISTS (
-           SELECT 1 FROM cartera.cuotas_credito cc2
+           SELECT 1 FROM ${CARTERA_SCHEMA}.cuotas_credito cc2
            WHERE cc2.credito_id = c.credito_id
              AND cc2.pagado = false
              AND EXTRACT(YEAR FROM cc2.fecha_vencimiento::date) >= ${anio}
@@ -700,14 +701,14 @@ export const updateDueDatesFromJson = async ({
 
       // 3a. UPDATE cuotas_credito: solo cambiar el día de fecha_vencimiento
       const cuotasResult = await db.execute(
-        `UPDATE cartera.cuotas_credito cc
+        `UPDATE ${CARTERA_SCHEMA}.cuotas_credito cc
          SET fecha_vencimiento = MAKE_DATE(
              EXTRACT(YEAR FROM cc.fecha_vencimiento)::int,
              EXTRACT(MONTH FROM cc.fecha_vencimiento)::int,
              LEAST(${diaPago}, ${ultimoDia("cc.fecha_vencimiento")})
            )
          WHERE cc.credito_id IN (
-           SELECT credito_id FROM cartera.creditos
+           SELECT credito_id FROM ${CARTERA_SCHEMA}.creditos
            WHERE numero_credito_sifco IN (${inClause})
          )
          AND cc.numero_cuota > 0`
@@ -716,7 +717,7 @@ export const updateDueDatesFromJson = async ({
       // 3b. UPDATE pagos_credito: fecha_vencimiento siempre,
       //     fecha_pago + fecha_boleta SOLO donde fecha_pago ya tiene valor
       const pagosResult = await db.execute(
-        `UPDATE cartera.pagos_credito pc
+        `UPDATE ${CARTERA_SCHEMA}.pagos_credito pc
          SET
            fecha_vencimiento = MAKE_DATE(
                EXTRACT(YEAR FROM pc.fecha_vencimiento)::int,
@@ -738,8 +739,8 @@ export const updateDueDatesFromJson = async ({
                )
              ELSE pc.fecha_boleta END
          WHERE pc.cuota_id IN (
-           SELECT cc.cuota_id FROM cartera.cuotas_credito cc
-           INNER JOIN cartera.creditos c ON cc.credito_id = c.credito_id
+           SELECT cc.cuota_id FROM ${CARTERA_SCHEMA}.cuotas_credito cc
+           INNER JOIN ${CARTERA_SCHEMA}.creditos c ON cc.credito_id = c.credito_id
            WHERE c.numero_credito_sifco IN (${inClause})
              AND cc.numero_cuota > 0
          )`

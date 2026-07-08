@@ -1,4 +1,5 @@
 // ============================================================
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 // Monitoreo de facturas no certificadas en SAT
 // ------------------------------------------------------------
 // - verificarFacturasSat(): job cada 15 min. Revisa las facturas
@@ -104,9 +105,9 @@ async function verificarEnSat(
 // la BD (así deja de aparecer en el reporte). Devuelve cuántas resolvió.
 async function resolverFallidasAnuladas(): Promise<number> {
   const r: any = await db.execute(sql`
-    UPDATE cartera.facturas_fallidas_sat AS ff
+    UPDATE ${SQL_CARTERA_SCHEMA}.facturas_fallidas_sat AS ff
     SET status = 'RESUELTA', resuelta_at = now(), updated_at = now()
-    FROM cartera.facturas_electronicas AS fe
+    FROM ${SQL_CARTERA_SCHEMA}.facturas_electronicas AS fe
     WHERE ff.factura_id = fe.factura_id
       AND ff.status = 'PENDIENTE'
       AND fe.status = 'ANULADA'

@@ -1,4 +1,5 @@
 import Big from "big.js";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import ExcelJS from "exceljs";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "../database";
@@ -102,7 +103,7 @@ export function calcularAcumuladosCorridos(
 // total del día y los acumulados cuadren con lo que el usuario tipeó.
 export async function recomputarTotalesDia(fecha: string, exec: any = db) {
   await exec.execute(sql`
-    UPDATE cartera.facturacion_snapshot_diario SET
+    UPDATE ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario SET
       facturacion = interes_cube + membresia + otros_ingresos + mora_cube + royalty,
       facturacion_mas_servicios =
         interes_cube + membresia + otros_ingresos + mora_cube + royalty + servicios_seguro_gps,
@@ -130,7 +131,7 @@ export async function recomputarAcumuladosMes(
   const res = await exec.execute(sql`
     SELECT fecha::text AS fecha, bloqueado,
            facturacion, servicios_seguro_gps, facturacion_inversionistas, ingreso_carros
-    FROM cartera.facturacion_snapshot_diario
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario
     WHERE fecha >= ${inicioMes}::date
       AND fecha < (${inicioMes}::date + INTERVAL '1 month')
     ORDER BY fecha
@@ -139,7 +140,7 @@ export async function recomputarAcumuladosMes(
   const updates = calcularAcumuladosCorridos(dias);
   for (const u of updates) {
     await exec.execute(sql`
-      UPDATE cartera.facturacion_snapshot_diario SET
+      UPDATE ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario SET
         facturacion_acumulado = ${u.facturacion_acumulado},
         acum_servicios_seguro_gps = ${u.acum_servicios_seguro_gps},
         acumulado_inversionistas = ${u.acumulado_inversionistas},
@@ -213,7 +214,7 @@ function colProducto(prefix: string, categoria: string): string | null {
 export async function generarSnapshotDiario(fecha: string) {
   // Si el día está bloqueado (editado a mano), NO se sobreescribe.
   const lockRes = await db.execute(sql`
-    SELECT bloqueado FROM cartera.facturacion_snapshot_diario
+    SELECT bloqueado FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario
     WHERE fecha = ${fecha}::date
   `);
   const lockRow = ((lockRes as any).rows ?? lockRes)[0];
@@ -240,10 +241,10 @@ export async function generarSnapshotDiario(fecha: string) {
   //    `fd.categoria` (resuelta por NIT al facturar); las de pago la derivan por JOIN.
   const desg = await db.execute(sql`
     SELECT COALESCE(u.categoria, fd.categoria) AS categoria, fd.rubro AS rubro, SUM(fd.monto_total) AS total
-    FROM cartera.facturacion_desglose fd
-    LEFT JOIN cartera.pagos_credito p ON p.pago_id   = fd.pago_id
-    LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
-    LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose fd
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito p ON p.pago_id   = fd.pago_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos      c ON c.credito_id = p.credito_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.usuarios      u ON u.usuario_id = c.usuario_id
     WHERE fd.fecha_aplicado_gt = ${fecha}::date
       -- Filas de PAGO: el pago debe existir (no huérfano por credito/usuario
       -- borrado) y, MISMO CRITERIO QUE EL EXCEL (getPagosConInversionistas que
@@ -323,11 +324,11 @@ export async function generarSnapshotDiario(fecha: string) {
   //      sub-cuenta. Tomándolo de los pagos aplicados cuadra al centavo con el Excel.
   const capPci = await db.execute(sql`
     SELECT u.categoria AS categoria, SUM(pci.abono_capital) AS cap
-    FROM cartera.pagos_credito p
-    JOIN cartera.creditos c ON c.credito_id = p.credito_id
-    JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-    JOIN cartera.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
-    JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
+    JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+    JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = pci.inversionista_id
     WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
       AND p.validation_status IN ('validated','pending','reset','capital','capital_validated')
       AND c."statusCredit" IN
@@ -350,7 +351,7 @@ export async function generarSnapshotDiario(fecha: string) {
   //      La categoría de las genéricas vive en fd.categoria (resuelta por NIT al facturar).
   const oiNuevo = await db.execute(sql`
     SELECT fd.categoria AS categoria, SUM(fd.monto_total) AS total
-    FROM cartera.facturacion_desglose fd
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose fd
     WHERE fd.fecha_aplicado_gt = ${fecha}::date
       AND fd.pago_id IS NULL
       AND fd.rubro::text IN ('INTERES','MEMBRESIA','SEGURO','GPS','OTROS')
@@ -378,7 +379,7 @@ export async function generarSnapshotDiario(fecha: string) {
   //    desglose). Verificado: gastos_administrativos solo tenía cargos del CRM (sin manuales).
   const adm = await db.execute(sql`
     SELECT COALESCE(SUM(monto_total), 0) AS total
-    FROM cartera.facturacion_desglose
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose
     WHERE fecha_aplicado_gt = ${fecha}::date AND pago_id IS NULL
       AND rubro::text IN ('INTERES','MEMBRESIA','SEGURO','GPS','OTROS')
   `);
@@ -387,7 +388,7 @@ export async function generarSnapshotDiario(fecha: string) {
   // 3.1) Ingresos por carros del día
   const carr = await db.execute(sql`
     SELECT COALESCE(SUM(monto), 0) AS total
-    FROM cartera.ingresos_carros WHERE fecha = ${fecha}::date
+    FROM ${SQL_CARTERA_SCHEMA}.ingresos_carros WHERE fecha = ${fecha}::date
   `);
   const ingresoCarros = new Big((carr as any).rows?.[0]?.total || 0);
 
@@ -397,7 +398,7 @@ export async function generarSnapshotDiario(fecha: string) {
   //    sola fuente y la misma fecha (COALESCE fecha_aplicado/fecha_pago).
   const inv = await db.execute(sql`
     SELECT COALESCE(SUM(monto_total), 0) AS total
-    FROM cartera.facturacion_desglose
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose
     WHERE rubro::text = 'INTERES_INVERSIONISTAS'
       AND fecha_aplicado_gt = ${fecha}::date
   `);
@@ -436,7 +437,7 @@ export async function generarSnapshotDiario(fecha: string) {
       COALESCE(SUM(servicios_seguro_gps), 0)       AS serv,
       COALESCE(SUM(facturacion_inversionistas), 0) AS inv,
       COALESCE(SUM(ingreso_carros), 0)             AS carros
-    FROM cartera.facturacion_snapshot_diario
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario
     WHERE fecha >= ${monthStart}::date AND fecha < ${fecha}::date
   `);
   const P = (prev as any).rows?.[0] ?? {};
@@ -450,7 +451,7 @@ export async function generarSnapshotDiario(fecha: string) {
     .plus(ingresoCarrosMtd);
   // Reserva acumulada (MTD) desde pagos_credito.reserva (pagos tiene histórico → sin corte).
   const reservaMtd = await db.execute(sql`
-    SELECT COALESCE(SUM(reserva), 0) AS total FROM cartera.pagos_credito
+    SELECT COALESCE(SUM(reserva), 0) AS total FROM ${SQL_CARTERA_SCHEMA}.pagos_credito
     WHERE (fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date BETWEEN ${monthStart}::date AND ${fecha}::date
   `);
   const reserva_acumulada = new Big((reservaMtd as any).rows[0].total);
@@ -465,7 +466,7 @@ export async function generarSnapshotDiario(fecha: string) {
 
   // 8) Metas del mes
   const meta = await db.execute(sql`
-    SELECT * FROM cartera.metas_facturacion WHERE anio = ${y} AND mes = ${m} LIMIT 1
+    SELECT * FROM ${SQL_CARTERA_SCHEMA}.metas_facturacion WHERE anio = ${y} AND mes = ${m} LIMIT 1
   `);
   const M = (meta as any).rows?.[0] || {};
   const meta_mensual = new Big(M.meta_mensual || 0);
@@ -548,9 +549,9 @@ export async function generarSnapshotDiario(fecha: string) {
   //   Best-effort: si falla (p.ej. tabla aún no migrada, o race del índice único),
   //   NO rompe el snapshot ya guardado. Días bloqueados retornan arriba (backfill aparte).
   try {
-    await db.execute(sql`DELETE FROM cartera.facturacion_snapshot_detalle WHERE fecha = ${fecha}::date`);
+    await db.execute(sql`DELETE FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_detalle WHERE fecha = ${fecha}::date`);
     await db.execute(sql`
-      INSERT INTO cartera.facturacion_snapshot_detalle
+      INSERT INTO ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_detalle
         (fecha, rubro, producto, origen, monto_total, monto_iva)
       SELECT ${fecha}::date, fd.rubro,
         CASE lower(trim(COALESCE(u.categoria, fd.categoria)))
@@ -562,10 +563,10 @@ export async function generarSnapshotDiario(fecha: string) {
         END,
         CASE WHEN fd.pago_id IS NULL THEN 'nuevo' ELSE 'pago' END,
         SUM(fd.monto_total), SUM(fd.monto_iva)
-      FROM cartera.facturacion_desglose fd
-      LEFT JOIN cartera.pagos_credito p ON p.pago_id   = fd.pago_id
-      LEFT JOIN cartera.creditos      c ON c.credito_id = p.credito_id
-      LEFT JOIN cartera.usuarios      u ON u.usuario_id = c.usuario_id
+      FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose fd
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito p ON p.pago_id   = fd.pago_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos      c ON c.credito_id = p.credito_id
+      LEFT JOIN ${SQL_CARTERA_SCHEMA}.usuarios      u ON u.usuario_id = c.usuario_id
       WHERE fd.fecha_aplicado_gt = ${fecha}::date
         AND fd.rubro::text <> 'CAPITAL'                            -- capital se toma del pci (abajo)
         AND NOT (fd.pago_id IS NULL AND fd.rubro::text = 'MORA')   -- mora genérica fuera (= snapshot)
@@ -586,9 +587,9 @@ export async function generarSnapshotDiario(fecha: string) {
     `);
     // CAPITAL desde pci de CUBE (igual que capital_total) → reconcilia con el snapshot
     await db.execute(sql`
-      INSERT INTO cartera.facturacion_snapshot_detalle
+      INSERT INTO ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_detalle
         (fecha, rubro, producto, origen, monto_total, monto_iva)
-      SELECT ${fecha}::date, 'CAPITAL'::cartera.rubro_facturacion,
+      SELECT ${fecha}::date, 'CAPITAL'::${SQL_CARTERA_SCHEMA}.rubro_facturacion,
         CASE lower(trim(u.categoria))
           WHEN 'cv vehículo' THEN 'autocompras'
           WHEN 'cv vehículo nuevo' THEN 'nuevo_autocompras'
@@ -597,11 +598,11 @@ export async function generarSnapshotDiario(fecha: string) {
           ELSE 'sin_producto'
         END,
         'pago', SUM(pci.abono_capital), 0
-      FROM cartera.pagos_credito p
-      JOIN cartera.creditos c ON c.credito_id = p.credito_id
-      JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-      JOIN cartera.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
-      JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+      JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
+      JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+      JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
+      JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = pci.inversionista_id
       WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
         AND p.validation_status IN ('validated','pending','reset','capital','capital_validated')
         AND c."statusCredit" IN
@@ -629,7 +630,7 @@ export async function generarSnapshotDiario(fecha: string) {
 export async function aplicarManualesEnSnapshotDia(fecha: string) {
   const [y, m] = fecha.split("-").map(Number);
   const hayDesglose = await db.execute(sql`
-    SELECT 1 FROM cartera.facturacion_desglose WHERE fecha_aplicado_gt = ${fecha}::date LIMIT 1
+    SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.facturacion_desglose WHERE fecha_aplicado_gt = ${fecha}::date LIMIT 1
   `);
   if (((hayDesglose as any).rows ?? []).length > 0) {
     // Día del sistema: rubros + administrativos + oi_* + otros + capital derivan del
@@ -651,9 +652,9 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
     return { success: true };
   }
   await db.execute(sql`
-    UPDATE cartera.facturacion_snapshot_diario SET
+    UPDATE ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario SET
       ingreso_carros = COALESCE((
-        SELECT SUM(monto) FROM cartera.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
+        SELECT SUM(monto) FROM ${SQL_CARTERA_SCHEMA}.ingresos_carros c WHERE c.fecha = ${fecha}::date), 0),
       updated_at = now()
     WHERE fecha = ${fecha}::date AND bloqueado = false
   `);
@@ -667,7 +668,7 @@ export async function aplicarManualesEnSnapshotDia(fecha: string) {
 //    deben refrescar también en días bloqueados (el lock vive en generarSnapshotDiario).
 export async function aplicarMetaEnSnapshotsMes(anio: number, mes: number) {
   const res = await db.execute(sql`
-    UPDATE cartera.facturacion_snapshot_diario s
+    UPDATE ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario s
     SET meta_facturacion_mensual = m.meta_mensual,
         meta_facturacion_semanal = m.meta_semanal,
         meta_facturacion_diaria  = m.meta_diaria,
@@ -677,7 +678,7 @@ export async function aplicarMetaEnSnapshotsMes(anio: number, mes: number) {
           THEN ROUND(s.facturacion_acumulado / m.meta_mensual * 100, 4)
           ELSE 0 END,
         updated_at = now()
-    FROM cartera.metas_facturacion m
+    FROM ${SQL_CARTERA_SCHEMA}.metas_facturacion m
     WHERE m.anio = ${anio} AND m.mes = ${mes}
       AND s.fecha >= make_date(${anio}, ${mes}, 1)
       AND s.fecha < (make_date(${anio}, ${mes}, 1) + INTERVAL '1 month')
@@ -739,7 +740,7 @@ export async function listarDetalleSnapshot(params: {
   const res = await db.execute(sql`
     SELECT rubro::text AS rubro, producto, origen,
            monto_total::float8 AS monto_total, monto_iva::float8 AS monto_iva
-    FROM cartera.facturacion_snapshot_detalle
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_detalle
     WHERE fecha = ${fecha}::date
       ${rubro ? sql`AND rubro::text = ${rubro}` : sql``}
     ORDER BY rubro, producto, origen
@@ -937,10 +938,10 @@ export async function generarExcelFacturacionDiaria(
   const det = await db.execute(sql`
     SELECT fecha::text AS fecha, rubro::text AS rubro, producto, origen,
            monto_total::float8 AS monto
-    FROM cartera.facturacion_snapshot_detalle
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_detalle
     WHERE fecha BETWEEN ${fechaInicio}::date AND ${fechaFin}::date
       AND fecha NOT IN (
-        SELECT fecha FROM cartera.facturacion_snapshot_diario WHERE bloqueado = true
+        SELECT fecha FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario WHERE bloqueado = true
       )
   `);
   const idx: Record<string, Record<string, Record<string, { nuevo: number; pago: number }>>> = {};
@@ -1132,7 +1133,7 @@ export async function guardarCeldasSnapshot(input: {
   // llenaría (la salta por bloqueado). Mismo patrón que aplicarManualesEnSnapshotDia.
   for (const c of cambios) {
     const ex = await db.execute(sql`
-      SELECT 1 FROM cartera.facturacion_snapshot_diario WHERE fecha = ${c.fecha}::date LIMIT 1
+      SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario WHERE fecha = ${c.fecha}::date LIMIT 1
     `);
     if ((((ex as any).rows ?? ex) as any[]).length === 0) {
       await generarSnapshotDiario(c.fecha);
@@ -1152,7 +1153,7 @@ export async function guardarCeldasSnapshot(input: {
 
       // Fila actual (para valores viejos + saber si ya estaba bloqueado).
       const prevRes = await tx.execute(sql`
-        SELECT * FROM cartera.facturacion_snapshot_diario WHERE fecha = ${c.fecha}::date
+        SELECT * FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario WHERE fecha = ${c.fecha}::date
       `);
       const prev = ((prevRes as any).rows ?? prevRes)[0] ?? null;
 
@@ -1165,7 +1166,7 @@ export async function guardarCeldasSnapshot(input: {
 
       if (prev) {
         await tx.execute(sql`
-          UPDATE cartera.facturacion_snapshot_diario
+          UPDATE ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario
           SET ${sql.join(sets, sql`, `)},
               bloqueado = true, bloqueado_por = ${usuarioId}, bloqueado_at = now(), updated_at = now()
           WHERE fecha = ${c.fecha}::date
@@ -1190,7 +1191,7 @@ export async function guardarCeldasSnapshot(input: {
           sql`now()`,
         ];
         await tx.execute(sql`
-          INSERT INTO cartera.facturacion_snapshot_diario (${sql.join(
+          INSERT INTO ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario (${sql.join(
             insertCols.map((x) => sql.raw(x)),
             sql`, `
           )})
@@ -1202,7 +1203,7 @@ export async function guardarCeldasSnapshot(input: {
       for (const col of cols) {
         const anterior = prev ? prev[col] ?? null : null;
         await tx.execute(sql`
-          INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+          INSERT INTO ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
           VALUES (${c.fecha}::date, ${col}, ${
           anterior === null ? null : String(anterior)
         }, ${valOf(col)}, 'edit', ${usuarioId})
@@ -1211,7 +1212,7 @@ export async function guardarCeldasSnapshot(input: {
       // Auditoría de lock si no estaba bloqueado.
       if (!prev || prev.bloqueado !== true) {
         await tx.execute(sql`
-          INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+          INSERT INTO ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
           VALUES (${c.fecha}::date, '*', NULL, NULL, 'lock', ${usuarioId})
         `);
       }
@@ -1243,12 +1244,12 @@ export async function desbloquearDiaSnapshot(
   const anio = Number(y);
   const mes = Number(m);
   await db.execute(sql`
-    UPDATE cartera.facturacion_snapshot_diario
+    UPDATE ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_diario
     SET bloqueado = false, bloqueado_por = ${usuarioId}, bloqueado_at = now(), updated_at = now()
     WHERE fecha = ${fecha}::date
   `);
   await db.execute(sql`
-    INSERT INTO cartera.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
+    INSERT INTO ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_auditoria (fecha, columna, valor_anterior, valor_nuevo, accion, usuario_id)
     VALUES (${fecha}::date, '*', NULL, NULL, 'unlock', ${usuarioId})
   `);
   // Vuelve a valores del sistema y refresca acumulados.
@@ -1280,8 +1281,8 @@ export async function listarAuditoriaSnapshot(opts: {
            -- convierte a America/Guatemala.
            to_char((a.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Guatemala',
                    'DD/MM/YYYY HH24:MI:SS') AS created_at
-    FROM cartera.facturacion_snapshot_auditoria a
-    LEFT JOIN cartera.platform_users u ON u.id = a.usuario_id
+    FROM ${SQL_CARTERA_SCHEMA}.facturacion_snapshot_auditoria a
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.platform_users u ON u.id = a.usuario_id
     ${whereSql}
     ORDER BY a.created_at DESC
     LIMIT ${lim}

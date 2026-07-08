@@ -1,4 +1,5 @@
 import { db } from "../database/index";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import {
   aseguradoras,
   asesores,
@@ -228,7 +229,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10)),
           sql`NOT EXISTS (
             SELECT 1
-            FROM cartera.pagos_credito p_pending
+            FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p_pending
             WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
               AND p_pending.validation_status = 'pending'
               AND p_pending.pagado = true
@@ -282,7 +283,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           eq(cuotas_credito.pagado, false),
           sql`NOT EXISTS (
             SELECT 1
-            FROM cartera.pagos_credito p_pending
+            FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p_pending
             WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
               AND p_pending.validation_status = 'pending'
           )`
@@ -871,19 +872,19 @@ export async function getCreditosWithUserByMesAnio(
     conditions.push(sql`${creditos.statusCredit} NOT IN (${fueraSql})`);
     conditions.push(sql`(
       EXISTS (
-        SELECT 1 FROM cartera.buckets b
+        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets b
          WHERE b.activo = true
            AND ${creditos.statusCredit} = ANY (b.estados_incluidos)
            AND b.numero IN (${numerosSql})
       )
       OR (
         NOT EXISTS (
-          SELECT 1 FROM cartera.buckets b
+          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets b
            WHERE b.activo = true
              AND ${creditos.statusCredit} = ANY (b.estados_incluidos)
         )
         AND EXISTS (
-          SELECT 1 FROM cartera.buckets b
+          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets b
            WHERE b.activo = true
              AND b.numero IN (${numerosSql})
              AND COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= b.cuotas_min

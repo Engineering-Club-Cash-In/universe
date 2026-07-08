@@ -1,4 +1,5 @@
 import { db } from "../database/index";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import {
   creditos,
   pagos_credito,
@@ -35,7 +36,7 @@ export interface CreditoNuevoConAbono {
 export async function diagnosticoCreditosAbonos() {
   // Total de créditos en la BD
   const totalCreditosResult = await db.execute<{ total: string }>(
-    sql`SELECT COUNT(*) as total FROM cartera.creditos`
+    sql`SELECT COUNT(*) as total FROM ${SQL_CARTERA_SCHEMA}.creditos`
   );
 
   // Rango de fechas de los créditos
@@ -46,7 +47,7 @@ export async function diagnosticoCreditosAbonos() {
     sql`SELECT 
           MIN(fecha_creacion AT TIME ZONE 'America/Guatemala')::date::text as fecha_min,
           MAX(fecha_creacion AT TIME ZONE 'America/Guatemala')::date::text as fecha_max
-        FROM cartera.creditos`
+        FROM ${SQL_CARTERA_SCHEMA}.creditos`
   );
 
   // Créditos agrupados por mes/año para ver la distribución real
@@ -57,7 +58,7 @@ export async function diagnosticoCreditosAbonos() {
     sql`SELECT 
           TO_CHAR(fecha_creacion AT TIME ZONE 'America/Guatemala', 'YYYY-MM') as mes,
           COUNT(*) as total
-        FROM cartera.creditos
+        FROM ${SQL_CARTERA_SCHEMA}.creditos
         GROUP BY TO_CHAR(fecha_creacion AT TIME ZONE 'America/Guatemala', 'YYYY-MM')
         ORDER BY mes DESC
         LIMIT 12`
@@ -71,7 +72,7 @@ export async function diagnosticoCreditosAbonos() {
     sql`SELECT
           COUNT(*) as total_pagos,
           COUNT(*) FILTER (WHERE CAST(abono_capital AS NUMERIC) > 0) as con_abono_capital
-        FROM cartera.pagos_credito`
+        FROM ${SQL_CARTERA_SCHEMA}.pagos_credito`
   );
 
   // ====================================================================
@@ -100,7 +101,7 @@ export async function diagnosticoCreditosAbonos() {
           -- Cuántas cuotas reales (numero_cuota > 0) están pagadas
           (
             SELECT COUNT(*) 
-            FROM cartera.cuotas_credito cc 
+            FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cc 
             WHERE cc.credito_id = c.credito_id 
               AND cc.numero_cuota > 0 
               AND cc.pagado = true
@@ -116,9 +117,9 @@ export async function diagnosticoCreditosAbonos() {
           -- Suma total
           COALESCE(SUM(CAST(COALESCE(p.membresias_mes, '0') AS NUMERIC)), 0)::text as suma_membresias_mes,
           COALESCE(SUM(CAST(COALESCE(p.membresias_pago, '0') AS NUMERIC)), 0)::text as suma_membresias_pago
-        FROM cartera.creditos c
-        INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-        LEFT JOIN cartera.pagos_credito p ON p.credito_id = c.credito_id
+        FROM ${SQL_CARTERA_SCHEMA}.creditos c
+        INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito p ON p.credito_id = c.credito_id
         WHERE 
           (c.fecha_creacion AT TIME ZONE 'America/Guatemala')::date >= '2026-03-01'
         GROUP BY c.credito_id, c.numero_credito_sifco, c.fecha_creacion, u.nombre, c.capital
@@ -131,7 +132,7 @@ export async function diagnosticoCreditosAbonos() {
           -- Y que NO tenga cuotas reales pagadas (o sea, el cliente aún no ha pagado nada)
           AND (
             SELECT COUNT(*) 
-            FROM cartera.cuotas_credito cc 
+            FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cc 
             WHERE cc.credito_id = c.credito_id 
               AND cc.numero_cuota > 0 
               AND cc.pagado = true

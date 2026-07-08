@@ -23,7 +23,17 @@
     CV_VEHICULO = "CV Vehículo",
   }
   export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR","CONTA"]);
-  export const customSchema = pgSchema("cartera");
+
+  // 🪣 COBROS-02: el schema de Postgres es parametrizable por env para poder
+  // apuntar TODO el back a un schema espejo (p.ej. el sandbox de pruebas
+  // `cartera_cobros2`, copia de `cartera` en dev) SIN tocar código.
+  // Sin la variable = "cartera" (comportamiento normal / producción).
+  //  - CARTERA_SCHEMA: string, para SQL crudo en template strings planos.
+  //  - SQL_CARTERA_SCHEMA: sql.raw(...), para SQL crudo dentro de sql`...`
+  //    de drizzle (un string ahí se volvería parámetro $n y rompería el query).
+  export const CARTERA_SCHEMA = process.env.CARTERA_SCHEMA ?? "cartera";
+  export const SQL_CARTERA_SCHEMA = sql.raw(CARTERA_SCHEMA);
+  export const customSchema = pgSchema(CARTERA_SCHEMA);
 
   export const statusCreditoInversionistaEspejoEnum = customSchema.enum("status_credito_inversionista_espejo", [
     "pendiente_reinversion",
@@ -1155,7 +1165,7 @@
   // ===== Funciones + triggers de cuentas_empresa (hora Guatemala) =====
   // Aplica un movimiento al saldo_actual de la cuenta y guarda saldo_post.
   export const aplicarMovimientoCuentaEmpresaFn = sql`
-    CREATE OR REPLACE FUNCTION cartera.aplicar_movimiento_cuenta_empresa()
+    CREATE OR REPLACE FUNCTION ${SQL_CARTERA_SCHEMA}.aplicar_movimiento_cuenta_empresa()
     RETURNS TRIGGER AS $$
     DECLARE
       v_delta numeric(18,2);
@@ -1163,7 +1173,7 @@
     BEGIN
       v_delta := CASE NEW.tipo WHEN 'ingreso' THEN NEW.monto ELSE -NEW.monto END;
 
-      UPDATE cartera.cuentas_empresa
+      UPDATE ${SQL_CARTERA_SCHEMA}.cuentas_empresa
          SET saldo_actual = saldo_actual + v_delta
        WHERE cuenta_id = NEW.cuenta_id
        RETURNING saldo_actual INTO v_nuevo_saldo;
@@ -1179,16 +1189,16 @@
   `;
 
   export const aplicarMovimientoCuentaEmpresaTrigger = sql`
-    DROP TRIGGER IF EXISTS trg_cuentas_empresa_mov_aplicar ON cartera.cuentas_empresa_movimientos;
+    DROP TRIGGER IF EXISTS trg_cuentas_empresa_mov_aplicar ON ${SQL_CARTERA_SCHEMA}.cuentas_empresa_movimientos;
     CREATE TRIGGER trg_cuentas_empresa_mov_aplicar
-    BEFORE INSERT ON cartera.cuentas_empresa_movimientos
+    BEFORE INSERT ON ${SQL_CARTERA_SCHEMA}.cuentas_empresa_movimientos
     FOR EACH ROW
-    EXECUTE FUNCTION cartera.aplicar_movimiento_cuenta_empresa();
+    EXECUTE FUNCTION ${SQL_CARTERA_SCHEMA}.aplicar_movimiento_cuenta_empresa();
   `;
 
   // Auto-actualiza fecha_actualizacion en cualquier UPDATE.
   export const setFechaActualizacionFn = sql`
-    CREATE OR REPLACE FUNCTION cartera.set_fecha_actualizacion()
+    CREATE OR REPLACE FUNCTION ${SQL_CARTERA_SCHEMA}.set_fecha_actualizacion()
     RETURNS TRIGGER AS $$
     BEGIN
       NEW.fecha_actualizacion = NOW() AT TIME ZONE 'America/Guatemala';
@@ -1198,11 +1208,11 @@
   `;
 
   export const cuentasEmpresaSetFechaTrigger = sql`
-    DROP TRIGGER IF EXISTS trg_cuentas_empresa_set_fecha_actualizacion ON cartera.cuentas_empresa;
+    DROP TRIGGER IF EXISTS trg_cuentas_empresa_set_fecha_actualizacion ON ${SQL_CARTERA_SCHEMA}.cuentas_empresa;
     CREATE TRIGGER trg_cuentas_empresa_set_fecha_actualizacion
-    BEFORE UPDATE ON cartera.cuentas_empresa
+    BEFORE UPDATE ON ${SQL_CARTERA_SCHEMA}.cuentas_empresa
     FOR EACH ROW
-    EXECUTE FUNCTION cartera.set_fecha_actualizacion();
+    EXECUTE FUNCTION ${SQL_CARTERA_SCHEMA}.set_fecha_actualizacion();
   `;
 
 

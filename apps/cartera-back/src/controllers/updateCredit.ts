@@ -450,7 +450,7 @@ const creditUpdateSchema = z.object({
   formato_credito: z.string().max(50).optional(),
   permite_abono_capital: z.boolean().optional(),
   no_amortiza_capital: z.boolean().optional(),
-  estado_devolucion: z.enum(['NO_APLICA', 'PENDIENTE_AUTORIZACION', 'VERIFICADO', 'RECHAZADO']).optional(),
+  estado_devolucion: z.enum(['NO_APLICA', 'PENDIENTE_AUTORIZACION', 'VERIFICADO', 'RECHAZADO', 'COMPLETADO']).optional(),
   motivo_devolucion: z.string().optional(),
   bandera_reinversion: z.boolean().optional(),
   // Motivo del ajuste manual de capital (se registra en historial_capital_credito).

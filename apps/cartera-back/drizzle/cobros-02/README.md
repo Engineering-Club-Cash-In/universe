@@ -18,6 +18,24 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 | `0002_credito_asesor.sql` | Bitácora de reasignaciones `credito_asesor_historial` + enum `credito_asesor_origen`. **La asignación vive en `creditos.asesor_id`** (no hay tabla de estado): en cartera el asesor del crédito ES el cobrador (el vendedor vive en el CRM). Reasignar (futuro) = `UPDATE creditos SET asesor_id` (solo ese campo) + INSERT en la bitácora. |
 | `0003_buckets_estado_mora.sql` | Agrega `buckets.estado_mora` (puente numero↔estadoMora: al_dia..mora_120_plus) + seed. Retira la duplicación con `config/moraBuckets.ts` (cartera-back) y el mirror en CRM. |
 
+## Asignación inicial (`asignacion/`) — carga de datos, NO schema
+
+Scripts **set-based** (nada de ir crédito por crédito) para poblar el modelo
+una vez aplicadas las migraciones 0000→0003. Pensados para el **sandbox de
+pruebas** (`cartera_cobros2`, copia del schema `cartera` en dev): cada archivo
+abre con `SET LOCAL search_path TO cartera_cobros2;` — cambiar esa línea a
+`cartera` cuando toque el ambiente real. Correr en orden; los 3 son
+idempotentes y revientan (no siguen a medias) si falta un prerequisito.
+
+| Archivo | Qué hace |
+|---|---|
+| `asignacion/01_pool_asesor_bucket.sql` | Crea el asesor de prueba de B1 y puebla el pool `asesor_bucket` por NOMBRE: B0 Caren Rivera · B1 Diego Gomez + Asesor Prueba B1 · B2 Samuel Gamboa · B3 Jorge Sente · B4 Erik Rivas · B5 Gerencia. |
+| `asignacion/02_asignar_asesores_creditos.sql` | Deriva el bucket de cada crédito (mismas reglas del motor: fuera del funnel no se toca; `estados_incluidos` manda; si no, `cuotas_atrasadas` de la mora activa vs rangos del catálogo) y asigna asesor: 1 asesor → directo, N asesores → round-robin determinístico (parejo). Bitácora en `credito_asesor_historial` PRIMERO, luego `UPDATE creditos SET asesor_id` — **únicamente ese campo**. |
+| `asignacion/03_linea_base_historial.sql` | Siembra el evento `INICIAL` en `buckets_historial` (solo créditos sin ningún registro), espejo de lo que haría el motor — así `procesarMoras` no re-siembra y solo registra SUBIDAs/BAJADAs reales. |
+
+Dry-run contra dev (2026-07-08): B0 437 · B1 597 (→ 299/298) · B2 219 ·
+B3 55 · B4 30 · B5 148 · FUERA 142 (no se tocan) — 1,193 créditos cambian de dueño.
+
 ## Decisiones de modelo (revisadas 2026-07-07, panel + confirmación de Daniel)
 
 - **Asignación = `creditos.asesor_id`** (decisión de raíz): los reportes por asesor

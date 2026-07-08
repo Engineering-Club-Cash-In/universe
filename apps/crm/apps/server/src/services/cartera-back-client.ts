@@ -730,6 +730,14 @@ export class CarteraBackClient {
 						...(params.email_cobrador && {
 							email_asesor: params.email_cobrador,
 						}),
+						// Sin esto el rango de fechas se perdía solo en la ruta POST
+						// (>50 SIFCOs) mientras el GET sí lo mandaba.
+						...(params.fecha_desde && {
+							fecha_desde: params.fecha_desde,
+						}),
+						...(params.fecha_hasta && {
+							fecha_hasta: params.fecha_hasta,
+						}),
 						...(params.capital_min !== undefined && {
 							capital_min: params.capital_min,
 						}),

@@ -632,11 +632,19 @@ export async function getCreditosWithUserByMesAnio(
   const offset = (page - 1) * perPage;
   const conditions: any[] = [];
 
-  // 🇬🇹 Fecha actual en Guatemala
-  const hoyGuatemala = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
-  );
-  const hoyStr = hoyGuatemala.toISOString().slice(0, 10);
+  // 🇬🇹 Fecha actual en Guatemala. sv-SE da directamente YYYY-MM-DD y no
+  // depende del TZ del proceso (el patrón anterior new Date(toLocaleString)
+  // + toISOString solo era correcto con el server en UTC).
+  const hoyStr = new Date().toLocaleDateString("sv-SE", {
+    timeZone: "America/Guatemala",
+  });
+  // Aritmética de días en espacio UTC puro (independiente del TZ del server).
+  const hoyUTC = new Date(`${hoyStr}T00:00:00Z`);
+  const sumarDiasStr = (dias: number) => {
+    const d = new Date(hoyUTC);
+    d.setUTCDate(d.getUTCDate() + dias);
+    return d.toISOString().slice(0, 10);
+  };
 
   try {
     // 📌 Filtros
@@ -735,40 +743,26 @@ export async function getCreditosWithUserByMesAnio(
   if (proximidad_pago) {
     console.log(`🔎 Filtrando por proximidad de pago: ${proximidad_pago}`);
 
-    // Calcular rangos de fecha según proximidad
-    const hoy = new Date(hoyGuatemala);
-    hoy.setHours(0, 0, 0, 0);
-
+    // Calcular rangos de fecha según proximidad (derivados de hoyStr para no
+    // depender del TZ del proceso)
     if (proximidad_pago === "TODAY") {
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date = ${hoyStr}::date`);
     } else if (proximidad_pago === "WEEK") {
-      const fin = new Date(hoy);
-      fin.setDate(fin.getDate() + 7);
-      const finStr = fin.toISOString().slice(0, 10);
+      const finStr = sumarDiasStr(7);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date > ${hoyStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "TWO_WEEKS") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 8);
-      const inicioStr = inicio.toISOString().slice(0, 10);
-      const fin = new Date(hoy);
-      fin.setDate(fin.getDate() + 14);
-      const finStr = fin.toISOString().slice(0, 10);
+      const inicioStr = sumarDiasStr(8);
+      const finStr = sumarDiasStr(14);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "MONTH") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 15);
-      const inicioStr = inicio.toISOString().slice(0, 10);
-      const fin = new Date(hoy);
-      fin.setDate(fin.getDate() + 30);
-      const finStr = fin.toISOString().slice(0, 10);
+      const inicioStr = sumarDiasStr(15);
+      const finStr = sumarDiasStr(30);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "DUEMONTH") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 31);
-      const inicioStr = inicio.toISOString().slice(0, 10);
+      const inicioStr = sumarDiasStr(31);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
     }
 
@@ -804,12 +798,15 @@ export async function getCreditosWithUserByMesAnio(
 
   if (excluir_pagados_mes) {
     console.log(`🔎 Excluyendo créditos con su cuota actual ya pagada`);
-    // Cuota actual = primera cuota con fecha_vencimiento >= hoy (mismo
-    // concepto que proxima_cuota). Se excluye el crédito solo si esa cuota
-    // está pagada (todas sus filas, por si hay duplicadas) Y no tiene mora
-    // activa; sin cuotas futuras no se excluye. Subconsulta correlacionada
-    // en vez de join para no multiplicar filas (paginación) y para que el
-    // COUNT herede la condición.
+    // Cuota actual = la MISMA cuota que la tabla muestra como Fecha de Pago
+    // (proximasCuotasMap): primera cuota con fecha_vencimiento >= (fecha_desde
+    // ?? hoy), con tope fecha_hasta si hay rango — si las anclas divergen, un
+    // crédito con cuota impaga visible podría ocultarse. Se excluye el crédito
+    // solo si esa cuota está pagada (todas sus filas, por si hay duplicadas)
+    // Y no tiene mora activa; sin cuotas en el rango no se excluye.
+    // Subconsulta correlacionada en vez de join para no multiplicar filas
+    // (paginación) y para que el COUNT herede la condición.
+    const anclaDesde = fecha_desde ?? hoyStr;
     conditions.push(sql`NOT (
       ${moras_credito.credito_id} IS NULL
       AND COALESCE((
@@ -822,7 +819,8 @@ export async function getCreditosWithUserByMesAnio(
             FROM ${cuotas_credito} cc2
             WHERE cc2.credito_id = ${creditos.credito_id}
               AND cc2.numero_cuota > 0
-              AND cc2.fecha_vencimiento >= ${hoyStr}::date
+              AND cc2.fecha_vencimiento >= ${anclaDesde}::date
+              ${fecha_hasta ? sql`AND cc2.fecha_vencimiento <= ${fecha_hasta}::date` : sql``}
           )
       ), false)
     )`);

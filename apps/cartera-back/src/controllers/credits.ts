@@ -655,8 +655,14 @@ export async function getCreditosWithUserByMesAnio(
   // `cuotas_max` undefined = sin tope (>= cuotas_min).
   cuotas_min?: number,
   cuotas_max?: number,
-  // 🪣 COBROS-02: filtro por BUCKET derivado (números del catálogo, ej. [1] o
-  // [4,5]). Usa las MISMAS reglas que la columna `bucket` de esta respuesta.
+  // 🪣 COBROS-02: filtro por BUCKET (números del catálogo, ej. [1] o [4,5]).
+  // El bucket (filtro Y columna de la respuesta) viene SIEMPRE del MOTOR: el
+  // último registrado en buckets_historial. Es estable — solo cambia cuando el
+  // job registra la transición (con su reasignación de asesor) — así un admin
+  // nunca ve saltos sin evento (la derivación viva parpadeaba a B0 al registrar
+  // un pago, ventana "mora apagada"). Fallback al derivado vivo SOLO para
+  // créditos que el motor aún no vio (sin INICIAL — p.ej. ambientes donde las
+  // migraciones cobros-02 no se han aplicado; ahí el try/catch degrada solo).
   buckets_numeros?: number[]
 ): Promise<{
   data: CreditoConInfo[];
@@ -859,39 +865,31 @@ export async function getCreditosWithUserByMesAnio(
     conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
   }
 
-  // 🪣 COBROS-02: filtro por BUCKET (B0-B5) derivado con las MISMAS reglas que
-  // la columna `bucket` de esta respuesta (bucketDeCredito): fuera del funnel
-  // queda excluido SIEMPRE; un estado en `buckets.estados_incluidos` fuerza su
-  // bucket (INCOBRABLE→B5, aunque su mora esté apagada) con prioridad sobre el
-  // rango de cuotas de la mora ACTIVA; sin mora activa cuenta 0 cuotas (B0).
-  // Así lo que se filtra es exactamente lo que se muestra.
+  // 🪣 COBROS-02: filtro por BUCKET (B0-B5). Fuera del funnel queda excluido
+  // SIEMPRE. El bucket = COALESCE(último de buckets_historial, derivación viva
+  // con las reglas de bucketDeCredito: estados_incluidos manda → INCOBRABLE a
+  // B5; luego rango de cuotas de la mora activa; sin mora = 0 → B0). El
+  // fallback vivo solo aplica a créditos sin INICIAL (el motor no los ha visto).
   if (buckets_numeros && buckets_numeros.length > 0) {
-    console.log(`🔎 Filtrando por bucket(s): ${buckets_numeros.join(", ")}`);
+    console.log(`🔎 Filtrando por bucket(s) [motor]: ${buckets_numeros.join(", ")}`);
     const numerosSql = sql.join(buckets_numeros.map((n) => sql`${n}`), sql`, `);
     const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
     conditions.push(sql`${creditos.statusCredit} NOT IN (${fueraSql})`);
-    conditions.push(sql`(
-      EXISTS (
-        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets b
-         WHERE b.activo = true
-           AND ${creditos.statusCredit} = ANY (b.estados_incluidos)
-           AND b.numero IN (${numerosSql})
-      )
-      OR (
-        NOT EXISTS (
-          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets b
-           WHERE b.activo = true
-             AND ${creditos.statusCredit} = ANY (b.estados_incluidos)
-        )
-        AND EXISTS (
-          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets b
-           WHERE b.activo = true
-             AND b.numero IN (${numerosSql})
-             AND COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= b.cuotas_min
-             AND (b.cuotas_max IS NULL OR COALESCE(${moras_credito.cuotas_atrasadas}, 0) <= b.cuotas_max)
-        )
-      )
-    )`);
+    conditions.push(sql`COALESCE(
+      (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+        WHERE h.credito_id = ${creditos.credito_id}
+        ORDER BY h.fecha DESC, h.historial_id DESC
+        LIMIT 1),
+      (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
+        WHERE b.activo = true
+          AND ${creditos.statusCredit} = ANY (b.estados_incluidos)
+        ORDER BY b.numero LIMIT 1),
+      (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
+        WHERE b.activo = true
+          AND COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= b.cuotas_min
+          AND (b.cuotas_max IS NULL OR COALESCE(${moras_credito.cuotas_atrasadas}, 0) <= b.cuotas_max)
+        ORDER BY b.numero LIMIT 1)
+    ) IN (${numerosSql})`);
   }
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1163,6 +1161,28 @@ export async function getCreditosWithUserByMesAnio(
     aplicarFallbackBuckets();
   }
 
+  // 4️⃣.6 Último bucket registrado por crédito (buckets_historial) — la columna
+  // `bucket` dice lo MISMO que el filtro (la verdad del motor, no la derivación
+  // viva). 1 query por página de créditos. Si la tabla no existe (migraciones
+  // cobros-02 pendientes en ese ambiente), el catch deja el map vacío y todo
+  // cae al derivado vivo — mismo comportamiento de siempre.
+  const ultimoBucketMap = new Map<number, number>();
+  if (creditosIds.length > 0) {
+    try {
+      const idsSql = sql.join(creditosIds.map((id) => sql`${id}`), sql`, `);
+      const ultimos = await db.execute<{ credito_id: number; bucket_nuevo: number }>(sql`
+        SELECT DISTINCT ON (credito_id) credito_id, bucket_nuevo
+        FROM ${SQL_CARTERA_SCHEMA}.buckets_historial
+        WHERE credito_id IN (${idsSql})
+        ORDER BY credito_id, fecha DESC, historial_id DESC`);
+      for (const r of ultimos.rows) {
+        ultimoBucketMap.set(Number(r.credito_id), Number(r.bucket_nuevo));
+      }
+    } catch (err) {
+      console.error("❌ Error cargando último bucket (motor):", err);
+    }
+  }
+
   // 5️⃣ Próximas cuotas
   let proximasCuotasMap: Record<number, ProximaCuota> = {};
   if (creditosIds.length > 0) {
@@ -1340,11 +1360,22 @@ export async function getCreditosWithUserByMesAnio(
         const proxima_cuota = proximasCuotasMap[creditoId] || null;
         const fecha_inicio = fechaInicioMap[creditoId] || null;
 
-        const numeroBucket = bucketDeCredito(
+        // Último bucket del motor; fallback al derivado vivo solo si el motor
+        // aún no vio el crédito (sin INICIAL). Fuera del funnel NO se consulta
+        // el historial (review Codex): un crédito que tuvo bucket y luego pasó
+        // a CANCELADO/EN_CONVENIO/etc. conservaría su último bucket como
+        // zombie — el motor ya no lo trackea, así que bucket = null.
+        const fueraDelFunnel = STATUS_BUCKET_FUERA.includes(
           row.creditos.statusCredit,
-          mora?.cuotas_atrasadas ?? 0,
-          catalogoBuckets,
         );
+        const numeroBucket = fueraDelFunnel
+          ? null
+          : ultimoBucketMap.get(creditoId) ??
+            bucketDeCredito(
+              row.creditos.statusCredit,
+              mora?.cuotas_atrasadas ?? 0,
+              catalogoBuckets,
+            );
         const bucket =
           numeroBucket == null ? null : bucketDisplayMap.get(numeroBucket) ?? null;
 

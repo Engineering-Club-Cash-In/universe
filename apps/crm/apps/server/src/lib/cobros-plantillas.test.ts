@@ -26,4 +26,26 @@ describe("plantillas masivas de cobros", () => {
 			}
 		}
 	});
+
+	test("no indican responder por este chat cuando tienen aviso de no responder", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			expect(plantilla.cuerpo, plantilla.id).not.toMatch(
+				/por este medio|por este chat|comunicarse por este medio/i,
+			);
+		}
+	});
+
+	test("dirigen comprobantes y dudas al telefono del asesor", () => {
+		const bienvenida = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "bienvenida",
+		);
+		const preMora = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "pre_mora",
+		);
+
+		expect(bienvenida?.cuerpo).toMatch(
+			/boleta o comprobante de pago[^.]*{telefonoAsesor}/i,
+		);
+		expect(preMora?.cuerpo).toMatch(/duda[^.]*{telefonoAsesor}/i);
+	});
 });

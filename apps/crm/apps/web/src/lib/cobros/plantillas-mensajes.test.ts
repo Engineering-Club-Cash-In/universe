@@ -28,4 +28,28 @@ describe("plantillas web de cobros", () => {
 			}
 		}
 	});
+
+	test("no indican responder por este chat cuando tienen aviso de no responder", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+
+			expect(cuerpoWhatsapp, plantilla.id).not.toMatch(
+				/por este medio|por este chat|comunicarse por este medio/i,
+			);
+		}
+	});
+
+	test("dirigen comprobantes y dudas al telefono del asesor", () => {
+		const bienvenida = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "bienvenida",
+		);
+		const preMora = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "pre_mora",
+		);
+
+		expect(bienvenida?.cuerpoWhastapp).toMatch(
+			/boleta o comprobante de pago[^.]*{telefonoAsesor}/i,
+		);
+		expect(preMora?.cuerpoWhastapp).toMatch(/duda[^.]*{telefonoAsesor}/i);
+	});
 });

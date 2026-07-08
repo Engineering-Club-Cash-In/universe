@@ -84,7 +84,7 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 
 A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
 
-Por favor, envíe su boleta o comprobante de pago por este medio para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor} para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
 
 ${COBROS_NO_REPLY_WARNING}
 
@@ -110,7 +110,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
 		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
 
-Si tiene alguna duda por favor comunicarse por este medio.
+Si tiene alguna duda, por favor comuníquese al {telefonoAsesor}.
 
 SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
 
@@ -150,7 +150,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}`,
 		etapa: "mora_90",
 		asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametros`.
-		cuerpo: `Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+		cuerpo: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
 
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 

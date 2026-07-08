@@ -160,10 +160,13 @@ export const bucketsRouter = new Elysia()
   )
 
   // Listado de créditos POR BUCKET — gemelo de /getAllCredits (misma data por
-  // crédito, misma paginación) pero el eje es el bucket derivado (B0-B5) en
-  // vez de las cuotas atrasadas crudas. Cubre lo que el aging por cuotas no
-  // puede: INCOBRABLE cae en B5 aunque su mora esté apagada, y los estados
-  // fuera del funnel quedan excluidos siempre.
+  // crédito, misma paginación) pero el eje es el bucket del MOTOR: el último
+  // registrado en buckets_historial. Fuente "motor" a propósito (pedido de
+  // Daniel 2026-07-08): la derivación viva parpadea a B0 al registrar un pago
+  // (ventana "mora apagada") y un admin viendo esto en tiempo real vería un
+  // salto B2→B0 sin evento. Con el motor, el bucket solo cambia cuando el job
+  // registra la transición (con su reasignación de asesor) → todo movimiento
+  // tiene su fila en el historial. Fuera del funnel excluido siempre.
   .get(
     "/buckets/creditos",
     async ({ query, set, user }: any) => {

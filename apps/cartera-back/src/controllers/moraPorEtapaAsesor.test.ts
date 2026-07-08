@@ -50,5 +50,22 @@ if (!hasDb) {
       const filt = await getMoraByEtapaYAsesor({ asesores: ids });
       expect(filt.porAsesor.every((a: any) => ids.includes(a.asesorId))).toBe(true);
     });
+
+    it("mapea cuotas → bucket con los umbrales exactos", async () => {
+      const { bucketCaseSql } = await import("./reportes");
+      const { db } = await import("../database");
+      const { sql } = await import("drizzle-orm");
+      const r = await db.execute<{ n: number; bucket: string }>(sql`
+        SELECT v.n, ${bucketCaseSql(sql`v.n`)} AS bucket
+        FROM (VALUES (1),(2),(3),(4),(5)) AS v(n)
+        ORDER BY v.n
+      `);
+      const map = Object.fromEntries(r.rows.map((x) => [x.n, x.bucket]));
+      expect(map[1]).toBe("mora_30");
+      expect(map[2]).toBe("mora_60");
+      expect(map[3]).toBe("mora_90");
+      expect(map[4]).toBe("mora_120_plus");
+      expect(map[5]).toBe("mora_120_plus");
+    });
   });
 }

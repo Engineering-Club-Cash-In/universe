@@ -1233,6 +1233,18 @@ function hoyGTStr(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
 }
 
+// Fragmento CASE compartido: clasifica cuotas atrasadas en el bucket de mora.
+// Umbral global (NO tocar sin revisar ambos call sites): >=4 → mora_120_plus,
+// =3 → mora_90, =2 → mora_60, resto → mora_30. Recibe la expresión de columna
+// (m.cuotas_atrasadas en el live path, s.cuotas en el histórico) para que
+// ambas queries compartan una única definición.
+export const bucketCaseSql = (col: ReturnType<typeof sql>) => sql`CASE
+  WHEN ${col} >= 4 THEN 'mora_120_plus'
+  WHEN ${col} = 3  THEN 'mora_90'
+  WHEN ${col} = 2  THEN 'mora_60'
+  ELSE                  'mora_30'
+END`;
+
 export async function getMoraByEtapaYAsesor({
   emailCobrador,
   fecha,
@@ -1259,12 +1271,7 @@ export async function getMoraByEtapaYAsesor({
       )
       SELECT
         a.asesor_id, a.nombre, a.email_cash_in AS email_asesor,
-        CASE
-          WHEN m.cuotas_atrasadas >= 4 THEN 'mora_120_plus'
-          WHEN m.cuotas_atrasadas = 3  THEN 'mora_90'
-          WHEN m.cuotas_atrasadas = 2  THEN 'mora_60'
-          ELSE                              'mora_30'
-        END AS bucket,
+        ${bucketCaseSql(sql`m.cuotas_atrasadas`)} AS bucket,
         COUNT(*)::int AS cantidad,
         COALESCE(SUM(c.capital::numeric), 0) AS suma_capital,
         COALESCE(SUM(m.monto_mora::numeric), 0) AS suma_mora
@@ -1283,12 +1290,7 @@ export async function getMoraByEtapaYAsesor({
     WITH ${snapCte(fecha!)}
     SELECT
       a.asesor_id, a.nombre, a.email_cash_in AS email_asesor,
-      CASE
-        WHEN s.cuotas >= 4 THEN 'mora_120_plus'
-        WHEN s.cuotas = 3  THEN 'mora_90'
-        WHEN s.cuotas = 2  THEN 'mora_60'
-        ELSE                    'mora_30'
-      END AS bucket,
+      ${bucketCaseSql(sql`s.cuotas`)} AS bucket,
       COUNT(*)::int AS cantidad,
       COALESCE(SUM(c.capital::numeric), 0) AS suma_capital,
       COALESCE(SUM(s.monto), 0) AS suma_mora

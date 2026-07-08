@@ -26,4 +26,18 @@ describe("bank statement opportunity documents", () => {
 		expect(successIndex).toBeGreaterThan(-1);
 		expect(attachmentWriteIndex).toBeGreaterThan(successIndex);
 	});
+
+	test("requires upload role before enabling opportunity attachments", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+		const roleGateIndex = source.indexOf(
+			'!["admin", "sales", "sales_supervisor", "analyst"].includes(',
+		);
+		const enableAttachmentsIndex = source.indexOf("opportunityForDocuments = {");
+
+		expect(roleGateIndex).toBeGreaterThan(-1);
+		expect(enableAttachmentsIndex).toBeGreaterThan(roleGateIndex);
+	});
 });

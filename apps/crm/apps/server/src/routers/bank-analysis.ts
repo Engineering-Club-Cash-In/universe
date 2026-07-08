@@ -131,6 +131,16 @@ export const bankAnalysisRouter = {
 				}
 
 				if (
+					!["admin", "sales", "sales_supervisor", "analyst"].includes(
+						context.userRole,
+					)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para subir documentos",
+					});
+				}
+
+				if (
 					context.userRole === "sales" &&
 					opportunity.assignedTo !== context.userId
 				) {

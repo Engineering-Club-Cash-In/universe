@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, or } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
+import { setCapitalSource } from "../utils/withAuditContext";
 import {
   pagos_credito,
   creditos,
@@ -142,6 +143,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
 
         console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
 
+        await setCapitalSource(tx, "REVERSO");
         await tx
           .update(creditos)
           .set({

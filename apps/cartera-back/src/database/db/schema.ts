@@ -1769,6 +1769,30 @@
     })
   );
 
+  // ── Historial de cambios del capital de un crédito ──
+  // Poblado por el trigger trg_historial_capital_credito (ver drizzle/0014).
+  export const historial_capital_credito = customSchema.table(
+    "historial_capital_credito",
+    {
+      id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+      txid: bigint("txid", { mode: "number" }).notNull(),
+      operacion: text("operacion").notNull(),
+      credito_id: integer("credito_id").notNull().references(() => creditos.credito_id, { onDelete: "cascade" }),
+      capital_anterior: numeric("capital_anterior", { precision: 18, scale: 2 }),
+      capital_nuevo: numeric("capital_nuevo", { precision: 18, scale: 2 }),
+      fuente: text("fuente").notNull().default("SISTEMA"),
+      motivo: text("motivo"),
+      platform_user_id: integer("platform_user_id").references(() => platform_users.id, { onDelete: "set null" }),
+      user_email: varchar("user_email", { length: 200 }),
+      fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => ({
+      ixCred:   index("ix_hist_cap_cred").on(t.credito_id, t.fecha),
+      ixFecha:  index("ix_hist_cap_fecha").on(t.fecha),
+      ixFuente: index("ix_hist_cap_fuente").on(t.fuente),
+    })
+  );
+
   // ── Audit logs ──
   export const audit_logs = customSchema.table("audit_logs", {
     id: serial("id").primaryKey(),

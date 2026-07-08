@@ -684,10 +684,14 @@ const updateInvestors = async (
 
   const statePrevioMap = new Map();
   existingRecords.forEach((record: any) => {
-      // Guardamos status y tipo_reinversion si existen en la tabla (aplica para tabla espejo)
+      // Guardamos status, tipo_reinversion y modalidad si existen en la tabla
+      // (aplica para tabla espejo; en la tabla padre estos campos no existen
+      // y quedan undefined, lo cual el "!== undefined" de abajo ya maneja).
       statePrevioMap.set(record.inversionista_id, {
           status: record.status,
-          tipo_reinversion: record.tipo_reinversion
+          tipo_reinversion: record.tipo_reinversion,
+          modalidad_facturacion: record.modalidad_facturacion,
+          modalidad_facturacion_spread_id: record.modalidad_facturacion_spread_id,
       });
   });
 
@@ -914,6 +918,8 @@ const updateInvestors = async (
     // 🔥 REINCORPORAR ESTADOS PREVIOS SI APLICA
     if (prevData?.status !== undefined) baseReturn.status = prevData.status;
     if (prevData?.tipo_reinversion !== undefined) baseReturn.tipo_reinversion = prevData.tipo_reinversion;
+    if (prevData?.modalidad_facturacion !== undefined) baseReturn.modalidad_facturacion = prevData.modalidad_facturacion;
+    if (prevData?.modalidad_facturacion_spread_id !== undefined) baseReturn.modalidad_facturacion_spread_id = prevData.modalidad_facturacion_spread_id;
 
     return baseReturn;
   });

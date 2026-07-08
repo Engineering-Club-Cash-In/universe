@@ -175,6 +175,7 @@ export function ModalEditCredit({
       ...safeInitialValues,
       estado_devolucion: safeInitialValues.estado_devolucion ?? "NO_APLICA",
       motivo_devolucion: "",
+      motivo_ajuste_capital: "",
       investors: parsedInvestors,
       investorsMirror: parsedInvestorsMirror, // 🆕 Campo para espejo
     },
@@ -256,6 +257,11 @@ export function ModalEditCredit({
         motivo_devolucion:
           values.estado_devolucion === "PENDIENTE_AUTORIZACION"
             ? values.motivo_devolucion?.trim() || ""
+            : undefined,
+        // Motivo del ajuste manual de capital: solo si el capital realmente cambió
+        motivo_ajuste_capital:
+          Number(values.capital) !== Number(safeInitialValues.capital ?? 0)
+            ? values.motivo_ajuste_capital?.trim() || undefined
             : undefined,
 
         // Lista Principal
@@ -567,6 +573,35 @@ export function ModalEditCredit({
                   );
                 })}
               </div>
+
+              {/* Motivo del ajuste de capital: aparece solo cuando el capital cambió */}
+              {Number(formik.values.capital ?? 0) !==
+                Number(safeInitialValues.capital ?? 0) && (
+                <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50">
+                  <Label className="text-amber-800 font-medium">
+                    Motivo del ajuste de capital
+                  </Label>
+                  <Input
+                    type="text"
+                    name="motivo_ajuste_capital"
+                    value={formik.values.motivo_ajuste_capital || ""}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    placeholder="¿Por qué se está ajustando el capital? (queda en el historial)"
+                    className="mt-1 border-amber-300 bg-white"
+                  />
+                  <p className="text-xs text-amber-700 mt-1">
+                    Capital: Q
+                    {Number(safeInitialValues.capital ?? 0).toLocaleString("es-GT", {
+                      minimumFractionDigits: 2,
+                    })}{" "}
+                    → Q
+                    {Number(formik.values.capital ?? 0).toLocaleString("es-GT", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Opciones del crédito */}

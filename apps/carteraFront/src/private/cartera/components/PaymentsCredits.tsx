@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getPagosByCredito, getHistorialCambioFecha, type HistorialCambioFecha } from "../services/services";
+import { getPagosByCredito, getHistorialCambioFecha, type HistorialCambioFecha, getHistorialCapital, type HistorialCapital } from "../services/services";
 import {
   Table,
   TableBody,
@@ -46,7 +46,7 @@ import { editPaymentService, type EditPaymentParams } from "../services/services
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DollarSign, Pencil } from "lucide-react";
+import { DollarSign, Pencil, History } from "lucide-react";
 import { toast } from "sonner";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
@@ -398,6 +398,26 @@ function colorEstado(estado: string) {
   return "bg-red-100 text-red-700 border-red-200";
 }
 
+// Estilos del badge por fuente del cambio de capital
+function colorFuenteCapital(fuente: string) {
+  switch (fuente) {
+    case "AJUSTE_MANUAL":
+      return "bg-amber-100 text-amber-800 border-amber-300";
+    case "CREACION":
+      return "bg-indigo-100 text-indigo-700 border-indigo-300";
+    case "PAGO":
+      return "bg-green-100 text-green-700 border-green-200";
+    case "REVERSO":
+      return "bg-orange-100 text-orange-700 border-orange-200";
+    case "CASTIGO":
+      return "bg-red-100 text-red-700 border-red-200";
+    case "MERGE":
+      return "bg-purple-100 text-purple-700 border-purple-200";
+    default:
+      return "bg-gray-100 text-gray-600 border-gray-300";
+  }
+}
+
 export function PaymentsCredits() {
   const [showInversionistas, setShowInversionistas] = useState(false);
   const [collapseInv, setCollapseInv] = useState<{ [key: number]: boolean }>(
@@ -418,6 +438,8 @@ export function PaymentsCredits() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [pagoParaEditar, setPagoParaEditar] = useState<any | null>(null);
   const [historialFecha, setHistorialFecha] = useState<HistorialCambioFecha[]>([]);
+  const [historialCapital, setHistorialCapital] = useState<HistorialCapital[]>([]);
+  const [showHistorialCapital, setShowHistorialCapital] = useState(false);
 
   React.useEffect(() => {
     if (!numero_credito_sifco) return;
@@ -438,6 +460,16 @@ export function PaymentsCredits() {
     queryFn: () => getPagosByCredito(numero_credito_sifco!,false),
     enabled: !!numero_credito_sifco,
   });
+
+  React.useEffect(() => {
+    if (!numero_credito_sifco) return;
+    getHistorialCapital(numero_credito_sifco)
+      .then((res) => setHistorialCapital(Array.isArray(res) ? res : []))
+      .catch((err) => {
+        console.error("Error al cargar historial de capital:", err);
+        setHistorialCapital([]);
+      });
+  }, [numero_credito_sifco]);
 const handleDownloadExcel = async () => {
   if (!numero_credito_sifco || descargandoExcel) return;
 
@@ -575,6 +607,69 @@ const handleDownloadExcel = async () => {
                   <span className="text-gray-400 text-xs ml-1">({new Date(h.created_at).toLocaleDateString("es-GT")})</span>
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Historial de capital */}
+          {historialCapital.length > 0 && (
+            <div className="w-full max-w-3xl mx-auto mt-3">
+              <button
+                type="button"
+                onClick={() => setShowHistorialCapital((v) => !v)}
+                className="w-full flex items-center justify-between gap-2 bg-amber-50 border-2 border-amber-200 rounded-xl px-4 py-2.5 shadow-sm hover:bg-amber-100/70 transition-colors"
+              >
+                <span className="flex items-center gap-2 text-amber-800 font-semibold text-sm">
+                  <History className="w-4 h-4 shrink-0" />
+                  Historial de capital ({historialCapital.length})
+                </span>
+                {showHistorialCapital ? (
+                  <ChevronUp className="w-4 h-4 text-amber-700" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-amber-700" />
+                )}
+              </button>
+
+              {showHistorialCapital && (
+                <div className="mt-2 border border-amber-100 rounded-xl overflow-hidden divide-y divide-amber-50">
+                  {historialCapital.map((h) => (
+                    <div key={h.id} className="flex flex-col gap-1 bg-white px-4 py-2.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${colorFuenteCapital(
+                            h.fuente
+                          )}`}
+                        >
+                          {h.fuente}
+                        </span>
+                        <span className="text-gray-400 line-through text-sm">
+                          {h.capital_anterior === null
+                            ? "—"
+                            : formatCurrency(h.capital_anterior)}
+                        </span>
+                        <span className="text-gray-400">&rarr;</span>
+                        <span className="font-semibold text-gray-800 text-sm">
+                          {h.capital_nuevo === null
+                            ? "—"
+                            : formatCurrency(h.capital_nuevo)}
+                        </span>
+                        <span className="text-gray-400 text-xs ml-auto">
+                          {formatDateTime(h.fecha)}
+                        </span>
+                      </div>
+                      {(h.motivo || h.user_email) && (
+                        <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                          {h.motivo && (
+                            <span className="italic">“{h.motivo}”</span>
+                          )}
+                          {h.user_email && (
+                            <span className="ml-auto">{h.user_email}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

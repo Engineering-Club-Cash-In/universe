@@ -46,6 +46,7 @@ import {
 } from "../controllers/bulkInsoluto";
 import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
+import { getHistorialCapital } from "../controllers/historialCapital";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
@@ -1681,6 +1682,24 @@ export const creditRouter = new Elysia()
       detail: {
         tags: ["Créditos"],
         summary: "Obtener historial de cambios de fecha de inicio",
+      },
+    }
+  )
+  // ========================================
+  // ENDPOINT: HISTORIAL DE CAPITAL
+  // ========================================
+  .get(
+    "/historial-capital/:numero_credito_sifco",
+    async ({ params, set }) => {
+      return getHistorialCapital({
+        numero_credito_sifco: params.numero_credito_sifco,
+        set,
+      });
+    },
+    {
+      detail: {
+        tags: ["Créditos"],
+        summary: "Obtener historial de cambios del capital de un crédito",
       },
     }
   )

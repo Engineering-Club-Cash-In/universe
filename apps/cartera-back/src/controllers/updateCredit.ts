@@ -14,7 +14,7 @@ import {
 import z from "zod";
 import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
-import { withAuditContext } from "../utils/withAuditContext";
+import { withAuditContext, withCapitalContext } from "../utils/withAuditContext";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
@@ -453,6 +453,8 @@ const creditUpdateSchema = z.object({
   estado_devolucion: z.enum(['NO_APLICA', 'PENDIENTE_AUTORIZACION', 'VERIFICADO', 'RECHAZADO']).optional(),
   motivo_devolucion: z.string().optional(),
   bandera_reinversion: z.boolean().optional(),
+  // Motivo del ajuste manual de capital (se registra en historial_capital_credito).
+  motivo_ajuste_capital: z.string().max(500).optional(),
 });
 
 type CreditUpdateData = z.infer<typeof creditUpdateSchema>;
@@ -1007,6 +1009,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       estado_devolucion,
       motivo_devolucion,
       bandera_reinversion,
+      motivo_ajuste_capital,
       ...fieldsToUpdate
     } = parseResult.data;
 
@@ -1215,12 +1218,34 @@ export const updateCredit = async ({ body, set, request }: any) => {
     updateFields.membresias =
       fieldsToUpdate.membresias_pago ?? current.membresias_pago;
 
-    // 8. Actualizar el crédito
-    const [updatedCredit] = await db
-      .update(creditos)
-      .set(updateFields)
-      .where(eq(creditos.credito_id, credito_id))
-      .returning();
+    // 8. Actualizar el crédito.
+    // Si el capital cambia, envolvemos el UPDATE en withCapitalContext para que
+    // el trigger trg_historial_capital_credito registre el ajuste manual con
+    // usuario + motivo (fuente = 'AJUSTE_MANUAL'). Si no cambia, el trigger no
+    // dispara (guard IS DISTINCT) y hacemos el UPDATE normal.
+    const capitalCambia =
+      fieldsToUpdate.capital !== undefined &&
+      !new Big(fieldsToUpdate.capital).eq(new Big(current.capital || 0));
+
+    const ejecutarUpdateCredito = (dbInstance: typeof db) =>
+      dbInstance
+        .update(creditos)
+        .set(updateFields)
+        .where(eq(creditos.credito_id, credito_id))
+        .returning();
+
+    let updatedCredit;
+    if (capitalCambia) {
+      const ajusteUserId = extractUserId(request);
+      [updatedCredit] = await withCapitalContext(
+        ajusteUserId,
+        "AJUSTE_MANUAL",
+        motivo_ajuste_capital,
+        ejecutarUpdateCredito,
+      );
+    } else {
+      [updatedCredit] = await ejecutarUpdateCredito(db);
+    }
 
     // 8.1 Si la cuota cambió, sincronizar cuotas pendientes y recalcular
     // cuotas de inversionistas (solo si NO vinieron en el body — si vinieron,

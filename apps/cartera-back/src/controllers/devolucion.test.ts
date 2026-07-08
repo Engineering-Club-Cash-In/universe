@@ -1,4 +1,11 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
+import Big from "big.js";
+
+// registrarCancelacionEspejo (invocado dentro de aceptarDevolucion) resta las
+// compras pendientes; aquí no hay ninguna, así que devolvemos 0.
+mock.module("../utils/comprasAjuste", () => ({
+  obtenerSumaComprasPendientes: () => Promise.resolve(new Big(0)),
+}));
 
 // ---------------------------------------------------------------------------
 // Estado mutable que leen los mocks; cada test lo configura antes de llamar.
@@ -30,6 +37,7 @@ function makeTx() {
         return p;
       },
     }),
+    delete: () => ({ where: () => Promise.resolve([]) }),
     select: () => ({
       from: () => ({
         innerJoin: () => ({ where: () => Promise.resolve(txEspejoRows) }),

@@ -140,6 +140,7 @@ export const cobrosAppRouter = {
 	getConveniosPago: cobrosRouter.getConveniosPago,
 	asignarResponsableCobros: cobrosRouter.asignarResponsableCobros,
 	getUsuariosCobros: cobrosRouter.getUsuariosCobros,
+	getBucketsCatalogo: cobrosRouter.getBucketsCatalogo,
 	getHistorialPagos: cobrosRouter.getHistorialPagos,
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
 	getTodosLosCreditos: cobrosRouter.getTodosLosCreditos,
@@ -438,7 +439,8 @@ export const manualVehicleRouter = {
 // Projection procedures exported separately to avoid TS7056 truncation
 export const proyeccionRouter = {
 	getInvestorsCartera: investorDocumentsRouter.getInvestorsCartera,
-	getSimulacionInversionista: investorDocumentsRouter.getSimulacionInversionista,
+	getSimulacionInversionista:
+		investorDocumentsRouter.getSimulacionInversionista,
 };
 
 // Merged AppRouter type to avoid serialization limit

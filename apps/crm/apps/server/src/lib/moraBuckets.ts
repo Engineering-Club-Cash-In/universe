@@ -23,15 +23,75 @@ export interface MoraBucket {
 	max: number | null;
 	/** Nombre de negocio mostrado en el frontend (embudo + filtros). */
 	label: string;
+	/** Prefijo corto del catálogo ("B0".."B5"). `null` si viene del fallback estático. */
+	prefijo: string | null;
+	/** Color del catálogo dinámico (hex/tailwind, según lo edite cartera-back). `null` = la UI usa su default. */
+	color: string | null;
+	/** Orden de presentación (embudo, filtros). */
+	orden: number;
 }
 
 export const MORA_BUCKETS: readonly MoraBucket[] = [
-	{ key: "0", estadoMora: "al_dia", min: 0, max: 0, label: "Cartera Sana" },
-	{ key: "1", estadoMora: "mora_30", min: 1, max: 1, label: "Alerta Temprana" },
-	{ key: "2", estadoMora: "mora_60", min: 2, max: 2, label: "Gestión Activa" },
-	{ key: "3", estadoMora: "mora_90", min: 3, max: 3, label: "Rescate" },
-	{ key: "4", estadoMora: "mora_120", min: 4, max: 4, label: "Última Instancia / Pre Jurídico" },
-	{ key: "5", estadoMora: "mora_120_plus", min: 5, max: null, label: "Jurídico" },
+	{
+		key: "0",
+		estadoMora: "al_dia",
+		min: 0,
+		max: 0,
+		label: "Cartera Sana",
+		prefijo: "B0",
+		color: null,
+		orden: 0,
+	},
+	{
+		key: "1",
+		estadoMora: "mora_30",
+		min: 1,
+		max: 1,
+		label: "Alerta Temprana",
+		prefijo: "B1",
+		color: null,
+		orden: 1,
+	},
+	{
+		key: "2",
+		estadoMora: "mora_60",
+		min: 2,
+		max: 2,
+		label: "Gestión Activa",
+		prefijo: "B2",
+		color: null,
+		orden: 2,
+	},
+	{
+		key: "3",
+		estadoMora: "mora_90",
+		min: 3,
+		max: 3,
+		label: "Rescate",
+		prefijo: "B3",
+		color: null,
+		orden: 3,
+	},
+	{
+		key: "4",
+		estadoMora: "mora_120",
+		min: 4,
+		max: 4,
+		label: "Última Instancia / Pre Jurídico",
+		prefijo: "B4",
+		color: null,
+		orden: 4,
+	},
+	{
+		key: "5",
+		estadoMora: "mora_120_plus",
+		min: 5,
+		max: null,
+		label: "Jurídico",
+		prefijo: "B5",
+		color: null,
+		orden: 5,
+	},
 ] as const;
 
 // `casos_cobros.estado_mora` es un pgEnum de 9 valores fijos en el CRM (ver
@@ -127,6 +187,9 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 					min: b.cuotas_min,
 					max: b.cuotas_max,
 					label: b.nombre,
+					prefijo: b.prefijo,
+					color: b.color,
+					orden: b.orden,
 				};
 			});
 		// Guard: catálogo vacío, o sin cubrir cada bucket conocido (siembra
@@ -198,8 +261,36 @@ export function labelPorEstadoMora(estadoMora: string): string | undefined {
 export function estadoMoraPorCuotas(cuotas: number): string {
 	maybeRefreshInBackground();
 	for (const b of activeBuckets()) {
-		const dentro = b.max === null ? cuotas >= b.min : cuotas >= b.min && cuotas <= b.max;
+		const dentro =
+			b.max === null ? cuotas >= b.min : cuotas >= b.min && cuotas <= b.max;
 		if (dentro) return b.estadoMora;
 	}
 	return "al_dia";
+}
+
+export type BucketParaUI = {
+	estadoMora: string;
+	label: string;
+	prefijo: string | null;
+	color: string | null;
+	orden: number;
+};
+
+/**
+ * Catálogo de buckets para RENDER en la web (label/color/orden por etapa) —
+ * evita que el frontend mantenga sus propias copias hardcodeadas. `color`
+ * puede venir `null` (catálogo dinámico sin color asignado, o fallback
+ * estático): la UI debe tener su propio default visual en ese caso.
+ */
+export function getBucketsParaUI(): BucketParaUI[] {
+	maybeRefreshInBackground();
+	return activeBuckets()
+		.map((b) => ({
+			estadoMora: b.estadoMora,
+			label: b.label,
+			prefijo: b.prefijo,
+			color: b.color,
+			orden: b.orden,
+		}))
+		.sort((a, b) => a.orden - b.orden);
 }

@@ -2305,27 +2305,29 @@ function RouteComponent() {
 													className="cursor-pointer font-medium text-primary hover:underline"
 													role="button"
 													tabIndex={0}
-													onClick={() => {
+												onClick={() => {
+													setIsDetailsDialogOpen(false);
+													navigate({
+														to: "/crm/leads",
+														search: {
+															leadId: selectedOpportunity.lead?.id,
+															opportunityId: selectedOpportunity.id,
+														},
+													});
+												}}
+												onKeyDown={(e) => {
+													if (e.key === "Enter" || e.key === " ") {
+														e.preventDefault();
 														setIsDetailsDialogOpen(false);
 														navigate({
 															to: "/crm/leads",
 															search: {
 																leadId: selectedOpportunity.lead?.id,
+																opportunityId: selectedOpportunity.id,
 															},
 														});
-													}}
-													onKeyDown={(e) => {
-														if (e.key === "Enter" || e.key === " ") {
-															e.preventDefault();
-															setIsDetailsDialogOpen(false);
-															navigate({
-																to: "/crm/leads",
-																search: {
-																	leadId: selectedOpportunity.lead?.id,
-																},
-															});
-														}
-													}}
+													}
+												}}
 												>
 													{formatLeadFullName(selectedOpportunity.lead)}
 												</span>

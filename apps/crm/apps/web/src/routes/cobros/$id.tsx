@@ -65,6 +65,7 @@ import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import {
 	bucketDeEstado,
+	estiloBucket,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
 import { formatFechaLocal } from "@/lib/date-utils";
@@ -477,7 +478,7 @@ function RouteComponent() {
 	};
 
 	const getEstadoBadge = (estado: string | null | undefined) =>
-		bucketDeEstado(estado, bucketsCatalogo.data).colorClass;
+		estiloBucket(bucketDeEstado(estado, bucketsCatalogo.data).colorHex);
 
 	const getEstadoLabel = (estado: string | null | undefined) =>
 		bucketDeEstado(estado, bucketsCatalogo.data).label;
@@ -543,7 +544,7 @@ function RouteComponent() {
 						</p>
 					</div>
 				</div>
-				<Badge className={getEstadoBadge(caso.estadoMora || "")}>
+				<Badge variant="outline" style={getEstadoBadge(caso.estadoMora || "")}>
 					{getEstadoLabel(caso.estadoMora || "")}
 				</Badge>
 			</div>

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { CSSProperties } from "react";
 import { orpc } from "@/utils/orpc";
 
 /**
@@ -170,4 +171,19 @@ export function bucketsParaRender(
 	return keys
 		.map((key) => bucketDeEstado(key, catalogo))
 		.sort((a, b) => a.orden - b.orden);
+}
+
+/**
+ * Estilo inline (fondo tenue + texto + borde) a partir de `colorHex` —
+ * `colorClass` es una clase Tailwind estática (el default hardcoded);
+ * Tailwind no puede generar clases para un hex arbitrario del catálogo
+ * dinámico, así que el color REAL solo llega vía estilo inline. Mismo
+ * patrón de opacidad ya usado en carteraFront/CreditsPaymentsData.tsx.
+ */
+export function estiloBucket(colorHex: string): CSSProperties {
+	return {
+		backgroundColor: `${colorHex}1A`,
+		color: colorHex,
+		borderColor: `${colorHex}40`,
+	};
 }

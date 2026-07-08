@@ -44,6 +44,7 @@ import { authClient } from "@/lib/auth-client";
 import {
 	type BucketUI,
 	bucketsParaRender,
+	estiloBucket,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
 import { getCobrosColumns } from "@/lib/cobros/columns";
@@ -124,7 +125,11 @@ function EmbudoRow({
 					className="group flex w-full cursor-pointer items-center gap-3 p-3 text-left transition-all hover:bg-muted/50"
 				>
 					<div className="flex w-32 shrink-0 items-center gap-2">
-						<Badge className={`${estado.colorClass} whitespace-nowrap text-xs`}>
+						<Badge
+							variant="outline"
+							className="whitespace-nowrap text-xs"
+							style={estiloBucket(estado.colorHex)}
+						>
 							{estado.label}
 						</Badge>
 					</div>
@@ -1191,7 +1196,13 @@ function RouteComponent() {
 										{filtrosEtapa.map((filtro) => (
 											<Badge
 												key={filtro.key}
-												className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.colorClass : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+												variant="outline"
+												className={`cursor-pointer ${filtroEtapa === filtro.key ? "" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+												style={
+													filtroEtapa === filtro.key
+														? estiloBucket(filtro.colorHex)
+														: undefined
+												}
 												onClick={() => {
 													setFiltroEtapa(
 														filtroEtapa === filtro.key ? null : filtro.key,

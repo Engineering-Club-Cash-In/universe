@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
 	type BucketsCatalogoQueryData,
 	bucketDeEstado,
+	estiloBucket,
 } from "@/lib/cobros/buckets-catalogo";
 import { parseFechaLocal } from "@/lib/date-utils";
 
@@ -44,7 +45,11 @@ function getEstadoBadge(
 	catalogo: BucketsCatalogoQueryData | undefined,
 ) {
 	const bucket = bucketDeEstado(estado, catalogo);
-	return <Badge className={bucket.colorClass}>{bucket.label}</Badge>;
+	return (
+		<Badge variant="outline" style={estiloBucket(bucket.colorHex)}>
+			{bucket.label}
+		</Badge>
+	);
 }
 
 const ETIQUETA_LABELS: Record<string, string> = {

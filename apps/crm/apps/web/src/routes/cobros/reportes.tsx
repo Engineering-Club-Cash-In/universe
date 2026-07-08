@@ -26,6 +26,7 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import {
 	bucketsParaRender,
+	estiloBucket,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
 import { PERMISSIONS } from "@/lib/roles";
@@ -139,7 +140,7 @@ function TabMora({
 									<CardTitle className="font-medium text-sm">
 										{etapa.label}
 									</CardTitle>
-									<Badge className={etapa.colorClass}>
+									<Badge variant="outline" style={estiloBucket(etapa.colorHex)}>
 										{bucket?.cantidad ?? 0}
 									</Badge>
 								</CardHeader>

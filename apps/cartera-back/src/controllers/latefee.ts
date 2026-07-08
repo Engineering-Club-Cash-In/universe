@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { client, db } from "../database";
-import { asesores, buckets, buckets_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, usuarios } from "../database/db/schema";
+import { asesor_bucket, asesores, buckets, buckets_historial, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -150,6 +150,33 @@ export function bucketDeCredito(
     (b) => cuotas >= b.cuotas_min && (b.cuotas_max == null || cuotas <= b.cuotas_max),
   );
   return porRango ? porRango.numero : null;
+}
+
+/**
+ * FASE 3 — elige el asesor para un crédito que ENTRA a un bucket:
+ *  · pool vacío → null (no hay elegibles; el crédito conserva su asesor)
+ *  · el asesor actual ya es elegible en el bucket destino → se queda (sin churn)
+ *  · si no → el elegible con MENOR carga en ese bucket (asignación equitativa
+ *    cuando hay N asesores; con 1 solo, queda directa); empate → menor asesor_id.
+ * Pura a propósito (sin DB) para poder testearla aislada.
+ */
+export function elegirAsesorParaBucket(
+  pool: number[],
+  cargaBucket: Map<number, number> | undefined,
+  asesorActual: number | null,
+): number | null {
+  if (pool.length === 0) return null;
+  if (asesorActual !== null && pool.includes(asesorActual)) return asesorActual;
+  let elegido: number | null = null;
+  let menorCarga = Infinity;
+  for (const asesorId of pool) {
+    const carga = cargaBucket?.get(asesorId) ?? 0;
+    if (carga < menorCarga || (carga === menorCarga && elegido !== null && asesorId < elegido)) {
+      menorCarga = carga;
+      elegido = asesorId;
+    }
+  }
+  return elegido;
 }
 
 /**
@@ -738,6 +765,7 @@ export async function procesarMoras() {
         pagado: cuotas_credito.pagado,
         statusCredit: creditos.statusCredit,
         capital: creditos.capital,
+        asesor_id: creditos.asesor_id, // FASE 3: dueño actual (para reasignar por bucket)
         hasPaidPayment: sql<boolean>`EXISTS (
           SELECT 1
           FROM cartera.pagos_credito pc
@@ -982,6 +1010,14 @@ export async function procesarMoras() {
     // Paso ADITIVO: no toca el cálculo de mora. Detecta cambios de bucket
     // (derivado de estado + cuotas) y los registra en `buckets_historial`.
     // Si algo falla aquí, NO debe romper el proceso de mora (operación crítica).
+    // Se devuelve en el resultado del job (útil para pruebas vía POST /moras/procesar).
+    const bucketsResumen = {
+      iniciales: 0,
+      subidas: 0,
+      bajadas: 0,
+      reasignados: 0,
+      sinPoolDestino: 0,
+    };
     try {
       // Catálogo de buckets (config dinámica: nombres/rangos/estados). ~6 filas.
       const catalogoBuckets: BucketCatalogo[] = await db
@@ -1000,11 +1036,13 @@ export async function procesarMoras() {
           "[BUCKETS] ⚠️ Catálogo `cartera.buckets` vacío (¿migración/seed sin aplicar?) — se omite el registro de transiciones.",
         );
       } else {
-      // status por crédito — ya viene en `cuotas` (el job lo cargó con JOIN)
+      // status y asesor por crédito — ya vienen en `cuotas` (el job los cargó con JOIN)
       const statusPorCredito = new Map<number, string>();
+      const asesorPorCredito = new Map<number, number>();
       for (const c of cuotas) {
         if (!statusPorCredito.has(c.credito_id)) {
           statusPorCredito.set(c.credito_id, c.statusCredit);
+          asesorPorCredito.set(c.credito_id, c.asesor_id);
         }
       }
 
@@ -1019,8 +1057,48 @@ export async function procesarMoras() {
         ultimoBucket.set(Number(row.credito_id), Number(row.bucket_nuevo));
       }
 
+      // 🎯 FASE 3 — pool de elegibles por bucket (asesor_bucket). Si está vacío
+      // (script 01 sin correr en este ambiente), el motor sigue registrando
+      // transiciones pero NO reasigna: cada crédito conserva su asesor.
+      const poolPorBucket = new Map<number, number[]>();
+      const poolRows = await db
+        .select({ asesor_id: asesor_bucket.asesor_id, bucket: asesor_bucket.bucket })
+        .from(asesor_bucket)
+        .where(eq(asesor_bucket.activo, true))
+        .orderBy(asesor_bucket.bucket, asesor_bucket.asesor_id);
+      for (const r of poolRows) {
+        const lista = poolPorBucket.get(r.bucket) ?? [];
+        lista.push(r.asesor_id);
+        poolPorBucket.set(r.bucket, lista);
+      }
+
+      // Carga = créditos que cada asesor del pool lleva HOY en cada bucket
+      // (según el último bucket registrado). Se mantiene VIVA durante el loop
+      // para que varias transiciones al mismo bucket en una misma corrida se
+      // repartan parejo entre N asesores (asignación equitativa).
+      const cargaPorBucket = new Map<number, Map<number, number>>();
+      const ajustarCarga = (
+        bucket: number | undefined,
+        asesor: number | null | undefined,
+        delta: number,
+      ) => {
+        if (bucket === undefined || asesor == null) return;
+        if (!poolPorBucket.get(bucket)?.includes(asesor)) return; // solo cuenta el pool
+        let porAsesor = cargaPorBucket.get(bucket);
+        if (!porAsesor) {
+          porAsesor = new Map();
+          cargaPorBucket.set(bucket, porAsesor);
+        }
+        porAsesor.set(asesor, Math.max(0, (porAsesor.get(asesor) ?? 0) + delta));
+      };
+      for (const [creditoId] of statusPorCredito) {
+        ajustarCarga(ultimoBucket.get(creditoId), asesorPorCredito.get(creditoId), 1);
+      }
+
       let bucketsSubidas = 0;
       let bucketsBajadas = 0;
+      let bucketsReasignados = 0;
+      let bucketsSinPoolDestino = 0;
       // Las líneas base se acumulan y se insertan en LOTE al final (la 1a
       // corrida siembra ~todos los créditos del funnel: fila por fila serían
       // miles de INSERTs secuenciales dentro del job).
@@ -1047,6 +1125,9 @@ export async function procesarMoras() {
             motivo: "Línea base — primer registro en el motor de buckets",
           });
           ultimoBucket.set(creditoId, bucketNuevo);
+          // La línea base NO reasigna (eso lo hace la carga inicial SQL);
+          // solo se registra la carga para que el reparto posterior sea justo.
+          ajustarCarga(bucketNuevo, asesorPorCredito.get(creditoId), 1);
           continue;
         }
 
@@ -1091,6 +1172,43 @@ export async function procesarMoras() {
           pago_id: pagoId,
         });
 
+        // 🎯 FASE 3 — reasignación automática: el crédito cambió de bucket →
+        // si su asesor actual NO es elegible en el destino, pasa al elegible
+        // con menor carga (1 asesor = directo; N = equitativo). El UPDATE toca
+        // ÚNICAMENTE creditos.asesor_id (decisión de raíz) + bitácora
+        // OBLIGATORIA en credito_asesor_historial, ambos en una transacción.
+        const asesorActual = asesorPorCredito.get(creditoId) ?? null;
+        const asesorElegido = elegirAsesorParaBucket(
+          poolPorBucket.get(bucketNuevo) ?? [],
+          cargaPorBucket.get(bucketNuevo),
+          asesorActual,
+        );
+        if (asesorElegido !== null && asesorElegido !== asesorActual) {
+          await db.transaction(async (tx) => {
+            await tx.insert(credito_asesor_historial).values({
+              credito_id: creditoId,
+              asesor_anterior: asesorActual,
+              asesor_nuevo: asesorElegido,
+              bucket: bucketNuevo,
+              origen: "PROCESO_AUTO",
+              motivo: `Reasignación automática por cambio de bucket B${bucketAnterior}→B${bucketNuevo}`,
+              usuario_id: null,
+            });
+            await tx
+              .update(creditos)
+              .set({ asesor_id: asesorElegido })
+              .where(eq(creditos.credito_id, creditoId));
+          });
+          asesorPorCredito.set(creditoId, asesorElegido);
+          bucketsReasignados++;
+        } else if (asesorElegido === null) {
+          bucketsSinPoolDestino++;
+        }
+        // Carga: el crédito sale del bucket anterior y entra al nuevo con su
+        // asesor final (el elegido, o el actual si se quedó).
+        ajustarCarga(bucketAnterior, asesorActual, -1);
+        ajustarCarga(bucketNuevo, asesorPorCredito.get(creditoId), 1);
+
         ultimoBucket.set(creditoId, bucketNuevo);
         if (esSubida) bucketsSubidas++;
         else bucketsBajadas++;
@@ -1107,8 +1225,14 @@ export async function procesarMoras() {
           .onConflictDoNothing();
       }
 
+      bucketsResumen.iniciales = filasIniciales.length;
+      bucketsResumen.subidas = bucketsSubidas;
+      bucketsResumen.bajadas = bucketsBajadas;
+      bucketsResumen.reasignados = bucketsReasignados;
+      bucketsResumen.sinPoolDestino = bucketsSinPoolDestino;
+
       console.log(
-        `[BUCKETS] Registros — iniciales: ${filasIniciales.length}, subidas: ${bucketsSubidas}, bajadas: ${bucketsBajadas}`,
+        `[BUCKETS] Registros — iniciales: ${filasIniciales.length}, subidas: ${bucketsSubidas}, bajadas: ${bucketsBajadas}, reasignados: ${bucketsReasignados}${bucketsSinPoolDestino > 0 ? ` ⚠️ sin pool destino: ${bucketsSinPoolDestino}` : ""}`,
       );
       } // fin else (catálogo no vacío)
     } catch (bucketErr) {
@@ -1127,7 +1251,7 @@ export async function procesarMoras() {
     console.log(`║   Sin capital (omitidas): ${sinCapital}`);
     console.log("╚════════════════════════════════════════════════════════════\n");
 
-    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital };
+    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, buckets: bucketsResumen };
 
   } catch (error: any) {
     console.error("\n╔════════════════════════════════════════════════════════════");

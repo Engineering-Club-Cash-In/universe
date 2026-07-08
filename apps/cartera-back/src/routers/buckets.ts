@@ -1,10 +1,23 @@
-// routes/buckets.ts — COBROS-02 · endpoints del motor de buckets (histórico).
+// routes/buckets.ts — COBROS-02 · endpoints del motor de buckets (histórico + listado).
 import { Elysia, t } from "elysia";
 import { authMiddleware } from "./midleware";
 import {
   getBucketsHistorial,
   getBucketsHistorialCredito,
 } from "../controllers/buckets/bucketsHistorial";
+import { getCreditosWithUserByMesAnio } from "../controllers/credits";
+import { StatusCredit } from "../database/db/schema";
+
+// Estados DENTRO del funnel operativo (= enum de statusCredit menos
+// STATUS_BUCKET_FUERA): ACTIVO/MOROSO clasifican por cuotas de la mora activa;
+// INCOBRABLE entra a B5 vía `buckets.estados_incluidos`. Se pasa como
+// whitelist al listado para que "sin filtro de bucket" = todo el funnel
+// (nunca CANCELADO/PENDIENTE_CANCELACION/EN_CONVENIO/CAIDO).
+const STATUS_FUNNEL: StatusCredit[] = [
+  StatusCredit.ACTIVO,
+  StatusCredit.MOROSO,
+  StatusCredit.INCOBRABLE,
+];
 
 // Gate de rol server-side: el histórico expone data de TODOS los créditos
 // (igual criterio que el historial de mora). authMiddleware solo autentica.
@@ -142,6 +155,113 @@ export const bucketsRouter = new Elysia()
         pago_id: t.Optional(t.String()),
         page: t.Optional(t.String()),
         pageSize: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // Listado de créditos POR BUCKET — gemelo de /getAllCredits (misma data por
+  // crédito, misma paginación) pero el eje es el bucket derivado (B0-B5) en
+  // vez de las cuotas atrasadas crudas. Cubre lo que el aging por cuotas no
+  // puede: INCOBRABLE cae en B5 aunque su mora esté apagada, y los estados
+  // fuera del funnel quedan excluidos siempre.
+  .get(
+    "/buckets/creditos",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        // bucket: CSV de números del catálogo (ej. "1" o "4,5"). Sin él =
+        // todo el funnel. Tokens inválidos → 400 (no descartar en silencio).
+        if (csvInvalido(query.bucket, esBucket)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] bucket inválido (CSV de enteros, ej. 0,1,5)" };
+        }
+        const bucketsNumeros = query.bucket
+          ? [...new Set(
+              String(query.bucket)
+                .split(",")
+                .map((s: string) => Number(s.trim()))
+                .filter((n: number) => Number.isInteger(n)),
+            )]
+          : undefined;
+
+        // mes/anio de creación: opcionales, van JUNTOS (0/0 = sin filtro,
+        // igual que /getAllCredits). Validar antes de castear.
+        const mes = query.mes !== undefined ? Number(query.mes) : 0;
+        const anio = query.anio !== undefined ? Number(query.anio) : 0;
+        if (!Number.isInteger(mes) || mes < 0 || mes > 12) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] mes inválido (1-12)" };
+        }
+        if (!Number.isInteger(anio) || anio < 0) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] anio inválido" };
+        }
+        if ((mes === 0) !== (anio === 0)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] mes y anio van juntos (ambos o ninguno)" };
+        }
+
+        const asesorId = query.asesor_id ? Number(query.asesor_id) : undefined;
+        if (asesorId !== undefined && (!Number.isInteger(asesorId) || asesorId <= 0)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] asesor_id inválido" };
+        }
+
+        // Paginación: floor ANTES de clamp (page=0.5 → 1, no OFFSET negativo).
+        const pageFloor = Math.floor(Number(query.page ?? 1));
+        const page = Number.isFinite(pageFloor) && pageFloor > 0 ? pageFloor : 1;
+        const perPageFloor = Math.floor(Number(query.perPage ?? 10));
+        const perPage =
+          Number.isFinite(perPageFloor) && perPageFloor > 0
+            ? Math.min(perPageFloor, 500)
+            : 10;
+
+        const result = await getCreditosWithUserByMesAnio(
+          mes,
+          anio,
+          page,
+          perPage,
+          query.numero_credito_sifco?.trim() || undefined,
+          undefined, // estado: el bucket ya encapsula el estado
+          asesorId,
+          query.nombre_usuario,
+          query.email_asesor,
+          undefined, // cuotas_atrasadas (escalar viejo): aquí el eje es el bucket
+          undefined, // proximidad_pago
+          undefined, // is_vehiculo_propio
+          undefined, // inversionista_ids
+          undefined, // fecha_desde
+          undefined, // fecha_hasta
+          undefined, // numeros_credito_sifco
+          undefined, // capital_min
+          undefined, // capital_max
+          STATUS_FUNNEL, // solo créditos del funnel (B0-B5)
+          undefined, // aseguradora_id
+          undefined, // cuotas_min
+          undefined, // cuotas_max
+          bucketsNumeros,
+        );
+        return { success: true, ...result };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener los créditos por bucket",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        bucket: t.Optional(t.String()),
+        mes: t.Optional(t.String()),
+        anio: t.Optional(t.String()),
+        numero_credito_sifco: t.Optional(t.String()),
+        nombre_usuario: t.Optional(t.String()),
+        asesor_id: t.Optional(t.String()),
+        email_asesor: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        perPage: t.Optional(t.String()),
       }),
     },
   )

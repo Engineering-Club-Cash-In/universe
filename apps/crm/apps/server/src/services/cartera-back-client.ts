@@ -11,6 +11,7 @@ import type {
 	CarteraBackConnectionError,
 	CarteraBackError,
 	CarteraBackValidationError,
+	CarteraBucketCatalogo,
 	CarteraCredito,
 	CarteraInversionista,
 	CarteraPagoCredito,
@@ -926,6 +927,18 @@ export class CarteraBackClient {
 		const response = await this.request<{
 			data: { banco_id: number; nombre: string }[];
 		}>("/bancos", { method: "GET" }, true);
+		return response.data ?? [];
+	}
+
+	// ========================================================================
+	// BUCKETS DE MORA (catálogo dinámico B0-B5)
+	// ========================================================================
+
+	async getBucketsCatalogo(): Promise<CarteraBucketCatalogo[]> {
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraBucketCatalogo[];
+		}>("/config/buckets", { method: "GET" }, true);
 		return response.data ?? [];
 	}
 

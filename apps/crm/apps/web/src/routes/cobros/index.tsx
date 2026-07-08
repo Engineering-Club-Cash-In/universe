@@ -45,7 +45,6 @@ import { getCobrosColumns } from "@/lib/cobros/columns";
 import { getPaymentDateRangeFilter } from "@/lib/cobros/payment-date-range-filter";
 import { parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
-import { labelPorEstadoMora } from "server/src/lib/moraBuckets";
 import { orpc } from "@/utils/orpc";
 
 // Función para calcular días restantes hasta la fecha de próximo pago
@@ -574,7 +573,7 @@ function RouteComponent() {
 	const filtrosEtapa = [
 		{
 			key: "al_dia",
-			label: labelPorEstadoMora("al_dia") ?? "Cartera Sana",
+			label: "Cartera Sana",
 			color: "bg-green-100 text-green-800",
 		},
 		{
@@ -584,27 +583,27 @@ function RouteComponent() {
 		},
 		{
 			key: "mora_30",
-			label: labelPorEstadoMora("mora_30") ?? "Alerta Temprana",
+			label: "Alerta Temprana",
 			color: "bg-yellow-100 text-yellow-800",
 		},
 		{
 			key: "mora_60",
-			label: labelPorEstadoMora("mora_60") ?? "Gestión Activa",
+			label: "Gestión Activa",
 			color: "bg-orange-100 text-orange-800",
 		},
 		{
 			key: "mora_90",
-			label: labelPorEstadoMora("mora_90") ?? "Rescate",
+			label: "Rescate",
 			color: "bg-red-100 text-red-800",
 		},
 		{
 			key: "mora_120",
-			label: labelPorEstadoMora("mora_120") ?? "Última Instancia / Pre Jurídico",
+			label: "Última Instancia / Pre Jurídico",
 			color: "bg-red-200 text-red-900",
 		},
 		{
 			key: "mora_120_plus",
-			label: labelPorEstadoMora("mora_120_plus") ?? "Jurídico",
+			label: "Jurídico",
 			color: "bg-red-300 text-red-900",
 		},
 		{
@@ -773,39 +772,37 @@ function RouteComponent() {
 							[
 								{
 									key: "al_dia",
-									label: labelPorEstadoMora("al_dia") ?? "Cartera Sana",
+									label: "Cartera Sana",
 									color: "bg-green-100 text-green-800",
 									barColor: "#22c55e",
 								},
 								{
 									key: "mora_30",
-									label: labelPorEstadoMora("mora_30") ?? "Alerta Temprana",
+									label: "Alerta Temprana",
 									color: "bg-yellow-100 text-yellow-800",
 									barColor: "#eab308",
 								},
 								{
 									key: "mora_60",
-									label: labelPorEstadoMora("mora_60") ?? "Gestión Activa",
+									label: "Gestión Activa",
 									color: "bg-orange-100 text-orange-800",
 									barColor: "#f97316",
 								},
 								{
 									key: "mora_90",
-									label: labelPorEstadoMora("mora_90") ?? "Rescate",
+									label: "Rescate",
 									color: "bg-red-100 text-red-800",
 									barColor: "#ef4444",
 								},
 								{
 									key: "mora_120",
-									label:
-										labelPorEstadoMora("mora_120") ??
-										"Última Instancia / Pre Jurídico",
+									label: "Última Instancia / Pre Jurídico",
 									color: "bg-red-200 text-red-900",
 									barColor: "#b91c1c",
 								},
 								{
 									key: "mora_120_plus",
-									label: labelPorEstadoMora("mora_120_plus") ?? "Jurídico",
+									label: "Jurídico",
 									color: "bg-red-300 text-red-900",
 									barColor: "#991b1b",
 								},

@@ -54,6 +54,8 @@ import {
 } from "../lib/messaging-test-mode";
 import {
 	estadoMoraPorCuotas,
+	ESTADOS_AGING_VALIDOS,
+	MORA_BUCKETS,
 	rangoCuotasPorEstadoMora,
 } from "../lib/moraBuckets";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
@@ -413,85 +415,71 @@ export const cobrosRouter = {
 						email: input?.emailCobrador,
 					});
 
-					// Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera
-					const estatusStats = recalculateCobrosCapitalPercentages([
-						{
-							estadoMora: "al_dia",
-							totalCases: statsResponse.porCuotasAtrasadas["0"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["0"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["0"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["0"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_30",
-							totalCases: statsResponse.porCuotasAtrasadas["1"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["1"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["1"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["1"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_60",
-							totalCases: statsResponse.porCuotasAtrasadas["2"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["2"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["2"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["2"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_90",
-							totalCases: statsResponse.porCuotasAtrasadas["3"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["3"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["3"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["3"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_120",
-							totalCases: statsResponse.porCuotasAtrasadas["4"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["4"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["4"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["4"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "mora_120_plus",
-							totalCases: statsResponse.porCuotasAtrasadas["5"]?.cantidad || 0,
-							montoTotal:
-								statsResponse.porCuotasAtrasadas["5"]?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porCuotasAtrasadas["5"]?.sumaCapital || "0",
-							porcentaje:
-								statsResponse.porCuotasAtrasadas["5"]?.porcentaje || "0",
-						},
-						{
-							estadoMora: "completado",
-							totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
-							montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porEstado.cancelado?.sumaCapital || "0",
-							porcentaje: statsResponse.porEstado.cancelado?.porcentaje || "0",
-						},
-						{
-							estadoMora: "incobrable",
-							totalCases: statsResponse.porEstado.incobrable?.cantidad || 0,
-							montoTotal: statsResponse.porEstado.incobrable?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porEstado.incobrable?.sumaCapital || "0",
-							porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
-						},
-					]);
+					// Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera.
+					// `estadoMora` viene del catálogo dinámico (cartera.buckets vía /stats
+					// enriquecido); el fallback deriva de MORA_BUCKETS (no un objeto literal
+					// capado a "0".."5") para que un bucket nuevo/renumerado tenga fallback
+					// también en la ventana en la que /stats aún no lo enriquece.
+					// Se itera sobre las keys reales de `porCuotasAtrasadas` (no una lista
+					// fija "0".."5") para que un bucket nuevo o renumerado en el catálogo
+					// no quede excluido silenciosamente del embudo/porcentajes del CRM.
+					const cuotasKeys = Object.keys(
+						statsResponse.porCuotasAtrasadas,
+					).sort((a, b) => Number(a) - Number(b));
+
+					const bucketsFunnel = cuotasKeys.map((key) => {
+						const bucketStats = statsResponse.porCuotasAtrasadas[key];
+						const fallbackEstado =
+							MORA_BUCKETS.find((b) => b.key === key)?.estadoMora ?? "al_dia";
+						// `estadoMora` de /stats viene del mismo catálogo varchar(24)
+						// editable a mano que valida moraBuckets.ts — se aplica la misma
+						// whitelist de AGING aquí (no ESTADOS_MORA_VALIDOS completo): estos
+						// son buckets de CUOTAS, no filas de status — un "en_convenio"/
+						// "pagado"/"incobrable" colado aquí sería válido en el enum pero
+						// semánticamente incorrecto para un bucket de aging.
+						const estadoMora =
+							bucketStats?.estadoMora &&
+							ESTADOS_AGING_VALIDOS.has(bucketStats.estadoMora)
+								? bucketStats.estadoMora
+								: fallbackEstado;
+						return {
+							estadoMora,
+							totalCases: bucketStats?.cantidad || 0,
+							montoTotal: bucketStats?.sumaMora || "0",
+							sumaCapital: bucketStats?.sumaCapital || "0",
+							porcentaje: bucketStats?.porcentaje || "0",
+						};
+					});
+
+					// Denominador de porcentajes = los estados de aging que realmente
+					// llegaron en este funnel (derivado, no un Set fijo de 6) — sin esto,
+					// un bucket nuevo/renumerado se lista en el array pero su capital
+					// queda fuera del total y nunca recibe porcentaje (ver
+					// cobros-capital-percentages.ts).
+					const activeEstados = new Set(bucketsFunnel.map((b) => b.estadoMora));
+
+					const estatusStats = recalculateCobrosCapitalPercentages(
+						[
+							...bucketsFunnel,
+							{
+								estadoMora: "completado",
+								totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
+								montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
+								sumaCapital:
+									statsResponse.porEstado.cancelado?.sumaCapital || "0",
+								porcentaje: statsResponse.porEstado.cancelado?.porcentaje || "0",
+							},
+							{
+								estadoMora: "incobrable",
+								totalCases: statsResponse.porEstado.incobrable?.cantidad || 0,
+								montoTotal: statsResponse.porEstado.incobrable?.sumaMora || "0",
+								sumaCapital:
+									statsResponse.porEstado.incobrable?.sumaCapital || "0",
+								porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
+							},
+						],
+						activeEstados,
+					);
 
 					console.log(
 						"[Cobros] Stats obtenidas desde endpoint /stats:",

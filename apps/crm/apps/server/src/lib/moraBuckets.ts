@@ -89,19 +89,37 @@ export function __resetMoraBucketsCacheForTests(): void {
 export async function refreshMoraBucketsCache(): Promise<void> {
 	try {
 		const catalogo = await carteraBackClient.getBucketsCatalogo();
-		// No se descartan filas con `estado_mora` null/inválido: eso dejaría su
-		// rango de cuotas sin cobertura y `estadoMoraPorCuotas` caería al "al_dia"
-		// final del loop para créditos realmente atrasados (persistido como etapa
-		// del caso). En vez de eso, cada fila usa su propio `estado_mora` si es
-		// uno de los 9 valores del enum del CRM, o el del bucket homólogo de
-		// MORA_BUCKETS (mismo `numero`/`key`) si no — nunca se propaga un valor
-		// fuera del enum (revienta el INSERT/UPDATE en sync-casos-cobros.ts).
-		const mapped = catalogo
+		// Solo se aceptan `numero` conocidos en MORA_BUCKETS ("0".."5"). Un
+		// `numero` fuera de ese conjunto (bucket nuevo agregado al catálogo sin
+		// que el código sepa mapearlo) se descarta ENTERO, sin importar si su
+		// estado_mora es válido: aceptarlo permitiría que un bucket huérfano con
+		// `orden` bajo (ej. -1) gane el first-match de estadoMoraPorCuotas sobre
+		// el bucket real y ensombrezca su clasificación para CUALQUIER crédito
+		// en ese rango de cuotas — no solo el rango del bucket nuevo. Añadir un
+		// bucket nuevo real requiere agregar su homólogo a MORA_BUCKETS primero.
+		const catalogoConocido = catalogo.filter((b) =>
+			MORA_BUCKETS.some((f) => f.key === String(b.numero)),
+		);
+		// Dedup por `numero`: si el catálogo trae dos filas con el mismo numero
+		// (bug de query en cartera-back, o edición manual duplicada), quedarse
+		// con la de `orden` más bajo de forma determinística — sin este dedup,
+		// dos entradas con la misma key coexistirían en el cache y cuál gana el
+		// first-match de `estadoMoraPorCuotas`/`rangoCuotasPorEstadoMora`
+		// dependería del orden de iteración, no de una regla explícita.
+		const porNumero = new Map<number, (typeof catalogoConocido)[number]>();
+		for (const b of [...catalogoConocido].sort((a, b) => a.orden - b.orden)) {
+			if (!porNumero.has(b.numero)) porNumero.set(b.numero, b);
+		}
+		// `estado_mora` null/inválido: la fila SÍ se conserva (numero conocido,
+		// solo falta el estado) usando el homólogo de MORA_BUCKETS — nunca se
+		// propaga un valor fuera del enum (revienta el INSERT/UPDATE en
+		// sync-casos-cobros.ts).
+		const mapped = Array.from(porNumero.values())
 			.sort((a, b) => a.orden - b.orden)
 			.map((b) => {
-				const fallbackEstado =
-					MORA_BUCKETS.find((f) => f.key === String(b.numero))?.estadoMora ??
-					"al_dia";
+				const fallbackEstado = MORA_BUCKETS.find(
+					(f) => f.key === String(b.numero),
+				)?.estadoMora as string;
 				const estadoMora =
 					b.estado_mora && ESTADOS_MORA_VALIDOS.has(b.estado_mora)
 						? b.estado_mora
@@ -114,15 +132,11 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 					label: b.nombre,
 				};
 			});
-		// Guard: catálogo vacío, o sin cubrir cada bucket del fallback conocido
-		// (siembra parcial, fila desactivada/borrada por error) — un catálogo
-		// incompleto reemplazando el cache dejaría rangos de cuotas sin cobertura
-		// (mismo síntoma que el guard de arriba, por otra puerta). Se cuentan
-		// `numero`/`key` DISTINTOS, no filas: un catálogo con una fila duplicada
-		// (mismo numero dos veces, otro numero ausente) tendría el mismo
-		// `mapped.length` que uno completo y colaría por un `length < length`
-		// simple. Todo-o-nada: o el catálogo cubre cada key del fallback, o no
-		// se usa y se conserva el cache/fallback previo.
+		// Guard: catálogo vacío, o sin cubrir cada bucket conocido (siembra
+		// parcial, fila desactivada/borrada por error) — un catálogo incompleto
+		// reemplazando el cache dejaría rangos de cuotas sin cobertura. Todo-o-
+		// nada: o el catálogo cubre cada key de MORA_BUCKETS, o no se usa y se
+		// conserva el cache/fallback previo.
 		const keysCubiertas = new Set(mapped.map((b) => b.key));
 		const faltantes = MORA_BUCKETS.filter((f) => !keysCubiertas.has(f.key));
 		if (faltantes.length > 0) {

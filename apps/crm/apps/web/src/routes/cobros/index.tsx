@@ -16,17 +16,14 @@ import {
 	Users,
 	X,
 } from "lucide-react";
-import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
-import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
-import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { CapitalRangeFilter } from "@/components/cobros/capital-range-filter";
+import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
 import { DataTable } from "@/components/data-table";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
 	Card,
 	CardContent,
@@ -39,8 +36,17 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
+import {
+	type BucketUI,
+	bucketsParaRender,
+	estiloBucket,
+	useBucketsCatalogo,
+} from "@/lib/cobros/buckets-catalogo";
 import { getCobrosColumns } from "@/lib/cobros/columns";
 import { getPaymentDateRangeFilter } from "@/lib/cobros/payment-date-range-filter";
 import { parseFechaLocal } from "@/lib/date-utils";
@@ -65,13 +71,6 @@ function calcularDiasHastaPago(fechaProximoPago: string | null) {
 
 type FiltroTemporal = "hoy" | "semana" | "quincena" | "mes" | "todos";
 
-interface EmbudoEstado {
-	key: string;
-	label: string;
-	color: string;
-	barColor: string;
-}
-
 interface EmbudoStats {
 	totalCases: number;
 	montoTotal: string;
@@ -86,7 +85,7 @@ function EmbudoRow({
 	emailCobrador,
 	onNavigate,
 }: {
-	estado: EmbudoEstado;
+	estado: BucketUI;
 	estadoStats: EmbudoStats;
 	maxCasos: number;
 	emailCobrador: string | undefined;
@@ -126,7 +125,11 @@ function EmbudoRow({
 					className="group flex w-full cursor-pointer items-center gap-3 p-3 text-left transition-all hover:bg-muted/50"
 				>
 					<div className="flex w-32 shrink-0 items-center gap-2">
-						<Badge className={`${estado.color} whitespace-nowrap text-xs`}>
+						<Badge
+							variant="outline"
+							className="whitespace-nowrap text-xs"
+							style={estiloBucket(estado.colorHex)}
+						>
 							{estado.label}
 						</Badge>
 					</div>
@@ -137,7 +140,7 @@ function EmbudoRow({
 									className="flex h-full items-center justify-between px-3 transition-all duration-300 group-hover:opacity-80"
 									style={{
 										width: `${porcentaje}%`,
-										backgroundColor: estado.barColor,
+										backgroundColor: estado.colorHex,
 									}}
 								>
 									<span
@@ -159,7 +162,7 @@ function EmbudoRow({
 										className="h-full transition-all duration-300 group-hover:opacity-80"
 										style={{
 											width: `${Math.max(porcentaje, 3)}%`,
-											backgroundColor: estado.barColor,
+											backgroundColor: estado.colorHex,
 										}}
 									/>
 									<span className="ml-2 whitespace-nowrap font-semibold text-muted-foreground text-sm">
@@ -177,13 +180,21 @@ function EmbudoRow({
 						<div className="flex items-center justify-end gap-2">
 							<span className="text-muted-foreground text-xs">Mora:</span>
 							<span className="font-medium">
-								Q{Number(estadoStats.montoTotal || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								Q
+								{Number(estadoStats.montoTotal || 0).toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 							</span>
 						</div>
 						<div className="flex items-center justify-end gap-2">
 							<span className="text-muted-foreground text-xs">Capital:</span>
 							<span className="font-medium">
-								Q{Number(estadoStats.sumaCapital || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								Q
+								{Number(estadoStats.sumaCapital || 0).toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 							</span>
 						</div>
 					</div>
@@ -244,7 +255,11 @@ function EmbudoRow({
 											{caso.numeroCredito || "-"}
 										</td>
 										<td className="py-2 text-right tabular-nums">
-											Q{Number(caso.montoFinanciado || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+											Q
+											{Number(caso.montoFinanciado || 0).toLocaleString(
+												"es-GT",
+												{ minimumFractionDigits: 2, maximumFractionDigits: 2 },
+											)}
 										</td>
 										<td className="py-2 text-right text-red-600 tabular-nums">
 											{Number(caso.montoEnMora || 0) > 0
@@ -252,7 +267,11 @@ function EmbudoRow({
 												: "-"}
 										</td>
 										<td className="py-2 pr-3 text-right tabular-nums">
-											Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+											Q
+											{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
 										</td>
 									</tr>
 								))}
@@ -289,28 +308,60 @@ const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 	reclamo: "Reclamo",
 };
 
-
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
-	const [filtroTemporal, setFiltroTemporal] = usePersistedState<FiltroTemporal>("cobros/filtroTemporal", "hoy");
+	const [filtroTemporal, setFiltroTemporal] = usePersistedState<FiltroTemporal>(
+		"cobros/filtroTemporal",
+		"hoy",
+	);
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
-	const [filtroEtapa, setFiltroEtapa] = usePersistedState<string | null>("cobros/filtroEtapa", null);
-	const [filtroEtiquetas, setFiltroEtiquetas] = usePersistedState<string[]>("cobros/filtroEtiquetas", []);
+	const [filtroEtapa, setFiltroEtapa] = usePersistedState<string | null>(
+		"cobros/filtroEtapa",
+		null,
+	);
+	const [filtroEtiquetas, setFiltroEtiquetas] = usePersistedState<string[]>(
+		"cobros/filtroEtiquetas",
+		[],
+	);
 	const [page, setPage] = usePersistedState<number>("cobros/page", 1);
-	const [filterValue, setFilterValue] = usePersistedState<string>("cobros/filterValue", "");
+	const [filterValue, setFilterValue] = usePersistedState<string>(
+		"cobros/filterValue",
+		"",
+	);
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState(filterValue);
-	const [sifcoFilterValue, setSifcoFilterValue] = usePersistedState<string>("cobros/sifcoFilterValue", "");
-	const [debouncedSifcoFilterValue, setDebouncedSifcoFilterValue] = useState(sifcoFilterValue);
-	const [pageSize, setPageSize] = usePersistedState<number>("cobros/pageSize", 25);
+	const [sifcoFilterValue, setSifcoFilterValue] = usePersistedState<string>(
+		"cobros/sifcoFilterValue",
+		"",
+	);
+	const [debouncedSifcoFilterValue, setDebouncedSifcoFilterValue] =
+		useState(sifcoFilterValue);
+	const [pageSize, setPageSize] = usePersistedState<number>(
+		"cobros/pageSize",
+		25,
+	);
 	const [dateRange, setDateRange] = usePersistedDateRange("cobros/dateRange");
-	const [pickerRange, setPickerRange] = useState<DateRange | undefined>(dateRange);
-	const fechaDesde = dateRange?.from && dateRange?.to ? dateRange.from.toISOString().slice(0, 10) : undefined;
-	const fechaHasta = dateRange?.from && dateRange?.to ? dateRange.to.toISOString().slice(0, 10) : undefined;
+	const [pickerRange, setPickerRange] = useState<DateRange | undefined>(
+		dateRange,
+	);
+	const fechaDesde =
+		dateRange?.from && dateRange?.to
+			? dateRange.from.toISOString().slice(0, 10)
+			: undefined;
+	const fechaHasta =
+		dateRange?.from && dateRange?.to
+			? dateRange.to.toISOString().slice(0, 10)
+			: undefined;
 	const [fechaError, setFechaError] = useState<string | null>(null);
-	const [capitalMin, setCapitalMin] = usePersistedState<number | undefined>("cobros/capitalMin", undefined);
-	const [capitalMax, setCapitalMax] = usePersistedState<number | undefined>("cobros/capitalMax", undefined);
+	const [capitalMin, setCapitalMin] = usePersistedState<number | undefined>(
+		"cobros/capitalMin",
+		undefined,
+	);
+	const [capitalMax, setCapitalMax] = usePersistedState<number | undefined>(
+		"cobros/capitalMax",
+		undefined,
+	);
 
 	const hasActiveFilters =
 		filtroTemporal !== "hoy" ||
@@ -356,6 +407,8 @@ function RouteComponent() {
 	}, [sifcoFilterValue]);
 
 	const userRole = session?.user.role;
+
+	const bucketsCatalogo = useBucketsCatalogo();
 
 	const dashboardStats = useQuery({
 		...orpc.getCobrosDashboardStats.queryOptions({
@@ -475,8 +528,8 @@ function RouteComponent() {
 	// Recalcular columnas cuando cambia el filtro de etapa: el CTA de contacto
 	// rápido sólo aparece para estados de mora activa.
 	const columns = useMemo(
-		() => getCobrosColumns({ filtroEtapa }),
-		[filtroEtapa],
+		() => getCobrosColumns({ filtroEtapa, catalogo: bucketsCatalogo.data }),
+		[filtroEtapa, bucketsCatalogo.data],
 	);
 
 	// Procesar creditos y calcular días hasta pago
@@ -544,7 +597,13 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiquetas, filtroEtapa]);
+	}, [
+		creditosConDias,
+		filtroTemporal,
+		mostrarCompletadosIncobrables,
+		filtroEtiquetas,
+		filtroEtapa,
+	]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -570,53 +629,17 @@ function RouteComponent() {
 		{ key: "todos" as const, label: "Todos", icon: Users },
 	];
 
-	const filtrosEtapa = [
-		{
-			key: "al_dia",
-			label: "Cartera Sana",
-			color: "bg-green-100 text-green-800",
-		},
-		{
-			key: "en_convenio",
-			label: "En Convenio",
-			color: "bg-green-100 text-green-800",
-		},
-		{
-			key: "mora_30",
-			label: "Alerta Temprana",
-			color: "bg-yellow-100 text-yellow-800",
-		},
-		{
-			key: "mora_60",
-			label: "Gestión Activa",
-			color: "bg-orange-100 text-orange-800",
-		},
-		{
-			key: "mora_90",
-			label: "Rescate",
-			color: "bg-red-100 text-red-800",
-		},
-		{
-			key: "mora_120",
-			label: "Última Instancia / Pre Jurídico",
-			color: "bg-red-200 text-red-900",
-		},
-		{
-			key: "mora_120_plus",
-			label: "Jurídico",
-			color: "bg-red-300 text-red-900",
-		},
-		{
-			key: "incobrable",
-			label: "Incobrable",
-			color: "bg-gray-100 text-gray-800",
-		},
-		{
-			key: "completado",
-			label: "Completado",
-			color: "bg-blue-100 text-blue-800",
-		},
-	];
+	const filtrosEtapa = bucketsParaRender(bucketsCatalogo.data, [
+		"al_dia",
+		"en_convenio",
+		"mora_30",
+		"mora_60",
+		"mora_90",
+		"mora_120",
+		"mora_120_plus",
+		"incobrable",
+		"completado",
+	]);
 
 	if (dashboardStats.isLoading) {
 		return (
@@ -708,7 +731,10 @@ function RouteComponent() {
 							Q
 							{stats
 								.reduce((sum, s) => sum + Number(s.montoTotal || 0), 0)
-								.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Suma de todos los montos en mora
@@ -728,7 +754,10 @@ function RouteComponent() {
 							Q
 							{stats
 								.reduce((sum, s) => sum + Number(s.sumaCapital || 0), 0)
-								.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Suma de todos los capitales
@@ -768,58 +797,16 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent>
 					<div className="space-y-1">
-						{(
-							[
-								{
-									key: "al_dia",
-									label: "Cartera Sana",
-									color: "bg-green-100 text-green-800",
-									barColor: "#22c55e",
-								},
-								{
-									key: "mora_30",
-									label: "Alerta Temprana",
-									color: "bg-yellow-100 text-yellow-800",
-									barColor: "#eab308",
-								},
-								{
-									key: "mora_60",
-									label: "Gestión Activa",
-									color: "bg-orange-100 text-orange-800",
-									barColor: "#f97316",
-								},
-								{
-									key: "mora_90",
-									label: "Rescate",
-									color: "bg-red-100 text-red-800",
-									barColor: "#ef4444",
-								},
-								{
-									key: "mora_120",
-									label: "Última Instancia / Pre Jurídico",
-									color: "bg-red-200 text-red-900",
-									barColor: "#b91c1c",
-								},
-								{
-									key: "mora_120_plus",
-									label: "Jurídico",
-									color: "bg-red-300 text-red-900",
-									barColor: "#991b1b",
-								},
-								{
-									key: "incobrable",
-									label: "Incobrable",
-									color: "bg-gray-100 text-gray-800",
-									barColor: "#6b7280",
-								},
-								{
-									key: "completado",
-									label: "Completado",
-									color: "bg-blue-100 text-blue-800",
-									barColor: "#3b82f6",
-								},
-							] satisfies EmbudoEstado[]
-						).map((estado) => {
+						{bucketsParaRender(bucketsCatalogo.data, [
+							"al_dia",
+							"mora_30",
+							"mora_60",
+							"mora_90",
+							"mora_120",
+							"mora_120_plus",
+							"incobrable",
+							"completado",
+						]).map((estado) => {
 							const estadoStat = stats.find(
 								(s) => s.estadoMora === estado.key,
 							) || {
@@ -1001,7 +988,8 @@ function RouteComponent() {
 										);
 										porcentajeReal = buckets120.length
 											? buckets120.reduce(
-													(sum, s) => sum + Number.parseFloat(s.porcentaje || "0"),
+													(sum, s) =>
+														sum + Number.parseFloat(s.porcentaje || "0"),
 													0,
 												)
 											: undefined;
@@ -1174,8 +1162,8 @@ function RouteComponent() {
 													return;
 												}
 												setFechaError(null);
-												setDateRange(range);    // persiste y afecta la query
-												setPickerRange(range);  // actualiza display
+												setDateRange(range); // persiste y afecta la query
+												setPickerRange(range); // actualiza display
 												if (!range.from || !range.to) return;
 												setFiltroTemporal("todos");
 												setPage(1);
@@ -1208,7 +1196,13 @@ function RouteComponent() {
 										{filtrosEtapa.map((filtro) => (
 											<Badge
 												key={filtro.key}
-												className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+												variant="outline"
+												className={`cursor-pointer ${filtroEtapa === filtro.key ? "" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+												style={
+													filtroEtapa === filtro.key
+														? estiloBucket(filtro.colorHex)
+														: undefined
+												}
 												onClick={() => {
 													setFiltroEtapa(
 														filtroEtapa === filtro.key ? null : filtro.key,
@@ -1278,11 +1272,30 @@ function RouteComponent() {
 								</div>
 								{hasActiveFilters && (
 									<div className="border-t pt-2">
-										<Button variant="ghost" size="sm" onClick={resetFilters} className="w-full text-muted-foreground">
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={resetFilters}
+											className="w-full text-muted-foreground"
+										>
 											<X className="mr-1 h-3 w-3" />
 											Limpiar filtros
-											<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-												{[filtroTemporal !== "hoy", filtroEtapa !== null, filtroEtiquetas.length > 0, filterValue !== "", sifcoFilterValue !== "", capitalMin !== undefined, capitalMax !== undefined, dateRange !== undefined].filter(Boolean).length}
+											<Badge
+												variant="secondary"
+												className="ml-1 h-4 px-1 text-xs"
+											>
+												{
+													[
+														filtroTemporal !== "hoy",
+														filtroEtapa !== null,
+														filtroEtiquetas.length > 0,
+														filterValue !== "",
+														sifcoFilterValue !== "",
+														capitalMin !== undefined,
+														capitalMax !== undefined,
+														dateRange !== undefined,
+													].filter(Boolean).length
+												}
 											</Badge>
 										</Button>
 									</div>

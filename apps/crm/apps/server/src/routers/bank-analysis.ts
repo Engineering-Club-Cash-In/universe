@@ -280,48 +280,6 @@ export const bankAnalysisRouter = {
 					}
 				}
 
-				if (opportunityForDocuments) {
-					for (const [index, file] of downloadedFiles.entries()) {
-						const documentType = getBankStatementOpportunityDocumentType(index);
-						if (!documentType) {
-							continue;
-						}
-
-						const uniqueFilename = generateUniqueFilename(file.name);
-						const { key } = await uploadFileToR2(
-							new Blob([new Uint8Array(file.buffer)], { type: file.mimeType }),
-							uniqueFilename,
-							opportunityForDocuments.id,
-						);
-
-						const [newDocument] = await db
-							.insert(opportunityDocuments)
-							.values({
-								opportunityId: opportunityForDocuments.id,
-								filename: uniqueFilename,
-								originalName: file.name,
-								mimeType: file.mimeType,
-								size: file.size,
-								documentType,
-								description:
-									"Guardado automáticamente desde análisis de capacidad de pago",
-								uploadedBy: context.userId,
-								filePath: key,
-							})
-							.returning({ id: opportunityDocuments.id });
-
-						if (newDocument) {
-							await updateChecklistForClientDocument(
-								opportunityForDocuments.id,
-								documentType,
-								newDocument.id,
-								!!opportunityForDocuments.vehicleId,
-								opportunityForDocuments.vehicleId || undefined,
-							);
-						}
-					}
-				}
-
 				// 4. Construir content parts con los PDFs descargados de R2
 				const fileParts = downloadedFiles.map((file) => ({
 					type: "file" as const,
@@ -389,6 +347,87 @@ export const bankAnalysisRouter = {
 					maxDebtRatio: input.maxDebtRatio,
 					maxVariableDebtRatio: input.maxVariableDebtRatio,
 				});
+
+				if (opportunityForDocuments) {
+					const savedDocuments: { id: string; documentType: string }[] = [];
+					const savedKeys: string[] = [];
+
+					try {
+						for (const [index, file] of downloadedFiles.entries()) {
+							const documentType = getBankStatementOpportunityDocumentType(index);
+							if (!documentType) {
+								continue;
+							}
+
+							const uniqueFilename = generateUniqueFilename(file.name);
+							const { key } = await uploadFileToR2(
+								new Blob([new Uint8Array(file.buffer)], { type: file.mimeType }),
+								uniqueFilename,
+								opportunityForDocuments.id,
+							);
+							savedKeys.push(key);
+
+							const [newDocument] = await db
+								.insert(opportunityDocuments)
+								.values({
+									opportunityId: opportunityForDocuments.id,
+									filename: uniqueFilename,
+									originalName: file.name,
+									mimeType: file.mimeType,
+									size: file.size,
+									documentType,
+									description:
+										"Guardado automáticamente desde análisis de capacidad de pago",
+									uploadedBy: context.userId,
+									filePath: key,
+								})
+								.returning({ id: opportunityDocuments.id });
+
+							if (newDocument) {
+								savedDocuments.push({ id: newDocument.id, documentType });
+								await updateChecklistForClientDocument(
+									opportunityForDocuments.id,
+									documentType,
+									newDocument.id,
+									!!opportunityForDocuments.vehicleId,
+									opportunityForDocuments.vehicleId || undefined,
+								);
+							}
+						}
+					} catch (error) {
+						// Do not turn a completed AI analysis into a spent failed attempt.
+						const cleanupResults = await Promise.allSettled([
+							...savedDocuments.map(({ id }) =>
+								db
+									.delete(opportunityDocuments)
+									.where(eq(opportunityDocuments.id, id)),
+							),
+							...savedKeys.map((key) => deleteFileFromR2(key)),
+						]);
+						const failedCleanups = cleanupResults.filter(
+							(result) => result.status === "rejected",
+						);
+						await Promise.allSettled(
+							savedDocuments.map(({ id, documentType }) =>
+								updateChecklistForClientDocument(
+									opportunityForDocuments.id,
+									documentType,
+									id,
+									!!opportunityForDocuments.vehicleId,
+									opportunityForDocuments.vehicleId || undefined,
+								),
+							),
+						);
+
+						console.error("Failed to save bank statement opportunity documents", {
+							opportunityId: opportunityForDocuments.id,
+							savedDocuments: savedDocuments.length,
+							savedFiles: savedKeys.length,
+							failedCleanups: failedCleanups.length,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
 
 				// 7. Actualizar con los resultados del análisis exitoso
 				await db

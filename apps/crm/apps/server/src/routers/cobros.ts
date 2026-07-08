@@ -3960,6 +3960,8 @@ export const cobrosRouter = {
 			z
 				.object({
 					emailCobrador: z.string().optional(),
+					fecha: z.string().optional(),
+					asesores: z.array(z.number()).optional(),
 				})
 				.optional(),
 		)
@@ -3972,6 +3974,8 @@ export const cobrosRouter = {
 
 			return carteraBackClient.getMoraByEtapaYAsesor({
 				emailCobrador: input?.emailCobrador,
+				fecha: input?.fecha,
+				asesores: input?.asesores,
 			});
 		}),
 

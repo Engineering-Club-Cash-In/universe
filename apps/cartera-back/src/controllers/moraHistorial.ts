@@ -18,7 +18,7 @@ const ETAPA_SQL = sql`CASE
 
 // CTE: estado de mora por crédito "as-of" `fecha`.
 // monto/tipo = último evento; cuotas = último evento CON cuotas>0 (carry-forward).
-const snapCte = (fecha: string) => sql`
+export const snapCte = (fecha: string) => sql`
   snap_raw AS (
     SELECT
       h.credito_id,

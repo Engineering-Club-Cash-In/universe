@@ -426,6 +426,9 @@ export type MoraTotales = {
 export type MoraByEtapaYAsesorResponse = {
 	totales: MoraTotales;
 	porAsesor: ({ asesorId: number; nombre: string; email: string } & MoraTotales)[];
+	fecha?: string;
+	alcance?: "live" | "historico";
+	dataDisponibleDesde?: string;
 };
 
 // ============================================================================
@@ -1608,9 +1611,15 @@ export class CarteraBackClient {
 	// REPORTES
 	// ========================================================================
 
-	async getMoraByEtapaYAsesor(params?: { emailCobrador?: string }) {
+	async getMoraByEtapaYAsesor(params?: {
+		emailCobrador?: string;
+		fecha?: string;
+		asesores?: number[];
+	}) {
 		const queryParams = new URLSearchParams();
 		if (params?.emailCobrador) queryParams.set("email_cobrador", params.emailCobrador);
+		if (params?.fecha) queryParams.set("fecha", params.fecha);
+		if (params?.asesores?.length) queryParams.set("asesores", params.asesores.join(","));
 		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
 		return this.request<MoraByEtapaYAsesorResponse>(
 			`/reportes/mora-por-etapa-asesor${qs}`,

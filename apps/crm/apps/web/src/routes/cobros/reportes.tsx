@@ -7,7 +7,8 @@ import {
 	RefreshCw,
 	TrendingDown,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { AsesorMultiSelect } from "@/components/cobros/asesor-multi-select";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,15 @@ const ETAPAS = [
 	},
 ];
 
+function todayGTISO() {
+	return new Date().toLocaleDateString("sv-SE", {
+		timeZone: "America/Guatemala",
+	});
+}
+function currentMonthGT() {
+	return todayGTISO().slice(0, 7); // YYYY-MM
+}
+
 function TabMora({
 	session,
 	canSeeAll,
@@ -82,12 +92,73 @@ function TabMora({
 		? undefined
 		: (session?.user?.email ?? undefined);
 
+	const [modo, setModo] = usePersistedState<"hoy" | "mes">(
+		"cobros.mora.modo",
+		"hoy",
+	);
+	const [mesAnio, setMesAnio] = usePersistedState<string>(
+		"cobros.mora.mes",
+		currentMonthGT(),
+	);
+	const [asesoresSel, setAsesoresSel] = usePersistedState<number[] | null>(
+		"cobros.mora.asesores",
+		null,
+	);
+
+	// Fecha snapshot = día 6 del mes elegido, clamp a hoy (nunca futura).
+	const hoy = todayGTISO();
+	const fechaSnapshot = useMemo(() => {
+		if (modo === "hoy") return undefined;
+		const dia6 = `${mesAnio}-06`;
+		return dia6 > hoy ? hoy : dia6;
+	}, [modo, mesAnio, hoy]);
+
+	const { data: asesoresData } = useQuery({
+		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
+		enabled: !!session && canSeeAll,
+	});
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const asesores: { asesorId: number; nombre: string }[] =
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(asesoresData as any)?.asesores ?? [];
+
 	const { data, isLoading, dataUpdatedAt, refetch, isFetching } = useQuery({
-		...orpc.getMoraByEtapaYAsesor.queryOptions({ input: { emailCobrador } }),
+		...orpc.getMoraByEtapaYAsesor.queryOptions({
+			input: {
+				emailCobrador,
+				fecha: fechaSnapshot,
+				asesores: asesoresSel ?? undefined,
+			},
+		}),
 		enabled: !!session,
-		refetchInterval: 60_000,
+		refetchInterval: modo === "hoy" ? 60_000 : false,
 		refetchIntervalInBackground: false,
 	});
+
+	// Totales con / sin Gerencia (cliente, sobre porAsesor).
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const porAsesor: any[] = (data as any)?.porAsesor ?? [];
+	const totalConGerencia = porAsesor.reduce(
+		(s, a) => s + Number(a.totalEnMora?.sumaMora ?? 0),
+		0,
+	);
+	const totalSinGerencia = porAsesor
+		.filter((a) => a.nombre !== "Gerencia")
+		.reduce((s, a) => s + Number(a.totalEnMora?.sumaMora ?? 0), 0);
+	const credConGerencia = porAsesor.reduce(
+		(s, a) => s + Number(a.totalEnMora?.cantidad ?? 0),
+		0,
+	);
+	const credSinGerencia = porAsesor
+		.filter((a) => a.nombre !== "Gerencia")
+		.reduce((s, a) => s + Number(a.totalEnMora?.cantidad ?? 0), 0);
+
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const dataDisponibleDesde = (data as any)?.dataDisponibleDesde as
+		| string
+		| undefined;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const alcance = (data as any)?.alcance as "live" | "historico" | undefined;
 
 	const ultimaAct = dataUpdatedAt ? fmtTime(new Date(dataUpdatedAt)) : null;
 
@@ -118,6 +189,64 @@ function TabMora({
 				</div>
 			</div>
 
+			{/* Filtros */}
+			<div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
+				<div className="flex flex-col gap-1.5">
+					<Label className="font-semibold text-xs">Momento</Label>
+					<div className="flex items-center gap-1.5">
+						<Button
+							variant={modo === "hoy" ? "default" : "outline"}
+							size="sm"
+							onClick={() => setModo("hoy")}
+						>
+							Hoy (en vivo)
+						</Button>
+						<Button
+							variant={modo === "mes" ? "default" : "outline"}
+							size="sm"
+							onClick={() => setModo("mes")}
+						>
+							Por mes
+						</Button>
+					</div>
+				</div>
+
+				<div className="flex flex-col gap-1">
+					<Label className="text-muted-foreground text-xs">Mes</Label>
+					<Input
+						type="month"
+						className="w-40"
+						value={mesAnio}
+						max={currentMonthGT()}
+						disabled={modo !== "mes"}
+						onChange={(e) => setMesAnio(e.target.value)}
+					/>
+				</div>
+
+				{canSeeAll && asesores.length > 0 && (
+					<div className="flex flex-col gap-1">
+						<Label className="text-muted-foreground text-xs">Asesores</Label>
+						<AsesorMultiSelect
+							asesores={asesores}
+							value={asesoresSel}
+							onChange={setAsesoresSel}
+						/>
+					</div>
+				)}
+
+				<p className="pb-2 text-muted-foreground text-xs">
+					{modo === "hoy"
+						? "Mora actual en vivo"
+						: `Mora al ${fechaSnapshot ?? hoy}${alcance === "historico" ? " (histórico)" : ""}`}
+				</p>
+			</div>
+
+			{dataDisponibleDesde && (
+				<div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-amber-800 text-sm">
+					No hay datos de mora antes del {dataDisponibleDesde}.
+				</div>
+			)}
+
 			{isLoading ? (
 				<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 					{ETAPAS.map((e) => (
@@ -134,8 +263,13 @@ function TabMora({
 						// eslint-disable-next-line @typescript-eslint/no-explicit-any
 						const bucket = (data as any)?.totales?.[etapa.key];
 						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const totalMora = parseFloat((data as any)?.totales?.totalEnMora?.sumaMora ?? "0");
-						const pct = totalMora > 0 ? (parseFloat(bucket?.sumaMora ?? "0") / totalMora) * 100 : 0;
+						const totalMora = Number.parseFloat(
+							(data as any)?.totales?.totalEnMora?.sumaMora ?? "0",
+						);
+						const pct =
+							totalMora > 0
+								? (Number.parseFloat(bucket?.sumaMora ?? "0") / totalMora) * 100
+								: 0;
 						return (
 							<Card key={etapa.key}>
 								<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -151,7 +285,7 @@ function TabMora({
 									<p className="text-muted-foreground text-xs">
 										Capital: {fmtQ(bucket?.sumaCapital ?? "0")}
 									</p>
-									<p className="mt-1 font-medium text-xs text-muted-foreground">
+									<p className="mt-1 font-medium text-muted-foreground text-xs">
 										{pct.toFixed(1)}% del total en mora
 									</p>
 								</CardContent>
@@ -161,30 +295,35 @@ function TabMora({
 				</div>
 			)}
 
-			{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-			{!!(data as any)?.totales?.totalEnMora && (
-				<Card className="border-red-200 bg-red-50">
-					<CardContent className="pt-4">
-						<div className="flex items-center justify-between">
-							<div>
-								<p className="font-semibold text-red-700 text-sm">
-									Total en Mora
-								</p>
-								{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-								<p className="font-bold text-3xl text-red-800">
-									{fmtQ((data as any).totales.totalEnMora.sumaMora)}
-								</p>
-							</div>
-							{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-							<div className="text-right">
-								<p className="text-muted-foreground text-sm">Créditos</p>
-								<p className="font-bold text-2xl">
-									{(data as any).totales.totalEnMora.cantidad}
-								</p>
-							</div>
-						</div>
-					</CardContent>
-				</Card>
+			{porAsesor.length > 0 && (
+				<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+					<Card className="border-red-200 bg-red-50">
+						<CardContent className="pt-4">
+							<p className="font-semibold text-red-700 text-sm">
+								Total en Mora (con Gerencia)
+							</p>
+							<p className="font-bold text-3xl text-red-800">
+								{fmtQ(totalConGerencia)}
+							</p>
+							<p className="text-muted-foreground text-xs">
+								{credConGerencia} créditos
+							</p>
+						</CardContent>
+					</Card>
+					<Card className="border-orange-200 bg-orange-50">
+						<CardContent className="pt-4">
+							<p className="font-semibold text-orange-700 text-sm">
+								Total en Mora (sin Gerencia)
+							</p>
+							<p className="font-bold text-3xl text-orange-800">
+								{fmtQ(totalSinGerencia)}
+							</p>
+							<p className="text-muted-foreground text-xs">
+								{credSinGerencia} créditos
+							</p>
+						</CardContent>
+					</Card>
+				</div>
 			)}
 
 			<div>
@@ -251,8 +390,17 @@ function TabMora({
 											</div>
 											{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
 											{(() => {
-												const totalMora = parseFloat((data as any)?.totales?.totalEnMora?.sumaMora ?? "0");
-												const pct = totalMora > 0 ? (parseFloat(asesor.totalEnMora?.sumaMora ?? "0") / totalMora) * 100 : 0;
+												const totalMora = Number.parseFloat(
+													(data as any)?.totales?.totalEnMora?.sumaMora ?? "0",
+												);
+												const pct =
+													totalMora > 0
+														? (Number.parseFloat(
+																asesor.totalEnMora?.sumaMora ?? "0",
+															) /
+																totalMora) *
+															100
+														: 0;
 												return pct > 0 ? (
 													<div className="font-medium text-muted-foreground text-xs">
 														{pct.toFixed(1)}%

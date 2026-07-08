@@ -345,6 +345,7 @@ export function OpportunityDetailModal({
 												to="/crm/leads"
 												search={{
 													leadId: displayLead.id,
+													opportunityId: opportunity.id,
 												}}
 												className="font-medium text-primary hover:underline"
 												onClick={() => onOpenChange(false)}

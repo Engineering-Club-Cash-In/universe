@@ -48,7 +48,10 @@ export class SATClientService {
   constructor(credentials: SATCredentials, endpointUrl: string) {
     this.credentials = credentials;
     this.endpointUrl = endpointUrl.trim();
-    this.xmlParser = new XMLParser();
+    // parseTagValue: false — la serie de SAT son 8 hex (ej. "3E722147") y el
+    // parseo numérico por defecto la interpreta como notación científica:
+    // Number("3E722147") = Infinity, que era lo que quedaba guardado en la BD.
+    this.xmlParser = new XMLParser({ parseTagValue: false });
   }
 
   // 🔥 POST_DOCUMENT_SAT - Certificar documento
@@ -183,9 +186,9 @@ export class SATClientService {
       });
 
       return {
-        batch,
-        serial,
-        documentGUID,
+        batch: String(batch),
+        serial: String(serial),
+        documentGUID: String(documentGUID),
         xmlCertificado: xmlBase64
       };
 

@@ -1,6 +1,7 @@
 import Big from "big.js";
 import z from "zod";
 import { db, client } from "../database";
+import { withCapitalContext } from "../utils/withAuditContext";
 import {
   creditos,
   usuarios,
@@ -2354,15 +2355,17 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         });
         const nuevoCapitalParc = recomputedParc.capital;
 
-        await db
-          .update(creditos)
-          .set({
-            capital: nuevoCapitalParc.toString(),
-            deudatotal: recomputedParc.deudaTotal.toString(),
-            iva_12: recomputedParc.iva.toString(),
-            cuota_interes: recomputedParc.cuotaInteres.toString(),
-          })
-          .where(eq(creditos.credito_id, pago.credito_id));
+        await withCapitalContext(null, "PAGO", null, (tx) =>
+          tx
+            .update(creditos)
+            .set({
+              capital: nuevoCapitalParc.toString(),
+              deudatotal: recomputedParc.deudaTotal.toString(),
+              iva_12: recomputedParc.iva.toString(),
+              cuota_interes: recomputedParc.cuotaInteres.toString(),
+            })
+            .where(eq(creditos.credito_id, pago.credito_id!))
+        );
 
         console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
         console.log("✅ Capital aplicado al crédito (cuota aún abierta)");
@@ -2426,15 +2429,17 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     console.log("📊 Nueva deuda total:", nueva_deuda_total.toString());
 
     // 6. ACTUALIZAR EL CRÉDITO
-    await db
-      .update(creditos)
-      .set({
-        capital: nuevo_capital.toString(),
-        deudatotal: nueva_deuda_total.toString(),
-        iva_12: iva_12.toString(),
-        cuota_interes: cuota_interes.toString(),
-      })
-      .where(eq(creditos.credito_id, pago.credito_id));
+    await withCapitalContext(null, "PAGO", null, (tx) =>
+      tx
+        .update(creditos)
+        .set({
+          capital: nuevo_capital.toString(),
+          deudatotal: nueva_deuda_total.toString(),
+          iva_12: iva_12.toString(),
+          cuota_interes: cuota_interes.toString(),
+        })
+        .where(eq(creditos.credito_id, pago.credito_id!))
+    );
 
     // 7. VALIDAR EL PAGO y registrar fecha de aplicación
     await db
@@ -2832,15 +2837,17 @@ export async function aplicarAbonoCapitalInversionistas(
   console.log(`📊 Nueva Deuda Total: Q${deudatotal.toString()}`);
 
   // 1️⃣.2 Actualizar el crédito
-  await db
-    .update(creditos)
-    .set({
-      capital: nuevoCapital.toString(),
-      deudatotal: deudatotal.toString(),
-      cuota_interes: cuota_interes.toString(),
-      iva_12: iva_12.toString(),
-    })
-    .where(eq(creditos.credito_id, credito_id));
+  await withCapitalContext(null, "PAGO", null, (tx) =>
+    tx
+      .update(creditos)
+      .set({
+        capital: nuevoCapital.toString(),
+        deudatotal: deudatotal.toString(),
+        cuota_interes: cuota_interes.toString(),
+        iva_12: iva_12.toString(),
+      })
+      .where(eq(creditos.credito_id, credito_id))
+  );
 
   console.log(`✅ Crédito actualizado`);
 

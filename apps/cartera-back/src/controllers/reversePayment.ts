@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq, and, not, inArray, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
+import { setCapitalSource } from "../utils/withAuditContext";
 import {
   pagos_credito,
   creditos,
@@ -227,6 +228,7 @@ export const reversePayment = async ({ body, set }: any) => {
       // 7️⃣ ACTUALIZAR EL CRÉDITO CON LOS NUEVOS VALORES
       // ======================================================================
       if (pagoValidado) {
+        await setCapitalSource(tx, "REVERSO");
         await tx
           .update(creditos)
           .set({

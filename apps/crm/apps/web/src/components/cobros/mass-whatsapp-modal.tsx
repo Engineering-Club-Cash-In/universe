@@ -97,6 +97,7 @@ interface MassWhatsappModalProps {
 		etiquetas?: string[];
 		fechaDesde?: string;
 		fechaHasta?: string;
+		excluirPagadosMes?: boolean;
 	};
 	etiquetaLabels?: Record<string, string>;
 	totalDestinatarios?: number;
@@ -187,6 +188,7 @@ export function MassWhatsappModal({
 						: undefined,
 				fechaDesde: filtros.fechaDesde,
 				fechaHasta: filtros.fechaHasta,
+				excluirPagadosMes: filtros.excluirPagadosMes,
 			}),
 		onSuccess: (res) => {
 			// `descartados` ya incluye los que fallaron en el proveedor, así que

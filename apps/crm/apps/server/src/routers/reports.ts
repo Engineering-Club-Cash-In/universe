@@ -21,6 +21,10 @@ import { quotations } from "../db/schema/quotations";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
+	getLeadSourceChannelType,
+	type LeadSourceChannelType,
+} from "../lib/lead-sources";
+import {
 	closedCreditsReportProcedure,
 	metaColocacionReportProcedure,
 	porcentajeEfectividadReportProcedure,
@@ -30,6 +34,12 @@ import {
 import type { StatusCreditEnum } from "../types/cartera-back";
 
 const SECONDS_PER_DAY = 60 * 60 * 24;
+const CHANNEL_TYPE_ORDER: LeadSourceChannelType[] = [
+	"Físico",
+	"Pauta Digital",
+	"Orgánico Digital",
+	"Otros",
+];
 
 // Schema para filtros de fecha
 const dateRangeSchema = z.object({
@@ -93,6 +103,116 @@ export function isPorcentajeEfectividadPeriodCloseIncluded(
 		firstClosedAt >= start &&
 		firstClosedAt <= end
 	);
+}
+
+type EfectividadFuenteRow = {
+	source: string | null;
+	totalOportunidades: number;
+	totalCerradas: number | `${number}`;
+	totalCierresPeriodo?: number | `${number}`;
+	porcentaje: number;
+};
+
+export function aggregateEfectividadPorTipoCanal(rows: EfectividadFuenteRow[]) {
+	const totals = new Map<
+		LeadSourceChannelType,
+		{
+			totalOportunidades: number;
+			totalCerradas: number;
+			totalCierresPeriodo: number;
+		}
+	>();
+
+	for (const row of rows) {
+		const tipoCanal = getLeadSourceChannelType(row.source);
+		const total = totals.get(tipoCanal) ?? {
+			totalOportunidades: 0,
+			totalCerradas: 0,
+			totalCierresPeriodo: 0,
+		};
+		total.totalOportunidades += row.totalOportunidades;
+		total.totalCerradas += Number(row.totalCerradas);
+		total.totalCierresPeriodo += Number(row.totalCierresPeriodo ?? 0);
+		totals.set(tipoCanal, total);
+	}
+
+	return CHANNEL_TYPE_ORDER.flatMap((tipoCanal) => {
+		const total = totals.get(tipoCanal);
+		if (!total) return [];
+		return [
+			{
+				tipoCanal,
+				totalOportunidades: total.totalOportunidades,
+				totalCerradas: total.totalCerradas,
+				totalCierresPeriodo: total.totalCierresPeriodo,
+				porcentaje:
+					total.totalOportunidades > 0
+						? Math.round(
+								(total.totalCerradas * 1000) / total.totalOportunidades,
+							) / 10
+						: 0,
+			},
+		];
+	});
+}
+
+type TiempoCierreFuenteRow = {
+	source: string | null;
+	totalCreditos: number;
+	avgDias: number;
+	totalDias?: number | `${number}`;
+	minDias: number | `${number}`;
+	maxDias: number | `${number}`;
+};
+
+export function aggregateTiempoCierrePorTipoCanal(
+	rows: TiempoCierreFuenteRow[],
+) {
+	const totals = new Map<
+		LeadSourceChannelType,
+		{
+			totalCreditos: number;
+			totalDias: number;
+			minDias: number | null;
+			maxDias: number | null;
+		}
+	>();
+
+	for (const row of rows) {
+		const tipoCanal = getLeadSourceChannelType(row.source);
+		const minDias = Number(row.minDias);
+		const maxDias = Number(row.maxDias);
+		const total = totals.get(tipoCanal) ?? {
+			totalCreditos: 0,
+			totalDias: 0,
+			minDias: null,
+			maxDias: null,
+		};
+		total.totalCreditos += row.totalCreditos;
+		total.totalDias += Number(row.totalDias ?? row.avgDias * row.totalCreditos);
+		total.minDias =
+			total.minDias === null ? minDias : Math.min(total.minDias, minDias);
+		total.maxDias =
+			total.maxDias === null ? maxDias : Math.max(total.maxDias, maxDias);
+		totals.set(tipoCanal, total);
+	}
+
+	return CHANNEL_TYPE_ORDER.flatMap((tipoCanal) => {
+		const total = totals.get(tipoCanal);
+		if (!total) return [];
+		return [
+			{
+				tipoCanal,
+				totalCreditos: total.totalCreditos,
+				avgDias:
+					total.totalCreditos > 0
+						? Math.round((total.totalDias * 10) / total.totalCreditos) / 10
+						: 0,
+				minDias: total.minDias ?? 0,
+				maxDias: total.maxDias ?? 0,
+			},
+		];
+	});
 }
 
 function parseGuatemalaDateRange(startDate: string, endDate: string) {
@@ -537,6 +657,60 @@ export const getReporteInventario = protectedProcedure.handler(async () => {
 
 const CLOSED_STAGE_THRESHOLD = 90;
 const MAX_REPORT_ROWS = 10_000;
+
+type PorcentajeEfectividadFuenteBaseRow = {
+	source: string;
+	totalOportunidades: number;
+	totalCerradas: number;
+	porcentaje: number;
+};
+
+type PorcentajeEfectividadCierrePeriodoFuenteRow = {
+	source: string;
+	totalCierresPeriodo: number;
+};
+
+export function buildPorcentajeEfectividadFuenteRows(
+	cohortRows: PorcentajeEfectividadFuenteBaseRow[],
+	periodCloseRows: PorcentajeEfectividadCierrePeriodoFuenteRow[],
+) {
+	const bySource = new Map<
+		string,
+		PorcentajeEfectividadFuenteBaseRow & { totalCierresPeriodo: number }
+	>();
+
+	for (const row of cohortRows) {
+		bySource.set(row.source, {
+			source: row.source,
+			totalOportunidades: row.totalOportunidades,
+			totalCerradas: row.totalCerradas ?? 0,
+			totalCierresPeriodo: 0,
+			porcentaje: row.porcentaje ?? 0,
+		});
+	}
+
+	for (const row of periodCloseRows) {
+		const current = bySource.get(row.source) ?? {
+			source: row.source,
+			totalOportunidades: 0,
+			totalCerradas: 0,
+			totalCierresPeriodo: 0,
+			porcentaje: 0,
+		};
+		current.totalCierresPeriodo = row.totalCierresPeriodo ?? 0;
+		bySource.set(row.source, current);
+	}
+
+	return [...bySource.values()].sort((a, b) => {
+		if (b.totalOportunidades !== a.totalOportunidades) {
+			return b.totalOportunidades - a.totalOportunidades;
+		}
+		if (b.totalCierresPeriodo !== a.totalCierresPeriodo) {
+			return b.totalCierresPeriodo - a.totalCierresPeriodo;
+		}
+		return a.source.localeCompare(b.source);
+	});
+}
 /**
  * Reporte Porcentaje Efectividad
  * Tasa de conversión de oportunidades a créditos cerrados, por fuente.
@@ -589,66 +763,90 @@ export const getReportePorcentajeEfectividad =
 			const totalCerradas = sql<number>`COUNT(${everClosed.opportunityId})`;
 			const porcentaje = sql<number>`ROUND(COUNT(${everClosed.opportunityId}) * 100.0 / NULLIF(COUNT(${opportunities.id}), 0), 1)`;
 
-			const [totalRows, periodCloseRows, porFuente, registrosRaw] =
-				await Promise.all([
-					db
-						.select({
-							totalOportunidades: count(opportunities.id),
-							totalCerradas,
-							porcentaje,
-						})
-						.from(opportunities)
-						.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
-						.where(baseWhere),
+			const [
+				totalRows,
+				periodCloseRows,
+				porFuente,
+				cierresPeriodoPorFuente,
+				registrosRaw,
+			] = await Promise.all([
+				db
+					.select({
+						totalOportunidades: count(opportunities.id),
+						totalCerradas,
+						porcentaje,
+					})
+					.from(opportunities)
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere),
 
-					db
-						.select({ totalCierresPeriodo: count(opportunities.id) })
-						.from(firstClosedStageDates)
-						.innerJoin(
-							opportunities,
-							eq(firstClosedStageDates.opportunityId, opportunities.id),
-						)
-						.where(
-							and(
-								gte(firstClosedStageDates.firstClosedStageAt, start),
-								lte(firstClosedStageDates.firstClosedStageAt, end),
-								ne(opportunities.status, MIGRATED_OPPORTUNITY_STATUS),
-							),
+				db
+					.select({ totalCierresPeriodo: count(opportunities.id) })
+					.from(firstClosedStageDates)
+					.innerJoin(
+						opportunities,
+						eq(firstClosedStageDates.opportunityId, opportunities.id),
+					)
+					.where(
+						and(
+							gte(firstClosedStageDates.firstClosedStageAt, start),
+							lte(firstClosedStageDates.firstClosedStageAt, end),
+							ne(opportunities.status, MIGRATED_OPPORTUNITY_STATUS),
 						),
+					),
 
-					db
-						.select({
-							source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
-							totalOportunidades: count(opportunities.id),
-							totalCerradas,
-							porcentaje,
-						})
-						.from(opportunities)
-						.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
-						.where(baseWhere)
-						.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
-						.orderBy(desc(count(opportunities.id))),
+				db
+					.select({
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+						totalOportunidades: count(opportunities.id),
+						totalCerradas,
+						porcentaje,
+					})
+					.from(opportunities)
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere)
+					.groupBy(sql`COALESCE(${opportunities.source}, 'other')`)
+					.orderBy(desc(count(opportunities.id))),
 
-					db
-						.select({
-							id: opportunities.id,
-							createdAt: opportunities.createdAt,
-							source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
-							nombre: sql<
-								string | null
-							>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
-							etapaNombre: salesStages.name,
-							etapaPorcentaje: salesStages.closurePercentage,
-							cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`,
-						})
-						.from(opportunities)
-						.leftJoin(leads, eq(opportunities.leadId, leads.id))
-						.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-						.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
-						.where(baseWhere)
-						.orderBy(desc(opportunities.createdAt))
-						.limit(MAX_REPORT_ROWS + 1),
-				]);
+				db
+					.select({
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+						totalCierresPeriodo: count(opportunities.id),
+					})
+					.from(firstClosedStageDates)
+					.innerJoin(
+						opportunities,
+						eq(firstClosedStageDates.opportunityId, opportunities.id),
+					)
+					.where(
+						and(
+							gte(firstClosedStageDates.firstClosedStageAt, start),
+							lte(firstClosedStageDates.firstClosedStageAt, end),
+							ne(opportunities.status, MIGRATED_OPPORTUNITY_STATUS),
+						),
+					)
+					.groupBy(sql`COALESCE(${opportunities.source}, 'other')`),
+
+				db
+					.select({
+						id: opportunities.id,
+						createdAt: opportunities.createdAt,
+						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
+						nombre: sql<
+							string | null
+						>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
+						etapaNombre: salesStages.name,
+						etapaPorcentaje: salesStages.closurePercentage,
+						cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`,
+					})
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.leftJoin(everClosed, eq(opportunities.id, everClosed.opportunityId))
+					.where(baseWhere)
+					.orderBy(desc(opportunities.createdAt))
+					.limit(MAX_REPORT_ROWS + 1),
+			]);
 
 			if (registrosRaw.length > MAX_REPORT_ROWS) {
 				throw new ORPCError("BAD_REQUEST", {
@@ -657,20 +855,28 @@ export const getReportePorcentajeEfectividad =
 				});
 			}
 
-			return {
-				total: {
-					totalOportunidades: totalRows[0]?.totalOportunidades ?? 0,
-					totalCerradas: totalRows[0]?.totalCerradas ?? 0,
-					totalCierresPeriodo:
-						periodCloseRows[0]?.totalCierresPeriodo ?? 0,
-					porcentaje: totalRows[0]?.porcentaje ?? 0,
-				},
-				porFuente: porFuente.map((row) => ({
+			const porFuenteRows = buildPorcentajeEfectividadFuenteRows(
+				porFuente.map((row) => ({
 					source: row.source,
 					totalOportunidades: row.totalOportunidades,
 					totalCerradas: row.totalCerradas ?? 0,
 					porcentaje: row.porcentaje ?? 0,
 				})),
+				cierresPeriodoPorFuente.map((row) => ({
+					source: row.source,
+					totalCierresPeriodo: row.totalCierresPeriodo,
+				})),
+			);
+
+			return {
+				total: {
+					totalOportunidades: totalRows[0]?.totalOportunidades ?? 0,
+					totalCerradas: totalRows[0]?.totalCerradas ?? 0,
+					totalCierresPeriodo: periodCloseRows[0]?.totalCierresPeriodo ?? 0,
+					porcentaje: totalRows[0]?.porcentaje ?? 0,
+				},
+				porFuente: porFuenteRows,
+				porTipoCanal: aggregateEfectividadPorTipoCanal(porFuenteRows),
 				registros: registrosRaw.map((row) => ({
 					id: row.id,
 					createdAt: row.createdAt,
@@ -715,8 +921,9 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 
 		// Fallback a opportunities.createdAt cuando leadId es null (oportunidades
 		// vinculadas directamente a empresa sin prospecto previo).
+		const diasDesdeCreacionBase = sql<number>`EXTRACT(EPOCH FROM (${firstClosedStageDates.firstClosedStageAt} - COALESCE(${leads.createdAt}, ${opportunities.createdAt}))) / ${SECONDS_PER_DAY}`;
 		const diasDesdeCreacion = (fn: "AVG" | "MIN" | "MAX") =>
-			sql<number>`ROUND(${sql.raw(fn)}(EXTRACT(EPOCH FROM (${firstClosedStageDates.firstClosedStageAt} - COALESCE(${leads.createdAt}, ${opportunities.createdAt}))) / ${SECONDS_PER_DAY}), 1)`;
+			sql<number>`ROUND(${sql.raw(fn)}(${diasDesdeCreacionBase}), 1)`;
 
 		const baseWhere = and(
 			gte(firstClosedStageDates.firstClosedStageAt, start),
@@ -745,6 +952,7 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 					avgDias: diasDesdeCreacion("AVG"),
 					minDias: diasDesdeCreacion("MIN"),
 					maxDias: diasDesdeCreacion("MAX"),
+					totalDias: sql<number>`SUM(${diasDesdeCreacionBase})`,
 				})
 				.from(firstClosedStageDates)
 				.innerJoin(
@@ -757,6 +965,15 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 				.orderBy(desc(count())),
 		]);
 
+		const porFuenteRows = porFuente.map((row) => ({
+			source: row.source,
+			totalCreditos: row.totalCreditos,
+			avgDias: row.avgDias ?? 0,
+			totalDias: row.totalDias ?? 0,
+			minDias: row.minDias ?? 0,
+			maxDias: row.maxDias ?? 0,
+		}));
+
 		return {
 			total: {
 				totalCreditos: totalRows[0]?.totalCreditos ?? 0,
@@ -764,13 +981,8 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 				minDias: totalRows[0]?.minDias ?? 0,
 				maxDias: totalRows[0]?.maxDias ?? 0,
 			},
-			porFuente: porFuente.map((row) => ({
-				source: row.source,
-				totalCreditos: row.totalCreditos,
-				avgDias: row.avgDias ?? 0,
-				minDias: row.minDias ?? 0,
-				maxDias: row.maxDias ?? 0,
-			})),
+			porFuente: porFuenteRows,
+			porTipoCanal: aggregateTiempoCierrePorTipoCanal(porFuenteRows),
 		};
 	});
 

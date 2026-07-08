@@ -426,6 +426,9 @@ export type MoraTotales = {
 export type MoraByEtapaYAsesorResponse = {
 	totales: MoraTotales;
 	porAsesor: ({ asesorId: number; nombre: string; email: string } & MoraTotales)[];
+	fecha?: string;
+	alcance?: "live" | "historico";
+	dataDisponibleDesde?: string;
 };
 
 // ============================================================================
@@ -730,11 +733,22 @@ export class CarteraBackClient {
 						...(params.email_cobrador && {
 							email_asesor: params.email_cobrador,
 						}),
+						// Sin esto el rango de fechas se perdía solo en la ruta POST
+						// (>50 SIFCOs) mientras el GET sí lo mandaba.
+						...(params.fecha_desde && {
+							fecha_desde: params.fecha_desde,
+						}),
+						...(params.fecha_hasta && {
+							fecha_hasta: params.fecha_hasta,
+						}),
 						...(params.capital_min !== undefined && {
 							capital_min: params.capital_min,
 						}),
 						...(params.capital_max !== undefined && {
 							capital_max: params.capital_max,
+						}),
+						...(params.excluir_pagados_mes && {
+							excluir_pagados_mes: true,
 						}),
 						excel: false,
 					}),
@@ -769,6 +783,9 @@ export class CarteraBackClient {
 				}),
 				...(params.capital_max !== undefined && {
 					capital_max: params.capital_max.toString(),
+				}),
+				...(params.excluir_pagados_mes && {
+					excluir_pagados_mes: "true",
 				}),
 				excel: "false",
 			});
@@ -1594,9 +1611,15 @@ export class CarteraBackClient {
 	// REPORTES
 	// ========================================================================
 
-	async getMoraByEtapaYAsesor(params?: { emailCobrador?: string }) {
+	async getMoraByEtapaYAsesor(params?: {
+		emailCobrador?: string;
+		fecha?: string;
+		asesores?: number[];
+	}) {
 		const queryParams = new URLSearchParams();
 		if (params?.emailCobrador) queryParams.set("email_cobrador", params.emailCobrador);
+		if (params?.fecha) queryParams.set("fecha", params.fecha);
+		if (params?.asesores?.length) queryParams.set("asesores", params.asesores.join(","));
 		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
 		return this.request<MoraByEtapaYAsesorResponse>(
 			`/reportes/mora-por-etapa-asesor${qs}`,

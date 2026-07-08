@@ -3,6 +3,8 @@ import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	__resetMoraBucketsCacheForTests,
 	estadoMoraPorCuotas,
+	getBucketsParaUI,
+	getBucketsParaUIAsync,
 	labelPorEstadoMora,
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
@@ -188,6 +190,137 @@ describe("estadoMoraPorCuotas", () => {
 		// comportamiento determinístico, documentado, no azar de iteración.
 		const rango = rangoCuotasPorEstadoMora("mora_120");
 		expect(rango).toEqual({ min: 10, max: 10 });
+	});
+});
+
+describe("getBucketsParaUI", () => {
+	let getBucketsCatalogoSpy: ReturnType<
+		typeof spyOn<typeof carteraBackClient, "getBucketsCatalogo">
+	>;
+
+	beforeEach(() => {
+		__resetMoraBucketsCacheForTests();
+		getBucketsCatalogoSpy = spyOn(carteraBackClient, "getBucketsCatalogo");
+	});
+
+	test("falls back to MORA_BUCKETS estático (con prefijo, color null) cuando el catálogo dinámico no cargó", () => {
+		getBucketsCatalogoSpy.mockRejectedValue(new Error("cartera-back down"));
+
+		const ui = getBucketsParaUI();
+
+		expect(ui).toEqual([
+			{ estadoMora: "al_dia", label: "Cartera Sana", prefijo: "B0", color: null, orden: 0 },
+			{ estadoMora: "mora_30", label: "Alerta Temprana", prefijo: "B1", color: null, orden: 1 },
+			{ estadoMora: "mora_60", label: "Gestión Activa", prefijo: "B2", color: null, orden: 2 },
+			{ estadoMora: "mora_90", label: "Rescate", prefijo: "B3", color: null, orden: 3 },
+			{ estadoMora: "mora_120", label: "Última Instancia / Pre Jurídico", prefijo: "B4", color: null, orden: 4 },
+			{ estadoMora: "mora_120_plus", label: "Jurídico", prefijo: "B5", color: null, orden: 5 },
+		]);
+	});
+
+	test("propaga prefijo/color/orden del catálogo dinámico, ordenado por orden", async () => {
+		const catalogo = buildCatalogoCompleto();
+		// Colores reales (hex) del seed — confirma que sobreviven el mapeo
+		// completo hasta getBucketsParaUI, no solo hasta el cache interno.
+		const conColores = catalogo.map((b) => ({
+			...b,
+			color: `#${b.numero}${b.numero}${b.numero}`,
+		}));
+		getBucketsCatalogoSpy.mockResolvedValue(conColores);
+
+		await refreshMoraBucketsCache();
+		const ui = getBucketsParaUI();
+
+		expect(ui.map((b) => b.orden)).toEqual([0, 1, 2, 3, 4, 5]);
+		expect(ui[0]).toEqual({
+			estadoMora: "al_dia",
+			label: "Cartera Sana",
+			prefijo: "B0",
+			color: "#000",
+			orden: 0,
+		});
+		expect(ui[5]).toEqual({
+			estadoMora: "mora_120_plus",
+			label: "Jurídico",
+			prefijo: "B5",
+			color: "#555",
+			orden: 5,
+		});
+	});
+
+	test("respeta orden no-secuencial del catálogo dinámico (no el orden de llegada)", async () => {
+		// dedup/orden ya se prueban arriba contra rangoCuotasPorEstadoMora; acá
+		// se confirma que getBucketsParaUI también ordena por `orden`, no
+		// devuelve la lista en el orden crudo que llegó del catálogo.
+		const catalogo = buildCatalogoCompleto().map((b) =>
+			b.numero === 0 ? { ...b, orden: 99 } : b,
+		);
+		getBucketsCatalogoSpy.mockResolvedValue(catalogo);
+
+		await refreshMoraBucketsCache();
+		const ui = getBucketsParaUI();
+
+		expect(ui[ui.length - 1].estadoMora).toBe("al_dia");
+		expect(ui[0].estadoMora).toBe("mora_30");
+	});
+});
+
+describe("getBucketsParaUIAsync", () => {
+	let getBucketsCatalogoSpy: ReturnType<
+		typeof spyOn<typeof carteraBackClient, "getBucketsCatalogo">
+	>;
+
+	beforeEach(() => {
+		__resetMoraBucketsCacheForTests();
+		getBucketsCatalogoSpy = spyOn(carteraBackClient, "getBucketsCatalogo");
+	});
+
+	test("espera el primer refresh en cold-start: devuelve el catálogo dinámico, no el fallback estático", async () => {
+		// Sin este await, la primera llamada tras un restart del server (cache
+		// nunca poblado) devolvía MORA_BUCKETS (color: null, labels genéricos)
+		// aunque cartera-back esté sano — porque maybeRefreshInBackground()
+		// dispara el fetch sin esperarlo. getBucketsParaUIAsync SÍ espera
+		// cuando el cache está vacío.
+		const catalogo = buildCatalogoCompleto();
+		const conColores = catalogo.map((b) => ({
+			...b,
+			color: `#${b.numero}${b.numero}${b.numero}`,
+		}));
+		getBucketsCatalogoSpy.mockResolvedValue(conColores);
+
+		const ui = await getBucketsParaUIAsync();
+
+		expect(ui[0]).toEqual({
+			estadoMora: "al_dia",
+			label: "Cartera Sana",
+			prefijo: "B0",
+			color: "#000",
+			orden: 0,
+		});
+	});
+
+	test("cache ya poblado: responde directo sin esperar ningún refresh", async () => {
+		const catalogo = buildCatalogoCompleto();
+		getBucketsCatalogoSpy.mockResolvedValue(catalogo);
+		await refreshMoraBucketsCache();
+
+		const ui = await getBucketsParaUIAsync();
+
+		expect(ui[0].estadoMora).toBe("al_dia");
+	});
+
+	test("si el refresh falla en cold-start, cae al fallback estático sin colgarse", async () => {
+		getBucketsCatalogoSpy.mockRejectedValue(new Error("cartera-back down"));
+
+		const ui = await getBucketsParaUIAsync();
+
+		expect(ui[0]).toEqual({
+			estadoMora: "al_dia",
+			label: "Cartera Sana",
+			prefijo: "B0",
+			color: null,
+			orden: 0,
+		});
 	});
 });
 

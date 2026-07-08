@@ -40,11 +40,11 @@ import {
 } from "../db/schema/crm";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 } from "../lib/cobros-plantillas";
-import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
@@ -52,13 +52,14 @@ import {
 	isTestModeEnabled,
 	TEST_EMAIL,
 } from "../lib/messaging-test-mode";
+import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
-	estadoMoraPorCuotas,
 	ESTADOS_AGING_VALIDOS,
+	estadoMoraPorCuotas,
+	getBucketsParaUIAsync,
 	MORA_BUCKETS,
 	rangoCuotasPorEstadoMora,
 } from "../lib/moraBuckets";
-import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
@@ -423,9 +424,9 @@ export const cobrosRouter = {
 					// Se itera sobre las keys reales de `porCuotasAtrasadas` (no una lista
 					// fija "0".."5") para que un bucket nuevo o renumerado en el catálogo
 					// no quede excluido silenciosamente del embudo/porcentajes del CRM.
-					const cuotasKeys = Object.keys(
-						statsResponse.porCuotasAtrasadas,
-					).sort((a, b) => Number(a) - Number(b));
+					const cuotasKeys = Object.keys(statsResponse.porCuotasAtrasadas).sort(
+						(a, b) => Number(a) - Number(b),
+					);
 
 					const bucketsFunnel = cuotasKeys.map((key) => {
 						const bucketStats = statsResponse.porCuotasAtrasadas[key];
@@ -467,7 +468,8 @@ export const cobrosRouter = {
 								montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
 								sumaCapital:
 									statsResponse.porEstado.cancelado?.sumaCapital || "0",
-								porcentaje: statsResponse.porEstado.cancelado?.porcentaje || "0",
+								porcentaje:
+									statsResponse.porEstado.cancelado?.porcentaje || "0",
 							},
 							{
 								estadoMora: "incobrable",
@@ -475,7 +477,8 @@ export const cobrosRouter = {
 								montoTotal: statsResponse.porEstado.incobrable?.sumaMora || "0",
 								sumaCapital:
 									statsResponse.porEstado.incobrable?.sumaCapital || "0",
-								porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
+								porcentaje:
+									statsResponse.porEstado.incobrable?.porcentaje || "0",
 							},
 						],
 						activeEstados,
@@ -1511,6 +1514,12 @@ export const cobrosRouter = {
 
 			return casoActualizado[0];
 		}),
+
+	// Catálogo de buckets para render en la UI (label/color/orden por etapa) —
+	// evita que el frontend mantenga sus propias copias hardcodeadas.
+	getBucketsCatalogo: cobrosProcedure.handler(async () => {
+		return getBucketsParaUIAsync();
+	}),
 
 	// Obtener usuarios con rol de cobros para asignación
 	getUsuariosCobros: cobrosSupervisorProcedure.handler(async () => {

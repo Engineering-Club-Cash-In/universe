@@ -1361,14 +1361,21 @@ export async function getCreditosWithUserByMesAnio(
         const fecha_inicio = fechaInicioMap[creditoId] || null;
 
         // Último bucket del motor; fallback al derivado vivo solo si el motor
-        // aún no vio el crédito (sin INICIAL).
-        const numeroBucket =
-          ultimoBucketMap.get(creditoId) ??
-          bucketDeCredito(
-            row.creditos.statusCredit,
-            mora?.cuotas_atrasadas ?? 0,
-            catalogoBuckets,
-          );
+        // aún no vio el crédito (sin INICIAL). Fuera del funnel NO se consulta
+        // el historial (review Codex): un crédito que tuvo bucket y luego pasó
+        // a CANCELADO/EN_CONVENIO/etc. conservaría su último bucket como
+        // zombie — el motor ya no lo trackea, así que bucket = null.
+        const fueraDelFunnel = STATUS_BUCKET_FUERA.includes(
+          row.creditos.statusCredit,
+        );
+        const numeroBucket = fueraDelFunnel
+          ? null
+          : ultimoBucketMap.get(creditoId) ??
+            bucketDeCredito(
+              row.creditos.statusCredit,
+              mora?.cuotas_atrasadas ?? 0,
+              catalogoBuckets,
+            );
         const bucket =
           numeroBucket == null ? null : bucketDisplayMap.get(numeroBucket) ?? null;
 

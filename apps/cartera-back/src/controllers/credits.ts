@@ -39,7 +39,7 @@ import {
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
-import { bucketDeCredito, BucketCatalogo, getBucketsCatalogo } from "./latefee";
+import { bucketDeCredito, BucketCatalogo, getBucketsCatalogo, STATUS_BUCKET_FUERA } from "./latefee";
 
 // Fallback B0-B5 — usado si el catálogo dinámico `cartera.buckets` no
 // responde (DB caída, migración pendiente). Incluye `estados_incluidos` en B5
@@ -653,7 +653,10 @@ export async function getCreditosWithUserByMesAnio(
   // `cuotas_atrasadas` (que sólo hacía `= N`). Si se envían, tienen prioridad.
   // `cuotas_max` undefined = sin tope (>= cuotas_min).
   cuotas_min?: number,
-  cuotas_max?: number
+  cuotas_max?: number,
+  // 🪣 COBROS-02: filtro por BUCKET derivado (números del catálogo, ej. [1] o
+  // [4,5]). Usa las MISMAS reglas que la columna `bucket` de esta respuesta.
+  buckets_numeros?: number[]
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -853,6 +856,41 @@ export async function getCreditosWithUserByMesAnio(
 
   if (aseguradora_id !== undefined) {
     conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
+  }
+
+  // 🪣 COBROS-02: filtro por BUCKET (B0-B5) derivado con las MISMAS reglas que
+  // la columna `bucket` de esta respuesta (bucketDeCredito): fuera del funnel
+  // queda excluido SIEMPRE; un estado en `buckets.estados_incluidos` fuerza su
+  // bucket (INCOBRABLE→B5, aunque su mora esté apagada) con prioridad sobre el
+  // rango de cuotas de la mora ACTIVA; sin mora activa cuenta 0 cuotas (B0).
+  // Así lo que se filtra es exactamente lo que se muestra.
+  if (buckets_numeros && buckets_numeros.length > 0) {
+    console.log(`🔎 Filtrando por bucket(s): ${buckets_numeros.join(", ")}`);
+    const numerosSql = sql.join(buckets_numeros.map((n) => sql`${n}`), sql`, `);
+    const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+    conditions.push(sql`${creditos.statusCredit} NOT IN (${fueraSql})`);
+    conditions.push(sql`(
+      EXISTS (
+        SELECT 1 FROM cartera.buckets b
+         WHERE b.activo = true
+           AND ${creditos.statusCredit} = ANY (b.estados_incluidos)
+           AND b.numero IN (${numerosSql})
+      )
+      OR (
+        NOT EXISTS (
+          SELECT 1 FROM cartera.buckets b
+           WHERE b.activo = true
+             AND ${creditos.statusCredit} = ANY (b.estados_incluidos)
+        )
+        AND EXISTS (
+          SELECT 1 FROM cartera.buckets b
+           WHERE b.activo = true
+             AND b.numero IN (${numerosSql})
+             AND COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= b.cuotas_min
+             AND (b.cuotas_max IS NULL OR COALESCE(${moras_credito.cuotas_atrasadas}, 0) <= b.cuotas_max)
+        )
+      )
+    )`);
   }
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;

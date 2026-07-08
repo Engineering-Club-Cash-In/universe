@@ -108,6 +108,7 @@ export const Route = createFileRoute("/crm/leads")({
 	validateSearch: z.object({
 		companyId: z.string().optional(),
 		leadId: z.string().optional(),
+		opportunityId: z.string().optional(),
 	}).parse,
 });
 
@@ -291,6 +292,7 @@ function RouteComponent() {
 			: () => Promise.resolve([]),
 		enabled: !!selectedLead?.id && isDetailsDialogOpen,
 	});
+	const analysisOpportunityId = search.opportunityId;
 
 	// Query para obtener un lead específico por ID (desde URL)
 	const specificLeadQuery = useQuery({
@@ -2697,6 +2699,7 @@ function RouteComponent() {
 								{selectedLead?.id && (
 									<BankStatementAnalysis
 										leadId={selectedLead.id}
+										opportunityId={analysisOpportunityId}
 										onAnalysisComplete={() => creditAnalysisQuery.refetch()}
 									/>
 								)}

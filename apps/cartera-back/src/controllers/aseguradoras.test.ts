@@ -12,6 +12,7 @@ mock.module("../database", () => ({
     insert: () => ({ values: () => ({ returning: () => Promise.resolve([]) }) }),
     update: () => ({ set: () => ({ where: () => Promise.resolve([]) }) }),
   },
+  client: {},
 }));
 
 // Also mock ExcelJS to avoid needing the real library in unit tests

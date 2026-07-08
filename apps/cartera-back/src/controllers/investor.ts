@@ -4320,7 +4320,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           }
 
           // 5C) Regla de cierre: tras liquidar, cualquier estado de devolución
-          // del/los crédito(s) procesado(s) pasa a COMPLETADO.
+          // del/los crédito(s) procesado(s) pasa a COMPLETADO (solo si ya estaba VERIFICADO).
           if (creditoIdsConPagos.length > 0) {
             await db
               .update(creditos)
@@ -4328,7 +4328,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               .where(
                 and(
                   inArray(creditos.credito_id, creditoIdsConPagos),
-                  ne(creditos.estado_devolucion, "NO_APLICA")
+                  eq(creditos.estado_devolucion, "VERIFICADO")
                 )
               );
 

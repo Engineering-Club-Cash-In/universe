@@ -4300,7 +4300,6 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                 body: {
                   inversionista_id: inv_id,
                   creditos: creditoIdsSalida,
-                  skipStatusAndEmail: true,
                 },
                 set: { status: 200 },
                 request: {} as any,

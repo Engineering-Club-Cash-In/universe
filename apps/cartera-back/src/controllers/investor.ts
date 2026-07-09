@@ -4351,34 +4351,53 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                     )
                   );
 
-                const creditoIdsConMontoPendiente = filasEspejoPrevias
-                  .filter((f) => Number(f.monto_aportado) !== 0)
-                  .map((f) => f.credito_id);
+                // Un crédito solo es válido si tiene fila en el espejo para este
+                // inversionista Y su monto_aportado es 0. Se excluye tanto el que
+                // tiene monto != 0 como el que NO tiene fila espejo (estado anómalo:
+                // exitInvestor trataría la fila faltante como no-fatal y movería el
+                // padre igual, saltándose el safeguard). Los excluidos quedan en
+                // VERIFICADO para revisión manual.
+                const creditoIdsConEspejoEnCero = new Set(
+                  filasEspejoPrevias
+                    .filter((f) => Number(f.monto_aportado) === 0)
+                    .map((f) => f.credito_id)
+                );
+
+                const creditoIdsDevolucionValidos = creditoIdsDevolucion.filter((id) =>
+                  creditoIdsConEspejoEnCero.has(id)
+                );
+                const creditoIdsConMontoPendiente = creditoIdsDevolucion.filter(
+                  (id) => !creditoIdsConEspejoEnCero.has(id)
+                );
 
                 if (creditoIdsConMontoPendiente.length > 0) {
+                  const montoPorCredito = new Map(
+                    filasEspejoPrevias.map((f) => [f.credito_id, f.monto_aportado])
+                  );
                   console.warn(
-                    `  ⚠️  monto_aportado en espejo != 0 antes de exitInvestor para inversionista ${inv_id} — se omiten:`,
-                    filasEspejoPrevias
-                      .filter((f) => creditoIdsConMontoPendiente.includes(f.credito_id))
-                      .map((f) => `credito_id=${f.credito_id} monto_aportado=${f.monto_aportado}`)
+                    `  ⚠️  créditos con espejo inválido (monto != 0 o sin fila) antes de exitInvestor para inversionista ${inv_id} — se omiten:`,
+                    creditoIdsConMontoPendiente
+                      .map((id) =>
+                        montoPorCredito.has(id)
+                          ? `credito_id=${id} monto_aportado=${montoPorCredito.get(id)}`
+                          : `credito_id=${id} SIN_FILA_ESPEJO`
+                      )
                       .join(", ")
                   );
                 }
 
-                const creditoIdsDevolucionValidos = creditoIdsDevolucion.filter(
-                  (id) => !creditoIdsConMontoPendiente.includes(id)
-                );
-
                 if (creditoIdsDevolucionValidos.length > 0) {
-                  const exitResultDevolucion: any = await exitInvestor({
-                    body: {
-                      inversionista_id: inv_id,
-                      creditos: creditoIdsDevolucionValidos,
-                      skipStatusAndEmail: true,
+                  const exitResultDevolucion: any = await exitInvestor(
+                    {
+                      body: {
+                        inversionista_id: inv_id,
+                        creditos: creditoIdsDevolucionValidos,
+                      },
+                      set: { status: 200 },
+                      request: {} as any,
                     },
-                    set: { status: 200 },
-                    request: {} as any,
-                  });
+                    { skipStatusAndEmail: true }
+                  );
 
                   if (!exitResultDevolucion?.success) {
                     // exitInvestor falló por completo: no se transfirió nada. No se
@@ -5372,7 +5391,15 @@ const CUBE_INVESTMENT_ID = 86;
 // - 404: inversionista no encontrado.
 // - 500: error inesperado (la transacción hace rollback).
 // ============================================================================
-export const exitInvestor = async ({ body, set, request }: any) => {
+// El segundo argumento `opts` NO viene del body HTTP — solo lo pueden pasar
+// las llamadas internas (ver liquidateByInvestorId). El router pasa únicamente
+// el contexto de Elysia, así que un caller HTTP nunca puede setear
+// skipStatusAndEmail, sin importar props extra en el body.
+export const exitInvestor = async (
+  { body, set, request }: any,
+  opts: { skipStatusAndEmail?: boolean } = {}
+) => {
+  const skipStatusAndEmail = opts.skipStatusAndEmail === true;
   // ── Helper de logging con prefijo único por request ──
   // runId: 6 chars alfanuméricos en mayúsculas, para hilar logs de un
   // mismo request cuando hay múltiples corriendo en paralelo.
@@ -5392,13 +5419,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
     // ========================================================================
     // Se valida manualmente (Elysia ya valida el schema a nivel router, pero
     // acá defendemos por si se llama internamente sin pasar por el router).
-    //
-    // skipStatusAndEmail: SOLO para llamadas internas (ver liquidateByInvestorId).
-    // El schema del router (routers/investor.ts) NO declara este campo, así que
-    // Elysia lo descarta en /investor/exit — un caller HTTP no puede activarlo.
-    // Si algún día se agrega al schema del router, revisar que siga sin ser
-    // controlable por clientes externos.
-    const { inversionista_id, creditos: creditoIds, skipStatusAndEmail } = body ?? {};
+    const { inversionista_id, creditos: creditoIds } = body ?? {};
 
     if (typeof inversionista_id !== "number" || !Number.isFinite(inversionista_id)) {
       warn("❌ Validación falló: inversionista_id inválido →", inversionista_id);

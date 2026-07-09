@@ -203,7 +203,7 @@ export function BucketsHistorial() {
                     <TableHead className="font-bold text-indigo-800 text-center">Evento</TableHead>
                     <TableHead className="font-bold text-indigo-800 text-center">Transición</TableHead>
                     <TableHead className="font-bold text-indigo-800 text-center">Cuotas</TableHead>
-                    <TableHead className="font-bold text-indigo-800">Asesor</TableHead>
+                    <TableHead className="font-bold text-indigo-800">Asesor actual</TableHead>
                     <TableHead className="font-bold text-indigo-800 text-center">Origen</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -230,7 +230,19 @@ export function BucketsHistorial() {
                         </span>
                       </TableCell>
                       <TableCell className="text-center text-black">{r.cuotas_atrasadas_nuevas ?? "—"}</TableCell>
-                      <TableCell className="text-black text-xs">{r.asesor || "—"}</TableCell>
+                      {/* Dueño ACTUAL del crédito (review Codex: el join es vivo, cambia
+                          con cada reasignación). En BAJADAs se agrega la atribución
+                          inmutable del evento (h.asesor_id) cuando difiere del actual. */}
+                      <TableCell className="text-black text-xs">
+                        {r.asesor || "—"}
+                        {r.tipo_evento === "BAJADA" &&
+                          r.asesor_atribucion &&
+                          r.asesor_atribucion !== r.asesor && (
+                            <span className="block text-[10px] text-emerald-700">
+                              curó: {r.asesor_atribucion}
+                            </span>
+                          )}
+                      </TableCell>
                       <TableCell className="text-center">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${origenBadgeClass(r.origen)}`} title={r.motivo ?? undefined}>
                           {origenLabel(r.origen)}

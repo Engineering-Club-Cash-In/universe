@@ -25,8 +25,13 @@
 //     ANTES de hacer nada, para confirmar contra qué base se corre.
 //   - DRY-RUN por defecto: solo calcula y muestra el monto a reinvertir por
 //     saliente. Ningún UPDATE/INSERT/CREATE TABLE ocurre sin `--apply`.
-//   - Backup: antes de tocar nada, crea 2 tablas `_bk_cube_compra_reinv_*`
-//     con snapshot de las filas de los 9 créditos (padre + espejo).
+//   - Backup: antes de tocar nada, crea 3 tablas `_bk_cube_compra_reinv_*`:
+//     snapshot COMPLETO (whole-table, sin WHERE) de `creditos_inversionistas`
+//     y `creditos_inversionistas_espejo` (Movimiento B muta candidatos
+//     elegidos dinámicamente que NO son necesariamente los 9 créditos del
+//     lote, así que el backup no puede acotarse a esos 9), más un snapshot
+//     acotado de `estado_devolucion` de los 9 (lo único que Movimiento A
+//     cambia en `creditos`).
 //   - Movimiento A corre en una transacción POR CRÉDITO (si un crédito
 //     falla, no arrastra a los demás). Movimiento B usa la transacción
 //     propia de addInvestorToCredit (una por saliente).
@@ -126,7 +131,15 @@ async function main() {
   }
 
   // ──────────────────────────────────────────────────────────────────
-  // 2) BACKUP de filas afectadas (padre + espejo de los 9 créditos)
+  // 2) BACKUP, ANTES de mutar nada.
+  //
+  // Movimiento B (addInvestorToCredit en modo automático) hace delete+rebuild
+  // sobre `creditos_inversionistas` / `_espejo` en créditos CANDIDATOS
+  // elegidos dinámicamente (no son los 9 de CREDITOS_A) — no hay forma de
+  // saber de antemano cuáles son, así que el backup de esas dos tablas debe
+  // ser de TABLA COMPLETA (sin WHERE) para que Movimiento B sea reversible.
+  // Movimiento A solo cambia `estado_devolucion` en `creditos`, y solo en
+  // los 9 créditos del lote, así que ese snapshot sí puede acotarse a ellos.
   //
   // NOTA: `= any(${idsCred})` con un arreglo JS interpolado directo en un
   // `sql` tag de drizzle-orm/postgres-js revienta con
@@ -137,11 +150,20 @@ async function main() {
   // ──────────────────────────────────────────────────────────────────
   const stamp = FECHA_COMPRA.replace(/-/g, "");
   const idsCredLiteral = dsql.raw(idsCred.join(","));
-  await db.execute(dsql`create table if not exists cartera._bk_cube_compra_reinv_${dsql.raw(stamp)}_ci as
-    select * from cartera.creditos_inversionistas where credito_id in (${idsCredLiteral})`);
-  await db.execute(dsql`create table if not exists cartera._bk_cube_compra_reinv_${dsql.raw(stamp)}_esp as
-    select * from cartera.creditos_inversionistas_espejo where credito_id in (${idsCredLiteral})`);
-  console.log(`Backup creado: cartera._bk_cube_compra_reinv_${stamp}_{ci,esp}`);
+
+  const bkCi = await db.execute(dsql`create table cartera._bk_cube_compra_reinv_${dsql.raw(stamp)}_ci as
+    select * from cartera.creditos_inversionistas`);
+  const bkEsp = await db.execute(dsql`create table cartera._bk_cube_compra_reinv_${dsql.raw(stamp)}_esp as
+    select * from cartera.creditos_inversionistas_espejo`);
+  const bkEstado = await db.execute(dsql`create table cartera._bk_cube_compra_reinv_${dsql.raw(stamp)}_estado as
+    select credito_id, estado_devolucion from cartera.creditos where credito_id in (${idsCredLiteral})`);
+
+  const rowCount = (r: any) => (r as any).count ?? (r as any).rowCount ?? "?";
+  console.log(
+    `Backup creado: cartera._bk_cube_compra_reinv_${stamp}_ci (${rowCount(bkCi)} filas, tabla completa), ` +
+      `_esp (${rowCount(bkEsp)} filas, tabla completa), ` +
+      `_estado (${rowCount(bkEstado)} filas, los 9 créditos)`,
+  );
 
   // ──────────────────────────────────────────────────────────────────
   // 3) MOVIMIENTO A: absorber + estado_devolucion -> NO_APLICA

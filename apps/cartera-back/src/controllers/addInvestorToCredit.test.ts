@@ -10,4 +10,8 @@ describe("resolverFechaCompra", () => {
   it("devuelve undefined cuando no viene fecha (deja el default now())", () => {
     expect(resolverFechaCompra(undefined)).toBeUndefined();
   });
+
+  it("rechaza una fecha de calendario inválida (rollover silencioso)", () => {
+    expect(() => resolverFechaCompra("2026-02-30")).toThrow("fecha_compra inválida: 2026-02-30");
+  });
 });

@@ -144,10 +144,19 @@ export async function getCreditCandidates(
   monto?: number,
   limit?: number,
   inversionistaIdSolicitante?: number,
-  porcentaje?: number
+  porcentaje?: number,
+  excluirCreditos: number[] = []
 ): Promise<CreditCandidate[]> {
   console.log("\n🔍 ========== getCreditCandidates ==========");
   console.log(`   monto: ${monto ?? "no especificado"}`);
+  if (excluirCreditos.length > 0) {
+    console.log(`   excluirCreditos: ${excluirCreditos.join(", ")}`);
+  }
+  // drizzle-orm `notInArray` con un arreglo vacío genera SQL inválido
+  // ("NOT IN ()"), así que el filtro solo se agrega si hay algo que excluir.
+  const filtroExclusion = excluirCreditos.length
+    ? [notInArray(creditos.credito_id, excluirCreditos)]
+    : [];
 
   // Para optimizar el rendimiento y aprovechar índices (sargable), calculamos la fecha
   // exacta de inicio de mes en UTC basándonos en la zona horaria de Guatemala.
@@ -184,7 +193,8 @@ export async function getCreditCandidates(
       lt(creditos.fecha_creacion, inicioMesGuateUTC),
       // Solo créditos sin proceso de devolución a Cube (NO_APLICA).
       // PENDIENTE_AUTORIZACION / VERIFICADO / RECHAZADO están en flujo de devolución.
-      eq(creditos.estado_devolucion, "NO_APLICA")
+      eq(creditos.estado_devolucion, "NO_APLICA"),
+      ...filtroExclusion
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
@@ -220,7 +230,8 @@ export async function getCreditCandidates(
         // Solo créditos sin proceso de devolución a Cube.
         // PENDIENTE_AUTORIZACION / VERIFICADO / RECHAZADO están en flujo de
         // devolución a Cube; no deben ofrecerse a inversionistas.
-        eq(creditos.estado_devolucion, "NO_APLICA")
+        eq(creditos.estado_devolucion, "NO_APLICA"),
+        ...filtroExclusion
       )
     );
 

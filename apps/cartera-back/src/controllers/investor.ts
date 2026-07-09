@@ -52,7 +52,7 @@ import {
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
-import { calcDerivadosCubePuro, absorberInversionistaEnCube } from "./absorberEnCube";
+import { absorberInversionistaEnCube } from "./absorberEnCube";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO

@@ -20,11 +20,18 @@ import {
 } from "./assignCapital";
 import { sendInvestorAddedToCreditsNotification } from "@cci/email";
 
-// Convierte "YYYY-MM-DD" a un Date al mediodía local para evitar que el
+// Convierte "YYYY-MM-DD" a un Date al mediodía UTC para evitar que el
 // almacenamiento en timestamptz corra el día. undefined => usar default now().
+// Valida que sea una fecha de calendario real: rechaza tanto el rollover
+// silencioso de JS Date (ej. "2026-02-30" → 2026-03-02) como fechas
+// directamente inválidas (ej. "2026-13-01" → Invalid Date).
 export function resolverFechaCompra(fecha?: string): Date | undefined {
   if (!fecha) return undefined;
-  return new Date(`${fecha}T12:00:00Z`);
+  const d = new Date(`${fecha}T12:00:00Z`);
+  if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== fecha) {
+    throw new Error(`fecha_compra inválida: ${fecha}`);
+  }
+  return d;
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
@@ -93,6 +100,11 @@ const addInvestorToCreditSchema = z.object({
   fecha_compra: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   // Nuevos campos para el buscador de capital
   minimo: z.number().int().positive().optional(),
+  // Créditos a excluir del buscador automático de candidatos (getCreditCandidates).
+  // Uso: scripts de migración que no quieren que un saliente reinvierta de
+  // vuelta en los créditos que él mismo acaba de dejar (p.ej. cubeCompraReinversion).
+  // Se ignora en modo manual (ahí los créditos vienen forzados explícitamente).
+  excluir_creditos: z.array(z.number().int().positive()).optional(),
   // MODO MANUAL: arreglo de { credito_id, monto }. Si viene (y no vacío) se
   // IGNORA el buscador de candidatos y se opera SOLO sobre estos créditos,
   // asignando a cada uno su `monto`. La suma de los montos debe igualar
@@ -348,6 +360,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       minimo,
       manual,
       fecha_compra,
+      excluir_creditos,
     } = parseResult.data;
 
     // ================================================================
@@ -433,7 +446,13 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       console.log(` - porcentaje_inversion: ${porcentaje_inversion}`);
       console.log("================================================================");
 
-      candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentaje_inversion);
+      candidatos = await getCreditCandidates(
+        monto_aportado,
+        minimo,
+        inversionista_id,
+        porcentaje_inversion,
+        excluir_creditos ?? [],
+      );
 
       console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
       candidatos.forEach((c, i) => {

@@ -45,13 +45,22 @@ export function BucketBadge({
   );
 }
 
-// Fecha del evento: mismo criterio que el resto de la app (slice del string
-// que manda el back), con hora — el job corre a fin de día y la hora ubica.
+// Fecha del evento en día GUATEMALA (review Codex): los filtros desde/hasta de
+// estos endpoints cortan por día GT, y el job corre ~23:59 GT (~05:59 UTC del
+// día siguiente) — mostrar el slice UTC descuadraba la fecha visible contra el
+// filtro que incluyó el evento. en-CA da YYYY-MM-DD; si no parsea, slice crudo.
 export const fmtFechaEvento = (v: string) => {
   const s = String(v ?? "");
-  const fecha = s.slice(0, 10);
-  const hora = s.slice(11, 16);
-  return hora ? `${fecha} ${hora}` : fecha;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, 16).replace("T", " ");
+  const fecha = d.toLocaleDateString("en-CA", { timeZone: "America/Guatemala" });
+  const hora = d.toLocaleTimeString("es-GT", {
+    timeZone: "America/Guatemala",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${fecha} ${hora}`;
 };
 
 export const origenLabel = (origen: string) =>

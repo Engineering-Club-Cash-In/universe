@@ -71,7 +71,7 @@ export async function notifyPayInvestors(
 }
 
 // ============================================
-// Obtener detalles de vehículo por número SIFCO
+// Obtener placa/chasis por número SIFCO
 // ============================================
 export interface VehicleDetails {
   id: string;
@@ -103,6 +103,21 @@ export interface VehicleDetailsResponse {
   error?: string;
 }
 
+export type VehicleReportDetails = Pick<VehicleDetails, "licensePlate" | "vinNumber">;
+
+type VehiclesBySifcoApiResponse = {
+  success: boolean;
+  data?: {
+    vehicles?: Array<{
+      numeroSifco: string;
+      licensePlate: string | null;
+      vinNumber: string | null;
+    }>;
+  };
+  message?: string;
+  error?: string;
+};
+
 export async function getVehicleDetailsBySifco(
   numeroSifco: string,
 ): Promise<VehicleDetailsResponse> {
@@ -110,14 +125,16 @@ export async function getVehicleDetailsBySifco(
     const { data } = await crmApi.get("/info/vehicle-details", {
       params: { numero_sifco: numeroSifco },
     });
-    if (!data) { return { success: false, message: "Sin respuesta del CRM" }}
+    if (!data) {
+      return { success: false, message: "Sin respuesta del CRM" };
+    }
 
     const vehicle = data?.data?.vehicle;
-    if (!vehicle) { 
-      console.error(`No contiene datos del vechículo para número ${numeroSifco}`);
-      return { success: false, message: "Vehículo no encontrado en CRM" }; 
+    if (!vehicle) {
+      console.error(`No contiene datos del vehículo para número ${numeroSifco}`);
+      return { success: false, message: "Vehículo no encontrado en CRM" };
     }
-    
+
     console.log("Consultado detalles del vehículo exitosamente");
     return {
       success: true,
@@ -133,4 +150,29 @@ export async function getVehicleDetailsBySifco(
       error: msg,
     };
   }
+}
+
+export async function getVehiclesBySifcoMap(
+  sifcos: string[],
+): Promise<Map<string, VehicleReportDetails>> {
+  const uniqueSifcos = [...new Set(sifcos.map((sifco) => sifco.trim()).filter(Boolean))];
+  const vehicles = new Map<string, VehicleReportDetails>();
+  if (uniqueSifcos.length === 0) return vehicles;
+
+  const { data } = await crmApi.post<VehiclesBySifcoApiResponse>("/info/vehicles-by-sifco", {
+    numero_sifcos: uniqueSifcos,
+  });
+
+  if (!data.success) {
+    throw new Error(data.message || data.error || "Error obteniendo vehículos del CRM");
+  }
+
+  for (const vehicle of data.data?.vehicles ?? []) {
+    vehicles.set(vehicle.numeroSifco, {
+      licensePlate: vehicle.licensePlate ?? "",
+      vinNumber: vehicle.vinNumber ?? "",
+    });
+  }
+
+  return vehicles;
 }

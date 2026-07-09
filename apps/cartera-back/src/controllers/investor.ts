@@ -52,6 +52,7 @@ import {
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
+import { calcDerivadosCubePuro } from "./absorberEnCube";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -5477,35 +5478,6 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           log(`   🟢 CUBE NO existe en el crédito (padre)`);
         }
 
-        // Helper canónico: deriva cuota + montos + IVAs para un row CUBE-puro
-        // (porcentaje_cash_in=100, porcentaje_participacion_inversionista=0)
-        // a partir del monto_aportado final y la tasa del crédito. Replica la
-        // fórmula de `processAndReplaceCreditInvestors` para mantener
-        // consistencia con el resto del sistema.
-        const calcDerivadosCubePuro = (montoAportadoNuevo: Big) => {
-          const porcentajeCashIn = new Big("100");
-          const porcentajeInversion = new Big("0");
-          const cuota = montoAportadoNuevo
-            .times(creditoData.porcentaje_interes)
-            .div(100)
-            .round(2);
-          const montoInversionista = cuota.times(porcentajeInversion).div(100).round(2);
-          const montoCashIn = cuota.times(porcentajeCashIn).div(100).round(2);
-          const ivaInversionista = montoInversionista.gt(0)
-            ? montoInversionista.times(0.12).round(2)
-            : new Big(0);
-          const ivaCashIn = montoCashIn.gt(0)
-            ? montoCashIn.times(0.12).round(2)
-            : new Big(0);
-          return {
-            cuota_inversionista: cuota.toFixed(2),
-            monto_inversionista: montoInversionista.toFixed(2),
-            monto_cash_in: montoCashIn.toFixed(2),
-            iva_inversionista: ivaInversionista.toFixed(2),
-            iva_cash_in: ivaCashIn.toFixed(2),
-          };
-        };
-
         if (!cubeEnPadre) {
           // ──────────────────────────────────────────────────────────────────
           // 4.4A — CASO A: SWAP en PADRE
@@ -5514,7 +5486,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           // cash_in=100 (todo el rendimiento es Cash-In). Cuota e IVAs se
           // recalculan con la fórmula canónica desde la tasa del crédito.
           // ──────────────────────────────────────────────────────────────────
-          const derivadosSwapPadre = calcDerivadosCubePuro(new Big(invEnPadre.monto_aportado));
+          const derivadosSwapPadre = calcDerivadosCubePuro(new Big(invEnPadre.monto_aportado), creditoData.porcentaje_interes);
           log(`   🔄 [PADRE] Caso A (SWAP): inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, CUBE puro 0/100 →`, derivadosSwapPadre);
           const resA = await tx
             .update(creditos_inversionistas)
@@ -5544,7 +5516,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           //   4. Borrar el row del inversionista.
           // No se tocan otros inversionistas del pool.
           // ──────────────────────────────────────────────────────────────────
-          const derivadosMergePadre = calcDerivadosCubePuro(nuevoMontoCubePadre);
+          const derivadosMergePadre = calcDerivadosCubePuro(nuevoMontoCubePadre, creditoData.porcentaje_interes);
           const payload = {
             monto_aportado: nuevoMontoCubePadre.toFixed(8),
             porcentaje_participacion_inversionista: "0",
@@ -5622,7 +5594,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
             // monto_aportado con el valor del PADRE (capital original, sin
             // descuentos por pagos previos). Cuota + 4 derivados se recalculan
             // con la fórmula canónica desde ese mismo monto_aportado.
-            const derivadosSwapEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre);
+            const derivadosSwapEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre, creditoData.porcentaje_interes);
             log(`   🔄 [ESPEJO] Caso A (SWAP): inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, status→completado, CUBE puro 0/100, monto_aportado=${nuevoMontoCubePadre.toFixed(2)} (sincronizado con padre) →`, derivadosSwapEspejo);
             const resEA = await tx
               .update(creditos_inversionistas_espejo)
@@ -5649,7 +5621,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
             // monto_aportado al valor del PADRE (sincroniza capital) y
             // recalcular cuota + 4 derivados con la fórmula canónica.
             log(`   🟡 [ESPEJO] CUBE YA existe en espejo: monto_aportado=${cubeEnEspejo.monto_aportado}, status=${cubeEnEspejo.status}`);
-            const derivadosMergeEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre);
+            const derivadosMergeEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre, creditoData.porcentaje_interes);
 
             const payloadE = {
               monto_aportado: nuevoMontoCubePadre.toFixed(8),

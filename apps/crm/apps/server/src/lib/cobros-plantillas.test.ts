@@ -3,6 +3,8 @@ import { PLANTILLAS_MENSAJES } from "./cobros-plantillas";
 
 const NO_REPLY_WARNING =
 	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+const CONFIRMATION_REQUEST_REGEX =
+	/confirme la recepción|confirmar recepción|confirme recepcion/i;
 
 describe("plantillas masivas de cobros", () => {
 	test("incluyen el aviso de no responder exactamente una vez", () => {
@@ -32,6 +34,16 @@ describe("plantillas masivas de cobros", () => {
 			expect(plantilla.cuerpo, plantilla.id).not.toMatch(
 				/por este medio|por este chat|comunicarse por este medio/i,
 			);
+		}
+	});
+
+	test("no piden confirmar recepcion cuando tienen aviso de no responder", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			if (plantilla.cuerpo.includes(NO_REPLY_WARNING)) {
+				expect(plantilla.cuerpo, plantilla.id).not.toMatch(
+					CONFIRMATION_REQUEST_REGEX,
+				);
+			}
 		}
 	});
 

@@ -88,7 +88,7 @@ Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor} para aplic
 
 ${COBROS_NO_REPLY_WARNING}
 
-Agradecemos confirme la recepción de este mensaje. Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 	},
 	{
 		id: "al_dia",

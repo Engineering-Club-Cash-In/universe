@@ -3,6 +3,8 @@ import { PLANTILLAS_MENSAJES } from "./plantillas-mensajes";
 
 const NO_REPLY_WARNING =
 	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+const CONFIRMATION_REQUEST_REGEX =
+	/confirme la recepción|confirmar recepción|confirme recepcion/i;
 
 describe("plantillas web de cobros", () => {
 	test("incluyen el aviso de no responder en el cuerpo de WhatsApp", () => {
@@ -36,6 +38,18 @@ describe("plantillas web de cobros", () => {
 			expect(cuerpoWhatsapp, plantilla.id).not.toMatch(
 				/por este medio|por este chat|comunicarse por este medio/i,
 			);
+		}
+	});
+
+	test("no piden confirmar recepcion cuando tienen aviso de no responder", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+
+			if (cuerpoWhatsapp.includes(NO_REPLY_WARNING)) {
+				expect(cuerpoWhatsapp, plantilla.id).not.toMatch(
+					CONFIRMATION_REQUEST_REGEX,
+				);
+			}
 		}
 	});
 

@@ -20,6 +20,13 @@ import {
 } from "./assignCapital";
 import { sendInvestorAddedToCreditsNotification } from "@cci/email";
 
+// Convierte "YYYY-MM-DD" a un Date al mediodía local para evitar que el
+// almacenamiento en timestamptz corra el día. undefined => usar default now().
+export function resolverFechaCompra(fecha?: string): Date | undefined {
+  if (!fecha) return undefined;
+  return new Date(`${fecha}T12:00:00`);
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 // ================================================================
@@ -81,6 +88,9 @@ const addInvestorToCreditSchema = z.object({
   // Se sigue aceptando por compatibilidad, pero YA NO se usa para actualizar
   // la fecha de las filas (ni del inversionista nuevo ni del existente).
   fecha_inicio_participacion: z.string().optional(),
+  // Fecha explícita para el registro en compras_credito_inversionista.fecha
+  // (NO afecta fecha_inicio_participacion). YYYY-MM-DD.
+  fecha_compra: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   // Nuevos campos para el buscador de capital
   minimo: z.number().int().positive().optional(),
   // MODO MANUAL: arreglo de { credito_id, monto }. Si viene (y no vacío) se
@@ -337,6 +347,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       // ya NO se desestructura ni se usa: no actualiza la fecha de las filas.
       minimo,
       manual,
+      fecha_compra,
     } = parseResult.data;
 
     // ================================================================
@@ -730,6 +741,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         }
       }
 
+      const fechaCompraResuelta = resolverFechaCompra(fecha_compra);
+
       for (const candidato of candidatos) {
         // ── Si ya se distribuyó todo el monto, no seguir ──
         // En modo manual cada crédito trae su propio monto independiente,
@@ -1098,6 +1111,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             tipoReinvActualPorInv.get(inversionista_id) ??
             null,
           status: statusEspejo,
+          ...(fechaCompraResuelta ? { fecha: fechaCompraResuelta } : {}),
         });
 
         // ================================================================

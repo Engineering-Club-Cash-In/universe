@@ -6086,8 +6086,13 @@ export const exitInvestor = async (
       log(`📧 Correos: enviados=${enviados}, fallidos=${fallidos}`);
     }
 
+    // Cuando skipStatusAndEmail=true no se cambió el status: el inversionista
+    // sigue con el que tenía (invRow.status). Solo pasó a "inactivo" en el
+    // camino normal.
+    const statusFinal = skipStatusAndEmail ? invRow.status : "inactivo";
+
     log(`⏱️  Duración total: ${Date.now() - t0}ms`);
-    log(`✅ DONE — inversionista ${invRow.inversionista_id} inactivado, ${resultados.length} crédito(s), Q${totalTransferido.toFixed(2)} a CUBE`);
+    log(`✅ DONE — inversionista ${invRow.inversionista_id} (status=${statusFinal}), ${resultados.length} crédito(s), Q${totalTransferido.toFixed(2)} a CUBE`);
     log("═══════════════════════════════════════════════════════════");
 
     // ========================================================================
@@ -6099,8 +6104,10 @@ export const exitInvestor = async (
     set.status = 200;
     return {
       success: true,
-      message: `Inversionista inactivado. ${resultados.length} crédito(s) transferido(s) a CUBE. Total: Q${totalTransferido.toFixed(2)}.`,
-      inversionista: { inversionista_id: invRow.inversionista_id, nombre: invRow.nombre, status: "inactivo" },
+      message: skipStatusAndEmail
+        ? `${resultados.length} crédito(s) transferido(s) a CUBE. Total: Q${totalTransferido.toFixed(2)}. (status del inversionista sin cambios)`
+        : `Inversionista inactivado. ${resultados.length} crédito(s) transferido(s) a CUBE. Total: Q${totalTransferido.toFixed(2)}.`,
+      inversionista: { inversionista_id: invRow.inversionista_id, nombre: invRow.nombre, status: statusFinal },
       total_transferido_a_cube: totalTransferido.toFixed(2),
       creditos_procesados: resultados,
       errores,

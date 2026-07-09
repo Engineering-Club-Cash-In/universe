@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { PLANTILLAS_MENSAJES } from "./cobros-plantillas";
+import {
+	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+	PLANTILLAS_MENSAJES,
+	prepararTelefonoAsesorParaEnvio,
+} from "./cobros-plantillas";
 
 const NO_REPLY_WARNING =
 	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
@@ -59,5 +63,25 @@ describe("plantillas masivas de cobros", () => {
 			/boleta o comprobante de pago[^.]*{telefonoAsesor}/i,
 		);
 		expect(preMora?.cuerpo).toMatch(/duda[^.]*{telefonoAsesor}/i);
+	});
+
+	test("descarta plantillas no-reply sin telefono de asesor", () => {
+		const cuerpo = PLANTILLAS_MENSAJES[0].cuerpo;
+
+		for (const telefono of [null, undefined, "", "   "]) {
+			expect(prepararTelefonoAsesorParaEnvio(cuerpo, telefono)).toEqual({
+				enviar: false,
+				motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+			});
+		}
+	});
+
+	test("recorta el telefono del asesor antes de interpolar", () => {
+		const cuerpo = PLANTILLAS_MENSAJES[0].cuerpo;
+
+		expect(prepararTelefonoAsesorParaEnvio(cuerpo, " 41286630 ")).toEqual({
+			enviar: true,
+			telefonoAsesor: "41286630",
+		});
 	});
 });

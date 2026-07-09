@@ -68,6 +68,18 @@ export function mensajePlantillaEditable(
   return metodoContacto === "whatsapp" ? mensajeWhatsappEditado : mensajeEditado;
 }
 
+export function mensajeSmsEditable(
+  metodoInicial: string,
+  mensajeEditado: string,
+  mensajeWhatsappEditado: string,
+): string {
+  return mensajePlantillaEditable(
+    metodoInicial,
+    mensajeEditado,
+    mensajeWhatsappEditado,
+  );
+}
+
 function toCapitalCase(str: string): string {
   return str
     .toLowerCase()

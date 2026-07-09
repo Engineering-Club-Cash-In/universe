@@ -53,6 +53,7 @@ import {
 	PLANTILLAS_MENSAJES,
 	crearUrlWhatsappManual,
 	mensajePlantillaEditable,
+	mensajeSmsEditable,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -312,6 +313,11 @@ export function ContactoModal({
 			mensajeEditado,
 			mensajeWhatsappEditado,
 		);
+		const mensajeSms = mensajeSmsEditable(
+			metodoInicial,
+			mensajeEditado,
+			mensajeWhatsappEditado,
+		);
 		const telefonoAsesorNoReply = prepararTelefonoAsesorParaEnvio(
 			mensajeWhatsapp,
 			telefonoAsesorLimpio,
@@ -380,13 +386,13 @@ export function ContactoModal({
 					toast.error("No hay teléfono para enviar SMS");
 					return;
 				}
-				if (!mensajeEditado.trim()) {
+				if (!mensajeSms.trim()) {
 					toast.error("No hay mensaje para enviar");
 					return;
 				}
 				smsApiMutation.mutate({
 					telefono: telLimpio,
-					mensaje: mensajeEditado,
+					mensaje: mensajeSms,
 				});
 				break;
 		}

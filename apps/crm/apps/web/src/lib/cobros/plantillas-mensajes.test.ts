@@ -4,6 +4,7 @@ import {
 	PLANTILLAS_MENSAJES,
 	crearUrlWhatsappManual,
 	mensajePlantillaEditable,
+	mensajeSmsEditable,
 	prepararTelefonoAsesorParaEnvio,
 } from "./plantillas-mensajes";
 
@@ -98,6 +99,16 @@ describe("plantillas web de cobros", () => {
 		expect(
 			mensajePlantillaEditable("whatsapp", "Mensaje fallback", ""),
 		).toBe("");
+	});
+
+	test("envia por SMS el mensaje visible cuando se edita desde WhatsApp", () => {
+		expect(
+			mensajeSmsEditable(
+				"whatsapp",
+				"Mensaje email largo oculto",
+				"Mensaje visible editado",
+			),
+		).toBe("Mensaje visible editado");
 	});
 
 	test("descarta plantillas no-reply sin telefono de asesor", () => {

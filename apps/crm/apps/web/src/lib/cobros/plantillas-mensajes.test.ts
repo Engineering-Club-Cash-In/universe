@@ -3,6 +3,7 @@ import {
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	PLANTILLAS_MENSAJES,
 	crearUrlWhatsappManual,
+	mensajePlantillaEditable,
 	prepararTelefonoAsesorParaEnvio,
 } from "./plantillas-mensajes";
 
@@ -81,6 +82,22 @@ describe("plantillas web de cobros", () => {
 		const text = new URL(url).searchParams.get("text");
 
 		expect(text).toBe("Mensaje WhatsApp no-reply");
+	});
+
+	test("edita el cuerpo visible que usa WhatsApp", () => {
+		expect(
+			mensajePlantillaEditable(
+				"whatsapp",
+				"Mensaje email por este medio",
+				"Mensaje WhatsApp no-reply",
+			),
+		).toBe("Mensaje WhatsApp no-reply");
+	});
+
+	test("respeta mensajes de WhatsApp vacios editados manualmente", () => {
+		expect(
+			mensajePlantillaEditable("whatsapp", "Mensaje fallback", ""),
+		).toBe("");
 	});
 
 	test("descarta plantillas no-reply sin telefono de asesor", () => {

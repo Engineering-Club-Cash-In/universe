@@ -52,6 +52,7 @@ import {
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	crearUrlWhatsappManual,
+	mensajePlantillaEditable,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -306,7 +307,11 @@ export function ContactoModal({
 	const ejecutarAccion = (metodo: AccionContacto) => {
 		const tel = telefonoSeleccionado || telefonoPrincipal;
 		const telLimpio = tel.replace(/[^0-9]/g, "");
-		const mensajeWhatsapp = mensajeWhatsappEditado || mensajeEditado;
+		const mensajeWhatsapp = mensajePlantillaEditable(
+			"whatsapp",
+			mensajeEditado,
+			mensajeWhatsappEditado,
+		);
 		const telefonoAsesorNoReply = prepararTelefonoAsesorParaEnvio(
 			mensajeWhatsapp,
 			telefonoAsesorLimpio,
@@ -325,11 +330,7 @@ export function ContactoModal({
 				window.open(`tel:${tel}`);
 				break;
 			case "whatsapp-link": {
-				const url = crearUrlWhatsappManual(
-					telLimpio,
-					mensajeWhatsappEditado,
-					mensajeEditado,
-				);
+				const url = crearUrlWhatsappManual(telLimpio, mensajeWhatsapp);
 				window.open(url);
 				break;
 			}
@@ -393,6 +394,19 @@ export function ContactoModal({
 
 	const mostrarPlantillas =
 		metodoInicial === "whatsapp" || metodoInicial === "email";
+	const mensajeEditable = mensajePlantillaEditable(
+		metodoInicial,
+		mensajeEditado,
+		mensajeWhatsappEditado,
+	);
+	const handleMensajeEditableChange = (mensaje: string) => {
+		if (metodoInicial === "whatsapp") {
+			setMensajeWhatsappEditado(mensaje);
+			return;
+		}
+
+		setMensajeEditado(mensaje);
+	};
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -533,8 +547,10 @@ export function ContactoModal({
 										<Label>Mensaje (editable)</Label>
 										<Textarea
 											className="min-h-[150px] text-sm"
-											value={mensajeEditado}
-											onChange={(e) => setMensajeEditado(e.target.value)}
+											value={mensajeEditable}
+											onChange={(e) =>
+												handleMensajeEditableChange(e.target.value)
+											}
 										/>
 									</div>
 								)}

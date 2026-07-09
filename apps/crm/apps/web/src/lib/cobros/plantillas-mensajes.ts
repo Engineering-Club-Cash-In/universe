@@ -60,6 +60,14 @@ export function crearUrlWhatsappManual(
     : `https://wa.me/${telefonoLimpio}`;
 }
 
+export function mensajePlantillaEditable(
+  metodoContacto: string,
+  mensajeEditado: string,
+  mensajeWhatsappEditado: string,
+): string {
+  return metodoContacto === "whatsapp" ? mensajeWhatsappEditado : mensajeEditado;
+}
+
 function toCapitalCase(str: string): string {
   return str
     .toLowerCase()

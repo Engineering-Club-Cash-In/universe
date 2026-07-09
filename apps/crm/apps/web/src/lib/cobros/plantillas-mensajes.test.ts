@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { PLANTILLAS_MENSAJES } from "./plantillas-mensajes";
+import {
+	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+	PLANTILLAS_MENSAJES,
+	prepararTelefonoAsesorParaEnvio,
+} from "./plantillas-mensajes";
 
 const NO_REPLY_WARNING =
 	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
@@ -65,5 +69,27 @@ describe("plantillas web de cobros", () => {
 			/boleta o comprobante de pago[^.]*{telefonoAsesor}/i,
 		);
 		expect(preMora?.cuerpoWhastapp).toMatch(/duda[^.]*{telefonoAsesor}/i);
+	});
+
+	test("descarta plantillas no-reply sin telefono de asesor", () => {
+		const cuerpoWhatsapp =
+			PLANTILLAS_MENSAJES[0].cuerpoWhastapp ?? PLANTILLAS_MENSAJES[0].cuerpo;
+
+		for (const telefono of [null, undefined, "", "   "]) {
+			expect(prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, telefono)).toEqual({
+				enviar: false,
+				motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+			});
+		}
+	});
+
+	test("recorta el telefono del asesor antes de interpolar", () => {
+		const cuerpoWhatsapp =
+			PLANTILLAS_MENSAJES[0].cuerpoWhastapp ?? PLANTILLAS_MENSAJES[0].cuerpo;
+
+		expect(prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, " 41286630 ")).toEqual({
+			enviar: true,
+			telefonoAsesor: "41286630",
+		});
 	});
 });

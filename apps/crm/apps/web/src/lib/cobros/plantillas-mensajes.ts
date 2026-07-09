@@ -32,6 +32,22 @@ export interface PlantillaMensaje {
 
 export const COBROS_NO_REPLY_WARNING =
   "*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
+
+export function prepararTelefonoAsesorParaEnvio(
+  cuerpo: string,
+  telefono: string | null | undefined,
+):
+  | { enviar: true; telefonoAsesor: string }
+  | { enviar: false; motivo: string } {
+  const telefonoAsesor = telefono?.trim() ?? "";
+
+  if (cuerpo.includes(COBROS_NO_REPLY_WARNING) && !telefonoAsesor) {
+    return { enviar: false, motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR };
+  }
+
+  return { enviar: true, telefonoAsesor };
+}
 
 function toCapitalCase(str: string): string {
   return str

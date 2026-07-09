@@ -51,6 +51,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
 	interpolar,
 	PLANTILLAS_MENSAJES,
+	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
 } from "@/lib/cobros/plantillas-mensajes";
@@ -131,6 +132,8 @@ export function ContactoModal({
 	const [mensajeWhatsappEditado, setMensajeWhatsappEditado] = useState("");
 	const [asuntoEditado, setAsuntoEditado] = useState("");
 
+	const telefonoAsesorLimpio = telefonoAsesor.trim();
+
 	const variables: VariablesPlantilla = useMemo(
 		() => ({
 			clienteNombre,
@@ -140,7 +143,7 @@ export function ContactoModal({
 			marcaLineaModelo,
 			montoAdeudado,
 			cuotasAtraso,
-			telefonoAsesor,
+			telefonoAsesor: telefonoAsesorLimpio,
 			nombreAsesor,
 		}),
 		[
@@ -151,7 +154,7 @@ export function ContactoModal({
 			marcaLineaModelo,
 			montoAdeudado,
 			cuotasAtraso,
-			telefonoAsesor,
+			telefonoAsesorLimpio,
 			nombreAsesor,
 		],
 	);
@@ -303,6 +306,19 @@ export function ContactoModal({
 		const tel = telefonoSeleccionado || telefonoPrincipal;
 		const telLimpio = tel.replace(/[^0-9]/g, "");
 		const mensajeWhatsapp = mensajeWhatsappEditado || mensajeEditado;
+		const telefonoAsesorNoReply = prepararTelefonoAsesorParaEnvio(
+			mensajeWhatsapp,
+			telefonoAsesorLimpio,
+		);
+		if (
+			(metodo === "whatsapp-link" || metodo === "whatsapp-api") &&
+			!telefonoAsesorNoReply.enviar
+		) {
+			toast.error(
+				"No se puede enviar esta plantilla no-reply porque el asesor no tiene teléfono registrado",
+			);
+			return;
+		}
 		switch (metodo) {
 			case "llamada":
 				window.open(`tel:${tel}`);

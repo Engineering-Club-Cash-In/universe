@@ -4264,6 +4264,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                 body: {
                   inversionista_id: inv_id,
                   creditos: creditoIdsDevolucion,
+                  skipStatusAndEmail: true,
                 },
                 set: { status: 200 },
                 request: {} as any,
@@ -4299,6 +4300,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                 body: {
                   inversionista_id: inv_id,
                   creditos: creditoIdsSalida,
+                  skipStatusAndEmail: true,
                 },
                 set: { status: 200 },
                 request: {} as any,
@@ -5314,7 +5316,13 @@ export const exitInvestor = async ({ body, set, request }: any) => {
     // ========================================================================
     // Se valida manualmente (Elysia ya valida el schema a nivel router, pero
     // acá defendemos por si se llama internamente sin pasar por el router).
-    const { inversionista_id, creditos: creditoIds } = body ?? {};
+    //
+    // skipStatusAndEmail: SOLO para llamadas internas (ver liquidateByInvestorId).
+    // El schema del router (routers/investor.ts) NO declara este campo, así que
+    // Elysia lo descarta en /investor/exit — un caller HTTP no puede activarlo.
+    // Si algún día se agrega al schema del router, revisar que siga sin ser
+    // controlable por clientes externos.
+    const { inversionista_id, creditos: creditoIds, skipStatusAndEmail } = body ?? {};
 
     if (typeof inversionista_id !== "number" || !Number.isFinite(inversionista_id)) {
       warn("❌ Validación falló: inversionista_id inválido →", inversionista_id);
@@ -5822,7 +5830,9 @@ export const exitInvestor = async ({ body, set, request }: any) => {
       // el status — sería prematuro marcarlo como inactivo sin haberlo
       // sacado efectivamente de ningún crédito.
       // ──────────────────────────────────────────────────────────────────────
-      if (resultados.length > 0) {
+      if (skipStatusAndEmail) {
+        log(`⏭️  skipStatusAndEmail=true → NO se cambia status del inversionista`);
+      } else if (resultados.length > 0) {
         log(`🔻 Pasando inversionista ${inversionista_id} → status='inactivo'`);
         const resStatus = await tx
           .update(inversionistas)
@@ -5878,99 +5888,106 @@ export const exitInvestor = async ({ body, set, request }: any) => {
     // ========================================================================
     // PASO 7: ARMAR Y ENVIAR EL CORREO
     // ========================================================================
-    // Fecha en GT (zona horaria Guatemala) para mostrar el momento exacto
-    // del cambio sin depender de la zona del server.
-    const fechaGT = new Date().toLocaleString("es-GT", { timeZone: "America/Guatemala" });
-    const subject = `Inversionista INACTIVADO (cartera transferida a CUBE): ${invRow.nombre}`;
+    let enviados = 0;
+    let fallidos = 0;
 
-    // Una fila por crédito procesado, con SIFCO, ID interno, monto y
-    // leyenda de qué acción se tomó (swap vs merge).
-    const filasCreditos = resultados
-      .map(
-        (r) => `
-          <tr>
-            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.numero_credito_sifco ?? "—"}</td>
-            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.credito_id}</td>
-            <td style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Q${r.monto_transferido}</td>
-            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.accion === "merge" ? "Sumado a CUBE existente" : "CUBE tomó la posición"}</td>
-          </tr>
-        `,
-      )
-      .join("");
+    if (skipStatusAndEmail) {
+      log(`⏭️  skipStatusAndEmail=true → NO se envía correo de notificación`);
+    } else {
+      // Fecha en GT (zona horaria Guatemala) para mostrar el momento exacto
+      // del cambio sin depender de la zona del server.
+      const fechaGT = new Date().toLocaleString("es-GT", { timeZone: "America/Guatemala" });
+      const subject = `Inversionista INACTIVADO (cartera transferida a CUBE): ${invRow.nombre}`;
 
-    // Si hubo créditos saltados, se listan al final en rojo para que
-    // el equipo pueda revisarlos aparte.
-    const erroresHtml =
-      errores.length > 0
-        ? `
-          <h3 style="margin-top:16px; color:#b91c1c;">Créditos omitidos</h3>
-          <ul style="color:#b91c1c;">
-            ${errores.map((e) => `<li>Crédito ${e.credito_id}: ${e.razon}</li>`).join("")}
-          </ul>
-        `
-        : "";
-
-    const html = `
-      <div style="font-family: Arial, sans-serif; color:#111;">
-        <h2 style="margin-bottom: 8px;">Salida de inversionista — cartera transferida a CUBE</h2>
-        <p>
-          El inversionista <strong>${invRow.nombre}</strong> (ID: ${invRow.inversionista_id})
-          fue <strong style="color:#dc2626;">INACTIVADO</strong>.
-          Su participación en los créditos listados fue transferida a <strong>CUBE INVESTMENTS S.A.</strong>
-        </p>
-        <table style="border-collapse: collapse; margin-top: 8px;">
-          <tr><td style="padding:4px 8px;"><strong>Estado anterior:</strong></td><td style="padding:4px 8px;">${invRow.status}</td></tr>
-          <tr><td style="padding:4px 8px;"><strong>Estado nuevo:</strong></td><td style="padding:4px 8px; color:#dc2626;"><strong>inactivo</strong></td></tr>
-          <tr><td style="padding:4px 8px;"><strong>Fecha (GT):</strong></td><td style="padding:4px 8px;">${fechaGT}</td></tr>
-          ${usuarioNombre || usuarioEmail
-            ? `<tr><td style="padding:4px 8px;"><strong>Ejecutado por:</strong></td><td style="padding:4px 8px;">${[usuarioNombre, usuarioEmail].filter(Boolean).join(" — ")}</td></tr>`
-            : ""}
-          <tr><td style="padding:4px 8px;"><strong>Total transferido a CUBE:</strong></td><td style="padding:4px 8px;"><strong>Q${totalTransferido.toFixed(2)}</strong></td></tr>
-          <tr><td style="padding:4px 8px;"><strong>Créditos procesados:</strong></td><td style="padding:4px 8px;">${resultados.length}</td></tr>
-        </table>
-
-        <h3 style="margin-top:16px;">Créditos transferidos</h3>
-        <table style="border-collapse: collapse; margin-top: 4px; min-width: 520px;">
-          <thead>
-            <tr style="background:#f3f4f6;">
-              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">SIFCO</th>
-              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Crédito ID</th>
-              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Monto a CUBE</th>
-              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Acción</th>
+      // Una fila por crédito procesado, con SIFCO, ID interno, monto y
+      // leyenda de qué acción se tomó (swap vs merge).
+      const filasCreditos = resultados
+        .map(
+          (r) => `
+            <tr>
+              <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.numero_credito_sifco ?? "—"}</td>
+              <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.credito_id}</td>
+              <td style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Q${r.monto_transferido}</td>
+              <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.accion === "merge" ? "Sumado a CUBE existente" : "CUBE tomó la posición"}</td>
             </tr>
-          </thead>
-          <tbody>${filasCreditos}</tbody>
-        </table>
-        ${erroresHtml}
-        <p style="margin-top:16px; color:#555; font-size:12px;">Correo automático — Club Cash In / Cartera.</p>
-      </div>
-    `;
+          `,
+        )
+        .join("");
 
-    log(`📧 Enviando correo a ${INVESTOR_STATUS_CHANGE_RECIPIENTS.length} destinatario(s): [${INVESTOR_STATUS_CHANGE_RECIPIENTS.join(", ")}]`);
-    log(`📧 Asunto: "${subject}"`);
+      // Si hubo créditos saltados, se listan al final en rojo para que
+      // el equipo pueda revisarlos aparte.
+      const erroresHtml =
+        errores.length > 0
+          ? `
+            <h3 style="margin-top:16px; color:#b91c1c;">Créditos omitidos</h3>
+            <ul style="color:#b91c1c;">
+              ${errores.map((e) => `<li>Crédito ${e.credito_id}: ${e.razon}</li>`).join("")}
+            </ul>
+          `
+          : "";
 
-    // `allSettled` para que un destinatario que falle no tumbe el resto.
-    // Enviamos individualmente (sendPlainEmail acepta un solo `to`) en paralelo.
-    const mailResults = await Promise.allSettled(
-      INVESTOR_STATUS_CHANGE_RECIPIENTS.map((to) => sendPlainEmail(to, subject, html)),
-    );
+      const html = `
+        <div style="font-family: Arial, sans-serif; color:#111;">
+          <h2 style="margin-bottom: 8px;">Salida de inversionista — cartera transferida a CUBE</h2>
+          <p>
+            El inversionista <strong>${invRow.nombre}</strong> (ID: ${invRow.inversionista_id})
+            fue <strong style="color:#dc2626;">INACTIVADO</strong>.
+            Su participación en los créditos listados fue transferida a <strong>CUBE INVESTMENTS S.A.</strong>
+          </p>
+          <table style="border-collapse: collapse; margin-top: 8px;">
+            <tr><td style="padding:4px 8px;"><strong>Estado anterior:</strong></td><td style="padding:4px 8px;">${invRow.status}</td></tr>
+            <tr><td style="padding:4px 8px;"><strong>Estado nuevo:</strong></td><td style="padding:4px 8px; color:#dc2626;"><strong>inactivo</strong></td></tr>
+            <tr><td style="padding:4px 8px;"><strong>Fecha (GT):</strong></td><td style="padding:4px 8px;">${fechaGT}</td></tr>
+            ${usuarioNombre || usuarioEmail
+              ? `<tr><td style="padding:4px 8px;"><strong>Ejecutado por:</strong></td><td style="padding:4px 8px;">${[usuarioNombre, usuarioEmail].filter(Boolean).join(" — ")}</td></tr>`
+              : ""}
+            <tr><td style="padding:4px 8px;"><strong>Total transferido a CUBE:</strong></td><td style="padding:4px 8px;"><strong>Q${totalTransferido.toFixed(2)}</strong></td></tr>
+            <tr><td style="padding:4px 8px;"><strong>Créditos procesados:</strong></td><td style="padding:4px 8px;">${resultados.length}</td></tr>
+          </table>
 
-    mailResults.forEach((r, i) => {
-      const to = INVESTOR_STATUS_CHANGE_RECIPIENTS[i];
-      if (r.status === "fulfilled" && (r as any).value?.success) {
-        log(`   ✉️  OK → ${to} (id=${(r as any).value?.data?.id ?? "?"})`);
-      } else if (r.status === "fulfilled") {
-        warn(`   ✉️  FAIL → ${to}:`, (r as any).value?.error);
-      } else {
-        warn(`   ✉️  REJECTED → ${to}:`, r.reason);
-      }
-    });
+          <h3 style="margin-top:16px;">Créditos transferidos</h3>
+          <table style="border-collapse: collapse; margin-top: 4px; min-width: 520px;">
+            <thead>
+              <tr style="background:#f3f4f6;">
+                <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">SIFCO</th>
+                <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Crédito ID</th>
+                <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Monto a CUBE</th>
+                <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Acción</th>
+              </tr>
+            </thead>
+            <tbody>${filasCreditos}</tbody>
+          </table>
+          ${erroresHtml}
+          <p style="margin-top:16px; color:#555; font-size:12px;">Correo automático — Club Cash In / Cartera.</p>
+        </div>
+      `;
 
-    const enviados = mailResults.filter(
-      (r) => r.status === "fulfilled" && (r as any).value?.success,
-    ).length;
-    const fallidos = INVESTOR_STATUS_CHANGE_RECIPIENTS.length - enviados;
-    log(`📧 Correos: enviados=${enviados}, fallidos=${fallidos}`);
+      log(`📧 Enviando correo a ${INVESTOR_STATUS_CHANGE_RECIPIENTS.length} destinatario(s): [${INVESTOR_STATUS_CHANGE_RECIPIENTS.join(", ")}]`);
+      log(`📧 Asunto: "${subject}"`);
+
+      // `allSettled` para que un destinatario que falle no tumbe el resto.
+      // Enviamos individualmente (sendPlainEmail acepta un solo `to`) en paralelo.
+      const mailResults = await Promise.allSettled(
+        INVESTOR_STATUS_CHANGE_RECIPIENTS.map((to) => sendPlainEmail(to, subject, html)),
+      );
+
+      mailResults.forEach((r, i) => {
+        const to = INVESTOR_STATUS_CHANGE_RECIPIENTS[i];
+        if (r.status === "fulfilled" && (r as any).value?.success) {
+          log(`   ✉️  OK → ${to} (id=${(r as any).value?.data?.id ?? "?"})`);
+        } else if (r.status === "fulfilled") {
+          warn(`   ✉️  FAIL → ${to}:`, (r as any).value?.error);
+        } else {
+          warn(`   ✉️  REJECTED → ${to}:`, r.reason);
+        }
+      });
+
+      enviados = mailResults.filter(
+        (r) => r.status === "fulfilled" && (r as any).value?.success,
+      ).length;
+      fallidos = INVESTOR_STATUS_CHANGE_RECIPIENTS.length - enviados;
+      log(`📧 Correos: enviados=${enviados}, fallidos=${fallidos}`);
+    }
 
     log(`⏱️  Duración total: ${Date.now() - t0}ms`);
     log(`✅ DONE — inversionista ${invRow.inversionista_id} inactivado, ${resultados.length} crédito(s), Q${totalTransferido.toFixed(2)} a CUBE`);

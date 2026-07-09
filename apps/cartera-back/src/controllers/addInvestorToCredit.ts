@@ -20,18 +20,24 @@ import {
 } from "./assignCapital";
 import { sendInvestorAddedToCreditsNotification } from "@cci/email";
 
+// Valida que "YYYY-MM-DD" sea una fecha de calendario real: rechaza tanto el
+// rollover silencioso de JS Date (ej. "2026-02-30" → 2026-03-02) como fechas
+// directamente inválidas (ej. "2026-13-01" → Invalid Date). Se usa en el
+// `.refine()` del schema (para que una fecha inválida caiga en el 400 de
+// validación, no en el 500 genérico) y como defensa en resolverFechaCompra.
+export function esFechaCalendarioValida(fecha: string): boolean {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === fecha;
+}
+
 // Convierte "YYYY-MM-DD" a un Date al mediodía UTC para evitar que el
 // almacenamiento en timestamptz corra el día. undefined => usar default now().
-// Valida que sea una fecha de calendario real: rechaza tanto el rollover
-// silencioso de JS Date (ej. "2026-02-30" → 2026-03-02) como fechas
-// directamente inválidas (ej. "2026-13-01" → Invalid Date).
 export function resolverFechaCompra(fecha?: string): Date | undefined {
   if (!fecha) return undefined;
-  const d = new Date(`${fecha}T12:00:00Z`);
-  if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== fecha) {
+  if (!esFechaCalendarioValida(fecha)) {
     throw new Error(`fecha_compra inválida: ${fecha}`);
   }
-  return d;
+  return new Date(`${fecha}T12:00:00Z`);
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
@@ -97,7 +103,13 @@ const addInvestorToCreditSchema = z.object({
   fecha_inicio_participacion: z.string().optional(),
   // Fecha explícita para el registro en compras_credito_inversionista.fecha
   // (NO afecta fecha_inicio_participacion). YYYY-MM-DD.
-  fecha_compra: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  fecha_compra: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine(esFechaCalendarioValida, {
+      message: "fecha_compra no es una fecha de calendario válida",
+    })
+    .optional(),
   // Nuevos campos para el buscador de capital
   minimo: z.number().int().positive().optional(),
   // Créditos a excluir del buscador automático de candidatos (getCreditCandidates).

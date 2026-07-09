@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { resolverFechaCompra } from "./addInvestorToCredit";
+import { resolverFechaCompra, esFechaCalendarioValida } from "./addInvestorToCredit";
 
 describe("resolverFechaCompra", () => {
   it("usa la fecha explícita al mediodía (evita corrimiento de TZ)", () => {
@@ -13,5 +13,19 @@ describe("resolverFechaCompra", () => {
 
   it("rechaza una fecha de calendario inválida (rollover silencioso)", () => {
     expect(() => resolverFechaCompra("2026-02-30")).toThrow("fecha_compra inválida: 2026-02-30");
+  });
+});
+
+describe("esFechaCalendarioValida", () => {
+  it("acepta una fecha real", () => {
+    expect(esFechaCalendarioValida("2026-06-10")).toBe(true);
+  });
+
+  it("rechaza rollover silencioso (2026-02-30 → marzo)", () => {
+    expect(esFechaCalendarioValida("2026-02-30")).toBe(false);
+  });
+
+  it("rechaza mes inválido (2026-13-01 → Invalid Date)", () => {
+    expect(esFechaCalendarioValida("2026-13-01")).toBe(false);
   });
 });

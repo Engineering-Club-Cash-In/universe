@@ -27,6 +27,12 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -34,12 +40,6 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
 	Select,
 	SelectContent,
@@ -50,13 +50,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
 	accionUsaCuerpoNoReply,
+	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
 	interpolar,
-	PLANTILLAS_MENSAJES,
-	crearUrlWhatsappManual,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
+	PLANTILLAS_MENSAJES,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -330,6 +330,7 @@ export function ContactoModal({
 			metodo,
 			mensajeWhatsapp,
 			mensajeSms,
+			mensajeEmail,
 		);
 		const telefonoAsesorNoReply = prepararTelefonoAsesorParaEnvio(
 			cuerpoNoReply,
@@ -667,7 +668,9 @@ export function ContactoModal({
 									<DropdownMenuItem onClick={() => ejecutarAccion("email-api")}>
 										Enviar Directo (Automático)
 									</DropdownMenuItem>
-									<DropdownMenuItem onClick={() => ejecutarAccion("email-link")}>
+									<DropdownMenuItem
+										onClick={() => ejecutarAccion("email-link")}
+									>
 										Abrir cliente de correo (Manual)
 									</DropdownMenuItem>
 								</DropdownMenuContent>

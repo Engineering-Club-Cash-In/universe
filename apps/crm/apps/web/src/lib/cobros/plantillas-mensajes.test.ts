@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
-	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
-	PLANTILLAS_MENSAJES,
 	accionUsaCuerpoNoReply,
-	cuerpoParaValidarNoReply,
+	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	crearUrlWhatsappManual,
+	cuerpoParaValidarNoReply,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
+	PLANTILLAS_MENSAJES,
 	prepararTelefonoAsesorParaEnvio,
 } from "./plantillas-mensajes";
 
@@ -99,9 +99,9 @@ describe("plantillas web de cobros", () => {
 	});
 
 	test("respeta mensajes de WhatsApp vacios editados manualmente", () => {
-		expect(
-			mensajePlantillaEditable("whatsapp", "Mensaje fallback", ""),
-		).toBe("");
+		expect(mensajePlantillaEditable("whatsapp", "Mensaje fallback", "")).toBe(
+			"",
+		);
 	});
 
 	test("envia por SMS el mensaje visible cuando se edita desde WhatsApp", () => {
@@ -128,7 +128,8 @@ describe("plantillas web de cobros", () => {
 		expect(accionUsaCuerpoNoReply("whatsapp-link")).toBe(true);
 		expect(accionUsaCuerpoNoReply("whatsapp-api")).toBe(true);
 		expect(accionUsaCuerpoNoReply("sms-api")).toBe(true);
-		expect(accionUsaCuerpoNoReply("email-api")).toBe(false);
+		expect(accionUsaCuerpoNoReply("email-link")).toBe(true);
+		expect(accionUsaCuerpoNoReply("email-api")).toBe(true);
 	});
 
 	test("valida no-reply contra el cuerpo real de SMS", () => {
@@ -141,15 +142,28 @@ describe("plantillas web de cobros", () => {
 		).toBe("Mensaje SMS seguro");
 	});
 
+	test("valida no-reply contra el cuerpo real de Email", () => {
+		expect(
+			cuerpoParaValidarNoReply(
+				"email-api",
+				`Mensaje WhatsApp oculto ${NO_REPLY_WARNING}`,
+				"Mensaje SMS seguro",
+				"Mensaje Email seguro",
+			),
+		).toBe("Mensaje Email seguro");
+	});
+
 	test("descarta plantillas no-reply sin telefono de asesor", () => {
 		const cuerpoWhatsapp =
 			PLANTILLAS_MENSAJES[0].cuerpoWhastapp ?? PLANTILLAS_MENSAJES[0].cuerpo;
 
 		for (const telefono of [null, undefined, "", "   "]) {
-			expect(prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, telefono)).toEqual({
-				enviar: false,
-				motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
-			});
+			expect(prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, telefono)).toEqual(
+				{
+					enviar: false,
+					motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+				},
+			);
 		}
 	});
 
@@ -157,7 +171,9 @@ describe("plantillas web de cobros", () => {
 		const cuerpoWhatsapp =
 			PLANTILLAS_MENSAJES[0].cuerpoWhastapp ?? PLANTILLAS_MENSAJES[0].cuerpo;
 
-		expect(prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, " 41286630 ")).toEqual({
+		expect(
+			prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, " 41286630 "),
+		).toEqual({
 			enviar: true,
 			telefonoAsesor: "41286630",
 		});

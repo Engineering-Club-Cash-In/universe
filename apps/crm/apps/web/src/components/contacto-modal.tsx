@@ -50,6 +50,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
 	accionUsaCuerpoNoReply,
+	cuerpoParaValidarNoReply,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	crearUrlWhatsappManual,
@@ -319,8 +320,13 @@ export function ContactoModal({
 			mensajeEditado,
 			mensajeWhatsappEditado,
 		);
-		const telefonoAsesorNoReply = prepararTelefonoAsesorParaEnvio(
+		const cuerpoNoReply = cuerpoParaValidarNoReply(
+			metodo,
 			mensajeWhatsapp,
+			mensajeSms,
+		);
+		const telefonoAsesorNoReply = prepararTelefonoAsesorParaEnvio(
+			cuerpoNoReply,
 			telefonoAsesorLimpio,
 		);
 		if (accionUsaCuerpoNoReply(metodo) && !telefonoAsesorNoReply.enviar) {

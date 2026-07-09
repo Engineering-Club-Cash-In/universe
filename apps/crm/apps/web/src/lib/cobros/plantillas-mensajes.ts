@@ -86,6 +86,14 @@ export function accionUsaCuerpoNoReply(metodo: string): boolean {
   );
 }
 
+export function cuerpoParaValidarNoReply(
+  metodo: string,
+  mensajeWhatsapp: string,
+  mensajeSms: string,
+): string {
+  return metodo === "sms-api" ? mensajeSms : mensajeWhatsapp;
+}
+
 function toCapitalCase(str: string): string {
   return str
     .toLowerCase()

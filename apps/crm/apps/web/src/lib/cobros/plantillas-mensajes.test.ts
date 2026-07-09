@@ -3,6 +3,7 @@ import {
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	PLANTILLAS_MENSAJES,
 	accionUsaCuerpoNoReply,
+	cuerpoParaValidarNoReply,
 	crearUrlWhatsappManual,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
@@ -117,6 +118,16 @@ describe("plantillas web de cobros", () => {
 		expect(accionUsaCuerpoNoReply("whatsapp-api")).toBe(true);
 		expect(accionUsaCuerpoNoReply("sms-api")).toBe(true);
 		expect(accionUsaCuerpoNoReply("email-api")).toBe(false);
+	});
+
+	test("valida no-reply contra el cuerpo real de SMS", () => {
+		expect(
+			cuerpoParaValidarNoReply(
+				"sms-api",
+				`Mensaje WhatsApp oculto ${NO_REPLY_WARNING}`,
+				"Mensaje SMS seguro",
+			),
+		).toBe("Mensaje SMS seguro");
 	});
 
 	test("descarta plantillas no-reply sin telefono de asesor", () => {

@@ -46,6 +46,25 @@ d("absorberInversionistaEnCube (integración sandbox)", () => {
     } finally { await sql.end(); }
   });
 
+  it("MERGE: monto_transferido_raw conserva precisión completa del monto_aportado del saliente", async () => {
+    const sql = postgres(SB!);
+    const db = drizzle(sql);
+    try {
+      await db.transaction(async (tx) => {
+        const [saliente] = await tx.select().from(creditos_inversionistas)
+          .where(and(eq(creditos_inversionistas.credito_id, 838),
+                     eq(creditos_inversionistas.inversionista_id, 1))); // Adriana
+
+        const r = await absorberInversionistaEnCube(tx, 838, 1);
+        expect(r.ok).toBe(true);
+        if (r.ok) {
+          expect(new Big(r.monto_transferido_raw).eq(new Big(saliente.monto_aportado))).toBe(true);
+        }
+        throw new Error("ROLLBACK");   // no persistir: deja el sandbox intacto
+      }).catch((e) => { if (e.message !== "ROLLBACK") throw e; });
+    } finally { await sql.end(); }
+  });
+
   it("SWAP: crédito 466 sin CUBE → el row del saliente pasa a CUBE (100%)", async () => {
     const sql = postgres(SB!);
     const db = drizzle(sql);

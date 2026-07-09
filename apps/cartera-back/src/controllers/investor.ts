@@ -5391,7 +5391,12 @@ export const exitInvestor = async ({ body, set, request }: any) => {
         log(`📂 [${idx + 1}/${creditoIds.length}] Procesando crédito_id=${credito_id}`);
         const r = await absorberInversionistaEnCube(tx, credito_id, inversionista_id, { log, warn });
         if (!r.ok) { errores.push({ credito_id: r.credito_id, razon: r.razon }); continue; }
-        totalTransferido = totalTransferido.plus(new Big(r.monto_transferido));
+        // Acumular con precisión completa (monto_transferido_raw, sin
+        // redondear a 2 decimales) para que el total no vaya arrastrando
+        // el error de redondeo por-crédito; se redondea UNA sola vez al
+        // formatear la respuesta/correo (mismo comportamiento que el
+        // exitInvestor pre-refactor, que sumaba monto_aportado crudo).
+        totalTransferido = totalTransferido.plus(new Big(r.monto_transferido_raw));
         resultados.push({
           credito_id: r.credito_id,
           numero_credito_sifco: r.numero_credito_sifco,

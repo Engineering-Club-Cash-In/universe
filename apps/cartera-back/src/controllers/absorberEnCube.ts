@@ -58,6 +58,7 @@ export type AbsorberResultado =
       credito_id: number;
       numero_credito_sifco: string | null;
       monto_transferido: string;
+      monto_transferido_raw: string;
       cube_preexistente: boolean;
       accion: "swap" | "merge";
     }
@@ -456,6 +457,7 @@ export async function absorberInversionistaEnCube(
     credito_id,
     numero_credito_sifco: creditoData.numero_credito_sifco ?? null,
     monto_transferido: montoTransferido.toFixed(2),
+    monto_transferido_raw: montoTransferido.toFixed(8),
     cube_preexistente: cubePreexistente,
     accion: cubePreexistente ? "merge" : "swap",
   };

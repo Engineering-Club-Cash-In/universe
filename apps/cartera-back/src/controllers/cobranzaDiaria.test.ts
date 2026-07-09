@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import Big from "big.js";
-import { interesCubeResidual } from "./cobranzaDiaria";
+import { interesCubeResidual, efectividadPct } from "./cobranzaDiaria";
 
 const round2 = (b: Big) => Number(b.round(2).toString());
 
@@ -30,5 +30,17 @@ describe("interesCubeResidual", () => {
       { inversionista_id: 86, nombre: "Cube Investments S.A.", porcentaje_participacion_inversionista: 0, porcentaje_cash_in: 100, monto_aportado: "1000" },
     ]);
     expect(round2(cube)).toBeCloseTo(500, 1);
+  });
+});
+
+describe("efectividadPct", () => {
+  it("cobrado/programado", () => {
+    expect(efectividadPct(new Big("9900"), new Big("12400"))).toBeCloseTo(0.7984, 4);
+  });
+  it("programado 0 → 0 (sin división por cero)", () => {
+    expect(efectividadPct(new Big("0"), new Big("0"))).toBe(0);
+  });
+  it("cobrado completo → 1", () => {
+    expect(efectividadPct(new Big("500"), new Big("500"))).toBe(1);
   });
 });

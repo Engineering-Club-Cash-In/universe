@@ -60,3 +60,8 @@ export function interesCubeResidual(totalInteres: Big, inversionistas: InvSplitI
   const cube = totalInteres.minus(sumaNoCube);
   return cube.lt(0) ? new Big(0) : cube;
 }
+
+export function efectividadPct(cobrado: Big, programado: Big): number {
+  if (programado.lte(0)) return 0;
+  return Number(cobrado.div(programado).round(4).toString());
+}

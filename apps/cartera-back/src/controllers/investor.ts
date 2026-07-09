@@ -4241,6 +4241,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           const creditoIdsConPagos = [
             ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
           ];
+          // Créditos excluidos de exitInvestor en 5A por monto_aportado pendiente
+          // en el espejo — 5C debe respetarlos y NO marcarlos COMPLETADO.
+          let creditoIdsConMontoPendiente: number[] = [];
 
           if (creditoIdsConPagos.length > 0) {
             const creditosConDevolucion = await db
@@ -4277,7 +4280,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                   )
                 );
 
-              const creditoIdsConMontoPendiente = filasEspejoPrevias
+              creditoIdsConMontoPendiente = filasEspejoPrevias
                 .filter((f) => Number(f.monto_aportado) !== 0)
                 .map((f) => f.credito_id);
 
@@ -4359,20 +4362,34 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
           // 5C) Regla de cierre: tras liquidar, cualquier estado de devolución
           // del/los crédito(s) procesado(s) pasa a COMPLETADO (solo si ya estaba VERIFICADO).
+          // Se excluyen los créditos que 5A dejó fuera por monto_aportado pendiente
+          // en el espejo — deben seguir en VERIFICADO para revisión manual.
           if (creditoIdsConPagos.length > 0) {
-            await db
-              .update(creditos)
-              .set({ estado_devolucion: "COMPLETADO" })
-              .where(
-                and(
-                  inArray(creditos.credito_id, creditoIdsConPagos),
-                  eq(creditos.estado_devolucion, "VERIFICADO")
-                )
-              );
-
-            console.log(
-              `  ✅ Estado devolución actualizado a COMPLETADO en ${creditoIdsConPagos.length} crédito(s) procesado(s) en liquidación`
+            const creditoIdsParaCierre = creditoIdsConPagos.filter(
+              (id) => !creditoIdsConMontoPendiente.includes(id)
             );
+
+            if (creditoIdsParaCierre.length > 0) {
+              await db
+                .update(creditos)
+                .set({ estado_devolucion: "COMPLETADO" })
+                .where(
+                  and(
+                    inArray(creditos.credito_id, creditoIdsParaCierre),
+                    eq(creditos.estado_devolucion, "VERIFICADO")
+                  )
+                );
+
+              console.log(
+                `  ✅ Estado devolución actualizado a COMPLETADO en ${creditoIdsParaCierre.length} crédito(s) procesado(s) en liquidación`
+              );
+            }
+
+            if (creditoIdsConMontoPendiente.length > 0) {
+              console.warn(
+                `  ⚠️  ${creditoIdsConMontoPendiente.length} crédito(s) excluidos de COMPLETADO por monto_aportado pendiente en espejo: [${creditoIdsConMontoPendiente.join(", ")}]`
+              );
+            }
           }
         } catch (exitError) {
           console.error(

@@ -1648,10 +1648,12 @@ export class CarteraBackClient {
 			queryParams.set("asesores", params.asesores.join(","));
 		if (params.emailCobrador)
 			queryParams.set("email_cobrador", params.emailCobrador);
+		// Sin caché: es un reporte de flujo (pagos del período). Con caché el
+		// "Actualizar" podría devolver un hit stale tras registrar/ajustar un pago.
 		return this.request<MoraCobradaPorAsesorResponse>(
 			`/reportes/mora-cobrada-por-asesor?${queryParams}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
 	}
 

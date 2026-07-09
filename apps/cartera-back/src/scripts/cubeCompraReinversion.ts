@@ -1,4 +1,31 @@
 // ============================================================================
+// RUNBOOK — LEER ANTES DE CORRER CONTRA PROD
+// ============================================================================
+//   - Correr SOLO contra la DB que se pretende tocar. El guard imprime
+//     inet_server_addr() + count(*) de cartera.creditos ANTES de hacer nada:
+//     confirmar esa salida contra la base esperada ANTES de agregar --apply.
+//   - Default es DRY-RUN (solo calcula y muestra el monto por saliente).
+//     `--apply` es lo único que dispara escrituras reales.
+//   - Movimiento A hace commit POR CRÉDITO (una tx por cada uno de los 9).
+//     Movimiento B corre dentro de la transacción propia de
+//     addInvestorToCredit (una tx por saliente). El run NO es atómico de
+//     punta a punta: un fallo a mitad de camino puede dejar Movimiento A
+//     aplicado y Movimiento B parcial.
+//   - ANTES de un --apply contra prod: verificar en vivo el headroom de
+//     candidatos para los 8 salientes (en particular Massis ~Q122.8k y
+//     Tonejos ~Q139.7k, los montos más grandes del lote). El script ahora
+//     ABORTA (throw) si algún saliente queda con monto_sin_asignar > 0 —
+//     ya no continúa silenciosamente con un candidato insuficiente.
+//   - RECUPERACIÓN ante fallo parcial: restaurar `creditos_inversionistas` /
+//     `_espejo` desde `cartera._bk_cube_compra_reinv_<stamp>_ci` /
+//     `_esp`, y `estado_devolucion` desde `_estado`. Luego DROP a las 3
+//     tablas `_bk_*` y recién ahí reintentar — un re-run con los backups
+//     todavía presentes se bloquea solo (CREATE TABLE no tiene
+//     IF NOT EXISTS, así que revienta si las `_bk_*` del mismo stamp ya
+//     existen).
+// ============================================================================
+//
+// ============================================================================
 // SCRIPT ORQUESTADOR: cubeCompraReinversion
 // ============================================================================
 //
@@ -219,9 +246,10 @@ async function main() {
         `Movimiento B falló para saliente ${saliente}: ${JSON.stringify(out)}`,
       );
     }
-    if (new Big(out.monto_sin_asignar ?? 0).gt(0)) {
-      console.warn(
-        `⚠️  Saliente ${saliente}: monto_sin_asignar=${out.monto_sin_asignar} (no hubo suficientes créditos candidatos) — revisar antes de prod`,
+    const sinAsignar = new Big(out.monto_sin_asignar ?? 0);
+    if (sinAsignar.gt(0)) {
+      throw new Error(
+        `Movimiento B: saliente ${saliente} quedó con monto_sin_asignar=${sinAsignar.toFixed(2)} (candidatos insuficientes). Abortando; restaurar desde backup _bk_cube_compra_reinv_* y reintentar tras verificar headroom.`,
       );
     }
   }

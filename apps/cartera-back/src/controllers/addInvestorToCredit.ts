@@ -24,7 +24,7 @@ import { sendInvestorAddedToCreditsNotification } from "@cci/email";
 // almacenamiento en timestamptz corra el día. undefined => usar default now().
 export function resolverFechaCompra(fecha?: string): Date | undefined {
   if (!fecha) return undefined;
-  return new Date(`${fecha}T12:00:00`);
+  return new Date(`${fecha}T12:00:00Z`);
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";

@@ -425,10 +425,20 @@ export type MoraTotales = {
 
 export type MoraByEtapaYAsesorResponse = {
 	totales: MoraTotales;
-	porAsesor: ({ asesorId: number; nombre: string; email: string } & MoraTotales)[];
+	porAsesor: ({
+		asesorId: number;
+		nombre: string;
+		email: string;
+	} & MoraTotales)[];
 	fecha?: string;
 	alcance?: "live" | "historico";
 	dataDisponibleDesde?: string;
+};
+
+export type MoraCobradaPorAsesorResponse = {
+	periodo: { inicio: string; fin: string };
+	porAsesor: { asesorId: number; nombre: string; cobrado: string }[];
+	totalCobrado: string;
 };
 
 // ============================================================================
@@ -1556,7 +1566,10 @@ export class CarteraBackClient {
 			otros: cobradoResult.cobrado_otros ?? "0",
 		};
 
-		return { cobrado, esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" } };
+		return {
+			cobrado,
+			esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" },
+		};
 	}
 
 	async getFlujoCuotasInversiones(params: {
@@ -1617,14 +1630,38 @@ export class CarteraBackClient {
 		asesores?: number[];
 	}) {
 		const queryParams = new URLSearchParams();
-		if (params?.emailCobrador) queryParams.set("email_cobrador", params.emailCobrador);
+		if (params?.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
 		if (params?.fecha) queryParams.set("fecha", params.fecha);
-		if (params?.asesores?.length) queryParams.set("asesores", params.asesores.join(","));
+		if (params?.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
 		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
 		return this.request<MoraByEtapaYAsesorResponse>(
 			`/reportes/mora-por-etapa-asesor${qs}`,
 			{ method: "GET" },
 			true,
+		);
+	}
+
+	async getMoraCobradaPorAsesor(params: {
+		mes: number;
+		anio: number;
+		asesores?: number[];
+		emailCobrador?: string;
+	}) {
+		const queryParams = new URLSearchParams();
+		queryParams.set("mes", String(params.mes));
+		queryParams.set("anio", String(params.anio));
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		if (params.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
+		// Sin caché: es un reporte de flujo (pagos del período). Con caché el
+		// "Actualizar" podría devolver un hit stale tras registrar/ajustar un pago.
+		return this.request<MoraCobradaPorAsesorResponse>(
+			`/reportes/mora-cobrada-por-asesor?${queryParams}`,
+			{ method: "GET" },
+			false,
 		);
 	}
 
@@ -1639,11 +1676,10 @@ export class CarteraBackClient {
 			...(params.asesorId ? { asesor_id: String(params.asesorId) } : {}),
 		});
 
-		const response = await this.request<{ ok: boolean; data: CuotaPorFechaRow[] }>(
-			`/reportes/cuotas-por-fecha?${qp}`,
-			{ method: "GET" },
-			false,
-		);
+		const response = await this.request<{
+			ok: boolean;
+			data: CuotaPorFechaRow[];
+		}>(`/reportes/cuotas-por-fecha?${qp}`, { method: "GET" }, false);
 
 		return response.data ?? [];
 	}

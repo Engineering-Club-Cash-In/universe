@@ -4260,23 +4260,60 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                 `  🚪 Inversionista ${inv_id} → exitInvestor por estado_devolucion=VERIFICADO en ${creditoIdsDevolucion.length} crédito(s)`
               );
 
-              const exitResultDevolucion = await exitInvestor({
-                body: {
-                  inversionista_id: inv_id,
-                  creditos: creditoIdsDevolucion,
-                  skipStatusAndEmail: true,
-                },
-                set: { status: 200 },
-                request: {} as any,
-              });
+              // Validación previa: el monto_aportado del inversionista en el espejo
+              // debería estar en 0 en este punto (ya liquidado por el loop de pagos).
+              // Los créditos que no cumplan se skippean (no entran a exitInvestor,
+              // no se marcan COMPLETADO) para revisión manual.
+              const filasEspejoPrevias = await db
+                .select({
+                  credito_id: creditos_inversionistas_espejo.credito_id,
+                  monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+                })
+                .from(creditos_inversionistas_espejo)
+                .where(
+                  and(
+                    inArray(creditos_inversionistas_espejo.credito_id, creditoIdsDevolucion),
+                    eq(creditos_inversionistas_espejo.inversionista_id, inv_id)
+                  )
+                );
 
-              // Después de separar en exitInvestor, dejar estado_devolucion en COMPLETADO
-              await db
-                .update(creditos)
-                .set({ estado_devolucion: "COMPLETADO" })
-                .where(inArray(creditos.credito_id, creditoIdsDevolucion));
+              const creditoIdsConMontoPendiente = filasEspejoPrevias
+                .filter((f) => Number(f.monto_aportado) !== 0)
+                .map((f) => f.credito_id);
 
-              console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a COMPLETADO:`, exitResultDevolucion);
+              if (creditoIdsConMontoPendiente.length > 0) {
+                console.warn(
+                  `  ⚠️  monto_aportado en espejo != 0 antes de exitInvestor para inversionista ${inv_id} — se omiten:`,
+                  filasEspejoPrevias
+                    .filter((f) => creditoIdsConMontoPendiente.includes(f.credito_id))
+                    .map((f) => `credito_id=${f.credito_id} monto_aportado=${f.monto_aportado}`)
+                    .join(", ")
+                );
+              }
+
+              const creditoIdsDevolucionValidos = creditoIdsDevolucion.filter(
+                (id) => !creditoIdsConMontoPendiente.includes(id)
+              );
+
+              if (creditoIdsDevolucionValidos.length > 0) {
+                const exitResultDevolucion = await exitInvestor({
+                  body: {
+                    inversionista_id: inv_id,
+                    creditos: creditoIdsDevolucionValidos,
+                    skipStatusAndEmail: true,
+                  },
+                  set: { status: 200 },
+                  request: {} as any,
+                });
+
+                // Después de separar en exitInvestor, dejar estado_devolucion en COMPLETADO
+                await db
+                  .update(creditos)
+                  .set({ estado_devolucion: "COMPLETADO" })
+                  .where(inArray(creditos.credito_id, creditoIdsDevolucionValidos));
+
+                console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a COMPLETADO:`, exitResultDevolucion);
+              }
             }
           }
 

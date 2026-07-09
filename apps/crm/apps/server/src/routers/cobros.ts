@@ -42,8 +42,9 @@ import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import {
-	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
+	interpolar as interpolarPlantilla,
+	prepararTelefonoAsesorParaEnvio,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
 import { toDateStrGT } from "../lib/guatemala-month-window";
@@ -3583,6 +3584,19 @@ export const cobrosRouter = {
 				const cuerpoBase = input.cuerpoEditado?.trim()
 					? input.cuerpoEditado
 					: plantilla.cuerpo;
+				const telefonoAsesor = prepararTelefonoAsesorParaEnvio(
+					cuerpoBase,
+					asesor.telefono,
+				);
+
+				if (!telefonoAsesor.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: telefonoAsesor.motivo,
+					});
+					continue;
+				}
 
 				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
 				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
@@ -3610,7 +3624,7 @@ export const cobrosRouter = {
 								})
 							: "",
 					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
-					telefonoAsesor: asesor.telefono ?? "",
+					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 				});
 
@@ -3619,7 +3633,7 @@ export const cobrosRouter = {
 					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
 					telefonoReal: telefono,
 					mensaje,
-					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
+					casoCobroId: sifco ? casoIdPorSifco.get(sifco) ?? null : null,
 					clienteNombre,
 				});
 			}

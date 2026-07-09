@@ -80,6 +80,18 @@ export function mensajeSmsEditable(
   );
 }
 
+export function mensajeEmailEditable(
+  metodoInicial: string,
+  mensajeEditado: string,
+  mensajeWhatsappEditado: string,
+): string {
+  return mensajePlantillaEditable(
+    metodoInicial,
+    mensajeEditado,
+    mensajeWhatsappEditado,
+  );
+}
+
 export function accionUsaCuerpoNoReply(metodo: string): boolean {
   return (
     metodo === "whatsapp-link" || metodo === "whatsapp-api" || metodo === "sms-api"

@@ -5,6 +5,7 @@ import {
 	accionUsaCuerpoNoReply,
 	cuerpoParaValidarNoReply,
 	crearUrlWhatsappManual,
+	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
 	prepararTelefonoAsesorParaEnvio,
@@ -106,6 +107,16 @@ describe("plantillas web de cobros", () => {
 	test("envia por SMS el mensaje visible cuando se edita desde WhatsApp", () => {
 		expect(
 			mensajeSmsEditable(
+				"whatsapp",
+				"Mensaje email largo oculto",
+				"Mensaje visible editado",
+			),
+		).toBe("Mensaje visible editado");
+	});
+
+	test("envia por Email el mensaje visible cuando se edita desde WhatsApp", () => {
+		expect(
+			mensajeEmailEditable(
 				"whatsapp",
 				"Mensaje email largo oculto",
 				"Mensaje visible editado",

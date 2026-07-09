@@ -54,6 +54,7 @@ import {
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	crearUrlWhatsappManual,
+	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
 	prepararTelefonoAsesorParaEnvio,
@@ -320,6 +321,11 @@ export function ContactoModal({
 			mensajeEditado,
 			mensajeWhatsappEditado,
 		);
+		const mensajeEmail = mensajeEmailEditable(
+			metodoInicial,
+			mensajeEditado,
+			mensajeWhatsappEditado,
+		);
 		const cuerpoNoReply = cuerpoParaValidarNoReply(
 			metodo,
 			mensajeWhatsapp,
@@ -361,7 +367,7 @@ export function ContactoModal({
 			case "email-link": {
 				const params = new URLSearchParams();
 				if (asuntoEditado) params.set("subject", asuntoEditado);
-				if (mensajeEditado) params.set("body", mensajeEditado);
+				if (mensajeEmail) params.set("body", mensajeEmail);
 				const query = params.toString();
 				window.open(`mailto:${emailCliente || ""}${query ? `?${query}` : ""}`);
 				break;
@@ -375,14 +381,14 @@ export function ContactoModal({
 					toast.error("El asunto es requerido");
 					return;
 				}
-				if (!mensajeEditado.trim()) {
+				if (!mensajeEmail.trim()) {
 					toast.error("El mensaje es requerido");
 					return;
 				}
 				emailApiMutation.mutate({
 					destinatario: emailCliente,
 					asunto: asuntoEditado,
-					mensaje: mensajeEditado,
+					mensaje: mensajeEmail,
 				});
 				break;
 			case "sms-api":

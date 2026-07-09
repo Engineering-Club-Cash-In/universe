@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+	accionUsaCuerpoNoReply,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	crearUrlWhatsappManual,
@@ -322,10 +323,7 @@ export function ContactoModal({
 			mensajeWhatsapp,
 			telefonoAsesorLimpio,
 		);
-		if (
-			(metodo === "whatsapp-link" || metodo === "whatsapp-api") &&
-			!telefonoAsesorNoReply.enviar
-		) {
+		if (accionUsaCuerpoNoReply(metodo) && !telefonoAsesorNoReply.enviar) {
 			toast.error(
 				"No se puede enviar esta plantilla no-reply porque el asesor no tiene teléfono registrado",
 			);

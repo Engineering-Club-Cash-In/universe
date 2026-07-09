@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	PLANTILLAS_MENSAJES,
+	accionUsaCuerpoNoReply,
 	crearUrlWhatsappManual,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
@@ -109,6 +110,13 @@ describe("plantillas web de cobros", () => {
 				"Mensaje visible editado",
 			),
 		).toBe("Mensaje visible editado");
+	});
+
+	test("bloquea todos los envios que usan cuerpo no-reply sin telefono de asesor", () => {
+		expect(accionUsaCuerpoNoReply("whatsapp-link")).toBe(true);
+		expect(accionUsaCuerpoNoReply("whatsapp-api")).toBe(true);
+		expect(accionUsaCuerpoNoReply("sms-api")).toBe(true);
+		expect(accionUsaCuerpoNoReply("email-api")).toBe(false);
 	});
 
 	test("descarta plantillas no-reply sin telefono de asesor", () => {

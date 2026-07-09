@@ -80,6 +80,12 @@ export function mensajeSmsEditable(
   );
 }
 
+export function accionUsaCuerpoNoReply(metodo: string): boolean {
+  return (
+    metodo === "whatsapp-link" || metodo === "whatsapp-api" || metodo === "sms-api"
+  );
+}
+
 function toCapitalCase(str: string): string {
   return str
     .toLowerCase()

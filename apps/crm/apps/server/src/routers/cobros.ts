@@ -40,11 +40,11 @@ import {
 } from "../db/schema/crm";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 } from "../lib/cobros-plantillas";
-import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
@@ -3976,6 +3976,30 @@ export const cobrosRouter = {
 				emailCobrador: input?.emailCobrador,
 				fecha: input?.fecha,
 				asesores: input?.asesores,
+			});
+		}),
+
+	getMoraCobradaPorAsesor: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				mes: z.number(),
+				anio: z.number(),
+				asesores: z.array(z.number()).optional(),
+				emailCobrador: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getMoraCobradaPorAsesor({
+				mes: input.mes,
+				anio: input.anio,
+				asesores: input.asesores,
+				emailCobrador: input.emailCobrador,
 			});
 		}),
 

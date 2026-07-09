@@ -86,8 +86,13 @@ export const getVehiclesBySifcoController = async (numeroSifcos: string[]) => {
 				vinNumber: vehicles.vinNumber,
 			})
 			.from(opportunities)
-			.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-			.where(inArray(opportunities.numeroSifco, uniqueSifcos))
+			.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+			.where(
+				and(
+					inArray(opportunities.numeroSifco, uniqueSifcos),
+					inArray(opportunities.status, ["won", "migrate"]),
+				),
+			)
 			.orderBy(desc(opportunities.updatedAt), desc(opportunities.createdAt));
 
 		const seen = new Set<string>();

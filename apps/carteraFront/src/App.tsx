@@ -23,6 +23,8 @@ import { RecibosGenericos } from "./private/recibos-genericos/components/Recibos
 import { FallenCredits } from "./private/cartera/components/FallenCredits";
 import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
 import { MoraHistorial } from "./private/cartera/components/MoraHistorial";
+import { BucketsHistorial } from "./private/cartera/components/BucketsHistorial";
+import { BucketsCambiosAsesor } from "./private/cartera/components/BucketsCambiosAsesor";
 import { DevolucionCube } from "./private/cartera/components/DevolucionCube";
 import { CierreCartera } from "./private/cartera/components/CierreCartera";
 import { FacturacionDiaria } from "./private/cartera/components/FacturacionDiaria";
@@ -263,6 +265,25 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
               <MoraHistorial />
+            </RoleRoute>
+          }
+        />
+
+        {/* COBROS-02: módulos temporales de auditoría del motor de buckets */}
+        <Route
+          path="buckets-historial"
+          element={
+            <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
+              <BucketsHistorial />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="buckets-asesores"
+          element={
+            <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
+              <BucketsCambiosAsesor />
             </RoleRoute>
           }
         />

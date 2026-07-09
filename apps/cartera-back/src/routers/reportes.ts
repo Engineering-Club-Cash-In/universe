@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMoraByEtapaYAsesor, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
+import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -290,6 +290,47 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/mora-por-etapa-asesor]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/mora-cobrada-por-asesor", async ({ query, set }) => {
+    try {
+      const { mes, anio, asesores, email_cobrador } = query as Record<string, string>;
+      const mesNum = Number(mes);
+      const anioNum = Number(anio);
+      if (!Number.isInteger(mesNum) || mesNum < 1 || mesNum > 12) {
+        set.status = 400;
+        return { error: "Parámetro 'mes' inválido (1-12)" };
+      }
+      if (!Number.isInteger(anioNum) || anioNum < 2000 || anioNum > 2100) {
+        set.status = 400;
+        return { error: "Parámetro 'anio' inválido" };
+      }
+
+      let asesoresIds: number[] | undefined;
+      if (asesores) {
+        asesoresIds = asesores
+          .split(",")
+          .map((s) => Number(s.trim()))
+          .filter((n) => Number.isInteger(n) && n > 0);
+        if (!asesoresIds.length) {
+          set.status = 400;
+          return { error: "Parámetro 'asesores' inválido" };
+        }
+      }
+
+      const data = await getMoraCobradaPorAsesor({
+        mes: mesNum,
+        anio: anioNum,
+        asesores: asesoresIds,
+        emailCobrador: email_cobrador,
+      });
+      set.status = 200;
+      return data;
+    } catch (error) {
+      console.error("[/reportes/mora-cobrada-por-asesor]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

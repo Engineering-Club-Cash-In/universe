@@ -172,6 +172,7 @@ export const cobrosAppRouter = {
 
 	// CRM Cobros — nuevas vistas
 	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
+	getMoraCobradaPorAsesor: cobrosRouter.getMoraCobradaPorAsesor,
 	getCuotasPorFecha: cobrosRouter.getCuotasPorFecha,
 	getDescuentosCRM: cobrosRouter.getDescuentosCRM,
 
@@ -438,7 +439,8 @@ export const manualVehicleRouter = {
 // Projection procedures exported separately to avoid TS7056 truncation
 export const proyeccionRouter = {
 	getInvestorsCartera: investorDocumentsRouter.getInvestorsCartera,
-	getSimulacionInversionista: investorDocumentsRouter.getSimulacionInversionista,
+	getSimulacionInversionista:
+		investorDocumentsRouter.getSimulacionInversionista,
 };
 
 // Merged AppRouter type to avoid serialization limit

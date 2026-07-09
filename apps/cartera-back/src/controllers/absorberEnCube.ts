@@ -462,3 +462,42 @@ export async function absorberInversionistaEnCube(
     accion: cubePreexistente ? "merge" : "swap",
   };
 }
+
+// ============================================================================
+// BATCH: cubeCompraCredito
+// ============================================================================
+//
+// PROPÓSITO
+// Absorbe a TODOS los inversionistas no-CUBE de un crédito hacia CUBE,
+// llamando a `absorberInversionistaEnCube` una vez por cada uno de forma
+// secuencial (no en paralelo, para no pisarse entre sí sobre el mismo
+// pool/crédito). Es un movimiento de pool puro — no toca `estado` del
+// crédito, no registra abonos ni envía correo; eso queda a cargo del
+// caller (p.ej. el flujo de "compra de cartera" completo).
+//
+// La lista de salientes se lee de `creditos_inversionistas` (padre) al
+// inicio, ANTES de absorber a nadie — es una foto fija del pool. Cada
+// absorción sucesiva no cambia esa lista porque `absorberInversionistaEnCube`
+// solo transforma/borra el row del inversionista que se le pasa, nunca
+// agrega inversionistas nuevos.
+// ============================================================================
+export async function cubeCompraCredito(
+  tx: any,
+  credito_id: number,
+  logger?: { log?: (...a: any[]) => void; warn?: (...a: any[]) => void },
+): Promise<{ credito_id: number; absorbidos: AbsorberResultado[] }> {
+  const noCube = await tx
+    .select({ inversionista_id: creditos_inversionistas.inversionista_id })
+    .from(creditos_inversionistas)
+    .where(eq(creditos_inversionistas.credito_id, credito_id));
+
+  const salientes = noCube
+    .map((r: any) => r.inversionista_id)
+    .filter((id: number) => id !== CUBE_INVESTMENT_ID);
+
+  const absorbidos: AbsorberResultado[] = [];
+  for (const invId of salientes) {
+    absorbidos.push(await absorberInversionistaEnCube(tx, credito_id, invId, logger));
+  }
+  return { credito_id, absorbidos };
+}

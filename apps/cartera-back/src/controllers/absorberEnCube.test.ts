@@ -93,4 +93,21 @@ d("absorberInversionistaEnCube (integración sandbox)", () => {
       }).catch((e) => { if (e.message !== "ROLLBACK") throw e; });
     } finally { await sql.end(); }
   });
+
+  it("cubeCompraCredito 838 → absorbe al único no-CUBE, CUBE queda 100%", async () => {
+    const sql = postgres(SB!);
+    const db = drizzle(sql);
+    try {
+      await db.transaction(async (tx) => {
+        const { cubeCompraCredito } = await import("./absorberEnCube");
+        const res = await cubeCompraCredito(tx, 838);
+        expect(res.absorbidos.length).toBe(1);
+        const rows = await tx.select().from(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, 838));
+        expect(rows.length).toBe(1);
+        expect(rows[0].inversionista_id).toBe(86);
+        throw new Error("ROLLBACK");
+      }).catch((e) => { if (e.message !== "ROLLBACK") throw e; });
+    } finally { await sql.end(); }
+  });
 });

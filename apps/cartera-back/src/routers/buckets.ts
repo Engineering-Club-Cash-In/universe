@@ -5,6 +5,7 @@ import {
   getBucketsHistorial,
   getBucketsHistorialCredito,
 } from "../controllers/buckets/bucketsHistorial";
+import { getAsesorHistorial } from "../controllers/buckets/asesorHistorial";
 import { getCreditosWithUserByMesAnio } from "../controllers/credits";
 import { StatusCredit } from "../database/db/schema";
 
@@ -153,6 +154,77 @@ export const bucketsRouter = new Elysia()
         asesor: t.Optional(t.String()),
         status_credito: t.Optional(t.String()),
         pago_id: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        pageSize: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // Bitácora de cambios de asesor (credito_asesor_historial), paginada y con
+  // filtros + resumen. Misma validación estricta que /buckets/historial.
+  .get(
+    "/buckets/asesores-historial",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const creditoId = query.credito_id ? Number(query.credito_id) : undefined;
+        if (creditoId !== undefined && (!Number.isInteger(creditoId) || creditoId <= 0)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] credito_id inválido" };
+        }
+        if (query.desde && !esFecha(query.desde)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] desde inválida (formato YYYY-MM-DD)" };
+        }
+        if (query.hasta && !esFecha(query.hasta)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] hasta inválida (formato YYYY-MM-DD)" };
+        }
+        if (query.desde && query.hasta && query.desde > query.hasta) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] rango de fechas inválido (desde > hasta)" };
+        }
+        if (csvInvalido(query.bucket, esBucket)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] bucket inválido (CSV de enteros, ej. 0,1,5)" };
+        }
+        if (query.origen && !ORIGENES.includes(query.origen)) {
+          set.status = 400;
+          return { success: false, message: `[ERROR] origen inválido (valores: ${ORIGENES.join(", ")})` };
+        }
+        return await getAsesorHistorial({
+          desde: query.desde,
+          hasta: query.hasta,
+          origen: query.origen,
+          bucket: query.bucket,
+          asesor_nuevo: query.asesor_nuevo,
+          asesor_anterior: query.asesor_anterior,
+          credito_id: creditoId,
+          numero_credito_sifco: query.numero_credito_sifco,
+          nombre_usuario: query.nombre_usuario,
+          page: query.page ? Number(query.page) : 1,
+          pageSize: query.pageSize ? Number(query.pageSize) : 20,
+        });
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener el histórico de cambios de asesor",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        desde: t.Optional(t.String()),
+        hasta: t.Optional(t.String()),
+        origen: t.Optional(t.String()),
+        bucket: t.Optional(t.String()),
+        asesor_nuevo: t.Optional(t.String()),
+        asesor_anterior: t.Optional(t.String()),
+        credito_id: t.Optional(t.String()),
+        numero_credito_sifco: t.Optional(t.String()),
+        nombre_usuario: t.Optional(t.String()),
         page: t.Optional(t.String()),
         pageSize: t.Optional(t.String()),
       }),

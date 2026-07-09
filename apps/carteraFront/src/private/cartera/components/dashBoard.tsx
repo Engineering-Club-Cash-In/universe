@@ -20,6 +20,8 @@ import {
   Wallet,
   PiggyBank,
   Shield,
+  Layers,
+  UserCog,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
@@ -125,6 +127,28 @@ const menuSections: MenuSection[] = [
         icon: <Shield className="h-4 w-4" />,
         path: "/seguros",
         roles: ["ADMIN"],
+      },
+    ],
+  },
+  {
+    // COBROS-02: módulos temporales de auditoría del motor de buckets.
+    key: "buckets",
+    label: "Buckets",
+    icon: <Layers className="h-4 w-4" />,
+    items: [
+      {
+        key: "buckets-historial",
+        label: "Historial de Buckets",
+        icon: <Layers className="h-4 w-4" />,
+        path: "/buckets-historial",
+        roles: ["ADMIN", "CONTA"],
+      },
+      {
+        key: "buckets-asesores",
+        label: "Cambios de Asesor",
+        icon: <UserCog className="h-4 w-4" />,
+        path: "/buckets-asesores",
+        roles: ["ADMIN", "CONTA"],
       },
     ],
   },

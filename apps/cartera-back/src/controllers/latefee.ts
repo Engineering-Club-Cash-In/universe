@@ -293,7 +293,8 @@ export async function createMora({
         AND NOT EXISTS (
           SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
           WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required'))`);
+            AND pc.validation_status IN ('validated', 'no_required')
+            AND COALESCE(pc.monto_aplicado, 0) > 0)`);
     const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
 
     // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
@@ -751,6 +752,13 @@ export async function procesarMoras() {
         statusCredit: creditos.statusCredit,
         capital: creditos.capital,
         asesor_id: creditos.asesor_id, // FASE 3: dueño actual (para reasignar por bucket)
+        // Una fila de pago "vouchea" la cuota solo si aplicó plata REAL a la
+        // cuota (monto_aplicado > 0). Los pagos especiales de solo mora/otros/
+        // convenio se insertan colgados de la primera cuota pendiente con
+        // pagado=true y monto_aplicado=0 (getSpecialPaymentInstallmentFields):
+        // ese `pagado` significa "fila completa", NO "cuota cubierta" — sin
+        // este AND, pagar SOLO la mora sacaba la cuota del conteo al validar
+        // (cuotas 2→1 → BAJADA falsa de bucket y mora recalculada de menos).
         hasPaidPayment: sql<boolean>`EXISTS (
           SELECT 1
           FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
@@ -758,6 +766,7 @@ export async function procesarMoras() {
             AND pc."paymentFalse" = false
             AND pc.pagado = true
             AND pc.validation_status IN ('validated', 'no_required')
+            AND COALESCE(pc.monto_aplicado, 0) > 0
         )`,
       })
       .from(cuotas_credito)

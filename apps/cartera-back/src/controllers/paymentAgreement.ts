@@ -1432,8 +1432,9 @@ export const updateConvenioStatus = async (
       }
 
       // Contar cuotas vencidas con la MISMA lógica que createMora/procesarMoras
-      // (< hoy GT, impaga, sin pago cubriente validated/no_required) para que el conteo
-      // coincida con el que recalcula createMora y no lo rechace por mismatch.
+      // (< hoy GT, impaga, sin pago cubriente validated/no_required CON plata real
+      // aplicada — monto_aplicado > 0, igual que el guard cuotasReales) para que el
+      // conteo coincida con el que recalcula createMora y no lo rechace por mismatch.
       const ovRes = await db.execute<any>(sql`
         SELECT COUNT(*)::int AS n
         FROM cartera.cuotas_credito cu
@@ -1443,7 +1444,8 @@ export const updateConvenioStatus = async (
           AND NOT EXISTS (
             SELECT 1 FROM cartera.pagos_credito pc
             WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-              AND pc.validation_status IN ('validated', 'no_required'))`);
+              AND pc.validation_status IN ('validated', 'no_required')
+              AND COALESCE(pc.monto_aplicado, 0) > 0)`);
       const numCuotasAtrasadas = Number(ovRes.rows?.[0]?.n ?? 0);
 
       console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);

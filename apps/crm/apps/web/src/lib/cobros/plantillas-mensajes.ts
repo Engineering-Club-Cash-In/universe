@@ -49,6 +49,17 @@ export function prepararTelefonoAsesorParaEnvio(
   return { enviar: true, telefonoAsesor };
 }
 
+export function crearUrlWhatsappManual(
+  telefonoLimpio: string,
+  mensajeWhatsapp: string,
+  mensajeFallback = "",
+): string {
+  const mensaje = mensajeWhatsapp || mensajeFallback;
+  return mensaje
+    ? `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`
+    : `https://wa.me/${telefonoLimpio}`;
+}
+
 function toCapitalCase(str: string): string {
   return str
     .toLowerCase()

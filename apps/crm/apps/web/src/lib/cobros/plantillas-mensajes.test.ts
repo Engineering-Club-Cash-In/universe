@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	PLANTILLAS_MENSAJES,
+	crearUrlWhatsappManual,
 	prepararTelefonoAsesorParaEnvio,
 } from "./plantillas-mensajes";
 
@@ -69,6 +70,17 @@ describe("plantillas web de cobros", () => {
 			/boleta o comprobante de pago[^.]*{telefonoAsesor}/i,
 		);
 		expect(preMora?.cuerpoWhastapp).toMatch(/duda[^.]*{telefonoAsesor}/i);
+	});
+
+	test("crea links manuales de WhatsApp con el cuerpo de WhatsApp", () => {
+		const url = crearUrlWhatsappManual(
+			"50241286630",
+			"Mensaje WhatsApp no-reply",
+			"Mensaje email por este medio",
+		);
+		const text = new URL(url).searchParams.get("text");
+
+		expect(text).toBe("Mensaje WhatsApp no-reply");
 	});
 
 	test("descarta plantillas no-reply sin telefono de asesor", () => {

@@ -51,6 +51,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
 	interpolar,
 	PLANTILLAS_MENSAJES,
+	crearUrlWhatsappManual,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -324,9 +325,11 @@ export function ContactoModal({
 				window.open(`tel:${tel}`);
 				break;
 			case "whatsapp-link": {
-				const url = mensajeEditado
-					? `https://wa.me/${telLimpio}?text=${encodeURIComponent(mensajeEditado)}`
-					: `https://wa.me/${telLimpio}`;
+				const url = crearUrlWhatsappManual(
+					telLimpio,
+					mensajeWhatsappEditado,
+					mensajeEditado,
+				);
 				window.open(url);
 				break;
 			}

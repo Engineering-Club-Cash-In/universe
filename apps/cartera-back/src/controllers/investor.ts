@@ -6722,6 +6722,40 @@ async function consultarResumenGlobalPorEstadoPago(
     condicionesJoinPagos.push(sql`EXTRACT(YEAR FROM ${pe.fecha_pago}) = ${anio}`);
   }
 
+  // ── Combinada con excedente/variable ────────────────────────────────────
+  // Dentro de una combinada, los créditos excedente/variable no se resuelven
+  // per-pago: se suman en un pool y se les aplica el monto_reinversion del
+  // inversionista (igual que las modalidades "crudas").
+  //   - Excedente: RECIBE el monto fijo; el sobrante del pool se reinvierte.
+  //   - Variable : REINVIERTE el monto fijo; el resto del pool lo recibe.
+  const cuotaCompleta = sql`
+    ${pe.abono_capital}
+    + ${pe.abono_interes}
+    + CASE
+        WHEN ${inversionistas.emite_factura}
+          THEN ${pe.abono_iva_12}
+        ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+      END`;
+
+  const montoReinv = sql`COALESCE(${inversionistas.monto_reinversion}, 0)::numeric`;
+
+  const poolExcedente = sql`COALESCE(SUM(
+    CASE WHEN ${ce.tipo_reinversion} = 'reinversion_excedente' THEN (${cuotaCompleta}) ELSE 0 END
+  ), 0)`;
+  const poolVariable = sql`COALESCE(SUM(
+    CASE WHEN ${ce.tipo_reinversion} = 'reinversion_variable' THEN (${cuotaCompleta}) ELSE 0 END
+  ), 0)`;
+
+  // Lo que se REINVIERTE de los pools (0 si el pool está vacío).
+  const reinvPools = sql`
+    GREATEST((${poolExcedente}) - (${montoReinv}), 0)
+    + LEAST((${montoReinv}), (${poolVariable}))`;
+
+  // Lo que el inversionista RECIBE de los pools (el inverso).
+  const recibePools = sql`
+    LEAST((${montoReinv}), (${poolExcedente}))
+    + ((${poolVariable}) - LEAST((${montoReinv}), (${poolVariable})))`;
+
   const selectObj: Record<string, any> = {
     inversionista_id: inversionistas.inversionista_id,
     nombre: inversionistas.nombre,
@@ -6781,6 +6815,7 @@ async function consultarResumenGlobalPorEstadoPago(
             ELSE 0
           END
         ), 0)
+        + (${reinvPools})
         WHEN 'reinversion_variable' THEN LEAST(
           COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
           COALESCE(SUM(
@@ -6839,6 +6874,7 @@ async function consultarResumenGlobalPorEstadoPago(
                 ELSE 0
               END
             ), 0)
+            + (${reinvPools})
             WHEN 'reinversion_variable' THEN LEAST(
               COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
               COALESCE(SUM(
@@ -6902,11 +6938,14 @@ async function consultarResumenGlobalPorEstadoPago(
             WHEN 'reinversion_interes' THEN (
               ${pe.abono_capital} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
+            WHEN 'reinversion_excedente' THEN 0
+            WHEN 'reinversion_variable' THEN 0
             ELSE (
                ${pe.abono_capital} + ${pe.abono_interes} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
           END
         ), 0)
+        + (${recibePools})
         WHEN 'reinversion_variable' THEN
           COALESCE(SUM(
             ${pe.abono_capital}

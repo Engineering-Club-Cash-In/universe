@@ -680,6 +680,10 @@ function AsesorRow({
 	const [isOpen, setIsOpen] = useState(false);
 	const [limit, setLimit] = useState(10);
 
+	// El grupo "Sin asesor" (asesor_id null) no se puede expandir: el endpoint de
+	// detalle exige un asesorId, así que la fila queda como total no desglosable.
+	const expandable = asesor.asesor_id != null;
+
 	const detalle = useQuery({
 		...orpc.getCobranzaDiariaDetalle.queryOptions({
 			input: {
@@ -700,12 +704,13 @@ function AsesorRow({
 		<Collapsible
 			open={isOpen}
 			onOpenChange={setIsOpen}
+			disabled={!expandable}
 			className="rounded-lg border border-border"
 		>
 			<CollapsibleTrigger asChild>
 				<button
 					type="button"
-					className="group flex w-full cursor-pointer items-center gap-3 p-3 text-left hover:bg-muted/50"
+					className="group flex w-full items-center gap-3 p-3 text-left hover:bg-muted/50 enabled:cursor-pointer disabled:cursor-default disabled:hover:bg-transparent data-[state=open]:cursor-pointer"
 				>
 					<span className="min-w-40 font-medium">{asesor.asesor_nombre}</span>
 					<span className="text-muted-foreground text-xs">
@@ -717,9 +722,11 @@ function AsesorRow({
 					<Badge variant="outline">
 						{(asesor.efectividad * 100).toFixed(1)}%
 					</Badge>
-					<ChevronDown
-						className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
-					/>
+					{expandable && (
+						<ChevronDown
+							className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
+						/>
+					)}
 				</button>
 			</CollapsibleTrigger>
 			<CollapsibleContent>
@@ -869,7 +876,11 @@ function TabCobradoVsEsperado({
 		enabled: !!session && canSeeAll,
 	});
 
-	const filtro = { anio, mes, dia };
+	// Días válidos del mes seleccionado (evita Feb 31 → make_date inválido → 500).
+	const diasEnMes = new Date(anio, mes, 0).getDate();
+	const diaValido = Math.min(dia, diasEnMes);
+
+	const filtro = { anio, mes, dia: diaValido };
 
 	const { data, isLoading, dataUpdatedAt, refetch, isFetching } = useQuery({
 		...orpc.getCobranzaDiaria.queryOptions({
@@ -899,7 +910,7 @@ function TabCobradoVsEsperado({
 
 	const anios = [anioHoy, anioHoy - 1, anioHoy - 2];
 	const meses = Array.from({ length: 12 }, (_, i) => i + 1);
-	const dias = Array.from({ length: 31 }, (_, i) => i + 1);
+	const dias = Array.from({ length: diasEnMes }, (_, i) => i + 1);
 
 	return (
 		<div className="space-y-6">
@@ -947,7 +958,10 @@ function TabCobradoVsEsperado({
 
 				<div className="flex flex-col gap-1">
 					<Label className="text-xs">Día</Label>
-					<Select value={String(dia)} onValueChange={(v) => setDia(Number(v))}>
+					<Select
+						value={String(diaValido)}
+						onValueChange={(v) => setDia(Number(v))}
+					>
 						<SelectTrigger className="w-20">
 							<SelectValue />
 						</SelectTrigger>

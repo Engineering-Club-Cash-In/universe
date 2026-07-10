@@ -1103,6 +1103,18 @@ app.post("/info/vehicles-by-sifco", async (c) => {
 		const numeroSifcos = body.numero_sifcos
 			.map((value) => String(value ?? "").trim())
 			.filter(Boolean);
+
+		const MAX_SIFCOS = 50000;
+		if (numeroSifcos.length > MAX_SIFCOS) {
+			return c.json(
+				{
+					success: false,
+					message: `numero_sifcos excede el máximo permitido (${MAX_SIFCOS})`,
+				},
+				400,
+			);
+		}
+
 		const result = await getVehiclesBySifcoController(numeroSifcos);
 		return c.json(result, result.success ? 200 : 500);
 	} catch (err: any) {

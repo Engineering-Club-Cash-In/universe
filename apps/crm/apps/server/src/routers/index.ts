@@ -174,6 +174,8 @@ export const cobrosAppRouter = {
 	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
 	getMoraCobradaPorAsesor: cobrosRouter.getMoraCobradaPorAsesor,
 	getCuotasPorFecha: cobrosRouter.getCuotasPorFecha,
+	getCobranzaDiaria: cobrosRouter.getCobranzaDiaria,
+	getCobranzaDiariaDetalle: cobrosRouter.getCobranzaDiariaDetalle,
 	getDescuentosCRM: cobrosRouter.getDescuentosCRM,
 
 	// Seguimientos programados

@@ -374,7 +374,11 @@ function SubirBoletaDialog({
 			await upload({
 				file: toUpload,
 				inversionista_id: inv.inversionista_id,
-				monto_boleta: String(inv.total_a_recibir_con_reinversion),
+				// La boleta se emite por la cuota real a transferir (mismo campo que
+				// usan la fila y los archivos ACH/Terceros).
+				monto_boleta: String(
+					inv.total_cuota ?? inv.total_a_recibir_con_reinversion,
+				),
 				notas: notas.trim() || undefined,
 			});
 			toast.success("Boleta subida correctamente");
@@ -403,7 +407,11 @@ function SubirBoletaDialog({
 				<DialogHeader>
 					<DialogTitle>Subir Boleta</DialogTitle>
 					<DialogDescription>
-						{inv.nombre} — {formatCurrency(inv.total_a_recibir_con_reinversion, inv.currencySymbol)}
+						{inv.nombre} —{" "}
+						{formatCurrency(
+							inv.total_cuota ?? inv.total_a_recibir_con_reinversion,
+							inv.currencySymbol,
+						)}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -1066,11 +1074,18 @@ function PagarInversionistas() {
 		);
 	}
 
+	// Suma la cuota real a transferir, igual que la fila, la boleta y los archivos
+	// ACH/Terceros. No sirve `total_a_recibir_con_reinversion`: para los créditos en
+	// interés compuesto de inversionistas que emiten factura arrastra el IVA, que no
+	// se transfiere, e infla el total.
 	const totalPendienteLiquidar = inversionistas
 		.filter((inv) => inv.estado_liquidacion_resumen !== "liquidated")
 		.reduce(
 			(acc, inv) =>
-				acc + Number.parseFloat(inv.total_a_recibir_con_reinversion || "0"),
+				acc +
+				Number.parseFloat(
+					(inv.total_cuota ?? inv.total_a_recibir_con_reinversion) || "0",
+				),
 			0,
 		);
 	return (

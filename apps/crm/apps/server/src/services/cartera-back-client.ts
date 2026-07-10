@@ -1684,6 +1684,54 @@ export class CarteraBackClient {
 		return response.data ?? [];
 	}
 
+	async getCobranzaDiaria(params: {
+		anio: number;
+		mes: number;
+		dia: number;
+		asesorId?: number;
+	}): Promise<any> {
+		const qp = new URLSearchParams({
+			anio: String(params.anio),
+			mes: String(params.mes),
+			dia: String(params.dia),
+			...(params.asesorId ? { asesor_id: String(params.asesorId) } : {}),
+		});
+
+		const res = await this.request<{ ok: boolean; data: any }>(
+			`/reportes/cobranza-diaria?${qp}`,
+			{ method: "GET" },
+			false,
+		);
+
+		return res.data ?? { asesores: [], totalGeneral: null };
+	}
+
+	async getCobranzaDiariaDetalle(params: {
+		anio: number;
+		mes: number;
+		dia: number;
+		asesorId: number;
+		limit?: number;
+		offset?: number;
+	}): Promise<any> {
+		const qp = new URLSearchParams({
+			anio: String(params.anio),
+			mes: String(params.mes),
+			dia: String(params.dia),
+			asesor_id: String(params.asesorId),
+			limit: String(params.limit ?? 10),
+			offset: String(params.offset ?? 0),
+		});
+
+		const res = await this.request<{ ok: boolean; data: any }>(
+			`/reportes/cobranza-diaria/detalle?${qp}`,
+			{ method: "GET" },
+			false,
+		);
+
+		return res.data ?? { creditos: [], total: 0, hasMore: false };
+	}
+
 	// ========================================================================
 	// CACHE MANAGEMENT
 	// ========================================================================

@@ -21,7 +21,11 @@ export async function construirFilasCredito(
 			cr.asesor_id, a.nombre AS asesor_nombre,
 			COALESCE(prog.capital_restante,0) AS cap_rest, COALESCE(prog.interes_restante,0) AS int_rest,
 			COALESCE(prog.iva_12_restante,0) AS iva_rest, COALESCE(prog.seguro_restante,0) AS seg_rest,
-			COALESCE(prog.gps_restante,0) AS gps_rest, COALESCE(prog.membresias,0) AS mem_rest,
+			COALESCE(prog.gps_restante,0) AS gps_rest,
+			-- Migrados SIFCO no ponen membresias=0 al pagar (a diferencia de los otros
+			-- *_restante), dejando una membresía fantasma en cuotas ya pagadas. Se fuerza a 0
+			-- cuando la cuota está pagada, para quedar consistente con los demás rubros.
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.membresias,0) END AS mem_rest,
 			COALESCE(pag.abono_capital,0) AS cap_cob, COALESCE(pag.abono_interes,0) AS int_cob,
 			COALESCE(pag.abono_iva,0) AS iva_cob, COALESCE(pag.abono_seguro,0) AS seg_cob,
 			COALESCE(pag.abono_gps,0) AS gps_cob, COALESCE(pag.membresias_pagada,0) AS mem_cob,

@@ -1177,10 +1177,13 @@ export class CarteraBackClient {
 			queryParams.set("anio", String(filters.anio));
 		}
 
+		// Sin cache: el estado de liquidación debe verse fresco siempre. Con cache
+		// en memoria + varias instancias, el invalidate del POST liquidar no llega
+		// a las demás instancias y la UI muestra "pendiente" hasta 5 min después.
 		const response = await this.request<ResumenGlobalInversionista[]>(
 			`/resumen-global-liquidaciones?${queryParams.toString()}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
 		return response;
 	}

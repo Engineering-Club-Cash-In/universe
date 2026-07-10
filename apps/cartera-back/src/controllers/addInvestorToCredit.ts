@@ -21,6 +21,7 @@ import {
 import { sendInvestorAddedToCreditsNotification } from "@cci/email";
 import {
   resolveModalidadFacturacionSpread,
+  getModalidadFacturacionSpreadById,
   type ModalidadFacturacionSpreadRow,
 } from "./modalidadFacturacion";
 
@@ -79,11 +80,17 @@ const addInvestorToCreditSchema = z.object({
   porcentaje_cash_in: z.number().min(0).max(100).optional(),
   porcentaje_inversion: z.number().min(0).max(100).optional(),
   // Solo aplica cuando tipo_operacion === "compra_cartera". Si viene, el
-  // % Inversionista / % Cash In se calcula del catálogo (por monto_aportado)
-  // y SE IGNORAN porcentaje_cash_in / porcentaje_inversion si vinieran.
+  // % Inversionista / % Cash In se calcula del catálogo (por monto_aportado,
+  // salvo que venga modalidad_facturacion_spread_id — ver abajo) y SE
+  // IGNORAN porcentaje_cash_in / porcentaje_inversion si vinieran.
   modalidad_facturacion: z
     .enum(["p2p_directa", "factura_cube", "factura_cube_pequeno"])
     .optional(),
+  // Anulación manual del bracket: si viene, se usa ESA fila exacta del
+  // catálogo (cualquiera de los 8 brackets de la modalidad, sin importar si
+  // corresponde al monto_aportado — decisión de negocio) en vez de resolver
+  // por monto. Debe pertenecer a la modalidad enviada en modalidad_facturacion.
+  modalidad_facturacion_spread_id: z.number().int().positive().optional(),
   tipo_operacion: z.enum(["reinversion", "compra_cartera"]),
   tipo_reinversion: z
     .enum([
@@ -352,6 +359,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       porcentaje_cash_in,
       porcentaje_inversion,
       modalidad_facturacion,
+      modalidad_facturacion_spread_id,
       tipo_operacion,
       tipo_reinversion,
       // NOTA: fecha_inicio_participacion se sigue aceptando en el body pero
@@ -383,9 +391,16 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     // MODALIDAD DE FACTURACIÓN
     // OPCIONAL a nivel backend (retrocompatible: el front todavía no la
     // manda). Si VIENE, define el % Inversionista / % Cash In desde el bracket
-    // del catálogo (por monto_aportado) y esos valores MANDAN sobre cualquier
-    // porcentaje del request. Si NO viene, el flujo de porcentajes sigue como
-    // antes. Solo aplica a compra_cartera; en reinversión se rechaza si viene.
+    // del catálogo y esos valores MANDAN sobre cualquier porcentaje del
+    // request. Si NO viene, el flujo de porcentajes sigue como antes. Solo
+    // aplica a compra_cartera; en reinversión se rechaza si viene.
+    //
+    // Por default el bracket se resuelve por monto_aportado. Si además viene
+    // modalidad_facturacion_spread_id, es una anulación manual: el operador
+    // puede elegir cualquiera de los 8 brackets de la modalidad (no tiene
+    // que ser el que corresponde al monto), siempre que el monto sea válido
+    // para el catálogo (el piso de Q25,000 es duro, sin excepción — se
+    // valida abajo con resolveModalidadFacturacionSpread).
     // ================================================================
     if (tipo_operacion !== "compra_cartera" && modalidad_facturacion) {
       set.status = 400;
@@ -399,22 +414,81 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       };
     }
 
+    if (modalidad_facturacion_spread_id && !modalidad_facturacion) {
+      set.status = 400;
+      return {
+        message: "Validation failed",
+        errors: {
+          modalidad_facturacion_spread_id: [
+            "modalidad_facturacion_spread_id requiere que venga modalidad_facturacion",
+          ],
+        },
+      };
+    }
+
     let modalidadFacturacionSpreadRow: ModalidadFacturacionSpreadRow | null = null;
     if (modalidad_facturacion) {
-      modalidadFacturacionSpreadRow = await resolveModalidadFacturacionSpread(
-        monto_aportado,
-        modalidad_facturacion,
-      );
-      if (!modalidadFacturacionSpreadRow) {
-        set.status = 400;
-        return {
-          message: "Validation failed",
-          errors: {
-            monto_aportado: [
-              `No existe un bracket de modalidad de facturación para el monto Q${monto_aportado}`,
-            ],
-          },
-        };
+      if (modalidad_facturacion_spread_id) {
+        modalidadFacturacionSpreadRow = await getModalidadFacturacionSpreadById(
+          modalidad_facturacion_spread_id,
+        );
+        if (!modalidadFacturacionSpreadRow) {
+          set.status = 400;
+          return {
+            message: "Validation failed",
+            errors: {
+              modalidad_facturacion_spread_id: [
+                `No existe un bracket de modalidad de facturación con id ${modalidad_facturacion_spread_id}`,
+              ],
+            },
+          };
+        }
+        if (modalidadFacturacionSpreadRow.modalidad !== modalidad_facturacion) {
+          set.status = 400;
+          return {
+            message: "Validation failed",
+            errors: {
+              modalidad_facturacion_spread_id: [
+                `El bracket ${modalidad_facturacion_spread_id} pertenece a la modalidad '${modalidadFacturacionSpreadRow.modalidad}', no a '${modalidad_facturacion}'`,
+              ],
+            },
+          };
+        }
+        // El pricing usa la fila elegida (modalidadFacturacionSpreadRow) sin
+        // importar su bracket — pero el monto igual debe ser válido para el
+        // catálogo (piso de Q25,000 duro, sin excepción). Este resolve solo
+        // se usa para ese chequeo; el resultado se descarta.
+        const bracketDelMonto = await resolveModalidadFacturacionSpread(
+          monto_aportado,
+          modalidad_facturacion,
+        );
+        if (!bracketDelMonto) {
+          set.status = 400;
+          return {
+            message: "Validation failed",
+            errors: {
+              monto_aportado: [
+                `No existe un bracket de modalidad de facturación para el monto Q${monto_aportado}`,
+              ],
+            },
+          };
+        }
+      } else {
+        modalidadFacturacionSpreadRow = await resolveModalidadFacturacionSpread(
+          monto_aportado,
+          modalidad_facturacion,
+        );
+        if (!modalidadFacturacionSpreadRow) {
+          set.status = 400;
+          return {
+            message: "Validation failed",
+            errors: {
+              monto_aportado: [
+                `No existe un bracket de modalidad de facturación para el monto Q${monto_aportado}`,
+              ],
+            },
+          };
+        }
       }
     }
 

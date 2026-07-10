@@ -65,3 +65,80 @@ export function efectividadPct(cobrado: Big, programado: Big): number {
   if (programado.lte(0)) return 0;
   return Number(cobrado.div(programado).round(4).toString());
 }
+
+const RUBROS = ["capital", "interes", "iva", "seguro", "gps", "membresia"] as const;
+
+function nuevoAcc() {
+  return {
+    cuotas: 0,
+    cobrado: { capital: new Big(0), interes: new Big(0), iva: new Big(0), seguro: new Big(0), gps: new Big(0), membresia: new Big(0) },
+    restante: { capital: new Big(0), interes: new Big(0), iva: new Big(0), seguro: new Big(0), gps: new Big(0), membresia: new Big(0) },
+    cubeEsp: new Big(0),
+    cubeCob: new Big(0),
+    mora: new Big(0),
+    totalCob: new Big(0),
+    totalEsp: new Big(0),
+  };
+}
+type Acc = ReturnType<typeof nuevoAcc>;
+
+function sumar(acc: Acc, r: CobranzaCreditoRow) {
+  acc.cuotas += 1;
+  for (const k of RUBROS) {
+    acc.cobrado[k] = acc.cobrado[k].plus(r.cobrado[k]);
+    acc.restante[k] = acc.restante[k].plus(r.restante[k]);
+  }
+  acc.cubeEsp = acc.cubeEsp.plus(r.cube.esperado);
+  acc.cubeCob = acc.cubeCob.plus(r.cube.cobrado);
+  acc.mora = acc.mora.plus(r.mora_cobrada);
+  acc.totalCob = acc.totalCob.plus(r.total_cobrado);
+  acc.totalEsp = acc.totalEsp.plus(r.total_esperado);
+}
+
+function materializar(asesor_id: number | null, asesor_nombre: string, acc: Acc): CobranzaAsesorRow {
+  const money = (b: Big) => b.round(2).toFixed(2);
+  const rubro = (o: Acc["cobrado"]): RubroMontos => ({
+    capital: money(o.capital),
+    interes: money(o.interes),
+    iva: money(o.iva),
+    seguro: money(o.seguro),
+    gps: money(o.gps),
+    membresia: money(o.membresia),
+  });
+  const programado = acc.totalCob.plus(acc.totalEsp);
+  return {
+    asesor_id,
+    asesor_nombre,
+    cuotas: acc.cuotas,
+    cobrado: rubro(acc.cobrado),
+    restante: rubro(acc.restante),
+    cube: { esperado: money(acc.cubeEsp), cobrado: money(acc.cubeCob) },
+    mora_cobrada: money(acc.mora),
+    total_cobrado: money(acc.totalCob),
+    total_esperado: money(acc.totalEsp),
+    programado: money(programado),
+    efectividad: efectividadPct(acc.totalCob, programado),
+  };
+}
+
+/**
+ * Agrupa las filas por crédito en filas por asesor (suma de cada rubro cobrado/restante,
+ * CUBE, mora y totales) más un renglón `totalGeneral` con la suma de todos los asesores.
+ */
+export function agruparPorAsesor(rows: CobranzaCreditoRow[]): {
+  asesores: CobranzaAsesorRow[];
+  totalGeneral: CobranzaAsesorRow;
+} {
+  const porAsesor = new Map<number | null, { nombre: string; acc: Acc }>();
+  const general = nuevoAcc();
+  for (const r of rows) {
+    const key = r.asesor_id;
+    if (!porAsesor.has(key)) porAsesor.set(key, { nombre: r.asesor_nombre ?? "Sin asesor", acc: nuevoAcc() });
+    sumar(porAsesor.get(key)!.acc, r);
+    sumar(general, r);
+  }
+  const asesores = [...porAsesor.entries()]
+    .map(([id, { nombre, acc }]) => materializar(id, nombre, acc))
+    .sort((a, b) => Number(b.total_esperado) - Number(a.total_esperado));
+  return { asesores, totalGeneral: materializar(null, "TOTAL", general) };
+}

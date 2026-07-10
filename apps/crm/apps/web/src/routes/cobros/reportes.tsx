@@ -590,111 +590,13 @@ function TabMora({
 	);
 }
 
-// ─── Cuotas por Fecha (Pagos Esperados) ─────────────────────────────────────
-
-type QuickPeriod = "hoy" | "semana" | "quincena" | "mes";
-type FechaMode = QuickPeriod | "personalizado";
-
-const QUICK_LABELS: Record<QuickPeriod, string> = {
-	hoy: "Hoy",
-	semana: "Esta Semana",
-	quincena: "Esta Quincena",
-	mes: "Este Mes",
-};
+// ─── shared helpers (fecha) ───────────────────────────────────────────────
 
 function todayGT(): string {
 	return new Intl.DateTimeFormat("en-CA", {
 		timeZone: "America/Guatemala",
 	}).format(new Date());
 }
-
-function addDaysGT(dateStr: string, n: number): string {
-	const [y, m, d] = dateStr.split("-").map(Number);
-	const dt = new Date(Date.UTC(y, m - 1, d + n));
-	return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
-}
-
-function fmtDate(dt: Date): string {
-	return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
-}
-
-function weekRangeGT(): { start: string; end: string } {
-	const h = todayGT();
-	const [y, m, d] = h.split("-").map(Number);
-	const dt = new Date(Date.UTC(y, m - 1, d));
-	const dow = dt.getUTCDay(); // 0=Dom, 1=Lun ... 6=Sab
-	const daysFromMon = dow === 0 ? 6 : dow - 1;
-	const monday = new Date(Date.UTC(y, m - 1, d - daysFromMon));
-	const sunday = new Date(Date.UTC(y, m - 1, d - daysFromMon + 6));
-	return { start: fmtDate(monday), end: fmtDate(sunday) };
-}
-
-function monthRangeGT(): { start: string; end: string } {
-	const h = todayGT();
-	const [y, m] = h.split("-").map(Number);
-	const start = `${y}-${String(m).padStart(2, "0")}-01`;
-	const lastDay = new Date(Date.UTC(y, m, 0));
-	return { start, end: fmtDate(lastDay) };
-}
-
-// Rango calculado para un preset. Se recalcula en cada render, así "Hoy" /
-// "Esta Semana" siguen frescos aunque el usuario vuelva otro día.
-function rangeForPreset(p: QuickPeriod): { start: string; end: string } {
-	if (p === "hoy") {
-		const h = todayGT();
-		return { start: h, end: h };
-	}
-	if (p === "semana") return weekRangeGT();
-	if (p === "quincena") {
-		const h = todayGT();
-		return { start: h, end: addDaysGT(h, 14) };
-	}
-	return monthRangeGT();
-}
-
-// Modo inicial para sesiones previas a `modoFecha`: si las fechas guardadas
-// coinciden con un preset, se restaura ese preset; si son un rango propio, se
-// abre en "personalizado" para no perder el filtro del usuario.
-function inferModoFechaInicial(): FechaMode {
-	try {
-		const fiRaw = sessionStorage.getItem("cobros/reportes/cuotas/fechaInicio");
-		const ffRaw = sessionStorage.getItem("cobros/reportes/cuotas/fechaFin");
-		if (!fiRaw || !ffRaw) return "hoy";
-		const fi = JSON.parse(fiRaw) as string;
-		const ff = JSON.parse(ffRaw) as string;
-		for (const p of Object.keys(QUICK_LABELS) as QuickPeriod[]) {
-			const r = rangeForPreset(p);
-			if (fi === r.start && ff === r.end) return p;
-		}
-		return "personalizado";
-	} catch {
-		return "hoy";
-	}
-}
-
-type CuotaFila = {
-	cuota_id: number;
-	fecha_vencimiento: string;
-	pagado: boolean;
-	numero_credito_sifco: string;
-	cliente_nombre: string;
-	asesor_nombre: string | null;
-	statusCredit: string;
-	capital_esperado: string;
-	interes_esperado: string;
-	iva_esperado: string;
-	seguro_esperado: string;
-	gps_esperado: string;
-	membresias_esperado: string;
-	total_esperado: string;
-	capital_pagado: string;
-	interes_pagado: string;
-	iva_pagado: string;
-	seguro_pagado: string;
-	gps_pagado: string;
-	total_pagado: string;
-	membresias_pagado: string;
-};
 
 function RubroCelda({
 	esperado,
@@ -712,431 +614,6 @@ function RubroCelda({
 			>
 				{pagadoNum > 0 ? fmtQ(pagado) : "—"}
 			</div>
-		</div>
-	);
-}
-
-function EstadoBadge({ row }: { row: CuotaFila }) {
-	if (row.pagado)
-		return <Badge className="bg-green-100 text-green-800">Pagado</Badge>;
-	if (Number(row.total_pagado) > 0)
-		return <Badge className="bg-yellow-100 text-yellow-800">Parcial</Badge>;
-	return <Badge className="bg-red-100 text-red-800">Pendiente</Badge>;
-}
-
-const colsCuotas: ColumnDef<CuotaFila>[] = [
-	{
-		accessorKey: "numero_credito_sifco",
-		header: "Crédito / Cliente",
-		cell: ({ row }) => (
-			<div className="flex flex-col gap-0.5">
-				<Link
-					to="/cobros/$id"
-					params={{ id: row.original.numero_credito_sifco }}
-					search={{ tipo: "contrato" }}
-					className="font-mono text-blue-600 text-xs hover:underline"
-				>
-					{row.original.numero_credito_sifco}
-				</Link>
-				<span className="text-muted-foreground text-xs">
-					{row.original.cliente_nombre}
-				</span>
-			</div>
-		),
-	},
-	{
-		accessorKey: "asesor_nombre",
-		header: "Asesor",
-		cell: ({ row }) => row.original.asesor_nombre ?? "—",
-	},
-	{
-		accessorKey: "fecha_vencimiento",
-		header: "Fecha Venc.",
-		cell: ({ row }) =>
-			new Date(`${row.original.fecha_vencimiento}T12:00:00`).toLocaleDateString(
-				"es-GT",
-			),
-	},
-	{
-		accessorKey: "capital_esperado",
-		header: "Capital",
-		cell: ({ row }) => (
-			<RubroCelda
-				esperado={row.original.capital_esperado}
-				pagado={row.original.capital_pagado}
-			/>
-		),
-	},
-	{
-		accessorKey: "interes_esperado",
-		header: "Interés",
-		cell: ({ row }) => (
-			<RubroCelda
-				esperado={row.original.interes_esperado}
-				pagado={row.original.interes_pagado}
-			/>
-		),
-	},
-	{
-		accessorKey: "iva_esperado",
-		header: "IVA 12%",
-		cell: ({ row }) => (
-			<RubroCelda
-				esperado={row.original.iva_esperado}
-				pagado={row.original.iva_pagado}
-			/>
-		),
-	},
-	{
-		accessorKey: "seguro_esperado",
-		header: "Seguro",
-		cell: ({ row }) => (
-			<RubroCelda
-				esperado={row.original.seguro_esperado}
-				pagado={row.original.seguro_pagado}
-			/>
-		),
-	},
-	{
-		accessorKey: "gps_esperado",
-		header: "GPS",
-		cell: ({ row }) => (
-			<RubroCelda
-				esperado={row.original.gps_esperado}
-				pagado={row.original.gps_pagado}
-			/>
-		),
-	},
-	{
-		accessorKey: "membresias_esperado",
-		header: "Membresías",
-		cell: ({ row }) => (
-			<RubroCelda
-				esperado={row.original.membresias_esperado}
-				pagado={row.original.membresias_pagado}
-			/>
-		),
-	},
-	{
-		accessorKey: "total_esperado",
-		header: "Total",
-		cell: ({ row }) => (
-			<RubroCelda
-				esperado={row.original.total_esperado}
-				pagado={row.original.total_pagado}
-			/>
-		),
-	},
-	{
-		id: "estado",
-		header: "Estado",
-		cell: ({ row }) => <EstadoBadge row={row.original} />,
-	},
-];
-
-function TabCuotasPorFecha({
-	session,
-	canSeeAll,
-}: {
-	session: ReturnType<typeof authClient.useSession>["data"];
-	canSeeAll: boolean;
-}) {
-	const hoyInit = todayGT();
-
-	// El modo manda: si es un preset, las fechas se calculan al vuelo. Solo en
-	// "personalizado" se usan (y editan) las fechas guardadas.
-	const [modoFecha, setModoFecha] = usePersistedState<FechaMode>(
-		"cobros/reportes/cuotas/modoFecha",
-		inferModoFechaInicial(),
-	);
-	const [fechaInicioCustom, setFechaInicioCustom] = usePersistedState<string>(
-		"cobros/reportes/cuotas/fechaInicio",
-		hoyInit,
-	);
-	const [fechaFinCustom, setFechaFinCustom] = usePersistedState<string>(
-		"cobros/reportes/cuotas/fechaFin",
-		hoyInit,
-	);
-	const [asesorId, setAsesorId] = usePersistedState<string>(
-		"cobros/reportes/cuotas/asesorId",
-		"",
-	);
-	const [filtroEstado, setFiltroEstado] = usePersistedState<string>(
-		"cobros/reportes/cuotas/filtroEstado",
-		"todos",
-	);
-
-	const esPersonalizado = modoFecha === "personalizado";
-	const { start: fechaInicio, end: fechaFin } = esPersonalizado
-		? { start: fechaInicioCustom, end: fechaFinCustom }
-		: rangeForPreset(modoFecha);
-
-	function activarPersonalizado() {
-		// Sembrar las fechas editables con el rango del preset actual.
-		if (!esPersonalizado) {
-			const r = rangeForPreset(modoFecha);
-			setFechaInicioCustom(r.start);
-			setFechaFinCustom(r.end);
-		}
-		setModoFecha("personalizado");
-	}
-
-	const { data: asesoresData } = useQuery({
-		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
-		enabled: !!session && canSeeAll,
-	});
-
-	const { data, isLoading, dataUpdatedAt, refetch, isFetching } = useQuery({
-		...orpc.getCuotasPorFecha.queryOptions({
-			input: {
-				fechaInicio,
-				fechaFin,
-				asesorId: canSeeAll
-					? asesorId
-						? Number(asesorId)
-						: undefined
-					: undefined,
-			},
-		}),
-		enabled: !!session && !!fechaInicio && !!fechaFin,
-		staleTime: 5 * 60 * 1000,
-	});
-
-	const ultimaAct = dataUpdatedAt
-		? new Date(dataUpdatedAt).toLocaleTimeString("es-GT", {
-				hour: "2-digit",
-				minute: "2-digit",
-			})
-		: null;
-
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const totales = (data as any)?.totales;
-	const rows: CuotaFila[] =
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(data as any)?.rows ?? [];
-
-	function getEstado(row: CuotaFila): "pagado" | "parcial" | "pendiente" {
-		if (row.pagado) return "pagado";
-		if (Number(row.total_pagado) > 0) return "parcial";
-		return "pendiente";
-	}
-
-	const filteredRows =
-		filtroEstado === "todos"
-			? rows
-			: rows.filter((r) => getEstado(r) === filtroEstado);
-
-	return (
-		<div className="space-y-6">
-			<div className="flex items-center gap-2">
-				<CalendarClock className="h-5 w-5 text-blue-600" />
-				<h2 className="font-semibold text-xl">Pagos Esperados</h2>
-			</div>
-
-			{/* Filtros */}
-			<div className="space-y-3">
-				{/* Período — filtro principal */}
-				<div className="rounded-lg border bg-muted/30 p-3">
-					<div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-						<div className="flex flex-col gap-1.5">
-							<Label className="font-semibold text-xs">Período</Label>
-							<div className="flex flex-wrap items-center gap-1.5">
-								{(Object.keys(QUICK_LABELS) as QuickPeriod[]).map((p) => (
-									<Button
-										key={p}
-										variant={modoFecha === p ? "default" : "outline"}
-										size="sm"
-										onClick={() => setModoFecha(p)}
-									>
-										{QUICK_LABELS[p]}
-									</Button>
-								))}
-								<Button
-									variant={esPersonalizado ? "default" : "outline"}
-									size="sm"
-									onClick={activarPersonalizado}
-								>
-									Personalizado
-								</Button>
-							</div>
-						</div>
-
-						<div className="flex items-end gap-2">
-							<div className="flex flex-col gap-1">
-								<Label className="text-muted-foreground text-xs">Desde</Label>
-								<Input
-									type="date"
-									className="w-36"
-									value={fechaInicio}
-									disabled={!esPersonalizado}
-									onChange={(e) => setFechaInicioCustom(e.target.value)}
-								/>
-							</div>
-							<div className="flex flex-col gap-1">
-								<Label className="text-muted-foreground text-xs">Hasta</Label>
-								<Input
-									type="date"
-									className="w-36"
-									value={fechaFin}
-									disabled={!esPersonalizado}
-									onChange={(e) => setFechaFinCustom(e.target.value)}
-								/>
-							</div>
-						</div>
-
-						{!esPersonalizado && (
-							<p className="pb-2 text-muted-foreground text-xs">
-								Selecciona «Personalizado» para elegir fechas.
-							</p>
-						)}
-					</div>
-				</div>
-
-				{/* Filtros secundarios */}
-				<div className="flex flex-wrap items-end gap-3">
-					{canSeeAll && (
-						<div className="flex flex-col gap-1">
-							<Label className="text-xs">Asesor</Label>
-							<Select
-								value={asesorId}
-								onValueChange={(v) => setAsesorId(v === "todos" ? "" : v)}
-							>
-								<SelectTrigger className="w-48">
-									<SelectValue placeholder="Todos los asesores" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="todos">Todos</SelectItem>
-									{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-									{(asesoresData as any)?.asesores?.map((a: any) => (
-										<SelectItem key={a.asesorId} value={String(a.asesorId)}>
-											{a.nombre}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						</div>
-					)}
-
-					<div className="flex flex-col gap-1">
-						<Label className="text-xs">Estado</Label>
-						<Select value={filtroEstado} onValueChange={setFiltroEstado}>
-							<SelectTrigger className="w-36">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="todos">Todos</SelectItem>
-								<SelectItem value="pagado">Pagado</SelectItem>
-								<SelectItem value="parcial">Parcial</SelectItem>
-								<SelectItem value="pendiente">Pendiente</SelectItem>
-							</SelectContent>
-						</Select>
-					</div>
-
-					<div className="ml-auto flex items-center gap-2">
-						{ultimaAct && (
-							<span className="text-muted-foreground text-xs">
-								Actualizado: {ultimaAct}
-							</span>
-						)}
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => refetch()}
-							disabled={isFetching}
-						>
-							<RefreshCw
-								className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
-							/>
-							Actualizar
-						</Button>
-					</div>
-				</div>
-			</div>
-
-			{/* Summary cards */}
-			<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-				<Card className="gap-1 border-blue-200 bg-blue-50 py-3">
-					<CardHeader className="px-4 pt-0 pb-0">
-						<CardTitle className="font-medium text-blue-700 text-xs">
-							Total Esperado
-						</CardTitle>
-					</CardHeader>
-					<CardContent className="px-4 pb-0">
-						<div className="font-bold text-blue-800 text-lg">
-							{fmtQ(totales?.totalEsp ?? "0")}
-						</div>
-					</CardContent>
-				</Card>
-				<Card className="gap-1 border-green-200 bg-green-50 py-3">
-					<CardHeader className="px-4 pt-0 pb-0">
-						<CardTitle className="font-medium text-green-700 text-xs">
-							Total Pagado
-						</CardTitle>
-					</CardHeader>
-					<CardContent className="px-4 pb-0">
-						<div className="font-bold text-green-700 text-lg">
-							{fmtQ(totales?.totalPag ?? "0")}
-						</div>
-					</CardContent>
-				</Card>
-				<Card className="gap-1 border-red-200 bg-red-50 py-3">
-					<CardHeader className="px-4 pt-0 pb-0">
-						<CardTitle className="font-medium text-red-700 text-xs">
-							Total Pendiente
-						</CardTitle>
-					</CardHeader>
-					<CardContent className="px-4 pb-0">
-						<div className="font-bold text-lg text-red-700">
-							{fmtQ(totales?.totalPendiente ?? "0")}
-						</div>
-					</CardContent>
-				</Card>
-				<Card className="gap-1 py-3">
-					<CardHeader className="px-4 pt-0 pb-0">
-						<CardTitle className="font-medium text-xs">Cuotas</CardTitle>
-					</CardHeader>
-					<CardContent className="px-4 pb-0">
-						<div className="font-bold text-lg">
-							{totales?.cuotasPagadas ?? 0} / {totales?.cuotasTotal ?? 0}
-						</div>
-						<p className="text-muted-foreground text-xs">pagadas / total</p>
-					</CardContent>
-				</Card>
-			</div>
-
-			{/* Rubro breakdown cards */}
-			<div className="grid grid-cols-3 gap-3 md:grid-cols-6">
-				{(
-					[
-						{ key: "capitalEsp", label: "Capital" },
-						{ key: "interesEsp", label: "Interés" },
-						{ key: "ivaEsp", label: "IVA 12%" },
-						{ key: "seguroEsp", label: "Seguro" },
-						{ key: "gpsEsp", label: "GPS" },
-						{ key: "membresiasEsp", label: "Membresías" },
-					] as const
-				).map((c) => (
-					<Card key={c.key} className="gap-0.5 py-2.5">
-						<CardHeader className="px-3 pt-0 pb-0">
-							<CardTitle className="font-medium text-muted-foreground text-xs">
-								{c.label}
-							</CardTitle>
-						</CardHeader>
-						<CardContent className="px-3 pb-0">
-							<div className="font-semibold text-sm">
-								{fmtQ(totales?.[c.key] ?? "0")}
-							</div>
-						</CardContent>
-					</Card>
-				))}
-			</div>
-
-			{/* Detail table */}
-			<DataTable
-				columns={colsCuotas}
-				data={filteredRows}
-				isLoading={isLoading}
-			/>
 		</div>
 	);
 }
@@ -1323,7 +800,9 @@ function AsesorRow({
 												/>
 											</td>
 											<td className="px-3 text-right text-green-600 text-xs">
-												{Number(c.mora_cobrada) > 0 ? fmtQ(c.mora_cobrada) : "—"}
+												{Number(c.mora_cobrada) > 0
+													? fmtQ(c.mora_cobrada)
+													: "—"}
 											</td>
 											<td className="px-3">
 												<RubroCelda
@@ -1342,8 +821,8 @@ function AsesorRow({
 										size="sm"
 										onClick={() => setLimit((l) => l + 10)}
 									>
-										Mostrar más (
-										{detalleData.total - (creditos.length ?? 0)} restantes)
+										Mostrar más ({detalleData.total - (creditos.length ?? 0)}{" "}
+										restantes)
 									</Button>
 								</div>
 							)}
@@ -1362,9 +841,11 @@ function TabCobradoVsEsperado({
 	session: ReturnType<typeof authClient.useSession>["data"];
 	canSeeAll: boolean;
 }) {
-	const [anioHoy, mesHoy, diaHoy] = todayGT()
-		.split("-")
-		.map(Number) as [number, number, number];
+	const [anioHoy, mesHoy, diaHoy] = todayGT().split("-").map(Number) as [
+		number,
+		number,
+		number,
+	];
 
 	const [anio, setAnio] = usePersistedState<number>(
 		"cobros/reportes/cobranza/anio",
@@ -1526,7 +1007,7 @@ function TabCobradoVsEsperado({
 			{/* Summary cards */}
 			<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
 				<Card className="gap-1 border-blue-200 bg-blue-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-blue-700 text-xs">
 							A Cobrar
 						</CardTitle>
@@ -1538,7 +1019,7 @@ function TabCobradoVsEsperado({
 					</CardContent>
 				</Card>
 				<Card className="gap-1 border-green-200 bg-green-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-green-700 text-xs">
 							Cobrado
 						</CardTitle>
@@ -1550,19 +1031,19 @@ function TabCobradoVsEsperado({
 					</CardContent>
 				</Card>
 				<Card className="gap-1 border-red-200 bg-red-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-red-700 text-xs">
 							Restante
 						</CardTitle>
 					</CardHeader>
 					<CardContent className="px-4 pb-0">
-						<div className="font-bold text-red-700 text-lg">
+						<div className="font-bold text-lg text-red-700">
 							{fmtQ(totalGeneral?.total_esperado ?? "0")}
 						</div>
 					</CardContent>
 				</Card>
 				<Card className="gap-1 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-xs">Efectividad</CardTitle>
 					</CardHeader>
 					<CardContent className="px-4 pb-0">

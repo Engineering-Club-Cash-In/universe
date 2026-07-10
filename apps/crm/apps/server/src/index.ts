@@ -1100,12 +1100,10 @@ app.post("/info/vehicles-by-sifco", async (c) => {
 			);
 		}
 
-		const numeroSifcos = body.numero_sifcos
-			.map((value) => String(value ?? "").trim())
-			.filter(Boolean);
-
+		// Tope de abuso sobre el array CRUDO, antes de normalizar, para no recorrer
+		// un payload gigante (aunque normalice a vacío) en una ruta pública.
 		const MAX_SIFCOS = 50000;
-		if (numeroSifcos.length > MAX_SIFCOS) {
+		if (body.numero_sifcos.length > MAX_SIFCOS) {
 			return c.json(
 				{
 					success: false,
@@ -1114,6 +1112,10 @@ app.post("/info/vehicles-by-sifco", async (c) => {
 				400,
 			);
 		}
+
+		const numeroSifcos = body.numero_sifcos
+			.map((value) => String(value ?? "").trim())
+			.filter(Boolean);
 
 		const result = await getVehiclesBySifcoController(numeroSifcos);
 		return c.json(result, result.success ? 200 : 500);

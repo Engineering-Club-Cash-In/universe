@@ -8593,6 +8593,7 @@ export async function getCreditosEspejoPendientes(
       compra_cartera_extendida_at:
         creditos_inversionistas_espejo.compra_cartera_extendida_at,
       tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+      modalidad_facturacion: creditos_inversionistas_espejo.modalidad_facturacion,
       // Info del crédito
       numero_credito_sifco: creditos.numero_credito_sifco,
       nombre_usuario: usuarios.nombre,

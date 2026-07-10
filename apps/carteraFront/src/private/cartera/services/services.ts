@@ -3904,6 +3904,7 @@ export interface CreditoEspejoPendiente {
   tiempo_restante_ms: number | null;
   status: "pendiente_reinversion" | "pendiente_compra_cartera" | "pendiente_revision" | string;
   tipo_reinversion: string | null;
+  modalidad_facturacion: ModalidadFacturacion | null;
   numero_credito_sifco: string;
   nombre_usuario: string;
   monto_aportado_nuevo: string | null;
@@ -3992,10 +3993,76 @@ export interface AgregarInversionistaCreditoPayload {
   fecha_inicio_participacion?: string;
   porcentaje_cash_in?: number;
   porcentaje_inversion?: number;
+  // Solo aplica cuando tipo_operacion === "compra_cartera". Si viene, el
+  // % Inversionista / % Cash In se calcula del catálogo (por monto_aportado,
+  // salvo que venga modalidad_facturacion_spread_id) y SE IGNORAN
+  // porcentaje_cash_in / porcentaje_inversion si vinieran.
+  modalidad_facturacion?: ModalidadFacturacion;
+  // Anulación manual: id exacto del bracket elegido (de los 8 de la
+  // modalidad), sin importar si corresponde al monto_aportado.
+  modalidad_facturacion_spread_id?: number;
   // MODO MANUAL: créditos específicos con su monto. Si viene, el backend
   // ignora el buscador de candidatos y opera solo sobre estos. La suma de los
   // montos debe igualar monto_aportado.
   manual?: { credito_id: number; monto: number }[];
+}
+
+// ============================================================================
+// MODALIDAD DE FACTURACIÓN
+// ============================================================================
+
+export type ModalidadFacturacion =
+  | "p2p_directa"
+  | "factura_cube"
+  | "factura_cube_pequeno";
+
+export const MODALIDAD_FACTURACION_LABELS: Record<ModalidadFacturacion, string> = {
+  p2p_directa: "Facturación P2P Directa",
+  factura_cube: "1 Factura a Cube",
+  factura_cube_pequeno: "1 Factura a Cube · Pequeño Contribuyente",
+};
+
+export interface ModalidadFacturacionSpreadRow {
+  id: number;
+  monto_desde: string;
+  monto_hasta: string | null; // null = sin límite superior
+  modalidad: ModalidadFacturacion;
+  spread: string; // % Inversionista de esa modalidad
+  tasa: string; // tasa final que ve el cliente
+}
+
+/**
+ * Resuelve, para un monto dado, las 3 filas del catálogo (una por
+ * modalidad) del bracket correspondiente — fuente única de verdad en SQL.
+ * Devuelve [] si el monto no cae en ningún bracket (backend responde 404).
+ */
+export async function resolverModalidadFacturacionSpreadService(
+  monto: number,
+): Promise<ModalidadFacturacionSpreadRow[]> {
+  try {
+    const res = await api.get<{ data: ModalidadFacturacionSpreadRow[] }>(
+      "/modalidad-facturacion/spread/resolver",
+      { params: { monto } },
+    );
+    return res.data.data ?? [];
+  } catch (err: any) {
+    if (err?.response?.status === 404) return [];
+    throw err;
+  }
+}
+
+/**
+ * Devuelve las 8 filas (una por bracket) de una modalidad, sin filtrar por
+ * monto. Fuente de opciones para la anulación manual del spread.
+ */
+export async function listModalidadFacturacionSpreadByModalidadService(
+  modalidad: ModalidadFacturacion,
+): Promise<ModalidadFacturacionSpreadRow[]> {
+  const res = await api.get<{ data: ModalidadFacturacionSpreadRow[] }>(
+    "/modalidad-facturacion/spread/por-modalidad",
+    { params: { modalidad } },
+  );
+  return res.data.data ?? [];
 }
 
 export interface AgregarInversionistaCreditoResponse {

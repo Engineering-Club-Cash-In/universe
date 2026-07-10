@@ -19,12 +19,20 @@ export async function construirFilasCredito(
 	const qA = await exec.execute(sql`
 		SELECT cr.credito_id, cr.numero_credito_sifco, u.nombre AS cliente_nombre,
 			cr.asesor_id, a.nombre AS asesor_nombre,
-			COALESCE(prog.capital_restante,0) AS cap_rest, COALESCE(prog.interes_restante,0) AS int_rest,
-			COALESCE(prog.iva_12_restante,0) AS iva_rest, COALESCE(prog.seguro_restante,0) AS seg_rest,
-			COALESCE(prog.gps_restante,0) AS gps_rest,
-			-- Migrados SIFCO no ponen membresias=0 al pagar (a diferencia de los otros
-			-- *_restante), dejando una membresía fantasma en cuotas ya pagadas. Se fuerza a 0
-			-- cuando la cuota está pagada, para quedar consistente con los demás rubros.
+			-- Restantes por rubro. Una cuota PAGADA no debe nada → se fuerza a 0 (los migrados
+			-- SIFCO no siempre ponen capital_restante/membresias en 0 al pagar, dejando un
+			-- restante fantasma). En NO pagadas, el capital se topa al saldo de la cuota
+			-- (cuota − otros rubros): en filas schedule/no_required, capital_restante trae el
+			-- principal remanente del préstamo, no el capital de esta cuota (igual que getAcumuladoPorCredito).
+			CASE WHEN c.pagado THEN 0 ELSE LEAST(
+				COALESCE(prog.capital_restante,0),
+				GREATEST(cr.cuota::numeric - COALESCE(prog.interes_restante,0) - COALESCE(prog.iva_12_restante,0)
+					- COALESCE(prog.seguro_restante,0) - COALESCE(prog.gps_restante,0) - COALESCE(prog.membresias,0), 0)
+			) END AS cap_rest,
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.interes_restante,0) END AS int_rest,
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.iva_12_restante,0) END AS iva_rest,
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.seguro_restante,0) END AS seg_rest,
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.gps_restante,0) END AS gps_rest,
 			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.membresias,0) END AS mem_rest,
 			COALESCE(pag.abono_capital,0) AS cap_cob, COALESCE(pag.abono_interes,0) AS int_cob,
 			COALESCE(pag.abono_iva,0) AS iva_cob, COALESCE(pag.abono_seguro,0) AS seg_cob,

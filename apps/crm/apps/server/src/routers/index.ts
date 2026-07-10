@@ -378,6 +378,10 @@ export const reportsAppRouter = {
 	cambiarStatusInversionista:
 		investorDocumentsRouter.cambiarStatusInversionista,
 	getInvestorsCartera: investorDocumentsRouter.getInvestorsCartera,
+	resolverModalidadFacturacionSpread:
+		investorDocumentsRouter.resolverModalidadFacturacionSpread,
+	listModalidadFacturacionSpreadByModalidad:
+		investorDocumentsRouter.listModalidadFacturacionSpreadByModalidad,
 	getSimulacionInversionista:
 		investorDocumentsRouter.getSimulacionInversionista,
 

@@ -74,6 +74,24 @@ export interface SimulacionInversionistaResult {
 }
 
 // ============================================================================
+// TIPOS MODALIDAD DE FACTURACIÓN
+// ============================================================================
+
+export type ModalidadFacturacion =
+	| "p2p_directa"
+	| "factura_cube"
+	| "factura_cube_pequeno";
+
+export interface ModalidadFacturacionSpreadRow {
+	id: number;
+	monto_desde: string;
+	monto_hasta: string | null; // null = sin límite superior
+	modalidad: ModalidadFacturacion;
+	spread: string; // % Inversionista de esa modalidad
+	tasa: string; // tasa final que ve el cliente
+}
+
+// ============================================================================
 // CONFIGURATION
 // ============================================================================
 
@@ -109,6 +127,24 @@ const DEFAULT_CONFIG: CarteraBackClientConfig = {
 };
 
 // ============================================================================
+// ERROR TIPADO CON STATUS HTTP
+// ============================================================================
+// A diferencia de los demás throws de `request()` (que solo se distinguen
+// por texto en `.message`), este preserva el status code real para que los
+// callers puedan chequear `err.status === 404` en vez de parsear el mensaje.
+// `handleError()` lo respeta explícitamente (no lo reescribe) para que el
+// status sobreviva hasta el caller final.
+export class CarteraBackHttpError extends Error {
+	constructor(
+		message: string,
+		public readonly status: number,
+	) {
+		super(message);
+		this.name = "CarteraBackHttpError";
+	}
+}
+
+// ============================================================================
 // CIRCUIT BREAKER
 // ============================================================================
 
@@ -136,6 +172,9 @@ class CircuitBreaker {
 			this.onSuccess();
 			return result;
 		} catch (error) {
+			if (error instanceof CarteraBackHttpError && error.status < 500) {
+				throw error;
+			}
 			this.onFailure();
 			throw error;
 		}
@@ -529,23 +568,27 @@ export class CarteraBackClient {
 								} catch {
 									retryData = { error: retryText };
 								}
-								throw new Error(
+								throw new CarteraBackHttpError(
 									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+									retryRes.status,
 								);
 							}
-							throw new Error(
+							throw new CarteraBackHttpError(
 								`Authentication failed: ${errorData.error || errorData.message}`,
+								res.status,
 							);
 						}
 
 						if (res.status === 400) {
-							throw new Error(
+							throw new CarteraBackHttpError(
 								`Validation failed: ${errorData.error || errorData.message}`,
+								res.status,
 							);
 						}
 
-						throw new Error(
+						throw new CarteraBackHttpError(
 							`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
+							res.status,
 						);
 					}
 
@@ -563,11 +606,17 @@ export class CarteraBackClient {
 			} catch (error) {
 				lastError = error as Error;
 
-				// Don't retry on authentication or validation errors
+				// Don't retry on authentication/validation errors, nor on 4xx
+				// (esos son respuestas definitivas del servidor, no fallas
+				// transitorias — ej. un 404 de "monto sin bracket" no cambia
+				// de resultado al reintentar).
 				if (
 					lastError.message.includes("Authentication failed") ||
 					lastError.message.includes("Validation failed") ||
-					lastError.message.includes("Circuit breaker is OPEN")
+					lastError.message.includes("Circuit breaker is OPEN") ||
+					(lastError instanceof CarteraBackHttpError &&
+						lastError.status >= 400 &&
+						lastError.status < 500)
 				) {
 					break;
 				}
@@ -588,6 +637,13 @@ export class CarteraBackClient {
 	}
 
 	private handleError(error: Error): CarteraBackError {
+		// Preservar tal cual: los callers que necesitan el status HTTP real
+		// (ej. distinguir un 404 de "sin bracket" de un error genérico)
+		// dependen de que esta instancia no se reescriba.
+		if (error instanceof CarteraBackHttpError) {
+			return error as unknown as CarteraBackError;
+		}
+
 		if (error.message.includes("Authentication failed")) {
 			return new Error(error.message) as CarteraBackAuthError;
 		}
@@ -1453,6 +1509,13 @@ export class CarteraBackClient {
 			| "sin_reinversion"
 			| "reinversion_capital"
 			| "reinversion_total";
+		// Obligatoria en compra_cartera: define el % Inversionista / % Cash In
+		// desde el catálogo de spreads (por monto_aportado, salvo que venga
+		// modalidad_facturacion_spread_id).
+		modalidad_facturacion?: ModalidadFacturacion;
+		// Anulación manual: id exacto del bracket elegido (de los 8 de la
+		// modalidad), sin importar si corresponde al monto_aportado.
+		modalidad_facturacion_spread_id?: number;
 		porcentaje_inversion?: number;
 		porcentaje_cash_in?: number;
 		fecha_inicio_participacion?: string;
@@ -1465,6 +1528,50 @@ export class CarteraBackClient {
 			body: JSON.stringify(input),
 		});
 		return response;
+	}
+
+	/**
+	 * Resuelve, para un monto dado, las 3 filas del catálogo (una por
+	 * modalidad) del bracket correspondiente — fuente única de verdad en SQL,
+	 * el front ya no reimplementa esta comparación en JS. Devuelve `[]` si el
+	 * monto no cae en ningún bracket (backend responde 404 en ese caso).
+	 */
+	async resolverModalidadFacturacionSpread(
+		monto: number,
+	): Promise<ModalidadFacturacionSpreadRow[]> {
+		try {
+			const response = await this.request<{
+				data: ModalidadFacturacionSpreadRow[];
+			}>(
+				`/modalidad-facturacion/spread/resolver?monto=${encodeURIComponent(monto)}`,
+				{ method: "GET" },
+				true,
+			);
+			return response.data ?? [];
+		} catch (err) {
+			if (err instanceof CarteraBackHttpError && err.status === 404) {
+				return [];
+			}
+			throw err;
+		}
+	}
+
+	/**
+	 * Devuelve las 8 filas (una por bracket) de una modalidad, sin filtrar
+	 * por monto. Lo usa el front para poblar el combobox de anulación manual
+	 * del spread (el operador puede elegir cualquiera de los 8).
+	 */
+	async listModalidadFacturacionSpreadByModalidad(
+		modalidad: ModalidadFacturacion,
+	): Promise<ModalidadFacturacionSpreadRow[]> {
+		const response = await this.request<{
+			data: ModalidadFacturacionSpreadRow[];
+		}>(
+			`/modalidad-facturacion/spread/por-modalidad?modalidad=${encodeURIComponent(modalidad)}`,
+			{ method: "GET" },
+			true,
+		);
+		return response.data ?? [];
 	}
 
 	// ========================================================================

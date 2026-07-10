@@ -1,6 +1,9 @@
 import Big from "big.js";
 import { calcularSplitInteresPci, type InvSplitInput } from "../cofidi/splitInteresPci";
-import { CUBE_INVESTMENT_ID } from "./absorberEnCube";
+
+// Inversionista CUBE (id 86). Se define local para no acoplar este módulo a
+// absorberEnCube (que no vive en develop); es el mismo valor que CUBE_INVESTMENT_ID.
+const CUBE_INVESTMENT_ID = 86;
 
 Big.DP = 20;
 Big.RM = Big.roundHalfUp;

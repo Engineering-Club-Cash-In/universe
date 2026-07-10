@@ -399,11 +399,19 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "anio, mes y dia son requeridos" };
       }
+      const a = Number(anio);
+      const m = Number(mes);
+      const d = Number(dia);
+      const asesorId = asesor_id ? Number(asesor_id) : undefined;
+      if (Number.isNaN(a) || Number.isNaN(m) || Number.isNaN(d) || (asesorId !== undefined && Number.isNaN(asesorId))) {
+        set.status = 400;
+        return { error: "anio, mes, dia y asesor_id deben ser numéricos válidos" };
+      }
       const data = await getCobranzaDiaria({
-        anio: Number(anio),
-        mes: Number(mes),
-        dia: Number(dia),
-        asesorId: asesor_id ? Number(asesor_id) : undefined,
+        anio: a,
+        mes: m,
+        dia: d,
+        asesorId,
       });
       set.status = 200;
       return { ok: true, data };
@@ -421,11 +429,19 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "anio, mes, dia y asesor_id son requeridos" };
       }
+      const a = Number(anio);
+      const m = Number(mes);
+      const d = Number(dia);
+      const asesorId = Number(asesor_id);
+      if (Number.isNaN(a) || Number.isNaN(m) || Number.isNaN(d) || Number.isNaN(asesorId)) {
+        set.status = 400;
+        return { error: "anio, mes, dia y asesor_id deben ser numéricos válidos" };
+      }
       const data = await getCobranzaDiariaDetalle({
-        anio: Number(anio),
-        mes: Number(mes),
-        dia: Number(dia),
-        asesorId: Number(asesor_id),
+        anio: a,
+        mes: m,
+        dia: d,
+        asesorId,
         limit: limit ? Number(limit) : undefined,
         offset: offset ? Number(offset) : undefined,
       });

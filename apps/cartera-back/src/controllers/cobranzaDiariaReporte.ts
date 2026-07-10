@@ -13,7 +13,7 @@ export async function construirFilasCredito(
 	p: { anio: number; mes: number; dia: number; asesorId?: number; limit?: number; offset?: number },
 	exec: Exec,
 ): Promise<CobranzaCreditoRow[]> {
-	const asesorFilter = p.asesorId ? sql`AND cr.asesor_id = ${p.asesorId}` : sql``;
+	const asesorFilter = p.asesorId != null ? sql`AND cr.asesor_id = ${p.asesorId}` : sql``;
 	const pageFilter = p.limit != null ? sql`LIMIT ${p.limit} OFFSET ${p.offset ?? 0}` : sql``;
 
 	const qA = await exec.execute(sql`
@@ -123,6 +123,7 @@ export async function getCobranzaDiariaDetalle(p: {
 		SELECT COUNT(*)::int AS total
 		FROM cartera.cuotas_credito c
 		JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+		JOIN cartera.usuarios u ON cr.usuario_id = u.usuario_id
 		WHERE c.fecha_vencimiento::date = make_date(${p.anio}, ${p.mes}, ${p.dia})
 			AND c.numero_cuota > 0
 			AND cr."statusCredit" IN ('ACTIVO','MOROSO','EN_CONVENIO')

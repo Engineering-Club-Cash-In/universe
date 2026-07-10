@@ -4,6 +4,8 @@ import type { ColumnDef } from "@tanstack/react-table";
 import {
 	BarChart3,
 	CalendarClock,
+	ChevronDown,
+	Loader2,
 	RefreshCw,
 	TrendingDown,
 } from "lucide-react";
@@ -13,6 +15,11 @@ import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -1134,6 +1141,478 @@ function TabCuotasPorFecha({
 	);
 }
 
+// ─── Cobrado vs Esperado (Cobranza Diaria) ──────────────────────────────────
+
+type RubroMontos = {
+	capital: string;
+	interes: string;
+	iva: string;
+	seguro: string;
+	gps: string;
+	membresia: string;
+};
+
+type CobranzaAsesorRow = {
+	asesor_id: number | null;
+	asesor_nombre: string;
+	cuotas: number;
+	cobrado: RubroMontos;
+	restante: RubroMontos;
+	cube: { esperado: string; cobrado: string };
+	mora_cobrada: string;
+	total_cobrado: string;
+	total_esperado: string;
+	programado: string;
+	efectividad: number;
+};
+
+type CobranzaCreditoRow = {
+	credito_id: number;
+	numero_credito_sifco: string;
+	cliente_nombre: string;
+	asesor_id: number | null;
+	asesor_nombre: string | null;
+	cobrado: RubroMontos;
+	restante: RubroMontos;
+	cube: { esperado: string; cobrado: string };
+	mora_cobrada: string;
+	total_cobrado: string;
+	total_esperado: string;
+};
+
+const DETALLE_COBRANZA_COLS = [
+	"Crédito / Cliente",
+	"Capital",
+	"Interés",
+	"Int. CUBE",
+	"IVA",
+	"Seguro",
+	"GPS",
+	"Membresía",
+	"Mora",
+	"Total",
+];
+
+function AsesorRow({
+	asesor,
+	filtro,
+}: {
+	asesor: CobranzaAsesorRow;
+	filtro: { anio: number; mes: number; dia: number };
+}) {
+	const [isOpen, setIsOpen] = useState(false);
+	const [limit, setLimit] = useState(10);
+
+	const detalle = useQuery({
+		...orpc.getCobranzaDiariaDetalle.queryOptions({
+			input: {
+				...filtro,
+				asesorId: asesor.asesor_id as number,
+				limit,
+				offset: 0,
+			},
+		}),
+		enabled: isOpen && asesor.asesor_id != null,
+	});
+
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const detalleData = detalle.data as any;
+	const creditos: CobranzaCreditoRow[] = detalleData?.creditos ?? [];
+
+	return (
+		<Collapsible
+			open={isOpen}
+			onOpenChange={setIsOpen}
+			className="rounded-lg border border-border"
+		>
+			<CollapsibleTrigger asChild>
+				<button
+					type="button"
+					className="group flex w-full cursor-pointer items-center gap-3 p-3 text-left hover:bg-muted/50"
+				>
+					<span className="min-w-40 font-medium">{asesor.asesor_nombre}</span>
+					<span className="text-muted-foreground text-xs">
+						{asesor.cuotas} cuotas
+					</span>
+					<span className="ml-auto text-right text-sm">
+						{fmtQ(asesor.total_cobrado)} / {fmtQ(asesor.total_esperado)}
+					</span>
+					<Badge variant="outline">
+						{(asesor.efectividad * 100).toFixed(1)}%
+					</Badge>
+					<ChevronDown
+						className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
+					/>
+				</button>
+			</CollapsibleTrigger>
+			<CollapsibleContent>
+				<div className="overflow-x-auto border-t bg-card">
+					{detalle.isLoading ? (
+						<div className="flex items-center gap-2 p-3 text-muted-foreground text-sm">
+							<Loader2 className="h-4 w-4 animate-spin" /> Cargando detalle…
+						</div>
+					) : (
+						<>
+							<table className="w-full text-sm">
+								<thead className="bg-muted/50">
+									<tr>
+										{DETALLE_COBRANZA_COLS.map((h) => (
+											<th
+												key={h}
+												className="px-3 py-2 text-left font-medium text-muted-foreground text-xs"
+											>
+												{h}
+											</th>
+										))}
+									</tr>
+								</thead>
+								<tbody>
+									{creditos.map((c) => (
+										<tr
+											key={c.credito_id}
+											className="border-t hover:bg-muted/30"
+										>
+											<td className="px-3 py-1.5">
+												<div className="font-mono text-blue-600 text-xs">
+													{c.numero_credito_sifco}
+												</div>
+												<div className="text-muted-foreground text-xs">
+													{c.cliente_nombre}
+												</div>
+											</td>
+											<td className="px-3">
+												<RubroCelda
+													esperado={c.restante.capital}
+													pagado={c.cobrado.capital}
+												/>
+											</td>
+											<td className="px-3">
+												<RubroCelda
+													esperado={c.restante.interes}
+													pagado={c.cobrado.interes}
+												/>
+											</td>
+											<td className="px-3">
+												<RubroCelda
+													esperado={c.cube.esperado}
+													pagado={c.cube.cobrado}
+												/>
+											</td>
+											<td className="px-3">
+												<RubroCelda
+													esperado={c.restante.iva}
+													pagado={c.cobrado.iva}
+												/>
+											</td>
+											<td className="px-3">
+												<RubroCelda
+													esperado={c.restante.seguro}
+													pagado={c.cobrado.seguro}
+												/>
+											</td>
+											<td className="px-3">
+												<RubroCelda
+													esperado={c.restante.gps}
+													pagado={c.cobrado.gps}
+												/>
+											</td>
+											<td className="px-3">
+												<RubroCelda
+													esperado={c.restante.membresia}
+													pagado={c.cobrado.membresia}
+												/>
+											</td>
+											<td className="px-3 text-right text-green-600 text-xs">
+												{Number(c.mora_cobrada) > 0 ? fmtQ(c.mora_cobrada) : "—"}
+											</td>
+											<td className="px-3">
+												<RubroCelda
+													esperado={c.total_esperado}
+													pagado={c.total_cobrado}
+												/>
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+							{detalleData?.hasMore && (
+								<div className="border-t px-3 py-2 text-center">
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={() => setLimit((l) => l + 10)}
+									>
+										Mostrar más (
+										{detalleData.total - (creditos.length ?? 0)} restantes)
+									</Button>
+								</div>
+							)}
+						</>
+					)}
+				</div>
+			</CollapsibleContent>
+		</Collapsible>
+	);
+}
+
+function TabCobradoVsEsperado({
+	session,
+	canSeeAll,
+}: {
+	session: ReturnType<typeof authClient.useSession>["data"];
+	canSeeAll: boolean;
+}) {
+	const [anioHoy, mesHoy, diaHoy] = todayGT()
+		.split("-")
+		.map(Number) as [number, number, number];
+
+	const [anio, setAnio] = usePersistedState<number>(
+		"cobros/reportes/cobranza/anio",
+		anioHoy,
+	);
+	const [mes, setMes] = usePersistedState<number>(
+		"cobros/reportes/cobranza/mes",
+		mesHoy,
+	);
+	const [dia, setDia] = usePersistedState<number>(
+		"cobros/reportes/cobranza/dia",
+		diaHoy,
+	);
+	const [asesorId, setAsesorId] = usePersistedState<string>(
+		"cobros/reportes/cobranza/asesorId",
+		"",
+	);
+
+	const { data: asesoresData } = useQuery({
+		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
+		enabled: !!session && canSeeAll,
+	});
+
+	const filtro = { anio, mes, dia };
+
+	const { data, isLoading, dataUpdatedAt, refetch, isFetching } = useQuery({
+		...orpc.getCobranzaDiaria.queryOptions({
+			input: {
+				...filtro,
+				asesorId: canSeeAll
+					? asesorId
+						? Number(asesorId)
+						: undefined
+					: undefined,
+			},
+		}),
+		enabled: !!session,
+	});
+
+	const ultimaAct = dataUpdatedAt
+		? new Date(dataUpdatedAt).toLocaleTimeString("es-GT", {
+				hour: "2-digit",
+				minute: "2-digit",
+			})
+		: null;
+
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const resultado = data as any;
+	const asesores: CobranzaAsesorRow[] = resultado?.asesores ?? [];
+	const totalGeneral: CobranzaAsesorRow | undefined = resultado?.totalGeneral;
+
+	const anios = [anioHoy, anioHoy - 1, anioHoy - 2];
+	const meses = Array.from({ length: 12 }, (_, i) => i + 1);
+	const dias = Array.from({ length: 31 }, (_, i) => i + 1);
+
+	return (
+		<div className="space-y-6">
+			<div className="flex items-center gap-2">
+				<CalendarClock className="h-5 w-5 text-blue-600" />
+				<h2 className="font-semibold text-xl">Cobrado vs Esperado</h2>
+			</div>
+
+			{/* Filtros */}
+			<div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
+				<div className="flex flex-col gap-1">
+					<Label className="text-xs">Año</Label>
+					<Select
+						value={String(anio)}
+						onValueChange={(v) => setAnio(Number(v))}
+					>
+						<SelectTrigger className="w-24">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{anios.map((a) => (
+								<SelectItem key={a} value={String(a)}>
+									{a}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+
+				<div className="flex flex-col gap-1">
+					<Label className="text-xs">Mes</Label>
+					<Select value={String(mes)} onValueChange={(v) => setMes(Number(v))}>
+						<SelectTrigger className="w-20">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{meses.map((m) => (
+								<SelectItem key={m} value={String(m)}>
+									{m}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+
+				<div className="flex flex-col gap-1">
+					<Label className="text-xs">Día</Label>
+					<Select value={String(dia)} onValueChange={(v) => setDia(Number(v))}>
+						<SelectTrigger className="w-20">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{dias.map((d) => (
+								<SelectItem key={d} value={String(d)}>
+									{d}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+
+				{canSeeAll && (
+					<div className="flex flex-col gap-1">
+						<Label className="text-xs">Asesor</Label>
+						<Select
+							value={asesorId}
+							onValueChange={(v) => setAsesorId(v === "todos" ? "" : v)}
+						>
+							<SelectTrigger className="w-48">
+								<SelectValue placeholder="Todos los asesores" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="todos">Todos</SelectItem>
+								{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+								{(asesoresData as any)?.asesores?.map((a: any) => (
+									<SelectItem key={a.asesorId} value={String(a.asesorId)}>
+										{a.nombre}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+				)}
+
+				<div className="ml-auto flex items-center gap-2">
+					{ultimaAct && (
+						<span className="text-muted-foreground text-xs">
+							Actualizado: {ultimaAct}
+						</span>
+					)}
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => refetch()}
+						disabled={isFetching}
+					>
+						<RefreshCw
+							className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
+						/>
+						Actualizar
+					</Button>
+				</div>
+			</div>
+
+			{/* Summary cards */}
+			<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+				<Card className="gap-1 border-blue-200 bg-blue-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-blue-700 text-xs">
+							A Cobrar
+						</CardTitle>
+					</CardHeader>
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-blue-800 text-lg">
+							{fmtQ(totalGeneral?.programado ?? "0")}
+						</div>
+					</CardContent>
+				</Card>
+				<Card className="gap-1 border-green-200 bg-green-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-green-700 text-xs">
+							Cobrado
+						</CardTitle>
+					</CardHeader>
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-green-700 text-lg">
+							{fmtQ(totalGeneral?.total_cobrado ?? "0")}
+						</div>
+					</CardContent>
+				</Card>
+				<Card className="gap-1 border-red-200 bg-red-50 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-red-700 text-xs">
+							Restante
+						</CardTitle>
+					</CardHeader>
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-red-700 text-lg">
+							{fmtQ(totalGeneral?.total_esperado ?? "0")}
+						</div>
+					</CardContent>
+				</Card>
+				<Card className="gap-1 py-3">
+					<CardHeader className="px-4 pb-0 pt-0">
+						<CardTitle className="font-medium text-xs">Efectividad</CardTitle>
+					</CardHeader>
+					<CardContent className="px-4 pb-0">
+						<div className="font-bold text-lg">
+							{((totalGeneral?.efectividad ?? 0) * 100).toFixed(1)}%
+						</div>
+						<p className="text-muted-foreground text-xs">
+							{totalGeneral?.cuotas ?? 0} cuotas
+						</p>
+					</CardContent>
+				</Card>
+			</div>
+
+			{/* Por asesor */}
+			{isLoading ? (
+				<div className="h-32 animate-pulse rounded bg-muted" />
+			) : asesores.length === 0 ? (
+				<p className="text-muted-foreground text-sm">
+					No hay datos disponibles para la fecha seleccionada.
+				</p>
+			) : (
+				<div className="space-y-2">
+					{asesores.map((a) => (
+						<AsesorRow
+							key={a.asesor_id ?? "sin-asesor"}
+							asesor={a}
+							filtro={filtro}
+						/>
+					))}
+					{totalGeneral && (
+						<div className="flex items-center gap-3 rounded-lg border border-border bg-muted/50 p-3 font-semibold">
+							<span className="min-w-40">TOTAL</span>
+							<span className="text-muted-foreground text-xs">
+								{totalGeneral.cuotas} cuotas
+							</span>
+							<span className="ml-auto text-right text-sm">
+								{fmtQ(totalGeneral.total_cobrado)} /{" "}
+								{fmtQ(totalGeneral.total_esperado)}
+							</span>
+							<Badge variant="outline">
+								{(totalGeneral.efectividad * 100).toFixed(1)}%
+							</Badge>
+						</div>
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
+
 // ─── Descuentos ─────────────────────────────────────────────────────────────
 
 type DescuentoRow = {
@@ -1397,7 +1876,7 @@ function RouteComponent() {
 					</TabsTrigger>
 					<TabsTrigger value="pagos">
 						<CalendarClock className="mr-2 h-4 w-4" />
-						Pagos Esperados
+						Cobrado vs Esperado
 					</TabsTrigger>
 					<TabsTrigger value="descuentos">
 						<BarChart3 className="mr-2 h-4 w-4" />
@@ -1409,7 +1888,7 @@ function RouteComponent() {
 					<TabMora session={session} canSeeAll={canSeeAll} />
 				</TabsContent>
 				<TabsContent value="pagos" className="mt-6">
-					<TabCuotasPorFecha session={session} canSeeAll={canSeeAll} />
+					<TabCobradoVsEsperado session={session} canSeeAll={canSeeAll} />
 				</TabsContent>
 				<TabsContent value="descuentos" className="mt-6">
 					<TabDescuentos session={session} />

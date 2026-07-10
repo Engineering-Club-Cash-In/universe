@@ -94,4 +94,28 @@ describe("agruparPorAsesor", () => {
     expect(totalGeneral.total_esperado).toBe("50.00");
     expect(totalGeneral.cuotas).toBe(2);
   });
+
+  it("agrupa asesor_id null como 'Sin asesor' y suma en totalGeneral", () => {
+    const { asesores, totalGeneral } = agruparPorAsesor([
+      credito({ credito_id: 1, asesor_id: null, asesor_nombre: null, total_cobrado: "75", total_esperado: "100" }),
+      credito({ credito_id: 2, asesor_id: 10, asesor_nombre: "Sam", total_cobrado: "150", total_esperado: "200" }),
+    ]);
+    expect(asesores).toHaveLength(2);
+    // El crédito sin asesor debe formar su propio grupo
+    const sinAsesor = asesores.find((a) => a.asesor_id === null);
+    expect(sinAsesor).toBeDefined();
+    expect(sinAsesor?.asesor_nombre).toBe("Sin asesor");
+    expect(sinAsesor?.total_cobrado).toBe("75.00");
+    expect(sinAsesor?.total_esperado).toBe("100.00");
+    expect(sinAsesor?.cuotas).toBe(1);
+    // El crédito con asesor está en su grupo
+    const conAsesor = asesores.find((a) => a.asesor_id === 10);
+    expect(conAsesor?.asesor_nombre).toBe("Sam");
+    expect(conAsesor?.total_cobrado).toBe("150.00");
+    expect(conAsesor?.total_esperado).toBe("200.00");
+    // totalGeneral suma ambos
+    expect(totalGeneral.total_cobrado).toBe("225.00");
+    expect(totalGeneral.total_esperado).toBe("300.00");
+    expect(totalGeneral.cuotas).toBe(2);
+  });
 });

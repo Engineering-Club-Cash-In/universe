@@ -65,7 +65,17 @@ VALUES
   -- Bracket 8: Más de Q1,000,000
   (1000000.01,  NULL,       'p2p_directa',          80.0099206300, 16.1300000000),
   (1000000.01,  NULL,       'factura_cube',         74.4092261900, 15.0009000000),
-  (1000000.01,  NULL,       'factura_cube_pequeno', 57.8643176000, 11.6654464300)
+  (1000000.01,  NULL,       'factura_cube_pequeno', 57.8643176000, 11.6654464300),
+  -- Bracket 9: tarifa especial, sin rango de monto propio (no existe en la
+  -- estructura de 8 brackets por monto del Excel de finanzas). Solo
+  -- seleccionable manualmente vía modalidad_facturacion_spread_id — nunca es
+  -- la pre-elección automática de ningún monto. monto_desde usa un valor
+  -- centinela deliberadamente inalcanzable para que la resolución automática
+  -- por monto (resolveModalidadFacturacionSpread / listModalidadFacturacionByMonto)
+  -- nunca la devuelva.
+  (99999999.99, NULL,       'p2p_directa',          85.0000000000, 17.1360000000),
+  (99999999.99, NULL,       'factura_cube',         79.0500000000, 15.9364800000),
+  (99999999.99, NULL,       'factura_cube_pequeno', 61.4732142900, 12.3930000000)
 ON CONFLICT (monto_desde, modalidad) DO NOTHING;
 
 ALTER TABLE cartera.creditos_inversionistas_espejo

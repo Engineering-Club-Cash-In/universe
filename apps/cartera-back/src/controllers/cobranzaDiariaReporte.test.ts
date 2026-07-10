@@ -33,3 +33,21 @@ describe("getCobranzaDiaria", () => {
 		expect(totalGeneral.asesor_nombre).toBe("TOTAL");
 	});
 });
+
+const { getCobranzaDiariaDetalle } = await import("./cobranzaDiariaReporte");
+
+describe("getCobranzaDiariaDetalle", () => {
+	it("pagina y reporta hasMore usando el count", async () => {
+		const exec = makeExec([
+			{ rows: [ { credito_id: 1, numero_credito_sifco: "X1", cliente_nombre: "Cli", asesor_id: 10, asesor_nombre: "Sam",
+				cap_rest: "100", int_rest: "0", iva_rest: "0", seg_rest: "0", gps_rest: "0", mem_rest: "0",
+				cap_cob: "0", int_cob: "0", iva_cob: "0", seg_cob: "0", gps_cob: "0", mem_cob: "0", mora_cob: "0" } ] }, // qA
+			{ rows: [] }, // qB inversionistas
+			{ rows: [{ total: "23" }] }, // count
+		]);
+		const res = await getCobranzaDiariaDetalle({ anio: 2026, mes: 7, dia: 8, asesorId: 10, limit: 10, offset: 0, executor: exec as any });
+		expect(res.creditos).toHaveLength(1);
+		expect(res.total).toBe(23);
+		expect(res.hasMore).toBe(true);
+	});
+});

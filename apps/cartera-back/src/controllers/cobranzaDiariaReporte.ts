@@ -110,3 +110,24 @@ export async function getCobranzaDiaria(p: {
 	const rows = await construirFilasCredito(p, p.executor ?? db);
 	return agruparPorAsesor(rows);
 }
+
+export async function getCobranzaDiariaDetalle(p: {
+	anio: number; mes: number; dia: number; asesorId: number;
+	limit?: number; offset?: number; executor?: Exec;
+}): Promise<{ creditos: CobranzaCreditoRow[]; total: number; hasMore: boolean }> {
+	const exec = p.executor ?? db;
+	const limit = p.limit ?? 10;
+	const offset = p.offset ?? 0;
+	const creditos = await construirFilasCredito({ ...p, limit, offset }, exec);
+	const countRes = await exec.execute(sql`
+		SELECT COUNT(*)::int AS total
+		FROM cartera.cuotas_credito c
+		JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
+		WHERE c.fecha_vencimiento::date = make_date(${p.anio}, ${p.mes}, ${p.dia})
+			AND c.numero_cuota > 0
+			AND cr."statusCredit" IN ('ACTIVO','MOROSO','EN_CONVENIO')
+			AND cr.asesor_id = ${p.asesorId}
+	`);
+	const total = Number((countRes.rows[0] as any)?.total ?? 0);
+	return { creditos, total, hasMore: offset + creditos.length < total };
+}

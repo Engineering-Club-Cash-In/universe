@@ -97,3 +97,39 @@ export async function resolveModalidadFacturacionSpread(
 
   return (row as ModalidadFacturacionSpreadRow) ?? null;
 }
+
+/**
+ * Devuelve las 8 filas (una por bracket) de una modalidad, sin filtrar por
+ * monto. Fuente de opciones para la anulación manual del spread: el
+ * operador puede elegir cualquiera de estos 8, sin importar el monto de la
+ * compra (decisión de negocio).
+ */
+export async function listModalidadFacturacionSpreadByModalidad(
+  modalidad: ModalidadFacturacion,
+  executor: DbExecutor = db,
+): Promise<{ data: ModalidadFacturacionSpreadRow[] }> {
+  const rows = await executor
+    .select()
+    .from(modalidad_facturacion_spread)
+    .where(eq(modalidad_facturacion_spread.modalidad, modalidad))
+    .orderBy(asc(modalidad_facturacion_spread.monto_desde));
+
+  return { data: rows as ModalidadFacturacionSpreadRow[] };
+}
+
+/**
+ * Resuelve una fila del catálogo por su id exacto — usado cuando el
+ * operador anula manualmente el bracket resuelto por monto (elige uno de
+ * los 8 disponibles para la modalidad). Devuelve null si el id no existe.
+ */
+export async function getModalidadFacturacionSpreadById(
+  id: number,
+  executor: DbExecutor = db,
+): Promise<ModalidadFacturacionSpreadRow | null> {
+  const [row] = await executor
+    .select()
+    .from(modalidad_facturacion_spread)
+    .where(eq(modalidad_facturacion_spread.id, id));
+
+  return (row as ModalidadFacturacionSpreadRow) ?? null;
+}

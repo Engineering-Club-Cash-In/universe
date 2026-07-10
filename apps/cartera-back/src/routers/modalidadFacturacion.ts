@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import {
   listModalidadFacturacionSpread,
   listModalidadFacturacionByMonto,
+  listModalidadFacturacionSpreadByModalidad,
 } from "../controllers/modalidadFacturacion";
 import { authMiddleware } from "./midleware";
 
@@ -64,6 +65,42 @@ export const modalidadFacturacionRouter = new Elysia()
     {
       query: t.Object({
         monto: t.String(),
+      }),
+    },
+  )
+
+  /**
+   * GET /modalidad-facturacion/spread/por-modalidad?modalidad=p2p_directa
+   * Devuelve las 8 filas (una por bracket) de una modalidad, sin filtrar por
+   * monto. Lo usa el front para poblar el combobox de anulación manual del
+   * spread (el operador puede elegir cualquiera de los 8, sin importar el
+   * monto de la compra).
+   * Response: { data: [{ id, monto_desde, monto_hasta, modalidad, spread, tasa }] }
+   */
+  .get(
+    "/modalidad-facturacion/spread/por-modalidad",
+    async ({ query, set }) => {
+      try {
+        const result = await listModalidadFacturacionSpreadByModalidad(
+          query.modalidad,
+        );
+        set.status = 200;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return {
+          message: "Error obteniendo catálogo por modalidad",
+          error: String(error),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        modalidad: t.Union([
+          t.Literal("p2p_directa"),
+          t.Literal("factura_cube"),
+          t.Literal("factura_cube_pequeno"),
+        ]),
       }),
     },
   );

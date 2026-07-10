@@ -26,6 +26,10 @@ export const addInvestorToCreditRouter = new Elysia()
           t.Literal("factura_cube_pequeno"),
         ]),
       ),
+      // Anulación manual del bracket: si viene, se usa esa fila exacta del
+      // catálogo (cualquiera de los 8 de la modalidad) en vez de resolver
+      // por monto_aportado. Requiere que venga modalidad_facturacion.
+      modalidad_facturacion_spread_id: t.Optional(t.Number({ minimum: 1 })),
       tipo_operacion: t.Union([
         t.Literal("reinversion"),
         t.Literal("compra_cartera"),

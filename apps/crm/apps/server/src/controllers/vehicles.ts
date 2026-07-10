@@ -79,21 +79,31 @@ export const getVehiclesBySifcoController = async (numeroSifcos: string[]) => {
 	}
 
 	try {
-		const rows = await db
-			.select({
-				numeroSifco: opportunities.numeroSifco,
-				licensePlate: vehicles.licensePlate,
-				vinNumber: vehicles.vinNumber,
-			})
-			.from(opportunities)
-			.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-			.where(
-				and(
-					inArray(opportunities.numeroSifco, uniqueSifcos),
-					inArray(opportunities.status, ["won", "migrate"]),
-				),
-			)
-			.orderBy(desc(opportunities.updatedAt), desc(opportunities.createdAt));
+		const CHUNK_SIZE = 1000;
+		const rows: {
+			numeroSifco: string | null;
+			licensePlate: string | null;
+			vinNumber: string | null;
+		}[] = [];
+		for (let i = 0; i < uniqueSifcos.length; i += CHUNK_SIZE) {
+			const chunk = uniqueSifcos.slice(i, i + CHUNK_SIZE);
+			const part = await db
+				.select({
+					numeroSifco: opportunities.numeroSifco,
+					licensePlate: vehicles.licensePlate,
+					vinNumber: vehicles.vinNumber,
+				})
+				.from(opportunities)
+				.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.where(
+					and(
+						inArray(opportunities.numeroSifco, chunk),
+						inArray(opportunities.status, ["won", "migrate"]),
+					),
+				)
+				.orderBy(desc(opportunities.updatedAt), desc(opportunities.createdAt));
+			rows.push(...part);
+		}
 
 		const seen = new Set<string>();
 		const matchedVehicles: VehicleBySifco[] = [];

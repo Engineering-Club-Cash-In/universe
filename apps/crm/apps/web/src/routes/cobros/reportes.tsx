@@ -5,6 +5,8 @@ import {
 	BarChart3,
 	CalendarClock,
 	ChevronDown,
+	ChevronLeft,
+	ChevronRight,
 	Loader2,
 	RefreshCw,
 	TrendingDown,
@@ -111,6 +113,16 @@ function TabMora({
 		"cobros.mora.asesores",
 		null,
 	);
+
+	// Avanza/retrocede el mes seleccionado (sin pasar del mes actual).
+	const esMesActual = mesAnio >= currentMonthGT();
+	const shiftMes = (delta: number) => {
+		const [y, m] = mesAnio.split("-").map(Number);
+		const d = new Date(y, m - 1 + delta, 1);
+		const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+		if (next > currentMonthGT()) return;
+		setMesAnio(next);
+	};
 
 	// Fecha snapshot = día 6 del mes elegido, clamp a hoy (nunca futura).
 	const hoy = todayGTISO();
@@ -264,14 +276,36 @@ function TabMora({
 
 				<div className="flex flex-col gap-1">
 					<Label className="text-muted-foreground text-xs">Mes</Label>
-					<Input
-						type="month"
-						className="w-40"
-						value={mesAnio}
-						max={currentMonthGT()}
-						disabled={modo !== "mes"}
-						onChange={(e) => setMesAnio(e.target.value)}
-					/>
+					<div className="flex items-center gap-1">
+						<Button
+							variant="outline"
+							size="icon"
+							className="h-9 w-9 shrink-0"
+							disabled={modo !== "mes"}
+							onClick={() => shiftMes(-1)}
+							aria-label="Mes anterior"
+						>
+							<ChevronLeft className="h-4 w-4" />
+						</Button>
+						<Input
+							type="month"
+							className="w-40"
+							value={mesAnio}
+							max={currentMonthGT()}
+							disabled={modo !== "mes"}
+							onChange={(e) => setMesAnio(e.target.value)}
+						/>
+						<Button
+							variant="outline"
+							size="icon"
+							className="h-9 w-9 shrink-0"
+							disabled={modo !== "mes" || esMesActual}
+							onClick={() => shiftMes(1)}
+							aria-label="Mes siguiente"
+						>
+							<ChevronRight className="h-4 w-4" />
+						</Button>
+					</div>
 				</div>
 
 				{canSeeAll && asesores.length > 0 && (

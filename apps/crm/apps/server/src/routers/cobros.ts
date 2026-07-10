@@ -4087,6 +4087,50 @@ export const cobrosRouter = {
 		}),
 
 	// ========================================================================
+	// COBRANZA DIARIA (Cobrado vs Esperado)
+	// ========================================================================
+
+	getCobranzaDiaria: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				anio: z.number(),
+				mes: z.number(),
+				dia: z.number(),
+				asesorId: z.number().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getCobranzaDiaria(input);
+		}),
+
+	getCobranzaDiariaDetalle: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				anio: z.number(),
+				mes: z.number(),
+				dia: z.number(),
+				asesorId: z.number(),
+				limit: z.number().optional(),
+				offset: z.number().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getCobranzaDiariaDetalle(input);
+		}),
+
+	// ========================================================================
 	// DESCUENTOS / RUBROS POR CRÉDITO
 	// ========================================================================
 

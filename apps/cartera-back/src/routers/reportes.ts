@@ -3,6 +3,7 @@ import { db } from "../database";
 import { buildActivePortfolioRows, buildActivePortfolioWorkbook, getActivePortfolioCredits } from "../controllers/activePortfolioReport";
 import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
 import { getVehiclesBySifcoMap } from "../services/crm.service";
+import { getCobranzaDiaria, getCobranzaDiariaDetalle } from "../controllers/cobranzaDiariaReporte";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -386,6 +387,68 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return { ok: true, data };
     } catch (error) {
       console.error("[/reportes/cuotas-por-fecha]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/cobranza-diaria", async ({ query, set }) => {
+    try {
+      const { anio, mes, dia, asesor_id } = query as Record<string, string>;
+      if (!anio || !mes || !dia) {
+        set.status = 400;
+        return { error: "anio, mes y dia son requeridos" };
+      }
+      const a = Number(anio);
+      const m = Number(mes);
+      const d = Number(dia);
+      const asesorId = asesor_id ? Number(asesor_id) : undefined;
+      if (Number.isNaN(a) || Number.isNaN(m) || Number.isNaN(d) || (asesorId !== undefined && Number.isNaN(asesorId))) {
+        set.status = 400;
+        return { error: "anio, mes, dia y asesor_id deben ser numéricos válidos" };
+      }
+      const data = await getCobranzaDiaria({
+        anio: a,
+        mes: m,
+        dia: d,
+        asesorId,
+      });
+      set.status = 200;
+      return { ok: true, data };
+    } catch (error) {
+      console.error("[/reportes/cobranza-diaria]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/cobranza-diaria/detalle", async ({ query, set }) => {
+    try {
+      const { anio, mes, dia, asesor_id, limit, offset } = query as Record<string, string>;
+      if (!anio || !mes || !dia || !asesor_id) {
+        set.status = 400;
+        return { error: "anio, mes, dia y asesor_id son requeridos" };
+      }
+      const a = Number(anio);
+      const m = Number(mes);
+      const d = Number(dia);
+      const asesorId = Number(asesor_id);
+      if (Number.isNaN(a) || Number.isNaN(m) || Number.isNaN(d) || Number.isNaN(asesorId)) {
+        set.status = 400;
+        return { error: "anio, mes, dia y asesor_id deben ser numéricos válidos" };
+      }
+      const data = await getCobranzaDiariaDetalle({
+        anio: a,
+        mes: m,
+        dia: d,
+        asesorId,
+        limit: limit ? Number(limit) : undefined,
+        offset: offset ? Number(offset) : undefined,
+      });
+      set.status = 200;
+      return { ok: true, data };
+    } catch (error) {
+      console.error("[/reportes/cobranza-diaria/detalle]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

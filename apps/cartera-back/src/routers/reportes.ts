@@ -1,5 +1,8 @@
 import { Elysia } from "elysia";
+import { db } from "../database";
+import { buildActivePortfolioRows, buildActivePortfolioWorkbook, getActivePortfolioCredits } from "../controllers/activePortfolioReport";
 import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
+import { getVehiclesBySifcoMap } from "../services/crm.service";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -22,7 +25,34 @@ function fechaValida(s: string): boolean {
   return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
 }
 
+function puedeDescargarCarteraActiva(user: { role?: string } | undefined): boolean {
+  return user?.role === "ADMIN" || user?.role === "CONTA";
+}
+
 export const reportesRouter = new Elysia().use(authMiddleware)
+
+  .get("/reportes/cartera-activa/excel", async ({ set, user }) => {
+    if (!puedeDescargarCarteraActiva(user)) {
+      set.status = 403;
+      return { error: "No autorizado" };
+    }
+
+    try {
+      const credits = await getActivePortfolioCredits(db);
+      const vehicles = await getVehiclesBySifcoMap(credits.map((credit) => credit.numero_credito_sifco));
+      const buf = await buildActivePortfolioWorkbook(buildActivePortfolioRows(credits, vehicles));
+      return new Response(new Uint8Array(buf), {
+        headers: {
+          "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "content-disposition": 'attachment; filename="reporte-cartera-activa.xlsx"',
+        },
+      });
+    } catch (error) {
+      console.error("[/reportes/cartera-activa/excel]", error);
+      set.status = 500;
+      return { error: "Error generando reporte de cartera activa" };
+    }
+  })
 
   .get("/reportes/monto-cobrar", async ({ query, set }) => {
     try {

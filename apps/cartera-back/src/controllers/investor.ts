@@ -5761,6 +5761,9 @@ export const exitInvestor = async (
                 monto_aportado: nuevoMontoCubePadre.toFixed(8),
                 ...derivadosSwapEspejo,
                 status: "completado",
+                // CUBE no tiene régimen fiscal, así que queda en null.
+                modalidad_facturacion: null,
+                modalidad_facturacion_spread_id: null,
                 updated_at: new Date(),
               })
               .where(

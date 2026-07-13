@@ -638,7 +638,17 @@ function LiquidacionesInversionistas() {
 														}
 													>
 														<SelectTrigger id="inv-pct-inv">
-															<SelectValue placeholder="—" />
+															{/* Texto explícito: Radix solo registra el texto
+															    de un SelectItem cuando el dropdown se abre al
+															    menos una vez, así que un valor pre-seleccionado
+															    por monto (sin que el usuario haya abierto el
+															    combo) se vería en blanco si dependemos del
+															    lookup automático. */}
+															<SelectValue placeholder="—">
+																{compraSpreadRow
+																	? `${Number(compraSpreadRow.spread).toFixed(4)}%`
+																	: undefined}
+															</SelectValue>
 														</SelectTrigger>
 														<SelectContent>
 															{modalidadPorModalidadQuery.data?.map((row) => (

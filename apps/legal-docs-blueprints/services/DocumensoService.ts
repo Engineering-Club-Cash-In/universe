@@ -341,6 +341,8 @@ export class DocumensoService {
         headers: {
           'Content-Type': 'application/pdf',
         },
+        // Sin timeout, un stall a media subida deja el request colgado para siempre
+        signal: AbortSignal.timeout(60_000),
       });
 
       if (!uploadResponse.ok) {
@@ -403,6 +405,7 @@ export class DocumensoService {
             headers: {
               'Content-Type': 'application/pdf',
             },
+            signal: AbortSignal.timeout(60_000),
           });
 
           if (!uploadResponse.ok) {
@@ -612,6 +615,7 @@ export class DocumensoService {
       const response = await fetch(signingUrl, {
         method: 'HEAD',
         redirect: 'manual',
+        signal: AbortSignal.timeout(30_000),
       });
 
       // Si hay redirect a /complete, el documento está firmado

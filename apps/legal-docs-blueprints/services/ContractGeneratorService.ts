@@ -126,14 +126,27 @@ export class ContractGeneratorService {
       ]
     });
 
-    // Registrar cobertura INREXSA (no tiene género, solo singular y plural)
+    // Registrar cobertura placas particulares (no tiene género, solo singular y plural)
     this.registerTemplate({
       type: ContractType.COBERTURA_INREXSA,
-      templateFilename: 'cobertura_inrexsa/cobertura_cci.docx',
-      templateFilenameFemale: 'cobertura_inrexsa/cobertura_cci.docx',
-      templateFilenamePlural: 'cobertura_inrexsa/cobertura_cci-plural.docx',
-      templateFilenameFemalePlural: 'cobertura_inrexsa/cobertura_cci-plural.docx',
-      description: 'Carta de cobertura CCI',
+      templateFilename: 'cobertura_inrexsa/CARTA_COBERTURA_PLACAS_PARTICULARES.docx',
+      templateFilenameFemale: 'cobertura_inrexsa/CARTA_COBERTURA_PLACAS_PARTICULARES.docx',
+      templateFilenamePlural: 'cobertura_inrexsa/CARTA_COBERTURA_PLACAS_PARTICULARES_PLURAL.docx',
+      templateFilenameFemalePlural: 'cobertura_inrexsa/CARTA_COBERTURA_PLACAS_PARTICULARES_PLURAL.docx',
+      description: 'Carta de cobertura placas particulares',
+      requiredFields: [
+        'nombreCompleto',
+      ]
+    });
+
+    // Registrar cobertura placas comerciales (no tiene género, solo singular y plural)
+    this.registerTemplate({
+      type: ContractType.COBERTURA_INREXSA_COMERCIAL,
+      templateFilename: 'cobertura_inrexsa/CARTA_COBERTURA_PLACAS_COMERCIALES.docx',
+      templateFilenameFemale: 'cobertura_inrexsa/CARTA_COBERTURA_PLACAS_COMERCIALES.docx',
+      templateFilenamePlural: 'cobertura_inrexsa/CARTA_COBERTURA_PLACAS_COMERCIALES_PLURAL.docx',
+      templateFilenameFemalePlural: 'cobertura_inrexsa/CARTA_COBERTURA_PLACAS_COMERCIALES_PLURAL.docx',
+      description: 'Carta de cobertura placas comerciales',
       requiredFields: [
         'nombreCompleto',
       ]

@@ -16,8 +16,9 @@ import {
 	type estadoMoraEnum,
 } from "../db/schema/cobros";
 import { leads } from "../db/schema/crm";
-import { estadoMoraPorCuotas } from "../lib/moraBuckets";
+import { fetchAllPages } from "../lib/fetch-all-pages";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import { estadoMoraPorCuotas } from "../lib/moraBuckets";
 import { createNotification } from "../routers/notifications";
 import type { StatusCreditEnum } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
@@ -195,7 +196,9 @@ export async function sincronizarCasosCobros(
 
 	try {
 		// 1. Obtener créditos de cartera-back
-		let creditosResponse;
+		let creditos: Awaited<
+			ReturnType<typeof carteraBackClient.getAllCreditos>
+		>["data"];
 
 		if (options.forceSyncAll) {
 			// Obtener TODOS los créditos (todos los estados)
@@ -214,41 +217,75 @@ export async function sincronizarCasosCobros(
 				"MOROSO",
 			];
 
-			const allCreditos = [];
-			for (const estado of estados) {
-				const response = await carteraBackClient.getAllCreditos({
-					mes,
-					anio,
-					estado,
-					page: 1,
-					perPage: 10000,
-				});
-				allCreditos.push(...response.data);
+			// allSettled en vez de Promise.all: si un estado falla (red, cartera-back
+			// caído, etc.) no debe tumbar la sync de los otros 4 estados que sí
+			// tenían datos válidos -- se loguea el error y se sigue con el resto.
+			const resultadosPorEstado = await Promise.allSettled(
+				estados.map((estado) =>
+					fetchAllPages(
+						(page) =>
+							carteraBackClient.getAllCreditos({
+								mes,
+								anio,
+								estado,
+								page,
+								perPage: 10000,
+							}),
+						{ concurrency: 3 },
+					),
+				),
+			);
+
+			creditos = [];
+			let estadosExitosos = 0;
+			for (let i = 0; i < resultadosPorEstado.length; i++) {
+				const resultado = resultadosPorEstado[i];
+				if (resultado.status === "fulfilled") {
+					estadosExitosos++;
+					creditos.push(...resultado.value);
+				} else {
+					const mensaje =
+						resultado.reason instanceof Error
+							? resultado.reason.message
+							: String(resultado.reason);
+					console.error(
+						`[SyncCobros] Falló obtener créditos del estado ${estados[i]}:`,
+						mensaje,
+					);
+					result.errors.push(
+						`Estado ${estados[i]}: no se pudo obtener créditos de cartera-back (${mensaje})`,
+					);
+				}
 			}
 
-			creditosResponse = {
-				data: allCreditos,
-				total: allCreditos.length,
-				page: 1,
-				perPage: allCreditos.length,
-			};
+			// Si NINGÚN estado trajo datos, no es una sync parcial exitosa con 0
+			// créditos -- es un fallo total (cartera-back caído, auth rota, etc.).
+			// Marcar success:false para que el caller no lo confunda con "sync
+			// corrió bien, la cartera está vacía este mes". No se corta el flujo
+			// (return) para que el log a carteraBackSyncLog al final igual quede
+			// registrado con status "error" (ya lo detecta por result.errors).
+			if (estadosExitosos === 0) {
+				result.success = false;
+			}
 		} else {
-			// Solo créditos morosos
-			creditosResponse = await carteraBackClient.getAllCreditos({
-				mes,
-				anio,
-				estado: "MOROSO",
-				page: 1,
-				perPage: 1000,
-			});
+			// Solo créditos morosos — paginar hasta agotar resultados
+			creditos = await fetchAllPages((page) =>
+				carteraBackClient.getAllCreditos({
+					mes,
+					anio,
+					estado: "MOROSO",
+					page,
+					perPage: 1000,
+				}),
+			);
 		}
 
 		console.log(
-			`[SyncCobros] Encontrados ${creditosResponse.data.length} créditos en cartera-back`,
+			`[SyncCobros] Encontrados ${creditos.length} créditos en cartera-back`,
 		);
 
 		// 2. Procesar cada crédito
-		for (const credito of creditosResponse.data) {
+		for (const credito of creditos) {
 			try {
 				// Obtener detalles completos del crédito
 				const creditoCompleto = await carteraBackClient.getCredito(

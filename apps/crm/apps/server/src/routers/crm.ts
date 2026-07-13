@@ -61,6 +61,7 @@ import {
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
+import { fetchAllPages } from "../lib/fetch-all-pages";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
@@ -226,25 +227,30 @@ async function getClientCreditsFromCartera(
 	const maxPages = 200;
 	const creditsBySifco = new Map<string, CarteraClientCredit>();
 
-	for (const estado of CLIENT_CREDIT_CARTERA_STATUSES) {
-		let page = 1;
-		while (page <= maxPages) {
-			const response = await fetchCredits({
-				...params,
-				estado,
-				page,
-				perPage,
-			});
+	// fetchCredits tipa totalPages como opcional (compartido con fetchers
+	// legacy). Se pasa tal cual: si viene numérico, fetchAllPages pagina en
+	// paralelo; si viene ausente (fetcher sin totalPages), cae al fallback por
+	// longitud vía `perPage` en vez de truncar silenciosamente en la página 1.
+	const creditsPorEstado = await Promise.all(
+		CLIENT_CREDIT_CARTERA_STATUSES.map((estado) =>
+			fetchAllPages<CarteraClientCredit>(
+				async (page) => {
+					const response = await fetchCredits({
+						...params,
+						estado,
+						page,
+						perPage,
+					});
+					return { data: response.data, totalPages: response.totalPages };
+				},
+				{ maxPages, perPage },
+			),
+		),
+	);
 
-			for (const row of response.data) {
-				const sifco = row.creditos?.numero_credito_sifco?.trim();
-				if (sifco && !creditsBySifco.has(sifco)) creditsBySifco.set(sifco, row);
-			}
-
-			if (response.data.length < perPage) break;
-			if (response.totalPages != null && page >= response.totalPages) break;
-			page += 1;
-		}
+	for (const row of creditsPorEstado.flat()) {
+		const sifco = row.creditos?.numero_credito_sifco?.trim();
+		if (sifco && !creditsBySifco.has(sifco)) creditsBySifco.set(sifco, row);
 	}
 
 	return Array.from(creditsBySifco.values());

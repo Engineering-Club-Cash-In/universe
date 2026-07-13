@@ -13,6 +13,7 @@ import {
 	Target,
 	TrendingDown,
 	TrendingUp,
+	TriangleAlert,
 	Users,
 	X,
 } from "lucide-react";
@@ -667,11 +668,23 @@ function RouteComponent() {
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
-			<div>
-				<h1 className="font-bold text-3xl">Dashboard de Cobros</h1>
-				<p className="text-muted-foreground">
-					Gestión y seguimiento de cobranza - Enfoque preventivo
-				</p>
+			<div className="flex items-center justify-between">
+				<div>
+					<h1 className="font-bold text-3xl">Dashboard de Cobros</h1>
+					<p className="text-muted-foreground">
+						Gestión y seguimiento de cobranza - Enfoque preventivo
+					</p>
+				</div>
+				{dashboardStats.data?.fuente != null &&
+					dashboardStats.data.fuente !== "cartera-back" && (
+						<Badge
+							variant="outline"
+							className="gap-1.5 border-amber-300 bg-amber-50 text-amber-800"
+						>
+							<TriangleAlert className="h-3.5 w-3.5" />
+							Datos parciales
+						</Badge>
+					)}
 			</div>
 
 			{/* Estadísticas Generales */}

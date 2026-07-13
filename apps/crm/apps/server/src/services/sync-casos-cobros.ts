@@ -237,9 +237,11 @@ export async function sincronizarCasosCobros(
 			);
 
 			creditos = [];
+			let estadosExitosos = 0;
 			for (let i = 0; i < resultadosPorEstado.length; i++) {
 				const resultado = resultadosPorEstado[i];
 				if (resultado.status === "fulfilled") {
+					estadosExitosos++;
 					creditos.push(...resultado.value);
 				} else {
 					const mensaje =
@@ -254,6 +256,16 @@ export async function sincronizarCasosCobros(
 						`Estado ${estados[i]}: no se pudo obtener créditos de cartera-back (${mensaje})`,
 					);
 				}
+			}
+
+			// Si NINGÚN estado trajo datos, no es una sync parcial exitosa con 0
+			// créditos -- es un fallo total (cartera-back caído, auth rota, etc.).
+			// Marcar success:false para que el caller no lo confunda con "sync
+			// corrió bien, la cartera está vacía este mes". No se corta el flujo
+			// (return) para que el log a carteraBackSyncLog al final igual quede
+			// registrado con status "error" (ya lo detecta por result.errors).
+			if (estadosExitosos === 0) {
+				result.success = false;
 			}
 		} else {
 			// Solo créditos morosos — paginar hasta agotar resultados

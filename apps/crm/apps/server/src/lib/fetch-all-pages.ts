@@ -5,7 +5,7 @@
  * primera) -- Promise.all aborta apenas la primera rechaza, perdiendo el
  * resultado de trabajo ya casi terminado en las demás.
  */
-async function mapWithConcurrency<A, B>(
+export async function mapWithConcurrency<A, B>(
 	items: readonly A[],
 	concurrency: number,
 	fn: (item: A) => Promise<B>,

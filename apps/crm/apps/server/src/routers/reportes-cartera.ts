@@ -10,7 +10,7 @@ import { db } from "../db";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import { casosCobros } from "../db/schema/cobros";
 import { metasMensuales, TIPOS_META } from "../db/schema/metas";
-import { fetchAllPages } from "../lib/fetch-all-pages";
+import { fetchAllPages, mapWithConcurrency } from "../lib/fetch-all-pages";
 import {
 	getGuatemalaMonthWindow,
 	gtDateStrToDate,
@@ -68,9 +68,15 @@ export const reportesCarteraRouter = {
 					}),
 				);
 
-				// 2. Enriquecer con datos del CRM
-				const creditosEnriquecidos = await Promise.all(
-					creditosCartera.map(async (credito) => {
+				// 2. Enriquecer con datos del CRM (concurrencia acotada -- con
+				// paginación completa creditosCartera puede tener miles de
+				// registros; sin límite, Promise.all dispararía todas las queries
+				// DB + llamadas getCredito de golpe, agotando el pool o
+				// provocando timeouts).
+				const creditosEnriquecidos = await mapWithConcurrency(
+					creditosCartera,
+					20,
+					async (credito) => {
 						try {
 							// Obtener referencia del CRM
 							const reference = await db
@@ -221,7 +227,7 @@ export const reportesCarteraRouter = {
 									error instanceof Error ? error.message : "Error desconocido",
 							};
 						}
-					}),
+					},
 				);
 
 				// 3. Calcular totales y métricas

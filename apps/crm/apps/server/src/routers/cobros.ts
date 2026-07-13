@@ -40,12 +40,16 @@ import {
 } from "../db/schema/crm";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
-import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
+import {
+	deriveHasCapitalData,
+	recalculateCobrosPercentagesWithFallback,
+} from "../lib/cobros-capital-percentages";
 import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
+import { fetchAllPages } from "../lib/fetch-all-pages";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	getTestPhone,
@@ -178,31 +182,20 @@ async function obtenerTodasLasPaginasCreditos(
 	>,
 ) {
 	const perPage = 100;
-	// Tope duro: si cartera-back devolviera totalPages null/undefined y siempre
-	// exactamente `perPage` items, el loop no terminaría. 200 páginas = 20k
-	// créditos, muy por encima de la cartera real.
-	const MAX_PAGES = 200;
-	const data: Awaited<
-		ReturnType<typeof obtenerTodosLosCreditosCarteraBack>
-	>["data"] = [];
-	let page = 1;
-	while (page <= MAX_PAGES) {
-		const resp = await obtenerTodosLosCreditosCarteraBack({
-			...params,
-			page,
-			perPage,
-		});
-		data.push(...resp.data);
-		if (resp.data.length < perPage) break;
-		if (resp.totalPages != null && page >= resp.totalPages) break;
-		page += 1;
-	}
-	if (page > MAX_PAGES) {
-		console.warn(
-			`[obtenerTodasLasPaginasCreditos] Se alcanzó MAX_PAGES=${MAX_PAGES} (${data.length} créditos). Posible truncamiento — la cartera supera el tope.`,
-		);
-	}
-	return data;
+	// Tope duro: 200 páginas = 20k créditos, muy por encima de la cartera real.
+	const maxPages = 200;
+
+	return fetchAllPages(
+		async (page) => {
+			const resp = await obtenerTodosLosCreditosCarteraBack({
+				...params,
+				page,
+				perPage,
+			});
+			return { data: resp.data, totalPages: resp.totalPages ?? 0 };
+		},
+		{ maxPages },
+	);
 }
 
 /**
@@ -447,6 +440,10 @@ export const cobrosRouter = {
 							estadoMora,
 							totalCases: bucketStats?.cantidad || 0,
 							montoTotal: bucketStats?.sumaMora || "0",
+							// sumaCapitalCruda preserva undefined/null tal como vino en el
+							// payload (para deriveHasCapitalData); sumaCapital ya defaultea
+							// a "0" para el cálculo de porcentajes.
+							sumaCapitalCruda: bucketStats?.sumaCapital,
 							sumaCapital: bucketStats?.sumaCapital || "0",
 							porcentaje: bucketStats?.porcentaje || "0",
 						};
@@ -459,9 +456,35 @@ export const cobrosRouter = {
 					// cobros-capital-percentages.ts).
 					const activeEstados = new Set(bucketsFunnel.map((b) => b.estadoMora));
 
-					const estatusStats = recalculateCobrosCapitalPercentages(
+					const statsCrudasParaDerivar = [
+						...bucketsFunnel.map((b) => ({
+							estadoMora: b.estadoMora,
+							sumaCapital: b.sumaCapitalCruda,
+						})),
+						{
+							estadoMora: "completado",
+							sumaCapital: statsResponse.porEstado.cancelado?.sumaCapital,
+						},
+						{
+							estadoMora: "incobrable",
+							sumaCapital: statsResponse.porEstado.incobrable?.sumaCapital,
+						},
+					];
+
+					// all-or-nothing: si UN bucket activo no trajo sumaCapital real, la
+					// fuente completa se trata como sin capital confiable (ver
+					// deriveHasCapitalData) -- evita mezclar buckets con capital real y
+					// buckets con capital desconocido-tratado-como-cero en el mismo %.
+					const hasCapitalData = deriveHasCapitalData(
+						statsCrudasParaDerivar,
+						activeEstados,
+					);
+
+					const estatusStats = recalculateCobrosPercentagesWithFallback(
 						[
-							...bucketsFunnel,
+							...bucketsFunnel.map(
+								({ sumaCapitalCruda, ...bucket }) => bucket,
+							),
 							{
 								estadoMora: "completado",
 								totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
@@ -481,6 +504,7 @@ export const cobrosRouter = {
 									statsResponse.porEstado.incobrable?.porcentaje || "0",
 							},
 						],
+						hasCapitalData,
 						activeEstados,
 					);
 
@@ -505,6 +529,9 @@ export const cobrosRouter = {
 						totalCasosAsignados: statsResponse.totalCreditos,
 						efectividad: statsResponse.efectividad,
 						contactosHoy: contactosHoy[0]?.count || 0,
+						fuente: hasCapitalData
+							? ("cartera-back" as const)
+							: ("cartera-back-parcial" as const),
 					};
 				} catch (error) {
 					console.error(
@@ -646,15 +673,19 @@ export const cobrosRouter = {
 				);
 
 			return {
-				estatusStats: recalculateCobrosCapitalPercentages(
+				estatusStats: recalculateCobrosPercentagesWithFallback(
 					Object.entries(embudoStats).map(([estado, data]) => ({
 						estadoMora: estado,
 						...data,
 					})),
+					// El fallback local nunca calcula sumaCapital (queda en "0" a
+					// propósito) -> siempre calcular porcentaje por número de casos.
+					false,
 				),
 				totalCasosAsignados: casosAsignados[0]?.count || 0,
 				efectividad: "0",
 				contactosHoy: contactosHoy[0]?.count || 0,
+				fuente: "local" as const,
 			};
 		}),
 

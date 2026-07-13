@@ -9,6 +9,7 @@ export enum ContractType {
   CARTA_EMISION_CHEQUES = 'carta_emision_cheques',
   DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
   COBERTURA_INREXSA = 'cobertura_inrexsa',
+  COBERTURA_INREXSA_COMERCIAL = 'cobertura_inrexsa_comercial',
   PAGARE_UNICO_LIBRE_PROTESTO = 'pagare_unico_libre_protesto',
   DECLARACION_DE_VENDEDOR = 'declaracion_vendedor',
   CARTA_CARRO_NUEVO = 'carta_carro_nuevo',
@@ -471,6 +472,21 @@ export interface CoberturaInrexsaData extends BaseContractData {
   full_date: string;
 }
 
+// ===== COBERTURA PLACAS COMERCIALES =====
+/**
+ * Datos para generar carta de cobertura de placas comerciales
+ * Mismos campos que la cobertura de placas particulares (INREXSA)
+ */
+export interface CoberturaInrexsaComercialData extends BaseContractData {
+  contractType: ContractType.COBERTURA_INREXSA_COMERCIAL;
+
+  /** Nombre completo del deudor/solicitante */
+  debtor_name: string;
+
+  /** Fecha completa del documento (ej: "Guatemala 28 de octubre de dos mil veinticinco") */
+  full_date: string;
+}
+
 // ===== PAGARÉ ÚNICO LIBRE DE PROTESTO =====
 /**
  * Datos para generar pagaré único libre de protesto
@@ -699,7 +715,7 @@ export interface CartaCarroNuevoData extends BaseContractData {
 /**
  * Union type que incluye todos los tipos de contratos disponibles
  */
-export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | PagareUnicoLibreProtestoData | DeclaracionDeVendedorData | CartaCarroNuevoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
+export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | CoberturaInrexsaComercialData | PagareUnicoLibreProtestoData | DeclaracionDeVendedorData | CartaCarroNuevoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
 
 /**
  * Interfaz para la respuesta de generación de contrato

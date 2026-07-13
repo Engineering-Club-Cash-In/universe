@@ -49,7 +49,15 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   },
 
   [ContractType.COBERTURA_INREXSA]: {
-    pattern: 'f)_____________________',
+    pattern: 'Firma:___________________________',
+    signerCount: 1,
+    signers: ['Cliente'],
+    yOffset: -4.0,  // Un poquito más arriba
+    xOffset: -4.5   // Más a la izquierda
+  },
+
+  [ContractType.COBERTURA_INREXSA_COMERCIAL]: {
+    pattern: 'Firma:___________________________',
     signerCount: 1,
     signers: ['Cliente'],
     yOffset: -4.0,  // Un poquito más arriba

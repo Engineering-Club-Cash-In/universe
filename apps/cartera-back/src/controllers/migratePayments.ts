@@ -10,13 +10,15 @@ interface AjustarCuotasConSIFCOParams {
   cuota_esperada: number; // 20  → cuota cuya fecha conocemos
   fecha_cuota: string;    // "2025-12-28" → fecha de esa cuota
   plazo_completo: number; // 60  → plazo total objetivo
+  dia_vencimiento?: number; // 1-31 → si viene, se respeta este día exacto (no aplica la regla día 1 → 30)
 }
- 
+
 export const ajustarCuotasConSIFCO = async ({
   numero_credito_sifco,
   cuota_esperada,
   fecha_cuota,
   plazo_completo,
+  dia_vencimiento,
 }: AjustarCuotasConSIFCOParams): Promise<void> => {
   console.log(`\n🔧 Ajustando crédito ${numero_credito_sifco} - SOLO FECHAS Y PLAZO`);
   console.log(`   📊 Cuota esperada: ${cuota_esperada} (fecha: ${fecha_cuota})`);
@@ -59,7 +61,13 @@ export const ajustarCuotasConSIFCO = async ({
   let diaVencimiento: number;
   const fechaBase = new Date(fechaEsperada);
 
-  if (diaEsperado === 1) {
+  if (dia_vencimiento != null) {
+    // Día explícito (ej. créditos que pagan el 1): se respeta tal cual
+    diaVencimiento = dia_vencimiento;
+    const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
+    fechaBase.setDate(Math.min(diaVencimiento, ultimoDia));
+    console.log(`   📌 Día de vencimiento explícito: ${diaVencimiento}`);
+  } else if (diaEsperado === 1) {
     // Día 1 = SIFCO manda el mes correcto, día 30 del mismo mes
     diaVencimiento = 30;
     const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();

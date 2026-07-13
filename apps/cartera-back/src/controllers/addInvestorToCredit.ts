@@ -516,12 +516,6 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     let candidatos: CreditCandidate[];
 
     if (esManual) {
-      // LIMITACIÓN CONOCIDA (modalidad + manual): el modo manual no pasa por
-      // getCreditCandidates, así que no aplica el filtro de "% incompatible". Si
-      // el operador elige a mano un crédito donde el inversionista ya participa,
-      // la compra reprecia su posición previa al spread nuevo. Hoy el CRM solo
-      // expone el modo automático; si se habilitara el manual con modalidad,
-      // habría que agregar aquí un guard equivalente al filtro automático.
       console.log("================================================================");
       console.log(`[addInvestorToCredit] MODO MANUAL: ${manual!.length} crédito(s) forzado(s)`);
 
@@ -550,6 +544,44 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           success: false,
           message: `Créditos no encontrados: ${noEncontrados.join(", ")}`,
         };
+      }
+
+      // Modo manual + modalidad: si el inversionista ya participa en un
+      // crédito de la lista con otro %, se rechaza (409) en vez de repreciarlo.
+      if (modalidadFacturacionSpreadRow) {
+        const spreadSolicitado = Number(modalidadFacturacionSpreadRow.spread);
+        const conflictos: {
+          credito_id: number;
+          numero_credito_sifco: string;
+          porcentaje_actual: number;
+        }[] = [];
+        for (const candidato of armados) {
+          const filaExistente = candidato.credito_completo?.espejo?.find(
+            (e: any) => e.inversionista_id === inversionista_id,
+          );
+          if (
+            filaExistente &&
+            Number(filaExistente.porcentaje_participacion_inversionista) !==
+              spreadSolicitado
+          ) {
+            conflictos.push({
+              credito_id: candidato.credito_id,
+              numero_credito_sifco: candidato.numero_credito_sifco,
+              porcentaje_actual: Number(
+                filaExistente.porcentaje_participacion_inversionista,
+              ),
+            });
+          }
+        }
+        if (conflictos.length > 0) {
+          set.status = 409;
+          return {
+            success: false,
+            message:
+              "El inversionista ya participa en uno o más créditos de la lista con un % distinto al que aplicaría la modalidad elegida. Quítalos de la lista o hazlo en una operación aparte.",
+            conflictos,
+          };
+        }
       }
 
       candidatos = armados;

@@ -45,18 +45,45 @@ export async function mapWithConcurrency<A, B>(
 }
 
 export async function fetchAllPages<T>(
-	fetchPage: (page: number) => Promise<{ data: T[]; totalPages: number }>,
-	opts?: { maxPages?: number; concurrency?: number },
+	fetchPage: (
+		page: number,
+	) => Promise<{ data: T[]; totalPages?: number | null }>,
+	opts?: { maxPages?: number; concurrency?: number; perPage?: number },
 ): Promise<T[]> {
 	const maxPages = opts?.maxPages ?? 1000;
 	const concurrency = opts?.concurrency ?? 10;
+	const perPage = opts?.perPage;
 
 	const first = await fetchPage(1);
 	const data = [...first.data];
 
+	// Modo "totalPages desconocido": la fuente no reporta totalPages (fetchers
+	// legacy). Si el caller pasó `perPage`, se pagina secuencialmente mientras
+	// la página venga llena (data.length === perPage) y se corta en la primera
+	// página corta -- replica el fallback por longitud clásico. Sin `perPage`
+	// no se puede paginar a ciegas, así que se trata como dato corrupto.
+	if (first.totalPages == null) {
+		if (perPage === undefined) {
+			throw new Error(
+				`fetchAllPages: response has an invalid totalPages (${first.totalPages}); expected a non-negative integer or a perPage fallback`,
+			);
+		}
+
+		// Se sigue mientras la última página vino llena (el acumulado equivale a
+		// page*perPage exacto). Una página corta rompe la igualdad y corta.
+		let page = 1;
+		while (data.length === page * perPage && page < maxPages) {
+			page += 1;
+			const next = await fetchPage(page);
+			data.push(...next.data);
+		}
+
+		return data;
+	}
+
 	// totalPages === 0 es una respuesta válida (sin resultados, ej. ningún
-	// crédito en ese estado este mes) -- solo valores negativos, no-enteros o
-	// ausentes son datos corruptos.
+	// crédito en ese estado este mes) -- solo valores negativos o no-enteros
+	// son datos corruptos.
 	if (!Number.isInteger(first.totalPages) || first.totalPages < 0) {
 		throw new Error(
 			`fetchAllPages: response has an invalid totalPages (${first.totalPages}); expected a non-negative integer`,

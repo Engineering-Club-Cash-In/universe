@@ -228,9 +228,9 @@ async function getClientCreditsFromCartera(
 	const creditsBySifco = new Map<string, CarteraClientCredit>();
 
 	// fetchCredits tipa totalPages como opcional (compartido con fetchers
-	// legacy). Se normaliza a 0 ("sin resultados") en vez de castear el tipo
-	// -- fetchAllPages acepta 0 como respuesta válida y sigue validando en
-	// runtime cualquier otro valor corrupto (NaN, negativo, string, etc).
+	// legacy). Se pasa tal cual: si viene numérico, fetchAllPages pagina en
+	// paralelo; si viene ausente (fetcher sin totalPages), cae al fallback por
+	// longitud vía `perPage` en vez de truncar silenciosamente en la página 1.
 	const creditsPorEstado = await Promise.all(
 		CLIENT_CREDIT_CARTERA_STATUSES.map((estado) =>
 			fetchAllPages<CarteraClientCredit>(
@@ -241,9 +241,9 @@ async function getClientCreditsFromCartera(
 						page,
 						perPage,
 					});
-					return { data: response.data, totalPages: response.totalPages ?? 0 };
+					return { data: response.data, totalPages: response.totalPages };
 				},
-				{ maxPages },
+				{ maxPages, perPage },
 			),
 		),
 	);

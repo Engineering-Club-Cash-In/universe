@@ -171,6 +171,46 @@ describe("fetchAllPages", () => {
 		expect(new Set(messages)).toEqual(new Set(["page 2 boom", "page 3 boom"]));
 	});
 
+	test("paginates by page length when totalPages is absent and perPage is given", async () => {
+		const pages: Record<number, string[]> = {
+			1: ["a", "b"],
+			2: ["c", "d"],
+			3: ["e"],
+		};
+		const calledPages: number[] = [];
+
+		const fetchPage = async (page: number) => {
+			calledPages.push(page);
+			return { data: pages[page] ?? [] };
+		};
+
+		const result = await fetchAllPages(fetchPage, { perPage: 2 });
+
+		// Sin totalPages, sigue mientras la página venga llena (===perPage) y
+		// corta en la página corta [e] (length 1 < 2).
+		expect(result).toEqual(["a", "b", "c", "d", "e"]);
+		expect(calledPages).toEqual([1, 2, 3]);
+	});
+
+	test("stops after one page when the first page is already short (length-based)", async () => {
+		let calls = 0;
+		const fetchPage = async () => {
+			calls += 1;
+			return { data: ["a"] };
+		};
+
+		const result = await fetchAllPages(fetchPage, { perPage: 2 });
+
+		expect(result).toEqual(["a"]);
+		expect(calls).toBe(1);
+	});
+
+	test("throws when totalPages is absent and no perPage fallback is configured", async () => {
+		const fetchPage = async () => ({ data: ["a"] });
+
+		await expect(fetchAllPages(fetchPage)).rejects.toThrow(/totalPages/);
+	});
+
 	test("preserves the original error objects (not just flattened messages)", async () => {
 		class CustomFetchError extends Error {
 			constructor(

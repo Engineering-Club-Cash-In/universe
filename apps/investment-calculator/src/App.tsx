@@ -148,8 +148,14 @@ export default function InvestmentCalculator() {
 
   // Ajusta el plazo al mínimo permitido de Tradicional cuando el valor
   // actual no es uno de los válidos (60/72/84 meses).
-  const clampTermToTradicional = (modelo: string) => {
-    if (modelo !== "standard") return;
+  //
+  // El clamp SOLO aplica en "Calcular Rendimiento": en "Calcular Objetivo" el
+  // plazo es libre y Tradicional no es una opción de cotización, así que
+  // pisar el plazo ahí reescribiría el objetivo del usuario y recalcularía el
+  // capital requerido. Como `mainTab` se actualiza de forma asíncrona, el
+  // llamador pasa el valor efectivo del modo (el destino, no el estado viejo).
+  const clampTermToTradicional = (modelo: string, effectiveMainTab: string) => {
+    if (effectiveMainTab !== "calculator" || modelo !== "standard") return;
     const meses = termUnit === "years" ? term * 12 : term;
     if (!PLAZOS_TRADICIONAL.includes(meses)) {
       setTerm(PLAZOS_TRADICIONAL[0]);
@@ -159,9 +165,11 @@ export default function InvestmentCalculator() {
 
   // Cambio de modelo de inversión: el modelo se elige ANTES que el plazo.
   // Al entrar a Tradicional, si el plazo actual no es permitido, se ajusta.
+  // Este handler también lo usa la tira de tabs de la tabla de amortización,
+  // que se renderiza en ambos modos; por eso el clamp respeta el `mainTab`.
   const handleModeloChange = (modelo: string) => {
     setActiveTab(modelo);
-    clampTermToTradicional(modelo);
+    clampTermToTradicional(modelo, mainTab);
   };
 
   // `term` es estado compartido con la pestaña "Calcular Objetivo", cuyo
@@ -170,9 +178,7 @@ export default function InvestmentCalculator() {
   // plazo queda con un valor inválido y la cotización usa un plazo bloqueado.
   const handleMainTabChange = (tab: string) => {
     setMainTab(tab);
-    if (tab === "calculator") {
-      clampTermToTradicional(activeTab);
-    }
+    clampTermToTradicional(activeTab, tab);
   };
 
   // Helper function to get VAT rate

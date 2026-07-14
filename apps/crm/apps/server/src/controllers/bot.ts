@@ -449,6 +449,10 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				lastName: renapData.firstLastName,
 				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
 				assignedTo,
+				assignmentType:
+					assignedTo === existingLead[0].assignedTo
+						? existingLead[0].assignmentType
+						: "auto",
 				status: "new",
 				age: age ?? existingLead[0].age,
 				updatedAt: new Date(),

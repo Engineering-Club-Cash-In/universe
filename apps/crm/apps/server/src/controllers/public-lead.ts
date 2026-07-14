@@ -252,6 +252,7 @@ export async function createPublicLead(c: Context) {
 					.update(leads)
 					.set({
 						assignedTo,
+						assignmentType: "auto",
 						updatedAt: new Date(),
 					})
 					.where(eq(leads.id, existingLead.id))

@@ -92,6 +92,19 @@ describe("lead assignment helpers", () => {
 		expect(selected?.id).toBe("available");
 	});
 
+	test("balances fallback assignments after reactivating an older lead", () => {
+		const selected = getSalesUserWithLeastAutoAssignedLeads(
+			[
+				{ id: "first", role: "sales", assignLeads: true, banned: false },
+				{ id: "second", role: "sales", assignLeads: true, banned: false },
+			],
+			new Map(),
+			new Map([["first", 1]]),
+		);
+
+		expect(selected?.id).toBe("second");
+	});
+
 	test("returns no assignee when no eligible fallback exists", () => {
 		expect(
 			resolveExistingLeadAssignee(

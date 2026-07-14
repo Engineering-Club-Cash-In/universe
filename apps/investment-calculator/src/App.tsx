@@ -146,17 +146,32 @@ export default function InvestmentCalculator() {
     return termUnit === "years" ? term * 12 : term;
   }, [termUnit, term]);
 
+  // Ajusta el plazo al mínimo permitido de Tradicional cuando el valor
+  // actual no es uno de los válidos (60/72/84 meses).
+  const clampTermToTradicional = (modelo: string) => {
+    if (modelo !== "standard") return;
+    const meses = termUnit === "years" ? term * 12 : term;
+    if (!PLAZOS_TRADICIONAL.includes(meses)) {
+      setTerm(PLAZOS_TRADICIONAL[0]);
+      setTermUnit("months");
+    }
+  };
+
   // Cambio de modelo de inversión: el modelo se elige ANTES que el plazo.
-  // Al entrar a Tradicional, si el plazo actual no es uno de los permitidos
-  // (60/72/84 meses), se ajusta al mínimo permitido.
+  // Al entrar a Tradicional, si el plazo actual no es permitido, se ajusta.
   const handleModeloChange = (modelo: string) => {
     setActiveTab(modelo);
-    if (modelo === "standard") {
-      const meses = termUnit === "years" ? term * 12 : term;
-      if (!PLAZOS_TRADICIONAL.includes(meses)) {
-        setTerm(PLAZOS_TRADICIONAL[0]);
-        setTermUnit("months");
-      }
+    clampTermToTradicional(modelo);
+  };
+
+  // `term` es estado compartido con la pestaña "Calcular Objetivo", cuyo
+  // input libre acepta cualquier valor. Al volver a "Calcular Rendimiento"
+  // con Tradicional activo hay que re-aplicar el clamp, si no el select de
+  // plazo queda con un valor inválido y la cotización usa un plazo bloqueado.
+  const handleMainTabChange = (tab: string) => {
+    setMainTab(tab);
+    if (tab === "calculator") {
+      clampTermToTradicional(activeTab);
     }
   };
 
@@ -995,7 +1010,7 @@ export default function InvestmentCalculator() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs value={mainTab} onValueChange={setMainTab}>
+          <Tabs value={mainTab} onValueChange={handleMainTabChange}>
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="calculator">Calcular Rendimiento</TabsTrigger>
             <TabsTrigger value="goal">Calcular Objetivo</TabsTrigger>

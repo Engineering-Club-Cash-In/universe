@@ -25,7 +25,20 @@ export const assignCapitalRouter = new Elysia()
    *      Devuelve los top N créditos por score.
    *      Para dar opciones sin filtrar tanto como solo_insertable.
    *
+   *  - plazo_objetivo  (opcional, entero positivo)
+   *      Filtro estricto: solo créditos con EXACTAMENTE esa cantidad de plazos
+   *      (cuotas) restantes. No escala a plazos vecinos.
+   *      Si los créditos de ese plazo no cubren el monto, se devuelven igual
+   *      los que haya (o ninguno); el faltante queda sin asignar.
+   *
    * Prioridad de modos: solo_insertable > minimo > default (todos)
+   * plazo_objetivo es ortogonal: filtra antes, y luego se aplica el modo.
+   *
+   * OJO con `total_sin_filtro` en la respuesta: cuenta los candidatos que
+   * devolvió el controller, o sea DESPUÉS del filtro de plazo_objetivo y antes
+   * del modo. Con plazo_objetivo=12 y 3 candidatos de 400, dice 3 — no 400.
+   * Si el front necesita el "3 de 400", ese total pre-filtro hoy no sale de
+   * getCreditCandidates y hay que exponerlo aparte.
    */
   .get("/assign-capital/candidates", async ({ query, set }) => {
     const {
@@ -34,6 +47,7 @@ export const assignCapitalRouter = new Elysia()
       minimo: minimoStr,
       inversionista_id: inversionistaIdStr,
       porcentaje: porcentajeStr,
+      plazo_objetivo: plazoObjetivoStr,
     } = query as Record<string, string | undefined>;
 
     // ── Validar monto ──────────────────────────────────────────
@@ -89,8 +103,19 @@ export const assignCapitalRouter = new Elysia()
       porcentaje = parsed;
     }
 
+    // ── Validar plazo_objetivo ─────────────────────────────────
+    let plazoObjetivo: number | undefined;
+    if (plazoObjetivoStr !== undefined && plazoObjetivoStr !== "") {
+      const parsed = Number(plazoObjetivoStr);
+      if (isNaN(parsed) || parsed < 1 || !Number.isInteger(parsed)) {
+        set.status = 400;
+        return { ok: false, message: "El parámetro 'plazo_objetivo' debe ser un entero positivo (ej: 12)." };
+      }
+      plazoObjetivo = parsed;
+    }
+
     try {
-      const allCandidates = await getCreditCandidates(monto, minimo, inversionista_id, porcentaje);
+      const allCandidates = await getCreditCandidates(monto, minimo, inversionista_id, porcentaje, plazoObjetivo);
 
       let result: CreditCandidate[];
 
@@ -114,10 +139,13 @@ export const assignCapitalRouter = new Elysia()
       return {
         ok: true,
         total: result.length,
+        // "sin filtro" = sin el modo (solo_insertable / minimo). El filtro de
+        // plazo_objetivo, si vino, YA se aplicó: no es el universo completo.
         total_sin_filtro: allCandidates.length,
         monto_buscado: monto ?? null,
         solo_insertable: soloInsertable,
         minimo: minimo ?? null,
+        plazo_objetivo: plazoObjetivo ?? null,
         capital_acumulado: soloInsertable
           ? result.reduce((acc, c) => acc + c.capital_activo, 0)
           : null,

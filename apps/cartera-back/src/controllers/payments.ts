@@ -943,6 +943,60 @@ export async function insertPagosCreditoInversionistas(
       }
     }
 
+    // ── VARIANTE 2 DEL PLAZO: diferencia de amortización (solo registrar) ──
+    // Si el inversionista definió su propio plazo (espejo.plazo_inversionista),
+    // su capital debería amortizar como cuota nivelada (sistema francés, igual
+    // que la calculadora de inversión) sobre SU monto y SU plazo:
+    //   r     = porcentaje_interes × 1.12 / 100   (tasa del deudor con IVA)
+    //   cuota = monto × r × (1+r)^n / ((1+r)^n − 1)
+    //   amortizacion_real = cuota − monto × r     (interés+IVA del mes)
+    // n = plazo_inversionista_restante: meses que le FALTAN al plazo. Cuando la
+    // liquidación reste el monto y decremente el restante (pendiente), la cuota
+    // recalculada con (saldo vigente, plazo restante) sigue la curva francesa
+    // exacta y cierra en n meses.
+    // La columna guarda amortizacion_real − abono_capital: lo que el crédito NO
+    // cubrió este mes (lo que CUBE comprará después). Clamp a 0 si el abono ya
+    // cubre la amortización (devoluciones, créditos por cerrar). Por ahora NO
+    // se resta del espejo ni se ejecuta compra alguna.
+    let diferenciaAmortizacionPlazo: Big | null = null;
+    const plazoRestante =
+      inv.plazo_inversionista_restante ?? inv.plazo_inversionista;
+    if (
+      plazoRestante != null &&
+      plazoRestante >= 1 &&
+      !isCube &&
+      montoBaseCalculo.gt(0)
+    ) {
+      const n = plazoRestante;
+      const rMensual = new Big(currentCredit?.porcentaje_interes ?? 0)
+        .times(1.12)
+        .div(100);
+
+      let amortizacionReal: Big;
+      if (rMensual.gt(0)) {
+        const factor = new Big(1).plus(rMensual).pow(n); // n es entero
+        const cuotaNivelada = montoBaseCalculo
+          .times(rMensual)
+          .times(factor)
+          .div(factor.minus(1));
+        amortizacionReal = cuotaNivelada.minus(montoBaseCalculo.times(rMensual));
+      } else {
+        // Sin interés → amortización lineal
+        amortizacionReal = montoBaseCalculo.div(n);
+      }
+
+      diferenciaAmortizacionPlazo = amortizacionReal.minus(abono_capital).round(2);
+      if (diferenciaAmortizacionPlazo.lt(0)) {
+        diferenciaAmortizacionPlazo = new Big(0);
+      }
+
+      console.log(`   📐 VARIANTE 2 (plazo restante ${n} de ${inv.plazo_inversionista} meses):`);
+      console.log(`      monto base: ${montoBaseCalculo.toString()}`);
+      console.log(`      amortización real del mes: ${amortizacionReal.round(2).toString()}`);
+      console.log(`      abono_capital del crédito: ${abono_capital.toString()}`);
+      console.log(`      diferencia_amortizacion_plazo: ${diferenciaAmortizacionPlazo.toString()}`);
+    }
+
     const resultado = {
       pago_id,
       inversionista_id: inv.inversionista_id,
@@ -950,6 +1004,8 @@ export async function insertPagosCreditoInversionistas(
       abono_capital: abono_capital.toString(),
       abono_interes: bigInteres.toString(),
       abono_iva_12: bigIVA.toString(),
+      diferencia_amortizacion_plazo:
+        diferenciaAmortizacionPlazo?.toString() ?? null,
       abono_interes_sin_compras: interesSinCompras?.toString() ?? null,
       abono_interes_con_compras: interesConCompras?.toString() ?? null,
       abono_iva_12_sin_compras: ivaSinCompras?.toString() ?? null,

@@ -920,6 +920,14 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           ]),
         );
 
+        // ── Mapa de plazo restante actual (misma preservación) ──
+        const plazoRestanteActualPorInv = new Map<number, number | null>(
+          (espejoActual ?? []).map((e: any) => [
+            e.inversionista_id as number,
+            e.plazo_inversionista_restante ?? null,
+          ]),
+        );
+
         // ── Extraer datos del crédito que necesitamos para recalcular ──
         // Estos vienen del GET, no hacemos queries adicionales
         const creditoData = {
@@ -1227,6 +1235,15 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
                 plazoActualPorInv.get(inv.inversionista_id) ??
                 null
               : plazoActualPorInv.get(inv.inversionista_id) ?? null,
+          // plazo restante: si el target trae plazo nuevo, el contador se
+          // REINICIA al plazo completo; si no, se preserva lo que llevaba.
+          // Los demás siempre preservan su restante.
+          plazo_inversionista_restante:
+            inv.inversionista_id === inversionista_id
+              ? plazo_inversionista ??
+                plazoRestanteActualPorInv.get(inv.inversionista_id) ??
+                null
+              : plazoRestanteActualPorInv.get(inv.inversionista_id) ?? null,
           updated_at: new Date(),
         }));
 

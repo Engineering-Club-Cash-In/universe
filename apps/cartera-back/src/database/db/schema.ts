@@ -551,6 +551,10 @@
       compra_cartera_extendida_at: timestamp("compra_cartera_extendida_at", { withTimezone: true }),
       // Plazo propio del inversionista en meses (NULL = usa el plazo del crédito).
       plazo_inversionista: integer("plazo_inversionista"),
+      // Meses que le FALTAN al plazo propio. Arranca = plazo_inversionista y
+      // cada liquidación lo decrementará (pendiente de implementar junto con
+      // la resta al monto). Es el n de la cuota nivelada en pagos espejo.
+      plazo_inversionista_restante: integer("plazo_inversionista_restante"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
@@ -774,6 +778,16 @@
         scale: 2,
       }),
       abono_iva_12_con_compras: numeric("abono_iva_12_con_compras", {
+        precision: 18,
+        scale: 2,
+      }),
+
+      // VARIANTE 2 del plazo: amortización real del mes según el plazo propio
+      // del inversionista (cuota nivelada sobre su monto y su plazo) menos el
+      // abono_capital que el crédito sí cubrió. NULL = sin plazo propio.
+      // Por ahora solo se registra; la resta al espejo y la compra de CUBE
+      // vienen después.
+      diferencia_amortizacion_plazo: numeric("diferencia_amortizacion_plazo", {
         precision: 18,
         scale: 2,
       }),

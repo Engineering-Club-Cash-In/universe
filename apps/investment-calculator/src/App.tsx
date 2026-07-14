@@ -62,6 +62,18 @@ interface AmortizationRow {
 
 const DEFAULT_INVESTOR_PERCENTAGE = 70;
 
+// Plazos permitidos para el modelo Tradicional (acuerdo de la minuta
+// "Plazos Calculadora Inversión"): los plazos de 12 a 48 meses quedan
+// bloqueados por inviabilidad operativa; solo se cotiza a 60, 72 y 84 meses.
+const PLAZOS_TRADICIONAL = [60, 72, 84];
+
+// Textos legales/advertencia (BORRADOR pendiente de revisión del grupo).
+const DISCLAIMER_GENERAL =
+  "Los rendimientos y montos presentados en este cotizador son de carácter referencial y aproximados: pueden variar según la composición y el comportamiento de la cartera adquirida, el momento de adquisición de cada crédito, así como por el régimen fiscal aplicable al inversionista, retenciones, impuestos u otras disposiciones legales vigentes. Esta simulación no constituye una oferta vinculante, una promesa de rendimiento ni una garantía de resultados futuros.";
+
+const DISCLAIMER_TRADICIONAL =
+  "En el modelo Tradicional los intereses se calculan sobre el capital que permanece activo cada mes, por lo que la devolución de capital y los intereses proyectados son estimaciones sujetas al ritmo real de amortización de la cartera. Si el inversionista desea retirar su capital antes del plazo cotizado, Cash In realizará su mejor esfuerzo por vender la cartera correspondiente; dicha venta está sujeta a condiciones de mercado y no constituye una obligación contractual ni una garantía de salida inmediata.";
+
 const normalizeInvestorPercentage = (value: number) =>
   Math.min(Math.max(Number.isFinite(value) ? value : DEFAULT_INVESTOR_PERCENTAGE, 1), 100);
 
@@ -79,7 +91,8 @@ export default function InvestmentCalculator() {
   const [mainTab, setMainTab] = useState("calculator"); // 'calculator' or 'goal'
   const [capital, setCapital] = useState<string>("7591.11");
   const [interestRate, setInterestRate] = useState<number>(1.5);
-  const [term, setTerm] = useState<number>(1);
+  // El modelo por defecto es Tradicional → arranca en el plazo mínimo permitido (60 meses).
+  const [term, setTerm] = useState<number>(60);
   const [investorPercentage, setInvestorPercentage] = useState<number>(
     DEFAULT_INVESTOR_PERCENTAGE
   );
@@ -89,7 +102,7 @@ export default function InvestmentCalculator() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   // New state for term unit
-  const [termUnit, setTermUnit] = useState<"months" | "years">("years");
+  const [termUnit, setTermUnit] = useState<"months" | "years">("months");
 
   // Small taxpayer state
   const [isSmallTaxpayer, setIsSmallTaxpayer] = useState<boolean>(false);
@@ -132,6 +145,20 @@ export default function InvestmentCalculator() {
   const getTermInMonths = useCallback(() => {
     return termUnit === "years" ? term * 12 : term;
   }, [termUnit, term]);
+
+  // Cambio de modelo de inversión: el modelo se elige ANTES que el plazo.
+  // Al entrar a Tradicional, si el plazo actual no es uno de los permitidos
+  // (60/72/84 meses), se ajusta al mínimo permitido.
+  const handleModeloChange = (modelo: string) => {
+    setActiveTab(modelo);
+    if (modelo === "standard") {
+      const meses = termUnit === "years" ? term * 12 : term;
+      if (!PLAZOS_TRADICIONAL.includes(meses)) {
+        setTerm(PLAZOS_TRADICIONAL[0]);
+        setTermUnit("months");
+      }
+    }
+  };
 
   // Helper function to get VAT rate
   const getVatRate = useCallback(() => {
@@ -270,10 +297,38 @@ export default function InvestmentCalculator() {
     [displayCapital, interestRate, term, termUnit, investorPercentage, isSmallTaxpayer]
   );
   
-  const compoundScheduleArr = useMemo(() => 
-    generateCompoundSchedule(displayCapital), 
+  const compoundScheduleArr = useMemo(() =>
+    generateCompoundSchedule(displayCapital),
     [displayCapital, interestRate, term, termUnit, investorPercentage, isSmallTaxpayer]
   );
+
+  // Proyección anual del modelo Tradicional (minuta "Plazos Calculadora
+  // Inversión"): desglose por año de la devolución estimada de capital y los
+  // intereses ganados. La ganancia se calcula sobre el capital ACTIVO de cada
+  // mes (la tabla mensual ya funciona sobre saldo); aquí solo se agrupa por año.
+  const annualProjection = useMemo(() => {
+    const years: {
+      year: number;
+      capitalDevuelto: number;
+      intereses: number;
+      totalRecibir: number;
+      saldoFinal: number;
+    }[] = [];
+    for (let i = 0; i < standardSchedule.length; i += 12) {
+      const chunk = standardSchedule.slice(i, i + 12);
+      years.push({
+        year: i / 12 + 1,
+        capitalDevuelto: chunk.reduce((s, r) => s + r.amortization, 0),
+        intereses: chunk.reduce((s, r) => s + r.interestVatPayment, 0),
+        totalRecibir: chunk.reduce(
+          (s, r) => s + r.amortization + r.interest * (investorPercentage / 100),
+          0
+        ),
+        saldoFinal: chunk[chunk.length - 1]?.finalBalance ?? 0,
+      });
+    }
+    return years;
+  }, [standardSchedule, investorPercentage]);
 
   // Calculate investment results using the backend functions
   const investmentParams: InvestmentParams = {
@@ -460,6 +515,81 @@ export default function InvestmentCalculator() {
       )
     );
 
+    // Proyección anual (solo modelo Tradicional): desglose por año de capital
+    // devuelto e intereses, calculado sobre el capital activo de cada mes.
+    let annualSection: HTMLDivElement | null = null;
+    if (activeTab === "standard" && annualProjection.length > 0) {
+      annualSection = document.createElement("div");
+
+      const annualTitle = document.createElement("h2");
+      annualTitle.textContent = "Proyección Anual";
+      annualTitle.style.fontSize = "22px";
+      annualTitle.style.marginTop = "20px";
+      annualTitle.style.marginBottom = "15px";
+      annualSection.appendChild(annualTitle);
+
+      const annualTable = document.createElement("table");
+      annualTable.style.width = "100%";
+      annualTable.style.borderCollapse = "collapse";
+      annualTable.style.marginBottom = "10px";
+      annualTable.style.fontSize = "13px";
+
+      const annualHead = document.createElement("thead");
+      const annualHeaderRow = document.createElement("tr");
+      [
+        "Año",
+        "Capital Devuelto",
+        "Intereses + IVA",
+        "Total a Recibir",
+        "Capital Activo al Cierre",
+      ].forEach((h) => {
+        const th = document.createElement("th");
+        th.textContent = h;
+        th.style.padding = "8px";
+        th.style.backgroundColor = "#f2f2f2";
+        th.style.border = "1px solid #ddd";
+        th.style.textAlign = "right";
+        annualHeaderRow.appendChild(th);
+      });
+      annualHead.appendChild(annualHeaderRow);
+      annualTable.appendChild(annualHead);
+
+      const annualBody = document.createElement("tbody");
+      const fmtQ = (v: number) =>
+        `Q ${v.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
+      annualProjection.forEach((y) => {
+        const tr = document.createElement("tr");
+        [
+          `Año ${y.year}`,
+          fmtQ(y.capitalDevuelto),
+          fmtQ(y.intereses),
+          fmtQ(y.totalRecibir),
+          fmtQ(y.saldoFinal),
+        ].forEach((text, i) => {
+          const td = document.createElement("td");
+          td.textContent = text;
+          td.style.padding = "8px";
+          td.style.border = "1px solid #ddd";
+          td.style.textAlign = i === 0 ? "center" : "right";
+          tr.appendChild(td);
+        });
+        annualBody.appendChild(tr);
+      });
+      annualTable.appendChild(annualBody);
+      annualSection.appendChild(annualTable);
+
+      const annualNote = document.createElement("p");
+      annualNote.textContent = DISCLAIMER_TRADICIONAL;
+      annualNote.style.fontSize = "10px";
+      annualNote.style.color = "#666666";
+      annualNote.style.fontStyle = "italic";
+      annualNote.style.lineHeight = "1.4";
+      annualSection.appendChild(annualNote);
+    }
+
     // Agregar la tabla de amortización
     const tableTitle = document.createElement("h2");
     tableTitle.textContent = "Tabla de Amortización";
@@ -615,11 +745,14 @@ export default function InvestmentCalculator() {
     disclaimer.style.border = "1px solid #ddd";
     disclaimer.style.borderRadius = "3px";
     disclaimer.style.backgroundColor = "#f9f9f9";
-    disclaimer.textContent = "Los rendimientos y montos presentados en este cotizador son de carácter referencial y pueden variar según el régimen fiscal aplicable al inversionista, así como por retenciones, impuestos u otras disposiciones legales vigentes. Esta simulación no constituye una oferta vinculante ni garantiza resultados futuros.";
+    disclaimer.textContent = DISCLAIMER_GENERAL;
 
     // Agregar todo al contenedor principal
     printContent.appendChild(header);
     printContent.appendChild(summary);
+    if (annualSection) {
+      printContent.appendChild(annualSection);
+    }
     printContent.appendChild(tableTitle);
     printContent.appendChild(table);
     printContent.appendChild(disclaimer);
@@ -858,7 +991,7 @@ export default function InvestmentCalculator() {
             *No hay penalización por cancelación anticipada de créditos
           </CardDescription>
           <CardDescription className="text-xs text-gray-500 mt-4 italic">
-            Los rendimientos y montos presentados en este cotizador son de carácter referencial y pueden variar según el régimen fiscal aplicable al inversionista, así como por retenciones, impuestos u otras disposiciones legales vigentes. Esta simulación no constituye una oferta vinculante ni garantiza resultados futuros.
+            {DISCLAIMER_GENERAL}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -868,6 +1001,20 @@ export default function InvestmentCalculator() {
             <TabsTrigger value="goal">Calcular Objetivo</TabsTrigger>
             </TabsList>
             <TabsContent value="calculator">
+              {/* El modelo se elige PRIMERO: define qué plazos se pueden cotizar. */}
+              <div className="space-y-2 pt-4 md:max-w-xs">
+                <Label htmlFor="modelo">Modelo de Inversión</Label>
+                <Select value={activeTab} onValueChange={handleModeloChange}>
+                  <SelectTrigger id="modelo">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Tradicional</SelectItem>
+                    <SelectItem value="interest-only">Al vencimiento</SelectItem>
+                    <SelectItem value="compound">Interés Compuesto</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5 pt-4">
                 <div className="space-y-2">
                   <Label htmlFor="capital">Monto a Invertir (Q)</Label>
@@ -890,30 +1037,53 @@ export default function InvestmentCalculator() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="term">Plazo</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="term"
-                      type="number"
-                      value={term}
-                      onChange={(e) => setTerm(Number(e.target.value))}
-                      min="1"
-                      className="flex-1"
-                    />
+                  {activeTab === "standard" ? (
+                    // Tradicional: plazos de 12 a 48 meses bloqueados (minuta);
+                    // solo se cotiza a 60, 72 u 84 meses.
                     <Select
-                      value={termUnit}
-                      onValueChange={(value) =>
-                        setTermUnit(value as "months" | "years")
-                      }
+                      value={String(getTermInMonths())}
+                      onValueChange={(v) => {
+                        setTerm(Number(v));
+                        setTermUnit("months");
+                      }}
                     >
-                      <SelectTrigger className="w-24">
+                      <SelectTrigger id="term">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="months">Meses</SelectItem>
-                        <SelectItem value="years">Años</SelectItem>
+                        {PLAZOS_TRADICIONAL.map((meses) => (
+                          <SelectItem key={meses} value={String(meses)}>
+                            {meses / 12} años ({meses} meses)
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Input
+                        id="term"
+                        type="number"
+                        value={term}
+                        onChange={(e) => setTerm(Number(e.target.value))}
+                        min="1"
+                        className="flex-1"
+                      />
+                      <Select
+                        value={termUnit}
+                        onValueChange={(value) =>
+                          setTermUnit(value as "months" | "years")
+                        }
+                      >
+                        <SelectTrigger className="w-24">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="months">Meses</SelectItem>
+                          <SelectItem value="years">Años</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="investorSplit">
@@ -1082,15 +1252,6 @@ export default function InvestmentCalculator() {
             </TabsContent>
           </Tabs>
 
-          {/* Summary Tabs for the summary cards */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="my-4">
-              <TabsTrigger value="standard">Tradicional</TabsTrigger>
-              <TabsTrigger value="interest-only">Al vencimiento</TabsTrigger>
-              <TabsTrigger value="compound">Interés Compuesto</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
           <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <Card>
               <CardHeader>
@@ -1143,13 +1304,78 @@ export default function InvestmentCalculator() {
         </CardContent>
       </Card>
 
+      {/* Proyección Anual — solo modelo Tradicional (minuta Plazos Calculadora) */}
+      {activeTab === "standard" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Proyección Anual</CardTitle>
+            <CardDescription>
+              Devolución estimada de capital e intereses ganados por año. La
+              ganancia se calcula sobre el capital que permanece activo cada
+              mes, no sobre el monto inicial.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table containerClassname="">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Año</TableHead>
+                  <TableHead className="text-right">Capital Devuelto</TableHead>
+                  <TableHead className="text-right">Intereses + IVA</TableHead>
+                  <TableHead className="text-right">Total a Recibir</TableHead>
+                  <TableHead className="text-right">Capital Activo al Cierre</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {annualProjection.map((y) => (
+                  <TableRow key={y.year}>
+                    <TableCell>Año {y.year}</TableCell>
+                    <TableCell className="text-right">
+                      Q{" "}
+                      {y.capitalDevuelto.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      Q{" "}
+                      {y.intereses.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      Q{" "}
+                      {y.totalRecibir.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      Q{" "}
+                      {y.saldoFinal.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <p className="mt-4 text-xs text-gray-500 italic">
+              {DISCLAIMER_TRADICIONAL}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Amortization Schedule Table with Tabs */}
       <Card>
         <CardHeader>
           <CardTitle>Tabla de Amortización</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={handleModeloChange}>
             <TabsList className="mb-4">
               <TabsTrigger value="standard">Tradicional</TabsTrigger>
               <TabsTrigger value="interest-only">Al vencimiento</TabsTrigger>

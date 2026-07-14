@@ -206,6 +206,34 @@ ${COBROS_NO_REPLY_WARNING}
 Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 	},
 	{
+		id: "impuesto_circulacion_2026",
+		nombre: "Impuesto de circulación 2026",
+		etapa: "al_dia",
+		asunto: "Recordatorio de pago - Impuesto de circulación 2026",
+		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+
+Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+
+¡No lo dejes para última hora!
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente,
+{nombreAsesor}
+Tel: {telefonoAsesor}`,
+		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+
+Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+
+¡No lo dejes para última hora!
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente,
+{nombreAsesor}
+Tel: {telefonoAsesor}`,
+	},
+	{
 		id: "pre_mora",
 		nombre: "Aviso de atraso",
 		etapa: "pre_mora",

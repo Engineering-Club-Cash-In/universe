@@ -599,6 +599,33 @@ export default function InvestmentCalculator() {
         });
         annualBody.appendChild(tr);
       });
+
+      // Fila de totales (misma info que la fila de resumen de la tabla mensual)
+      const annualTotalsRow = document.createElement("tr");
+      annualTotalsRow.style.backgroundColor = "#f2f2f2";
+      annualTotalsRow.style.fontWeight = "bold";
+      const annualTotals: [string, number][] = [
+        [`Monto a Invertir: ${fmtQ(displayCapital)}`, 2],
+        [
+          `Total Intereses: ${fmtQ(investmentResult.grossProfit + investmentResult.vatPaid)}`,
+          1,
+        ],
+        [
+          `Total a Recibir: ${fmtQ(displayCapital + (investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))}`,
+          2,
+        ],
+      ];
+      annualTotals.forEach(([text, span], i) => {
+        const td = document.createElement("td");
+        td.textContent = text;
+        td.colSpan = span;
+        td.style.padding = "8px";
+        td.style.border = "1px solid #ddd";
+        if (i > 0) td.style.textAlign = "right";
+        annualTotalsRow.appendChild(td);
+      });
+      annualBody.appendChild(annualTotalsRow);
+
       annualTable.appendChild(annualBody);
       annualSection.appendChild(annualTable);
 
@@ -772,10 +799,13 @@ export default function InvestmentCalculator() {
     printContent.appendChild(header);
     printContent.appendChild(summary);
     if (annualSection) {
+      // Tradicional: la Proyección Anual ES la tabla del resumen (la tabla
+      // mensual no se incluye, igual que en la UI).
       printContent.appendChild(annualSection);
+    } else {
+      printContent.appendChild(tableTitle);
+      printContent.appendChild(table);
     }
-    printContent.appendChild(tableTitle);
-    printContent.appendChild(table);
     printContent.appendChild(disclaimer);
 
     // Agregar el contenedor al documento
@@ -1325,78 +1355,26 @@ export default function InvestmentCalculator() {
         </CardContent>
       </Card>
 
-      {/* Proyección Anual — solo modelo Tradicional (minuta Plazos Calculadora).
-          Solo en "Calcular Rendimiento": en modo Objetivo el plazo es libre
-          (Tradicional no es una opción ahí) y renderizarla cotizaría un
-          Tradicional con plazo bloqueado. */}
-      {activeTab === "standard" && mainTab === "calculator" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Proyección Anual</CardTitle>
+      {/* Amortization Schedule Table with Tabs.
+          Para Tradicional (en "Calcular Rendimiento") la tabla ES la
+          Proyección Anual (minuta Plazos Calculadora): devolución de capital
+          e intereses agrupados por año. Los otros modelos (y el modo
+          Objetivo, donde el plazo es libre y Tradicional no es una opción)
+          conservan la tabla mensual. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {activeTab === "standard" && mainTab === "calculator"
+              ? "Proyección Anual"
+              : "Tabla de Amortización"}
+          </CardTitle>
+          {activeTab === "standard" && mainTab === "calculator" && (
             <CardDescription>
               Devolución estimada de capital e intereses ganados por año. La
               ganancia se calcula sobre el capital que permanece activo cada
               mes, no sobre el monto inicial.
             </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table containerClassname="">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Año</TableHead>
-                  <TableHead className="text-right">Capital Devuelto</TableHead>
-                  <TableHead className="text-right">Intereses + IVA</TableHead>
-                  <TableHead className="text-right">Total a Recibir</TableHead>
-                  <TableHead className="text-right">Capital Activo al Cierre</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {annualProjection.map((y) => (
-                  <TableRow key={y.year}>
-                    <TableCell>Año {y.year}</TableCell>
-                    <TableCell className="text-right">
-                      Q{" "}
-                      {y.capitalDevuelto.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      Q{" "}
-                      {y.intereses.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      Q{" "}
-                      {y.totalRecibir.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      Q{" "}
-                      {y.saldoFinal.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <p className="mt-4 text-xs text-gray-500 italic">
-              {DISCLAIMER_TRADICIONAL}
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Amortization Schedule Table with Tabs */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Tabla de Amortización</CardTitle>
+          )}
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={handleModeloChange}>
@@ -1406,6 +1384,82 @@ export default function InvestmentCalculator() {
               <TabsTrigger value="compound">Interés Compuesto</TabsTrigger>
             </TabsList>
             <TabsContent value="standard">
+              {activeTab === "standard" && mainTab === "calculator" ? (
+                <>
+                  <Table containerClassname="">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Año</TableHead>
+                        <TableHead className="text-right">Capital Devuelto</TableHead>
+                        <TableHead className="text-right">Intereses + IVA</TableHead>
+                        <TableHead className="text-right">Total a Recibir</TableHead>
+                        <TableHead className="text-right">Capital Activo al Cierre</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {annualProjection.map((y) => (
+                        <TableRow key={y.year}>
+                          <TableCell>Año {y.year}</TableCell>
+                          <TableCell className="text-right">
+                            Q{" "}
+                            {y.capitalDevuelto.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            Q{" "}
+                            {y.intereses.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            Q{" "}
+                            {y.totalRecibir.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            Q{" "}
+                            {y.saldoFinal.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                    <TableRow className="bg-gray-100 font-semibold">
+                      <TableCell colSpan={2}>
+                        Monto a Invertir: Q{" "}
+                        {displayCapital.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        Total Intereses: Q{" "}
+                        {(investmentResult.grossProfit + investmentResult.vatPaid).toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </TableCell>
+                      <TableCell colSpan={2} className="text-right">
+                        Total a Recibir: Q{" "}
+                        {(displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))).toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </TableCell>
+                    </TableRow>
+                  </Table>
+                  <p className="mt-4 text-xs text-gray-500 italic">
+                    {DISCLAIMER_TRADICIONAL}
+                  </p>
+                </>
+              ) : (
               <ScrollArea className="h-[500px] rounded-md border">
                 <Table containerClassname="">
                   <TableHeader>
@@ -1491,6 +1545,7 @@ export default function InvestmentCalculator() {
                 </Table>
                 <ScrollBar orientation="horizontal" />
               </ScrollArea>
+              )}
             </TabsContent>
 
             <TabsContent value="interest-only">

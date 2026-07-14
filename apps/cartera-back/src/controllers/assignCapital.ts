@@ -57,6 +57,8 @@ export interface CreditCandidate {
   formato_credito: "Pool" | "Individual";
   cuotas_pagadas: number;
   total_cuotas: number;
+  // Cuotas que quedan por encima de la última cuota pagada. Ver calcPlazosRestantes.
+  plazos_restantes: number;
   inversionistas: InversionistaResult[];
   score: number;
   score_breakdown: ScoreBreakdown;
@@ -137,6 +139,48 @@ function calcCapitalProximityBonus(
 }
 
 // ============================================================
+// FUNCIONES DE PLAZOS RESTANTES
+// ============================================================
+
+/**
+ * Plazos (meses/cuotas) que le quedan al crédito.
+ *
+ * Se recorren las cuotas en orden DESCENDENTE y se busca la primera pagada;
+ * los plazos restantes son las cuotas que quedan POR ENCIMA de ella. Por eso
+ * basta con la cuota pagada de mayor número (`maxCuotaPagada`).
+ *
+ * Consecuencia deliberada: los huecos NO se cuentan. Si de 24 cuotas están
+ * pagadas la 1, 2, 4 y 5 (la 3 quedó impaga), la mayor pagada es la 5 y los
+ * restantes son 19 — no 20.
+ *
+ * Crédito sin ninguna cuota pagada (`maxCuotaPagada = 0`) → restantes = total.
+ */
+export function calcPlazosRestantes(
+  totalCuotas: number,
+  maxCuotaPagada: number
+): number {
+  if (totalCuotas <= 0) return 0;
+  return Math.max(0, totalCuotas - maxCuotaPagada);
+}
+
+/**
+ * Filtra los candidatos dejando SOLO los que tienen exactamente `plazoObjetivo`
+ * plazos restantes. Filtro estricto: no se escala a plazos vecinos.
+ *
+ * Si los créditos de ese plazo no alcanzan a cubrir el monto pedido, no importa:
+ * se devuelven los que haya (incluso ninguno). El caller ya reporta el faltante
+ * como monto sin asignar.
+ *
+ * Conserva el orden de score de la lista de entrada.
+ */
+export function seleccionarPorPlazo(
+  candidatos: CreditCandidate[],
+  plazoObjetivo: number
+): CreditCandidate[] {
+  return candidatos.filter((c) => c.plazos_restantes === plazoObjetivo);
+}
+
+// ============================================================
 // QUERY PRINCIPAL
 // ============================================================
 
@@ -144,10 +188,12 @@ export async function getCreditCandidates(
   monto?: number,
   limit?: number,
   inversionistaIdSolicitante?: number,
-  porcentaje?: number
+  porcentaje?: number,
+  plazoObjetivo?: number
 ): Promise<CreditCandidate[]> {
   console.log("\n🔍 ========== getCreditCandidates ==========");
   console.log(`   monto: ${monto ?? "no especificado"}`);
+  console.log(`   plazoObjetivo: ${plazoObjetivo ?? "no especificado"}`);
 
   // Para optimizar el rendimiento y aprovechar índices (sargable), calculamos la fecha
   // exacta de inicio de mes en UTC basándonos en la zona horaria de Guatemala.
@@ -386,12 +432,17 @@ export async function getCreditCandidates(
   }
 
   // ──────────────────────────────────────────────────────────
-  // 5. Cuotas pagadas por crédito (todas incluyendo cuota 0)
+  // 5. Cuotas pagadas por crédito: cuántas y cuál es la de mayor número.
+  //    El MAX equivale a recorrer las cuotas en orden descendente y quedarse
+  //    con la primera pagada; alimenta el cálculo de plazos restantes.
+  //    Un crédito sin cuotas pagadas no aparece en el resultado (GROUP BY no
+  //    emite grupos vacíos) y cae al `?? 0` de más abajo.
   // ──────────────────────────────────────────────────────────
   const cuotasPagadasRaw = await db
     .select({
       credito_id: cuotas_credito.credito_id,
       count: sql<number>`COUNT(*)::int`,
+      max_pagada: sql<number>`MAX(${cuotas_credito.numero_cuota})::int`,
     })
     .from(cuotas_credito)
     .where(
@@ -405,8 +456,10 @@ export async function getCreditCandidates(
     .groupBy(cuotas_credito.credito_id);
 
   const cuotasPagadasByCredito = new Map<number, number>();
+  const maxCuotaPagadaByCredito = new Map<number, number>();
   for (const row of cuotasPagadasRaw) {
     cuotasPagadasByCredito.set(row.credito_id, Number(row.count));
+    maxCuotaPagadaByCredito.set(row.credito_id, Number(row.max_pagada));
   }
 
   // ──────────────────────────────────────────────────────────
@@ -483,7 +536,7 @@ export async function getCreditCandidates(
   // ──────────────────────────────────────────────────────────
   // 7. Aplicar filtros hard y calcular score
   // ──────────────────────────────────────────────────────────
-  const candidates: CreditCandidate[] = [];
+  let candidates: CreditCandidate[] = [];
 
   for (const credito of baseCredits) {
     const { credito_id, numero_credito_sifco, capital, formato_credito } =
@@ -577,6 +630,8 @@ export async function getCreditCandidates(
     // Cuotas pagadas y totales
     const cuotasPagadas = cuotasPagadasByCredito.get(credito_id) ?? 0;
     const totalCuotas = totalCuotasByCredito.get(credito_id) ?? 0;
+    const maxCuotaPagada = maxCuotaPagadaByCredito.get(credito_id) ?? 0;
+    const plazosRestantes = calcPlazosRestantes(totalCuotas, maxCuotaPagada);
 
     // FILTRO CRÍTICO: Solo si es cuota 1 confirmada pa delante (se descarta si solo tiene cuota 0 o ninguna)
     if (cuotasPagadas === 0) {
@@ -636,6 +691,7 @@ export async function getCreditCandidates(
       formato_credito: actualFormadoCredito as "Pool" | "Individual",
       cuotas_pagadas: cuotasPagadas,
       total_cuotas: totalCuotas,
+      plazos_restantes: plazosRestantes,
       inversionistas: invs,
       score,
       score_breakdown: {
@@ -675,6 +731,21 @@ export async function getCreditCandidates(
     }
     return 0;
   });
+
+  // ──────────────────────────────────────────────────────────
+  // 7.5 Filtro estricto por plazos restantes
+  //     Va ANTES del limit: si recortáramos primero, podríamos tirar los únicos
+  //     candidatos del plazo pedido. Si no alcanzan a cubrir el monto, se
+  //     devuelven igual — el caller reporta el faltante como monto sin asignar.
+  // ──────────────────────────────────────────────────────────
+  if (plazoObjetivo !== undefined && plazoObjetivo !== null) {
+    const antes = candidates.length;
+    candidates = seleccionarPorPlazo(candidates, plazoObjetivo);
+    const capitalCube = candidates.reduce((acc, c) => acc + c.capital_evaluado, 0);
+    console.log(
+      `   📆 Filtro plazos restantes (exactamente ${plazoObjetivo}): ${antes} → ${candidates.length} candidato(s), capital Cube Q${capitalCube}`
+    );
+  }
 
   // Si se especificó un límite, cortar antes de las queries de relaciones
   if (limit !== undefined) {
@@ -801,10 +872,13 @@ export async function getCreditCandidateById(
     capital: Number(c.capital),
     // capital_activo / cuotas / score no se calculan en modo manual:
     // el flujo aguas abajo solo consume credito_completo.
+    // OJO: plazos_restantes = 0 acá es "no calculado", NO "crédito liquidado".
+    // No filtres por este campo sobre un candidato salido de esta función.
     capital_activo: 0,
     formato_credito: esIndividual ? "Individual" : "Pool",
     cuotas_pagadas: 0,
     total_cuotas: 0,
+    plazos_restantes: 0,
     inversionistas: inversionistasResult,
     score: 0,
     score_breakdown: {

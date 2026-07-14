@@ -334,6 +334,14 @@ export function TableInvestors() {
   const [compraCarteraOpen, setCompraCarteraOpen] = useState(false);
   const [compraCarteraInvId, setCompraCarteraInvId] = useState<number | null>(null);
   const [compraCarteraMonto, setCompraCarteraMonto] = useState("");
+  // Plazo propio del inversionista en meses (en cuánto tiempo saca su
+  // inversión). Opcional: vacío = usa el plazo del crédito. Siempre se
+  // guarda (espejo y compras).
+  const [compraCarteraPlazo, setCompraCarteraPlazo] = useState("");
+  // true → el plazo también filtra los créditos candidatos (variante 1:
+  // escalada por rondas de cuotas pendientes). false → variante 2: el plazo
+  // solo se guarda y los créditos se eligen con el flujo normal.
+  const [compraCarteraUsarPlazo, setCompraCarteraUsarPlazo] = useState(true);
   const [compraCarteraPctInv, setCompraCarteraPctInv] = useState("70");
   const [compraCarteraPctCashIn, setCompraCarteraPctCashIn] = useState("30");
   const [compraCarteraTipoReinversion, setCompraCarteraTipoReinversion] =
@@ -562,6 +570,8 @@ export function TableInvestors() {
   const handleAbrirCompraCartera = (inv: any) => {
     setCompraCarteraInvId(inv.inversionista_id);
     setCompraCarteraMonto("");
+    setCompraCarteraPlazo("");
+    setCompraCarteraUsarPlazo(true);
     setCompraCarteraManual(false);
     setCompraCarteraManualList([]);
     setCompraCarteraTipoReinversion("sin_reinversion");
@@ -2754,6 +2764,44 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 />
               </div>
             )}
+            <div>
+              <label htmlFor="compra-plazo" className="text-sm font-medium text-gray-700">
+                Plazo del inversionista (meses)
+              </label>
+              <Input
+                id="compra-plazo"
+                type="number"
+                min={1}
+                step="1"
+                placeholder="Vacío = plazo del crédito"
+                value={compraCarteraPlazo}
+                onChange={(e) => setCompraCarteraPlazo(e.target.value)}
+                className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                En cuánto tiempo el inversionista saca su inversión.
+              </p>
+            </div>
+            {/* Solo aplica si se ingresó un plazo: define si el plazo además
+                filtra los créditos candidatos (variante 1) o solo se guarda
+                (variante 2). */}
+            {compraCarteraPlazo && Number(compraCarteraPlazo) > 0 && !compraCarteraManual && (
+              <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+                <div className="pr-3">
+                  <label htmlFor="compra-usar-plazo" className="text-sm font-medium text-gray-700 cursor-pointer">
+                    Usar plazo para elegir créditos
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Apagado: el plazo solo se guarda y los créditos se eligen como siempre.
+                  </p>
+                </div>
+                <Switch
+                  id="compra-usar-plazo"
+                  checked={compraCarteraUsarPlazo}
+                  onCheckedChange={setCompraCarteraUsarPlazo}
+                />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label htmlFor="compra-pct-inv" className="text-sm font-medium text-gray-700">
@@ -2837,6 +2885,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     tipo_reinversion: compraCarteraTipoReinversion,
                     porcentaje_inversion: Number(compraCarteraPctInv),
                     porcentaje_cash_in: Number(compraCarteraPctCashIn),
+                    ...(compraCarteraPlazo &&
+                      Number(compraCarteraPlazo) > 0 && {
+                        plazo_inversionista: Math.round(
+                          Number(compraCarteraPlazo),
+                        ),
+                        usar_plazo_en_candidatos: compraCarteraUsarPlazo,
+                      }),
                     ...(compraCarteraManual && {
                       manual: compraCarteraManualList.map((c) => ({
                         credito_id: c.credito_id,

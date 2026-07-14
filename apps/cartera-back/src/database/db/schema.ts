@@ -549,6 +549,8 @@
       aceptada_at: timestamp("aceptada_at", { withTimezone: true }),
       aceptada_por: text("aceptada_por"),
       compra_cartera_extendida_at: timestamp("compra_cartera_extendida_at", { withTimezone: true }),
+      // Plazo propio del inversionista en meses (NULL = usa el plazo del crédito).
+      plazo_inversionista: integer("plazo_inversionista"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
@@ -582,6 +584,8 @@
       fecha: timestamp("fecha", { withTimezone: true }).notNull().$default(() => new Date()),
       created_at: timestamp("created_at", { withTimezone: true }).notNull().$default(() => new Date()),
       updated_at: timestamp("updated_at", { withTimezone: true }),
+      // Plazo propio del inversionista en meses (NULL = usa el plazo del crédito).
+      plazo_inversionista: integer("plazo_inversionista"),
     },
     (t) => ({
       ixStatus: index("ix_compras_credito_inv_status").on(t.status),

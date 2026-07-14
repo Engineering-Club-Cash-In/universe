@@ -31,6 +31,12 @@ export const addInvestorToCreditRouter = new Elysia()
         ]),
       ),
       fecha_inicio_participacion: t.Optional(t.String()),
+      // Plazo propio del inversionista en meses (en cuánto tiempo saca su
+      // inversión). Siempre se persiste en espejo y compras.
+      plazo_inversionista: t.Optional(t.Integer({ minimum: 1 })),
+      // true/ausente → el plazo también filtra candidatos (escalada por rondas).
+      // false → variante 2: el plazo solo se guarda; candidatos con flujo normal.
+      usar_plazo_en_candidatos: t.Optional(t.Boolean()),
       minimo: t.Optional(t.Number({ minimum: 1 })),
       // MODO MANUAL: arreglo de { credito_id, monto }. Si viene, se ignora el
       // buscador de candidatos y se opera SOLO sobre estos créditos. La suma

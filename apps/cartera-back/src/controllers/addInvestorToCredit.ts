@@ -81,6 +81,17 @@ const addInvestorToCreditSchema = z.object({
   // Se sigue aceptando por compatibilidad, pero YA NO se usa para actualizar
   // la fecha de las filas (ni del inversionista nuevo ni del existente).
   fecha_inicio_participacion: z.string().optional(),
+  // Plazo propio del inversionista en meses (en cuánto tiempo saca su
+  // inversión). Siempre se persiste en espejo y compras. NULL = usa el
+  // plazo del crédito.
+  plazo_inversionista: z.number().int().positive().optional(),
+  // VARIANTE 1 vs 2 del plazo:
+  //   true / ausente → el plazo también FILTRA candidatos (escalada por
+  //                    rondas de cuotas pendientes).
+  //   false          → el plazo SOLO se guarda; los candidatos se eligen
+  //                    con el flujo normal (variante 2: no importa qué
+  //                    crédito cede, solo dejar definido el plazo).
+  usar_plazo_en_candidatos: z.boolean().optional(),
   // Nuevos campos para el buscador de capital
   minimo: z.number().int().positive().optional(),
   // MODO MANUAL: arreglo de { credito_id, monto }. Si viene (y no vacío) se
@@ -335,6 +346,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       tipo_reinversion,
       // NOTA: fecha_inicio_participacion se sigue aceptando en el body pero
       // ya NO se desestructura ni se usa: no actualiza la fecha de las filas.
+      plazo_inversionista,
+      usar_plazo_en_candidatos,
       minimo,
       manual,
     } = parseResult.data;
@@ -499,6 +512,139 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           message:
             "No se encontraron créditos candidatos compatibles (todos tienen alguna modalidad ya asignada)",
           descartados: filtradosPorTipoReinversion,
+        };
+      }
+    }
+
+    // ================================================================
+    // ESCALADA POR PLAZO (solo modo AUTOMÁTICO con plazo_inversionista)
+    // El inversionista define en cuántos meses saca su inversión. La compra
+    // se llena POR RONDAS: primero créditos con cuotas pendientes == plazo;
+    // si el CUBE disponible no cubre el monto, se escala a plazo+1, plazo+2,
+    // ... hasta cubrir el monto o agotar la cartera elegible (no hay créditos
+    // con más cuotas pendientes). Si aun así no alcanza, la compra queda
+    // PARCIAL como siempre (monto_sin_asignar > 0).
+    // El orden de rondas se respeta en la distribución: un crédito que cumple
+    // el plazo SIEMPRE se llena antes que uno de plazo mayor, sin importar
+    // el score (dentro de cada ronda sí manda el score).
+    //
+    // ⚠️ SIMULACIÓN DEL GET POR PLAZO: getCreditCandidates aún NO recibe
+    // `plazo` (lo está trabajando el equipo del buscador). Mientras tanto se
+    // pide la lista completa UNA vez (arriba) y cada ronda se simula en
+    // memoria con total_cuotas - cuotas_pagadas, que el candidato ya trae.
+    // Cuando el GET soporte plazo (filtro cuotas pendientes == plazo), cada
+    // ronda se reemplaza por una llamada real:
+    //   await getCreditCandidates(monto_aportado, minimo, inversionista_id,
+    //     porcentaje_inversion, plazoActual)
+    // y se elimina rondaPorPlazo/maxPendientes (el corte de "cartera agotada"
+    // pasa a ser N rondas seguidas sin resultados).
+    // ================================================================
+    let escaladaPlazoInfo:
+      | {
+          plazo_solicitado: number;
+          plazo_final: number;
+          capacidad_cube: string;
+          rondas: {
+            plazo: number;
+            creditos: number;
+            capacidad_acumulada: string;
+          }[];
+        }
+      | undefined;
+
+    // usar_plazo_en_candidatos === false → VARIANTE 2: el plazo solo se
+    // guarda (espejo + compras); la selección de candidatos es la normal.
+    if (
+      !esManual &&
+      plazo_inversionista !== undefined &&
+      usar_plazo_en_candidatos !== false
+    ) {
+      // Capacidad real de un candidato = monto de CUBE en el PADRE, que es el
+      // tope que la distribución puede tomar de ese crédito (ver PASO 3b).
+      const capacidadCube = (c: CreditCandidate): Big => {
+        const cube = (c.credito_completo?.inversionistas_detalle ?? []).find(
+          (inv: any) => inv.inversionista_id === CUBE_INVESTMENT_ID,
+        );
+        return cube ? new Big(cube.monto_aportado) : new Big(0);
+      };
+
+      const cuotasPendientes = (c: CreditCandidate) =>
+        c.total_cuotas - c.cuotas_pagadas;
+
+      // SIMULACIÓN: una "llamada" al GET con plazo == N. Mantiene el orden
+      // por score que ya trae la lista y replica el corte por `minimo` que el
+      // GET real aplicaría por llamada.
+      const rondaPorPlazo = (plazo: number): CreditCandidate[] => {
+        const ronda = candidatos.filter((c) => cuotasPendientes(c) === plazo);
+        if (minimo !== undefined) ronda.splice(minimo);
+        return ronda;
+      };
+
+      // Techo de escalada: no existe crédito con más cuotas pendientes que
+      // esto, así que iterar más allá nunca agrega candidatos.
+      const maxPendientes = candidatos.reduce(
+        (max, c) => Math.max(max, cuotasPendientes(c)),
+        0,
+      );
+
+      const objetivo = new Big(monto_aportado);
+      const seleccionados: CreditCandidate[] = [];
+      const rondasLog: {
+        plazo: number;
+        creditos: number;
+        capacidad_acumulada: string;
+      }[] = [];
+      let capacidad = new Big(0);
+      let plazoActual = plazo_inversionista;
+      let plazoFinal = plazo_inversionista;
+
+      console.log("================================================================");
+      console.log(
+        `[addInvestorToCredit] ESCALADA POR PLAZO: objetivo Q${objetivo}, plazo solicitado ${plazo_inversionista}, techo ${maxPendientes} cuotas pendientes`,
+      );
+
+      while (capacidad.lt(objetivo) && plazoActual <= maxPendientes) {
+        const ronda = rondaPorPlazo(plazoActual);
+        for (const c of ronda) {
+          seleccionados.push(c);
+          capacidad = capacidad.plus(capacidadCube(c));
+        }
+        if (ronda.length > 0) {
+          plazoFinal = plazoActual;
+          rondasLog.push({
+            plazo: plazoActual,
+            creditos: ronda.length,
+            capacidad_acumulada: capacidad.toString(),
+          });
+          console.log(
+            ` - Ronda plazo ${plazoActual}: ${ronda.length} crédito(s), capacidad CUBE acumulada Q${capacidad}`,
+          );
+        }
+        plazoActual++;
+      }
+
+      if (capacidad.lt(objetivo)) {
+        console.log(
+          `⚠️ Cartera agotada en plazo ${plazoFinal}: capacidad Q${capacidad} < objetivo Q${objetivo}. La compra quedará PARCIAL.`,
+        );
+      }
+      console.log("================================================================");
+
+      candidatos = seleccionados;
+
+      escaladaPlazoInfo = {
+        plazo_solicitado: plazo_inversionista,
+        plazo_final: plazoFinal,
+        capacidad_cube: capacidad.toString(),
+        rondas: rondasLog,
+      };
+
+      if (candidatos.length === 0) {
+        set.status = 404;
+        return {
+          success: false,
+          message: `No se encontraron créditos candidatos con ${plazo_inversionista} o más cuotas pendientes`,
+          escalada_plazo: escaladaPlazoInfo,
         };
       }
     }
@@ -761,6 +907,16 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           (espejoActual ?? []).map((e: any) => [
             e.inversionista_id as number,
             e.tipo_reinversion ?? null,
+          ]),
+        );
+
+        // ── Mapa de plazo_inversionista actual por inversionista en el espejo ──
+        // Mismo patrón que tipo_reinversion: el nuke & rebuild del espejo
+        // borraría el plazo de los OTROS inversionistas si no lo preservamos.
+        const plazoActualPorInv = new Map<number, number | null>(
+          (espejoActual ?? []).map((e: any) => [
+            e.inversionista_id as number,
+            e.plazo_inversionista ?? null,
           ]),
         );
 
@@ -1061,6 +1217,16 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
                 tipoReinvActualPorInv.get(inv.inversionista_id) ??
                 null
               : tipoReinvActualPorInv.get(inv.inversionista_id) ?? null,
+          // plazo_inversionista (misma lógica de preservación que tipo_reinversion):
+          //   - target: si viene en el request lo usa; si no, preserva el
+          //     valor previo del espejo.
+          //   - resto: preserva el valor existente del espejo.
+          plazo_inversionista:
+            inv.inversionista_id === inversionista_id
+              ? plazo_inversionista ??
+                plazoActualPorInv.get(inv.inversionista_id) ??
+                null
+              : plazoActualPorInv.get(inv.inversionista_id) ?? null,
           updated_at: new Date(),
         }));
 
@@ -1097,6 +1263,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             tipo_reinversion ??
             tipoReinvActualPorInv.get(inversionista_id) ??
             null,
+          // Plazo propio del inversionista para ESTA operación (solo lo que
+          // vino en el request; el registro histórico no se hereda del espejo).
+          plazo_inversionista: plazo_inversionista ?? null,
           status: statusEspejo,
         });
 
@@ -1228,6 +1397,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       monto_sin_asignar: montoRestante.toString(),
       resultados,
       errores,
+      // Presente solo cuando la compra automática vino con plazo_inversionista:
+      // detalle de las rondas de escalada (plazo → créditos → capacidad CUBE).
+      ...(escaladaPlazoInfo && { escalada_plazo: escaladaPlazoInfo }),
     };
   } catch (error) {
     console.error("[addInvestorToCredit] Error:", error);

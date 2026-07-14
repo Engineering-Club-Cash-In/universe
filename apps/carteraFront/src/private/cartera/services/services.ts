@@ -3992,6 +3992,14 @@ export interface AgregarInversionistaCreditoPayload {
   fecha_inicio_participacion?: string;
   porcentaje_cash_in?: number;
   porcentaje_inversion?: number;
+  // Plazo propio del inversionista en meses (en cuánto tiempo saca su
+  // inversión). Opcional: si no viene, aplica el plazo del crédito. Siempre
+  // se persiste en espejo y compras.
+  plazo_inversionista?: number;
+  // true/ausente → el plazo también filtra los créditos candidatos (escalada
+  // por rondas de cuotas pendientes). false → variante 2: el plazo solo se
+  // guarda y los créditos se eligen con el flujo normal.
+  usar_plazo_en_candidatos?: boolean;
   // MODO MANUAL: créditos específicos con su monto. Si viene, el backend
   // ignora el buscador de candidatos y opera solo sobre estos. La suma de los
   // montos debe igualar monto_aportado.

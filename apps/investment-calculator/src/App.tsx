@@ -532,8 +532,14 @@ export default function InvestmentCalculator() {
 
     // Proyección anual (solo modelo Tradicional): desglose por año de capital
     // devuelto e intereses, calculado sobre el capital activo de cada mes.
+    // Igual que en la UI, solo aplica en "Calcular Rendimiento" (en modo
+    // Objetivo el plazo es libre y Tradicional no es una opción).
     let annualSection: HTMLDivElement | null = null;
-    if (activeTab === "standard" && annualProjection.length > 0) {
+    if (
+      activeTab === "standard" &&
+      mainTab === "calculator" &&
+      annualProjection.length > 0
+    ) {
       annualSection = document.createElement("div");
 
       const annualTitle = document.createElement("h2");
@@ -1319,8 +1325,11 @@ export default function InvestmentCalculator() {
         </CardContent>
       </Card>
 
-      {/* Proyección Anual — solo modelo Tradicional (minuta Plazos Calculadora) */}
-      {activeTab === "standard" && (
+      {/* Proyección Anual — solo modelo Tradicional (minuta Plazos Calculadora).
+          Solo en "Calcular Rendimiento": en modo Objetivo el plazo es libre
+          (Tradicional no es una opción ahí) y renderizarla cotizaría un
+          Tradicional con plazo bloqueado. */}
+      {activeTab === "standard" && mainTab === "calculator" && (
         <Card>
           <CardHeader>
             <CardTitle>Proyección Anual</CardTitle>

@@ -1,15 +1,19 @@
-import { and, asc, count, desc, eq, gte, or } from "drizzle-orm";
+import { and, asc, count, eq, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
-	leadSourceEnum,
+	type leadSourceEnum,
 	leads,
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
-import { canReceiveAutoAssignedLead } from "../lib/lead-assignment";
+import {
+	findSalesUserWithLeastAutoAssignedLeads,
+	resolveExistingLeadAssigneeFromDatabase,
+} from "../lib/lead-assignment";
 import { getPublicLeadExistingOpportunityUpdates } from "../lib/lead-helpers";
+import { getOpenOpportunityBySource } from "../lib/lead-opportunity";
 import { validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 
@@ -30,7 +34,13 @@ export async function getSalesUserWithLeastOpportunities() {
 			role: user.role,
 		})
 		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
+		.where(
+			and(
+				eq(user.role, "sales"),
+				eq(user.assignLeads, true),
+				eq(user.banned, false),
+			),
+		);
 
 	if (salesUsers.length === 0) {
 		return null;
@@ -69,68 +79,9 @@ export async function getSalesUserWithLeastOpportunities() {
 	return minUser;
 }
 
-/**
- * Encuentra al usuario de ventas con menos leads asignados.
- * Si hay empate, retorna el primero encontrado.
- * Si no hay usuarios de ventas, retorna null.
- */
-export async function getSalesUserWithLeastLeads() {
-	// Obtener todos los usuarios de ventas activos (no baneados)
-	const salesUsers = await db
-		.select({
-			id: user.id,
-			name: user.name,
-			email: user.email,
-			role: user.role,
-		})
-		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
-
-	if (salesUsers.length === 0) {
-		return null;
-	}
-
-	// Contar leads automáticos asignados hoy por usuario (hora Guatemala UTC-6)
-	const startOfToday = new Date(
-		new Date().toLocaleDateString("en-US", { timeZone: "America/Guatemala" }),
-	);
-
-	const leadCounts = await db
-		.select({
-			assignedTo: leads.assignedTo,
-			count: count(leads.id),
-		})
-		.from(leads)
-		.where(
-			and(
-				eq(leads.assignmentType, "auto"),
-				gte(leads.createdAt, startOfToday),
-			),
-		)
-		.groupBy(leads.assignedTo);
-
-	// Crear un mapa de conteos
-	const countMap = new Map<string, number>();
-	for (const lc of leadCounts) {
-		if (lc.assignedTo) {
-			countMap.set(lc.assignedTo, lc.count);
-		}
-	}
-
-	// Encontrar el usuario de ventas con menos leads
-	let minUser = salesUsers[0];
-	let minCount = countMap.get(minUser.id) ?? 0;
-
-	for (const salesUser of salesUsers) {
-		const userCount = countMap.get(salesUser.id) ?? 0;
-		if (userCount < minCount) {
-			minCount = userCount;
-			minUser = salesUser;
-		}
-	}
-
-	return minUser;
-}
+export {
+	findSalesUserWithLeastAutoAssignedLeads as getSalesUserWithLeastLeads,
+};
 
 /**
  * Crea una nueva oportunidad vinculada a un lead
@@ -180,57 +131,6 @@ export async function createOpportunityForLead(
 	return newOpportunity;
 }
 
-/**
- * Verifica si un lead ya tiene una oportunidad abierta con el mismo source.
- */
-export async function getOpenOpportunityBySource(
-	leadId: string,
-	source: LeadSource,
-) {
-	const [existing] = await db
-		.select({
-			id: opportunities.id,
-			source: opportunities.source,
-			campaign: opportunities.campaign,
-			creditType: opportunities.creditType,
-		})
-		.from(opportunities)
-		.where(
-			and(
-				eq(opportunities.leadId, leadId),
-				or(
-					eq(opportunities.status, "open"),
-					eq(opportunities.status, "on_hold"),
-				),
-			),
-		)
-		.orderBy(desc(opportunities.createdAt))
-		.limit(1);
-	return existing;
-}
-
-async function resolveLeadAssignee(existingAssignedTo?: string | null) {
-	if (existingAssignedTo) {
-		const [currentOwner] = await db
-			.select({
-				id: user.id,
-				role: user.role,
-				assignLeads: user.assignLeads,
-				banned: user.banned,
-			})
-			.from(user)
-			.where(eq(user.id, existingAssignedTo))
-			.limit(1);
-
-		if (canReceiveAutoAssignedLead(currentOwner)) {
-			return currentOwner.id;
-		}
-	}
-
-	const fallbackSalesUser = await getSalesUserWithLeastLeads();
-	return fallbackSalesUser?.id ?? null;
-}
-
 export async function createPublicLead(c: Context) {
 	try {
 		const body = await c.req.json();
@@ -257,10 +157,7 @@ export async function createPublicLead(c: Context) {
 		if (hasDpi) {
 			const resultadoDpi = validarDpi(body.dpi);
 			if (!resultadoDpi.valid) {
-				return c.json(
-					{ success: false, error: resultadoDpi.error },
-					400,
-				);
+				return c.json({ success: false, error: resultadoDpi.error }, 400);
 			}
 			body.dpi = resultadoDpi.dpiLimpio;
 		}
@@ -279,8 +176,7 @@ export async function createPublicLead(c: Context) {
 		// --- Lead existente ---
 		if (existingLead) {
 			const source = body.source || existingLead.source || "website";
-			const campaign =
-				body.campaign || existingLead.campaign || undefined;
+			const campaign = body.campaign || existingLead.campaign || undefined;
 			let leadData = existingLead;
 
 			if (body.isRegister) {
@@ -308,11 +204,13 @@ export async function createPublicLead(c: Context) {
 				source,
 			);
 			if (existingOpportunity) {
-				const opportunityUpdates =
-					getPublicLeadExistingOpportunityUpdates(existingOpportunity, {
+				const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(
+					existingOpportunity,
+					{
 						campaign: body.campaign,
 						creditType,
-					});
+					},
+				);
 
 				if (Object.keys(opportunityUpdates).length > 0) {
 					await db
@@ -335,7 +233,9 @@ export async function createPublicLead(c: Context) {
 				);
 			}
 
-			const assignedTo = await resolveLeadAssignee(existingLead.assignedTo);
+			const assignedTo = await resolveExistingLeadAssigneeFromDatabase(
+				existingLead.assignedTo,
+			);
 
 			if (!assignedTo) {
 				return c.json(
@@ -410,7 +310,7 @@ export async function createPublicLead(c: Context) {
 		}
 
 		// --- Lead nuevo: mismo asesor para lead y oportunidad ---
-		const salesUserForLead = await getSalesUserWithLeastLeads();
+		const salesUserForLead = await findSalesUserWithLeastAutoAssignedLeads();
 
 		if (!salesUserForLead) {
 			return c.json(

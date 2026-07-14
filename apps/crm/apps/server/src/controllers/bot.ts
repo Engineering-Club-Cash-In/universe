@@ -12,12 +12,13 @@ import {
 } from "@/db/schema";
 import type { documentTypeEnum } from "@/db/schema/documents";
 import { getRenapData } from "@/functions/getRenapInfo";
+import { resolveExistingLeadAssigneeFromDatabase } from "@/lib/lead-assignment";
+import { getOpenOpportunityBySource } from "@/lib/lead-opportunity";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
 import { salesUser } from "@/utils/constants";
 import { db } from "../db";
 import { validarDpi } from "../utils/cui-validation";
 import { otpController } from "./otp";
-import { getOpenOpportunityBySource } from "./public-lead";
 
 // Type for document type enum
 type DocumentType = (typeof documentTypeEnum.enumValues)[number];
@@ -430,13 +431,24 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		createdByUserId = salesUser;
 	} else {
 		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
+		const assignedTo = await resolveExistingLeadAssigneeFromDatabase(
+			existingLead[0].assignedTo,
+		);
+
+		if (!assignedTo) {
+			return {
+				success: false,
+				message: "No sales user available to assign the reactivated lead",
+			};
+		}
+
 		await db
 			.update(leads)
 			.set({
 				firstName: renapData.firstName,
 				lastName: renapData.firstLastName,
 				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
-				assignedTo: existingLead[0].assignedTo,
+				assignedTo,
 				status: "new",
 				age: age ?? existingLead[0].age,
 				updatedAt: new Date(),
@@ -444,7 +456,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 			})
 			.where(eq(leads.dpi, dpi));
 		leadId = existingLead[0].id;
-		assignedUserId = existingLead[0].assignedTo;
+		assignedUserId = assignedTo;
 		createdByUserId = existingLead[0].createdBy;
 	}
 

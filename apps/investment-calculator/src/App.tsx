@@ -351,6 +351,19 @@ export default function InvestmentCalculator() {
     return years;
   }, [standardSchedule, investorPercentage]);
 
+  // Totales del footer de la Proyección Anual: se calculan sumando las filas
+  // por año para que SIEMPRE cuadren con lo mostrado. (No derivar de
+  // investmentResult dividiendo por 1+getVatRate(): con Pequeño Contribuyente
+  // el IVA de la tabla sigue siendo 12% mientras getVatRate() baja a 5%, y el
+  // total quedaría descuadrado respecto a la suma de las filas.)
+  const annualTotals = useMemo(
+    () => ({
+      intereses: annualProjection.reduce((s, y) => s + y.intereses, 0),
+      totalRecibir: annualProjection.reduce((s, y) => s + y.totalRecibir, 0),
+    }),
+    [annualProjection]
+  );
+
   // Calculate investment results using the backend functions
   const investmentParams: InvestmentParams = {
     capital: displayCapital,
@@ -610,18 +623,13 @@ export default function InvestmentCalculator() {
       const annualTotalsRow = document.createElement("tr");
       annualTotalsRow.style.backgroundColor = "#f2f2f2";
       annualTotalsRow.style.fontWeight = "bold";
-      const annualTotals: [string, number][] = [
+      // Mismos totales que la UI: sumados de las filas por año para que cuadren.
+      const annualTotalsRowData: [string, number][] = [
         [`Monto a Invertir: ${fmtQ(displayCapital)}`, 2],
-        [
-          `Total Intereses: ${fmtQ(investmentResult.grossProfit + investmentResult.vatPaid)}`,
-          1,
-        ],
-        [
-          `Total a Recibir: ${fmtQ(displayCapital + (investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))}`,
-          2,
-        ],
+        [`Total Intereses: ${fmtQ(annualTotals.intereses)}`, 1],
+        [`Total a Recibir: ${fmtQ(annualTotals.totalRecibir)}`, 2],
       ];
-      annualTotals.forEach(([text, span], i) => {
+      annualTotalsRowData.forEach(([text, span], i) => {
         const td = document.createElement("td");
         td.textContent = text;
         td.colSpan = span;
@@ -1447,14 +1455,14 @@ export default function InvestmentCalculator() {
                       </TableCell>
                       <TableCell className="text-right">
                         Total Intereses: Q{" "}
-                        {(investmentResult.grossProfit + investmentResult.vatPaid).toLocaleString("en-US", {
+                        {annualTotals.intereses.toLocaleString("en-US", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}
                       </TableCell>
                       <TableCell colSpan={2} className="text-right">
                         Total a Recibir: Q{" "}
-                        {(displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))).toLocaleString("en-US", {
+                        {annualTotals.totalRecibir.toLocaleString("en-US", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}

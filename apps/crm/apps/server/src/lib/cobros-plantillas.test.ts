@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+	COBROS_NO_REPLY_WARNING,
+	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararTelefonoAsesorParaEnvio,
 } from "./cobros-plantillas";
@@ -83,5 +85,62 @@ describe("plantillas masivas de cobros", () => {
 			enviar: true,
 			telefonoAsesor: "41286630",
 		});
+	});
+
+	test("define el recordatorio de impuesto de circulación 2026", () => {
+		const plantilla = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
+		);
+
+		expect(plantilla?.nombre).toBe("Impuesto de circulación 2026");
+		expect(
+			plantilla?.cuerpo,
+		).toBe(`Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+
+Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+
+¡No lo dejes para última hora!
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente,
+{nombreAsesor}
+Tel: {telefonoAsesor}`);
+	});
+
+	test("interpola el recordatorio de impuesto con los datos del cliente y asesor", () => {
+		const plantilla = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
+		);
+		const mensaje = interpolar(plantilla?.cuerpo ?? "", {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "",
+			cuotaMensual: "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+		});
+
+		expect(mensaje).toContain("Estimado(a) Maria Lopez");
+		expect(mensaje).toContain("Atentamente,\nCarlos Pérez\nTel: 41286630");
+		expect(mensaje.match(/NO RESPONDER EN ESTE CHAT/g)?.length).toBe(1);
+	});
+
+	test("conserva los cinco párrafos del contrato SimpleTech para impuesto de circulación", () => {
+		const plantilla = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
+		);
+		const paragraphs = (plantilla?.cuerpo ?? "")
+			.split(/\n\s*\n/g)
+			.map((paragraph) => paragraph.trim())
+			.filter(Boolean);
+
+		expect(paragraphs).toHaveLength(5);
+		expect(paragraphs.slice(3).join("\n\n")).toBe(
+			`${COBROS_NO_REPLY_WARNING}\n\nAtentamente,\n{nombreAsesor}\nTel: {telefonoAsesor}`,
+		);
 	});
 });

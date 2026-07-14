@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	accionUsaCuerpoNoReply,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+	COBROS_NO_REPLY_WARNING,
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
+	interpolar,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
@@ -177,5 +179,29 @@ describe("plantillas web de cobros", () => {
 			enviar: true,
 			telefonoAsesor: "41286630",
 		});
+	});
+
+	test("muestra el recordatorio de impuesto de circulación 2026 con sus variables", () => {
+		const plantilla = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
+		);
+		const cuerpoWhatsapp = plantilla?.cuerpoWhastapp ?? plantilla?.cuerpo ?? "";
+		const mensaje = interpolar(cuerpoWhatsapp, {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "",
+			cuotaMensual: "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+		});
+
+		expect(plantilla?.nombre).toBe("Impuesto de circulación 2026");
+		expect(mensaje).toContain("Estimado(a) Maria Lopez");
+		expect(mensaje).toContain("Atentamente,\nCarlos Pérez\nTel: 41286630");
+		expect(mensaje.match(/NO RESPONDER EN ESTE CHAT/g)?.length).toBe(1);
+		expect(cuerpoWhatsapp).toContain(COBROS_NO_REPLY_WARNING);
 	});
 });

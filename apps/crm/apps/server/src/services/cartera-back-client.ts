@@ -4,6 +4,7 @@
  */
 
 import type {
+	AsesorHistorialResponse,
 	BoletaPagoInversionista,
 	CarteraAsesor,
 	CarteraBackApiResponse,
@@ -24,13 +25,16 @@ import type {
 	CreatePagoInput,
 	CreateUsuarioInput,
 	CreditActionInput,
+	CreditoBucketResponse,
 	CreditoDetailResponse,
 	CreditoDirectoResponse,
 	FacturarGenericoInput,
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
 	GetAllCreditsParams,
+	GetAsesorHistorialParams,
 	GetBucketsHistorialParams,
+	GetCreditosPorBucketParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
 	GetPaymentsParams,
@@ -1007,6 +1011,120 @@ export class CarteraBackClient {
 			data: CarteraBucketHistorialEvento[];
 		}>(`/buckets/historial/credito/${creditoId}`, { method: "GET" });
 		return response.data ?? [];
+	}
+
+	// Listado de créditos POR BUCKET (motor). Fuente de la tabla de la página
+	// /cobros/buckets del CRM. Cada fila trae creditos.asesor_id, asesores
+	// (nombre), usuarios (cliente), numero_credito_sifco y el objeto bucket.
+	async getCreditosPorBucket(
+		params: GetCreditosPorBucketParams,
+	): Promise<PaginatedResponse<CreditoBucketResponse>> {
+		const queryParams = new URLSearchParams({
+			...(params.bucket !== undefined && { bucket: String(params.bucket) }),
+			...(params.page && { page: params.page.toString() }),
+			...(params.perPage && { perPage: params.perPage.toString() }),
+			...(params.numero_credito_sifco && {
+				numero_credito_sifco: params.numero_credito_sifco,
+			}),
+			...(params.nombre_usuario && { nombre_usuario: params.nombre_usuario }),
+			...(params.email_asesor && { email_asesor: params.email_asesor }),
+		});
+		const response = await this.request<{
+			success: boolean;
+			data: CreditoBucketResponse[];
+			page: number;
+			perPage: number;
+			totalCount: number;
+			totalPages: number;
+		}>(`/buckets/creditos?${queryParams}`, { method: "GET" });
+		return {
+			data: response.data ?? [],
+			page: response.page,
+			perPage: response.perPage,
+			total: response.totalCount,
+			totalPages: response.totalPages,
+		};
+	}
+
+	// Pool de asesores elegibles de un bucket (alimenta el dropdown del modal).
+	async getPoolAsesoresPorBucket(
+		bucket: number,
+	): Promise<{ asesor_id: number; nombre: string }[]> {
+		const response = await this.request<{
+			success: boolean;
+			data: { asesor_id: number; nombre: string }[];
+		}>(`/buckets/pool/${bucket}`, { method: "GET" }, true);
+		return response.data ?? [];
+	}
+
+	// Reasignación MANUAL del asesor de un crédito (supervisor/gerente). El
+	// usuario_email es el del supervisor real (el token es cuenta de servicio),
+	// para que la bitácora API_MANUAL registre quién lo hizo.
+	async reasignarAsesor(input: {
+		credito_id: number;
+		asesor_nuevo_id: number;
+		motivo: string;
+		usuario_email?: string;
+	}): Promise<{
+		success: boolean;
+		credito_id: number;
+		asesor_anterior: number | null;
+		asesor_nuevo: number;
+		bucket: number;
+	}> {
+		// Invalidar lecturas cacheadas que muestran asesor_id, tras mutarlo
+		// (review Codex #1102). Substrings que SÍ matchean la cache key real
+		// (`GET:${url}:${body}`): getCredito → "/credito?", getAllCreditos →
+		// "getAllCredits", getStats → "stats", getMoraByEtapaYAsesor (agrupa
+		// por asesor_id, review Codex) → "mora-por-etapa-asesor". (Nota: el
+		// patrón `credito:${id}` usado en updateCredito/creditAction NO matchea
+		// nada — bug preexistente fuera de alcance de este fix puntual.)
+		this.cache.invalidate("/credito?");
+		this.cache.invalidate("getAllCredits");
+		this.cache.invalidate("stats");
+		this.cache.invalidate("mora-por-etapa-asesor");
+		const result = await this.request<{
+			success: boolean;
+			credito_id: number;
+			asesor_anterior: number | null;
+			asesor_nuevo: number;
+			bucket: number;
+		}>(`/buckets/creditos/${input.credito_id}/reasignar`, {
+			method: "POST",
+			body: JSON.stringify({
+				asesor_nuevo_id: input.asesor_nuevo_id,
+				motivo: input.motivo,
+				...(input.usuario_email && { usuario_email: input.usuario_email }),
+			}),
+		});
+		return result;
+	}
+
+	// Bitácora de cambios de asesor (credito_asesor_historial) — auditoría de
+	// reasignaciones manuales (API_MANUAL) y automáticas (PROCESO_AUTO).
+	async getAsesorHistorial(
+		params: GetAsesorHistorialParams,
+	): Promise<AsesorHistorialResponse> {
+		const queryParams = new URLSearchParams({
+			...(params.desde && { desde: params.desde }),
+			...(params.hasta && { hasta: params.hasta }),
+			...(params.origen && { origen: params.origen }),
+			...(params.bucket && { bucket: params.bucket }),
+			...(params.asesor_nuevo && { asesor_nuevo: params.asesor_nuevo }),
+			...(params.numero_credito_sifco && {
+				numero_credito_sifco: params.numero_credito_sifco,
+			}),
+			...(params.nombre_usuario && { nombre_usuario: params.nombre_usuario }),
+			...(params.credito_id !== undefined && {
+				credito_id: params.credito_id.toString(),
+			}),
+			...(params.page && { page: params.page.toString() }),
+			...(params.pageSize && { pageSize: params.pageSize.toString() }),
+		});
+		return this.request<AsesorHistorialResponse>(
+			`/buckets/asesores-historial?${queryParams}`,
+			{ method: "GET" },
+		);
 	}
 
 	// ========================================================================

@@ -4395,6 +4395,109 @@ export const cobrosRouter = {
 				totalPages,
 			};
 		}),
+
+	// ────────────────────────────────────────────────────────────────────────
+	// COBROS-02 · Reasignación manual de asesor por bucket (supervisor/gerente)
+	// ────────────────────────────────────────────────────────────────────────
+
+	// Listado de créditos por bucket — fuente de la tabla de /cobros/buckets.
+	getCreditosPorBucket: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				bucket: z.number().int().min(0).optional(),
+				page: z.number().int().positive().optional(),
+				perPage: z.number().int().positive().max(200).optional(),
+				numeroCredito: z.string().optional(),
+				nombreCliente: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const resp = await carteraBackClient.getCreditosPorBucket({
+				bucket: input.bucket,
+				page: input.page ?? 1,
+				perPage: input.perPage ?? 20,
+				numero_credito_sifco: input.numeroCredito?.trim() || undefined,
+				nombre_usuario: input.nombreCliente?.trim() || undefined,
+			});
+			return {
+				data: resp.data.map((c) => ({
+					creditoId: c.creditos.credito_id,
+					numeroCreditoSifco: c.creditos.numero_credito_sifco,
+					cliente: c.usuarios?.nombre ?? "",
+					asesorId: c.creditos.asesor_id ?? null,
+					asesorNombre: c.asesores?.nombre ?? null,
+					bucket: c.bucket ?? null,
+				})),
+				page: resp.page,
+				perPage: resp.perPage,
+				total: resp.total,
+				totalPages: resp.totalPages,
+			};
+		}),
+
+	// Pool de asesores elegibles de un bucket (dropdown del modal de reasignar).
+	getPoolAsesoresPorBucket: cobrosSupervisorProcedure
+		.input(z.object({ bucket: z.number().int().min(0) }))
+		.handler(async ({ input }) => {
+			return carteraBackClient.getPoolAsesoresPorBucket(input.bucket);
+		}),
+
+	// Reasignación manual. Solo supervisor/gerente (cobrosSupervisorProcedure).
+	// El email del supervisor va a cartera-back para la bitácora API_MANUAL.
+	reasignarAsesorCredito: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				creditoId: z.number().int().positive(),
+				asesorNuevoId: z.number().int().positive(),
+				motivo: z.string().trim().min(1, "El motivo es obligatorio"),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			try {
+				return await carteraBackClient.reasignarAsesor({
+					credito_id: input.creditoId,
+					asesor_nuevo_id: input.asesorNuevoId,
+					motivo: input.motivo,
+					usuario_email: context.session.user.email,
+				});
+			} catch (err) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						err instanceof Error
+							? err.message
+							: "No se pudo reasignar el asesor",
+				});
+			}
+		}),
+
+	// Bitácora de reasignaciones de asesor (auditoría) — manual + automática.
+	getHistorialReasignaciones: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				desde: z.string().optional(),
+				hasta: z.string().optional(),
+				origen: z.enum(["PROCESO_AUTO", "API_MANUAL"]).optional(),
+				bucket: z.number().int().min(0).optional(),
+				asesor: z.string().optional(),
+				numeroCredito: z.string().optional(),
+				creditoId: z.number().int().positive().optional(),
+				page: z.number().int().positive().optional(),
+				pageSize: z.number().int().positive().max(200).optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			return carteraBackClient.getAsesorHistorial({
+				desde: input.desde,
+				hasta: input.hasta,
+				origen: input.origen,
+				bucket: input.bucket !== undefined ? String(input.bucket) : undefined,
+				asesor_nuevo: input.asesor?.trim() || undefined,
+				numero_credito_sifco: input.numeroCredito?.trim() || undefined,
+				credito_id: input.creditoId,
+				page: input.page ?? 1,
+				pageSize: input.pageSize ?? 20,
+			});
+		}),
 };
 
 /**

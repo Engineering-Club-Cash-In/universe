@@ -7,6 +7,10 @@ import {
 } from "../controllers/buckets/bucketsHistorial";
 import { getAsesorHistorial } from "../controllers/buckets/asesorHistorial";
 import { getCreditosWithUserByMesAnio } from "../controllers/credits";
+import {
+  getAsesoresPorBucket,
+  reasignarAsesorManual,
+} from "../controllers/buckets/reasignarAsesor";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo (= enum de statusCredit menos
@@ -361,5 +365,76 @@ export const bucketsRouter = new Elysia()
           error: String(err),
         };
       }
+    },
+  )
+
+  // Pool de asesores elegibles de un bucket (alimenta el dropdown del modal de
+  // reasignación manual en el CRM). Misma fuente que valida el POST /reasignar.
+  .get(
+    "/buckets/pool/:bucket",
+    async ({ params, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const bucket = Number(params.bucket);
+        if (!Number.isInteger(bucket) || bucket < 0) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] bucket inválido" };
+        }
+        const data = await getAsesoresPorBucket(bucket);
+        return { success: true, data };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener el pool de asesores del bucket",
+          error: String(err),
+        };
+      }
+    },
+  )
+
+  // Reasignación MANUAL del asesor de un crédito (supervisor/gerente). Solo a un
+  // asesor del pool del bucket actual; motivo obligatorio; bitácora API_MANUAL.
+  .post(
+    "/buckets/creditos/:credito_id/reasignar",
+    async ({ params, body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const creditoId = Number(params.credito_id);
+        if (!Number.isInteger(creditoId) || creditoId <= 0) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] credito_id inválido" };
+        }
+        const asesorNuevoId = Number(body?.asesor_nuevo_id);
+        if (!Number.isInteger(asesorNuevoId) || asesorNuevoId <= 0) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] asesor_nuevo_id inválido" };
+        }
+        const result = await reasignarAsesorManual({
+          credito_id: creditoId,
+          asesor_nuevo_id: asesorNuevoId,
+          motivo: body?.motivo,
+          usuario_email: body?.usuario_email,
+        });
+        if (!result.success) {
+          set.status = result.status ?? 400;
+          return { success: false, message: result.message };
+        }
+        return result;
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo reasignar el asesor del crédito",
+          error: String(err),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        asesor_nuevo_id: t.Union([t.Number(), t.String()]),
+        motivo: t.String(),
+        usuario_email: t.Optional(t.String()),
+      }),
     },
   );

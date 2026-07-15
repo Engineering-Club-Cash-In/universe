@@ -683,6 +683,85 @@ export interface CarteraBucketCatalogo {
 }
 
 // ============================================================================
+// HISTORIAL DE BUCKETS (motor COBROS-02, GET /buckets/historial)
+// ============================================================================
+
+/** Fila del histórico de migraciones de bucket (`cartera.buckets_historial` + joins). */
+export interface CarteraBucketHistorialRow {
+	historial_id: number;
+	fecha: string;
+	credito_id: number;
+	numero_credito_sifco: string;
+	cliente: string;
+	asesor_id: number | null;
+	asesor: string | null;
+	tipo_evento: "INICIAL" | "SUBIDA" | "BAJADA";
+	origen: string;
+	bucket_anterior: number | null;
+	bucket_anterior_prefijo: string | null;
+	bucket_anterior_nombre: string | null;
+	bucket_nuevo: number;
+	bucket_nuevo_prefijo: string | null;
+	bucket_nuevo_nombre: string | null;
+	cuotas_atrasadas_nuevas: number | null;
+	status_credito: string | null;
+	status_actual: string;
+	capital: string;
+	asesor_atribucion_id: number | null;
+	asesor_atribucion: string | null;
+	pago_id: number | null;
+	motivo: string | null;
+}
+
+export interface CarteraBucketsHistorialResponse {
+	success: boolean;
+	data: CarteraBucketHistorialRow[];
+	pagination: {
+		page: number;
+		pageSize: number;
+		total: number;
+		totalPages: number;
+	};
+	resumen: {
+		total: number;
+		iniciales: number;
+		subidas: number;
+		bajadas: number;
+	};
+}
+
+export interface GetBucketsHistorialParams {
+	desde?: string; // YYYY-MM-DD (corte por día GT, inclusive)
+	hasta?: string; // YYYY-MM-DD
+	tipo_evento?: string; // CSV: INICIAL,SUBIDA,BAJADA
+	bucket_nuevo?: string; // CSV de enteros 0-5
+	numero_credito_sifco?: string; // ILIKE
+	nombre_usuario?: string; // cliente, ILIKE
+	page?: number;
+	pageSize?: number;
+}
+
+/** Evento del drill-down por crédito (GET /buckets/historial/credito/:id). */
+export interface CarteraBucketHistorialEvento {
+	historial_id: number;
+	fecha: string;
+	tipo_evento: "INICIAL" | "SUBIDA" | "BAJADA";
+	origen: string;
+	bucket_anterior: number | null;
+	bucket_anterior_prefijo: string | null;
+	bucket_anterior_nombre: string | null;
+	bucket_nuevo: number;
+	bucket_nuevo_prefijo: string | null;
+	bucket_nuevo_nombre: string | null;
+	cuotas_atrasadas_nuevas: number | null;
+	status_credito: string | null;
+	asesor_atribucion_id: number | null;
+	asesor_atribucion: string | null;
+	pago_id: number | null;
+	motivo: string | null;
+}
+
+// ============================================================================
 // FACTURACIÓN
 // ============================================================================
 

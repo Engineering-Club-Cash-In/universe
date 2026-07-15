@@ -45,8 +45,8 @@ import {
 	recalculateCobrosPercentagesWithFallback,
 } from "../lib/cobros-capital-percentages";
 import {
-	PLANTILLAS_MENSAJES,
 	interpolar as interpolarPlantilla,
+	PLANTILLAS_MENSAJES,
 	prepararTelefonoAsesorParaEnvio,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
@@ -487,9 +487,7 @@ export const cobrosRouter = {
 
 					const estatusStats = recalculateCobrosPercentagesWithFallback(
 						[
-							...bucketsFunnel.map(
-								({ sumaCapitalCruda, ...bucket }) => bucket,
-							),
+							...bucketsFunnel.map(({ sumaCapitalCruda, ...bucket }) => bucket),
 							{
 								estadoMora: "completado",
 								totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
@@ -1562,6 +1560,67 @@ export const cobrosRouter = {
 	getBucketsCatalogo: cobrosProcedure.handler(async () => {
 		return getBucketsParaUIAsync();
 	}),
+
+	// CB-006: histórico de migraciones de bucket (motor COBROS-02) desde
+	// cartera-back (/buckets/historial). Solo admin/cobros_supervisor: expone
+	// movimientos de TODA la cartera, no la porción del asesor.
+	getBucketsHistorial: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				desde: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/)
+					.optional(),
+				hasta: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/)
+					.optional(),
+				tipoEvento: z.enum(["INICIAL", "SUBIDA", "BAJADA"]).optional(),
+				bucketNuevo: z.number().int().min(0).max(5).optional(),
+				numeroCreditoSifco: z.string().max(100).optional(),
+				nombreUsuario: z.string().max(200).optional(),
+				page: z.number().int().min(1).default(1),
+				pageSize: z.number().int().min(1).max(100).default(20),
+			}),
+		)
+		.handler(async ({ input }) => {
+			try {
+				return await carteraBackClient.getBucketsHistorial({
+					desde: input.desde,
+					hasta: input.hasta,
+					tipo_evento: input.tipoEvento,
+					bucket_nuevo:
+						input.bucketNuevo !== undefined
+							? String(input.bucketNuevo)
+							: undefined,
+					numero_credito_sifco: input.numeroCreditoSifco || undefined,
+					nombre_usuario: input.nombreUsuario || undefined,
+					page: input.page,
+					pageSize: input.pageSize,
+				});
+			} catch (error) {
+				console.error("[getBucketsHistorial] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "No se pudo obtener el historial de buckets",
+				});
+			}
+		}),
+
+	// CB-006: ficha por cuenta — historial completo de migraciones de UN crédito.
+	getBucketsHistorialCredito: cobrosSupervisorProcedure
+		.input(z.object({ creditoId: z.number().int().positive() }))
+		.handler(async ({ input }) => {
+			try {
+				return await carteraBackClient.getBucketsHistorialCredito(
+					input.creditoId,
+				);
+			} catch (error) {
+				console.error("[getBucketsHistorialCredito] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "No se pudo obtener el historial del crédito",
+				});
+			}
+		}),
 
 	// Obtener usuarios con rol de cobros para asignación
 	getUsuariosCobros: cobrosSupervisorProcedure.handler(async () => {
@@ -3660,7 +3719,7 @@ export const cobrosRouter = {
 					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
 					telefonoReal: telefono,
 					mensaje,
-					casoCobroId: sifco ? casoIdPorSifco.get(sifco) ?? null : null,
+					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
 					clienteNombre,
 				});
 			}

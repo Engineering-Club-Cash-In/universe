@@ -13,6 +13,7 @@ import {
 	FileText,
 	Gavel,
 	Landmark,
+	Layers,
 	LayoutDashboard,
 	Menu,
 	MessageSquare,
@@ -262,6 +263,14 @@ export default function Header() {
 											<Link to="/cobros/metas" className="cursor-pointer">
 												<Target className="mr-2 h-4 w-4" />
 												Metas de Mora
+											</Link>
+										</DropdownMenuItem>
+									)}
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/buckets" className="cursor-pointer">
+												<Layers className="mr-2 h-4 w-4" />
+												Historial de Buckets
 											</Link>
 										</DropdownMenuItem>
 									)}
@@ -609,6 +618,12 @@ function MobileNav({
 											<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>
 												<Target />
 												Metas de Mora
+											</Link>
+										)}
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link to="/cobros/buckets" className={MOBILE_LINK_CLASS}>
+												<Layers />
+												Historial de Buckets
 											</Link>
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (

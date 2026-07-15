@@ -141,6 +141,8 @@ export const cobrosAppRouter = {
 	asignarResponsableCobros: cobrosRouter.asignarResponsableCobros,
 	getUsuariosCobros: cobrosRouter.getUsuariosCobros,
 	getBucketsCatalogo: cobrosRouter.getBucketsCatalogo,
+	getBucketsHistorial: cobrosRouter.getBucketsHistorial,
+	getBucketsHistorialCredito: cobrosRouter.getBucketsHistorialCredito,
 	getHistorialPagos: cobrosRouter.getHistorialPagos,
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
 	getTodosLosCreditos: cobrosRouter.getTodosLosCreditos,

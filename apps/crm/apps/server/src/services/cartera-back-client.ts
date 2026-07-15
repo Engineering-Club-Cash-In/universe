@@ -12,6 +12,8 @@ import type {
 	CarteraBackError,
 	CarteraBackValidationError,
 	CarteraBucketCatalogo,
+	CarteraBucketHistorialEvento,
+	CarteraBucketsHistorialResponse,
 	CarteraCredito,
 	CarteraInversionista,
 	CarteraPagoCredito,
@@ -28,6 +30,7 @@ import type {
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
 	GetAllCreditsParams,
+	GetBucketsHistorialParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
 	GetPaymentsParams,
@@ -966,6 +969,43 @@ export class CarteraBackClient {
 			success: boolean;
 			data: CarteraBucketCatalogo[];
 		}>("/config/buckets", { method: "GET" }, true);
+		return response.data ?? [];
+	}
+
+	/**
+	 * Histórico de migraciones de bucket (motor COBROS-02), paginado con
+	 * filtros y resumen. Sin cache: el job puede correrse manual y la vista
+	 * de auditoría debe reflejarlo al instante.
+	 */
+	async getBucketsHistorial(
+		params: GetBucketsHistorialParams = {},
+	): Promise<CarteraBucketsHistorialResponse> {
+		const queryParams = new URLSearchParams({
+			...(params.desde && { desde: params.desde }),
+			...(params.hasta && { hasta: params.hasta }),
+			...(params.tipo_evento && { tipo_evento: params.tipo_evento }),
+			...(params.bucket_nuevo && { bucket_nuevo: params.bucket_nuevo }),
+			...(params.numero_credito_sifco && {
+				numero_credito_sifco: params.numero_credito_sifco,
+			}),
+			...(params.nombre_usuario && { nombre_usuario: params.nombre_usuario }),
+			...(params.page && { page: params.page.toString() }),
+			...(params.pageSize && { pageSize: params.pageSize.toString() }),
+		});
+		return this.request<CarteraBucketsHistorialResponse>(
+			`/buckets/historial?${queryParams}`,
+			{ method: "GET" },
+		);
+	}
+
+	/** Drill-down: historial completo de migraciones de UN crédito (la "ficha"). */
+	async getBucketsHistorialCredito(
+		creditoId: number,
+	): Promise<CarteraBucketHistorialEvento[]> {
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraBucketHistorialEvento[];
+		}>(`/buckets/historial/credito/${creditoId}`, { method: "GET" });
 		return response.data ?? [];
 	}
 

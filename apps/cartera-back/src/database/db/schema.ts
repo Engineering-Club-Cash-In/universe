@@ -62,7 +62,8 @@
     "NO_APLICA",
     "PENDIENTE_AUTORIZACION",
     "VERIFICADO",
-    "RECHAZADO"
+    "RECHAZADO",
+    "COMPLETADO"
   ]);
 
   // 🧾 Rubros del desglose de facturación (lo que factura CUBE) para el reporte diario.
@@ -256,7 +257,14 @@
     fecha_liquidacion_inversionistas: timestamp("fecha_liquidacion_inversionistas"), // 👈 Cuándo se liquidó
 
     createdAt: timestamp("createdat").defaultNow(),
-  });
+  }, (table) => ({
+    // Soporta las subconsultas correlacionadas por crédito/fecha (filtro
+    // excluir_pagados_mes, próximas cuotas) sin seq scan por fila.
+    idxCreditoFecha: index("idx_cuotas_credito_credito_fecha").on(
+      table.credito_id,
+      table.fecha_vencimiento,
+    ),
+  }));
   // 📊 Cierre mensual de cartera — foto del estado por cada statusCredit.
   //    El job corre el día 5 de cada mes y `periodo` apunta al mes anterior (el que se cierra).
   //    `capital_total` = suma del campo capital (monto colocado) de los créditos en ese estado.
@@ -1966,6 +1974,30 @@
       ixTxid:   index("ix_hist_mont_txid").on(t.txid),
       ixCred:   index("ix_hist_mont_cred").on(t.credito_id, t.inversionista_id),
       ixFecha:  index("ix_hist_mont_fecha").on(t.fecha),
+    })
+  );
+
+  // ── Historial de cambios del capital de un crédito ──
+  // Poblado por el trigger trg_historial_capital_credito (ver drizzle/0014).
+  export const historial_capital_credito = customSchema.table(
+    "historial_capital_credito",
+    {
+      id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+      txid: bigint("txid", { mode: "number" }).notNull(),
+      operacion: text("operacion").notNull(),
+      credito_id: integer("credito_id").notNull().references(() => creditos.credito_id, { onDelete: "cascade" }),
+      capital_anterior: numeric("capital_anterior", { precision: 18, scale: 2 }),
+      capital_nuevo: numeric("capital_nuevo", { precision: 18, scale: 2 }),
+      fuente: text("fuente").notNull().default("SISTEMA"),
+      motivo: text("motivo"),
+      platform_user_id: integer("platform_user_id").references(() => platform_users.id, { onDelete: "set null" }),
+      user_email: varchar("user_email", { length: 200 }),
+      fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => ({
+      ixCred:   index("ix_hist_cap_cred").on(t.credito_id, t.fecha),
+      ixFecha:  index("ix_hist_cap_fecha").on(t.fecha),
+      ixFuente: index("ix_hist_cap_fuente").on(t.fuente),
     })
   );
 

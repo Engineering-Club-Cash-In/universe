@@ -1,0 +1,207 @@
+import { describe, expect, test } from "bun:test";
+import {
+	accionUsaCuerpoNoReply,
+	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+	COBROS_NO_REPLY_WARNING,
+	crearUrlWhatsappManual,
+	cuerpoParaValidarNoReply,
+	interpolar,
+	mensajeEmailEditable,
+	mensajePlantillaEditable,
+	mensajeSmsEditable,
+	PLANTILLAS_MENSAJES,
+	prepararTelefonoAsesorParaEnvio,
+} from "./plantillas-mensajes";
+
+const NO_REPLY_WARNING =
+	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+const CONFIRMATION_REQUEST_REGEX =
+	/confirme la recepción|confirmar recepción|confirme recepcion/i;
+
+describe("plantillas web de cobros", () => {
+	test("incluyen el aviso de no responder en el cuerpo de WhatsApp", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+			const matches = cuerpoWhatsapp.matchAll(
+				/NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS/g,
+			);
+
+			expect(Array.from(matches).length, plantilla.id).toBe(1);
+			expect(cuerpoWhatsapp, plantilla.id).toContain(NO_REPLY_WARNING);
+		}
+	});
+
+	test("colocan el aviso antes de la firma cuando existe", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+			const warningIndex = cuerpoWhatsapp.indexOf(NO_REPLY_WARNING);
+			const signatureIndex = cuerpoWhatsapp.indexOf("Atentamente");
+
+			if (signatureIndex !== -1) {
+				expect(warningIndex, plantilla.id).toBeLessThan(signatureIndex);
+			}
+		}
+	});
+
+	test("no indican responder por este chat cuando tienen aviso de no responder", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+
+			expect(cuerpoWhatsapp, plantilla.id).not.toMatch(
+				/por este medio|por este chat|comunicarse por este medio/i,
+			);
+		}
+	});
+
+	test("no piden confirmar recepcion cuando tienen aviso de no responder", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+
+			if (cuerpoWhatsapp.includes(NO_REPLY_WARNING)) {
+				expect(cuerpoWhatsapp, plantilla.id).not.toMatch(
+					CONFIRMATION_REQUEST_REGEX,
+				);
+			}
+		}
+	});
+
+	test("dirigen comprobantes y dudas al telefono del asesor", () => {
+		const bienvenida = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "bienvenida",
+		);
+		const preMora = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "pre_mora",
+		);
+
+		expect(bienvenida?.cuerpoWhastapp).toMatch(
+			/boleta o comprobante de pago[^.]*{telefonoAsesor}/i,
+		);
+		expect(preMora?.cuerpoWhastapp).toMatch(/duda[^.]*{telefonoAsesor}/i);
+	});
+
+	test("crea links manuales de WhatsApp con el cuerpo de WhatsApp", () => {
+		const url = crearUrlWhatsappManual(
+			"50241286630",
+			"Mensaje WhatsApp no-reply",
+			"Mensaje email por este medio",
+		);
+		const text = new URL(url).searchParams.get("text");
+
+		expect(text).toBe("Mensaje WhatsApp no-reply");
+	});
+
+	test("edita el cuerpo visible que usa WhatsApp", () => {
+		expect(
+			mensajePlantillaEditable(
+				"whatsapp",
+				"Mensaje email por este medio",
+				"Mensaje WhatsApp no-reply",
+			),
+		).toBe("Mensaje WhatsApp no-reply");
+	});
+
+	test("respeta mensajes de WhatsApp vacios editados manualmente", () => {
+		expect(mensajePlantillaEditable("whatsapp", "Mensaje fallback", "")).toBe(
+			"",
+		);
+	});
+
+	test("envia por SMS el mensaje visible cuando se edita desde WhatsApp", () => {
+		expect(
+			mensajeSmsEditable(
+				"whatsapp",
+				"Mensaje email largo oculto",
+				"Mensaje visible editado",
+			),
+		).toBe("Mensaje visible editado");
+	});
+
+	test("envia por Email el mensaje visible cuando se edita desde WhatsApp", () => {
+		expect(
+			mensajeEmailEditable(
+				"whatsapp",
+				"Mensaje email largo oculto",
+				"Mensaje visible editado",
+			),
+		).toBe("Mensaje visible editado");
+	});
+
+	test("bloquea todos los envios que usan cuerpo no-reply sin telefono de asesor", () => {
+		expect(accionUsaCuerpoNoReply("whatsapp-link")).toBe(true);
+		expect(accionUsaCuerpoNoReply("whatsapp-api")).toBe(true);
+		expect(accionUsaCuerpoNoReply("sms-api")).toBe(true);
+		expect(accionUsaCuerpoNoReply("email-link")).toBe(true);
+		expect(accionUsaCuerpoNoReply("email-api")).toBe(true);
+	});
+
+	test("valida no-reply contra el cuerpo real de SMS", () => {
+		expect(
+			cuerpoParaValidarNoReply(
+				"sms-api",
+				`Mensaje WhatsApp oculto ${NO_REPLY_WARNING}`,
+				"Mensaje SMS seguro",
+			),
+		).toBe("Mensaje SMS seguro");
+	});
+
+	test("valida no-reply contra el cuerpo real de Email", () => {
+		expect(
+			cuerpoParaValidarNoReply(
+				"email-api",
+				`Mensaje WhatsApp oculto ${NO_REPLY_WARNING}`,
+				"Mensaje SMS seguro",
+				"Mensaje Email seguro",
+			),
+		).toBe("Mensaje Email seguro");
+	});
+
+	test("descarta plantillas no-reply sin telefono de asesor", () => {
+		const cuerpoWhatsapp =
+			PLANTILLAS_MENSAJES[0].cuerpoWhastapp ?? PLANTILLAS_MENSAJES[0].cuerpo;
+
+		for (const telefono of [null, undefined, "", "   "]) {
+			expect(prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, telefono)).toEqual(
+				{
+					enviar: false,
+					motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+				},
+			);
+		}
+	});
+
+	test("recorta el telefono del asesor antes de interpolar", () => {
+		const cuerpoWhatsapp =
+			PLANTILLAS_MENSAJES[0].cuerpoWhastapp ?? PLANTILLAS_MENSAJES[0].cuerpo;
+
+		expect(
+			prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, " 41286630 "),
+		).toEqual({
+			enviar: true,
+			telefonoAsesor: "41286630",
+		});
+	});
+
+	test("muestra el recordatorio de impuesto de circulación 2026 con sus variables", () => {
+		const plantilla = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
+		);
+		const cuerpoWhatsapp = plantilla?.cuerpoWhastapp ?? plantilla?.cuerpo ?? "";
+		const mensaje = interpolar(cuerpoWhatsapp, {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "",
+			cuotaMensual: "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+		});
+
+		expect(plantilla?.nombre).toBe("Impuesto de circulación 2026");
+		expect(mensaje).toContain("Estimado(a) Maria Lopez");
+		expect(mensaje).toContain("Atentamente,\nCarlos Pérez\nTel: 41286630");
+		expect(mensaje.match(/NO RESPONDER EN ESTE CHAT/g)?.length).toBe(1);
+		expect(cuerpoWhatsapp).toContain(COBROS_NO_REPLY_WARNING);
+	});
+});

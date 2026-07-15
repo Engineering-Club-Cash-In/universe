@@ -26,7 +26,10 @@ import {
 	validatePortalToken,
 } from "./controllers/portal-lead";
 import { createPublicLead } from "./controllers/public-lead";
-import { getVehicleByCodigoController } from "./controllers/vehicles";
+import {
+	getVehicleByCodigoController,
+	getVehiclesBySifcoController,
+} from "./controllers/vehicles";
 import type { db } from "./db";
 import { otps } from "./db/schema/otp";
 import {
@@ -1084,6 +1087,45 @@ app.get("/info/vehicle-details", async (c) => {
 
 	const result = await getVehicleByCodigoController(numero_sifco);
 	return c.json(result, result.success ? 200 : 404);
+});
+
+// Endpoint batch para reportes de cartera: placa/chasis por números SIFCO.
+app.post("/info/vehicles-by-sifco", async (c) => {
+	try {
+		const body = await c.req.json<{ numero_sifcos?: unknown }>();
+		if (!Array.isArray(body.numero_sifcos)) {
+			return c.json(
+				{ success: false, message: "numero_sifcos must be an array" },
+				400,
+			);
+		}
+
+		// Tope de abuso sobre el array CRUDO, antes de normalizar, para no recorrer
+		// un payload gigante (aunque normalice a vacío) en una ruta pública.
+		const MAX_SIFCOS = 50000;
+		if (body.numero_sifcos.length > MAX_SIFCOS) {
+			return c.json(
+				{
+					success: false,
+					message: `numero_sifcos excede el máximo permitido (${MAX_SIFCOS})`,
+				},
+				400,
+			);
+		}
+
+		const numeroSifcos = body.numero_sifcos
+			.map((value) => String(value ?? "").trim())
+			.filter(Boolean);
+
+		const result = await getVehiclesBySifcoController(numeroSifcos);
+		return c.json(result, result.success ? 200 : 500);
+	} catch (err: any) {
+		console.error("[ERROR] /info/vehicles-by-sifco:", err);
+		return c.json(
+			{ success: false, message: err.message || "Internal server error" },
+			500,
+		);
+	}
 });
 
 // Job periódico de notificaciones de cobros (cada hora)

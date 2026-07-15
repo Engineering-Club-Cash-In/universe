@@ -2,6 +2,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { abonos_capital, creditos_inversionistas_espejo, inversionistas } from "../database/db";
 import { db } from "../database";
 import Big from "big.js";
+import { obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
 
 export async function createAbonoCapital(data: {
   credito_id: number;
@@ -167,6 +168,94 @@ export async function distribuirAbonoCapitalEspejo(
       data: null,
     };
   }
+}
+
+/**
+ * Registra la CANCELACIÓN de capital de un crédito al aceptar su devolución.
+ * Inserta una fila en abonos_capital por cada inversionista del espejo, con
+ * monto = su capital REAL (cada inversionista recupera lo que efectivamente aportó).
+ *
+ * Debe llamarse DENTRO de una transacción (recibe el handle `tx`) para que el
+ * registro sea atómico junto con el cambio de estado del crédito.
+ *
+ * Detalles:
+ * - Idempotente: primero borra las cancelaciones ABIERTAS (liquidado=false) del
+ *   crédito y luego reinserta. updateCredit permite VERIFICADO ->
+ *   PENDIENTE_AUTORIZACION, así que una devolución puede re-aceptarse antes de
+ *   liquidar; sin esto cada re-aceptación acumularía otro juego de filas
+ *   CANCELACION (doble conteo). Las filas ya liquidadas (pago real) NO se tocan.
+ * - Capital real: al monto_aportado del espejo se le restan las compras
+ *   PENDIENTES (que ya "ensuciaron" el espejo pero aún no son capital real),
+ *   igual que el cálculo de intereses en pagos (obtenerSumaComprasPendientes).
+ * - No reusa distribuirAbonoCapitalEspejo a propósito: esa función usa el `db`
+ *   global (no participaría en la transacción) y suma sobre filas no-liquidadas
+ *   existentes sin discriminar por tipo, con lo que podría fusionar la
+ *   cancelación dentro de un abono CAPITAL previo.
+ */
+export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
+  // 1. Inversionistas del espejo con su capital aportado
+  const invsEspejo = await tx
+    .select({
+      inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+      monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+      nombre: inversionistas.nombre,
+    })
+    .from(creditos_inversionistas_espejo)
+    .innerJoin(
+      inversionistas,
+      eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
+    )
+    .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
+
+  // Sin espejo → no hay capital de inversionistas que cancelar. No es error.
+  if (invsEspejo.length === 0) {
+    return { insertados: 0, detalle: [] as any[] };
+  }
+
+  // 2. Idempotencia: reemplazar las cancelaciones ABIERTAS previas del crédito
+  //    (una re-aceptación no debe acumular). Solo las no-liquidadas.
+  await tx
+    .delete(abonos_capital)
+    .where(
+      and(
+        eq(abonos_capital.credito_id, credito_id),
+        eq(abonos_capital.tipo, "CANCELACION"),
+        eq(abonos_capital.liquidado, false)
+      )
+    );
+
+  // 3. Una fila CANCELACION por inversionista con su capital REAL
+  //    (monto_aportado del espejo menos sus compras pendientes).
+  const detalle: any[] = [];
+  for (const inv of invsEspejo) {
+    const pendientes = await obtenerSumaComprasPendientes(
+      credito_id,
+      inv.inversionista_id
+    );
+    const monto = new Big(inv.monto_aportado ?? 0).minus(pendientes);
+
+    // Omitir capital real en cero o negativo (nada que cancelar)
+    if (monto.lte(0)) continue;
+
+    const [nuevo] = await tx
+      .insert(abonos_capital)
+      .values({
+        credito_id,
+        inversionista_id: inv.inversionista_id,
+        monto: monto.toString(),
+        tipo: "CANCELACION" as const,
+        liquidado: false,
+      })
+      .returning();
+
+    detalle.push({
+      inversionista: inv.nombre,
+      inversionista_id: inv.inversionista_id,
+      monto: nuevo.monto,
+    });
+  }
+
+  return { insertados: detalle.length, detalle };
 }
 
 export async function updateAbonoCapital(

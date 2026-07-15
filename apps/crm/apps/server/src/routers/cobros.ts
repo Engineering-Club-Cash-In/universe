@@ -45,8 +45,9 @@ import {
 	recalculateCobrosPercentagesWithFallback,
 } from "../lib/cobros-capital-percentages";
 import {
-	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
+	interpolar as interpolarPlantilla,
+	prepararTelefonoAsesorParaEnvio,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
 import { fetchAllPages } from "../lib/fetch-all-pages";
@@ -112,6 +113,7 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	fecha_hasta?: string;
 	capital_min?: number;
 	capital_max?: number;
+	excluir_pagados_mes?: boolean;
 }) {
 	const estado = params.estado || "ACTIVO";
 
@@ -160,6 +162,9 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		}),
 		...(params.capital_max !== undefined && {
 			capital_max: params.capital_max,
+		}),
+		...(params.excluir_pagados_mes && {
+			excluir_pagados_mes: true,
 		}),
 	});
 
@@ -705,6 +710,7 @@ export const cobrosRouter = {
 				etiquetas: z.array(z.string()).optional(),
 				capitalMin: z.number().optional(),
 				capitalMax: z.number().optional(),
+				excluirPagadosMes: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -868,6 +874,7 @@ export const cobrosRouter = {
 									fecha_hasta: input.fechaHasta,
 									capital_min: input.capitalMin,
 									capital_max: input.capitalMax,
+									excluir_pagados_mes: input.excluirPagadosMes,
 								});
 							}
 						} else {
@@ -914,6 +921,7 @@ export const cobrosRouter = {
 									numeros_credito_sifco: sifcosFiltro,
 									capital_min: input.capitalMin,
 									capital_max: input.capitalMax,
+									excluir_pagados_mes: input.excluirPagadosMes,
 								});
 
 								const allCredits = [...firstPage.data];
@@ -934,6 +942,7 @@ export const cobrosRouter = {
 										numeros_credito_sifco: sifcosFiltro,
 										capital_min: input.capitalMin,
 										capital_max: input.capitalMax,
+										excluir_pagados_mes: input.excluirPagadosMes,
 									});
 									allCredits.push(...nextPage.data);
 								}
@@ -979,6 +988,7 @@ export const cobrosRouter = {
 								fecha_hasta: input.fechaHasta,
 								capital_min: input.capitalMin,
 								capital_max: input.capitalMax,
+								excluir_pagados_mes: input.excluirPagadosMes,
 							});
 						}
 					} else {
@@ -999,6 +1009,7 @@ export const cobrosRouter = {
 							numeros_credito_sifco: sifcosPorEtiquetas,
 							capital_min: input.capitalMin,
 							capital_max: input.capitalMax,
+							excluir_pagados_mes: input.excluirPagadosMes,
 						});
 					}
 
@@ -3250,6 +3261,7 @@ export const cobrosRouter = {
 				etiquetas: z.array(z.string()).optional(),
 				fechaDesde: z.string().optional(),
 				fechaHasta: z.string().optional(),
+				excluirPagadosMes: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3453,6 +3465,7 @@ export const cobrosRouter = {
 						numeros_credito_sifco: sifcosPorEtiquetas,
 						fecha_desde: input.fechaDesde,
 						fecha_hasta: input.fechaHasta,
+						excluir_pagados_mes: input.excluirPagadosMes,
 						page,
 						perPage,
 					});
@@ -3598,6 +3611,19 @@ export const cobrosRouter = {
 				const cuerpoBase = input.cuerpoEditado?.trim()
 					? input.cuerpoEditado
 					: plantilla.cuerpo;
+				const telefonoAsesor = prepararTelefonoAsesorParaEnvio(
+					cuerpoBase,
+					asesor.telefono,
+				);
+
+				if (!telefonoAsesor.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: telefonoAsesor.motivo,
+					});
+					continue;
+				}
 
 				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
 				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
@@ -3625,7 +3651,7 @@ export const cobrosRouter = {
 								})
 							: "",
 					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
-					telefonoAsesor: asesor.telefono ?? "",
+					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 				});
 
@@ -3634,7 +3660,7 @@ export const cobrosRouter = {
 					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
 					telefonoReal: telefono,
 					mensaje,
-					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
+					casoCobroId: sifco ? casoIdPorSifco.get(sifco) ?? null : null,
 					clienteNombre,
 				});
 			}
@@ -3975,6 +4001,8 @@ export const cobrosRouter = {
 			z
 				.object({
 					emailCobrador: z.string().optional(),
+					fecha: z.string().optional(),
+					asesores: z.array(z.number()).optional(),
 				})
 				.optional(),
 		)
@@ -3987,6 +4015,32 @@ export const cobrosRouter = {
 
 			return carteraBackClient.getMoraByEtapaYAsesor({
 				emailCobrador: input?.emailCobrador,
+				fecha: input?.fecha,
+				asesores: input?.asesores,
+			});
+		}),
+
+	getMoraCobradaPorAsesor: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				mes: z.number(),
+				anio: z.number(),
+				asesores: z.array(z.number()).optional(),
+				emailCobrador: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getMoraCobradaPorAsesor({
+				mes: input.mes,
+				anio: input.anio,
+				asesores: input.asesores,
+				emailCobrador: input.emailCobrador,
 			});
 		}),
 
@@ -4057,6 +4111,50 @@ export const cobrosRouter = {
 					cuotasPagadas,
 				},
 			};
+		}),
+
+	// ========================================================================
+	// COBRANZA DIARIA (Cobrado vs Esperado)
+	// ========================================================================
+
+	getCobranzaDiaria: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				anio: z.number(),
+				mes: z.number(),
+				dia: z.number(),
+				asesorId: z.number().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getCobranzaDiaria(input);
+		}),
+
+	getCobranzaDiariaDetalle: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				anio: z.number(),
+				mes: z.number(),
+				dia: z.number(),
+				asesorId: z.number(),
+				limit: z.number().optional(),
+				offset: z.number().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+
+			return carteraBackClient.getCobranzaDiariaDetalle(input);
 		}),
 
 	// ========================================================================

@@ -717,6 +717,7 @@ export const paymentRouter = new Elysia()
         cuota_esperada,
         fecha_cuota,
         plazo_completo,
+        dia_vencimiento,
       } = body;
 
       if (!fecha_cuota || fecha_cuota.trim() === "") {
@@ -733,6 +734,7 @@ export const paymentRouter = new Elysia()
           cuota_esperada,
           fecha_cuota,
           plazo_completo,
+          dia_vencimiento,
         });
 
         return {
@@ -757,12 +759,13 @@ export const paymentRouter = new Elysia()
         plazo_completo: t.Number(),
         plazo_encontrado: t.Number(),
         cuotas_por_crear: t.Number(),
+        dia_vencimiento: t.Optional(t.Number({ minimum: 1, maximum: 31 })),
       }),
       detail: {
         tags: ["SIFCO Pagos"],
         summary: "Ajustar fechas y plazo de un crédito",
         description:
-          "Ajusta fecha_vencimiento de cuotas y crea/borra cuotas según plazo_completo. NO modifica el estado pagado de cuotas existentes ni los abonos.",
+          "Ajusta fecha_vencimiento de cuotas y crea/borra cuotas según plazo_completo. NO modifica el estado pagado de cuotas existentes ni los abonos. Si se envía dia_vencimiento, se respeta ese día exacto; si no, aplica la regla histórica (día 1 → día 30).",
       },
     }
   )  .post("/procesar-desde-archivo", async () => {

@@ -363,6 +363,10 @@ function RouteComponent() {
 		"cobros/capitalMax",
 		undefined,
 	);
+	const [excluirPagados, setExcluirPagados] = usePersistedState<boolean>(
+		"cobros/excluirPagados",
+		false,
+	);
 
 	const hasActiveFilters =
 		filtroTemporal !== "hoy" ||
@@ -372,7 +376,8 @@ function RouteComponent() {
 		sifcoFilterValue !== "" ||
 		capitalMin !== undefined ||
 		capitalMax !== undefined ||
-		dateRange !== undefined;
+		dateRange !== undefined ||
+		excluirPagados;
 	const resetFilters = () => {
 		setFiltroTemporal("hoy");
 		setFiltroEtapa(null);
@@ -381,6 +386,7 @@ function RouteComponent() {
 		setSifcoFilterValue("");
 		setCapitalMin(undefined);
 		setCapitalMax(undefined);
+		setExcluirPagados(false);
 		setDateRange(undefined);
 		setPickerRange(undefined);
 		setFechaError(null);
@@ -515,6 +521,7 @@ function RouteComponent() {
 				etiquetas: filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
 				capitalMin,
 				capitalMax,
+				excluirPagadosMes: excluirPagados || undefined,
 			},
 		}),
 		enabled: !!session,
@@ -1095,6 +1102,7 @@ function RouteComponent() {
 										filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
 									fechaDesde,
 									fechaHasta,
+									excluirPagadosMes: excluirPagados || undefined,
 								}}
 								etiquetaLabels={ETIQUETA_LABELS_FILTRO}
 								totalDestinatarios={totalCreditos}
@@ -1229,6 +1237,25 @@ function RouteComponent() {
 									</div>
 								</div>
 
+								{/* Cuota actual */}
+								<div className="flex flex-col gap-2">
+									<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+										Cuota actual
+									</span>
+									<div className="flex flex-wrap items-center gap-2">
+										<Button
+											variant={excluirPagados ? "default" : "outline"}
+											size="sm"
+											onClick={() => {
+												setExcluirPagados(!excluirPagados);
+												setPage(1);
+											}}
+										>
+											Ocultar los que ya pagaron su cuota
+										</Button>
+									</div>
+								</div>
+
 								{/* Etiquetas */}
 								<div className="flex flex-col gap-2">
 									<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
@@ -1307,6 +1334,7 @@ function RouteComponent() {
 														capitalMin !== undefined,
 														capitalMax !== undefined,
 														dateRange !== undefined,
+														excluirPagados,
 													].filter(Boolean).length
 												}
 											</Badge>

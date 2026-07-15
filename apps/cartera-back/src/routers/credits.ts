@@ -46,6 +46,7 @@ import {
 } from "../controllers/bulkInsoluto";
 import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
+import { getHistorialCapital } from "../controllers/historialCapital";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
@@ -202,6 +203,7 @@ export const creditRouter = new Elysia()
     aseguradora_id,      // 🆕 NUEVO
     cuotas_min,          // 🆕 rango de cuotas atrasadas (min inclusivo)
     cuotas_max,          // 🆕 rango de cuotas atrasadas (max inclusivo)
+    excluir_pagados_mes, // 🆕 NUEVO
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -352,6 +354,9 @@ export const creditRouter = new Elysia()
     return { message: "Parámetro 'aseguradora_id' debe ser un número válido." };
   }
 
+  // 🆕 Excluir créditos con su cuota actual ya pagada (default false)
+  const excluirPagadosMesParam = excluir_pagados_mes === "true" ? true : undefined;
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -374,6 +379,7 @@ export const creditRouter = new Elysia()
         is_vehiculo_propio: isVehiculoPropioParam,
         inversionista_ids: inversionistaIdsArray,
         aseguradora_id: aseguradoraIdNum,
+        excluir_pagados_mes: excluirPagadosMesParam,
         excel: true,
       });
       set.status = 200;
@@ -402,7 +408,9 @@ export const creditRouter = new Elysia()
         estadosCreditoParsed?.values,
         aseguradoraIdNum,
         cuotasMinNum,
-        cuotasMaxNum
+        cuotasMaxNum,
+        undefined, // buckets_numeros
+        excluirPagadosMesParam
       );
       set.status = 200;
       return result;
@@ -449,6 +457,7 @@ export const creditRouter = new Elysia()
         aseguradora_id,
         cuotas_min,
         cuotas_max,
+        excluir_pagados_mes,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -492,6 +501,7 @@ export const creditRouter = new Elysia()
             is_vehiculo_propio,
             inversionista_ids,
             aseguradora_id,
+            excluir_pagados_mes,
             excel: true,
           });
           set.status = 200;
@@ -520,7 +530,9 @@ export const creditRouter = new Elysia()
           estadosCreditoParsed?.values,
           aseguradora_id,
           cuotas_min,
-          cuotas_max
+          cuotas_max,
+          undefined, // buckets_numeros
+          excluir_pagados_mes
         );
         set.status = 200;
         return result;
@@ -570,6 +582,7 @@ export const creditRouter = new Elysia()
         aseguradora_id: t.Optional(t.Number()),
         cuotas_min: t.Optional(t.Number()),
         cuotas_max: t.Optional(t.Number()),
+        excluir_pagados_mes: t.Optional(t.Boolean()),
       }),
     }
   )
@@ -1687,6 +1700,24 @@ export const creditRouter = new Elysia()
       detail: {
         tags: ["Créditos"],
         summary: "Obtener historial de cambios de fecha de inicio",
+      },
+    }
+  )
+  // ========================================
+  // ENDPOINT: HISTORIAL DE CAPITAL
+  // ========================================
+  .get(
+    "/historial-capital/:numero_credito_sifco",
+    async ({ params, set }) => {
+      return getHistorialCapital({
+        numero_credito_sifco: params.numero_credito_sifco,
+        set,
+      });
+    },
+    {
+      detail: {
+        tags: ["Créditos"],
+        summary: "Obtener historial de cambios del capital de un crédito",
       },
     }
   )

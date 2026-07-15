@@ -34,12 +34,14 @@ function isPdfFile(file: File) {
 interface BankStatementAnalysisProps {
 	leadId?: string;
 	coDebtorId?: string;
+	opportunityId?: string;
 	onAnalysisComplete?: () => void;
 }
 
 export function BankStatementAnalysis({
 	leadId,
 	coDebtorId,
+	opportunityId,
 	onAnalysisComplete,
 }: BankStatementAnalysisProps) {
 	const [files, setFiles] = useState<File[]>([]);
@@ -113,6 +115,7 @@ export function BankStatementAnalysis({
 
 			return client.analyzeBankStatements({
 				...(leadId ? { leadId } : { coDebtorId: coDebtorId! }),
+				...(leadId && opportunityId ? { opportunityId } : {}),
 				files: filePayloads,
 				annualRate: Number.parseFloat(annualRate),
 				termMonths: Number.parseInt(termMonths),

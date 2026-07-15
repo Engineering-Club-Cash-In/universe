@@ -4229,113 +4229,210 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         }
 
         // ========================================
-        // FASE 5: SALIDA AUTOMÁTICA (pendiente_devolucion)
-        // Si el inversionista quedó marcado como `pendiente_devolucion`,
-        // se ejecuta exitInvestor sobre los créditos con pagos liquidados
-        // en esta corrida. exitInvestor traslada la participación a CUBE
-        // y marca al inversionista como `inactivo`. Como salvaguarda,
-        // forzamos el status a `inactivo` después.
+        // FASE 5: SALIDA AUTOMÁTICA — dos caminos MUTUAMENTE EXCLUYENTES:
+        //  RAMA 1 (inversionista pendiente_devolucion): salida total. exitInvestor
+        //    sobre TODOS los créditos con pagos, sin flag → correo + inactiva.
+        //  RAMA 2 (resto): devolución de créditos VERIFICADO individuales.
+        //    exitInvestor con skipStatusAndEmail (sin correo, no inactiva) y
+        //    validación de monto_aportado==0 en espejo antes de mover a CUBE.
+        // Al ser excluyentes, ningún crédito pasa por exitInvestor dos veces.
         // ========================================
         try {
-          // 5A) Salida automática por créditos con devolucion_cube=true
-          //     (independiente del status del inversionista)
           const creditoIdsConPagos = [
             ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
           ];
 
           if (creditoIdsConPagos.length > 0) {
-            const creditosConDevolucion = await db
-              .select({ credito_id: creditos.credito_id })
-              .from(creditos)
-              .where(
-                and(
-                  inArray(creditos.credito_id, creditoIdsConPagos),
-                  eq(creditos.estado_devolucion, 'VERIFICADO')
-                )
-              );
+            const [invRow] = await db
+              .select({ status: inversionistas.status })
+              .from(inversionistas)
+              .where(eq(inversionistas.inversionista_id, inv_id))
+              .limit(1);
 
-            const creditoIdsDevolucion = creditosConDevolucion.map((c) => c.credito_id);
-
-            if (creditoIdsDevolucion.length > 0) {
+            if (invRow?.status === "pendiente_devolucion") {
+              // ── RAMA 1: SALIDA TOTAL DEL INVERSIONISTA ──
+              // Todo se devuelve a CUBE. exitInvestor SIN flag → manda correo
+              // e inactiva al inversionista. Sin validación de monto porque es
+              // una salida completa (no una devolución de crédito individual).
               console.log(
-                `  🚪 Inversionista ${inv_id} → exitInvestor por estado_devolucion=VERIFICADO en ${creditoIdsDevolucion.length} crédito(s)`
+                `  🚪 Inversionista ${inv_id} en pendiente_devolucion → exitInvestor (salida total) sobre ${creditoIdsConPagos.length} crédito(s)`
               );
 
-              const exitResultDevolucion = await exitInvestor({
+              const exitResult: any = await exitInvestor({
                 body: {
                   inversionista_id: inv_id,
-                  creditos: creditoIdsDevolucion,
+                  creditos: creditoIdsConPagos,
                 },
                 set: { status: 200 },
                 request: {} as any,
               });
 
-              // Después de separar en exitInvestor, dejar estado_devolucion en NO_APLICA
-              await db
-                .update(creditos)
-                .set({ estado_devolucion: "NO_APLICA" })
-                .where(inArray(creditos.credito_id, creditoIdsDevolucion));
+              if (!exitResult?.success) {
+                // exitInvestor falló por completo: no se transfirió nada. No se
+                // marca inactivo ni COMPLETADO — todo queda como estaba para revisión.
+                console.error(
+                  `  ❌ exitInvestor (salida total) falló para inversionista ${inv_id} — no se marca inactivo ni COMPLETADO:`,
+                  exitResult?.message ?? exitResult
+                );
+              } else {
+                console.log(`  ✅ Salida total ejecutada:`, exitResult);
 
-              console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a NO_APLICA:`, exitResultDevolucion);
-            }
-          }
+                await db
+                  .update(inversionistas)
+                  .set({ status: "inactivo" })
+                  .where(eq(inversionistas.inversionista_id, inv_id));
 
-          const [invRow] = await db
-            .select({ status: inversionistas.status })
-            .from(inversionistas)
-            .where(eq(inversionistas.inversionista_id, inv_id))
-            .limit(1);
+                console.log(`  ✅ Inversionista ${inv_id} marcado como inactivo`);
 
-          if (invRow?.status === "pendiente_devolucion") {
-            const creditoIdsSalida = [
-              ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
-            ];
+                // Solo los créditos realmente transferidos por exitInvestor y que
+                // estaban VERIFICADO pasan a COMPLETADO (no la lista de entrada).
+                const creditoIdsProcesados: number[] = (exitResult.creditos_procesados ?? []).map(
+                  (r: any) => r.credito_id
+                );
 
-            if (creditoIdsSalida.length > 0) {
-              console.log(
-                `  🚪 Inversionista ${inv_id} en pendiente_devolucion → exitInvestor sobre ${creditoIdsSalida.length} crédito(s)`
-              );
+                if (creditoIdsProcesados.length > 0) {
+                  await db
+                    .update(creditos)
+                    .set({ estado_devolucion: "COMPLETADO" })
+                    .where(
+                      and(
+                        inArray(creditos.credito_id, creditoIdsProcesados),
+                        eq(creditos.estado_devolucion, "VERIFICADO")
+                      )
+                    );
 
-              const exitResult = await exitInvestor({
-                body: {
-                  inversionista_id: inv_id,
-                  creditos: creditoIdsSalida,
-                },
-                set: { status: 200 },
-                request: {} as any,
-              });
+                  console.log(
+                    `  ✅ Créditos VERIFICADO reseteados a COMPLETADO tras salida total del inversionista ${inv_id}`
+                  );
+                }
 
-              console.log(`  ✅ Salida ejecutada:`, exitResult);
-
-              await db
-                .update(inversionistas)
-                .set({ status: "inactivo" })
-                .where(eq(inversionistas.inversionista_id, inv_id));
-
-              console.log(`  ✅ Inversionista ${inv_id} marcado como inactivo`);
+                if (Array.isArray(exitResult.errores) && exitResult.errores.length > 0) {
+                  console.warn(
+                    `  ⚠️  exitInvestor (salida total) tuvo ${exitResult.errores.length} crédito(s) con error — no marcados COMPLETADO:`,
+                    exitResult.errores
+                  );
+                }
+              }
             } else {
-              console.warn(
-                `  ⚠️ Inversionista ${inv_id} pendiente_devolucion pero sin créditos con pagos en esta corrida; se omite exitInvestor`
-              );
+              // ── RAMA 2: DEVOLUCIÓN DE CRÉDITOS VERIFICADO INDIVIDUALES ──
+              // El inversionista NO sale por completo; solo los créditos marcados
+              // VERIFICADO se devuelven a CUBE. exitInvestor CON flag → no correo,
+              // no inactiva. Se valida que monto_aportado==0 en espejo antes de mover.
+              const creditosConDevolucion = await db
+                .select({ credito_id: creditos.credito_id })
+                .from(creditos)
+                .where(
+                  and(
+                    inArray(creditos.credito_id, creditoIdsConPagos),
+                    eq(creditos.estado_devolucion, 'VERIFICADO')
+                  )
+                );
+
+              const creditoIdsDevolucion = creditosConDevolucion.map((c) => c.credito_id);
+
+              if (creditoIdsDevolucion.length > 0) {
+                console.log(
+                  `  🚪 Inversionista ${inv_id} → exitInvestor por estado_devolucion=VERIFICADO en ${creditoIdsDevolucion.length} crédito(s)`
+                );
+
+                // Validación previa: el monto_aportado del inversionista en el espejo
+                // debería estar en 0 en este punto (ya liquidado por el loop de pagos).
+                // Los créditos que no cumplan se skippean (no entran a exitInvestor,
+                // no se marcan COMPLETADO) para revisión manual.
+                const filasEspejoPrevias = await db
+                  .select({
+                    credito_id: creditos_inversionistas_espejo.credito_id,
+                    monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+                  })
+                  .from(creditos_inversionistas_espejo)
+                  .where(
+                    and(
+                      inArray(creditos_inversionistas_espejo.credito_id, creditoIdsDevolucion),
+                      eq(creditos_inversionistas_espejo.inversionista_id, inv_id)
+                    )
+                  );
+
+                // Un crédito solo es válido si tiene fila en el espejo para este
+                // inversionista Y su monto_aportado es 0. Se excluye tanto el que
+                // tiene monto != 0 como el que NO tiene fila espejo (estado anómalo:
+                // exitInvestor trataría la fila faltante como no-fatal y movería el
+                // padre igual, saltándose el safeguard). Los excluidos quedan en
+                // VERIFICADO para revisión manual.
+                const creditoIdsConEspejoEnCero = new Set(
+                  filasEspejoPrevias
+                    .filter((f) => Number(f.monto_aportado) === 0)
+                    .map((f) => f.credito_id)
+                );
+
+                const creditoIdsDevolucionValidos = creditoIdsDevolucion.filter((id) =>
+                  creditoIdsConEspejoEnCero.has(id)
+                );
+                const creditoIdsConMontoPendiente = creditoIdsDevolucion.filter(
+                  (id) => !creditoIdsConEspejoEnCero.has(id)
+                );
+
+                if (creditoIdsConMontoPendiente.length > 0) {
+                  const montoPorCredito = new Map(
+                    filasEspejoPrevias.map((f) => [f.credito_id, f.monto_aportado])
+                  );
+                  console.warn(
+                    `  ⚠️  créditos con espejo inválido (monto != 0 o sin fila) antes de exitInvestor para inversionista ${inv_id} — se omiten:`,
+                    creditoIdsConMontoPendiente
+                      .map((id) =>
+                        montoPorCredito.has(id)
+                          ? `credito_id=${id} monto_aportado=${montoPorCredito.get(id)}`
+                          : `credito_id=${id} SIN_FILA_ESPEJO`
+                      )
+                      .join(", ")
+                  );
+                }
+
+                if (creditoIdsDevolucionValidos.length > 0) {
+                  const exitResultDevolucion: any = await exitInvestor(
+                    {
+                      body: {
+                        inversionista_id: inv_id,
+                        creditos: creditoIdsDevolucionValidos,
+                      },
+                      set: { status: 200 },
+                      request: {} as any,
+                    },
+                    { skipStatusAndEmail: true }
+                  );
+
+                  if (!exitResultDevolucion?.success) {
+                    // exitInvestor falló por completo: no se transfirió nada. No se
+                    // marca COMPLETADO — los créditos quedan en VERIFICADO para revisión.
+                    console.error(
+                      `  ❌ exitInvestor (devolución VERIFICADO) falló para inversionista ${inv_id} — no se marca COMPLETADO:`,
+                      exitResultDevolucion?.message ?? exitResultDevolucion
+                    );
+                  } else {
+                    // Solo los créditos realmente transferidos por exitInvestor pasan
+                    // a COMPLETADO (no la lista de entrada).
+                    const creditoIdsProcesados: number[] = (exitResultDevolucion.creditos_procesados ?? []).map(
+                      (r: any) => r.credito_id
+                    );
+
+                    if (creditoIdsProcesados.length > 0) {
+                      await db
+                        .update(creditos)
+                        .set({ estado_devolucion: "COMPLETADO" })
+                        .where(inArray(creditos.credito_id, creditoIdsProcesados));
+
+                      console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a COMPLETADO:`, exitResultDevolucion);
+                    }
+
+                    if (Array.isArray(exitResultDevolucion.errores) && exitResultDevolucion.errores.length > 0) {
+                      console.warn(
+                        `  ⚠️  exitInvestor (devolución VERIFICADO) tuvo ${exitResultDevolucion.errores.length} crédito(s) con error — quedan en VERIFICADO:`,
+                        exitResultDevolucion.errores
+                      );
+                    }
+                  }
+                }
+              }
             }
-          }
-
-          // 5C) Regla de cierre: tras liquidar, cualquier estado de devolución
-          // del/los crédito(s) procesado(s) vuelve a NO_APLICA.
-          if (creditoIdsConPagos.length > 0) {
-            await db
-              .update(creditos)
-              .set({ estado_devolucion: "NO_APLICA" })
-              .where(
-                and(
-                  inArray(creditos.credito_id, creditoIdsConPagos),
-                  ne(creditos.estado_devolucion, "NO_APLICA")
-                )
-              );
-
-            console.log(
-              `  ✅ Estado devolución reseteado a NO_APLICA en ${creditoIdsConPagos.length} crédito(s) procesado(s) en liquidación`
-            );
           }
         } catch (exitError) {
           console.error(
@@ -5295,7 +5392,15 @@ const CUBE_INVESTMENT_ID = 86;
 // - 404: inversionista no encontrado.
 // - 500: error inesperado (la transacción hace rollback).
 // ============================================================================
-export const exitInvestor = async ({ body, set, request }: any) => {
+// El segundo argumento `opts` NO viene del body HTTP — solo lo pueden pasar
+// las llamadas internas (ver liquidateByInvestorId). El router pasa únicamente
+// el contexto de Elysia, así que un caller HTTP nunca puede setear
+// skipStatusAndEmail, sin importar props extra en el body.
+export const exitInvestor = async (
+  { body, set, request }: any,
+  opts: { skipStatusAndEmail?: boolean } = {}
+) => {
+  const skipStatusAndEmail = opts.skipStatusAndEmail === true;
   // ── Helper de logging con prefijo único por request ──
   // runId: 6 chars alfanuméricos en mayúsculas, para hilar logs de un
   // mismo request cuando hay múltiples corriendo en paralelo.
@@ -5823,7 +5928,9 @@ export const exitInvestor = async ({ body, set, request }: any) => {
       // el status — sería prematuro marcarlo como inactivo sin haberlo
       // sacado efectivamente de ningún crédito.
       // ──────────────────────────────────────────────────────────────────────
-      if (resultados.length > 0) {
+      if (skipStatusAndEmail) {
+        log(`⏭️  skipStatusAndEmail=true → NO se cambia status del inversionista`);
+      } else if (resultados.length > 0) {
         log(`🔻 Pasando inversionista ${inversionista_id} → status='inactivo'`);
         const resStatus = await tx
           .update(inversionistas)
@@ -5879,102 +5986,114 @@ export const exitInvestor = async ({ body, set, request }: any) => {
     // ========================================================================
     // PASO 7: ARMAR Y ENVIAR EL CORREO
     // ========================================================================
-    // Fecha en GT (zona horaria Guatemala) para mostrar el momento exacto
-    // del cambio sin depender de la zona del server.
-    const fechaGT = new Date().toLocaleString("es-GT", { timeZone: "America/Guatemala" });
-    const subject = `Inversionista INACTIVADO (cartera transferida a CUBE): ${invRow.nombre}`;
+    let enviados = 0;
+    let fallidos = 0;
 
-    // Una fila por crédito procesado, con SIFCO, ID interno, monto y
-    // leyenda de qué acción se tomó (swap vs merge).
-    const filasCreditos = resultados
-      .map(
-        (r) => `
-          <tr>
-            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.numero_credito_sifco ?? "—"}</td>
-            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.credito_id}</td>
-            <td style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Q${r.monto_transferido}</td>
-            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.accion === "merge" ? "Sumado a CUBE existente" : "CUBE tomó la posición"}</td>
-          </tr>
-        `,
-      )
-      .join("");
+    if (skipStatusAndEmail) {
+      log(`⏭️  skipStatusAndEmail=true → NO se envía correo de notificación`);
+    } else {
+      // Fecha en GT (zona horaria Guatemala) para mostrar el momento exacto
+      // del cambio sin depender de la zona del server.
+      const fechaGT = new Date().toLocaleString("es-GT", { timeZone: "America/Guatemala" });
+      const subject = `Inversionista INACTIVADO (cartera transferida a CUBE): ${invRow.nombre}`;
 
-    // Si hubo créditos saltados, se listan al final en rojo para que
-    // el equipo pueda revisarlos aparte.
-    const erroresHtml =
-      errores.length > 0
-        ? `
-          <h3 style="margin-top:16px; color:#b91c1c;">Créditos omitidos</h3>
-          <ul style="color:#b91c1c;">
-            ${errores.map((e) => `<li>Crédito ${e.credito_id}: ${e.razon}</li>`).join("")}
-          </ul>
-        `
-        : "";
-
-    const html = `
-      <div style="font-family: Arial, sans-serif; color:#111;">
-        <h2 style="margin-bottom: 8px;">Salida de inversionista — cartera transferida a CUBE</h2>
-        <p>
-          El inversionista <strong>${invRow.nombre}</strong> (ID: ${invRow.inversionista_id})
-          fue <strong style="color:#dc2626;">INACTIVADO</strong>.
-          Su participación en los créditos listados fue transferida a <strong>CUBE INVESTMENTS S.A.</strong>
-        </p>
-        <table style="border-collapse: collapse; margin-top: 8px;">
-          <tr><td style="padding:4px 8px;"><strong>Estado anterior:</strong></td><td style="padding:4px 8px;">${invRow.status}</td></tr>
-          <tr><td style="padding:4px 8px;"><strong>Estado nuevo:</strong></td><td style="padding:4px 8px; color:#dc2626;"><strong>inactivo</strong></td></tr>
-          <tr><td style="padding:4px 8px;"><strong>Fecha (GT):</strong></td><td style="padding:4px 8px;">${fechaGT}</td></tr>
-          ${usuarioNombre || usuarioEmail
-            ? `<tr><td style="padding:4px 8px;"><strong>Ejecutado por:</strong></td><td style="padding:4px 8px;">${[usuarioNombre, usuarioEmail].filter(Boolean).join(" — ")}</td></tr>`
-            : ""}
-          <tr><td style="padding:4px 8px;"><strong>Total transferido a CUBE:</strong></td><td style="padding:4px 8px;"><strong>Q${totalTransferido.toFixed(2)}</strong></td></tr>
-          <tr><td style="padding:4px 8px;"><strong>Créditos procesados:</strong></td><td style="padding:4px 8px;">${resultados.length}</td></tr>
-        </table>
-
-        <h3 style="margin-top:16px;">Créditos transferidos</h3>
-        <table style="border-collapse: collapse; margin-top: 4px; min-width: 520px;">
-          <thead>
-            <tr style="background:#f3f4f6;">
-              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">SIFCO</th>
-              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Crédito ID</th>
-              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Monto a CUBE</th>
-              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Acción</th>
+      // Una fila por crédito procesado, con SIFCO, ID interno, monto y
+      // leyenda de qué acción se tomó (swap vs merge).
+      const filasCreditos = resultados
+        .map(
+          (r) => `
+            <tr>
+              <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.numero_credito_sifco ?? "—"}</td>
+              <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.credito_id}</td>
+              <td style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Q${r.monto_transferido}</td>
+              <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.accion === "merge" ? "Sumado a CUBE existente" : "CUBE tomó la posición"}</td>
             </tr>
-          </thead>
-          <tbody>${filasCreditos}</tbody>
-        </table>
-        ${erroresHtml}
-        <p style="margin-top:16px; color:#555; font-size:12px;">Correo automático — Club Cash In / Cartera.</p>
-      </div>
-    `;
+          `,
+        )
+        .join("");
 
-    log(`📧 Enviando correo a ${INVESTOR_STATUS_CHANGE_RECIPIENTS.length} destinatario(s): [${INVESTOR_STATUS_CHANGE_RECIPIENTS.join(", ")}]`);
-    log(`📧 Asunto: "${subject}"`);
+      // Si hubo créditos saltados, se listan al final en rojo para que
+      // el equipo pueda revisarlos aparte.
+      const erroresHtml =
+        errores.length > 0
+          ? `
+            <h3 style="margin-top:16px; color:#b91c1c;">Créditos omitidos</h3>
+            <ul style="color:#b91c1c;">
+              ${errores.map((e) => `<li>Crédito ${e.credito_id}: ${e.razon}</li>`).join("")}
+            </ul>
+          `
+          : "";
 
-    // `allSettled` para que un destinatario que falle no tumbe el resto.
-    // Enviamos individualmente (sendPlainEmail acepta un solo `to`) en paralelo.
-    const mailResults = await Promise.allSettled(
-      INVESTOR_STATUS_CHANGE_RECIPIENTS.map((to) => sendPlainEmail(to, subject, html)),
-    );
+      const html = `
+        <div style="font-family: Arial, sans-serif; color:#111;">
+          <h2 style="margin-bottom: 8px;">Salida de inversionista — cartera transferida a CUBE</h2>
+          <p>
+            El inversionista <strong>${invRow.nombre}</strong> (ID: ${invRow.inversionista_id})
+            fue <strong style="color:#dc2626;">INACTIVADO</strong>.
+            Su participación en los créditos listados fue transferida a <strong>CUBE INVESTMENTS S.A.</strong>
+          </p>
+          <table style="border-collapse: collapse; margin-top: 8px;">
+            <tr><td style="padding:4px 8px;"><strong>Estado anterior:</strong></td><td style="padding:4px 8px;">${invRow.status}</td></tr>
+            <tr><td style="padding:4px 8px;"><strong>Estado nuevo:</strong></td><td style="padding:4px 8px; color:#dc2626;"><strong>inactivo</strong></td></tr>
+            <tr><td style="padding:4px 8px;"><strong>Fecha (GT):</strong></td><td style="padding:4px 8px;">${fechaGT}</td></tr>
+            ${usuarioNombre || usuarioEmail
+              ? `<tr><td style="padding:4px 8px;"><strong>Ejecutado por:</strong></td><td style="padding:4px 8px;">${[usuarioNombre, usuarioEmail].filter(Boolean).join(" — ")}</td></tr>`
+              : ""}
+            <tr><td style="padding:4px 8px;"><strong>Total transferido a CUBE:</strong></td><td style="padding:4px 8px;"><strong>Q${totalTransferido.toFixed(2)}</strong></td></tr>
+            <tr><td style="padding:4px 8px;"><strong>Créditos procesados:</strong></td><td style="padding:4px 8px;">${resultados.length}</td></tr>
+          </table>
 
-    mailResults.forEach((r, i) => {
-      const to = INVESTOR_STATUS_CHANGE_RECIPIENTS[i];
-      if (r.status === "fulfilled" && (r as any).value?.success) {
-        log(`   ✉️  OK → ${to} (id=${(r as any).value?.data?.id ?? "?"})`);
-      } else if (r.status === "fulfilled") {
-        warn(`   ✉️  FAIL → ${to}:`, (r as any).value?.error);
-      } else {
-        warn(`   ✉️  REJECTED → ${to}:`, r.reason);
-      }
-    });
+          <h3 style="margin-top:16px;">Créditos transferidos</h3>
+          <table style="border-collapse: collapse; margin-top: 4px; min-width: 520px;">
+            <thead>
+              <tr style="background:#f3f4f6;">
+                <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">SIFCO</th>
+                <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Crédito ID</th>
+                <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Monto a CUBE</th>
+                <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Acción</th>
+              </tr>
+            </thead>
+            <tbody>${filasCreditos}</tbody>
+          </table>
+          ${erroresHtml}
+          <p style="margin-top:16px; color:#555; font-size:12px;">Correo automático — Club Cash In / Cartera.</p>
+        </div>
+      `;
 
-    const enviados = mailResults.filter(
-      (r) => r.status === "fulfilled" && (r as any).value?.success,
-    ).length;
-    const fallidos = INVESTOR_STATUS_CHANGE_RECIPIENTS.length - enviados;
-    log(`📧 Correos: enviados=${enviados}, fallidos=${fallidos}`);
+      log(`📧 Enviando correo a ${INVESTOR_STATUS_CHANGE_RECIPIENTS.length} destinatario(s): [${INVESTOR_STATUS_CHANGE_RECIPIENTS.join(", ")}]`);
+      log(`📧 Asunto: "${subject}"`);
+
+      // `allSettled` para que un destinatario que falle no tumbe el resto.
+      // Enviamos individualmente (sendPlainEmail acepta un solo `to`) en paralelo.
+      const mailResults = await Promise.allSettled(
+        INVESTOR_STATUS_CHANGE_RECIPIENTS.map((to) => sendPlainEmail(to, subject, html)),
+      );
+
+      mailResults.forEach((r, i) => {
+        const to = INVESTOR_STATUS_CHANGE_RECIPIENTS[i];
+        if (r.status === "fulfilled" && (r as any).value?.success) {
+          log(`   ✉️  OK → ${to} (id=${(r as any).value?.data?.id ?? "?"})`);
+        } else if (r.status === "fulfilled") {
+          warn(`   ✉️  FAIL → ${to}:`, (r as any).value?.error);
+        } else {
+          warn(`   ✉️  REJECTED → ${to}:`, r.reason);
+        }
+      });
+
+      enviados = mailResults.filter(
+        (r) => r.status === "fulfilled" && (r as any).value?.success,
+      ).length;
+      fallidos = INVESTOR_STATUS_CHANGE_RECIPIENTS.length - enviados;
+      log(`📧 Correos: enviados=${enviados}, fallidos=${fallidos}`);
+    }
+
+    // Cuando skipStatusAndEmail=true no se cambió el status: el inversionista
+    // sigue con el que tenía (invRow.status). Solo pasó a "inactivo" en el
+    // camino normal.
+    const statusFinal = skipStatusAndEmail ? invRow.status : "inactivo";
 
     log(`⏱️  Duración total: ${Date.now() - t0}ms`);
-    log(`✅ DONE — inversionista ${invRow.inversionista_id} inactivado, ${resultados.length} crédito(s), Q${totalTransferido.toFixed(2)} a CUBE`);
+    log(`✅ DONE — inversionista ${invRow.inversionista_id} (status=${statusFinal}), ${resultados.length} crédito(s), Q${totalTransferido.toFixed(2)} a CUBE`);
     log("═══════════════════════════════════════════════════════════");
 
     // ========================================================================
@@ -5986,8 +6105,10 @@ export const exitInvestor = async ({ body, set, request }: any) => {
     set.status = 200;
     return {
       success: true,
-      message: `Inversionista inactivado. ${resultados.length} crédito(s) transferido(s) a CUBE. Total: Q${totalTransferido.toFixed(2)}.`,
-      inversionista: { inversionista_id: invRow.inversionista_id, nombre: invRow.nombre, status: "inactivo" },
+      message: skipStatusAndEmail
+        ? `${resultados.length} crédito(s) transferido(s) a CUBE. Total: Q${totalTransferido.toFixed(2)}. (status del inversionista sin cambios)`
+        : `Inversionista inactivado. ${resultados.length} crédito(s) transferido(s) a CUBE. Total: Q${totalTransferido.toFixed(2)}.`,
+      inversionista: { inversionista_id: invRow.inversionista_id, nombre: invRow.nombre, status: statusFinal },
       total_transferido_a_cube: totalTransferido.toFixed(2),
       creditos_procesados: resultados,
       errores,
@@ -6602,6 +6723,40 @@ async function consultarResumenGlobalPorEstadoPago(
     condicionesJoinPagos.push(sql`EXTRACT(YEAR FROM ${pe.fecha_pago}) = ${anio}`);
   }
 
+  // ── Combinada con excedente/variable ────────────────────────────────────
+  // Dentro de una combinada, los créditos excedente/variable no se resuelven
+  // per-pago: se suman en un pool y se les aplica el monto_reinversion del
+  // inversionista (igual que las modalidades "crudas").
+  //   - Excedente: RECIBE el monto fijo; el sobrante del pool se reinvierte.
+  //   - Variable : REINVIERTE el monto fijo; el resto del pool lo recibe.
+  const cuotaCompleta = sql`
+    ${pe.abono_capital}
+    + ${pe.abono_interes}
+    + CASE
+        WHEN ${inversionistas.emite_factura}
+          THEN ${pe.abono_iva_12}
+        ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+      END`;
+
+  const montoReinv = sql`COALESCE(${inversionistas.monto_reinversion}, 0)::numeric`;
+
+  const poolExcedente = sql`COALESCE(SUM(
+    CASE WHEN ${ce.tipo_reinversion} = 'reinversion_excedente' THEN (${cuotaCompleta}) ELSE 0 END
+  ), 0)`;
+  const poolVariable = sql`COALESCE(SUM(
+    CASE WHEN ${ce.tipo_reinversion} = 'reinversion_variable' THEN (${cuotaCompleta}) ELSE 0 END
+  ), 0)`;
+
+  // Lo que se REINVIERTE de los pools (0 si el pool está vacío).
+  const reinvPools = sql`
+    GREATEST((${poolExcedente}) - (${montoReinv}), 0)
+    + LEAST((${montoReinv}), (${poolVariable}))`;
+
+  // Lo que el inversionista RECIBE de los pools (el inverso).
+  const recibePools = sql`
+    LEAST((${montoReinv}), (${poolExcedente}))
+    + ((${poolVariable}) - LEAST((${montoReinv}), (${poolVariable})))`;
+
   const selectObj: Record<string, any> = {
     inversionista_id: inversionistas.inversionista_id,
     nombre: inversionistas.nombre,
@@ -6661,6 +6816,7 @@ async function consultarResumenGlobalPorEstadoPago(
             ELSE 0
           END
         ), 0)
+        + (${reinvPools})
         WHEN 'reinversion_variable' THEN LEAST(
           COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
           COALESCE(SUM(
@@ -6719,6 +6875,7 @@ async function consultarResumenGlobalPorEstadoPago(
                 ELSE 0
               END
             ), 0)
+            + (${reinvPools})
             WHEN 'reinversion_variable' THEN LEAST(
               COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
               COALESCE(SUM(
@@ -6782,11 +6939,14 @@ async function consultarResumenGlobalPorEstadoPago(
             WHEN 'reinversion_interes' THEN (
               ${pe.abono_capital} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
+            WHEN 'reinversion_excedente' THEN 0
+            WHEN 'reinversion_variable' THEN 0
             ELSE (
                ${pe.abono_capital} + ${pe.abono_interes} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
           END
         ), 0)
+        + (${recibePools})
         WHEN 'reinversion_variable' THEN
           COALESCE(SUM(
             ${pe.abono_capital}

@@ -4,9 +4,19 @@ import { db } from "../database";
 import { getRenapData } from "./renap";
 
 /**
+ * 🏷️ Labels que no se derivan del enum (el enum vive en la DB de prod y no se renombra)
+ */
+const DOCUMENT_LABEL_OVERRIDES: Record<string, string> = {
+  cobertura_inrexsa: "Cobertura Placas Particulares",
+  cobertura_inrexsa_comercial: "Cobertura Placas Comerciales",
+};
+
+/**
  * 🔤 Converts snake_case names into a clean readable format
  */
 function formatDocumentName(name: string): string {
+  const override = DOCUMENT_LABEL_OVERRIDES[name];
+  if (override) return override;
   return name
     .split("_")
     .map((word) => {

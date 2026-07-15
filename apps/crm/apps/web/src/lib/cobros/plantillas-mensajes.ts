@@ -10,72 +10,156 @@
  */
 
 export interface VariablesPlantilla {
-  clienteNombre: string;
-  fechaPago: string;
-  cuotaMensual: string;
-  placa: string;
-  marcaLineaModelo: string;
-  montoAdeudado: string;
-  cuotasAtraso: number;
-  telefonoAsesor: string;
-  nombreAsesor: string;
+	clienteNombre: string;
+	fechaPago: string;
+	cuotaMensual: string;
+	placa: string;
+	marcaLineaModelo: string;
+	montoAdeudado: string;
+	cuotasAtraso: number;
+	telefonoAsesor: string;
+	nombreAsesor: string;
 }
 
 export interface PlantillaMensaje {
-  id: string;
-  nombre: string;
-  etapa: string;
-  asunto: string;
-  cuerpo: string;
-  cuerpoWhastapp?: string;
+	id: string;
+	nombre: string;
+	etapa: string;
+	asunto: string;
+	cuerpo: string;
+	cuerpoWhastapp?: string;
+}
+
+export const COBROS_NO_REPLY_WARNING =
+	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
+
+export function prepararTelefonoAsesorParaEnvio(
+	cuerpo: string,
+	telefono: string | null | undefined,
+):
+	| { enviar: true; telefonoAsesor: string }
+	| { enviar: false; motivo: string } {
+	const telefonoAsesor = telefono?.trim() ?? "";
+
+	if (cuerpo.includes(COBROS_NO_REPLY_WARNING) && !telefonoAsesor) {
+		return { enviar: false, motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR };
+	}
+
+	return { enviar: true, telefonoAsesor };
+}
+
+export function crearUrlWhatsappManual(
+	telefonoLimpio: string,
+	mensajeWhatsapp: string,
+	mensajeFallback = "",
+): string {
+	const mensaje = mensajeWhatsapp || mensajeFallback;
+	return mensaje
+		? `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`
+		: `https://wa.me/${telefonoLimpio}`;
+}
+
+export function mensajePlantillaEditable(
+	metodoContacto: string,
+	mensajeEditado: string,
+	mensajeWhatsappEditado: string,
+): string {
+	return metodoContacto === "whatsapp"
+		? mensajeWhatsappEditado
+		: mensajeEditado;
+}
+
+export function mensajeSmsEditable(
+	metodoInicial: string,
+	mensajeEditado: string,
+	mensajeWhatsappEditado: string,
+): string {
+	return mensajePlantillaEditable(
+		metodoInicial,
+		mensajeEditado,
+		mensajeWhatsappEditado,
+	);
+}
+
+export function mensajeEmailEditable(
+	metodoInicial: string,
+	mensajeEditado: string,
+	mensajeWhatsappEditado: string,
+): string {
+	return mensajePlantillaEditable(
+		metodoInicial,
+		mensajeEditado,
+		mensajeWhatsappEditado,
+	);
+}
+
+export function accionUsaCuerpoNoReply(metodo: string): boolean {
+	return (
+		metodo === "whatsapp-link" ||
+		metodo === "whatsapp-api" ||
+		metodo === "sms-api" ||
+		metodo === "email-link" ||
+		metodo === "email-api"
+	);
+}
+
+export function cuerpoParaValidarNoReply(
+	metodo: string,
+	mensajeWhatsapp: string,
+	mensajeSms: string,
+	mensajeEmail = mensajeWhatsapp,
+): string {
+	if (metodo === "email-link" || metodo === "email-api") return mensajeEmail;
+	return metodo === "sms-api" ? mensajeSms : mensajeWhatsapp;
 }
 
 function toCapitalCase(str: string): string {
-  return str
-    .toLowerCase()
-    .split(" ")
-    .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ""))
-    .join(" ");
+	return str
+		.toLowerCase()
+		.split(" ")
+		.map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ""))
+		.join(" ");
 }
 
 export function interpolar(
-  texto: string,
-  variables: VariablesPlantilla,
+	texto: string,
+	variables: VariablesPlantilla,
 ): string {
-  const v = (val: string | number, _placeholder: string) =>
-    val !== undefined && val !== null && val !== "" && val !== 0
-      ? String(val)
-      : "";
+	const v = (val: string | number, _placeholder: string) =>
+		val !== undefined && val !== null && val !== "" && val !== 0
+			? String(val)
+			: "";
 
-  const nombre = variables.clienteNombre
-    ? toCapitalCase(variables.clienteNombre)
-    : "";
+	const nombre = variables.clienteNombre
+		? toCapitalCase(variables.clienteNombre)
+		: "";
 
-  return texto
-    .replace(/{clienteNombre}/g, v(nombre, "nombre cliente"))
-    .replace(/{fechaPago}/g, v(variables.fechaPago, "fecha pago"))
-    .replace(/{cuotaMensual}/g, v(variables.cuotaMensual, "cuota mensual"))
-    .replace(/{placa}/g, v(variables.placa, "placa"))
-    .replace(
-      /{marcaLineaModelo}/g,
-      v(variables.marcaLineaModelo, "marca/modelo"),
-    )
-    .replace(/{montoAdeudado}/g, v(variables.montoAdeudado, "monto adeudado"))
-    .replace(/{cuotasAtraso}/g, v(variables.cuotasAtraso, "cuotas en atraso"))
-    .replace(
-      /{telefonoAsesor}/g,
-      v(variables.telefonoAsesor, "teléfono asesor"),
-    )
-    .replace(/{nombreAsesor}/g, v(variables.nombreAsesor, "nombre asesor"));
+	return texto
+		.replace(/{clienteNombre}/g, v(nombre, "nombre cliente"))
+		.replace(/{fechaPago}/g, v(variables.fechaPago, "fecha pago"))
+		.replace(/{cuotaMensual}/g, v(variables.cuotaMensual, "cuota mensual"))
+		.replace(/{placa}/g, v(variables.placa, "placa"))
+		.replace(
+			/{marcaLineaModelo}/g,
+			v(variables.marcaLineaModelo, "marca/modelo"),
+		)
+		.replace(/{montoAdeudado}/g, v(variables.montoAdeudado, "monto adeudado"))
+		.replace(/{cuotasAtraso}/g, v(variables.cuotasAtraso, "cuotas en atraso"))
+		.replace(
+			/{telefonoAsesor}/g,
+			v(variables.telefonoAsesor, "teléfono asesor"),
+		)
+		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor, "nombre asesor"));
 }
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
-  {
-    id: "bienvenida",
-    nombre: "Bienvenida",
-    etapa: "al_dia",
-    asunto: "Bienvenido/a a su plan de financiamiento",
-    cuerpo: `Hola {clienteNombre},
+	{
+		id: "bienvenida",
+		nombre: "Bienvenida",
+		etapa: "al_dia",
+		asunto: "Bienvenido/a a su plan de financiamiento",
+		cuerpo: `Hola {clienteNombre},
 
 Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
 
@@ -95,28 +179,66 @@ Agradecemos confirme la recepción de este mensaje.
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-    cuerpoWhastapp:
-      "Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.\n\nA continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL\n\nPor favor, envíe su boleta o comprobante de pago por este medio para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.\n\nAgradecemos confirme la recepción de este mensaje. Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.",
-  },
-  {
-    id: "al_dia",
-    nombre: "Recordatorio de pago",
-    etapa: "al_dia",
-    asunto: "Recordatorio de pago - Vehículo {placa}",
-    cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
+		cuerpoWhastapp: `Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
+
+A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor} para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "al_dia",
+		nombre: "Recordatorio de pago",
+		etapa: "al_dia",
+		asunto: "Recordatorio de pago - Vehículo {placa}",
+		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
 
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-    cuerpoWhastapp:
-      "Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.\n\nAtentamente, {nombreAsesor} Tel: {telefonoAsesor}.",
-  },
-  {
-    id: "pre_mora",
-    nombre: "Aviso de atraso",
-    etapa: "pre_mora",
-    asunto: "Aviso de atraso en pago - Vehículo {placa}",
-    cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
+		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "impuesto_circulacion_2026",
+		nombre: "Impuesto de circulación 2026",
+		etapa: "al_dia",
+		asunto: "Recordatorio de pago - Impuesto de circulación 2026",
+		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+
+Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+
+¡No lo dejes para última hora!
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente,
+{nombreAsesor}
+Tel: {telefonoAsesor}`,
+		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+
+Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+
+¡No lo dejes para última hora!
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente,
+{nombreAsesor}
+Tel: {telefonoAsesor}`,
+	},
+	{
+		id: "pre_mora",
+		nombre: "Aviso de atraso",
+		etapa: "pre_mora",
+		asunto: "Aviso de atraso en pago - Vehículo {placa}",
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
 
 Si tiene alguna duda por favor comunicarse por este medio.
 
@@ -125,28 +247,38 @@ SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-    cuerpoWhastapp:
-      "Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.\n\nSi tiene alguna duda por favor comunicarse por este medio.\n\nSI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.\n\nAtentamente, {nombreAsesor} Tel: {telefonoAsesor}.",
-  },
-  {
-    id: "mora_30",
-    nombre: "Mora 30 días",
-    etapa: "mora_30",
-    asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
-    cuerpo: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+		cuerpoWhastapp: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
+
+Si tiene alguna duda, por favor comuníquese al {telefonoAsesor}.
+
+SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "mora_30",
+		nombre: "Mora 30 días",
+		etapa: "mora_30",
+		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
+		cuerpo: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
 
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-    cuerpoWhastapp:
-      "Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.\n\nAtentamente, {nombreAsesor} Tel: {telefonoAsesor}.",
-  },
-  {
-    id: "mora_60",
-    nombre: "Mora 60 días",
-    etapa: "mora_60",
-    asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
-    cuerpo: `Estimado/a {clienteNombre},
+		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "mora_60",
+		nombre: "Mora 60 días",
+		etapa: "mora_60",
+		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
+		cuerpo: `Estimado/a {clienteNombre},
 
 Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
 
@@ -155,52 +287,62 @@ Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a to
 Atentamente,
 {nombreAsesor}
 Tel: {telefonoAsesor}`,
-    cuerpoWhastapp:
-      "Estimado/a {clienteNombre}, Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.\n\nSi no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.\n\nAtentamente, {nombreAsesor} Tel: {telefonoAsesor}",
-  },
-  {
-    id: "aviso_juridico",
-    nombre: "Aviso jurídico",
-    etapa: "mora_90",
-    asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
-    cuerpo: `Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+		cuerpoWhastapp: `Estimado/a {clienteNombre}, Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
+
+Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}`,
+	},
+	{
+		id: "aviso_juridico",
+		nombre: "Aviso jurídico",
+		etapa: "mora_90",
+		asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
+		cuerpo: `Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
 
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 
 Favor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.`,
-    cuerpoWhastapp:
-      "Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.\n\nPor lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.\n\nFavor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.",
-  },
+		cuerpoWhastapp: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+
+Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
+
+${COBROS_NO_REPLY_WARNING}
+
+Favor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.`,
+	},
 ];
 
 /** Sugiere una plantilla según el estado de mora y antigüedad del caso */
 export function sugerirPlantilla(
-  estadoMora: string | undefined,
-  fechaInicio?: string | Date | null,
+	estadoMora: string | undefined,
+	fechaInicio?: string | Date | null,
 ): string {
-  const mapaMora: Record<string, string> = {
-    pre_mora: "pre_mora",
-    mora_30: "mora_30",
-    mora_60: "mora_60",
-    mora_90: "aviso_juridico",
-    incobrable: "aviso_juridico",
-  };
+	const mapaMora: Record<string, string> = {
+		pre_mora: "pre_mora",
+		mora_30: "mora_30",
+		mora_60: "mora_60",
+		mora_90: "aviso_juridico",
+		incobrable: "aviso_juridico",
+	};
 
-  // Si tiene mora, usar plantilla correspondiente
-  if (estadoMora && mapaMora[estadoMora]) {
-    return mapaMora[estadoMora];
-  }
+	// Si tiene mora, usar plantilla correspondiente
+	if (estadoMora && mapaMora[estadoMora]) {
+		return mapaMora[estadoMora];
+	}
 
-  // Si es cliente reciente (menos de 30 días), bienvenida
-  if (fechaInicio) {
-    const inicio = new Date(fechaInicio);
-    const diasDesdeInicio =
-      (Date.now() - inicio.getTime()) / (1000 * 60 * 60 * 24);
-    if (diasDesdeInicio <= 30) {
-      return "bienvenida";
-    }
-  }
+	// Si es cliente reciente (menos de 30 días), bienvenida
+	if (fechaInicio) {
+		const inicio = new Date(fechaInicio);
+		const diasDesdeInicio =
+			(Date.now() - inicio.getTime()) / (1000 * 60 * 60 * 24);
+		if (diasDesdeInicio <= 30) {
+			return "bienvenida";
+		}
+	}
 
-  // Fallback: recordatorio de pago
-  return "al_dia";
+	// Fallback: recordatorio de pago
+	return "al_dia";
 }

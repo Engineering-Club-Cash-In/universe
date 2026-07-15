@@ -60,6 +60,8 @@ export class CrmApiService {
           email: this.serviceAccountEmail,
           password: this.serviceAccountPassword,
         }),
+        // Sin timeout, un stall de red deja el request colgado para siempre
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!response.ok) {
@@ -115,6 +117,7 @@ export class CrmApiService {
           'Cookie': `better-auth.session_token=${this.sessionToken}`,
         },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30_000),
       });
 
       // 3. Si falla por auth (401/403), re-autenticar e intentar de nuevo
@@ -136,6 +139,7 @@ export class CrmApiService {
             'Cookie': `better-auth.session_token=${this.sessionToken}`,
           },
           body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(30_000),
         });
 
         if (!retryResponse.ok) {

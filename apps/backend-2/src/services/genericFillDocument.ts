@@ -28,7 +28,15 @@ interface DocusealField {
   key: string;
   value: any;
 }
+// 🏷️ Labels que no se derivan del enum (el enum vive en la DB de prod y no se renombra)
+const DOCUMENT_LABEL_OVERRIDES: Record<string, string> = {
+  cobertura_inrexsa: "Cobertura Placas Particulares",
+  cobertura_inrexsa_comercial: "Cobertura Placas Comerciales",
+};
+
 function formatDocumentName(name: string): string {
+  const override = DOCUMENT_LABEL_OVERRIDES[name];
+  if (override) return override;
   return name
     .split("_")
     .map((word) => {

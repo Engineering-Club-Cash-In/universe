@@ -426,7 +426,20 @@ export type MoraTotales = {
 
 export type MoraByEtapaYAsesorResponse = {
 	totales: MoraTotales;
-	porAsesor: ({ asesorId: number; nombre: string; email: string } & MoraTotales)[];
+	porAsesor: ({
+		asesorId: number;
+		nombre: string;
+		email: string;
+	} & MoraTotales)[];
+	fecha?: string;
+	alcance?: "live" | "historico";
+	dataDisponibleDesde?: string;
+};
+
+export type MoraCobradaPorAsesorResponse = {
+	periodo: { inicio: string; fin: string };
+	porAsesor: { asesorId: number; nombre: string; cobrado: string }[];
+	totalCobrado: string;
 };
 
 // ============================================================================
@@ -737,11 +750,22 @@ export class CarteraBackClient {
 						...(params.email_cobrador && {
 							email_asesor: params.email_cobrador,
 						}),
+						// Sin esto el rango de fechas se perdía solo en la ruta POST
+						// (>50 SIFCOs) mientras el GET sí lo mandaba.
+						...(params.fecha_desde && {
+							fecha_desde: params.fecha_desde,
+						}),
+						...(params.fecha_hasta && {
+							fecha_hasta: params.fecha_hasta,
+						}),
 						...(params.capital_min !== undefined && {
 							capital_min: params.capital_min,
 						}),
 						...(params.capital_max !== undefined && {
 							capital_max: params.capital_max,
+						}),
+						...(params.excluir_pagados_mes && {
+							excluir_pagados_mes: true,
 						}),
 						excel: false,
 					}),
@@ -782,6 +806,9 @@ export class CarteraBackClient {
 				}),
 				...(params.capital_max !== undefined && {
 					capital_max: params.capital_max.toString(),
+				}),
+				...(params.excluir_pagados_mes && {
+					excluir_pagados_mes: "true",
 				}),
 				excel: "false",
 			});
@@ -1175,10 +1202,13 @@ export class CarteraBackClient {
 			queryParams.set("anio", String(filters.anio));
 		}
 
+		// Sin cache: el estado de liquidación debe verse fresco siempre. Con cache
+		// en memoria + varias instancias, el invalidate del POST liquidar no llega
+		// a las demás instancias y la UI muestra "pendiente" hasta 5 min después.
 		const response = await this.request<ResumenGlobalInversionista[]>(
 			`/resumen-global-liquidaciones?${queryParams.toString()}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
 		return response;
 	}
@@ -1564,7 +1594,10 @@ export class CarteraBackClient {
 			otros: cobradoResult.cobrado_otros ?? "0",
 		};
 
-		return { cobrado, esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" } };
+		return {
+			cobrado,
+			esperado: { meta_mensual: esperadoResult.meta_mensual ?? "0" },
+		};
 	}
 
 	async getFlujoCuotasInversiones(params: {
@@ -1619,14 +1652,44 @@ export class CarteraBackClient {
 	// REPORTES
 	// ========================================================================
 
-	async getMoraByEtapaYAsesor(params?: { emailCobrador?: string }) {
+	async getMoraByEtapaYAsesor(params?: {
+		emailCobrador?: string;
+		fecha?: string;
+		asesores?: number[];
+	}) {
 		const queryParams = new URLSearchParams();
-		if (params?.emailCobrador) queryParams.set("email_cobrador", params.emailCobrador);
+		if (params?.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
+		if (params?.fecha) queryParams.set("fecha", params.fecha);
+		if (params?.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
 		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
 		return this.request<MoraByEtapaYAsesorResponse>(
 			`/reportes/mora-por-etapa-asesor${qs}`,
 			{ method: "GET" },
 			true,
+		);
+	}
+
+	async getMoraCobradaPorAsesor(params: {
+		mes: number;
+		anio: number;
+		asesores?: number[];
+		emailCobrador?: string;
+	}) {
+		const queryParams = new URLSearchParams();
+		queryParams.set("mes", String(params.mes));
+		queryParams.set("anio", String(params.anio));
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		if (params.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
+		// Sin caché: es un reporte de flujo (pagos del período). Con caché el
+		// "Actualizar" podría devolver un hit stale tras registrar/ajustar un pago.
+		return this.request<MoraCobradaPorAsesorResponse>(
+			`/reportes/mora-cobrada-por-asesor?${queryParams}`,
+			{ method: "GET" },
+			false,
 		);
 	}
 
@@ -1641,13 +1704,60 @@ export class CarteraBackClient {
 			...(params.asesorId ? { asesor_id: String(params.asesorId) } : {}),
 		});
 
-		const response = await this.request<{ ok: boolean; data: CuotaPorFechaRow[] }>(
-			`/reportes/cuotas-por-fecha?${qp}`,
+		const response = await this.request<{
+			ok: boolean;
+			data: CuotaPorFechaRow[];
+		}>(`/reportes/cuotas-por-fecha?${qp}`, { method: "GET" }, false);
+
+		return response.data ?? [];
+	}
+
+	async getCobranzaDiaria(params: {
+		anio: number;
+		mes: number;
+		dia: number;
+		asesorId?: number;
+	}): Promise<any> {
+		const qp = new URLSearchParams({
+			anio: String(params.anio),
+			mes: String(params.mes),
+			dia: String(params.dia),
+			...(params.asesorId ? { asesor_id: String(params.asesorId) } : {}),
+		});
+
+		const res = await this.request<{ ok: boolean; data: any }>(
+			`/reportes/cobranza-diaria?${qp}`,
 			{ method: "GET" },
 			false,
 		);
 
-		return response.data ?? [];
+		return res.data ?? { asesores: [], totalGeneral: null };
+	}
+
+	async getCobranzaDiariaDetalle(params: {
+		anio: number;
+		mes: number;
+		dia: number;
+		asesorId: number;
+		limit?: number;
+		offset?: number;
+	}): Promise<any> {
+		const qp = new URLSearchParams({
+			anio: String(params.anio),
+			mes: String(params.mes),
+			dia: String(params.dia),
+			asesor_id: String(params.asesorId),
+			limit: String(params.limit ?? 10),
+			offset: String(params.offset ?? 0),
+		});
+
+		const res = await this.request<{ ok: boolean; data: any }>(
+			`/reportes/cobranza-diaria/detalle?${qp}`,
+			{ method: "GET" },
+			false,
+		);
+
+		return res.data ?? { creditos: [], total: 0, hasMore: false };
 	}
 
 	// ========================================================================

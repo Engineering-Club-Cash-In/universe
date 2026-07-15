@@ -291,6 +291,13 @@ const menuSections: MenuSection[] = [
         roles: ["ADMIN", "CONTA"],
       },
       {
+        key: "reporte-cartera-activa",
+        label: "Cartera Activa",
+        icon: <FileText className="h-4 w-4" />,
+        path: "/reporte-cartera-activa",
+        roles: ["ADMIN", "CONTA"],
+      },
+      {
         key: "capital-inversionistas",
         label: "Capital Inversionistas",
         icon: <TrendingUp className="h-4 w-4" />,

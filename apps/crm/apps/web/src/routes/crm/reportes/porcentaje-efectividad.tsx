@@ -187,13 +187,13 @@ export function PorcentajeEfectividadContent() {
 		}),
 		enabled: !!input,
 	});
+	const data = reportQuery.data;
 
 	// Reiniciar página al recibir datos nuevos
 	useEffect(() => {
-		setPage(0);
-	}, [reportQuery.data]);
+		if (data) setPage(0);
+	}, [data]);
 
-	const data = reportQuery.data;
 	const isLoading = reportQuery.isLoading;
 
 	const allRegistros = data?.registros ?? [];
@@ -248,10 +248,12 @@ export function PorcentajeEfectividadContent() {
 			porcentaje: row.porcentaje,
 			totalOportunidades: row.totalOportunidades,
 			totalCerradas: row.totalCerradas,
+			totalCierresPeriodo: row.totalCierresPeriodo,
 		}))
 		.sort((a, b) => b.porcentaje - a.porcentaje);
 
 	const chartHeight = Math.max(280, chartData.length * BAR_HEIGHT_PX);
+	const channelTypeData = data?.porTipoCanal ?? [];
 
 	return (
 		<div className="space-y-6">
@@ -260,8 +262,7 @@ export function PorcentajeEfectividadContent() {
 					Porcentaje Efectividad
 				</h1>
 				<p className="mt-1 text-muted-foreground">
-					Oportunidades creadas, cierres del período y conversión por fuente.
-					Excluye oportunidades migradas.
+					Creadas en el rango y cierres del período por medio.
 				</p>
 			</div>
 
@@ -271,32 +272,38 @@ export function PorcentajeEfectividadContent() {
 			/>
 
 			{/* ── Resumen estadístico ── */}
-			<div className="grid gap-4 md:grid-cols-3">
+			<div className="grid gap-4 md:grid-cols-4">
 				<ReportCard
-					title="Oportunidades abiertas"
+					title="Oportunidades creadas"
 					value={isLoading ? "—" : (data?.total.totalOportunidades ?? 0)}
-					description="Creadas en el período, sin migradas"
+					description="En el rango"
 					icon={Activity}
+				/>
+				<ReportCard
+					title="Cerradas (creadas)"
+					value={isLoading ? "—" : (data?.total.totalCerradas ?? 0)}
+					description="Creadas en el rango"
+					icon={CheckCircle2}
 				/>
 				<ReportCard
 					title="Cierres del período"
 					value={isLoading ? "—" : (data?.total.totalCierresPeriodo ?? 0)}
-					description="Primer cierre 90%+ en el rango"
+					description="Primer 90%+ en el rango"
 					icon={CheckCircle2}
 				/>
 				<ReportCard
-					title="Efectividad Global"
+					title="Efectividad (creadas)"
 					value={isLoading ? "—" : `${data?.total.porcentaje ?? 0}%`}
-					description={`Cohorte creada: ${data?.total.totalCerradas ?? 0} cerradas`}
+					description="Cerradas / creadas"
 					icon={Target}
 				/>
 			</div>
 
 			<Card>
 				<CardHeader>
-					<CardTitle>Efectividad por fuente</CardTitle>
+					<CardTitle>Efectividad de creadas por fuente</CardTitle>
 					<CardDescription>
-						Ordenado de mayor a menor tasa de conversión
+						Cerradas de oportunidades creadas en el rango
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -352,19 +359,21 @@ export function PorcentajeEfectividadContent() {
 
 			<Card>
 				<CardHeader>
-					<CardTitle>Detalle por fuente</CardTitle>
+					<CardTitle>Subtotales por tipo de canal</CardTitle>
 					<CardDescription>
-						Oportunidades creadas, cerradas y tasa de conversión por canal de
-						origen
+						Agrupación de fuentes para comparar efectividad por esfuerzo
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<Table>
 						<TableHeader>
 							<TableRow>
-								<TableHead>Fuente</TableHead>
+								<TableHead>Tipo de canal</TableHead>
 								<TableHead className="text-right">Oportunidades</TableHead>
-								<TableHead className="text-right">Cerradas</TableHead>
+								<TableHead className="text-right">Cerradas (creadas)</TableHead>
+								<TableHead className="text-right">
+									Cierres del período
+								</TableHead>
 								<TableHead className="text-right">Efectividad</TableHead>
 							</TableRow>
 						</TableHeader>
@@ -372,7 +381,72 @@ export function PorcentajeEfectividadContent() {
 							{isLoading ? (
 								<TableRow>
 									<TableCell
-										colSpan={4}
+										colSpan={5}
+										className="py-8 text-center text-muted-foreground"
+									>
+										Cargando...
+									</TableCell>
+								</TableRow>
+							) : channelTypeData.length === 0 ? (
+								<TableRow>
+									<TableCell
+										colSpan={5}
+										className="py-8 text-center text-muted-foreground"
+									>
+										No hay datos para el período seleccionado
+									</TableCell>
+								</TableRow>
+							) : (
+								channelTypeData.map((row) => (
+									<TableRow key={row.tipoCanal}>
+										<TableCell className="font-medium">
+											{row.tipoCanal}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.totalOportunidades}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.totalCerradas}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.totalCierresPeriodo}
+										</TableCell>
+										<TableCell className="text-right font-semibold">
+											{row.porcentaje}%
+										</TableCell>
+									</TableRow>
+								))
+							)}
+						</TableBody>
+					</Table>
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle>Detalle por fuente</CardTitle>
+					<CardDescription>
+						Creadas y cierres del rango por medio
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<Table>
+						<TableHeader>
+							<TableRow>
+								<TableHead>Fuente</TableHead>
+								<TableHead className="text-right">Creadas</TableHead>
+								<TableHead className="text-right">Cerradas (creadas)</TableHead>
+								<TableHead className="text-right">
+									Cierres del período
+								</TableHead>
+								<TableHead className="text-right">Efectividad</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{isLoading ? (
+								<TableRow>
+									<TableCell
+										colSpan={5}
 										className="py-8 text-center text-muted-foreground"
 									>
 										Cargando...
@@ -381,7 +455,7 @@ export function PorcentajeEfectividadContent() {
 							) : chartData.length === 0 ? (
 								<TableRow>
 									<TableCell
-										colSpan={4}
+										colSpan={5}
 										className="py-8 text-center text-muted-foreground"
 									>
 										No hay datos para el período seleccionado
@@ -406,6 +480,9 @@ export function PorcentajeEfectividadContent() {
 										</TableCell>
 										<TableCell className="text-right">
 											{row.totalCerradas}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.totalCierresPeriodo}
 										</TableCell>
 										<TableCell className="text-right font-semibold">
 											{row.porcentaje}%

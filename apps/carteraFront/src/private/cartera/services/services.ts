@@ -768,6 +768,10 @@ export interface UpdateCreditBody {
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
+  motivo_devolucion?: string;
+
+  // Motivo del ajuste manual de capital (se registra en el historial de capital)
+  motivo_ajuste_capital?: string;
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
@@ -3542,6 +3546,24 @@ export interface HistorialCambioFecha {
 
 export async function getHistorialCambioFecha(numeroCreditoSifco: string): Promise<HistorialCambioFecha[]> {
   const { data } = await api.get(`/historial-cambio-fecha/${numeroCreditoSifco}`);
+  return data.historial ?? [];
+}
+
+// Historial de cambios del capital de un crédito
+export interface HistorialCapital {
+  id: number;
+  operacion: string;               // INSERT | UPDATE
+  capital_anterior: string | null; // numeric → string
+  capital_nuevo: string | null;
+  fuente: string;                  // AJUSTE_MANUAL | PAGO | REVERSO | CASTIGO | MERGE | CREACION | SISTEMA
+  motivo: string | null;
+  platform_user_id: number | null;
+  user_email: string | null;
+  fecha: string;
+}
+
+export async function getHistorialCapital(numeroCreditoSifco: string): Promise<HistorialCapital[]> {
+  const { data } = await api.get(`/historial-capital/${numeroCreditoSifco}`);
   return data.historial ?? [];
 }
 

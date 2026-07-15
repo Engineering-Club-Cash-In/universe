@@ -6,7 +6,11 @@ WORKDIR /app
 
 COPY . .
 
-RUN npm install --legacy-peer-deps
+# npm ci instala EXACTAMENTE el árbol del package-lock.json commiteado.
+# Es determinista: sin lockfile, `npm install` resolvía transitivas distinto
+# en cada máquina y en CI a veces no hoisteaba deps que rollup necesita
+# (@babel/runtime, next-themes), rompiendo el build solo en CI.
+RUN npm ci --legacy-peer-deps
 
 RUN node node_modules/vite/bin/vite.js build
 

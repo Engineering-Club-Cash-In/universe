@@ -259,15 +259,25 @@ export async function createPaymentAgreement(
     // 🔗 ASOCIAR PAGOS AL CONVENIO (Tabla Pivot)
     // ============================================
     console.log("✅ Paso 11: Asociando pagos al convenio...");
-    
-    const agreementPaymentsData = payment_ids.map((pago_id) => ({
-      convenio_id: agreement.convenio_id,
-      pago_id: pago_id,
-    }));
+
+    // NO asociar al convenio los pagos SOLO DE MORA (pagado=true, monto_aplicado=0).
+    // Ya están cobrados y no representan una cuota del convenio. Tras los Pasos 5 y 6
+    // el único pago con pagado=true que puede quedar es justamente el mora-only, así
+    // que lo excluimos del pivot. Si entrara, getPaymentAgreements lo contaría como
+    // pago completado (summary.paid_payments) y el convenio recién creado se mostraría
+    // como parcialmente pagado en el front ("X de Y completados").
+    const agreementPaymentsData = pagos
+      .filter((item) => item.pago.pagado !== true)
+      .map((item) => ({
+        convenio_id: agreement.convenio_id,
+        pago_id: item.pago.pago_id,
+      }));
 
     console.log("📦 Datos a insertar en pivot:", agreementPaymentsData);
 
-    await db.insert(convenios_pagos_resume).values(agreementPaymentsData);
+    if (agreementPaymentsData.length > 0) {
+      await db.insert(convenios_pagos_resume).values(agreementPaymentsData);
+    }
 
     console.log("✅ Pagos asociados al convenio correctamente");
 

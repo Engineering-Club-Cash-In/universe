@@ -4115,63 +4115,18 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     );
 
     // ============================================
-    // 6️⃣ GENERAR PDF CON PUPPETEER
+    // 6️⃣ GUARDAR EN BASE DE DATOS *PRIMERO* (antes del PDF, que es frágil)
+    // ------------------------------------------------------------
+    // La certificación en SAT (paso 3) ya ocurrió: la factura EXISTE en SAT.
+    // Persistimos en la BD ANTES de generar/subir el PDF para que un fallo de
+    // Puppeteer o de R2 no deje la factura "en SAT pero no en la BD" (bug que
+    // obligaba a reconstruir facturas a mano). El pdf_url es determinístico
+    // (mismo filename que se sube abajo), así que la URL queda correcta desde
+    // el insert aunque el PDF se suba un instante después.
     // ============================================
-    console.log(`   🎨 Generando PDF...`);
-
-    const { launchBrowser } = await import("../utils/functions/browser");
-    const browser = await launchBrowser();
-
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
-
-    const pdfBuffer = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: {
-        top: "20px",
-        bottom: "20px",
-        left: "20px",
-        right: "20px",
-      },
-    });
-
-    await browser.close();
-
-    console.log(`   ✅ PDF generado`);
-
-    // ============================================
-    // 7️⃣ SUBIR PDF A R2 (CLOUDFLARE)
-    // ============================================
-    const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-
     const filename = `factura_${resultado.serie}_${resultado.numero}.pdf`;
-
-    const s3 = new S3Client({
-      endpoint: process.env.BUCKET_REPORTS_URL,
-      region: "auto",
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-      },
-    });
-
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.BUCKET_REPORTS,
-        Key: filename,
-        Body: pdfBuffer,
-        ContentType: "application/pdf",
-      })
-    );
-
     const pdfUrl = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
 
-    console.log(`   ✅ PDF subido a R2: ${filename}`);
-
-    // ============================================
-    // 8️⃣ GUARDAR EN BASE DE DATOS (🔥 CON CONVERSIÓN A GUATEMALA)
-    // ============================================
     console.log('🔍 ========== FECHAS DE SAT (ANTES DE CONVERSIÓN) ==========');
     console.log('📅 Fecha emisión (SAT):', datosGenerales["@_FechaHoraEmision"]);
     console.log('📅 Fecha certificación (SAT):', certificacion["dte:FechaHoraCertificacion"]);
@@ -4207,6 +4162,65 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
     console.log(`   ✅ Factura guardada en BD - ID: ${facturaGuardada.factura_id}`);
     console.log('📅 Fecha certificación guardada (Guatemala):', facturaGuardada.fecha_certificacion);
+
+    // ============================================
+    // 7️⃣ GENERAR PDF + SUBIR A R2 (best-effort, NO fatal)
+    // ------------------------------------------------------------
+    // Si esto falla, la factura YA quedó guardada arriba: NO relanzamos, solo
+    // logueamos para monitoreo/reintento. El PDF se puede regenerar luego con
+    // el mismo filename determinístico -> misma URL (script de backfill).
+    // ============================================
+    try {
+      console.log(`   🎨 Generando PDF...`);
+      const { launchBrowser } = await import("../utils/functions/browser");
+      const browser = await launchBrowser();
+      try {
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: "networkidle0" });
+
+        const pdfBuffer = await page.pdf({
+          format: "A4",
+          printBackground: true,
+          margin: {
+            top: "20px",
+            bottom: "20px",
+            left: "20px",
+            right: "20px",
+          },
+        });
+        console.log(`   ✅ PDF generado`);
+
+        const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
+        const s3 = new S3Client({
+          endpoint: process.env.BUCKET_REPORTS_URL,
+          region: "auto",
+          credentials: {
+            accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+          },
+        });
+
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: process.env.BUCKET_REPORTS,
+            Key: filename,
+            Body: pdfBuffer,
+            ContentType: "application/pdf",
+          })
+        );
+        console.log(`   ✅ PDF subido a R2: ${filename}`);
+      } finally {
+        await browser.close();
+      }
+    } catch (pdfError) {
+      // La factura YA está guardada en la BD (paso 6). No se pierde el registro.
+      console.error(
+        `⚠️ [certificarFactura] Factura ${resultado.serie}-${resultado.numero} ` +
+          `(${resultado.uuid}) GUARDADA en BD (id ${facturaGuardada.factura_id}) ` +
+          `pero FALLÓ el PDF/R2. Se puede regenerar el PDF luego:`,
+        pdfError
+      );
+    }
 
     // ============================================
     // 9️⃣ RETORNAR RESULTADO

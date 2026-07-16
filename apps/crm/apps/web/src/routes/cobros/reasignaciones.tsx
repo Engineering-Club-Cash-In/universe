@@ -257,6 +257,10 @@ function ReasignarModal({
 						</p>
 						{histQuery.isLoading ? (
 							<p className="text-muted-foreground text-xs">Cargando...</p>
+						) : histQuery.isError ? (
+							<p className="text-destructive text-xs">
+								No se pudo cargar el historial de este crédito.
+							</p>
 						) : historial.length === 0 ? (
 							<p className="text-muted-foreground text-xs italic">
 								Esta cuenta no ha sido reasignada manualmente antes.

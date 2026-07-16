@@ -2,6 +2,7 @@
 import api from "@/Provider/interceptor";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
+import type { InstallmentContributionSummary } from "./installmentContribution";
 
 const API_URL = import.meta.env.VITE_BACK_URL  ||'https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site'; ;
 
@@ -3478,7 +3479,7 @@ export const getEfectividadAsesores = async (params: {
 // ============================================
 // Abonos por cuota
 // ============================================
-export interface AbonosCuotaResponse {
+export interface AbonosCuotaResponse extends InstallmentContributionSummary {
   success: boolean;
   numero_credito_sifco: string;
   numero_cuota: number;

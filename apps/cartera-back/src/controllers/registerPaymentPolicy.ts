@@ -233,6 +233,15 @@ export type RubrosCuotaRow = {
   membresias_pago?: BigInput | null;
 };
 
+export type PagoCoberturaCuota = RubrosCuotaRow & {
+  pago_id?: number;
+  validationStatus?: string | null;
+  paymentFalse?: boolean | null;
+  mora?: BigInput | null;
+  otros?: string | number | null;
+  pagoConvenio?: BigInput | null;
+};
+
 /**
  * Σ de lo que los pagos hermanos aplicaron a la CUOTA contractual
  * (`credito.cuota`): capital + interés + IVA + seguro + GPS + membresías.
@@ -261,6 +270,108 @@ export const sumarAplicadoACuota = (rows: RubrosCuotaRow[]): Big =>
         .plus(new Big(r.membresias_pago ?? 0)),
     new Big(0)
   );
+
+export const calcularCoberturaCuota = ({
+  montoCuota,
+  pagos,
+  pagoIdEnValidacion,
+  incluirPendientes = false,
+}: {
+  montoCuota: BigInput;
+  pagos: PagoCoberturaCuota[];
+  pagoIdEnValidacion?: number;
+  incluirPendientes?: boolean;
+}) => {
+  const monto = new Big(montoCuota);
+  const aplicados = pagos.filter(
+    (pago) =>
+      pago.paymentFalse === false &&
+      (pago.validationStatus === "validated" ||
+        (pago.validationStatus === "pending" &&
+          (incluirPendientes ||
+            (pagoIdEnValidacion !== undefined &&
+              pago.pago_id === pagoIdEnValidacion))))
+  );
+  const totalAplicado = sumarAplicadoACuota(aplicados);
+  const saldoPendiente = monto.minus(totalAplicado);
+  const cuotaCompleta =
+    monto.gt(0) && totalAplicado.gte(monto.minus(0.01));
+
+  return {
+    totalAplicado,
+    saldoPendiente: saldoPendiente.gt(0) ? saldoPendiente : new Big(0),
+    cuotaCompleta,
+    tieneAbonoParcial:
+      !cuotaCompleta && totalAplicado.gt(0) && totalAplicado.lt(monto),
+  };
+};
+
+export const getCoveredOpenInstallment = ({
+  montoCuota,
+  cuotas,
+}: {
+  montoCuota: BigInput;
+  cuotas: {
+    cuotaId: number;
+    numeroCuota: number;
+    pagos: PagoCoberturaCuota[];
+  }[];
+}) => {
+  const cuotasLogicas = new Map<number, (typeof cuotas)[number]>();
+  for (const cuota of cuotas) {
+    const existente = cuotasLogicas.get(cuota.numeroCuota);
+    cuotasLogicas.set(
+      cuota.numeroCuota,
+      existente
+        ? { ...existente, pagos: [...existente.pagos, ...cuota.pagos] }
+        : cuota
+    );
+  }
+
+  const inconsistente = [...cuotasLogicas.values()].find((cuota) =>
+    calcularCoberturaCuota({
+      montoCuota,
+      pagos: cuota.pagos,
+    }).cuotaCompleta
+  );
+
+  return inconsistente
+    ? {
+        cuotaId: inconsistente.cuotaId,
+        numeroCuota: inconsistente.numeroCuota,
+      }
+    : null;
+};
+
+export type ResumenAbonosCuota = {
+  cuotaCerrada: boolean;
+  totalAplicadoCuota: string;
+  saldoPendiente: string;
+  tieneAbonoParcial: boolean;
+};
+
+export const calcularResumenAbonosCuota = ({
+  montoCuota,
+  cuotaCerrada,
+  pagos,
+}: {
+  montoCuota: BigInput;
+  cuotaCerrada: boolean;
+  pagos: PagoCoberturaCuota[];
+}): ResumenAbonosCuota => {
+  const cobertura = calcularCoberturaCuota({
+    montoCuota,
+    pagos,
+    incluirPendientes: true,
+  });
+
+  return {
+    cuotaCerrada,
+    totalAplicadoCuota: cobertura.totalAplicado.toFixed(2),
+    saldoPendiente: cobertura.saldoPendiente.toFixed(2),
+    tieneAbonoParcial: !cuotaCerrada && cobertura.tieneAbonoParcial,
+  };
+};
 
 export type SaldoCuotaNeto = {
   saldoRealCuota: Big;

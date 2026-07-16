@@ -17,7 +17,7 @@ import {
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
-import { and, eq, lt, sql, asc, lte, inArray, notInArray } from "drizzle-orm";
+import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -28,6 +28,19 @@ import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaCompra
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
+import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
+
+export const crearResumenAbonosCuota = (input: Parameters<
+  typeof calcularResumenAbonosCuota
+>[0]) => {
+  const resumen = calcularResumenAbonosCuota(input);
+  return {
+    cuota_cerrada: resumen.cuotaCerrada,
+    total_aplicado_cuota: resumen.totalAplicadoCuota,
+    saldo_pendiente: resumen.saldoPendiente,
+    tiene_abono_parcial: resumen.tieneAbonoParcial,
+  };
+};
 
 // ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
 // Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
@@ -987,13 +1000,19 @@ export async function insertPagosCreditoInversionistas(
   return resolvedInserts;
 }
 
+type InvestorPaymentDb = Pick<
+  typeof db,
+  "query" | "select" | "insert" | "update"
+>;
+
 export async function insertPagosCreditoInversionistasV2(
   pago_id: number,
   credito_id: number,
   fechaPeriodo?: Date,
+  txOrDb: InvestorPaymentDb = db,
 ) {
   // 1. Obtener el pago
-  const currentPago = await db.query.pagos_credito.findFirst({
+  const currentPago = await txOrDb.query.pagos_credito.findFirst({
     where: (p, { eq }) => eq(p.pago_id, pago_id),
   });
 
@@ -1002,7 +1021,7 @@ export async function insertPagosCreditoInversionistasV2(
   }
 
   // 2. Obtener inversionistas del crédito
-  const inversionistasData = await db.query.creditos_inversionistas.findMany({
+  const inversionistasData = await txOrDb.query.creditos_inversionistas.findMany({
     where: (ci, { eq }) => eq(ci.credito_id, credito_id),
   });
 
@@ -1013,7 +1032,7 @@ export async function insertPagosCreditoInversionistasV2(
   // 3. Obtener nombres para identificar a Cube
   const inversionistasWithName = await Promise.all(
     inversionistasData.map(async (inv) => {
-      const [invRow] = await db
+      const [invRow] = await txOrDb
         .select({ nombre: inversionistas.nombre })
         .from(inversionistas)
         .where(eq(inversionistas.inversionista_id, inv.inversionista_id));
@@ -1045,7 +1064,7 @@ export async function insertPagosCreditoInversionistasV2(
   //    del mes de la compra se aplicaría a un mes que no corresponde. La facturación
   //    tiene el MISMO comportamiento, así que pci y la factura no divergen; cuando se
   //    decida cerrar este borde hay que hacerlo en AMBOS lados (cofidi.ts + acá).
-  const comprasPendientesFacturar = await db
+  const comprasPendientesFacturar = await txOrDb
     .select({
       inversionista_id: compras_credito_inversionista.inversionista_id,
       monto_aportado: compras_credito_inversionista.monto_aportado,
@@ -1070,7 +1089,7 @@ export async function insertPagosCreditoInversionistasV2(
     const compra = comprasPendientesFacturar[0];
 
     // Espejo: base (monto_aportado), status y fecha_inicio_participacion por inversionista.
-    const espejoRows = await db
+    const espejoRows = await txOrDb
       .select({
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -1185,7 +1204,9 @@ export async function insertPagosCreditoInversionistasV2(
         credito_id,
         abonoCapitalInv.toNumber(),
         false,
-        inv.inversionista_id
+        inv.inversionista_id,
+        false,
+        txOrDb
       );
     }
 
@@ -1205,7 +1226,7 @@ export async function insertPagosCreditoInversionistasV2(
   }
 
   // 7. Insertar/upsert en pagos_credito_inversionistas
-  await db
+  await txOrDb
     .insert(pagos_credito_inversionistas)
     .values(inserts)
     .onConflictDoUpdate({
@@ -3307,7 +3328,7 @@ export async function getAbonosPorCuota(
 ) {
   // 1. Buscar el crédito por SIFCO
   const [credito] = await db
-    .select({ credito_id: creditos.credito_id })
+    .select({ credito_id: creditos.credito_id, cuota: creditos.cuota })
     .from(creditos)
     .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
     .limit(1);
@@ -3321,7 +3342,10 @@ export async function getAbonosPorCuota(
   // credito (p. ej. tras regeneraciones de calendario). Se consideran todas para
   // no perder pagos vinculados al cuota_id "viejo".
   const cuotasMatch = await db
-    .select({ cuota_id: cuotas_credito.cuota_id })
+    .select({
+      cuota_id: cuotas_credito.cuota_id,
+      pagado: cuotas_credito.pagado,
+    })
     .from(cuotas_credito)
     .where(
       and(
@@ -3340,6 +3364,8 @@ export async function getAbonosPorCuota(
   const pagos = await db
     .select({
       pago_id: pagos_credito.pago_id,
+      validationStatus: pagos_credito.validationStatus,
+      paymentFalse: pagos_credito.paymentFalse,
       abono_capital: pagos_credito.abono_capital,
       abono_iva_12: pagos_credito.abono_iva_12,
       abono_interes: pagos_credito.abono_interes,
@@ -3353,11 +3379,10 @@ export async function getAbonosPorCuota(
       and(
         eq(pagos_credito.credito_id, credito.credito_id),
         inArray(pagos_credito.cuota_id, cuotaIds),
-        // Excluir abonos directos a capital (no son pago de cuota) y reversados.
-        // `capital` = sin aplicar, `capital_validated` = aplicado; ninguno es
-        // abono de la cuota, así que no deben aparecer en este desglose.
+        // El desglose y el resumen deben usar exactamente los mismos pagos vivos
+        // de cuota. Excluye reversados, placeholders, convenio y capital directo.
         eq(pagos_credito.paymentFalse, false),
-        notInArray(pagos_credito.validationStatus, ["capital", "capital_validated"])
+        inArray(pagos_credito.validationStatus, ["pending", "validated"])
       )
     );
 
@@ -3377,6 +3402,11 @@ export async function getAbonosPorCuota(
     total_abono_seguro = total_abono_seguro.plus(p.abono_seguro || "0");
     total_abono_gps = total_abono_gps.plus(p.abono_gps || "0");
   }
+  const resumen = crearResumenAbonosCuota({
+    montoCuota: credito.cuota ?? 0,
+    cuotaCerrada: cuotasMatch.some((cuota) => cuota.pagado === true),
+    pagos,
+  });
 
   return {
     success: true,
@@ -3389,5 +3419,6 @@ export async function getAbonosPorCuota(
     membresias_pago: total_membresias_pago.toFixed(2),
     abono_seguro: total_abono_seguro.toFixed(2),
     abono_gps: total_abono_gps.toFixed(2),
+    ...resumen,
   };
 }

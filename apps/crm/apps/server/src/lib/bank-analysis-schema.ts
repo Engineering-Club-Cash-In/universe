@@ -30,14 +30,14 @@ export const bankStatementAnalysisSchema = z.object({
 		promedio_gastos_variables: z.number(),
 		disponibilidad_economica: z.number(),
 	}),
-	// Nullable e informativo: no debe tumbar el análisis core; días acotados a 1-31 enteros
+	// Nullish e informativo: la key puede faltar o venir null sin tumbar el análisis core; días acotados a 1-31 enteros
 	analisis_fecha_pago: z
 		.object({
 			dias_ingreso_detectados: z.array(z.number().int().min(1).max(31)),
 			dia_pago_sugerido: z.number().int().min(1).max(31),
 			justificacion: z.string(),
 		})
-		.nullable(),
+		.nullish(),
 });
 
 export type BankStatementAnalysis = z.infer<typeof bankStatementAnalysisSchema>;

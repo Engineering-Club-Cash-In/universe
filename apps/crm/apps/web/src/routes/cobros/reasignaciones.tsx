@@ -126,10 +126,16 @@ function ReasignarModal({
 			},
 		}),
 	);
-	// Solo reasignaciones hechas por un usuario REAL (supervisor). La siembra
-	// inicial de COBROS-02 quedó marcada API_MANUAL pero sin usuario (usuario_id
-	// null → "sistema"): no es una decisión humana, se excluye del modal.
-	const historial = (histQuery.data?.data ?? []).filter((h) => h.usuario);
+	// Excluir SOLO la siembra inicial de COBROS-02 (motivo fijo del script SQL
+	// 02_asignar_asesores_creditos.sql) — quedó marcada API_MANUAL pero no es
+	// una decisión humana. Filtrar por `usuario` en vez de este motivo exacto
+	// escondía también reasignaciones manuales REALES cuyo supervisor no
+	// resolvió en platform_users (usuario_id null, best-effort) — review Codex.
+	const MOTIVO_SIEMBRA_INICIAL =
+		"Asignación inicial por bucket — carga COBROS-02 (SQL)";
+	const historial = (histQuery.data?.data ?? []).filter(
+		(h) => h.motivo !== MOTIVO_SIEMBRA_INICIAL,
+	);
 
 	const mutation = useMutation({
 		mutationFn: () =>
@@ -264,7 +270,7 @@ function ReasignarModal({
 									>
 										<div className="mb-1 flex items-center justify-between text-muted-foreground">
 											<span className="font-medium">{fmtFecha(h.fecha)}</span>
-											<span>{h.usuario}</span>
+											<span>{h.usuario || "sistema"}</span>
 										</div>
 										<div className="flex items-center gap-1.5">
 											<span className="text-muted-foreground">
@@ -443,6 +449,10 @@ function HistorialReasignaciones() {
 				{query.isLoading ? (
 					<div className="py-10 text-center text-muted-foreground">
 						Cargando...
+					</div>
+				) : query.isError ? (
+					<div className="py-10 text-center text-destructive">
+						Error al cargar el historial de reasignaciones
 					</div>
 				) : rows.length === 0 ? (
 					<div className="py-10 text-center text-muted-foreground">

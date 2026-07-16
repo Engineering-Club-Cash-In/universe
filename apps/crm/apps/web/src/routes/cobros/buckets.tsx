@@ -5,6 +5,7 @@ import {
 	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
+	Filter,
 	Layers,
 	Loader2,
 	Search,
@@ -175,6 +176,56 @@ function AtrasoCell({ cuotas }: { cuotas: number | null }) {
 	);
 }
 
+/**
+ * Escalera de cobro B0→B5: leyenda del funnel con los colores reales del
+ * catálogo que además FILTRA (clic en un bucket = bucket destino; clic de
+ * nuevo = quitar). Enseña el orden de escalamiento de un vistazo.
+ */
+function EscaleraBuckets({
+	catalogo,
+	seleccionado,
+	onSelect,
+}: {
+	catalogo: BucketsCatalogoQueryData | undefined;
+	seleccionado: string;
+	onSelect: (valor: string) => void;
+}) {
+	return (
+		<div className="flex items-center gap-1">
+			{KEY_POR_NUMERO.map((key, numero) => {
+				const ui = bucketDeEstado(key, catalogo);
+				const activo = seleccionado === String(numero);
+				return (
+					<Fragment key={key}>
+						{numero > 0 ? (
+							<ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+						) : null}
+						<button
+							type="button"
+							onClick={() => onSelect(activo ? "todos" : String(numero))}
+							className={`rounded-full border px-2 py-0.5 font-semibold text-[11px] transition-all ${
+								activo
+									? "ring-2 ring-ring ring-offset-1 ring-offset-background"
+									: "opacity-90 hover:opacity-100 hover:shadow-sm"
+							}`}
+							style={estiloBucket(ui.colorHex)}
+							title={`${ui.label} — clic para ${activo ? "quitar el filtro" : "filtrar"}`}
+						>
+							B{numero}
+						</button>
+					</Fragment>
+				);
+			})}
+		</div>
+	);
+}
+
+/** Contexto del stat tile: qué proporción de los eventos filtrados representa. */
+const porcentajeDeEventos = (n: number, total: number) =>
+	total > 0
+		? `${((n / total) * 100).toLocaleString("es-GT", { maximumFractionDigits: 1 })}% de los eventos`
+		: "sin eventos en el período";
+
 /** Ficha por cuenta (CB-006): historial completo de migraciones del crédito. */
 function FichaCredito({
 	creditoId,
@@ -254,7 +305,7 @@ function FichaCredito({
 									(ev.pago_id ? `Pago #${ev.pago_id}` : "—")}
 							</td>
 							<td
-								className="max-w-[280px] truncate px-2 py-1.5 text-muted-foreground"
+								className="max-w-70 truncate px-2 py-1.5 text-muted-foreground"
 								title={ev.motivo ?? undefined}
 							>
 								{ev.motivo ?? "—"}
@@ -358,23 +409,53 @@ function BucketsHistorialPage() {
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
-			<div>
-				<h1 className="flex items-center gap-2 font-bold text-3xl">
-					<Layers className="h-7 w-7" />
-					Historial de Buckets
-				</h1>
-				<p className="text-muted-foreground">
-					Migraciones de bucket por cuenta registradas por el motor de cobros —
-					cada movimiento queda con su evento, atraso y transición.
-				</p>
+			<div className="flex flex-wrap items-center justify-between gap-4">
+				<div className="flex items-center gap-3">
+					<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+						<Layers className="h-6 w-6 text-primary" />
+					</div>
+					<div>
+						<h1 className="font-bold text-2xl tracking-tight">
+							Historial de Buckets
+						</h1>
+						<p className="text-muted-foreground text-sm">
+							Migraciones de bucket por cuenta registradas por el motor de
+							cobros — cada movimiento queda con su evento, atraso y transición.
+						</p>
+					</div>
+				</div>
+				<div className="hidden flex-col items-end gap-1.5 lg:flex">
+					<p className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+						Escalera de cobro · clic para filtrar
+					</p>
+					<EscaleraBuckets
+						catalogo={catalogo}
+						seleccionado={bucketNuevo}
+						onSelect={(valor) => {
+							setBucketNuevo(valor);
+							setPage(1);
+						}}
+					/>
+				</div>
 			</div>
 
 			{/* Filtros */}
 			<Card>
-				<CardContent className="pt-6">
-					<div className="flex flex-wrap items-end gap-3">
+				<CardContent className="p-3">
+					<div className="mb-2 flex items-center gap-2">
+						<Filter className="h-3.5 w-3.5 text-muted-foreground" />
+						<span className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+							Filtros
+						</span>
+						{filtrosActivos > 0 ? (
+							<Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+								{filtrosActivos}
+							</Badge>
+						) : null}
+					</div>
+					<div className="flex flex-wrap items-end gap-2">
 						<div className="space-y-1">
-							<p className="font-medium text-muted-foreground text-xs">Desde</p>
+							<p className="text-[11px] text-muted-foreground">Desde</p>
 							<Input
 								type="date"
 								value={desde}
@@ -382,11 +463,11 @@ function BucketsHistorialPage() {
 									setDesde(e.target.value);
 									setPage(1);
 								}}
-								className="w-[150px]"
+								className="h-8 w-35 text-xs"
 							/>
 						</div>
 						<div className="space-y-1">
-							<p className="font-medium text-muted-foreground text-xs">Hasta</p>
+							<p className="text-[11px] text-muted-foreground">Hasta</p>
 							<Input
 								type="date"
 								value={hasta}
@@ -394,13 +475,11 @@ function BucketsHistorialPage() {
 									setHasta(e.target.value);
 									setPage(1);
 								}}
-								className="w-[150px]"
+								className="h-8 w-35 text-xs"
 							/>
 						</div>
 						<div className="space-y-1">
-							<p className="font-medium text-muted-foreground text-xs">
-								Evento
-							</p>
+							<p className="text-[11px] text-muted-foreground">Evento</p>
 							<Select
 								value={tipoEvento}
 								onValueChange={(v) => {
@@ -408,7 +487,7 @@ function BucketsHistorialPage() {
 									setPage(1);
 								}}
 							>
-								<SelectTrigger className="w-[140px]">
+								<SelectTrigger className="h-8 w-30 text-xs">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -420,7 +499,7 @@ function BucketsHistorialPage() {
 							</Select>
 						</div>
 						<div className="space-y-1">
-							<p className="font-medium text-muted-foreground text-xs">
+							<p className="text-[11px] text-muted-foreground">
 								Bucket destino
 							</p>
 							<Select
@@ -430,7 +509,7 @@ function BucketsHistorialPage() {
 									setPage(1);
 								}}
 							>
-								<SelectTrigger className="w-[210px]">
+								<SelectTrigger className="h-8 w-47.5 text-xs">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -446,38 +525,43 @@ function BucketsHistorialPage() {
 								</SelectContent>
 							</Select>
 						</div>
-						<div className="min-w-[160px] flex-1 space-y-1">
-							<p className="font-medium text-muted-foreground text-xs">
-								No. SIFCO
-							</p>
+						<div className="min-w-37.5 flex-1 space-y-1">
+							<p className="text-[11px] text-muted-foreground">No. SIFCO</p>
 							<Input
 								placeholder="Buscar SIFCO..."
 								value={sifcoInput}
 								onChange={(e) => setSifcoInput(e.target.value)}
 								onKeyDown={(e) => e.key === "Enter" && aplicarBusqueda()}
+								className="h-8 text-xs"
 							/>
 						</div>
-						<div className="min-w-[160px] flex-1 space-y-1">
-							<p className="font-medium text-muted-foreground text-xs">
-								Cliente
-							</p>
+						<div className="min-w-37.5 flex-1 space-y-1">
+							<p className="text-[11px] text-muted-foreground">Cliente</p>
 							<Input
 								placeholder="Buscar nombre..."
 								value={clienteInput}
 								onChange={(e) => setClienteInput(e.target.value)}
 								onKeyDown={(e) => e.key === "Enter" && aplicarBusqueda()}
+								className="h-8 text-xs"
 							/>
 						</div>
-						<Button variant="outline" size="sm" onClick={aplicarBusqueda}>
-							<Search className="mr-1 h-4 w-4" />
-							Buscar
-						</Button>
-						{filtrosActivos > 0 ? (
-							<Button variant="ghost" size="sm" onClick={limpiarFiltros}>
-								<X className="mr-1 h-4 w-4" />
-								Limpiar ({filtrosActivos})
+						<div className="ml-auto flex items-center gap-2">
+							{filtrosActivos > 0 ? (
+								<Button
+									variant="ghost"
+									size="sm"
+									className="h-8"
+									onClick={limpiarFiltros}
+								>
+									<X className="mr-1 h-3.5 w-3.5" />
+									Limpiar
+								</Button>
+							) : null}
+							<Button size="sm" className="h-8" onClick={aplicarBusqueda}>
+								<Search className="mr-1 h-3.5 w-3.5" />
+								Buscar
 							</Button>
-						) : null}
+						</div>
 					</div>
 				</CardContent>
 			</Card>
@@ -486,41 +570,77 @@ function BucketsHistorialPage() {
 			{resumen ? (
 				<div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
 					<Card>
-						<CardContent className="pt-6 text-center">
-							<p className="text-muted-foreground text-xs">Eventos</p>
-							<p className="font-bold text-2xl">
-								{resumen.total.toLocaleString("es-GT")}
-							</p>
+						<CardContent className="flex items-center justify-between gap-3 p-4">
+							<div className="min-w-0">
+								<p className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+									Eventos
+								</p>
+								<p className="font-bold text-2xl tabular-nums">
+									{resumen.total.toLocaleString("es-GT")}
+								</p>
+								<p className="truncate text-muted-foreground text-xs">
+									{filtrosActivos > 0
+										? "en el período filtrado"
+										: "histórico completo"}
+								</p>
+							</div>
+							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+								<Layers className="h-5 w-5 text-muted-foreground" />
+							</div>
 						</CardContent>
 					</Card>
 					<Card>
-						<CardContent className="pt-6 text-center">
-							<p className="flex items-center justify-center gap-1 text-muted-foreground text-xs">
-								<TrendingUp className="h-3 w-3" /> Subidas
-							</p>
-							<p className="font-bold text-2xl text-red-600 dark:text-red-400">
-								{resumen.subidas.toLocaleString("es-GT")}
-							</p>
+						<CardContent className="flex items-center justify-between gap-3 p-4">
+							<div className="min-w-0">
+								<p className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+									Subidas
+								</p>
+								<p className="font-bold text-2xl tabular-nums">
+									{resumen.subidas.toLocaleString("es-GT")}
+								</p>
+								<p className="truncate text-muted-foreground text-xs">
+									{porcentajeDeEventos(resumen.subidas, resumen.total)}
+								</p>
+							</div>
+							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/40">
+								<TrendingUp className="h-5 w-5 text-red-600 dark:text-red-400" />
+							</div>
 						</CardContent>
 					</Card>
 					<Card>
-						<CardContent className="pt-6 text-center">
-							<p className="flex items-center justify-center gap-1 text-muted-foreground text-xs">
-								<TrendingDown className="h-3 w-3" /> Bajadas (curadas)
-							</p>
-							<p className="font-bold text-2xl text-emerald-600 dark:text-emerald-400">
-								{resumen.bajadas.toLocaleString("es-GT")}
-							</p>
+						<CardContent className="flex items-center justify-between gap-3 p-4">
+							<div className="min-w-0">
+								<p className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+									Cuentas curadas
+								</p>
+								<p className="font-bold text-2xl tabular-nums">
+									{resumen.bajadas.toLocaleString("es-GT")}
+								</p>
+								<p className="truncate text-muted-foreground text-xs">
+									{porcentajeDeEventos(resumen.bajadas, resumen.total)}
+								</p>
+							</div>
+							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/40">
+								<TrendingDown className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+							</div>
 						</CardContent>
 					</Card>
 					<Card>
-						<CardContent className="pt-6 text-center">
-							<p className="flex items-center justify-center gap-1 text-muted-foreground text-xs">
-								<Sparkles className="h-3 w-3" /> Iniciales
-							</p>
-							<p className="font-bold text-2xl text-blue-600 dark:text-blue-400">
-								{resumen.iniciales.toLocaleString("es-GT")}
-							</p>
+						<CardContent className="flex items-center justify-between gap-3 p-4">
+							<div className="min-w-0">
+								<p className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+									Iniciales
+								</p>
+								<p className="font-bold text-2xl tabular-nums">
+									{resumen.iniciales.toLocaleString("es-GT")}
+								</p>
+								<p className="truncate text-muted-foreground text-xs">
+									línea base del motor
+								</p>
+							</div>
+							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/40">
+								<Sparkles className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+							</div>
 						</CardContent>
 					</Card>
 				</div>
@@ -649,7 +769,7 @@ function BucketsHistorialPage() {
 											setPage(1);
 										}}
 									>
-										<SelectTrigger className="w-[130px]">
+										<SelectTrigger className="w-32.5">
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>

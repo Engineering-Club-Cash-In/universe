@@ -30,6 +30,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { estiloBucket } from "@/lib/cobros/buckets-catalogo";
@@ -613,132 +614,143 @@ function RouteComponent() {
 				pool del bucket (motivo obligatorio, queda auditado).
 			</p>
 
-			<Card>
-				<CardHeader>
-					<CardTitle className="text-base">Filtros</CardTitle>
-				</CardHeader>
-				<CardContent className="flex flex-wrap items-end gap-4">
-					<div className="space-y-2">
-						<Label>Bucket</Label>
-						<Select
-							value={bucket}
-							onValueChange={(v) => {
-								setBucket(v);
-								setPage(1);
-							}}
-						>
-							<SelectTrigger className="w-[220px]">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="todos">Todos</SelectItem>
-								{BUCKETS_FILTRO.map((b) => (
-									<SelectItem key={b.numero} value={String(b.numero)}>
-										{b.label}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
+			<Tabs defaultValue="buckets">
+				<TabsList>
+					<TabsTrigger value="buckets">Buckets</TabsTrigger>
+					<TabsTrigger value="historial">Historial de reasignaciones</TabsTrigger>
+				</TabsList>
+
+				<TabsContent value="buckets" className="space-y-6">
+					<Card>
+						<CardHeader>
+							<CardTitle className="text-base">Filtros</CardTitle>
+						</CardHeader>
+						<CardContent className="flex flex-wrap items-end gap-4">
+							<div className="space-y-2">
+								<Label>Bucket</Label>
+								<Select
+									value={bucket}
+									onValueChange={(v) => {
+										setBucket(v);
+										setPage(1);
+									}}
+								>
+									<SelectTrigger className="w-[220px]">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="todos">Todos</SelectItem>
+										{BUCKETS_FILTRO.map((b) => (
+											<SelectItem key={b.numero} value={String(b.numero)}>
+												{b.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="min-w-[200px] flex-1 space-y-2">
+								<Label>No. SIFCO</Label>
+								<Input
+									placeholder="Buscar por número de crédito..."
+									value={buscarInput}
+									onChange={(e) => setBuscarInput(e.target.value)}
+									onKeyDown={(e) => e.key === "Enter" && aplicarBusqueda()}
+								/>
+							</div>
+							<Button variant="outline" onClick={aplicarBusqueda}>
+								<Search className="mr-1 h-4 w-4" /> Buscar
+							</Button>
+						</CardContent>
+					</Card>
+
+					<Card>
+						<CardContent className="p-0">
+							{query.isLoading ? (
+								<div className="py-16 text-center text-muted-foreground">
+									Cargando...
+								</div>
+							) : query.isError ? (
+								<div className="py-16 text-center text-destructive">
+									Error al cargar los créditos
+								</div>
+							) : filas.length === 0 ? (
+								<div className="py-16 text-center text-muted-foreground">
+									No hay créditos para los filtros seleccionados
+								</div>
+							) : (
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>No. SIFCO</TableHead>
+											<TableHead>Cliente</TableHead>
+											<TableHead>Asesor actual</TableHead>
+											<TableHead className="text-center">Bucket</TableHead>
+											<TableHead className="text-right">Acción</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{filas.map((c) => (
+											<TableRow key={c.creditoId}>
+												<TableCell className="font-medium">
+													{c.numeroCreditoSifco}
+												</TableCell>
+												<TableCell>{c.cliente}</TableCell>
+												<TableCell>
+													{c.asesorNombre ?? (
+														<span className="text-muted-foreground italic">
+															Sin asesor
+														</span>
+													)}
+												</TableCell>
+												<TableCell className="text-center">
+													<BucketBadge bucket={c.bucket} />
+												</TableCell>
+												<TableCell className="text-right">
+													<Button
+														size="sm"
+														variant="outline"
+														onClick={() => setSeleccionado(c)}
+													>
+														Reasignar
+													</Button>
+												</TableCell>
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							)}
+						</CardContent>
+					</Card>
+
+					<div className="flex items-center justify-between">
+						<span className="text-muted-foreground text-sm">
+							Página {page} de {totalPages}
+						</span>
+						<div className="flex gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={page <= 1}
+								onClick={() => setPage((p) => p - 1)}
+							>
+								Anterior
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={page >= totalPages}
+								onClick={() => setPage((p) => p + 1)}
+							>
+								Siguiente
+							</Button>
+						</div>
 					</div>
-					<div className="min-w-[200px] flex-1 space-y-2">
-						<Label>No. SIFCO</Label>
-						<Input
-							placeholder="Buscar por número de crédito..."
-							value={buscarInput}
-							onChange={(e) => setBuscarInput(e.target.value)}
-							onKeyDown={(e) => e.key === "Enter" && aplicarBusqueda()}
-						/>
-					</div>
-					<Button variant="outline" onClick={aplicarBusqueda}>
-						<Search className="mr-1 h-4 w-4" /> Buscar
-					</Button>
-				</CardContent>
-			</Card>
+				</TabsContent>
 
-			<Card>
-				<CardContent className="p-0">
-					{query.isLoading ? (
-						<div className="py-16 text-center text-muted-foreground">
-							Cargando...
-						</div>
-					) : query.isError ? (
-						<div className="py-16 text-center text-destructive">
-							Error al cargar los créditos
-						</div>
-					) : filas.length === 0 ? (
-						<div className="py-16 text-center text-muted-foreground">
-							No hay créditos para los filtros seleccionados
-						</div>
-					) : (
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead>No. SIFCO</TableHead>
-									<TableHead>Cliente</TableHead>
-									<TableHead>Asesor actual</TableHead>
-									<TableHead className="text-center">Bucket</TableHead>
-									<TableHead className="text-right">Acción</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{filas.map((c) => (
-									<TableRow key={c.creditoId}>
-										<TableCell className="font-medium">
-											{c.numeroCreditoSifco}
-										</TableCell>
-										<TableCell>{c.cliente}</TableCell>
-										<TableCell>
-											{c.asesorNombre ?? (
-												<span className="text-muted-foreground italic">
-													Sin asesor
-												</span>
-											)}
-										</TableCell>
-										<TableCell className="text-center">
-											<BucketBadge bucket={c.bucket} />
-										</TableCell>
-										<TableCell className="text-right">
-											<Button
-												size="sm"
-												variant="outline"
-												onClick={() => setSeleccionado(c)}
-											>
-												Reasignar
-											</Button>
-										</TableCell>
-									</TableRow>
-								))}
-							</TableBody>
-						</Table>
-					)}
-				</CardContent>
-			</Card>
-
-			<div className="flex items-center justify-between">
-				<span className="text-muted-foreground text-sm">
-					Página {page} de {totalPages}
-				</span>
-				<div className="flex gap-2">
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={page <= 1}
-						onClick={() => setPage((p) => p - 1)}
-					>
-						Anterior
-					</Button>
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={page >= totalPages}
-						onClick={() => setPage((p) => p + 1)}
-					>
-						Siguiente
-					</Button>
-				</div>
-			</div>
-
-			<HistorialReasignaciones />
+				<TabsContent value="historial">
+					<HistorialReasignaciones />
+				</TabsContent>
+			</Tabs>
 
 			{seleccionado && (
 				<ReasignarModal

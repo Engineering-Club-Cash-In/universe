@@ -49,6 +49,14 @@ export async function createAbonoCapital(data: {
  *
  * `pago_id` es opcional porque resetCredit distribuye una CANCELACION que no
  * nace de un pago.
+ *
+ * Los errores NO se atrapan a propósito: si esto falla, quien aplica el pago
+ * tiene que enterarse y abortar. Antes se los tragaba y devolvía
+ * `{success:false}`, así que el pago se aplicaba igual: al crédito se le bajaba
+ * el capital y el inversionista se quedaba sin su abono.
+ *
+ * `{success:false}` queda solo para los casos donde no hay NADA que hacer (sin
+ * inversionistas en el espejo, capital total en 0). Eso no es una falla.
  */
 export async function distribuirAbonoCapitalEspejo(
   credito_id: number,
@@ -56,11 +64,10 @@ export async function distribuirAbonoCapitalEspejo(
   tipo: "CANCELACION" | "CAPITAL" = "CAPITAL",
   pago_id?: number
 ) {
-  try {
-    const abonoBig = new Big(monto_abono_capital);
+  const abonoBig = new Big(monto_abono_capital);
 
-    // 1. Traer inversionistas del espejo
-    const invsEspejo = await db
+  // 1. Traer inversionistas del espejo
+  const invsEspejo = await db
       .select({
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -126,25 +133,16 @@ export async function distribuirAbonoCapitalEspejo(
       });
     }
 
-    return {
-      success: true,
-      message: "Abono a capital distribuido entre inversionistas",
-      data: {
-        credito_id,
-        monto_total: abonoBig.toString(),
-        capital_credito: capitalTotal.toString(),
-        distribucion: resultados,
-      },
-    };
-  } catch (error: any) {
-    console.error("Error al distribuir abono a capital:", error);
-    return {
-      success: false,
-      message: "Error al distribuir el abono a capital",
-      error: error.message,
-      data: null,
-    };
-  }
+  return {
+    success: true,
+    message: "Abono a capital distribuido entre inversionistas",
+    data: {
+      credito_id,
+      monto_total: abonoBig.toString(),
+      capital_credito: capitalTotal.toString(),
+      distribucion: resultados,
+    },
+  };
 }
 
 /**

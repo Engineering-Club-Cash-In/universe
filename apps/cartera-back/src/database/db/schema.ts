@@ -1736,6 +1736,19 @@
     ixPago: index("ix_abonos_capital_pago_id").on(t.pago_id),
     ixCredInv: index("ix_abonos_capital_cred_inv").on(t.credito_id, t.inversionista_id),
     ixLiquidacion: index("ix_abonos_capital_liquidacion_id").on(t.liquidacion_id),
+    ixPagoEspejo: index("ix_abonos_capital_pago_espejo_id").on(t.pago_espejo_id),
+    // Un pago aporta UNA fila por inversionista. Deja de ser una convención del
+    // código y pasa a ser una garantía de la base: si dos aplicaciones del mismo
+    // pago corren a la vez, la segunda revienta en vez de duplicar el abono y
+    // restarle el capital dos veces al inversionista.
+    //
+    // Las filas con `pago_id` NULL (las previas a la migración y las CANCELACION
+    // de devolución/reset, que no nacen de un pago) NO chocan entre sí: en
+    // Postgres los NULL no colisionan en un índice único.
+    uxPagoInversionista: uniqueIndex("ux_abonos_capital_pago_inversionista").on(
+      t.pago_id,
+      t.inversionista_id
+    ),
   }));
 
   export const historico_liquidaciones_espejo = customSchema.table(

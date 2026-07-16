@@ -8,7 +8,7 @@ import {
   platform_users,
   SQL_CARTERA_SCHEMA,
 } from "../../database/db/schema";
-import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COBROS-02 · Buckets — Reasignación MANUAL de asesor (supervisor/gerente).
@@ -46,21 +46,7 @@ async function bucketActualDeCredito(credito_id: number): Promise<number | null>
   const res = await db.execute<{ bucket: number | null; fuera: boolean }>(sql`
     SELECT
       (c."statusCredit" IN (${fueraSql})) AS fuera,
-      COALESCE(
-        (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
-          WHERE h.credito_id = c.credito_id
-          ORDER BY h.fecha DESC, h.historial_id DESC
-          LIMIT 1),
-        (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
-          WHERE b.activo = true
-            AND c."statusCredit" = ANY (b.estados_incluidos)
-          ORDER BY b.numero LIMIT 1),
-        (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
-          WHERE b.activo = true
-            AND COALESCE(m.cuotas_atrasadas, 0) >= b.cuotas_min
-            AND (b.cuotas_max IS NULL OR COALESCE(m.cuotas_atrasadas, 0) <= b.cuotas_max)
-          ORDER BY b.numero LIMIT 1)
-      ) AS bucket
+      ${bucketActualSql("c", "m")} AS bucket
     FROM ${SQL_CARTERA_SCHEMA}.creditos c
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
       ON m.credito_id = c.credito_id AND m.activa = true

@@ -145,6 +145,7 @@ export const cobrosAppRouter = {
 	getBucketsHistorialCredito: cobrosRouter.getBucketsHistorialCredito,
 	getCreditosPorBucket: cobrosRouter.getCreditosPorBucket,
 	getPoolAsesoresPorBucket: cobrosRouter.getPoolAsesoresPorBucket,
+	getCargaPorAsesorBucket: cobrosRouter.getCargaPorAsesorBucket,
 	reasignarAsesorCredito: cobrosRouter.reasignarAsesorCredito,
 	getHistorialReasignaciones: cobrosRouter.getHistorialReasignaciones,
 	getHistorialPagos: cobrosRouter.getHistorialPagos,

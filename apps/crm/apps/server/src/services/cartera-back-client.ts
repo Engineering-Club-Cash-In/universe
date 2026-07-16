@@ -24,6 +24,7 @@ import type {
 	CreateCreditoInput,
 	CreatePagoInput,
 	CreateUsuarioInput,
+	CargaPorAsesorBucketResponse,
 	CreditActionInput,
 	CreditoBucketResponse,
 	CreditoDetailResponse,
@@ -34,6 +35,7 @@ import type {
 	GetAllCreditsParams,
 	GetAsesorHistorialParams,
 	GetBucketsHistorialParams,
+	GetCargaPorAsesorBucketParams,
 	GetCreditosPorBucketParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
@@ -1044,6 +1046,33 @@ export class CarteraBackClient {
 			total: response.totalCount,
 			totalPages: response.totalPages,
 		};
+	}
+
+	// CB-018: carga de cuentas por asesor y bucket (dashboard gerencial) —
+	// cuentas asignadas, capacidad base, % utilización, sobrecarga y alerta de
+	// nueva posición. Fuente de la página /cobros/carga del CRM.
+	// Sin cache (mismo criterio que getCreditosPorBucket, su hermana en
+	// /cobros/buckets): reasignarAsesor() NO invalida ningún substring que
+	// matchee "/buckets/carga" (solo invalida "/credito?", "getAllCredits",
+	// "stats", "mora-por-etapa-asesor") — cachear aquí dejaría el dashboard
+	// mostrando carga desactualizada hasta 5 min después de una reasignación,
+	// justo la pantalla donde gerencia decide en base al efecto de reasignar.
+	async getCargaPorAsesorBucket(
+		params: GetCargaPorAsesorBucketParams = {},
+	): Promise<CargaPorAsesorBucketResponse> {
+		const queryParams = new URLSearchParams({
+			...(params.bucket !== undefined && { bucket: String(params.bucket) }),
+			...(params.asesor_id !== undefined && {
+				asesor_id: String(params.asesor_id),
+			}),
+		});
+		const response = await this.request<{
+			success: boolean;
+			data: CargaPorAsesorBucketResponse;
+		}>(`/buckets/carga?${queryParams}`, { method: "GET" });
+		return (
+			response.data ?? { buckets: [], porAsesor: [], fecha: "" }
+		);
 	}
 
 	// Pool de asesores elegibles de un bucket (alimenta el dropdown del modal).

@@ -469,6 +469,26 @@
         .notNull()
         .references(() => buckets.numero), // 0-5 (FK al catálogo)
       activo: boolean("activo").notNull().default(true),
+      // CB-018: capacidad base de cuentas activas que ESTE asesor puede
+      // atender en ESTE bucket (default 300, parametrizable por fila —
+      // confirmado con el informador del ticket: el techo es por asesor, no
+      // agregado del bucket). Denominador de % utilización/sobrecarga.
+      // SOLO se edita a mano (SQL directo, mismo patrón que el catálogo
+      // `buckets`). Ni el job automático (latefee.ts) ni la reasignación
+      // manual (reasignarAsesor.ts) la escriben — es config de gerencia, no
+      // dato derivado de actividad.
+      capacidad_base: integer("capacidad_base").notNull().default(300),
+      // CB-018: margen sobre capacidad_base antes de disparar
+      // alerta_nueva_posicion (default 10%: alerta a partir de capacidad+10%,
+      // NO apenas se toca capacidad_base — eso lo marca `sobrecarga`, sin
+      // margen). Parametrizable por fila, mismo patrón/invariante que
+      // capacidad_base (SOLO editable a mano, ni job ni reasignación la
+      // escriben). 'porcentaje' → valor% de capacidad_base; 'fijo' → valor en
+      // cuentas absolutas.
+      margen_alerta_tipo: varchar("margen_alerta_tipo", { length: 16 })
+        .notNull()
+        .default("porcentaje"),
+      margen_alerta_valor: numeric("margen_alerta_valor").notNull().default("10"),
       created_at: timestamp("created_at").defaultNow(),
       updated_at: timestamp("updated_at").defaultNow(),
     },

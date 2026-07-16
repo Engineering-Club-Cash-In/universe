@@ -11,6 +11,7 @@ import {
   getAsesoresPorBucket,
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
+import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo (= enum de statusCredit menos
@@ -26,6 +27,19 @@ const STATUS_FUNNEL: StatusCredit[] = [
 
 // Gate de rol server-side: el histórico expone data de TODOS los créditos
 // (igual criterio que el historial de mora). authMiddleware solo autentica.
+//
+// ⚠️ 3 gates INDEPENDIENTES protegen esta misma ruta de datos (/buckets/*),
+// con vocabularios de rol DISTINTOS (no hay traducción automática entre
+// ellos — son 2 sistemas de auth separados, cartera-back con su JWT propio y
+// CRM con better-auth):
+//   1. Este (ADMIN/CONTA) — token de servicio del CRM, no un usuario humano.
+//   2. requireCobrosSupervisor (crm/apps/server/src/lib/orpc.ts) — admin/
+//      cobros_supervisor del usuario humano autenticado en el CRM.
+//   3. PERMISSIONS.canAssignCobros (crm/apps/web/src/lib/roles.ts) — mismo
+//      criterio que (2), pero evaluado en el cliente solo para UX (ocultar
+//      el nav item); NO es seguridad real, (2) es la que de verdad protege.
+// Si cambias el criterio de acceso a /buckets/carga (o cualquier /buckets/*),
+// revisa los 3 — no hay una sola fuente de verdad que los sincronice.
 const requireBucketsRole = (user: any, set: any): boolean => {
   if (!user || !["ADMIN", "CONTA"].includes(user.role)) {
     set.status = 403;
@@ -387,6 +401,43 @@ export const bucketsRouter = new Elysia()
         return {
           success: false,
           message: "[ERROR] No se pudo obtener el pool de asesores del bucket",
+          error: String(err),
+        };
+      }
+    },
+  )
+
+  // CB-018 · Carga de cuentas por asesor y bucket (dashboard gerencial): cuentas
+  // asignadas, capacidad base, % utilización, sobrecarga y alerta de nueva
+  // posición. Filtros opcionales por bucket y asesor_id.
+  .get(
+    "/buckets/carga",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        // esBucket solo valida "entero no-negativo" (la usan otras rutas con
+        // CSVs de buckets históricos); aquí además se acota al rango real del
+        // catálogo (0-5) para no devolver vacío en silencio con p.ej. bucket=99.
+        if (
+          query?.bucket !== undefined &&
+          (!esBucket(String(query.bucket)) || Number(query.bucket) > 5)
+        ) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] bucket inválido (rango 0-5)" };
+        }
+        const bucket = query?.bucket !== undefined ? Number(query.bucket) : undefined;
+        const asesorIdRaw = query?.asesor_id !== undefined ? Number(query.asesor_id) : undefined;
+        if (asesorIdRaw !== undefined && (!Number.isInteger(asesorIdRaw) || asesorIdRaw <= 0)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] asesor_id inválido" };
+        }
+        const data = await getCargaPorAsesorBucket({ bucket, asesor_id: asesorIdRaw });
+        return { success: true, data };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener la carga por asesor y bucket",
           error: String(err),
         };
       }

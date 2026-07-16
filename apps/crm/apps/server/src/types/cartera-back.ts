@@ -883,6 +883,32 @@ export interface CarteraBucketHistorialEvento {
 }
 
 // ============================================================================
+// PREMORA (CC2-11, GET /cuotas/proximas-vencer)
+// ============================================================================
+
+/** Cuota pendiente de un crédito AL DÍA que vence en exactamente N días (día GT). */
+export interface CarteraCuotaProximaVencer {
+	cuota_id: number;
+	credito_id: number;
+	numero_cuota: number;
+	fecha_vencimiento: string; // YYYY-MM-DD
+	dias_para_vencer: number; // 0 | 1 | 3 | 5 (según el filtro pedido)
+	numero_credito_sifco: string;
+	monto_cuota: string;
+	cliente: string;
+	telefono_cliente_cartera: string | null;
+	asesor_id: number | null;
+	asesor: string | null;
+	telefono_asesor: string | null;
+}
+
+export interface CarteraCuotasProximasResponse {
+	success: boolean;
+	total: number;
+	data: CarteraCuotaProximaVencer[];
+}
+
+// ============================================================================
 // FACTURACIÓN
 // ============================================================================
 

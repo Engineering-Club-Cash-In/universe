@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { RPCHandler } from "@orpc/server/fetch";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { type Context as HonoContext, Hono } from "hono";
+import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import {
@@ -47,6 +47,7 @@ import {
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
+import { sendPremoraReminders } from "./services/send-premora-reminders";
 
 const app = new Hono();
 const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
@@ -855,7 +856,10 @@ app.get("/api/accounting/resumen-transferencias-excel", async (c) => {
 		const moneda = c.req.query("moneda");
 
 		if (!mes || !anio) {
-			return c.json({ error: "Los parámetros 'mes' y 'anio' son obligatorios" }, 400);
+			return c.json(
+				{ error: "Los parámetros 'mes' y 'anio' son obligatorios" },
+				400,
+			);
 		}
 
 		const monedaParam: "quetzales" | "dolar" | undefined =
@@ -1148,6 +1152,25 @@ setTimeout(() => {
 	procesarSeguimientosRecurrentes().catch(console.error);
 }, 10_000);
 
+// Recordatorios Premora (CC2-11): diario a las 8:00 GT (= 14:00 UTC, GT no
+// tiene DST). También corre al boot (abajo): la tabla recordatorios_premora
+// hace idempotente el envío, así que un deploy tardío recupera el batch del
+// día sin duplicar mensajes.
+function scheduleAtPremoraGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(14, 0, 0, 0);
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await sendPremoraReminders().catch(console.error);
+		scheduleAtPremoraGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtPremoraGT();
+setTimeout(() => {
+	sendPremoraReminders().catch(console.error);
+}, 15_000);
+
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
 function scheduleAtMidnightGT() {
 	const now = new Date();
@@ -1160,7 +1183,6 @@ function scheduleAtMidnightGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtMidnightGT();
-
 
 export default {
 	port: process.env.PORT || 3000,

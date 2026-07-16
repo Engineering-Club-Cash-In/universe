@@ -89,6 +89,14 @@ export function interpolar(
 		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor));
 }
 
+/**
+ * Cuentas de pago (mismo texto que la bienvenida). Las plantillas premora las
+ * incluyen porque el criterio de CC2-11 pide "link de pago o cuentas de pago";
+ * cuando exista el link de pago se agrega como variable.
+ */
+export const COBROS_CUENTAS_PAGO =
+	"A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL";
+
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 	{
 		id: "bienvenida",
@@ -147,6 +155,73 @@ Tel: {telefonoAsesor}`,
 Si tiene alguna duda, por favor comuníquese al {telefonoAsesor}.
 
 SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	// ── Premora (CC2-11): recordatorios automáticos D-5/D-3/D-1/D-0 para
+	// créditos AL DÍA. Los envía el job diario (send-premora-reminders.ts);
+	// {fechaPago} aquí es la FECHA completa de vencimiento (dd/mm/aaaa).
+	{
+		id: "premora_5",
+		nombre: "Premora — 5 días antes",
+		etapa: "al_dia",
+		asunto: "Recordatorio: su cuota vence en 5 días",
+		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 5 días).
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REALIZÓ SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "premora_3",
+		nombre: "Premora — 3 días antes",
+		etapa: "al_dia",
+		asunto: "Recordatorio: su cuota vence en 3 días",
+		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 3 días).
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REALIZÓ SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "premora_1",
+		nombre: "Premora — 1 día antes",
+		etapa: "al_dia",
+		asunto: "Recordatorio: su cuota vence mañana",
+		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la cuota de su crédito por Q{cuotaMensual} vence MAÑANA {fechaPago}.
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REALIZÓ SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "premora_0",
+		nombre: "Premora — día de pago (D-0)",
+		etapa: "al_dia",
+		asunto: "Hoy es su día de pago",
+		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
+		cuerpo: `Estimado(a) {clienteNombre}, buen día. Le saludamos de Clubcashin.com para recordarle que HOY {fechaPago} vence la cuota de su crédito por Q{cuotaMensual}. Quedamos a la espera de su comprobante de pago.
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REALIZÓ SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
 
 ${COBROS_NO_REPLY_WARNING}
 

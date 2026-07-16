@@ -20,6 +20,7 @@ export * from "./notes";
 export * from "./notifications";
 export * from "./otp";
 export * from "./quotations";
+export * from "./recordatorios-premora";
 export * from "./renap";
 export * from "./vehicles";
 export * from "./views";

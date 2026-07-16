@@ -100,15 +100,23 @@ describe("getCargaPorAsesorBucket", () => {
     expect(detalle.alerta_nueva_posicion).toBe(false);
   });
 
-  it("margen PORCENTAJE (default 10%): alerta arranca en 111, no en 101 (capacidad=100)", async () => {
+  it("margen PORCENTAJE (default 10%): alerta arranca EN 110 inclusive (capacidad=100), no antes", async () => {
     estado.pool = [poolRow({ asesor_id: 1, bucket: 0, capacidad_base: 100 })];
 
     estado.cuentas = [{ asesor_id: 1, nombre: "Ana", email_asesor: null, bucket: 0, cuentas: 105 }];
     let r = await getCargaPorAsesorBucket();
     let d = r.porAsesor[0].porBucket[0];
     expect(d.sobrecarga).toBe(true); // ya pasó capacidad_base (100)
-    expect(d.alerta_nueva_posicion).toBe(false); // pero no pasó 110 (100+10%)
+    expect(d.alerta_nueva_posicion).toBe(false); // 105 aún no llega a 110
     expect(d.umbral_alerta_cuentas).toBe(110);
+
+    // Caso límite EXACTO (review Codex): 110 = umbral exacto, debe SÍ disparar
+    // (el ticket/migración 0005 documentan "alerta a partir de 110" —
+    // inclusive, no estrictamente mayor).
+    estado.cuentas = [{ asesor_id: 1, nombre: "Ana", email_asesor: null, bucket: 0, cuentas: 110 }];
+    r = await getCargaPorAsesorBucket();
+    d = r.porAsesor[0].porBucket[0];
+    expect(d.alerta_nueva_posicion).toBe(true);
 
     estado.cuentas = [{ asesor_id: 1, nombre: "Ana", email_asesor: null, bucket: 0, cuentas: 111 }];
     r = await getCargaPorAsesorBucket();
@@ -116,7 +124,7 @@ describe("getCargaPorAsesorBucket", () => {
     expect(d.alerta_nueva_posicion).toBe(true);
   });
 
-  it("margen FIJO: capacidad=100, margen fijo=15 → alerta arranca en 116, no en 110", async () => {
+  it("margen FIJO: capacidad=100, margen fijo=15 → alerta arranca EN 115 inclusive, no en 110", async () => {
     estado.pool = [
       poolRow({
         asesor_id: 1,
@@ -131,7 +139,13 @@ describe("getCargaPorAsesorBucket", () => {
     let r = await getCargaPorAsesorBucket();
     let d = r.porAsesor[0].porBucket[0];
     expect(d.umbral_alerta_cuentas).toBe(115);
-    expect(d.alerta_nueva_posicion).toBe(false); // 112 no pasa 115
+    expect(d.alerta_nueva_posicion).toBe(false); // 112 aún no llega a 115
+
+    // Caso límite EXACTO (review Codex): 115 = umbral exacto, debe SÍ disparar.
+    estado.cuentas = [{ asesor_id: 1, nombre: "Ana", email_asesor: null, bucket: 0, cuentas: 115 }];
+    r = await getCargaPorAsesorBucket();
+    d = r.porAsesor[0].porBucket[0];
+    expect(d.alerta_nueva_posicion).toBe(true);
 
     estado.cuentas = [{ asesor_id: 1, nombre: "Ana", email_asesor: null, bucket: 0, cuentas: 116 }];
     r = await getCargaPorAsesorBucket();

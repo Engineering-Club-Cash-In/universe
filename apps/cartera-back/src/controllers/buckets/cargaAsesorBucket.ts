@@ -31,10 +31,12 @@ import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classifi
 // auto-ajuste, que sea una decisión explícita nueva, no un efecto colateral.
 //
 // ⚠️ `sobrecarga` (cuentas > capacidad_base) y `alerta_nueva_posicion`
-// (cuentas > capacidad_base + margen) son señales DISTINTAS y ambas a nivel
-// asesor+bucket: sobrecarga = ya pasó su cupo nominal; alerta = ya amerita
-// abrir nueva posición (dispara más tarde, con el margen encima — confirmado
-// con el informador: "límite 100, alerta a los 110").
+// (cuentas >= capacidad_base + margen, INCLUSIVE — review Codex #1113: con
+// capacidad=100/margen=10%, el umbral es 110 y 110 exacto YA debe disparar,
+// no solo 111+) son señales DISTINTAS y ambas a nivel asesor+bucket:
+// sobrecarga = ya pasó su cupo nominal; alerta = ya amerita abrir nueva
+// posición (dispara más tarde, con el margen encima — confirmado con el
+// informador: "límite 100, alerta a los 110").
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type CargaBucketFila = {
@@ -300,7 +302,7 @@ export async function getCargaPorAsesorBucket(params: {
           const utilizacionPct =
             capacidad > 0 ? Math.round((cuentas / capacidad) * 1000) / 10 : 0;
           const sobrecarga = cuentas > capacidad;
-          const alerta = cuentas > umbralAlertaCuentas;
+          const alerta = cuentas >= umbralAlertaCuentas;
           if (alerta) alertaPorBucket.set(bucket, (alertaPorBucket.get(bucket) ?? 0) + 1);
           if (sobrecarga) sobrecargaPorBucket.set(bucket, (sobrecargaPorBucket.get(bucket) ?? 0) + 1);
           return {

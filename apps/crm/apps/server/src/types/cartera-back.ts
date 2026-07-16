@@ -184,6 +184,76 @@ export interface CreditoDetailResponse {
 	proxima_cuota?: CarteraCuotaCredito | null;
 }
 
+/** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */
+export interface CreditoBucketResponse extends CreditoDetailResponse {
+	bucket?: {
+		numero: number;
+		prefijo: string;
+		nombre: string;
+		color: string | null;
+	};
+}
+
+export interface GetCreditosPorBucketParams {
+	/** Número de bucket del catálogo (0-5). Omitir = todo el funnel. */
+	bucket?: number;
+	page?: number;
+	perPage?: number;
+	numero_credito_sifco?: string;
+	nombre_usuario?: string;
+	email_asesor?: string;
+}
+
+export interface GetAsesorHistorialParams {
+	desde?: string; // YYYY-MM-DD
+	hasta?: string; // YYYY-MM-DD
+	origen?: string; // PROCESO_AUTO | API_MANUAL
+	bucket?: string; // CSV de enteros
+	asesor_nuevo?: string; // CSV de nombres
+	numero_credito_sifco?: string;
+	nombre_usuario?: string;
+	credito_id?: number;
+	page?: number;
+	pageSize?: number;
+}
+
+/** Fila de la bitácora de cambios de asesor (credito_asesor_historial). */
+export interface AsesorCambioRow {
+	historial_id: number;
+	fecha: string;
+	credito_id: number;
+	numero_credito_sifco: string;
+	cliente: string;
+	asesor_anterior_id: number | null;
+	asesor_anterior: string | null;
+	asesor_nuevo_id: number | null;
+	asesor_nuevo: string | null;
+	bucket: number | null;
+	bucket_prefijo: string | null;
+	bucket_nombre: string | null;
+	origen: string;
+	motivo: string | null;
+	usuario: string | null;
+	status_actual: string;
+}
+
+export interface AsesorHistorialResponse {
+	success: boolean;
+	data: AsesorCambioRow[];
+	pagination: {
+		page: number;
+		pageSize: number;
+		total: number;
+		totalPages: number;
+	};
+	resumen: {
+		total: number;
+		automaticos: number;
+		manuales: number;
+		creditos: number;
+	};
+}
+
 /**
  * @deprecated Usar CreditoDetailResponse en su lugar
  * Este tipo representa una estructura que NO coincide con la API real

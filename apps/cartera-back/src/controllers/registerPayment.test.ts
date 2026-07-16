@@ -14,9 +14,19 @@ import {
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
   calcularCoberturaCuota,
+  getCreditPaymentBlock,
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
+  it("clasifica un crédito pendiente de cancelación con un mensaje descriptivo", () => {
+    expect(getCreditPaymentBlock("PENDIENTE_CANCELACION")).toEqual({
+      code: "CREDIT_PENDING_CANCELLATION",
+      message:
+        "No se puede registrar el pago porque el crédito está pendiente de cancelación.",
+    });
+    expect(getCreditPaymentBlock("ACTIVO")).toBeNull();
+  });
+
   it("usa null en vez de 0 cuando el pago no tiene cuota", () => {
     expect(getCuotaIdForPaymentInsert(null)).toBeNull();
     expect(getCuotaIdForPaymentInsert(undefined)).toBeNull();

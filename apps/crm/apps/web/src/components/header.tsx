@@ -22,6 +22,7 @@ import {
 	Target,
 	TrendingUp,
 	UserCircle,
+	UserCog,
 	Users,
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
@@ -271,6 +272,17 @@ export default function Header() {
 											<Link to="/cobros/buckets" className="cursor-pointer">
 												<Layers className="mr-2 h-4 w-4" />
 												Historial de Buckets
+											</Link>
+										</DropdownMenuItem>
+									)}
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link
+												to="/cobros/reasignaciones"
+												className="cursor-pointer"
+											>
+												<UserCog className="mr-2 h-4 w-4" />
+												Reasignar Cuentas
 											</Link>
 										</DropdownMenuItem>
 									)}
@@ -624,6 +636,15 @@ function MobileNav({
 											<Link to="/cobros/buckets" className={MOBILE_LINK_CLASS}>
 												<Layers />
 												Historial de Buckets
+											</Link>
+										)}
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link
+												to="/cobros/reasignaciones"
+												className={MOBILE_LINK_CLASS}
+											>
+												<UserCog />
+												Reasignar Cuentas
 											</Link>
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (

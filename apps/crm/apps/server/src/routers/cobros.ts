@@ -4442,6 +4442,31 @@ export const cobrosRouter = {
 			return carteraBackClient.getPoolAsesoresPorBucket(input.bucket);
 		}),
 
+	// ────────────────────────────────────────────────────────────────────────
+	// CB-018 · Carga de cuentas por asesor y bucket (dashboard gerencial)
+	// ────────────────────────────────────────────────────────────────────────
+	getCargaPorAsesorBucket: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				// Rango del catálogo (0-5), igual que cartera-back (routers/buckets.ts,
+				// /buckets/carga) — validado en ambas capas para fallar rápido aquí en
+				// vez de depender del 400 que igual devolvería cartera-back.
+				bucket: z.number().int().min(0).max(5).optional(),
+				asesorId: z.number().int().positive().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+			return carteraBackClient.getCargaPorAsesorBucket({
+				bucket: input.bucket,
+				asesor_id: input.asesorId,
+			});
+		}),
+
 	// Reasignación manual. Solo supervisor/gerente (cobrosSupervisorProcedure).
 	// El email del supervisor va a cartera-back para la bitácora API_MANUAL.
 	reasignarAsesorCredito: cobrosSupervisorProcedure

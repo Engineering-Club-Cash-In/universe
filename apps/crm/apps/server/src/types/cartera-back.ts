@@ -204,6 +204,57 @@ export interface GetCreditosPorBucketParams {
 	email_asesor?: string;
 }
 
+/** CB-018: filtros de GET /buckets/carga (carga por asesor y bucket). */
+export interface GetCargaPorAsesorBucketParams {
+	bucket?: number;
+	asesor_id?: number;
+}
+
+/**
+ * Detalle por asesor dentro de un bucket. Capacidad/% utilización/sobrecarga
+ * viven AQUÍ (ticket CB-018, confirmado con el informador: el techo de 300 es
+ * "la cantidad que puede atender un asesor", NO un agregado del bucket
+ * completo) — cada combinación asesor+bucket tiene su propio techo.
+ */
+export interface CargaPorAsesorBucketDetalle {
+	bucket: number;
+	cuentas: number;
+	capacidad_base: number;
+	utilizacion_pct: number;
+	elegible: boolean;
+	/** cuentas > capacidad_base (sin margen) — ya pasó su cupo nominal. */
+	sobrecarga: boolean;
+	/** cuentas > capacidad_base + margen (margen %/fijo configurable por fila) — señal de abrir plaza. */
+	alerta_nueva_posicion: boolean;
+	/** Umbral absoluto (capacidad_base + margen resuelto) a partir del cual esta fila entra en alerta_nueva_posicion. */
+	umbral_alerta_cuentas: number;
+}
+
+export interface CargaPorAsesor {
+	asesor_id: number;
+	nombre: string;
+	email_asesor: string | null;
+	porBucket: CargaPorAsesorBucketDetalle[];
+}
+
+/** Resumen informativo del bucket: totales y conteos de sus asesores en alerta/sobrecarga. */
+export interface CargaPorBucketResumen {
+	numero: number;
+	prefijo: string;
+	nombre: string;
+	color: string | null;
+	cuentas_totales: number;
+	asesores_en_pool: number;
+	asesores_en_alerta: number;
+	asesores_sobrecargados: number;
+}
+
+export interface CargaPorAsesorBucketResponse {
+	buckets: CargaPorBucketResumen[];
+	porAsesor: CargaPorAsesor[];
+	fecha: string;
+}
+
 export interface GetAsesorHistorialParams {
 	desde?: string; // YYYY-MM-DD
 	hasta?: string; // YYYY-MM-DD

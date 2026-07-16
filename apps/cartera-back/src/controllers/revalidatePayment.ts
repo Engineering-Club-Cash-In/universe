@@ -1,12 +1,16 @@
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
-import { pagos_credito, creditos } from "../database/db";
+import { pagos_credito, creditos, cuotas_credito } from "../database/db";
 import { insertPagosCreditoInversionistasV2 } from "./payments";
 import { esPagoAplicado } from "../utils/paymentStatus";
-import { shouldRejectZeroAppliedNormalValidation } from "./registerPaymentPolicy";
+import {
+  calcularCoberturaCuota,
+  shouldRejectZeroAppliedNormalValidation,
+} from "./registerPaymentPolicy";
+import { PAYMENT_ADVISORY_LOCK_NAMESPACE } from "../utils/paymentAdvisoryLock";
 
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
@@ -38,6 +42,9 @@ export const revalidatePayment = async ({ body, set }: any) => {
 
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     const result = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${PAYMENT_ADVISORY_LOCK_NAMESPACE}, ${credito_id})`
+      );
       // 2️⃣ OBTENER DATOS DEL PAGO
       const [pago] = await tx
         .select()
@@ -56,6 +63,9 @@ export const revalidatePayment = async ({ body, set }: any) => {
       
       if (esPagoAplicado(pago.validationStatus)) {
         throw new Error(`Payment ${pago_id} is already validated`);
+      }
+      if (pago.validationStatus !== "pending" || pago.paymentFalse !== false) {
+        throw new Error(`Payment ${pago_id} is not pending revalidation`);
       }
 
       if (
@@ -95,30 +105,43 @@ export const revalidatePayment = async ({ body, set }: any) => {
 
       // 4️⃣ CALCULAR NUEVO CAPITAL (restar el abono_capital del pago)
       const capital_actual = new Big(credito.capital ?? 0);
-      const todosPagosCuota = pago.cuota_id === null
+      const pagosVivosCuota = pago.cuota_id === null
         ? []
         : await tx
-            .select({ abono_capital: pagos_credito.abono_capital })
+            .select({
+              pago_id: pagos_credito.pago_id,
+              validationStatus: pagos_credito.validationStatus,
+              paymentFalse: pagos_credito.paymentFalse,
+              abono_capital: pagos_credito.abono_capital,
+              abono_interes: pagos_credito.abono_interes,
+              abono_iva_12: pagos_credito.abono_iva_12,
+              abono_seguro: pagos_credito.abono_seguro,
+              abono_gps: pagos_credito.abono_gps,
+              membresias_pago: pagos_credito.membresias_pago,
+            })
             .from(pagos_credito)
             .where(
               and(
                 eq(pagos_credito.cuota_id, pago.cuota_id),
-                eq(pagos_credito.validationStatus, "validated")
+                eq(pagos_credito.validationStatus, "validated"),
+                eq(pagos_credito.paymentFalse, false),
+                ne(pagos_credito.pago_id, pago_id)
               )
             );
+      const otrosPagosVivos = pagosVivosCuota.filter(
+        (otroPago) => otroPago.pago_id !== pago_id
+      );
 
-      let abono_capital_total = new Big(0);
-      for (const p of todosPagosCuota) {
-        abono_capital_total = abono_capital_total.plus(p.abono_capital ?? 0);
-      }
-
-      // Incluir el abono del pago actual (aún no está "validated")
-      abono_capital_total = abono_capital_total.plus(pago.abono_capital ?? 0);
-
-      const nuevo_capital = capital_actual.minus(abono_capital_total);
+      const abono_capital_actual = new Big(pago.abono_capital ?? 0);
+      const nuevo_capital = capital_actual.minus(abono_capital_actual);
+      const coberturaCuota = calcularCoberturaCuota({
+        montoCuota: credito.cuota ?? 0,
+        pagos: [...otrosPagosVivos, pago],
+        pagoIdEnValidacion: pago_id,
+      });
 
       console.log(`💰 Capital actual: ${capital_actual.toString()}`);
-      console.log(`💰 Abono capital total de cuota: ${abono_capital_total.toString()}`);
+      console.log(`💰 Abono capital del pago actual: ${abono_capital_actual.toString()}`);
       console.log(`💰 Nuevo capital: ${nuevo_capital.toString()}`);
 
       // 5️⃣ CALCULAR NUEVA DEUDA TOTAL
@@ -158,11 +181,35 @@ export const revalidatePayment = async ({ body, set }: any) => {
       }
 
       // 7️⃣ VALIDAR EL PAGO y registrar fecha de aplicación
-      await tx
+      const [validatedPayment] = await tx
         .update(pagos_credito)
         .set({ validationStatus: "validated", fecha_aplicado: new Date() })
-        .where(eq(pagos_credito.pago_id, pago_id));
+        .where(
+          and(
+            eq(pagos_credito.pago_id, pago_id),
+            eq(pagos_credito.validationStatus, "pending"),
+            eq(pagos_credito.paymentFalse, false)
+          )
+        )
+        .returning({ pago_id: pagos_credito.pago_id });
+      if (!validatedPayment) {
+        throw new Error(`Payment ${pago_id} changed during revalidation`);
+      }
       console.log("✅ Pago marcado como validado con fecha de aplicación");
+
+      if (pago.cuota_id !== null && coberturaCuota.cuotaCompleta) {
+        await tx
+          .update(cuotas_credito)
+          .set({ pagado: true })
+          .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+      }
+
+      await insertPagosCreditoInversionistasV2(
+        pago_id,
+        credito_id,
+        undefined,
+        tx
+      );
 
       return {
         pago_id,
@@ -178,13 +225,6 @@ export const revalidatePayment = async ({ body, set }: any) => {
       return result;
     }
 
-    // 8️⃣ EJECUTAR INVERSIONISTAS (fuera de la transacción para usar la función existente o asegurar que los registros se vean en la otra conexión)
-    // El insertPagosCreditoInversionistasV2 ya maneja su propia forma de inserción.
-    // Ojo: insertPagosCreditoInversionistasV2 puede requerir validaciones internas.
-    console.log("\n💼 ========== PROCESANDO INVERSIONISTAS ==========");
-    await insertPagosCreditoInversionistasV2(pago_id, credito_id);
-    console.log("✅ Pagos a inversionistas procesados correctamente");
-
     set.status = 200;
     return {
       message: "Payment revalidated successfully",
@@ -196,8 +236,12 @@ export const revalidatePayment = async ({ body, set }: any) => {
     
     if (error.message.includes("not found")) {
       set.status = 404;
-    } else if (error.message.includes("already validated")) {
-      set.status = 400;
+    } else if (
+      error.message.includes("already validated") ||
+      error.message.includes("not pending revalidation") ||
+      error.message.includes("changed during revalidation")
+    ) {
+      set.status = 409;
     } else {
       set.status = 500;
     }

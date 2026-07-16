@@ -13,6 +13,7 @@ import {
   shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
+  calcularCoberturaCuota,
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
@@ -258,6 +259,32 @@ describe("sumarAplicadoACuota", () => {
         },
       ]).toFixed(2)
     ).toBe("0.00");
+  });
+});
+
+describe("calcularCoberturaCuota", () => {
+  it("cubre una cuota con pagos partidos vivos aunque uno siga pending", () => {
+    const cobertura = calcularCoberturaCuota({
+      montoCuota: "100.00",
+      incluirPendientes: true,
+      pagos: [
+        {
+          pago_id: 1,
+          validationStatus: "validated",
+          paymentFalse: false,
+          abono_capital: "40.00",
+        },
+        {
+          pago_id: 2,
+          validationStatus: "pending",
+          paymentFalse: false,
+          abono_capital: "59.99",
+        },
+      ],
+    });
+
+    expect(cobertura.cuotaCompleta).toBeTrue();
+    expect(cobertura.totalAplicado.toFixed(2)).toBe("99.99");
   });
 });
 

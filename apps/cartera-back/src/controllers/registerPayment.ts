@@ -25,6 +25,7 @@ import {
   calcularSaldoNetoCuota,
   esDestinoSobrescribible,
   getCuotaIdForPaymentInsert,
+  getCoveredOpenInstallment,
   getRequestedInstallmentFloor,
   getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
@@ -35,15 +36,12 @@ import {
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
+import {
+  PAYMENT_ADVISORY_LOCK_NAMESPACE,
+  type PaymentAdvisoryLockConnection,
+} from "../utils/paymentAdvisoryLock";
 
-type LockConn = {
-  query: (text: string, values?: unknown[]) => Promise<unknown>;
-  release: () => void;
-};
-
-// Namespace para advisory locks de pagos (evita colisión con otros locks).
-// pg_advisory_lock(ns, credito_id) serializa pagos concurrentes del mismo crédito.
-const PAGO_LOCK_NS = 8765;
+const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -342,6 +340,36 @@ const obtenerInfoCompletaCredito = async (
         )
         .orderBy(cuotas_credito.numero_cuota),
     ]);
+
+    const cuotasParaValidar = new Map<
+      number,
+      {
+        cuotaId: number;
+        numeroCuota: number;
+        pagos: (typeof pagos_credito.$inferSelect)[];
+      }
+    >();
+    for (const item of cuotasPendientes) {
+      const cuotaId = item.cuotas_credito.cuota_id;
+      const cuota = cuotasParaValidar.get(cuotaId) ?? {
+        cuotaId,
+        numeroCuota: item.cuotas_credito.numero_cuota,
+        pagos: [],
+      };
+      cuota.pagos.push(item.pagos_credito);
+      cuotasParaValidar.set(cuotaId, cuota);
+    }
+    const cuotaInconsistente = getCoveredOpenInstallment({
+      montoCuota: info.credito.cuota ?? 0,
+      cuotas: [...cuotasParaValidar.values()],
+    });
+    if (cuotaInconsistente) {
+      set.status = 409;
+      throw new Error(
+        `${CUOTA_INTEGRITY_ERROR_PREFIX} la cuota ${cuotaInconsistente.numeroCuota} está abierta, pero sus pagos validados ya cubren el total. Revalide el pago antes de registrar uno nuevo.`
+      );
+    }
+
     console.log(cuotaApagar,"cuota a pagar");
     const cuotasPendientesUnicas = Array.from(
       new Map(
@@ -400,6 +428,13 @@ const obtenerInfoCompletaCredito = async (
       },
     };
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)
+    ) {
+      throw error;
+    }
+
     // 🔥 Preservar errores 404
     if (
       (error as any).message === "Credit not found" ||
@@ -509,7 +544,7 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 
 export const insertPayment = async ({ body, set }: any) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
-  let lockConn: LockConn | undefined;
+  let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
   try {
     // 1. Validar schema
@@ -551,7 +586,7 @@ export const insertPayment = async ({ body, set }: any) => {
     lockConn = await client.connect();
     lockedCreditoId = credito_id;
     await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
-      PAGO_LOCK_NS,
+      PAYMENT_ADVISORY_LOCK_NAMESPACE,
       credito_id,
     ]);
 
@@ -1936,6 +1971,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
     }
   } catch (error) {
     console.error("[insertPayment] Error:", error);
+    if (
+      error instanceof Error &&
+      error.message.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)
+    ) {
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
+
     set.status = 500;
     return {
       message: "Internal server error",
@@ -1947,7 +1990,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       try {
         if (lockedCreditoId !== undefined) {
           await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
-            PAGO_LOCK_NS,
+            PAYMENT_ADVISORY_LOCK_NAMESPACE,
             lockedCreditoId,
           ]);
         }

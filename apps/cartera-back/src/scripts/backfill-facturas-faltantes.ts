@@ -173,7 +173,9 @@ function buildDatos(xml: string) {
       nit: emisor["@_NITEmisor"],
       nombre: emisor["@_NombreEmisor"],
       nombreComercial: emisor["@_NombreComercial"],
-      direccion: emisor["dte:DireccionEmisor"]?.["dte:Direccion"],
+      // Objeto completo: el HTML lee direccion["dte:Direccion"], ["dte:Municipio"]
+      // y ["dte:Departamento"]. Pasar solo el string interno los deja en undefined.
+      direccion: emisor["dte:DireccionEmisor"],
     },
     receptor: {
       nit: receptor["@_IDReceptor"],

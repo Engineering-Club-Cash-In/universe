@@ -154,9 +154,21 @@ export async function distribuirAbonoCapitalEspejo(
  * Se puede borrar sin miedo porque cada fila es exclusiva de un pago: no
  * acumula aportes de otros pagos, así que nadie más pierde plata.
  *
- * Las filas YA LIQUIDADAS no se borran (la plata ya le salió al inversionista):
- * se devuelven en `omitidos` para tratarlas a mano. Es el caso que decidimos
- * dejar fuera de este cambio.
+ * TIRA ERROR (y voltea la transacción del reverso) en dos casos, porque en los
+ * dos el abono ya no se puede tocar:
+ *
+ *  - `liquidado`: la plata ya le salió al inversionista.
+ *  - `pago_espejo_id` seteado: una fila de espejo ya lo consumió. El espejo
+ *    CONGELA el monto a pagar al generarse y no se regenera mientras esté sin
+ *    liquidar, así que la liquidación le va a pagar ese capital igual. Borrar el
+ *    abono no la frena: el inversionista terminaría cobrando un capital que se
+ *    revirtió, mientras el cliente lo sigue debiendo.
+ *
+ * Los dos se resuelven a mano antes de revertir; el sistema no puede adivinar.
+ *
+ * Los errores NO se atrapan a propósito: si el borrado falla, el reverso entero
+ * tiene que caerse. Si se tragara el error, el pago se revertiría igual y el
+ * abono quedaría huérfano — justo lo que esta función viene a evitar.
  *
  * `executor` permite pasar el `tx` de una transacción para que la reversión sea
  * atómica con el resto del reverso.
@@ -165,62 +177,58 @@ export async function revertirAbonoCapitalEspejo(
   pago_id: number,
   executor: any = db
 ) {
-  try {
-    // 1. Las filas que generó este pago
-    const filas = await executor
-      .select()
-      .from(abonos_capital)
-      .where(eq(abonos_capital.pago_id, pago_id));
+  // 1. Las filas que generó este pago
+  const filas = await executor
+    .select()
+    .from(abonos_capital)
+    .where(eq(abonos_capital.pago_id, pago_id));
 
-    if (filas.length === 0) {
-      return {
-        success: true,
-        message: "El pago no generó abonos a capital: nada que revertir",
-        data: { pago_id, borrados: [], omitidos: [] },
-      };
-    }
-
-    // 2. Las liquidadas NO se tocan: esa plata ya salió.
-    const liquidadas = filas.filter((f: any) => f.liquidado);
-    const borrables = filas.filter((f: any) => !f.liquidado);
-
-    if (borrables.length > 0) {
-      await executor.delete(abonos_capital).where(
-        and(
-          eq(abonos_capital.pago_id, pago_id),
-          eq(abonos_capital.liquidado, false)
-        )
-      );
-    }
-
+  if (filas.length === 0) {
     return {
       success: true,
-      message: "Abonos a capital del pago revertidos",
-      data: {
-        pago_id,
-        borrados: borrables.map((f: any) => ({
-          abono_id: f.abono_id,
-          inversionista_id: f.inversionista_id,
-          monto: f.monto,
-          tipo: f.tipo,
-        })),
-        omitidos: liquidadas.map((f: any) => ({
-          abono_id: f.abono_id,
-          inversionista_id: f.inversionista_id,
-          monto: f.monto,
-          motivo: "YA_LIQUIDADO_LA_PLATA_YA_SALIO",
-        })),
-      },
-    };
-  } catch (error: any) {
-    console.error("Error al revertir abono a capital:", error);
-    return {
-      success: false,
-      message: "Error al revertir el abono a capital",
-      error: error.message,
-      data: null,
+      message: "El pago no generó abonos a capital: nada que revertir",
+      data: { pago_id, borrados: [] },
     };
   }
+
+  // 2. Portero: la plata ya salió.
+  const liquidadas = filas.filter((f: any) => f.liquidado);
+  if (liquidadas.length > 0) {
+    throw new Error(
+      `[ABONO_YA_LIQUIDADO] El pago ${pago_id} tiene ${liquidadas.length} abono(s) a capital ya liquidado(s) ` +
+        `(abono_id: ${liquidadas.map((f: any) => f.abono_id).join(", ")}). ` +
+        `Esa plata ya se le pagó al inversionista: hay que revertir la liquidación antes de revertir el pago.`
+    );
+  }
+
+  // 3. Portero: ya entró en una foto que se va a pagar.
+  const enEspejo = filas.filter((f: any) => f.pago_espejo_id != null);
+  if (enEspejo.length > 0) {
+    throw new Error(
+      `[ABONO_EN_CALCULO_PENDIENTE] El pago ${pago_id} tiene ${enEspejo.length} abono(s) a capital que ya entraron ` +
+        `en un cálculo de pagos (espejo id: ${enEspejo.map((f: any) => f.pago_espejo_id).join(", ")}). ` +
+        `Ese monto ya quedó congelado para liquidar: hay que liquidar o descartar el espejo antes de revertir el pago.`
+    );
+  }
+
+  // 4. Ninguna foto los tomó y ninguno se pagó: se borran.
+  await executor
+    .delete(abonos_capital)
+    .where(eq(abonos_capital.pago_id, pago_id));
+
+  return {
+    success: true,
+    message: "Abonos a capital del pago revertidos",
+    data: {
+      pago_id,
+      borrados: filas.map((f: any) => ({
+        abono_id: f.abono_id,
+        inversionista_id: f.inversionista_id,
+        monto: f.monto,
+        tipo: f.tipo,
+      })),
+    },
+  };
 }
 
 /**

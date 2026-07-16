@@ -3974,20 +3974,21 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         // de liquidación creado. También se cierran los abonos a capital asociados
         // y se marca cada cuota como pagada al inversionista para que no vuelva a
         // procesarse en futuras ejecuciones.
-        // Se cierran TODOS los abonos abiertos de los pares (crédito, inversionista)
-        // que entraron en esta liquidación, no solo el que apunta `abono_capital_id`.
-        // Motivo: calcularYRegistrarPagosEspejo suma al espejo TODAS las filas
-        // abiertas del par (payments.ts) pero solo linkea la primera. Ahora que
-        // cada pago inserta su propia fila, cerrar solo la linkeada dejaría a las
-        // hermanas abiertas y la próxima liquidación se las volvería a pagar.
-        const creditoIdsLiquidados = [
-          ...new Set(
-            pagosNoLiquidados
-              .map((p) => p.credito_id)
-              .filter((id): id is number => id != null)
-          ),
-        ];
-        if (creditoIdsLiquidados.length > 0) {
+        // Se cierran EXACTAMENTE los abonos que estas filas de espejo consumieron
+        // (`pago_espejo_id`), que son los que se pagaron: el monto liquidado sale
+        // de `p.abono_capital`, la foto que el espejo congeló al generarse.
+        //
+        // No se cierra por par (crédito, inversionista): un abono nacido DESPUÉS
+        // de esa foto no está en el monto pagado — el espejo no se regenera
+        // mientras haya uno sin liquidar (payments.ts) — así que cerrarlo lo
+        // dejaría cobrado sin haberse pagado y el inversionista nunca vería esa
+        // plata. Sin marca queda abierto y lo toma el siguiente calcular pagos.
+        //
+        // Tampoco se cierra solo el de `abono_capital_id`: ese link es una sola
+        // casilla y apunta a uno, pero el espejo sumó todos los abiertos del par.
+        // Cerrar solo ese dejaría a las hermanas abiertas y la próxima liquidación
+        // se las volvería a pagar.
+        if (pagosIds.length > 0) {
           const abonosCerrados = await tx
             .update(abonos_capital)
             .set({
@@ -3997,8 +3998,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             })
             .where(
               and(
-                eq(abonos_capital.inversionista_id, inv_id),
-                inArray(abonos_capital.credito_id, creditoIdsLiquidados),
+                inArray(abonos_capital.pago_espejo_id, pagosIds),
                 eq(abonos_capital.liquidado, false)
               )
             )

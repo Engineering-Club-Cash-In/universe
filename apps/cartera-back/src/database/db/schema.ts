@@ -1708,6 +1708,19 @@
     monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
     tipo: tipoAbonoEnum("tipo").notNull(),
     liquidado: boolean("liquidado").notNull().default(false),
+    // Fila de espejo que YA consumió este abono (lo sumó en su `abono_capital`).
+    // Se setea al generar el espejo. Es la marca de "este abono entró en la foto":
+    // el espejo congela el monto a pagar y no se regenera mientras haya uno sin
+    // liquidar, así que un abono que nace DESPUÉS no está en esa foto, no se paga
+    // en esa liquidación y debe quedar abierto para el siguiente ciclo.
+    // La liquidación cierra solo los marcados con las filas que liquida.
+    //
+    // Sin `.references()` a propósito: `pagos_credito_inversionistas_espejo` ya
+    // apunta acá con `abono_capital_id`, y declarar la vuelta en Drizzle deja las
+    // dos tablas referenciándose entre sí — TypeScript no puede inferir el tipo y
+    // el schema entero se cae a `any`. El FK real (con ON DELETE SET NULL) se crea
+    // en la migración 0021; Drizzle no lo necesita para consultar.
+    pago_espejo_id: integer("pago_espejo_id"),
     // Liquidación en la que se cerró este abono. Se setea junto con
     // `liquidado`. Hace explícito lo que antes había que deducir dando la
     // vuelta por `pagos_credito_inversionistas_espejo.abono_capital_id`, que al

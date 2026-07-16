@@ -141,13 +141,15 @@ describe("registrarCancelacionEspejo", () => {
 // Mock del executor para revertirAbonoCapitalEspejo. Simula:
 //   ex.select().from().where()   -> las filas de abonos_capital de ese pago
 //   ex.delete().where()          -> borrado (contado en state.deleteCalls)
-function makeExecutor(filas: any[]) {
+// `failDelete` simula que el borrado revienta (error de DB/FK/conexión).
+function makeExecutor(filas: any[], failDelete = false) {
   const state = { deleteCalls: 0 };
   const ex: any = {
     select: () => ({ from: () => ({ where: () => Promise.resolve(filas) }) }),
     delete: () => ({
       where: () => {
         state.deleteCalls++;
+        if (failDelete) return Promise.reject(new Error("connection reset"));
         return Promise.resolve([]);
       },
     }),
@@ -155,11 +157,21 @@ function makeExecutor(filas: any[]) {
   return { ex, state };
 }
 
+const abonoAbierto = (over: any = {}) => ({
+  abono_id: 1,
+  inversionista_id: 10,
+  monto: "600",
+  tipo: "CAPITAL",
+  liquidado: false,
+  pago_espejo_id: null,
+  ...over,
+});
+
 describe("revertirAbonoCapitalEspejo", () => {
   it("borra las filas que generó ese pago", async () => {
     const { ex, state } = makeExecutor([
-      { abono_id: 1, inversionista_id: 10, monto: "600", tipo: "CAPITAL", liquidado: false },
-      { abono_id: 2, inversionista_id: 20, monto: "400", tipo: "CAPITAL", liquidado: false },
+      abonoAbierto({ abono_id: 1, inversionista_id: 10, monto: "600" }),
+      abonoAbierto({ abono_id: 2, inversionista_id: 20, monto: "400" }),
     ]);
 
     const res = await revertirAbonoCapitalEspejo(555, ex);
@@ -167,8 +179,11 @@ describe("revertirAbonoCapitalEspejo", () => {
     expect(res.success).toBe(true);
     expect(state.deleteCalls).toBe(1);
     expect(res.data!.borrados).toHaveLength(2);
-    expect(res.data!.borrados[0]).toMatchObject({ abono_id: 1, inversionista_id: 10, monto: "600" });
-    expect(res.data!.omitidos).toHaveLength(0);
+    expect(res.data!.borrados[0]).toMatchObject({
+      abono_id: 1,
+      inversionista_id: 10,
+      monto: "600",
+    });
   });
 
   it("no hace nada si el pago no generó ningún abono", async () => {
@@ -182,35 +197,34 @@ describe("revertirAbonoCapitalEspejo", () => {
     expect(res.data!.borrados).toHaveLength(0);
   });
 
-  it("no borra las filas ya liquidadas: las reporta como omitidas", async () => {
-    // La plata ya le salió al inversionista: borrarla la haría desaparecer.
-    const { ex, state } = makeExecutor([
-      { abono_id: 1, inversionista_id: 10, monto: "600", tipo: "CAPITAL", liquidado: true },
-    ]);
+  it("TIRA ERROR y no borra nada si el abono ya fue liquidado", async () => {
+    // La plata ya le salió al inversionista: el pago no se puede revertir.
+    const { ex, state } = makeExecutor([abonoAbierto({ liquidado: true })]);
 
-    const res = await revertirAbonoCapitalEspejo(555, ex);
-
+    await expect(revertirAbonoCapitalEspejo(555, ex)).rejects.toThrow(
+      /\[ABONO_YA_LIQUIDADO\]/
+    );
     expect(state.deleteCalls).toBe(0);
-    expect(res.data!.borrados).toHaveLength(0);
-    expect(res.data!.omitidos).toHaveLength(1);
-    expect(res.data!.omitidos[0]).toMatchObject({
-      abono_id: 1,
-      motivo: "YA_LIQUIDADO_LA_PLATA_YA_SALIO",
-    });
   });
 
-  it("borra las abiertas y conserva las liquidadas cuando vienen mezcladas", async () => {
-    const { ex, state } = makeExecutor([
-      { abono_id: 1, inversionista_id: 10, monto: "600", tipo: "CAPITAL", liquidado: false },
-      { abono_id: 2, inversionista_id: 20, monto: "400", tipo: "CAPITAL", liquidado: true },
-    ]);
+  it("TIRA ERROR y no borra nada si el abono ya entró en un cálculo de pagos", async () => {
+    // El espejo ya congeló ese monto y se lo va a pagar igual: borrar el abono
+    // dejaría al inversionista cobrando un capital que se revirtió.
+    const { ex, state } = makeExecutor([abonoAbierto({ pago_espejo_id: 77 })]);
 
-    const res = await revertirAbonoCapitalEspejo(555, ex);
+    await expect(revertirAbonoCapitalEspejo(555, ex)).rejects.toThrow(
+      /\[ABONO_EN_CALCULO_PENDIENTE\]/
+    );
+    expect(state.deleteCalls).toBe(0);
+  });
 
-    expect(state.deleteCalls).toBe(1);
-    expect(res.data!.borrados).toHaveLength(1);
-    expect(res.data!.borrados[0].abono_id).toBe(1);
-    expect(res.data!.omitidos).toHaveLength(1);
-    expect(res.data!.omitidos[0].abono_id).toBe(2);
+  it("propaga el error si el borrado falla, para que la transacción se caiga", async () => {
+    // Si se tragara el error, el pago se revertiría igual y el abono quedaría
+    // huérfano: justo el bug que esta función viene a evitar.
+    const { ex } = makeExecutor([abonoAbierto()], true);
+
+    await expect(revertirAbonoCapitalEspejo(555, ex)).rejects.toThrow(
+      /connection reset/
+    );
   });
 });

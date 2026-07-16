@@ -259,16 +259,10 @@ export const reversePayment = async ({ body, set }: any) => {
       // 8️⃣.5️⃣ REVERSAR EL ABONO A CAPITAL DEL ESPEJO (abonos_capital)
       // ======================================================================
       // Borra las filas que ESTE pago generó (van marcadas con su pago_id). Si
-      // el pago no generó ninguna, la función no hace nada: no hace falta
-      // filtrar por estado del pago, el pago_id ya dice la verdad.
+      // el pago no generó ninguna, no hace nada: el pago_id ya dice la verdad.
+      // Tira error (y voltea esta transacción) si el abono ya se liquidó o si ya
+      // entró en un cálculo de pagos: en esos casos el reverso no puede seguir.
       const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
-
-      if (reversionEspejo?.data?.omitidos?.length) {
-        console.warn(
-          `⚠️ Abono a capital NO revertido del todo en el espejo (revisar a mano):`,
-          reversionEspejo.data.omitidos,
-        );
-      }
 
       // ======================================================================
       // 9️⃣ DEVOLVER ABONOS A LOS "RESTANTES" DEL PAGO
@@ -793,7 +787,11 @@ try {
       error.message === "Payment is not marked as paid" ||
       error.message === "Credit not found or not active" ||
       error.message === "Incobrable structural row cannot be reversed" ||
-      error.message === "User not found"
+      error.message === "User not found" ||
+      // Porteros del abono a capital: no es una falla del sistema, es que este
+      // pago no se puede revertir hasta resolver el abono a mano.
+      error.message?.startsWith("[ABONO_YA_LIQUIDADO]") ||
+      error.message?.startsWith("[ABONO_EN_CALCULO_PENDIENTE]")
     ) {
       set.status = 400;
     } else {

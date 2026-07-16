@@ -10,7 +10,6 @@ import {
   facturas_electronicas,
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
-import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { anularFacturaEnCofidi } from "./reversePayment";
 
 // ============================================================================
@@ -97,19 +96,14 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
 
       console.log("✅ Crédito encontrado y activo");
 
-      // 3️⃣.5️⃣ REVERSAR EL ABONO A CAPITAL DEL ESPEJO (abonos_capital)
-      // Borra las filas que ESTE pago generó (marcadas con su pago_id); si no
-      // generó ninguna, no hace nada. Va ANTES del branch de `pagoValidado`
-      // porque ese solo mira `validated`, así que un abono a capital se iría
-      // por el early-return de abajo sin revertirse.
-      const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
-
-      if (reversionEspejo?.data?.omitidos?.length) {
-        console.warn(
-          `⚠️ Abono a capital NO revertido del todo en el espejo (revisar a mano):`,
-          reversionEspejo.data.omitidos,
-        );
-      }
+      // Ojo: acá NO se revierten los abonos a capital del espejo. `pagoValidado`
+      // solo reconoce `validated`, así que un `capital_validated` cae en el
+      // early-return de abajo sin devolver el capital ni cambiar de estado;
+      // borrarle los abonos antes lo dejaría a medias (abono borrado + pago
+      // todavía aplicado). Los pagos que esta ruta sí maneja (cuotas normales)
+      // nunca generan abonos, así que no hay nada que revertir.
+      // El reverso del abono vive en reversePayment.ts, que usa esPagoAplicado
+      // y sí reconoce los abonos directos a capital.
 
       if (!pagoValidado) {
         console.log("ℹ️ El pago ya está en estado PENDIENTE. Solo se reversarán las inversiones.");
@@ -121,7 +115,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
           credito_id,
           numero_credito_sifco: creditData.numero_credito_sifco,
           cuota: creditData.cuota,
-          abonoCapitalEspejo: reversionEspejo?.data ?? undefined,
           message: "Inversiones reversadas exitosamente (el pago ya estaba pendiente)"
         };
       }
@@ -264,7 +257,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
         nuevoCapital: nuevoCapital.toString(),
         facturasAnuladas,
         facturasConError,
-        abonoCapitalEspejo: reversionEspejo?.data ?? undefined,
         numero_credito_sifco: creditData.numero_credito_sifco,
         cuota: creditData.cuota
       };

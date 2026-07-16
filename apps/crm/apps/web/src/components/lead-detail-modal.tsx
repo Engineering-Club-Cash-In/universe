@@ -741,6 +741,18 @@ export function LeadDetailModal({
 								</div>
 							)}
 
+							{/* Suggested Payment Day */}
+							{creditAnalysisQuery.data.suggestedPaymentDay != null && (
+								<div className="flex items-center justify-between rounded-lg border px-3 py-2">
+									<span className="text-muted-foreground text-xs">
+										Fecha Ideal de Pago
+									</span>
+									<span className="font-bold text-blue-600 text-sm">
+										Día {creditAnalysisQuery.data.suggestedPaymentDay}
+									</span>
+								</div>
+							)}
+
 							{/* Payment Capacity */}
 							<div className="grid grid-cols-2 gap-4">
 								{creditAnalysisQuery.data.maxPayment && (

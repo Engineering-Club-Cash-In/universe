@@ -226,6 +226,7 @@ type CreditAnalysisData = {
 	economicAvailability: string | null;
 	maxPayment: string | null;
 	maxCreditAmount: string | null;
+	suggestedPaymentDay: number | null;
 	analyzedAt: Date;
 } | null;
 
@@ -1566,6 +1567,20 @@ function RouteComponent() {
 											</span>
 										</div>
 									</div>
+
+									{/* Fecha Ideal de Pago Sugerida */}
+									{selectedClient.creditAnalysis.suggestedPaymentDay !=
+										null && (
+										<div className="flex items-center justify-between rounded-lg border px-3 py-2">
+											<span className="text-muted-foreground text-xs">
+												Fecha Ideal de Pago
+											</span>
+											<span className="font-bold text-blue-600 text-sm">
+												Día{" "}
+												{selectedClient.creditAnalysis.suggestedPaymentDay}
+											</span>
+										</div>
+									)}
 
 									{/* Capacidad de Pago */}
 									<div className="grid grid-cols-2 gap-3">

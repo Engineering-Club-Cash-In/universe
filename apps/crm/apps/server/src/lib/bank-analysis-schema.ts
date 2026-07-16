@@ -30,6 +30,14 @@ export const bankStatementAnalysisSchema = z.object({
 		promedio_gastos_variables: z.number(),
 		disponibilidad_economica: z.number(),
 	}),
+	// Nullable e informativo: no debe tumbar el análisis core; días acotados a 1-31 enteros
+	analisis_fecha_pago: z
+		.object({
+			dias_ingreso_detectados: z.array(z.number().int().min(1).max(31)),
+			dia_pago_sugerido: z.number().int().min(1).max(31),
+			justificacion: z.string(),
+		})
+		.nullable(),
 });
 
 export type BankStatementAnalysis = z.infer<typeof bankStatementAnalysisSchema>;
@@ -64,6 +72,11 @@ Eres un analista de capacidad de pago para una financiera que otorga créditos p
    - promedio_gastos_variables: Promedio mensual de gastos variables.
    - disponibilidad_economica: Promedio de la diferencia entre créditos y débitos totales. Se calcula como: (promedio_creditos - promedio_debitos).
    **Nota**: El promedio de créditos es la suma de 'total_creditos' a lo largo de los meses analizados dividido por la cantidad de meses. El promedio de débitos es la suma de 'total_debitos' a lo largo de los meses analizados dividido por la cantidad de meses.
+
+4. **analisis_fecha_pago**: Determina la fecha ideal de pago según CUÁNDO recibe ingresos el solicitante, analizando las FECHAS de las transacciones de crédito (no solo los totales). Devuelve:
+   - dias_ingreso_detectados: Días del mes (1-31) en que se repiten sus ingresos recurrentes. Si es quincena, incluye ambos (ej. [15, 30]).
+   - dia_pago_sugerido: Día del mes (1-31) para la cuota, entre 1 y 5 días después de su ingreso recurrente de mayor monto, para no caer donde el dinero ya se gastó. En quincena, elige la que deje más liquidez. Devuelve el día real, no un valor fijo.
+   - justificacion: 1-2 frases justificando el día según el patrón detectado. Si el ingreso es irregular, elige el día más conservador y acláralo; no inventes precisión.
 
 ## IMPORTANTE: Múltiples cuentas bancarias del mismo titular
 

@@ -364,6 +364,8 @@ export const bankAnalysisRouter = {
 							analysis.promedio_mensual.disponibilidad_economica.toString(),
 						maxPayment: creditCapacity.maxPayment.toString(),
 						maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
+						suggestedPaymentDay:
+							analysis.analisis_fecha_pago?.dia_pago_sugerido ?? null,
 						analyzedAt: new Date(),
 						updatedAt: new Date(),
 					})

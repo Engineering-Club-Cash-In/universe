@@ -116,6 +116,18 @@ export function ConsolidatedCreditSummary({
 				</div>
 			</div>
 
+			{/* Fecha ideal de pago sugerida (solo del deudor principal) */}
+			{lead.suggestedPaymentDay != null && (
+				<div className="rounded-md bg-white/80 p-2 text-center dark:bg-white/5">
+					<p className="text-muted-foreground text-xs">
+						Fecha ideal de pago
+					</p>
+					<p className="font-semibold text-blue-600 text-sm">
+						Día {lead.suggestedPaymentDay}
+					</p>
+				</div>
+			)}
+
 			{/* Desglose si hay co-firmantes */}
 			{coDebtorsCount > 0 && (
 				<div className="border-t pt-3">

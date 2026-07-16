@@ -2484,6 +2484,30 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     }
 
     // ──────────────────────────────────────────────
+    // PASO 4.5: Reabrir los abonos a capital que esta liquidación cerró
+    //   Los espejos vuelven a NO_LIQUIDADO, así que sus abonos tienen que volver
+    //   a estar abiertos: la próxima liquidación los paga de nuevo.
+    //
+    //   Sin esto quedan liquidado=true para siempre y:
+    //     - nunca se le vuelven a pagar al inversionista,
+    //     - el reporte no los ve (quedan con liquidacion_id=NULL),
+    //     - el portero de revertirAbonoCapitalEspejo los da por pagados y bloquea
+    //       el reverso del pago.
+    //
+    //   `pago_espejo_id` NO se limpia: la fila de espejo sigue existiendo y sigue
+    //   teniendo ese monto congelado, solo que ahora sin liquidar.
+    //
+    //   Va ANTES del PASO 8 (borrar la liquidación): después, el FK
+    //   ON DELETE SET NULL limpia el liquidacion_id y ya no hay cómo encontrarlos.
+    const abonosReabiertos = await tx
+      .update(abonos_capital)
+      .set({ liquidado: false, liquidacion_id: null, updated_at: new Date() })
+      .where(eq(abonos_capital.liquidacion_id, liquidacion_id))
+      .returning({ abono_id: abonos_capital.abono_id });
+
+    console.log(`  ✅ ${abonosReabiertos.length} abono(s) a capital reabiertos`);
+
+    // ──────────────────────────────────────────────
     // PASO 5: Revertir cuotas del crédito
     //   Marcamos liquidado_inversionistas = false y limpiamos fecha
     // ──────────────────────────────────────────────

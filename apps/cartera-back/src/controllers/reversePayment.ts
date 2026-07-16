@@ -153,6 +153,24 @@ export const reversePayment = async ({ body, set }: any) => {
       console.log("✅ Usuario encontrado");
 
       // ======================================================================
+      // 4️⃣.5️⃣ REVERSAR EL ABONO A CAPITAL DEL ESPEJO (abonos_capital)
+      // ======================================================================
+      // Borra las filas que ESTE pago generó (van marcadas con su pago_id); si no
+      // generó ninguna, no hace nada: el pago_id ya dice la verdad.
+      //
+      // Tira error si el abono ya se liquidó o si ya entró en un cálculo de
+      // pagos, y ahí el reverso no puede seguir.
+      //
+      // 🔴 VA ACÁ, LO MÁS TEMPRANO POSIBLE, Y NO MÁS ABAJO: de acá para adelante
+      // hay tres cosas que escriben FUERA de esta transacción (usan el `db`
+      // global, no el `tx`): updateMora (6️⃣), reverseConvenioPayment (6️⃣.5️⃣) y
+      // processAndReplaceCreditInvestorsReverse (8️⃣). Si el portero tirara
+      // después de ellas, el rollback NO las desharía: el pago quedaría sin
+      // revertir pero la mora, el convenio y el saldo del inversionista ya
+      // habrían cambiado. Se aborta antes de tocar nada.
+      const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
+
+      // ======================================================================
       // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (solo si cuota está pagada)
       // ======================================================================
       let nuevoCapital = new Big(creditData.creditos.capital ?? 0);
@@ -254,15 +272,6 @@ export const reversePayment = async ({ body, set }: any) => {
         pago_id,
       );
       console.log("✅ Inversiones reversadas correctamente");
-
-      // ======================================================================
-      // 8️⃣.5️⃣ REVERSAR EL ABONO A CAPITAL DEL ESPEJO (abonos_capital)
-      // ======================================================================
-      // Borra las filas que ESTE pago generó (van marcadas con su pago_id). Si
-      // el pago no generó ninguna, no hace nada: el pago_id ya dice la verdad.
-      // Tira error (y voltea esta transacción) si el abono ya se liquidó o si ya
-      // entró en un cálculo de pagos: en esos casos el reverso no puede seguir.
-      const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
 
       // ======================================================================
       // 9️⃣ DEVOLVER ABONOS A LOS "RESTANTES" DEL PAGO

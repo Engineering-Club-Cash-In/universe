@@ -908,6 +908,10 @@ export async function insertPagosCreditoInversionistas(
       );
 
     let abonoCapitalId: number | null = null;
+    // Abonos que esta fila de espejo consume (los que suma en su abono_capital).
+    // Se marcan con el id de la fila después del insert: son "los que entraron en
+    // la foto" y por lo tanto los únicos que la liquidación puede cerrar.
+    let abonoIdsConsumidos: number[] = [];
     if (abonosNoLiquidados.length > 0) {
       if (inv.status_inversionista === "pendiente_devolucion" || aplicarDevolucionCube) {
         // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
@@ -932,6 +936,8 @@ export async function insertPagosCreditoInversionistas(
           abono_capital = abono_capital.plus(montoAbono);
         }
         abonoCapitalId = abonosNoLiquidados[0].abono_id;
+        // Todos, no solo el linkeado: el abono_capital de arriba los sumó a todos.
+        abonoIdsConsumidos = abonosNoLiquidados.map((a) => a.abono_id);
 
         console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
         console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
@@ -974,6 +980,8 @@ export async function insertPagosCreditoInversionistas(
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
       fecha_pago: fechaDelPeriodo,
+      // No es columna del espejo: se separa antes del insert (ver abajo).
+      _abonoIdsConsumidos: abonoIdsConsumidos,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -993,11 +1001,54 @@ export async function insertPagosCreditoInversionistas(
   // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
 
-  await db
-    .insert(pagos_credito_inversionistas_espejo)
-    .values(resolvedInserts);
+  // `_abonoIdsConsumidos` es interno, no es columna: se separa antes del insert.
+  const filas = resolvedInserts.map(
+    ({ _abonoIdsConsumidos, ...fila }) => fila
+  );
 
-  return resolvedInserts;
+  // 5. Insertar el espejo y marcar los abonos que consumió, ATADOS en una sola
+  //    transacción: o se guardan los dos o ninguno.
+  //
+  //    🔴 Van juntos y no sueltos porque la marca (`pago_espejo_id`) es lo único
+  //    que dice "este abono ya entró en una foto que se va a pagar". Si el espejo
+  //    quedara guardado con el monto adentro pero los abonos sin marcar (falla el
+  //    update, se cae la conexión, se reinicia el proceso), la liquidación —que
+  //    cierra SOLO los marcados— los dejaría abiertos: se pagarían con esta foto
+  //    y el siguiente cálculo los agarraría de nuevo, pagándole DOS VECES el
+  //    mismo capital al inversionista.
+  //
+  //    Atados, si se rompe en el medio no queda foto tampoco y el cálculo se
+  //    rehace limpio la próxima vez.
+  await db.transaction(async (tx) => {
+    const filasInsertadas = await tx
+      .insert(pagos_credito_inversionistas_espejo)
+      .values(filas)
+      .returning({
+        id: pagos_credito_inversionistas_espejo.id,
+        inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id,
+      });
+
+    // Se matchea por inversionista_id (hay una fila por inversionista) y no por
+    // índice, para no depender del orden que devuelve el INSERT.
+    for (const insertada of filasInsertadas) {
+      const origen = resolvedInserts.find(
+        (r) => r.inversionista_id === insertada.inversionista_id
+      );
+      const abonoIds = origen?._abonoIdsConsumidos ?? [];
+      if (abonoIds.length === 0) continue;
+
+      await tx
+        .update(abonos_capital)
+        .set({ pago_espejo_id: insertada.id, updated_at: new Date() })
+        .where(inArray(abonos_capital.abono_id, abonoIds));
+
+      console.log(
+        `   🔖 ${abonoIds.length} abono(s) marcados como consumidos por el espejo ${insertada.id}`
+      );
+    }
+  });
+
+  return filas;
 }
 
 type InvestorPaymentDb = Pick<

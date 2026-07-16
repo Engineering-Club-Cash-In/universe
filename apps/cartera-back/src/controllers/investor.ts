@@ -2484,6 +2484,30 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     }
 
     // ──────────────────────────────────────────────
+    // PASO 4.5: Reabrir los abonos a capital que esta liquidación cerró
+    //   Los espejos vuelven a NO_LIQUIDADO, así que sus abonos tienen que volver
+    //   a estar abiertos: la próxima liquidación los paga de nuevo.
+    //
+    //   Sin esto quedan liquidado=true para siempre y:
+    //     - nunca se le vuelven a pagar al inversionista,
+    //     - el reporte no los ve (quedan con liquidacion_id=NULL),
+    //     - el portero de revertirAbonoCapitalEspejo los da por pagados y bloquea
+    //       el reverso del pago.
+    //
+    //   `pago_espejo_id` NO se limpia: la fila de espejo sigue existiendo y sigue
+    //   teniendo ese monto congelado, solo que ahora sin liquidar.
+    //
+    //   Va ANTES del PASO 8 (borrar la liquidación): después, el FK
+    //   ON DELETE SET NULL limpia el liquidacion_id y ya no hay cómo encontrarlos.
+    const abonosReabiertos = await tx
+      .update(abonos_capital)
+      .set({ liquidado: false, liquidacion_id: null, updated_at: new Date() })
+      .where(eq(abonos_capital.liquidacion_id, liquidacion_id))
+      .returning({ abono_id: abonos_capital.abono_id });
+
+    console.log(`  ✅ ${abonosReabiertos.length} abono(s) a capital reabiertos`);
+
+    // ──────────────────────────────────────────────
     // PASO 5: Revertir cuotas del crédito
     //   Marcamos liquidado_inversionistas = false y limpiamos fecha
     // ──────────────────────────────────────────────
@@ -3974,19 +3998,36 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         // de liquidación creado. También se cierran los abonos a capital asociados
         // y se marca cada cuota como pagada al inversionista para que no vuelva a
         // procesarse en futuras ejecuciones.
-        const abonoIdsALiquidar = [
-          ...new Set(
-            pagosNoLiquidados
-              .map((p) => p.abono_capital_id)
-              .filter((id): id is number => id != null)
-          ),
-        ];
-        if (abonoIdsALiquidar.length > 0) {
-          await tx
+        // Se cierran EXACTAMENTE los abonos que estas filas de espejo consumieron
+        // (`pago_espejo_id`), que son los que se pagaron: el monto liquidado sale
+        // de `p.abono_capital`, la foto que el espejo congeló al generarse.
+        //
+        // No se cierra por par (crédito, inversionista): un abono nacido DESPUÉS
+        // de esa foto no está en el monto pagado — el espejo no se regenera
+        // mientras haya uno sin liquidar (payments.ts) — así que cerrarlo lo
+        // dejaría cobrado sin haberse pagado y el inversionista nunca vería esa
+        // plata. Sin marca queda abierto y lo toma el siguiente calcular pagos.
+        //
+        // Tampoco se cierra solo el de `abono_capital_id`: ese link es una sola
+        // casilla y apunta a uno, pero el espejo sumó todos los abiertos del par.
+        // Cerrar solo ese dejaría a las hermanas abiertas y la próxima liquidación
+        // se las volvería a pagar.
+        if (pagosIds.length > 0) {
+          const abonosCerrados = await tx
             .update(abonos_capital)
-            .set({ liquidado: true, updated_at: new Date() })
-            .where(inArray(abonos_capital.abono_id, abonoIdsALiquidar));
-          console.log(`  ✅ ${abonoIdsALiquidar.length} abono(s) a capital marcados como liquidados`);
+            .set({
+              liquidado: true,
+              liquidacion_id: liquidacion.liquidacion_id,
+              updated_at: new Date(),
+            })
+            .where(
+              and(
+                inArray(abonos_capital.pago_espejo_id, pagosIds),
+                eq(abonos_capital.liquidado, false)
+              )
+            )
+            .returning({ abono_id: abonos_capital.abono_id });
+          console.log(`  ✅ ${abonosCerrados.length} abono(s) a capital marcados como liquidados`);
         }
 
         // Marcar cuotas como liquidado_inversionistas

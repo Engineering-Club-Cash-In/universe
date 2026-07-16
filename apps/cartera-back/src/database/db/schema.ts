@@ -1696,12 +1696,60 @@
     inversionista_id: integer("inversionista_id")
       .notNull()
       .references(() => inversionistas.inversionista_id),
+    // Pago que generó este abono. Una fila por (pago, inversionista): NO se
+    // acumula, así revertir el pago es borrar exactamente sus filas.
+    // Nullable a propósito: las filas previas a esta columna, las CANCELACION
+    // (devolución/reset, que no nacen de un pago) y el alta manual por API no
+    // tienen pago. CASCADE: si el pago se borra (reversePayment borra los
+    // parciales), su abono se va con él en vez de quedar huérfano.
+    pago_id: integer("pago_id").references(() => pagos_credito.pago_id, {
+      onDelete: "cascade",
+    }),
     monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
     tipo: tipoAbonoEnum("tipo").notNull(),
     liquidado: boolean("liquidado").notNull().default(false),
+    // Fila de espejo que YA consumió este abono (lo sumó en su `abono_capital`).
+    // Se setea al generar el espejo. Es la marca de "este abono entró en la foto":
+    // el espejo congela el monto a pagar y no se regenera mientras haya uno sin
+    // liquidar, así que un abono que nace DESPUÉS no está en esa foto, no se paga
+    // en esa liquidación y debe quedar abierto para el siguiente ciclo.
+    // La liquidación cierra solo los marcados con las filas que liquida.
+    //
+    // Sin `.references()` a propósito: `pagos_credito_inversionistas_espejo` ya
+    // apunta acá con `abono_capital_id`, y declarar la vuelta en Drizzle deja las
+    // dos tablas referenciándose entre sí — TypeScript no puede inferir el tipo y
+    // el schema entero se cae a `any`. El FK real (con ON DELETE SET NULL) se crea
+    // en la migración 0021; Drizzle no lo necesita para consultar.
+    pago_espejo_id: integer("pago_espejo_id"),
+    // Liquidación en la que se cerró este abono. Se setea junto con
+    // `liquidado`. Hace explícito lo que antes había que deducir dando la
+    // vuelta por `pagos_credito_inversionistas_espejo.abono_capital_id`, que al
+    // ser una sola casilla solo apunta a un abono: con varias filas por par
+    // (una por pago) los reportes que iban por ahí subcontaban.
+    liquidacion_id: integer("liquidacion_id").references(
+      () => liquidaciones.liquidacion_id,
+      { onDelete: "set null" }
+    ),
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),
-  });
+  }, (t) => ({
+    ixPago: index("ix_abonos_capital_pago_id").on(t.pago_id),
+    ixCredInv: index("ix_abonos_capital_cred_inv").on(t.credito_id, t.inversionista_id),
+    ixLiquidacion: index("ix_abonos_capital_liquidacion_id").on(t.liquidacion_id),
+    ixPagoEspejo: index("ix_abonos_capital_pago_espejo_id").on(t.pago_espejo_id),
+    // Un pago aporta UNA fila por inversionista. Deja de ser una convención del
+    // código y pasa a ser una garantía de la base: si dos aplicaciones del mismo
+    // pago corren a la vez, la segunda revienta en vez de duplicar el abono y
+    // restarle el capital dos veces al inversionista.
+    //
+    // Las filas con `pago_id` NULL (las previas a la migración y las CANCELACION
+    // de devolución/reset, que no nacen de un pago) NO chocan entre sí: en
+    // Postgres los NULL no colisionan en un índice único.
+    uxPagoInversionista: uniqueIndex("ux_abonos_capital_pago_inversionista").on(
+      t.pago_id,
+      t.inversionista_id
+    ),
+  }));
 
   export const historico_liquidaciones_espejo = customSchema.table(
     "historico_liquidaciones_espejo",

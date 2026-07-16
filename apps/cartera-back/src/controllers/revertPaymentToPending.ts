@@ -96,6 +96,15 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
 
       console.log("✅ Crédito encontrado y activo");
 
+      // Ojo: acá NO se revierten los abonos a capital del espejo. `pagoValidado`
+      // solo reconoce `validated`, así que un `capital_validated` cae en el
+      // early-return de abajo sin devolver el capital ni cambiar de estado;
+      // borrarle los abonos antes lo dejaría a medias (abono borrado + pago
+      // todavía aplicado). Los pagos que esta ruta sí maneja (cuotas normales)
+      // nunca generan abonos, así que no hay nada que revertir.
+      // El reverso del abono vive en reversePayment.ts, que usa esPagoAplicado
+      // y sí reconoce los abonos directos a capital.
+
       if (!pagoValidado) {
         console.log("ℹ️ El pago ya está en estado PENDIENTE. Solo se reversarán las inversiones.");
         

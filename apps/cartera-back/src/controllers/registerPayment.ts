@@ -2833,13 +2833,16 @@ export async function aplicarAbonoCapitalInversionistas(
 ) {
   console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
 
-  // Distribuir abono a capital en tabla espejo
-  try {
-    await distribuirAbonoCapitalEspejo(credito_id, abono_capital);
-    console.log("✅ Abono distribuido en tabla abonos_capital (espejo)");
-  } catch (err) {
-    console.error("⚠️ Error al distribuir abono en espejo:", err);
-  }
+  // Distribuir abono a capital en tabla espejo. El pago_id deja cada fila
+  // amarrada a este pago, para poder revertirla si el pago se reversa.
+  //
+  // 🔴 SIN try/catch a propósito: si esto falla, aplicar el pago NO puede seguir.
+  // Antes se tragaba el error y continuaba como si nada: al crédito se le bajaba
+  // el capital pero el inversionista nunca recibía su abono — le desaparecía la
+  // plata, sin que nadie se enterara salvo por un console.error.
+  // Es el mismo bug que teníamos del lado del reverso.
+  await distribuirAbonoCapitalEspejo(credito_id, abono_capital, "CAPITAL", pago_id);
+  console.log("✅ Abono distribuido en tabla abonos_capital (espejo)");
 
   const abonoCapitalBig = new Big(abono_capital);
   console.log(`💵 Abono Total: ${abonoCapitalBig.toString()}`);

@@ -1708,11 +1708,21 @@
     monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
     tipo: tipoAbonoEnum("tipo").notNull(),
     liquidado: boolean("liquidado").notNull().default(false),
+    // Liquidación en la que se cerró este abono. Se setea junto con
+    // `liquidado`. Hace explícito lo que antes había que deducir dando la
+    // vuelta por `pagos_credito_inversionistas_espejo.abono_capital_id`, que al
+    // ser una sola casilla solo apunta a un abono: con varias filas por par
+    // (una por pago) los reportes que iban por ahí subcontaban.
+    liquidacion_id: integer("liquidacion_id").references(
+      () => liquidaciones.liquidacion_id,
+      { onDelete: "set null" }
+    ),
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),
   }, (t) => ({
     ixPago: index("ix_abonos_capital_pago_id").on(t.pago_id),
     ixCredInv: index("ix_abonos_capital_cred_inv").on(t.credito_id, t.inversionista_id),
+    ixLiquidacion: index("ix_abonos_capital_liquidacion_id").on(t.liquidacion_id),
   }));
 
   export const historico_liquidaciones_espejo = customSchema.table(

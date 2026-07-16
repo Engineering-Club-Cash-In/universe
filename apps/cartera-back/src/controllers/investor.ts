@@ -3990,7 +3990,11 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         if (creditoIdsLiquidados.length > 0) {
           const abonosCerrados = await tx
             .update(abonos_capital)
-            .set({ liquidado: true, updated_at: new Date() })
+            .set({
+              liquidado: true,
+              liquidacion_id: liquidacion.liquidacion_id,
+              updated_at: new Date(),
+            })
             .where(
               and(
                 eq(abonos_capital.inversionista_id, inv_id),

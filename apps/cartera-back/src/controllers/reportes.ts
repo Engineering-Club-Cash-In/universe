@@ -853,20 +853,21 @@ export async function getReinversionLiquidaciones({
     (cubeRows.rows[0] as Record<string, unknown>)?.interes_cube ?? 0
   );
 
-  // Pagos extras recibidos (abonos a capital / cancelaciones) que fluyen desde
-  // las liquidaciones del mes: liquidación → pago espejo → abono.
-  // Cada abono se cuenta una sola vez (DISTINCT) aunque tenga varios pagos espejo.
+  // Pagos extras recibidos (abonos a capital / cancelaciones) de las
+  // liquidaciones del mes, leídos directo del abono.
+  //
+  // Antes se llegaba al abono por `espejo.abono_capital_id`, pero esa es una
+  // sola casilla: apunta a UN abono. Mientras hubo una fila por par
+  // (crédito, inversionista) daba igual — ese uno era todo. Ahora que cada pago
+  // inserta su propia fila, ir por el link se comía las hermanas y subcontaba.
+  // `abonos_capital.liquidacion_id` se setea al cerrar el abono, así que no hace
+  // falta el rodeo ni el DISTINCT.
   const extrasRows = await db.execute(sql`
     SELECT a.tipo, COALESCE(SUM(a.monto::numeric), 0) AS total
     FROM cartera.abonos_capital a
-    WHERE a.abono_id IN (
-      SELECT DISTINCT e.abono_capital_id
-      FROM cartera.pagos_credito_inversionistas_espejo e
-      JOIN cartera.liquidaciones l ON l.liquidacion_id = e.liquidacion_id
-      WHERE e.abono_capital_id IS NOT NULL
-        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
-        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    )
+    JOIN cartera.liquidaciones l ON l.liquidacion_id = a.liquidacion_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     GROUP BY a.tipo
   `);
 

@@ -3044,9 +3044,6 @@ function RouteComponent() {
 
 										{/* Payment Capacity */}
 										<div className="space-y-4">
-											<h4 className="font-medium text-base">
-												Capacidad de Pago
-											</h4>
 											{creditAnalysisQuery.data.suggestedPaymentDay !=
 												null && (
 												<div className="flex items-center justify-between rounded-lg border px-3 py-2">
@@ -3059,6 +3056,9 @@ function RouteComponent() {
 													</span>
 												</div>
 											)}
+											<h4 className="font-medium text-base">
+												Capacidad de Pago
+											</h4>
 											<div className="grid grid-cols-2 gap-4">
 												<div className="rounded-lg border p-4 text-center">
 													<Label className="text-muted-foreground text-xs">

@@ -1045,14 +1045,19 @@ export default function InvestmentCalculator() {
       capital = interest / monthlyInterestRate;
     } else if (inverseMode === "tradicionalAnual") {
       // Tradicional con frecuencia anual: el "monto deseado" es el INTERÉS que
-      // el inversionista quiere ganar por AÑO. Se lleva a interés mensual
-      // (÷12) y de ahí al capital, con la misma estructura que el modo mensual
-      // (grossup por participación y por IVA). El plazo no altera el capital
-      // (interés sobre el aporte), igual que en el modo mensual interest-only.
-      const monthlyDesired = D / 12;
-      const interestPlusVat = monthlyDesired / investorShare;
-      const interest = interestPlusVat / (1 + vatRate);
-      capital = interest / monthlyInterestRate;
+      // el inversionista quiere ganar en el PRIMER AÑO.
+      //
+      // Se resuelve invirtiendo el MISMO schedule que se despliega (amortización
+      // francesa), no con interés simple: en Tradicional el saldo baja cada mes,
+      // así que un cálculo interest-only subcotiza el capital (la Proyección
+      // Anual mostraría menos de lo pedido en el año 1).
+      // El schedule es lineal en el capital → basta escalar desde una referencia,
+      // sin iterar. En años siguientes el interés baja (propio del modelo).
+      const REF = 10000;
+      const refYear1 = generateAmortizationSchedule(REF)
+        .slice(0, 12)
+        .reduce((sum, row) => sum + row.interestVatPayment, 0);
+      capital = refYear1 > 0 ? (D * REF) / refYear1 : 0;
     } else {
       // lumpSum
       if (lumpSumType === "compound") {

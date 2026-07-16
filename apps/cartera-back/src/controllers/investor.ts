@@ -3974,19 +3974,32 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         // de liquidación creado. También se cierran los abonos a capital asociados
         // y se marca cada cuota como pagada al inversionista para que no vuelva a
         // procesarse en futuras ejecuciones.
-        const abonoIdsALiquidar = [
+        // Se cierran TODOS los abonos abiertos de los pares (crédito, inversionista)
+        // que entraron en esta liquidación, no solo el que apunta `abono_capital_id`.
+        // Motivo: calcularYRegistrarPagosEspejo suma al espejo TODAS las filas
+        // abiertas del par (payments.ts) pero solo linkea la primera. Ahora que
+        // cada pago inserta su propia fila, cerrar solo la linkeada dejaría a las
+        // hermanas abiertas y la próxima liquidación se las volvería a pagar.
+        const creditoIdsLiquidados = [
           ...new Set(
             pagosNoLiquidados
-              .map((p) => p.abono_capital_id)
+              .map((p) => p.credito_id)
               .filter((id): id is number => id != null)
           ),
         ];
-        if (abonoIdsALiquidar.length > 0) {
-          await tx
+        if (creditoIdsLiquidados.length > 0) {
+          const abonosCerrados = await tx
             .update(abonos_capital)
             .set({ liquidado: true, updated_at: new Date() })
-            .where(inArray(abonos_capital.abono_id, abonoIdsALiquidar));
-          console.log(`  ✅ ${abonoIdsALiquidar.length} abono(s) a capital marcados como liquidados`);
+            .where(
+              and(
+                eq(abonos_capital.inversionista_id, inv_id),
+                inArray(abonos_capital.credito_id, creditoIdsLiquidados),
+                eq(abonos_capital.liquidado, false)
+              )
+            )
+            .returning({ abono_id: abonos_capital.abono_id });
+          console.log(`  ✅ ${abonosCerrados.length} abono(s) a capital marcados como liquidados`);
         }
 
         // Marcar cuotas como liquidado_inversionistas

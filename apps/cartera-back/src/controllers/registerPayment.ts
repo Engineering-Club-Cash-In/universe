@@ -2790,9 +2790,10 @@ export async function aplicarAbonoCapitalInversionistas(
 ) {
   console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
 
-  // Distribuir abono a capital en tabla espejo
+  // Distribuir abono a capital en tabla espejo. El pago_id deja cada fila
+  // amarrada a este pago, para poder revertirla si el pago se reversa.
   try {
-    await distribuirAbonoCapitalEspejo(credito_id, abono_capital);
+    await distribuirAbonoCapitalEspejo(credito_id, abono_capital, "CAPITAL", pago_id);
     console.log("✅ Abono distribuido en tabla abonos_capital (espejo)");
   } catch (err) {
     console.error("⚠️ Error al distribuir abono en espejo:", err);

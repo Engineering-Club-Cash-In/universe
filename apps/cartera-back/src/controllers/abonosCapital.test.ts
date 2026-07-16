@@ -14,7 +14,9 @@ mock.module("../utils/comprasAjuste", () => ({
     Promise.resolve(new Big(pendientesPorInv[invId] ?? 0)),
 }));
 
-const { registrarCancelacionEspejo } = await import("./abonosCapital");
+const { registrarCancelacionEspejo, revertirAbonoCapitalEspejo } = await import(
+  "./abonosCapital"
+);
 
 // Mock del handle de transacción (tx) de drizzle. Simula:
 //   tx.select().from().innerJoin().where()  -> filas del espejo
@@ -133,5 +135,82 @@ describe("registrarCancelacionEspejo", () => {
     await registrarCancelacionEspejo(tx, 1);
 
     expect(inserted[0].monto).toBe("1000.5");
+  });
+});
+
+// Mock del executor para revertirAbonoCapitalEspejo. Simula:
+//   ex.select().from().where()   -> las filas de abonos_capital de ese pago
+//   ex.delete().where()          -> borrado (contado en state.deleteCalls)
+function makeExecutor(filas: any[]) {
+  const state = { deleteCalls: 0 };
+  const ex: any = {
+    select: () => ({ from: () => ({ where: () => Promise.resolve(filas) }) }),
+    delete: () => ({
+      where: () => {
+        state.deleteCalls++;
+        return Promise.resolve([]);
+      },
+    }),
+  };
+  return { ex, state };
+}
+
+describe("revertirAbonoCapitalEspejo", () => {
+  it("borra las filas que generó ese pago", async () => {
+    const { ex, state } = makeExecutor([
+      { abono_id: 1, inversionista_id: 10, monto: "600", tipo: "CAPITAL", liquidado: false },
+      { abono_id: 2, inversionista_id: 20, monto: "400", tipo: "CAPITAL", liquidado: false },
+    ]);
+
+    const res = await revertirAbonoCapitalEspejo(555, ex);
+
+    expect(res.success).toBe(true);
+    expect(state.deleteCalls).toBe(1);
+    expect(res.data!.borrados).toHaveLength(2);
+    expect(res.data!.borrados[0]).toMatchObject({ abono_id: 1, inversionista_id: 10, monto: "600" });
+    expect(res.data!.omitidos).toHaveLength(0);
+  });
+
+  it("no hace nada si el pago no generó ningún abono", async () => {
+    // Caso normal: una cuota corriente nunca creó filas en abonos_capital.
+    const { ex, state } = makeExecutor([]);
+
+    const res = await revertirAbonoCapitalEspejo(555, ex);
+
+    expect(res.success).toBe(true);
+    expect(state.deleteCalls).toBe(0);
+    expect(res.data!.borrados).toHaveLength(0);
+  });
+
+  it("no borra las filas ya liquidadas: las reporta como omitidas", async () => {
+    // La plata ya le salió al inversionista: borrarla la haría desaparecer.
+    const { ex, state } = makeExecutor([
+      { abono_id: 1, inversionista_id: 10, monto: "600", tipo: "CAPITAL", liquidado: true },
+    ]);
+
+    const res = await revertirAbonoCapitalEspejo(555, ex);
+
+    expect(state.deleteCalls).toBe(0);
+    expect(res.data!.borrados).toHaveLength(0);
+    expect(res.data!.omitidos).toHaveLength(1);
+    expect(res.data!.omitidos[0]).toMatchObject({
+      abono_id: 1,
+      motivo: "YA_LIQUIDADO_LA_PLATA_YA_SALIO",
+    });
+  });
+
+  it("borra las abiertas y conserva las liquidadas cuando vienen mezcladas", async () => {
+    const { ex, state } = makeExecutor([
+      { abono_id: 1, inversionista_id: 10, monto: "600", tipo: "CAPITAL", liquidado: false },
+      { abono_id: 2, inversionista_id: 20, monto: "400", tipo: "CAPITAL", liquidado: true },
+    ]);
+
+    const res = await revertirAbonoCapitalEspejo(555, ex);
+
+    expect(state.deleteCalls).toBe(1);
+    expect(res.data!.borrados).toHaveLength(1);
+    expect(res.data!.borrados[0].abono_id).toBe(1);
+    expect(res.data!.omitidos).toHaveLength(1);
+    expect(res.data!.omitidos[0].abono_id).toBe(2);
   });
 });

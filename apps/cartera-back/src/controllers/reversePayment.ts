@@ -15,6 +15,7 @@ import {
   facturas_electronicas,
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
+import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
@@ -253,6 +254,21 @@ export const reversePayment = async ({ body, set }: any) => {
         pago_id,
       );
       console.log("✅ Inversiones reversadas correctamente");
+
+      // ======================================================================
+      // 8️⃣.5️⃣ REVERSAR EL ABONO A CAPITAL DEL ESPEJO (abonos_capital)
+      // ======================================================================
+      // Borra las filas que ESTE pago generó (van marcadas con su pago_id). Si
+      // el pago no generó ninguna, la función no hace nada: no hace falta
+      // filtrar por estado del pago, el pago_id ya dice la verdad.
+      const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
+
+      if (reversionEspejo?.data?.omitidos?.length) {
+        console.warn(
+          `⚠️ Abono a capital NO revertido del todo en el espejo (revisar a mano):`,
+          reversionEspejo.data.omitidos,
+        );
+      }
 
       // ======================================================================
       // 9️⃣ DEVOLVER ABONOS A LOS "RESTANTES" DEL PAGO
@@ -693,6 +709,7 @@ export const reversePayment = async ({ body, set }: any) => {
         facturasAnuladas,
         facturasConError,
         totalFacturas: facturasDelPago.length,
+        reversionEspejo,
       };
     });
 try {
@@ -747,6 +764,8 @@ try {
           usuario_id: result.user.usuario_id,
           saldo_a_favor: result.nuevoSaldoAFavor.toString(),
         },
+        // Presente solo si el pago era un abono directo a capital.
+        abonoCapitalEspejo: result.reversionEspejo?.data ?? undefined,
         // 🆕 Info de facturas anuladas
         facturas:
           result.totalFacturas > 0

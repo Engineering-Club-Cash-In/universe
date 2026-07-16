@@ -1696,12 +1696,24 @@
     inversionista_id: integer("inversionista_id")
       .notNull()
       .references(() => inversionistas.inversionista_id),
+    // Pago que generó este abono. Una fila por (pago, inversionista): NO se
+    // acumula, así revertir el pago es borrar exactamente sus filas.
+    // Nullable a propósito: las filas previas a esta columna, las CANCELACION
+    // (devolución/reset, que no nacen de un pago) y el alta manual por API no
+    // tienen pago. CASCADE: si el pago se borra (reversePayment borra los
+    // parciales), su abono se va con él en vez de quedar huérfano.
+    pago_id: integer("pago_id").references(() => pagos_credito.pago_id, {
+      onDelete: "cascade",
+    }),
     monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
     tipo: tipoAbonoEnum("tipo").notNull(),
     liquidado: boolean("liquidado").notNull().default(false),
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),
-  });
+  }, (t) => ({
+    ixPago: index("ix_abonos_capital_pago_id").on(t.pago_id),
+    ixCredInv: index("ix_abonos_capital_cred_inv").on(t.credito_id, t.inversionista_id),
+  }));
 
   export const historico_liquidaciones_espejo = customSchema.table(
     "historico_liquidaciones_espejo",

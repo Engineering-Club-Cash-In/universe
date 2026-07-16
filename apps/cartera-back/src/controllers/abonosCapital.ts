@@ -40,14 +40,21 @@ export async function createAbonoCapital(data: {
 }
 
 /**
- * Distribuye un abono a capital entre los inversionistas del espejo.
- * Si ya existe un registro con credito_id + inversionista_id y liquidado = false, suma el monto.
- * Si no existe, inserta uno nuevo.
+ * Distribuye un abono a capital entre los inversionistas del espejo:
+ * INSERTA una fila por inversionista, marcada con el `pago_id` que la originó.
+ *
+ * NO acumula sobre una fila abierta previa (como hacía antes): cada pago tiene
+ * sus propias filas. Eso es lo que hace que revertir un pago sea simplemente
+ * borrar sus filas, sin tocar lo que aportaron los demás pagos.
+ *
+ * `pago_id` es opcional porque resetCredit distribuye una CANCELACION que no
+ * nace de un pago.
  */
 export async function distribuirAbonoCapitalEspejo(
   credito_id: number,
   monto_abono_capital: number | string,
-  tipo: "CANCELACION" | "CAPITAL" = "CAPITAL"
+  tipo: "CANCELACION" | "CAPITAL" = "CAPITAL",
+  pago_id?: number
 ) {
   try {
     const abonoBig = new Big(monto_abono_capital);
@@ -95,58 +102,28 @@ export async function distribuirAbonoCapitalEspejo(
       // Monto que le toca del abono
       const montoAbono = abonoBig.times(porcentajeGeneral).round(6);
 
-      // Buscar si ya existe uno no liquidado
-      const [existente] = await db
-        .select()
-        .from(abonos_capital)
-        .where(
-          and(
-            eq(abonos_capital.credito_id, credito_id),
-            eq(abonos_capital.inversionista_id, inv.inversionista_id),
-            eq(abonos_capital.liquidado, false)
-          )
-        )
-        .limit(1);
-
-      if (existente) {
-        // Sumar al existente
-        const nuevoMonto = new Big(existente.monto).plus(montoAbono).toString();
-        const [actualizado] = await db
-          .update(abonos_capital)
-          .set({ monto: nuevoMonto, updated_at: new Date() })
-          .where(eq(abonos_capital.abono_id, existente.abono_id))
-          .returning();
-
-        resultados.push({
-          inversionista: inv.nombre,
+      // Una fila propia por (pago, inversionista): nunca se suma sobre una
+      // fila previa, así revertir el pago no le toca lo suyo a otros pagos.
+      const [nuevo] = await db
+        .insert(abonos_capital)
+        .values({
+          credito_id,
           inversionista_id: inv.inversionista_id,
-          accion: "SUMADO",
-          monto_agregado: montoAbono.toString(),
-          monto_total: nuevoMonto,
-          porcentaje: porcentajeGeneral.toFixed(4),
-        });
-      } else {
-        // Insertar nuevo
-        const [nuevo] = await db
-          .insert(abonos_capital)
-          .values({
-            credito_id,
-            inversionista_id: inv.inversionista_id,
-            monto: montoAbono.toString(),
-            tipo,
-            liquidado: false,
-          })
-          .returning();
+          pago_id: pago_id ?? null,
+          monto: montoAbono.toString(),
+          tipo,
+          liquidado: false,
+        })
+        .returning();
 
-        resultados.push({
-          inversionista: inv.nombre,
-          inversionista_id: inv.inversionista_id,
-          accion: "INSERTADO",
-          monto_agregado: montoAbono.toString(),
-          monto_total: montoAbono.toString(),
-          porcentaje: porcentajeGeneral.toFixed(4),
-        });
-      }
+      resultados.push({
+        inversionista: inv.nombre,
+        inversionista_id: inv.inversionista_id,
+        abono_id: nuevo.abono_id,
+        pago_id: pago_id ?? null,
+        monto_agregado: montoAbono.toString(),
+        porcentaje: porcentajeGeneral.toFixed(4),
+      });
     }
 
     return {
@@ -164,6 +141,82 @@ export async function distribuirAbonoCapitalEspejo(
     return {
       success: false,
       message: "Error al distribuir el abono a capital",
+      error: error.message,
+      data: null,
+    };
+  }
+}
+
+/**
+ * Revierte el abono a capital de un pago: borra las filas de `abonos_capital`
+ * que ese pago generó (una por inversionista, marcadas con su `pago_id`).
+ *
+ * Se puede borrar sin miedo porque cada fila es exclusiva de un pago: no
+ * acumula aportes de otros pagos, así que nadie más pierde plata.
+ *
+ * Las filas YA LIQUIDADAS no se borran (la plata ya le salió al inversionista):
+ * se devuelven en `omitidos` para tratarlas a mano. Es el caso que decidimos
+ * dejar fuera de este cambio.
+ *
+ * `executor` permite pasar el `tx` de una transacción para que la reversión sea
+ * atómica con el resto del reverso.
+ */
+export async function revertirAbonoCapitalEspejo(
+  pago_id: number,
+  executor: any = db
+) {
+  try {
+    // 1. Las filas que generó este pago
+    const filas = await executor
+      .select()
+      .from(abonos_capital)
+      .where(eq(abonos_capital.pago_id, pago_id));
+
+    if (filas.length === 0) {
+      return {
+        success: true,
+        message: "El pago no generó abonos a capital: nada que revertir",
+        data: { pago_id, borrados: [], omitidos: [] },
+      };
+    }
+
+    // 2. Las liquidadas NO se tocan: esa plata ya salió.
+    const liquidadas = filas.filter((f: any) => f.liquidado);
+    const borrables = filas.filter((f: any) => !f.liquidado);
+
+    if (borrables.length > 0) {
+      await executor.delete(abonos_capital).where(
+        and(
+          eq(abonos_capital.pago_id, pago_id),
+          eq(abonos_capital.liquidado, false)
+        )
+      );
+    }
+
+    return {
+      success: true,
+      message: "Abonos a capital del pago revertidos",
+      data: {
+        pago_id,
+        borrados: borrables.map((f: any) => ({
+          abono_id: f.abono_id,
+          inversionista_id: f.inversionista_id,
+          monto: f.monto,
+          tipo: f.tipo,
+        })),
+        omitidos: liquidadas.map((f: any) => ({
+          abono_id: f.abono_id,
+          inversionista_id: f.inversionista_id,
+          monto: f.monto,
+          motivo: "YA_LIQUIDADO_LA_PLATA_YA_SALIO",
+        })),
+      },
+    };
+  } catch (error: any) {
+    console.error("Error al revertir abono a capital:", error);
+    return {
+      success: false,
+      message: "Error al revertir el abono a capital",
       error: error.message,
       data: null,
     };

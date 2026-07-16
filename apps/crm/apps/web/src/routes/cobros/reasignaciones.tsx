@@ -158,16 +158,24 @@ function ReasignarModal({
 	const elegibles = pool.filter((a) => a.asesor_id !== credito.asesorId);
 	// El pool NO está vacío pero el único elegible es el asesor actual: no hay a
 	// quién reasignar dentro del bucket (mensaje distinto a "pool sin asesores").
+	// isError se distingue de poolVacio: un fetch fallido NO es lo mismo que un
+	// pool realmente vacío (mensaje distinto — review Codex).
 	const soloElAsesorActual =
-		!poolQuery.isLoading && pool.length > 0 && elegibles.length === 0;
-	const poolVacio = !poolQuery.isLoading && pool.length === 0;
+		!poolQuery.isLoading &&
+		!poolQuery.isError &&
+		pool.length > 0 &&
+		elegibles.length === 0;
+	const poolVacio =
+		!poolQuery.isLoading && !poolQuery.isError && pool.length === 0;
 	const placeholderAsesor = poolQuery.isLoading
 		? "Cargando..."
-		: soloElAsesorActual
-			? "No hay otros asesores en este bucket"
-			: poolVacio
-				? "El bucket no tiene asesores en su pool"
-				: "Selecciona un asesor";
+		: poolQuery.isError
+			? "Error al cargar asesores"
+			: soloElAsesorActual
+				? "No hay otros asesores en este bucket"
+				: poolVacio
+					? "El bucket no tiene asesores en su pool"
+					: "Selecciona un asesor";
 	const motivoValido = motivo.trim().length > 0;
 	const puedeGuardar = !!asesorNuevoId && motivoValido && !mutation.isPending;
 
@@ -212,7 +220,13 @@ function ReasignarModal({
 								))}
 							</SelectContent>
 						</Select>
-						{(soloElAsesorActual || poolVacio) && (
+						{poolQuery.isError && (
+							<p className="text-destructive text-xs">
+								No se pudo cargar el pool de asesores de este bucket. Intenta de
+								nuevo.
+							</p>
+						)}
+						{!poolQuery.isError && (soloElAsesorActual || poolVacio) && (
 							<p className="text-muted-foreground text-xs">
 								{soloElAsesorActual
 									? "Este bucket solo tiene un asesor en su pool. Agrega otro asesor al pool del bucket para poder reasignar."
@@ -330,7 +344,7 @@ function HistorialReasignaciones() {
 
 	const rows = query.data?.data ?? [];
 	const resumen = query.data?.resumen;
-	const totalPages = query.data?.pagination.totalPages ?? 1;
+	const totalPages = query.data?.pagination?.totalPages ?? 1;
 
 	const aplicar = () => {
 		setAsesor(asesorInput.trim());

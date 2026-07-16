@@ -34,6 +34,7 @@ import { Route as CrmClientsRouteImport } from './routes/crm/clients'
 import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
+import { Route as CobrosCargaRouteImport } from './routes/cobros/carga'
 import { Route as CobrosBucketsRouteImport } from './routes/cobros/buckets'
 import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
@@ -178,6 +179,11 @@ const CobrosMetasRoute = CobrosMetasRouteImport.update({
   path: '/cobros/metas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosCargaRoute = CobrosCargaRouteImport.update({
+  id: '/cobros/carga',
+  path: '/cobros/carga',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosBucketsRoute = CobrosBucketsRouteImport.update({
   id: '/cobros/buckets',
   path: '/cobros/buckets',
@@ -281,6 +287,7 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
+  '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reportes': typeof CobrosReportesRoute
@@ -325,6 +332,7 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
+  '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reportes': typeof CobrosReportesRoute
@@ -370,6 +378,7 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
+  '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reportes': typeof CobrosReportesRoute
@@ -416,6 +425,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/buckets'
+    | '/cobros/carga'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reportes'
@@ -460,6 +470,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/buckets'
+    | '/cobros/carga'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reportes'
@@ -504,6 +515,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/buckets'
+    | '/cobros/carga'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reportes'
@@ -549,6 +561,7 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   CobrosIdRoute: typeof CobrosIdRoute
   CobrosBucketsRoute: typeof CobrosBucketsRoute
+  CobrosCargaRoute: typeof CobrosCargaRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
   CobrosReportesRoute: typeof CobrosReportesRoute
@@ -760,6 +773,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosMetasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/carga': {
+      id: '/cobros/carga'
+      path: '/cobros/carga'
+      fullPath: '/cobros/carga'
+      preLoaderRoute: typeof CobrosCargaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/buckets': {
       id: '/cobros/buckets'
       path: '/cobros/buckets'
@@ -893,6 +913,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   CobrosIdRoute: CobrosIdRoute,
   CobrosBucketsRoute: CobrosBucketsRoute,
+  CobrosCargaRoute: CobrosCargaRoute,
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
   CobrosReportesRoute: CobrosReportesRoute,

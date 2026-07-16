@@ -11,6 +11,7 @@ import {
 	ChevronDown,
 	Database,
 	FileText,
+	Gauge,
 	Gavel,
 	Landmark,
 	Layers,
@@ -283,6 +284,14 @@ export default function Header() {
 											>
 												<UserCog className="mr-2 h-4 w-4" />
 												Reasignar Cuentas
+											</Link>
+										</DropdownMenuItem>
+									)}
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/carga" className="cursor-pointer">
+												<Gauge className="mr-2 h-4 w-4" />
+												Carga de Cuentas
 											</Link>
 										</DropdownMenuItem>
 									)}
@@ -645,6 +654,12 @@ function MobileNav({
 											>
 												<UserCog />
 												Reasignar Cuentas
+											</Link>
+										)}
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link to="/cobros/carga" className={MOBILE_LINK_CLASS}>
+												<Gauge />
+												Carga de Cuentas
 											</Link>
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (

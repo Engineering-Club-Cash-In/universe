@@ -66,8 +66,7 @@ mock.module("../database/index", () => {
     return { innerJoin, leftJoin, where };
   };
 
-  return {
-    db: {
+  const mockDbInstance: any = {
       select: mock((fields: any) => {
         const isSelectNoFields = !fields || Object.keys(fields).length === 0;
         let isMainQuery = false;
@@ -113,6 +112,11 @@ mock.module("../database/index", () => {
           where: () => Promise.resolve()
         })
       })),
+      // insertPagosCreditoInversionistas mete el insert del espejo y el marcado
+      // de los abonos en una transacción, para que no puedan quedar sueltos.
+      // El mock corre el callback con el mismo `db`: acá no se prueba el
+      // rollback, solo que el flujo siga funcionando.
+      transaction: mock(async (cb: any) => cb(mockDbInstance)),
       query: {
         creditos_inversionistas_espejo: {
           findMany: mock(() => Promise.resolve(
@@ -147,8 +151,9 @@ mock.module("../database/index", () => {
           }))
         }
       }
-    }
   };
+
+  return { db: mockDbInstance };
 });
 
 // Mock @cci/email

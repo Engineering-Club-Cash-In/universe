@@ -42,9 +42,31 @@ export const cuotasRouter = new Elysia()
             message: "[ERROR] solo_al_dia inválido (true|false)",
           };
         }
+        // buckets: CSV 0-5 opcional — filtra por bucket MOTOR (sin INICIAL
+        // cuenta como B0). Lo usa el job premora cuando PREMORA_BUCKETS
+        // incluye más que B0.
+        let buckets: number[] | undefined;
+        if (query.buckets != null && String(query.buckets).trim() !== "") {
+          const bTokens = String(query.buckets)
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+          if (
+            bTokens.length === 0 ||
+            bTokens.some((s: string) => !/^[0-5]$/.test(s))
+          ) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "[ERROR] buckets inválido (CSV de enteros 0-5)",
+            };
+          }
+          buckets = [...new Set(bTokens.map(Number))];
+        }
         const dias = [...new Set(tokens.map(Number))];
         return await getCuotasProximasVencer(dias, {
           soloAlDia: rawSoloAlDia === "true",
+          buckets,
         });
       } catch (err) {
         set.status = 500;
@@ -59,6 +81,7 @@ export const cuotasRouter = new Elysia()
       query: t.Object({
         dias: t.Optional(t.String()),
         solo_al_dia: t.Optional(t.String()),
+        buckets: t.Optional(t.String()),
       }),
     },
   );

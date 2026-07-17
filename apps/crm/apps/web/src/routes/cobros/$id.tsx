@@ -1383,8 +1383,18 @@ function RouteComponent() {
 														}`}
 													>
 														<MessageCircle className="mr-0.5 h-2.5 w-2.5" />
-														{(rec.tipo ?? "").replace("premora_", "D-")}
+														{(rec.tipo ?? "")
+															.replace("premora_", "D-")
+															.replace("_mora", "")}
 													</Badge>
+													{(rec.tipo ?? "").endsWith("_mora") && (
+														<Badge
+															variant="outline"
+															className="border-red-300 text-[10px] text-red-700 dark:text-red-400"
+														>
+															Variante mora
+														</Badge>
+													)}
 													<span className="text-sm">
 														{rec.enviado ? "Enviado" : "Falló"}
 														{rec.telefono ? ` al ${rec.telefono}` : ""}

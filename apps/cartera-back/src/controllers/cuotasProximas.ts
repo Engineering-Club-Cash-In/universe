@@ -26,12 +26,17 @@ const pagoCubriente = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
 
 export async function getCuotasProximasVencer(
   dias: number[],
-  opts: { soloAlDia?: boolean } = {},
+  opts: { soloAlDia?: boolean; buckets?: number[] } = {},
 ) {
   // Default true: premora SOLO recuerda a créditos al día (B0). Con false
   // (la Agenda del día del CRM) entra TODO el funnel — el asesor gestiona
   // también las cuotas próximas de créditos en mora.
   const soloAlDia = opts.soloAlDia !== false;
+  // buckets: filtro por bucket MOTOR (PREMORA_BUCKETS del CRM). Un crédito
+  // sin INICIAL en buckets_historial cuenta como B0 (COALESCE). Orthogonal a
+  // soloAlDia: el job del CRM manda soloAlDia=false + buckets=0,1,... cuando
+  // el funnel de recordatorios está encendido.
+  const buckets = opts.buckets ?? [];
   const hoyGT = sql`(now() AT TIME ZONE 'America/Guatemala')::date`;
   const diasList = sql.join(
     dias.map((d) => sql`${d}`),
@@ -41,6 +46,18 @@ export async function getCuotasProximasVencer(
   const filtroEstado = soloAlDia
     ? sql`c."statusCredit" = 'ACTIVO'`
     : sql`c."statusCredit" IN ('ACTIVO', 'MOROSO', 'INCOBRABLE')`;
+
+  const filtroBuckets =
+    buckets.length > 0
+      ? sql`AND COALESCE(
+      (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+        WHERE h.credito_id = c.credito_id
+        ORDER BY h.fecha DESC, h.historial_id DESC
+        LIMIT 1), 0) IN (${sql.join(
+          buckets.map((b) => sql`${b}`),
+          sql`, `,
+        )})`
+      : sql``;
 
   const res = await db.execute<any>(sql`
     SELECT
@@ -71,6 +88,7 @@ export async function getCuotasProximasVencer(
     INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
     WHERE ${filtroEstado}
+      ${filtroBuckets}
       AND cu.pagado = false
       AND NOT EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))})
       -- Ya hay un pago REGISTRADO para esta cuota aunque CONTA no lo haya

@@ -1767,6 +1767,10 @@ export const cobrosRouter = {
 								"premora_3",
 								"premora_1",
 								"premora_0",
+								"premora_5_mora",
+								"premora_3_mora",
+								"premora_1_mora",
+								"premora_0_mora",
 							]),
 							eq(cobrosSendLogs.status, "sent"),
 							gte(cobrosSendLogs.createdAt, sql`now() - interval '10 days'`),
@@ -1778,7 +1782,9 @@ export const cobrosRouter = {
 				>();
 				for (const envio of enviosRecientes) {
 					const sifco = envio.numeroCreditoSifco ?? "";
-					const tipo = envio.plantillaId ?? "";
+					// Tipo BASE (la variante _mora es la misma campaña D-X): así el
+					// dedupe contra los claims —que son por tipo base— funciona.
+					const tipo = (envio.plantillaId ?? "").replace("_mora", "");
 					const porTipo = enviosPorSifco.get(sifco) ?? new Map();
 					if (!porTipo.has(tipo)) {
 						porTipo.set(tipo, {
@@ -1868,6 +1874,10 @@ export const cobrosRouter = {
 								"premora_3",
 								"premora_1",
 								"premora_0",
+								"premora_5_mora",
+								"premora_3_mora",
+								"premora_1_mora",
+								"premora_0_mora",
 							]),
 						),
 					)

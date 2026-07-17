@@ -1133,12 +1133,44 @@ app.post("/info/vehicles-by-sifco", async (c) => {
 	}
 });
 
+// CSRF (review Codex): la cookie de sesión viaja cross-site (sameSite
+// "none"), así que una página maliciosa podría disparar el batch desde el
+// navegador de un admin logueado. Defensa: POST-only + Origin de dominios
+// propios (mismas reglas que el CORS de arriba). Sin Origin (curl/Postman)
+// se permite: un navegador SIEMPRE manda Origin en un POST cross-site.
+function esOrigenConfiable(origin: string | undefined): boolean {
+	if (!origin) return true;
+	if (
+		origin.startsWith("http://localhost:") ||
+		origin.startsWith("http://127.0.0.1:")
+	) {
+		return true;
+	}
+	if (
+		/^https?:\/\/(.*\.)?(devteamatcci\.site|servicioscashin\.com|clubcashin\.com)$/.test(
+			origin,
+		)
+	) {
+		return true;
+	}
+	const allowed = [
+		process.env.CORS_ORIGIN,
+		process.env.FRONT_URL,
+		process.env.TALLER_URL,
+	].filter((o): o is string => Boolean(o && o !== "*"));
+	return allowed.includes(origin);
+}
+
 // Corrida MANUAL de premora (pruebas / re-corridas del día). Solo admin y
-// supervisor de cobros. `force` salta el gate PREMORA_WHATSAPP_ENABLED (por
-// eso el cron puede quedar apagado en dev y este endpoint sí funciona);
-// TEST_MESSAGE y los claims de idempotencia aplican exactamente igual.
-// `?sifco=A,B` limita el batch a esos créditos para no disparar todo el día.
-app.on(["GET", "POST"], "/api/premora/run", async (c) => {
+// supervisor de cobros, POST-only con Origin validado (CSRF, arriba).
+// `force` salta el gate PREMORA_WHATSAPP_ENABLED (por eso el cron puede
+// quedar apagado en dev y este endpoint sí funciona); TEST_MESSAGE y los
+// claims de idempotencia aplican exactamente igual. `?sifco=A,B` limita el
+// batch a esos créditos para no disparar todo el día.
+app.post("/api/premora/run", async (c) => {
+	if (!esOrigenConfiable(c.req.header("origin"))) {
+		return c.json({ error: "Origen no permitido" }, 403);
+	}
 	const context = await createContext({ context: c });
 	if (!context.session?.user?.id) {
 		return c.json({ error: "No autorizado" }, 401);
@@ -1173,14 +1205,31 @@ app.on(["GET", "POST"], "/api/premora/run", async (c) => {
 		}
 	}
 
+	// `?buckets=0,1` (CSV 0-5): override de PREMORA_BUCKETS para esta corrida.
+	const bucketsParam = c.req.query("buckets");
+	let buckets: number[] | undefined;
+	if (bucketsParam) {
+		const tokens = bucketsParam.split(",").map((s) => s.trim());
+		if (tokens.length === 0 || tokens.some((s) => !/^[0-5]$/.test(s))) {
+			return c.json({ error: "buckets inválido: CSV de enteros 0-5" }, 400);
+		}
+		buckets = [...new Set(tokens.map(Number))];
+	}
+
 	const testMode = isTestModeEnabled();
-	const resumen = await sendPremoraReminders({ force: true, sifcos, dias });
+	const resumen = await sendPremoraReminders({
+		force: true,
+		sifcos,
+		dias,
+		buckets,
+	});
 	return c.json({
 		success: true,
 		testMode,
 		telefonoTest: testMode ? getTestPhone() : null,
 		filtroSifco: sifcos ?? null,
 		filtroDias: dias ?? null,
+		filtroBuckets: buckets ?? null,
 		resumen,
 	});
 });

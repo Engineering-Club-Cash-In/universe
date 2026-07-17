@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -337,6 +338,15 @@ function HistorialReasignaciones() {
 	const [page, setPage] = useState(1);
 	const pageSize = 20;
 
+	const asesoresQuery = useQuery(
+		orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
+	);
+	const asesores = asesoresQuery.data?.asesores ?? [];
+	const asesorOptions = asesores.map((a) => ({
+		value: a.nombre,
+		label: a.nombre,
+	}));
+
 	const query = useQuery(
 		orpc.getHistorialReasignaciones.queryOptions({
 			input: {
@@ -413,13 +423,19 @@ function HistorialReasignaciones() {
 					</div>
 					<div className="space-y-2">
 						<Label>Asesor nuevo</Label>
-						<Input
-							placeholder="Buscar asesor..."
-							value={asesorInput}
-							onChange={(e) => setAsesorInput(e.target.value)}
-							onKeyDown={(e) => e.key === "Enter" && aplicar()}
-							className="w-[180px]"
+						<Combobox
+							options={asesorOptions}
+							value={asesorInput || null}
+							onChange={setAsesorInput}
+							placeholder="Todos los asesores"
+							isLoading={asesoresQuery.isLoading}
+							width="180px"
 						/>
+						{asesoresQuery.isError && (
+							<p className="text-destructive text-xs">
+								No se pudo cargar la lista de asesores.
+							</p>
+						)}
 					</div>
 					<div className="space-y-2">
 						<Label>No. SIFCO</Label>
@@ -617,7 +633,9 @@ function RouteComponent() {
 			<Tabs defaultValue="buckets">
 				<TabsList>
 					<TabsTrigger value="buckets">Buckets</TabsTrigger>
-					<TabsTrigger value="historial">Historial de reasignaciones</TabsTrigger>
+					<TabsTrigger value="historial">
+						Historial de reasignaciones
+					</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value="buckets" className="space-y-6">

@@ -32,8 +32,20 @@ export const cuotasRouter = new Elysia()
             message: "[ERROR] dias inválido (CSV de enteros 0-60, ej. 5,3,1,0)",
           };
         }
+        // solo_al_dia: "true" (default, premora) | "false" (Agenda del día:
+        // todo el funnel ACTIVO/MOROSO/INCOBRABLE, sin exigir cero vencidas).
+        const rawSoloAlDia = String(query.solo_al_dia ?? "true");
+        if (rawSoloAlDia !== "true" && rawSoloAlDia !== "false") {
+          set.status = 400;
+          return {
+            success: false,
+            message: "[ERROR] solo_al_dia inválido (true|false)",
+          };
+        }
         const dias = [...new Set(tokens.map(Number))];
-        return await getCuotasProximasVencer(dias);
+        return await getCuotasProximasVencer(dias, {
+          soloAlDia: rawSoloAlDia === "true",
+        });
       } catch (err) {
         set.status = 500;
         return {
@@ -46,6 +58,7 @@ export const cuotasRouter = new Elysia()
     {
       query: t.Object({
         dias: t.Optional(t.String()),
+        solo_al_dia: t.Optional(t.String()),
       }),
     },
   );

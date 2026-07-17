@@ -33,6 +33,12 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
+import {
+	type BucketsCatalogoQueryData,
+	bucketDeEstado,
+	estiloBucket,
+	useBucketsCatalogo,
+} from "@/lib/cobros/buckets-catalogo";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -52,6 +58,8 @@ interface AgendaItem {
 	fechaVencimiento: string;
 	diasParaVencer: number;
 	numeroCreditoSifco: string;
+	statusCredit: string;
+	bucket: number | null;
 	montoCuota: string;
 	cliente: string | null;
 	telefono: string | null;
@@ -74,6 +82,40 @@ interface AsesorOption {
 	activo: boolean;
 	email: string;
 	isActive: boolean;
+}
+
+/** Bucket numérico del motor (0-5) → key de estadoMora del catálogo de UI. */
+const KEY_POR_NUMERO = [
+	"al_dia",
+	"mora_30",
+	"mora_60",
+	"mora_90",
+	"mora_120",
+	"mora_120_plus",
+] as const;
+
+/** Badge de bucket con label/color del catálogo dinámico (igual que /cobros/buckets). */
+function BucketBadge({
+	numero,
+	catalogo,
+}: {
+	numero: number | null;
+	catalogo: BucketsCatalogoQueryData | undefined;
+}) {
+	if (numero === null || numero === undefined) {
+		return <span className="text-muted-foreground text-xs">—</span>;
+	}
+	const ui = bucketDeEstado(KEY_POR_NUMERO[numero], catalogo);
+	return (
+		<Badge
+			variant="outline"
+			className="whitespace-nowrap text-[10px]"
+			style={estiloBucket(ui.colorHex)}
+			title={ui.label}
+		>
+			B{numero}
+		</Badge>
+	);
 }
 
 /** Urgencia visual por días para vencer: hoy = rojo → D-5 = neutro. */
@@ -135,6 +177,7 @@ function AgendaDiaPage() {
 	const { data: session } = authClient.useSession();
 	const userRole = session?.user?.role;
 	const esSupervisor = !!userRole && PERMISSIONS.canAssignCobros(userRole);
+	const bucketsCatalogo = useBucketsCatalogo();
 
 	// "todos" | asesorId como string (Select de shadcn trabaja con strings).
 	const [asesorSel, setAsesorSel] = useState("todos");
@@ -188,6 +231,19 @@ function AgendaDiaPage() {
 
 	const totalHoy = items.filter((i) => i.diasParaVencer === 0).length;
 
+	// Con "todos" el bucket va por FILA (varía); con UN asesor (elegido o
+	// forzado por rol) va GENERAL en el header — sus buckets, sin repetirse.
+	const mostrandoTodos = esSupervisor && asesorSel === "todos";
+	const bucketsDelAsesor = mostrandoTodos
+		? []
+		: [
+				...new Set(
+					items
+						.map((i) => i.bucket)
+						.filter((b): b is number => b !== null && b !== undefined),
+				),
+			].sort((a, b) => a - b);
+
 	const irAlDetalle = (sifco: string) => {
 		navigate({
 			to: "/cobros/$id",
@@ -209,8 +265,8 @@ function AgendaDiaPage() {
 							<div>
 								<CardTitle className="text-xl">Agenda del día</CardTitle>
 								<CardDescription>
-									Cuentas al día con cuota próxima a vencer — de hoy (D-0) a 5
-									días (D-5)
+									Cuentas con cuota próxima a vencer — de hoy (D-0) a 5 días
+									(D-5), de todo el funnel
 									{agenda?.asesorForzado
 										? ` · Agenda de ${agenda.asesorForzado.nombre}`
 										: ""}
@@ -227,6 +283,17 @@ function AgendaDiaPage() {
 								</Badge>
 							)}
 							<Badge variant="secondary">{items.length} cuentas</Badge>
+							{bucketsDelAsesor.length > 0 && (
+								<span className="inline-flex items-center gap-1">
+									{bucketsDelAsesor.map((b) => (
+										<BucketBadge
+											key={b}
+											numero={b}
+											catalogo={bucketsCatalogo.data}
+										/>
+									))}
+								</span>
+							)}
 							{esSupervisor && (
 								<Select value={asesorSel} onValueChange={setAsesorSel}>
 									<SelectTrigger className="h-8 w-52">
@@ -301,6 +368,7 @@ function AgendaDiaPage() {
 									<TableHeader>
 										<TableRow>
 											<TableHead>Cliente</TableHead>
+											{mostrandoTodos && <TableHead>Bucket</TableHead>}
 											<TableHead>Crédito</TableHead>
 											<TableHead className="text-center">Cuota</TableHead>
 											<TableHead className="text-right">Monto</TableHead>
@@ -321,6 +389,14 @@ function AgendaDiaPage() {
 												<TableCell className="font-medium">
 													{item.cliente ?? "—"}
 												</TableCell>
+												{mostrandoTodos && (
+													<TableCell>
+														<BucketBadge
+															numero={item.bucket}
+															catalogo={bucketsCatalogo.data}
+														/>
+													</TableCell>
+												)}
 												<TableCell className="max-w-45 truncate font-mono text-muted-foreground text-xs">
 													{item.numeroCreditoSifco}
 												</TableCell>

@@ -24,12 +24,23 @@ const pagoCubriente = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
     AND pc.validation_status IN ('validated', 'no_required')
     AND COALESCE(pc.monto_aplicado, 0) > 0`;
 
-export async function getCuotasProximasVencer(dias: number[]) {
+export async function getCuotasProximasVencer(
+  dias: number[],
+  opts: { soloAlDia?: boolean } = {},
+) {
+  // Default true: premora SOLO recuerda a créditos al día (B0). Con false
+  // (la Agenda del día del CRM) entra TODO el funnel — el asesor gestiona
+  // también las cuotas próximas de créditos en mora.
+  const soloAlDia = opts.soloAlDia !== false;
   const hoyGT = sql`(now() AT TIME ZONE 'America/Guatemala')::date`;
   const diasList = sql.join(
     dias.map((d) => sql`${d}`),
     sql`, `,
   );
+
+  const filtroEstado = soloAlDia
+    ? sql`c."statusCredit" = 'ACTIVO'`
+    : sql`c."statusCredit" IN ('ACTIVO', 'MOROSO', 'INCOBRABLE')`;
 
   const res = await db.execute<any>(sql`
     SELECT
@@ -39,6 +50,13 @@ export async function getCuotasProximasVencer(dias: number[]) {
       cu.fecha_vencimiento::date::text AS fecha_vencimiento,
       (cu.fecha_vencimiento::date - ${hoyGT})::int AS dias_para_vencer,
       c.numero_credito_sifco,
+      c."statusCredit" AS status_credit,
+      -- Bucket MOTOR (último de buckets_historial, misma fuente que el listado
+      -- por bucket): NULL si el crédito no tiene INICIAL registrado.
+      (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+        WHERE h.credito_id = c.credito_id
+        ORDER BY h.fecha DESC, h.historial_id DESC
+        LIMIT 1) AS bucket,
       ROUND(c.cuota::numeric, 2)::text AS monto_cuota,
       u.nombre AS cliente,
       -- usuarios NO tiene teléfono en cartera (solo asesores/admins/conta/
@@ -52,7 +70,7 @@ export async function getCuotasProximasVencer(dias: number[]) {
     INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = cu.credito_id
     INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
-    WHERE c."statusCredit" = 'ACTIVO'
+    WHERE ${filtroEstado}
       AND cu.pagado = false
       AND NOT EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))})
       -- Ya hay un pago REGISTRADO para esta cuota aunque CONTA no lo haya
@@ -65,14 +83,18 @@ export async function getCuotasProximasVencer(dias: number[]) {
           AND COALESCE(pr.monto_boleta, 0) > 0
       )
       AND (cu.fecha_vencimiento::date - ${hoyGT}) IN (${diasList})
-      -- Crédito AL DÍA: ninguna cuota ya vencida sigue pendiente.
-      AND NOT EXISTS (
+      -- Crédito AL DÍA: ninguna cuota ya vencida sigue pendiente (solo premora).
+      ${
+        soloAlDia
+          ? sql`AND NOT EXISTS (
         SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito v
         WHERE v.credito_id = cu.credito_id
           AND v.fecha_vencimiento::date < ${hoyGT}
           AND v.pagado = false
           AND NOT EXISTS (${pagoCubriente(sql.raw("v.cuota_id"))})
-      )
+      )`
+          : sql``
+      }
     ORDER BY dias_para_vencer ASC, c.numero_credito_sifco ASC
   `);
 

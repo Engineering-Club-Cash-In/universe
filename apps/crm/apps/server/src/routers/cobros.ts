@@ -1640,9 +1640,13 @@ export const cobrosRouter = {
 					context.userRole ?? "",
 				);
 
-				const respuesta = await carteraBackClient.getCuotasProximasVencer([
-					0, 1, 2, 3, 4, 5,
-				]);
+				// Todo el funnel (soloAlDia: false): la agenda es pareja para todos
+				// los asesores — cuentas al día Y en mora con cuota próxima. Los
+				// recordatorios WhatsApp (premora) siguen siendo solo B0.
+				const respuesta = await carteraBackClient.getCuotasProximasVencer(
+					[0, 1, 2, 3, 4, 5],
+					{ soloAlDia: false },
+				);
 				let cuotas = respuesta.data ?? [];
 
 				let asesorForzado: { asesorId: number; nombre: string } | null = null;
@@ -1748,6 +1752,8 @@ export const cobrosRouter = {
 							fechaVencimiento: c.fecha_vencimiento,
 							diasParaVencer: c.dias_para_vencer,
 							numeroCreditoSifco: c.numero_credito_sifco,
+							statusCredit: c.status_credit,
+							bucket: c.bucket,
 							montoCuota: c.monto_cuota,
 							cliente: c.cliente,
 							telefono:

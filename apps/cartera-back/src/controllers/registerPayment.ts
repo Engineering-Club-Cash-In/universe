@@ -26,6 +26,8 @@ import {
   esDestinoSobrescribible,
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
+  CREDIT_PENDING_CANCELLATION_ERROR,
+  getCreditPaymentBlock,
   getRequestedInstallmentFloor,
   getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
@@ -287,21 +289,29 @@ const obtenerInfoCompletaCredito = async (
           eq(moras_credito.activa, true) // ✅ Solo traer mora activa
         )
       )
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          or(
-            eq(creditos.statusCredit, "ACTIVO"),
-            eq(creditos.statusCredit, "MOROSO"),
-            eq(creditos.statusCredit, "EN_CONVENIO") 
-            ,eq(creditos.statusCredit, "INCOBRABLE")// 🚨 También traer créditos en convenio
-          )
-        )
-      )
+      .where(eq(creditos.credito_id, credito_id))
       .limit(1);
 
-    // ❌ Validación: Crédito no encontrado o inactivo
+    // ❌ Validación: Crédito no encontrado
     if (!info || !info.credito) {
+      set.status = 404;
+      throw new Error("Credit not found");
+    }
+
+    const paymentBlock = getCreditPaymentBlock(info.credito.statusCredit);
+    if (paymentBlock) {
+      set.status = 409;
+      throw Object.assign(new Error(paymentBlock.message), {
+        code: paymentBlock.code,
+      });
+    }
+
+    // Mantener intactos los estados que históricamente admiten pagos.
+    if (
+      !["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(
+        info.credito.statusCredit
+      )
+    ) {
       set.status = 404;
       throw new Error("Credit not found");
     }
@@ -432,6 +442,10 @@ const obtenerInfoCompletaCredito = async (
       error instanceof Error &&
       error.message.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)
     ) {
+      throw error;
+    }
+
+    if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
       throw error;
     }
 
@@ -1971,6 +1985,13 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
     }
   } catch (error) {
     console.error("[insertPayment] Error:", error);
+    if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
+      set.status = 409;
+      return {
+        success: false,
+        ...CREDIT_PENDING_CANCELLATION_ERROR,
+      };
+    }
     if (
       error instanceof Error &&
       error.message.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)

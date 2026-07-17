@@ -2,6 +2,17 @@ import Big from "big.js";
 
 type BigInput = number | string | Big;
 
+export const CREDIT_PENDING_CANCELLATION_ERROR = {
+  code: "CREDIT_PENDING_CANCELLATION",
+  message:
+    "No se puede registrar el pago porque el crédito está pendiente de cancelación.",
+} as const;
+
+export const getCreditPaymentBlock = (statusCredit: string | null | undefined) =>
+  statusCredit === "PENDIENTE_CANCELACION"
+    ? CREDIT_PENDING_CANCELLATION_ERROR
+    : null;
+
 export const getCuotaIdForPaymentInsert = (
   cuotaId: number | null | undefined
 ) => cuotaId ?? null;

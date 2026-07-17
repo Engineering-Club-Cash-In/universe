@@ -437,14 +437,24 @@ function HistorialReasignaciones() {
 					</div>
 					<div className="space-y-2">
 						<Label>Asesor nuevo</Label>
-						<Combobox
-							options={asesorOptions}
-							value={asesorInput || null}
-							onChange={setAsesorInput}
-							placeholder="Todos los asesores"
-							isLoading={asesoresQuery.isLoading}
-							width="180px"
-						/>
+						{asesoresQuery.isError ? (
+							<Input
+								placeholder="Buscar asesor..."
+								value={asesorInput}
+								onChange={(e) => setAsesorInput(e.target.value)}
+								onKeyDown={(e) => e.key === "Enter" && aplicar()}
+								className="w-[180px]"
+							/>
+						) : (
+							<Combobox
+								options={asesorOptions}
+								value={asesorInput || null}
+								onChange={setAsesorInput}
+								placeholder="Todos los asesores"
+								isLoading={asesoresQuery.isLoading}
+								width="180px"
+							/>
+						)}
 						{asesoresQuery.isError && (
 							<p className="text-destructive text-xs">
 								No se pudo cargar la lista de asesores.

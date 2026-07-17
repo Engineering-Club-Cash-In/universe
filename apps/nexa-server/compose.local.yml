@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexa-server-postgres
+    environment:
+      POSTGRES_USER: nexa
+      POSTGRES_PASSWORD: nexa
+      POSTGRES_DB: nexa_local
+    ports:
+      - "54329:5432"
+    volumes:
+      - nexa-server-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexa -d nexa_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  nexa-server-postgres-data:

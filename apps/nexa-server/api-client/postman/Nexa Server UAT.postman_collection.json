@@ -1,0 +1,121 @@
+{
+  "info": {
+    "name": "Nexa Server UAT",
+    "description": "Coleccion funcional para demostrar creacion de token maestro y token de cliente en nexa-server UAT.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "internal_api_key",
+      "value": "",
+      "type": "secret"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/health"
+      }
+    },
+    {
+      "name": "01 Crear token maestro",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{internal_api_key}}"
+          }
+        ],
+        "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/tokens/bootstrap",
+        "description": "Crea el token maestro en Nexa UAT si no existe. Si ya existe, devuelve el token activo."
+      }
+    },
+    {
+      "name": "02 Crear credito mock",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{internal_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"creditoId\": 1043001,\n  \"borrowerName\": \"Cliente demo token Nexa\",\n  \"initialBalance\": 1000,\n  \"installmentAmount\": 250\n}"
+        },
+        "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/mock-credits",
+        "description": "Solo para ambiente con MOCK_CARTERA=true. Crea el credito local para poder aplicar pagos de prueba."
+      }
+    },
+    {
+      "name": "03 Crear token de cliente",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{internal_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"creditoId\": 1043001,\n  \"description\": \"Credito demo 1043001\",\n  \"nationalId\": \"1234567890101\"\n}"
+        },
+        "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/token-users",
+        "description": "Crea el token de cliente asociado al credito usando el token maestro activo."
+      }
+    },
+    {
+      "name": "04 Listar tokens de cliente",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{internal_api_key}}"
+          }
+        ],
+        "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/token-users"
+      }
+    },
+    {
+      "name": "05 Listar creditos mock",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{internal_api_key}}"
+          }
+        ],
+        "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/mock-credits"
+      }
+    },
+    {
+      "name": "06 Listar transacciones",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{internal_api_key}}"
+          }
+        ],
+        "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/transactions"
+      }
+    }
+  ]
+}

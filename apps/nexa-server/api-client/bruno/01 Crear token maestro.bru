@@ -1,0 +1,23 @@
+meta {
+  name: 01 Crear token maestro
+  type: http
+  seq: 2
+}
+
+post {
+  url: https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/tokens/bootstrap
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer dev-secret
+}
+
+docs {
+  Crea el token maestro en Nexa UAT si no existe. Si ya existe, devuelve el token activo.
+}
+
+settings {
+  encodeUrl: true
+}

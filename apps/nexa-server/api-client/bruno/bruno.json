@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Nexa Server UAT",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

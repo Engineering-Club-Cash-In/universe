@@ -6,6 +6,7 @@
 import type {
 	AsesorHistorialResponse,
 	BoletaPagoInversionista,
+	CargaPorAsesorBucketResponse,
 	CarteraAsesor,
 	CarteraBackApiResponse,
 	CarteraBackAuthError,
@@ -16,6 +17,7 @@ import type {
 	CarteraBucketHistorialEvento,
 	CarteraBucketsHistorialResponse,
 	CarteraCredito,
+	CarteraCuotasProximasResponse,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraStatsResponse,
@@ -24,7 +26,6 @@ import type {
 	CreateCreditoInput,
 	CreatePagoInput,
 	CreateUsuarioInput,
-	CargaPorAsesorBucketResponse,
 	CreditActionInput,
 	CreditoBucketResponse,
 	CreditoDetailResponse,
@@ -1015,6 +1016,21 @@ export class CarteraBackClient {
 		return response.data ?? [];
 	}
 
+	/**
+	 * Premora (CC2-11): cuotas pendientes de créditos AL DÍA que vencen en
+	 * exactamente N días (día GT). Sin cache: lo consume el job diario de
+	 * recordatorios y debe ver el estado real de pagos del momento.
+	 */
+	async getCuotasProximasVencer(
+		dias: number[] = [5, 3, 1, 0],
+	): Promise<CarteraCuotasProximasResponse> {
+		const queryParams = new URLSearchParams({ dias: dias.join(",") });
+		return this.request<CarteraCuotasProximasResponse>(
+			`/cuotas/proximas-vencer?${queryParams}`,
+			{ method: "GET" },
+		);
+	}
+
 	// Listado de créditos POR BUCKET (motor). Fuente de la tabla de la página
 	// /cobros/buckets del CRM. Cada fila trae creditos.asesor_id, asesores
 	// (nombre), usuarios (cliente), numero_credito_sifco y el objeto bucket.
@@ -1070,9 +1086,7 @@ export class CarteraBackClient {
 			success: boolean;
 			data: CargaPorAsesorBucketResponse;
 		}>(`/buckets/carga?${queryParams}`, { method: "GET" });
-		return (
-			response.data ?? { buckets: [], porAsesor: [], fecha: "" }
-		);
+		return response.data ?? { buckets: [], porAsesor: [], fecha: "" };
 	}
 
 	// Pool de asesores elegibles de un bucket (alimenta el dropdown del modal).

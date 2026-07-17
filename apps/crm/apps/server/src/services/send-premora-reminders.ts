@@ -151,23 +151,35 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 			enviadosPrevios.map((e) => `${e.cuotaId}:${e.tipo}`),
 		);
 
+		// Casos de cobros TAMBIÉN inactivos (review Codex): el sync cierra los
+		// casos curados con activo=false, y premora apunta justo a créditos al
+		// día (los curados). El caso —aunque cerrado— trae el teléfono
+		// corregido por el asesor y es el ancla del historial de contacto y de
+		// la notificación D-0. Con varios por SIFCO gana el activo; a igualdad,
+		// el más reciente.
 		const casos = await db
 			.select({
 				id: casosCobros.id,
 				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 				telefonoPrincipal: casosCobros.telefonoPrincipal,
 				responsable: casosCobros.responsableCobros,
+				activo: casosCobros.activo,
+				updatedAt: casosCobros.updatedAt,
 			})
 			.from(casosCobros)
-			.where(
-				and(
-					inArray(casosCobros.numeroCreditoSifco, sifcos),
-					eq(casosCobros.activo, true),
-				),
-			);
-		const casoPorSifco = new Map(
-			casos.map((c) => [c.numeroCreditoSifco ?? "", c]),
-		);
+			.where(inArray(casosCobros.numeroCreditoSifco, sifcos));
+		const casoPorSifco = new Map<string, (typeof casos)[number]>();
+		for (const caso of casos) {
+			const sifco = caso.numeroCreditoSifco ?? "";
+			const previo = casoPorSifco.get(sifco);
+			const gana =
+				!previo ||
+				(Boolean(caso.activo) && !previo.activo) ||
+				(Boolean(caso.activo) === Boolean(previo.activo) &&
+					(caso.updatedAt?.getTime() ?? 0) >
+						(previo.updatedAt?.getTime() ?? 0));
+			if (gana) casoPorSifco.set(sifco, caso);
+		}
 
 		const oportunidades = await db
 			.select({
@@ -267,21 +279,32 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 			// un crash justo entre reclamar y enviar pierde ESE recordatorio,
 			// pero premora tiene red (al D-5 le siguen D-3/D-1/D-0) y un doble
 			// mensaje al cliente no tiene deshacer.
-			const claim = await db
-				.insert(recordatoriosPremora)
-				.values({
-					cuotaId: cuota.cuota_id,
-					creditoId: cuota.credito_id,
-					numeroCreditoSifco: cuota.numero_credito_sifco,
-					tipo,
-					telefono: telefonoDestino,
-					fechaVencimiento: cuota.fecha_vencimiento,
-				})
-				.onConflictDoNothing()
-				.returning({ id: recordatoriosPremora.id });
-			if (claim.length === 0) {
-				resumen.yaEnviados++;
-				continue;
+			// EN MODO TEST NO se escribe el claim (review Codex): el envío va al
+			// teléfono de prueba y no debe CONSUMIR el recordatorio real — al
+			// apagar el test, el cliente debe recibir el suyo.
+			let claimId: string | null = null;
+			if (testMode) {
+				console.log(
+					`${LOG_PREFIX}[TEST] claim omitido para ${cuota.numero_credito_sifco} ${tipo} (no consume el recordatorio real)`,
+				);
+			} else {
+				const claim = await db
+					.insert(recordatoriosPremora)
+					.values({
+						cuotaId: cuota.cuota_id,
+						creditoId: cuota.credito_id,
+						numeroCreditoSifco: cuota.numero_credito_sifco,
+						tipo,
+						telefono: telefonoDestino,
+						fechaVencimiento: cuota.fecha_vencimiento,
+					})
+					.onConflictDoNothing()
+					.returning({ id: recordatoriosPremora.id });
+				if (claim.length === 0) {
+					resumen.yaEnviados++;
+					continue;
+				}
+				claimId = claim[0].id;
 			}
 
 			const result = await sendWhatsappTemplate({
@@ -323,15 +346,17 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 				console.error(
 					`${LOG_PREFIX} ${cuota.numero_credito_sifco} ${tipo}: falló envío (${result.error})`,
 				);
-				try {
-					await db
-						.delete(recordatoriosPremora)
-						.where(eq(recordatoriosPremora.id, claim[0].id));
-				} catch (err) {
-					console.error(
-						`${LOG_PREFIX} No se pudo liberar el claim ${claim[0].id}:`,
-						err,
-					);
+				if (claimId) {
+					try {
+						await db
+							.delete(recordatoriosPremora)
+							.where(eq(recordatoriosPremora.id, claimId));
+					} catch (err) {
+						console.error(
+							`${LOG_PREFIX} No se pudo liberar el claim ${claimId}:`,
+							err,
+						);
+					}
 				}
 				resumen.fallidos++;
 				continue;

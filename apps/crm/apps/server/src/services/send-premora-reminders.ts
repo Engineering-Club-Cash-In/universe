@@ -476,7 +476,12 @@ export async function sendPremoraReminders(
 }
 
 const TITULO_D0_INDIVIDUAL = "Pago vence hoy (Premora D-0)";
-const TITULO_D0_RESUMEN = "Agenda D-0: pagos que vencen hoy";
+// El título lleva la FECHA GT de vencimiento (review Codex en #1119): el job
+// también corre al boot, y un deploy tarde en el día GT dejaba la corrida de
+// las 8:00 del día siguiente dentro de la ventana de 20h → sin resumen para
+// OTRA fecha. Con la fecha en el título, el dedup es por día de vencimiento.
+const tituloResumenD0 = (fechaGT: string) =>
+	`Agenda D-0: pagos que vencen hoy (${fechaGT})`;
 
 /**
  * Notificaciones D-0. Dedup por título + ventana de 24h (mismo criterio que
@@ -551,12 +556,17 @@ async function notificarAgendaD0(
 			.from(user)
 			.where(eq(user.role, "cobros_supervisor"));
 		if (supervisores.length > 0) {
+			// Todos los D-0 de una corrida comparten fecha (= hoy GT): el título
+			// con esa fecha hace el dedup por día de vencimiento, no por edad.
+			const tituloResumen = tituloResumenD0(
+				fechaLegible(d0[0].fecha_vencimiento),
+			);
 			const yaResumen = await db
 				.select({ id: notifications.id })
 				.from(notifications)
 				.where(
 					and(
-						eq(notifications.titulo, TITULO_D0_RESUMEN),
+						eq(notifications.titulo, tituloResumen),
 						gt(notifications.createdAt, sql`now() - interval '20 hours'`),
 					),
 				)
@@ -569,7 +579,7 @@ async function notificarAgendaD0(
 				const extra = d0.length > 10 ? ` y ${d0.length - 10} más` : "";
 				await db.insert(notifications).values(
 					supervisores.map((s) => ({
-						titulo: TITULO_D0_RESUMEN,
+						titulo: tituloResumen,
 						descripcion: `${d0.length} crédito(s) al día tienen cuota que vence hoy: ${listado}${extra}.`,
 						type: "reminder" as const,
 						status: "pending" as const,

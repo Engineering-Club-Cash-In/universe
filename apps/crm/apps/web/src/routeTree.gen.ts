@@ -36,6 +36,7 @@ import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasig
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
 import { Route as CobrosCargaRouteImport } from './routes/cobros/carga'
 import { Route as CobrosBucketsRouteImport } from './routes/cobros/buckets'
+import { Route as CobrosAgendaRouteImport } from './routes/cobros/agenda'
 import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
@@ -189,6 +190,11 @@ const CobrosBucketsRoute = CobrosBucketsRouteImport.update({
   path: '/cobros/buckets',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosAgendaRoute = CobrosAgendaRouteImport.update({
+  id: '/cobros/agenda',
+  path: '/cobros/agenda',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosIdRoute = CobrosIdRouteImport.update({
   id: '/cobros/$id',
   path: '/cobros/$id',
@@ -286,6 +292,7 @@ export interface FileRoutesByFullPath {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/agenda': typeof CobrosAgendaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/metas': typeof CobrosMetasRoute
@@ -331,6 +338,7 @@ export interface FileRoutesByTo {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/agenda': typeof CobrosAgendaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/metas': typeof CobrosMetasRoute
@@ -377,6 +385,7 @@ export interface FileRoutesById {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/agenda': typeof CobrosAgendaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/metas': typeof CobrosMetasRoute
@@ -424,6 +433,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/agenda'
     | '/cobros/buckets'
     | '/cobros/carga'
     | '/cobros/metas'
@@ -469,6 +479,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/agenda'
     | '/cobros/buckets'
     | '/cobros/carga'
     | '/cobros/metas'
@@ -514,6 +525,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/agenda'
     | '/cobros/buckets'
     | '/cobros/carga'
     | '/cobros/metas'
@@ -560,6 +572,7 @@ export interface RootRouteChildren {
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
   CobrosIdRoute: typeof CobrosIdRoute
+  CobrosAgendaRoute: typeof CobrosAgendaRoute
   CobrosBucketsRoute: typeof CobrosBucketsRoute
   CobrosCargaRoute: typeof CobrosCargaRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
@@ -787,6 +800,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosBucketsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/agenda': {
+      id: '/cobros/agenda'
+      path: '/cobros/agenda'
+      fullPath: '/cobros/agenda'
+      preLoaderRoute: typeof CobrosAgendaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/$id': {
       id: '/cobros/$id'
       path: '/cobros/$id'
@@ -912,6 +932,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
   CobrosIdRoute: CobrosIdRoute,
+  CobrosAgendaRoute: CobrosAgendaRoute,
   CobrosBucketsRoute: CobrosBucketsRoute,
   CobrosCargaRoute: CobrosCargaRoute,
   CobrosMetasRoute: CobrosMetasRoute,

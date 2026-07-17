@@ -62,6 +62,8 @@ export interface PremoraRunOptions {
 	force?: boolean;
 	/** Limita el batch a estos créditos (pruebas quirúrgicas). */
 	sifcos?: string[];
+	/** Corre solo estos días (subconjunto de 5/3/1/0); vacío = todos. */
+	dias?: number[];
 }
 
 export interface PremoraResumen {
@@ -138,9 +140,9 @@ export async function sendPremoraReminders(
 		}
 
 		// 1. Cuotas próximas a vencer (créditos AL DÍA) desde cartera-back.
-		const respuesta = await carteraBackClient.getCuotasProximasVencer([
-			5, 3, 1, 0,
-		]);
+		const diasQuery = opts.dias?.length ? opts.dias : [5, 3, 1, 0];
+		const respuesta =
+			await carteraBackClient.getCuotasProximasVencer(diasQuery);
 		let cuotas = respuesta.data ?? [];
 		if (opts.sifcos?.length) {
 			const filtro = new Set(opts.sifcos);

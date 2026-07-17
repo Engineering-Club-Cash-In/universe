@@ -1156,13 +1156,31 @@ app.on(["GET", "POST"], "/api/premora/run", async (c) => {
 				.filter(Boolean)
 		: undefined;
 
+	// `?dias=3` (CSV) corre solo esos recordatorios; sin el param van los 4.
+	const diasParam = c.req.query("dias");
+	let dias: number[] | undefined;
+	if (diasParam) {
+		dias = diasParam
+			.split(",")
+			.map((s) => Number(s.trim()))
+			.filter((n) => Number.isInteger(n));
+		const validos = [5, 3, 1, 0];
+		if (dias.length === 0 || dias.some((d) => !validos.includes(d))) {
+			return c.json(
+				{ error: "dias inválido: solo se aceptan 5, 3, 1 y 0 (CSV)" },
+				400,
+			);
+		}
+	}
+
 	const testMode = isTestModeEnabled();
-	const resumen = await sendPremoraReminders({ force: true, sifcos });
+	const resumen = await sendPremoraReminders({ force: true, sifcos, dias });
 	return c.json({
 		success: true,
 		testMode,
 		telefonoTest: testMode ? getTestPhone() : null,
 		filtroSifco: sifcos ?? null,
+		filtroDias: dias ?? null,
 		resumen,
 	});
 });

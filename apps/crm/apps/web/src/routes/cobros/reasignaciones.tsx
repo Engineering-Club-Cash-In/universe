@@ -345,12 +345,16 @@ function HistorialReasignaciones() {
 		queryKey: ["cobros", "asesores-todos"],
 		queryFn: async () => {
 			const perPage = 100;
-			const primera = await client.getAsesores({ page: 1, perPage });
-			const todos = [...primera.asesores];
-			const totalPages = primera.pagination.totalPages;
-			for (let page = 2; page <= totalPages; page++) {
-				const siguiente = await client.getAsesores({ page, perPage });
-				todos.push(...siguiente.asesores);
+			const todos: Awaited<
+				ReturnType<typeof client.getAsesores>
+			>["asesores"] = [];
+			let page = 1;
+			let hayMasPaginas = true;
+			while (hayMasPaginas) {
+				const respuesta = await client.getAsesores({ page, perPage });
+				todos.push(...respuesta.asesores);
+				hayMasPaginas = page < respuesta.pagination.totalPages;
+				page++;
 			}
 			return todos;
 		},

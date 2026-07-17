@@ -1734,12 +1734,59 @@ export const cobrosRouter = {
 					.where(inArray(recordatoriosPremora.cuotaId, cuotaIds));
 				const recPorCuota = new Map<
 					number,
-					{ tipo: string; enviadoAt: Date }[]
+					{ tipo: string; enviadoAt: Date; modoPrueba: boolean }[]
 				>();
 				for (const rec of recordatorios) {
 					const lista = recPorCuota.get(rec.cuotaId) ?? [];
-					lista.push({ tipo: rec.tipo, enviadoAt: rec.enviadoAt });
+					lista.push({
+						tipo: rec.tipo,
+						enviadoAt: rec.enviadoAt,
+						modoPrueba: false,
+					});
 					recPorCuota.set(rec.cuotaId, lista);
+				}
+
+				// + envíos recientes en cobros_send_logs: el modo test NO escribe
+				// claims (a propósito — no consume el recordatorio real), así que
+				// sin esto la agenda diría "—" aunque la prueba ya salió. Los logs
+				// no traen cuota_id: se mapean por SIFCO+tipo con ventana de 10
+				// días (la ventana natural D-5→D-0 de una cuota).
+				const enviosRecientes = await db
+					.select({
+						numeroCreditoSifco: cobrosSendLogs.numeroCreditoSifco,
+						plantillaId: cobrosSendLogs.plantillaId,
+						providerResponse: cobrosSendLogs.providerResponse,
+						createdAt: cobrosSendLogs.createdAt,
+					})
+					.from(cobrosSendLogs)
+					.where(
+						and(
+							inArray(cobrosSendLogs.numeroCreditoSifco, sifcos),
+							inArray(cobrosSendLogs.plantillaId, [
+								"premora_5",
+								"premora_3",
+								"premora_1",
+								"premora_0",
+							]),
+							eq(cobrosSendLogs.status, "sent"),
+							gte(cobrosSendLogs.createdAt, sql`now() - interval '10 days'`),
+						),
+					);
+				const enviosPorSifco = new Map<
+					string,
+					Map<string, { enviadoAt: Date; modoPrueba: boolean }>
+				>();
+				for (const envio of enviosRecientes) {
+					const sifco = envio.numeroCreditoSifco ?? "";
+					const tipo = envio.plantillaId ?? "";
+					const porTipo = enviosPorSifco.get(sifco) ?? new Map();
+					if (!porTipo.has(tipo)) {
+						porTipo.set(tipo, {
+							enviadoAt: envio.createdAt,
+							modoPrueba: envio.providerResponse?.testMode === true,
+						});
+					}
+					enviosPorSifco.set(sifco, porTipo);
 				}
 
 				const items = cuotas
@@ -1763,7 +1810,21 @@ export const cobrosRouter = {
 							casoId: caso?.id ?? null,
 							asesorId: c.asesor_id,
 							asesor: c.asesor,
-							recordatorios: recPorCuota.get(c.cuota_id) ?? [],
+							recordatorios: (() => {
+								// Claims exactos por cuota + envíos por SIFCO (dedupe por
+								// tipo; el claim real gana sobre el log).
+								const lista = [...(recPorCuota.get(c.cuota_id) ?? [])];
+								const tipos = new Set(lista.map((r) => r.tipo));
+								const envios = enviosPorSifco.get(c.numero_credito_sifco);
+								if (envios) {
+									for (const [tipo, envio] of envios) {
+										if (!tipos.has(tipo)) {
+											lista.push({ tipo, ...envio });
+										}
+									}
+								}
+								return lista;
+							})(),
 						};
 					})
 					.sort(

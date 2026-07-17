@@ -49,6 +49,7 @@ export const Route = createFileRoute("/cobros/agenda")({
 interface AgendaRecordatorio {
 	tipo: string;
 	enviadoAt: string | Date;
+	modoPrueba?: boolean;
 }
 
 interface AgendaItem {
@@ -430,8 +431,12 @@ function AgendaDiaPage() {
 																<Badge
 																	key={r.tipo}
 																	variant="outline"
-																	className="gap-0.5 border-transparent bg-emerald-100 text-[10px] text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-																	title={`Recordatorio ${etiquetaRecordatorio(r.tipo)} enviado`}
+																	className={`gap-0.5 border-transparent text-[10px] ${
+																		r.modoPrueba
+																			? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+																			: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+																	}`}
+																	title={`Recordatorio ${etiquetaRecordatorio(r.tipo)} enviado${r.modoPrueba ? " (modo prueba)" : ""}`}
 																>
 																	<MessageCircle className="h-2.5 w-2.5" />
 																	{etiquetaRecordatorio(r.tipo)}

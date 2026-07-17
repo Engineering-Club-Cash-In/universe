@@ -330,25 +330,15 @@ function HistorialReasignaciones() {
 	const [page, setPage] = useState(1);
 	const pageSize = 20;
 
-	// getAsesores limita perPage a 100 en el server; se pagina hasta traer
-	// todos los asesores para que el Select pueda filtrar por cualquiera,
-	// no solo los primeros 100.
+	// El endpoint /advisor de cartera-back ignora page/perPage y siempre
+	// retorna todos los asesores; la metadata de paginación de getAsesores
+	// es inferida (no real), así que no hay que paginar acá — una sola
+	// llamada ya trae la lista completa.
 	const asesoresQuery = useQuery({
 		queryKey: ["cobros", "asesores-todos"],
 		queryFn: async () => {
-			const perPage = 100;
-			const todos: Awaited<
-				ReturnType<typeof client.getAsesores>
-			>["asesores"] = [];
-			let page = 1;
-			let hayMasPaginas = true;
-			while (hayMasPaginas) {
-				const respuesta = await client.getAsesores({ page, perPage });
-				todos.push(...respuesta.asesores);
-				hayMasPaginas = page < respuesta.pagination.totalPages;
-				page++;
-			}
-			return todos;
+			const respuesta = await client.getAsesores({});
+			return respuesta.asesores;
 		},
 	});
 	const asesores = asesoresQuery.data ?? [];

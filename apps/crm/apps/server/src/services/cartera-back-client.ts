@@ -1281,13 +1281,18 @@ export class CarteraBackClient {
 			JSON.stringify(response, null, 2),
 		);
 
-		// Transformar la respuesta al formato PaginatedResponse esperado
+		// El endpoint /advisor no retorna metadata de paginación; se infiere
+		// si hay más páginas según si la página actual vino completa.
+		const page = params.page || 1;
+		const perPage = params.perPage || 20;
+		const hayMasPaginas = response.length === perPage;
+
 		return {
 			data: response,
-			page: params.page || 1,
-			perPage: params.perPage || 20,
-			total: response.length,
-			totalPages: 1,
+			page,
+			perPage,
+			total: (page - 1) * perPage + response.length,
+			totalPages: hayMasPaginas ? page + 1 : page,
 		};
 	}
 

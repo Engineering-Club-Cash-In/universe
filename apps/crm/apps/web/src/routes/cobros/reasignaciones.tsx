@@ -127,16 +127,10 @@ function ReasignarModal({
 			},
 		}),
 	);
-	// Excluir SOLO la siembra inicial de COBROS-02 (motivo fijo del script SQL
-	// 02_asignar_asesores_creditos.sql) — quedó marcada API_MANUAL pero no es
-	// una decisión humana. Filtrar por `usuario` en vez de este motivo exacto
-	// escondía también reasignaciones manuales REALES cuyo supervisor no
-	// resolvió en platform_users (usuario_id null, best-effort) — review Codex.
-	const MOTIVO_SIEMBRA_INICIAL =
-		"Asignación inicial por bucket — carga COBROS-02 (SQL)";
-	const historial = (histQuery.data?.data ?? []).filter(
-		(h) => h.motivo !== MOTIVO_SIEMBRA_INICIAL,
-	);
+	// El backend ya excluye la siembra inicial de COBROS-02 (motivo fijo del
+	// script SQL, no una decisión humana) — sin filtro client-side para no
+	// desalinear paginación/resumen con lo mostrado (review Codex).
+	const historial = histQuery.data?.data ?? [];
 
 	const mutation = useMutation({
 		mutationFn: () =>
@@ -330,12 +324,24 @@ function OrigenBadge({ origen }: { origen: string }) {
 function HistorialReasignaciones() {
 	const [origen, setOrigen] = useState<string>("todos");
 	const [bucket, setBucket] = useState<string>("todos");
-	const [asesorInput, setAsesorInput] = useState("");
+	const [asesor, setAsesor] = useState<string>("todos");
 	const [sifcoInput, setSifcoInput] = useState("");
-	const [asesor, setAsesor] = useState("");
 	const [sifco, setSifco] = useState("");
 	const [page, setPage] = useState(1);
 	const pageSize = 20;
+
+	// El endpoint /advisor de cartera-back ignora page/perPage y siempre
+	// retorna todos los asesores; la metadata de paginación de getAsesores
+	// es inferida (no real), así que no hay que paginar acá — una sola
+	// llamada ya trae la lista completa.
+	const asesoresQuery = useQuery({
+		queryKey: ["cobros", "asesores-todos"],
+		queryFn: async () => {
+			const respuesta = await client.getAsesores({});
+			return respuesta.asesores;
+		},
+	});
+	const asesores = asesoresQuery.data ?? [];
 
 	const query = useQuery(
 		orpc.getHistorialReasignaciones.queryOptions({
@@ -345,7 +351,7 @@ function HistorialReasignaciones() {
 						? undefined
 						: (origen as "PROCESO_AUTO" | "API_MANUAL"),
 				bucket: bucket === "todos" ? undefined : Number(bucket),
-				asesor: asesor || undefined,
+				asesorId: asesor === "todos" ? undefined : Number(asesor),
 				numeroCredito: sifco || undefined,
 				page,
 				pageSize,
@@ -353,12 +359,14 @@ function HistorialReasignaciones() {
 		}),
 	);
 
+	// El backend ya excluye la siembra inicial de COBROS-02 (review Codex:
+	// filtrar client-side después de paginar desalineaba "Página X de Y" y el
+	// resumen, que contaban filas ya excluidas visualmente, con lo mostrado).
 	const rows = query.data?.data ?? [];
 	const resumen = query.data?.resumen;
 	const totalPages = query.data?.pagination?.totalPages ?? 1;
 
 	const aplicar = () => {
-		setAsesor(asesorInput.trim());
 		setSifco(sifcoInput.trim());
 		setPage(1);
 	};
@@ -413,13 +421,31 @@ function HistorialReasignaciones() {
 					</div>
 					<div className="space-y-2">
 						<Label>Asesor nuevo</Label>
-						<Input
-							placeholder="Buscar asesor..."
-							value={asesorInput}
-							onChange={(e) => setAsesorInput(e.target.value)}
-							onKeyDown={(e) => e.key === "Enter" && aplicar()}
-							className="w-[180px]"
-						/>
+						<Select
+							value={asesor}
+							onValueChange={(v) => {
+								setAsesor(v);
+								setPage(1);
+							}}
+						>
+							<SelectTrigger className="w-[180px]">
+								<SelectValue placeholder="Todos los asesores" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="todos">Todos</SelectItem>
+								{asesores.map((a) => (
+									<SelectItem key={a.asesorId} value={String(a.asesorId)}>
+										{a.nombre}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						{asesoresQuery.isError && (
+							<p className="text-destructive text-xs">
+								No se pudo cargar la lista de asesores; el filtro no está
+								disponible.
+							</p>
+						)}
 					</div>
 					<div className="space-y-2">
 						<Label>No. SIFCO</Label>
@@ -617,7 +643,9 @@ function RouteComponent() {
 			<Tabs defaultValue="buckets">
 				<TabsList>
 					<TabsTrigger value="buckets">Buckets</TabsTrigger>
-					<TabsTrigger value="historial">Historial de reasignaciones</TabsTrigger>
+					<TabsTrigger value="historial">
+						Historial de reasignaciones
+					</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value="buckets" className="space-y-6">

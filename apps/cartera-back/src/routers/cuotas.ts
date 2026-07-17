@@ -32,8 +32,42 @@ export const cuotasRouter = new Elysia()
             message: "[ERROR] dias inválido (CSV de enteros 0-60, ej. 5,3,1,0)",
           };
         }
+        // solo_al_dia: "true" (default, premora) | "false" (Agenda del día:
+        // todo el funnel ACTIVO/MOROSO/INCOBRABLE, sin exigir cero vencidas).
+        const rawSoloAlDia = String(query.solo_al_dia ?? "true");
+        if (rawSoloAlDia !== "true" && rawSoloAlDia !== "false") {
+          set.status = 400;
+          return {
+            success: false,
+            message: "[ERROR] solo_al_dia inválido (true|false)",
+          };
+        }
+        // buckets: CSV 0-5 opcional — filtra por bucket MOTOR (sin historial
+        // solo cuenta como B0 si el crédito está al día en tiempo real). Lo
+        // usa el job premora cuando PREMORA_BUCKETS incluye más que B0.
+        let buckets: number[] | undefined;
+        if (query.buckets != null && String(query.buckets).trim() !== "") {
+          const bTokens = String(query.buckets)
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+          if (
+            bTokens.length === 0 ||
+            bTokens.some((s: string) => !/^[0-5]$/.test(s))
+          ) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "[ERROR] buckets inválido (CSV de enteros 0-5)",
+            };
+          }
+          buckets = [...new Set(bTokens.map(Number))];
+        }
         const dias = [...new Set(tokens.map(Number))];
-        return await getCuotasProximasVencer(dias);
+        return await getCuotasProximasVencer(dias, {
+          soloAlDia: rawSoloAlDia === "true",
+          buckets,
+        });
       } catch (err) {
         set.status = 500;
         return {
@@ -46,6 +80,8 @@ export const cuotasRouter = new Elysia()
     {
       query: t.Object({
         dias: t.Optional(t.String()),
+        solo_al_dia: t.Optional(t.String()),
+        buckets: t.Optional(t.String()),
       }),
     },
   );

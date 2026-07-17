@@ -894,6 +894,8 @@ export interface CarteraCuotaProximaVencer {
 	fecha_vencimiento: string; // YYYY-MM-DD
 	dias_para_vencer: number; // 0 | 1 | 3 | 5 (según el filtro pedido)
 	numero_credito_sifco: string;
+	status_credit: string; // ACTIVO | MOROSO | INCOBRABLE (funnel)
+	bucket: number | null; // bucket MOTOR (último de buckets_historial)
 	monto_cuota: string;
 	cliente: string;
 	telefono_cliente_cartera: string | null;

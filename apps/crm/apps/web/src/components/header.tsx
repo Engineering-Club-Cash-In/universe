@@ -7,6 +7,7 @@ import {
 	Briefcase,
 	Building2,
 	Calculator,
+	CalendarClock,
 	Car,
 	ChevronDown,
 	Database,
@@ -258,6 +259,12 @@ export default function Header() {
 										<Link to="/cobros" className="cursor-pointer">
 											<Banknote className="mr-2 h-4 w-4" />
 											Dashboard
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/cobros/agenda" className="cursor-pointer">
+											<CalendarClock className="mr-2 h-4 w-4" />
+											Agenda del día
 										</Link>
 									</DropdownMenuItem>
 									{PERMISSIONS.canAssignCobros(userRole) && (
@@ -634,6 +641,10 @@ function MobileNav({
 										<Link to="/cobros" className={MOBILE_LINK_CLASS}>
 											<Banknote />
 											Dashboard
+										</Link>
+										<Link to="/cobros/agenda" className={MOBILE_LINK_CLASS}>
+											<CalendarClock />
+											Agenda del día
 										</Link>
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>

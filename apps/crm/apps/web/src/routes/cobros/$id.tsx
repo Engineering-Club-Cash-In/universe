@@ -252,6 +252,17 @@ function RouteComponent() {
 		enabled: !!session && !!id,
 	});
 
+	// Recordatorios Premora enviados al crédito (CC2-11). No depende del caso:
+	// aplica también a créditos al día sin caso de cobros.
+	const recordatoriosPremora = useQuery({
+		...orpc.getRecordatoriosPremora.queryOptions({
+			input: {
+				numeroSifco: casoDetails.data?.numeroCreditoSifco || id || "",
+			},
+		}),
+		enabled: !!session && !!(casoDetails.data?.numeroCreditoSifco || id),
+	});
+
 	// Obtener información de recuperación si es caso incobrable
 	const recuperacionInfo = useQuery({
 		...orpc.getRecuperacionVehiculo.queryOptions({
@@ -1328,6 +1339,92 @@ function RouteComponent() {
 					{matchingOpportunity?.lead?.id && (
 						<ReferenciasView leadId={matchingOpportunity.lead.id} />
 					)}
+
+					{/* Recordatorios Premora enviados (CC2-11) */}
+					<Card>
+						<CardHeader>
+							<CardTitle className="flex items-center gap-2">
+								<CalendarClock className="h-5 w-5" />
+								Recordatorios de Pago
+							</CardTitle>
+							<CardDescription>
+								Recordatorios automáticos Premora (D-5 / D-3 / D-1 / D-0)
+								enviados por WhatsApp
+							</CardDescription>
+						</CardHeader>
+						<CardContent>
+							{(recordatoriosPremora.data?.recordatorios ?? []).length === 0 ? (
+								<div className="py-6 text-center text-muted-foreground text-sm">
+									Sin recordatorios enviados a este crédito
+								</div>
+							) : (
+								<div className="space-y-2">
+									{(recordatoriosPremora.data?.recordatorios ?? []).map(
+										(rec: {
+											id: string;
+											tipo: string | null;
+											telefono: string | null;
+											enviado: boolean;
+											error: string | null;
+											modoPrueba: boolean;
+											fecha: string | Date;
+										}) => (
+											<div
+												key={rec.id}
+												className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2.5"
+											>
+												<div className="flex items-center gap-2">
+													<Badge
+														variant="outline"
+														className={`border-transparent text-[10px] ${
+															rec.enviado
+																? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+																: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
+														}`}
+													>
+														<MessageCircle className="mr-0.5 h-2.5 w-2.5" />
+														{(rec.tipo ?? "")
+															.replace("premora_", "D-")
+															.replace("_mora", "")}
+													</Badge>
+													{(rec.tipo ?? "").endsWith("_mora") && (
+														<Badge
+															variant="outline"
+															className="border-red-300 text-[10px] text-red-700 dark:text-red-400"
+														>
+															Variante mora
+														</Badge>
+													)}
+													<span className="text-sm">
+														{rec.enviado ? "Enviado" : "Falló"}
+														{rec.telefono ? ` al ${rec.telefono}` : ""}
+													</span>
+													{rec.modoPrueba && (
+														<Badge
+															variant="outline"
+															className="border-amber-300 text-[10px] text-amber-700 dark:text-amber-400"
+														>
+															Prueba
+														</Badge>
+													)}
+												</div>
+												<span className="text-muted-foreground text-xs">
+													{new Date(rec.fecha).toLocaleString("es-GT", {
+														timeZone: "America/Guatemala",
+														day: "2-digit",
+														month: "2-digit",
+														year: "numeric",
+														hour: "2-digit",
+														minute: "2-digit",
+													})}
+												</span>
+											</div>
+										),
+									)}
+								</div>
+							)}
+						</CardContent>
+					</Card>
 
 					{/* Historial de Contactos */}
 					<Card>

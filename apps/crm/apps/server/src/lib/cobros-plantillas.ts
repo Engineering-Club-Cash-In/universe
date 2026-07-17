@@ -227,6 +227,74 @@ ${COBROS_NO_REPLY_WARNING}
 
 Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 	},
+	// ── Variantes premora para créditos EN MORA (B1-B4, PREMORA_BUCKETS) ──
+	// Mismo esquema de 5 bloques (mensaje4parametros). El tono cambia: se
+	// recuerda la cuota próxima Y el saldo vencido. COPY BORRADOR — afinar
+	// con el equipo de cobros antes de encender el funnel.
+	{
+		id: "premora_5_mora",
+		nombre: "Premora (en mora) — 5 días antes",
+		etapa: "pre_mora",
+		asunto: "Recordatorio: su cuota vence en 5 días",
+		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 5 días). Además, su crédito presenta saldo vencido: comuníquese con su asesor para regularizar su cuenta y evitar cargos adicionales.
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REGULARIZÓ SU CUENTA POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "premora_3_mora",
+		nombre: "Premora (en mora) — 3 días antes",
+		etapa: "pre_mora",
+		asunto: "Recordatorio: su cuota vence en 3 días",
+		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 3 días). Además, su crédito presenta saldo vencido: comuníquese con su asesor para regularizar su cuenta y evitar cargos adicionales.
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REGULARIZÓ SU CUENTA POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "premora_1_mora",
+		nombre: "Premora (en mora) — 1 día antes",
+		etapa: "pre_mora",
+		asunto: "Recordatorio: su cuota vence mañana",
+		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence MAÑANA {fechaPago}. Además, su crédito presenta saldo vencido: comuníquese con su asesor para regularizar su cuenta y evitar cargos adicionales.
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REGULARIZÓ SU CUENTA POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "premora_0_mora",
+		nombre: "Premora (en mora) — día de pago (D-0)",
+		etapa: "pre_mora",
+		asunto: "Hoy es su día de pago",
+		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
+		cuerpo: `Estimado(a) {clienteNombre}, buen día. Le saludamos de Clubcashin.com para recordarle que HOY {fechaPago} vence la cuota de su crédito por Q{cuotaMensual}. Además, su crédito presenta saldo vencido: comuníquese con su asesor para regularizar su cuenta y evitar cargos adicionales.
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REGULARIZÓ SU CUENTA POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
 	{
 		id: "mora_30",
 		nombre: "Mora 30 días",

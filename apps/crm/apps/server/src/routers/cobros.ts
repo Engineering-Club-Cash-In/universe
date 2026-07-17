@@ -39,6 +39,7 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { quotations } from "../db/schema/quotations";
+import { recordatoriosPremora } from "../db/schema/recordatorios-premora";
 import { vehicles } from "../db/schema/vehicles";
 import {
 	deriveHasCapitalData,
@@ -71,6 +72,7 @@ import {
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
+import { primerTelefono } from "../lib/phone-utils";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	sendWhatsappTemplate,
@@ -1618,6 +1620,286 @@ export const cobrosRouter = {
 				console.error("[getBucketsHistorialCredito] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message: "No se pudo obtener el historial del crédito",
+				});
+			}
+		}),
+
+	// CC2-11: Agenda del día — cuotas que vencen HOY (D-0) hasta D-5 de créditos
+	// al día, agrupadas por urgencia. El rol cobros SOLO ve su agenda: se fuerza
+	// server-side matcheando su email de login contra los asesores de cartera
+	// (mismo puente por correo que el resto del módulo — la info del cliente
+	// vive en el CRM, la del crédito en cartera). Admin/supervisor eligen
+	// asesor con `asesorId` o ven todos.
+	getAgendaDia: cobrosProcedure
+		.input(
+			z.object({ asesorId: z.number().int().positive().optional() }).optional(),
+		)
+		.handler(async ({ input, context }) => {
+			try {
+				const puedeVerTodos = PERMISSIONS.canAssignCobros(
+					context.userRole ?? "",
+				);
+
+				// Todo el funnel (soloAlDia: false): la agenda es pareja para todos
+				// los asesores — cuentas al día Y en mora con cuota próxima. Los
+				// recordatorios WhatsApp (premora) siguen siendo solo B0.
+				const respuesta = await carteraBackClient.getCuotasProximasVencer(
+					[0, 1, 2, 3, 4, 5],
+					{ soloAlDia: false },
+				);
+				let cuotas = respuesta.data ?? [];
+
+				let asesorForzado: { asesorId: number; nombre: string } | null = null;
+				if (!puedeVerTodos) {
+					const email = context.session?.user?.email?.trim().toLowerCase();
+					const advisors = await carteraBackClient.getAdvisors({
+						page: 1,
+						perPage: 500,
+					});
+					const propio = (advisors.data ?? []).find(
+						(a) => a.email?.trim().toLowerCase() === email,
+					);
+					if (!propio) {
+						// Usuario cobros sin asesor de cartera vinculado por correo:
+						// agenda vacía con aviso (nunca la de otros).
+						return {
+							success: true,
+							sinAsesor: true,
+							asesorForzado: null,
+							items: [],
+						};
+					}
+					asesorForzado = {
+						asesorId: propio.asesor_id,
+						nombre: propio.nombre,
+					};
+					cuotas = cuotas.filter((c) => c.asesor_id === propio.asesor_id);
+				} else if (input?.asesorId) {
+					cuotas = cuotas.filter((c) => c.asesor_id === input.asesorId);
+				}
+
+				if (cuotas.length === 0) {
+					return { success: true, sinAsesor: false, asesorForzado, items: [] };
+				}
+
+				const sifcos = [...new Set(cuotas.map((c) => c.numero_credito_sifco))];
+				const cuotaIds = [...new Set(cuotas.map((c) => c.cuota_id))];
+
+				// Teléfono del cliente: caso de cobros → lead (cartera no tiene
+				// teléfonos de clientes). Casos también inactivos: con varios por
+				// SIFCO gana el activo y a igualdad el más reciente.
+				const casos = await db
+					.select({
+						id: casosCobros.id,
+						numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+						telefonoPrincipal: casosCobros.telefonoPrincipal,
+						activo: casosCobros.activo,
+						updatedAt: casosCobros.updatedAt,
+					})
+					.from(casosCobros)
+					.where(inArray(casosCobros.numeroCreditoSifco, sifcos));
+				const casoPorSifco = new Map<string, (typeof casos)[number]>();
+				for (const caso of casos) {
+					const sifco = caso.numeroCreditoSifco ?? "";
+					const previo = casoPorSifco.get(sifco);
+					const gana =
+						!previo ||
+						(Boolean(caso.activo) && !previo.activo) ||
+						(Boolean(caso.activo) === Boolean(previo.activo) &&
+							(caso.updatedAt?.getTime() ?? 0) >
+								(previo.updatedAt?.getTime() ?? 0));
+					if (gana) casoPorSifco.set(sifco, caso);
+				}
+
+				const oportunidades = await db
+					.select({
+						numeroSifco: opportunities.numeroSifco,
+						leadPhone: leads.phone,
+					})
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(inArray(opportunities.numeroSifco, sifcos));
+				const leadPhonePorSifco = new Map(
+					oportunidades.map((o) => [o.numeroSifco ?? "", o.leadPhone]),
+				);
+
+				// Recordatorios premora ya enviados por cuota (badges en la agenda).
+				const recordatorios = await db
+					.select({
+						cuotaId: recordatoriosPremora.cuotaId,
+						tipo: recordatoriosPremora.tipo,
+						enviadoAt: recordatoriosPremora.enviadoAt,
+					})
+					.from(recordatoriosPremora)
+					.where(inArray(recordatoriosPremora.cuotaId, cuotaIds));
+				const recPorCuota = new Map<
+					number,
+					{ tipo: string; enviadoAt: Date; modoPrueba: boolean }[]
+				>();
+				for (const rec of recordatorios) {
+					const lista = recPorCuota.get(rec.cuotaId) ?? [];
+					lista.push({
+						tipo: rec.tipo,
+						enviadoAt: rec.enviadoAt,
+						modoPrueba: false,
+					});
+					recPorCuota.set(rec.cuotaId, lista);
+				}
+
+				// + envíos recientes en cobros_send_logs: el modo test NO escribe
+				// claims (a propósito — no consume el recordatorio real), así que
+				// sin esto la agenda diría "—" aunque la prueba ya salió. Los logs
+				// no traen cuota_id: se mapean por SIFCO+tipo con ventana de 10
+				// días (la ventana natural D-5→D-0 de una cuota).
+				const enviosRecientes = await db
+					.select({
+						numeroCreditoSifco: cobrosSendLogs.numeroCreditoSifco,
+						plantillaId: cobrosSendLogs.plantillaId,
+						providerResponse: cobrosSendLogs.providerResponse,
+						createdAt: cobrosSendLogs.createdAt,
+					})
+					.from(cobrosSendLogs)
+					.where(
+						and(
+							inArray(cobrosSendLogs.numeroCreditoSifco, sifcos),
+							inArray(cobrosSendLogs.plantillaId, [
+								"premora_5",
+								"premora_3",
+								"premora_1",
+								"premora_0",
+								"premora_5_mora",
+								"premora_3_mora",
+								"premora_1_mora",
+								"premora_0_mora",
+							]),
+							eq(cobrosSendLogs.status, "sent"),
+							gte(cobrosSendLogs.createdAt, sql`now() - interval '10 days'`),
+						),
+					);
+				const enviosPorSifco = new Map<
+					string,
+					Map<string, { enviadoAt: Date; modoPrueba: boolean }>
+				>();
+				for (const envio of enviosRecientes) {
+					const sifco = envio.numeroCreditoSifco ?? "";
+					// Tipo BASE (la variante _mora es la misma campaña D-X): así el
+					// dedupe contra los claims —que son por tipo base— funciona.
+					const tipo = (envio.plantillaId ?? "").replace("_mora", "");
+					const porTipo = enviosPorSifco.get(sifco) ?? new Map();
+					if (!porTipo.has(tipo)) {
+						porTipo.set(tipo, {
+							enviadoAt: envio.createdAt,
+							modoPrueba: envio.providerResponse?.testMode === true,
+						});
+					}
+					enviosPorSifco.set(sifco, porTipo);
+				}
+
+				const items = cuotas
+					.map((c) => {
+						const caso = casoPorSifco.get(c.numero_credito_sifco);
+						return {
+							cuotaId: c.cuota_id,
+							creditoId: c.credito_id,
+							numeroCuota: c.numero_cuota,
+							fechaVencimiento: c.fecha_vencimiento,
+							diasParaVencer: c.dias_para_vencer,
+							numeroCreditoSifco: c.numero_credito_sifco,
+							statusCredit: c.status_credit,
+							bucket: c.bucket,
+							montoCuota: c.monto_cuota,
+							cliente: c.cliente,
+							telefono:
+								primerTelefono(caso?.telefonoPrincipal) ??
+								primerTelefono(leadPhonePorSifco.get(c.numero_credito_sifco)) ??
+								null,
+							casoId: caso?.id ?? null,
+							asesorId: c.asesor_id,
+							asesor: c.asesor,
+							recordatorios: (() => {
+								// Claims exactos por cuota + envíos por SIFCO (dedupe por
+								// tipo; el claim real gana sobre el log).
+								const lista = [...(recPorCuota.get(c.cuota_id) ?? [])];
+								const tipos = new Set(lista.map((r) => r.tipo));
+								const envios = enviosPorSifco.get(c.numero_credito_sifco);
+								if (envios) {
+									for (const [tipo, envio] of envios) {
+										if (!tipos.has(tipo)) {
+											lista.push({ tipo, ...envio });
+										}
+									}
+								}
+								return lista;
+							})(),
+						};
+					})
+					.sort(
+						(a, b) =>
+							a.diasParaVencer - b.diasParaVencer ||
+							(a.cliente ?? "").localeCompare(b.cliente ?? ""),
+					);
+
+				return { success: true, sinAsesor: false, asesorForzado, items };
+			} catch (error) {
+				console.error("[getAgendaDia] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "No se pudo obtener la agenda del día",
+				});
+			}
+		}),
+
+	// CC2-11: recordatorios premora enviados a un crédito (card del detalle).
+	// Fuente = cobros_send_logs (incluye intentos fallidos y envíos en modo
+	// prueba, marcados) — la traza completa, no solo los claims.
+	getRecordatoriosPremora: cobrosProcedure
+		.input(z.object({ numeroSifco: z.string().min(1).max(100) }))
+		.handler(async ({ input }) => {
+			try {
+				const envios = await db
+					.select({
+						id: cobrosSendLogs.id,
+						plantillaId: cobrosSendLogs.plantillaId,
+						telefono: cobrosSendLogs.telefono,
+						status: cobrosSendLogs.status,
+						errorMessage: cobrosSendLogs.errorMessage,
+						providerResponse: cobrosSendLogs.providerResponse,
+						createdAt: cobrosSendLogs.createdAt,
+					})
+					.from(cobrosSendLogs)
+					.where(
+						and(
+							eq(cobrosSendLogs.numeroCreditoSifco, input.numeroSifco),
+							inArray(cobrosSendLogs.plantillaId, [
+								"premora_5",
+								"premora_3",
+								"premora_1",
+								"premora_0",
+								"premora_5_mora",
+								"premora_3_mora",
+								"premora_1_mora",
+								"premora_0_mora",
+							]),
+						),
+					)
+					.orderBy(desc(cobrosSendLogs.createdAt))
+					.limit(30);
+
+				return {
+					success: true,
+					recordatorios: envios.map((e) => ({
+						id: e.id,
+						tipo: e.plantillaId,
+						telefono: e.telefono,
+						enviado: e.status === "sent",
+						error: e.errorMessage,
+						modoPrueba: e.providerResponse?.testMode === true,
+						fecha: e.createdAt,
+					})),
+				};
+			} catch (error) {
+				console.error("[getRecordatoriosPremora] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "No se pudieron obtener los recordatorios",
 				});
 			}
 		}),

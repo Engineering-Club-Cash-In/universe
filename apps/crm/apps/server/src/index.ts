@@ -39,6 +39,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
+import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
 import { PERMISSIONS } from "./lib/roles";
 import {
 	appRouter,
@@ -1130,6 +1131,128 @@ app.post("/info/vehicles-by-sifco", async (c) => {
 			500,
 		);
 	}
+});
+
+// CSRF (review Codex): la cookie de sesión viaja cross-site (sameSite
+// "none"), así que una página maliciosa podría disparar el batch desde el
+// navegador de un admin logueado. Defensa: POST-only + Origin de dominios
+// propios (mismas reglas que el CORS de arriba). Sin Origin (curl/Postman)
+// se permite: un navegador SIEMPRE manda Origin en un POST cross-site.
+function esOrigenConfiable(origin: string | undefined): boolean {
+	if (!origin) return true;
+	if (
+		origin.startsWith("http://localhost:") ||
+		origin.startsWith("http://127.0.0.1:")
+	) {
+		return true;
+	}
+	if (
+		/^https?:\/\/(.*\.)?(devteamatcci\.site|servicioscashin\.com|clubcashin\.com)$/.test(
+			origin,
+		)
+	) {
+		return true;
+	}
+	const allowed = [
+		process.env.CORS_ORIGIN,
+		process.env.FRONT_URL,
+		process.env.TALLER_URL,
+	].filter((o): o is string => Boolean(o && o !== "*"));
+	return allowed.includes(origin);
+}
+
+// Corrida MANUAL de premora (pruebas / re-corridas del día). Solo admin y
+// supervisor de cobros, POST-only con Origin validado (CSRF, arriba).
+// `force` salta el gate PREMORA_WHATSAPP_ENABLED (por eso el cron puede
+// quedar apagado en dev y este endpoint sí funciona); TEST_MESSAGE y los
+// claims de idempotencia aplican exactamente igual. `?sifco=A,B` limita el
+// batch a esos créditos para no disparar todo el día.
+app.post("/api/premora/run", async (c) => {
+	if (!esOrigenConfiable(c.req.header("origin"))) {
+		return c.json({ error: "Origen no permitido" }, 403);
+	}
+	const context = await createContext({ context: c });
+	if (!context.session?.user?.id) {
+		return c.json({ error: "No autorizado" }, 401);
+	}
+	const userRole = context.session.user.role;
+	if (!userRole || !PERMISSIONS.canAssignCobros(userRole)) {
+		return c.json({ error: "No tienes permiso para correr premora" }, 403);
+	}
+
+	// Filtros de la corrida. REGLA (review Codex): un filtro PRESENTE pero
+	// vacío ("?sifco=" por una variable sin valor, "?dias=,,") es un 400 —
+	// jamás degradar en silencio a un batch más amplio del que se pidió.
+	const sifcoParam = c.req.query("sifco");
+	let sifcos: string[] | undefined;
+	if (sifcoParam != null) {
+		sifcos = sifcoParam
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		if (sifcos.length === 0) {
+			return c.json(
+				{ error: "sifco presente pero vacío: no se corre el batch completo" },
+				400,
+			);
+		}
+	}
+
+	// `?dias=3` (CSV) corre solo esos recordatorios; sin el param van los 4.
+	const diasParam = c.req.query("dias");
+	let dias: number[] | undefined;
+	if (diasParam != null) {
+		const tokens = diasParam
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		dias = tokens.map((s) => Number(s)).filter((n) => Number.isInteger(n));
+		const validos = [5, 3, 1, 0];
+		if (
+			tokens.length === 0 ||
+			dias.length !== tokens.length ||
+			dias.some((d) => !validos.includes(d))
+		) {
+			return c.json(
+				{ error: "dias inválido o vacío: solo se aceptan 5, 3, 1 y 0 (CSV)" },
+				400,
+			);
+		}
+	}
+
+	// `?buckets=0,1` (CSV 0-5): override de PREMORA_BUCKETS para esta corrida.
+	const bucketsParam = c.req.query("buckets");
+	let buckets: number[] | undefined;
+	if (bucketsParam != null) {
+		const tokens = bucketsParam
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		if (tokens.length === 0 || tokens.some((s) => !/^[0-5]$/.test(s))) {
+			return c.json(
+				{ error: "buckets inválido o vacío: CSV de enteros 0-5" },
+				400,
+			);
+		}
+		buckets = [...new Set(tokens.map(Number))];
+	}
+
+	const testMode = isTestModeEnabled();
+	const resumen = await sendPremoraReminders({
+		force: true,
+		sifcos,
+		dias,
+		buckets,
+	});
+	return c.json({
+		success: true,
+		testMode,
+		telefonoTest: testMode ? getTestPhone() : null,
+		filtroSifco: sifcos ?? null,
+		filtroDias: dias ?? null,
+		filtroBuckets: buckets ?? null,
+		resumen,
+	});
 });
 
 // Job periódico de notificaciones de cobros (cada hora)

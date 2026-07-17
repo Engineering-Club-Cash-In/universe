@@ -53,6 +53,41 @@ const TIPO_POR_DIAS: Record<number, TipoPremora> = {
 	0: "premora_0",
 };
 
+export interface PremoraRunOptions {
+	/**
+	 * Corrida MANUAL (endpoint /api/premora/run): ignora el gate de env
+	 * PREMORA_WHATSAPP_ENABLED. Todo lo demás aplica igual (test-mode,
+	 * claims, historial).
+	 */
+	force?: boolean;
+	/** Limita el batch a estos créditos (pruebas quirúrgicas). */
+	sifcos?: string[];
+	/** Corre solo estos días (subconjunto de 5/3/1/0); vacío = todos. */
+	dias?: number[];
+	/** Override de PREMORA_BUCKETS para esta corrida (0-5). */
+	buckets?: number[];
+}
+
+/**
+ * Buckets del funnel a los que se les manda recordatorio, desde
+ * PREMORA_BUCKETS (CSV 0-5, default "0" = solo créditos al día). Encender
+ * B1-B4 = poner PREMORA_BUCKETS=0,1,2,3,4 en el env — sin deploy de código.
+ * B5 (jurídico) queda fuera simplemente no incluyéndolo. Valor inválido →
+ * warn y fallback a [0] (jamás mandar de más por un typo).
+ */
+function bucketsDesdeEnv(): number[] {
+	const raw = process.env.PREMORA_BUCKETS?.trim();
+	if (!raw) return [0];
+	const tokens = raw.split(",").map((s) => s.trim());
+	if (tokens.some((s) => !/^[0-5]$/.test(s))) {
+		console.warn(
+			`${LOG_PREFIX} PREMORA_BUCKETS inválido ("${raw}"); fallback a "0"`,
+		);
+		return [0];
+	}
+	return [...new Set(tokens.map(Number))].sort((a, b) => a - b);
+}
+
 export interface PremoraResumen {
 	skipped?: boolean;
 	reason?: string;
@@ -110,10 +145,12 @@ async function resolverUsuarioSistema(): Promise<string | null> {
 	return admin?.id ?? null;
 }
 
-export async function sendPremoraReminders(): Promise<PremoraResumen> {
+export async function sendPremoraReminders(
+	opts: PremoraRunOptions = {},
+): Promise<PremoraResumen> {
 	try {
 		// 0. Habilitado por env (mismo patrón que la bienvenida).
-		if (process.env.PREMORA_WHATSAPP_ENABLED !== "true") {
+		if (!opts.force && process.env.PREMORA_WHATSAPP_ENABLED !== "true") {
 			console.log(
 				`${LOG_PREFIX} PREMORA_WHATSAPP_ENABLED != "true"; job omitido`,
 			);
@@ -124,11 +161,32 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 			return resumenVacio({ skipped: true, reason: "cartera_back_disabled" });
 		}
 
-		// 1. Cuotas próximas a vencer (créditos AL DÍA) desde cartera-back.
-		const respuesta = await carteraBackClient.getCuotasProximasVencer([
-			5, 3, 1, 0,
-		]);
-		const cuotas = respuesta.data ?? [];
+		// 1. Cuotas próximas a vencer desde cartera-back. Con PREMORA_BUCKETS=0
+		// (default) va la consulta clásica: solo créditos al día en tiempo real.
+		// Con buckets extra va el funnel filtrado por bucket MOTOR — y cada
+		// cuota decide su plantilla (normal vs _mora) según su bucket.
+		const diasQuery = opts.dias?.length ? opts.dias : [5, 3, 1, 0];
+		const bucketsActivos = opts.buckets?.length
+			? [...new Set(opts.buckets)].sort((a, b) => a - b)
+			: bucketsDesdeEnv();
+		const soloB0 = bucketsActivos.length === 1 && bucketsActivos[0] === 0;
+		console.log(
+			`${LOG_PREFIX} Buckets activos: ${bucketsActivos.map((b) => `B${b}`).join(", ")}`,
+		);
+		const respuesta = soloB0
+			? await carteraBackClient.getCuotasProximasVencer(diasQuery)
+			: await carteraBackClient.getCuotasProximasVencer(diasQuery, {
+					soloAlDia: false,
+					buckets: bucketsActivos,
+				});
+		let cuotas = respuesta.data ?? [];
+		if (opts.sifcos?.length) {
+			const filtro = new Set(opts.sifcos);
+			cuotas = cuotas.filter((c) => filtro.has(c.numero_credito_sifco));
+			console.log(
+				`${LOG_PREFIX} Filtro manual por SIFCO (${opts.sifcos.join(", ")}): ${cuotas.length} cuota(s)`,
+			);
+		}
 		console.log(
 			`${LOG_PREFIX} ${cuotas.length} cuota(s) próximas a vencer (D-5/D-3/D-1/D-0)`,
 		);
@@ -227,9 +285,20 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 				continue;
 			}
 
-			const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === tipo);
+			// Plantilla según el bucket MOTOR de la cuota: B0 la normal; B1+ la
+			// variante `_mora` (recuerda también el saldo vencido). El claim
+			// sigue siendo por tipo BASE (premora_X): un cliente jamás recibe la
+			// normal Y la de mora para la misma cuota.
+			// En modo clásico (soloB0) SIEMPRE la normal (review Codex): ese
+			// batch es al-día estricto en TIEMPO REAL, pero el bucket motor puede
+			// venir stale (un crédito recién curado sigue en B2 en
+			// buckets_historial hasta que corra procesarMoras) → mirar el bucket
+			// histórico le mandaría "saldo vencido" a quien ya está al día.
+			const plantillaId =
+				!soloB0 && (cuota.bucket ?? 0) >= 1 ? `${tipo}_mora` : tipo;
+			const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === plantillaId);
 			if (!plantilla) {
-				console.error(`${LOG_PREFIX} Plantilla "${tipo}" no encontrada`);
+				console.error(`${LOG_PREFIX} Plantilla "${plantillaId}" no encontrada`);
 				resumen.fallidos++;
 				continue;
 			}
@@ -316,7 +385,7 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 			// Traza del intento SIEMPRE (éxito o fallo), como todos los envíos.
 			await persistCobrosSendLog({
 				numeroCreditoSifco: cuota.numero_credito_sifco,
-				plantillaId: tipo,
+				plantillaId,
 				telefono: telefonoDestino,
 				mensaje,
 				providerRequest: result.providerRequest ?? null,
@@ -413,7 +482,12 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 }
 
 const TITULO_D0_INDIVIDUAL = "Pago vence hoy (Premora D-0)";
-const TITULO_D0_RESUMEN = "Agenda D-0: pagos que vencen hoy";
+// El título lleva la FECHA GT de vencimiento (review Codex en #1119): el job
+// también corre al boot, y un deploy tarde en el día GT dejaba la corrida de
+// las 8:00 del día siguiente dentro de la ventana de 20h → sin resumen para
+// OTRA fecha. Con la fecha en el título, el dedup es por día de vencimiento.
+const tituloResumenD0 = (fechaGT: string) =>
+	`Agenda D-0: pagos que vencen hoy (${fechaGT})`;
 
 /**
  * Notificaciones D-0. Dedup por título + ventana de 24h (mismo criterio que
@@ -488,12 +562,17 @@ async function notificarAgendaD0(
 			.from(user)
 			.where(eq(user.role, "cobros_supervisor"));
 		if (supervisores.length > 0) {
+			// Todos los D-0 de una corrida comparten fecha (= hoy GT): el título
+			// con esa fecha hace el dedup por día de vencimiento, no por edad.
+			const tituloResumen = tituloResumenD0(
+				fechaLegible(d0[0].fecha_vencimiento),
+			);
 			const yaResumen = await db
 				.select({ id: notifications.id })
 				.from(notifications)
 				.where(
 					and(
-						eq(notifications.titulo, TITULO_D0_RESUMEN),
+						eq(notifications.titulo, tituloResumen),
 						gt(notifications.createdAt, sql`now() - interval '20 hours'`),
 					),
 				)
@@ -506,7 +585,7 @@ async function notificarAgendaD0(
 				const extra = d0.length > 10 ? ` y ${d0.length - 10} más` : "";
 				await db.insert(notifications).values(
 					supervisores.map((s) => ({
-						titulo: TITULO_D0_RESUMEN,
+						titulo: tituloResumen,
 						descripcion: `${d0.length} crédito(s) al día tienen cuota que vence hoy: ${listado}${extra}.`,
 						type: "reminder" as const,
 						status: "pending" as const,

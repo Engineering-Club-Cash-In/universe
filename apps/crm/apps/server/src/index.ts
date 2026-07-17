@@ -1180,26 +1180,41 @@ app.post("/api/premora/run", async (c) => {
 		return c.json({ error: "No tienes permiso para correr premora" }, 403);
 	}
 
+	// Filtros de la corrida. REGLA (review Codex): un filtro PRESENTE pero
+	// vacío ("?sifco=" por una variable sin valor, "?dias=,,") es un 400 —
+	// jamás degradar en silencio a un batch más amplio del que se pidió.
 	const sifcoParam = c.req.query("sifco");
-	const sifcos = sifcoParam
-		? sifcoParam
-				.split(",")
-				.map((s) => s.trim())
-				.filter(Boolean)
-		: undefined;
+	let sifcos: string[] | undefined;
+	if (sifcoParam != null) {
+		sifcos = sifcoParam
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		if (sifcos.length === 0) {
+			return c.json(
+				{ error: "sifco presente pero vacío: no se corre el batch completo" },
+				400,
+			);
+		}
+	}
 
 	// `?dias=3` (CSV) corre solo esos recordatorios; sin el param van los 4.
 	const diasParam = c.req.query("dias");
 	let dias: number[] | undefined;
-	if (diasParam) {
-		dias = diasParam
+	if (diasParam != null) {
+		const tokens = diasParam
 			.split(",")
-			.map((s) => Number(s.trim()))
-			.filter((n) => Number.isInteger(n));
+			.map((s) => s.trim())
+			.filter(Boolean);
+		dias = tokens.map((s) => Number(s)).filter((n) => Number.isInteger(n));
 		const validos = [5, 3, 1, 0];
-		if (dias.length === 0 || dias.some((d) => !validos.includes(d))) {
+		if (
+			tokens.length === 0 ||
+			dias.length !== tokens.length ||
+			dias.some((d) => !validos.includes(d))
+		) {
 			return c.json(
-				{ error: "dias inválido: solo se aceptan 5, 3, 1 y 0 (CSV)" },
+				{ error: "dias inválido o vacío: solo se aceptan 5, 3, 1 y 0 (CSV)" },
 				400,
 			);
 		}
@@ -1208,10 +1223,16 @@ app.post("/api/premora/run", async (c) => {
 	// `?buckets=0,1` (CSV 0-5): override de PREMORA_BUCKETS para esta corrida.
 	const bucketsParam = c.req.query("buckets");
 	let buckets: number[] | undefined;
-	if (bucketsParam) {
-		const tokens = bucketsParam.split(",").map((s) => s.trim());
+	if (bucketsParam != null) {
+		const tokens = bucketsParam
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
 		if (tokens.length === 0 || tokens.some((s) => !/^[0-5]$/.test(s))) {
-			return c.json({ error: "buckets inválido: CSV de enteros 0-5" }, 400);
+			return c.json(
+				{ error: "buckets inválido o vacío: CSV de enteros 0-5" },
+				400,
+			);
 		}
 		buckets = [...new Set(tokens.map(Number))];
 	}

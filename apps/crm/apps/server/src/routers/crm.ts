@@ -4877,7 +4877,7 @@ export const crmRouter = {
 									required: true,
 									completed: false,
 								},
-								...(vehicle.isNew
+								...(vehicle?.isNew
 									? [
 											{
 												name: "Factura del vehículo nuevo",

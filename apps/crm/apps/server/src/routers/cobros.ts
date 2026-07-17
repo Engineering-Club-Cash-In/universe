@@ -4503,7 +4503,7 @@ export const cobrosRouter = {
 				hasta: z.string().optional(),
 				origen: z.enum(["PROCESO_AUTO", "API_MANUAL"]).optional(),
 				bucket: z.number().int().min(0).optional(),
-				asesor: z.string().optional(),
+				asesorId: z.number().int().positive().optional(),
 				numeroCredito: z.string().optional(),
 				creditoId: z.number().int().positive().optional(),
 				page: z.number().int().positive().optional(),
@@ -4516,7 +4516,8 @@ export const cobrosRouter = {
 				hasta: input.hasta,
 				origen: input.origen,
 				bucket: input.bucket !== undefined ? String(input.bucket) : undefined,
-				asesor_nuevo: input.asesor?.trim() || undefined,
+				asesor_nuevo:
+					input.asesorId !== undefined ? String(input.asesorId) : undefined,
 				numero_credito_sifco: input.numeroCredito?.trim() || undefined,
 				credito_id: input.creditoId,
 				page: input.page ?? 1,

@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -128,16 +127,10 @@ function ReasignarModal({
 			},
 		}),
 	);
-	// Excluir SOLO la siembra inicial de COBROS-02 (motivo fijo del script SQL
-	// 02_asignar_asesores_creditos.sql) — quedó marcada API_MANUAL pero no es
-	// una decisión humana. Filtrar por `usuario` en vez de este motivo exacto
-	// escondía también reasignaciones manuales REALES cuyo supervisor no
-	// resolvió en platform_users (usuario_id null, best-effort) — review Codex.
-	const MOTIVO_SIEMBRA_INICIAL =
-		"Asignación inicial por bucket — carga COBROS-02 (SQL)";
-	const historial = (histQuery.data?.data ?? []).filter(
-		(h) => h.motivo !== MOTIVO_SIEMBRA_INICIAL,
-	);
+	// El backend ya excluye la siembra inicial de COBROS-02 (motivo fijo del
+	// script SQL, no una decisión humana) — sin filtro client-side para no
+	// desalinear paginación/resumen con lo mostrado (review Codex).
+	const historial = histQuery.data?.data ?? [];
 
 	const mutation = useMutation({
 		mutationFn: () =>
@@ -331,16 +324,15 @@ function OrigenBadge({ origen }: { origen: string }) {
 function HistorialReasignaciones() {
 	const [origen, setOrigen] = useState<string>("todos");
 	const [bucket, setBucket] = useState<string>("todos");
-	const [asesorInput, setAsesorInput] = useState("");
+	const [asesor, setAsesor] = useState<string>("todos");
 	const [sifcoInput, setSifcoInput] = useState("");
-	const [asesor, setAsesor] = useState("");
 	const [sifco, setSifco] = useState("");
 	const [page, setPage] = useState(1);
 	const pageSize = 20;
 
 	// getAsesores limita perPage a 100 en el server; se pagina hasta traer
-	// todos los asesores para que el combobox pueda filtrar por cualquiera,
-	// no solo los primeros 100 (regresión detectada en review de Codex).
+	// todos los asesores para que el Select pueda filtrar por cualquiera,
+	// no solo los primeros 100.
 	const asesoresQuery = useQuery({
 		queryKey: ["cobros", "asesores-todos"],
 		queryFn: async () => {
@@ -360,10 +352,6 @@ function HistorialReasignaciones() {
 		},
 	});
 	const asesores = asesoresQuery.data ?? [];
-	const asesorOptions = asesores.map((a) => ({
-		value: a.nombre,
-		label: a.nombre,
-	}));
 
 	const query = useQuery(
 		orpc.getHistorialReasignaciones.queryOptions({
@@ -373,7 +361,7 @@ function HistorialReasignaciones() {
 						? undefined
 						: (origen as "PROCESO_AUTO" | "API_MANUAL"),
 				bucket: bucket === "todos" ? undefined : Number(bucket),
-				asesor: asesor || undefined,
+				asesorId: asesor === "todos" ? undefined : Number(asesor),
 				numeroCredito: sifco || undefined,
 				page,
 				pageSize,
@@ -381,12 +369,14 @@ function HistorialReasignaciones() {
 		}),
 	);
 
+	// El backend ya excluye la siembra inicial de COBROS-02 (review Codex:
+	// filtrar client-side después de paginar desalineaba "Página X de Y" y el
+	// resumen, que contaban filas ya excluidas visualmente, con lo mostrado).
 	const rows = query.data?.data ?? [];
 	const resumen = query.data?.resumen;
 	const totalPages = query.data?.pagination?.totalPages ?? 1;
 
 	const aplicar = () => {
-		setAsesor(asesorInput.trim());
 		setSifco(sifcoInput.trim());
 		setPage(1);
 	};
@@ -441,27 +431,29 @@ function HistorialReasignaciones() {
 					</div>
 					<div className="space-y-2">
 						<Label>Asesor nuevo</Label>
-						{asesoresQuery.isError ? (
-							<Input
-								placeholder="Buscar asesor..."
-								value={asesorInput}
-								onChange={(e) => setAsesorInput(e.target.value)}
-								onKeyDown={(e) => e.key === "Enter" && aplicar()}
-								className="w-[180px]"
-							/>
-						) : (
-							<Combobox
-								options={asesorOptions}
-								value={asesorInput || null}
-								onChange={setAsesorInput}
-								placeholder="Todos los asesores"
-								isLoading={asesoresQuery.isLoading}
-								width="180px"
-							/>
-						)}
+						<Select
+							value={asesor}
+							onValueChange={(v) => {
+								setAsesor(v);
+								setPage(1);
+							}}
+						>
+							<SelectTrigger className="w-[180px]">
+								<SelectValue placeholder="Todos los asesores" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="todos">Todos</SelectItem>
+								{asesores.map((a) => (
+									<SelectItem key={a.asesorId} value={String(a.asesorId)}>
+										{a.nombre}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
 						{asesoresQuery.isError && (
 							<p className="text-destructive text-xs">
-								No se pudo cargar la lista de asesores.
+								No se pudo cargar la lista de asesores; el filtro no está
+								disponible.
 							</p>
 						)}
 					</div>

@@ -15,8 +15,11 @@ export type AsesorHistorialArgs = {
   hasta?: string; // YYYY-MM-DD (corte por día GT, inclusive)
   origen?: string; // PROCESO_AUTO | API_MANUAL
   bucket?: string; // CSV de enteros (snapshot del bucket al momento del cambio)
-  asesor_nuevo?: string; // CSV de nombres, ILIKE
-  asesor_anterior?: string; // CSV de nombres, ILIKE
+  // CSV de asesor_id (preferido, exacto) o de nombres (ILIKE, legacy —
+  // carteraFront todavía no tiene selector de asesor y manda texto libre;
+  // review Codex: nombre no es unique, por eso el CRM ya manda id).
+  asesor_nuevo?: string;
+  asesor_anterior?: string;
   credito_id?: number;
   numero_credito_sifco?: string; // ILIKE
   nombre_usuario?: string; // cliente, ILIKE
@@ -32,8 +35,17 @@ const csv = (v?: string) =>
 const csvInts = (v?: string) =>
   csv(v).map((s) => Number(s)).filter((n) => Number.isInteger(n));
 
+// Motivo fijo del script de siembra inicial de COBROS-02
+// (02_asignar_asesores_creditos.sql): quedó marcada API_MANUAL pero no es una
+// decisión humana. Se excluye SIEMPRE — ambos consumidores del CRM (tab de
+// historial y modal de reasignación) la filtraban client-side, desalineando
+// paginación/resumen (que contaban filas ya excluidas visualmente) con lo
+// mostrado — review Codex.
+const MOTIVO_SIEMBRA_INICIAL =
+  "Asignación inicial por bucket — carga COBROS-02 (SQL)";
+
 function buildWhere(a: AsesorHistorialArgs) {
-  const filters: any[] = [];
+  const filters: any[] = [sql`h.motivo IS DISTINCT FROM ${MOTIVO_SIEMBRA_INICIAL}`];
 
   // Rango de fecha por DÍA Guatemala (fecha es timestamp UTC; el motor corre
   // ~23:59 GT ≈ 06:00 UTC del día siguiente → comparar en GT evita el corrimiento).
@@ -54,17 +66,29 @@ function buildWhere(a: AsesorHistorialArgs) {
   }
   if (a.nombre_usuario) filters.push(sql`u.nombre ILIKE ${"%" + a.nombre_usuario + "%"}`);
 
-  const nuevos = csv(a.asesor_nuevo);
-  if (nuevos.length) {
-    filters.push(
-      sql`(${sql.join(nuevos.map((n) => sql`an.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})`,
-    );
+  const nuevosIds = csvInts(a.asesor_nuevo);
+  if (nuevosIds.length) {
+    filters.push(sql`h.asesor_nuevo IN (${sql.join(nuevosIds.map((n) => sql`${n}`), sql`, `)})`);
+  } else {
+    const nuevosNombres = csv(a.asesor_nuevo);
+    if (nuevosNombres.length) {
+      filters.push(
+        sql`(${sql.join(nuevosNombres.map((n) => sql`an.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})`,
+      );
+    }
   }
-  const anteriores = csv(a.asesor_anterior);
-  if (anteriores.length) {
+  const anterioresIds = csvInts(a.asesor_anterior);
+  if (anterioresIds.length) {
     filters.push(
-      sql`(${sql.join(anteriores.map((n) => sql`aa.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})`,
+      sql`h.asesor_anterior IN (${sql.join(anterioresIds.map((n) => sql`${n}`), sql`, `)})`,
     );
+  } else {
+    const anterioresNombres = csv(a.asesor_anterior);
+    if (anterioresNombres.length) {
+      filters.push(
+        sql`(${sql.join(anterioresNombres.map((n) => sql`aa.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})`,
+      );
+    }
   }
 
   return filters.length ? sql.join(filters, sql` AND `) : sql`TRUE`;

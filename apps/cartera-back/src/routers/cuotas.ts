@@ -42,9 +42,9 @@ export const cuotasRouter = new Elysia()
             message: "[ERROR] solo_al_dia inválido (true|false)",
           };
         }
-        // buckets: CSV 0-5 opcional — filtra por bucket MOTOR (sin INICIAL
-        // cuenta como B0). Lo usa el job premora cuando PREMORA_BUCKETS
-        // incluye más que B0.
+        // buckets: CSV 0-5 opcional — filtra por bucket MOTOR (sin historial
+        // solo cuenta como B0 si el crédito está al día en tiempo real). Lo
+        // usa el job premora cuando PREMORA_BUCKETS incluye más que B0.
         let buckets: number[] | undefined;
         if (query.buckets != null && String(query.buckets).trim() !== "") {
           const bTokens = String(query.buckets)

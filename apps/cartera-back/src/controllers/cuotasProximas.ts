@@ -33,9 +33,11 @@ export async function getCuotasProximasVencer(
   // también las cuotas próximas de créditos en mora.
   const soloAlDia = opts.soloAlDia !== false;
   // buckets: filtro por bucket MOTOR (PREMORA_BUCKETS del CRM). Un crédito
-  // sin INICIAL en buckets_historial cuenta como B0 (COALESCE). Orthogonal a
-  // soloAlDia: el job del CRM manda soloAlDia=false + buckets=0,1,... cuando
-  // el funnel de recordatorios está encendido.
+  // SIN historial de buckets NO se asume B0 a ciegas (review Codex): solo
+  // cuenta como B0 si además está al día EN TIEMPO REAL — si no, un moroso
+  // sin INICIAL recibiría la plantilla amistosa de cartera sana. Orthogonal
+  // a soloAlDia: el job del CRM manda soloAlDia=false + buckets=0,1,...
+  // cuando el funnel de recordatorios está encendido.
   const buckets = opts.buckets ?? [];
   const hoyGT = sql`(now() AT TIME ZONE 'America/Guatemala')::date`;
   const diasList = sql.join(
@@ -47,16 +49,36 @@ export async function getCuotasProximasVencer(
     ? sql`c."statusCredit" = 'ACTIVO'`
     : sql`c."statusCredit" IN ('ACTIVO', 'MOROSO', 'INCOBRABLE')`;
 
+  const bucketMotorSub = sql`(SELECT h.bucket_nuevo
+      FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+      WHERE h.credito_id = c.credito_id
+      ORDER BY h.fecha DESC, h.historial_id DESC
+      LIMIT 1)`;
+
+  // Crédito al día EN TIEMPO REAL (mismo criterio estricto del modo premora).
+  const esAlDiaReal = sql`(c."statusCredit" = 'ACTIVO'
+      AND NOT EXISTS (
+        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito v
+        WHERE v.credito_id = c.credito_id
+          AND v.fecha_vencimiento::date < ${hoyGT}
+          AND v.pagado = false
+          AND NOT EXISTS (${pagoCubriente(sql.raw("v.cuota_id"))})
+      ))`;
+
+  const bucketsList = sql.join(
+    buckets.map((b) => sql`${b}`),
+    sql`, `,
+  );
   const filtroBuckets =
     buckets.length > 0
-      ? sql`AND COALESCE(
-      (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
-        WHERE h.credito_id = c.credito_id
-        ORDER BY h.fecha DESC, h.historial_id DESC
-        LIMIT 1), 0) IN (${sql.join(
-          buckets.map((b) => sql`${b}`),
-          sql`, `,
-        )})`
+      ? sql`AND (
+      ${bucketMotorSub} IN (${bucketsList})
+      ${
+        buckets.includes(0)
+          ? sql`OR (${bucketMotorSub} IS NULL AND ${esAlDiaReal})`
+          : sql``
+      }
+    )`
       : sql``;
 
   const res = await db.execute<any>(sql`

@@ -1028,7 +1028,8 @@ export class CarteraBackClient {
 		const queryParams = new URLSearchParams({ dias: dias.join(",") });
 		// Default true (premora, solo B0). false = Agenda del día (todo el funnel).
 		if (opts.soloAlDia === false) queryParams.set("solo_al_dia", "false");
-		// Filtro por bucket MOTOR (PREMORA_BUCKETS); sin INICIAL cuenta como B0.
+		// Filtro por bucket MOTOR (PREMORA_BUCKETS); un crédito sin historial
+		// solo cuenta como B0 si está al día en tiempo real.
 		if (opts.buckets?.length)
 			queryParams.set("buckets", opts.buckets.join(","));
 		return this.request<CarteraCuotasProximasResponse>(

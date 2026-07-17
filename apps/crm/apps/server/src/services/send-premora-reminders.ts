@@ -285,8 +285,11 @@ export async function sendPremoraReminders(
 				continue;
 			}
 
-			// Plantilla según el bucket MOTOR de la cuota: B0 (o sin INICIAL) la
-			// normal; B1+ la variante `_mora` (recuerda también el saldo vencido).
+			// Plantilla según el bucket MOTOR de la cuota: B0 la normal; B1+ la
+			// variante `_mora` (recuerda también el saldo vencido). bucket=null
+			// solo llega de créditos al día verificados (en funnel cartera-back
+			// exige al-día real para contarlos como B0; en modo clásico todo el
+			// batch es al día estricto) → normal es correcta.
 			// El claim sigue siendo por tipo BASE (premora_X): un cliente jamás
 			// recibe la normal Y la de mora para la misma cuota.
 			const plantillaId = (cuota.bucket ?? 0) >= 1 ? `${tipo}_mora` : tipo;

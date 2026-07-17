@@ -172,6 +172,12 @@ function RouteComponent() {
 				posiciones. El techo es por asesor dentro de cada bucket.
 			</p>
 
+			{query.isError && (
+				<p className="text-destructive text-sm">
+					No se pudo cargar la carga por asesor y bucket. Intenta de nuevo.
+				</p>
+			)}
+
 			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 				<Card>
 					<CardHeader className="pb-2">
@@ -255,8 +261,8 @@ function RouteComponent() {
 									<TableCell>
 										{b.asesores_en_alerta > 0 ? (
 											<Badge variant="destructive">
-												{b.asesores_sobrecargados} de {b.asesores_en_pool}{" "}
-												sobrecargado(s)
+												{b.asesores_en_alerta} de {b.asesores_en_pool} en
+												alerta
 											</Badge>
 										) : (
 											<span className="text-muted-foreground text-xs">—</span>

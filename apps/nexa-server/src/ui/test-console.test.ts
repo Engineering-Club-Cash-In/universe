@@ -9,6 +9,7 @@ describe("test console UI", () => {
       nexaBaseUrl: "https://nexa.example",
       nexaApiKey: "api-key",
       nexaBearerToken: "bearer-token",
+      nexaMtlsMode: "disabled",
       nexaAccumulatorAccount: 10300102824,
       nexaPaymentTokenName: "Club Cashin GTQ UAT",
       nexaWebhookFlowId: "local-flow",
@@ -18,6 +19,10 @@ describe("test console UI", () => {
       internalApiKey: "dev-secret",
       carteraApiBaseUrl: "http://localhost:7000",
       mockCartera: true,
+      enableAdminApi: true,
+      enableTestUi: true,
+      nodeEnv: "test",
+      deploymentMode: "integration",
     }, {} as never);
 
     const response = await app.request("/ui");
@@ -28,7 +33,7 @@ describe("test console UI", () => {
     expect(html).toContain("Nexa UAT Test Console");
     expect(html).toContain("/admin/tokens/bootstrap");
     expect(html).toContain("/webhook/v1/payment-token");
-    expect(html).toContain('id="internalApiKey" value="dev-secret"');
+    expect(html).toContain('id="internalApiKey" type="password" value=""');
     expect(html).toContain("Cargar tokens");
     expect(html).toContain("Estado de cuenta local");
     expect(html).toContain("Cartera mock");

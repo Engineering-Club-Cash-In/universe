@@ -43,11 +43,16 @@ export const paymentTokenStatementResponseSchema = z.object({
   transactions: z.array(tokenTransactionSchema),
 });
 
+const safePositiveInteger = z
+  .union([z.string().regex(/^\d+$/), z.number()])
+  .transform(Number)
+  .pipe(z.number().int().positive().safe());
+
 export const paymentTokenWebhookSchema = z.object({
-  id: z.union([z.string(), z.number()]),
-  reference: z.union([z.string(), z.number()]),
+  id: safePositiveInteger,
+  reference: safePositiveInteger,
   token: z.string(),
-  amount: z.number(),
+  amount: z.number().positive(),
   originAccount: z.string(),
   originBank: z.string(),
   comments: z.string().nullable().default(""),

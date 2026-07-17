@@ -35,9 +35,9 @@ export function renderTestConsole() {
     <section>
       <h2>Configuracion</h2>
       <label>Base URL <input id="baseUrl" value="http://localhost:7010" /></label>
-      <label>INTERNAL_API_KEY <input id="internalApiKey" value="dev-secret" /></label>
-      <label>Webhook flowId <input id="flowId" value="local-flow" /></label>
-      <label>Webhook bearer <input id="webhookBearer" value="local-webhook-token" /></label>
+      <label>INTERNAL_API_KEY <input id="internalApiKey" type="password" value="" autocomplete="off" /></label>
+      <label>Webhook flowId <input id="flowId" value="" autocomplete="off" /></label>
+      <label>Webhook bearer <input id="webhookBearer" type="password" value="" autocomplete="off" /></label>
     </section>
 
     <div class="grid">

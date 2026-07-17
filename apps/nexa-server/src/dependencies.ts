@@ -11,10 +11,10 @@ export function createDependencies(config: AppConfig) {
     baseUrl: config.nexaBaseUrl,
     apiKey: config.nexaApiKey,
     bearerToken: config.nexaBearerToken,
-    tls: config.nexaClientCertPath && config.nexaClientKeyPath
+    tls: config.nexaMtlsMode === "required"
       ? {
-        certPath: config.nexaClientCertPath,
-        keyPath: config.nexaClientKeyPath,
+        certPath: config.nexaClientCertPath!,
+        keyPath: config.nexaClientKeyPath!,
         caPath: config.nexaCaCertPath,
       }
       : undefined,

@@ -23,8 +23,6 @@ export function createPaymentTokenWebhookRouter(deps: {
     c.header("X-Nexa-Request-Id", requestId);
     logWebhook(requestId, "received", {
       contentType: c.req.header("Content-Type") ?? null,
-      flowId: c.req.header("flowId") ?? null,
-      userAgent: c.req.header("User-Agent") ?? null,
     });
 
     const flowId = c.req.header("flowId");
@@ -51,65 +49,54 @@ export function createPaymentTokenWebhookRouter(deps: {
 
       logWebhook(requestId, "parsed", {
         elapsedMs: elapsed(startedAt),
-        id: reviewId,
-        reference,
-        amount: webhook.amount,
         currency: webhook.currency,
-        token: maskToken(webhook.token),
       });
 
       if (!(await deps.transactions.existsByReference(reference))) {
-        logWebhook(requestId, "new-reference", { elapsedMs: elapsed(startedAt), reference });
+        logWebhook(requestId, "new-reference", { elapsedMs: elapsed(startedAt) });
         const transaction = toTokenTransaction(webhook);
         const stored = await deps.transactions.createPending(transaction);
-        logWebhook(requestId, "pending-created", { elapsedMs: elapsed(startedAt), reference, transactionId: stored.id });
+        logWebhook(requestId, "pending-created", { elapsedMs: elapsed(startedAt) });
         const tokenUser = await deps.tokenUsers.findByToken(webhook.token);
 
         if (!tokenUser) {
-          logWebhook(requestId, "token-user-not-found", { elapsedMs: elapsed(startedAt), reference });
+          logWebhook(requestId, "token-user-not-found", { elapsedMs: elapsed(startedAt) });
           await deps.transactions.markRejected(stored.id, "Token no asociado a credito");
-          logWebhook(requestId, "marked-rejected", { elapsedMs: elapsed(startedAt), reference });
+          logWebhook(requestId, "marked-rejected", { elapsedMs: elapsed(startedAt) });
           queueReviewTransfer(requestId, deps.nexa, { id: reviewId, reference: reviewReference, status: "REJECTED" });
         } else {
           logWebhook(requestId, "token-user-found", {
             elapsedMs: elapsed(startedAt),
-            reference,
-            creditoId: tokenUser.creditoId,
           });
           const carteraResult = await deps.cartera.applyNexaPayment({ creditoId: tokenUser.creditoId, transaction });
           logWebhook(requestId, "cartera-result", {
             elapsedMs: elapsed(startedAt),
-            reference,
             status: carteraResult.status,
           });
           if (carteraResult.status === "APPLIED") {
             await deps.transactions.markApplied(stored.id, carteraResult.paymentId);
             logWebhook(requestId, "marked-applied", {
               elapsedMs: elapsed(startedAt),
-              reference,
-              paymentId: carteraResult.paymentId,
             });
             queueReviewTransfer(requestId, deps.nexa, { id: reviewId, reference: reviewReference, status: "APPROVED" });
           } else {
             await deps.transactions.markRejected(stored.id, carteraResult.reason);
             logWebhook(requestId, "marked-rejected", {
               elapsedMs: elapsed(startedAt),
-              reference,
-              reason: carteraResult.reason,
             });
             queueReviewTransfer(requestId, deps.nexa, { id: reviewId, reference: reviewReference, status: "REJECTED" });
           }
         }
       } else {
-        logWebhook(requestId, "duplicate-reference", { elapsedMs: elapsed(startedAt), reference });
+        logWebhook(requestId, "duplicate-reference", { elapsedMs: elapsed(startedAt) });
       }
 
-      logWebhook(requestId, "responding-ok", { elapsedMs: elapsed(startedAt), reference });
+      logWebhook(requestId, "responding-ok", { elapsedMs: elapsed(startedAt) });
       return c.json({ reference, status: "OK" });
     } catch (error) {
       logWebhook(requestId, "failed", {
         elapsedMs: elapsed(startedAt),
-        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.name : "UnknownError",
       });
       throw error;
     }
@@ -123,13 +110,12 @@ function queueReviewTransfer(
   nexa: NexaReviewClient,
   payload: { id: number; reference: number; status: ReviewTransferStatus },
 ) {
-  logWebhook(requestId, "review-queued", payload);
-  nexa.reviewTransfer(payload).then((response) => {
-    logWebhook(requestId, "review-succeeded", { ...payload, response });
+  logWebhook(requestId, "review-queued");
+  nexa.reviewTransfer(payload).then(() => {
+    logWebhook(requestId, "review-succeeded");
   }).catch((error) => {
     logWebhook(requestId, "review-failed", {
-      ...payload,
-      error: error instanceof Error ? error.message : String(error),
+      errorType: error instanceof Error ? error.name : "UnknownError",
     });
     // Review failures should not undo local/mock cartera application.
   });
@@ -165,10 +151,6 @@ function elapsed(startedAt: number) {
   return Date.now() - startedAt;
 }
 
-function maskToken(token: string) {
-  if (token.length <= 8) return "***";
-  return `${token.slice(0, 4)}...${token.slice(-4)}`;
-}
 
 function parseAuthorizationToken(value: string | undefined) {
   return value?.replace(/^Bearer\s+/i, "").trim();
@@ -182,5 +164,4 @@ function logWebhook(requestId: string, event: string, data: Record<string, unkno
     ...data,
   });
   console.log(line);
-  console.error(line);
 }

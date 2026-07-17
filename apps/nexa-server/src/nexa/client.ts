@@ -56,18 +56,12 @@ export class NexaClient {
     tokenId: number;
     users: Array<{ identifier: number; description: string; nationalId: number }>;
   }) {
-    if (process.env.NEXA_DEBUG === "true") {
-      console.log("[NexaClient] createTokenUsers payload", JSON.stringify(payload));
-    }
     const response = await this.request("/api/v1/open-api-nexa/payment-token/token/user", {
       method: "POST",
       body: JSON.stringify(payload),
     });
 
     const body = await response.json();
-    if (process.env.NEXA_DEBUG === "true") {
-      console.log("[NexaClient] createTokenUsers response", JSON.stringify(body));
-    }
     return createTokenUsersResponseSchema.parse(body);
   }
 
@@ -103,8 +97,7 @@ export class NexaClient {
     const response = await this.fetch(`${this.baseUrl}${path}`, requestInit);
 
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Nexa request failed with ${response.status}: ${text}`);
+      throw new Error(`Nexa request failed with HTTP ${response.status}`);
     }
 
     return response;

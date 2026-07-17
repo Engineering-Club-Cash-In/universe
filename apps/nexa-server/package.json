@@ -10,7 +10,7 @@
     "check-types": "tsc --noEmit",
     "webhook:simulate": "bun run src/scripts/simulate-webhook.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "bun run src/db/migrate.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.0",

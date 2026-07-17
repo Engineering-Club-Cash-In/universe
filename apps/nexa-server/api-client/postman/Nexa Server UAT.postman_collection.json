@@ -4,7 +4,13 @@
     "description": "Coleccion funcional para demostrar creacion de token maestro y token de cliente en nexa-server UAT.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "variable": [],
+  "variable": [
+    {
+      "key": "internal_api_key",
+      "value": "",
+      "type": "secret"
+    }
+  ],
   "item": [
     {
       "name": "00 Health",
@@ -21,7 +27,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer dev-secret"
+            "value": "Bearer {{internal_api_key}}"
           }
         ],
         "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/tokens/bootstrap",
@@ -35,7 +41,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer dev-secret"
+            "value": "Bearer {{internal_api_key}}"
           },
           {
             "key": "Content-Type",
@@ -57,7 +63,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer dev-secret"
+            "value": "Bearer {{internal_api_key}}"
           },
           {
             "key": "Content-Type",
@@ -79,7 +85,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer dev-secret"
+            "value": "Bearer {{internal_api_key}}"
           }
         ],
         "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/token-users"
@@ -92,7 +98,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer dev-secret"
+            "value": "Bearer {{internal_api_key}}"
           }
         ],
         "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/mock-credits"
@@ -105,7 +111,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer dev-secret"
+            "value": "Bearer {{internal_api_key}}"
           }
         ],
         "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/transactions"

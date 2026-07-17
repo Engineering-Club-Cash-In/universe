@@ -338,10 +338,24 @@ function HistorialReasignaciones() {
 	const [page, setPage] = useState(1);
 	const pageSize = 20;
 
-	const asesoresQuery = useQuery(
-		orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
-	);
-	const asesores = asesoresQuery.data?.asesores ?? [];
+	// getAsesores limita perPage a 100 en el server; se pagina hasta traer
+	// todos los asesores para que el combobox pueda filtrar por cualquiera,
+	// no solo los primeros 100 (regresión detectada en review de Codex).
+	const asesoresQuery = useQuery({
+		queryKey: ["cobros", "asesores-todos"],
+		queryFn: async () => {
+			const perPage = 100;
+			const primera = await client.getAsesores({ page: 1, perPage });
+			const todos = [...primera.asesores];
+			const totalPages = primera.pagination.totalPages;
+			for (let page = 2; page <= totalPages; page++) {
+				const siguiente = await client.getAsesores({ page, perPage });
+				todos.push(...siguiente.asesores);
+			}
+			return todos;
+		},
+	});
+	const asesores = asesoresQuery.data ?? [];
 	const asesorOptions = asesores.map((a) => ({
 		value: a.nombre,
 		label: a.nombre,

@@ -34,7 +34,14 @@ export const bankStatementAnalysisSchema = z.object({
 	analisis_fecha_pago: z
 		.object({
 			dias_ingreso_detectados: z.array(z.number().int().min(1).max(31)),
-			dia_pago_sugerido: z.number().int().min(1).max(31),
+			dias_pago_sugeridos: z
+				.array(
+					z.object({
+						dia: z.number().int().min(1).max(31),
+						porcentaje: z.number().int().min(0).max(100),
+					}),
+				)
+				.length(3),
 			justificacion: z.string(),
 		})
 		.nullable()
@@ -76,8 +83,10 @@ Eres un analista de capacidad de pago para una financiera que otorga créditos p
 
 4. **analisis_fecha_pago**: Determina la fecha ideal de pago según CUÁNDO recibe ingresos el solicitante, analizando las FECHAS de las transacciones de crédito (no solo los totales). Devuelve:
    - dias_ingreso_detectados: Días del mes (1-31) en que se repiten sus ingresos recurrentes. Si es quincena, incluye ambos (ej. [15, 30]).
-   - dia_pago_sugerido: Día del mes (1-31) para la cuota, entre 1 y 5 días después de su ingreso recurrente de mayor monto, para no caer donde el dinero ya se gastó. En quincena, elige la que deje más liquidez. Devuelve el día real, no un valor fijo.
-   - justificacion: 1-2 frases justificando el día según el patrón detectado. Si el ingreso es irregular, elige el día más conservador y acláralo; no inventes precisión.
+   - dias_pago_sugeridos: SIEMPRE exactamente 3 candidatos de día de pago, ordenados de mejor a peor. Cada candidato es un objeto con:
+     - dia: Día del mes (1-31) para la cuota, típicamente poco después de un ingreso recurrente detectado, para no caer donde el dinero ya se gastó. En quincena, prioriza la que deje más liquidez. Devuelve días reales, no valores fijos.
+     - porcentaje: Qué tan recomendado es ese día frente a los otros dos (0-100, entero). El primero debe tener el porcentaje más alto.
+   - justificacion: 1-2 frases explicando el orden de los 3 candidatos según el patrón detectado. Si el ingreso es irregular, elige los 3 días más conservadores y acláralo; no inventes precisión.
 
 ## IMPORTANTE: Múltiples cuentas bancarias del mismo titular
 

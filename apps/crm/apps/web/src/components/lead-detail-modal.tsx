@@ -741,15 +741,26 @@ export function LeadDetailModal({
 								</div>
 							)}
 
-							{/* Suggested Payment Day */}
-							{creditAnalysisQuery.data.suggestedPaymentDay != null && (
-								<div className="flex items-center justify-between rounded-lg border px-3 py-2">
-									<span className="text-muted-foreground text-xs">
-										Fecha Ideal de Pago
-									</span>
-									<span className="font-bold text-blue-600 text-sm">
-										Día {creditAnalysisQuery.data.suggestedPaymentDay}
-									</span>
+							{/* Suggested Payment Days */}
+							{creditAnalysisQuery.data.suggestedPaymentDays != null && (
+								<div className="space-y-1.5">
+									<h4 className="font-medium text-sm">Fechas de Pago</h4>
+									<p className="mb-3 text-muted-foreground text-xs italic">
+										Porcentaje indica día mejor ajustado
+									</p>
+									{creditAnalysisQuery.data.suggestedPaymentDays.map((c, i) => (
+										<div
+											key={c.dia}
+											className="flex items-center justify-between rounded-lg border px-3 py-2"
+										>
+											<span className="text-muted-foreground text-xs">
+												Fecha Ideal de Pago {i + 1}
+											</span>
+											<span className="font-bold text-blue-600 text-sm">
+												Día {c.dia} ({c.porcentaje}%)
+											</span>
+										</div>
+									))}
 								</div>
 							)}
 

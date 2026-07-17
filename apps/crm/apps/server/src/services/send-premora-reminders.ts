@@ -9,8 +9,10 @@
  *
  * Garantías:
  *  - Idempotente: `recordatorios_premora` con UNIQUE (cuota, tipo) — cada
- *    cuota recibe como máximo UN recordatorio de cada tipo, aunque el job
- *    corra dos veces o el server se reinicie a media corrida.
+ *    cuota recibe como máximo UN recordatorio de cada tipo. El insert se hace
+ *    como CLAIM *antes* de enviar (si otra corrida concurrente ya reclamó,
+ *    no se envía); si el envío falla, el claim se libera y la próxima
+ *    corrida reintenta.
  *  - Historial de contacto: cada envío queda registrado en `contactos_cobros`
  *    (el histórico que ya usa el CRM) cuando el crédito tiene caso; si no hay
  *    caso, la traza queda igual en `cobros_send_logs` + `recordatorios_premora`.
@@ -256,6 +258,32 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 			});
 
 			const telefonoDestino = testMode ? getTestPhone() : telefono;
+
+			// 4. RECLAMAR el recordatorio ANTES de enviar (review Codex): el
+			// INSERT contra el UNIQUE (cuota, tipo) es el lock — si otra corrida
+			// concurrente ya lo reclamó, no devuelve fila y NO se envía (jamás
+			// doble WhatsApp al cliente). Si el envío falla, se libera el claim
+			// más abajo para que la próxima corrida reintente. Trade-off asumido:
+			// un crash justo entre reclamar y enviar pierde ESE recordatorio,
+			// pero premora tiene red (al D-5 le siguen D-3/D-1/D-0) y un doble
+			// mensaje al cliente no tiene deshacer.
+			const claim = await db
+				.insert(recordatoriosPremora)
+				.values({
+					cuotaId: cuota.cuota_id,
+					creditoId: cuota.credito_id,
+					numeroCreditoSifco: cuota.numero_credito_sifco,
+					tipo,
+					telefono: telefonoDestino,
+					fechaVencimiento: cuota.fecha_vencimiento,
+				})
+				.onConflictDoNothing()
+				.returning({ id: recordatoriosPremora.id });
+			if (claim.length === 0) {
+				resumen.yaEnviados++;
+				continue;
+			}
+
 			const result = await sendWhatsappTemplate({
 				phone: telefonoDestino,
 				message: mensaje,
@@ -291,26 +319,24 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 			});
 
 			if (!result.success) {
-				// Sin marca de idempotencia: la próxima corrida lo reintenta.
+				// Liberar el claim → la próxima corrida lo reintenta.
 				console.error(
 					`${LOG_PREFIX} ${cuota.numero_credito_sifco} ${tipo}: falló envío (${result.error})`,
 				);
+				try {
+					await db
+						.delete(recordatoriosPremora)
+						.where(eq(recordatoriosPremora.id, claim[0].id));
+				} catch (err) {
+					console.error(
+						`${LOG_PREFIX} No se pudo liberar el claim ${claim[0].id}:`,
+						err,
+					);
+				}
 				resumen.fallidos++;
 				continue;
 			}
 
-			// 4. Marca de idempotencia (onConflictDoNothing por si hay carrera).
-			await db
-				.insert(recordatoriosPremora)
-				.values({
-					cuotaId: cuota.cuota_id,
-					creditoId: cuota.credito_id,
-					numeroCreditoSifco: cuota.numero_credito_sifco,
-					tipo,
-					telefono: telefonoDestino,
-					fechaVencimiento: cuota.fecha_vencimiento,
-				})
-				.onConflictDoNothing();
 			resumen.enviados++;
 
 			// 5. Historial de contacto del CRM (requisito: que quede en el

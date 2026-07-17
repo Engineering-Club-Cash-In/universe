@@ -41,7 +41,10 @@ export async function getCuotasProximasVencer(dias: number[]) {
       c.numero_credito_sifco,
       ROUND(c.cuota::numeric, 2)::text AS monto_cuota,
       u.nombre AS cliente,
-      u.telefono AS telefono_cliente_cartera,
+      -- usuarios NO tiene teléfono en cartera (solo asesores/admins/conta/
+      -- inversionistas lo tienen). Se devuelve NULL para mantener la forma
+      -- del API: el CRM resuelve el teléfono real con caso de cobros → lead.
+      NULL::text AS telefono_cliente_cartera,
       c.asesor_id,
       a.nombre AS asesor,
       a.telefono AS telefono_asesor

@@ -39,6 +39,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
+import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
 import { PERMISSIONS } from "./lib/roles";
 import {
 	appRouter,
@@ -1130,6 +1131,40 @@ app.post("/info/vehicles-by-sifco", async (c) => {
 			500,
 		);
 	}
+});
+
+// Corrida MANUAL de premora (pruebas / re-corridas del día). Solo admin y
+// supervisor de cobros. `force` salta el gate PREMORA_WHATSAPP_ENABLED (por
+// eso el cron puede quedar apagado en dev y este endpoint sí funciona);
+// TEST_MESSAGE y los claims de idempotencia aplican exactamente igual.
+// `?sifco=A,B` limita el batch a esos créditos para no disparar todo el día.
+app.on(["GET", "POST"], "/api/premora/run", async (c) => {
+	const context = await createContext({ context: c });
+	if (!context.session?.user?.id) {
+		return c.json({ error: "No autorizado" }, 401);
+	}
+	const userRole = context.session.user.role;
+	if (!userRole || !PERMISSIONS.canAssignCobros(userRole)) {
+		return c.json({ error: "No tienes permiso para correr premora" }, 403);
+	}
+
+	const sifcoParam = c.req.query("sifco");
+	const sifcos = sifcoParam
+		? sifcoParam
+				.split(",")
+				.map((s) => s.trim())
+				.filter(Boolean)
+		: undefined;
+
+	const testMode = isTestModeEnabled();
+	const resumen = await sendPremoraReminders({ force: true, sifcos });
+	return c.json({
+		success: true,
+		testMode,
+		telefonoTest: testMode ? getTestPhone() : null,
+		filtroSifco: sifcos ?? null,
+		resumen,
+	});
 });
 
 // Job periódico de notificaciones de cobros (cada hora)

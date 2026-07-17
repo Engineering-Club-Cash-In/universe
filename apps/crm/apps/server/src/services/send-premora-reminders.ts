@@ -53,6 +53,17 @@ const TIPO_POR_DIAS: Record<number, TipoPremora> = {
 	0: "premora_0",
 };
 
+export interface PremoraRunOptions {
+	/**
+	 * Corrida MANUAL (endpoint /api/premora/run): ignora el gate de env
+	 * PREMORA_WHATSAPP_ENABLED. Todo lo demás aplica igual (test-mode,
+	 * claims, historial).
+	 */
+	force?: boolean;
+	/** Limita el batch a estos créditos (pruebas quirúrgicas). */
+	sifcos?: string[];
+}
+
 export interface PremoraResumen {
 	skipped?: boolean;
 	reason?: string;
@@ -110,10 +121,12 @@ async function resolverUsuarioSistema(): Promise<string | null> {
 	return admin?.id ?? null;
 }
 
-export async function sendPremoraReminders(): Promise<PremoraResumen> {
+export async function sendPremoraReminders(
+	opts: PremoraRunOptions = {},
+): Promise<PremoraResumen> {
 	try {
 		// 0. Habilitado por env (mismo patrón que la bienvenida).
-		if (process.env.PREMORA_WHATSAPP_ENABLED !== "true") {
+		if (!opts.force && process.env.PREMORA_WHATSAPP_ENABLED !== "true") {
 			console.log(
 				`${LOG_PREFIX} PREMORA_WHATSAPP_ENABLED != "true"; job omitido`,
 			);
@@ -128,7 +141,14 @@ export async function sendPremoraReminders(): Promise<PremoraResumen> {
 		const respuesta = await carteraBackClient.getCuotasProximasVencer([
 			5, 3, 1, 0,
 		]);
-		const cuotas = respuesta.data ?? [];
+		let cuotas = respuesta.data ?? [];
+		if (opts.sifcos?.length) {
+			const filtro = new Set(opts.sifcos);
+			cuotas = cuotas.filter((c) => filtro.has(c.numero_credito_sifco));
+			console.log(
+				`${LOG_PREFIX} Filtro manual por SIFCO (${opts.sifcos.join(", ")}): ${cuotas.length} cuota(s)`,
+			);
+		}
 		console.log(
 			`${LOG_PREFIX} ${cuotas.length} cuota(s) próximas a vencer (D-5/D-3/D-1/D-0)`,
 		);

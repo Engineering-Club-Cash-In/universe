@@ -286,13 +286,16 @@ export async function sendPremoraReminders(
 			}
 
 			// Plantilla según el bucket MOTOR de la cuota: B0 la normal; B1+ la
-			// variante `_mora` (recuerda también el saldo vencido). bucket=null
-			// solo llega de créditos al día verificados (en funnel cartera-back
-			// exige al-día real para contarlos como B0; en modo clásico todo el
-			// batch es al día estricto) → normal es correcta.
-			// El claim sigue siendo por tipo BASE (premora_X): un cliente jamás
-			// recibe la normal Y la de mora para la misma cuota.
-			const plantillaId = (cuota.bucket ?? 0) >= 1 ? `${tipo}_mora` : tipo;
+			// variante `_mora` (recuerda también el saldo vencido). El claim
+			// sigue siendo por tipo BASE (premora_X): un cliente jamás recibe la
+			// normal Y la de mora para la misma cuota.
+			// En modo clásico (soloB0) SIEMPRE la normal (review Codex): ese
+			// batch es al-día estricto en TIEMPO REAL, pero el bucket motor puede
+			// venir stale (un crédito recién curado sigue en B2 en
+			// buckets_historial hasta que corra procesarMoras) → mirar el bucket
+			// histórico le mandaría "saldo vencido" a quien ya está al día.
+			const plantillaId =
+				!soloB0 && (cuota.bucket ?? 0) >= 1 ? `${tipo}_mora` : tipo;
 			const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === plantillaId);
 			if (!plantilla) {
 				console.error(`${LOG_PREFIX} Plantilla "${plantillaId}" no encontrada`);

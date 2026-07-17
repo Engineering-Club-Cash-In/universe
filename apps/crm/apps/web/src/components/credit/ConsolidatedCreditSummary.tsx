@@ -116,6 +116,28 @@ export function ConsolidatedCreditSummary({
 				</div>
 			</div>
 
+			{/* Fecha ideal de pago sugerida (solo del deudor principal) */}
+			{lead.suggestedPaymentDays != null && (
+				<div className="space-y-1.5">
+					<p className="mb-3 text-center text-muted-foreground text-xs italic">
+						Porcentaje indica día mejor ajustado
+					</p>
+					{lead.suggestedPaymentDays.map((c, i) => (
+						<div
+							key={c.dia}
+							className="flex items-center justify-between rounded-md bg-white/80 px-2 py-1 dark:bg-white/5"
+						>
+							<span className="text-muted-foreground text-xs">
+								Fecha ideal de pago {i + 1}
+							</span>
+							<span className="font-semibold text-blue-600 text-sm">
+								Día {c.dia} ({c.porcentaje}%)
+							</span>
+						</div>
+					))}
+				</div>
+			)}
+
 			{/* Desglose si hay co-firmantes */}
 			{coDebtorsCount > 0 && (
 				<div className="border-t pt-3">

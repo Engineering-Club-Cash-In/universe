@@ -339,6 +339,14 @@ export const bankAnalysisRouter = {
 					});
 				}
 
+				// 5.5. ordenar por porcentaje descendente antes de persistir, ya que la UI
+				// asume que el índice 0 es siempre la mejor recomendación.
+				if (analysis.analisis_fecha_pago) {
+					analysis.analisis_fecha_pago.dias_pago_sugeridos = [
+						...analysis.analisis_fecha_pago.dias_pago_sugeridos,
+					].sort((a, b) => b.porcentaje - a.porcentaje);
+				}
+
 				// 6. Calcular capacidad crediticia
 				const creditCapacity = calculateCreditCapacity(analysis, {
 					annualRate: input.annualRate,
@@ -364,6 +372,8 @@ export const bankAnalysisRouter = {
 							analysis.promedio_mensual.disponibilidad_economica.toString(),
 						maxPayment: creditCapacity.maxPayment.toString(),
 						maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
+						suggestedPaymentDays:
+							analysis.analisis_fecha_pago?.dias_pago_sugeridos ?? null,
 						analyzedAt: new Date(),
 						updatedAt: new Date(),
 					})

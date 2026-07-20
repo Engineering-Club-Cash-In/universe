@@ -5,6 +5,7 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { logAuthDiagnostic } from "@/lib/auth-session";
+import type { bucketCapacidadRouter } from "../../../server/src/routers/bucket-capacidad";
 import type {
 	AppRouter,
 	disbursementRouter,
@@ -78,7 +79,8 @@ type MergedRouter = AppRouter &
 	typeof manualVehicleRouter &
 	InvestmentsRouter &
 	typeof disbursementRouter &
-	typeof proyeccionRouter;
+	typeof proyeccionRouter &
+	typeof bucketCapacidadRouter;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

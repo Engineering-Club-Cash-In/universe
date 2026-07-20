@@ -1,9 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { LayoutDashboard } from "lucide-react";
+import { LayoutDashboard, Loader2, Pencil } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
 	Select,
@@ -23,7 +34,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { estiloBucket } from "@/lib/cobros/buckets-catalogo";
 import { PERMISSIONS } from "@/lib/roles";
-import { orpc } from "@/utils/orpc";
+import { orpc, queryClient } from "@/utils/orpc";
 
 export const Route = createFileRoute("/cobros/carga")({
 	component: RouteComponent,
@@ -69,10 +80,7 @@ function BucketBadge({
 	color: string | null;
 }) {
 	return (
-		<Badge
-			variant="outline"
-			style={color ? estiloBucket(color) : undefined}
-		>
+		<Badge variant="outline" style={color ? estiloBucket(color) : undefined}>
 			{prefijo} · {nombre}
 		</Badge>
 	);
@@ -96,10 +104,179 @@ function BarraUtilizacion({
 					style={{ width: `${Math.min(pct, 100)}%` }}
 				/>
 			</div>
-			<span className={`font-medium text-sm ${textoUtilizacion(sobrecarga, alerta)}`}>
+			<span
+				className={`font-medium text-sm ${textoUtilizacion(sobrecarga, alerta)}`}
+			>
 				{pct.toFixed(1)}%
 			</span>
 		</div>
+	);
+}
+
+// CB-019 (review) · Mismos topes que el server (cobros.ts actualizarCapacidadAsesorBucket
+// + actualizarAsesorBucket.ts en cartera-back) — validar acá es solo UX, el
+// server sigue siendo la fuente de verdad. Devuelve el motivo por el que no
+// se puede guardar, o null si todo es válido.
+function motivoInvalido(
+	capacidad: string,
+	margenTipo: "porcentaje" | "fijo",
+	margenValor: string,
+): string | null {
+	const capacidadNum = Number(capacidad);
+	if (capacidad.trim() === "" || !Number.isFinite(capacidadNum)) {
+		return "Capacidad máxima debe ser un número";
+	}
+	if (!Number.isInteger(capacidadNum) || capacidadNum <= 0) {
+		return "Capacidad máxima debe ser un entero mayor a 0";
+	}
+	if (capacidadNum > 2000) {
+		return "Capacidad máxima no puede ser mayor a 2000";
+	}
+	const margenNum = Number(margenValor);
+	if (margenValor.trim() === "" || !Number.isFinite(margenNum)) {
+		return "Valor de margen debe ser un número";
+	}
+	if (margenNum < 0) {
+		return "Valor de margen no puede ser negativo";
+	}
+	if (margenTipo === "porcentaje" && margenNum > 100) {
+		return "Valor de margen no puede ser mayor a 100 cuando es porcentaje";
+	}
+	if (margenTipo === "fijo" && margenNum > 500) {
+		return "Valor de margen no puede ser mayor a 500 cuando es fijo";
+	}
+	return null;
+}
+
+// CB-019 · Modal de edición de capacidad_base/margen_alerta por asesor+bucket.
+// Antes solo editable a mano por SQL (ver cargaAsesorBucket.ts) — este modal
+// es el único camino de escritura, vía PATCH /buckets/asesor-bucket/:id/:bucket.
+function EditarCapacidadDialog({
+	asesorId,
+	nombre,
+	bucket,
+	capacidadBase,
+	margenAlertaTipo,
+	margenAlertaValor,
+	open,
+	onOpenChange,
+}: {
+	asesorId: number;
+	nombre: string;
+	bucket: number;
+	capacidadBase: number;
+	margenAlertaTipo: "porcentaje" | "fijo";
+	margenAlertaValor: number;
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+}) {
+	const [capacidad, setCapacidad] = useState(String(capacidadBase));
+	const [margenTipo, setMargenTipo] = useState<"porcentaje" | "fijo">(
+		margenAlertaTipo,
+	);
+	const [margenValor, setMargenValor] = useState(String(margenAlertaValor));
+	const error = motivoInvalido(capacidad, margenTipo, margenValor);
+
+	const mutation = useMutation({
+		...orpc.actualizarCapacidadAsesorBucket.mutationOptions(),
+		onSuccess: () => {
+			toast.success("Capacidad actualizada");
+			// .key() = prefijo del path → invalida TODAS las variantes de la query
+			// (cualquier bucket filtrado), no solo input:{} (review code-review:
+			// mismo patrón documentado en reasignaciones.tsx:145-149 — con
+			// queryOptions({input:{}}).queryKey la tabla con filtro activo quedaba
+			// stale tras guardar).
+			queryClient.invalidateQueries({
+				queryKey: orpc.getCargaPorAsesorBucket.key(),
+			});
+			onOpenChange(false);
+		},
+		onError: (error: Error) => {
+			toast.error(error.message);
+		},
+	});
+
+	return (
+		<Dialog
+			open={open}
+			onOpenChange={(next) => {
+				if (!next) {
+					setCapacidad(String(capacidadBase));
+					setMargenTipo(margenAlertaTipo);
+					setMargenValor(String(margenAlertaValor));
+				}
+				onOpenChange(next);
+			}}
+		>
+			<DialogContent className="sm:max-w-sm">
+				<DialogHeader>
+					<DialogTitle>
+						Capacidad — {nombre} · B{bucket}
+					</DialogTitle>
+				</DialogHeader>
+				<div className="space-y-4">
+					<div className="space-y-1.5">
+						<Label htmlFor="capacidad-base">Capacidad máxima (cuentas)</Label>
+						<Input
+							id="capacidad-base"
+							type="number"
+							min="1"
+							value={capacidad}
+							onChange={(e) => setCapacidad(e.target.value)}
+						/>
+					</div>
+					<div className="grid grid-cols-2 gap-3">
+						<div className="space-y-1.5">
+							<Label htmlFor="margen-tipo">Margen de alerta</Label>
+							<Select
+								value={margenTipo}
+								onValueChange={(v) => setMargenTipo(v as "porcentaje" | "fijo")}
+							>
+								<SelectTrigger id="margen-tipo">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="porcentaje">Porcentaje</SelectItem>
+									<SelectItem value="fijo">Cuentas fijas</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="space-y-1.5">
+							<Label htmlFor="margen-valor">
+								Valor {margenTipo === "porcentaje" ? "(%)" : "(cuentas)"}
+							</Label>
+							<Input
+								id="margen-valor"
+								type="number"
+								min="0"
+								value={margenValor}
+								onChange={(e) => setMargenValor(e.target.value)}
+							/>
+						</div>
+					</div>
+				</div>
+				<DialogFooter className="sm:flex-col sm:items-end sm:gap-2">
+					{error && <p className="text-destructive text-xs">{error}</p>}
+					<Button
+						disabled={mutation.isPending || !!error}
+						onClick={() =>
+							mutation.mutate({
+								asesorId,
+								bucket,
+								capacidadBase: Number(capacidad),
+								margenAlertaTipo: margenTipo,
+								margenAlertaValor: Number(margenValor),
+							})
+						}
+					>
+						{mutation.isPending ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : null}
+						Guardar
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
 	);
 }
 
@@ -109,6 +286,14 @@ function RouteComponent() {
 
 	const [bucket, setBucket] = useState<string>("todos");
 	const bucketNumero = bucket === "todos" ? undefined : Number(bucket);
+	const [editando, setEditando] = useState<{
+		asesorId: number;
+		nombre: string;
+		bucket: number;
+		capacidadBase: number;
+		margenAlertaTipo: "porcentaje" | "fijo";
+		margenAlertaValor: number;
+	} | null>(null);
 
 	const query = useQuery({
 		...orpc.getCargaPorAsesorBucket.queryOptions({
@@ -141,11 +326,20 @@ function RouteComponent() {
 	// globales suman/promedian sobre el detalle por asesor, no sobre buckets[].
 	const filasAsesorBucket = porAsesor.flatMap((a) => a.porBucket);
 	const cuentasTotales = filasAsesorBucket.reduce((s, d) => s + d.cuentas, 0);
-	const capacidadTotal = filasAsesorBucket.reduce((s, d) => s + d.capacidad_base, 0);
+	const capacidadTotal = filasAsesorBucket.reduce(
+		(s, d) => s + d.capacidad_base,
+		0,
+	);
 	const utilizacionGlobalPct =
-		capacidadTotal > 0 ? Math.round((cuentasTotales / capacidadTotal) * 1000) / 10 : 0;
-	const asesoresEnAlerta = filasAsesorBucket.filter((d) => d.alerta_nueva_posicion).length;
-	const asesoresSobrecargados = filasAsesorBucket.filter((d) => d.sobrecarga).length;
+		capacidadTotal > 0
+			? Math.round((cuentasTotales / capacidadTotal) * 1000) / 10
+			: 0;
+	const asesoresEnAlerta = filasAsesorBucket.filter(
+		(d) => d.alerta_nueva_posicion,
+	).length;
+	const asesoresSobrecargados = filasAsesorBucket.filter(
+		(d) => d.sobrecarga,
+	).length;
 
 	// Filas planas asesor × bucket para la tabla de reparto (con capacidad y
 	// utilización propias de esa combinación). El servidor ya filtra por
@@ -167,9 +361,9 @@ function RouteComponent() {
 				<h1 className="font-bold text-2xl">Carga de Cuentas por Asesor</h1>
 			</div>
 			<p className="text-muted-foreground text-sm">
-				Cuentas activas por asesor y bucket, capacidad base, % de
-				utilización y alertas de sobrecarga — para decidir nuevas
-				posiciones. El techo es por asesor dentro de cada bucket.
+				Cuentas activas por asesor y bucket, capacidad base, % de utilización y
+				alertas de sobrecarga — para decidir nuevas posiciones. El techo es por
+				asesor dentro de cada bucket.
 			</p>
 
 			{query.isError && (
@@ -261,8 +455,7 @@ function RouteComponent() {
 									<TableCell>
 										{b.asesores_en_alerta > 0 ? (
 											<Badge variant="destructive">
-												{b.asesores_en_alerta} de {b.asesores_en_pool} en
-												alerta
+												{b.asesores_en_alerta} de {b.asesores_en_pool} en alerta
 											</Badge>
 										) : (
 											<span className="text-muted-foreground text-xs">—</span>
@@ -272,7 +465,10 @@ function RouteComponent() {
 							))}
 							{buckets.length === 0 && !query.isLoading && (
 								<TableRow>
-									<TableCell colSpan={4} className="text-center text-muted-foreground">
+									<TableCell
+										colSpan={4}
+										className="text-center text-muted-foreground"
+									>
 										Sin datos.
 									</TableCell>
 								</TableRow>
@@ -308,6 +504,7 @@ function RouteComponent() {
 								<TableHead>Cuentas</TableHead>
 								<TableHead>Capacidad</TableHead>
 								<TableHead>Utilización</TableHead>
+								<TableHead className="w-10" />
 							</TableRow>
 						</TableHeader>
 						<TableBody>
@@ -338,11 +535,34 @@ function RouteComponent() {
 											alerta={f.alerta_nueva_posicion}
 										/>
 									</TableCell>
+									<TableCell>
+										{userRole === "admin" && (
+											<Button
+												variant="ghost"
+												size="icon"
+												onClick={() =>
+													setEditando({
+														asesorId: f.asesorId,
+														nombre: f.nombre,
+														bucket: f.bucket,
+														capacidadBase: f.capacidad_base,
+														margenAlertaTipo: f.margen_alerta_tipo,
+														margenAlertaValor: f.margen_alerta_valor,
+													})
+												}
+											>
+												<Pencil className="h-4 w-4" />
+											</Button>
+										)}
+									</TableCell>
 								</TableRow>
 							))}
 							{filas.length === 0 && !query.isLoading && (
 								<TableRow>
-									<TableCell colSpan={5} className="text-center text-muted-foreground">
+									<TableCell
+										colSpan={6}
+										className="text-center text-muted-foreground"
+									>
 										Sin datos.
 									</TableCell>
 								</TableRow>
@@ -351,6 +571,22 @@ function RouteComponent() {
 					</Table>
 				</CardContent>
 			</Card>
+
+			{editando && (
+				<EditarCapacidadDialog
+					key={`${editando.asesorId}-${editando.bucket}`}
+					asesorId={editando.asesorId}
+					nombre={editando.nombre}
+					bucket={editando.bucket}
+					capacidadBase={editando.capacidadBase}
+					margenAlertaTipo={editando.margenAlertaTipo}
+					margenAlertaValor={editando.margenAlertaValor}
+					open={!!editando}
+					onOpenChange={(next) => {
+						if (!next) setEditando(null);
+					}}
+				/>
+			)}
 		</div>
 	);
 }

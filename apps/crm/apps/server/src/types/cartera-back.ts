@@ -228,6 +228,9 @@ export interface CargaPorAsesorBucketDetalle {
 	alerta_nueva_posicion: boolean;
 	/** Umbral absoluto (capacidad_base + margen resuelto) a partir del cual esta fila entra en alerta_nueva_posicion. */
 	umbral_alerta_cuentas: number;
+	/** CB-019: crudos de margen, para prellenar el formulario de edición de capacidad. */
+	margen_alerta_tipo: "porcentaje" | "fijo";
+	margen_alerta_valor: number;
 }
 
 export interface CargaPorAsesor {
@@ -253,6 +256,15 @@ export interface CargaPorAsesorBucketResponse {
 	buckets: CargaPorBucketResumen[];
 	porAsesor: CargaPorAsesor[];
 	fecha: string;
+}
+
+/** CB-019: input de PATCH /buckets/asesor-bucket/:asesor_id/:bucket. */
+export interface ActualizarCapacidadAsesorBucketInput {
+	asesor_id: number;
+	bucket: number;
+	capacidad_base: number;
+	margen_alerta_tipo: "porcentaje" | "fijo";
+	margen_alerta_valor: number;
 }
 
 export interface GetAsesorHistorialParams {

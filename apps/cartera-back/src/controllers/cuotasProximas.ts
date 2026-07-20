@@ -97,6 +97,13 @@ export async function getCuotasProximasVencer(
         ORDER BY h.fecha DESC, h.historial_id DESC
         LIMIT 1) AS bucket,
       ROUND(c.cuota::numeric, 2)::text AS monto_cuota,
+      -- Mora ACTIVA del crédito (0 si no tiene). OJO: monto_mora es SOLO el
+      -- RECARGO (capital × porcentaje × cuotas atrasadas), NO incluye las
+      -- cuotas vencidas — por eso se devuelve junto a cuotas_atrasadas y el
+      -- mensaje las nombra por separado. moras_credito tiene
+      -- UNIQUE (credito_id) WHERE activa → el LEFT JOIN nunca duplica filas.
+      COALESCE(ROUND(m.monto_mora::numeric, 2), 0)::text AS monto_mora,
+      COALESCE(m.cuotas_atrasadas, 0)::int AS cuotas_atrasadas,
       u.nombre AS cliente,
       -- usuarios NO tiene teléfono en cartera (solo asesores/admins/conta/
       -- inversionistas lo tienen). Se devuelve NULL para mantener la forma
@@ -109,6 +116,8 @@ export async function getCuotasProximasVencer(
     INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = cu.credito_id
     INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
+      ON m.credito_id = c.credito_id AND m.activa = true
     WHERE ${filtroEstado}
       ${filtroBuckets}
       AND cu.pagado = false

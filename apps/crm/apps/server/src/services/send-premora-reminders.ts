@@ -294,8 +294,14 @@ export async function sendPremoraReminders(
 			// venir stale (un crédito recién curado sigue en B2 en
 			// buckets_historial hasta que corra procesarMoras) → mirar el bucket
 			// histórico le mandaría "saldo vencido" a quien ya está al día.
+			// La variante `_mora` NOMBRA las cuotas vencidas y el recargo, así que
+			// exige el dato real de `moras_credito`: si el bucket dice B1+ pero no
+			// hay mora activa (bucket stale, mora aún sin procesar) el mensaje
+			// diría "registra  cuota(s) vencida(s)" → cae a la plantilla base.
 			const plantillaId =
-				!soloB0 && (cuota.bucket ?? 0) >= 1 ? `${tipo}_mora` : tipo;
+				!soloB0 && (cuota.bucket ?? 0) >= 1 && cuota.cuotas_atrasadas > 0
+					? `${tipo}_mora`
+					: tipo;
 			const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === plantillaId);
 			if (!plantilla) {
 				console.error(`${LOG_PREFIX} Plantilla "${plantillaId}" no encontrada`);
@@ -333,7 +339,8 @@ export async function sendPremoraReminders(
 				placa: "",
 				marcaLineaModelo: "",
 				montoAdeudado: "",
-				cuotasAtraso: 0,
+				montoMora: montoLegible(cuota.monto_mora),
+				cuotasAtraso: cuota.cuotas_atrasadas,
 				telefonoAsesor: asesorCheck.telefonoAsesor,
 				nombreAsesor: cuota.asesor ?? "",
 			});

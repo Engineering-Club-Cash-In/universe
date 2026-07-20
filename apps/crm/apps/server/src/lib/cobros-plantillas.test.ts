@@ -119,6 +119,7 @@ Tel: {telefonoAsesor}`);
 			placa: "",
 			marcaLineaModelo: "",
 			montoAdeudado: "",
+			montoMora: "",
 			cuotasAtraso: 0,
 			telefonoAsesor: "41286630",
 			nombreAsesor: "Carlos Pérez",

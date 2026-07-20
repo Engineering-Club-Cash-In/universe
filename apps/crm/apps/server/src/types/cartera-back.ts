@@ -909,6 +909,12 @@ export interface CarteraCuotaProximaVencer {
 	status_credit: string; // ACTIVO | MOROSO | INCOBRABLE (funnel)
 	bucket: number | null; // bucket MOTOR (último de buckets_historial)
 	monto_cuota: string;
+	/** Mora ACTIVA: SOLO el recargo, NO incluye las cuotas vencidas ("0.00" si no tiene). */
+	monto_mora: string;
+	/** Cuotas atrasadas según la FOTO de `moras_credito` (puede venir stale). */
+	cuotas_atrasadas: number;
+	/** Cuotas vencidas reales en tiempo real. Si difiere de `cuotas_atrasadas`, la foto está stale. */
+	cuotas_vencidas_reales: number;
 	cliente: string;
 	telefono_cliente_cartera: string | null;
 	asesor_id: number | null;

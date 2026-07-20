@@ -144,6 +144,7 @@ export async function sendWelcomeMessage(
 			placa: "",
 			marcaLineaModelo: "",
 			montoAdeudado: "",
+			montoMora: "",
 			cuotasAtraso: 0,
 			telefonoAsesor: credito.asesor?.telefono ?? "",
 			nombreAsesor: credito.asesor?.nombre ?? "",

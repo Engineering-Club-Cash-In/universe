@@ -24,6 +24,8 @@ export interface VariablesPlantilla {
 	placa: string;
 	marcaLineaModelo: string;
 	montoAdeudado: string;
+	/** SOLO el recargo por mora (no incluye las cuotas vencidas). Ver `cuotasAtraso`. */
+	montoMora: string;
 	cuotasAtraso: number;
 	telefonoAsesor: string;
 	nombreAsesor: string;
@@ -84,6 +86,7 @@ export function interpolar(
 		.replace(/{placa}/g, v(variables.placa))
 		.replace(/{marcaLineaModelo}/g, v(variables.marcaLineaModelo))
 		.replace(/{montoAdeudado}/g, v(variables.montoAdeudado))
+		.replace(/{montoMora}/g, v(variables.montoMora))
 		.replace(/{cuotasAtraso}/g, v(variables.cuotasAtraso))
 		.replace(/{telefonoAsesor}/g, v(variables.telefonoAsesor))
 		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor));
@@ -237,7 +240,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		etapa: "pre_mora",
 		asunto: "Recordatorio: su cuota vence en 5 días",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 5 días). Además, su crédito presenta saldo vencido: comuníquese con su asesor para regularizar su cuenta y evitar cargos adicionales.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 5 días). Además su crédito registra {cuotasAtraso} cuota(s) vencida(s) y Q{montoMora} de mora.
 
 ${COBROS_CUENTAS_PAGO}
 
@@ -253,7 +256,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		etapa: "pre_mora",
 		asunto: "Recordatorio: su cuota vence en 3 días",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 3 días). Además, su crédito presenta saldo vencido: comuníquese con su asesor para regularizar su cuenta y evitar cargos adicionales.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 3 días). Además su crédito registra {cuotasAtraso} cuota(s) vencida(s) y Q{montoMora} de mora.
 
 ${COBROS_CUENTAS_PAGO}
 
@@ -269,7 +272,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		etapa: "pre_mora",
 		asunto: "Recordatorio: su cuota vence mañana",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence MAÑANA {fechaPago}. Además, su crédito presenta saldo vencido: comuníquese con su asesor para regularizar su cuenta y evitar cargos adicionales.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence MAÑANA {fechaPago}. Además su crédito registra {cuotasAtraso} cuota(s) vencida(s) y Q{montoMora} de mora.
 
 ${COBROS_CUENTAS_PAGO}
 
@@ -285,7 +288,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		etapa: "pre_mora",
 		asunto: "Hoy es su día de pago",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Estimado(a) {clienteNombre}, buen día. Le saludamos de Clubcashin.com para recordarle que HOY {fechaPago} vence la cuota de su crédito por Q{cuotaMensual}. Además, su crédito presenta saldo vencido: comuníquese con su asesor para regularizar su cuenta y evitar cargos adicionales.
+		cuerpo: `Estimado(a) {clienteNombre}, buen día. Le saludamos de Clubcashin.com para recordarle que HOY {fechaPago} vence la cuota de su crédito por Q{cuotaMensual}. Además su crédito registra {cuotasAtraso} cuota(s) vencida(s) y Q{montoMora} de mora.
 
 ${COBROS_CUENTAS_PAGO}
 

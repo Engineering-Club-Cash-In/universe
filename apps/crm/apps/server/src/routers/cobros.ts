@@ -3992,6 +3992,13 @@ export const cobrosRouter = {
 									maximumFractionDigits: 2,
 								})
 							: "",
+					montoMora:
+						montoMora > 0
+							? montoMora.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})
+							: "",
 					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
@@ -4769,16 +4776,21 @@ export const cobrosRouter = {
 					margenAlertaValor: z.number().min(0),
 				})
 				.refine(
-					(v) => v.margenAlertaTipo !== "porcentaje" || v.margenAlertaValor <= 100,
+					(v) =>
+						v.margenAlertaTipo !== "porcentaje" || v.margenAlertaValor <= 100,
 					{
-						message: "margenAlertaValor debe ser <= 100 cuando el tipo es porcentaje",
+						message:
+							"margenAlertaValor debe ser <= 100 cuando el tipo es porcentaje",
 						path: ["margenAlertaValor"],
 					},
 				)
-				.refine((v) => v.margenAlertaTipo !== "fijo" || v.margenAlertaValor <= 500, {
-					message: "margenAlertaValor debe ser <= 500 cuando el tipo es fijo",
-					path: ["margenAlertaValor"],
-				}),
+				.refine(
+					(v) => v.margenAlertaTipo !== "fijo" || v.margenAlertaValor <= 500,
+					{
+						message: "margenAlertaValor debe ser <= 500 cuando el tipo es fijo",
+						path: ["margenAlertaValor"],
+					},
+				),
 		)
 		.handler(async ({ input }) => {
 			if (!isCarteraBackEnabled()) {
@@ -4801,7 +4813,9 @@ export const cobrosRouter = {
 				// cartera-back a BAD_REQUEST en vez de burbujear como 500 genérico.
 				throw new ORPCError("BAD_REQUEST", {
 					message:
-						err instanceof Error ? err.message : "No se pudo actualizar la capacidad",
+						err instanceof Error
+							? err.message
+							: "No se pudo actualizar la capacidad",
 				});
 			}
 		}),

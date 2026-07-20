@@ -463,6 +463,19 @@ export const bucketsRouter = new Elysia()
           set.status = 400;
           return { success: false, message: "[ERROR] bucket inválido (rango 0-5)" };
         }
+        // String vacío/whitespace → Number("") = 0, se cuela como margen "0"
+        // válido en vez de dar 400 (review Codex) — se rechaza ANTES del
+        // Number(...) para no perder la distinción entre "vacío" y "0" real.
+        if (
+          String(body?.capacidad_base ?? "").trim() === "" ||
+          String(body?.margen_alerta_valor ?? "").trim() === ""
+        ) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "[ERROR] capacidad_base y margen_alerta_valor no pueden estar vacíos",
+          };
+        }
         const result = await actualizarCapacidadAsesorBucket({
           asesor_id: asesorId,
           bucket,

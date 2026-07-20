@@ -69,16 +69,26 @@ export async function actualizarCapacidadAsesorBucket(params: {
     };
   }
 
+  // activo=true (review Codex): getAsesoresPorBucket/getCargaPorAsesorBucket
+  // solo consideran pool ACTIVO — sin este filtro, el PATCH podía "actualizar"
+  // con éxito una fila inactiva que el resto del sistema ya ignora, dando al
+  // usuario un falso "listo" sobre una fila que nadie usa.
   const [existente] = await db
     .select({ id: asesor_bucket.id })
     .from(asesor_bucket)
-    .where(and(eq(asesor_bucket.asesor_id, asesor_id), eq(asesor_bucket.bucket, bucket)));
+    .where(
+      and(
+        eq(asesor_bucket.asesor_id, asesor_id),
+        eq(asesor_bucket.bucket, bucket),
+        eq(asesor_bucket.activo, true),
+      ),
+    );
 
   if (!existente) {
     return {
       success: false,
       status: 404,
-      message: `[ERROR] El asesor ${asesor_id} no está en el pool del bucket B${bucket}`,
+      message: `[ERROR] El asesor ${asesor_id} no está en el pool activo del bucket B${bucket}`,
     };
   }
 
@@ -90,7 +100,13 @@ export async function actualizarCapacidadAsesorBucket(params: {
       margen_alerta_valor: margen_alerta_valor.toString(),
       updated_at: new Date(),
     })
-    .where(and(eq(asesor_bucket.asesor_id, asesor_id), eq(asesor_bucket.bucket, bucket)));
+    .where(
+      and(
+        eq(asesor_bucket.asesor_id, asesor_id),
+        eq(asesor_bucket.bucket, bucket),
+        eq(asesor_bucket.activo, true),
+      ),
+    );
 
   return { success: true, asesor_id, bucket };
 }

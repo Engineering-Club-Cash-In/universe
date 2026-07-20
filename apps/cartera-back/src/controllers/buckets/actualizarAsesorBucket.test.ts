@@ -81,7 +81,24 @@ describe("actualizarCapacidadAsesorBucket — controller real con DB fakeada", (
     });
 
     expect(r).toMatchObject({ success: false, status: 404 });
-    expect((r as any).message).toContain("no está en el pool");
+    expect((r as any).message).toContain("no está en el pool activo");
+    expect(estado.updates).toHaveLength(0);
+  });
+
+  it("404 cuando la fila existe pero está inactiva (activo=false) — no se actualiza (review Codex)", async () => {
+    // El SELECT real filtra activo=true; una fila inactiva no aparece en el
+    // resultado — mismo efecto que "no existe" desde la perspectiva del pool.
+    estado.selectsPorTabla.set(schema.asesor_bucket, []);
+
+    const r = await actualizarCapacidadAsesorBucket({
+      asesor_id: 7,
+      bucket: 2,
+      capacidad_base: 300,
+      margen_alerta_tipo: "porcentaje",
+      margen_alerta_valor: 10,
+    });
+
+    expect(r).toMatchObject({ success: false, status: 404 });
     expect(estado.updates).toHaveLength(0);
   });
 

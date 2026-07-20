@@ -41,6 +41,7 @@ import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
 import { PERMISSIONS } from "./lib/roles";
+import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import {
 	appRouter,
 	disbursementRouter,
@@ -177,6 +178,7 @@ const handler = new RPCHandler(
 		manualVehicleRouter,
 		investmentsRouter,
 		disbursementRouter,
+		bucketCapacidadRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

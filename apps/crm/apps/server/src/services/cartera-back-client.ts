@@ -1096,6 +1096,30 @@ export class CarteraBackClient {
 		return response.data ?? { buckets: [], porAsesor: [], fecha: "" };
 	}
 
+	// CB-019: escritura de capacidad_base/margen_alerta por asesor+bucket (antes
+	// solo editable a mano por SQL). Sin cache que invalidar aquí (getCargaPorAsesorBucket
+	// ya es sin cache — ver comentario arriba); el caller invalida su propia query.
+	async actualizarCapacidadAsesorBucket(input: {
+		asesor_id: number;
+		bucket: number;
+		capacidad_base: number;
+		margen_alerta_tipo: "porcentaje" | "fijo";
+		margen_alerta_valor: number;
+	}): Promise<{ success: boolean; message?: string }> {
+		const response = await this.request<{
+			success: boolean;
+			message?: string;
+		}>(`/buckets/asesor-bucket/${input.asesor_id}/${input.bucket}`, {
+			method: "PATCH",
+			body: JSON.stringify({
+				capacidad_base: input.capacidad_base,
+				margen_alerta_tipo: input.margen_alerta_tipo,
+				margen_alerta_valor: input.margen_alerta_valor,
+			}),
+		});
+		return response;
+	}
+
 	// Pool de asesores elegibles de un bucket (alimenta el dropdown del modal).
 	async getPoolAsesoresPorBucket(
 		bucket: number,

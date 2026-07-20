@@ -67,6 +67,7 @@ import {
 	rangoCuotasPorEstadoMora,
 } from "../lib/moraBuckets";
 import {
+	adminProcedure,
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
 	crmCobrosOrInvestmentsProcedure,
@@ -4747,6 +4748,62 @@ export const cobrosRouter = {
 				bucket: input.bucket,
 				asesor_id: input.asesorId,
 			});
+		}),
+
+	// ────────────────────────────────────────────────────────────────────────
+	// CB-019 · Configurar capacidad_base/margen_alerta por asesor+bucket
+	// Solo admin (a diferencia de getCargaPorAsesorBucket, que sigue siendo
+	// admin+supervisor): el supervisor puede ver el dashboard pero no editar
+	// capacidades, pedido explícito del negocio.
+	// ────────────────────────────────────────────────────────────────────────
+	actualizarCapacidadAsesorBucket: adminProcedure
+		.input(
+			z
+				.object({
+					asesorId: z.number().int().positive(),
+					bucket: z.number().int().min(0).max(5),
+					// Tope de sanidad (review code-review): un asesor no atiende más de
+					// 2000 cuentas en un bucket — evita un fat-finger tipo 999999.
+					capacidadBase: z.number().int().positive().max(2000),
+					margenAlertaTipo: z.enum(["porcentaje", "fijo"]),
+					margenAlertaValor: z.number().min(0),
+				})
+				.refine(
+					(v) => v.margenAlertaTipo !== "porcentaje" || v.margenAlertaValor <= 100,
+					{
+						message: "margenAlertaValor debe ser <= 100 cuando el tipo es porcentaje",
+						path: ["margenAlertaValor"],
+					},
+				)
+				.refine((v) => v.margenAlertaTipo !== "fijo" || v.margenAlertaValor <= 500, {
+					message: "margenAlertaValor debe ser <= 500 cuando el tipo es fijo",
+					path: ["margenAlertaValor"],
+				}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+			try {
+				return await carteraBackClient.actualizarCapacidadAsesorBucket({
+					asesor_id: input.asesorId,
+					bucket: input.bucket,
+					capacidad_base: input.capacidadBase,
+					margen_alerta_tipo: input.margenAlertaTipo,
+					margen_alerta_valor: input.margenAlertaValor,
+				});
+			} catch (err) {
+				// cartera-back-client.ts (request()) lanza Error en cualquier no-2xx
+				// (400/404/500) — el {success:false} del client method nunca se
+				// alcanza (review code-review #1). Se mapea el mensaje real de
+				// cartera-back a BAD_REQUEST en vez de burbujear como 500 genérico.
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						err instanceof Error ? err.message : "No se pudo actualizar la capacidad",
+				});
+			}
 		}),
 
 	// Reasignación manual. Solo supervisor/gerente (cobrosSupervisorProcedure).

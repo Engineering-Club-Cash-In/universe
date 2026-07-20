@@ -22,13 +22,13 @@ import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classifi
 // sobrecarga/utilización/alerta se calculan por esa misma combinación, nunca
 // agregadas a nivel bucket completo.
 //
-// ⚠️ capacidad_base/margen_alerta_* son SOLO LECTURA aquí: son el techo y el
-// margen que gerencia configura a mano (mismo patrón que el resto del
-// catálogo — SQL manual, ver migraciones 0001/0003/0004/0005, "Cartera aplica
-// el SQL a mano"). Este módulo nunca debe escribirlas, y tampoco lo hacen
-// latefee.ts (job automático) ni reasignarAsesor.ts (reasignación manual) —
-// ambos solo LEEN asesor_bucket para el pool. Si algún día se agrega
-// auto-ajuste, que sea una decisión explícita nueva, no un efecto colateral.
+// ⚠️ capacidad_base/margen_alerta_* son SOLO LECTURA aquí: este módulo nunca
+// debe escribirlas, y tampoco lo hacen latefee.ts (job automático) ni
+// reasignarAsesor.ts (reasignación manual) — ambos solo LEEN asesor_bucket
+// para el pool. CB-019 agregó el único camino de escritura explícito, desde
+// el CRM: actualizarAsesorBucket.ts (PATCH /buckets/asesor-bucket/:id/:bucket).
+// Si algún día se agrega auto-ajuste, que sea una decisión explícita nueva
+// en ese módulo, no un efecto colateral acá.
 //
 // ⚠️ `sobrecarga` (cuentas > capacidad_base) y `alerta_nueva_posicion`
 // (cuentas >= capacidad_base + margen, INCLUSIVE — review Codex #1113: con
@@ -97,6 +97,10 @@ export type CargaPorAsesorBucketDetalle = {
   // cual esta fila entra en alerta_nueva_posicion — el frontend lo consume
   // directo, sin recalcular la fórmula del margen (que puede ser % o fijo).
   umbral_alerta_cuentas: number;
+  // CB-019: crudos de margen (además del umbral ya resuelto arriba) — el CRM
+  // los necesita para prellenar el formulario de edición de capacidad.
+  margen_alerta_tipo: MargenAlertaTipo;
+  margen_alerta_valor: number;
 };
 
 export type CargaPorAsesor = {
@@ -314,6 +318,8 @@ export async function getCargaPorAsesorBucket(params: {
             sobrecarga,
             alerta_nueva_posicion: alerta,
             umbral_alerta_cuentas: Math.round(umbralAlertaCuentas * 10) / 10,
+            margen_alerta_tipo: margenTipo,
+            margen_alerta_valor: margenValor,
           };
         })
         .sort((x, y) => x.bucket - y.bucket),

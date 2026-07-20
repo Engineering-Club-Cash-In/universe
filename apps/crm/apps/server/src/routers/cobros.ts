@@ -1701,6 +1701,11 @@ export const cobrosRouter = {
 				const cuotas = respuesta.data ?? [];
 				const total = respuesta.total ?? cuotas.length;
 				const totalPages = respuesta.totalPages ?? 1;
+				// Página EFECTIVA: cartera-back clampa la página a la última válida
+				// si la pedida quedó fuera de rango (día encogido); hay que devolver
+				// ESA, no la pedida, o el paginador del front queda pegado en una
+				// página imposible (review Codex).
+				const pageEfectiva = respuesta.page ?? page;
 
 				if (cuotas.length === 0) {
 					return {
@@ -1710,7 +1715,7 @@ export const cobrosRouter = {
 						dia: input.dia,
 						items: [],
 						total,
-						page,
+						page: pageEfectiva,
 						perPage,
 						totalPages,
 					};
@@ -1876,7 +1881,7 @@ export const cobrosRouter = {
 					dia: input.dia,
 					items,
 					total,
-					page,
+					page: pageEfectiva,
 					perPage,
 					totalPages,
 				};

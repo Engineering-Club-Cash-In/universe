@@ -29,7 +29,13 @@ const ESTADOS_SIN_MORA = sql`('EN_CONVENIO', 'INCOBRABLE', 'CANCELADO', 'PENDIEN
 
 export async function getCuotasProximasVencer(
   dias: number[],
-  opts: { soloAlDia?: boolean; buckets?: number[] } = {},
+  opts: {
+    soloAlDia?: boolean;
+    buckets?: number[];
+    asesorId?: number;
+    page?: number;
+    perPage?: number;
+  } = {},
 ) {
   // Default true: premora SOLO recuerda a créditos al día (B0). Con false
   // (la Agenda del día del CRM) entra TODO el funnel — el asesor gestiona
@@ -42,6 +48,23 @@ export async function getCuotasProximasVencer(
   // a soloAlDia: el job del CRM manda soloAlDia=false + buckets=0,1,...
   // cuando el funnel de recordatorios está encendido.
   const buckets = opts.buckets ?? [];
+
+  // Filtro por asesor DUEÑO del crédito (Agenda del día por asesor). Se baja al
+  // SQL a propósito — NO filtrar en el CRM después de traer todo — para que la
+  // paginación sea correcta: el LIMIT/OFFSET tiene que aplicar sobre las filas
+  // del asesor, no sobre el universo completo.
+  const filtroAsesor =
+    opts.asesorId != null ? sql`AND c.asesor_id = ${opts.asesorId}` : sql``;
+
+  // Paginación OPCIONAL: la Agenda del CRM manda page/per_page (el día 15/30
+  // trae ~600 cuentas y se pagina de a perPage). El job de recordatorios NO los
+  // manda: necesita TODAS las cuotas del día para enviarlas. Sin perPage → se
+  // devuelven todas las filas (comportamiento clásico intacto).
+  const paginar = opts.perPage != null && opts.perPage > 0;
+  const page = Math.max(1, opts.page ?? 1);
+  const perPage = paginar ? (opts.perPage as number) : 0;
+  const offset = paginar ? (page - 1) * perPage : 0;
+
   const hoyGT = sql`(now() AT TIME ZONE 'America/Guatemala')::date`;
   const diasList = sql.join(
     dias.map((d) => sql`${d}`),
@@ -86,6 +109,7 @@ export async function getCuotasProximasVencer(
 
   const res = await db.execute<any>(sql`
     SELECT
+      ${paginar ? sql`COUNT(*) OVER()::int AS _total,` : sql``}
       cu.cuota_id,
       cu.credito_id,
       cu.numero_cuota,
@@ -140,6 +164,7 @@ export async function getCuotasProximasVencer(
       ON m.credito_id = c.credito_id AND m.activa = true
     WHERE ${filtroEstado}
       ${filtroBuckets}
+      ${filtroAsesor}
       AND cu.pagado = false
       AND NOT EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))})
       -- Ya hay un pago REGISTRADO para esta cuota aunque CONTA no lo haya
@@ -164,8 +189,31 @@ export async function getCuotasProximasVencer(
       )`
           : sql``
       }
-    ORDER BY dias_para_vencer ASC, c.numero_credito_sifco ASC
+    ORDER BY dias_para_vencer ASC, u.nombre ASC, cu.cuota_id ASC
+    ${paginar ? sql`LIMIT ${perPage} OFFSET ${offset}` : sql``}
   `);
 
-  return { success: true, total: res.rows.length, data: res.rows };
+  const rows = res.rows as Array<Record<string, unknown>>;
+
+  // Sin paginación (job de recordatorios): forma clásica, todas las filas.
+  if (!paginar) {
+    return { success: true, total: rows.length, data: rows };
+  }
+
+  // COUNT(*) OVER() da el total del set filtrado (antes del LIMIT) en la misma
+  // pasada — sin una segunda query que repita las subconsultas correlacionadas.
+  // Una página fuera de rango vuelve vacía → total 0 (el CRM ya conoce el total
+  // desde la página 1, no pide páginas fuera de rango).
+  const total = rows.length > 0 ? Number(rows[0]._total ?? 0) : 0;
+  for (const r of rows) {
+    delete r._total;
+  }
+  return {
+    success: true,
+    total,
+    page,
+    perPage,
+    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    data: rows,
+  };
 }

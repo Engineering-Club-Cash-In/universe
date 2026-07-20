@@ -24,6 +24,9 @@ const pagoCubriente = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
     AND pc.validation_status IN ('validated', 'no_required')
     AND COALESCE(pc.monto_aplicado, 0) > 0`;
 
+// Estados que NO devengan mora (espejo de STATUS_EXCLUIDOS_MORA en latefee.ts).
+const ESTADOS_SIN_MORA = sql`('EN_CONVENIO', 'INCOBRABLE', 'CANCELADO', 'PENDIENTE_CANCELACION', 'CAIDO')`;
+
 export async function getCuotasProximasVencer(
   dias: number[],
   opts: { soloAlDia?: boolean; buckets?: number[] } = {},
@@ -104,6 +107,23 @@ export async function getCuotasProximasVencer(
       -- UNIQUE (credito_id) WHERE activa → el LEFT JOIN nunca duplica filas.
       COALESCE(ROUND(m.monto_mora::numeric, 2), 0)::text AS monto_mora,
       COALESCE(m.cuotas_atrasadas, 0)::int AS cuotas_atrasadas,
+      -- Cuotas vencidas REALES en este instante (espejo de
+      -- isOverdueInstallmentForMora en latefee.ts). moras_credito es una FOTO
+      -- que solo se refresca cuando corre procesarMoras (review Codex): entre
+      -- que CONTA valida una cuota vencida y la siguiente corrida del job, la
+      -- fila sigue diciendo las cuotas y el recargo VIEJOS. El CRM compara este
+      -- conteo vivo contra cuotas_atrasadas y solo cita números cuando cuadran.
+      CASE
+        WHEN c."statusCredit" IN ${ESTADOS_SIN_MORA} THEN 0
+        ELSE (
+          SELECT COUNT(*)
+          FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito v
+          WHERE v.credito_id = c.credito_id
+            AND v.fecha_vencimiento::date < ${hoyGT}
+            AND v.pagado = false
+            AND NOT EXISTS (${pagoCubriente(sql.raw("v.cuota_id"))})
+        )
+      END::int AS cuotas_vencidas_reales,
       u.nombre AS cliente,
       -- usuarios NO tiene teléfono en cartera (solo asesores/admins/conta/
       -- inversionistas lo tienen). Se devuelve NULL para mantener la forma

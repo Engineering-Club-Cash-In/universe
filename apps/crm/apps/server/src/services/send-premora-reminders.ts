@@ -294,12 +294,23 @@ export async function sendPremoraReminders(
 			// venir stale (un crédito recién curado sigue en B2 en
 			// buckets_historial hasta que corra procesarMoras) → mirar el bucket
 			// histórico le mandaría "saldo vencido" a quien ya está al día.
-			// La variante `_mora` NOMBRA las cuotas vencidas y el recargo, así que
-			// exige el dato real de `moras_credito`: si el bucket dice B1+ pero no
-			// hay mora activa (bucket stale, mora aún sin procesar) el mensaje
-			// diría "registra  cuota(s) vencida(s)" → cae a la plantilla base.
+			// La variante `_mora` NOMBRA las cuotas vencidas y el recargo, y esos
+			// números salen de `moras_credito`, que es una FOTO refrescada solo
+			// cuando corre procesarMoras (review Codex). Si CONTA validó una cuota
+			// vencida hace un rato, la foto todavía dice las cuotas y el recargo
+			// viejos → le diríamos "registra 2 cuota(s) vencida(s)" a quien ya
+			// bajó a 1. Por eso solo citamos números cuando la foto COINCIDE con
+			// las cuotas vencidas reales de este instante; si están desfasadas (o
+			// ya no hay vencidas) va la plantilla base, que nunca miente: solo
+			// recuerda la cuota próxima a vencer.
+			// El monto NO se recalcula acá a propósito: la fórmula del recargo es
+			// del motor de moras (latefee.ts) y duplicarla sería una segunda
+			// fuente de verdad que puede discrepar.
+			const vencidasReales = cuota.cuotas_vencidas_reales ?? 0;
+			const fotoMoraAlDia =
+				vencidasReales > 0 && vencidasReales === cuota.cuotas_atrasadas;
 			const plantillaId =
-				!soloB0 && (cuota.bucket ?? 0) >= 1 && cuota.cuotas_atrasadas > 0
+				!soloB0 && (cuota.bucket ?? 0) >= 1 && fotoMoraAlDia
 					? `${tipo}_mora`
 					: tipo;
 			const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === plantillaId);
@@ -340,7 +351,8 @@ export async function sendPremoraReminders(
 				marcaLineaModelo: "",
 				montoAdeudado: "",
 				montoMora: montoLegible(cuota.monto_mora),
-				cuotasAtraso: cuota.cuotas_atrasadas,
+				// Conteo VIVO (== cuotas_atrasadas cuando se usa la variante _mora).
+				cuotasAtraso: vencidasReales,
 				telefonoAsesor: asesorCheck.telefonoAsesor,
 				nombreAsesor: cuota.asesor ?? "",
 			});

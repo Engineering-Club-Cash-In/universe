@@ -19,12 +19,18 @@ export async function construirFilasCredito(
 	const qA = await exec.execute(sql`
 		SELECT cr.credito_id, cr.numero_credito_sifco, u.nombre AS cliente_nombre,
 			cr.asesor_id, a.nombre AS asesor_nombre,
-			COALESCE(prog.capital_restante,0) AS cap_rest, COALESCE(prog.interes_restante,0) AS int_rest,
-			COALESCE(prog.iva_12_restante,0) AS iva_rest, COALESCE(prog.seguro_restante,0) AS seg_rest,
-			COALESCE(prog.gps_restante,0) AS gps_rest,
-			-- Migrados SIFCO no ponen membresias=0 al pagar (a diferencia de los otros
-			-- *_restante), dejando una membresía fantasma en cuotas ya pagadas. Se fuerza a 0
-			-- cuando la cuota está pagada, para quedar consistente con los demás rubros.
+			-- Restantes por rubro. Una cuota PAGADA no debe nada → se fuerza a 0 (los migrados
+			-- SIFCO no siempre ponen capital_restante/membresias en 0 al pagar, dejando un
+			-- restante fantasma). En filas schedule/no_required, capital_restante trae el principal
+			-- remanente del préstamo, no el capital de esta cuota, así que se topa al saldo real de
+			-- la cuota en JS (ver construirFilasCredito), restando lo cobrado para no inflar el
+			-- capital cuando hay abonos parciales en otros rubros.
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.capital_restante,0) END AS cap_rest_raw,
+			cr.cuota::numeric AS cuota,
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.interes_restante,0) END AS int_rest,
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.iva_12_restante,0) END AS iva_rest,
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.seguro_restante,0) END AS seg_rest,
+			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.gps_restante,0) END AS gps_rest,
 			CASE WHEN c.pagado THEN 0 ELSE COALESCE(prog.membresias,0) END AS mem_rest,
 			COALESCE(pag.abono_capital,0) AS cap_cob, COALESCE(pag.abono_interes,0) AS int_cob,
 			COALESCE(pag.abono_iva,0) AS iva_cob, COALESCE(pag.abono_seguro,0) AS seg_cob,
@@ -84,8 +90,22 @@ export async function construirFilasCredito(
 		const invs = invPorCredito.get(Number(f.credito_id)) ?? [];
 		const cubeEsp = interesCubeResidual(new Big(f.int_rest ?? 0), invs);
 		const cubeCob = interesCubeResidual(new Big(f.int_cob ?? 0), invs);
-		const restante = { capital: f.cap_rest, interes: f.int_rest, iva: f.iva_rest, seguro: f.seg_rest, gps: f.gps_rest, membresia: f.mem_rest };
 		const cobrado = { capital: f.cap_cob, interes: f.int_cob, iva: f.iva_cob, seguro: f.seg_cob, gps: f.gps_cob, membresia: f.mem_cob };
+		// Capital de ESTA cuota topado: cap_rest_raw trae el principal remanente del préstamo
+		// (filas schedule/no_required), no el capital de la cuota. El tope = saldo real de la
+		// cuota (cuota − todo lo cobrado) − lo que aún falta de los otros rubros. Restar lo
+		// cobrado evita que un abono parcial en otro rubro devuelva ese monto ya cobrado al
+		// capital e infle programado/esperado (Codex P2). Cuota pagada: cap_rest_raw ya es 0.
+		const otrosRest = new Big(f.int_rest ?? 0).plus(f.iva_rest ?? 0).plus(f.seg_rest ?? 0)
+			.plus(f.gps_rest ?? 0).plus(f.mem_rest ?? 0);
+		const cuotaRest = new Big(f.cuota ?? 0)
+			.minus(f.cap_cob ?? 0).minus(f.int_cob ?? 0).minus(f.iva_cob ?? 0)
+			.minus(f.seg_cob ?? 0).minus(f.gps_cob ?? 0).minus(f.mem_cob ?? 0);
+		let capTope = cuotaRest.minus(otrosRest);
+		if (capTope.lt(0)) capTope = new Big(0);
+		const capRestRaw = new Big(f.cap_rest_raw ?? 0);
+		const capRest = capRestRaw.lt(capTope) ? capRestRaw : capTope; // LEAST(crudo, tope)
+		const restante = { capital: capRest.toString(), interes: f.int_rest, iva: f.iva_rest, seguro: f.seg_rest, gps: f.gps_rest, membresia: f.mem_rest };
 		const sum = (o: Record<string, string>) =>
 			Object.values(o).reduce((a, v) => a.plus(v ?? 0), new Big(0));
 		return {

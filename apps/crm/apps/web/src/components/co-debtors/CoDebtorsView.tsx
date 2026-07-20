@@ -553,6 +553,30 @@ function CoDebtorCard({
 										</p>
 									</div>
 
+									{/* Fecha ideal de pago */}
+									{creditAnalysisQuery.data?.suggestedPaymentDays != null && (
+										<div className="space-y-1">
+											<p className="mb-3 text-muted-foreground text-xs italic">
+												Porcentaje indica día mejor ajustado
+											</p>
+											{creditAnalysisQuery.data.suggestedPaymentDays.map(
+												(c, i) => (
+													<div
+														key={c.dia}
+														className="flex items-center justify-between rounded border px-2 py-1 text-xs"
+													>
+														<span className="text-muted-foreground">
+															Fecha ideal de pago {i + 1}
+														</span>
+														<span className="font-semibold text-blue-600">
+															Día {c.dia} ({c.porcentaje}%)
+														</span>
+													</div>
+												),
+											)}
+										</div>
+									)}
+
 									{/* Capacidad de pago */}
 									<div className="grid grid-cols-2 gap-2 text-center text-xs">
 										<div className="rounded border p-2">

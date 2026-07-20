@@ -3,6 +3,213 @@ import {
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
 } from "./registerPaymentPolicy";
+import * as registerPaymentPolicy from "./registerPaymentPolicy";
+
+describe("registerPaymentPolicy - integridad de cuotas abiertas", () => {
+  it("detecta una cuota abierta que ya está cubierta por pagos validados vivos", () => {
+    const detectarInconsistencia = Reflect.get(
+      registerPaymentPolicy,
+      "getCoveredOpenInstallment",
+    );
+
+    expect(detectarInconsistencia).toBeFunction();
+    if (typeof detectarInconsistencia !== "function") return;
+
+    expect(
+      detectarInconsistencia({
+        montoCuota: "100.00",
+        cuotas: [
+          {
+            cuotaId: 20,
+            numeroCuota: 3,
+            pagos: [
+              {
+                pago_id: 30,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "80.00",
+                abono_interes: "17.86",
+                abono_iva_12: "2.14",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ cuotaId: 20, numeroCuota: 3 });
+  });
+
+  it("no bloquea varios pagos pending antes de validación", () => {
+    expect(
+      registerPaymentPolicy.getCoveredOpenInstallment({
+        montoCuota: "100.00",
+        cuotas: [
+          {
+            cuotaId: 20,
+            numeroCuota: 3,
+            pagos: [
+              {
+                validationStatus: "pending",
+                paymentFalse: false,
+                abono_capital: "60.00",
+              },
+              {
+                validationStatus: "pending",
+                paymentFalse: false,
+                abono_capital: "40.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("detecta cobertura repartida entre filas duplicadas de la misma cuota", () => {
+    expect(
+      registerPaymentPolicy.getCoveredOpenInstallment({
+        montoCuota: "100.00",
+        cuotas: [
+          {
+            cuotaId: 20,
+            numeroCuota: 3,
+            pagos: [
+              {
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "60.00",
+              },
+            ],
+          },
+          {
+            cuotaId: 21,
+            numeroCuota: 3,
+            pagos: [
+              {
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "40.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ cuotaId: 20, numeroCuota: 3 });
+  });
+});
+
+describe("registerPaymentPolicy - resumen de abonos de cuota", () => {
+  const resumir = (
+    input: Parameters<
+      typeof registerPaymentPolicy.calcularResumenAbonosCuota
+    >[0],
+  ) => {
+    const calcularResumen = Reflect.get(
+      registerPaymentPolicy,
+      "calcularResumenAbonosCuota",
+    );
+    expect(calcularResumen).toBeFunction();
+    if (typeof calcularResumen !== "function") return;
+    return calcularResumen(input);
+  };
+
+  it("un pago completo de una cuota cerrada no es abono parcial", () => {
+    expect(
+      resumir({
+        montoCuota: "100.00",
+        cuotaCerrada: true,
+        pagos: [
+          {
+            validationStatus: "validated",
+            paymentFalse: false,
+            abono_capital: "80.00",
+            abono_interes: "17.86",
+            abono_iva_12: "2.14",
+          },
+        ],
+      }),
+    ).toEqual({
+      cuotaCerrada: true,
+      totalAplicadoCuota: "100.00",
+      saldoPendiente: "0.00",
+      tieneAbonoParcial: false,
+    });
+  });
+
+  it("una cuota abierta parcialmente cubierta sí tiene abono parcial", () => {
+    expect(
+      resumir({
+        montoCuota: "100.00",
+        cuotaCerrada: false,
+        pagos: [
+          {
+            validationStatus: "pending",
+            paymentFalse: false,
+            abono_capital: "40.00",
+          },
+        ],
+      }),
+    ).toEqual({
+      cuotaCerrada: false,
+      totalAplicadoCuota: "40.00",
+      saldoPendiente: "60.00",
+      tieneAbonoParcial: true,
+    });
+  });
+
+  it("un placeholder en cero no es abono parcial", () => {
+    expect(
+      resumir({
+        montoCuota: "100.00",
+        cuotaCerrada: false,
+        pagos: [
+          {
+            validationStatus: "no_required",
+            paymentFalse: false,
+            abono_capital: "0",
+          },
+        ],
+      }),
+    ).toEqual({
+      cuotaCerrada: false,
+      totalAplicadoCuota: "0.00",
+      saldoPendiente: "100.00",
+      tieneAbonoParcial: false,
+    });
+  });
+
+  it("excluye mora, otros, convenio y abono directo a capital", () => {
+    expect(
+      resumir({
+        montoCuota: "100.00",
+        cuotaCerrada: false,
+        pagos: [
+          {
+            validationStatus: "validated",
+            paymentFalse: false,
+            abono_interes: "20.00",
+          },
+          {
+            validationStatus: "validated",
+            paymentFalse: false,
+            mora: "100.00",
+            otros: "200.00",
+            pagoConvenio: "300.00",
+          },
+          {
+            validationStatus: "capital_validated",
+            paymentFalse: false,
+            abono_capital: "500.00",
+          },
+        ],
+      }),
+    ).toEqual({
+      cuotaCerrada: false,
+      totalAplicadoCuota: "20.00",
+      saldoPendiente: "80.00",
+      tieneAbonoParcial: true,
+    });
+  });
+});
 
 describe("registerPaymentPolicy - shouldIncobrableInstallmentBePaid", () => {
   it("no aplica (null) cuando el crédito no es incobrable", () => {

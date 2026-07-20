@@ -1,7 +1,12 @@
 node_modules
+**/node_modules
 dist
+**/dist
 .next
+**/.next
 .git
+.env
+.env.*
 .venv
 .playwright-mcp
 .tanstack

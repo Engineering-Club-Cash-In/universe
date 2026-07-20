@@ -3044,6 +3044,32 @@ function RouteComponent() {
 
 										{/* Payment Capacity */}
 										<div className="space-y-4">
+											{creditAnalysisQuery.data.suggestedPaymentDays !=
+												null && (
+												<div className="space-y-1.5">
+													<h4 className="font-medium text-base">
+														Fechas de Pago 
+													</h4>
+													<p className="text-muted-foreground text-xs italic mb-3">
+														Porcentaje indica día mejor ajustado
+													</p>
+													{creditAnalysisQuery.data.suggestedPaymentDays.map(
+														(c, i) => (
+															<div
+																key={c.dia}
+																className="flex items-center justify-between rounded-lg border px-3 py-2"
+															>
+																<span className="text-muted-foreground text-xs">
+																	Fecha Ideal de Pago {i + 1}
+																</span>
+																<span className="font-bold text-blue-600 text-sm">
+																	Día {c.dia} ({c.porcentaje}%)
+																</span>
+															</div>
+														),
+													)}
+												</div>
+											)}
 											<h4 className="font-medium text-base">
 												Capacidad de Pago
 											</h4>

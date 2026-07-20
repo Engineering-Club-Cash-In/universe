@@ -23,6 +23,7 @@ import { useResetCredit } from "./resetCredit";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
+import { getDisplayedPartialContribution } from "../services/installmentContribution";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive({ message: "Debe seleccionar un crédito" }),
   usuario_id: z.number().int().positive({ message: "Usuario requerido" }),
@@ -445,14 +446,7 @@ console.log("Cuota a usar:", cuotaAPagar);
 const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
 
 // 🔥 Calcular abonos ya realizados en la cuota SELECCIONADA (desde endpoint)
-const abonosRealizados = abonosCuota ? (
-  Number(abonosCuota.abono_capital || 0) +
-  Number(abonosCuota.abono_interes || 0) +
-  Number(abonosCuota.abono_iva_12 || 0) +
-  Number(abonosCuota.abono_seguro || 0) +
-  Number(abonosCuota.abono_gps || 0) +
-  Number(abonosCuota.membresias_pago || 0)
-) : 0;
+const abonosRealizados = getDisplayedPartialContribution(abonosCuota);
 
 // 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar
 const cuotaComparar = Math.max(0,cuota - abonosRealizados );

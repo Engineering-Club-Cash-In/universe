@@ -1,0 +1,32 @@
+meta {
+  name: 03 Crear token de cliente
+  type: http
+  seq: 4
+}
+
+post {
+  url: https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/token-users
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer dev-secret
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "creditoId": 1043001,
+    "description": "Credito demo 1043001",
+    "nationalId": "1234567890101"
+  }
+}
+
+docs {
+  Crea el token de cliente asociado al credito usando el token maestro activo.
+}
+
+settings {
+  encodeUrl: true
+}

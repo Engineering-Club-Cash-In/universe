@@ -17,7 +17,7 @@ import {
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
-import { and, eq, lt, sql, asc, lte, inArray, notInArray } from "drizzle-orm";
+import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -28,6 +28,19 @@ import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaCompra
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
+import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
+
+export const crearResumenAbonosCuota = (input: Parameters<
+  typeof calcularResumenAbonosCuota
+>[0]) => {
+  const resumen = calcularResumenAbonosCuota(input);
+  return {
+    cuota_cerrada: resumen.cuotaCerrada,
+    total_aplicado_cuota: resumen.totalAplicadoCuota,
+    saldo_pendiente: resumen.saldoPendiente,
+    tiene_abono_parcial: resumen.tieneAbonoParcial,
+  };
+};
 
 // ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
 // Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
@@ -895,6 +908,10 @@ export async function insertPagosCreditoInversionistas(
       );
 
     let abonoCapitalId: number | null = null;
+    // Abonos que esta fila de espejo consume (los que suma en su abono_capital).
+    // Se marcan con el id de la fila después del insert: son "los que entraron en
+    // la foto" y por lo tanto los únicos que la liquidación puede cerrar.
+    let abonoIdsConsumidos: number[] = [];
     if (abonosNoLiquidados.length > 0) {
       if (inv.status_inversionista === "pendiente_devolucion" || aplicarDevolucionCube) {
         // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
@@ -919,6 +936,8 @@ export async function insertPagosCreditoInversionistas(
           abono_capital = abono_capital.plus(montoAbono);
         }
         abonoCapitalId = abonosNoLiquidados[0].abono_id;
+        // Todos, no solo el linkeado: el abono_capital de arriba los sumó a todos.
+        abonoIdsConsumidos = abonosNoLiquidados.map((a) => a.abono_id);
 
         console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
         console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
@@ -961,6 +980,8 @@ export async function insertPagosCreditoInversionistas(
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
       fecha_pago: fechaDelPeriodo,
+      // No es columna del espejo: se separa antes del insert (ver abajo).
+      _abonoIdsConsumidos: abonoIdsConsumidos,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -980,20 +1001,69 @@ export async function insertPagosCreditoInversionistas(
   // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
 
-  await db
-    .insert(pagos_credito_inversionistas_espejo)
-    .values(resolvedInserts);
+  // `_abonoIdsConsumidos` es interno, no es columna: se separa antes del insert.
+  const filas = resolvedInserts.map(
+    ({ _abonoIdsConsumidos, ...fila }) => fila
+  );
 
-  return resolvedInserts;
+  // 5. Insertar el espejo y marcar los abonos que consumió, ATADOS en una sola
+  //    transacción: o se guardan los dos o ninguno.
+  //
+  //    🔴 Van juntos y no sueltos porque la marca (`pago_espejo_id`) es lo único
+  //    que dice "este abono ya entró en una foto que se va a pagar". Si el espejo
+  //    quedara guardado con el monto adentro pero los abonos sin marcar (falla el
+  //    update, se cae la conexión, se reinicia el proceso), la liquidación —que
+  //    cierra SOLO los marcados— los dejaría abiertos: se pagarían con esta foto
+  //    y el siguiente cálculo los agarraría de nuevo, pagándole DOS VECES el
+  //    mismo capital al inversionista.
+  //
+  //    Atados, si se rompe en el medio no queda foto tampoco y el cálculo se
+  //    rehace limpio la próxima vez.
+  await db.transaction(async (tx) => {
+    const filasInsertadas = await tx
+      .insert(pagos_credito_inversionistas_espejo)
+      .values(filas)
+      .returning({
+        id: pagos_credito_inversionistas_espejo.id,
+        inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id,
+      });
+
+    // Se matchea por inversionista_id (hay una fila por inversionista) y no por
+    // índice, para no depender del orden que devuelve el INSERT.
+    for (const insertada of filasInsertadas) {
+      const origen = resolvedInserts.find(
+        (r) => r.inversionista_id === insertada.inversionista_id
+      );
+      const abonoIds = origen?._abonoIdsConsumidos ?? [];
+      if (abonoIds.length === 0) continue;
+
+      await tx
+        .update(abonos_capital)
+        .set({ pago_espejo_id: insertada.id, updated_at: new Date() })
+        .where(inArray(abonos_capital.abono_id, abonoIds));
+
+      console.log(
+        `   🔖 ${abonoIds.length} abono(s) marcados como consumidos por el espejo ${insertada.id}`
+      );
+    }
+  });
+
+  return filas;
 }
+
+type InvestorPaymentDb = Pick<
+  typeof db,
+  "query" | "select" | "insert" | "update"
+>;
 
 export async function insertPagosCreditoInversionistasV2(
   pago_id: number,
   credito_id: number,
   fechaPeriodo?: Date,
+  txOrDb: InvestorPaymentDb = db,
 ) {
   // 1. Obtener el pago
-  const currentPago = await db.query.pagos_credito.findFirst({
+  const currentPago = await txOrDb.query.pagos_credito.findFirst({
     where: (p, { eq }) => eq(p.pago_id, pago_id),
   });
 
@@ -1002,7 +1072,7 @@ export async function insertPagosCreditoInversionistasV2(
   }
 
   // 2. Obtener inversionistas del crédito
-  const inversionistasData = await db.query.creditos_inversionistas.findMany({
+  const inversionistasData = await txOrDb.query.creditos_inversionistas.findMany({
     where: (ci, { eq }) => eq(ci.credito_id, credito_id),
   });
 
@@ -1013,7 +1083,7 @@ export async function insertPagosCreditoInversionistasV2(
   // 3. Obtener nombres para identificar a Cube
   const inversionistasWithName = await Promise.all(
     inversionistasData.map(async (inv) => {
-      const [invRow] = await db
+      const [invRow] = await txOrDb
         .select({ nombre: inversionistas.nombre })
         .from(inversionistas)
         .where(eq(inversionistas.inversionista_id, inv.inversionista_id));
@@ -1045,7 +1115,7 @@ export async function insertPagosCreditoInversionistasV2(
   //    del mes de la compra se aplicaría a un mes que no corresponde. La facturación
   //    tiene el MISMO comportamiento, así que pci y la factura no divergen; cuando se
   //    decida cerrar este borde hay que hacerlo en AMBOS lados (cofidi.ts + acá).
-  const comprasPendientesFacturar = await db
+  const comprasPendientesFacturar = await txOrDb
     .select({
       inversionista_id: compras_credito_inversionista.inversionista_id,
       monto_aportado: compras_credito_inversionista.monto_aportado,
@@ -1070,7 +1140,7 @@ export async function insertPagosCreditoInversionistasV2(
     const compra = comprasPendientesFacturar[0];
 
     // Espejo: base (monto_aportado), status y fecha_inicio_participacion por inversionista.
-    const espejoRows = await db
+    const espejoRows = await txOrDb
       .select({
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -1185,7 +1255,9 @@ export async function insertPagosCreditoInversionistasV2(
         credito_id,
         abonoCapitalInv.toNumber(),
         false,
-        inv.inversionista_id
+        inv.inversionista_id,
+        false,
+        txOrDb
       );
     }
 
@@ -1205,7 +1277,7 @@ export async function insertPagosCreditoInversionistasV2(
   }
 
   // 7. Insertar/upsert en pagos_credito_inversionistas
-  await db
+  await txOrDb
     .insert(pagos_credito_inversionistas)
     .values(inserts)
     .onConflictDoUpdate({
@@ -3307,7 +3379,7 @@ export async function getAbonosPorCuota(
 ) {
   // 1. Buscar el crédito por SIFCO
   const [credito] = await db
-    .select({ credito_id: creditos.credito_id })
+    .select({ credito_id: creditos.credito_id, cuota: creditos.cuota })
     .from(creditos)
     .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
     .limit(1);
@@ -3321,7 +3393,10 @@ export async function getAbonosPorCuota(
   // credito (p. ej. tras regeneraciones de calendario). Se consideran todas para
   // no perder pagos vinculados al cuota_id "viejo".
   const cuotasMatch = await db
-    .select({ cuota_id: cuotas_credito.cuota_id })
+    .select({
+      cuota_id: cuotas_credito.cuota_id,
+      pagado: cuotas_credito.pagado,
+    })
     .from(cuotas_credito)
     .where(
       and(
@@ -3340,6 +3415,8 @@ export async function getAbonosPorCuota(
   const pagos = await db
     .select({
       pago_id: pagos_credito.pago_id,
+      validationStatus: pagos_credito.validationStatus,
+      paymentFalse: pagos_credito.paymentFalse,
       abono_capital: pagos_credito.abono_capital,
       abono_iva_12: pagos_credito.abono_iva_12,
       abono_interes: pagos_credito.abono_interes,
@@ -3353,11 +3430,10 @@ export async function getAbonosPorCuota(
       and(
         eq(pagos_credito.credito_id, credito.credito_id),
         inArray(pagos_credito.cuota_id, cuotaIds),
-        // Excluir abonos directos a capital (no son pago de cuota) y reversados.
-        // `capital` = sin aplicar, `capital_validated` = aplicado; ninguno es
-        // abono de la cuota, así que no deben aparecer en este desglose.
+        // El desglose y el resumen deben usar exactamente los mismos pagos vivos
+        // de cuota. Excluye reversados, placeholders, convenio y capital directo.
         eq(pagos_credito.paymentFalse, false),
-        notInArray(pagos_credito.validationStatus, ["capital", "capital_validated"])
+        inArray(pagos_credito.validationStatus, ["pending", "validated"])
       )
     );
 
@@ -3377,6 +3453,11 @@ export async function getAbonosPorCuota(
     total_abono_seguro = total_abono_seguro.plus(p.abono_seguro || "0");
     total_abono_gps = total_abono_gps.plus(p.abono_gps || "0");
   }
+  const resumen = crearResumenAbonosCuota({
+    montoCuota: credito.cuota ?? 0,
+    cuotaCerrada: cuotasMatch.some((cuota) => cuota.pagado === true),
+    pagos,
+  });
 
   return {
     success: true,
@@ -3389,5 +3470,6 @@ export async function getAbonosPorCuota(
     membresias_pago: total_membresias_pago.toFixed(2),
     abono_seguro: total_abono_seguro.toFixed(2),
     abono_gps: total_abono_gps.toFixed(2),
+    ...resumen,
   };
 }

@@ -540,6 +540,12 @@ function RouteComponent() {
 											<Button
 												variant="ghost"
 												size="icon"
+												disabled={!f.elegible}
+												title={
+													f.elegible
+														? undefined
+														: "Este asesor no tiene una fila activa en el pool de este bucket — no se puede editar su capacidad"
+												}
 												onClick={() =>
 													setEditando({
 														asesorId: f.asesorId,

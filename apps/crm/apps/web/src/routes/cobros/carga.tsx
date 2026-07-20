@@ -437,7 +437,7 @@ function RouteComponent() {
 								<TableHead>Bucket</TableHead>
 								<TableHead>Asesores en pool</TableHead>
 								<TableHead>Cuentas totales</TableHead>
-								<TableHead>Asesores en alerta</TableHead>
+								<TableHead>Alertas</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
@@ -453,13 +453,26 @@ function RouteComponent() {
 									<TableCell>{b.asesores_en_pool}</TableCell>
 									<TableCell>{b.cuentas_totales}</TableCell>
 									<TableCell>
-										{b.asesores_en_alerta > 0 ? (
-											<Badge variant="destructive">
-												{b.asesores_en_alerta} de {b.asesores_en_pool} en alerta
-											</Badge>
-										) : (
-											<span className="text-muted-foreground text-xs">—</span>
-										)}
+										<div className="flex flex-wrap gap-1">
+											{b.asesores_en_alerta > 0 && (
+												<Badge className="border-transparent bg-amber-500 text-white hover:bg-amber-500/90">
+													{b.asesores_en_alerta} alerta
+													{b.asesores_en_alerta > 1 ? "s" : ""} de nueva
+													posición
+												</Badge>
+											)}
+											{b.asesores_sobrecargados > 0 && (
+												<Badge variant="destructive">
+													{b.asesores_sobrecargados} de sobrecarga
+												</Badge>
+											)}
+											{b.asesores_en_alerta === 0 &&
+												b.asesores_sobrecargados === 0 && (
+													<span className="text-muted-foreground text-xs">
+														—
+													</span>
+												)}
+										</div>
 									</TableCell>
 								</TableRow>
 							))}

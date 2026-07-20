@@ -5940,9 +5940,26 @@ export const crmRouter = {
 							.where(inArray(vehicles.id, vehicleIds))
 					: [];
 
+			// Fetch suggested payment days (fecha ideal de pago) from the lead's credit analysis
+			const creditAnalysisData =
+				leadIds.length > 0
+					? await db
+							.select({
+								leadId: creditAnalysis.leadId,
+								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+							})
+							.from(creditAnalysis)
+							.where(inArray(creditAnalysis.leadId, leadIds))
+					: [];
+
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
 			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
+			const creditAnalysisMap = new Map(
+				creditAnalysisData
+					.filter((ca): ca is typeof ca & { leadId: string } => !!ca.leadId)
+					.map((ca) => [ca.leadId, ca.suggestedPaymentDays]),
+			);
 
 			// Map results
 			const data = opps.map((opp) => {
@@ -5985,6 +6002,9 @@ export const crmRouter = {
 					categoria: opp.categoria,
 					nit: opp.nit,
 					diaPagoMensual: opp.diaPagoMensual,
+					suggestedPaymentDays: opp.leadId
+						? creditAnalysisMap.get(opp.leadId) ?? null
+						: null,
 					createdAt: opp.createdAt,
 					updatedAt: opp.updatedAt,
 					creditType: opp.creditType,
@@ -6058,7 +6078,7 @@ export const crmRouter = {
 					"Vehículo",
 				]),
 				nit: z.string(),
-				diaPagoMensual: z.union([z.literal(15), z.literal(30)]),
+				diaPagoMensual: z.number().int().min(1).max(31),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -6086,6 +6106,32 @@ export const crmRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "La oportunidad debe estar en la etapa del 50%",
 				});
+			}
+
+			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
+			// por el análisis de capacidad de pago (IA) del lead de esta oportunidad.
+			if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
+				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
+					null;
+				if (opportunity.leadId) {
+					const [analysis] = await db
+						.select({
+							suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+						})
+						.from(creditAnalysis)
+						.where(eq(creditAnalysis.leadId, opportunity.leadId))
+						.limit(1);
+					suggestedDays = analysis?.suggestedPaymentDays ?? null;
+				}
+				const isRecommended = suggestedDays?.some(
+					(d) => d.dia === input.diaPagoMensual,
+				);
+				if (!isRecommended) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
+					});
+				}
 			}
 
 			// Parse existing investors from DB

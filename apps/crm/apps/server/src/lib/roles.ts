@@ -171,6 +171,9 @@ export const PERMISSIONS = {
 	canAccessMetaColocacionReport: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
 
+	canAccessEfectividadPorEtapaReport: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
+
 	// Credit Detail Approval (40% → 50%)
 	canApproveCreditDetail: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,

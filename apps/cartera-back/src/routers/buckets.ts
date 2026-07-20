@@ -12,6 +12,7 @@ import {
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
+import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo (= enum de statusCredit menos
@@ -441,6 +442,54 @@ export const bucketsRouter = new Elysia()
           error: String(err),
         };
       }
+    },
+  )
+
+  // CB-019 · Escritura de capacidad_base/margen_alerta por asesor+bucket (config
+  // gerencial, antes solo editable a mano por SQL). Solo edita filas existentes
+  // del pool — no da de alta asesor+bucket nuevos.
+  .patch(
+    "/buckets/asesor-bucket/:asesor_id/:bucket",
+    async ({ params, body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const asesorId = Number(params.asesor_id);
+        if (!Number.isInteger(asesorId) || asesorId <= 0) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] asesor_id inválido" };
+        }
+        const bucket = Number(params.bucket);
+        if (!Number.isInteger(bucket) || bucket < 0 || bucket > 5) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] bucket inválido (rango 0-5)" };
+        }
+        const result = await actualizarCapacidadAsesorBucket({
+          asesor_id: asesorId,
+          bucket,
+          capacidad_base: Number(body?.capacidad_base),
+          margen_alerta_tipo: body?.margen_alerta_tipo,
+          margen_alerta_valor: Number(body?.margen_alerta_valor),
+        });
+        if (!result.success) {
+          set.status = result.status;
+          return { success: false, message: result.message };
+        }
+        return result;
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo actualizar la capacidad del asesor en el bucket",
+          error: String(err),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        capacidad_base: t.Union([t.Number(), t.String()]),
+        margen_alerta_tipo: t.Union([t.Literal("porcentaje"), t.Literal("fijo")]),
+        margen_alerta_valor: t.Union([t.Number(), t.String()]),
+      }),
     },
   )
 

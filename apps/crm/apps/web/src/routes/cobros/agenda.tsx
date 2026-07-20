@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	CalendarClock,
 	CheckCircle2,
+	ChevronLeft,
+	ChevronRight,
 	Loader2,
 	MessageCircle,
 	Phone,
@@ -10,6 +12,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
@@ -74,8 +77,16 @@ interface AgendaResponse {
 	success: boolean;
 	sinAsesor: boolean;
 	asesorForzado: { asesorId: number; nombre: string } | null;
+	dia: number;
 	items: AgendaItem[];
+	total: number;
+	page: number;
+	perPage: number;
+	totalPages: number;
 }
+
+const DIAS_AGENDA = [0, 1, 2, 3, 4, 5] as const;
+const PER_PAGE_AGENDA = 25;
 
 interface AsesorOption {
 	asesorId: number;
@@ -182,15 +193,28 @@ function AgendaDiaPage() {
 
 	// "todos" | asesorId como string (Select de shadcn trabaja con strings).
 	const [asesorSel, setAsesorSel] = useState("todos");
+	// Página por día (cada sección pagina sola). Sin entrada = página 1.
+	const [pagPorDia, setPagPorDia] = useState<Record<number, number>>({});
 
-	const agendaQuery = useQuery({
-		...orpc.getAgendaDia.queryOptions({
-			input: {
-				asesorId:
-					esSupervisor && asesorSel !== "todos" ? Number(asesorSel) : undefined,
-			},
-		}),
-		enabled: !!session,
+	const asesorIdInput =
+		esSupervisor && asesorSel !== "todos" ? Number(asesorSel) : undefined;
+
+	// Una query POR DÍA (D-0..D-5). Cada sección pagina sola: el día 15/30
+	// (~600 cuentas) llega de a PER_PAGE, no de un jalón. keepPreviousData deja
+	// la tabla visible mientras cambia de página (no parpadea a vacío).
+	const dayQueries = useQueries({
+		queries: DIAS_AGENDA.map((dia) => ({
+			...orpc.getAgendaDia.queryOptions({
+				input: {
+					dia,
+					asesorId: asesorIdInput,
+					page: pagPorDia[dia] ?? 1,
+					perPage: PER_PAGE_AGENDA,
+				},
+			}),
+			enabled: !!session,
+			placeholderData: keepPreviousData,
+		})),
 	});
 
 	const asesoresQuery = useQuery({
@@ -215,35 +239,51 @@ function AgendaDiaPage() {
 		);
 	}
 
-	const agenda = agendaQuery.data as AgendaResponse | undefined;
-	const items = agenda?.items ?? [];
+	const secciones = DIAS_AGENDA.map((dia, idx) => ({
+		dia,
+		query: dayQueries[idx],
+		data: dayQueries[idx]?.data as AgendaResponse | undefined,
+	}));
+
 	const asesores = (
 		(asesoresQuery.data as { asesores?: AsesorOption[] } | undefined)
 			?.asesores ?? []
 	).filter((a) => a.activo);
 
-	// Agrupar por urgencia manteniendo el orden D-0 → D-5 del server.
-	const grupos = [0, 1, 2, 3, 4, 5]
-		.map((dias) => ({
-			dias,
-			items: items.filter((i) => i.diasParaVencer === dias),
-		}))
-		.filter((g) => g.items.length > 0);
+	const sinAsesor = secciones.some((s) => s.data?.sinAsesor);
+	const asesorForzado =
+		secciones.find((s) => s.data?.asesorForzado)?.data?.asesorForzado ?? null;
+	// Total real (no limitado por la página): suma del `total` de cada día.
+	const totalCuentas = secciones.reduce(
+		(acc, s) => acc + (s.data?.total ?? 0),
+		0,
+	);
+	const totalHoy = secciones[0]?.data?.total ?? 0;
 
-	const totalHoy = items.filter((i) => i.diasParaVencer === 0).length;
+	const primeraCarga = dayQueries.every((q) => q.isPending);
+	const sinCuotas =
+		!sinAsesor && dayQueries.every((q) => !q.isPending) && totalCuentas === 0;
 
 	// Con "todos" el bucket va por FILA (varía); con UN asesor (elegido o
 	// forzado por rol) va GENERAL en el header — sus buckets, sin repetirse.
+	// Se calcula sobre las filas cargadas (asesor→bucket es estable, así que la
+	// unión de las páginas visibles ya cubre sus buckets).
 	const mostrandoTodos = esSupervisor && asesorSel === "todos";
 	const bucketsDelAsesor = mostrandoTodos
 		? []
 		: [
 				...new Set(
-					items
+					secciones
+						.flatMap((s) => s.data?.items ?? [])
 						.map((i) => i.bucket)
 						.filter((b): b is number => b !== null && b !== undefined),
 				),
 			].sort((a, b) => a - b);
+
+	const cambiarAsesor = (v: string) => {
+		setAsesorSel(v);
+		setPagPorDia({}); // reset de todas las secciones a la página 1
+	};
 
 	const irAlDetalle = (sifco: string) => {
 		navigate({
@@ -268,9 +308,7 @@ function AgendaDiaPage() {
 								<CardDescription>
 									Cuentas con cuota próxima a vencer — de hoy (D-0) a 5 días
 									(D-5), de todo el funnel
-									{agenda?.asesorForzado
-										? ` · Agenda de ${agenda.asesorForzado.nombre}`
-										: ""}
+									{asesorForzado ? ` · Agenda de ${asesorForzado.nombre}` : ""}
 								</CardDescription>
 							</div>
 						</div>
@@ -283,7 +321,7 @@ function AgendaDiaPage() {
 									{totalHoy} pagan hoy
 								</Badge>
 							)}
-							<Badge variant="secondary">{items.length} cuentas</Badge>
+							<Badge variant="secondary">{totalCuentas} cuentas</Badge>
 							{bucketsDelAsesor.length > 0 && (
 								<span className="inline-flex items-center gap-1">
 									{bucketsDelAsesor.map((b) => (
@@ -296,7 +334,7 @@ function AgendaDiaPage() {
 								</span>
 							)}
 							{esSupervisor && (
-								<Select value={asesorSel} onValueChange={setAsesorSel}>
+								<Select value={asesorSel} onValueChange={cambiarAsesor}>
 									<SelectTrigger className="h-8 w-52">
 										<UserRound className="mr-1 h-3.5 w-3.5 text-muted-foreground" />
 										<SelectValue placeholder="Asesor" />
@@ -317,13 +355,13 @@ function AgendaDiaPage() {
 			</Card>
 
 			{/* Estados */}
-			{agendaQuery.isLoading && (
+			{primeraCarga && (
 				<div className="flex items-center justify-center py-16">
 					<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
 				</div>
 			)}
 
-			{!agendaQuery.isLoading && agenda?.sinAsesor && (
+			{sinAsesor && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
 						Tu usuario no está vinculado a un asesor de cartera (por correo).
@@ -332,7 +370,7 @@ function AgendaDiaPage() {
 				</Card>
 			)}
 
-			{!agendaQuery.isLoading && !agenda?.sinAsesor && items.length === 0 && (
+			{sinCuotas && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
 						Sin cuotas próximas a vencer en los próximos 5 días. 🎉
@@ -340,12 +378,21 @@ function AgendaDiaPage() {
 				</Card>
 			)}
 
-			{/* Grupos por urgencia */}
-			{grupos.map((grupo) => {
-				const urgencia = URGENCIA[grupo.dias];
-				const fecha = grupo.items[0]?.fechaVencimiento;
+			{/* Una sección (card) por día, cada una paginada de forma independiente */}
+			{secciones.map(({ dia, query, data }) => {
+				const dayTotal = data?.total ?? 0;
+				// La sección solo aparece cuando ya cargó y tiene cuentas.
+				if (query.isPending || dayTotal === 0) return null;
+				const dayItems = data?.items ?? [];
+				const dayTotalPages = data?.totalPages ?? 1;
+				// Página EFECTIVA del server (ya viene clamped si el día encogió y
+				// la página pedida quedó fuera de rango) → el paginador se
+				// auto-corrige en vez de quedarse pegado en una página vacía.
+				const dayPage = data?.page ?? pagPorDia[dia] ?? 1;
+				const urgencia = URGENCIA[dia];
+				const fecha = dayItems[0]?.fechaVencimiento;
 				return (
-					<Card key={grupo.dias}>
+					<Card key={dia}>
 						<CardHeader className="pb-2">
 							<div className="flex items-center gap-2">
 								<span className={`h-2.5 w-2.5 rounded-full ${urgencia.dot}`} />
@@ -354,7 +401,7 @@ function AgendaDiaPage() {
 									variant="outline"
 									className={`border-transparent text-[10px] ${urgencia.chip}`}
 								>
-									{grupo.items.length}
+									{dayTotal}
 								</Badge>
 								{fecha && (
 									<span className="text-muted-foreground text-xs">
@@ -381,7 +428,7 @@ function AgendaDiaPage() {
 										</TableRow>
 									</TableHeader>
 									<TableBody>
-										{grupo.items.map((item) => (
+										{dayItems.map((item) => (
 											<TableRow
 												key={item.cuotaId}
 												className="cursor-pointer"
@@ -455,6 +502,42 @@ function AgendaDiaPage() {
 									</TableBody>
 								</Table>
 							</div>
+
+							{/* Paginador de la sección (solo si hay más de una página) */}
+							{dayTotalPages > 1 && (
+								<div className="flex items-center justify-between pt-3">
+									<span className="text-muted-foreground text-xs">
+										Mostrando {dayItems.length} de {dayTotal} · página {dayPage}{" "}
+										de {dayTotalPages}
+									</span>
+									<div className="flex items-center gap-1">
+										<Button
+											variant="outline"
+											size="sm"
+											className="h-8"
+											disabled={dayPage <= 1 || query.isFetching}
+											onClick={() =>
+												setPagPorDia((p) => ({ ...p, [dia]: dayPage - 1 }))
+											}
+										>
+											<ChevronLeft className="h-4 w-4" />
+											Anterior
+										</Button>
+										<Button
+											variant="outline"
+											size="sm"
+											className="h-8"
+											disabled={dayPage >= dayTotalPages || query.isFetching}
+											onClick={() =>
+												setPagPorDia((p) => ({ ...p, [dia]: dayPage + 1 }))
+											}
+										>
+											Siguiente
+											<ChevronRight className="h-4 w-4" />
+										</Button>
+									</div>
+								</div>
+							)}
 						</CardContent>
 					</Card>
 				);

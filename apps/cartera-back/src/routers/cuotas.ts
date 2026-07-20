@@ -63,10 +63,54 @@ export const cuotasRouter = new Elysia()
           }
           buckets = [...new Set(bTokens.map(Number))];
         }
+        // asesor_id: opcional, entero positivo — filtra por asesor DUEÑO del
+        // crédito (Agenda del día por asesor). Se baja al SQL para paginar bien.
+        let asesorId: number | undefined;
+        if (query.asesor_id != null && String(query.asesor_id).trim() !== "") {
+          const s = String(query.asesor_id).trim();
+          if (!/^\d{1,9}$/.test(s) || Number(s) < 1) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "[ERROR] asesor_id inválido (entero positivo)",
+            };
+          }
+          asesorId = Number(s);
+        }
+        // page / per_page: paginación OPCIONAL (Agenda del día). per_page se topa
+        // a 200 para no permitir pedir toda la cartera de un jalón. Sin ellos →
+        // sin paginación (el job de recordatorios necesita todas las cuotas).
+        let perPage: number | undefined;
+        if (query.per_page != null && String(query.per_page).trim() !== "") {
+          const s = String(query.per_page).trim();
+          if (!/^\d{1,3}$/.test(s) || Number(s) < 1 || Number(s) > 200) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "[ERROR] per_page inválido (entero 1-200)",
+            };
+          }
+          perPage = Number(s);
+        }
+        let page: number | undefined;
+        if (query.page != null && String(query.page).trim() !== "") {
+          const s = String(query.page).trim();
+          if (!/^\d{1,6}$/.test(s) || Number(s) < 1) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "[ERROR] page inválido (entero positivo)",
+            };
+          }
+          page = Number(s);
+        }
         const dias = [...new Set(tokens.map(Number))];
         return await getCuotasProximasVencer(dias, {
           soloAlDia: rawSoloAlDia === "true",
           buckets,
+          asesorId,
+          page,
+          perPage,
         });
       } catch (err) {
         set.status = 500;
@@ -82,6 +126,9 @@ export const cuotasRouter = new Elysia()
         dias: t.Optional(t.String()),
         solo_al_dia: t.Optional(t.String()),
         buckets: t.Optional(t.String()),
+        asesor_id: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        per_page: t.Optional(t.String()),
       }),
     },
   );

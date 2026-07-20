@@ -1023,7 +1023,13 @@ export class CarteraBackClient {
 	 */
 	async getCuotasProximasVencer(
 		dias: number[] = [5, 3, 1, 0],
-		opts: { soloAlDia?: boolean; buckets?: number[] } = {},
+		opts: {
+			soloAlDia?: boolean;
+			buckets?: number[];
+			asesorId?: number;
+			page?: number;
+			perPage?: number;
+		} = {},
 	): Promise<CarteraCuotasProximasResponse> {
 		const queryParams = new URLSearchParams({ dias: dias.join(",") });
 		// Default true (premora, solo B0). false = Agenda del día (todo el funnel).
@@ -1032,6 +1038,13 @@ export class CarteraBackClient {
 		// solo cuenta como B0 si está al día en tiempo real.
 		if (opts.buckets?.length)
 			queryParams.set("buckets", opts.buckets.join(","));
+		// Agenda del día: filtro por asesor + paginación (el job de premora no los
+		// manda → sin límite). Sin cache: la agenda tiene que reflejar pagos y
+		// ajustes de fecha al instante, igual que getBucketsHistorial.
+		if (opts.asesorId != null)
+			queryParams.set("asesor_id", String(opts.asesorId));
+		if (opts.page != null) queryParams.set("page", String(opts.page));
+		if (opts.perPage != null) queryParams.set("per_page", String(opts.perPage));
 		return this.request<CarteraCuotasProximasResponse>(
 			`/cuotas/proximas-vencer?${queryParams}`,
 			{ method: "GET" },

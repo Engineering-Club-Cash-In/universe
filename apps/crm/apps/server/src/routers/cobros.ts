@@ -1633,24 +1633,29 @@ export const cobrosRouter = {
 	// asesor con `asesorId` o ven todos.
 	getAgendaDia: cobrosProcedure
 		.input(
-			z.object({ asesorId: z.number().int().positive().optional() }).optional(),
+			z.object({
+				// Un día del embudo D-0..D-5 por llamada: la Agenda dispara una query
+				// por sección y cada una pagina sola (el 15/30 son ~600 cuentas).
+				dia: z.number().int().min(0).max(5),
+				asesorId: z.number().int().positive().optional(),
+				page: z.number().int().positive().optional(),
+				perPage: z.number().int().min(1).max(200).optional(),
+			}),
 		)
 		.handler(async ({ input, context }) => {
 			try {
 				const puedeVerTodos = PERMISSIONS.canAssignCobros(
 					context.userRole ?? "",
 				);
+				const perPage = input.perPage ?? 50;
+				const page = input.page ?? 1;
 
-				// Todo el funnel (soloAlDia: false): la agenda es pareja para todos
-				// los asesores — cuentas al día Y en mora con cuota próxima. Los
-				// recordatorios WhatsApp (premora) siguen siendo solo B0.
-				const respuesta = await carteraBackClient.getCuotasProximasVencer(
-					[0, 1, 2, 3, 4, 5],
-					{ soloAlDia: false },
-				);
-				let cuotas = respuesta.data ?? [];
-
+				// Asesor a filtrar EN EL SQL. El rol `cobros` queda FORZADO a su
+				// propio asesor (matcheo por correo, nunca ve otro); admin/supervisor
+				// eligen uno o ven todos. getAdvisors va cacheado (TTL 5m) → las 6
+				// llamadas por día resuelven el asesor de un solo hit real.
 				let asesorForzado: { asesorId: number; nombre: string } | null = null;
+				let asesorIdFiltro: number | undefined;
 				if (!puedeVerTodos) {
 					const email = context.session?.user?.email?.trim().toLowerCase();
 					const advisors = await carteraBackClient.getAdvisors({
@@ -1667,20 +1672,53 @@ export const cobrosRouter = {
 							success: true,
 							sinAsesor: true,
 							asesorForzado: null,
+							dia: input.dia,
 							items: [],
+							total: 0,
+							page,
+							perPage,
+							totalPages: 1,
 						};
 					}
 					asesorForzado = {
 						asesorId: propio.asesor_id,
 						nombre: propio.nombre,
 					};
-					cuotas = cuotas.filter((c) => c.asesor_id === propio.asesor_id);
-				} else if (input?.asesorId) {
-					cuotas = cuotas.filter((c) => c.asesor_id === input.asesorId);
+					asesorIdFiltro = propio.asesor_id;
+				} else if (input.asesorId) {
+					asesorIdFiltro = input.asesorId;
 				}
 
+				// Todo el funnel (soloAlDia: false): la agenda es pareja para todos
+				// — cuentas al día Y en mora con cuota próxima. Los recordatorios
+				// WhatsApp (premora) siguen siendo solo B0. Filtro de asesor +
+				// paginación EN EL SQL: el día pesado llega de a perPage y el LIMIT
+				// aplica sobre las filas del asesor, no sobre el universo.
+				const respuesta = await carteraBackClient.getCuotasProximasVencer(
+					[input.dia],
+					{ soloAlDia: false, asesorId: asesorIdFiltro, page, perPage },
+				);
+				const cuotas = respuesta.data ?? [];
+				const total = respuesta.total ?? cuotas.length;
+				const totalPages = respuesta.totalPages ?? 1;
+				// Página EFECTIVA: cartera-back clampa la página a la última válida
+				// si la pedida quedó fuera de rango (día encogido); hay que devolver
+				// ESA, no la pedida, o el paginador del front queda pegado en una
+				// página imposible (review Codex).
+				const pageEfectiva = respuesta.page ?? page;
+
 				if (cuotas.length === 0) {
-					return { success: true, sinAsesor: false, asesorForzado, items: [] };
+					return {
+						success: true,
+						sinAsesor: false,
+						asesorForzado,
+						dia: input.dia,
+						items: [],
+						total,
+						page: pageEfectiva,
+						perPage,
+						totalPages,
+					};
 				}
 
 				const sifcos = [...new Set(cuotas.map((c) => c.numero_credito_sifco))];
@@ -1796,51 +1834,57 @@ export const cobrosRouter = {
 					enviosPorSifco.set(sifco, porTipo);
 				}
 
-				const items = cuotas
-					.map((c) => {
-						const caso = casoPorSifco.get(c.numero_credito_sifco);
-						return {
-							cuotaId: c.cuota_id,
-							creditoId: c.credito_id,
-							numeroCuota: c.numero_cuota,
-							fechaVencimiento: c.fecha_vencimiento,
-							diasParaVencer: c.dias_para_vencer,
-							numeroCreditoSifco: c.numero_credito_sifco,
-							statusCredit: c.status_credit,
-							bucket: c.bucket,
-							montoCuota: c.monto_cuota,
-							cliente: c.cliente,
-							telefono:
-								primerTelefono(caso?.telefonoPrincipal) ??
-								primerTelefono(leadPhonePorSifco.get(c.numero_credito_sifco)) ??
-								null,
-							casoId: caso?.id ?? null,
-							asesorId: c.asesor_id,
-							asesor: c.asesor,
-							recordatorios: (() => {
-								// Claims exactos por cuota + envíos por SIFCO (dedupe por
-								// tipo; el claim real gana sobre el log).
-								const lista = [...(recPorCuota.get(c.cuota_id) ?? [])];
-								const tipos = new Set(lista.map((r) => r.tipo));
-								const envios = enviosPorSifco.get(c.numero_credito_sifco);
-								if (envios) {
-									for (const [tipo, envio] of envios) {
-										if (!tipos.has(tipo)) {
-											lista.push({ tipo, ...envio });
-										}
+				const items = cuotas.map((c) => {
+					const caso = casoPorSifco.get(c.numero_credito_sifco);
+					return {
+						cuotaId: c.cuota_id,
+						creditoId: c.credito_id,
+						numeroCuota: c.numero_cuota,
+						fechaVencimiento: c.fecha_vencimiento,
+						diasParaVencer: c.dias_para_vencer,
+						numeroCreditoSifco: c.numero_credito_sifco,
+						statusCredit: c.status_credit,
+						bucket: c.bucket,
+						montoCuota: c.monto_cuota,
+						cliente: c.cliente,
+						telefono:
+							primerTelefono(caso?.telefonoPrincipal) ??
+							primerTelefono(leadPhonePorSifco.get(c.numero_credito_sifco)) ??
+							null,
+						casoId: caso?.id ?? null,
+						asesorId: c.asesor_id,
+						asesor: c.asesor,
+						recordatorios: (() => {
+							// Claims exactos por cuota + envíos por SIFCO (dedupe por
+							// tipo; el claim real gana sobre el log).
+							const lista = [...(recPorCuota.get(c.cuota_id) ?? [])];
+							const tipos = new Set(lista.map((r) => r.tipo));
+							const envios = enviosPorSifco.get(c.numero_credito_sifco);
+							if (envios) {
+								for (const [tipo, envio] of envios) {
+									if (!tipos.has(tipo)) {
+										lista.push({ tipo, ...envio });
 									}
 								}
-								return lista;
-							})(),
-						};
-					})
-					.sort(
-						(a, b) =>
-							a.diasParaVencer - b.diasParaVencer ||
-							(a.cliente ?? "").localeCompare(b.cliente ?? ""),
-					);
+							}
+							return lista;
+						})(),
+					};
+				});
+				// Sin re-ordenar: el SQL ya viene ORDER BY nombre del cliente y ese
+				// orden ES el de la paginación (re-ordenar acá partiría las páginas).
 
-				return { success: true, sinAsesor: false, asesorForzado, items };
+				return {
+					success: true,
+					sinAsesor: false,
+					asesorForzado,
+					dia: input.dia,
+					items,
+					total,
+					page: pageEfectiva,
+					perPage,
+					totalPages,
+				};
 			} catch (error) {
 				console.error("[getAgendaDia] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {

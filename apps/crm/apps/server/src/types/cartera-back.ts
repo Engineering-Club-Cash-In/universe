@@ -925,6 +925,10 @@ export interface CarteraCuotaProximaVencer {
 export interface CarteraCuotasProximasResponse {
 	success: boolean;
 	total: number;
+	/** Presentes solo cuando se pidió paginación (Agenda del día); el job no la usa. */
+	page?: number;
+	perPage?: number;
+	totalPages?: number;
 	data: CarteraCuotaProximaVencer[];
 }
 

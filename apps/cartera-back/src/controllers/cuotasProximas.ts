@@ -107,9 +107,66 @@ export async function getCuotasProximasVencer(
     )`
       : sql``;
 
+  // FROM + JOINs y WHERE se comparten entre el COUNT y la query de datos para
+  // que el total sea EXACTAMENTE el del set paginado (los mismos predicados).
+  const fromJoins = sql`
+    FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = cu.credito_id
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
+      ON m.credito_id = c.credito_id AND m.activa = true`;
+
+  const whereClause = sql`
+    WHERE ${filtroEstado}
+      ${filtroBuckets}
+      ${filtroAsesor}
+      AND cu.pagado = false
+      AND NOT EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))})
+      -- Ya hay un pago REGISTRADO para esta cuota aunque CONTA no lo haya
+      -- validado todavía: no recordarle a quien ya mandó su boleta.
+      AND NOT EXISTS (
+        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pr
+        WHERE pr.cuota_id = cu.cuota_id
+          AND pr."paymentFalse" = false
+          AND pr.validation_status = 'pending'
+          AND COALESCE(pr.monto_boleta, 0) > 0
+      )
+      AND (cu.fecha_vencimiento::date - ${hoyGT}) IN (${diasList})
+      -- Crédito AL DÍA: ninguna cuota ya vencida sigue pendiente (solo premora).
+      ${
+        soloAlDia
+          ? sql`AND NOT EXISTS (
+        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito v
+        WHERE v.credito_id = cu.credito_id
+          AND v.fecha_vencimiento::date < ${hoyGT}
+          AND v.pagado = false
+          AND NOT EXISTS (${pagoCubriente(sql.raw("v.cuota_id"))})
+      )`
+          : sql``
+      }`;
+
+  // Total + clamp de página ANTES de traer la página (review Codex): con un
+  // COUNT(*) OVER() en la misma query, una página fuera de rango vuelve VACÍA →
+  // total 0 → la sección de la agenda desaparecería si el día encogió (un pago
+  // o una reasignación) mientras el usuario estaba en una página tardía. Un
+  // COUNT dedicado da el total real siempre, y si la página quedó fuera de rango
+  // se devuelve la ÚLTIMA página válida en vez de una vacía.
+  let totalPaginado = 0;
+  let pageEfectiva = page;
+  let offsetEfectivo = offset;
+  if (paginar) {
+    const countRes = await db.execute<any>(
+      sql`SELECT COUNT(*)::int AS total ${fromJoins} ${whereClause}`,
+    );
+    totalPaginado = Number(countRes.rows[0]?.total ?? 0);
+    const totalPages = Math.max(1, Math.ceil(totalPaginado / perPage));
+    pageEfectiva = Math.min(page, totalPages);
+    offsetEfectivo = (pageEfectiva - 1) * perPage;
+  }
+
   const res = await db.execute<any>(sql`
     SELECT
-      ${paginar ? sql`COUNT(*) OVER()::int AS _total,` : sql``}
       cu.cuota_id,
       cu.credito_id,
       cu.numero_cuota,
@@ -156,41 +213,10 @@ export async function getCuotasProximasVencer(
       c.asesor_id,
       a.nombre AS asesor,
       a.telefono AS telefono_asesor
-    FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
-    INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = cu.credito_id
-    INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
-    LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
-    LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
-      ON m.credito_id = c.credito_id AND m.activa = true
-    WHERE ${filtroEstado}
-      ${filtroBuckets}
-      ${filtroAsesor}
-      AND cu.pagado = false
-      AND NOT EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))})
-      -- Ya hay un pago REGISTRADO para esta cuota aunque CONTA no lo haya
-      -- validado todavía: no recordarle a quien ya mandó su boleta.
-      AND NOT EXISTS (
-        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pr
-        WHERE pr.cuota_id = cu.cuota_id
-          AND pr."paymentFalse" = false
-          AND pr.validation_status = 'pending'
-          AND COALESCE(pr.monto_boleta, 0) > 0
-      )
-      AND (cu.fecha_vencimiento::date - ${hoyGT}) IN (${diasList})
-      -- Crédito AL DÍA: ninguna cuota ya vencida sigue pendiente (solo premora).
-      ${
-        soloAlDia
-          ? sql`AND NOT EXISTS (
-        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito v
-        WHERE v.credito_id = cu.credito_id
-          AND v.fecha_vencimiento::date < ${hoyGT}
-          AND v.pagado = false
-          AND NOT EXISTS (${pagoCubriente(sql.raw("v.cuota_id"))})
-      )`
-          : sql``
-      }
+    ${fromJoins}
+    ${whereClause}
     ORDER BY dias_para_vencer ASC, u.nombre ASC, cu.cuota_id ASC
-    ${paginar ? sql`LIMIT ${perPage} OFFSET ${offset}` : sql``}
+    ${paginar ? sql`LIMIT ${perPage} OFFSET ${offsetEfectivo}` : sql``}
   `);
 
   const rows = res.rows as Array<Record<string, unknown>>;
@@ -200,20 +226,12 @@ export async function getCuotasProximasVencer(
     return { success: true, total: rows.length, data: rows };
   }
 
-  // COUNT(*) OVER() da el total del set filtrado (antes del LIMIT) en la misma
-  // pasada — sin una segunda query que repita las subconsultas correlacionadas.
-  // Una página fuera de rango vuelve vacía → total 0 (el CRM ya conoce el total
-  // desde la página 1, no pide páginas fuera de rango).
-  const total = rows.length > 0 ? Number(rows[0]._total ?? 0) : 0;
-  for (const r of rows) {
-    delete r._total;
-  }
   return {
     success: true,
-    total,
-    page,
+    total: totalPaginado,
+    page: pageEfectiva,
     perPage,
-    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    totalPages: Math.max(1, Math.ceil(totalPaginado / perPage)),
     data: rows,
   };
 }

@@ -86,7 +86,7 @@ interface AgendaResponse {
 }
 
 const DIAS_AGENDA = [0, 1, 2, 3, 4, 5] as const;
-const PER_PAGE_AGENDA = 50;
+const PER_PAGE_AGENDA = 25;
 
 interface AsesorOption {
 	asesorId: number;
@@ -385,7 +385,10 @@ function AgendaDiaPage() {
 				if (query.isPending || dayTotal === 0) return null;
 				const dayItems = data?.items ?? [];
 				const dayTotalPages = data?.totalPages ?? 1;
-				const dayPage = pagPorDia[dia] ?? 1;
+				// Página EFECTIVA del server (ya viene clamped si el día encogió y
+				// la página pedida quedó fuera de rango) → el paginador se
+				// auto-corrige en vez de quedarse pegado en una página vacía.
+				const dayPage = data?.page ?? pagPorDia[dia] ?? 1;
 				const urgencia = URGENCIA[dia];
 				const fecha = dayItems[0]?.fechaVencimiento;
 				return (

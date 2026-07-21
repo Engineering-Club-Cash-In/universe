@@ -7,6 +7,7 @@ import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
+import { EfectividadPorEtapaContent } from "./efectividad-por-etapa";
 import { MetaColocacionContent } from "./meta-colocacion";
 import { PorcentajeEfectividadContent } from "./porcentaje-efectividad";
 import { TiempoCierreContent } from "./tiempo-cierre";
@@ -34,7 +35,10 @@ function RouteComponent() {
 	const canMeta = userRole
 		? PERMISSIONS.canAccessMetaColocacionReport(userRole)
 		: false;
-	const canAny = canTiempo || canEfectividad || canMeta;
+	const canEtapa = userRole
+		? PERMISSIONS.canAccessEfectividadPorEtapaReport(userRole)
+		: false;
+	const canAny = canTiempo || canEfectividad || canMeta || canEtapa;
 	const isPending = sessionPending || userProfile.isPending;
 
 	useEffect(() => {
@@ -73,14 +77,17 @@ function RouteComponent() {
 		? "meta"
 		: canEfectividad
 			? "efectividad"
-			: "tiempo";
+			: canTiempo
+				? "tiempo"
+				: "etapa";
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
 			<div>
 				<h1 className="font-bold text-3xl tracking-tight">Reportes</h1>
 				<p className="mt-1 text-muted-foreground">
-					Reportes de ventas: colocación, efectividad y tiempo de cierre.
+					Reportes de ventas: colocación, efectividad, tiempo de cierre y
+					efectividad por etapa.
 				</p>
 			</div>
 
@@ -92,6 +99,9 @@ function RouteComponent() {
 					)}
 					{canTiempo && (
 						<TabsTrigger value="tiempo">Tiempo de cierre</TabsTrigger>
+					)}
+					{canEtapa && (
+						<TabsTrigger value="etapa">Efectividad por Etapa</TabsTrigger>
 					)}
 				</TabsList>
 
@@ -108,6 +118,11 @@ function RouteComponent() {
 				{canTiempo && (
 					<TabsContent value="tiempo" className="space-y-6">
 						<TiempoCierreContent />
+					</TabsContent>
+				)}
+				{canEtapa && (
+					<TabsContent value="etapa" className="space-y-6">
+						<EfectividadPorEtapaContent />
 					</TabsContent>
 				)}
 			</Tabs>

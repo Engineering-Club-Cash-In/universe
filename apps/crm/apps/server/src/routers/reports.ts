@@ -26,6 +26,7 @@ import {
 } from "../lib/lead-sources";
 import {
 	closedCreditsReportProcedure,
+	efectividadPorEtapaReportProcedure,
 	metaColocacionReportProcedure,
 	porcentajeEfectividadReportProcedure,
 	protectedProcedure,
@@ -657,6 +658,13 @@ export const getReporteInventario = protectedProcedure.handler(async () => {
 
 const CLOSED_STAGE_THRESHOLD = 90;
 const MAX_REPORT_ROWS = 10_000;
+// Primeras 4 etapas del pipeline: Preparación, Llamada de presentación, Solución
+// y propuesta, Recepción de documentación y traslado a análisis.
+const EFECTIVIDAD_POR_ETAPA_MAX_ORDER = 4;
+
+function pctOf(numerator: number, denominator: number) {
+	return denominator > 0 ? Math.round((numerator * 1000) / denominator) / 10 : 0;
+}
 
 type PorcentajeEfectividadFuenteBaseRow = {
 	source: string;
@@ -984,6 +992,164 @@ export const getReporteTiempoCierre = tiempoCierreReportProcedure
 			porFuente: porFuenteRows,
 			porTipoCanal: aggregateTiempoCierrePorTipoCanal(porFuenteRows),
 		};
+	});
+
+type EfectividadPorEtapaRawRow = {
+	stageId: string;
+	stageOrder: number;
+	stageName: string;
+	source: string | null;
+	llegaron: number;
+	avanzaron: number;
+	cerraron: number;
+};
+
+export function buildEfectividadPorEtapaRows(rows: EfectividadPorEtapaRawRow[]) {
+	const porEtapaFuente = rows
+		.filter((row): row is EfectividadPorEtapaRawRow & { source: string } =>
+			row.source !== null,
+		)
+		.map((row) => ({
+			stageId: row.stageId,
+			stageOrder: row.stageOrder,
+			stageName: row.stageName,
+			source: row.source,
+			llegaron: row.llegaron,
+			avanzaron: row.avanzaron,
+			cerraron: row.cerraron,
+			pctAvance: pctOf(row.avanzaron, row.llegaron),
+			pctEfectividad: pctOf(row.cerraron, row.llegaron),
+		}))
+		.sort((a, b) => a.stageOrder - b.stageOrder || b.llegaron - a.llegaron);
+
+	const byStage = new Map<
+		string,
+		{
+			stageId: string;
+			stageOrder: number;
+			stageName: string;
+			llegaron: number;
+			avanzaron: number;
+			cerraron: number;
+		}
+	>();
+
+	for (const row of rows) {
+		const current = byStage.get(row.stageId) ?? {
+			stageId: row.stageId,
+			stageOrder: row.stageOrder,
+			stageName: row.stageName,
+			llegaron: 0,
+			avanzaron: 0,
+			cerraron: 0,
+		};
+		current.llegaron += row.llegaron;
+		current.avanzaron += row.avanzaron;
+		current.cerraron += row.cerraron;
+		byStage.set(row.stageId, current);
+	}
+
+	const porEtapa = [...byStage.values()]
+		.sort((a, b) => a.stageOrder - b.stageOrder)
+		.map((stage) => ({
+			...stage,
+			pctAvance: pctOf(stage.avanzaron, stage.llegaron),
+			pctEfectividad: pctOf(stage.cerraron, stage.llegaron),
+		}));
+
+	return { porEtapa, porEtapaFuente };
+}
+
+/**
+ * Reporte de Efectividad por Etapa
+ * De las oportunidades creadas en el rango, cuántas llegan a cada una de las
+ * primeras 4 etapas del pipeline ("llegar" = etapa actual o alguna vez en su
+ * historial), cuántas avanzan más allá de esa etapa y cuántas terminan
+ * cerrando (etapa con closurePercentage >= 90), desglosado por etapa y fuente.
+ */
+export const getReporteEfectividadPorEtapa = efectividadPorEtapaReportProcedure
+	.input(closedCreditsReportInputSchema)
+	.handler(async ({ input }) => {
+		const { start, end } = parseGuatemalaDateRange(
+			input.startDate,
+			input.endDate,
+		);
+
+		const result = await db.execute(sql`
+			WITH target_stages AS (
+				SELECT id, "order", name
+				FROM sales_stages
+				WHERE "order" <= ${EFECTIVIDAD_POR_ETAPA_MAX_ORDER}
+			), touched_stages AS (
+				SELECT o.id AS opportunity_id, o.stage_id AS stage_id
+				FROM opportunities o
+				WHERE o.stage_id IN (SELECT id FROM target_stages)
+				UNION
+				SELECT h.opportunity_id, h.from_stage_id
+				FROM opportunity_stage_history h
+				WHERE h.from_stage_id IN (SELECT id FROM target_stages)
+				UNION
+				SELECT h.opportunity_id, h.to_stage_id
+				FROM opportunity_stage_history h
+				WHERE h.to_stage_id IN (SELECT id FROM target_stages)
+			), max_order_reached AS (
+				SELECT h.opportunity_id, MAX(s."order") AS max_order
+				FROM opportunity_stage_history h
+				JOIN sales_stages s ON s.id = h.to_stage_id
+				GROUP BY h.opportunity_id
+			), ever_closed AS (
+				SELECT DISTINCT h.opportunity_id
+				FROM opportunity_stage_history h
+				JOIN sales_stages s ON s.id = h.to_stage_id
+				WHERE s.closure_percentage >= ${CLOSED_STAGE_THRESHOLD}
+			), cohort AS (
+				SELECT o.id, COALESCE(o.source, 'other') AS source, o.stage_id AS current_stage_id
+				FROM opportunities o
+				WHERE o.created_at >= ${start}
+					AND o.created_at <= ${end}
+					AND o.status != 'migrate'
+			)
+			SELECT
+				ts.id AS stage_id,
+				ts."order" AS stage_order,
+				ts.name AS stage_name,
+				c.source AS source,
+				COUNT(DISTINCT c.id)::int AS llegaron,
+				COUNT(DISTINCT CASE
+					WHEN GREATEST(cs."order", COALESCE(mo.max_order, 0)) > ts."order" THEN c.id
+				END)::int AS avanzaron,
+				COUNT(DISTINCT CASE WHEN ec.opportunity_id IS NOT NULL THEN c.id END)::int AS cerraron
+			FROM target_stages ts
+			LEFT JOIN touched_stages tch ON tch.stage_id = ts.id
+			LEFT JOIN cohort c ON c.id = tch.opportunity_id
+			LEFT JOIN sales_stages cs ON cs.id = c.current_stage_id
+			LEFT JOIN max_order_reached mo ON mo.opportunity_id = c.id
+			LEFT JOIN ever_closed ec ON ec.opportunity_id = c.id
+			GROUP BY ts.id, ts."order", ts.name, c.source
+			ORDER BY ts."order", c.source
+		`);
+
+		const rawRows = result.rows as {
+			stage_id: string;
+			stage_order: number;
+			stage_name: string;
+			source: string | null;
+			llegaron: number;
+			avanzaron: number;
+			cerraron: number;
+		}[];
+
+		return buildEfectividadPorEtapaRows(
+			rawRows.map((row) => ({
+				stageId: row.stage_id,
+				stageOrder: row.stage_order,
+				stageName: row.stage_name,
+				source: row.source,
+				llegaron: row.llegaron,
+				avanzaron: row.avanzaron,
+				cerraron: row.cerraron,
+			})),
+		);
 	});
 
 /**

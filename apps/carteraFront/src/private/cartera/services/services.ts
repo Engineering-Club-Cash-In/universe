@@ -1920,6 +1920,8 @@ export interface GetPagosParams {
   fechaInicio?: string;
   fechaFin?: string;
   fechaAplicado?: string;
+  fechaAplicadoInicio?: string;
+  fechaAplicadoFin?: string;
   categoriaCredito?: string;
   formatoCredito?: string;
   soloAplicados?: boolean;

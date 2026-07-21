@@ -2618,6 +2618,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     // Solo no-CUBE: el interés de CUBE ya se corrige desde el desglose abajo
     // (incluye parciales). Excluye redirigidos a CUBE (bandera + espejo
     // pendiente), igual que la simulación del detalle.
+    // Con filtro == CUBE la query se salta por completo (Codex P2): un resumen
+    // solo-CUBE no debe ganar filas no-CUBE por los parciales simulables.
+    const esFiltroCube = Boolean(inversionistaId) && Number(inversionistaId) === CUBE_ID;
     const totalesSimQuery = sql`
       WITH pf AS (
         SELECT p.pago_id, p.credito_id, c.bandera_reinversion,
@@ -2657,7 +2660,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       GROUP BY ci.inversionista_id, i.nombre, i.emite_factura
     `;
 
-    const totalesSimResult = await db.execute(totalesSimQuery);
+    const totalesSimResult = esFiltroCube
+      ? { rows: [] as any[] }
+      : await db.execute(totalesSimQuery);
     for (const simRow of totalesSimResult.rows as any[]) {
       const interesSim = new Big(simRow.interesSim ?? 0);
       const ivaSim = new Big(simRow.ivaSim ?? 0);

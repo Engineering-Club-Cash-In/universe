@@ -150,6 +150,12 @@ function ReasignarModal({
 			queryClient.invalidateQueries({
 				queryKey: orpc.getHistorialReasignaciones.key(),
 			});
+			// Las tarjetas de carga por asesor (getCargaPorAsesorBucket) muestran
+			// conteos/utilización que cambian al reasignar; sin invalidar quedarían
+			// stale justo tras la acción que las modifica.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getCargaPorAsesorBucket.key(),
+			});
 			onClose();
 		},
 		onError: (err: Error) => toast.error(err.message),
@@ -664,6 +670,7 @@ function RouteComponent() {
 				page,
 				perPage,
 				numeroCredito: buscar || undefined,
+				asesorId,
 			},
 		}),
 		enabled: !!session,

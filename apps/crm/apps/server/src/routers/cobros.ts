@@ -4743,6 +4743,7 @@ export const cobrosRouter = {
 				perPage: z.number().int().positive().max(200).optional(),
 				numeroCredito: z.string().optional(),
 				nombreCliente: z.string().optional(),
+				asesorId: z.number().int().positive().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -4752,6 +4753,7 @@ export const cobrosRouter = {
 				perPage: input.perPage ?? 20,
 				numero_credito_sifco: input.numeroCredito?.trim() || undefined,
 				nombre_usuario: input.nombreCliente?.trim() || undefined,
+				asesor_id: input.asesorId,
 			});
 			return {
 				data: resp.data.map((c) => ({

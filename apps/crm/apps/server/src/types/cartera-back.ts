@@ -202,6 +202,8 @@ export interface GetCreditosPorBucketParams {
 	numero_credito_sifco?: string;
 	nombre_usuario?: string;
 	email_asesor?: string;
+	/** Filtra la lista por asesor asignado (cartera-back /buckets/creditos). */
+	asesor_id?: number;
 }
 
 /** CB-018: filtros de GET /buckets/carga (carga por asesor y bucket). */

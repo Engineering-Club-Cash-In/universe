@@ -1765,6 +1765,8 @@ interface GetPagosOptions {
   formatoCredito?: string;
   soloAplicados?: boolean;
   fechaAplicado?: string;
+  fechaAplicadoInicio?: string;
+  fechaAplicadoFin?: string;
   fechaBoleta?: string;
   fechaBoletaInicio?: string;
   fechaBoletaFin?: string;
@@ -1874,6 +1876,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     formatoCredito,
     soloAplicados,
     fechaAplicado,
+    fechaAplicadoInicio,
+    fechaAplicadoFin,
     fechaBoleta,
     fechaBoletaInicio,
     fechaBoletaFin,
@@ -1954,6 +1958,18 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (fechaAplicado) {
       whereClauses.push(
         `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+      );
+    }
+    // 📅 Rango de fecha_aplicado (zona Guatemala). Inclusivo en ambos extremos.
+    // Se puede usar combinado o por separado con fechaAplicado (exacta).
+    if (fechaAplicadoInicio) {
+      whereClauses.push(
+        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >= '${fechaAplicadoInicio}'::date`
+      );
+    }
+    if (fechaAplicadoFin) {
+      whereClauses.push(
+        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= '${fechaAplicadoFin}'::date`
       );
     }
     if (fechaBoleta) {

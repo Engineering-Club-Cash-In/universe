@@ -815,6 +815,70 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
     expect(out).toHaveLength(0);
   });
 
+  it("caso 12 (sim): bandera_reinversion excluye SOLO al redirigido a CUBE (espejo pendiente); los demás sí se simulan", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("60"), iva: new Big("6.43") },
+      creditoInvs: [
+        {
+          inversionista_id: 1,
+          nombre: "InvNormal",
+          emite_factura: false,
+          porcentaje_participacion_inversionista: "90",
+          porcentaje_cash_in: "10",
+          monto_aportado: "50000",
+          status_espejo: "activo",
+        },
+        {
+          inversionista_id: 2,
+          nombre: "InvRedirigido",
+          emite_factura: false,
+          porcentaje_participacion_inversionista: "85",
+          porcentaje_cash_in: "15",
+          monto_aportado: "50000",
+          status_espejo: "pendiente_compra_cartera",
+        },
+      ],
+      abonoInteresPago: "100",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      banderaReinversion: true,
+    });
+
+    // InvNormal se simula: 100 × 0.5 × 0.90 = 45.00
+    const invNormal = out.find((r: any) => r.inversionistaId === 1)!;
+    expect(invNormal).toBeDefined();
+    expect(invNormal.abonoInteres).toBe(45);
+
+    // InvRedirigido NO aparece (su interés ya va dentro del desglose de CUBE)
+    expect(out.find((r: any) => r.inversionistaId === 2)).toBeUndefined();
+
+    // Sin bandera, el mismo roster simula a AMBOS (el espejo pendiente solo,
+    // sin bandera, no redirige — misma condición que cofidi).
+    const outSinBandera = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("60"), iva: new Big("6.43") },
+      creditoInvs: [
+        {
+          inversionista_id: 2,
+          nombre: "InvRedirigido",
+          emite_factura: false,
+          porcentaje_participacion_inversionista: "85",
+          porcentaje_cash_in: "15",
+          monto_aportado: "50000",
+          status_espejo: "pendiente_compra_cartera",
+        },
+      ],
+      abonoInteresPago: "100",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      banderaReinversion: false,
+    });
+    expect(outSinBandera.find((r: any) => r.inversionistaId === 2)).toBeDefined();
+  });
+
   it("caso 11 (sim): simularSinPci=false conserva el comportamiento previo (solo CUBE)", () => {
     const out = armarInversionistasPago({
       pciRows: null,

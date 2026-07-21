@@ -1793,6 +1793,10 @@ export type ReportCreditoInv = {
   porcentaje_participacion_inversionista: string | number;
   porcentaje_cash_in: string | number;
   monto_aportado: string | number;
+  // status del espejo (creditos_inversionistas_espejo): con bandera_reinversion
+  // activa, 'pendiente_reinversion'/'pendiente_compra_cartera' redirigen el
+  // interés de ESE inversionista a CUBE en la facturación (cofidi.ts).
+  status_espejo?: string | null;
 };
 
 
@@ -1813,7 +1817,17 @@ function simularInversionistasSinPci(args: {
   abonoInteresPago: string | number | null | undefined;
   abonoIvaPago: string | number | null | undefined;
   cuota?: string | number | null;
+  banderaReinversion?: boolean;
 }): ReportInvRow[] {
+  // Redirigido a CUBE (misma condición que cofidi al facturar): su interés ya
+  // está dentro del desglose INTERES de CUBE — simularle su parte regular lo
+  // doble-contaría. Solo se excluye a ESE inversionista; los demás del mismo
+  // crédito se facturan normal y sí se simulan (Codex P2, PR #1137).
+  const esRedirigidoACube = (ci: ReportCreditoInv) =>
+    args.banderaReinversion === true &&
+    (ci.status_espejo === "pendiente_reinversion" ||
+      ci.status_espejo === "pendiente_compra_cartera");
+
   const split = calcularSplitInteresPci({
     inversionistas: args.creditoInvs.map((ci) => ({
       inversionista_id: ci.inversionista_id,
@@ -1832,7 +1846,7 @@ function simularInversionistasSinPci(args: {
   // json_build_object y el front (modalViewInvestor) les hace .toFixed() —
   // una fila simulada con strings reventaría el modal.
   return args.creditoInvs
-    .filter((ci) => ci.inversionista_id !== args.cubeId)
+    .filter((ci) => ci.inversionista_id !== args.cubeId && !esRedirigidoACube(ci))
     .map((ci) => {
       const s = splitPorInv.get(ci.inversionista_id);
       const interes = (s?.abono_interes ?? new Big(0)).round(2);
@@ -1889,6 +1903,7 @@ export function armarInversionistasPago(args: {
   abonoInteresPago?: string | number | null;            // pagos_credito.abono_interes
   abonoIvaPago?: string | number | null;                // pagos_credito.abono_iva_12
   simularSinPci?: boolean;                              // el caller gatea: validated + !pendienteFacturar
+  banderaReinversion?: boolean;                         // excluye SOLO a los redirigidos a CUBE (espejo pendiente)
 }): ReportInvRow[] {
   const rows = Array.isArray(args.pciRows) ? args.pciRows : [];
   let noCube = rows.filter((r) => r.inversionistaId !== args.cubeId);
@@ -1910,6 +1925,7 @@ export function armarInversionistasPago(args: {
       abonoInteresPago: args.abonoInteresPago,
       abonoIvaPago: args.abonoIvaPago,
       cuota: args.cuota,
+      banderaReinversion: args.banderaReinversion,
     });
   }
 
@@ -2298,9 +2314,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           i.emite_factura AS "emiteFactura",
           ci.porcentaje_participacion_inversionista AS "porcentajeParticipacion",
           ci.porcentaje_cash_in AS "porcentajeCashIn",
-          ci.monto_aportado AS "montoAportado"
+          ci.monto_aportado AS "montoAportado",
+          esp.status AS "statusEspejo"
         FROM cartera.creditos_inversionistas ci
         INNER JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+        LEFT JOIN cartera.creditos_inversionistas_espejo esp
+          ON esp.credito_id = ci.credito_id
+          AND esp.inversionista_id = ci.inversionista_id
         WHERE ci.credito_id = ANY(${"{" + creditoIds.join(",") + "}"}::bigint[])
       `);
       for (const row of ciResult.rows as any[]) {
@@ -2313,6 +2333,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           porcentaje_participacion_inversionista: row.porcentajeParticipacion ?? 0,
           porcentaje_cash_in: row.porcentajeCashIn ?? 0,
           monto_aportado: row.montoAportado ?? 0,
+          status_espejo: row.statusEspejo ?? null,
         });
         creditoInvsByCredito.set(cid, arr);
       }
@@ -2376,18 +2397,18 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
             cuota: r.cuotaMonto as any,
             // 🆕 Parciales sin reparto: simular filas no-CUBE con la misma
             // matemática del cierre (calcularSplitInteresPci). Solo pagos
-            // 'validated' (reset/cancelación reparte distinto), sin compra de
-            // cartera pendiente (esos usan prorrateo por días, no aportado) y
-            // sin bandera_reinversion (en esa ventana la facturación redirige
-            // el interés del inversionista a CUBE → el desglose INTERES ya lo
-            // incluye y simular su parte regular lo doble-contaría).
+            // 'validated' (reset/cancelación reparte distinto) y sin compra de
+            // cartera pendiente (esos usan prorrateo por días, no aportado).
+            // Con bandera_reinversion se excluye POR INVERSIONISTA solo a los
+            // redirigidos a CUBE (espejo pendiente) — los demás del crédito se
+            // facturan normal y sí se simulan.
             creditoInvs,
             abonoInteresPago: r.abono_interes as any,
             abonoIvaPago: r.abono_iva_12 as any,
             simularSinPci:
               (r as any).validation_status === "validated" &&
-              !((r as any).pendienteFacturar ?? false) &&
-              !((r as any).banderaReinversion ?? false),
+              !((r as any).pendienteFacturar ?? false),
+            banderaReinversion: (r as any).banderaReinversion ?? false,
           })
         : pciRows;
 

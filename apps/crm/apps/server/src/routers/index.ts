@@ -340,6 +340,7 @@ export const reportsAppRouter = {
 	getReportePorcentajeEfectividad:
 		reportsRouter.getReportePorcentajeEfectividad,
 	getReporteMetaColocacion: reportsRouter.getReporteMetaColocacion,
+	getReporteEfectividadPorEtapa: reportsRouter.getReporteEfectividadPorEtapa,
 	// Reportes unificados (cartera-back + CRM)
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,

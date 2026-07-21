@@ -673,4 +673,224 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
     expect(out).toHaveLength(1);
     expect(out.find((r: any) => r.inversionistaId === 86)).toBeUndefined();
   });
+
+  // ── 🆕 Simulación de parciales sin reparto (simularSinPci) ────────────────
+  // Caso real (crédito 01010214120570, pago 144366 del 2026-07-07): parcial de
+  // interés Q365.17 facturado el día 7; el reparto real (pci) no se creó sino
+  // hasta que la cuota cerró el día 20. La simulación debe mostrar al
+  // inversionista desde el día 7 con el MISMO monto que pci escribió después.
+  const creditoInvsJennifer = [
+    {
+      inversionista_id: 14,
+      nombre: "Carlos Fernando Carrillo Cifuentes",
+      emite_factura: false,
+      porcentaje_participacion_inversionista: "80",
+      porcentaje_cash_in: "20",
+      monto_aportado: "100176.29",
+    },
+    {
+      inversionista_id: 86,
+      nombre: "Cube Investments S.A.",
+      emite_factura: false,
+      porcentaje_participacion_inversionista: "0",
+      porcentaje_cash_in: "100",
+      monto_aportado: "0",
+    },
+  ];
+
+  it("caso 7 (sim): parcial sin pci + simularSinPci → simula no-CUBE igual que el reparto real", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("73.03"), iva: new Big("7.83") },
+      cuota: "3751.32",
+      creditoInvs: creditoInvsJennifer,
+      abonoInteresPago: "365.17",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+    });
+
+    expect(out).toHaveLength(2);
+
+    // Carlos: 365.17 × 100% (aportado) × 80% (participación) = 292.14 —
+    // exactamente lo que pci registró al cerrar la cuota el día 20.
+    // Numbers (no strings): el front tipa number y hace .toFixed().
+    const carlos = out.find((r: any) => r.inversionistaId === 14)!;
+    expect(carlos.abonoInteres).toBe(292.14);
+    expect(carlos.abonoIva).toBe(0);
+    expect(carlos.abonoCapital).toBe(0); // capital solo se reparte al cierre
+    expect(carlos.isr).toBe(14.61);
+    expect(carlos.montoAportado).toBe(100176.29);
+    expect(carlos.porcentajeParticipacion).toBe(80);
+
+    // CUBE sigue saliendo del desglose (net 65.20), como antes.
+    const cube = out.find((r: any) => r.inversionistaId === 86)!;
+    expect(cube.abonoInteres).toBe("65.20");
+    expect(cube.abonoIva).toBe("7.83");
+  });
+
+  it("caso 8 (sim): si YA hay filas pci, el reparto real manda y no se simula", () => {
+    const pciRows = [
+      {
+        inversionistaId: 14,
+        nombreInversionista: "Carlos Fernando Carrillo Cifuentes",
+        emiteFactura: false,
+        abonoCapital: "0.00",
+        abonoInteres: "292.14",
+        abonoIva: "0.00",
+        isr: "14.61",
+        cuotaPago: "3751.32",
+        montoAportado: "100176.29",
+        porcentajeParticipacion: "80",
+      },
+    ];
+
+    const out = armarInversionistasPago({
+      pciRows,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("73.03"), iva: new Big("7.83") },
+      creditoInvs: creditoInvsJennifer,
+      abonoInteresPago: "365.17",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+    });
+
+    // 1 fila pci (Carlos) + fila CUBE del desglose; nada duplicado por simulación.
+    expect(out).toHaveLength(2);
+    expect(out.filter((r: any) => r.inversionistaId === 14)).toHaveLength(1);
+  });
+
+  it("caso 9 (sim): reparte por monto_aportado entre varios inversionistas", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("29.6"), iva: new Big("3.17") },
+      creditoInvs: [
+        {
+          inversionista_id: 1,
+          nombre: "InvA",
+          emite_factura: false,
+          porcentaje_participacion_inversionista: "90",
+          porcentaje_cash_in: "10",
+          monto_aportado: "60000",
+        },
+        {
+          inversionista_id: 2,
+          nombre: "InvB",
+          emite_factura: true,
+          porcentaje_participacion_inversionista: "85",
+          porcentaje_cash_in: "15",
+          monto_aportado: "40000",
+        },
+      ],
+      abonoInteresPago: "100",
+      abonoIvaPago: "12",
+      simularSinPci: true,
+    });
+
+    // InvA: 100 × 0.6 × 0.90 = 54.00 | IVA 12 × 0.6 × 0.90 = 6.48
+    const invA = out.find((r: any) => r.inversionistaId === 1)!;
+    expect(invA.abonoInteres).toBe(54);
+    expect(invA.abonoIva).toBe(6.48);
+
+    // InvB (emite_factura=true también se simula: pci lo incluye al cierre):
+    // 100 × 0.4 × 0.85 = 34.00 | IVA 12 × 0.4 × 0.85 = 4.08
+    const invB = out.find((r: any) => r.inversionistaId === 2)!;
+    expect(invB.abonoInteres).toBe(34);
+    expect(invB.abonoIva).toBe(4.08);
+    expect(invB.emiteFactura).toBe(true);
+  });
+
+  it("caso 10 (sim): sin desglose (pago no facturado) NO se simula aunque simularSinPci=true", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: null,
+      creditoInvs: creditoInvsJennifer,
+      abonoInteresPago: "365.17",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+    });
+
+    expect(out).toHaveLength(0);
+  });
+
+  it("caso 12 (sim): bandera_reinversion excluye SOLO al redirigido a CUBE (espejo pendiente); los demás sí se simulan", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("60"), iva: new Big("6.43") },
+      creditoInvs: [
+        {
+          inversionista_id: 1,
+          nombre: "InvNormal",
+          emite_factura: false,
+          porcentaje_participacion_inversionista: "90",
+          porcentaje_cash_in: "10",
+          monto_aportado: "50000",
+          status_espejo: "activo",
+        },
+        {
+          inversionista_id: 2,
+          nombre: "InvRedirigido",
+          emite_factura: false,
+          porcentaje_participacion_inversionista: "85",
+          porcentaje_cash_in: "15",
+          monto_aportado: "50000",
+          status_espejo: "pendiente_compra_cartera",
+        },
+      ],
+      abonoInteresPago: "100",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      banderaReinversion: true,
+    });
+
+    // InvNormal se simula: 100 × 0.5 × 0.90 = 45.00
+    const invNormal = out.find((r: any) => r.inversionistaId === 1)!;
+    expect(invNormal).toBeDefined();
+    expect(invNormal.abonoInteres).toBe(45);
+
+    // InvRedirigido NO aparece (su interés ya va dentro del desglose de CUBE)
+    expect(out.find((r: any) => r.inversionistaId === 2)).toBeUndefined();
+
+    // Sin bandera, el mismo roster simula a AMBOS (el espejo pendiente solo,
+    // sin bandera, no redirige — misma condición que cofidi).
+    const outSinBandera = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("60"), iva: new Big("6.43") },
+      creditoInvs: [
+        {
+          inversionista_id: 2,
+          nombre: "InvRedirigido",
+          emite_factura: false,
+          porcentaje_participacion_inversionista: "85",
+          porcentaje_cash_in: "15",
+          monto_aportado: "50000",
+          status_espejo: "pendiente_compra_cartera",
+        },
+      ],
+      abonoInteresPago: "100",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      banderaReinversion: false,
+    });
+    expect(outSinBandera.find((r: any) => r.inversionistaId === 2)).toBeDefined();
+  });
+
+  it("caso 11 (sim): simularSinPci=false conserva el comportamiento previo (solo CUBE)", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("73.03"), iva: new Big("7.83") },
+      creditoInvs: creditoInvsJennifer,
+      abonoInteresPago: "365.17",
+      abonoIvaPago: "0",
+      simularSinPci: false,
+    });
+
+    expect(out).toHaveLength(1);
+    expect(out[0].inversionistaId).toBe(86);
+  });
 });

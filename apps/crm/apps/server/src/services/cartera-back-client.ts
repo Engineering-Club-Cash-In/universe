@@ -1066,6 +1066,9 @@ export class CarteraBackClient {
 			}),
 			...(params.nombre_usuario && { nombre_usuario: params.nombre_usuario }),
 			...(params.email_asesor && { email_asesor: params.email_asesor }),
+			...(params.asesor_id !== undefined && {
+				asesor_id: String(params.asesor_id),
+			}),
 		});
 		const response = await this.request<{
 			success: boolean;

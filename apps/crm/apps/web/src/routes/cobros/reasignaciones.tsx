@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search, UserCog } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -149,6 +149,12 @@ function ReasignarModal({
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getHistorialReasignaciones.key(),
+			});
+			// Las tarjetas de carga por asesor (getCargaPorAsesorBucket) muestran
+			// conteos/utilización que cambian al reasignar; sin invalidar quedarían
+			// stale justo tras la acción que las modifica.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getCargaPorAsesorBucket.key(),
 			});
 			onClose();
 		},
@@ -491,7 +497,7 @@ function HistorialReasignaciones() {
 					</div>
 				) : (
 					<div className="overflow-x-auto">
-						<Table>
+						<Table className="text-xs">
 							<TableHeader>
 								<TableRow>
 									<TableHead>Fecha</TableHead>
@@ -511,9 +517,18 @@ function HistorialReasignaciones() {
 											{fmtFecha(r.fecha)}
 										</TableCell>
 										<TableCell className="font-medium text-xs">
-											{r.numero_credito_sifco}
+											<Link
+												to="/cobros/$id"
+												params={{ id: r.numero_credito_sifco }}
+												search={{ tipo: "caso" }}
+												className="text-primary hover:underline"
+											>
+												{r.numero_credito_sifco}
+											</Link>
 										</TableCell>
-										<TableCell>{r.cliente}</TableCell>
+										<TableCell className="max-w-[140px] truncate text-xs">
+											{r.cliente}
+										</TableCell>
 										<TableCell className="text-xs">
 											<span className="text-muted-foreground">
 												{r.asesor_anterior ?? "Sin asesor"}
@@ -541,12 +556,15 @@ function HistorialReasignaciones() {
 											<OrigenBadge origen={r.origen} />
 										</TableCell>
 										<TableCell
-											className="max-w-[240px] truncate text-muted-foreground text-xs"
+											className="max-w-[160px] truncate text-muted-foreground"
 											title={r.motivo ?? undefined}
 										>
 											{r.motivo || "—"}
 										</TableCell>
-										<TableCell className="text-muted-foreground text-xs">
+										<TableCell
+											className="max-w-[120px] truncate text-muted-foreground"
+											title={r.usuario || "sistema"}
+										>
 											{r.usuario || "sistema"}
 										</TableCell>
 									</TableRow>
@@ -589,6 +607,7 @@ function RouteComponent() {
 	const userRole = session?.user.role;
 
 	const [bucket, setBucket] = useState<string>("todos");
+	const [asesor, setAsesor] = useState<string>("todos");
 	const [buscarInput, setBuscarInput] = useState("");
 	const [buscar, setBuscar] = useState("");
 	const [page, setPage] = useState(1);
@@ -596,6 +615,53 @@ function RouteComponent() {
 	const perPage = 20;
 
 	const bucketNumero = bucket === "todos" ? undefined : Number(bucket);
+	const asesorId = asesor === "todos" ? undefined : Number(asesor);
+
+	// Lista de asesores para el filtro (misma queryKey que el historial → se
+	// comparte la caché). El endpoint /advisor de cartera-back ignora
+	// page/perPage (SELECT sin LIMIT, ver cartera-back/src/controllers/
+	// advisor.ts getAdvisors) y siempre retorna todos los asesores, así que una
+	// sola llamada trae la lista completa.
+	const asesoresQuery = useQuery({
+		queryKey: ["cobros", "asesores-todos"],
+		queryFn: async () => {
+			const respuesta = await client.getAsesores({});
+			return respuesta.asesores;
+		},
+		enabled: !!session,
+	});
+	const asesores = asesoresQuery.data ?? [];
+
+	// Tarjetas de créditos por asesor: solo se piden cuando hay algún filtro
+	// (bucket o asesor); en "Todos + Todos" no se muestran tarjetas.
+	const hayFiltroTarjetas = bucket !== "todos" || asesor !== "todos";
+	const cargaQuery = useQuery({
+		...orpc.getCargaPorAsesorBucket.queryOptions({
+			input: { bucket: bucketNumero, asesorId },
+		}),
+		enabled: !!session && hayFiltroTarjetas,
+	});
+	const tarjetasAsesor = (cargaQuery.data?.porAsesor ?? [])
+		.map((a) => {
+			const creditos = a.porBucket.reduce((s, d) => s + d.cuentas, 0);
+			const capacidad = a.porBucket.reduce((s, d) => s + d.capacidad_base, 0);
+			const sobrecarga = a.porBucket.some((d) => d.sobrecarga);
+			const util = capacidad > 0 ? Math.round((creditos / capacidad) * 100) : 0;
+			return {
+				asesorId: a.asesor_id,
+				nombre: a.nombre,
+				email: a.email_asesor ?? null,
+				creditos,
+				capacidad,
+				util,
+				sobrecarga,
+			};
+		})
+		.sort((x, y) => y.creditos - x.creditos);
+	const totalCreditosTarjetas = tarjetasAsesor.reduce(
+		(s, t) => s + t.creditos,
+		0,
+	);
 
 	const query = useQuery({
 		...orpc.getCreditosPorBucket.queryOptions({
@@ -604,6 +670,7 @@ function RouteComponent() {
 				page,
 				perPage,
 				numeroCredito: buscar || undefined,
+				asesorId,
 			},
 		}),
 		enabled: !!session,
@@ -676,6 +743,34 @@ function RouteComponent() {
 									</SelectContent>
 								</Select>
 							</div>
+							<div className="space-y-2">
+								<Label>Asesor</Label>
+								<Select
+									value={asesor}
+									onValueChange={(v) => {
+										setAsesor(v);
+										setPage(1);
+									}}
+								>
+									<SelectTrigger className="w-[200px]">
+										<SelectValue placeholder="Todos los asesores" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="todos">Todos</SelectItem>
+										{asesores.map((a) => (
+											<SelectItem key={a.asesorId} value={String(a.asesorId)}>
+												{a.nombre}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+								{asesoresQuery.isError && (
+									<p className="text-destructive text-xs">
+										No se pudo cargar la lista de asesores; el filtro no está
+										disponible.
+									</p>
+								)}
+							</div>
 							<div className="min-w-[200px] flex-1 space-y-2">
 								<Label>No. SIFCO</Label>
 								<Input
@@ -690,6 +785,91 @@ function RouteComponent() {
 							</Button>
 						</CardContent>
 					</Card>
+
+					{hayFiltroTarjetas && (
+						<div className="space-y-3">
+							<div className="flex items-baseline justify-between">
+								<h2 className="font-medium text-muted-foreground text-sm">
+									Créditos asignados por asesor
+								</h2>
+								{tarjetasAsesor.length > 0 && (
+									<span className="text-muted-foreground text-xs">
+										{tarjetasAsesor.length} asesor
+										{tarjetasAsesor.length > 1 ? "es" : ""} ·{" "}
+										<b className="text-foreground">{totalCreditosTarjetas}</b>{" "}
+										créditos
+									</span>
+								)}
+							</div>
+							{cargaQuery.isLoading ? (
+								<div className="py-4 text-muted-foreground text-sm">
+									Cargando...
+								</div>
+							) : cargaQuery.isError ? (
+								<div className="py-4 text-destructive text-sm">
+									No se pudo cargar la carga por asesor.
+								</div>
+							) : tarjetasAsesor.length === 0 ? (
+								<div className="py-4 text-muted-foreground text-sm">
+									Sin asesores para los filtros seleccionados.
+								</div>
+							) : (
+								<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+									{tarjetasAsesor.map((t) => (
+										<Card
+											key={t.asesorId}
+											className="overflow-hidden border-l-4 border-l-primary/70 transition-colors hover:bg-muted/40"
+										>
+											<CardContent className="p-3">
+												<div
+													className="truncate font-medium text-sm leading-tight"
+													title={t.nombre}
+												>
+													{t.nombre}
+												</div>
+												{t.email && (
+													<div
+														className="truncate text-[11px] text-muted-foreground"
+														title={t.email}
+													>
+														{t.email}
+													</div>
+												)}
+												<div className="mt-2 flex items-baseline gap-1">
+													<span className="font-bold text-2xl leading-none">
+														{t.creditos}
+													</span>
+													<span className="text-muted-foreground text-xs">
+														créd.
+													</span>
+												</div>
+												{t.capacidad > 0 && (
+													<div className="mt-2 space-y-1">
+														<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+															<div
+																className={`h-full rounded-full ${
+																	t.sobrecarga
+																		? "bg-destructive"
+																		: t.util >= 85
+																			? "bg-amber-500"
+																			: "bg-primary"
+																}`}
+																style={{ width: `${Math.min(t.util, 100)}%` }}
+															/>
+														</div>
+														<div className="flex justify-between text-[11px] text-muted-foreground">
+															<span>{t.util}% util.</span>
+															<span>cap. {t.capacidad}</span>
+														</div>
+													</div>
+												)}
+											</CardContent>
+										</Card>
+									))}
+								</div>
+							)}
+						</div>
+					)}
 
 					<Card>
 						<CardContent className="p-0">
@@ -706,46 +886,48 @@ function RouteComponent() {
 									No hay créditos para los filtros seleccionados
 								</div>
 							) : (
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead>No. SIFCO</TableHead>
-											<TableHead>Cliente</TableHead>
-											<TableHead>Asesor actual</TableHead>
-											<TableHead className="text-center">Bucket</TableHead>
-											<TableHead className="text-right">Acción</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{filas.map((c) => (
-											<TableRow key={c.creditoId}>
-												<TableCell className="font-medium">
-													{c.numeroCreditoSifco}
-												</TableCell>
-												<TableCell>{c.cliente}</TableCell>
-												<TableCell>
-													{c.asesorNombre ?? (
-														<span className="text-muted-foreground italic">
-															Sin asesor
-														</span>
-													)}
-												</TableCell>
-												<TableCell className="text-center">
-													<BucketBadge bucket={c.bucket} />
-												</TableCell>
-												<TableCell className="text-right">
-													<Button
-														size="sm"
-														variant="outline"
-														onClick={() => setSeleccionado(c)}
-													>
-														Reasignar
-													</Button>
-												</TableCell>
+								<div className="overflow-x-auto">
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>No. SIFCO</TableHead>
+												<TableHead>Cliente</TableHead>
+												<TableHead>Asesor actual</TableHead>
+												<TableHead className="text-center">Bucket</TableHead>
+												<TableHead className="text-right">Acción</TableHead>
 											</TableRow>
-										))}
-									</TableBody>
-								</Table>
+										</TableHeader>
+										<TableBody>
+											{filas.map((c) => (
+												<TableRow key={c.creditoId}>
+													<TableCell className="font-medium">
+														{c.numeroCreditoSifco}
+													</TableCell>
+													<TableCell>{c.cliente}</TableCell>
+													<TableCell>
+														{c.asesorNombre ?? (
+															<span className="text-muted-foreground italic">
+																Sin asesor
+															</span>
+														)}
+													</TableCell>
+													<TableCell className="text-center">
+														<BucketBadge bucket={c.bucket} />
+													</TableCell>
+													<TableCell className="text-right">
+														<Button
+															size="sm"
+															variant="outline"
+															onClick={() => setSeleccionado(c)}
+														>
+															Reasignar
+														</Button>
+													</TableCell>
+												</TableRow>
+											))}
+										</TableBody>
+									</Table>
+								</div>
 							)}
 						</CardContent>
 					</Card>

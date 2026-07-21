@@ -192,6 +192,13 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
     ],
   },
 
+  [ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
   // ===== INVERSIONES SOCIEDAD =====
   [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {
     signerCount: 1,

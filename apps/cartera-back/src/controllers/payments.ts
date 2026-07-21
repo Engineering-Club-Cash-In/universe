@@ -1797,18 +1797,83 @@ export type ReportCreditoInv = {
 
 
 /**
+ * 🧮 Simula las filas no-CUBE de un pago PARCIAL que todavía no tiene reparto en
+ * pagos_credito_inversionistas (la distribución real se crea hasta que la cuota
+ * se completa — aplicarPagoAlCredito, rama de cierre). Usa la MISMA función pura
+ * del reparto real (calcularSplitInteresPci) alimentada con los
+ * creditos_inversionistas del crédito, de modo que lo simulado hoy sea idéntico
+ * a lo que pci escribirá al cerrar la cuota (flujo regular; los pagos con compra
+ * de cartera pendiente de facturar se excluyen en el caller vía pendienteFacturar
+ * porque su reparto real usa el prorrateo por días).
+ * Capital: se deja en 0 — el reparto de capital solo ocurre al cierre.
+ */
+function simularInversionistasSinPci(args: {
+  creditoInvs: ReportCreditoInv[];
+  cubeId: number;
+  abonoInteresPago: string | number | null | undefined;
+  abonoIvaPago: string | number | null | undefined;
+  cuota?: string | number | null;
+}): ReportInvRow[] {
+  const split = calcularSplitInteresPci({
+    inversionistas: args.creditoInvs.map((ci) => ({
+      inversionista_id: ci.inversionista_id,
+      nombre: ci.nombre,
+      porcentaje_participacion_inversionista:
+        ci.porcentaje_participacion_inversionista ?? 0,
+      porcentaje_cash_in: ci.porcentaje_cash_in ?? 0,
+      monto_aportado: ci.monto_aportado ?? 0,
+    })),
+    pagoAbonoInteres: new Big(args.abonoInteresPago ?? 0),
+    pagoAbonoIva: new Big(args.abonoIvaPago ?? 0),
+  });
+  const splitPorInv = new Map(split.map((s) => [s.inversionista_id, s]));
+
+  // ⚠️ Emitir NUMBERS (no strings): las filas pci reales llegan como número vía
+  // json_build_object y el front (modalViewInvestor) les hace .toFixed() —
+  // una fila simulada con strings reventaría el modal.
+  return args.creditoInvs
+    .filter((ci) => ci.inversionista_id !== args.cubeId)
+    .map((ci) => {
+      const s = splitPorInv.get(ci.inversionista_id);
+      const interes = (s?.abono_interes ?? new Big(0)).round(2);
+      const iva = (s?.abono_iva_12 ?? new Big(0)).round(2);
+      return {
+        inversionistaId: ci.inversionista_id,
+        nombreInversionista: ci.nombre,
+        emiteFactura: ci.emite_factura ?? false,
+        abonoCapital: 0,
+        abonoInteres: Number(interes.toFixed(2)),
+        abonoIva: Number(iva.toFixed(2)),
+        isr: Number(interes.times("0.05").round(2).toFixed(2)),
+        cuotaPago: args.cuota != null ? Number(args.cuota) : 0,
+        montoAportado:
+          ci.monto_aportado != null ? Number(ci.monto_aportado) : null,
+        porcentajeParticipacion:
+          ci.porcentaje_participacion_inversionista != null
+            ? Number(ci.porcentaje_participacion_inversionista)
+            : null,
+      };
+    });
+}
+
+/**
  * 🧮 Arma el array `inversionistas` de UN pago para el reporte JSON, reflejando
  * el interés facturado de CUBE leído del desglose:
  *   - CUBE: su interés = el del desglose (rubro INTERES, CON IVA). Reemplaza la
  *     fila CUBE del pci (si existía) o crea una nueva.
  *   - Inversionistas no-CUBE: del pci, SIN CAMBIO.
- *   - Parciales (sin filas pci): solo aparece CUBE del desglose; los demás
- *     inversionistas se difieren hasta que la cuota se complete.
+ *   - Parciales (sin filas pci) con simularSinPci=true: los no-CUBE se SIMULAN
+ *     desde creditos_inversionistas con la misma matemática del reparto real
+ *     (ver simularInversionistasSinPci); así el reporte los muestra desde el
+ *     día del parcial y no hasta que la cuota se complete.
+ *   - Parciales sin simularSinPci: solo aparece CUBE del desglose (comportamiento
+ *     previo; aplica a pagos reset/cancelación y prorrateados por compra de cartera).
  *   - Sin desglose (pagos pre-facturación / pendientes): fallback → conservar el
- *     array pci tal cual (comportamiento previo).
+ *     array pci tal cual (comportamiento previo). La simulación también queda
+ *     detrás de este gate: sin desglose no hay facturación que reflejar.
  *
  * Función PURA (sin DB) → testeable en aislamiento. NO toca abono_capital ni la
- * parte de los inversionistas no-CUBE; solo ajusta/crea la fila de CUBE.
+ * parte de los inversionistas no-CUBE del pci; solo ajusta/crea la fila de CUBE.
  *
  * Invariante (cuotas completas): Σ(salida.abonoInteres) =
  *   Σ(no-CUBE pci) + (desglose CUBE net) = el interés facturado del pago.
@@ -1819,13 +1884,34 @@ export function armarInversionistasPago(args: {
   desgloseCubeInteres: { total: Big; iva: Big } | null; // del desglose rubro INTERES (monto_total CON iva, monto_iva)
   cubeMeta?: Partial<ReportInvRow> | null;              // metadatos de CUBE (de creditos_inversionistas) si CUBE no está en pci
   cuota?: string | number | null;
+  // 🆕 Simulación de parciales sin reparto (ver simularInversionistasSinPci):
+  creditoInvs?: ReportCreditoInv[] | null;              // inversionistas del crédito
+  abonoInteresPago?: string | number | null;            // pagos_credito.abono_interes
+  abonoIvaPago?: string | number | null;                // pagos_credito.abono_iva_12
+  simularSinPci?: boolean;                              // el caller gatea: validated + !pendienteFacturar
 }): ReportInvRow[] {
   const rows = Array.isArray(args.pciRows) ? args.pciRows : [];
-  const noCube = rows.filter((r) => r.inversionistaId !== args.cubeId);
+  let noCube = rows.filter((r) => r.inversionistaId !== args.cubeId);
   const pciCube = rows.find((r) => r.inversionistaId === args.cubeId) ?? null;
 
   // Sin desglose → fallback: conservar el pci tal cual.
   if (!args.desgloseCubeInteres) return rows;
+
+  // 🆕 PARCIAL sin reparto (cuota aún abierta) ya facturado: simular los no-CUBE.
+  // Solo cuando NO hay filas pci — si el reparto real ya existe, ese manda.
+  if (
+    rows.length === 0 &&
+    args.simularSinPci === true &&
+    (args.creditoInvs?.length ?? 0) > 0
+  ) {
+    noCube = simularInversionistasSinPci({
+      creditoInvs: args.creditoInvs!,
+      cubeId: args.cubeId,
+      abonoInteresPago: args.abonoInteresPago,
+      abonoIvaPago: args.abonoIvaPago,
+      cuota: args.cuota,
+    });
+  }
 
   const cubeNet = args.desgloseCubeInteres.total.minus(args.desgloseCubeInteres.iva);
   const cubeIva = args.desgloseCubeInteres.iva;
@@ -2288,6 +2374,20 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
             desgloseCubeInteres: desgloseCubeByPago.get(Number(r.pagoId)) ?? null,
             cubeMeta,
             cuota: r.cuotaMonto as any,
+            // 🆕 Parciales sin reparto: simular filas no-CUBE con la misma
+            // matemática del cierre (calcularSplitInteresPci). Solo pagos
+            // 'validated' (reset/cancelación reparte distinto), sin compra de
+            // cartera pendiente (esos usan prorrateo por días, no aportado) y
+            // sin bandera_reinversion (en esa ventana la facturación redirige
+            // el interés del inversionista a CUBE → el desglose INTERES ya lo
+            // incluye y simular su parte regular lo doble-contaría).
+            creditoInvs,
+            abonoInteresPago: r.abono_interes as any,
+            abonoIvaPago: r.abono_iva_12 as any,
+            simularSinPci:
+              (r as any).validation_status === "validated" &&
+              !((r as any).pendienteFacturar ?? false) &&
+              !((r as any).banderaReinversion ?? false),
           })
         : pciRows;
 

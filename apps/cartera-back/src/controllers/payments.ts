@@ -2016,6 +2016,24 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       );
     }
 
+    // 🧮 Elegibilidad de SIMULACIÓN a nivel pago (espejo SQL de los gates del
+    // detalle en armarInversionistasPago/simularInversionistasSinPci): pago
+    // validated con interés, ya facturado (desglose INTERES), sin reparto pci
+    // y sin compra de cartera pendiente (prorrateo). La condición por
+    // inversionista (membresía en el crédito y no-redirigido a CUBE) se agrega
+    // donde se usa. Mantener en sync con los gates del detalle.
+    const pagoSimulableSQL = `
+      NOT EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas pci_sim
+                  WHERE pci_sim.pago_id = p.pago_id)
+      AND p.validation_status = 'validated'
+      AND p.abono_interes > 0
+      AND EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd_sim
+                  WHERE fd_sim.pago_id = p.pago_id AND fd_sim.rubro::text = 'INTERES')
+      AND NOT EXISTS (SELECT 1 FROM cartera.compras_credito_inversionista cci_sim
+                      WHERE cci_sim.credito_id = p.credito_id
+                        AND cci_sim.pendiente_facturar = true
+                        AND cci_sim.tipo_operacion = 'compra_cartera')`;
+
     if (inversionistaId) {
       if (Number(inversionistaId) === CUBE_ID) {
         // Para CUBE, el rubro INTERES del desglose ES de CUBE aunque no haya fila pci
@@ -2036,12 +2054,28 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           )
         )`);
       } else {
+        // Con reparto real (pci) O parcial simulable donde este inversionista
+        // participa y NO está redirigido a CUBE — así el filtro ve los mismos
+        // pagos cuyo detalle ya muestra la fila simulada (Codex P2, PR #1137).
         whereClauses.push(`
-          EXISTS (
-            SELECT 1
-            FROM cartera.pagos_credito_inversionistas pci2
-            WHERE pci2.pago_id = p.pago_id
-            AND pci2.inversionista_id = '${inversionistaId}'
+          (
+            EXISTS (
+              SELECT 1
+              FROM cartera.pagos_credito_inversionistas pci2
+              WHERE pci2.pago_id = p.pago_id
+              AND pci2.inversionista_id = '${inversionistaId}'
+            )
+            OR (
+              ${pagoSimulableSQL}
+              AND EXISTS (SELECT 1 FROM cartera.creditos_inversionistas ci_sim
+                          WHERE ci_sim.credito_id = p.credito_id
+                            AND ci_sim.inversionista_id = '${inversionistaId}')
+              AND NOT (c.bandera_reinversion = true AND EXISTS (
+                    SELECT 1 FROM cartera.creditos_inversionistas_espejo esp_sim
+                    WHERE esp_sim.credito_id = p.credito_id
+                      AND esp_sim.inversionista_id = '${inversionistaId}'
+                      AND esp_sim.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
+            )
           )
         `);
       }
@@ -2574,6 +2608,92 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       totalIsr: new Big(r.totalIsr).round(2).toNumber(),
       totalMontoAportado: new Big(r.totalMontoAportado).round(2).toNumber(),
     }));
+
+    // 💰 FIX (Codex P2, PR #1137): el detalle muestra filas SIMULADAS en los
+    // parciales sin pci; el resumen por inversionista debe sumarlas también,
+    // o el total no cuadra contra las filas listadas. Réplica en SQL de
+    // calcularSplitInteresPci (flujo regular, redondeo por pago-inversionista):
+    //   interés_inv = ROUND(abono_interes × (aporte/Σaportes) × pct/100, 2)
+    // Si cambia src/cofidi/splitInteresPci.ts hay que actualizar esta fórmula.
+    // Solo no-CUBE: el interés de CUBE ya se corrige desde el desglose abajo
+    // (incluye parciales). Excluye redirigidos a CUBE (bandera + espejo
+    // pendiente), igual que la simulación del detalle.
+    const totalesSimQuery = sql`
+      WITH pf AS (
+        SELECT p.pago_id, p.credito_id, c.bandera_reinversion,
+               p.abono_interes::numeric AS interes,
+               COALESCE(p.abono_iva_12, 0)::numeric AS iva
+        FROM cartera.pagos_credito p
+        LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
+        LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+        ${sql.raw(whereSQL)}
+        AND ${sql.raw(pagoSimulableSQL)}
+      ),
+      aportes AS (
+        SELECT ci.credito_id, SUM(ci.monto_aportado::numeric) AS total
+        FROM cartera.creditos_inversionistas ci
+        WHERE ci.credito_id IN (SELECT DISTINCT credito_id FROM pf)
+        GROUP BY ci.credito_id
+      )
+      SELECT ci.inversionista_id AS "inversionistaId",
+             i.nombre AS "nombreInversionista",
+             i.emite_factura AS "emiteFactura",
+             SUM(ROUND(pf.interes * (ci.monto_aportado::numeric / a.total)
+                 * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS "interesSim",
+             SUM(ROUND(pf.iva * (ci.monto_aportado::numeric / a.total)
+                 * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS "ivaSim",
+             SUM(ci.monto_aportado::numeric) AS "aporteSim"
+      FROM pf
+      JOIN aportes a ON a.credito_id = pf.credito_id AND a.total > 0
+      JOIN cartera.creditos_inversionistas ci ON ci.credito_id = pf.credito_id
+      JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+      WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+        AND NOT (pf.bandera_reinversion = true AND EXISTS (
+              SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
+              WHERE esp.credito_id = pf.credito_id
+                AND esp.inversionista_id = ci.inversionista_id
+                AND esp.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
+        ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND ci.inversionista_id = '${inversionistaId}'` : "")}
+      GROUP BY ci.inversionista_id, i.nombre, i.emite_factura
+    `;
+
+    const totalesSimResult = await db.execute(totalesSimQuery);
+    for (const simRow of totalesSimResult.rows as any[]) {
+      const interesSim = new Big(simRow.interesSim ?? 0);
+      const ivaSim = new Big(simRow.ivaSim ?? 0);
+      if (interesSim.lte(0) && ivaSim.lte(0)) continue;
+      const idx = totalesInversionistas.findIndex(
+        (t) => Number(t.inversionistaId) === Number(simRow.inversionistaId)
+      );
+      if (idx >= 0) {
+        const t = totalesInversionistas[idx];
+        const interesTotal = new Big(t.totalAbonoInteres).plus(interesSim);
+        totalesInversionistas[idx] = {
+          ...t,
+          totalAbonoInteres: interesTotal.round(2).toNumber(),
+          totalAbonoIva: new Big(t.totalAbonoIva).plus(ivaSim).round(2).toNumber(),
+          totalIsr: interesTotal.times("0.05").round(2).toNumber(),
+          totalMontoAportado: new Big(t.totalMontoAportado)
+            .plus(simRow.aporteSim ?? 0)
+            .round(2)
+            .toNumber(),
+        };
+      } else {
+        totalesInversionistas.push({
+          inversionistaId: Number(simRow.inversionistaId),
+          nombreInversionista: simRow.nombreInversionista,
+          emiteFactura: simRow.emiteFactura ?? false,
+          totalAbonoCapital: 0,
+          totalAbonoInteres: interesSim.round(2).toNumber(),
+          totalAbonoIva: ivaSim.round(2).toNumber(),
+          totalIsr: interesSim.times("0.05").round(2).toNumber(),
+          totalMontoAportado: new Big(simRow.aporteSim ?? 0).round(2).toNumber(),
+        });
+      }
+    }
+    totalesInversionistas.sort((a, b) =>
+      String(a.nombreInversionista).localeCompare(String(b.nombreInversionista))
+    );
 
     // 💰 FIX: la fila de CUBE en el resumen debe reflejar el desglose (rubro INTERES),
     // igual que el detalle per-pago (armarInversionistasPago). El pci crudo de CUBE NO

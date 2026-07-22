@@ -7,7 +7,8 @@ import {
 	RefreshCw,
 	TrendingDown,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { AsesorMultiSelect } from "@/components/cobros/asesor-multi-select";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,15 @@ const ETAPAS = [
 	},
 ];
 
+function todayGTISO() {
+	return new Date().toLocaleDateString("sv-SE", {
+		timeZone: "America/Guatemala",
+	});
+}
+function currentMonthGT() {
+	return todayGTISO().slice(0, 7); // YYYY-MM
+}
+
 function TabMora({
 	session,
 	canSeeAll,
@@ -82,12 +92,114 @@ function TabMora({
 		? undefined
 		: (session?.user?.email ?? undefined);
 
+	const [modo, setModo] = usePersistedState<"hoy" | "mes">(
+		"cobros.mora.modo",
+		"hoy",
+	);
+	const [mesAnio, setMesAnio] = usePersistedState<string>(
+		"cobros.mora.mes",
+		currentMonthGT(),
+	);
+	const [asesoresSel, setAsesoresSel] = usePersistedState<number[] | null>(
+		"cobros.mora.asesores",
+		null,
+	);
+
+	// Fecha snapshot = día 6 del mes elegido, clamp a hoy (nunca futura).
+	const hoy = todayGTISO();
+	const fechaSnapshot = useMemo(() => {
+		if (modo === "hoy") return undefined;
+		const dia6 = `${mesAnio}-06`;
+		return dia6 > hoy ? hoy : dia6;
+	}, [modo, mesAnio, hoy]);
+
+	const { data: asesoresData } = useQuery({
+		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
+		enabled: !!session && canSeeAll,
+	});
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const asesores: { asesorId: number; nombre: string }[] =
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(asesoresData as any)?.asesores ?? [];
+
 	const { data, isLoading, dataUpdatedAt, refetch, isFetching } = useQuery({
-		...orpc.getMoraByEtapaYAsesor.queryOptions({ input: { emailCobrador } }),
+		...orpc.getMoraByEtapaYAsesor.queryOptions({
+			input: {
+				emailCobrador,
+				fecha: fechaSnapshot,
+				asesores: asesoresSel ?? undefined,
+			},
+		}),
 		enabled: !!session,
-		refetchInterval: 60_000,
+		refetchInterval: modo === "hoy" ? 60_000 : false,
 		refetchIntervalInBackground: false,
 	});
+
+	// Totales con / sin Gerencia (cliente, sobre porAsesor).
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const porAsesor: any[] = (data as any)?.porAsesor ?? [];
+	const totalConGerencia = porAsesor.reduce(
+		(s, a) => s + Number(a.totalEnMora?.sumaMora ?? 0),
+		0,
+	);
+	const totalSinGerencia = porAsesor
+		.filter((a) => a.nombre !== "Gerencia")
+		.reduce((s, a) => s + Number(a.totalEnMora?.sumaMora ?? 0), 0);
+	const credConGerencia = porAsesor.reduce(
+		(s, a) => s + Number(a.totalEnMora?.cantidad ?? 0),
+		0,
+	);
+	const credSinGerencia = porAsesor
+		.filter((a) => a.nombre !== "Gerencia")
+		.reduce((s, a) => s + Number(a.totalEnMora?.cantidad ?? 0), 0);
+
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const dataDisponibleDesde = (data as any)?.dataDisponibleDesde as
+		| string
+		| undefined;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const alcance = (data as any)?.alcance as "live" | "historico" | undefined;
+
+	// Cobrado (mora cobrada en el período del mes). Solo aplica en modo "mes".
+	const anioNum = Number(mesAnio.slice(0, 4));
+	const mesNum = Number(mesAnio.slice(5, 7));
+	const { data: cobradoData, refetch: refetchCobrado } = useQuery({
+		...orpc.getMoraCobradaPorAsesor.queryOptions({
+			input: {
+				mes: mesNum,
+				anio: anioNum,
+				asesores: asesoresSel ?? undefined,
+				emailCobrador,
+			},
+		}),
+		enabled: !!session && modo === "mes",
+	});
+	const cobradoMap = useMemo(() => {
+		const m = new Map<number, { cobrado: number; nombre: string }>();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		for (const a of ((cobradoData as any)?.porAsesor ?? []) as any[]) {
+			m.set(a.asesorId, { cobrado: Number(a.cobrado), nombre: a.nombre });
+		}
+		return m;
+	}, [cobradoData]);
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const totalCobrado = Number((cobradoData as any)?.totalCobrado ?? 0);
+	const verCobrado = modo === "mes";
+
+	// Filas del desglose = unión de asesores con mora esperada y/o cobrada. El
+	// total cobrado incluye pagos sobre créditos ya saldados / fuera del snapshot
+	// de mora activa, así que sin la unión las filas no sumarían el total.
+	const filasAsesor = useMemo(() => {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const map = new Map<number, any>();
+		for (const a of porAsesor) map.set(a.asesorId, a);
+		if (verCobrado) {
+			for (const [id, c] of cobradoMap) {
+				if (!map.has(id)) map.set(id, { asesorId: id, nombre: c.nombre });
+			}
+		}
+		return [...map.values()];
+	}, [porAsesor, cobradoMap, verCobrado]);
 
 	const ultimaAct = dataUpdatedAt ? fmtTime(new Date(dataUpdatedAt)) : null;
 
@@ -107,7 +219,10 @@ function TabMora({
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() => refetch()}
+						onClick={() => {
+							refetch();
+							if (verCobrado) refetchCobrado();
+						}}
 						disabled={isFetching}
 					>
 						<RefreshCw
@@ -117,6 +232,64 @@ function TabMora({
 					</Button>
 				</div>
 			</div>
+
+			{/* Filtros */}
+			<div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
+				<div className="flex flex-col gap-1.5">
+					<Label className="font-semibold text-xs">Momento</Label>
+					<div className="flex items-center gap-1.5">
+						<Button
+							variant={modo === "hoy" ? "default" : "outline"}
+							size="sm"
+							onClick={() => setModo("hoy")}
+						>
+							Hoy (en vivo)
+						</Button>
+						<Button
+							variant={modo === "mes" ? "default" : "outline"}
+							size="sm"
+							onClick={() => setModo("mes")}
+						>
+							Por mes
+						</Button>
+					</div>
+				</div>
+
+				<div className="flex flex-col gap-1">
+					<Label className="text-muted-foreground text-xs">Mes</Label>
+					<Input
+						type="month"
+						className="w-40"
+						value={mesAnio}
+						max={currentMonthGT()}
+						disabled={modo !== "mes"}
+						onChange={(e) => setMesAnio(e.target.value)}
+					/>
+				</div>
+
+				{canSeeAll && asesores.length > 0 && (
+					<div className="flex flex-col gap-1">
+						<Label className="text-muted-foreground text-xs">Asesores</Label>
+						<AsesorMultiSelect
+							asesores={asesores}
+							value={asesoresSel}
+							onChange={setAsesoresSel}
+						/>
+					</div>
+				)}
+
+				<p className="pb-2 text-muted-foreground text-xs">
+					{modo === "hoy"
+						? "Mora actual en vivo"
+						: `Mora al ${fechaSnapshot ?? hoy}${alcance === "historico" ? " (histórico)" : ""}`}
+				</p>
+			</div>
+
+			{dataDisponibleDesde && (
+				<div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-amber-800 text-sm">
+					No hay datos de mora antes del {dataDisponibleDesde}.
+				</div>
+			)}
 
 			{isLoading ? (
 				<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -134,8 +307,13 @@ function TabMora({
 						// eslint-disable-next-line @typescript-eslint/no-explicit-any
 						const bucket = (data as any)?.totales?.[etapa.key];
 						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const totalMora = parseFloat((data as any)?.totales?.totalEnMora?.sumaMora ?? "0");
-						const pct = totalMora > 0 ? (parseFloat(bucket?.sumaMora ?? "0") / totalMora) * 100 : 0;
+						const totalMora = Number.parseFloat(
+							(data as any)?.totales?.totalEnMora?.sumaMora ?? "0",
+						);
+						const pct =
+							totalMora > 0
+								? (Number.parseFloat(bucket?.sumaMora ?? "0") / totalMora) * 100
+								: 0;
 						return (
 							<Card key={etapa.key}>
 								<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -151,7 +329,7 @@ function TabMora({
 									<p className="text-muted-foreground text-xs">
 										Capital: {fmtQ(bucket?.sumaCapital ?? "0")}
 									</p>
-									<p className="mt-1 font-medium text-xs text-muted-foreground">
+									<p className="mt-1 font-medium text-muted-foreground text-xs">
 										{pct.toFixed(1)}% del total en mora
 									</p>
 								</CardContent>
@@ -161,30 +339,58 @@ function TabMora({
 				</div>
 			)}
 
-			{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-			{!!(data as any)?.totales?.totalEnMora && (
-				<Card className="border-red-200 bg-red-50">
-					<CardContent className="pt-4">
-						<div className="flex items-center justify-between">
-							<div>
+			{(porAsesor.length > 0 || (verCobrado && totalCobrado > 0)) && (
+				<div
+					className={`grid grid-cols-1 gap-4 md:grid-cols-2 ${verCobrado ? "lg:grid-cols-3" : ""}`}
+				>
+					{porAsesor.length > 0 && (
+						<Card className="border-red-200 bg-red-50">
+							<CardContent className="pt-4">
 								<p className="font-semibold text-red-700 text-sm">
-									Total en Mora
+									Total en Mora (con Gerencia)
 								</p>
-								{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
 								<p className="font-bold text-3xl text-red-800">
-									{fmtQ((data as any).totales.totalEnMora.sumaMora)}
+									{fmtQ(totalConGerencia)}
 								</p>
-							</div>
-							{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-							<div className="text-right">
-								<p className="text-muted-foreground text-sm">Créditos</p>
-								<p className="font-bold text-2xl">
-									{(data as any).totales.totalEnMora.cantidad}
+								<p className="text-muted-foreground text-xs">
+									{credConGerencia} créditos
 								</p>
-							</div>
-						</div>
-					</CardContent>
-				</Card>
+							</CardContent>
+						</Card>
+					)}
+					{porAsesor.length > 0 && (
+						<Card className="border-orange-200 bg-orange-50">
+							<CardContent className="pt-4">
+								<p className="font-semibold text-orange-700 text-sm">
+									Total en Mora (sin Gerencia)
+								</p>
+								<p className="font-bold text-3xl text-orange-800">
+									{fmtQ(totalSinGerencia)}
+								</p>
+								<p className="text-muted-foreground text-xs">
+									{credSinGerencia} créditos
+								</p>
+							</CardContent>
+						</Card>
+					)}
+					{verCobrado && (
+						<Card className="border-green-200 bg-green-50">
+							<CardContent className="pt-4">
+								<p className="font-semibold text-green-700 text-sm">
+									Mora Cobrada (en el mes)
+								</p>
+								<p className="font-bold text-3xl text-green-800">
+									{fmtQ(totalCobrado)}
+								</p>
+								<p className="text-muted-foreground text-xs">
+									{totalConGerencia > 0
+										? `${((totalCobrado / totalConGerencia) * 100).toFixed(1)}% de lo esperado`
+										: "—"}
+								</p>
+							</CardContent>
+						</Card>
+					)}
+				</div>
 			)}
 
 			<div>
@@ -192,7 +398,7 @@ function TabMora({
 				{isLoading ? (
 					<div className="h-32 animate-pulse rounded bg-muted" />
 					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				) : !(data as any)?.porAsesor?.length ? (
+				) : filasAsesor.length === 0 ? (
 					<p className="text-muted-foreground text-sm">
 						No hay datos disponibles.
 					</p>
@@ -213,11 +419,24 @@ function TabMora({
 									<th className="px-4 py-3 text-right font-semibold">
 										Total en Mora
 									</th>
+									{verCobrado && (
+										<>
+											<th className="px-4 py-3 text-right font-semibold">
+												Cobrado
+											</th>
+											<th className="px-4 py-3 text-right font-semibold">
+												% Cobrado
+											</th>
+											<th className="px-4 py-3 text-right font-semibold">
+												Pendiente
+											</th>
+										</>
+									)}
 								</tr>
 							</thead>
 							<tbody>
 								{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-								{(data as any).porAsesor.map((asesor: any) => (
+								{filasAsesor.map((asesor: any) => (
 									<tr
 										key={asesor.asesorId}
 										className="border-t hover:bg-muted/30"
@@ -251,8 +470,17 @@ function TabMora({
 											</div>
 											{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
 											{(() => {
-												const totalMora = parseFloat((data as any)?.totales?.totalEnMora?.sumaMora ?? "0");
-												const pct = totalMora > 0 ? (parseFloat(asesor.totalEnMora?.sumaMora ?? "0") / totalMora) * 100 : 0;
+												const totalMora = Number.parseFloat(
+													(data as any)?.totales?.totalEnMora?.sumaMora ?? "0",
+												);
+												const pct =
+													totalMora > 0
+														? (Number.parseFloat(
+																asesor.totalEnMora?.sumaMora ?? "0",
+															) /
+																totalMora) *
+															100
+														: 0;
 												return pct > 0 ? (
 													<div className="font-medium text-muted-foreground text-xs">
 														{pct.toFixed(1)}%
@@ -260,6 +488,34 @@ function TabMora({
 												) : null;
 											})()}
 										</td>
+										{verCobrado &&
+											(() => {
+												const esperado = Number.parseFloat(
+													asesor.totalEnMora?.sumaMora ?? "0",
+												);
+												const cobrado =
+													cobradoMap.get(asesor.asesorId)?.cobrado ?? 0;
+												const pct =
+													esperado > 0 ? (cobrado / esperado) * 100 : 0;
+												const pendiente = Math.max(0, esperado - cobrado);
+												return (
+													<>
+														<td className="px-4 py-3 text-right font-medium text-green-700">
+															{cobrado > 0 ? (
+																fmtQ(cobrado)
+															) : (
+																<span className="text-muted-foreground">—</span>
+															)}
+														</td>
+														<td className="px-4 py-3 text-right text-muted-foreground">
+															{esperado > 0 ? `${pct.toFixed(1)}%` : "—"}
+														</td>
+														<td className="px-4 py-3 text-right">
+															{fmtQ(pendiente)}
+														</td>
+													</>
+												);
+											})()}
 									</tr>
 								))}
 							</tbody>
@@ -292,6 +548,30 @@ function TabMora({
 												{(data as any).totales.totalEnMora?.cantidad ?? 0} créd.
 											</div>
 										</td>
+										{verCobrado &&
+											(() => {
+												// eslint-disable-next-line @typescript-eslint/no-explicit-any
+												const esperadoTot = Number.parseFloat(
+													(data as any).totales.totalEnMora?.sumaMora ?? "0",
+												);
+												const pctTot =
+													esperadoTot > 0
+														? (totalCobrado / esperadoTot) * 100
+														: 0;
+												return (
+													<>
+														<td className="px-4 py-3 text-right text-green-700">
+															{fmtQ(totalCobrado)}
+														</td>
+														<td className="px-4 py-3 text-right font-normal text-muted-foreground">
+															{esperadoTot > 0 ? `${pctTot.toFixed(1)}%` : "—"}
+														</td>
+														<td className="px-4 py-3 text-right">
+															{fmtQ(Math.max(0, esperadoTot - totalCobrado))}
+														</td>
+													</>
+												);
+											})()}
 									</tr>
 								</tfoot>
 							)}
@@ -421,7 +701,7 @@ function RubroCelda({
 		<div className="space-y-0.5 text-right">
 			<div className="text-muted-foreground text-xs">{fmtQ(esperado)}</div>
 			<div
-				className={`text-xs font-medium ${pagadoNum > 0 ? "text-green-600" : "text-muted-foreground/40"}`}
+				className={`font-medium text-xs ${pagadoNum > 0 ? "text-green-600" : "text-muted-foreground/40"}`}
 			>
 				{pagadoNum > 0 ? fmtQ(pagado) : "—"}
 			</div>
@@ -599,18 +879,16 @@ function TabCuotasPorFecha({
 		enabled: !!session && canSeeAll,
 	});
 
-	const {
-		data,
-		isLoading,
-		dataUpdatedAt,
-		refetch,
-		isFetching,
-	} = useQuery({
+	const { data, isLoading, dataUpdatedAt, refetch, isFetching } = useQuery({
 		...orpc.getCuotasPorFecha.queryOptions({
 			input: {
 				fechaInicio,
 				fechaFin,
-				asesorId: canSeeAll ? (asesorId ? Number(asesorId) : undefined) : undefined,
+				asesorId: canSeeAll
+					? asesorId
+						? Number(asesorId)
+						: undefined
+					: undefined,
 			},
 		}),
 		enabled: !!session && !!fechaInicio && !!fechaFin,
@@ -636,9 +914,10 @@ function TabCuotasPorFecha({
 		return "pendiente";
 	}
 
-	const filteredRows = filtroEstado === "todos"
-		? rows
-		: rows.filter((r) => getEstado(r) === filtroEstado);
+	const filteredRows =
+		filtroEstado === "todos"
+			? rows
+			: rows.filter((r) => getEstado(r) === filtroEstado);
 
 	return (
 		<div className="space-y-6">
@@ -770,7 +1049,7 @@ function TabCuotasPorFecha({
 			{/* Summary cards */}
 			<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
 				<Card className="gap-1 border-blue-200 bg-blue-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-blue-700 text-xs">
 							Total Esperado
 						</CardTitle>
@@ -782,7 +1061,7 @@ function TabCuotasPorFecha({
 					</CardContent>
 				</Card>
 				<Card className="gap-1 border-green-200 bg-green-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-green-700 text-xs">
 							Total Pagado
 						</CardTitle>
@@ -794,19 +1073,19 @@ function TabCuotasPorFecha({
 					</CardContent>
 				</Card>
 				<Card className="gap-1 border-red-200 bg-red-50 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-red-700 text-xs">
 							Total Pendiente
 						</CardTitle>
 					</CardHeader>
 					<CardContent className="px-4 pb-0">
-						<div className="font-bold text-red-700 text-lg">
+						<div className="font-bold text-lg text-red-700">
 							{fmtQ(totales?.totalPendiente ?? "0")}
 						</div>
 					</CardContent>
 				</Card>
 				<Card className="gap-1 py-3">
-					<CardHeader className="px-4 pb-0 pt-0">
+					<CardHeader className="px-4 pt-0 pb-0">
 						<CardTitle className="font-medium text-xs">Cuotas</CardTitle>
 					</CardHeader>
 					<CardContent className="px-4 pb-0">
@@ -831,7 +1110,7 @@ function TabCuotasPorFecha({
 					] as const
 				).map((c) => (
 					<Card key={c.key} className="gap-0.5 py-2.5">
-						<CardHeader className="px-3 pb-0 pt-0">
+						<CardHeader className="px-3 pt-0 pb-0">
 							<CardTitle className="font-medium text-muted-foreground text-xs">
 								{c.label}
 							</CardTitle>
@@ -846,7 +1125,11 @@ function TabCuotasPorFecha({
 			</div>
 
 			{/* Detail table */}
-			<DataTable columns={colsCuotas} data={filteredRows} isLoading={isLoading} />
+			<DataTable
+				columns={colsCuotas}
+				data={filteredRows}
+				isLoading={isLoading}
+			/>
 		</div>
 	);
 }
@@ -906,28 +1189,98 @@ const colsDescuentos: ColumnDef<DescuentoRow>[] = [
 			</div>
 		),
 	},
-	{ accessorKey: "multas", header: "Multas", cell: ({ row }) => fmtDesc(row.original.multas) },
-	{ accessorKey: "copiaDeLlave", header: "Copia llave", cell: ({ row }) => fmtDesc(row.original.copiaDeLlave) },
-	{ accessorKey: "diferenciaCopia", header: "Dif. copia", cell: ({ row }) => fmtDesc(row.original.diferenciaCopia) },
-	{ accessorKey: "impuestoCirculacion", header: "Imp. circulación", cell: ({ row }) => fmtDesc(row.original.impuestoCirculacion) },
-	{ accessorKey: "garantiaMobiliaria", header: "Garantía mob.", cell: ({ row }) => fmtDesc(row.original.garantiaMobiliaria) },
-	{ accessorKey: "placas", header: "Placas", cell: ({ row }) => fmtDesc(row.original.placas) },
-	{ accessorKey: "contratoLeasing", header: "Cto. leasing", cell: ({ row }) => fmtDesc(row.original.contratoLeasing) },
-	{ accessorKey: "verificacionDireccion", header: "Verif. dirección", cell: ({ row }) => fmtDesc(row.original.verificacionDireccion) },
-	{ accessorKey: "traspasoVehiculo", header: "Traspaso", cell: ({ row }) => fmtDesc(row.original.traspasoVehiculo) },
-	{ accessorKey: "intereses", header: "Intereses", cell: ({ row }) => fmtDesc(row.original.intereses) },
-	{ accessorKey: "rcdp", header: "RCDP", cell: ({ row }) => fmtDesc(row.original.rcdp) },
-	{ accessorKey: "gps", header: "GPS", cell: ({ row }) => fmtDesc(row.original.gps) },
-	{ accessorKey: "seguro", header: "Seguro", cell: ({ row }) => fmtDesc(row.original.seguro) },
-	{ accessorKey: "membresia", header: "Membresía", cell: ({ row }) => fmtDesc(row.original.membresia) },
-	{ accessorKey: "gastosAdmin", header: "Gastos admin", cell: ({ row }) => fmtDesc(row.original.gastosAdmin) },
-	{ accessorKey: "freelance", header: "Free Lance", cell: ({ row }) => fmtDesc(row.original.freelance) },
-	{ accessorKey: "royalty", header: "Royalty", cell: ({ row }) => fmtDesc(row.original.royalty) },
+	{
+		accessorKey: "multas",
+		header: "Multas",
+		cell: ({ row }) => fmtDesc(row.original.multas),
+	},
+	{
+		accessorKey: "copiaDeLlave",
+		header: "Copia llave",
+		cell: ({ row }) => fmtDesc(row.original.copiaDeLlave),
+	},
+	{
+		accessorKey: "diferenciaCopia",
+		header: "Dif. copia",
+		cell: ({ row }) => fmtDesc(row.original.diferenciaCopia),
+	},
+	{
+		accessorKey: "impuestoCirculacion",
+		header: "Imp. circulación",
+		cell: ({ row }) => fmtDesc(row.original.impuestoCirculacion),
+	},
+	{
+		accessorKey: "garantiaMobiliaria",
+		header: "Garantía mob.",
+		cell: ({ row }) => fmtDesc(row.original.garantiaMobiliaria),
+	},
+	{
+		accessorKey: "placas",
+		header: "Placas",
+		cell: ({ row }) => fmtDesc(row.original.placas),
+	},
+	{
+		accessorKey: "contratoLeasing",
+		header: "Cto. leasing",
+		cell: ({ row }) => fmtDesc(row.original.contratoLeasing),
+	},
+	{
+		accessorKey: "verificacionDireccion",
+		header: "Verif. dirección",
+		cell: ({ row }) => fmtDesc(row.original.verificacionDireccion),
+	},
+	{
+		accessorKey: "traspasoVehiculo",
+		header: "Traspaso",
+		cell: ({ row }) => fmtDesc(row.original.traspasoVehiculo),
+	},
+	{
+		accessorKey: "intereses",
+		header: "Intereses",
+		cell: ({ row }) => fmtDesc(row.original.intereses),
+	},
+	{
+		accessorKey: "rcdp",
+		header: "RCDP",
+		cell: ({ row }) => fmtDesc(row.original.rcdp),
+	},
+	{
+		accessorKey: "gps",
+		header: "GPS",
+		cell: ({ row }) => fmtDesc(row.original.gps),
+	},
+	{
+		accessorKey: "seguro",
+		header: "Seguro",
+		cell: ({ row }) => fmtDesc(row.original.seguro),
+	},
+	{
+		accessorKey: "membresia",
+		header: "Membresía",
+		cell: ({ row }) => fmtDesc(row.original.membresia),
+	},
+	{
+		accessorKey: "gastosAdmin",
+		header: "Gastos admin",
+		cell: ({ row }) => fmtDesc(row.original.gastosAdmin),
+	},
+	{
+		accessorKey: "freelance",
+		header: "Free Lance",
+		cell: ({ row }) => fmtDesc(row.original.freelance),
+	},
+	{
+		accessorKey: "royalty",
+		header: "Royalty",
+		cell: ({ row }) => fmtDesc(row.original.royalty),
+	},
 	{
 		accessorKey: "totalDescuentos",
 		header: "Total",
 		cell: ({ row }) => (
-			<span className="font-semibold">{fmtQ(row.original.totalDescuentos)}</span>
+			<span className="font-semibold">
+				{fmtQ(row.original.totalDescuentos)}
+			</span>
 		),
 	},
 ];
@@ -992,18 +1345,18 @@ function TabDescuentos({
 				hideSearch
 				stickyFirstColumn
 				serverPagination={
-						data
-							? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-								{
-									page: (data as any).page,
-									pageSize: (data as any).pageSize,
-									totalPages: (data as any).totalPages,
-									totalItems: (data as any).total,
-									onPageChange: setPage,
-								}
-							: undefined
-					}
-				/>
+					data
+						? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+							{
+								page: (data as any).page,
+								pageSize: (data as any).pageSize,
+								totalPages: (data as any).totalPages,
+								totalItems: (data as any).total,
+								onPageChange: setPage,
+							}
+						: undefined
+				}
+			/>
 		</div>
 	);
 }

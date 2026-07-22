@@ -27,6 +27,12 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -34,12 +40,6 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
 	Select,
 	SelectContent,
@@ -49,8 +49,15 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+	accionUsaCuerpoNoReply,
+	crearUrlWhatsappManual,
+	cuerpoParaValidarNoReply,
 	interpolar,
+	mensajeEmailEditable,
+	mensajePlantillaEditable,
+	mensajeSmsEditable,
 	PLANTILLAS_MENSAJES,
+	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
 } from "@/lib/cobros/plantillas-mensajes";
@@ -131,6 +138,8 @@ export function ContactoModal({
 	const [mensajeWhatsappEditado, setMensajeWhatsappEditado] = useState("");
 	const [asuntoEditado, setAsuntoEditado] = useState("");
 
+	const telefonoAsesorLimpio = telefonoAsesor.trim();
+
 	const variables: VariablesPlantilla = useMemo(
 		() => ({
 			clienteNombre,
@@ -140,7 +149,7 @@ export function ContactoModal({
 			marcaLineaModelo,
 			montoAdeudado,
 			cuotasAtraso,
-			telefonoAsesor,
+			telefonoAsesor: telefonoAsesorLimpio,
 			nombreAsesor,
 		}),
 		[
@@ -151,7 +160,7 @@ export function ContactoModal({
 			marcaLineaModelo,
 			montoAdeudado,
 			cuotasAtraso,
-			telefonoAsesor,
+			telefonoAsesorLimpio,
 			nombreAsesor,
 		],
 	);
@@ -302,15 +311,43 @@ export function ContactoModal({
 	const ejecutarAccion = (metodo: AccionContacto) => {
 		const tel = telefonoSeleccionado || telefonoPrincipal;
 		const telLimpio = tel.replace(/[^0-9]/g, "");
-		const mensajeWhatsapp = mensajeWhatsappEditado || mensajeEditado;
+		const mensajeWhatsapp = mensajePlantillaEditable(
+			"whatsapp",
+			mensajeEditado,
+			mensajeWhatsappEditado,
+		);
+		const mensajeSms = mensajeSmsEditable(
+			metodoInicial,
+			mensajeEditado,
+			mensajeWhatsappEditado,
+		);
+		const mensajeEmail = mensajeEmailEditable(
+			metodoInicial,
+			mensajeEditado,
+			mensajeWhatsappEditado,
+		);
+		const cuerpoNoReply = cuerpoParaValidarNoReply(
+			metodo,
+			mensajeWhatsapp,
+			mensajeSms,
+			mensajeEmail,
+		);
+		const telefonoAsesorNoReply = prepararTelefonoAsesorParaEnvio(
+			cuerpoNoReply,
+			telefonoAsesorLimpio,
+		);
+		if (accionUsaCuerpoNoReply(metodo) && !telefonoAsesorNoReply.enviar) {
+			toast.error(
+				"No se puede enviar esta plantilla no-reply porque el asesor no tiene teléfono registrado",
+			);
+			return;
+		}
 		switch (metodo) {
 			case "llamada":
 				window.open(`tel:${tel}`);
 				break;
 			case "whatsapp-link": {
-				const url = mensajeEditado
-					? `https://wa.me/${telLimpio}?text=${encodeURIComponent(mensajeEditado)}`
-					: `https://wa.me/${telLimpio}`;
+				const url = crearUrlWhatsappManual(telLimpio, mensajeWhatsapp);
 				window.open(url);
 				break;
 			}
@@ -331,7 +368,7 @@ export function ContactoModal({
 			case "email-link": {
 				const params = new URLSearchParams();
 				if (asuntoEditado) params.set("subject", asuntoEditado);
-				if (mensajeEditado) params.set("body", mensajeEditado);
+				if (mensajeEmail) params.set("body", mensajeEmail);
 				const query = params.toString();
 				window.open(`mailto:${emailCliente || ""}${query ? `?${query}` : ""}`);
 				break;
@@ -345,14 +382,14 @@ export function ContactoModal({
 					toast.error("El asunto es requerido");
 					return;
 				}
-				if (!mensajeEditado.trim()) {
+				if (!mensajeEmail.trim()) {
 					toast.error("El mensaje es requerido");
 					return;
 				}
 				emailApiMutation.mutate({
 					destinatario: emailCliente,
 					asunto: asuntoEditado,
-					mensaje: mensajeEditado,
+					mensaje: mensajeEmail,
 				});
 				break;
 			case "sms-api":
@@ -360,13 +397,13 @@ export function ContactoModal({
 					toast.error("No hay teléfono para enviar SMS");
 					return;
 				}
-				if (!mensajeEditado.trim()) {
+				if (!mensajeSms.trim()) {
 					toast.error("No hay mensaje para enviar");
 					return;
 				}
 				smsApiMutation.mutate({
 					telefono: telLimpio,
-					mensaje: mensajeEditado,
+					mensaje: mensajeSms,
 				});
 				break;
 		}
@@ -374,6 +411,19 @@ export function ContactoModal({
 
 	const mostrarPlantillas =
 		metodoInicial === "whatsapp" || metodoInicial === "email";
+	const mensajeEditable = mensajePlantillaEditable(
+		metodoInicial,
+		mensajeEditado,
+		mensajeWhatsappEditado,
+	);
+	const handleMensajeEditableChange = (mensaje: string) => {
+		if (metodoInicial === "whatsapp") {
+			setMensajeWhatsappEditado(mensaje);
+			return;
+		}
+
+		setMensajeEditado(mensaje);
+	};
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -514,8 +564,10 @@ export function ContactoModal({
 										<Label>Mensaje (editable)</Label>
 										<Textarea
 											className="min-h-[150px] text-sm"
-											value={mensajeEditado}
-											onChange={(e) => setMensajeEditado(e.target.value)}
+											value={mensajeEditable}
+											onChange={(e) =>
+												handleMensajeEditableChange(e.target.value)
+											}
 										/>
 									</div>
 								)}
@@ -616,7 +668,9 @@ export function ContactoModal({
 									<DropdownMenuItem onClick={() => ejecutarAccion("email-api")}>
 										Enviar Directo (Automático)
 									</DropdownMenuItem>
-									<DropdownMenuItem onClick={() => ejecutarAccion("email-link")}>
+									<DropdownMenuItem
+										onClick={() => ejecutarAccion("email-link")}
+									>
 										Abrir cliente de correo (Manual)
 									</DropdownMenuItem>
 								</DropdownMenuContent>

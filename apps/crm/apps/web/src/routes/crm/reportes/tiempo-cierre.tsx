@@ -171,6 +171,7 @@ export function TiempoCierreContent() {
 		.sort((a, b) => a.avgDias - b.avgDias);
 
 	const chartHeight = Math.max(280, chartData.length * BAR_HEIGHT_PX);
+	const channelTypeData = data?.porTipoCanal ?? [];
 
 	return (
 		<div className="space-y-6">
@@ -270,6 +271,69 @@ export function TiempoCierreContent() {
 							</BarChart>
 						</ResponsiveContainer>
 					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle>Subtotales por tipo de canal</CardTitle>
+					<CardDescription>
+						Agrupación de fuentes para comparar tiempos de cierre por esfuerzo
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<Table>
+						<TableHeader>
+							<TableRow>
+								<TableHead>Tipo de canal</TableHead>
+								<TableHead className="text-right">Créditos</TableHead>
+								<TableHead className="text-right">Promedio (días)</TableHead>
+								<TableHead className="text-right">Mínimo (días)</TableHead>
+								<TableHead className="text-right">Máximo (días)</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{isLoading ? (
+								<TableRow>
+									<TableCell
+										colSpan={5}
+										className="py-8 text-center text-muted-foreground"
+									>
+										Cargando...
+									</TableCell>
+								</TableRow>
+							) : channelTypeData.length === 0 ? (
+								<TableRow>
+									<TableCell
+										colSpan={5}
+										className="py-8 text-center text-muted-foreground"
+									>
+										No hay datos para el período seleccionado
+									</TableCell>
+								</TableRow>
+							) : (
+								channelTypeData.map((row) => (
+									<TableRow key={row.tipoCanal}>
+										<TableCell className="font-medium">
+											{row.tipoCanal}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.totalCreditos}
+										</TableCell>
+										<TableCell className="text-right font-semibold">
+											{row.avgDias}
+										</TableCell>
+										<TableCell className="text-right text-green-600 dark:text-green-400">
+											{row.minDias}
+										</TableCell>
+										<TableCell className="text-right text-orange-600 dark:text-orange-400">
+											{row.maxDias}
+										</TableCell>
+									</TableRow>
+								))
+							)}
+						</TableBody>
+					</Table>
 				</CardContent>
 			</Card>
 

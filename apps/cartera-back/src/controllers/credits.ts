@@ -1,4 +1,5 @@
 import { db } from "../database/index";
+import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
 import {
   aseguradoras,
   asesores,
@@ -616,7 +617,8 @@ export async function getCreditosWithUserByMesAnio(
   capital_min?: number,
   capital_max?: number,
   estados_credito?: StatusCredit[],
-  aseguradora_id?: number
+  aseguradora_id?: number,
+  excluir_pagados_mes?: boolean
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -631,11 +633,19 @@ export async function getCreditosWithUserByMesAnio(
   const offset = (page - 1) * perPage;
   const conditions: any[] = [];
 
-  // 🇬🇹 Fecha actual en Guatemala
-  const hoyGuatemala = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
-  );
-  const hoyStr = hoyGuatemala.toISOString().slice(0, 10);
+  // 🇬🇹 Fecha actual en Guatemala. sv-SE da directamente YYYY-MM-DD y no
+  // depende del TZ del proceso (el patrón anterior new Date(toLocaleString)
+  // + toISOString solo era correcto con el server en UTC).
+  const hoyStr = new Date().toLocaleDateString("sv-SE", {
+    timeZone: "America/Guatemala",
+  });
+  // Aritmética de días en espacio UTC puro (independiente del TZ del server).
+  const hoyUTC = new Date(`${hoyStr}T00:00:00Z`);
+  const sumarDiasStr = (dias: number) => {
+    const d = new Date(hoyUTC);
+    d.setUTCDate(d.getUTCDate() + dias);
+    return d.toISOString().slice(0, 10);
+  };
 
   try {
     // 📌 Filtros
@@ -734,40 +744,26 @@ export async function getCreditosWithUserByMesAnio(
   if (proximidad_pago) {
     console.log(`🔎 Filtrando por proximidad de pago: ${proximidad_pago}`);
 
-    // Calcular rangos de fecha según proximidad
-    const hoy = new Date(hoyGuatemala);
-    hoy.setHours(0, 0, 0, 0);
-
+    // Calcular rangos de fecha según proximidad (derivados de hoyStr para no
+    // depender del TZ del proceso)
     if (proximidad_pago === "TODAY") {
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date = ${hoyStr}::date`);
     } else if (proximidad_pago === "WEEK") {
-      const fin = new Date(hoy);
-      fin.setDate(fin.getDate() + 7);
-      const finStr = fin.toISOString().slice(0, 10);
+      const finStr = sumarDiasStr(7);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date > ${hoyStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "TWO_WEEKS") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 8);
-      const inicioStr = inicio.toISOString().slice(0, 10);
-      const fin = new Date(hoy);
-      fin.setDate(fin.getDate() + 14);
-      const finStr = fin.toISOString().slice(0, 10);
+      const inicioStr = sumarDiasStr(8);
+      const finStr = sumarDiasStr(14);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "MONTH") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 15);
-      const inicioStr = inicio.toISOString().slice(0, 10);
-      const fin = new Date(hoy);
-      fin.setDate(fin.getDate() + 30);
-      const finStr = fin.toISOString().slice(0, 10);
+      const inicioStr = sumarDiasStr(15);
+      const finStr = sumarDiasStr(30);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "DUEMONTH") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 31);
-      const inicioStr = inicio.toISOString().slice(0, 10);
+      const inicioStr = sumarDiasStr(31);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
     }
 
@@ -799,6 +795,36 @@ export async function getCreditosWithUserByMesAnio(
 
   if (aseguradora_id !== undefined) {
     conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
+  }
+
+  if (excluir_pagados_mes) {
+    console.log(`🔎 Excluyendo créditos con su cuota actual ya pagada`);
+    // Cuota actual = la MISMA cuota que la tabla muestra como Fecha de Pago
+    // (proximasCuotasMap): primera cuota con fecha_vencimiento >= (fecha_desde
+    // ?? hoy), con tope fecha_hasta si hay rango — si las anclas divergen, un
+    // crédito con cuota impaga visible podría ocultarse. Se excluye el crédito
+    // solo si esa cuota está pagada (todas sus filas, por si hay duplicadas)
+    // Y no tiene mora activa; sin cuotas en el rango no se excluye.
+    // Subconsulta correlacionada en vez de join para no multiplicar filas
+    // (paginación) y para que el COUNT herede la condición.
+    const anclaDesde = fecha_desde ?? hoyStr;
+    conditions.push(sql`NOT (
+      ${moras_credito.credito_id} IS NULL
+      AND COALESCE((
+        SELECT bool_and(COALESCE(cc.pagado, false))
+        FROM ${cuotas_credito} cc
+        WHERE cc.credito_id = ${creditos.credito_id}
+          AND cc.numero_cuota > 0
+          AND cc.fecha_vencimiento = (
+            SELECT MIN(cc2.fecha_vencimiento)
+            FROM ${cuotas_credito} cc2
+            WHERE cc2.credito_id = ${creditos.credito_id}
+              AND cc2.numero_cuota > 0
+              AND cc2.fecha_vencimiento >= ${anclaDesde}::date
+              ${fecha_hasta ? sql`AND cc2.fecha_vencimiento <= ${fecha_hasta}::date` : sql``}
+          )
+      ), false)
+    )`);
   }
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1573,6 +1599,7 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
         .returning({ cuota_id: cuotas_credito.cuota_id });
 
       // e) Actualizar crédito: INCOBRABLE, plazo 1, cuota = capital completo
+      await setCapitalSource(tx, "CASTIGO");
       await tx
         .update(creditos)
         .set({
@@ -1729,24 +1756,26 @@ export async function reiniciarCredito(
   creditId: number,
   montoIncobrable?: number
 ) {
-  await db
-    .update(creditos)
-    .set({
-      capital: "0",
-      deudatotal: montoIncobrable !== undefined ? String(montoIncobrable) : "0",
-      cuota_interes: "0",
-      cuota: "0",
-      iva_12: "0",
-      seguro_10_cuotas: "0",
-      gps: "0",
-      membresias_pago: "0",
-      membresias: "0",
-      porcentaje_royalti: "0",
-      royalti: "0",
-      otros: "0",
-      statusCredit: "ACTIVO",
-    })
-    .where(eq(creditos.credito_id, creditId));
+  await withCapitalContext(null, "REINICIO", null, (tx) =>
+    tx
+      .update(creditos)
+      .set({
+        capital: "0",
+        deudatotal: montoIncobrable !== undefined ? String(montoIncobrable) : "0",
+        cuota_interes: "0",
+        cuota: "0",
+        iva_12: "0",
+        seguro_10_cuotas: "0",
+        gps: "0",
+        membresias_pago: "0",
+        membresias: "0",
+        porcentaje_royalti: "0",
+        royalti: "0",
+        otros: "0",
+        statusCredit: "ACTIVO",
+      })
+      .where(eq(creditos.credito_id, creditId))
+  );
 }
 
 function construirUrlBoletas(url_boletas: string[], r2BaseUrl: string) {
@@ -2036,25 +2065,27 @@ export async function resetCredit({
       const capitalIncobrable = new Big(montoIncobrable!);
 
       // 16a. Actualizar crédito: capital = incobrable, lo demás en 0 (preservamos porcentaje_interes)
-      await db
-        .update(creditos)
-        .set({
-          capital: capitalIncobrable.toString(),
-          deudatotal: capitalIncobrable.toString(),
-          cuota_interes: "0",
-          cuota: capitalIncobrable.toString(),
-          iva_12: "0",
-          seguro_10_cuotas: "0",
-          gps: "0",
-          membresias_pago: "0",
-          membresias: "0",
-          porcentaje_royalti: "0",
-          royalti: "0",
-          otros: "0",
-          plazo: 1,
-          statusCredit: "INCOBRABLE",
-        })
-        .where(eq(creditos.credito_id, creditId));
+      await withCapitalContext(null, "CASTIGO", null, (tx) =>
+        tx
+          .update(creditos)
+          .set({
+            capital: capitalIncobrable.toString(),
+            deudatotal: capitalIncobrable.toString(),
+            cuota_interes: "0",
+            cuota: capitalIncobrable.toString(),
+            iva_12: "0",
+            seguro_10_cuotas: "0",
+            gps: "0",
+            membresias_pago: "0",
+            membresias: "0",
+            porcentaje_royalti: "0",
+            royalti: "0",
+            otros: "0",
+            plazo: 1,
+            statusCredit: "INCOBRABLE",
+          })
+          .where(eq(creditos.credito_id, creditId))
+      );
 
       // 16b. Crear cuota pendiente para el monto incobrable (correlativa)
       const [maxCuotaRowInc] = await db
@@ -2117,24 +2148,26 @@ export async function resetCredit({
       });
     } else {
       // CANCELADO: zerear todo (preservamos porcentaje_interes)
-      await db
-        .update(creditos)
-        .set({
-          capital: "0",
-          deudatotal: "0",
-          cuota_interes: "0",
-          cuota: "0",
-          iva_12: "0",
-          seguro_10_cuotas: "0",
-          gps: "0",
-          membresias_pago: "0",
-          membresias: "0",
-          porcentaje_royalti: "0",
-          royalti: "0",
-          otros: "0",
-          statusCredit: "CANCELADO",
-        })
-        .where(eq(creditos.credito_id, creditId));
+      await withCapitalContext(null, "CANCELACION", null, (tx) =>
+        tx
+          .update(creditos)
+          .set({
+            capital: "0",
+            deudatotal: "0",
+            cuota_interes: "0",
+            cuota: "0",
+            iva_12: "0",
+            seguro_10_cuotas: "0",
+            gps: "0",
+            membresias_pago: "0",
+            membresias: "0",
+            porcentaje_royalti: "0",
+            royalti: "0",
+            otros: "0",
+            statusCredit: "CANCELADO",
+          })
+          .where(eq(creditos.credito_id, creditId))
+      );
     }
 
     // 17. Retorno OK
@@ -2620,22 +2653,24 @@ export const mergeCreditosAndUpdate = async ({
       "💾 PASO 3: Actualizando crédito destino con valores consolidados..."
     );
 
-    const [creditoActualizado] = await db
-      .update(creditos)
-      .set({
-        capital: capitalTotal.toString(),
-        cuota: cuota_total.toString(),
-        cuota_interes: cuota_interes.toString(),
-        iva_12: iva_12.toString(),
-        deudatotal: deudatotal.toString(),
-        seguro_10_cuotas: seguro_total.toString(),
-        gps: gps_total.toString(),
-        membresias_pago: membresias_total.toString(),
-        membresias: membresias_total.toString(),
-        otros: otros_total.toString(),
-      })
-      .where(eq(creditos.credito_id, creditoDestino.credito_id))
-      .returning();
+    const [creditoActualizado] = await withCapitalContext(null, "MERGE", null, (tx) =>
+      tx
+        .update(creditos)
+        .set({
+          capital: capitalTotal.toString(),
+          cuota: cuota_total.toString(),
+          cuota_interes: cuota_interes.toString(),
+          iva_12: iva_12.toString(),
+          deudatotal: deudatotal.toString(),
+          seguro_10_cuotas: seguro_total.toString(),
+          gps: gps_total.toString(),
+          membresias_pago: membresias_total.toString(),
+          membresias: membresias_total.toString(),
+          otros: otros_total.toString(),
+        })
+        .where(eq(creditos.credito_id, creditoDestino.credito_id))
+        .returning()
+    );
 
     console.log(
       `   ✅ Crédito ${creditoDestino.numero_credito_sifco} actualizado exitosamente`

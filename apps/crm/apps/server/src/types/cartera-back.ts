@@ -575,6 +575,7 @@ export interface GetAllCreditsParams {
 	fecha_hasta?: string;
 	capital_min?: number;
 	capital_max?: number;
+	excluir_pagados_mes?: boolean;
 }
 
 export interface GetPaymentsParams {

@@ -243,24 +243,41 @@ export const investorDocumentsRouter = {
 	// Crear inversionista — opcionalmente con compra de cartera
 	crearInversionista: crmCobrosOrInvestmentsProcedure
 		.input(
-			z.object({
-				nombre: z.string().min(1),
-				dpi: z.string().optional(),
-				email: z.string().email().optional(),
-				banco: z.number().nullable().optional(),
-				tipoCuenta: z.string().optional(),
-				numeroCuenta: z.string().optional(),
-				tipoReinversion: z.string().optional(),
-				montoReinversion: z.number().optional(),
-				moneda: z.enum(["quetzales", "dolares"]).optional(),
-				emiteFactura: z.boolean().optional(),
-				// Compra de cartera opcional
-				hacerCompraCartera: z.boolean().optional(),
-				montoCompraCartera: z.number().positive().optional(),
-				porcentajeInversion: z.number().min(0).max(100).optional(),
-				porcentajeCashIn: z.number().min(0).max(100).optional(),
-				fechaInicioParticipacion: z.string().optional(),
-			}),
+			z
+				.object({
+					nombre: z.string().min(1),
+					dpi: z.string().optional(),
+					email: z.string().email().optional(),
+					banco: z.number().nullable().optional(),
+					tipoCuenta: z.string().optional(),
+					numeroCuenta: z.string().optional(),
+					tipoReinversion: z.string().optional(),
+					montoReinversion: z.number().optional(),
+					moneda: z.enum(["quetzales", "dolares"]).optional(),
+					emiteFactura: z.boolean().optional(),
+					// Compra de cartera opcional
+					hacerCompraCartera: z.boolean().optional(),
+					montoCompraCartera: z.number().positive().optional(),
+					// Obligatoria cuando hacerCompraCartera = true (cartera-back la
+					// exige). Por default calcula el % Inversionista/Cash In por
+					// monto; si viene modalidadFacturacionSpreadId, el operador
+					// anuló manualmente el bracket (ver ese campo abajo).
+					modalidadFacturacion: z
+						.enum(["p2p_directa", "factura_cube", "factura_cube_pequeno"])
+						.optional(),
+					// Anulación manual: id del bracket elegido (de los 8 de la
+					// modalidad), sin importar si corresponde al monto.
+					modalidadFacturacionSpreadId: z.number().int().positive().optional(),
+					fechaInicioParticipacion: z.string().optional(),
+				})
+				.refine(
+					(data) => !data.hacerCompraCartera || !!data.modalidadFacturacion,
+					{
+						message:
+							"La modalidad de facturación es obligatoria para hacer una compra de cartera",
+						path: ["modalidadFacturacion"],
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
 			// 1. Crear inversionista en cartera-back
@@ -299,6 +316,7 @@ export const investorDocumentsRouter = {
 			});
 
 			// 3. Si pidió compra de cartera, ejecutarla con el ID del nuevo inversionista
+			// (modalidadFacturacion ya viene garantizada por el .refine() del schema)
 			let compraResult = null;
 			if (input.hacerCompraCartera && input.montoCompraCartera) {
 				const tipoReinversionCompra: "sin_reinversion" | "reinversion_capital" | "reinversion_total" =
@@ -311,8 +329,8 @@ export const investorDocumentsRouter = {
 					monto_aportado: input.montoCompraCartera,
 					tipo_operacion: "compra_cartera",
 					tipo_reinversion: tipoReinversionCompra,
-					porcentaje_inversion: input.porcentajeInversion,
-					porcentaje_cash_in: input.porcentajeCashIn,
+					modalidad_facturacion: input.modalidadFacturacion,
+					modalidad_facturacion_spread_id: input.modalidadFacturacionSpreadId,
 					fecha_inicio_participacion:
 						input.fechaInicioParticipacion || undefined,
 				});
@@ -324,6 +342,7 @@ export const investorDocumentsRouter = {
 					details: {
 						monto_aportado: input.montoCompraCartera,
 						tipo_reinversion: tipoReinversionCompra,
+						modalidad_facturacion: input.modalidadFacturacion,
 						fecha_inicio_participacion: input.fechaInicioParticipacion,
 					},
 					performedBy: context.session.user.id,
@@ -350,8 +369,18 @@ export const investorDocumentsRouter = {
 					"reinversion_capital",
 					"reinversion_total",
 				]),
-				porcentajeInversion: z.number().min(0).max(100).optional(),
-				porcentajeCashIn: z.number().min(0).max(100).optional(),
+				// Obligatoria: define el % Inversionista / % Cash In desde el
+				// catálogo de spreads. Por default por monto; si viene
+				// modalidadFacturacionSpreadId, el operador anuló manualmente
+				// el bracket (ver ese campo abajo).
+				modalidadFacturacion: z.enum([
+					"p2p_directa",
+					"factura_cube",
+					"factura_cube_pequeno",
+				]),
+				// Anulación manual: id del bracket elegido (de los 8 de la
+				// modalidad), sin importar si corresponde al monto.
+				modalidadFacturacionSpreadId: z.number().int().positive().optional(),
 				fechaInicioParticipacion: z.string().optional(),
 			}),
 		)
@@ -362,8 +391,8 @@ export const investorDocumentsRouter = {
 				monto_aportado: input.montoAportado,
 				tipo_operacion: "compra_cartera",
 				tipo_reinversion: input.tipoReinversion,
-				porcentaje_inversion: input.porcentajeInversion,
-				porcentaje_cash_in: input.porcentajeCashIn,
+				modalidad_facturacion: input.modalidadFacturacion,
+				modalidad_facturacion_spread_id: input.modalidadFacturacionSpreadId,
 				fecha_inicio_participacion: input.fechaInicioParticipacion || undefined,
 			});
 
@@ -374,8 +403,8 @@ export const investorDocumentsRouter = {
 				details: {
 					monto_aportado: input.montoAportado,
 					tipo_reinversion: input.tipoReinversion,
-					porcentaje_inversion: input.porcentajeInversion,
-					porcentaje_cash_in: input.porcentajeCashIn,
+					modalidad_facturacion: input.modalidadFacturacion,
+					modalidad_facturacion_spread_id: input.modalidadFacturacionSpreadId,
 					fecha_inicio_participacion: input.fechaInicioParticipacion,
 				},
 				performedBy: context.session.user.id,
@@ -390,6 +419,37 @@ export const investorDocumentsRouter = {
 		const result = await carteraBackClient.getInvestors();
 		return result.data ?? [];
 	}),
+
+	// Resuelve, por monto, las 3 filas de Modalidad de Facturación (una por
+	// modalidad) del bracket correspondiente. Lo usa el modal de compra de
+	// cartera para autocalcular % Inversionista/CCI — única fuente de verdad
+	// (SQL), el front ya no reimplementa la resolución de bracket.
+	resolverModalidadFacturacionSpread: crmCobrosOrInvestmentsProcedure
+		.input(z.object({ monto: z.number().positive() }))
+		.handler(async ({ input }) => {
+			return await carteraBackClient.resolverModalidadFacturacionSpread(
+				input.monto,
+			);
+		}),
+
+	// Las 8 filas (una por bracket) de una modalidad, sin filtrar por monto.
+	// Alimenta el combobox de anulación manual del spread — el operador
+	// puede elegir cualquiera de los 8, sin importar el monto de la compra.
+	listModalidadFacturacionSpreadByModalidad: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				modalidad: z.enum([
+					"p2p_directa",
+					"factura_cube",
+					"factura_cube_pequeno",
+				]),
+			}),
+		)
+		.handler(async ({ input }) => {
+			return await carteraBackClient.listModalidadFacturacionSpreadByModalidad(
+				input.modalidad,
+			);
+		}),
 
 	getSimulacionInversionista: investmentManagerProcedure
 		.input(

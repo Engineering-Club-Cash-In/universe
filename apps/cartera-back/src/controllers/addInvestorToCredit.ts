@@ -516,6 +516,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     let candidatos: CreditCandidate[];
 
     if (esManual) {
+      // LIMITACIÓN CONOCIDA (modalidad + manual): el modo manual no pasa por
+      // getCreditCandidates, así que no aplica el filtro de "% incompatible". Si
+      // el operador elige a mano un crédito donde el inversionista ya participa,
+      // la compra reprecia su posición previa al spread nuevo. Hoy el CRM solo
+      // expone el modo automático; si se habilitara el manual con modalidad,
+      // habría que agregar aquí un guard equivalente al filtro automático.
       console.log("================================================================");
       console.log(`[addInvestorToCredit] MODO MANUAL: ${manual!.length} crédito(s) forzado(s)`);
 

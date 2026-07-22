@@ -313,6 +313,7 @@ export const quotationsRouter = {
 					vehicleType: input.vehicleType,
 					vehicleCondition,
 					vehicleOrigin: input.vehicleOrigin,
+					creditType: input.creditType,
 					vehicleValue: input.vehicleValue.toString(),
 					insuredAmount: input.insuredAmount.toString(),
 					downPayment: input.downPayment.toString(),

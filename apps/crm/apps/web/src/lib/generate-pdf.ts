@@ -1,8 +1,10 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import {
-	type QuotationCreditType,
 	getQuotationPdfCopy,
+	getSobreVehiculoDisbursement,
+	type QuotationCreditType,
+	type QuotationExtraCosts,
 } from "./quotation-pdf-copy";
 
 // Tipo para filas de la tabla de amortización
@@ -85,6 +87,7 @@ interface QuotationData {
 	transferCost: number; // Traspaso
 	adminCost: number; // Gastos administrativos
 	membershipCost: number; // Membresía
+	extraCosts: QuotationExtraCosts;
 	amortizationTable: {
 		period: number;
 		initialBalance: number;
@@ -146,75 +149,126 @@ export function generateQuotationPdf(
 	let y = quotation.clientName ? 68 : 60;
 	const leftCol = 14;
 	const leftValueCol = 70; // Increased spacing for longer labels
-	const rightCol = 110;
-	const rightValueCol = 165;
 
-	// Left column items
-	doc.text("Valor del vehículo:", leftCol, y);
-	doc.text(formatCurrency(quotation.vehicleValue), leftValueCol, y);
+	if (quotation.creditType === "sobre_vehiculo") {
+		const sobreValueCol = 105;
+		const sobreValueOptions = { align: "right" as const };
+		const disbursement = getSobreVehiculoDisbursement(
+			quotation.downPayment,
+			quotation.extraCosts,
+		);
 
-	y += 7;
-	doc.text(copy.downPaymentLabel, leftCol, y);
-	doc.text(`${formatCurrency(quotation.downPayment)}`, leftValueCol, y);
-	if (copy.showDownPaymentPercentage) {
+		doc.text("Valor del vehículo:", leftCol, y);
+		doc.text(
+			formatCurrency(quotation.vehicleValue),
+			sobreValueCol,
+			y,
+			sobreValueOptions,
+		);
+
+		y += 7;
+		doc.text("Monto solicitado:", leftCol, y);
+		doc.text(
+			formatCurrency(quotation.downPayment),
+			sobreValueCol,
+			y,
+			sobreValueOptions,
+		);
+
+		y += 10;
+		doc.text("Plazo (meses):", leftCol, y);
+		doc.text(`${quotation.termMonths}`, sobreValueCol, y, sobreValueOptions);
+
+		y += 7;
+		doc.text("Tasa de interés:", leftCol, y);
+		doc.text(`${quotation.interestRate}%`, sobreValueCol, y, sobreValueOptions);
+
+		y += 10;
+		doc.setFont("helvetica", "bold");
+		doc.text("Gastos adicionales a descontar:", leftCol, y);
+		const additionalCostsText =
+			disbursement.additionalCosts === 0
+				? formatCurrency(0)
+				: `-${formatCurrency(disbursement.additionalCosts)}`;
+		doc.text(additionalCostsText, sobreValueCol, y, sobreValueOptions);
+
+		y += 12;
+		doc.setDrawColor(100);
+		doc.line(leftCol, y, 115, y);
+
+		y += 8;
+		doc.setTextColor(0, 100, 0);
+		doc.text("Total a desembolsar / recibir:", leftCol, y);
+		doc.text(
+			formatCurrency(disbursement.netDisbursement),
+			sobreValueCol,
+			y,
+			sobreValueOptions,
+		);
+		doc.setTextColor(0, 0, 0);
+	} else {
+		doc.text("Valor del vehículo:", leftCol, y);
+		doc.text(formatCurrency(quotation.vehicleValue), leftValueCol, y);
+
+		y += 7;
+		doc.text(copy.downPaymentLabel, leftCol, y);
+		doc.text(`${formatCurrency(quotation.downPayment)}`, leftValueCol, y);
 		doc.text(
 			`${quotation.downPaymentPercentage.toFixed(2)}%`,
 			leftValueCol + 30,
 			y,
 		);
-	}
 
-	y += 7;
-	doc.text("Monto a financiar:", leftCol, y);
-	doc.text(formatCurrency(quotation.amountToFinance), leftValueCol, y);
-	const financePercentage = 100 - quotation.downPaymentPercentage;
-	doc.text(`${financePercentage.toFixed(2)}%`, leftValueCol + 30, y);
-
-	y += 10;
-	doc.text("Plazo (meses):", leftCol, y);
-	doc.text(`${quotation.termMonths}`, leftValueCol, y);
-
-	y += 7;
-	doc.text("Tasa de interés:", leftCol, y);
-	doc.text(`${quotation.interestRate}%`, leftValueCol, y);
-
-	// Additional costs section
-	y += 10;
-	doc.setFont("helvetica", "bold");
-	doc.text("Costos adicionales:", leftCol, y);
-	doc.setFont("helvetica", "normal");
-
-	y += 7;
-	doc.text("Seguro:", leftCol, y);
-	doc.text(formatCurrency(quotation.insuranceCost), leftValueCol, y);
-
-	y += 7;
-	doc.text("GPS:", leftCol, y);
-	doc.text(formatCurrency(quotation.gpsCost), leftValueCol, y);
-
-	y += 7;
-	doc.text("Traspaso:", leftCol, y);
-	doc.text(formatCurrency(quotation.transferCost), leftValueCol, y);
-
-	y += 7;
-	doc.text("Gastos administrativos:", leftCol, y);
-	doc.text(formatCurrency(quotation.adminCost), leftValueCol, y);
-
-	if (!options?.clientVersion) {
 		y += 7;
-		doc.text("Membresía:", leftCol, y);
-		doc.text(formatCurrency(quotation.membershipCost), leftValueCol, y);
+		doc.text("Monto a financiar:", leftCol, y);
+		doc.text(formatCurrency(quotation.amountToFinance), leftValueCol, y);
+		const financePercentage = 100 - quotation.downPaymentPercentage;
+		doc.text(`${financePercentage.toFixed(2)}%`, leftValueCol + 30, y);
+
+		y += 10;
+		doc.text("Plazo (meses):", leftCol, y);
+		doc.text(`${quotation.termMonths}`, leftValueCol, y);
+
+		y += 7;
+		doc.text("Tasa de interés:", leftCol, y);
+		doc.text(`${quotation.interestRate}%`, leftValueCol, y);
+
+		y += 10;
+		doc.setFont("helvetica", "bold");
+		doc.text("Costos adicionales:", leftCol, y);
+		doc.setFont("helvetica", "normal");
+
+		y += 7;
+		doc.text("Seguro:", leftCol, y);
+		doc.text(formatCurrency(quotation.insuranceCost), leftValueCol, y);
+
+		y += 7;
+		doc.text("GPS:", leftCol, y);
+		doc.text(formatCurrency(quotation.gpsCost), leftValueCol, y);
+
+		y += 7;
+		doc.text("Traspaso:", leftCol, y);
+		doc.text(formatCurrency(quotation.transferCost), leftValueCol, y);
+
+		y += 7;
+		doc.text("Gastos administrativos:", leftCol, y);
+		doc.text(formatCurrency(quotation.adminCost), leftValueCol, y);
+
+		if (!options?.clientVersion) {
+			y += 7;
+			doc.text("Membresía:", leftCol, y);
+			doc.text(formatCurrency(quotation.membershipCost), leftValueCol, y);
+		}
+
+		y += 12;
+		doc.setDrawColor(100);
+		doc.line(leftCol, y, 115, y);
+
+		y += 8;
+		doc.setFont("helvetica", "bold");
+		doc.text("Monto total a financiar:", leftCol, y);
+		doc.text(formatCurrency(quotation.totalFinanced), leftValueCol, y);
 	}
-
-	// Total financed and monthly payment - highlighted
-	y += 12;
-	doc.setDrawColor(100);
-	doc.line(leftCol, y, 115, y);
-
-	y += 8;
-	doc.setFont("helvetica", "bold");
-	doc.text("Monto total a financiar:", leftCol, y);
-	doc.text(formatCurrency(quotation.totalFinanced), leftValueCol, y);
 
 	y += 10;
 	doc.setFontSize(14);

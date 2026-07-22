@@ -9,7 +9,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
-import { opportunities } from "./crm";
+import { creditTypeEnum, opportunities } from "./crm";
 import { vehicles } from "./vehicles";
 
 export const quotationStatusEnum = pgEnum("quotation_status", [
@@ -62,6 +62,7 @@ export const quotations = pgTable("quotations", {
 	}).notNull(),
 
 	// Datos del financiamiento
+	creditType: creditTypeEnum("credit_type").notNull().default("autocompra"),
 	downPayment: decimal("down_payment", { precision: 14, scale: 2 }).notNull(),
 	downPaymentPercentage: decimal("down_payment_percentage", {
 		precision: 12,

@@ -66,10 +66,13 @@ import {
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
 import {
-	DISBURSEMENT_SALE_LABEL,
 	formatQuotationClientName,
 	formatVehicleWithClient,
 } from "@/lib/quotation-display";
+import {
+	EXTRA_COST_FIELDS,
+	type ExtraCostFieldConfig,
+} from "@/lib/quotation-pdf-copy";
 import { PERMISSIONS } from "@/lib/roles";
 import {
 	QUOTER_VEHICLE_ORIGIN_OPTIONS,
@@ -171,212 +174,6 @@ interface QuotationFormValues {
 	extraAdminCost: number;
 	rcdpCost: number;
 }
-
-// Configuración de campos de gastos extra
-type ExtraCostFieldType = "percentage" | "fixed";
-type CreditTypeFilter = "all" | "autocompra" | "sobre_vehiculo";
-
-interface ExtraCostFieldConfig {
-	name: string;
-	label: string;
-	type: ExtraCostFieldType;
-	percentageField?: keyof QuotationFormValues; // Campo del form para el porcentaje (si aplica)
-	valueField: keyof QuotationFormValues; // Campo del form para el valor
-	creditType: CreditTypeFilter;
-	section: "comision" | "otros" | "abogado";
-	computed?: boolean; // Si es true, el campo se calcula automáticamente y no es editable
-	defaultActive?: boolean; // Si es true, el campo está activo por defecto
-	defaultValue?: number; // Valor por defecto al activar el campo
-}
-
-const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
-	// Sección: Comisión y Gastos de Registro
-	{
-		name: "royalty",
-		label: "Royalty",
-		type: "percentage",
-		percentageField: "royaltyPercentage",
-		valueField: "royalty",
-		creditType: "all",
-		section: "comision",
-		computed: true,
-	},
-	{
-		name: "freelance",
-		label: "Free Lance",
-		type: "percentage",
-		percentageField: "freelancePercentage",
-		valueField: "freelanceCost",
-		creditType: "all",
-		section: "comision",
-	},
-	{
-		name: "inspection",
-		label: DISBURSEMENT_SALE_LABEL,
-		type: "fixed",
-		valueField: "inspectionCost",
-		creditType: "all",
-		section: "comision",
-	},
-	{
-		name: "extraGps",
-		label: "GPS",
-		type: "fixed",
-		valueField: "extraGpsCost",
-		creditType: "all",
-		section: "comision",
-	},
-	{
-		name: "extraInsurance",
-		label: "Seguro INREXSA",
-		type: "fixed",
-		valueField: "extraInsuranceCost",
-		creditType: "all",
-		section: "comision",
-		defaultActive: true,
-	},
-	{
-		name: "extraMembership",
-		label: "Membresía",
-		type: "fixed",
-		valueField: "extraMembershipCost",
-		creditType: "all",
-		section: "comision",
-		defaultActive: true,
-	},
-	{
-		name: "extraAdmin",
-		label: "Gastos Administrativos",
-		type: "fixed",
-		valueField: "extraAdminCost",
-		creditType: "all",
-		section: "comision",
-		defaultActive: true,
-	},
-	{
-		name: "interest",
-		label: "Intereses",
-		type: "fixed",
-		valueField: "interestCost",
-		creditType: "all",
-		section: "comision",
-		computed: true,
-	},
-	{
-		name: "rcdp",
-		label: "RCDP 1er Trimestre",
-		type: "fixed",
-		valueField: "rcdpCost",
-		creditType: "all",
-		section: "comision",
-		computed: true,
-	},
-	// Sección: Otros Descuentos
-	{
-		name: "appointment",
-		label: "Nombramiento",
-		type: "fixed",
-		valueField: "appointmentCost",
-		creditType: "autocompra",
-		section: "otros",
-		defaultActive: true,
-		defaultValue: 150,
-	},
-	{
-		name: "fines",
-		label: "Multas",
-		type: "fixed",
-		valueField: "finesCost",
-		creditType: "all",
-		section: "otros",
-	},
-	{
-		name: "keyCopy",
-		label: "Copia de llave",
-		type: "fixed",
-		valueField: "keyCopyCost",
-		creditType: "all",
-		section: "otros",
-	},
-	{
-		name: "keyCopyDiff",
-		label: "Diferencia copia llave",
-		type: "fixed",
-		valueField: "keyCopyDiffCost",
-		creditType: "all",
-		section: "otros",
-	},
-	{
-		name: "addressVerification",
-		label: "Verificación de dirección",
-		type: "fixed",
-		valueField: "addressVerificationCost",
-		creditType: "all",
-		section: "otros",
-		defaultActive: true,
-		defaultValue: 395,
-	},
-	{
-		name: "circulationTax",
-		label: "Impuesto circulación",
-		type: "fixed",
-		valueField: "circulationTaxCost",
-		creditType: "all",
-		section: "otros",
-	},
-	{
-		name: "vehicleTransfer",
-		label: "Traspaso de vehículo",
-		type: "fixed",
-		valueField: "vehicleTransferCost",
-		creditType: "all",
-		section: "otros",
-	},
-	{
-		name: "mobileGuarantee",
-		label: "Garantía mobiliaria",
-		type: "fixed",
-		valueField: "mobileGuaranteeCost",
-		creditType: "all",
-		section: "otros",
-		defaultActive: true,
-		defaultValue: 400,
-	},
-	{
-		name: "licensePlates",
-		label: "Placas",
-		type: "fixed",
-		valueField: "licensePlatesCost",
-		creditType: "all",
-		section: "otros",
-	},
-	// Sección: Gastos de Abogado
-	{
-		name: "leasingContract",
-		label: "Contrato Leasing",
-		type: "fixed",
-		valueField: "leasingContractCost",
-		creditType: "all",
-		section: "abogado",
-		defaultValue: 400,
-	},
-	{
-		name: "collectionAuth",
-		label: "Auténtica contrato cobranza",
-		type: "fixed",
-		valueField: "collectionAuthCost",
-		creditType: "all",
-		section: "abogado",
-	},
-	{
-		name: "legal",
-		label: "Gastos legales",
-		type: "fixed",
-		valueField: "legalCost",
-		creditType: "all",
-		section: "abogado",
-	},
-];
 
 // Componente para la tabla de gastos extra
 function ExtraCostsTable({
@@ -1579,6 +1376,7 @@ function QuoterPage() {
 			transferCost: values.transferCost,
 			adminCost: values.adminCost,
 			membershipCost: values.membershipCost,
+			extraCosts: values,
 			amortizationTable: amortizationTable,
 		};
 	};
@@ -2720,6 +2518,7 @@ function QuotationDetailDialog({
 			transferCost: Number(quotation.transferCost || 0),
 			adminCost: Number(quotation.adminCost || 0),
 			membershipCost: Number(quotation.membershipCost || 0),
+			extraCosts: quotation,
 			amortizationTable: quotation.amortizationTable.map((row) => ({
 				period: row.period,
 				initialBalance: row.initialBalance,

@@ -12,6 +12,10 @@ import {
 import { buildServerInsurancePersistence } from "../lib/insurance-selection";
 import { crmProcedure } from "../lib/orpc";
 import {
+	type QuotationCreditType,
+	resolveQuotationCreditType,
+} from "../lib/quotation-credit-type";
+import {
 	canManageAnyQuotation,
 	canManageQuotations,
 } from "../lib/quotation-permissions";
@@ -21,6 +25,7 @@ type Simplify<T> = { [K in keyof T]: T[K] };
 
 type QuotationWithClient = Simplify<
 	typeof quotations.$inferSelect & {
+		creditType: QuotationCreditType;
 		leadFirstName: string | null;
 		leadLastName: string | null;
 		companyName: string | null;
@@ -37,12 +42,14 @@ const quotationWithClientAndAmortizationOutput =
 
 function flattenQuotationClient(row: {
 	quotation: typeof quotations.$inferSelect;
+	creditType: QuotationCreditType | null;
 	leadFirstName: string | null;
 	leadLastName: string | null;
 	companyName: string | null;
 }): QuotationWithClient {
 	return {
 		...row.quotation,
+		creditType: resolveQuotationCreditType(row.creditType),
 		leadFirstName: row.leadFirstName,
 		leadLastName: row.leadLastName,
 		companyName: row.companyName,
@@ -51,6 +58,7 @@ function flattenQuotationClient(row: {
 
 const quotationClientSelect = {
 	quotation: quotations,
+	creditType: opportunities.creditType,
 	leadFirstName: leads.firstName,
 	leadLastName: leads.lastName,
 	companyName: companies.name,

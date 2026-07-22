@@ -2702,6 +2702,7 @@ function QuotationDetailDialog({
 		const quotation = quotationQuery.data;
 		const clientName = formatQuotationClientName(quotation);
 		const quotationData = {
+			creditType: quotation.creditType,
 			clientName,
 			vehicleBrand: quotation.vehicleBrand,
 			vehicleLine: quotation.vehicleLine,

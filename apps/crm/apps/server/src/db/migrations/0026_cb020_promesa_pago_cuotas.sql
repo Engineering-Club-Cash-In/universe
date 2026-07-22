@@ -30,12 +30,36 @@ ALTER TABLE public.contactos_cobros
 ALTER TABLE public.contactos_cobros
   ADD COLUMN IF NOT EXISTS estado_promesa public.estado_promesa;
 
--- CHECK de rango (review): la validación de "cuota_inicio > 0, cuota_fin >=
--- cuota_inicio" solo vivía en Zod (app layer) — un INSERT/UPDATE por SQL
--- directo o un bug futuro en el código podía dejar un rango invertido o
--- negativo sin que la DB lo impida. NULL en cualquiera de las dos (o ambas,
--- "solo mora" sin rango) sigue permitido — el CHECK solo exige coherencia
--- cuando el rango SÍ está presente.
+-- CHECK de rango (review Codex, ronda 2): la primera versión de este CHECK
+-- solo exigía coherencia CUANDO ambos bounds estaban presentes (OR cuota_fin
+-- IS NULL escapaba el chequeo) — dejaba pasar cuota_inicio=5, cuota_fin=NULL
+-- (bound parcial). Mismo hueco que ya se cerró en Zod (createContactoCobros,
+-- .refine "ambos o ninguno"): con el rango a medias, evaluarPromesa trata
+-- cuota_fin=NULL como "sin rango, no bloquea" — la cuota que el usuario SÍ
+-- especificó nunca se verifica. AMBOS bounds o NINGUNO, siempre — sin escape
+-- por un solo NULL. NULL/NULL ("solo mora" o el caso vacío del web viejo,
+-- previo al PR de web) sigue permitido.
+--
+-- Diagnóstico previo (review Codex, ronda 3): si YA existen filas con bound
+-- parcial (por SQL directo previo, u otro origen no controlado por Zod), el
+-- ADD CONSTRAINT de abajo revienta con el error genérico de Postgres
+-- ("violates check constraint") sin decir CUÁLES filas — quien aplique esto
+-- a mano queda a ciegas. Verificado en dev al escribir esta migración: 0
+-- filas afectadas — pero el ambiente donde se corra puede diferir. Este
+-- bloque falla ANTES, con mensaje explícito y los ids a corregir.
+DO $$
+DECLARE
+  filas_afectadas text;
+BEGIN
+  SELECT string_agg(id::text, ', ') INTO filas_afectadas
+  FROM public.contactos_cobros
+  WHERE (cuota_inicio IS NULL) IS DISTINCT FROM (cuota_fin IS NULL);
+
+  IF filas_afectadas IS NOT NULL THEN
+    RAISE EXCEPTION 'contactos_cobros tiene filas con cuota_inicio/cuota_fin parcial (una NULL, la otra no) — el CHECK de abajo las rechazaría. Corregir a mano antes de aplicar esta migración. ids: %', filas_afectadas;
+  END IF;
+END $$;
+
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -44,9 +68,13 @@ BEGIN
     ALTER TABLE public.contactos_cobros
       ADD CONSTRAINT contactos_cobros_cuota_rango_check
       CHECK (
-        cuota_inicio IS NULL
-        OR cuota_fin IS NULL
-        OR (cuota_inicio > 0 AND cuota_fin >= cuota_inicio)
+        (cuota_inicio IS NULL AND cuota_fin IS NULL)
+        OR (
+          cuota_inicio IS NOT NULL
+          AND cuota_fin IS NOT NULL
+          AND cuota_inicio > 0
+          AND cuota_fin >= cuota_inicio
+        )
       );
   END IF;
 END $$;

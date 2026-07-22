@@ -1355,17 +1355,25 @@ export const cobrosRouter = {
 					cuotaFin: z.number().int().positive().optional(),
 					incluyeMora: z.boolean().default(false),
 				})
-				.refine(
-					(v) =>
-						v.estadoContacto !== "promesa_pago" ||
-						(v.cuotaInicio != null && v.cuotaFin != null) ||
-						v.incluyeMora,
-					{
-						message:
-							"La promesa debe incluir un rango de cuotas o marcar que incluye mora",
-						path: ["cuotaInicio"],
-					},
-				)
+				// ⚠️ DEUDA TÉCNICA TEMPORAL (review Codex, ronda 3 — PR #1145) ⚠️
+				// Este .refine() era OBLIGATORIO (rango o mora) — pero el web
+				// ACTUAL en COBROS-02 todavía manda promesa_pago SIN ninguno de
+				// los dos. El modal nuevo (con selector de cuotas + checkbox de
+				// mora) vive en `git stash show stash@{0}` de esta sesión —
+				// "CRM web: promesa de pago (CB-020)" — sin PR abierto todavía.
+				// Con el .refine() estricto, desplegar este PR solo hubiera roto
+				// el botón "Promesa de Pago" que ya funciona en producción.
+				//
+				// Se quita esta exigencia por completo — el "ambos bounds o
+				// ninguno" del .refine() de más abajo sigue vigente y es
+				// suficiente para bloquear rangos a medias; lo único que se
+				// relaja es "algo es obligatorio" (rango o mora), permitiendo de
+				// nuevo el caso 100% vacío del web viejo.
+				//
+				// ACCIÓN REQUERIDA cuando el PR de web (stash de arriba) se
+				// mergee: reponer este .refine() y el de fechaProximoContacto
+				// (más abajo, mismo motivo) en un PR de limpieza aparte. Buscar
+				// "DEUDA TÉCNICA TEMPORAL" en este archivo para encontrar ambos.
 				.refine(
 					(v) =>
 						v.cuotaInicio == null ||
@@ -1376,22 +1384,29 @@ export const cobrosRouter = {
 						path: ["cuotaFin"],
 					},
 				)
-				.refine(
-					// CB-020 (review Codex): fechaProximoContacto era opcional incluso
-					// para promesa_pago — el front la exige en el modal, pero el
-					// contrato del endpoint no. Sin fecha, el job nocturno
-					// (check-promesas-pago.ts) salta la fila para siempre (necesita
-					// fechaPrometida para decidir "incumplida"), dejándola "pendiente"
-					// eterna sin importar si se pagó o no.
-					(v) =>
-						v.estadoContacto !== "promesa_pago" ||
-						v.fechaProximoContacto != null,
-					{
-						message:
-							"La fecha prometida es obligatoria para una promesa de pago",
-						path: ["fechaProximoContacto"],
-					},
-				)
+				// ⚠️ DEUDA TÉCNICA TEMPORAL (review Codex, ronda 3 — PR #1145) ⚠️
+				// Este .refine() asumía que "el front la exige en el modal" —
+				// cierto SOLO para la variante nueva (`git stash show
+				// stash@{0}`, "CRM web: promesa de pago (CB-020)", sin PR
+				// abierto). El web ACTUAL en COBROS-02 tiene "requiereSeguimiento"
+				// como checkbox GENÉRICO e independiente de estadoContacto: un
+				// asesor puede registrar promesa_pago sin marcarlo, y
+				// fechaProximoContacto queda undefined. Con este .refine() activo,
+				// ESE registro (que hoy funciona en producción) sería rechazado.
+				//
+				// Se quita hasta que el PR de web se mergee (ahí la fecha SÍ es
+				// obligatoria en el modal nuevo).
+				//
+				// El riesgo que motivó este .refine() (check-promesas-pago.ts
+				// salta filas sin fecha para siempre) sigue documentado y
+				// pendiente — sin fecha, esas promesas simplemente no se evalúan,
+				// comportamiento IGUAL al que ya tenía el código antes de esta
+				// feature (no es una regresión, es mantener el status quo).
+				//
+				// ACCIÓN REQUERIDA cuando el PR de web se mergee: reponer este
+				// .refine() junto con el de rango/mora obligatorio de arriba (en
+				// un PR de limpieza aparte). Buscar "DEUDA TÉCNICA TEMPORAL" en
+				// este archivo para encontrar ambos.
 				.refine(
 					// CB-020 (review Codex): el primer .refine() de arriba solo exige
 					// "rango completo O incluyeMora" — eso deja pasar un rango A
@@ -1403,11 +1418,9 @@ export const cobrosRouter = {
 					// "mora + cuota" puede marcarse cumplida con solo que se
 					// salde la mora. Ambos bounds o ninguno, SIEMPRE, sin
 					// importar incluyeMora.
-					(v) =>
-						(v.cuotaInicio == null) === (v.cuotaFin == null),
+					(v) => (v.cuotaInicio == null) === (v.cuotaFin == null),
 					{
-						message:
-							"Debes indicar ambas cuotas (desde y hasta) o ninguna",
+						message: "Debes indicar ambas cuotas (desde y hasta) o ninguna",
 						path: ["cuotaFin"],
 					},
 				),

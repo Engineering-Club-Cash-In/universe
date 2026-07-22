@@ -462,6 +462,12 @@ export async function sendPremoraReminders(
 						casoCobroId: caso.id,
 						metodoContacto: "whatsapp",
 						estadoContacto: "contactado",
+						// CB-020: prefijo "Recordatorio automático" identifica el origen
+						// del contacto (sin columna "origen" en DB) — un consumidor
+						// futuro que necesite distinguir contacto manual del asesor vs
+						// envío automático puede filtrar por este prefijo en
+						// `comentarios`. No cambiar el texto sin actualizar cualquier
+						// filtro que dependa de él.
 						comentarios: `Recordatorio automático ${tipo.replace("premora_", "Premora D-")} enviado por WhatsApp al ${telefonoDestino}${testMode ? " (modo prueba)" : ""}. Cuota #${cuota.numero_cuota} vence el ${fechaLegible(cuota.fecha_vencimiento)} por Q${montoLegible(cuota.monto_cuota)}.`,
 						realizadoPor: caso.responsable ?? usuarioSistema,
 					});

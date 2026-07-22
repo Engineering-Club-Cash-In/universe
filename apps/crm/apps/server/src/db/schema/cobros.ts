@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
 	boolean,
 	check,
@@ -10,7 +11,6 @@ import {
 	timestamp,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 import { user } from "./auth";
 import { clients } from "./crm";
 import { vehicles } from "./vehicles";
@@ -43,6 +43,16 @@ export const estadoContactoEnum = pgEnum("estado_contacto", [
 	"promesa_pago",
 	"acuerdo_parcial",
 	"rechaza_pagar",
+]);
+
+// CB-020: estado de cumplimiento de una promesa de pago (solo aplica a filas
+// con estadoContacto = 'promesa_pago'). Se deriva cruzando cuotaInicio/
+// cuotaFin/incluyeMora contra el estado real del crédito en cartera-back
+// (getEstadoPromesasPago) — nunca se marca a mano.
+export const estadoPromesaEnum = pgEnum("estado_promesa", [
+	"pendiente",
+	"cumplida",
+	"incumplida",
 ]);
 
 export const tipoRecuperacionEnum = pgEnum("tipo_recuperacion", [
@@ -199,6 +209,17 @@ export const contactosCobros = pgTable(
 		acuerdosAlcanzados: text("acuerdos_alcanzados"),
 		compromisosPago: text("compromisos_pago"),
 
+		// CB-020: promesa de pago atada a cuotas concretas (no a una fecha
+		// genérica) — solo aplican cuando estadoContacto = 'promesa_pago'.
+		// cartera-back NO separa la mora por cuota (es un monto agregado del
+		// crédito, ver moras_credito), por eso incluyeMora es independiente del
+		// rango: puede haber rango sin mora, mora sin rango ("solo mora"), o
+		// ambos. Ver getEstadoPromesasPago para la verificación.
+		cuotaInicio: integer("cuota_inicio"),
+		cuotaFin: integer("cuota_fin"),
+		incluyeMora: boolean("incluye_mora").notNull().default(false),
+		estadoPromesa: estadoPromesaEnum("estado_promesa"),
+
 		// Próximo seguimiento
 		requiereSeguimiento: boolean("requiere_seguimiento").default(false),
 		fechaProximoContacto: timestamp("fecha_proximo_contacto"),
@@ -341,24 +362,30 @@ export const metasMoraCobros = pgTable("metas_mora_cobros", {
 });
 
 // Seguimientos programados recurrentes para casos de cobros
-export const seguimientosProgramados = pgTable("seguimientos_programados", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	casoCobroId: uuid("caso_cobro_id")
-		.notNull()
-		.references(() => casosCobros.id, { onDelete: "cascade" }),
-	agenteId: text("agente_id")
-		.notNull()
-		.references(() => user.id),
-	metodoContacto: metodoContactoEnum("metodo_contacto").notNull(),
-	intervaloDias: integer("intervalo_dias").notNull(),
-	ocurrenciasMaximas: integer("ocurrencias_maximas"),
-	ocurrenciasRealizadas: integer("ocurrencias_realizadas").notNull().default(0),
-	fechaInicio: timestamp("fecha_inicio").notNull(),
-	fechaFin: timestamp("fecha_fin"),
-	presetOriginal: text("preset_original"),
-	activo: boolean("activo").default(true),
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (table) => [
-	check("intervalo_dias_positive", sql`${table.intervaloDias} > 0`),
-]);
+export const seguimientosProgramados = pgTable(
+	"seguimientos_programados",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		agenteId: text("agente_id")
+			.notNull()
+			.references(() => user.id),
+		metodoContacto: metodoContactoEnum("metodo_contacto").notNull(),
+		intervaloDias: integer("intervalo_dias").notNull(),
+		ocurrenciasMaximas: integer("ocurrencias_maximas"),
+		ocurrenciasRealizadas: integer("ocurrencias_realizadas")
+			.notNull()
+			.default(0),
+		fechaInicio: timestamp("fecha_inicio").notNull(),
+		fechaFin: timestamp("fecha_fin"),
+		presetOriginal: text("preset_original"),
+		activo: boolean("activo").default(true),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		check("intervalo_dias_positive", sql`${table.intervaloDias} > 0`),
+	],
+);

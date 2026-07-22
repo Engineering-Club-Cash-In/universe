@@ -74,6 +74,11 @@ import {
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
 import { primerTelefono } from "../lib/phone-utils";
+import {
+	derivarEstadoCredito,
+	type EstadoPromesa,
+	evaluarPromesa,
+} from "../lib/promesa-pago";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	sendWhatsappTemplate,
@@ -1333,23 +1338,54 @@ export const cobrosRouter = {
 	// Registrar contacto de cobros
 	createContactoCobros: cobrosProcedure
 		.input(
-			z.object({
-				casoCobroId: z.string().uuid(),
-				metodoContacto: z.enum(metodoContactoEnum.enumValues),
-				estadoContacto: z.enum(estadoContactoEnum.enumValues),
-				duracionLlamada: z.number().optional(),
-				comentarios: z.string().min(1, "Los comentarios son requeridos"),
-				acuerdosAlcanzados: z.string().optional(),
-				compromisosPago: z.string().optional(),
-				requiereSeguimiento: z.boolean().default(false),
-				fechaProximoContacto: z.date().optional(),
-			}),
+			z
+				.object({
+					casoCobroId: z.string().uuid(),
+					metodoContacto: z.enum(metodoContactoEnum.enumValues),
+					estadoContacto: z.enum(estadoContactoEnum.enumValues),
+					duracionLlamada: z.number().optional(),
+					comentarios: z.string().min(1, "Los comentarios son requeridos"),
+					acuerdosAlcanzados: z.string().optional(),
+					compromisosPago: z.string().optional(),
+					requiereSeguimiento: z.boolean().default(false),
+					fechaProximoContacto: z.date().optional(),
+					// CB-020: promesa de pago atada a cuotas — solo relevantes cuando
+					// estadoContacto = 'promesa_pago'.
+					cuotaInicio: z.number().int().positive().optional(),
+					cuotaFin: z.number().int().positive().optional(),
+					incluyeMora: z.boolean().default(false),
+				})
+				.refine(
+					(v) =>
+						v.estadoContacto !== "promesa_pago" ||
+						(v.cuotaInicio != null && v.cuotaFin != null) ||
+						v.incluyeMora,
+					{
+						message:
+							"La promesa debe incluir un rango de cuotas o marcar que incluye mora",
+						path: ["cuotaInicio"],
+					},
+				)
+				.refine(
+					(v) =>
+						v.cuotaInicio == null ||
+						v.cuotaFin == null ||
+						v.cuotaFin >= v.cuotaInicio,
+					{
+						message: "cuotaFin debe ser mayor o igual a cuotaInicio",
+						path: ["cuotaFin"],
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
+			const estadoPromesa =
+				input.estadoContacto === "promesa_pago" ? "pendiente" : undefined;
+
 			const nuevoContacto = await db
 				.insert(contactosCobros)
 				.values({
 					...input,
+					estadoPromesa,
 					realizadoPor: context.userId,
 				})
 				.returning();
@@ -1396,6 +1432,11 @@ export const cobrosRouter = {
 					compromisosPago: contactosCobros.compromisosPago,
 					requiereSeguimiento: contactosCobros.requiereSeguimiento,
 					fechaProximoContacto: contactosCobros.fechaProximoContacto,
+					cuotaInicio: contactosCobros.cuotaInicio,
+					cuotaFin: contactosCobros.cuotaFin,
+					incluyeMora: contactosCobros.incluyeMora,
+					estadoPromesa: contactosCobros.estadoPromesa,
+					realizadoPorId: contactosCobros.realizadoPor,
 					realizadoPor: user.name,
 				})
 				.from(contactosCobros)
@@ -1970,6 +2011,84 @@ export const cobrosRouter = {
 
 		return usuarios;
 	}),
+
+	// CB-020: estado de cumplimiento de promesas de pago. Cada promesa se
+	// verifica con DOS chequeos independientes (ver plan — cartera-back NO
+	// separa la mora por cuota, es un monto agregado del crédito):
+	//  1. Si tiene rango de cuotas (cuotaInicio/cuotaFin) → TODAS esas cuotas
+	//     deben estar pagado=true (cuotasPagadas de getCredito).
+	//  2. Si incluyeMora=true → la mora ACTIVA del crédito debe estar saldada
+	//     (mora.activa=false o moraActual="0.00").
+	// cumplida = los chequeos que apliquen se cumplen; incumplida = la fecha
+	// prometida ya pasó y alguno no se cumple; pendiente = la fecha no llega.
+	// Persiste el resultado en estadoPromesa (no solo lo devuelve) para que
+	// quede disponible sin recalcular en cada lectura.
+	getEstadoPromesasPago: cobrosProcedure
+		.input(
+			z.object({
+				numeroSifco: z.string().min(1),
+				promesas: z
+					.array(
+						z.object({
+							id: z.string(),
+							cuotaInicio: z.number().int().positive().nullable(),
+							cuotaFin: z.number().int().positive().nullable(),
+							incluyeMora: z.boolean(),
+							fechaPrometida: z.coerce.date(),
+						}),
+					)
+					.max(100),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (input.promesas.length === 0) return {};
+
+			let credito: Awaited<ReturnType<typeof carteraBackClient.getCredito>>;
+			try {
+				credito = await carteraBackClient.getCredito(input.numeroSifco);
+			} catch (error) {
+				console.error(
+					"[getEstadoPromesasPago] Error consultando crédito:",
+					error,
+				);
+				// Sin datos no se puede afirmar incumplimiento — todas quedan
+				// "pendiente" en vez de arriesgar un falso "incumplida".
+				return Object.fromEntries(
+					input.promesas.map((p) => [p.id, "pendiente" as const]),
+				);
+			}
+
+			const estadoCredito = derivarEstadoCredito(credito);
+			const hoy = new Date();
+			const resultado: Record<string, EstadoPromesa> = {};
+			for (const promesa of input.promesas) {
+				resultado[promesa.id] = evaluarPromesa(promesa, estadoCredito, hoy);
+			}
+
+			// Persistir — best-effort, no debe tumbar la respuesta de lectura.
+			// allSettled, no all: un UPDATE que falle no debe bloquear la
+			// persistencia de las demás promesas (`resultado` ya se devuelve al
+			// front sin importar esto, pero la fila en DB sí queda atrás si se
+			// pierde por una sola falla ajena).
+			const resultadosPersistencia = await Promise.allSettled(
+				Object.entries(resultado).map(([id, estado]) =>
+					db
+						.update(contactosCobros)
+						.set({ estadoPromesa: estado })
+						.where(eq(contactosCobros.id, id)),
+				),
+			);
+			for (const r of resultadosPersistencia) {
+				if (r.status === "rejected") {
+					console.error(
+						"[getEstadoPromesasPago] Error persistiendo estadoPromesa:",
+						r.reason,
+					);
+				}
+			}
+
+			return resultado;
+		}),
 
 	// Obtener historial de cuotas de pago de un contrato
 	getHistorialPagos: cobrosProcedure
@@ -4160,6 +4279,12 @@ export const cobrosRouter = {
 					// Registrar en historial del caso (mismo flujo que contacto-modal)
 					// solo cuando el envío fue exitoso y el crédito tiene caso.
 					if (ok && c.casoCobroId) {
+						// CB-020: prefijo "Envío masivo" identifica el origen del
+						// contacto (sin columna "origen" en DB) — un consumidor futuro
+						// que necesite distinguir contacto manual del asesor vs envío
+						// automático puede filtrar por este prefijo en `comentarios`.
+						// No cambiar el texto sin actualizar cualquier filtro que
+						// dependa de él.
 						contactosARegistrar.push({
 							casoCobroId: c.casoCobroId,
 							metodoContacto: "whatsapp",

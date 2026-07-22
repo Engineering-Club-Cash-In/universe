@@ -745,7 +745,26 @@ export const crmRouter = {
 	// Respuestas de formularios de captación (ej. Meta Instant Forms) guardadas en llave-valor
 	getLeadIntakeAnswers: crmProcedure
 		.input(z.object({ leadId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			const [lead] = await db
+				.select({ assignedTo: leads.assignedTo })
+				.from(leads)
+				.where(eq(leads.id, input.leadId))
+				.limit(1);
+
+			if (!lead) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Lead no encontrado",
+				});
+			}
+
+			// Sales users can only see their assigned leads
+			if (context.userRole === "sales" && lead.assignedTo !== context.userId) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ver este lead",
+				});
+			}
+
 			const answers = await db
 				.select({
 					campaignFormKey: leadIntakeAnswers.campaignFormKey,

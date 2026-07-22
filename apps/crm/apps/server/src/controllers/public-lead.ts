@@ -20,30 +20,95 @@ import { getOnlyRenapInfoController } from "./bot";
 
 type LeadSource = (typeof leadSourceEnum.enumValues)[number];
 
+// Rate limit en memoria por IP para leads públicos sin token. No sobrevive restart ni
+// escala entre instancias, pero basta para frenar abuso casual.
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 5;
+const RATE_LIMIT_CLEANUP_EVERY_N_CALLS = 500;
+const rateLimitBuckets = new Map<string, { count: number; windowStart: number }>();
+let rateLimitCallCount = 0;
+
+function cleanupExpiredBuckets() {
+	const now = Date.now();
+	for (const [ip, bucket] of rateLimitBuckets) {
+		if (now - bucket.windowStart > RATE_LIMIT_WINDOW_MS) {
+			rateLimitBuckets.delete(ip);
+		}
+	}
+}
+
+function isRateLimited(ip: string): boolean {
+	rateLimitCallCount += 1;
+	if (rateLimitCallCount % RATE_LIMIT_CLEANUP_EVERY_N_CALLS === 0) {
+		cleanupExpiredBuckets();
+	}
+
+	const now = Date.now();
+	const bucket = rateLimitBuckets.get(ip);
+
+	if (!bucket || now - bucket.windowStart > RATE_LIMIT_WINDOW_MS) {
+		rateLimitBuckets.set(ip, { count: 1, windowStart: now });
+		return false;
+	}
+
+	bucket.count += 1;
+	return bucket.count > RATE_LIMIT_MAX_REQUESTS;
+}
+
+function getClientIp(c: Context): string {
+	return (
+		c.req.header("cf-connecting-ip") ||
+		c.req.header("x-forwarded-for") ||
+		"unknown"
+	);
+}
+
 /**
- * Valida que la solicitud venga con el secreto compartido configurado para integraciones
- * externas (ej. Make) vía header "Authorization: Bearer <secret>".
+ * Creación básica de lead: pública, solo con rate limit por IP (comportamiento de siempre).
+ * campaignFormKey/intakeAnswers (Make) sí exige "Authorization: Bearer <secret>".
  */
 export async function validatePublicLeadToken(
 	c: Context,
 	next: () => Promise<void>,
 ) {
-	const secret = process.env.BETTER_SECRET_PUBLIC_LEAD;
+	const authHeader = c.req.header("Authorization");
 
-	if (!secret) {
-		console.error("[ERROR] BETTER_SECRET_PUBLIC_LEAD not configured");
+	if (authHeader) {
+		const secret = process.env.BETTER_SECRET_PUBLIC_LEAD;
+
+		if (!secret) {
+			console.error("[ERROR] BETTER_SECRET_PUBLIC_LEAD not configured");
+			return c.json(
+				{ success: false, error: "Configuración de autorización no disponible" },
+				500,
+			);
+		}
+
+		if (authHeader !== `Bearer ${secret}`) {
+			return c.json({ success: false, error: "No autorizado" }, 401);
+		}
+
+		await next();
+		return;
+	}
+
+	const body = await c.req.json().catch(() => null);
+	const hasBody = typeof body === "object" && body !== null;
+
+	if (hasBody && body.intakeAnswers) {
 		return c.json(
-			{ success: false, error: "Configuración de autorización no disponible" },
-			500,
+			{
+				success: false,
+				error: "Se requiere autenticación para enviar datos de formulario de captación",
+			},
+			401,
 		);
 	}
 
-	const authHeader = c.req.header("Authorization");
-
-	if (authHeader !== `Bearer ${secret}`) {
+	if (isRateLimited(getClientIp(c))) {
 		return c.json(
-			{ success: false, error: "No autorizado" },
-			401,
+			{ success: false, error: "Demasiadas solicitudes, intenta más tarde" },
+			429,
 		);
 	}
 

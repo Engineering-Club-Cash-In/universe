@@ -99,6 +99,43 @@ describe("evaluarPromesa", () => {
 		expect(estado).toBe("cumplida");
 	});
 
+	// Fila legacy (creada antes del .refine() en createContactoCobros, o con
+	// columnas NULL por default sin backfill) — confirmado con datos reales
+	// en dev: filas con cuota_inicio/cuota_fin/incluye_mora en null/null/false.
+	// Sin rango y sin mora no hay NINGUNA obligación que verificar: no debe
+	// marcarse "cumplida" automática solo porque ambos chequeos "no aplican".
+	test("sin rango Y sin mora (fila legacy), fecha futura → pendiente, NUNCA cumplida automática", () => {
+		const estadoCredito = derivarEstadoCredito(creditoFixture({}));
+		const estado = evaluarPromesa(
+			{
+				id: "p1",
+				cuotaInicio: null,
+				cuotaFin: null,
+				incluyeMora: false,
+				fechaPrometida: futuro,
+			},
+			estadoCredito,
+			hoy,
+		);
+		expect(estado).toBe("pendiente");
+	});
+
+	test("sin rango Y sin mora (fila legacy), fecha ya pasada → incumplida (no cumplida)", () => {
+		const estadoCredito = derivarEstadoCredito(creditoFixture({}));
+		const estado = evaluarPromesa(
+			{
+				id: "p1",
+				cuotaInicio: null,
+				cuotaFin: null,
+				incluyeMora: false,
+				fechaPrometida: pasado,
+			},
+			estadoCredito,
+			hoy,
+		);
+		expect(estado).toBe("incumplida");
+	});
+
 	test("rango parcialmente pagado (falta 1 cuota), fecha futura → pendiente", () => {
 		const estadoCredito = derivarEstadoCredito(
 			creditoFixture({ cuotasPagadas: [cuotaPagada(1)] }),

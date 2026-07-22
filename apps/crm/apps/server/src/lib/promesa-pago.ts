@@ -60,7 +60,18 @@ export function evaluarPromesa(
 
 	const moraOk = promesa.incluyeMora ? estadoCredito.moraSaldada : true;
 
-	if (rangoSaldado && moraOk) return "cumplida";
+	// Sin rango Y sin mora: la promesa no tiene ninguna obligación real que
+	// verificar. rangoSaldado y moraOk son "true" por defecto (rama "no
+	// aplica, no bloquea" de cada uno) — combinados, un AND vacío da
+	// "cumplida" automática sin haber comprobado nada. createContactoCobros
+	// ya rechaza esta combinación al CREAR (review Codex, fix anterior), pero
+	// no protege filas legacy ya existentes en DB (creadas antes de ese
+	// .refine(), o con columnas NULL por default sin backfill de la
+	// migración) — confirmado con datos reales: 2 filas en dev con
+	// cuota_inicio/cuota_fin/incluye_mora en null/null/false. Nunca "cumplida"
+	// automática en este caso — cae al chequeo de fecha como cualquier otra.
+	const tieneObligacion = tieneRango || promesa.incluyeMora;
+	if (tieneObligacion && rangoSaldado && moraOk) return "cumplida";
 	// fechaPrometida se guarda como MEDIANOCHE GT del día prometido (ver
 	// gtDateStrToDate: T06:00:00Z = 00:00 GT). Comparar `fechaPrometida < hoy`
 	// a secas (instante contra instante) daba gracia solo hasta la medianoche

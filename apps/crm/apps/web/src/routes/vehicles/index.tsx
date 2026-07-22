@@ -437,6 +437,10 @@ function VehiclesDashboard() {
 		iscvCode: "",
 	});
 
+	// Un vehículo vendido no se puede editar: primero hay que cambiar su estado
+	// (solo admin/supervisor) y recién ahí se habilitan los campos.
+	const isVehicleSoldLocked = editVehicleForm.status === "sold";
+
 	const updateVehicleMutation = useMutation({
 		mutationFn: (data: typeof editVehicleForm) =>
 			client.updateVehicle({
@@ -2566,6 +2570,13 @@ function VehiclesDashboard() {
 									</SelectContent>
 								</Select>
 							)}
+							{isVehicleSoldLocked && (
+								<p className="text-muted-foreground text-xs">
+									La información de un vehículo vendido no se puede editar; el
+									estado debe pasar primero a Disponible para habilitar los
+									campos.
+								</p>
+							)}
 						</div>
 
 						{/* Información Básica */}
@@ -2576,6 +2587,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-make">Marca *</Label>
 									<Input
 										id="edit-make"
+										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.make}
 										onChange={(e) =>
 											setEditVehicleForm({
@@ -2591,6 +2603,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-model">Modelo/Línea *</Label>
 									<Input
 										id="edit-model"
+										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.model}
 										onChange={(e) =>
 											setEditVehicleForm({
@@ -2606,6 +2619,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-year">Año *</Label>
 									<Input
 										id="edit-year"
+										disabled={isVehicleSoldLocked}
 										type="number"
 										value={editVehicleForm.year}
 										onChange={(e) =>
@@ -2625,6 +2639,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-color">Color *</Label>
 									<Input
 										id="edit-color"
+										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.color}
 										onChange={(e) =>
 											setEditVehicleForm({
@@ -2640,6 +2655,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-vehicleType">Tipo de Vehículo *</Label>
 									<Select
 										value={editVehicleForm.vehicleType}
+										disabled={isVehicleSoldLocked}
 										onValueChange={(value) =>
 											setEditVehicleForm({
 												...editVehicleForm,
@@ -2663,6 +2679,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-vehicleCondition">Condición *</Label>
 									<Select
 										value={String(editVehicleForm.isNew)}
+										disabled={isVehicleSoldLocked}
 										onValueChange={(value) =>
 											setEditVehicleForm({
 												...editVehicleForm,
@@ -2686,6 +2703,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-origin">Origen</Label>
 									<Select
 										value={editVehicleForm.origin}
+										disabled={isVehicleSoldLocked}
 										onValueChange={(value) =>
 											setEditVehicleForm({ ...editVehicleForm, origin: value })
 										}
@@ -2720,6 +2738,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-licensePlate">Placa</Label>
 									<Input
 										id="edit-licensePlate"
+										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.licensePlate}
 										onChange={(e) =>
 											setEditVehicleForm({
@@ -2734,6 +2753,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-vinNumber">VIN</Label>
 									<Input
 										id="edit-vinNumber"
+										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.vinNumber}
 										onChange={(e) =>
 											setEditVehicleForm({
@@ -2748,6 +2768,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-motorNumber">No. Motor</Label>
 									<Input
 										id="edit-motorNumber"
+										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.motorNumber}
 										onChange={(e) =>
 											setEditVehicleForm({
@@ -2762,6 +2783,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-fuelType">Combustible</Label>
 									<Select
 										value={editVehicleForm.fuelType}
+										disabled={isVehicleSoldLocked}
 										onValueChange={(value) =>
 											setEditVehicleForm({
 												...editVehicleForm,
@@ -2784,6 +2806,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-transmission">Transmisión</Label>
 									<Select
 										value={editVehicleForm.transmission}
+										disabled={isVehicleSoldLocked}
 										onValueChange={(value) =>
 											setEditVehicleForm({
 												...editVehicleForm,
@@ -2804,6 +2827,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-kmMileage">Kilometraje</Label>
 									<Input
 										id="edit-kmMileage"
+										disabled={isVehicleSoldLocked}
 										type="number"
 										value={editVehicleForm.kmMileage}
 										onChange={(e) =>
@@ -2832,6 +2856,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-seats">Asientos</Label>
 									<Input
 										id="edit-seats"
+										disabled={isVehicleSoldLocked}
 										type="number"
 										value={editVehicleForm.seats ?? ""}
 										onChange={(e) =>
@@ -2851,6 +2876,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-doors">Puertas</Label>
 									<Input
 										id="edit-doors"
+										disabled={isVehicleSoldLocked}
 										type="number"
 										value={editVehicleForm.doors ?? ""}
 										onChange={(e) =>
@@ -2870,6 +2896,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-axles">Ejes</Label>
 									<Input
 										id="edit-axles"
+										disabled={isVehicleSoldLocked}
 										type="number"
 										value={editVehicleForm.axles ?? ""}
 										onChange={(e) =>
@@ -2889,6 +2916,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-vehicleUse">Uso del Vehículo</Label>
 									<Select
 										value={editVehicleForm.vehicleUse}
+										disabled={isVehicleSoldLocked}
 										onValueChange={(value) =>
 											setEditVehicleForm({
 												...editVehicleForm,
@@ -2912,6 +2940,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-series">Serie</Label>
 									<Input
 										id="edit-series"
+										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.series}
 										onChange={(e) =>
 											setEditVehicleForm({
@@ -2926,6 +2955,7 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-iscvCode">Código ISCV</Label>
 									<Input
 										id="edit-iscvCode"
+										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.iscvCode}
 										onChange={(e) =>
 											setEditVehicleForm({
@@ -2942,6 +2972,7 @@ function VehiclesDashboard() {
 						<div className="flex items-center space-x-2">
 							<Checkbox
 								id="edit-isOwned"
+								disabled={isVehicleSoldLocked}
 								checked={editVehicleForm.isOwned}
 								onCheckedChange={(checked) =>
 									setEditVehicleForm({

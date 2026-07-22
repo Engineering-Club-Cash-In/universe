@@ -428,6 +428,13 @@ function VehiclesDashboard() {
 			| "sold"
 			| "maintenance"
 			| "auction",
+		// Estado del vehículo al abrir el modal (no se envía al server)
+		initialStatus: "pending" as
+			| "pending"
+			| "available"
+			| "sold"
+			| "maintenance"
+			| "auction",
 		// Campos para contratos legales
 		seats: null as number | null,
 		doors: null as number | null,
@@ -437,9 +444,13 @@ function VehiclesDashboard() {
 		iscvCode: "",
 	});
 
-	// Un vehículo vendido no se puede editar: primero hay que cambiar su estado
-	// (solo admin/supervisor) y recién ahí se habilitan los campos.
-	const isVehicleSoldLocked = editVehicleForm.status === "sold";
+	// Un vehículo vendido no se puede editar: primero hay que pasarlo a
+	// Disponible (solo admin/supervisor) y recién ahí se habilitan los campos.
+	// Se compara contra el estado al abrir el modal para que otros estados
+	// (mantenimiento, remate, etc.) no desbloqueen la edición de un vendido.
+	const isVehicleSoldLocked =
+		editVehicleForm.initialStatus === "sold" &&
+		editVehicleForm.status !== "available";
 
 	const updateVehicleMutation = useMutation({
 		mutationFn: (data: typeof editVehicleForm) =>
@@ -840,6 +851,8 @@ function VehiclesDashboard() {
 																				isNew: vehicle.isNew || false,
 																				isOwned: vehicle.isOwned || false,
 																				status: vehicle.status || "pending",
+																				initialStatus:
+																					vehicle.status || "pending",
 																				// Campos para contratos legales
 																				seats: vehicle.seats ?? null,
 																				doors: vehicle.doors ?? null,
@@ -1130,6 +1143,7 @@ function VehiclesDashboard() {
 											isNew: selectedVehicle.isNew || false,
 											isOwned: selectedVehicle.isOwned || false,
 											status: selectedVehicle.status || "pending",
+											initialStatus: selectedVehicle.status || "pending",
 											seats: selectedVehicle.seats ?? null,
 											doors: selectedVehicle.doors ?? null,
 											axles: selectedVehicle.axles ?? 2,

@@ -220,7 +220,7 @@ describe("evaluarPromesa", () => {
 		expect(estado).toBe("cumplida");
 	});
 
-	test("fechaPrometida = hoy exacto (medianoche del día) → NO incumplida todavía (gracia del día)", () => {
+	test("fechaPrometida = hoy exacto (mismo instante) → NO incumplida todavía", () => {
 		const estadoCredito = derivarEstadoCredito(
 			creditoFixture({ cuotasPagadas: [] }),
 		);
@@ -236,6 +236,50 @@ describe("evaluarPromesa", () => {
 			hoy,
 		);
 		expect(estado).toBe("pendiente");
+	});
+
+	// Caso real que el test anterior NO cubría (comparaba mismo instante
+	// exacto) — el que Codex encontró en review: fechaPrometida es medianoche
+	// GT del día prometido, pero "hoy" durante ESE MISMO día ya tiene hora
+	// avanzada. Debe seguir "pendiente" durante todo el día prometido.
+	test("fechaPrometida = medianoche GT de HOY, hora actual avanzada el MISMO día → sigue pendiente (gracia real del día)", () => {
+		const medianochePrometida = new Date("2026-07-22T06:00:00.000Z"); // 00:00 GT
+		const mediodiaMismoDia = new Date("2026-07-22T18:00:00.000Z"); // 12:00 GT, mismo día
+		const estadoCredito = derivarEstadoCredito(
+			creditoFixture({ cuotasPagadas: [] }),
+		);
+		const estado = evaluarPromesa(
+			{
+				id: "p1",
+				cuotaInicio: 1,
+				cuotaFin: 1,
+				incluyeMora: false,
+				fechaPrometida: medianochePrometida,
+			},
+			estadoCredito,
+			mediodiaMismoDia,
+		);
+		expect(estado).toBe("pendiente");
+	});
+
+	test("fechaPrometida = medianoche GT de AYER, hoy ya es el día siguiente → incumplida", () => {
+		const medianochePrometidaAyer = new Date("2026-07-22T06:00:00.000Z"); // 00:00 GT del 22
+		const hoySiguienteDia = new Date("2026-07-23T07:00:00.000Z"); // 01:00 GT del 23 — ya pasó
+		const estadoCredito = derivarEstadoCredito(
+			creditoFixture({ cuotasPagadas: [] }),
+		);
+		const estado = evaluarPromesa(
+			{
+				id: "p1",
+				cuotaInicio: 1,
+				cuotaFin: 1,
+				incluyeMora: false,
+				fechaPrometida: medianochePrometidaAyer,
+			},
+			estadoCredito,
+			hoySiguienteDia,
+		);
+		expect(estado).toBe("incumplida");
 	});
 
 	test("cuota única (cuotaInicio === cuotaFin)", () => {

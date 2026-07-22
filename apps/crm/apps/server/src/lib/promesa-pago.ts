@@ -61,12 +61,19 @@ export function evaluarPromesa(
 	const moraOk = promesa.incluyeMora ? estadoCredito.moraSaldada : true;
 
 	if (rangoSaldado && moraOk) return "cumplida";
-	// fechaPrometida se guarda como medianoche del día prometido (ver
-	// $id.tsx/contacto-modal) — la comparación estricta `<` da gracia el DÍA
-	// COMPLETO de la promesa: solo pasa a incumplida a partir del día
-	// siguiente. Intencional: "prometió pagar hoy" no debe marcarse vencida
-	// mientras el día sigue corriendo (coincide con el criterio de la Cola
-	// del día, donde una promesa que vence HOY sigue vigente hasta medianoche).
-	if (promesa.fechaPrometida < hoy) return "incumplida";
+	// fechaPrometida se guarda como MEDIANOCHE GT del día prometido (ver
+	// gtDateStrToDate: T06:00:00Z = 00:00 GT). Comparar `fechaPrometida < hoy`
+	// a secas (instante contra instante) daba gracia solo hasta la medianoche
+	// GT, no el día completo: alguien abriendo el caso a mediodía del MISMO
+	// día prometido ya veía "incumplida" (bug real, encontrado en review de
+	// PR — el test que lo cubría comparaba fechaPrometida === hoy exacto, no
+	// el caso real de "mismo día, hora distinta"). El corte real es el
+	// SIGUIENTE día calendario: se suma 24h a fechaPrometida (ya normalizada
+	// a medianoche GT) para obtener la medianoche GT del día después — recién
+	// ahí, si `hoy` ya la pasó, cuenta como incumplida.
+	const finDeGraciaGT = new Date(
+		promesa.fechaPrometida.getTime() + 24 * 60 * 60 * 1000,
+	);
+	if (finDeGraciaGT <= hoy) return "incumplida";
 	return "pendiente";
 }

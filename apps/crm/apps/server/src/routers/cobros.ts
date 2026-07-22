@@ -1375,6 +1375,22 @@ export const cobrosRouter = {
 						message: "cuotaFin debe ser mayor o igual a cuotaInicio",
 						path: ["cuotaFin"],
 					},
+				)
+				.refine(
+					// CB-020 (review Codex): fechaProximoContacto era opcional incluso
+					// para promesa_pago — el front la exige en el modal, pero el
+					// contrato del endpoint no. Sin fecha, el job nocturno
+					// (check-promesas-pago.ts) salta la fila para siempre (necesita
+					// fechaPrometida para decidir "incumplida"), dejándola "pendiente"
+					// eterna sin importar si se pagó o no.
+					(v) =>
+						v.estadoContacto !== "promesa_pago" ||
+						v.fechaProximoContacto != null,
+					{
+						message:
+							"La fecha prometida es obligatoria para una promesa de pago",
+						path: ["fechaProximoContacto"],
+					},
 				),
 		)
 		.handler(async ({ input, context }) => {

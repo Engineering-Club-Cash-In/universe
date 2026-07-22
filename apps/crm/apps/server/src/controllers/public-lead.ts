@@ -1,4 +1,4 @@
-import { and, asc, count, eq, or } from "drizzle-orm";
+import { and, asc, count, eq, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -8,6 +8,7 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
+import { leadIntakeAnswers } from "../db/schema/lead-intake";
 import {
 	findSalesUserWithLeastAutoAssignedLeads,
 	resolveExistingLeadAssigneeFromDatabase,
@@ -18,6 +19,134 @@ import { validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 
 type LeadSource = (typeof leadSourceEnum.enumValues)[number];
+
+/**
+ * Valida que la solicitud venga con el secreto compartido configurado para integraciones
+ * externas (ej. Make) vía header "Authorization: Bearer <secret>".
+ */
+export async function validatePublicLeadToken(
+	c: Context,
+	next: () => Promise<void>,
+) {
+	const secret = process.env.BETTER_SECRET_PUBLIC_LEAD;
+
+	if (!secret) {
+		console.error("[ERROR] BETTER_SECRET_PUBLIC_LEAD not configured");
+		return c.json(
+			{ success: false, error: "Configuración de autorización no disponible" },
+			500,
+		);
+	}
+
+	const authHeader = c.req.header("Authorization");
+
+	if (authHeader !== `Bearer ${secret}`) {
+		return c.json(
+			{ success: false, error: "No autorizado" },
+			401,
+		);
+	}
+
+	await next();
+}
+
+type IntakeAnswer = { fieldKey: string; fieldValue?: string | null };
+
+// Campos/valores válidos por formulario (campaignFormKey) — única barrera de validación,
+// ya que la tabla es llave-valor sin tipos. Reutiliza un fieldKey entre formularios solo si
+// es el mismo concepto; si no, dale uno propio. Rangos de presupuesto/ingreso son
+// provisionales hasta confirmar las opciones reales del formulario de Meta.
+const INTAKE_FORM_FIELDS: Record<string, Record<string, string[]>> = {
+	credito_filtro_julio2026: {
+		vehicle_condition: ["nuevo", "usado", "no_seguro"],
+		budget_range: [
+			"Menos de Q30,000",
+			"Q30,000 - Q50,000",
+			"Q50,000 - Q80,000",
+			"Q80,000 - Q120,000",
+			"Q120,000 - Q180,000",
+			"Q180,000 o más",
+		],
+		income_range: [
+			"Menos de Q4,000",
+			"Q4,000 - Q6,000",
+			"Q6,000 - Q8,000",
+			"Q8,000 - Q12,000",
+			"Q12,000 - Q18,000",
+			"Q18,000 o más",
+		],
+	},
+};
+
+export function validateIntakeAnswers(
+	campaignFormKey: string,
+	answers: IntakeAnswer[],
+): string | null {
+	const allowedFields = INTAKE_FORM_FIELDS[campaignFormKey];
+
+	if (!allowedFields) {
+		return `campaignFormKey no reconocido: ${campaignFormKey}`;
+	}
+
+	for (const answer of answers) {
+		const allowedValues = allowedFields[answer.fieldKey];
+
+		if (!allowedValues) {
+			return `El campo "${answer.fieldKey}" no pertenece al formulario "${campaignFormKey}"`;
+		}
+
+		if (answer.fieldValue && !allowedValues.includes(answer.fieldValue)) {
+			return `Valor no válido para ${answer.fieldKey}: ${answer.fieldValue}`;
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Guarda las respuestas de un formulario de captación (ej. Meta Instant Forms) en formato
+ * llave-valor, sin requerir migración cuando se agregue una pregunta nueva al formulario.
+ * campaignFormKey identifica de qué campaña/formulario vienen, para que dos formularios
+ * distintos puedan reusar el mismo fieldKey sin pisarse entre sí.
+ */
+async function upsertIntakeAnswers(
+	leadId: string,
+	campaignFormKey: string,
+	answers: IntakeAnswer[],
+) {
+	if (!campaignFormKey || !Array.isArray(answers) || answers.length === 0) {
+		return;
+	}
+
+	const rows = answers
+		.filter((a) => a && a.fieldKey)
+		.map((a) => ({
+			leadId,
+			campaignFormKey,
+			fieldKey: a.fieldKey,
+			fieldValue: a.fieldValue ?? null,
+		}));
+
+	if (rows.length === 0) return;
+
+	// Todo o nada: las respuestas de un mismo envío se guardan juntas o ninguna se guarda.
+	await db.transaction(async (tx) => {
+		await tx
+			.insert(leadIntakeAnswers)
+			.values(rows)
+			.onConflictDoUpdate({
+				target: [
+					leadIntakeAnswers.leadId,
+					leadIntakeAnswers.campaignFormKey,
+					leadIntakeAnswers.fieldKey,
+				],
+				set: {
+					fieldValue: sql`excluded.field_value`,
+					updatedAt: new Date(),
+				},
+			});
+	});
+}
 
 /**
  * Encuentra al usuario de ventas con menos oportunidades asignadas.
@@ -151,6 +280,31 @@ export async function createPublicLead(c: Context) {
 			);
 		}
 
+		if (body.intakeAnswers) {
+			if (!Array.isArray(body.intakeAnswers)) {
+				return c.json(
+					{ success: false, error: "intakeAnswers debe ser un arreglo" },
+					400,
+				);
+			}
+			if (!body.campaignFormKey) {
+				return c.json(
+					{
+						success: false,
+						error: "campaignFormKey es requerido cuando se envían intakeAnswers",
+					},
+					400,
+				);
+			}
+			const intakeError = validateIntakeAnswers(
+				body.campaignFormKey,
+				body.intakeAnswers,
+			);
+			if (intakeError) {
+				return c.json({ success: false, error: intakeError }, 400);
+			}
+		}
+
 		const creditType = body.creditType || "autocompra";
 		const hasDpi = !!(body.dpi && body.dpi.trim() !== "");
 
@@ -183,6 +337,14 @@ export async function createPublicLead(c: Context) {
 				return c.json(
 					{ success: true, data: existingLead, message: "Lead ya existe" },
 					200,
+				);
+			}
+
+			if (body.campaignFormKey && body.intakeAnswers) {
+				await upsertIntakeAnswers(
+					existingLead.id,
+					body.campaignFormKey,
+					body.intakeAnswers,
 				);
 			}
 
@@ -353,6 +515,14 @@ export async function createPublicLead(c: Context) {
 				updatedAt: new Date(),
 			})
 			.returning();
+
+		if (body.campaignFormKey && body.intakeAnswers) {
+			await upsertIntakeAnswers(
+				newLead.id,
+				body.campaignFormKey,
+				body.intakeAnswers,
+			);
+		}
 
 		// RENAP solo si tiene DPI y teléfono
 		const renapInfo = hasDpi

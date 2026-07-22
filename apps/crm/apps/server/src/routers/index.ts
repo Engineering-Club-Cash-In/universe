@@ -40,6 +40,7 @@ export const crmAppRouter = {
 	updateCompany: crmRouter.updateCompany,
 	getLeads: crmRouter.getLeads,
 	getLeadById: crmRouter.getLeadById,
+	getLeadIntakeAnswers: crmRouter.getLeadIntakeAnswers,
 	getLeadsStats: crmRouter.getLeadsStats,
 	createLead: crmRouter.createLead,
 	updateLead: crmRouter.updateLead,

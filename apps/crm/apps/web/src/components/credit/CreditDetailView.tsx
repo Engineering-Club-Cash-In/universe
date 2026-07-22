@@ -2782,6 +2782,7 @@ export function CreditDetailView({
 														quotation.termMonths,
 													);
 													generateQuotationPdf({
+														creditType: opportunity.creditType,
 														vehicleBrand: quotation.vehicleBrand,
 														vehicleLine: quotation.vehicleLine,
 														vehicleModel: quotation.vehicleModel,

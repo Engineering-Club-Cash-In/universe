@@ -1,5 +1,9 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import {
+	type QuotationCreditType,
+	getQuotationPdfCopy,
+} from "./quotation-pdf-copy";
 
 // Tipo para filas de la tabla de amortización
 export interface AmortizationRow {
@@ -62,6 +66,7 @@ export function generateAmortizationTable(
 
 // Define an interface for the quotation data
 interface QuotationData {
+	creditType: QuotationCreditType;
 	clientName?: string | null;
 	vehicleBrand: string | null;
 	vehicleLine: string | null;
@@ -94,6 +99,7 @@ export function generateQuotationPdf(
 	options?: { clientVersion?: boolean },
 ) {
 	const doc = new jsPDF();
+	const copy = getQuotationPdfCopy(quotation.creditType);
 
 	// Helper function to format currency
 	const formatCurrency = (value: number) =>
@@ -103,6 +109,11 @@ export function generateQuotationPdf(
 	doc.setFontSize(18);
 	doc.setFont("helvetica", "bold");
 	doc.text("Detalle de cuotas niveladas", 105, 20, { align: "center" });
+	doc.setFontSize(11);
+	doc.setFont("helvetica", "normal");
+	doc.text(`Tipo de crédito: ${copy.creditTypeLabel}`, 105, 27, {
+		align: "center",
+	});
 
 	// Vehicle Info Section
 	doc.setFontSize(14);
@@ -143,13 +154,15 @@ export function generateQuotationPdf(
 	doc.text(formatCurrency(quotation.vehicleValue), leftValueCol, y);
 
 	y += 7;
-	doc.text("Enganche:", leftCol, y);
+	doc.text(copy.downPaymentLabel, leftCol, y);
 	doc.text(`${formatCurrency(quotation.downPayment)}`, leftValueCol, y);
-	doc.text(
-		`${quotation.downPaymentPercentage.toFixed(2)}%`,
-		leftValueCol + 30,
-		y,
-	);
+	if (copy.showDownPaymentPercentage) {
+		doc.text(
+			`${quotation.downPaymentPercentage.toFixed(2)}%`,
+			leftValueCol + 30,
+			y,
+		);
+	}
 
 	y += 7;
 	doc.text("Monto a financiar:", leftCol, y);

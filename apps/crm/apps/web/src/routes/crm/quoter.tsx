@@ -1561,6 +1561,7 @@ function QuoterPage() {
 				: 0;
 
 		return {
+			creditType: values.creditType,
 			clientName,
 			vehicleBrand: values.vehicleBrand,
 			vehicleLine: values.vehicleLine,

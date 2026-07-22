@@ -940,7 +940,7 @@ export class CarteraBackClient {
 	async getBancos(): Promise<{ banco_id: number; nombre: string }[]> {
 		const response = await this.request<{
 			data: { banco_id: number; nombre: string }[];
-		}>("/bancos", { method: "GET" }, true);
+		}>("/bancos?con_transferencia=true", { method: "GET" }, true);
 		return response.data ?? [];
 	}
 

@@ -532,10 +532,10 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
     expect(invA.abonoInteres).toBe("100");
     expect(invA.abonoIva).toBe("12");
 
-    // CUBE reemplazado con los valores del desglose (formato toFixed(2))
+    // CUBE reemplazado con los valores del desglose (como number)
     const cube = out.find((r: any) => r.inversionistaId === 86)!;
-    expect(cube.abonoInteres).toBe("70.00");
-    expect(cube.abonoIva).toBe("8.40");
+    expect(cube.abonoInteres).toBe(70);
+    expect(cube.abonoIva).toBe(8.4);
   });
 
   it("caso 6 (isr): isr de CUBE = round2(net × 0.05); net 70 → isr 3.5", () => {
@@ -561,7 +561,7 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
     });
 
     const cube = out.find((r: any) => r.inversionistaId === 86)!;
-    expect(cube.isr).toBe("3.50"); // 70 * 0.05 = 3.5, formatted as toFixed(2)
+    expect(cube.isr).toBe(3.5); // 70 * 0.05 = 3.5, como number
   });
 
   it("caso 2: CUBE NO en pci → crea fila CUBE nueva con el desglose", () => {
@@ -591,7 +591,7 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
     expect(out).toHaveLength(2);
     const cube = out.find((r: any) => r.inversionistaId === 86)!;
     expect(cube).toBeDefined();
-    expect(cube.abonoInteres).toBe("15.00");
+    expect(cube.abonoInteres).toBe(15);
     expect(cube.emiteFactura).toBe(true);
   });
 
@@ -606,7 +606,7 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
     expect(out).toHaveLength(1);
     const cube = out.find((r: any) => r.inversionistaId === 86)!;
     expect(cube).toBeDefined();
-    expect(cube.abonoInteres).toBe("20.00");
+    expect(cube.abonoInteres).toBe(20);
   });
 
   it("caso 4: sin desglose (fallback) → devuelve pci tal cual, sin cambios", () => {
@@ -725,8 +725,8 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
 
     // CUBE sigue saliendo del desglose (net 65.20), como antes.
     const cube = out.find((r: any) => r.inversionistaId === 86)!;
-    expect(cube.abonoInteres).toBe("65.20");
-    expect(cube.abonoIva).toBe("7.83");
+    expect(cube.abonoInteres).toBe(65.2);
+    expect(cube.abonoIva).toBe(7.83);
   });
 
   it("caso 8 (sim): si YA hay filas pci, el reparto real manda y no se simula", () => {

@@ -10,6 +10,12 @@ interface ModalInversionistasProps {
   inversionistas: InversionistaPago[];
 }
 
+// El API puede devolver estos montos como number, string (filas sintéticas /
+// respuestas viejas) o null (montoAportado sin creditos_inversionistas):
+// convertir SIEMPRE antes de .toFixed para no reventar el modal.
+const monto = (v: number | string | null | undefined): string =>
+  v == null || v === "" || isNaN(Number(v)) ? "--" : Number(v).toFixed(2);
+
 export function ModalInversionistas({ open, onClose, inversionistas }: ModalInversionistasProps) {
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -24,23 +30,23 @@ export function ModalInversionistas({ open, onClose, inversionistas }: ModalInve
               <div className="grid grid-cols-2 gap-3 mt-2 text-sm text-blue-900">
                 <div className="flex items-center gap-2">
                   <BadgeDollarSign className="w-4 h-4 text-green-700" /> Abono Capital:{" "}
-                  <span className="font-semibold">{inv.abonoCapital.toFixed(2)}</span>
+                  <span className="font-semibold">{monto(inv.abonoCapital)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <BadgeDollarSign className="w-4 h-4 text-indigo-700" /> Abono Interés:{" "}
-                  <span className="font-semibold">{inv.abonoInteres.toFixed(2)}</span>
+                  <span className="font-semibold">{monto(inv.abonoInteres)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <BadgeDollarSign className="w-4 h-4 text-yellow-700" /> Abono IVA:{" "}
-                  <span className="font-semibold">{inv.abonoIva.toFixed(2)}</span>
+                  <span className="font-semibold">{monto(inv.abonoIva)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Info className="w-4 h-4 text-blue-700" /> ISR (5%):{" "}
-                  <span className="font-semibold">{inv.isr.toFixed(2)}</span>
+                  <span className="font-semibold">{monto(inv.isr)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <BadgeDollarSign className="w-4 h-4 text-blue-800" /> Monto Aportado:{" "}
-                  <span className="font-semibold">{inv.montoAportado.toFixed(2)}</span>
+                  <span className="font-semibold">{monto(inv.montoAportado)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Percent className="w-4 h-4 text-blue-600" /> % Participación:{" "}

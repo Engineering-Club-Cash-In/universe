@@ -146,10 +146,11 @@ export const investorDocumentsRouter = {
 			return result;
 		}),
 
-	// Bancos — catálogo desde cartera-back
+	// Bancos — catálogo desde cartera-back (solo con transferencia: alimenta
+	// los comboboxes de crear/editar inversionista)
 	getBancosCartera: crmCobrosOrInvestmentsProcedure
 		.handler(async () => {
-			return carteraBackClient.getBancos();
+			return carteraBackClient.getBancosTransferencia();
 		}),
 
 	// Editar inversionista — upsert en cartera-back + log

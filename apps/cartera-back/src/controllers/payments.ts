@@ -1939,17 +1939,23 @@ export function armarInversionistasPago(args: {
   // no estaba en pci tampoco se agrega fila vacía.
   if (cubeNet.abs().lte(new Big("0.005")) && !pciCube) return noCube;
 
+  // ⚠️ NUMBERS, no strings: el modal del front (modalViewInvestor) hace
+  // .toFixed() sobre estos campos — un string o null lo revienta con
+  // "toFixed is not a function" y deja la página en blanco.
+  const aNumero = (v: string | number | null | undefined): number | null =>
+    v == null || v === "" ? null : Number(v);
+
   const cubeRow: ReportInvRow = {
     inversionistaId: args.cubeId,
     nombreInversionista: pciCube?.nombreInversionista ?? args.cubeMeta?.nombreInversionista ?? "Cube Investments S.A.",
     emiteFactura: pciCube?.emiteFactura ?? args.cubeMeta?.emiteFactura ?? false,
-    abonoCapital: pciCube?.abonoCapital ?? "0",
-    abonoInteres: cubeNet.round(2).toFixed(2),
-    abonoIva: cubeIva.round(2).toFixed(2),
-    isr: cubeNet.times("0.05").round(2).toFixed(2),
+    abonoCapital: aNumero(pciCube?.abonoCapital) ?? 0,
+    abonoInteres: Number(cubeNet.round(2).toFixed(2)),
+    abonoIva: Number(cubeIva.round(2).toFixed(2)),
+    isr: Number(cubeNet.times("0.05").round(2).toFixed(2)),
     cuotaPago: pciCube?.cuotaPago ?? (args.cuota ?? "0"),
-    montoAportado: pciCube?.montoAportado ?? args.cubeMeta?.montoAportado ?? null,
-    porcentajeParticipacion: pciCube?.porcentajeParticipacion ?? args.cubeMeta?.porcentajeParticipacion ?? null,
+    montoAportado: aNumero(pciCube?.montoAportado ?? args.cubeMeta?.montoAportado),
+    porcentajeParticipacion: aNumero(pciCube?.porcentajeParticipacion ?? args.cubeMeta?.porcentajeParticipacion),
   };
   return [...noCube, cubeRow];
 }

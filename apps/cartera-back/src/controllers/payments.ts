@@ -18,7 +18,7 @@ import {
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
-import { and, eq, lt, sql, asc, lte, inArray, notInArray } from "drizzle-orm";
+import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -29,6 +29,19 @@ import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaCompra
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
+import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
+
+export const crearResumenAbonosCuota = (input: Parameters<
+  typeof calcularResumenAbonosCuota
+>[0]) => {
+  const resumen = calcularResumenAbonosCuota(input);
+  return {
+    cuota_cerrada: resumen.cuotaCerrada,
+    total_aplicado_cuota: resumen.totalAplicadoCuota,
+    saldo_pendiente: resumen.saldoPendiente,
+    tiene_abono_parcial: resumen.tieneAbonoParcial,
+  };
+};
 
 // ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
 // Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
@@ -896,6 +909,10 @@ export async function insertPagosCreditoInversionistas(
       );
 
     let abonoCapitalId: number | null = null;
+    // Abonos que esta fila de espejo consume (los que suma en su abono_capital).
+    // Se marcan con el id de la fila después del insert: son "los que entraron en
+    // la foto" y por lo tanto los únicos que la liquidación puede cerrar.
+    let abonoIdsConsumidos: number[] = [];
     if (abonosNoLiquidados.length > 0) {
       if (inv.status_inversionista === "pendiente_devolucion" || aplicarDevolucionCube) {
         // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
@@ -920,6 +937,8 @@ export async function insertPagosCreditoInversionistas(
           abono_capital = abono_capital.plus(montoAbono);
         }
         abonoCapitalId = abonosNoLiquidados[0].abono_id;
+        // Todos, no solo el linkeado: el abono_capital de arriba los sumó a todos.
+        abonoIdsConsumidos = abonosNoLiquidados.map((a) => a.abono_id);
 
         console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
         console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
@@ -962,6 +981,8 @@ export async function insertPagosCreditoInversionistas(
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
       fecha_pago: fechaDelPeriodo,
+      // No es columna del espejo: se separa antes del insert (ver abajo).
+      _abonoIdsConsumidos: abonoIdsConsumidos,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -981,20 +1002,69 @@ export async function insertPagosCreditoInversionistas(
   // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
 
-  await db
-    .insert(pagos_credito_inversionistas_espejo)
-    .values(resolvedInserts);
+  // `_abonoIdsConsumidos` es interno, no es columna: se separa antes del insert.
+  const filas = resolvedInserts.map(
+    ({ _abonoIdsConsumidos, ...fila }) => fila
+  );
 
-  return resolvedInserts;
+  // 5. Insertar el espejo y marcar los abonos que consumió, ATADOS en una sola
+  //    transacción: o se guardan los dos o ninguno.
+  //
+  //    🔴 Van juntos y no sueltos porque la marca (`pago_espejo_id`) es lo único
+  //    que dice "este abono ya entró en una foto que se va a pagar". Si el espejo
+  //    quedara guardado con el monto adentro pero los abonos sin marcar (falla el
+  //    update, se cae la conexión, se reinicia el proceso), la liquidación —que
+  //    cierra SOLO los marcados— los dejaría abiertos: se pagarían con esta foto
+  //    y el siguiente cálculo los agarraría de nuevo, pagándole DOS VECES el
+  //    mismo capital al inversionista.
+  //
+  //    Atados, si se rompe en el medio no queda foto tampoco y el cálculo se
+  //    rehace limpio la próxima vez.
+  await db.transaction(async (tx) => {
+    const filasInsertadas = await tx
+      .insert(pagos_credito_inversionistas_espejo)
+      .values(filas)
+      .returning({
+        id: pagos_credito_inversionistas_espejo.id,
+        inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id,
+      });
+
+    // Se matchea por inversionista_id (hay una fila por inversionista) y no por
+    // índice, para no depender del orden que devuelve el INSERT.
+    for (const insertada of filasInsertadas) {
+      const origen = resolvedInserts.find(
+        (r) => r.inversionista_id === insertada.inversionista_id
+      );
+      const abonoIds = origen?._abonoIdsConsumidos ?? [];
+      if (abonoIds.length === 0) continue;
+
+      await tx
+        .update(abonos_capital)
+        .set({ pago_espejo_id: insertada.id, updated_at: new Date() })
+        .where(inArray(abonos_capital.abono_id, abonoIds));
+
+      console.log(
+        `   🔖 ${abonoIds.length} abono(s) marcados como consumidos por el espejo ${insertada.id}`
+      );
+    }
+  });
+
+  return filas;
 }
+
+type InvestorPaymentDb = Pick<
+  typeof db,
+  "query" | "select" | "insert" | "update"
+>;
 
 export async function insertPagosCreditoInversionistasV2(
   pago_id: number,
   credito_id: number,
   fechaPeriodo?: Date,
+  txOrDb: InvestorPaymentDb = db,
 ) {
   // 1. Obtener el pago
-  const currentPago = await db.query.pagos_credito.findFirst({
+  const currentPago = await txOrDb.query.pagos_credito.findFirst({
     where: (p, { eq }) => eq(p.pago_id, pago_id),
   });
 
@@ -1003,7 +1073,7 @@ export async function insertPagosCreditoInversionistasV2(
   }
 
   // 2. Obtener inversionistas del crédito
-  const inversionistasData = await db.query.creditos_inversionistas.findMany({
+  const inversionistasData = await txOrDb.query.creditos_inversionistas.findMany({
     where: (ci, { eq }) => eq(ci.credito_id, credito_id),
   });
 
@@ -1014,7 +1084,7 @@ export async function insertPagosCreditoInversionistasV2(
   // 3. Obtener nombres para identificar a Cube
   const inversionistasWithName = await Promise.all(
     inversionistasData.map(async (inv) => {
-      const [invRow] = await db
+      const [invRow] = await txOrDb
         .select({ nombre: inversionistas.nombre })
         .from(inversionistas)
         .where(eq(inversionistas.inversionista_id, inv.inversionista_id));
@@ -1046,7 +1116,7 @@ export async function insertPagosCreditoInversionistasV2(
   //    del mes de la compra se aplicaría a un mes que no corresponde. La facturación
   //    tiene el MISMO comportamiento, así que pci y la factura no divergen; cuando se
   //    decida cerrar este borde hay que hacerlo en AMBOS lados (cofidi.ts + acá).
-  const comprasPendientesFacturar = await db
+  const comprasPendientesFacturar = await txOrDb
     .select({
       inversionista_id: compras_credito_inversionista.inversionista_id,
       monto_aportado: compras_credito_inversionista.monto_aportado,
@@ -1071,7 +1141,7 @@ export async function insertPagosCreditoInversionistasV2(
     const compra = comprasPendientesFacturar[0];
 
     // Espejo: base (monto_aportado), status y fecha_inicio_participacion por inversionista.
-    const espejoRows = await db
+    const espejoRows = await txOrDb
       .select({
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -1186,7 +1256,9 @@ export async function insertPagosCreditoInversionistasV2(
         credito_id,
         abonoCapitalInv.toNumber(),
         false,
-        inv.inversionista_id
+        inv.inversionista_id,
+        false,
+        txOrDb
       );
     }
 
@@ -1206,7 +1278,7 @@ export async function insertPagosCreditoInversionistasV2(
   }
 
   // 7. Insertar/upsert en pagos_credito_inversionistas
-  await db
+  await txOrDb
     .insert(pagos_credito_inversionistas)
     .values(inserts)
     .onConflictDoUpdate({
@@ -1694,6 +1766,8 @@ interface GetPagosOptions {
   formatoCredito?: string;
   soloAplicados?: boolean;
   fechaAplicado?: string;
+  fechaAplicadoInicio?: string;
+  fechaAplicadoFin?: string;
   fechaBoleta?: string;
   fechaBoletaInicio?: string;
   fechaBoletaFin?: string;
@@ -1722,8 +1796,82 @@ export type ReportCreditoInv = {
   porcentaje_participacion_inversionista: string | number;
   porcentaje_cash_in: string | number;
   monto_aportado: string | number;
+  // status del espejo (creditos_inversionistas_espejo): con bandera_reinversion
+  // activa, 'pendiente_reinversion'/'pendiente_compra_cartera' redirigen el
+  // interés de ESE inversionista a CUBE en la facturación (cofidi.ts).
+  status_espejo?: string | null;
 };
 
+
+/**
+ * 🧮 Simula las filas no-CUBE de un pago PARCIAL que todavía no tiene reparto en
+ * pagos_credito_inversionistas (la distribución real se crea hasta que la cuota
+ * se completa — aplicarPagoAlCredito, rama de cierre). Usa la MISMA función pura
+ * del reparto real (calcularSplitInteresPci) alimentada con los
+ * creditos_inversionistas del crédito, de modo que lo simulado hoy sea idéntico
+ * a lo que pci escribirá al cerrar la cuota (flujo regular; los pagos con compra
+ * de cartera pendiente de facturar se excluyen en el caller vía pendienteFacturar
+ * porque su reparto real usa el prorrateo por días).
+ * Capital: se deja en 0 — el reparto de capital solo ocurre al cierre.
+ */
+function simularInversionistasSinPci(args: {
+  creditoInvs: ReportCreditoInv[];
+  cubeId: number;
+  abonoInteresPago: string | number | null | undefined;
+  abonoIvaPago: string | number | null | undefined;
+  cuota?: string | number | null;
+  banderaReinversion?: boolean;
+}): ReportInvRow[] {
+  // Redirigido a CUBE (misma condición que cofidi al facturar): su interés ya
+  // está dentro del desglose INTERES de CUBE — simularle su parte regular lo
+  // doble-contaría. Solo se excluye a ESE inversionista; los demás del mismo
+  // crédito se facturan normal y sí se simulan (Codex P2, PR #1137).
+  const esRedirigidoACube = (ci: ReportCreditoInv) =>
+    args.banderaReinversion === true &&
+    (ci.status_espejo === "pendiente_reinversion" ||
+      ci.status_espejo === "pendiente_compra_cartera");
+
+  const split = calcularSplitInteresPci({
+    inversionistas: args.creditoInvs.map((ci) => ({
+      inversionista_id: ci.inversionista_id,
+      nombre: ci.nombre,
+      porcentaje_participacion_inversionista:
+        ci.porcentaje_participacion_inversionista ?? 0,
+      porcentaje_cash_in: ci.porcentaje_cash_in ?? 0,
+      monto_aportado: ci.monto_aportado ?? 0,
+    })),
+    pagoAbonoInteres: new Big(args.abonoInteresPago ?? 0),
+    pagoAbonoIva: new Big(args.abonoIvaPago ?? 0),
+  });
+  const splitPorInv = new Map(split.map((s) => [s.inversionista_id, s]));
+
+  // ⚠️ Emitir NUMBERS (no strings): las filas pci reales llegan como número vía
+  // json_build_object y el front (modalViewInvestor) les hace .toFixed() —
+  // una fila simulada con strings reventaría el modal.
+  return args.creditoInvs
+    .filter((ci) => ci.inversionista_id !== args.cubeId && !esRedirigidoACube(ci))
+    .map((ci) => {
+      const s = splitPorInv.get(ci.inversionista_id);
+      const interes = (s?.abono_interes ?? new Big(0)).round(2);
+      const iva = (s?.abono_iva_12 ?? new Big(0)).round(2);
+      return {
+        inversionistaId: ci.inversionista_id,
+        nombreInversionista: ci.nombre,
+        emiteFactura: ci.emite_factura ?? false,
+        abonoCapital: 0,
+        abonoInteres: Number(interes.toFixed(2)),
+        abonoIva: Number(iva.toFixed(2)),
+        isr: Number(interes.times("0.05").round(2).toFixed(2)),
+        cuotaPago: args.cuota != null ? Number(args.cuota) : 0,
+        montoAportado:
+          ci.monto_aportado != null ? Number(ci.monto_aportado) : null,
+        porcentajeParticipacion:
+          ci.porcentaje_participacion_inversionista != null
+            ? Number(ci.porcentaje_participacion_inversionista)
+            : null,
+      };
+    });
+}
 
 /**
  * 🧮 Arma el array `inversionistas` de UN pago para el reporte JSON, reflejando
@@ -1731,13 +1879,18 @@ export type ReportCreditoInv = {
  *   - CUBE: su interés = el del desglose (rubro INTERES, CON IVA). Reemplaza la
  *     fila CUBE del pci (si existía) o crea una nueva.
  *   - Inversionistas no-CUBE: del pci, SIN CAMBIO.
- *   - Parciales (sin filas pci): solo aparece CUBE del desglose; los demás
- *     inversionistas se difieren hasta que la cuota se complete.
+ *   - Parciales (sin filas pci) con simularSinPci=true: los no-CUBE se SIMULAN
+ *     desde creditos_inversionistas con la misma matemática del reparto real
+ *     (ver simularInversionistasSinPci); así el reporte los muestra desde el
+ *     día del parcial y no hasta que la cuota se complete.
+ *   - Parciales sin simularSinPci: solo aparece CUBE del desglose (comportamiento
+ *     previo; aplica a pagos reset/cancelación y prorrateados por compra de cartera).
  *   - Sin desglose (pagos pre-facturación / pendientes): fallback → conservar el
- *     array pci tal cual (comportamiento previo).
+ *     array pci tal cual (comportamiento previo). La simulación también queda
+ *     detrás de este gate: sin desglose no hay facturación que reflejar.
  *
  * Función PURA (sin DB) → testeable en aislamiento. NO toca abono_capital ni la
- * parte de los inversionistas no-CUBE; solo ajusta/crea la fila de CUBE.
+ * parte de los inversionistas no-CUBE del pci; solo ajusta/crea la fila de CUBE.
  *
  * Invariante (cuotas completas): Σ(salida.abonoInteres) =
  *   Σ(no-CUBE pci) + (desglose CUBE net) = el interés facturado del pago.
@@ -1748,13 +1901,36 @@ export function armarInversionistasPago(args: {
   desgloseCubeInteres: { total: Big; iva: Big } | null; // del desglose rubro INTERES (monto_total CON iva, monto_iva)
   cubeMeta?: Partial<ReportInvRow> | null;              // metadatos de CUBE (de creditos_inversionistas) si CUBE no está en pci
   cuota?: string | number | null;
+  // 🆕 Simulación de parciales sin reparto (ver simularInversionistasSinPci):
+  creditoInvs?: ReportCreditoInv[] | null;              // inversionistas del crédito
+  abonoInteresPago?: string | number | null;            // pagos_credito.abono_interes
+  abonoIvaPago?: string | number | null;                // pagos_credito.abono_iva_12
+  simularSinPci?: boolean;                              // el caller gatea: validated + !pendienteFacturar
+  banderaReinversion?: boolean;                         // excluye SOLO a los redirigidos a CUBE (espejo pendiente)
 }): ReportInvRow[] {
   const rows = Array.isArray(args.pciRows) ? args.pciRows : [];
-  const noCube = rows.filter((r) => r.inversionistaId !== args.cubeId);
+  let noCube = rows.filter((r) => r.inversionistaId !== args.cubeId);
   const pciCube = rows.find((r) => r.inversionistaId === args.cubeId) ?? null;
 
   // Sin desglose → fallback: conservar el pci tal cual.
   if (!args.desgloseCubeInteres) return rows;
+
+  // 🆕 PARCIAL sin reparto (cuota aún abierta) ya facturado: simular los no-CUBE.
+  // Solo cuando NO hay filas pci — si el reparto real ya existe, ese manda.
+  if (
+    rows.length === 0 &&
+    args.simularSinPci === true &&
+    (args.creditoInvs?.length ?? 0) > 0
+  ) {
+    noCube = simularInversionistasSinPci({
+      creditoInvs: args.creditoInvs!,
+      cubeId: args.cubeId,
+      abonoInteresPago: args.abonoInteresPago,
+      abonoIvaPago: args.abonoIvaPago,
+      cuota: args.cuota,
+      banderaReinversion: args.banderaReinversion,
+    });
+  }
 
   const cubeNet = args.desgloseCubeInteres.total.minus(args.desgloseCubeInteres.iva);
   const cubeIva = args.desgloseCubeInteres.iva;
@@ -1764,17 +1940,23 @@ export function armarInversionistasPago(args: {
   // no estaba en pci tampoco se agrega fila vacía.
   if (cubeNet.abs().lte(new Big("0.005")) && !pciCube) return noCube;
 
+  // ⚠️ NUMBERS, no strings: el modal del front (modalViewInvestor) hace
+  // .toFixed() sobre estos campos — un string o null lo revienta con
+  // "toFixed is not a function" y deja la página en blanco.
+  const aNumero = (v: string | number | null | undefined): number | null =>
+    v == null || v === "" ? null : Number(v);
+
   const cubeRow: ReportInvRow = {
     inversionistaId: args.cubeId,
     nombreInversionista: pciCube?.nombreInversionista ?? args.cubeMeta?.nombreInversionista ?? "Cube Investments S.A.",
     emiteFactura: pciCube?.emiteFactura ?? args.cubeMeta?.emiteFactura ?? false,
-    abonoCapital: pciCube?.abonoCapital ?? "0",
-    abonoInteres: cubeNet.round(2).toFixed(2),
-    abonoIva: cubeIva.round(2).toFixed(2),
-    isr: cubeNet.times("0.05").round(2).toFixed(2),
+    abonoCapital: aNumero(pciCube?.abonoCapital) ?? 0,
+    abonoInteres: Number(cubeNet.round(2).toFixed(2)),
+    abonoIva: Number(cubeIva.round(2).toFixed(2)),
+    isr: Number(cubeNet.times("0.05").round(2).toFixed(2)),
     cuotaPago: pciCube?.cuotaPago ?? (args.cuota ?? "0"),
-    montoAportado: pciCube?.montoAportado ?? args.cubeMeta?.montoAportado ?? null,
-    porcentajeParticipacion: pciCube?.porcentajeParticipacion ?? args.cubeMeta?.porcentajeParticipacion ?? null,
+    montoAportado: aNumero(pciCube?.montoAportado ?? args.cubeMeta?.montoAportado),
+    porcentajeParticipacion: aNumero(pciCube?.porcentajeParticipacion ?? args.cubeMeta?.porcentajeParticipacion),
   };
   return [...noCube, cubeRow];
 }
@@ -1803,6 +1985,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     formatoCredito,
     soloAplicados,
     fechaAplicado,
+    fechaAplicadoInicio,
+    fechaAplicadoFin,
     fechaBoleta,
     fechaBoletaInicio,
     fechaBoletaFin,
@@ -1843,6 +2027,24 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       );
     }
 
+    // 🧮 Elegibilidad de SIMULACIÓN a nivel pago (espejo SQL de los gates del
+    // detalle en armarInversionistasPago/simularInversionistasSinPci): pago
+    // validated con interés, ya facturado (desglose INTERES), sin reparto pci
+    // y sin compra de cartera pendiente (prorrateo). La condición por
+    // inversionista (membresía en el crédito y no-redirigido a CUBE) se agrega
+    // donde se usa. Mantener en sync con los gates del detalle.
+    const pagoSimulableSQL = `
+      NOT EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas pci_sim
+                  WHERE pci_sim.pago_id = p.pago_id)
+      AND p.validation_status = 'validated'
+      AND p.abono_interes > 0
+      AND EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd_sim
+                  WHERE fd_sim.pago_id = p.pago_id AND fd_sim.rubro::text = 'INTERES')
+      AND NOT EXISTS (SELECT 1 FROM cartera.compras_credito_inversionista cci_sim
+                      WHERE cci_sim.credito_id = p.credito_id
+                        AND cci_sim.pendiente_facturar = true
+                        AND cci_sim.tipo_operacion = 'compra_cartera')`;
+
     if (inversionistaId) {
       if (Number(inversionistaId) === CUBE_ID) {
         // Para CUBE, el rubro INTERES del desglose ES de CUBE aunque no haya fila pci
@@ -1863,12 +2065,28 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           )
         )`);
       } else {
+        // Con reparto real (pci) O parcial simulable donde este inversionista
+        // participa y NO está redirigido a CUBE — así el filtro ve los mismos
+        // pagos cuyo detalle ya muestra la fila simulada (Codex P2, PR #1137).
         whereClauses.push(`
-          EXISTS (
-            SELECT 1
-            FROM ${CARTERA_SCHEMA}.pagos_credito_inversionistas pci2
-            WHERE pci2.pago_id = p.pago_id
-            AND pci2.inversionista_id = '${inversionistaId}'
+          (
+            EXISTS (
+              SELECT 1
+              FROM ${CARTERA_SCHEMA}.pagos_credito_inversionistas pci2
+              WHERE pci2.pago_id = p.pago_id
+              AND pci2.inversionista_id = '${inversionistaId}'
+            )
+            OR (
+              ${pagoSimulableSQL}
+              AND EXISTS (SELECT 1 FROM ${CARTERA_SCHEMA}.creditos_inversionistas ci_sim
+                          WHERE ci_sim.credito_id = p.credito_id
+                            AND ci_sim.inversionista_id = '${inversionistaId}')
+              AND NOT (c.bandera_reinversion = true AND EXISTS (
+                    SELECT 1 FROM ${CARTERA_SCHEMA}.creditos_inversionistas_espejo esp_sim
+                    WHERE esp_sim.credito_id = p.credito_id
+                      AND esp_sim.inversionista_id = '${inversionistaId}'
+                      AND esp_sim.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
+            )
           )
         `);
       }
@@ -1883,6 +2101,18 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (fechaAplicado) {
       whereClauses.push(
         `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+      );
+    }
+    // 📅 Rango de fecha_aplicado (zona Guatemala). Inclusivo en ambos extremos.
+    // Se puede usar combinado o por separado con fechaAplicado (exacta).
+    if (fechaAplicadoInicio) {
+      whereClauses.push(
+        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >= '${fechaAplicadoInicio}'::date`
+      );
+    }
+    if (fechaAplicadoFin) {
+      whereClauses.push(
+        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= '${fechaAplicadoFin}'::date`
       );
     }
     if (fechaBoleta) {
@@ -2141,9 +2371,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           i.emite_factura AS "emiteFactura",
           ci.porcentaje_participacion_inversionista AS "porcentajeParticipacion",
           ci.porcentaje_cash_in AS "porcentajeCashIn",
-          ci.monto_aportado AS "montoAportado"
+          ci.monto_aportado AS "montoAportado",
+          esp.status AS "statusEspejo"
         FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci
         INNER JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = ci.inversionista_id
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo esp
+          ON esp.credito_id = ci.credito_id
+          AND esp.inversionista_id = ci.inversionista_id
         WHERE ci.credito_id = ANY(${"{" + creditoIds.join(",") + "}"}::bigint[])
       `);
       for (const row of ciResult.rows as any[]) {
@@ -2156,6 +2390,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           porcentaje_participacion_inversionista: row.porcentajeParticipacion ?? 0,
           porcentaje_cash_in: row.porcentajeCashIn ?? 0,
           monto_aportado: row.montoAportado ?? 0,
+          status_espejo: row.statusEspejo ?? null,
         });
         creditoInvsByCredito.set(cid, arr);
       }
@@ -2217,6 +2452,20 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
             desgloseCubeInteres: desgloseCubeByPago.get(Number(r.pagoId)) ?? null,
             cubeMeta,
             cuota: r.cuotaMonto as any,
+            // 🆕 Parciales sin reparto: simular filas no-CUBE con la misma
+            // matemática del cierre (calcularSplitInteresPci). Solo pagos
+            // 'validated' (reset/cancelación reparte distinto) y sin compra de
+            // cartera pendiente (esos usan prorrateo por días, no aportado).
+            // Con bandera_reinversion se excluye POR INVERSIONISTA solo a los
+            // redirigidos a CUBE (espejo pendiente) — los demás del crédito se
+            // facturan normal y sí se simulan.
+            creditoInvs,
+            abonoInteresPago: r.abono_interes as any,
+            abonoIvaPago: r.abono_iva_12 as any,
+            simularSinPci:
+              (r as any).validation_status === "validated" &&
+              !((r as any).pendienteFacturar ?? false),
+            banderaReinversion: (r as any).banderaReinversion ?? false,
           })
         : pciRows;
 
@@ -2382,6 +2631,97 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       totalIsr: new Big(r.totalIsr).round(2).toNumber(),
       totalMontoAportado: new Big(r.totalMontoAportado).round(2).toNumber(),
     }));
+
+    // 💰 FIX (Codex P2, PR #1137): el detalle muestra filas SIMULADAS en los
+    // parciales sin pci; el resumen por inversionista debe sumarlas también,
+    // o el total no cuadra contra las filas listadas. Réplica en SQL de
+    // calcularSplitInteresPci (flujo regular, redondeo por pago-inversionista):
+    //   interés_inv = ROUND(abono_interes × (aporte/Σaportes) × pct/100, 2)
+    // Si cambia src/cofidi/splitInteresPci.ts hay que actualizar esta fórmula.
+    // Solo no-CUBE: el interés de CUBE ya se corrige desde el desglose abajo
+    // (incluye parciales). Excluye redirigidos a CUBE (bandera + espejo
+    // pendiente), igual que la simulación del detalle.
+    // Con filtro == CUBE la query se salta por completo (Codex P2): un resumen
+    // solo-CUBE no debe ganar filas no-CUBE por los parciales simulables.
+    const esFiltroCube = Boolean(inversionistaId) && Number(inversionistaId) === CUBE_ID;
+    const totalesSimQuery = sql`
+      WITH pf AS (
+        SELECT p.pago_id, p.credito_id, c.bandera_reinversion,
+               p.abono_interes::numeric AS interes,
+               COALESCE(p.abono_iva_12, 0)::numeric AS iva
+        FROM cartera.pagos_credito p
+        LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
+        LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+        ${sql.raw(whereSQL)}
+        AND ${sql.raw(pagoSimulableSQL)}
+      ),
+      aportes AS (
+        SELECT ci.credito_id, SUM(ci.monto_aportado::numeric) AS total
+        FROM cartera.creditos_inversionistas ci
+        WHERE ci.credito_id IN (SELECT DISTINCT credito_id FROM pf)
+        GROUP BY ci.credito_id
+      )
+      SELECT ci.inversionista_id AS "inversionistaId",
+             i.nombre AS "nombreInversionista",
+             i.emite_factura AS "emiteFactura",
+             SUM(ROUND(pf.interes * (ci.monto_aportado::numeric / a.total)
+                 * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS "interesSim",
+             SUM(ROUND(pf.iva * (ci.monto_aportado::numeric / a.total)
+                 * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS "ivaSim",
+             SUM(ci.monto_aportado::numeric) AS "aporteSim"
+      FROM pf
+      JOIN aportes a ON a.credito_id = pf.credito_id AND a.total > 0
+      JOIN cartera.creditos_inversionistas ci ON ci.credito_id = pf.credito_id
+      JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+      WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+        AND NOT (pf.bandera_reinversion = true AND EXISTS (
+              SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
+              WHERE esp.credito_id = pf.credito_id
+                AND esp.inversionista_id = ci.inversionista_id
+                AND esp.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
+        ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND ci.inversionista_id = '${inversionistaId}'` : "")}
+      GROUP BY ci.inversionista_id, i.nombre, i.emite_factura
+    `;
+
+    const totalesSimResult = esFiltroCube
+      ? { rows: [] as any[] }
+      : await db.execute(totalesSimQuery);
+    for (const simRow of totalesSimResult.rows as any[]) {
+      const interesSim = new Big(simRow.interesSim ?? 0);
+      const ivaSim = new Big(simRow.ivaSim ?? 0);
+      if (interesSim.lte(0) && ivaSim.lte(0)) continue;
+      const idx = totalesInversionistas.findIndex(
+        (t) => Number(t.inversionistaId) === Number(simRow.inversionistaId)
+      );
+      if (idx >= 0) {
+        const t = totalesInversionistas[idx];
+        const interesTotal = new Big(t.totalAbonoInteres).plus(interesSim);
+        totalesInversionistas[idx] = {
+          ...t,
+          totalAbonoInteres: interesTotal.round(2).toNumber(),
+          totalAbonoIva: new Big(t.totalAbonoIva).plus(ivaSim).round(2).toNumber(),
+          totalIsr: interesTotal.times("0.05").round(2).toNumber(),
+          totalMontoAportado: new Big(t.totalMontoAportado)
+            .plus(simRow.aporteSim ?? 0)
+            .round(2)
+            .toNumber(),
+        };
+      } else {
+        totalesInversionistas.push({
+          inversionistaId: Number(simRow.inversionistaId),
+          nombreInversionista: simRow.nombreInversionista,
+          emiteFactura: simRow.emiteFactura ?? false,
+          totalAbonoCapital: 0,
+          totalAbonoInteres: interesSim.round(2).toNumber(),
+          totalAbonoIva: ivaSim.round(2).toNumber(),
+          totalIsr: interesSim.times("0.05").round(2).toNumber(),
+          totalMontoAportado: new Big(simRow.aporteSim ?? 0).round(2).toNumber(),
+        });
+      }
+    }
+    totalesInversionistas.sort((a, b) =>
+      String(a.nombreInversionista).localeCompare(String(b.nombreInversionista))
+    );
 
     // 💰 FIX: la fila de CUBE en el resumen debe reflejar el desglose (rubro INTERES),
     // igual que el detalle per-pago (armarInversionistasPago). El pci crudo de CUBE NO
@@ -3308,7 +3648,7 @@ export async function getAbonosPorCuota(
 ) {
   // 1. Buscar el crédito por SIFCO
   const [credito] = await db
-    .select({ credito_id: creditos.credito_id })
+    .select({ credito_id: creditos.credito_id, cuota: creditos.cuota })
     .from(creditos)
     .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
     .limit(1);
@@ -3322,7 +3662,10 @@ export async function getAbonosPorCuota(
   // credito (p. ej. tras regeneraciones de calendario). Se consideran todas para
   // no perder pagos vinculados al cuota_id "viejo".
   const cuotasMatch = await db
-    .select({ cuota_id: cuotas_credito.cuota_id })
+    .select({
+      cuota_id: cuotas_credito.cuota_id,
+      pagado: cuotas_credito.pagado,
+    })
     .from(cuotas_credito)
     .where(
       and(
@@ -3341,6 +3684,8 @@ export async function getAbonosPorCuota(
   const pagos = await db
     .select({
       pago_id: pagos_credito.pago_id,
+      validationStatus: pagos_credito.validationStatus,
+      paymentFalse: pagos_credito.paymentFalse,
       abono_capital: pagos_credito.abono_capital,
       abono_iva_12: pagos_credito.abono_iva_12,
       abono_interes: pagos_credito.abono_interes,
@@ -3354,11 +3699,10 @@ export async function getAbonosPorCuota(
       and(
         eq(pagos_credito.credito_id, credito.credito_id),
         inArray(pagos_credito.cuota_id, cuotaIds),
-        // Excluir abonos directos a capital (no son pago de cuota) y reversados.
-        // `capital` = sin aplicar, `capital_validated` = aplicado; ninguno es
-        // abono de la cuota, así que no deben aparecer en este desglose.
+        // El desglose y el resumen deben usar exactamente los mismos pagos vivos
+        // de cuota. Excluye reversados, placeholders, convenio y capital directo.
         eq(pagos_credito.paymentFalse, false),
-        notInArray(pagos_credito.validationStatus, ["capital", "capital_validated"])
+        inArray(pagos_credito.validationStatus, ["pending", "validated"])
       )
     );
 
@@ -3378,6 +3722,11 @@ export async function getAbonosPorCuota(
     total_abono_seguro = total_abono_seguro.plus(p.abono_seguro || "0");
     total_abono_gps = total_abono_gps.plus(p.abono_gps || "0");
   }
+  const resumen = crearResumenAbonosCuota({
+    montoCuota: credito.cuota ?? 0,
+    cuotaCerrada: cuotasMatch.some((cuota) => cuota.pagado === true),
+    pagos,
+  });
 
   return {
     success: true,
@@ -3390,5 +3739,6 @@ export async function getAbonosPorCuota(
     membresias_pago: total_membresias_pago.toFixed(2),
     abono_seguro: total_abono_seguro.toFixed(2),
     abono_gps: total_abono_gps.toFixed(2),
+    ...resumen,
   };
 }

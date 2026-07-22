@@ -57,6 +57,11 @@ function traducirDetalleTecnico(detail: string): string {
  */
 const MENSAJE_SIN_INFORMACION = /^internal server error$/i;
 
+const MENSAJES_POR_CODIGO: Record<string, string> = {
+  CREDIT_PENDING_CANCELLATION:
+    "No se puede registrar el pago porque el crédito está pendiente de cancelación.",
+};
+
 /**
  * Firmas de errores técnicos que nunca deben mostrarse al usuario.
  * Los throws de negocio del backend ("Payment not found", "No se encontró
@@ -89,13 +94,23 @@ function esDetalleTecnicoCrudo(detail: string): boolean {
  *    `error`, no solo cuando los roles están invertidos.
  */
 function extraerDetalle(data: unknown): string | undefined {
-  const cuerpo = (data ?? {}) as { message?: unknown; error?: unknown; mensaje?: unknown };
+  const cuerpo = (data ?? {}) as {
+    code?: unknown;
+    message?: unknown;
+    error?: unknown;
+    mensaje?: unknown;
+  };
+  const code = typeof cuerpo.code === "string" ? cuerpo.code : "";
   const message = typeof cuerpo.message === "string" ? cuerpo.message.trim() : "";
   const mensaje = typeof cuerpo.mensaje === "string" ? cuerpo.mensaje.trim() : "";
   const errorRaw = typeof cuerpo.error === "string" ? cuerpo.error.trim() : "";
 
   const errorUtilizable =
     !!errorRaw && (buscarTraduccion(errorRaw) !== null || !esDetalleTecnicoCrudo(errorRaw));
+
+  if (MENSAJES_POR_CODIGO[code]) {
+    return MENSAJES_POR_CODIGO[code];
+  }
 
   // `message` curado tiene prioridad, salvo que sea el genérico sin información.
   if (message && !MENSAJE_SIN_INFORMACION.test(message)) {

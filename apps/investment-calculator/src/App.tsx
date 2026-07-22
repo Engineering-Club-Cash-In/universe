@@ -125,9 +125,11 @@ export default function InvestmentCalculator() {
 
   // --- Inverse Calculator State ---
   const [desiredAmount, setDesiredAmount] = useState<string>("1000");
-  const [inverseMode, setInverseMode] = useState<"monthly" | "lumpSum">(
-    "monthly"
-  );
+  // "monthly" se retiró de la UI (Calcular Objetivo solo ofrece Anual /
+  // Al final del plazo). El tipo se conserva por si se reactiva.
+  const [inverseMode, setInverseMode] = useState<
+    "monthly" | "lumpSum" | "tradicionalAnual"
+  >("tradicionalAnual");
   const [lumpSumType, setLumpSumType] = useState<"compound" | "interest-only">(
     "compound"
   );
@@ -172,13 +174,57 @@ export default function InvestmentCalculator() {
     clampTermToTradicional(modelo, mainTab);
   };
 
-  // `term` es estado compartido con la pestaña "Calcular Objetivo", cuyo
-  // input libre acepta cualquier valor. Al volver a "Calcular Rendimiento"
-  // con Tradicional activo hay que re-aplicar el clamp, si no el select de
-  // plazo queda con un valor inválido y la cotización usa un plazo bloqueado.
+  // Cambio de frecuencia en "Calcular Objetivo". Además de la matemática
+  // (inverseMode), sincroniza el MODELO (activeTab) que refleja la tira de
+  // tabs de abajo:
+  //   - Anual (Tradicional) → modelo Tradicional + plazo restringido 60/72/84.
+  //   - Al final del plazo   → modelo según el "Tipo de Inversión" elegido
+  //                            (Interés Compuesto / Al vencimiento).
+  const handleFrecuenciaChange = (
+    modo: "monthly" | "lumpSum" | "tradicionalAnual"
+  ) => {
+    setInverseMode(modo);
+    if (modo === "tradicionalAnual") {
+      setActiveTab("standard");
+      const meses = termUnit === "years" ? term * 12 : term;
+      if (!PLAZOS_TRADICIONAL.includes(meses)) {
+        setTerm(PLAZOS_TRADICIONAL[0]);
+        setTermUnit("months");
+      }
+    } else if (modo === "lumpSum") {
+      setActiveTab(lumpSumType === "compound" ? "compound" : "interest-only");
+    }
+  };
+
+  // Cambio del "Tipo de Inversión" (solo visible en "Al final del plazo").
+  // Sincroniza el modelo (activeTab) con la tira de tabs de abajo.
+  const handleTipoInversionChange = (tipo: "compound" | "interest-only") => {
+    setLumpSumType(tipo);
+    setActiveTab(tipo === "compound" ? "compound" : "interest-only");
+  };
+
+  // `term` y `activeTab` son estado compartido entre las dos pestañas.
+  //   - Al volver a "Calcular Rendimiento": re-aplicar el clamp de plazo (si
+  //     no, el select de plazo queda con un valor inválido).
+  //   - Al entrar a "Calcular Objetivo": sincronizar el MODELO con la
+  //     frecuencia del objetivo (no arrastrar el modelo de Rendimiento), para
+  //     que la tira de tabs de abajo refleje lo elegido arriba.
   const handleMainTabChange = (tab: string) => {
     setMainTab(tab);
-    clampTermToTradicional(activeTab, tab);
+    if (tab === "calculator") {
+      clampTermToTradicional(activeTab, tab);
+    } else if (tab === "goal") {
+      if (inverseMode === "tradicionalAnual") {
+        setActiveTab("standard");
+        const meses = termUnit === "years" ? term * 12 : term;
+        if (!PLAZOS_TRADICIONAL.includes(meses)) {
+          setTerm(PLAZOS_TRADICIONAL[0]);
+          setTermUnit("months");
+        }
+      } else if (inverseMode === "lumpSum") {
+        setActiveTab(lumpSumType === "compound" ? "compound" : "interest-only");
+      }
+    }
   };
 
   // Helper function to get VAT rate
@@ -364,6 +410,17 @@ export default function InvestmentCalculator() {
     [annualProjection]
   );
 
+  // ¿Mostrar la Proyección Anual (tabla por año) en vez de la mensual?
+  // Aplica al modelo Tradicional en dos casos:
+  //   - Calcular Rendimiento (plazo restringido a 60/72/84).
+  //   - Calcular Objetivo con frecuencia "Tradicional (anual)" (mismo plazo
+  //     restringido). En los otros modos del objetivo el plazo es libre, así
+  //     que ahí se sigue mostrando la tabla mensual.
+  const showAnnualTradicional =
+    activeTab === "standard" &&
+    (mainTab === "calculator" ||
+      (mainTab === "goal" && inverseMode === "tradicionalAnual"));
+
   // Calculate investment results using the backend functions
   const investmentParams: InvestmentParams = {
     capital: displayCapital,
@@ -470,7 +527,8 @@ export default function InvestmentCalculator() {
     summary.appendChild(
       createSummaryRow(
         "Tasa de Interés Mensual:",
-        `${parseFloat((interestRate * (investorPercentage / 100)).toFixed(4))}%`
+        // Tasa real del crédito (no multiplicada por el % del inversionista).
+        `${parseFloat(interestRate.toFixed(4))}%`
       )
     );
 
@@ -554,11 +612,7 @@ export default function InvestmentCalculator() {
     // Igual que en la UI, solo aplica en "Calcular Rendimiento" (en modo
     // Objetivo el plazo es libre y Tradicional no es una opción).
     let annualSection: HTMLDivElement | null = null;
-    if (
-      activeTab === "standard" &&
-      mainTab === "calculator" &&
-      annualProjection.length > 0
-    ) {
+    if (showAnnualTradicional && annualProjection.length > 0) {
       annualSection = document.createElement("div");
 
       const annualTitle = document.createElement("h2");
@@ -989,6 +1043,21 @@ export default function InvestmentCalculator() {
       const interestPlusVat = D / investorShare;
       const interest = interestPlusVat / (1 + vatRate);
       capital = interest / monthlyInterestRate;
+    } else if (inverseMode === "tradicionalAnual") {
+      // Tradicional con frecuencia anual: el "monto deseado" es el INTERÉS que
+      // el inversionista quiere ganar en el PRIMER AÑO.
+      //
+      // Se resuelve invirtiendo el MISMO schedule que se despliega (amortización
+      // francesa), no con interés simple: en Tradicional el saldo baja cada mes,
+      // así que un cálculo interest-only subcotiza el capital (la Proyección
+      // Anual mostraría menos de lo pedido en el año 1).
+      // El schedule es lineal en el capital → basta escalar desde una referencia,
+      // sin iterar. En años siguientes el interés baja (propio del modelo).
+      const REF = 10000;
+      const refYear1 = generateAmortizationSchedule(REF)
+        .slice(0, 12)
+        .reduce((sum, row) => sum + row.interestVatPayment, 0);
+      capital = refYear1 > 0 ? (D * REF) / refYear1 : 0;
     } else {
       // lumpSum
       if (lumpSumType === "compound") {
@@ -1199,14 +1268,18 @@ export default function InvestmentCalculator() {
                   <Select
                     value={inverseMode}
                     onValueChange={(v) =>
-                      setInverseMode(v as "monthly" | "lumpSum")
+                      handleFrecuenciaChange(
+                        v as "monthly" | "lumpSum" | "tradicionalAnual"
+                      )
                     }
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="monthly">Mensual</SelectItem>
+                      <SelectItem value="tradicionalAnual">
+                        Anual (Tradicional)
+                      </SelectItem>
                       <SelectItem value="lumpSum">
                         Al final del plazo
                       </SelectItem>
@@ -1219,7 +1292,7 @@ export default function InvestmentCalculator() {
                     <Select
                       value={lumpSumType}
                       onValueChange={(v) =>
-                        setLumpSumType(v as "compound" | "interest-only")
+                        handleTipoInversionChange(v as "compound" | "interest-only")
                       }
                     >
                       <SelectTrigger>
@@ -1238,30 +1311,52 @@ export default function InvestmentCalculator() {
                 )}
                 <div className="space-y-2">
                   <Label htmlFor="term-goal">Plazo</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="term-goal"
-                      type="number"
-                      value={term}
-                      onChange={(e) => setTerm(Number(e.target.value))}
-                      min="1"
-                      className="flex-1"
-                    />
+                  {inverseMode === "tradicionalAnual" ? (
+                    // Tradicional: mismos plazos que la primera sección (60/72/84).
                     <Select
-                      value={termUnit}
-                      onValueChange={(value) =>
-                        setTermUnit(value as "months" | "years")
-                      }
+                      value={String(getTermInMonths())}
+                      onValueChange={(v) => {
+                        setTerm(Number(v));
+                        setTermUnit("months");
+                      }}
                     >
-                      <SelectTrigger className="w-24">
+                      <SelectTrigger id="term-goal">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="months">Meses</SelectItem>
-                        <SelectItem value="years">Años</SelectItem>
+                        {PLAZOS_TRADICIONAL.map((meses) => (
+                          <SelectItem key={meses} value={String(meses)}>
+                            {meses / 12} años ({meses} meses)
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Input
+                        id="term-goal"
+                        type="number"
+                        value={term}
+                        onChange={(e) => setTerm(Number(e.target.value))}
+                        min="1"
+                        className="flex-1"
+                      />
+                      <Select
+                        value={termUnit}
+                        onValueChange={(value) =>
+                          setTermUnit(value as "months" | "years")
+                        }
+                      >
+                        <SelectTrigger className="w-24">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="months">Meses</SelectItem>
+                          <SelectItem value="years">Años</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="investorSplitGoal">
@@ -1280,19 +1375,21 @@ export default function InvestmentCalculator() {
                     step="1"
                   />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="smallTaxpayerGoal"
-                    checked={isSmallTaxpayer}
-                    onChange={(e) => setIsSmallTaxpayer(e.target.checked)}
-                    className="rounded"
-                  />
-                  <Label htmlFor="smallTaxpayerGoal">
-                    Pequeño Contribuyente (IVA 5%)
-                  </Label>
+                {/* Pequeño Contribuyente ocupa el espacio final del grid, igual
+                    que en "Calcular Rendimiento". */}
+                <div className="space-y-2">
+                  <div className="flex h-full items-center space-x-2 pt-2 md:pt-6">
+                    <input
+                      type="checkbox"
+                      id="smallTaxpayerGoal"
+                      checked={isSmallTaxpayer}
+                      onChange={(e) => setIsSmallTaxpayer(e.target.checked)}
+                      className="rounded"
+                    />
+                    <Label htmlFor="smallTaxpayerGoal">
+                      Pequeño Contribuyente (IVA 5%)
+                    </Label>
+                  </div>
                 </div>
               </div>
               {requiredCapital && (
@@ -1370,19 +1467,19 @@ export default function InvestmentCalculator() {
       </Card>
 
       {/* Amortization Schedule Table with Tabs.
-          Para Tradicional (en "Calcular Rendimiento") la tabla ES la
-          Proyección Anual (minuta Plazos Calculadora): devolución de capital
-          e intereses agrupados por año. Los otros modelos (y el modo
-          Objetivo, donde el plazo es libre y Tradicional no es una opción)
+          Para Tradicional la tabla ES la Proyección Anual (minuta Plazos
+          Calculadora): devolución de capital e intereses agrupados por año.
+          Aplica en Calcular Rendimiento y en Calcular Objetivo cuando la
+          frecuencia es "Tradicional (anual)". Los otros modelos y modos
           conservan la tabla mensual. */}
       <Card>
         <CardHeader>
           <CardTitle>
-            {activeTab === "standard" && mainTab === "calculator"
+            {showAnnualTradicional
               ? "Proyección Anual"
               : "Tabla de Amortización"}
           </CardTitle>
-          {activeTab === "standard" && mainTab === "calculator" && (
+          {showAnnualTradicional && (
             <CardDescription>
               Devolución estimada de capital e intereses ganados por año. La
               ganancia se calcula sobre el capital que permanece activo cada
@@ -1391,14 +1488,27 @@ export default function InvestmentCalculator() {
           )}
         </CardHeader>
         <CardContent>
-          <Tabs value={activeTab} onValueChange={handleModeloChange}>
+          {/* Tira de tabs de solo lectura: el modelo se elige arriba
+              (dropdown en Rendimiento, Frecuencia/Tipo en Objetivo). Aquí solo
+              se refleja — los triggers no-activos van deshabilitados para que
+              no se pueda cambiar el modelo desde abajo, en ambas pestañas. */}
+          <Tabs value={activeTab}>
             <TabsList className="mb-4">
-              <TabsTrigger value="standard">Tradicional</TabsTrigger>
-              <TabsTrigger value="interest-only">Al vencimiento</TabsTrigger>
-              <TabsTrigger value="compound">Interés Compuesto</TabsTrigger>
+              <TabsTrigger value="standard" disabled={activeTab !== "standard"}>
+                Tradicional
+              </TabsTrigger>
+              <TabsTrigger
+                value="interest-only"
+                disabled={activeTab !== "interest-only"}
+              >
+                Al vencimiento
+              </TabsTrigger>
+              <TabsTrigger value="compound" disabled={activeTab !== "compound"}>
+                Interés Compuesto
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="standard">
-              {activeTab === "standard" && mainTab === "calculator" ? (
+              {showAnnualTradicional ? (
                 <>
                   <Table containerClassname="">
                     <TableHeader>
@@ -1763,7 +1873,8 @@ export default function InvestmentCalculator() {
               <div className="flex justify-between text-lg font-semibold">
                 <p>Tasa de Interés Mensual:</p>
                 <span className="text-black">
-                  {parseFloat((interestRate * (investorPercentage / 100)).toFixed(4))}%
+                  {/* Tasa real del crédito (no × % del inversionista). */}
+                  {parseFloat(interestRate.toFixed(4))}%
                 </span>
               </div>
               <Separator />

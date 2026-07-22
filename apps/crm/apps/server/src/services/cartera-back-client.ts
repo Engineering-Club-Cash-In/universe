@@ -960,10 +960,23 @@ export class CarteraBackClient {
 	// BANCOS (BANKS)
 	// ========================================================================
 
+	// Catálogo completo, para mapear banco_id → nombre de registros existentes
+	// (un inversionista puede tener guardado un banco sin transferencia).
 	async getBancos(): Promise<{ banco_id: number; nombre: string }[]> {
 		const response = await this.request<{
 			data: { banco_id: number; nombre: string }[];
 		}>("/bancos", { method: "GET" }, true);
+		return response.data ?? [];
+	}
+
+	// Solo bancos con id_banco_transferencia, para comboboxes de selección
+	// de banco (crear/editar inversionista) — igual que auth-google.
+	async getBancosTransferencia(): Promise<
+		{ banco_id: number; nombre: string }[]
+	> {
+		const response = await this.request<{
+			data: { banco_id: number; nombre: string }[];
+		}>("/bancos?con_transferencia=true", { method: "GET" }, true);
 		return response.data ?? [];
 	}
 

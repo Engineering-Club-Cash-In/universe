@@ -15,6 +15,7 @@ import {
   facturas_electronicas,
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
+import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
@@ -150,6 +151,24 @@ export const reversePayment = async ({ body, set }: any) => {
       }
 
       console.log("✅ Usuario encontrado");
+
+      // ======================================================================
+      // 4️⃣.5️⃣ REVERSAR EL ABONO A CAPITAL DEL ESPEJO (abonos_capital)
+      // ======================================================================
+      // Borra las filas que ESTE pago generó (van marcadas con su pago_id); si no
+      // generó ninguna, no hace nada: el pago_id ya dice la verdad.
+      //
+      // Tira error si el abono ya se liquidó o si ya entró en un cálculo de
+      // pagos, y ahí el reverso no puede seguir.
+      //
+      // 🔴 VA ACÁ, LO MÁS TEMPRANO POSIBLE, Y NO MÁS ABAJO: de acá para adelante
+      // hay tres cosas que escriben FUERA de esta transacción (usan el `db`
+      // global, no el `tx`): updateMora (6️⃣), reverseConvenioPayment (6️⃣.5️⃣) y
+      // processAndReplaceCreditInvestorsReverse (8️⃣). Si el portero tirara
+      // después de ellas, el rollback NO las desharía: el pago quedaría sin
+      // revertir pero la mora, el convenio y el saldo del inversionista ya
+      // habrían cambiado. Se aborta antes de tocar nada.
+      const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
 
       // ======================================================================
       // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (solo si cuota está pagada)
@@ -693,6 +712,7 @@ export const reversePayment = async ({ body, set }: any) => {
         facturasAnuladas,
         facturasConError,
         totalFacturas: facturasDelPago.length,
+        reversionEspejo,
       };
     });
 try {
@@ -747,6 +767,8 @@ try {
           usuario_id: result.user.usuario_id,
           saldo_a_favor: result.nuevoSaldoAFavor.toString(),
         },
+        // Presente solo si el pago era un abono directo a capital.
+        abonoCapitalEspejo: result.reversionEspejo?.data ?? undefined,
         // 🆕 Info de facturas anuladas
         facturas:
           result.totalFacturas > 0
@@ -774,7 +796,11 @@ try {
       error.message === "Payment is not marked as paid" ||
       error.message === "Credit not found or not active" ||
       error.message === "Incobrable structural row cannot be reversed" ||
-      error.message === "User not found"
+      error.message === "User not found" ||
+      // Porteros del abono a capital: no es una falla del sistema, es que este
+      // pago no se puede revertir hasta resolver el abono a mano.
+      error.message?.startsWith("[ABONO_YA_LIQUIDADO]") ||
+      error.message?.startsWith("[ABONO_EN_CALCULO_PENDIENTE]")
     ) {
       set.status = 400;
     } else {

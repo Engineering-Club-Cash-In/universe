@@ -342,6 +342,37 @@ const requireMetaColocacionReport = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireEfectividadPorEtapaReport = o.middleware(
+	async ({ context, next }) => {
+		if (!context.session?.user) {
+			throw new ORPCError("UNAUTHORIZED");
+		}
+
+		const userId = context.session.user.id;
+		const userData = await db
+			.select()
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1);
+		const userRole = userData[0]?.role;
+
+		if (!PERMISSIONS.canAccessEfectividadPorEtapaReport(userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "Efectividad por etapa report access required",
+			});
+		}
+
+		return next({
+			context: {
+				session: context.session,
+				user: userData[0],
+				userId,
+				userRole,
+			},
+		});
+	},
+);
+
 const requireViewOpportunityContracts = o.middleware(
 	async ({ context, next }) => {
 		if (!context.session?.user) {
@@ -575,6 +606,9 @@ export const porcentajeEfectividadReportProcedure = publicProcedure.use(
 );
 export const metaColocacionReportProcedure = publicProcedure.use(
 	requireMetaColocacionReport,
+);
+export const efectividadPorEtapaReportProcedure = publicProcedure.use(
+	requireEfectividadPorEtapaReport,
 );
 export const viewOpportunityContractsProcedure = publicProcedure.use(
 	requireViewOpportunityContracts,

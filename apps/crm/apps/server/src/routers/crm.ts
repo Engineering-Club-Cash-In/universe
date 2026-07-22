@@ -3637,6 +3637,7 @@ export const crmRouter = {
 								economicAvailability: creditAnalysis.economicAvailability,
 								maxPayment: creditAnalysis.maxPayment,
 								maxCreditAmount: creditAnalysis.maxCreditAmount,
+								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
 								analyzedAt: creditAnalysis.analyzedAt,
 							})
 							.from(creditAnalysis)
@@ -4882,7 +4883,7 @@ export const crmRouter = {
 									required: true,
 									completed: false,
 								},
-								...(vehicle.isNew
+								...(vehicle?.isNew
 									? [
 											{
 												name: "Factura del vehículo nuevo",
@@ -6671,6 +6672,7 @@ export const crmRouter = {
 				economicAvailability: parseDecimal(leadAnalysis?.economicAvailability),
 				maxPayment: parseDecimal(leadAnalysis?.maxPayment),
 				maxCreditAmount: parseDecimal(leadAnalysis?.maxCreditAmount),
+				suggestedPaymentDays: leadAnalysis?.suggestedPaymentDays ?? null,
 				hasAnalysis: leadAnalysis?.analyzedAt != null,
 			};
 

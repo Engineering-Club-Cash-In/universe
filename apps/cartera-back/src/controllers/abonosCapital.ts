@@ -40,20 +40,34 @@ export async function createAbonoCapital(data: {
 }
 
 /**
- * Distribuye un abono a capital entre los inversionistas del espejo.
- * Si ya existe un registro con credito_id + inversionista_id y liquidado = false, suma el monto.
- * Si no existe, inserta uno nuevo.
+ * Distribuye un abono a capital entre los inversionistas del espejo:
+ * INSERTA una fila por inversionista, marcada con el `pago_id` que la originó.
+ *
+ * NO acumula sobre una fila abierta previa (como hacía antes): cada pago tiene
+ * sus propias filas. Eso es lo que hace que revertir un pago sea simplemente
+ * borrar sus filas, sin tocar lo que aportaron los demás pagos.
+ *
+ * `pago_id` es opcional porque resetCredit distribuye una CANCELACION que no
+ * nace de un pago.
+ *
+ * Los errores NO se atrapan a propósito: si esto falla, quien aplica el pago
+ * tiene que enterarse y abortar. Antes se los tragaba y devolvía
+ * `{success:false}`, así que el pago se aplicaba igual: al crédito se le bajaba
+ * el capital y el inversionista se quedaba sin su abono.
+ *
+ * `{success:false}` queda solo para los casos donde no hay NADA que hacer (sin
+ * inversionistas en el espejo, capital total en 0). Eso no es una falla.
  */
 export async function distribuirAbonoCapitalEspejo(
   credito_id: number,
   monto_abono_capital: number | string,
-  tipo: "CANCELACION" | "CAPITAL" = "CAPITAL"
+  tipo: "CANCELACION" | "CAPITAL" = "CAPITAL",
+  pago_id?: number
 ) {
-  try {
-    const abonoBig = new Big(monto_abono_capital);
+  const abonoBig = new Big(monto_abono_capital);
 
-    // 1. Traer inversionistas del espejo
-    const invsEspejo = await db
+  // 1. Traer inversionistas del espejo
+  const invsEspejo = await db
       .select({
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -95,79 +109,124 @@ export async function distribuirAbonoCapitalEspejo(
       // Monto que le toca del abono
       const montoAbono = abonoBig.times(porcentajeGeneral).round(6);
 
-      // Buscar si ya existe uno no liquidado
-      const [existente] = await db
-        .select()
-        .from(abonos_capital)
-        .where(
-          and(
-            eq(abonos_capital.credito_id, credito_id),
-            eq(abonos_capital.inversionista_id, inv.inversionista_id),
-            eq(abonos_capital.liquidado, false)
-          )
-        )
-        .limit(1);
-
-      if (existente) {
-        // Sumar al existente
-        const nuevoMonto = new Big(existente.monto).plus(montoAbono).toString();
-        const [actualizado] = await db
-          .update(abonos_capital)
-          .set({ monto: nuevoMonto, updated_at: new Date() })
-          .where(eq(abonos_capital.abono_id, existente.abono_id))
-          .returning();
-
-        resultados.push({
-          inversionista: inv.nombre,
+      // Una fila propia por (pago, inversionista): nunca se suma sobre una
+      // fila previa, así revertir el pago no le toca lo suyo a otros pagos.
+      const [nuevo] = await db
+        .insert(abonos_capital)
+        .values({
+          credito_id,
           inversionista_id: inv.inversionista_id,
-          accion: "SUMADO",
-          monto_agregado: montoAbono.toString(),
-          monto_total: nuevoMonto,
-          porcentaje: porcentajeGeneral.toFixed(4),
-        });
-      } else {
-        // Insertar nuevo
-        const [nuevo] = await db
-          .insert(abonos_capital)
-          .values({
-            credito_id,
-            inversionista_id: inv.inversionista_id,
-            monto: montoAbono.toString(),
-            tipo,
-            liquidado: false,
-          })
-          .returning();
+          pago_id: pago_id ?? null,
+          monto: montoAbono.toString(),
+          tipo,
+          liquidado: false,
+        })
+        .returning();
 
-        resultados.push({
-          inversionista: inv.nombre,
-          inversionista_id: inv.inversionista_id,
-          accion: "INSERTADO",
-          monto_agregado: montoAbono.toString(),
-          monto_total: montoAbono.toString(),
-          porcentaje: porcentajeGeneral.toFixed(4),
-        });
-      }
+      resultados.push({
+        inversionista: inv.nombre,
+        inversionista_id: inv.inversionista_id,
+        abono_id: nuevo.abono_id,
+        pago_id: pago_id ?? null,
+        monto_agregado: montoAbono.toString(),
+        porcentaje: porcentajeGeneral.toFixed(4),
+      });
     }
 
+  return {
+    success: true,
+    message: "Abono a capital distribuido entre inversionistas",
+    data: {
+      credito_id,
+      monto_total: abonoBig.toString(),
+      capital_credito: capitalTotal.toString(),
+      distribucion: resultados,
+    },
+  };
+}
+
+/**
+ * Revierte el abono a capital de un pago: borra las filas de `abonos_capital`
+ * que ese pago generó (una por inversionista, marcadas con su `pago_id`).
+ *
+ * Se puede borrar sin miedo porque cada fila es exclusiva de un pago: no
+ * acumula aportes de otros pagos, así que nadie más pierde plata.
+ *
+ * TIRA ERROR (y voltea la transacción del reverso) en dos casos, porque en los
+ * dos el abono ya no se puede tocar:
+ *
+ *  - `liquidado`: la plata ya le salió al inversionista.
+ *  - `pago_espejo_id` seteado: una fila de espejo ya lo consumió. El espejo
+ *    CONGELA el monto a pagar al generarse y no se regenera mientras esté sin
+ *    liquidar, así que la liquidación le va a pagar ese capital igual. Borrar el
+ *    abono no la frena: el inversionista terminaría cobrando un capital que se
+ *    revirtió, mientras el cliente lo sigue debiendo.
+ *
+ * Los dos se resuelven a mano antes de revertir; el sistema no puede adivinar.
+ *
+ * Los errores NO se atrapan a propósito: si el borrado falla, el reverso entero
+ * tiene que caerse. Si se tragara el error, el pago se revertiría igual y el
+ * abono quedaría huérfano — justo lo que esta función viene a evitar.
+ *
+ * `executor` permite pasar el `tx` de una transacción para que la reversión sea
+ * atómica con el resto del reverso.
+ */
+export async function revertirAbonoCapitalEspejo(
+  pago_id: number,
+  executor: any = db
+) {
+  // 1. Las filas que generó este pago
+  const filas = await executor
+    .select()
+    .from(abonos_capital)
+    .where(eq(abonos_capital.pago_id, pago_id));
+
+  if (filas.length === 0) {
     return {
       success: true,
-      message: "Abono a capital distribuido entre inversionistas",
-      data: {
-        credito_id,
-        monto_total: abonoBig.toString(),
-        capital_credito: capitalTotal.toString(),
-        distribucion: resultados,
-      },
-    };
-  } catch (error: any) {
-    console.error("Error al distribuir abono a capital:", error);
-    return {
-      success: false,
-      message: "Error al distribuir el abono a capital",
-      error: error.message,
-      data: null,
+      message: "El pago no generó abonos a capital: nada que revertir",
+      data: { pago_id, borrados: [] },
     };
   }
+
+  // 2. Portero: la plata ya salió.
+  const liquidadas = filas.filter((f: any) => f.liquidado);
+  if (liquidadas.length > 0) {
+    throw new Error(
+      `[ABONO_YA_LIQUIDADO] El pago ${pago_id} tiene ${liquidadas.length} abono(s) a capital ya liquidado(s) ` +
+        `(abono_id: ${liquidadas.map((f: any) => f.abono_id).join(", ")}). ` +
+        `Esa plata ya se le pagó al inversionista: hay que revertir la liquidación antes de revertir el pago.`
+    );
+  }
+
+  // 3. Portero: ya entró en una foto que se va a pagar.
+  const enEspejo = filas.filter((f: any) => f.pago_espejo_id != null);
+  if (enEspejo.length > 0) {
+    throw new Error(
+      `[ABONO_EN_CALCULO_PENDIENTE] El pago ${pago_id} tiene ${enEspejo.length} abono(s) a capital que ya entraron ` +
+        `en un cálculo de pagos (espejo id: ${enEspejo.map((f: any) => f.pago_espejo_id).join(", ")}). ` +
+        `Ese monto ya quedó congelado para liquidar: hay que liquidar o descartar el espejo antes de revertir el pago.`
+    );
+  }
+
+  // 4. Ninguna foto los tomó y ninguno se pagó: se borran.
+  await executor
+    .delete(abonos_capital)
+    .where(eq(abonos_capital.pago_id, pago_id));
+
+  return {
+    success: true,
+    message: "Abonos a capital del pago revertidos",
+    data: {
+      pago_id,
+      borrados: filas.map((f: any) => ({
+        abono_id: f.abono_id,
+        inversionista_id: f.inversionista_id,
+        monto: f.monto,
+        tipo: f.tipo,
+      })),
+    },
+  };
 }
 
 /**

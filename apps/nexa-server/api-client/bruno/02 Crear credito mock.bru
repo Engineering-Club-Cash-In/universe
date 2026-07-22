@@ -1,0 +1,33 @@
+meta {
+  name: 02 Crear credito mock
+  type: http
+  seq: 3
+}
+
+post {
+  url: https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/mock-credits
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer dev-secret
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "creditoId": 1043001,
+    "borrowerName": "Cliente demo token Nexa",
+    "initialBalance": 1000,
+    "installmentAmount": 250
+  }
+}
+
+docs {
+  Solo para ambiente con MOCK_CARTERA=true. Crea el credito local para poder aplicar pagos de prueba.
+}
+
+settings {
+  encodeUrl: true
+}

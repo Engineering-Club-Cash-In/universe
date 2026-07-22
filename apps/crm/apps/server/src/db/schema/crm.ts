@@ -275,6 +275,10 @@ export const creditAnalysis = pgTable("credit_analysis", {
 	maxPayment: decimal("max_payment", { precision: 12, scale: 2 }),
 	adjustedPayment: decimal("adjusted_payment", { precision: 12, scale: 2 }),
 	maxCreditAmount: decimal("max_credit_amount", { precision: 12, scale: 2 }),
+	// Hasta 3 fechas ideales de pago sugeridas por la IA, rankeadas con % de recomendación
+	suggestedPaymentDays: jsonb("suggested_payment_days").$type<
+		Array<{ dia: number; porcentaje: number }>
+	>(),
 	// Control de intentos de análisis con IA (cada llamada a IA cuesta dinero)
 	attemptCount: integer("attempt_count").notNull().default(0), // Se incrementa al llamar a la IA
 	// Metadata

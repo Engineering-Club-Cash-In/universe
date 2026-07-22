@@ -118,6 +118,7 @@ interface CreditDetailViewProps {
 		vehicleLine: string | null;
 		vehicleModel: string | null;
 		vehicleType: (typeof vehicleTypeEnum.enumValues)[number];
+		creditType: "autocompra" | "sobre_vehiculo";
 		vehicleValue: string;
 		insuredAmount: string;
 		downPayment: string;
@@ -2782,6 +2783,7 @@ export function CreditDetailView({
 														quotation.termMonths,
 													);
 													generateQuotationPdf({
+														creditType: quotation.creditType,
 														vehicleBrand: quotation.vehicleBrand,
 														vehicleLine: quotation.vehicleLine,
 														vehicleModel: quotation.vehicleModel,
@@ -2800,6 +2802,7 @@ export function CreditDetailView({
 														transferCost: Number(quotation.transferCost),
 														adminCost: Number(quotation.adminCost),
 														membershipCost: Number(quotation.membershipCost),
+														extraCosts: quotation,
 														amortizationTable,
 													});
 												}}

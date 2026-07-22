@@ -757,6 +757,8 @@ export async function exportPagosConInversionistasExcel(
     formatoCredito?: string;
     soloAplicados?: boolean;
     fechaAplicado?: string;
+    fechaAplicadoInicio?: string;
+    fechaAplicadoFin?: string;
     fechaBoleta?: string;
     fechaBoletaInicio?: string;
     fechaBoletaFin?: string;
@@ -1077,6 +1079,8 @@ export async function exportPagosAdvisorExcel(
     formatoCredito?: string;
     soloAplicados?: boolean;
     fechaAplicado?: string;
+    fechaAplicadoInicio?: string;
+    fechaAplicadoFin?: string;
     fechaBoleta?: string;
     fechaBoletaInicio?: string;
     fechaBoletaFin?: string;

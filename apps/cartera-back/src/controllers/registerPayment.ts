@@ -25,6 +25,9 @@ import {
   calcularSaldoNetoCuota,
   esDestinoSobrescribible,
   getCuotaIdForPaymentInsert,
+  getCoveredOpenInstallment,
+  CREDIT_PENDING_CANCELLATION_ERROR,
+  getCreditPaymentBlock,
   getRequestedInstallmentFloor,
   getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
@@ -35,15 +38,12 @@ import {
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
+import {
+  PAYMENT_ADVISORY_LOCK_NAMESPACE,
+  type PaymentAdvisoryLockConnection,
+} from "../utils/paymentAdvisoryLock";
 
-type LockConn = {
-  query: (text: string, values?: unknown[]) => Promise<unknown>;
-  release: () => void;
-};
-
-// Namespace para advisory locks de pagos (evita colisión con otros locks).
-// pg_advisory_lock(ns, credito_id) serializa pagos concurrentes del mismo crédito.
-const PAGO_LOCK_NS = 8765;
+const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -289,21 +289,29 @@ const obtenerInfoCompletaCredito = async (
           eq(moras_credito.activa, true) // ✅ Solo traer mora activa
         )
       )
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          or(
-            eq(creditos.statusCredit, "ACTIVO"),
-            eq(creditos.statusCredit, "MOROSO"),
-            eq(creditos.statusCredit, "EN_CONVENIO") 
-            ,eq(creditos.statusCredit, "INCOBRABLE")// 🚨 También traer créditos en convenio
-          )
-        )
-      )
+      .where(eq(creditos.credito_id, credito_id))
       .limit(1);
 
-    // ❌ Validación: Crédito no encontrado o inactivo
+    // ❌ Validación: Crédito no encontrado
     if (!info || !info.credito) {
+      set.status = 404;
+      throw new Error("Credit not found");
+    }
+
+    const paymentBlock = getCreditPaymentBlock(info.credito.statusCredit);
+    if (paymentBlock) {
+      set.status = 409;
+      throw Object.assign(new Error(paymentBlock.message), {
+        code: paymentBlock.code,
+      });
+    }
+
+    // Mantener intactos los estados que históricamente admiten pagos.
+    if (
+      !["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(
+        info.credito.statusCredit
+      )
+    ) {
       set.status = 404;
       throw new Error("Credit not found");
     }
@@ -342,6 +350,36 @@ const obtenerInfoCompletaCredito = async (
         )
         .orderBy(cuotas_credito.numero_cuota),
     ]);
+
+    const cuotasParaValidar = new Map<
+      number,
+      {
+        cuotaId: number;
+        numeroCuota: number;
+        pagos: (typeof pagos_credito.$inferSelect)[];
+      }
+    >();
+    for (const item of cuotasPendientes) {
+      const cuotaId = item.cuotas_credito.cuota_id;
+      const cuota = cuotasParaValidar.get(cuotaId) ?? {
+        cuotaId,
+        numeroCuota: item.cuotas_credito.numero_cuota,
+        pagos: [],
+      };
+      cuota.pagos.push(item.pagos_credito);
+      cuotasParaValidar.set(cuotaId, cuota);
+    }
+    const cuotaInconsistente = getCoveredOpenInstallment({
+      montoCuota: info.credito.cuota ?? 0,
+      cuotas: [...cuotasParaValidar.values()],
+    });
+    if (cuotaInconsistente) {
+      set.status = 409;
+      throw new Error(
+        `${CUOTA_INTEGRITY_ERROR_PREFIX} la cuota ${cuotaInconsistente.numeroCuota} está abierta, pero sus pagos validados ya cubren el total. Revalide el pago antes de registrar uno nuevo.`
+      );
+    }
+
     console.log(cuotaApagar,"cuota a pagar");
     const cuotasPendientesUnicas = Array.from(
       new Map(
@@ -400,6 +438,17 @@ const obtenerInfoCompletaCredito = async (
       },
     };
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)
+    ) {
+      throw error;
+    }
+
+    if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
+      throw error;
+    }
+
     // 🔥 Preservar errores 404
     if (
       (error as any).message === "Credit not found" ||
@@ -509,7 +558,7 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 
 export const insertPayment = async ({ body, set }: any) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
-  let lockConn: LockConn | undefined;
+  let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
   try {
     // 1. Validar schema
@@ -551,7 +600,7 @@ export const insertPayment = async ({ body, set }: any) => {
     lockConn = await client.connect();
     lockedCreditoId = credito_id;
     await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
-      PAGO_LOCK_NS,
+      PAYMENT_ADVISORY_LOCK_NAMESPACE,
       credito_id,
     ]);
 
@@ -1936,6 +1985,21 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
     }
   } catch (error) {
     console.error("[insertPayment] Error:", error);
+    if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
+      set.status = 409;
+      return {
+        success: false,
+        ...CREDIT_PENDING_CANCELLATION_ERROR,
+      };
+    }
+    if (
+      error instanceof Error &&
+      error.message.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)
+    ) {
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
+
     set.status = 500;
     return {
       message: "Internal server error",
@@ -1947,7 +2011,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       try {
         if (lockedCreditoId !== undefined) {
           await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
-            PAGO_LOCK_NS,
+            PAYMENT_ADVISORY_LOCK_NAMESPACE,
             lockedCreditoId,
           ]);
         }
@@ -2790,13 +2854,16 @@ export async function aplicarAbonoCapitalInversionistas(
 ) {
   console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
 
-  // Distribuir abono a capital en tabla espejo
-  try {
-    await distribuirAbonoCapitalEspejo(credito_id, abono_capital);
-    console.log("✅ Abono distribuido en tabla abonos_capital (espejo)");
-  } catch (err) {
-    console.error("⚠️ Error al distribuir abono en espejo:", err);
-  }
+  // Distribuir abono a capital en tabla espejo. El pago_id deja cada fila
+  // amarrada a este pago, para poder revertirla si el pago se reversa.
+  //
+  // 🔴 SIN try/catch a propósito: si esto falla, aplicar el pago NO puede seguir.
+  // Antes se tragaba el error y continuaba como si nada: al crédito se le bajaba
+  // el capital pero el inversionista nunca recibía su abono — le desaparecía la
+  // plata, sin que nadie se enterara salvo por un console.error.
+  // Es el mismo bug que teníamos del lado del reverso.
+  await distribuirAbonoCapitalEspejo(credito_id, abono_capital, "CAPITAL", pago_id);
+  console.log("✅ Abono distribuido en tabla abonos_capital (espejo)");
 
   const abonoCapitalBig = new Big(abono_capital);
   console.log(`💵 Abono Total: ${abonoCapitalBig.toString()}`);

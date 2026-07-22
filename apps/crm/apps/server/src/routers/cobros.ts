@@ -1391,6 +1391,25 @@ export const cobrosRouter = {
 							"La fecha prometida es obligatoria para una promesa de pago",
 						path: ["fechaProximoContacto"],
 					},
+				)
+				.refine(
+					// CB-020 (review Codex): el primer .refine() de arriba solo exige
+					// "rango completo O incluyeMora" — eso deja pasar un rango A
+					// MEDIAS (ej. cuotaInicio=5, cuotaFin=null) siempre que
+					// incluyeMora=true, porque esa condición sola ya satisface el
+					// OR. evaluarPromesa trata cuotaFin=null como "sin rango, no
+					// bloquea" (tieneRango=false), así que la cuota #5 que el
+					// usuario SÍ especificó nunca se verifica — una promesa de
+					// "mora + cuota" puede marcarse cumplida con solo que se
+					// salde la mora. Ambos bounds o ninguno, SIEMPRE, sin
+					// importar incluyeMora.
+					(v) =>
+						(v.cuotaInicio == null) === (v.cuotaFin == null),
+					{
+						message:
+							"Debes indicar ambas cuotas (desde y hasta) o ninguna",
+						path: ["cuotaFin"],
+					},
 				),
 		)
 		.handler(async ({ input, context }) => {
@@ -2039,25 +2058,48 @@ export const cobrosRouter = {
 	// prometida ya pasó y alguno no se cumple; pendiente = la fecha no llega.
 	// Persiste el resultado en estadoPromesa (no solo lo devuelve) para que
 	// quede disponible sin recalcular en cada lectura.
+	//
+	// CB-020 (review Codex): el input SOLO manda `id` + `numeroSifco` — los
+	// datos de evaluación (cuotaInicio/cuotaFin/incluyeMora/fechaPrometida)
+	// se CARGAN de `contactos_cobros` por id, nunca se toman del cliente.
+	// Antes el cliente los mandaba directo: un id real con
+	// cuotaInicio/cuotaFin/incluyeMora=null/null/false pasaba evaluarPromesa
+	// como "cumplida" inmediata (sin rango ni mora que chequear) y ESO se
+	// persistía, pisando el estado real de la fila.
 	getEstadoPromesasPago: cobrosProcedure
 		.input(
 			z.object({
 				numeroSifco: z.string().min(1),
-				promesas: z
-					.array(
-						z.object({
-							id: z.string(),
-							cuotaInicio: z.number().int().positive().nullable(),
-							cuotaFin: z.number().int().positive().nullable(),
-							incluyeMora: z.boolean(),
-							fechaPrometida: z.coerce.date(),
-						}),
-					)
-					.max(100),
+				promesaIds: z.array(z.string().uuid()).max(100),
 			}),
 		)
 		.handler(async ({ input }) => {
-			if (input.promesas.length === 0) return {};
+			if (input.promesaIds.length === 0) return {};
+
+			// Fila real de DB por id — el `numeroSifco` del caso debe coincidir
+			// con el pedido, si no la fila se descarta (defensa contra un id de
+			// OTRO crédito colado en la lista).
+			const filas = await db
+				.select({
+					id: contactosCobros.id,
+					cuotaInicio: contactosCobros.cuotaInicio,
+					cuotaFin: contactosCobros.cuotaFin,
+					incluyeMora: contactosCobros.incluyeMora,
+					fechaProximoContacto: contactosCobros.fechaProximoContacto,
+					estadoContacto: contactosCobros.estadoContacto,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+				})
+				.from(contactosCobros)
+				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
+				.where(inArray(contactosCobros.id, input.promesaIds));
+
+			const promesasValidas = filas.filter(
+				(f) =>
+					f.estadoContacto === "promesa_pago" &&
+					f.numeroCreditoSifco === input.numeroSifco &&
+					f.fechaProximoContacto != null,
+			);
+			if (promesasValidas.length === 0) return {};
 
 			let credito: Awaited<ReturnType<typeof carteraBackClient.getCredito>>;
 			try {
@@ -2070,15 +2112,25 @@ export const cobrosRouter = {
 				// Sin datos no se puede afirmar incumplimiento — todas quedan
 				// "pendiente" en vez de arriesgar un falso "incumplida".
 				return Object.fromEntries(
-					input.promesas.map((p) => [p.id, "pendiente" as const]),
+					promesasValidas.map((p) => [p.id, "pendiente" as const]),
 				);
 			}
 
 			const estadoCredito = derivarEstadoCredito(credito);
 			const hoy = new Date();
 			const resultado: Record<string, EstadoPromesa> = {};
-			for (const promesa of input.promesas) {
-				resultado[promesa.id] = evaluarPromesa(promesa, estadoCredito, hoy);
+			for (const promesa of promesasValidas) {
+				resultado[promesa.id] = evaluarPromesa(
+					{
+						id: promesa.id,
+						cuotaInicio: promesa.cuotaInicio,
+						cuotaFin: promesa.cuotaFin,
+						incluyeMora: promesa.incluyeMora,
+						fechaPrometida: promesa.fechaProximoContacto as Date,
+					},
+					estadoCredito,
+					hoy,
+				);
 			}
 
 			// Persistir — best-effort, no debe tumbar la respuesta de lectura.

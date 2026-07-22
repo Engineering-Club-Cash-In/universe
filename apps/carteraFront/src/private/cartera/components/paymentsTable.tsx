@@ -257,14 +257,15 @@ export function PaymentsTable() {
   const { mutate: aplicarPago, isPending } = useAplicarPago();
   const facturarPago = useFacturarPagoCompleto(); // 🆕 NUEVO HOOK
 
-  // Filtros de fecha - modo "simple" (año/mes/día), "rango" (fechaInicio/fechaFin) o "aplicado" (fechaAplicado)
+  // Filtros de fecha - "simple"/"rango" filtran fecha_pago; "aplicado" filtra fecha_aplicado (rango) y "boleta" filtra fecha_boleta (rango)
   const [modoFecha, setModoFecha] = usePersistedState<"simple" | "rango" | "aplicado" | "boleta">("cartera/pagos/modoFecha", "simple");
   const [mes, setMes] = usePersistedState<number>("cartera/pagos/mes", new Date().getMonth() + 1);
   const [anio, setAnio] = usePersistedState<number>("cartera/pagos/anio", new Date().getFullYear());
   const [dia, setDia] = usePersistedState<number | undefined>("cartera/pagos/dia", new Date().getDate());
   const [fechaInicio, setFechaInicio] = usePersistedState<string>("cartera/pagos/fechaInicio", "");
   const [fechaFin, setFechaFin] = usePersistedState<string>("cartera/pagos/fechaFin", "");
-  const [fechaAplicado, setFechaAplicado] = usePersistedState<string>("cartera/pagos/fechaAplicado", "");
+  const [fechaAplicadoInicio, setFechaAplicadoInicio] = usePersistedState<string>("cartera/pagos/fechaAplicadoInicio", "");
+  const [fechaAplicadoFin, setFechaAplicadoFin] = usePersistedState<string>("cartera/pagos/fechaAplicadoFin", "");
   const [fechaBoleta, setFechaBoleta] = usePersistedState<string>("cartera/pagos/fechaBoleta", "");
   const [fechaBoletaInicio, setFechaBoletaInicio] = usePersistedState<string>("cartera/pagos/fechaBoletaInicio", "");
   const [fechaBoletaFin, setFechaBoletaFin] = usePersistedState<string>("cartera/pagos/fechaBoletaFin", "");
@@ -304,7 +305,8 @@ export function PaymentsTable() {
     )) ||
     fechaInicio !== "" ||
     fechaFin !== "" ||
-    fechaAplicado !== "" ||
+    fechaAplicadoInicio !== "" ||
+    fechaAplicadoFin !== "" ||
     fechaBoleta !== "" ||
     fechaBoletaInicio !== "" ||
     fechaBoletaFin !== "";
@@ -483,7 +485,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
       : modoFecha === "rango"
         ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
         : modoFecha === "aplicado"
-          ? { fechaAplicado: fechaAplicado || undefined }
+          ? { fechaAplicadoInicio: fechaAplicadoInicio || undefined, fechaAplicadoFin: fechaAplicadoFin || undefined }
           : {
               fechaBoletaInicio: fechaBoletaInicio || undefined,
               fechaBoletaFin: fechaBoletaFin || undefined,
@@ -526,7 +528,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
           : modoFecha === "rango"
             ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
             : modoFecha === "aplicado"
-              ? { fechaAplicado: fechaAplicado || undefined }
+              ? { fechaAplicadoInicio: fechaAplicadoInicio || undefined, fechaAplicadoFin: fechaAplicadoFin || undefined }
               : {
                   fechaBoletaInicio: fechaBoletaInicio || undefined,
                   fechaBoletaFin: fechaBoletaFin || undefined,
@@ -572,7 +574,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
           : modoFecha === "rango"
             ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
             : modoFecha === "aplicado"
-              ? { fechaAplicado: fechaAplicado || undefined }
+              ? { fechaAplicadoInicio: fechaAplicadoInicio || undefined, fechaAplicadoFin: fechaAplicadoFin || undefined }
               : {
                   fechaBoletaInicio: fechaBoletaInicio || undefined,
                   fechaBoletaFin: fechaBoletaFin || undefined,
@@ -639,7 +641,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   setDia(new Date().getDate());
                   setFechaInicio("");
                   setFechaFin("");
-                  setFechaAplicado("");
+                  setFechaAplicadoInicio(""); setFechaAplicadoFin("");
                   setFechaBoleta("");
                   setFechaBoletaInicio("");
                   setFechaBoletaFin("");
@@ -666,7 +668,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     formatoCredito !== "",
                     modoFecha !== "simple" || (modoFecha === "simple" && (mes !== today.getMonth() + 1 || anio !== today.getFullYear() || dia !== today.getDate())),
                     fechaInicio !== "" || fechaFin !== "",
-                    fechaAplicado !== "",
+                    fechaAplicadoInicio !== "" || fechaAplicadoFin !== "",
                     fechaBoleta !== "" || fechaBoletaInicio !== "" || fechaBoletaFin !== "",
                   ].filter(Boolean).length}
                 </Badge>
@@ -683,35 +685,47 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                 <CalendarRange className="w-3.5 h-3.5 text-blue-500" />
                 <span className="font-semibold text-blue-800 text-[11px] uppercase tracking-wider">Fechas</span>
               </div>
-              <div className="flex gap-1 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => { setModoFecha("simple"); setFechaInicio(""); setFechaFin(""); setFechaAplicado(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "simple" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                >
-                  Fecha
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setModoFecha("rango"); setDia(undefined); setFechaAplicado(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "rango" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                >
-                  Rango
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setModoFecha("aplicado"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "aplicado" ? "bg-emerald-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                >
-                  Aplicado
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setModoFecha("boleta"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaAplicado(""); setFechaBoleta(""); setPage(1); }}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "boleta" ? "bg-amber-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                >
-                  Boleta
-                </button>
+              <div className="space-y-2">
+                {/* Grupo 1: filtran por FECHA DE PAGO */}
+                <div>
+                  <span className="text-[9px] text-gray-400 font-semibold uppercase tracking-wider block mb-1">Fecha de pago</span>
+                  <div className="flex gap-1 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => { setModoFecha("simple"); setFechaInicio(""); setFechaFin(""); setFechaAplicadoInicio(""); setFechaAplicadoFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "simple" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    >
+                      Fecha
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setModoFecha("rango"); setDia(undefined); setFechaAplicadoInicio(""); setFechaAplicadoFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "rango" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    >
+                      Rango
+                    </button>
+                  </div>
+                </div>
+                {/* Grupo 2: filtran por OTRAS fechas (aplicación / boleta) */}
+                <div className="pt-1.5 border-t border-dashed border-gray-200">
+                  <span className="text-[9px] text-gray-400 font-semibold uppercase tracking-wider block mb-1">Otras fechas</span>
+                  <div className="flex gap-1 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => { setModoFecha("aplicado"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "aplicado" ? "bg-emerald-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    >
+                      Aplicado
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setModoFecha("boleta"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaAplicadoInicio(""); setFechaAplicadoFin(""); setFechaBoleta(""); setPage(1); }}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "boleta" ? "bg-amber-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    >
+                      Boleta
+                    </button>
+                  </div>
+                </div>
               </div>
               {modoFecha === "simple" ? (
                 <div className="grid grid-cols-3 gap-1.5">
@@ -756,6 +770,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       value={fechaInicio}
                       onChange={(value) => { setFechaInicio(value); setPage(1); }}
                       disableFuture={false}
+                      className="py-1.5 text-xs"
                     />
                   </div>
                   <div>
@@ -764,17 +779,30 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       value={fechaFin}
                       onChange={(value) => { setFechaFin(value); setPage(1); }}
                       disableFuture={false}
+                      className="py-1.5 text-xs"
                     />
                   </div>
                 </div>
               ) : modoFecha === "aplicado" ? (
-                <div>
-                  <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Fecha de Aplicación</label>
-                  <DatePickerMUI
-                    value={fechaAplicado}
-                    onChange={(value) => { setFechaAplicado(value); setPage(1); }}
-                    disableFuture={false}
-                  />
+                <div className="space-y-1.5">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Aplicado desde</label>
+                    <DatePickerMUI
+                      value={fechaAplicadoInicio}
+                      onChange={(value) => { setFechaAplicadoInicio(value); setPage(1); }}
+                      disableFuture={false}
+                      className="py-1.5 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Aplicado hasta</label>
+                    <DatePickerMUI
+                      value={fechaAplicadoFin}
+                      onChange={(value) => { setFechaAplicadoFin(value); setPage(1); }}
+                      disableFuture={false}
+                      className="py-1.5 text-xs"
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -784,6 +812,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       value={fechaBoletaInicio}
                       onChange={(value) => { setFechaBoletaInicio(value); setPage(1); }}
                       disableFuture={false}
+                      className="py-1.5 text-xs"
                     />
                   </div>
                   <div>
@@ -792,6 +821,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       value={fechaBoletaFin}
                       onChange={(value) => { setFechaBoletaFin(value); setPage(1); }}
                       disableFuture={false}
+                      className="py-1.5 text-xs"
                     />
                   </div>
                 </div>

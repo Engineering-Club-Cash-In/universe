@@ -135,8 +135,16 @@ export async function createPaymentAgreement(
     // ⚠️ VALIDAR QUE LOS PAGOS NO ESTÉN PAGADOS
     // ============================================
     console.log("✅ Paso 5: Validando que los pagos NO estén marcados como pagados...");
-    
-    const pagosPagados = pagos.filter((item) => item.pago.pagado === true);
+
+    // Un pago `pagado=true` con `monto_aplicado = 0` es un pago SOLO DE MORA:
+    // no abonó nada a la cuota (capital/interés), así que la cuota sigue impaga
+    // y DEBE poder entrar a un convenio. Solo bloquea si de verdad se aplicó
+    // monto a la cuota. La cuota totalmente pagada la cubre el Paso 6 (cuota.pagado).
+    const pagosPagados = pagos.filter(
+      (item) =>
+        item.pago.pagado === true &&
+        Number(item.pago.monto_aplicado ?? 0) > 0
+    );
 
     if (pagosPagados.length > 0) {
       console.error("❌ Pagos pagados detectados:", pagosPagados.length);

@@ -272,8 +272,7 @@ export function MassWhatsappModal({
 								/>
 								<p className="text-muted-foreground text-xs">
 									Separá con <strong>una línea en blanco</strong> para crear un
-									nuevo párrafo (= un parámetro del template). Mínimo 1, máximo
-									4. Las variables entre <code>{"{llaves}"}</code> se
+									nuevo párrafo (Mínimo 1, máximo 4). Las variables entre <code>{"{llaves}"}</code> se
 									reemplazan por los datos reales de cada crédito; si una
 									variable no existe o queda mal escrita, se manda literal.
 								</p>

@@ -296,6 +296,42 @@ describe("buildCarteraMatchedClientRows", () => {
 		]);
 	});
 
+	test("only returns SIFCO analyses owned by the sales user", () => {
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{
+					id: "opp-sales-1",
+					numeroSifco: "SIFCO-1",
+					assignedTo: "sales-1",
+					isClosed: true,
+				},
+				{
+					id: "opp-sales-2",
+					numeroSifco: "SIFCO-2",
+					assignedTo: "sales-2",
+					isClosed: true,
+				},
+			],
+			creditAnalysisByOpportunityId: new Map([
+				["opp-sales-1", { id: "analysis-sales-1" }],
+				["opp-sales-2", { id: "analysis-sales-2" }],
+			]),
+			carteraCreditBySifco: new Map([
+				["SIFCO-1", { creditos: { numero_credito_sifco: "SIFCO-1" } }],
+				["SIFCO-2", { creditos: { numero_credito_sifco: "SIFCO-2" } }],
+			]),
+			opportunityOwnerId: "sales-1",
+		});
+
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.carteraCredit?.numeroSifco).toBe("SIFCO-1");
+		expect(rows[0]?.creditAnalysis).toEqual({ id: "analysis-sales-1" });
+		expect(rows[0]?.opportunities.map((opportunity) => opportunity.id)).toEqual([
+			"opp-sales-1",
+		]);
+	});
+
 	test("does not assign an analysis when the SIFCO relation is ambiguous", () => {
 		const rows = buildCarteraMatchedClientRows({
 			lead,

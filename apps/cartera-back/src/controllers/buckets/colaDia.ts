@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
+import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CB-020 · Buckets — Cola del Día (universo SLA).
@@ -74,6 +75,16 @@ export async function getColaDiaSLA(
 		params.buckets && params.buckets.length > 0
 			? sql`AND b.numero IN (${sql.join(params.buckets.map((n) => sql`${n}`), sql`, `)})`
 			: sql``;
+	// Un crédito que salió del funnel (CANCELADO, EN_CONVENIO, CAIDO, etc.) no
+	// siempre escribe una transición de "salida" en buckets_historial — su
+	// última fila puede seguir siendo un B1-B5 viejo. Sin este filtro (mismo
+	// patrón que getCreditosWithUserByMesAnio en credits.ts), esos créditos
+	// quedarían en la Cola del Día indefinidamente aunque ya no se cobren
+	// activamente (review Codex).
+	const statusFueraSql = sql.join(
+		STATUS_BUCKET_FUERA.map((s) => sql`${s}`),
+		sql`, `,
+	);
 
 	// ultima_entrada: 1 fila por crédito con su bucket_nuevo/fecha más reciente.
 	// pool: buckets que el asesor (o cualquier asesor activo) cubre.
@@ -96,6 +107,7 @@ export async function getColaDiaSLA(
     INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
     WHERE b.numero > 0
       AND b.dias_sla IS NOT NULL
+      AND c."statusCredit" NOT IN (${statusFueraSql})
       ${filtroAsesor}
       ${filtroBuckets}
   `;

@@ -85,6 +85,7 @@ import {
 	getOccupationLabel,
 	getSourceLabel,
 	getStatusLabel,
+	getVehicleConditionLabel,
 	getWorkTimeLabel,
 	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
@@ -283,6 +284,18 @@ function RouteComponent() {
 			: () => Promise.resolve(null),
 		enabled: !!selectedLead?.id && isDetailsDialogOpen,
 	});
+
+	// Respuestas de formulario de captación (llave-valor)
+	const intakeAnswersQuery = useQuery({
+		queryKey: ["getLeadIntakeAnswers", selectedLead?.id],
+		queryFn: selectedLead?.id
+			? () => client.getLeadIntakeAnswers({ leadId: selectedLead.id })
+			: () => Promise.resolve({ data: [] }),
+		enabled: !!selectedLead?.id && isDetailsDialogOpen,
+	});
+	const intakeAnswers = new Map(
+		(intakeAnswersQuery.data?.data ?? []).map((a) => [a.fieldKey, a.fieldValue]),
+	);
 
 	// Query para obtener las oportunidades del lead
 	const leadOpportunitiesQuery = useQuery({
@@ -2485,6 +2498,43 @@ function RouteComponent() {
 									</div>
 								</div>
 							</div>
+
+							{/* Intake Section - Datos autodeclarados en formulario de captación */}
+							{intakeAnswers.size > 0 && (
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">Datos de Formulario</h3>
+									<div className="grid grid-cols-3 gap-4">
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Tipo de Vehículo
+											</Label>
+											<p className="text-sm">
+												{intakeAnswers.get("vehicle_condition")
+													? getVehicleConditionLabel(
+															intakeAnswers.get("vehicle_condition") as string,
+														)
+													: "No especificado"}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Presupuesto (rango)
+											</Label>
+											<p className="text-sm">
+												{intakeAnswers.get("budget_range") || "No especificado"}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Ingreso Mensual (rango)
+											</Label>
+											<p className="text-sm">
+												{intakeAnswers.get("income_range") || "No especificado"}
+											</p>
+										</div>
+									</div>
+								</div>
+							)}
 
 							{/* Bottom Section - Assets & Status */}
 							<div className="grid grid-cols-3 gap-6">

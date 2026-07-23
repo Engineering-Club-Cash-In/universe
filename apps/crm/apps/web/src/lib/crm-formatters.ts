@@ -121,6 +121,19 @@ export const getWorkTimeLabel = (time: string) => {
 	}
 };
 
+export const getVehicleConditionLabel = (condition: string) => {
+	switch (condition) {
+		case "nuevo":
+			return "Nuevo";
+		case "usado":
+			return "Usado";
+		case "no_seguro":
+			return "No está seguro";
+		default:
+			return condition;
+	}
+};
+
 export const getClientTypeLabel = (clientType: string) => {
 	switch (clientType) {
 		case "individual":

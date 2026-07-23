@@ -25,7 +25,10 @@ import {
 	updateLeadByEmail,
 	validatePortalToken,
 } from "./controllers/portal-lead";
-import { createPublicLead } from "./controllers/public-lead";
+import {
+	createPublicLead,
+	validatePublicLeadToken,
+} from "./controllers/public-lead";
 import {
 	getVehicleByCodigoController,
 	getVehiclesBySifcoController,
@@ -953,7 +956,7 @@ app.post("/api/notifications/pay-investors", async (c) => {
 });
 
 // REST endpoint for public lead creation (for external web forms)
-app.post("/api/public/lead", createPublicLead);
+app.post("/api/public/lead", validatePublicLeadToken, createPublicLead);
 
 // REST endpoint for investment lead creation (for external APIs)
 app.post("/api/public/investment-lead", async (c) => {

@@ -12,6 +12,7 @@ export * from "./documents";
 export * from "./insurance";
 export * from "./investments";
 export * from "./juridico-dashboard";
+export * from "./lead-intake";
 export * from "./legal-contracts";
 export * from "./locations";
 export * from "./metas";

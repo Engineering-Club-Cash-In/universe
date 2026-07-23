@@ -2577,7 +2577,8 @@ export function CreditDetailView({
 							<div className="mx-6 mb-2 flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2">
 								<Car className="h-4 w-4 shrink-0 text-muted-foreground" />
 								<span className="text-muted-foreground text-sm">
-									{vehicleString}
+									{vehicleString} ·{" "}
+									{vehiculo.licensePlate?.trim() || "(sin placas)"}
 								</span>
 								{(vehiculo as any).isOwned && (
 									<Badge

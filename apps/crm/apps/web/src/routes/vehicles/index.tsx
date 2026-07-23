@@ -2588,7 +2588,8 @@ function VehiclesDashboard() {
 								<p className="text-muted-foreground text-xs">
 									La información de un vehículo vendido no se puede editar; el
 									estado debe pasar primero a Disponible para habilitar los
-									campos.
+									campos. La placa sí puede actualizarse, por si el vehículo
+									recibe placas después de la venta.
 								</p>
 							)}
 						</div>
@@ -2752,7 +2753,6 @@ function VehiclesDashboard() {
 									<Label htmlFor="edit-licensePlate">Placa</Label>
 									<Input
 										id="edit-licensePlate"
-										disabled={isVehicleSoldLocked}
 										value={editVehicleForm.licensePlate}
 										onChange={(e) =>
 											setEditVehicleForm({

@@ -12,7 +12,9 @@ import {
 	FileUp,
 	Info,
 	Loader2,
+	PhoneOff,
 	Send,
+	TrendingUp,
 	Upload,
 	X,
 	XCircle,
@@ -37,10 +39,10 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { getRoleLabel, ROLES } from "@/lib/roles";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
 export const Route = createFileRoute("/notifications")({
@@ -170,6 +172,81 @@ const REDIRECT_CONFIG: Record<
 	},
 };
 
+// Labels legibles para el filtro por tipo (redirect_page). Son sustantivos
+// (categoría), a diferencia de REDIRECT_CONFIG que usa verbos de navegación.
+const REDIRECT_PAGE_FILTER_LABEL: Record<string, string> = {
+	opportunity_details: "Oportunidades",
+	client_details: "Clientes",
+	client_details_disbursement: "Desembolsos",
+	vehicle_details: "Vehículos",
+	contract_details: "Contratos",
+	analysis_details: "Análisis",
+	analysis_50_details: "Análisis 50%",
+	analysis_90_details: "Análisis 90%",
+	pay_investors: "Pago inversionistas",
+	cobros_detail: "Casos de cobro",
+};
+
+// COBROS-02: cada subtipo de cobros (columna cobros_tipo) pinta la tarjeta de
+// un color propio — no todo amarillo. Incluye ícono, fondo/borde y badge.
+const COBROS_TIPO_CONFIG: Record<
+	string,
+	{
+		label: string;
+		border: string;
+		bg: string;
+		icon: typeof Bell;
+		iconWrap: string;
+		iconColor: string;
+		badge: string;
+	}
+> = {
+	promesa_incumplida: {
+		label: "Promesa incumplida",
+		border: "border-red-200 dark:border-red-900/50",
+		bg: "bg-red-50/50 dark:bg-red-950/20",
+		icon: XCircle,
+		iconWrap: "bg-red-100 dark:bg-red-900/40",
+		iconColor: "text-red-600 dark:text-red-400",
+		badge: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+	},
+	cliente_subido: {
+		label: "Subió de bucket",
+		border: "border-amber-200 dark:border-amber-900/50",
+		bg: "bg-amber-50/50 dark:bg-amber-950/20",
+		icon: TrendingUp,
+		iconWrap: "bg-amber-100 dark:bg-amber-900/40",
+		iconColor: "text-amber-600 dark:text-amber-400",
+		badge:
+			"bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+	},
+	sin_contacto_3d: {
+		label: "3 días sin contacto",
+		border: "border-purple-200 dark:border-purple-900/50",
+		bg: "bg-purple-50/50 dark:bg-purple-950/20",
+		icon: PhoneOff,
+		iconWrap: "bg-purple-100 dark:bg-purple-900/40",
+		iconColor: "text-purple-600 dark:text-purple-400",
+		badge:
+			"bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+	},
+};
+
+// Acento lateral por redirectPage: da variedad de color al resto de la lista
+// (las de cobros ya van coloreadas por cobros_tipo, así que no llevan acento).
+const REDIRECT_ACCENT: Record<string, string> = {
+	opportunity_details: "border-l-blue-400",
+	client_details: "border-l-emerald-400",
+	client_details_disbursement: "border-l-teal-400",
+	vehicle_details: "border-l-orange-400",
+	contract_details: "border-l-indigo-400",
+	analysis_details: "border-l-cyan-400",
+	analysis_50_details: "border-l-cyan-400",
+	analysis_90_details: "border-l-sky-400",
+	pay_investors: "border-l-green-500",
+	cobros_detail: "border-l-rose-400",
+};
+
 const PAGE_SIZE = 20;
 const SUPERVISOR_ROLES = ["sales_supervisor", "analyst", "juridico"] as const;
 
@@ -247,11 +324,33 @@ function NotificationsPage() {
 	const isAdmin = userRole === ROLES.ADMIN;
 	const isSalesSupervisor = userRole === ROLES.SALES_SUPERVISOR;
 
-	const [statusFilter, setStatusFilter] = usePersistedState<string>("notifications/statusFilter", "all");
+	const [statusFilter, setStatusFilter] = usePersistedState<string>(
+		"notifications/statusFilter",
+		"all",
+	);
+	const [typeFilter, setTypeFilter] = usePersistedState<string>(
+		"notifications/typeFilter",
+		"all",
+	);
 
-	const hasActiveFilters = statusFilter !== "all";
+	// Tipos (redirect_page) que este usuario/rol realmente tiene — alimenta el
+	// dropdown para que solo aparezcan las opciones a las que tiene acceso.
+	const availableTypesQuery = useQuery({
+		...orpc.getAvailableNotificationTypes.queryOptions(),
+		enabled: !!session,
+	});
+	const availableTypes = useMemo(
+		() =>
+			(availableTypesQuery.data ?? [])
+				.map((t) => ({ value: t, label: REDIRECT_PAGE_FILTER_LABEL[t] ?? t }))
+				.sort((a, b) => a.label.localeCompare(b.label)),
+		[availableTypesQuery.data],
+	);
+
+	const hasActiveFilters = statusFilter !== "all" || typeFilter !== "all";
 	const resetFilters = () => {
 		setStatusFilter("all");
+		setTypeFilter("all");
 	};
 
 	// Admin: todas las notificaciones
@@ -382,23 +481,28 @@ function NotificationsPage() {
 		return { myNotifications: my, systemNotifications: system };
 	}, [isAdmin, notifications, userId]);
 
-	// Aplicar filtro de status
-	const filterByStatus = useCallback(
+	// Aplicar filtros de status + tipo (redirect_page)
+	const applyFilters = useCallback(
 		(items: typeof notifications) => {
-			if (statusFilter === "all")
-				return items.filter((n) => n.status !== "dismissed");
-			return items.filter((n) => n.status === statusFilter);
+			let result =
+				statusFilter === "all"
+					? items.filter((n) => n.status !== "dismissed")
+					: items.filter((n) => n.status === statusFilter);
+			if (typeFilter !== "all") {
+				result = result.filter((n) => n.redirectPage === typeFilter);
+			}
+			return result;
 		},
-		[statusFilter],
+		[statusFilter, typeFilter],
 	);
 
 	const filteredMy = useMemo(
-		() => filterByStatus(myNotifications),
-		[filterByStatus, myNotifications],
+		() => applyFilters(myNotifications),
+		[applyFilters, myNotifications],
 	);
 	const filteredSystem = useMemo(
-		() => filterByStatus(systemNotifications),
-		[filterByStatus, systemNotifications],
+		() => applyFilters(systemNotifications),
+		[applyFilters, systemNotifications],
 	);
 
 	// Paginación
@@ -417,6 +521,12 @@ function NotificationsPage() {
 	// Reset página al cambiar filtro
 	const handleStatusFilter = (value: string) => {
 		setStatusFilter(value);
+		myPagination.setPage(1);
+		systemPagination.setPage(1);
+	};
+
+	const handleTypeFilter = (value: string) => {
+		setTypeFilter(value);
 		myPagination.setPage(1);
 		systemPagination.setPage(1);
 	};
@@ -569,12 +679,35 @@ function NotificationsPage() {
 						<SelectItem value="dismissed">Descartadas</SelectItem>
 					</SelectContent>
 				</Select>
+				{availableTypes.length > 0 && (
+					<Select value={typeFilter} onValueChange={handleTypeFilter}>
+						<SelectTrigger className="w-[200px]">
+							<SelectValue placeholder="Filtrar por tipo" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="all">Todos los tipos</SelectItem>
+							{availableTypes.map((opt) => (
+								<SelectItem key={opt.value} value={opt.value}>
+									{opt.label}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				)}
 				{hasActiveFilters && (
-					<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={resetFilters}
+						className="shrink-0 text-muted-foreground"
+					>
 						<X className="mr-1 h-3 w-3" />
 						Limpiar filtros
 						<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-							{[statusFilter !== "all"].filter(Boolean).length}
+							{
+								[statusFilter !== "all", typeFilter !== "all"].filter(Boolean)
+									.length
+							}
 						</Badge>
 					</Button>
 				)}
@@ -643,6 +776,7 @@ function NotificationCard({
 		relatedEntityType: string | null;
 		relatedEntityId: string | null;
 		redirectPage?: string | null;
+		cobrosTipo?: string | null;
 		createdAt: Date;
 	};
 	onChangeStatus: (status: NotificationStatus) => void;
@@ -677,7 +811,16 @@ function NotificationCard({
 		STATUS_CONFIG[notification.status as NotificationStatus] ??
 		STATUS_CONFIG.pending;
 	const typeInfo = TYPE_CONFIG[notification.type] ?? TYPE_CONFIG.aviso;
-	const TypeIcon = typeInfo.icon;
+	const cobrosConfig = notification.cobrosTipo
+		? COBROS_TIPO_CONFIG[notification.cobrosTipo]
+		: undefined;
+	const CardIcon = cobrosConfig?.icon ?? typeInfo.icon;
+	// Acento lateral por dominio (redirectPage) para las NO-cobros; las de cobros
+	// ya van coloreadas por su cobros_tipo.
+	const accent =
+		!cobrosConfig && notification.redirectPage
+			? (REDIRECT_ACCENT[notification.redirectPage] ?? "")
+			: "";
 	const isPending = notification.status === "pending";
 	const isRead = notification.status === "read";
 	const isInProgress = notification.status === "in_progress";
@@ -700,24 +843,32 @@ function NotificationCard({
 		<>
 			<div
 				className={`rounded-lg border p-4 transition-colors ${
-					isPending
-						? "border-yellow-200 bg-yellow-50/40 dark:border-yellow-900/50 dark:bg-yellow-950/20"
-						: "border-border bg-card"
-				}`}
+					cobrosConfig
+						? `${cobrosConfig.border} ${isPending ? cobrosConfig.bg : ""}`
+						: isPending
+							? "border-yellow-200 bg-yellow-50/40 dark:border-yellow-900/50 dark:bg-yellow-950/20"
+							: "border-border bg-card"
+				} ${accent ? `border-l-4 ${accent}` : ""}`}
 			>
 				{/* Fila superior: icono + titulo + badges */}
 				<div className="flex items-start justify-between gap-3">
 					<div className="flex min-w-0 items-start gap-3">
 						<div
 							className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-								isPending ? "bg-yellow-100 dark:bg-yellow-900/40" : "bg-muted"
+								cobrosConfig
+									? cobrosConfig.iconWrap
+									: isPending
+										? "bg-yellow-100 dark:bg-yellow-900/40"
+										: "bg-muted"
 							}`}
 						>
-							<TypeIcon
+							<CardIcon
 								className={`h-4 w-4 ${
-									isPending
-										? "text-yellow-600 dark:text-yellow-400"
-										: "text-muted-foreground"
+									cobrosConfig
+										? cobrosConfig.iconColor
+										: isPending
+											? "text-yellow-600 dark:text-yellow-400"
+											: "text-muted-foreground"
 								}`}
 							/>
 						</div>
@@ -753,15 +904,25 @@ function NotificationCard({
 								{entityLink.label}
 							</Button>
 						)}
+						{cobrosConfig && (
+							<Badge
+								variant="outline"
+								className={`text-[11px] ${cobrosConfig.badge}`}
+							>
+								{cobrosConfig.label}
+							</Badge>
+						)}
 						<Badge
 							variant="outline"
 							className={`text-[11px] ${statusInfo.color}`}
 						>
 							{statusInfo.label}
 						</Badge>
-						<Badge variant="secondary" className="text-[11px]">
-							{typeInfo.label}
-						</Badge>
+						{!cobrosConfig && (
+							<Badge variant="secondary" className="text-[11px]">
+								{typeInfo.label}
+							</Badge>
+						)}
 					</div>
 				</div>
 

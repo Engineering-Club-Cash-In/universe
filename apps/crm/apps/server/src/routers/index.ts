@@ -297,6 +297,8 @@ export const miscAppRouter = {
 	getNotificationsByRole: notificationsRouter.getNotificationsByRole,
 	getNotificationsByAssign: notificationsRouter.getNotificationsByAssign,
 	getNotificationsByRoles: notificationsRouter.getNotificationsByRoles,
+	getAvailableNotificationTypes:
+		notificationsRouter.getAvailableNotificationTypes,
 	changeNotificationStatus: notificationsRouter.changeNotificationStatus,
 	getNotificationDocuments: notificationsRouter.getNotificationDocuments,
 	addDocumentToNotification: notificationsRouter.addDocumentToNotification,

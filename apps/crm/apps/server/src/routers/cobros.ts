@@ -2100,17 +2100,29 @@ export const cobrosRouter = {
 					incluyeMora: contactosCobros.incluyeMora,
 					fechaProximoContacto: contactosCobros.fechaProximoContacto,
 					estadoContacto: contactosCobros.estadoContacto,
+					estadoPromesa: contactosCobros.estadoPromesa,
 					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 				})
 				.from(contactosCobros)
 				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
 				.where(inArray(contactosCobros.id, input.promesaIds));
 
+			// "cumplida" es TERMINAL — mismo criterio que el job nocturno
+			// (check-promesas-pago.ts). Sin este filtro, re-abrir el caso
+			// re-evaluaba una promesa YA cumplida contra el estado ACTUAL del
+			// crédito: si esa promesa tenía incluyeMora=true y el crédito
+			// acumuló mora NUEVA después (de otra cuota, ajena a esta promesa),
+			// la promesa pasaba de "cumplida" a "pendiente"/"incumplida" sin que
+			// nada relacionado a ELLA hubiera cambiado — sobrescribía un
+			// resultado correcto y ya cerrado. El front (getHistorialContactos)
+			// ya cae a `promesa.estadoPromesa` (columna DB) cuando el id no
+			// viene en este resultado, así que excluirla aquí no pierde el dato.
 			const promesasValidas = filas.filter(
 				(f) =>
 					f.estadoContacto === "promesa_pago" &&
 					f.numeroCreditoSifco === input.numeroSifco &&
-					f.fechaProximoContacto != null,
+					f.fechaProximoContacto != null &&
+					f.estadoPromesa !== "cumplida",
 			);
 			if (promesasValidas.length === 0) return {};
 

@@ -82,26 +82,41 @@ export const notificationsRouter = {
 			const isAdmin = userData.role === "admin";
 			const isSalesSupervisor = userData.role === "sales_supervisor";
 
-			// Supervisor de ventas ve sus notificaciones + analyst + juridico
-			const roleFilter = isSalesSupervisor
-				? inArray(notifications.assignedToRole, [
-						"sales_supervisor",
-						"analyst",
-						"juridico",
-					])
-				: eq(notifications.assignedToRole, userData.role);
-
-			const conditions = isAdmin
-				? eq(notifications.status, "pending")
-				: and(
-						eq(notifications.status, "pending"),
-						or(roleFilter, eq(notifications.assignedTo, userId)),
-					);
+			// El contador debe reflejar lo que el usuario VE en "Mis notificaciones"
+			// (lo suyo, que puede atender), no todo el sistema — si no, el asesor no
+			// sabe cuántas notificaciones tiene realmente. Misma visibilidad que las
+			// listas de la página:
+			//  - admin: su rol (admin) o asignación directa. NO todo el sistema (eso
+			//    vive en la sección "Notificaciones del sistema", aparte).
+			//  - sales_supervisor: sus roles visibles o asignación directa.
+			//  - resto: su rol SIN asignar (rol-wide) o asignación directa — no las
+			//    del mismo rol asignadas a OTRO usuario.
+			const visibilidad = isAdmin
+				? or(
+						eq(notifications.assignedToRole, "admin"),
+						eq(notifications.assignedTo, userId),
+					)
+				: isSalesSupervisor
+					? or(
+							inArray(notifications.assignedToRole, [
+								"sales_supervisor",
+								"analyst",
+								"juridico",
+							]),
+							eq(notifications.assignedTo, userId),
+						)
+					: or(
+							and(
+								eq(notifications.assignedToRole, userData.role),
+								isNull(notifications.assignedTo),
+							),
+							eq(notifications.assignedTo, userId),
+						);
 
 			const [result] = await db
 				.select({ count: count() })
 				.from(notifications)
-				.where(conditions);
+				.where(and(eq(notifications.status, "pending"), visibilidad));
 
 			return { count: result?.count ?? 0 };
 		},

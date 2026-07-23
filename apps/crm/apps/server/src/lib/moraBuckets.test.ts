@@ -17,7 +17,9 @@ describe("estadoMoraPorCuotas", () => {
 	// implementación, no contrato documentado). Cambiar la implementación del
 	// MISMO handle (`mockResolvedValue`/`mockRejectedValue`) es el patrón
 	// correcto y no depende de ese detalle.
-	let getBucketsCatalogoSpy: ReturnType<typeof spyOn<typeof carteraBackClient, "getBucketsCatalogo">>;
+	let getBucketsCatalogoSpy: ReturnType<
+		typeof spyOn<typeof carteraBackClient, "getBucketsCatalogo">
+	>;
 
 	beforeEach(() => {
 		// El módulo es un singleton con estado global (cache + timestamp) que
@@ -126,6 +128,7 @@ describe("estadoMoraPorCuotas", () => {
 				orden: -1,
 				color: null,
 				estado_mora: null,
+				dias_sla: null,
 			},
 			...catalogo,
 		]);
@@ -156,6 +159,7 @@ describe("estadoMoraPorCuotas", () => {
 				orden: -1,
 				color: null,
 				estado_mora: "mora_90",
+				dias_sla: null,
 			},
 			...catalogo,
 		]);
@@ -209,12 +213,48 @@ describe("getBucketsParaUI", () => {
 		const ui = getBucketsParaUI();
 
 		expect(ui).toEqual([
-			{ estadoMora: "al_dia", label: "Cartera Sana", prefijo: "B0", color: null, orden: 0 },
-			{ estadoMora: "mora_30", label: "Alerta Temprana", prefijo: "B1", color: null, orden: 1 },
-			{ estadoMora: "mora_60", label: "Gestión Activa", prefijo: "B2", color: null, orden: 2 },
-			{ estadoMora: "mora_90", label: "Rescate", prefijo: "B3", color: null, orden: 3 },
-			{ estadoMora: "mora_120", label: "Última Instancia / Pre Jurídico", prefijo: "B4", color: null, orden: 4 },
-			{ estadoMora: "mora_120_plus", label: "Jurídico", prefijo: "B5", color: null, orden: 5 },
+			{
+				estadoMora: "al_dia",
+				label: "Cartera Sana",
+				prefijo: "B0",
+				color: null,
+				orden: 0,
+			},
+			{
+				estadoMora: "mora_30",
+				label: "Alerta Temprana",
+				prefijo: "B1",
+				color: null,
+				orden: 1,
+			},
+			{
+				estadoMora: "mora_60",
+				label: "Gestión Activa",
+				prefijo: "B2",
+				color: null,
+				orden: 2,
+			},
+			{
+				estadoMora: "mora_90",
+				label: "Rescate",
+				prefijo: "B3",
+				color: null,
+				orden: 3,
+			},
+			{
+				estadoMora: "mora_120",
+				label: "Última Instancia / Pre Jurídico",
+				prefijo: "B4",
+				color: null,
+				orden: 4,
+			},
+			{
+				estadoMora: "mora_120_plus",
+				label: "Jurídico",
+				prefijo: "B5",
+				color: null,
+				orden: 5,
+			},
 		]);
 	});
 
@@ -338,14 +378,51 @@ function buildCatalogoCompleto(
 	orden: number;
 	color: string | null;
 	estado_mora: string | null;
+	dias_sla: number | null;
 }> {
 	const buckets = [
-		{ numero: 0, nombre: "Cartera Sana", cuotas_min: 0, cuotas_max: 0, estadoMora: "al_dia" },
-		{ numero: 1, nombre: "Alerta Temprana", cuotas_min: 1, cuotas_max: 1, estadoMora: "mora_30" },
-		{ numero: 2, nombre: "Gestión Activa", cuotas_min: 2, cuotas_max: 2, estadoMora: "mora_60" },
-		{ numero: 3, nombre: "Rescate", cuotas_min: 3, cuotas_max: 3, estadoMora: "mora_90" },
-		{ numero: 4, nombre: "Última Instancia", cuotas_min: 4, cuotas_max: 4, estadoMora: "mora_120" },
-		{ numero: 5, nombre: "Jurídico", cuotas_min: 5, cuotas_max: null, estadoMora: "mora_120_plus" },
+		{
+			numero: 0,
+			nombre: "Cartera Sana",
+			cuotas_min: 0,
+			cuotas_max: 0,
+			estadoMora: "al_dia",
+		},
+		{
+			numero: 1,
+			nombre: "Alerta Temprana",
+			cuotas_min: 1,
+			cuotas_max: 1,
+			estadoMora: "mora_30",
+		},
+		{
+			numero: 2,
+			nombre: "Gestión Activa",
+			cuotas_min: 2,
+			cuotas_max: 2,
+			estadoMora: "mora_60",
+		},
+		{
+			numero: 3,
+			nombre: "Rescate",
+			cuotas_min: 3,
+			cuotas_max: 3,
+			estadoMora: "mora_90",
+		},
+		{
+			numero: 4,
+			nombre: "Última Instancia",
+			cuotas_min: 4,
+			cuotas_max: 4,
+			estadoMora: "mora_120",
+		},
+		{
+			numero: 5,
+			nombre: "Jurídico",
+			cuotas_min: 5,
+			cuotas_max: null,
+			estadoMora: "mora_120_plus",
+		},
 	];
 	return buckets.map((b) => ({
 		numero: b.numero,
@@ -359,5 +436,6 @@ function buildCatalogoCompleto(
 		orden: b.numero,
 		color: null,
 		estado_mora: estadoMoraOverrides[b.numero] ?? b.estadoMora,
+		dias_sla: null,
 	}));
 }

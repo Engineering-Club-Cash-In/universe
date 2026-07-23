@@ -16,6 +16,7 @@ import type {
 	CarteraBucketCatalogo,
 	CarteraBucketHistorialEvento,
 	CarteraBucketsHistorialResponse,
+	CarteraColaDiaResponse,
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
 	CarteraInversionista,
@@ -37,6 +38,7 @@ import type {
 	GetAsesorHistorialParams,
 	GetBucketsHistorialParams,
 	GetCargaPorAsesorBucketParams,
+	GetColaDiaSLAParams,
 	GetCreditosPorBucketParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
@@ -1098,6 +1100,27 @@ export class CarteraBackClient {
 			total: response.totalCount,
 			totalPages: response.totalPages,
 		};
+	}
+
+	// CB-020: universo SLA de la Cola del Día — créditos del POOL de buckets
+	// del asesor (asesor_bucket, no el asesor_id individual del crédito) con
+	// su fecha_limite_sla. Sin cache: la cola debe reflejar el estado real del
+	// bucket/SLA al instante, mismo criterio que sus hermanas de /buckets.
+	async getColaDiaSLA(
+		params: GetColaDiaSLAParams = {},
+	): Promise<CarteraColaDiaResponse> {
+		const queryParams = new URLSearchParams({
+			...(params.asesorId !== undefined && {
+				asesor_id: String(params.asesorId),
+			}),
+			...(params.buckets?.length && { bucket: params.buckets.join(",") }),
+			...(params.page && { page: params.page.toString() }),
+			...(params.perPage && { perPage: params.perPage.toString() }),
+		});
+		return this.request<CarteraColaDiaResponse>(
+			`/buckets/cola-dia?${queryParams}`,
+			{ method: "GET" },
+		);
 	}
 
 	// CB-018: carga de cuentas por asesor y bucket (dashboard gerencial) —

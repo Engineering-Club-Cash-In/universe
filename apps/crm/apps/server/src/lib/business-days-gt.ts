@@ -39,6 +39,18 @@ export function esDiaHabilGT(d: Date): boolean {
 }
 
 /**
+ * Mediodía UTC del día calendario GT SIGUIENTE al de `d`. Sirve para anclar el
+ * conteo "a partir del día siguiente": una subida de bucket se sella a las 23:59
+ * GT (motor procesarMoras), así que ese día no le dio tiempo al asesor y no debe
+ * contar como día hábil de gestión.
+ */
+export function siguienteDiaGT(d: Date): Date {
+	const { y, m, day } = gtYMD(d);
+	// GT no tiene DST → +24h desde el mediodía UTC cae siempre al día GT siguiente.
+	return new Date(Date.UTC(y, m - 1, day, 12, 0, 0) + 24 * 60 * 60 * 1000);
+}
+
+/**
  * Cuenta los días hábiles (regla de oro) en el intervalo SEMIABIERTO
  * [inicio, fin): desde el día calendario GT de `inicio` (inclusive) hasta el
  * día calendario GT de `fin` (EXCLUSIVE). Devuelve 0 si fin <= inicio.

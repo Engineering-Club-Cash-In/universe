@@ -1,5 +1,17 @@
 import { describe, expect, it } from "bun:test";
-import { contarDiasHabilesGT, esDiaHabilGT } from "./business-days-gt";
+import {
+	contarDiasHabilesGT,
+	esDiaHabilGT,
+	siguienteDiaGT,
+} from "./business-days-gt";
+
+const gtDay = (d: Date) =>
+	new Intl.DateTimeFormat("en-CA", {
+		timeZone: "America/Guatemala",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).format(d);
 
 // Fechas ancla (verificadas): 2025-01-01 = miércoles.
 //   2025-02-01 = sábado; por tanto 2025-02-15 = sábado (quincena en finde).
@@ -49,5 +61,27 @@ describe("contarDiasHabilesGT (intervalo [inicio, fin))", () => {
 	it("intervalo vacío o invertido = 0", () => {
 		expect(contarDiasHabilesGT(gt("2025-02-10"), gt("2025-02-10"))).toBe(0);
 		expect(contarDiasHabilesGT(gt("2025-02-13"), gt("2025-02-10"))).toBe(0);
+	});
+});
+
+describe("siguienteDiaGT + SLA de subida sellada 23:59 GT (Codex P2)", () => {
+	// Subida del motor: lunes 2025-02-10 23:59 GT = 2025-02-11 05:59 UTC.
+	const subidaLun2359 = new Date("2025-02-11T05:59:00Z");
+
+	it("ancla al día GT siguiente (martes 11), no al lunes", () => {
+		expect(gtDay(subidaLun2359)).toBe("2025-02-10"); // auto-documenta: es lunes GT
+		expect(gtDay(siguienteDiaGT(subidaLun2359))).toBe("2025-02-11");
+	});
+
+	it("NO escala el jueves: solo mar+mié = 2 hábiles (antes contaba lun→3)", () => {
+		expect(
+			contarDiasHabilesGT(siguienteDiaGT(subidaLun2359), gt("2025-02-13")),
+		).toBe(2);
+	});
+
+	it("escala el viernes: mar+mié+jue = 3 hábiles", () => {
+		expect(
+			contarDiasHabilesGT(siguienteDiaGT(subidaLun2359), gt("2025-02-14")),
+		).toBe(3);
 	});
 });

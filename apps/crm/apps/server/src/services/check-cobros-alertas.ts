@@ -20,7 +20,7 @@ import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import type { NewNotification } from "../db/schema/notifications";
 import { notifications } from "../db/schema/notifications";
-import { contarDiasHabilesGT } from "../lib/business-days-gt";
+import { contarDiasHabilesGT, siguienteDiaGT } from "../lib/business-days-gt";
 import type { CarteraBucketHistorialRow } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
@@ -231,12 +231,15 @@ async function notificarSinContacto(
 		}
 	}
 
-	// Candidatos: último evento = SUBIDA a bucket ≥ 1 con reloj vencido.
+	// Candidatos: último evento = SUBIDA a bucket ≥ 1 con reloj vencido. El
+	// conteo arranca el DÍA SIGUIENTE a la subida (sellada 23:59 GT → ese día no
+	// cuenta), si no se acusaría al asesor un día hábil antes (Codex P2).
 	const candidatos = [...ultimoPorCredito.values()].filter(
 		(e) =>
 			e.tipo_evento === "SUBIDA" &&
 			e.bucket_nuevo >= 1 &&
-			contarDiasHabilesGT(new Date(e.fecha), ahora) >= DIAS_HABILES_LIMITE,
+			contarDiasHabilesGT(siguienteDiaGT(new Date(e.fecha)), ahora) >=
+				DIAS_HABILES_LIMITE,
 	);
 	if (candidatos.length === 0) return 0;
 

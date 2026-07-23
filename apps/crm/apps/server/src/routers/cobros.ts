@@ -2134,10 +2134,19 @@ export const cobrosRouter = {
 					"[getEstadoPromesasPago] Error consultando crédito:",
 					error,
 				);
-				// Sin datos no se puede afirmar incumplimiento — todas quedan
-				// "pendiente" en vez de arriesgar un falso "incumplida".
+				// Sin datos no se puede RE-EVALUAR con certeza — pero forzar
+				// "pendiente" a todas (review Codex) pisaba el estado YA
+				// GUARDADO: una promesa que ya estaba "incumplida" en DB (dato
+				// real, calculado en un ciclo anterior con datos buenos)
+				// aparecía como "pendiente" en la UI durante un outage/timeout
+				// de cartera-back, ocultando delincuencia real justo cuando
+				// más importa. Preserva el estadoPromesa guardado; solo cae a
+				// "pendiente" si esa promesa NUNCA se evaluó (null en DB).
 				return Object.fromEntries(
-					promesasValidas.map((p) => [p.id, "pendiente" as const]),
+					promesasValidas.map((p) => [
+						p.id,
+						(p.estadoPromesa ?? "pendiente") as EstadoPromesa,
+					]),
 				);
 			}
 

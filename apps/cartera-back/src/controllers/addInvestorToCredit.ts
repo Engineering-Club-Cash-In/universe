@@ -556,9 +556,16 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           porcentaje_actual: number;
         }[] = [];
         for (const candidato of armados) {
-          const filaExistente = candidato.credito_completo?.espejo?.find(
-            (e: any) => e.inversionista_id === inversionista_id,
-          );
+          // El espejo manda si existe; si está vacío/desactualizado para
+          // este crédito, el padre (inversionistas_detalle) es la fuente
+          // real que el camino de escritura también lee y reprecia.
+          const filaExistente =
+            candidato.credito_completo?.espejo?.find(
+              (e: any) => e.inversionista_id === inversionista_id,
+            ) ??
+            candidato.credito_completo?.inversionistas_detalle?.find(
+              (i: any) => i.inversionista_id === inversionista_id,
+            );
           if (
             filaExistente &&
             Number(filaExistente.porcentaje_participacion_inversionista) !==

@@ -1,8 +1,16 @@
-import { and, asc, eq, gte, isNull, lte, or } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lte, ne, or } from "drizzle-orm";
 import { db } from "../database";
 import { modalidad_facturacion_spread } from "../database/db";
 
 type DbExecutor = Pick<typeof db, "select">;
+
+// Centinela de la fila 9 (tarifa especial, solo seleccionable manualmente
+// vía /por-modalidad — ver drizzle/0018). Su monto_desde también tiene
+// monto_hasta NULL (sin límite), igual que el bracket 8 real — así que para
+// montos >= a este valor, ambos matchean en la resolución por monto. Se
+// excluye explícitamente de listModalidadFacturacionByMonto y
+// resolveModalidadFacturacionSpread para que nunca se resuelva automático.
+const MONTO_DESDE_SOLO_MANUAL = "99999999.99";
 
 export type ModalidadFacturacion = "p2p_directa" | "factura_cube" | "factura_cube_pequeno";
 
@@ -58,6 +66,7 @@ export async function listModalidadFacturacionByMonto(
           isNull(modalidad_facturacion_spread.monto_hasta),
           gte(modalidad_facturacion_spread.monto_hasta, monto),
         ),
+        ne(modalidad_facturacion_spread.monto_desde, MONTO_DESDE_SOLO_MANUAL),
       ),
     )
     .orderBy(asc(modalidad_facturacion_spread.modalidad));
@@ -91,6 +100,7 @@ export async function resolveModalidadFacturacionSpread(
           isNull(modalidad_facturacion_spread.monto_hasta),
           gte(modalidad_facturacion_spread.monto_hasta, monto),
         ),
+        ne(modalidad_facturacion_spread.monto_desde, MONTO_DESDE_SOLO_MANUAL),
       ),
     )
     .orderBy(asc(modalidad_facturacion_spread.monto_desde));

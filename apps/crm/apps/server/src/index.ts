@@ -1312,8 +1312,19 @@ function scheduleAtCobrosAlertasGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtCobrosAlertasGT();
+// Recuperación al boot SOLO si ya pasaron las 08:00 GT (un deploy tardío recupera
+// el batch del día; el dedup evita duplicar). Antes de las 08:00 GT NO se corre:
+// dispararía las alertas "de las 8am" en medianoche — se deja que el timeout
+// programado las lance a la hora (Codex P2).
 setTimeout(() => {
-	checkCobrosAlertas().catch(console.error);
+	const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
+	if (horaGT >= 8) {
+		checkCobrosAlertas().catch(console.error);
+	} else {
+		console.log(
+			"[CobrosAlertas] Boot antes de las 08:00 GT; se omite la recuperación (el timeout programado la lanzará a la hora)",
+		);
+	}
 }, 20_000);
 
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.

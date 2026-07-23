@@ -1188,7 +1188,10 @@ export const crmRouter = {
 				}
 
 				const [opportunity] = await db
-					.select({ leadId: opportunities.leadId })
+					.select({
+						leadId: opportunities.leadId,
+						assignedTo: opportunities.assignedTo,
+					})
 					.from(opportunities)
 					.where(eq(opportunities.id, input.opportunityId))
 					.limit(1);
@@ -1202,6 +1205,17 @@ export const crmRouter = {
 				} catch (error) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+				if (
+					!canWriteOpportunityCreditAnalysis(
+						context.userRole,
+						context.userId,
+						opportunity.assignedTo,
+					)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para ver este análisis",
 					});
 				}
 

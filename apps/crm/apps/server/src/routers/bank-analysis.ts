@@ -22,6 +22,7 @@ import {
 import { updateChecklistForClientDocument } from "../lib/checklist";
 import {
 	assertOpportunityBelongsToLead,
+	canWriteOpportunityCreditAnalysis,
 	getCreditAnalysisOwnerCondition,
 	getCreditAnalysisResourceId,
 } from "../lib/credit-analysis-ownership";
@@ -144,6 +145,17 @@ export const bankAnalysisRouter = {
 				} catch (error) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+				if (
+					!canWriteOpportunityCreditAnalysis(
+						context.userRole,
+						context.userId,
+						opportunity.assignedTo,
+					)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para analizar esta oportunidad",
 					});
 				}
 

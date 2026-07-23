@@ -27,6 +27,7 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "garantia_mobiliaria",
   "declaracion_vendedor",
   "contrato_privado_uso_carro_usado",
+  // ===== INVERSIONES =====
   "acuerdo_inversion_cash_in",
   "carta_confirmacion_inversion_inicial",
   "carta_eleccion_modalidad_pago_reinversion",
@@ -36,6 +37,7 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "cesion_creditos",
   "contrato_servicios_cash_in_inversor_general",
   "designacion_beneficiario",
+  "contrato_participacion_administracion_cartera",
   // ===== INVERSIONES SOCIEDAD =====
   "acuerdo_inversion_cash_in_sociedad",
   "carta_confirmacion_inversion_inicial_sociedad",

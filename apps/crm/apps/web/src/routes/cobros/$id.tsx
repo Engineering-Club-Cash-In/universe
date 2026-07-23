@@ -73,6 +73,18 @@ import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
+// CB-020 (Codex, PR #1148): toLocaleDateString("es-GT") sin `timeZone`
+// explícito usa la zona horaria LOCAL del navegador para decidir qué día
+// es, no Guatemala — el string "es-GT" solo cambia el FORMATO (dd/mm/yyyy),
+// no la zona horaria del cálculo. Un asesor en una zona horaria distinta
+// (ej. America/Los_Angeles) ve un día distinto al que realmente se guardó
+// en medianoche GT (ver fechaAMedianocheGT en contacto-modal.tsx). Fuerza
+// la zona horaria de Guatemala para que la fecha mostrada coincida siempre
+// con la que se guardó, sin importar dónde esté físicamente el asesor.
+function formatFechaGT(date: Date): string {
+	return date.toLocaleDateString("es-GT", { timeZone: "America/Guatemala" });
+}
+
 export const Route = createFileRoute("/cobros/$id")({
 	component: RouteComponent,
 	validateSearch: (search: Record<string, unknown>) => ({
@@ -260,8 +272,22 @@ function RouteComponent() {
 				numeroSifco: casoDetails.data?.numeroCreditoSifco || id || "",
 				// El server carga cuotaInicio/cuotaFin/incluyeMora/fechaPrometida de
 				// DB por id (no confía en lo que mande el cliente) — solo manda ids.
+				// getHistorialContactos ahora pide limit=200 (ver arriba) — un caso
+				// con más de 100 promesas con fecha excedería el .max(100) del
+				// server y el request completo sería rechazado (Codex, PR #1148),
+				// dejando estadoPromesa estancado para TODAS. Se ordena por fecha
+				// prometida más reciente primero y se cortan las primeras 100: las
+				// más viejas conservan su estadoPromesa ya persistido en DB (mismo
+				// fallback que usa la tarjeta cuando el id no viene en la
+				// respuesta), solo dejan de recalcularse en cada visita.
 				promesaIds: promesasPago
 					.filter((p: any) => p.fechaProximoContacto)
+					.sort(
+						(a: any, b: any) =>
+							new Date(b.fechaProximoContacto).getTime() -
+							new Date(a.fechaProximoContacto).getTime(),
+					)
+					.slice(0, 100)
 					.map((p: any) => p.id),
 			},
 		}),
@@ -1747,7 +1773,7 @@ function RouteComponent() {
 															)}
 															<span className="text-muted-foreground text-sm">
 																{fechaPrometida
-																	? fechaPrometida.toLocaleDateString("es-GT")
+																	? formatFechaGT(fechaPrometida)
 																	: "Sin fecha"}
 															</span>
 															<Badge className={badge.color}>
@@ -1762,9 +1788,7 @@ function RouteComponent() {
 														<p className="text-muted-foreground text-sm">
 															Registrada:{" "}
 															{promesa.fechaContacto
-																? new Date(
-																		promesa.fechaContacto,
-																	).toLocaleDateString("es-GT")
+																? formatFechaGT(new Date(promesa.fechaContacto))
 																: "Sin fecha"}
 														</p>
 													</div>

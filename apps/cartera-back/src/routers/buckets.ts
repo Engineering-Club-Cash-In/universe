@@ -13,6 +13,7 @@ import {
 } from "../controllers/buckets/reasignarAsesor";
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
+import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo (= enum de statusCredit menos
@@ -402,6 +403,54 @@ export const bucketsRouter = new Elysia()
         return {
           success: false,
           message: "[ERROR] No se pudo obtener el pool de asesores del bucket",
+          error: String(err),
+        };
+      }
+    },
+  )
+
+  // CB-020 · Cola del Día — universo SLA: créditos del POOL de buckets del
+  // asesor (asesor_bucket, no el asesor_id del crédito individual) con la
+  // fecha en que entraron a su bucket ACTUAL + fecha_limite_sla derivada. El
+  // CRM cruza esto contra sus propias promesas de pago (contactos_cobros,
+  // que viven solo ahí) para armar las 3 categorías de la cola.
+  .get(
+    "/buckets/cola-dia",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const asesorId = query?.asesor_id ? Number(query.asesor_id) : undefined;
+        if (asesorId !== undefined && (!Number.isInteger(asesorId) || asesorId <= 0)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] asesor_id inválido" };
+        }
+        // esBucket solo valida "entero no-negativo"; acá además se acota al
+        // rango real del catálogo (0-5) — sin esto, ?bucket=999 pasaba la
+        // validación y devolvía 0 filas en silencio en vez de rechazar.
+        if (csvInvalido(query?.bucket, (s) => esBucket(s) && Number(s) <= 5)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] bucket inválido (CSV de enteros 0-5, ej. 3 o 3,4)" };
+        }
+        const buckets = query?.bucket
+          ? [...new Set(
+              String(query.bucket)
+                .split(",")
+                .map((s: string) => Number(s.trim()))
+                .filter((n: number) => Number.isInteger(n)),
+            )] as number[]
+          : undefined;
+        const pageFloor = Math.floor(Number(query?.page ?? 1));
+        const page = Number.isFinite(pageFloor) && pageFloor > 0 ? pageFloor : 1;
+        const perPageFloor = Math.floor(Number(query?.perPage ?? 50));
+        // Tope real (500) vive en getColaDiaSLA.
+        const perPage =
+          Number.isFinite(perPageFloor) && perPageFloor > 0 ? perPageFloor : 50;
+        return await getColaDiaSLA({ asesor_id: asesorId, buckets, page, perPage });
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener la cola del día",
           error: String(err),
         };
       }

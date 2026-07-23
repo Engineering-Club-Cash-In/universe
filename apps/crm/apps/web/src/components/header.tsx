@@ -10,6 +10,7 @@ import {
 	CalendarClock,
 	Car,
 	ChevronDown,
+	ClipboardList,
 	Database,
 	FileText,
 	Gauge,
@@ -265,6 +266,12 @@ export default function Header() {
 										<Link to="/cobros/agenda" className="cursor-pointer">
 											<CalendarClock className="mr-2 h-4 w-4" />
 											Agenda del día
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/cobros/cola" className="cursor-pointer">
+											<ClipboardList className="mr-2 h-4 w-4" />
+											Cola del día
 										</Link>
 									</DropdownMenuItem>
 									{PERMISSIONS.canAssignCobros(userRole) && (
@@ -645,6 +652,10 @@ function MobileNav({
 										<Link to="/cobros/agenda" className={MOBILE_LINK_CLASS}>
 											<CalendarClock />
 											Agenda del día
+										</Link>
+										<Link to="/cobros/cola" className={MOBILE_LINK_CLASS}>
+											<ClipboardList />
+											Cola del día
 										</Link>
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>

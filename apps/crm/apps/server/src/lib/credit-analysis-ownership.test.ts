@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
 	assertOpportunityBelongsToLead,
@@ -88,6 +90,46 @@ describe("credit analysis ownership", () => {
 				otherSalesUserId,
 			),
 		).toBe(true);
+	});
+
+	test("checks opportunity ownership before returning opportunity analysis", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/crm.ts"),
+			"utf8",
+		);
+		const readHandler = source.slice(
+			source.indexOf("getCreditAnalysisByLeadId: crmProcedure"),
+			source.indexOf("upsertCreditAnalysis: crmProcedure"),
+		);
+		const assignedToIndex = readHandler.indexOf(
+			"assignedTo: opportunities.assignedTo",
+		);
+		const permissionCheckIndex = readHandler.indexOf(
+			"!canWriteOpportunityCreditAnalysis(",
+		);
+		const analysisReadIndex = readHandler.indexOf(".from(creditAnalysis)");
+
+		expect(assignedToIndex).toBeGreaterThan(-1);
+		expect(permissionCheckIndex).toBeGreaterThan(assignedToIndex);
+		expect(analysisReadIndex).toBeGreaterThan(permissionCheckIndex);
+	});
+
+	test("checks opportunity ownership before bank analysis side effects", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+		const permissionCheckIndex = source.indexOf(
+			"!canWriteOpportunityCreditAnalysis(",
+		);
+		const uploadReadIndex = source.indexOf("verifyUploadedDocumentInR2({");
+		const attemptWriteIndex = source.indexOf(".update(creditAnalysis)");
+		const aiCallIndex = source.indexOf("const result = await generateObject({");
+
+		expect(permissionCheckIndex).toBeGreaterThan(-1);
+		expect(uploadReadIndex).toBeGreaterThan(permissionCheckIndex);
+		expect(attemptWriteIndex).toBeGreaterThan(permissionCheckIndex);
+		expect(aiCallIndex).toBeGreaterThan(permissionCheckIndex);
 	});
 
 	test("keeps co-debtor analysis scoped by coDebtorId", () => {

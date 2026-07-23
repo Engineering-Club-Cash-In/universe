@@ -193,7 +193,8 @@ const COBROS_TIPO_CONFIG: Record<
 	string,
 	{
 		label: string;
-		card: string;
+		border: string;
+		bg: string;
 		icon: typeof Bell;
 		iconWrap: string;
 		iconColor: string;
@@ -202,7 +203,8 @@ const COBROS_TIPO_CONFIG: Record<
 > = {
 	promesa_incumplida: {
 		label: "Promesa incumplida",
-		card: "border-red-200 bg-red-50/50 dark:border-red-900/50 dark:bg-red-950/20",
+		border: "border-red-200 dark:border-red-900/50",
+		bg: "bg-red-50/50 dark:bg-red-950/20",
 		icon: XCircle,
 		iconWrap: "bg-red-100 dark:bg-red-900/40",
 		iconColor: "text-red-600 dark:text-red-400",
@@ -210,7 +212,8 @@ const COBROS_TIPO_CONFIG: Record<
 	},
 	cliente_subido: {
 		label: "Subió de bucket",
-		card: "border-amber-200 bg-amber-50/50 dark:border-amber-900/50 dark:bg-amber-950/20",
+		border: "border-amber-200 dark:border-amber-900/50",
+		bg: "bg-amber-50/50 dark:bg-amber-950/20",
 		icon: TrendingUp,
 		iconWrap: "bg-amber-100 dark:bg-amber-900/40",
 		iconColor: "text-amber-600 dark:text-amber-400",
@@ -219,7 +222,8 @@ const COBROS_TIPO_CONFIG: Record<
 	},
 	sin_contacto_3d: {
 		label: "3 días sin contacto",
-		card: "border-purple-200 bg-purple-50/50 dark:border-purple-900/50 dark:bg-purple-950/20",
+		border: "border-purple-200 dark:border-purple-900/50",
+		bg: "bg-purple-50/50 dark:bg-purple-950/20",
 		icon: PhoneOff,
 		iconWrap: "bg-purple-100 dark:bg-purple-900/40",
 		iconColor: "text-purple-600 dark:text-purple-400",
@@ -840,7 +844,7 @@ function NotificationCard({
 			<div
 				className={`rounded-lg border p-4 transition-colors ${
 					cobrosConfig
-						? cobrosConfig.card
+						? `${cobrosConfig.border} ${isPending ? cobrosConfig.bg : ""}`
 						: isPending
 							? "border-yellow-200 bg-yellow-50/40 dark:border-yellow-900/50 dark:bg-yellow-950/20"
 							: "border-border bg-card"

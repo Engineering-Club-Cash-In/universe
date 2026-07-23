@@ -74,6 +74,11 @@ import {
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
 import { primerTelefono } from "../lib/phone-utils";
+import {
+	derivarEstadoCredito,
+	type EstadoPromesa,
+	evaluarPromesa,
+} from "../lib/promesa-pago";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	sendWhatsappTemplate,
@@ -1333,23 +1338,102 @@ export const cobrosRouter = {
 	// Registrar contacto de cobros
 	createContactoCobros: cobrosProcedure
 		.input(
-			z.object({
-				casoCobroId: z.string().uuid(),
-				metodoContacto: z.enum(metodoContactoEnum.enumValues),
-				estadoContacto: z.enum(estadoContactoEnum.enumValues),
-				duracionLlamada: z.number().optional(),
-				comentarios: z.string().min(1, "Los comentarios son requeridos"),
-				acuerdosAlcanzados: z.string().optional(),
-				compromisosPago: z.string().optional(),
-				requiereSeguimiento: z.boolean().default(false),
-				fechaProximoContacto: z.date().optional(),
-			}),
+			z
+				.object({
+					casoCobroId: z.string().uuid(),
+					metodoContacto: z.enum(metodoContactoEnum.enumValues),
+					estadoContacto: z.enum(estadoContactoEnum.enumValues),
+					duracionLlamada: z.number().optional(),
+					comentarios: z.string().min(1, "Los comentarios son requeridos"),
+					acuerdosAlcanzados: z.string().optional(),
+					compromisosPago: z.string().optional(),
+					requiereSeguimiento: z.boolean().default(false),
+					fechaProximoContacto: z.date().optional(),
+					// CB-020: promesa de pago atada a cuotas — solo relevantes cuando
+					// estadoContacto = 'promesa_pago'.
+					cuotaInicio: z.number().int().positive().optional(),
+					cuotaFin: z.number().int().positive().optional(),
+					incluyeMora: z.boolean().default(false),
+				})
+				// ⚠️ DEUDA TÉCNICA TEMPORAL (review Codex, ronda 3 — PR #1145) ⚠️
+				// Este .refine() era OBLIGATORIO (rango o mora) — pero el web
+				// ACTUAL en COBROS-02 todavía manda promesa_pago SIN ninguno de
+				// los dos. El modal nuevo (con selector de cuotas + checkbox de
+				// mora) vive en `git stash show stash@{0}` de esta sesión —
+				// "CRM web: promesa de pago (CB-020)" — sin PR abierto todavía.
+				// Con el .refine() estricto, desplegar este PR solo hubiera roto
+				// el botón "Promesa de Pago" que ya funciona en producción.
+				//
+				// Se quita esta exigencia por completo — el "ambos bounds o
+				// ninguno" del .refine() de más abajo sigue vigente y es
+				// suficiente para bloquear rangos a medias; lo único que se
+				// relaja es "algo es obligatorio" (rango o mora), permitiendo de
+				// nuevo el caso 100% vacío del web viejo.
+				//
+				// ACCIÓN REQUERIDA cuando el PR de web (stash de arriba) se
+				// mergee: reponer este .refine() y el de fechaProximoContacto
+				// (más abajo, mismo motivo) en un PR de limpieza aparte. Buscar
+				// "DEUDA TÉCNICA TEMPORAL" en este archivo para encontrar ambos.
+				.refine(
+					(v) =>
+						v.cuotaInicio == null ||
+						v.cuotaFin == null ||
+						v.cuotaFin >= v.cuotaInicio,
+					{
+						message: "cuotaFin debe ser mayor o igual a cuotaInicio",
+						path: ["cuotaFin"],
+					},
+				)
+				// ⚠️ DEUDA TÉCNICA TEMPORAL (review Codex, ronda 3 — PR #1145) ⚠️
+				// Este .refine() asumía que "el front la exige en el modal" —
+				// cierto SOLO para la variante nueva (`git stash show
+				// stash@{0}`, "CRM web: promesa de pago (CB-020)", sin PR
+				// abierto). El web ACTUAL en COBROS-02 tiene "requiereSeguimiento"
+				// como checkbox GENÉRICO e independiente de estadoContacto: un
+				// asesor puede registrar promesa_pago sin marcarlo, y
+				// fechaProximoContacto queda undefined. Con este .refine() activo,
+				// ESE registro (que hoy funciona en producción) sería rechazado.
+				//
+				// Se quita hasta que el PR de web se mergee (ahí la fecha SÍ es
+				// obligatoria en el modal nuevo).
+				//
+				// El riesgo que motivó este .refine() (check-promesas-pago.ts
+				// salta filas sin fecha para siempre) sigue documentado y
+				// pendiente — sin fecha, esas promesas simplemente no se evalúan,
+				// comportamiento IGUAL al que ya tenía el código antes de esta
+				// feature (no es una regresión, es mantener el status quo).
+				//
+				// ACCIÓN REQUERIDA cuando el PR de web se mergee: reponer este
+				// .refine() junto con el de rango/mora obligatorio de arriba (en
+				// un PR de limpieza aparte). Buscar "DEUDA TÉCNICA TEMPORAL" en
+				// este archivo para encontrar ambos.
+				.refine(
+					// CB-020 (review Codex): el primer .refine() de arriba solo exige
+					// "rango completo O incluyeMora" — eso deja pasar un rango A
+					// MEDIAS (ej. cuotaInicio=5, cuotaFin=null) siempre que
+					// incluyeMora=true, porque esa condición sola ya satisface el
+					// OR. evaluarPromesa trata cuotaFin=null como "sin rango, no
+					// bloquea" (tieneRango=false), así que la cuota #5 que el
+					// usuario SÍ especificó nunca se verifica — una promesa de
+					// "mora + cuota" puede marcarse cumplida con solo que se
+					// salde la mora. Ambos bounds o ninguno, SIEMPRE, sin
+					// importar incluyeMora.
+					(v) => (v.cuotaInicio == null) === (v.cuotaFin == null),
+					{
+						message: "Debes indicar ambas cuotas (desde y hasta) o ninguna",
+						path: ["cuotaFin"],
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
+			const estadoPromesa =
+				input.estadoContacto === "promesa_pago" ? "pendiente" : undefined;
+
 			const nuevoContacto = await db
 				.insert(contactosCobros)
 				.values({
 					...input,
+					estadoPromesa,
 					realizadoPor: context.userId,
 				})
 				.returning();
@@ -1396,6 +1480,11 @@ export const cobrosRouter = {
 					compromisosPago: contactosCobros.compromisosPago,
 					requiereSeguimiento: contactosCobros.requiereSeguimiento,
 					fechaProximoContacto: contactosCobros.fechaProximoContacto,
+					cuotaInicio: contactosCobros.cuotaInicio,
+					cuotaFin: contactosCobros.cuotaFin,
+					incluyeMora: contactosCobros.incluyeMora,
+					estadoPromesa: contactosCobros.estadoPromesa,
+					realizadoPorId: contactosCobros.realizadoPor,
 					realizadoPor: user.name,
 				})
 				.from(contactosCobros)
@@ -1970,6 +2059,151 @@ export const cobrosRouter = {
 
 		return usuarios;
 	}),
+
+	// CB-020: estado de cumplimiento de promesas de pago. Cada promesa se
+	// verifica con DOS chequeos independientes (ver plan — cartera-back NO
+	// separa la mora por cuota, es un monto agregado del crédito):
+	//  1. Si tiene rango de cuotas (cuotaInicio/cuotaFin) → TODAS esas cuotas
+	//     deben estar pagado=true (cuotasPagadas de getCredito).
+	//  2. Si incluyeMora=true → la mora ACTIVA del crédito debe estar saldada
+	//     (mora.activa=false o moraActual="0.00").
+	// cumplida = los chequeos que apliquen se cumplen; incumplida = la fecha
+	// prometida ya pasó y alguno no se cumple; pendiente = la fecha no llega.
+	// Persiste el resultado en estadoPromesa (no solo lo devuelve) para que
+	// quede disponible sin recalcular en cada lectura.
+	//
+	// CB-020 (review Codex): el input SOLO manda `id` + `numeroSifco` — los
+	// datos de evaluación (cuotaInicio/cuotaFin/incluyeMora/fechaPrometida)
+	// se CARGAN de `contactos_cobros` por id, nunca se toman del cliente.
+	// Antes el cliente los mandaba directo: un id real con
+	// cuotaInicio/cuotaFin/incluyeMora=null/null/false pasaba evaluarPromesa
+	// como "cumplida" inmediata (sin rango ni mora que chequear) y ESO se
+	// persistía, pisando el estado real de la fila.
+	getEstadoPromesasPago: cobrosProcedure
+		.input(
+			z.object({
+				numeroSifco: z.string().min(1),
+				promesaIds: z.array(z.string().uuid()).max(100),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (input.promesaIds.length === 0) return {};
+
+			// Fila real de DB por id — el `numeroSifco` del caso debe coincidir
+			// con el pedido, si no la fila se descarta (defensa contra un id de
+			// OTRO crédito colado en la lista).
+			const filas = await db
+				.select({
+					id: contactosCobros.id,
+					cuotaInicio: contactosCobros.cuotaInicio,
+					cuotaFin: contactosCobros.cuotaFin,
+					incluyeMora: contactosCobros.incluyeMora,
+					fechaProximoContacto: contactosCobros.fechaProximoContacto,
+					estadoContacto: contactosCobros.estadoContacto,
+					estadoPromesa: contactosCobros.estadoPromesa,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+				})
+				.from(contactosCobros)
+				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
+				.where(inArray(contactosCobros.id, input.promesaIds));
+
+			// "cumplida" es TERMINAL — mismo criterio que el job nocturno
+			// (check-promesas-pago.ts). Sin este filtro, re-abrir el caso
+			// re-evaluaba una promesa YA cumplida contra el estado ACTUAL del
+			// crédito: si esa promesa tenía incluyeMora=true y el crédito
+			// acumuló mora NUEVA después (de otra cuota, ajena a esta promesa),
+			// la promesa pasaba de "cumplida" a "pendiente"/"incumplida" sin que
+			// nada relacionado a ELLA hubiera cambiado — sobrescribía un
+			// resultado correcto y ya cerrado. El front (getHistorialContactos)
+			// ya cae a `promesa.estadoPromesa` (columna DB) cuando el id no
+			// viene en este resultado, así que excluirla aquí no pierde el dato.
+			const promesasValidas = filas.filter(
+				(f) =>
+					f.estadoContacto === "promesa_pago" &&
+					f.numeroCreditoSifco === input.numeroSifco &&
+					f.fechaProximoContacto != null &&
+					f.estadoPromesa !== "cumplida",
+			);
+			if (promesasValidas.length === 0) return {};
+
+			// CB-020 (review Codex): getCredito() usa un cache de 5 min (TTL
+			// default) que createPago() intenta invalidar con un patrón que NO
+			// matchea la key real (bug preexistente y ajeno a este PR, en
+			// cartera-back-client.ts:873 — "credito:${sifco}" vs la key real
+			// "GET:.../credito?numero_credito_sifco=${sifco}:{}", confirmado con
+			// prueba directa: .includes() da false). Sin este endpoint acá abajo
+			// no vale la pena arreglar ESE bug ajeno, pero SÍ evitar que la
+			// persistencia de estadoPromesa dependa de un snapshot potencialmente
+			// viejo: se invalida la key real ANTES de leer, para esta llamada.
+			carteraBackClient.invalidateCache(
+				`/credito?numero_credito_sifco=${input.numeroSifco}`,
+			);
+
+			let credito: Awaited<ReturnType<typeof carteraBackClient.getCredito>>;
+			try {
+				credito = await carteraBackClient.getCredito(input.numeroSifco);
+			} catch (error) {
+				console.error(
+					"[getEstadoPromesasPago] Error consultando crédito:",
+					error,
+				);
+				// Sin datos no se puede RE-EVALUAR con certeza — pero forzar
+				// "pendiente" a todas (review Codex) pisaba el estado YA
+				// GUARDADO: una promesa que ya estaba "incumplida" en DB (dato
+				// real, calculado en un ciclo anterior con datos buenos)
+				// aparecía como "pendiente" en la UI durante un outage/timeout
+				// de cartera-back, ocultando delincuencia real justo cuando
+				// más importa. Preserva el estadoPromesa guardado; solo cae a
+				// "pendiente" si esa promesa NUNCA se evaluó (null en DB).
+				return Object.fromEntries(
+					promesasValidas.map((p) => [
+						p.id,
+						(p.estadoPromesa ?? "pendiente") as EstadoPromesa,
+					]),
+				);
+			}
+
+			const estadoCredito = derivarEstadoCredito(credito);
+			const hoy = new Date();
+			const resultado: Record<string, EstadoPromesa> = {};
+			for (const promesa of promesasValidas) {
+				resultado[promesa.id] = evaluarPromesa(
+					{
+						id: promesa.id,
+						cuotaInicio: promesa.cuotaInicio,
+						cuotaFin: promesa.cuotaFin,
+						incluyeMora: promesa.incluyeMora,
+						fechaPrometida: promesa.fechaProximoContacto as Date,
+					},
+					estadoCredito,
+					hoy,
+				);
+			}
+
+			// Persistir — best-effort, no debe tumbar la respuesta de lectura.
+			// allSettled, no all: un UPDATE que falle no debe bloquear la
+			// persistencia de las demás promesas (`resultado` ya se devuelve al
+			// front sin importar esto, pero la fila en DB sí queda atrás si se
+			// pierde por una sola falla ajena).
+			const resultadosPersistencia = await Promise.allSettled(
+				Object.entries(resultado).map(([id, estado]) =>
+					db
+						.update(contactosCobros)
+						.set({ estadoPromesa: estado })
+						.where(eq(contactosCobros.id, id)),
+				),
+			);
+			for (const r of resultadosPersistencia) {
+				if (r.status === "rejected") {
+					console.error(
+						"[getEstadoPromesasPago] Error persistiendo estadoPromesa:",
+						r.reason,
+					);
+				}
+			}
+
+			return resultado;
+		}),
 
 	// Obtener historial de cuotas de pago de un contrato
 	getHistorialPagos: cobrosProcedure
@@ -4160,6 +4394,12 @@ export const cobrosRouter = {
 					// Registrar en historial del caso (mismo flujo que contacto-modal)
 					// solo cuando el envío fue exitoso y el crédito tiene caso.
 					if (ok && c.casoCobroId) {
+						// CB-020: prefijo "Envío masivo" identifica el origen del
+						// contacto (sin columna "origen" en DB) — un consumidor futuro
+						// que necesite distinguir contacto manual del asesor vs envío
+						// automático puede filtrar por este prefijo en `comentarios`.
+						// No cambiar el texto sin actualizar cualquier filtro que
+						// dependa de él.
 						contactosARegistrar.push({
 							casoCobroId: c.casoCobroId,
 							metodoContacto: "whatsapp",

@@ -49,6 +49,7 @@ import {
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
+import { checkPromesasPago } from "./services/check-promesas-pago";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
 
 const app = new Hono();
@@ -1275,6 +1276,7 @@ setTimeout(() => {
 	checkSeguimientosVencidos().catch(console.error);
 	checkCasosSinContacto(3).catch(console.error);
 	procesarSeguimientosRecurrentes().catch(console.error);
+	checkPromesasPago().catch(console.error);
 }, 10_000);
 
 // Recordatorios Premora (CC2-11): diario a las 8:00 GT (= 14:00 UTC, GT no
@@ -1297,6 +1299,9 @@ setTimeout(() => {
 }, 15_000);
 
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
+// CB-020: también cierra el día evaluando TODAS las promesas de pago activas
+// (pendiente/incumplida) sin depender de que alguien abra el caso — ver
+// check-promesas-pago.ts.
 function scheduleAtMidnightGT() {
 	const now = new Date();
 	const next = new Date();
@@ -1304,6 +1309,7 @@ function scheduleAtMidnightGT() {
 	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
 	setTimeout(async () => {
 		await procesarSeguimientosRecurrentes().catch(console.error);
+		await checkPromesasPago().catch(console.error);
 		scheduleAtMidnightGT();
 	}, next.getTime() - now.getTime());
 }

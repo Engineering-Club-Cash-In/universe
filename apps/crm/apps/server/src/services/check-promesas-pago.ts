@@ -14,7 +14,7 @@
  * Nunca lanza al caller: devuelve un resumen y loguea (patrón premora).
  */
 
-import { and, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, max, ne, or } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
@@ -77,9 +77,6 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 				cuotaFin: contactosCobros.cuotaFin,
 				incluyeMora: contactosCobros.incluyeMora,
 				fechaProximoContacto: contactosCobros.fechaProximoContacto,
-				// Estado ANTES de re-evaluar — para disparar la notificación solo en
-				// la transición (pendiente → incumplida), no cada noche.
-				estadoPromesaActual: contactosCobros.estadoPromesa,
 			})
 			.from(contactosCobros)
 			.where(
@@ -127,13 +124,17 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 			promesasPorSifco.set(sifco, grupo);
 		}
 
-		// Promesas que pasan a "incumplida" en ESTA corrida (transición) → alimentan
-		// la notificación del propósito 1 tras confirmar que el UPDATE persistió.
-		const transiciones: Array<{
+		// Promesas incumplidas de ESTA corrida → alimentan la notificación del
+		// propósito 1 tras confirmar que el UPDATE persistió. No se depende de
+		// "atrapar la transición": la de-duplicación se hace contra las
+		// notificaciones ya existentes (ver notificarPromesasIncumplidas), así que
+		// si una creación falló, la próxima corrida la reintenta (Codex P2).
+		const incumplidas: Array<{
 			casoId: string;
 			sifco: string;
 			cliente: string;
 			asesorId: number | null;
+			fechaPrometida: Date;
 		}> = [];
 
 		const hoy = new Date();
@@ -144,8 +145,13 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 
 				const actualizaciones: Array<{ id: string; estado: EstadoPromesa }> =
 					[];
-				// Candidatas a notificar (pendiente→incumplida) de este crédito.
-				const candidatos: Array<{ promesaId: string; casoId: string }> = [];
+				// Candidatas a notificar: toda promesa incumplida de este crédito
+				// (con su fecha prometida, que ancla el dedup por episodio).
+				const candidatos: Array<{
+					promesaId: string;
+					casoId: string;
+					fechaPrometida: Date;
+				}> = [];
 				for (const promesa of grupo) {
 					if (!promesa.fechaProximoContacto) continue; // fecha obligatoria en el modal, defensivo
 					const estado = evaluarPromesa(
@@ -160,13 +166,11 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 						hoy,
 					);
 					actualizaciones.push({ id: promesa.id, estado });
-					if (
-						estado === "incumplida" &&
-						promesa.estadoPromesaActual !== "incumplida"
-					) {
+					if (estado === "incumplida") {
 						candidatos.push({
 							promesaId: promesa.id,
 							casoId: promesa.casoCobroId,
+							fechaPrometida: promesa.fechaProximoContacto,
 						});
 					}
 					if (estado === "cumplida") resumen.cumplidas++;
@@ -206,15 +210,15 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 					}
 				}
 
-				// Solo notificar transiciones cuyo UPDATE sí persistió (si falló, el
-				// estado sigue viejo y la próxima corrida la vuelve a detectar).
+				// Solo considerar incumplidas cuyo UPDATE sí persistió.
 				for (const c of candidatos) {
 					if (idsRechazados.has(c.promesaId)) continue;
-					transiciones.push({
+					incumplidas.push({
 						casoId: c.casoId,
 						sifco,
 						cliente: credito.usuario?.nombre ?? "",
 						asesorId: credito.asesor?.asesor_id ?? null,
+						fechaPrometida: c.fechaPrometida,
 					});
 				}
 			} catch (error) {
@@ -234,7 +238,7 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 		// Propósito 1: avisar al asesor + supervisores de cada promesa que venció
 		// en esta corrida. Nunca tumba el job (patrón del resto de notificaciones).
 		try {
-			await notificarPromesasIncumplidas(transiciones);
+			await notificarPromesasIncumplidas(incumplidas);
 		} catch (err) {
 			console.error(
 				`${LOG_PREFIX} Error creando notificaciones de promesa incumplida:`,
@@ -253,41 +257,46 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 }
 
 /**
- * Propósito 1 (COBROS-02): notifica al asesor + supervisores por cada promesa
- * de pago que venció en la corrida. Una notificación por caso (aunque tenga
- * varias promesas vencidas hoy), deduplicada a 24h por seguridad.
+ * Propósito 1 (COBROS-02): notifica al asesor + supervisores cada promesa de
+ * pago incumplida. Una notificación por caso (la promesa incumplida más reciente
+ * si hay varias).
+ *
+ * IDEMPOTENTE Y RETRYABLE (Codex P2): en vez de depender de "atrapar la
+ * transición" pendiente→incumplida, se dispara para TODA incumplida y se
+ * deduplica contra las notificaciones ya existentes: se crea solo si NO hay una
+ * promesa_incumplida para el caso creada DESPUÉS de la fecha prometida. Así, si
+ * un insert falló (sin usuario sistema, error de DB, etc.), la próxima corrida
+ * lo reintenta; y una promesa posterior (fecha más nueva) vuelve a disparar.
  */
 async function notificarPromesasIncumplidas(
-	transiciones: Array<{
+	incumplidas: Array<{
 		casoId: string;
 		sifco: string;
 		cliente: string;
 		asesorId: number | null;
+		fechaPrometida: Date;
 	}>,
 ): Promise<void> {
-	if (transiciones.length === 0) return;
+	if (incumplidas.length === 0) return;
 
-	// Una por caso (varias promesas del mismo caso → un solo aviso).
-	const porCaso = new Map<string, (typeof transiciones)[number]>();
-	for (const t of transiciones) {
-		if (!porCaso.has(t.casoId)) porCaso.set(t.casoId, t);
+	// Una por caso: la promesa incumplida con la fecha prometida más reciente.
+	const porCaso = new Map<string, (typeof incumplidas)[number]>();
+	for (const it of incumplidas) {
+		const prev = porCaso.get(it.casoId);
+		if (!prev || it.fechaPrometida.getTime() > prev.fechaPrometida.getTime()) {
+			porCaso.set(it.casoId, it);
+		}
 	}
 	const items = [...porCaso.values()];
 	const casoIds = items.map((t) => t.casoId);
 
-	// Dedup defensivo: casos ya notificados con promesa_incumplida en 24h.
-	const yaNotificados = await db
-		.select({ relatedEntityId: notifications.relatedEntityId })
-		.from(notifications)
-		.where(
-			and(
-				inArray(notifications.relatedEntityId, casoIds),
-				eq(notifications.cobrosTipo, "promesa_incumplida"),
-				gt(notifications.createdAt, sql`now() - interval '24 hours'`),
-			),
-		);
-	const yaSet = new Set(yaNotificados.map((n) => n.relatedEntityId));
-	const pendientes = items.filter((t) => !yaSet.has(t.casoId));
+	// Dedup por episodio: última promesa_incumplida creada por caso. Se salta si
+	// ya hay una posterior a la fecha prometida de esta incumplida.
+	const ultimaNotif = await maxNotifPromesaPorCaso(casoIds);
+	const pendientes = items.filter((t) => {
+		const notif = ultimaNotif.get(t.casoId);
+		return !notif || notif.getTime() < t.fechaPrometida.getTime();
+	});
 	if (pendientes.length === 0) return;
 
 	const [mapaAsesor, supervisores, usuarioSistema] = await Promise.all([
@@ -321,4 +330,27 @@ async function notificarPromesasIncumplidas(
 			`${LOG_PREFIX} ${pendientes.length} promesa(s) incumplida(s) → ${filas.length} notificación(es) creada(s)`,
 		);
 	}
+}
+
+/** max(created_at) por caso de las notificaciones promesa_incumplida. */
+async function maxNotifPromesaPorCaso(
+	casoIds: string[],
+): Promise<Map<string, Date>> {
+	if (casoIds.length === 0) return new Map();
+	const rows = await db
+		.select({
+			casoId: notifications.relatedEntityId,
+			ultima: max(notifications.createdAt),
+		})
+		.from(notifications)
+		.where(
+			and(
+				inArray(notifications.relatedEntityId, casoIds),
+				eq(notifications.cobrosTipo, "promesa_incumplida"),
+			),
+		)
+		.groupBy(notifications.relatedEntityId);
+	const map = new Map<string, Date>();
+	for (const r of rows) if (r.casoId && r.ultima) map.set(r.casoId, r.ultima);
+	return map;
 }

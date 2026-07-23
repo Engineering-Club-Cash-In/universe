@@ -11,6 +11,7 @@ import {
 	ilike,
 	inArray,
 	isNotNull,
+	isNull,
 	max,
 	or,
 	sql,
@@ -2351,7 +2352,14 @@ export const cobrosRouter = {
 				// `casoIds` pero son independientes entre sí → en paralelo.
 				const [promesas, ultimosContactos] = await Promise.all([
 					// Promesas ACTIVAS (pendiente/incumplida — 'cumplida' es terminal,
-					// se excluye), para clasificar.
+					// se excluye), para clasificar. `estadoPromesa IS NULL` (filas
+					// legacy nunca evaluadas, o creadas antes de que
+					// getEstadoPromesasPago/el job nocturno les asignara un valor)
+					// cuenta como "pendiente" — mismo criterio que
+					// getEstadoPromesasPago (línea ~2160: `estadoPromesa ?? "pendiente"`)
+					// — sin este OR, `eq(estadoPromesa, "pendiente")` nunca matchea
+					// NULL en SQL y esas promesas se colaban fuera de la Cola del Día
+					// hasta que algo más las recalculara (review Codex).
 					casoIds.length === 0
 						? Promise.resolve([])
 						: db
@@ -2369,6 +2377,7 @@ export const cobrosRouter = {
 										or(
 											eq(contactosCobros.estadoPromesa, "pendiente"),
 											eq(contactosCobros.estadoPromesa, "incumplida"),
+											isNull(contactosCobros.estadoPromesa),
 										),
 									),
 								),
@@ -2397,10 +2406,15 @@ export const cobrosRouter = {
 					}>
 				>();
 				for (const p of promesas) {
-					if (!p.estadoPromesa || p.estadoPromesa === "cumplida") continue;
+					if (p.estadoPromesa === "cumplida") continue;
+					// NULL (legacy, nunca evaluada) cuenta como "pendiente" — el SQL
+					// de arriba ya la deja pasar con isNull(estadoPromesa), acá se
+					// resuelve el valor por defecto (mismo criterio que
+					// getEstadoPromesasPago: `estadoPromesa ?? "pendiente"`).
+					const estadoPromesa = p.estadoPromesa ?? "pendiente";
 					const lista = promesasPorCaso.get(p.casoCobroId) ?? [];
 					lista.push({
-						estadoPromesa: p.estadoPromesa,
+						estadoPromesa,
 						fechaPrometida: p.fechaProximoContacto as Date,
 					});
 					promesasPorCaso.set(p.casoCobroId, lista);

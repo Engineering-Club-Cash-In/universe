@@ -31,7 +31,7 @@ import {
 	Upload,
 	Users,
 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { InvestorStatusBadge } from "@/components/investments/InvestorStatusBadge";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +56,10 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { authClient } from "@/lib/auth-client";
+import {
+	MODALIDAD_FACTURACION_LABELS,
+	type ModalidadFacturacion,
+} from "@/lib/modalidad-facturacion";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -688,11 +692,75 @@ function InvestorLiquidacionesPage() {
 		useState<"sin_reinversion" | "reinversion_capital" | "reinversion_total">(
 			"sin_reinversion",
 		);
-	const [compraCarteraPctInversion, setCompraCarteraPctInversion] = useState("70");
-	const [compraCarteraPctCashIn, setCompraCarteraPctCashIn] = useState("30");
-	const [compraCarteraFecha, setCompraCarteraFecha] = useState(
-		new Date().toISOString().split("T")[0],
-	);
+	const [compraCarteraModalidad, setCompraCarteraModalidad] =
+		useState<ModalidadFacturacion>("p2p_directa");
+
+	// Resuelve por monto las 3 filas del bracket (SQL, fuente única de
+	// verdad) y de ahí tomamos la de la modalidad elegida. Solo se necesita
+	// mientras el modal está abierto y hay un monto válido. Se debounza el
+	// monto que alimenta la query para no disparar un request por cada
+	// dígito tecleado (y el parpadeo del warning que eso causaba).
+	const compraCarteraMontoNum = Number(compraCarteraMonto) || 0;
+	const [compraCarteraMontoDebounced, setCompraCarteraMontoDebounced] =
+		useState(compraCarteraMontoNum);
+	useEffect(() => {
+		const timer = setTimeout(
+			() => setCompraCarteraMontoDebounced(compraCarteraMontoNum),
+			350,
+		);
+		return () => clearTimeout(timer);
+	}, [compraCarteraMontoNum]);
+	const modalidadResolverQuery = useQuery({
+		...orpc.resolverModalidadFacturacionSpread.queryOptions({
+			input: { monto: compraCarteraMontoDebounced },
+		}),
+		enabled: compraCarteraOpen && compraCarteraMontoDebounced > 0,
+		staleTime: 5 * 60 * 1000,
+	});
+
+	// Anulación manual del % Inversionista: el operador puede elegir
+	// cualquiera de los 8 brackets de la modalidad (no solo el que
+	// corresponde al monto). null = usar la pre-elección automática del
+	// sistema. Se resetea al cambiar de modalidad o de monto para no
+	// arrastrar una elección que ya no aplica al contexto nuevo.
+	const [compraCarteraSpreadOverrideId, setCompraCarteraSpreadOverrideId] =
+		useState<number | null>(null);
+	useEffect(() => {
+		setCompraCarteraSpreadOverrideId(null);
+	}, [compraCarteraModalidad, compraCarteraMontoDebounced]);
+
+	const modalidadPorModalidadQuery = useQuery({
+		...orpc.listModalidadFacturacionSpreadByModalidad.queryOptions({
+			input: { modalidad: compraCarteraModalidad },
+		}),
+		enabled: compraCarteraOpen,
+		staleTime: 5 * 60 * 1000,
+	});
+	const compraCarteraOverrideRow = compraCarteraSpreadOverrideId
+		? modalidadPorModalidadQuery.data?.find(
+				(r) => r.id === compraCarteraSpreadOverrideId,
+			)
+		: undefined;
+	const compraCarteraSpreadRow =
+		compraCarteraOverrideRow ??
+		modalidadResolverQuery.data?.find(
+			(r) => r.modalidad === compraCarteraModalidad,
+		);
+	const compraCarteraPctInvCalc = compraCarteraSpreadRow
+		? Number(compraCarteraSpreadRow.spread)
+		: undefined;
+	const compraCarteraPctCashInCalc =
+		compraCarteraPctInvCalc !== undefined ? 100 - compraCarteraPctInvCalc : undefined;
+	// Con monto ingresado pero sin bracket válido (ej. < Q25,000) y SIN
+	// anulación manual activa, el backend responde sin filas: bloqueamos el
+	// confirmar. Con override activo no aplica (el operador ya eligió una
+	// fila válida, sin importar el monto).
+	const compraCarteraBracketFaltante =
+		!compraCarteraSpreadOverrideId &&
+		!modalidadResolverQuery.isLoading &&
+		!modalidadResolverQuery.isError &&
+		compraCarteraMontoDebounced > 0 &&
+		!compraCarteraSpreadRow;
 
 	const queryClient = useQueryClient();
 	const compraCarteraMutation = useMutation({
@@ -701,8 +769,7 @@ function InvestorLiquidacionesPage() {
 			toast.success("Compra de cartera registrada correctamente");
 			setCompraCarteraOpen(false);
 			setCompraCarteraMonto("");
-			setCompraCarteraPctInversion("70");
-			setCompraCarteraPctCashIn("30");
+			setCompraCarteraSpreadOverrideId(null);
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInvestorActivityLog.queryOptions({
 					input: { inversionistaId: investorIdNum },
@@ -1599,8 +1666,7 @@ function InvestorLiquidacionesPage() {
 					setCompraCarteraOpen(open);
 					if (!open) {
 						setCompraCarteraMonto("");
-						setCompraCarteraPctInversion("70");
-						setCompraCarteraPctCashIn("30");
+						setCompraCarteraSpreadOverrideId(null);
 					}
 				}}
 			>
@@ -1651,55 +1717,95 @@ function InvestorLiquidacionesPage() {
 								onChange={setCompraCarteraMonto}
 							/>
 						</div>
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="compra-pct-inv">% Inversiónista</Label>
-								<Input
-									id="compra-pct-inv"
-									type="number"
-									min="0"
-									max="100"
-									value={compraCarteraPctInversion}
-									onChange={(e) => {
-										const val = e.target.value;
-										setCompraCarteraPctInversion(val);
-										const num = Number(val);
-										if (!Number.isNaN(num)) {
-											setCompraCarteraPctCashIn(String(100 - num));
-										}
-									}}
-								/>
-							</div>
-							<div className="space-y-1.5">
-								<Label htmlFor="compra-pct-cci">% CCI</Label>
-								<Input
-									id="compra-pct-cci"
-									type="number"
-									min="0"
-									max="100"
-									value={compraCarteraPctCashIn}
-									onChange={(e) => {
-										const val = e.target.value;
-										setCompraCarteraPctCashIn(val);
-										const num = Number(val);
-										if (!Number.isNaN(num)) {
-											setCompraCarteraPctInversion(String(100 - num));
-										}
-									}}
-								/>
-							</div>
-						</div>
 						<div className="space-y-1.5">
-							<Label htmlFor="compra-fecha">
-								Fecha inicio participación
+							<Label htmlFor="compra-modalidad-fact">
+								Modalidad de Facturación
 							</Label>
-							<Input
-								id="compra-fecha"
-								type="date"
-								value={compraCarteraFecha}
-								onChange={(e) => setCompraCarteraFecha(e.target.value)}
-							/>
+							<Select
+								value={compraCarteraModalidad}
+								onValueChange={(v) =>
+									setCompraCarteraModalidad(v as ModalidadFacturacion)
+								}
+							>
+								<SelectTrigger id="compra-modalidad-fact">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="p2p_directa">
+										{MODALIDAD_FACTURACION_LABELS.p2p_directa}
+									</SelectItem>
+									<SelectItem value="factura_cube">
+										{MODALIDAD_FACTURACION_LABELS.factura_cube}
+									</SelectItem>
+									<SelectItem value="factura_cube_pequeno">
+										{MODALIDAD_FACTURACION_LABELS.factura_cube_pequeno}
+									</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
+						{/* % Inversionista: pre-elegido por el sistema según monto +
+						    modalidad, pero editable — el combobox solo permite elegir
+						    entre los spreads válidos de la modalidad actual (los 8
+						    brackets), sin importar si corresponde al monto. % CCI y
+						    Tasa se derivan del spread elegido. */}
+						{compraCarteraBracketFaltante ? (
+							<p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+								El monto ingresado no cae en ningún rango del catálogo
+								(mínimo Q25,000). Ajusta el monto.
+							</p>
+						) : (
+							<>
+								<div className="grid grid-cols-2 gap-3">
+									<div className="space-y-1.5">
+										<Label htmlFor="compra-pct-inv">% Inversiónista</Label>
+										<Select
+											value={compraCarteraSpreadRow?.id?.toString() ?? ""}
+											onValueChange={(v) =>
+												setCompraCarteraSpreadOverrideId(Number(v))
+											}
+										>
+											<SelectTrigger id="compra-pct-inv">
+												{/* Texto explícito: Radix solo registra el texto de
+												    un SelectItem cuando el dropdown se abre al menos
+												    una vez, así que un valor pre-seleccionado por
+												    monto (sin que el usuario haya abierto el combo)
+												    se vería en blanco si dependemos del lookup automático. */}
+												<SelectValue placeholder="—">
+													{compraCarteraSpreadRow
+														? `${Number(compraCarteraSpreadRow.spread).toFixed(4)}%`
+														: undefined}
+												</SelectValue>
+											</SelectTrigger>
+											<SelectContent>
+												{modalidadPorModalidadQuery.data?.map((row) => (
+													<SelectItem key={row.id} value={row.id.toString()}>
+														{Number(row.spread).toFixed(4)}%
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+									<div className="space-y-1.5">
+										<Label>% CCI</Label>
+										<div className="rounded-md border bg-muted px-3 py-2 text-sm font-semibold tabular-nums">
+											{compraCarteraPctCashInCalc !== undefined
+												? `${compraCarteraPctCashInCalc.toFixed(4)}%`
+												: "—"}
+										</div>
+									</div>
+								</div>
+								{compraCarteraSpreadRow && (
+									<div className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+										<span className="text-xs font-medium text-emerald-700">
+											Tasa del inversionista
+										</span>
+										<span className="text-sm font-bold text-emerald-800 tabular-nums">
+											{Number(compraCarteraSpreadRow.tasa).toFixed(4)}%
+										</span>
+									</div>
+								)}
+							</>
+						)}
 					</div>
 
 					<DialogFooter className="gap-3 sm:gap-3">
@@ -1708,8 +1814,7 @@ function InvestorLiquidacionesPage() {
 							onClick={() => {
 								setCompraCarteraOpen(false);
 								setCompraCarteraMonto("");
-								setCompraCarteraPctInversion("70");
-								setCompraCarteraPctCashIn("30");
+								setCompraCarteraSpreadOverrideId(null);
 							}}
 						>
 							Cancelar
@@ -1718,16 +1823,24 @@ function InvestorLiquidacionesPage() {
 							disabled={
 								compraCarteraMutation.isPending ||
 								!compraCarteraMonto ||
-								Number(compraCarteraMonto) <= 0
+								Number(compraCarteraMonto) <= 0 ||
+								// Sin bracket válido no hay spread que aplicar.
+								!compraCarteraSpreadRow ||
+								// El debounce todavía no alcanzó al monto tecleado: el
+								// spread mostrado podría no corresponder al monto actual.
+								compraCarteraMontoNum !== compraCarteraMontoDebounced ||
+								modalidadResolverQuery.isFetching
 							}
 							onClick={() => {
+								if (!compraCarteraSpreadRow) return;
 								compraCarteraMutation.mutate({
 									inversionistaId: investorIdNum,
 									montoAportado: Number(compraCarteraMonto),
 									tipoReinversion: compraCarteraTipoReinversion,
-									porcentajeInversion: Number(compraCarteraPctInversion),
-									porcentajeCashIn: Number(compraCarteraPctCashIn),
-									fechaInicioParticipacion: compraCarteraFecha || undefined,
+									modalidadFacturacion: compraCarteraModalidad,
+									// Solo se manda con anulación manual explícita: sin
+									// esto, el backend re-resuelve y valida por monto.
+									modalidadFacturacionSpreadId: compraCarteraOverrideRow?.id,
 								});
 							}}
 						>

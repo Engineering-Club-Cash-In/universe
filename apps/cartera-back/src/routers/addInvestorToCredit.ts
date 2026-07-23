@@ -15,6 +15,21 @@ export const addInvestorToCreditRouter = new Elysia()
       porcentaje_inversion: t.Optional(
         t.Number({ minimum: 0, maximum: 100 }),
       ),
+      // Solo aplica cuando tipo_operacion es "compra_cartera". Si viene, el
+      // % Inversionista / % Cash In se calcula del catálogo de spreads por
+      // monto_aportado (ver /modalidad-facturacion/spread/resolver) y se
+      // ignoran porcentaje_cash_in / porcentaje_inversion si vinieran.
+      modalidad_facturacion: t.Optional(
+        t.Union([
+          t.Literal("p2p_directa"),
+          t.Literal("factura_cube"),
+          t.Literal("factura_cube_pequeno"),
+        ]),
+      ),
+      // Anulación manual del bracket: si viene, se usa esa fila exacta del
+      // catálogo (cualquiera de los 8 de la modalidad) en vez de resolver
+      // por monto_aportado. Requiere que venga modalidad_facturacion.
+      modalidad_facturacion_spread_id: t.Optional(t.Number({ minimum: 1 })),
       tipo_operacion: t.Union([
         t.Literal("reinversion"),
         t.Literal("compra_cartera"),

@@ -3,6 +3,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube, useCompraCarteraAceptada, useExtenderCompraCartera } from "../hooks/useSesionesPendientes";
 import type { CreditoEspejoPendiente, InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
+import { MODALIDAD_FACTURACION_LABELS } from "../services/services";
 import {
   Loader2,
   Search,
@@ -133,7 +134,14 @@ function ModalConfirmAccion({
             <div key={c.credito_id} className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-mono text-gray-400 truncate">{c.numero_credito_sifco}</p>
-                <p className="text-xs font-semibold text-gray-800 truncate">{c.nombre_usuario}</p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <p className="text-xs font-semibold text-gray-800 truncate">{c.nombre_usuario}</p>
+                  {c.modalidad_facturacion && (
+                    <Badge variant="outline" className="text-[9px] py-0 border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 shrink-0">
+                      {MODALIDAD_FACTURACION_LABELS[c.modalidad_facturacion]}
+                    </Badge>
+                  )}
+                </div>
               </div>
               <span className="text-xs font-bold text-gray-600 shrink-0">{formatQ(c.monto_aportado_nuevo ?? c.monto_aportado)}</span>
             </div>
@@ -598,6 +606,11 @@ function CreditRow({
             {credito.tipo_reinversion && (
               <Badge variant="outline" className="text-[9px] py-0 border-indigo-200 text-indigo-700 bg-indigo-50">
                 {credito.tipo_reinversion.replaceAll("_", " ")}
+              </Badge>
+            )}
+            {credito.modalidad_facturacion && (
+              <Badge variant="outline" className="text-[9px] py-0 border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50">
+                {MODALIDAD_FACTURACION_LABELS[credito.modalidad_facturacion]}
               </Badge>
             )}
           </div>

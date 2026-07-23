@@ -2873,6 +2873,23 @@ export async function revertirComprasUltimaLiquidacion(
           .from(creditos_inversionistas)
           .where(eq(creditos_inversionistas.credito_id, creditoId));
 
+        // El padre no tiene columnas de modalidad (solo el espejo). Se leen
+        // aparte para preservarlas en el nuke & rebuild del espejo de abajo
+        // (si no, se borrarían a null).
+        const espejoModalidadActual = await tx
+          .select({
+            inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+            modalidad_facturacion:
+              creditos_inversionistas_espejo.modalidad_facturacion,
+            modalidad_facturacion_spread_id:
+              creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
+          })
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.credito_id, creditoId));
+        const modalidadPorInv = new Map(
+          espejoModalidadActual.map((i) => [i.inversionista_id, i]),
+        );
+
         const arrayNuevo: {
           inversionista_id: number;
           monto_aportado: Big;
@@ -2964,6 +2981,12 @@ export async function revertirComprasUltimaLiquidacion(
         const dataEspejo = dataPadre.map((r) => ({
           ...r,
           status: "completado" as const,
+          modalidad_facturacion:
+            modalidadPorInv.get(r.inversionista_id)?.modalidad_facturacion ??
+            null,
+          modalidad_facturacion_spread_id:
+            modalidadPorInv.get(r.inversionista_id)
+              ?.modalidad_facturacion_spread_id ?? null,
           updated_at: new Date(),
         }));
 
@@ -5779,6 +5802,9 @@ export const exitInvestor = async (
                 monto_aportado: nuevoMontoCubePadre.toFixed(8),
                 ...derivadosSwapEspejo,
                 status: "completado",
+                // CUBE no tiene régimen fiscal, así que queda en null.
+                modalidad_facturacion: null,
+                modalidad_facturacion_spread_id: null,
                 updated_at: new Date(),
               })
               .where(
@@ -8657,6 +8683,7 @@ export async function getCreditosEspejoPendientes(
       compra_cartera_extendida_at:
         creditos_inversionistas_espejo.compra_cartera_extendida_at,
       tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+      modalidad_facturacion: creditos_inversionistas_espejo.modalidad_facturacion,
       // Info del crédito
       numero_credito_sifco: creditos.numero_credito_sifco,
       nombre_usuario: usuarios.nombre,

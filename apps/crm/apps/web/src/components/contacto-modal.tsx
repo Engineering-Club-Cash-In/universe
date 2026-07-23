@@ -64,6 +64,39 @@ import {
 import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
 
+// CB-020: regla "rango o mora" — un checkbox de mora, un guard onSubmit del
+// campo y otro del form la repetían con el mismo string literal cada vez
+// (Codex, PR #1147). Centralizado para que un cambio de mensaje o condición
+// no pueda desincronizarse entre las 3 copias.
+const MENSAJE_RANGO_O_MORA_REQUERIDO =
+	"Indica un rango de cuotas, marca que incluye mora, o ambos";
+
+function faltaRangoOMora(
+	cuotaInicio: number | null | undefined,
+	cuotaFin: number | null | undefined,
+	incluyeMora: boolean,
+): boolean {
+	return cuotaInicio == null && cuotaFin == null && !incluyeMora;
+}
+
+/**
+ * CB-020 (Codex, PR #1147): el backend asume fechaProximoContacto guardada
+ * como medianoche GT (ver gtDateStrToDate en
+ * server/src/lib/guatemala-month-window.ts, T06:00:00Z = 00:00 GT) — la
+ * gracia de +24h de evaluarPromesa depende de ese punto de partida exacto.
+ * El Calendar de shadcn devolvía el Date crudo del navegador (medianoche en
+ * la zona horaria LOCAL del asesor, no necesariamente GT); si algún asesor
+ * corre con el reloj/timezone del sistema desalineado, la fecha guardada se
+ * corría de día. Se normaliza aquí al mismo formato que usa el backend, sin
+ * importar código de server (web no puede importar de apps/server).
+ */
+function fechaAMedianocheGT(date: Date): Date {
+	const anio = date.getFullYear();
+	const mes = String(date.getMonth() + 1).padStart(2, "0");
+	const dia = String(date.getDate()).padStart(2, "0");
+	return new Date(`${anio}-${mes}-${dia}T06:00:00.000Z`);
+}
+
 interface ContactoModalProps {
 	casoCobroId: string;
 	clienteNombre: string;
@@ -230,12 +263,24 @@ export function ContactoModal({
 			incluyeMora: false,
 		},
 		onSubmit: async ({ value }) => {
-			// Guard explícito además del validator del campo (Codex, PR #1147):
-			// si el campo nunca se toca, su validator onChange nunca corre y
-			// canSubmit puede no reflejar el error a tiempo — sin esto, una
-			// promesa podía enviarse con fechaProximoContacto undefined.
+			// NO ELIMINAR sin también quitar el botón submit de canSubmit
+			// (Codex, PR #1147): este guard es la defensa REAL — los
+			// validators onSubmit de los campos (fechaProximoContacto,
+			// incluyeMora, más abajo en el JSX) alimentan `canSubmit`, pero
+			// TanStack Form corre validators onSubmit DESPUÉS de invocar este
+			// handler, no antes — si algún día se asume que `canSubmit` ya
+			// garantiza esto y se borra este guard pensando que es
+			// redundante, reaparece el bug original: campo nunca tocado =
+			// onChange nunca corrió = se guarda sin fecha/rango/mora.
 			if (esPromesa && !value.fechaProximoContacto) {
 				toast.error("La fecha prometida es obligatoria");
+				return;
+			}
+			if (
+				esPromesa &&
+				faltaRangoOMora(value.cuotaInicio, value.cuotaFin, value.incluyeMora)
+			) {
+				toast.error(MENSAJE_RANGO_O_MORA_REQUERIDO);
 				return;
 			}
 			createContactoMutation.mutate(value);
@@ -1016,10 +1061,21 @@ export function ContactoModal({
 										const cuotaInicio =
 											fieldApi.form.getFieldValue("cuotaInicio");
 										const cuotaFin = fieldApi.form.getFieldValue("cuotaFin");
-										if (cuotaInicio == null && cuotaFin == null && !value) {
-											return "Indica un rango de cuotas, marca que incluye mora, o ambos";
-										}
-										return undefined;
+										return faltaRangoOMora(cuotaInicio, cuotaFin, value)
+											? MENSAJE_RANGO_O_MORA_REQUERIDO
+											: undefined;
+									},
+									// onChange no corre si el asesor nunca toca cuotas NI el
+									// checkbox (form arranca en undefined/undefined/false) —
+									// mismo patrón del bug de fecha (Codex, PR #1147): sin
+									// onSubmit, se podía guardar una promesa sin rango ni mora.
+									onSubmit: ({ value, fieldApi }) => {
+										const cuotaInicio =
+											fieldApi.form.getFieldValue("cuotaInicio");
+										const cuotaFin = fieldApi.form.getFieldValue("cuotaFin");
+										return faltaRangoOMora(cuotaInicio, cuotaFin, value)
+											? MENSAJE_RANGO_O_MORA_REQUERIDO
+											: undefined;
 									},
 								}}
 							>
@@ -1047,12 +1103,13 @@ export function ContactoModal({
 								]}
 							>
 								{([cuotaInicio, cuotaFin, incluyeMora]) =>
-									cuotaInicio == null &&
-									cuotaFin == null &&
-									!incluyeMora && (
+									faltaRangoOMora(
+										cuotaInicio as number | null | undefined,
+										cuotaFin as number | null | undefined,
+										!!incluyeMora,
+									) && (
 										<p className="text-red-500 text-sm">
-											Indica un rango de cuotas, marca que incluye mora, o
-											ambos.
+											{MENSAJE_RANGO_O_MORA_REQUERIDO}.
 										</p>
 									)
 								}
@@ -1142,7 +1199,11 @@ export function ContactoModal({
 														<Calendar
 															mode="single"
 															selected={field.state.value}
-															onSelect={(date) => field.handleChange(date)}
+															onSelect={(date) =>
+																field.handleChange(
+																	date ? fechaAMedianocheGT(date) : date,
+																)
+															}
 															disabled={(date) =>
 																date < new Date(new Date().setHours(0, 0, 0, 0))
 															}

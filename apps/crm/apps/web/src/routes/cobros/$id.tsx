@@ -1712,16 +1712,34 @@ function RouteComponent() {
 											const badge = estadoBadge[estadoPromesa];
 											const tieneRango =
 												promesa.cuotaInicio != null && promesa.cuotaFin != null;
+											// Fila legacy (creada antes de CB-020, ver
+											// promesa-pago.test.ts) puede tener rango null e
+											// incluyeMora=false — sin esto "Mora del crédito" se
+											// mostraba igual, mintiendo sobre lo que prometió el
+											// cliente (Codex, PR #1147).
 											const etiquetaRango = tieneRango
 												? promesa.cuotaInicio === promesa.cuotaFin
 													? `Cuota #${promesa.cuotaInicio}`
 													: `Cuotas #${promesa.cuotaInicio} a #${promesa.cuotaFin}`
-												: "Mora del crédito";
+												: promesa.incluyeMora
+													? "Mora del crédito"
+													: "Sin rango ni mora especificado";
 											return (
 												<div key={promesa.id} className="rounded-lg border p-4">
 													<div className="mb-2 flex items-start justify-between">
 														<div className="flex flex-wrap items-center gap-2">
-															<span className="font-medium">
+															<span
+																className={
+																	tieneRango || promesa.incluyeMora
+																		? "font-medium"
+																		: "font-medium text-muted-foreground italic"
+																}
+																title={
+																	tieneRango || promesa.incluyeMora
+																		? undefined
+																		: "Registro anterior a la validación de rango/mora obligatorio — revisar comentarios para saber qué prometió el cliente."
+																}
+															>
 																{etiquetaRango}
 															</span>
 															{tieneRango && promesa.incluyeMora && (

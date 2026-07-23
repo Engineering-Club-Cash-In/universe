@@ -33,7 +33,6 @@ import {
 import type { db } from "./db";
 import { otps } from "./db/schema/otp";
 import {
-	checkCasosSinContacto,
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
@@ -49,6 +48,7 @@ import {
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
+import { checkCobrosAlertas } from "./services/check-cobros-alertas";
 import { checkPromesasPago } from "./services/check-promesas-pago";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
 
@@ -1263,7 +1263,6 @@ setInterval(
 	async () => {
 		try {
 			await checkSeguimientosVencidos();
-			await checkCasosSinContacto(3);
 		} catch (error) {
 			console.error("Error en job de notificaciones cobros:", error);
 		}
@@ -1274,7 +1273,6 @@ setInterval(
 // Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista)
 setTimeout(() => {
 	checkSeguimientosVencidos().catch(console.error);
-	checkCasosSinContacto(3).catch(console.error);
 	procesarSeguimientosRecurrentes().catch(console.error);
 	checkPromesasPago().catch(console.error);
 }, 10_000);
@@ -1297,6 +1295,26 @@ scheduleAtPremoraGT();
 setTimeout(() => {
 	sendPremoraReminders().catch(console.error);
 }, 15_000);
+
+// COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d),
+// diario a las 8:00 GT — DESPUÉS de que la subida de bucket de medianoche ya
+// corrió en cartera, para leer las subidas de anoche. Reemplaza las viejas
+// notificaciones masivas de "sin contacto". Idempotente por su propio dedup, así
+// que el run de boot (abajo) recupera sin duplicar.
+function scheduleAtCobrosAlertasGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(14, 0, 0, 0); // 08:00 GT
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await checkCobrosAlertas().catch(console.error);
+		scheduleAtCobrosAlertasGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtCobrosAlertasGT();
+setTimeout(() => {
+	checkCobrosAlertas().catch(console.error);
+}, 20_000);
 
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
 // CB-020: también cierra el día evaluando TODAS las promesas de pago activas

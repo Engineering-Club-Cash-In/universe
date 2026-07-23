@@ -1,5 +1,14 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	or,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -32,6 +41,7 @@ const notificationWithCreator = {
 	relatedEntityType: notifications.relatedEntityType,
 	relatedEntityId: notifications.relatedEntityId,
 	redirectPage: notifications.redirectPage,
+	cobrosTipo: notifications.cobrosTipo,
 	readAt: notifications.readAt,
 	resolvedAt: notifications.resolvedAt,
 	createdAt: notifications.createdAt,
@@ -207,6 +217,61 @@ export const notificationsRouter = {
 
 			return result;
 		}),
+
+	// Tipos (redirect_page) disponibles para el filtro del usuario autenticado.
+	// Devuelve SOLO los redirect_page para los que el usuario/rol tiene al menos
+	// una notificación visible (sin importar el estado), replicando la misma
+	// visibilidad que getAllNotifications / getNotificationsByRole(s) /
+	// getNotificationsByAssign. Así el dropdown solo ofrece tipos que el usuario
+	// realmente puede ver.
+	getAvailableNotificationTypes: protectedProcedure.handler(
+		async ({ context }) => {
+			const userId = context.session.user.id;
+
+			const [userData] = await db
+				.select({ role: user.role })
+				.from(user)
+				.where(eq(user.id, userId))
+				.limit(1);
+
+			if (!userData) return [];
+
+			const isAdmin = userData.role === "admin";
+			const isSalesSupervisor = userData.role === "sales_supervisor";
+
+			// Misma visibilidad que las listas de la página de notificaciones:
+			//  - admin: todo (sin filtro)
+			//  - sales_supervisor: sus roles visibles + asignación directa
+			//  - resto: su rol (sin asignar) + asignación directa
+			const visibilidad = isAdmin
+				? undefined
+				: isSalesSupervisor
+					? or(
+							inArray(notifications.assignedToRole, [
+								"sales_supervisor",
+								"analyst",
+								"juridico",
+							]),
+							eq(notifications.assignedTo, userId),
+						)
+					: or(
+							and(
+								eq(notifications.assignedToRole, userData.role),
+								isNull(notifications.assignedTo),
+							),
+							eq(notifications.assignedTo, userId),
+						);
+
+			const rows = await db
+				.selectDistinct({ redirectPage: notifications.redirectPage })
+				.from(notifications)
+				.where(and(isNotNull(notifications.redirectPage), visibilidad));
+
+			return rows
+				.map((r) => r.redirectPage)
+				.filter((rp): rp is NonNullable<typeof rp> => rp !== null);
+		},
+	),
 
 	// Cambiar el status de una notificación
 	changeNotificationStatus: protectedProcedure

@@ -53,6 +53,16 @@ export const notificationRedirectPageEnum = pgEnum(
 	],
 );
 
+// COBROS-02: subtipo específico de las notificaciones del módulo de cobros.
+// Vive en su propia columna `cobros_tipo` (NO en `type`, que es general del CRM)
+// y solo lo setean los jobs de cobros; toda otra notificación lo deja null. La
+// web lo usa para pintar cada tarjeta de un color distinto.
+export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
+	"promesa_incumplida",
+	"cliente_subido",
+	"sin_contacto_3d",
+]);
+
 // Notifications table
 export const notifications = pgTable(
 	"notifications",
@@ -81,6 +91,9 @@ export const notifications = pgTable(
 
 		// Redirect URL
 		redirectPage: notificationRedirectPageEnum("redirect_page"),
+
+		// COBROS-02: subtipo de cobros (null para el resto de notificaciones).
+		cobrosTipo: cobrosNotifTipoEnum("cobros_tipo"),
 
 		// Timestamps de estado
 		readAt: timestamp("read_at"),

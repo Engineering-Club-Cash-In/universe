@@ -815,6 +815,8 @@ export interface CarteraBucketCatalogo {
 	orden: number;
 	color: string | null;
 	estado_mora: string | null;
+	/** CB-020: días de SLA para contactar desde que el crédito entró a este bucket. null = sin SLA (B0). */
+	dias_sla: number | null;
 }
 
 // ============================================================================
@@ -894,6 +896,49 @@ export interface CarteraBucketHistorialEvento {
 	asesor_atribucion: string | null;
 	pago_id: number | null;
 	motivo: string | null;
+}
+
+// ============================================================================
+// CB-020 · COLA DEL DÍA — universo SLA (GET /buckets/cola-dia)
+// ============================================================================
+
+/**
+ * Fila del universo SLA: un crédito del pool de buckets del asesor con la
+ * fecha en que entró a su bucket ACTUAL (buckets_historial) + la fecha límite
+ * derivada (fecha_entrada + dias_sla del bucket, día GT). El CRM cruza esto
+ * contra sus propias promesas de pago (contactos_cobros) para clasificar la
+ * cola en sus 3 categorías (SLA hoy / promesa hoy / incumplida).
+ */
+export interface CarteraColaDiaFila {
+	credito_id: number;
+	numero_credito_sifco: string;
+	cliente: string;
+	asesor_id: number;
+	asesor: string;
+	bucket: number;
+	bucket_prefijo: string;
+	bucket_nombre: string;
+	dias_sla: number;
+	fecha_entrada_bucket: string;
+	/** YYYY-MM-DD, día GT. */
+	fecha_limite_sla: string;
+}
+
+export interface CarteraColaDiaResponse {
+	success: boolean;
+	data: CarteraColaDiaFila[];
+	page: number;
+	perPage: number;
+	total: number;
+	totalPages: number;
+}
+
+export interface GetColaDiaSLAParams {
+	asesorId?: number;
+	/** Filtra por bucket(s) del catálogo (0-5). Omitir = todos los buckets con SLA. */
+	buckets?: number[];
+	page?: number;
+	perPage?: number;
 }
 
 // ============================================================================

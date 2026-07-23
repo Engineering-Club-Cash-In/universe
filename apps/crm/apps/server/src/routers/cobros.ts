@@ -11,6 +11,8 @@ import {
 	ilike,
 	inArray,
 	isNotNull,
+	isNull,
+	max,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -51,8 +53,15 @@ import {
 	prepararTelefonoAsesorParaEnvio,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
+import {
+	CATEGORIAS_COLA_DIA,
+	calificaParaColaDia,
+	calificaParaFiltro,
+	clasificarCreditoColaDia,
+	ordenColaDia,
+} from "../lib/cola-dia";
 import { fetchAllPages } from "../lib/fetch-all-pages";
-import { toDateStrGT } from "../lib/guatemala-month-window";
+import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	getTestPhone,
 	isTestModeEnabled,
@@ -453,7 +462,8 @@ export const createContactoCobrosSchema = z
 	// mergeado) ya la exige en el modal (obligatoria al submit);
 	// repuesto ahora que ese web se reemplazó.
 	.refine(
-		(v) => v.estadoContacto !== "promesa_pago" || v.fechaProximoContacto != null,
+		(v) =>
+			v.estadoContacto !== "promesa_pago" || v.fechaProximoContacto != null,
 		{
 			message: "La fecha prometida es obligatoria",
 			path: ["fechaProximoContacto"],
@@ -2194,6 +2204,336 @@ export const cobrosRouter = {
 			}
 
 			return resultado;
+		}),
+
+	// CB-020: Cola del Día priorizada. Combina el universo SLA de cartera-back
+	// (créditos del pool asesor_bucket con su fecha_limite_sla) con las
+	// promesas de pago del CRM (contactos_cobros, que solo viven acá) para
+	// armar las 3 categorías: SLA vence hoy, promesa vence hoy, incumplida.
+	// Mismo patrón de "asesor forzado" que getAgendaDia — el rol cobros solo
+	// ve su propia cola (match por email contra cartera-back.getAdvisors).
+	getColaDia: cobrosProcedure
+		.input(
+			z.object({
+				filtro: z.enum(CATEGORIAS_COLA_DIA).optional(),
+				asesorId: z.number().int().positive().optional(),
+				buckets: z.array(z.number().int().min(0).max(5)).optional(),
+				page: z.number().int().positive().optional(),
+				perPage: z.number().int().min(1).max(200).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			try {
+				const puedeVerTodos = PERMISSIONS.canAssignCobros(
+					context.userRole ?? "",
+				);
+				const perPage = input.perPage ?? 50;
+				const page = input.page ?? 1;
+
+				let asesorForzado: { asesorId: number; nombre: string } | null = null;
+				let asesorIdFiltro: number | undefined;
+				if (!puedeVerTodos) {
+					const email = context.session?.user?.email?.trim().toLowerCase();
+					const advisors = await carteraBackClient.getAdvisors({
+						page: 1,
+						perPage: 500,
+					});
+					const propio = (advisors.data ?? []).find(
+						(a) => a.email?.trim().toLowerCase() === email,
+					);
+					if (!propio) {
+						return {
+							success: true,
+							sinAsesor: true,
+							asesorForzado: null,
+							items: [],
+							total: 0,
+							page,
+							perPage,
+							totalPages: 1,
+						};
+					}
+					asesorForzado = {
+						asesorId: propio.asesor_id,
+						nombre: propio.nombre,
+					};
+					asesorIdFiltro = propio.asesor_id;
+				} else if (input.asesorId) {
+					asesorIdFiltro = input.asesorId;
+				}
+
+				// Universo SLA: TODOS los créditos del pool del asesor (o de todos
+				// los asesores, si no se filtra) — sin paginar acá todavía, porque
+				// la paginación real ocurre DESPUÉS de cruzar con promesas y
+				// clasificar (un crédito puede calificar o no calificar para la
+				// cola; paginar antes de saber eso rompería la página). "Promesa
+				// hoy"/"incumplida" son independientes del SLA — cartera-back NO
+				// filtra por fecha (no sabe de promesas, viven solo en el CRM), así
+				// que hay que traer el universo COMPLETO del pool, no solo lo que
+				// vence pronto. fetchAllPages pagina de verdad (perPage 100, en
+				// paralelo) en vez de forzar un perPage gigante en una sola
+				// llamada — mismo patrón que obtenerTodasLasPaginasCreditos, arriba
+				// en este archivo.
+				const universoData = await fetchAllPages(
+					async (page) => {
+						const resp = await carteraBackClient.getColaDiaSLA({
+							asesorId: asesorIdFiltro,
+							buckets: input.buckets,
+							page,
+							perPage: 100,
+						});
+						return { data: resp.data, totalPages: resp.totalPages ?? 0 };
+					},
+					{ maxPages: 200 }, // 200 * 100 = 20k créditos, muy por encima de la cartera real
+				);
+				const universo = { data: universoData };
+
+				if (universo.data.length === 0) {
+					return {
+						success: true,
+						sinAsesor: false,
+						asesorForzado,
+						items: [],
+						total: 0,
+						page,
+						perPage,
+						totalPages: 1,
+					};
+				}
+
+				const sifcos = [
+					...new Set(universo.data.map((c) => c.numero_credito_sifco)),
+				];
+
+				// Casos de cobros del CRM por SIFCO (teléfono + id para ir al detalle)
+				// y teléfono vía lead (cartera no tiene teléfonos de clientes) — ambas
+				// dependen solo de `sifcos`, sin dependencia entre sí → en paralelo.
+				const [casos, oportunidades] = await Promise.all([
+					db
+						.select({
+							id: casosCobros.id,
+							numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+							telefonoPrincipal: casosCobros.telefonoPrincipal,
+							activo: casosCobros.activo,
+							updatedAt: casosCobros.updatedAt,
+						})
+						.from(casosCobros)
+						.where(inArray(casosCobros.numeroCreditoSifco, sifcos)),
+					db
+						.select({
+							numeroSifco: opportunities.numeroSifco,
+							leadPhone: leads.phone,
+						})
+						.from(opportunities)
+						.leftJoin(leads, eq(opportunities.leadId, leads.id))
+						.where(inArray(opportunities.numeroSifco, sifcos)),
+				]);
+
+				// Con varios casos por SIFCO gana el activo y a igualdad el más
+				// reciente — mismo criterio que getAgendaDia.
+				const casoPorSifco = new Map<string, (typeof casos)[number]>();
+				for (const caso of casos) {
+					const sifco = caso.numeroCreditoSifco ?? "";
+					const previo = casoPorSifco.get(sifco);
+					const gana =
+						!previo ||
+						(Boolean(caso.activo) && !previo.activo) ||
+						(Boolean(caso.activo) === Boolean(previo.activo) &&
+							(caso.updatedAt?.getTime() ?? 0) >
+								(previo.updatedAt?.getTime() ?? 0));
+					if (gana) casoPorSifco.set(sifco, caso);
+				}
+				const casoIds = [...casoPorSifco.values()].map((c) => c.id);
+				const leadPhonePorSifco = new Map(
+					oportunidades.map((o) => [o.numeroSifco ?? "", o.leadPhone]),
+				);
+
+				// Promesas activas y último contacto por caso — ambas dependen de
+				// `casoIds` pero son independientes entre sí → en paralelo.
+				const [promesas, ultimosContactos] = await Promise.all([
+					// Promesas ACTIVAS (pendiente/incumplida — 'cumplida' es terminal,
+					// se excluye), para clasificar. `estadoPromesa IS NULL` (filas
+					// legacy nunca evaluadas, o creadas antes de que
+					// getEstadoPromesasPago/el job nocturno les asignara un valor)
+					// cuenta como "pendiente" — mismo criterio que
+					// getEstadoPromesasPago (línea ~2160: `estadoPromesa ?? "pendiente"`)
+					// — sin este OR, `eq(estadoPromesa, "pendiente")` nunca matchea
+					// NULL en SQL y esas promesas se colaban fuera de la Cola del Día
+					// hasta que algo más las recalculara (review Codex).
+					casoIds.length === 0
+						? Promise.resolve([])
+						: db
+								.select({
+									casoCobroId: contactosCobros.casoCobroId,
+									estadoPromesa: contactosCobros.estadoPromesa,
+									fechaProximoContacto: contactosCobros.fechaProximoContacto,
+								})
+								.from(contactosCobros)
+								.where(
+									and(
+										inArray(contactosCobros.casoCobroId, casoIds),
+										eq(contactosCobros.estadoContacto, "promesa_pago"),
+										isNotNull(contactosCobros.fechaProximoContacto),
+										or(
+											eq(contactosCobros.estadoPromesa, "pendiente"),
+											eq(contactosCobros.estadoPromesa, "incumplida"),
+											isNull(contactosCobros.estadoPromesa),
+										),
+									),
+								),
+					// Último contacto (CUALQUIER tipo) por caso — una sola fuente para
+					// dos usos: "contactado hoy" (saca la bandera slaHoy si el asesor
+					// ya llamó hoy) y "días sin contacto" (categoría sinContacto,
+					// CB-020). Mismo patrón que checkCasosSinContacto
+					// (jobs/cobros-notifications.ts): MAX(fecha_contacto) agrupado por
+					// caso_cobro_id.
+					casoIds.length === 0
+						? Promise.resolve([])
+						: db
+								.select({
+									casoCobroId: contactosCobros.casoCobroId,
+									ultimaFecha: max(contactosCobros.fechaContacto),
+								})
+								.from(contactosCobros)
+								.where(inArray(contactosCobros.casoCobroId, casoIds))
+								.groupBy(contactosCobros.casoCobroId),
+				]);
+				const promesasPorCaso = new Map<
+					string,
+					Array<{
+						estadoPromesa: "pendiente" | "incumplida";
+						fechaPrometida: Date;
+					}>
+				>();
+				for (const p of promesas) {
+					if (p.estadoPromesa === "cumplida") continue;
+					// NULL (legacy, nunca evaluada) cuenta como "pendiente" — el SQL
+					// de arriba ya la deja pasar con isNull(estadoPromesa), acá se
+					// resuelve el valor por defecto (mismo criterio que
+					// getEstadoPromesasPago: `estadoPromesa ?? "pendiente"`).
+					const estadoPromesa = p.estadoPromesa ?? "pendiente";
+					const lista = promesasPorCaso.get(p.casoCobroId) ?? [];
+					lista.push({
+						estadoPromesa,
+						fechaPrometida: p.fechaProximoContacto as Date,
+					});
+					promesasPorCaso.set(p.casoCobroId, lista);
+				}
+
+				const hoyStr = toDateStrGT(new Date());
+				const contactadoHoyPorCaso = new Set<string>();
+				const diasSinContactoPorCaso = new Map<string, number>();
+				// gtDateStrToDate: medianoche GT del día, no medianoche UTC — misma
+				// convención que usa el resto del proyecto para comparar fechas GT
+				// por día calendario (ver promesa-pago.ts).
+				const hoyMs = gtDateStrToDate(hoyStr).getTime();
+				const MS_POR_DIA = 24 * 60 * 60 * 1000;
+				for (const c of ultimosContactos) {
+					if (!c.ultimaFecha) continue;
+					if (toDateStrGT(c.ultimaFecha) === hoyStr) {
+						contactadoHoyPorCaso.add(c.casoCobroId);
+					}
+					const ultimaFechaStr = toDateStrGT(c.ultimaFecha);
+					const ultimaMs = gtDateStrToDate(ultimaFechaStr).getTime();
+					const dias = Math.floor((hoyMs - ultimaMs) / MS_POR_DIA);
+					diasSinContactoPorCaso.set(c.casoCobroId, dias);
+				}
+
+				const hoy = new Date();
+				const items = universo.data
+					.map((credito) => {
+						const caso = casoPorSifco.get(credito.numero_credito_sifco);
+						const promesasCredito = caso
+							? (promesasPorCaso.get(caso.id) ?? [])
+							: [];
+						const diasSinContacto = caso
+							? (diasSinContactoPorCaso.get(caso.id) ?? null)
+							: null;
+						const clasificacion = clasificarCreditoColaDia(
+							{
+								fechaLimiteSla: credito.fecha_limite_sla,
+								contactadoHoy: caso ? contactadoHoyPorCaso.has(caso.id) : false,
+								promesas: promesasCredito,
+								diasSinContacto,
+							},
+							hoy,
+						);
+						return {
+							credito,
+							caso,
+							promesasCredito,
+							clasificacion,
+							diasSinContacto,
+						};
+					})
+					.filter(({ clasificacion }) =>
+						input.filtro
+							? calificaParaFiltro(clasificacion, input.filtro)
+							: calificaParaColaDia(clasificacion),
+					)
+					.sort(
+						(a, b) =>
+							ordenColaDia(a.clasificacion) - ordenColaDia(b.clasificacion),
+					)
+					.map(
+						({
+							credito,
+							caso,
+							promesasCredito,
+							clasificacion,
+							diasSinContacto,
+						}) => ({
+							creditoId: credito.credito_id,
+							numeroCreditoSifco: credito.numero_credito_sifco,
+							cliente: credito.cliente,
+							asesorId: credito.asesor_id,
+							asesor: credito.asesor,
+							bucket: credito.bucket,
+							bucketPrefijo: credito.bucket_prefijo,
+							bucketNombre: credito.bucket_nombre,
+							fechaLimiteSla: credito.fecha_limite_sla,
+							// Próxima promesa activa a mostrar: la más próxima en el tiempo.
+							fechaPromesa:
+								promesasCredito.length > 0
+									? promesasCredito
+											.map((p) => p.fechaPrometida)
+											.sort((x, y) => x.getTime() - y.getTime())[0]
+									: null,
+							telefono:
+								primerTelefono(caso?.telefonoPrincipal) ??
+								primerTelefono(
+									leadPhonePorSifco.get(credito.numero_credito_sifco),
+								) ??
+								null,
+							casoId: caso?.id ?? null,
+							slaHoy: clasificacion.slaHoy,
+							promesaHoy: clasificacion.promesaHoy,
+							incumplida: clasificacion.incumplida,
+							sinContacto: clasificacion.sinContacto,
+							diasSinContacto,
+						}),
+					);
+
+				const total = items.length;
+				const totalPages = Math.max(1, Math.ceil(total / perPage));
+				const offset = (page - 1) * perPage;
+
+				return {
+					success: true,
+					sinAsesor: false,
+					asesorForzado,
+					items: items.slice(offset, offset + perPage),
+					total,
+					page,
+					perPage,
+					totalPages,
+				};
+			} catch (error) {
+				console.error("[getColaDia] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "No se pudo obtener la cola del día",
+				});
+			}
 		}),
 
 	// Obtener historial de cuotas de pago de un contrato

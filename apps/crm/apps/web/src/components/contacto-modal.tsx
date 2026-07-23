@@ -230,6 +230,14 @@ export function ContactoModal({
 			incluyeMora: false,
 		},
 		onSubmit: async ({ value }) => {
+			// Guard explícito además del validator del campo (Codex, PR #1147):
+			// si el campo nunca se toca, su validator onChange nunca corre y
+			// canSubmit puede no reflejar el error a tiempo — sin esto, una
+			// promesa podía enviarse con fechaProximoContacto undefined.
+			if (esPromesa && !value.fechaProximoContacto) {
+				toast.error("La fecha prometida es obligatoria");
+				return;
+			}
 			createContactoMutation.mutate(value);
 		},
 	});
@@ -1089,7 +1097,17 @@ export function ContactoModal({
 									<form.Field
 										name="fechaProximoContacto"
 										validators={{
+											// onChange no corre si el campo nunca se toca (form
+											// arranca en undefined) — sin onSubmit, un asesor que
+											// nunca abre el calendario puede enviar la promesa sin
+											// fecha (Codex, PR #1147): la fila queda invisible para
+											// getEstadoPromesasPago (este mismo archivo filtra por
+											// fechaProximoContacto antes de armar promesaIds).
 											onChange: ({ value }) =>
+												esPromesa && !value
+													? "La fecha prometida es obligatoria"
+													: undefined,
+											onSubmit: ({ value }) =>
 												esPromesa && !value
 													? "La fecha prometida es obligatoria"
 													: undefined,

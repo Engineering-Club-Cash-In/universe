@@ -222,9 +222,17 @@ function RouteComponent() {
 	});
 
 	// Obtener historial de contactos (solo para casos)
+	// CB-020 (Codex, PR #1147): getHistorialContactos aplica su límite ANTES
+	// de que este archivo separe promesa_pago del resto (ver `contactos` y
+	// `promesasPago` abajo) — con el default de 20, un caso con varias
+	// promesas dejaba el Historial general corto y perdía promesas viejas
+	// fuera de esa ventana en ambas listas. El server no filtra por tipo ni
+	// pagina de verdad (solo un límite plano) — hasta que eso se separe en
+	// el backend, subir el límite es el workaround práctico: cubre el caso
+	// real (decenas de contactos), no infinito.
 	const historialContactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
-			input: { casoCobroId: casoDetails.data?.id || "" },
+			input: { casoCobroId: casoDetails.data?.id || "", limit: 200 },
 		}),
 		enabled: !!session && !!casoDetails.data?.id,
 	});
@@ -1670,9 +1678,19 @@ function RouteComponent() {
 												)?.[promesa.id] ??
 												promesa.estadoPromesa ??
 												"pendiente";
+											// Mismo criterio de gracia que el backend (ver
+											// finDeGraciaGT en lib/promesa-pago.ts): comparar el
+											// instante crudo marcaba VENCIDA desde medianoche GT
+											// del MISMO día prometido, contradiciendo el badge
+											// "Pendiente" que sí usa esa gracia (Codex, PR #1147).
+											const finDeGraciaGT = fechaPrometida
+												? new Date(
+														fechaPrometida.getTime() + 24 * 60 * 60 * 1000,
+													)
+												: null;
 											const vencida =
-												fechaPrometida !== null &&
-												fechaPrometida < hoy &&
+												finDeGraciaGT !== null &&
+												finDeGraciaGT <= hoy &&
 												estadoPromesa !== "cumplida";
 											const estadoBadge: Record<
 												EstadoPromesa,

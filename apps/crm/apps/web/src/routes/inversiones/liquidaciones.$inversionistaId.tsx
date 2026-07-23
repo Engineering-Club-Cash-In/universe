@@ -694,9 +694,6 @@ function InvestorLiquidacionesPage() {
 		);
 	const [compraCarteraModalidad, setCompraCarteraModalidad] =
 		useState<ModalidadFacturacion>("p2p_directa");
-	const [compraCarteraFecha, setCompraCarteraFecha] = useState(
-		new Date().toISOString().split("T")[0],
-	);
 
 	// Resuelve por monto las 3 filas del bracket (SQL, fuente única de
 	// verdad) y de ahí tomamos la de la modalidad elegida. Solo se necesita
@@ -1809,17 +1806,6 @@ function InvestorLiquidacionesPage() {
 								)}
 							</>
 						)}
-						<div className="space-y-1.5">
-							<Label htmlFor="compra-fecha">
-								Fecha inicio participación
-							</Label>
-							<Input
-								id="compra-fecha"
-								type="date"
-								value={compraCarteraFecha}
-								onChange={(e) => setCompraCarteraFecha(e.target.value)}
-							/>
-						</div>
 					</div>
 
 					<DialogFooter className="gap-3 sm:gap-3">
@@ -1855,7 +1841,6 @@ function InvestorLiquidacionesPage() {
 									// Solo se manda con anulación manual explícita: sin
 									// esto, el backend re-resuelve y valida por monto.
 									modalidadFacturacionSpreadId: compraCarteraOverrideRow?.id,
-									fechaInicioParticipacion: compraCarteraFecha || undefined,
 								});
 							}}
 						>

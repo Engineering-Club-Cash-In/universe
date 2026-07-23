@@ -71,9 +71,6 @@ function LiquidacionesInversionistas() {
 	const [formMontoCompra, setFormMontoCompra] = useState("");
 	const [formModalidadFacturacion, setFormModalidadFacturacion] =
 		useState<ModalidadFacturacion>("p2p_directa");
-	const [formFechaCompra, setFormFechaCompra] = useState(
-		new Date().toISOString().split("T")[0],
-	);
 
 	// Resuelve por monto las 3 filas del bracket (SQL, fuente única de
 	// verdad) y de ahí tomamos la de la modalidad elegida. Solo se necesita si
@@ -160,7 +157,6 @@ function LiquidacionesInversionistas() {
 		setFormMontoCompra("");
 		setFormModalidadFacturacion("p2p_directa");
 		setCompraSpreadOverrideId(null);
-		setFormFechaCompra(new Date().toISOString().split("T")[0]);
 	};
 
 	const crearMutation = useMutation({
@@ -572,26 +568,13 @@ function LiquidacionesInversionistas() {
 
 							{hacerCompra && (
 								<div className="space-y-3">
-									<div className="grid grid-cols-2 gap-3">
-										<div className="space-y-1.5">
-											<Label htmlFor="inv-monto-compra">Monto aportado *</Label>
-											<CurrencyInput
-												id="inv-monto-compra"
-												value={formMontoCompra}
-												onChange={setFormMontoCompra}
-											/>
-										</div>
-										<div className="space-y-1.5">
-											<Label htmlFor="inv-fecha-compra">
-												Fecha participación
-											</Label>
-											<Input
-												id="inv-fecha-compra"
-												type="date"
-												value={formFechaCompra}
-												onChange={(e) => setFormFechaCompra(e.target.value)}
-											/>
-										</div>
+									<div className="space-y-1.5">
+										<Label htmlFor="inv-monto-compra">Monto aportado *</Label>
+										<CurrencyInput
+											id="inv-monto-compra"
+											value={formMontoCompra}
+											onChange={setFormMontoCompra}
+										/>
 									</div>
 									<div className="space-y-1.5">
 										<Label htmlFor="inv-modalidad-fact">
@@ -737,9 +720,6 @@ function LiquidacionesInversionistas() {
 									// esto, el backend re-resuelve y valida por monto.
 									modalidadFacturacionSpreadId: hacerCompra
 										? compraOverrideRow?.id
-										: undefined,
-									fechaInicioParticipacion: hacerCompra
-										? formFechaCompra || undefined
 										: undefined,
 								});
 							}}

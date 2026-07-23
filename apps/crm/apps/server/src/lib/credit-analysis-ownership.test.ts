@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
 	assertOpportunityBelongsToLead,
+	canWriteOpportunityCreditAnalysis,
 	getCreditAnalysisOwnerCondition,
 	getCreditAnalysisResourceId,
 } from "./credit-analysis-ownership";
@@ -57,6 +58,36 @@ describe("credit analysis ownership", () => {
 				"00000000-0000-0000-0000-000000000001",
 			),
 		).toThrow("La oportunidad no pertenece al lead analizado");
+	});
+
+	test("requires sales ownership of the opportunity without restricting supervisors or admins", () => {
+		const salesUserId = "00000000-0000-0000-0000-000000000001";
+		const otherSalesUserId = "00000000-0000-0000-0000-000000000002";
+
+		expect(
+			canWriteOpportunityCreditAnalysis(
+				"sales",
+				salesUserId,
+				otherSalesUserId,
+			),
+		).toBe(false);
+		expect(
+			canWriteOpportunityCreditAnalysis("sales", salesUserId, salesUserId),
+		).toBe(true);
+		expect(
+			canWriteOpportunityCreditAnalysis(
+				"sales_supervisor",
+				salesUserId,
+				otherSalesUserId,
+			),
+		).toBe(true);
+		expect(
+			canWriteOpportunityCreditAnalysis(
+				"admin",
+				salesUserId,
+				otherSalesUserId,
+			),
+		).toBe(true);
 	});
 
 	test("keeps co-debtor analysis scoped by coDebtorId", () => {

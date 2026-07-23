@@ -25,3 +25,11 @@ export function assertOpportunityBelongsToLead(
 		throw new Error("La oportunidad no pertenece al lead analizado");
 	}
 }
+
+export function canWriteOpportunityCreditAnalysis(
+	userRole: string,
+	userId: string,
+	assignedTo: string | null,
+): boolean {
+	return userRole !== "sales" || assignedTo === userId;
+}

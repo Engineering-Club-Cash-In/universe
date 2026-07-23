@@ -62,6 +62,7 @@ import {
 } from "../lib/checklist";
 import {
 	assertOpportunityBelongsToLead,
+	canWriteOpportunityCreditAnalysis,
 	getCreditAnalysisOwnerCondition,
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
@@ -1304,7 +1305,10 @@ export const crmRouter = {
 				}
 
 				const [opportunity] = await db
-					.select({ leadId: opportunities.leadId })
+					.select({
+						leadId: opportunities.leadId,
+						assignedTo: opportunities.assignedTo,
+					})
 					.from(opportunities)
 					.where(eq(opportunities.id, opportunityId!))
 					.limit(1);
@@ -1318,6 +1322,17 @@ export const crmRouter = {
 				} catch (error) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+				if (
+					!canWriteOpportunityCreditAnalysis(
+						context.userRole,
+						context.userId,
+						opportunity.assignedTo,
+					)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para actualizar este análisis",
 					});
 				}
 

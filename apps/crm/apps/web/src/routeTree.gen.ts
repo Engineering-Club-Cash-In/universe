@@ -34,6 +34,7 @@ import { Route as CrmClientsRouteImport } from './routes/crm/clients'
 import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
+import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
 import { Route as CobrosCargaRouteImport } from './routes/cobros/carga'
 import { Route as CobrosBucketsRouteImport } from './routes/cobros/buckets'
 import { Route as CobrosAgendaRouteImport } from './routes/cobros/agenda'
@@ -181,6 +182,11 @@ const CobrosMetasRoute = CobrosMetasRouteImport.update({
   path: '/cobros/metas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosColaRoute = CobrosColaRouteImport.update({
+  id: '/cobros/cola',
+  path: '/cobros/cola',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosCargaRoute = CobrosCargaRouteImport.update({
   id: '/cobros/carga',
   path: '/cobros/carga',
@@ -302,6 +308,7 @@ export interface FileRoutesByFullPath {
   '/cobros/agenda': typeof CobrosAgendaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
+  '/cobros/cola': typeof CobrosColaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reportes': typeof CobrosReportesRoute
@@ -349,6 +356,7 @@ export interface FileRoutesByTo {
   '/cobros/agenda': typeof CobrosAgendaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
+  '/cobros/cola': typeof CobrosColaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reportes': typeof CobrosReportesRoute
@@ -397,6 +405,7 @@ export interface FileRoutesById {
   '/cobros/agenda': typeof CobrosAgendaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
+  '/cobros/cola': typeof CobrosColaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reportes': typeof CobrosReportesRoute
@@ -446,6 +455,7 @@ export interface FileRouteTypes {
     | '/cobros/agenda'
     | '/cobros/buckets'
     | '/cobros/carga'
+    | '/cobros/cola'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reportes'
@@ -493,6 +503,7 @@ export interface FileRouteTypes {
     | '/cobros/agenda'
     | '/cobros/buckets'
     | '/cobros/carga'
+    | '/cobros/cola'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reportes'
@@ -540,6 +551,7 @@ export interface FileRouteTypes {
     | '/cobros/agenda'
     | '/cobros/buckets'
     | '/cobros/carga'
+    | '/cobros/cola'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reportes'
@@ -588,6 +600,7 @@ export interface RootRouteChildren {
   CobrosAgendaRoute: typeof CobrosAgendaRoute
   CobrosBucketsRoute: typeof CobrosBucketsRoute
   CobrosCargaRoute: typeof CobrosCargaRoute
+  CobrosColaRoute: typeof CobrosColaRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
   CobrosReportesRoute: typeof CobrosReportesRoute
@@ -800,6 +813,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosMetasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/cola': {
+      id: '/cobros/cola'
+      path: '/cobros/cola'
+      fullPath: '/cobros/cola'
+      preLoaderRoute: typeof CobrosColaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/carga': {
       id: '/cobros/carga'
       path: '/cobros/carga'
@@ -956,6 +976,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosAgendaRoute: CobrosAgendaRoute,
   CobrosBucketsRoute: CobrosBucketsRoute,
   CobrosCargaRoute: CobrosCargaRoute,
+  CobrosColaRoute: CobrosColaRoute,
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
   CobrosReportesRoute: CobrosReportesRoute,

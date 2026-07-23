@@ -25,6 +25,8 @@ export type BucketCatalogoCompleto = {
   orden: number;
   color: string | null;
   estado_mora: string | null;
+  /** CB-020: días de SLA para contactar desde que el crédito ENTRÓ a este bucket. null = sin SLA (B0). */
+  dias_sla: number | null;
 };
 
 // El bucket se DERIVA del catálogo dinámico `cartera.buckets` (nombres, rangos y

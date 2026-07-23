@@ -17,6 +17,7 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 | `0001_buckets_catalogo.sql` | Catálogo dinámico `buckets` (nombre/prefijo/rangos/estados/color) + CHECK de rangos + seed B0-B5 + FKs de `asesor_bucket.bucket` y `buckets_historial.bucket_(nuevo\|anterior)` al catálogo. |
 | `0002_credito_asesor.sql` | Bitácora de reasignaciones `credito_asesor_historial` + enum `credito_asesor_origen`. **La asignación vive en `creditos.asesor_id`** (no hay tabla de estado): en cartera el asesor del crédito ES el cobrador (el vendedor vive en el CRM). Reasignar (futuro) = `UPDATE creditos SET asesor_id` (solo ese campo) + INSERT en la bitácora. |
 | `0003_buckets_estado_mora.sql` | Agrega `buckets.estado_mora` (puente numero↔estadoMora: al_dia..mora_120_plus) + seed. Retira la duplicación con `config/moraBuckets.ts` (cartera-back) y el mirror en CRM. |
+| `0006_buckets_dias_sla.sql` | CB-020: agrega `buckets.dias_sla` (días para contactar desde que el crédito entra al bucket) + seed placeholder B1-B5 (B0 = NULL, sin SLA). Consumido por la Cola del Día del CRM (`GET /buckets/cola-dia`). |
 
 ## Asignación inicial (`asignacion/`) — carga de datos, NO schema
 

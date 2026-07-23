@@ -451,6 +451,10 @@
     orden: integer("orden").notNull().default(0),
     color: varchar("color", { length: 16 }),
     estado_mora: varchar("estado_mora", { length: 24 }), // puente numero↔estadoMora (al_dia..mora_120_plus), consumido por CRM
+    // CB-020: días de SLA para contactar un crédito desde que ENTRÓ a este
+    // bucket (ver buckets_historial). null = sin SLA (B0/Cartera Sana: al día,
+    // no aplica). Solo editable a mano (mismo patrón que el resto del catálogo).
+    dias_sla: integer("dias_sla"),
     activo: boolean("activo").notNull().default(true),
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),

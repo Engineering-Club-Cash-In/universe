@@ -82,7 +82,7 @@ export const bankAnalysisRouter = {
 			const resourceId = getCreditAnalysisResourceId(owner);
 			const expectedPrefix = buildUploadPrefix("bank_statement", resourceId);
 
-			// 1. Verificar que el lead/co-deudor existe y el usuario tiene acceso
+			// 1. Verificar que el lead/co-deudor existe
 			if (isForLead) {
 				const lead = await db
 					.select()
@@ -93,15 +93,6 @@ export const bankAnalysisRouter = {
 				if (lead.length === 0) {
 					throw new ORPCError("NOT_FOUND", {
 						message: "Lead no encontrado",
-					});
-				}
-
-				if (
-					context.userRole === "sales" &&
-					lead[0].assignedTo !== context.userId
-				) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para analizar este lead",
 					});
 				}
 			} else {

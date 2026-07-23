@@ -132,6 +132,24 @@ describe("credit analysis ownership", () => {
 		expect(aiCallIndex).toBeGreaterThan(permissionCheckIndex);
 	});
 
+	test("authorizes lead bank analysis by opportunity owner instead of lead owner", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+		const handler = source.slice(source.indexOf("analyzeBankStatements:"));
+
+		expect(handler).not.toContain(
+			"lead[0].assignedTo !== context.userId",
+		);
+		expect(handler.indexOf(".from(leads)")).toBeLessThan(
+			handler.indexOf(".from(opportunities)"),
+		);
+		expect(handler.indexOf("!canWriteOpportunityCreditAnalysis(")).toBeLessThan(
+			handler.indexOf("verifyUploadedDocumentInR2({"),
+		);
+	});
+
 	test("keeps co-debtor analysis scoped by coDebtorId", () => {
 		const coDebtorId = "30000000-0000-0000-0000-000000000001";
 		const condition = conditionSql({ coDebtorId });

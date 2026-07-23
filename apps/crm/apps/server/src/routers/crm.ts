@@ -3837,10 +3837,9 @@ export const crmRouter = {
 			const opps = await db
 				.select({ numeroSifco: opportunities.numeroSifco })
 				.from(opportunities)
-				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.where(
 					and(
-						eq(leads.assignedTo, context.userId),
+						eq(opportunities.assignedTo, context.userId),
 						isNotNull(opportunities.numeroSifco),
 					),
 				);

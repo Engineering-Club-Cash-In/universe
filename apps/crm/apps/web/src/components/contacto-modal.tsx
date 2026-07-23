@@ -64,6 +64,39 @@ import {
 import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
 
+// CB-020: regla "rango o mora" — un checkbox de mora, un guard onSubmit del
+// campo y otro del form la repetían con el mismo string literal cada vez
+// (Codex, PR #1147). Centralizado para que un cambio de mensaje o condición
+// no pueda desincronizarse entre las 3 copias.
+const MENSAJE_RANGO_O_MORA_REQUERIDO =
+	"Indica un rango de cuotas, marca que incluye mora, o ambos";
+
+function faltaRangoOMora(
+	cuotaInicio: number | null | undefined,
+	cuotaFin: number | null | undefined,
+	incluyeMora: boolean,
+): boolean {
+	return cuotaInicio == null && cuotaFin == null && !incluyeMora;
+}
+
+/**
+ * CB-020 (Codex, PR #1147): el backend asume fechaProximoContacto guardada
+ * como medianoche GT (ver gtDateStrToDate en
+ * server/src/lib/guatemala-month-window.ts, T06:00:00Z = 00:00 GT) — la
+ * gracia de +24h de evaluarPromesa depende de ese punto de partida exacto.
+ * El Calendar de shadcn devolvía el Date crudo del navegador (medianoche en
+ * la zona horaria LOCAL del asesor, no necesariamente GT); si algún asesor
+ * corre con el reloj/timezone del sistema desalineado, la fecha guardada se
+ * corría de día. Se normaliza aquí al mismo formato que usa el backend, sin
+ * importar código de server (web no puede importar de apps/server).
+ */
+function fechaAMedianocheGT(date: Date): Date {
+	const anio = date.getFullYear();
+	const mes = String(date.getMonth() + 1).padStart(2, "0");
+	const dia = String(date.getDate()).padStart(2, "0");
+	return new Date(`${anio}-${mes}-${dia}T06:00:00.000Z`);
+}
+
 interface ContactoModalProps {
 	casoCobroId: string;
 	clienteNombre: string;
@@ -75,6 +108,16 @@ interface ContactoModalProps {
 	// Modo controlado opcional (cuando el padre maneja el estado open)
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
+	// CB-020: "promesa" = modal reducido — solo Detalles de la Conversación +
+	// fecha prometida (obligatoria). Oculta método/estado/plantilla/envío:
+	// esos ya quedan fijos (estadoContacto=promesa_pago) porque la promesa se
+	// registra DESPUÉS de haber contactado al cliente por otro medio.
+	variante?: "completo" | "promesa";
+	// CB-020: cuotas ATRASADAS (no pagadas Y ya vencidas — no incluye cuotas
+	// futuras aún no vencidas) para el selector de rango en variante "promesa".
+	// $id.tsx filtra por fechaVencimiento < hoy antes de pasarlas — reusa la
+	// data que ya carga vía getHistorialPagos, no duplica el fetch aquí.
+	cuotasDisponibles?: Array<{ numeroCuota: number }>;
 	// Variables para plantillas de mensaje
 	fechaPago?: string;
 	cuotaMensual?: string;
@@ -98,6 +141,8 @@ export function ContactoModal({
 	children,
 	open,
 	onOpenChange,
+	variante = "completo",
+	cuotasDisponibles = [],
 	fechaPago = "",
 	cuotaMensual = "",
 	placa = "",
@@ -191,18 +236,53 @@ export function ContactoModal({
 		}
 	};
 
+	const esPromesa = variante === "promesa";
+
 	const form = useForm({
 		defaultValues: {
 			metodoContacto: metodoInicial,
-			estadoContacto: "contactado" as const,
+			// CB-020: variante promesa fija el estado — no pasa por el selector.
+			estadoContacto: (esPromesa ? "promesa_pago" : "contactado") as
+				| "contactado"
+				| "no_contesta"
+				| "numero_equivocado"
+				| "promesa_pago"
+				| "acuerdo_parcial"
+				| "rechaza_pagar",
 			comentarios: "",
 			acuerdosAlcanzados: "",
 			compromisosPago: "",
-			requiereSeguimiento: false,
+			// La fecha prometida ES la fecha de próximo contacto — nunca opcional
+			// en la variante promesa (por eso arranca en true).
+			requiereSeguimiento: esPromesa,
 			fechaProximoContacto: undefined as Date | undefined,
 			duracionLlamada: undefined as number | undefined,
+			// CB-020: rango de cuotas + mora — solo relevantes en variante promesa.
+			cuotaInicio: undefined as number | undefined,
+			cuotaFin: undefined as number | undefined,
+			incluyeMora: false,
 		},
 		onSubmit: async ({ value }) => {
+			// NO ELIMINAR sin también quitar el botón submit de canSubmit
+			// (Codex, PR #1147): este guard es la defensa REAL — los
+			// validators onSubmit de los campos (fechaProximoContacto,
+			// incluyeMora, más abajo en el JSX) alimentan `canSubmit`, pero
+			// TanStack Form corre validators onSubmit DESPUÉS de invocar este
+			// handler, no antes — si algún día se asume que `canSubmit` ya
+			// garantiza esto y se borra este guard pensando que es
+			// redundante, reaparece el bug original: campo nunca tocado =
+			// onChange nunca corrió = se guarda sin fecha/rango/mora.
+			if (esPromesa && !value.fechaProximoContacto) {
+				toast.error("La fecha prometida es obligatoria");
+				return;
+			}
+			if (
+				esPromesa &&
+				faltaRangoOMora(value.cuotaInicio, value.cuotaFin, value.incluyeMora)
+			) {
+				toast.error(MENSAJE_RANGO_O_MORA_REQUERIDO);
+				return;
+			}
 			createContactoMutation.mutate(value);
 		},
 	});
@@ -431,12 +511,18 @@ export function ContactoModal({
 			<DialogContent className="max-h-[90vh] min-w-3xl max-w-4xl overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
-						{getIconoMetodo(metodoInicial)}
-						Registrar Contacto - {clienteNombre}
+						{esPromesa ? (
+							<MessageSquare className="h-4 w-4" />
+						) : (
+							getIconoMetodo(metodoInicial)
+						)}
+						{esPromesa ? "Promesa de Pago" : "Registrar Contacto"} -{" "}
+						{clienteNombre}
 					</DialogTitle>
 					<DialogDescription>
-						Registra los detalles de la interacción con el cliente y programa el
-						próximo seguimiento.
+						{esPromesa
+							? "Registra lo hablado y la fecha en la que el cliente prometió pagar."
+							: "Registra los detalles de la interacción con el cliente y programa el próximo seguimiento."}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -448,273 +534,278 @@ export function ContactoModal({
 					}}
 					className="space-y-6"
 				>
-					{/* Sección: Información del Contacto */}
-					<div className="space-y-4">
-						<h3 className="font-medium text-lg">Información del Contacto</h3>
+					{/* Sección: Información del Contacto — oculta en variante "promesa":
+					    el método/estado/plantilla/envío no aplican, la promesa se
+					    registra sobre un contacto que ya ocurrió por otro medio. */}
+					{!esPromesa && (
+						<div className="space-y-4">
+							<h3 className="font-medium text-lg">Información del Contacto</h3>
 
-						<div className="grid grid-cols-2 gap-4">
-							<form.Field name="metodoContacto">
-								{(field) => (
+							<div className="grid grid-cols-2 gap-4">
+								<form.Field name="metodoContacto">
+									{(field) => (
+										<div className="space-y-2">
+											<Label>Método de Contacto</Label>
+											<Select
+												onValueChange={(value) =>
+													form.setFieldValue(
+														field.name,
+														value as typeof field.state.value,
+													)
+												}
+												defaultValue={field.state.value}
+											>
+												<SelectTrigger>
+													<SelectValue placeholder="Seleccionar método" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="llamada">📞 Llamada</SelectItem>
+													<SelectItem value="whatsapp">💬 WhatsApp</SelectItem>
+													<SelectItem value="email">📧 Email</SelectItem>
+													<SelectItem value="visita_domicilio">
+														🏠 Visita Domicilio
+													</SelectItem>
+													<SelectItem value="carta_notarial">
+														📋 Carta Notarial
+													</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</form.Field>
+
+								<form.Field name="estadoContacto">
+									{(field) => (
+										<div className="space-y-2">
+											<Label>Estado del Contacto</Label>
+											<Select
+												onValueChange={(value) =>
+													form.setFieldValue(
+														field.name,
+														value as typeof field.state.value,
+													)
+												}
+												defaultValue={field.state.value}
+											>
+												<SelectTrigger>
+													<SelectValue placeholder="Estado del contacto" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="contactado">
+														✅ Contactado
+													</SelectItem>
+													<SelectItem value="no_contesta">
+														❌ No Contesta
+													</SelectItem>
+													<SelectItem value="numero_equivocado">
+														📱 Número Equivocado
+													</SelectItem>
+													{/* CB-020: "Promesa de Pago" se registra SOLO desde el
+													    botón dedicado (modal reducido) — no aquí. */}
+													<SelectItem value="acuerdo_parcial">
+														📝 Acuerdo Parcial
+													</SelectItem>
+													<SelectItem value="rechaza_pagar">
+														🚫 Rechaza Pagar
+													</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</form.Field>
+							</div>
+
+							{/* Selector de plantilla para WhatsApp y Email */}
+							{mostrarPlantillas && (
+								<div className="space-y-3 rounded-md border p-3">
 									<div className="space-y-2">
-										<Label>Método de Contacto</Label>
+										<Label>Plantilla de mensaje</Label>
 										<Select
-											onValueChange={(value) =>
-												form.setFieldValue(
-													field.name,
-													value as typeof field.state.value,
-												)
-											}
-											defaultValue={field.state.value}
+											value={plantillaId}
+											onValueChange={handlePlantillaChange}
 										>
 											<SelectTrigger>
-												<SelectValue placeholder="Seleccionar método" />
+												<SelectValue placeholder="Seleccionar plantilla..." />
 											</SelectTrigger>
 											<SelectContent>
-												<SelectItem value="llamada">📞 Llamada</SelectItem>
-												<SelectItem value="whatsapp">💬 WhatsApp</SelectItem>
-												<SelectItem value="email">📧 Email</SelectItem>
-												<SelectItem value="visita_domicilio">
-													🏠 Visita Domicilio
-												</SelectItem>
-												<SelectItem value="carta_notarial">
-													📋 Carta Notarial
-												</SelectItem>
+												{PLANTILLAS_MENSAJES.map((p) => (
+													<SelectItem key={p.id} value={p.id}>
+														{p.nombre}
+													</SelectItem>
+												))}
 											</SelectContent>
 										</Select>
 									</div>
-								)}
-							</form.Field>
 
-							<form.Field name="estadoContacto">
-								{(field) => (
-									<div className="space-y-2">
-										<Label>Estado del Contacto</Label>
-										<Select
-											onValueChange={(value) =>
-												form.setFieldValue(
-													field.name,
-													value as typeof field.state.value,
-												)
-											}
-											defaultValue={field.state.value}
-										>
-											<SelectTrigger>
-												<SelectValue placeholder="Estado del contacto" />
-											</SelectTrigger>
-											<SelectContent>
-												<SelectItem value="contactado">
-													✅ Contactado
-												</SelectItem>
-												<SelectItem value="no_contesta">
-													❌ No Contesta
-												</SelectItem>
-												<SelectItem value="numero_equivocado">
-													📱 Número Equivocado
-												</SelectItem>
-												<SelectItem value="promesa_pago">
-													🤝 Promesa de Pago
-												</SelectItem>
-												<SelectItem value="acuerdo_parcial">
-													📝 Acuerdo Parcial
-												</SelectItem>
-												<SelectItem value="rechaza_pagar">
-													🚫 Rechaza Pagar
-												</SelectItem>
-											</SelectContent>
-										</Select>
-									</div>
-								)}
-							</form.Field>
-						</div>
+									{plantillaId && metodoInicial === "email" && (
+										<div className="space-y-2">
+											<Label>Asunto</Label>
+											<Input
+												value={asuntoEditado}
+												onChange={(e) => setAsuntoEditado(e.target.value)}
+											/>
+										</div>
+									)}
 
-						{/* Selector de plantilla para WhatsApp y Email */}
-						{mostrarPlantillas && (
-							<div className="space-y-3 rounded-md border p-3">
+									{plantillaId && (
+										<div className="space-y-2">
+											<Label>Mensaje (editable)</Label>
+											<Textarea
+												className="min-h-[150px] text-sm"
+												value={mensajeEditable}
+												onChange={(e) =>
+													handleMensajeEditableChange(e.target.value)
+												}
+											/>
+										</div>
+									)}
+								</div>
+							)}
+
+							{/* Selector de teléfono cuando hay múltiples */}
+							{telefonos.length > 1 && (
 								<div className="space-y-2">
-									<Label>Plantilla de mensaje</Label>
+									<Label>Teléfono a contactar</Label>
 									<Select
-										value={plantillaId}
-										onValueChange={handlePlantillaChange}
+										value={telefonoSeleccionado}
+										onValueChange={setTelefonoSeleccionado}
 									>
 										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar plantilla..." />
+											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
-											{PLANTILLAS_MENSAJES.map((p) => (
-												<SelectItem key={p.id} value={p.id}>
-													{p.nombre}
+											{telefonos.map((t) => (
+												<SelectItem key={t} value={t}>
+													{t}
 												</SelectItem>
 											))}
 										</SelectContent>
 									</Select>
 								</div>
+							)}
 
-								{plantillaId && metodoInicial === "email" && (
-									<div className="space-y-2">
-										<Label>Asunto</Label>
-										<Input
-											value={asuntoEditado}
-											onChange={(e) => setAsuntoEditado(e.target.value)}
-										/>
-									</div>
-								)}
-
-								{plantillaId && (
-									<div className="space-y-2">
-										<Label>Mensaje (editable)</Label>
-										<Textarea
-											className="min-h-[150px] text-sm"
-											value={mensajeEditable}
-											onChange={(e) =>
-												handleMensajeEditableChange(e.target.value)
-											}
-										/>
-									</div>
-								)}
-							</div>
-						)}
-
-						{/* Selector de teléfono cuando hay múltiples */}
-						{telefonos.length > 1 && (
-							<div className="space-y-2">
-								<Label>Teléfono a contactar</Label>
-								<Select
-									value={telefonoSeleccionado}
-									onValueChange={setTelefonoSeleccionado}
+							{/* Botones para ejecutar acción */}
+							<div className="flex flex-wrap gap-2">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => ejecutarAccion("llamada")}
+									disabled={envioEnCurso}
+									className="flex items-center gap-2"
 								>
-									<SelectTrigger>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										{telefonos.map((t) => (
-											<SelectItem key={t} value={t}>
-												{t}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
+									<Phone className="h-4 w-4" />
+									Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
+								</Button>
+
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											disabled={envioEnCurso}
+											className="flex items-center gap-2"
+										>
+											{whatsappApiMutation.isPending ? (
+												<Loader2 className="h-4 w-4 animate-spin" />
+											) : (
+												<MessageCircle className="h-4 w-4" />
+											)}
+											WhatsApp
+											{whatsappApiMutation.isPending ? null : (
+												<ChevronDown className="h-3 w-3" />
+											)}
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start">
+										<DropdownMenuItem
+											onClick={() => ejecutarAccion("whatsapp-api")}
+										>
+											Enviar Directo (Automático)
+										</DropdownMenuItem>
+										<DropdownMenuItem
+											onClick={() => ejecutarAccion("whatsapp-link")}
+										>
+											Abrir WhatsApp Web (Manual)
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											disabled={envioEnCurso}
+											className="flex items-center gap-2"
+										>
+											{emailApiMutation.isPending ? (
+												<Loader2 className="h-4 w-4 animate-spin" />
+											) : (
+												<Mail className="h-4 w-4" />
+											)}
+											Email
+											{emailApiMutation.isPending ? null : (
+												<ChevronDown className="h-3 w-3" />
+											)}
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start">
+										<DropdownMenuItem
+											onClick={() => ejecutarAccion("email-api")}
+										>
+											Enviar Directo (Automático)
+										</DropdownMenuItem>
+										<DropdownMenuItem
+											onClick={() => ejecutarAccion("email-link")}
+										>
+											Abrir cliente de correo (Manual)
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => ejecutarAccion("sms-api")}
+									disabled={envioEnCurso}
+									className="flex items-center gap-2"
+								>
+									{smsApiMutation.isPending ? (
+										<Loader2 className="h-4 w-4 animate-spin" />
+									) : (
+										<MessageSquare className="h-4 w-4" />
+									)}
+									{smsApiMutation.isPending ? "Enviando SMS..." : "SMS"}
+								</Button>
 							</div>
-						)}
 
-						{/* Botones para ejecutar acción */}
-						<div className="flex flex-wrap gap-2">
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={() => ejecutarAccion("llamada")}
-								disabled={envioEnCurso}
-								className="flex items-center gap-2"
-							>
-								<Phone className="h-4 w-4" />
-								Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
-							</Button>
-
-							<DropdownMenu>
-								<DropdownMenuTrigger asChild>
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										disabled={envioEnCurso}
-										className="flex items-center gap-2"
-									>
-										{whatsappApiMutation.isPending ? (
-											<Loader2 className="h-4 w-4 animate-spin" />
-										) : (
-											<MessageCircle className="h-4 w-4" />
-										)}
-										WhatsApp
-										{whatsappApiMutation.isPending ? null : (
-											<ChevronDown className="h-3 w-3" />
-										)}
-									</Button>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="start">
-									<DropdownMenuItem
-										onClick={() => ejecutarAccion("whatsapp-api")}
-									>
-										Enviar Directo (Automático)
-									</DropdownMenuItem>
-									<DropdownMenuItem
-										onClick={() => ejecutarAccion("whatsapp-link")}
-									>
-										Abrir WhatsApp Web (Manual)
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-
-							<DropdownMenu>
-								<DropdownMenuTrigger asChild>
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										disabled={envioEnCurso}
-										className="flex items-center gap-2"
-									>
-										{emailApiMutation.isPending ? (
-											<Loader2 className="h-4 w-4 animate-spin" />
-										) : (
-											<Mail className="h-4 w-4" />
-										)}
-										Email
-										{emailApiMutation.isPending ? null : (
-											<ChevronDown className="h-3 w-3" />
-										)}
-									</Button>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="start">
-									<DropdownMenuItem onClick={() => ejecutarAccion("email-api")}>
-										Enviar Directo (Automático)
-									</DropdownMenuItem>
-									<DropdownMenuItem
-										onClick={() => ejecutarAccion("email-link")}
-									>
-										Abrir cliente de correo (Manual)
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={() => ejecutarAccion("sms-api")}
-								disabled={envioEnCurso}
-								className="flex items-center gap-2"
-							>
-								{smsApiMutation.isPending ? (
-									<Loader2 className="h-4 w-4 animate-spin" />
-								) : (
-									<MessageSquare className="h-4 w-4" />
-								)}
-								{smsApiMutation.isPending ? "Enviando SMS..." : "SMS"}
-							</Button>
+							<form.Field name="metodoContacto">
+								{(metodoField) =>
+									metodoField.state.value === "llamada" && (
+										<form.Field name="duracionLlamada">
+											{(field) => (
+												<div className="space-y-2">
+													<Label>Duración de la Llamada (segundos)</Label>
+													<Input
+														type="number"
+														placeholder="Ej: 180"
+														value={field.state.value}
+														onChange={(e) =>
+															field.handleChange(Number(e.target.value))
+														}
+													/>
+												</div>
+											)}
+										</form.Field>
+									)
+								}
+							</form.Field>
 						</div>
-
-						<form.Field name="metodoContacto">
-							{(metodoField) =>
-								metodoField.state.value === "llamada" && (
-									<form.Field name="duracionLlamada">
-										{(field) => (
-											<div className="space-y-2">
-												<Label>Duración de la Llamada (segundos)</Label>
-												<Input
-													type="number"
-													placeholder="Ej: 180"
-													value={field.state.value}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value))
-													}
-												/>
-											</div>
-										)}
-									</form.Field>
-								)
-							}
-						</form.Field>
-					</div>
+					)}
 
 					{/* Sección: Detalles de la Conversación */}
 					<div className="space-y-4">
@@ -827,37 +918,265 @@ export function ContactoModal({
 						</div>
 					</div>
 
-					{/* Sección: Próximo Seguimiento */}
-					<div className="space-y-4">
-						<h3 className="font-medium text-lg">Próximo Seguimiento</h3>
+					{/* CB-020: Sección de cuotas — SOLO en variante promesa. cartera-back
+					    NO separa la mora por cuota (moras_credito es un monto agregado
+					    del crédito, no por cuota individual) — por eso el checkbox de
+					    mora es independiente del rango: puede haber rango sin mora,
+					    mora sin rango ("solo mora"), o ambos. */}
+					{esPromesa && (
+						<div className="space-y-4">
+							<h3 className="font-medium text-lg">¿Qué prometió pagar?</h3>
 
-						<form.Field name="requiereSeguimiento">
-							{(field) => (
-								<div className="flex items-center space-x-2">
-									<Checkbox
-										id="requiereSeguimiento"
-										checked={field.state.value}
-										onCheckedChange={(checked) => {
-											field.handleChange(!!checked);
-											if (!checked) {
-												form.setFieldValue("fechaProximoContacto", undefined);
-											}
+							{cuotasDisponibles.length === 0 ? (
+								<p className="text-muted-foreground text-sm">
+									Este contrato no tiene cuotas atrasadas.
+								</p>
+							) : (
+								<div className="grid grid-cols-2 gap-4">
+									<form.Field
+										name="cuotaInicio"
+										validators={{
+											// listenTo cuotaFin: si el usuario baja cuotaFin por
+											// debajo de un cuotaInicio ya elegido, este validator
+											// re-corre aunque cuotaInicio no haya cambiado (mismo
+											// fix que cuotaFin de abajo, en la dirección opuesta).
+											onChangeListenTo: ["cuotaFin"],
+											onChange: ({ value, fieldApi }) => {
+												const cuotaFin =
+													fieldApi.form.getFieldValue("cuotaFin");
+												if (
+													value != null &&
+													cuotaFin != null &&
+													cuotaFin < value
+												) {
+													return "Debe ser menor o igual a la cuota final";
+												}
+												return undefined;
+											},
 										}}
-									/>
-									<Label htmlFor="requiereSeguimiento">
-										Requiere seguimiento programado
-									</Label>
+									>
+										{(field) => (
+											<div className="space-y-2">
+												<Label>Cuota desde</Label>
+												<Select
+													value={field.state.value?.toString() ?? ""}
+													onValueChange={(value) =>
+														field.handleChange(
+															value ? Number(value) : undefined,
+														)
+													}
+												>
+													<SelectTrigger>
+														<SelectValue placeholder="Sin cuota" />
+													</SelectTrigger>
+													<SelectContent>
+														{cuotasDisponibles.map((c) => (
+															<SelectItem
+																key={c.numeroCuota}
+																value={c.numeroCuota.toString()}
+															>
+																Cuota #{c.numeroCuota}
+															</SelectItem>
+														))}
+													</SelectContent>
+												</Select>
+												{field.state.meta.errors.length > 0 && (
+													<p className="text-red-500 text-sm">
+														{field.state.meta.errors.join(", ")}
+													</p>
+												)}
+											</div>
+										)}
+									</form.Field>
+
+									<form.Field
+										name="cuotaFin"
+										validators={{
+											// Espejo del validator de cuotaInicio: sin esto, cambiar
+											// SOLO cuotaFin a un valor menor que cuotaInicio ya
+											// elegido no muestra error ni bloquea el submit (el
+											// validator de cuotaInicio no se re-corre porque ese
+											// campo no cambió) — el .refine() del server sí lo
+											// atrapa, pero como error de red, no como UX inmediata.
+											onChangeListenTo: ["cuotaInicio"],
+											onChange: ({ value, fieldApi }) => {
+												const cuotaInicio =
+													fieldApi.form.getFieldValue("cuotaInicio");
+												if (
+													value != null &&
+													cuotaInicio != null &&
+													value < cuotaInicio
+												) {
+													return "Debe ser mayor o igual a la cuota inicial";
+												}
+												return undefined;
+											},
+										}}
+									>
+										{(field) => (
+											<div className="space-y-2">
+												<Label>Cuota hasta</Label>
+												<Select
+													value={field.state.value?.toString() ?? ""}
+													onValueChange={(value) =>
+														field.handleChange(
+															value ? Number(value) : undefined,
+														)
+													}
+												>
+													<SelectTrigger>
+														<SelectValue placeholder="Igual a 'desde' si es solo una" />
+													</SelectTrigger>
+													<SelectContent>
+														{cuotasDisponibles.map((c) => (
+															<SelectItem
+																key={c.numeroCuota}
+																value={c.numeroCuota.toString()}
+															>
+																Cuota #{c.numeroCuota}
+															</SelectItem>
+														))}
+													</SelectContent>
+												</Select>
+												{field.state.meta.errors.length > 0 && (
+													<p className="text-red-500 text-sm">
+														{field.state.meta.errors.join(", ")}
+													</p>
+												)}
+											</div>
+										)}
+									</form.Field>
 								</div>
 							)}
-						</form.Field>
+
+							<form.Field
+								name="incluyeMora"
+								validators={{
+									// Re-corre cuando cuotaInicio/cuotaFin cambian (no solo
+									// cuando cambia este checkbox) para que canSubmit refleje
+									// la regla "rango O mora" en tiempo real — antes el error
+									// solo se mostraba como texto, sin bloquear el submit.
+									onChangeListenTo: ["cuotaInicio", "cuotaFin"],
+									onChange: ({ value, fieldApi }) => {
+										const cuotaInicio =
+											fieldApi.form.getFieldValue("cuotaInicio");
+										const cuotaFin = fieldApi.form.getFieldValue("cuotaFin");
+										return faltaRangoOMora(cuotaInicio, cuotaFin, value)
+											? MENSAJE_RANGO_O_MORA_REQUERIDO
+											: undefined;
+									},
+									// onChange no corre si el asesor nunca toca cuotas NI el
+									// checkbox (form arranca en undefined/undefined/false) —
+									// mismo patrón del bug de fecha (Codex, PR #1147): sin
+									// onSubmit, se podía guardar una promesa sin rango ni mora.
+									onSubmit: ({ value, fieldApi }) => {
+										const cuotaInicio =
+											fieldApi.form.getFieldValue("cuotaInicio");
+										const cuotaFin = fieldApi.form.getFieldValue("cuotaFin");
+										return faltaRangoOMora(cuotaInicio, cuotaFin, value)
+											? MENSAJE_RANGO_O_MORA_REQUERIDO
+											: undefined;
+									},
+								}}
+							>
+								{(field) => (
+									<div className="flex items-center space-x-2">
+										<Checkbox
+											id="incluyeMora"
+											checked={field.state.value}
+											onCheckedChange={(checked) =>
+												field.handleChange(!!checked)
+											}
+										/>
+										<Label htmlFor="incluyeMora">
+											Incluye pago de mora del crédito
+										</Label>
+									</div>
+								)}
+							</form.Field>
+
+							<form.Subscribe
+								selector={(state) => [
+									state.values.cuotaInicio,
+									state.values.cuotaFin,
+									state.values.incluyeMora,
+								]}
+							>
+								{([cuotaInicio, cuotaFin, incluyeMora]) =>
+									faltaRangoOMora(
+										cuotaInicio as number | null | undefined,
+										cuotaFin as number | null | undefined,
+										!!incluyeMora,
+									) && (
+										<p className="text-red-500 text-sm">
+											{MENSAJE_RANGO_O_MORA_REQUERIDO}.
+										</p>
+									)
+								}
+							</form.Subscribe>
+						</div>
+					)}
+
+					{/* Sección: Próximo Seguimiento — en variante "promesa" la fecha ES
+					    la fecha prometida y es obligatoria: no hay checkbox que la
+					    haga opcional (requiereSeguimiento arranca en true y no se
+					    puede desmarcar). */}
+					<div className="space-y-4">
+						<h3 className="font-medium text-lg">
+							{esPromesa ? "Fecha Prometida" : "Próximo Seguimiento"}
+						</h3>
+
+						{!esPromesa && (
+							<form.Field name="requiereSeguimiento">
+								{(field) => (
+									<div className="flex items-center space-x-2">
+										<Checkbox
+											id="requiereSeguimiento"
+											checked={field.state.value}
+											onCheckedChange={(checked) => {
+												field.handleChange(!!checked);
+												if (!checked) {
+													form.setFieldValue("fechaProximoContacto", undefined);
+												}
+											}}
+										/>
+										<Label htmlFor="requiereSeguimiento">
+											Requiere seguimiento programado
+										</Label>
+									</div>
+								)}
+							</form.Field>
+						)}
 
 						<form.Field name="requiereSeguimiento">
 							{(seguimientoField) =>
-								seguimientoField.state.value && (
-									<form.Field name="fechaProximoContacto">
+								(esPromesa || seguimientoField.state.value) && (
+									<form.Field
+										name="fechaProximoContacto"
+										validators={{
+											// onChange no corre si el campo nunca se toca (form
+											// arranca en undefined) — sin onSubmit, un asesor que
+											// nunca abre el calendario puede enviar la promesa sin
+											// fecha (Codex, PR #1147): la fila queda invisible para
+											// getEstadoPromesasPago (este mismo archivo filtra por
+											// fechaProximoContacto antes de armar promesaIds).
+											onChange: ({ value }) =>
+												esPromesa && !value
+													? "La fecha prometida es obligatoria"
+													: undefined,
+											onSubmit: ({ value }) =>
+												esPromesa && !value
+													? "La fecha prometida es obligatoria"
+													: undefined,
+										}}
+									>
 										{(field) => (
 											<div className="space-y-2">
-												<Label>Fecha de próximo contacto *</Label>
+												<Label>
+													{esPromesa
+														? "Fecha en la que prometió pagar *"
+														: "Fecha de próximo contacto *"}
+												</Label>
 												<Popover>
 													<PopoverTrigger asChild>
 														<Button
@@ -880,7 +1199,11 @@ export function ContactoModal({
 														<Calendar
 															mode="single"
 															selected={field.state.value}
-															onSelect={(date) => field.handleChange(date)}
+															onSelect={(date) =>
+																field.handleChange(
+																	date ? fechaAMedianocheGT(date) : date,
+																)
+															}
 															disabled={(date) =>
 																date < new Date(new Date().setHours(0, 0, 0, 0))
 															}
@@ -888,6 +1211,11 @@ export function ContactoModal({
 														/>
 													</PopoverContent>
 												</Popover>
+												{field.state.meta.errors.length > 0 && (
+													<p className="text-red-500 text-sm">
+														{field.state.meta.errors.join(", ")}
+													</p>
+												)}
 											</div>
 										)}
 									</form.Field>

@@ -11,6 +11,7 @@ import {
 	Clock,
 	Eye,
 	FileText,
+	HandCoins,
 	Loader,
 	Mail,
 	MapPin,
@@ -24,7 +25,7 @@ import {
 	Users,
 	X,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
@@ -71,6 +72,18 @@ import {
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
+
+// CB-020 (Codex, PR #1148): toLocaleDateString("es-GT") sin `timeZone`
+// explícito usa la zona horaria LOCAL del navegador para decidir qué día
+// es, no Guatemala — el string "es-GT" solo cambia el FORMATO (dd/mm/yyyy),
+// no la zona horaria del cálculo. Un asesor en una zona horaria distinta
+// (ej. America/Los_Angeles) ve un día distinto al que realmente se guardó
+// en medianoche GT (ver fechaAMedianocheGT en contacto-modal.tsx). Fuerza
+// la zona horaria de Guatemala para que la fecha mostrada coincida siempre
+// con la que se guardó, sin importar dónde esté físicamente el asesor.
+function formatFechaGT(date: Date): string {
+	return date.toLocaleDateString("es-GT", { timeZone: "America/Guatemala" });
+}
 
 export const Route = createFileRoute("/cobros/$id")({
 	component: RouteComponent,
@@ -221,11 +234,67 @@ function RouteComponent() {
 	});
 
 	// Obtener historial de contactos (solo para casos)
+	// CB-020 (Codex, PR #1147): getHistorialContactos aplica su límite ANTES
+	// de que este archivo separe promesa_pago del resto (ver `contactos` y
+	// `promesasPago` abajo) — con el default de 20, un caso con varias
+	// promesas dejaba el Historial general corto y perdía promesas viejas
+	// fuera de esa ventana en ambas listas. El server no filtra por tipo ni
+	// pagina de verdad (solo un límite plano) — hasta que eso se separe en
+	// el backend, subir el límite es el workaround práctico: cubre el caso
+	// real (decenas de contactos), no infinito.
 	const historialContactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
-			input: { casoCobroId: casoDetails.data?.id || "" },
+			input: { casoCobroId: casoDetails.data?.id || "", limit: 200 },
 		}),
 		enabled: !!session && !!casoDetails.data?.id,
+	});
+
+	// CB-020: promesas de pago registradas en el historial. El estado
+	// (pendiente/cumplida/incumplida) vive en estadoPromesa (columna DB) y se
+	// recalcula/persiste vía getEstadoPromesasPago (ver abajo). La tarjeta
+	// prioriza el resultado EN MEMORIA de esa query (más fresco) sobre
+	// promesa.estadoPromesa (columna DB, puede estar un ciclo atrás) — NO se
+	// invalida/refetchea historialContactos tras el cálculo: eso generaba un
+	// array `promesasPago` con nueva identidad en cada éxito, lo que a su vez
+	// recalculaba el input de esta misma query (key distinta) y volvía a
+	// disparar el efecto — un ciclo de refetch innecesario que se evita
+	// leyendo el resultado directo en vez de ir a buscarlo de nuevo a la DB.
+	const promesasPago = useMemo(
+		() =>
+			(historialContactos.data || []).filter(
+				(c: any) => c.estadoContacto === "promesa_pago",
+			),
+		[historialContactos.data],
+	);
+	const estadoPromesasPago = useQuery({
+		...orpc.getEstadoPromesasPago.queryOptions({
+			input: {
+				numeroSifco: casoDetails.data?.numeroCreditoSifco || id || "",
+				// El server carga cuotaInicio/cuotaFin/incluyeMora/fechaPrometida de
+				// DB por id (no confía en lo que mande el cliente) — solo manda ids.
+				// getHistorialContactos ahora pide limit=200 (ver arriba) — un caso
+				// con más de 100 promesas con fecha excedería el .max(100) del
+				// server y el request completo sería rechazado (Codex, PR #1148),
+				// dejando estadoPromesa estancado para TODAS. Se ordena por fecha
+				// prometida más reciente primero y se cortan las primeras 100: las
+				// más viejas conservan su estadoPromesa ya persistido en DB (mismo
+				// fallback que usa la tarjeta cuando el id no viene en la
+				// respuesta), solo dejan de recalcularse en cada visita.
+				promesaIds: promesasPago
+					.filter((p: any) => p.fechaProximoContacto)
+					.sort(
+						(a: any, b: any) =>
+							new Date(b.fechaProximoContacto).getTime() -
+							new Date(a.fechaProximoContacto).getTime(),
+					)
+					.slice(0, 100)
+					.map((p: any) => p.id),
+			},
+		}),
+		enabled:
+			!!session &&
+			promesasPago.length > 0 &&
+			!!(casoDetails.data?.numeroCreditoSifco || id),
 	});
 
 	// Obtener seguimientos activos
@@ -467,7 +536,11 @@ function RouteComponent() {
 	}
 
 	const caso = casoDetails.data;
-	const contactos = historialContactos.data || [];
+	// CB-020: las promesas de pago viven SOLO en la tarjeta "Promesas de
+	// Pago" (ver promesasPago) — no en el Historial de Contactos general.
+	const contactos = (historialContactos.data || []).filter(
+		(c: any) => c.estadoContacto !== "promesa_pago",
+	);
 	const convenios = conveniosPago.data || [];
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
@@ -1210,6 +1283,56 @@ function RouteComponent() {
 												Email
 											</Button>
 										</ContactoModal>
+
+										{/* CB-020: modal reducido — solo Detalles de la
+										    Conversación + fecha prometida (obligatoria). */}
+										<ContactoModal
+											casoCobroId={caso.id}
+											clienteNombre={caso.clienteNombre || ""}
+											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											telefonoAlternativo={
+												caso.telefonoAlternativo
+													? String(caso.telefonoAlternativo)
+													: undefined
+											}
+											emailCliente={caso.emailContacto || ""}
+											metodoInicial="llamada"
+											variante="promesa"
+											cuotasDisponibles={cuotas
+												.filter(
+													(c: any) =>
+														c.estadoMora !== "pagado" &&
+														c.fechaVencimiento &&
+														new Date(c.fechaVencimiento) < new Date(),
+												)
+												.map((c: any) => ({ numeroCuota: c.numeroCuota }))}
+											fechaPago={String(caso.diaPagoMensual || 15)}
+											cuotaMensual={Number(
+												caso.cuotaMensual || 0,
+											).toLocaleString()}
+											placa={caso.vehiculoPlaca || ""}
+											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
+											montoAdeudado={(
+												Number(caso.montoEnMora || 0) +
+												Number(caso.cuotaMensual || 0)
+											).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
+											cuotasAtraso={caso.cuotasVencidas ?? 0}
+											estadoMora={caso.estadoMora || undefined}
+											fechaInicio={caso.fechaInicio || null}
+											nombreAsesor={caso.asesor?.nombre || ""}
+											telefonoAsesor={caso.asesor?.telefono || ""}
+										>
+											<Button
+												variant="outline"
+												className="flex items-center gap-2"
+											>
+												<HandCoins className="h-4 w-4" />
+												Promesa de Pago
+											</Button>
+										</ContactoModal>
 									</div>
 								</>
 							) : (
@@ -1539,6 +1662,154 @@ function RouteComponent() {
 							)}
 						</CardContent>
 					</Card>
+
+					{/* CB-020: Promesas de Pago — filtro sobre los mismos contactos
+					    (no query aparte para listarlas). Las promesas ya NO aparecen
+					    en el Historial de arriba (se filtran ahí, ver `contactos`).
+					    Cumplida/incumplida/pendiente viene de estadoPromesa, persistido
+					    por getEstadoPromesasPago verificando cuotas + mora del crédito
+					    en cartera-back — 100% automático, sin confirmación manual. */}
+					{(() => {
+						if (promesasPago.length === 0) return null;
+						const hoy = new Date();
+						// Redeclarado localmente (no importado del server): igual al
+						// EstadoPromesa de lib/promesa-pago.ts en el backend — mantener
+						// ambos alineados si ese union cambia.
+						type EstadoPromesa = "pendiente" | "cumplida" | "incumplida";
+						return (
+							<Card>
+								<CardHeader>
+									<CardTitle className="flex items-center gap-2">
+										<HandCoins className="h-5 w-5" />
+										Promesas de Pago
+									</CardTitle>
+									<CardDescription>
+										Cuotas y/o mora que el cliente prometió pagar
+									</CardDescription>
+								</CardHeader>
+								<CardContent>
+									<div className="space-y-4">
+										{promesasPago.map((promesa: any) => {
+											const fechaPrometida = promesa.fechaProximoContacto
+												? new Date(promesa.fechaProximoContacto)
+												: null;
+											// Prioriza el resultado recién calculado (en memoria,
+											// sin refetch) sobre la columna DB, que puede estar un
+											// ciclo atrás si esta es la primera visita al caso.
+											const estadoPromesa: EstadoPromesa =
+												(
+													estadoPromesasPago.data as
+														| Record<string, EstadoPromesa>
+														| undefined
+												)?.[promesa.id] ??
+												promesa.estadoPromesa ??
+												"pendiente";
+											// Mismo criterio de gracia que el backend (ver
+											// finDeGraciaGT en lib/promesa-pago.ts): comparar el
+											// instante crudo marcaba VENCIDA desde medianoche GT
+											// del MISMO día prometido, contradiciendo el badge
+											// "Pendiente" que sí usa esa gracia (Codex, PR #1147).
+											const finDeGraciaGT = fechaPrometida
+												? new Date(
+														fechaPrometida.getTime() + 24 * 60 * 60 * 1000,
+													)
+												: null;
+											const vencida =
+												finDeGraciaGT !== null &&
+												finDeGraciaGT <= hoy &&
+												estadoPromesa !== "cumplida";
+											const estadoBadge: Record<
+												EstadoPromesa,
+												{ label: string; color: string }
+											> = {
+												cumplida: {
+													label: "Cumplida",
+													color: "bg-green-100 text-green-800",
+												},
+												incumplida: {
+													label: "Incumplida",
+													color: "bg-red-100 text-red-800",
+												},
+												pendiente: {
+													label: "Pendiente",
+													color: "bg-blue-100 text-blue-800",
+												},
+											};
+											const badge = estadoBadge[estadoPromesa];
+											const tieneRango =
+												promesa.cuotaInicio != null && promesa.cuotaFin != null;
+											// Fila legacy (creada antes de CB-020, ver
+											// promesa-pago.test.ts) puede tener rango null e
+											// incluyeMora=false — sin esto "Mora del crédito" se
+											// mostraba igual, mintiendo sobre lo que prometió el
+											// cliente (Codex, PR #1147).
+											const etiquetaRango = tieneRango
+												? promesa.cuotaInicio === promesa.cuotaFin
+													? `Cuota #${promesa.cuotaInicio}`
+													: `Cuotas #${promesa.cuotaInicio} a #${promesa.cuotaFin}`
+												: promesa.incluyeMora
+													? "Mora del crédito"
+													: "Sin rango ni mora especificado";
+											return (
+												<div key={promesa.id} className="rounded-lg border p-4">
+													<div className="mb-2 flex items-start justify-between">
+														<div className="flex flex-wrap items-center gap-2">
+															<span
+																className={
+																	tieneRango || promesa.incluyeMora
+																		? "font-medium"
+																		: "font-medium text-muted-foreground italic"
+																}
+																title={
+																	tieneRango || promesa.incluyeMora
+																		? undefined
+																		: "Registro anterior a la validación de rango/mora obligatorio — revisar comentarios para saber qué prometió el cliente."
+																}
+															>
+																{etiquetaRango}
+															</span>
+															{tieneRango && promesa.incluyeMora && (
+																<Badge variant="outline">+ Mora</Badge>
+															)}
+															<span className="text-muted-foreground text-sm">
+																{fechaPrometida
+																	? formatFechaGT(fechaPrometida)
+																	: "Sin fecha"}
+															</span>
+															<Badge className={badge.color}>
+																{badge.label}
+															</Badge>
+															{vencida && (
+																<Badge className="bg-red-600 text-white">
+																	VENCIDA
+																</Badge>
+															)}
+														</div>
+														<p className="text-muted-foreground text-sm">
+															Registrada:{" "}
+															{promesa.fechaContacto
+																? formatFechaGT(new Date(promesa.fechaContacto))
+																: "Sin fecha"}
+														</p>
+													</div>
+													<p className="mb-2 text-sm">{promesa.comentarios}</p>
+													{promesa.compromisosPago && (
+														<div className="rounded bg-green-50 p-2 text-sm">
+															<span className="font-medium">Compromiso: </span>
+															{promesa.compromisosPago}
+														</div>
+													)}
+													<div className="mt-2 text-muted-foreground text-xs">
+														Por: {promesa.realizadoPor || "Sin asignar"}
+													</div>
+												</div>
+											);
+										})}
+									</div>
+								</CardContent>
+							</Card>
+						);
+					})()}
 
 					{/* Historial de Pagos */}
 					<Card>

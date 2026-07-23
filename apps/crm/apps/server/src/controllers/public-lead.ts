@@ -64,7 +64,8 @@ function getClientIp(c: Context): string {
 }
 
 /**
- * Creación básica de lead: pública, solo con rate limit por IP (comportamiento de siempre).
+ * Creación básica de lead: pública, solo para el origen de portal-web y con rate limit
+ * por IP (comportamiento de siempre, ahora con esa validación de dominio agregada).
  * campaignFormKey/intakeAnswers (Make) sí exige "Authorization: Bearer <secret>".
  */
 export async function validatePublicLeadToken(
@@ -103,6 +104,16 @@ export async function validatePublicLeadToken(
 			},
 			401,
 		);
+	}
+
+	const origin = c.req.header("origin") || "";
+	const isLocalDev =
+		origin.startsWith("http://localhost:") ||
+		origin.startsWith("http://127.0.0.1:");
+	const allowedOrigin = process.env.PORTAL_WEB_ORIGIN;
+
+	if (!isLocalDev && (!allowedOrigin || origin !== allowedOrigin)) {
+		return c.json({ success: false, error: "Origen no permitido" }, 403);
 	}
 
 	if (isRateLimited(getClientIp(c))) {

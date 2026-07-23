@@ -149,18 +149,24 @@ async function notificarClientesSubidos(
 	mapaAsesor: Map<number, string>,
 	usuarioSistema: string,
 ): Promise<number> {
+	// El motor de buckets corre a las 23:59 GT (procesarMoras, cartera-back), así
+	// que las SUBIDA "de anoche" llevan la fecha GT de AYER. A las 08:00 GT hay
+	// que mirar ayer + hoy (ventana), no solo hoy, o el aviso cliente_subido
+	// nunca dispararía (Codex P2). El dedup de ~20h evita repetir.
 	const hoyKey = gtDateKey(ahora);
-	const subidasHoy = eventos.filter(
+	const ayerKey = gtDateKey(new Date(ahora.getTime() - 86_400_000));
+	const ventana = new Set([ayerKey, hoyKey]);
+	const subidasRecientes = eventos.filter(
 		(e) =>
 			e.tipo_evento === "SUBIDA" &&
 			e.bucket_nuevo >= 1 &&
-			gtDateKey(new Date(e.fecha)) === hoyKey,
+			ventana.has(gtDateKey(new Date(e.fecha))),
 	);
-	if (subidasHoy.length === 0) return 0;
+	if (subidasRecientes.length === 0) return 0;
 
-	// Una por crédito (por si hubiese doble evento el mismo día).
+	// Una por crédito (por si hubiese doble evento en la ventana).
 	const porCredito = new Map<number, CarteraBucketHistorialRow>();
-	for (const e of subidasHoy) {
+	for (const e of subidasRecientes) {
 		if (!porCredito.has(e.credito_id)) porCredito.set(e.credito_id, e);
 	}
 	const subs = [...porCredito.values()];

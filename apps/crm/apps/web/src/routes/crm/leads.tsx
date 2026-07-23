@@ -76,6 +76,7 @@ import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
+import { resolveAnalysisOpportunityId } from "@/lib/credit-analysis";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
@@ -155,6 +156,8 @@ function RouteComponent() {
 	};
 
 	const [isEditingCreditAnalysis, setIsEditingCreditAnalysis] = useState(false);
+	const [selectedAnalysisOpportunityId, setSelectedAnalysisOpportunityId] =
+		useState<string>();
 	const [isConvertDialogOpen, setIsConvertDialogOpen] = useState(false);
 	const [leadToConvert, setLeadToConvert] = useState<Lead | null>(null);
 	const [convertForm, setConvertForm] = useState({
@@ -276,14 +279,6 @@ function RouteComponent() {
 		enabled: !!selectedDepartamento,
 	});
 
-	const creditAnalysisQuery = useQuery({
-		queryKey: ["getCreditAnalysisByLeadId", selectedLead?.id],
-		queryFn: selectedLead?.id
-			? () => client.getCreditAnalysisByLeadId({ leadId: selectedLead.id })
-			: () => Promise.resolve(null),
-		enabled: !!selectedLead?.id && isDetailsDialogOpen,
-	});
-
 	// Query para obtener las oportunidades del lead
 	const leadOpportunitiesQuery = useQuery({
 		queryKey: ["getOpportunitiesByLeadId", selectedLead?.id],
@@ -292,7 +287,22 @@ function RouteComponent() {
 			: () => Promise.resolve([]),
 		enabled: !!selectedLead?.id && isDetailsDialogOpen,
 	});
-	const analysisOpportunityId = search.opportunityId;
+	const analysisOpportunityId = resolveAnalysisOpportunityId(
+		selectedAnalysisOpportunityId,
+		search.opportunityId,
+		leadOpportunitiesQuery.data ?? [],
+	);
+	const creditAnalysisQuery = useQuery({
+		queryKey: ["creditAnalysis", "opportunity", analysisOpportunityId],
+		queryFn: selectedLead?.id && analysisOpportunityId
+			? () =>
+					client.getCreditAnalysisByLeadId({
+						leadId: selectedLead.id,
+						opportunityId: analysisOpportunityId,
+					})
+			: () => Promise.resolve(null),
+		enabled: !!selectedLead?.id && !!analysisOpportunityId && isDetailsDialogOpen,
+	});
 
 	// Query para obtener un lead específico por ID (desde URL)
 	const specificLeadQuery = useQuery({
@@ -457,6 +467,7 @@ function RouteComponent() {
 	const upsertCreditAnalysisMutation = useMutation({
 		mutationFn: (input: {
 			leadId: string;
+			opportunityId: string;
 			monthlyFixedIncome?: number;
 			monthlyVariableIncome?: number;
 			monthlyFixedExpenses?: number;
@@ -467,7 +478,16 @@ function RouteComponent() {
 		}) => client.upsertCreditAnalysis(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
-				queryKey: ["getCreditAnalysisByLeadId", selectedLead?.id],
+				queryKey: ["creditAnalysis", "opportunity", analysisOpportunityId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ["getAnalysisChecklist", analysisOpportunityId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ["consolidatedCreditAnalysis", analysisOpportunityId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ["getConsolidatedCreditAnalysis", analysisOpportunityId],
 			});
 			toast.success("Análisis crediticio actualizado exitosamente");
 			setIsEditingCreditAnalysis(false);
@@ -692,6 +712,8 @@ function RouteComponent() {
 		prevDetailsOpenRef.current = isDetailsDialogOpen;
 
 		if (wasOpen && !isDetailsDialogOpen) {
+			setSelectedAnalysisOpportunityId(undefined);
+			setIsEditingCreditAnalysis(false);
 			// Skip cleanup if transitioning to edit modal
 			if (isTransitioningToEditRef.current) {
 				isTransitioningToEditRef.current = false;
@@ -705,6 +727,11 @@ function RouteComponent() {
 			}
 		}
 	}, [isDetailsDialogOpen, navigate, search.leadId]);
+
+	useEffect(() => {
+		setSelectedAnalysisOpportunityId(undefined);
+		setIsEditingCreditAnalysis(false);
+	}, [selectedLead?.id]);
 
 	// Populate form when editing a lead
 	useEffect(() => {
@@ -2660,6 +2687,7 @@ function RouteComponent() {
 										<Button
 											variant="outline"
 											size="sm"
+											disabled={!analysisOpportunityId}
 											onClick={() => {
 												const data = creditAnalysisQuery.data;
 												setCreditAnalysisForm({
@@ -2694,9 +2722,47 @@ function RouteComponent() {
 										</Button>
 									)}
 								</div>
+								{leadOpportunitiesQuery.data &&
+									leadOpportunitiesQuery.data.length > 1 && (
+										<div className="space-y-2">
+											<Label htmlFor="analysis-opportunity">
+												Oportunidad a analizar
+											</Label>
+											<Select
+												value={analysisOpportunityId}
+												onValueChange={(opportunityId) => {
+													setSelectedAnalysisOpportunityId(opportunityId);
+													setIsEditingCreditAnalysis(false);
+												}}
+											>
+												<SelectTrigger id="analysis-opportunity">
+													<SelectValue placeholder="Seleccione una oportunidad" />
+												</SelectTrigger>
+												<SelectContent>
+													{leadOpportunitiesQuery.data.map((opportunity) => (
+														<SelectItem
+															key={opportunity.id}
+															value={opportunity.id}
+														>
+															{opportunity.title || "Oportunidad"}
+															{opportunity.numeroSifco
+																? ` · SIFCO ${opportunity.numeroSifco}`
+																: ""}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								{!leadOpportunitiesQuery.isLoading &&
+									leadOpportunitiesQuery.data?.length === 0 && (
+										<p className="text-amber-700 text-sm">
+											Este lead no tiene oportunidades disponibles para analizar.
+										</p>
+									)}
 
 								{/* Análisis automático con IA */}
-								{selectedLead?.id && (
+								{selectedLead?.id && analysisOpportunityId && (
 									<BankStatementAnalysis
 										leadId={selectedLead.id}
 										opportunityId={analysisOpportunityId}
@@ -2708,9 +2774,10 @@ function RouteComponent() {
 									<form
 										onSubmit={(e) => {
 											e.preventDefault();
-											if (!selectedLead) return;
+											if (!selectedLead || !analysisOpportunityId) return;
 											upsertCreditAnalysisMutation.mutate({
 												leadId: selectedLead.id,
+												opportunityId: analysisOpportunityId,
 												monthlyFixedIncome:
 													creditAnalysisForm.monthlyFixedIncome
 														? Number(creditAnalysisForm.monthlyFixedIncome)
@@ -3114,6 +3181,7 @@ function RouteComponent() {
 										<Button
 											variant="link"
 											className="mt-2"
+											disabled={!analysisOpportunityId}
 											onClick={() => {
 												setCreditAnalysisForm({
 													monthlyFixedIncome: "",

@@ -1,3 +1,4 @@
+import { relations, sql } from "drizzle-orm";
 import {
 	boolean,
 	decimal,
@@ -7,6 +8,7 @@ import {
 	pgTable,
 	text,
 	timestamp,
+	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
@@ -242,53 +244,64 @@ export const coDebtors = pgTable("co_debtors", {
 });
 
 // Credit Analysis table - Análisis de capacidad de pago
-export const creditAnalysis = pgTable("credit_analysis", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	// El análisis puede ser de un lead O de un co-deudor (uno de los dos debe estar presente)
-	leadId: uuid("lead_id").references(() => leads.id),
-	coDebtorId: uuid("co_debtor_id").references(() => coDebtors.id),
-	// Resumen de análisis completo (JSON)
-	fullAnalysis: text("full_analysis"), // JSON string with complete bank analysis
-	// Promedios mensuales
-	monthlyFixedIncome: decimal("monthly_fixed_income", {
-		precision: 12,
-		scale: 2,
-	}),
-	monthlyVariableIncome: decimal("monthly_variable_income", {
-		precision: 12,
-		scale: 2,
-	}),
-	monthlyFixedExpenses: decimal("monthly_fixed_expenses", {
-		precision: 12,
-		scale: 2,
-	}),
-	monthlyVariableExpenses: decimal("monthly_variable_expenses", {
-		precision: 12,
-		scale: 2,
-	}),
-	economicAvailability: decimal("economic_availability", {
-		precision: 12,
-		scale: 2,
-	}),
-	// Cálculos de capacidad de pago
-	minPayment: decimal("min_payment", { precision: 12, scale: 2 }),
-	maxPayment: decimal("max_payment", { precision: 12, scale: 2 }),
-	adjustedPayment: decimal("adjusted_payment", { precision: 12, scale: 2 }),
-	maxCreditAmount: decimal("max_credit_amount", { precision: 12, scale: 2 }),
-	// Hasta 3 fechas ideales de pago sugeridas por la IA, rankeadas con % de recomendación
-	suggestedPaymentDays: jsonb("suggested_payment_days").$type<
-		Array<{ dia: number; porcentaje: number }>
-	>(),
-	// Control de intentos de análisis con IA (cada llamada a IA cuesta dinero)
-	attemptCount: integer("attempt_count").notNull().default(0), // Se incrementa al llamar a la IA
-	// Metadata
-	analyzedAt: timestamp("analyzed_at"), // null hasta que haya un análisis exitoso
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-	createdBy: text("created_by")
-		.notNull()
-		.references(() => user.id),
-});
+export const creditAnalysis = pgTable(
+	"credit_analysis",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		// El análisis puede ser de un lead O de un co-deudor (uno de los dos debe estar presente)
+		leadId: uuid("lead_id").references(() => leads.id),
+		coDebtorId: uuid("co_debtor_id").references(() => coDebtors.id),
+		opportunityId: uuid("opportunity_id").references(() => opportunities.id, {
+			onDelete: "set null",
+		}),
+		// Resumen de análisis completo (JSON)
+		fullAnalysis: text("full_analysis"), // JSON string with complete bank analysis
+		// Promedios mensuales
+		monthlyFixedIncome: decimal("monthly_fixed_income", {
+			precision: 12,
+			scale: 2,
+		}),
+		monthlyVariableIncome: decimal("monthly_variable_income", {
+			precision: 12,
+			scale: 2,
+		}),
+		monthlyFixedExpenses: decimal("monthly_fixed_expenses", {
+			precision: 12,
+			scale: 2,
+		}),
+		monthlyVariableExpenses: decimal("monthly_variable_expenses", {
+			precision: 12,
+			scale: 2,
+		}),
+		economicAvailability: decimal("economic_availability", {
+			precision: 12,
+			scale: 2,
+		}),
+		// Cálculos de capacidad de pago
+		minPayment: decimal("min_payment", { precision: 12, scale: 2 }),
+		maxPayment: decimal("max_payment", { precision: 12, scale: 2 }),
+		adjustedPayment: decimal("adjusted_payment", { precision: 12, scale: 2 }),
+		maxCreditAmount: decimal("max_credit_amount", { precision: 12, scale: 2 }),
+		// Hasta 3 fechas ideales de pago sugeridas por la IA, rankeadas con % de recomendación
+		suggestedPaymentDays: jsonb("suggested_payment_days").$type<
+			Array<{ dia: number; porcentaje: number }>
+		>(),
+		// Control de intentos de análisis con IA (cada llamada a IA cuesta dinero)
+		attemptCount: integer("attempt_count").notNull().default(0), // Se incrementa al llamar a la IA
+		// Metadata
+		analyzedAt: timestamp("analyzed_at"), // null hasta que haya un análisis exitoso
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+		createdBy: text("created_by")
+			.notNull()
+			.references(() => user.id),
+	},
+	(table) => [
+		uniqueIndex("credit_analysis_opportunity_id_unique")
+			.on(table.opportunityId)
+			.where(sql`${table.opportunityId} IS NOT NULL`),
+	],
+);
 
 // Opportunities table
 export const opportunities = pgTable("opportunities", {
@@ -391,6 +404,25 @@ export const opportunities = pgTable("opportunities", {
 		.notNull()
 		.references(() => user.id),
 });
+
+export const creditAnalysisRelations = relations(creditAnalysis, ({ one }) => ({
+	lead: one(leads, {
+		fields: [creditAnalysis.leadId],
+		references: [leads.id],
+	}),
+	coDebtor: one(coDebtors, {
+		fields: [creditAnalysis.coDebtorId],
+		references: [coDebtors.id],
+	}),
+	opportunity: one(opportunities, {
+		fields: [creditAnalysis.opportunityId],
+		references: [opportunities.id],
+	}),
+}));
+
+export const opportunitiesRelations = relations(opportunities, ({ one }) => ({
+	creditAnalyses: one(creditAnalysis),
+}));
 
 // Clients table
 export const clients = pgTable("clients", {

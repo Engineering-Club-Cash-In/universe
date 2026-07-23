@@ -166,7 +166,7 @@ describe("buildCarteraMatchedClientRows", () => {
 					isClosed: true,
 				},
 			],
-			creditAnalysis: null,
+			creditAnalysisByOpportunityId: new Map(),
 			carteraCreditBySifco: new Map([
 				[
 					"SIFCO-1",
@@ -207,7 +207,7 @@ describe("buildCarteraMatchedClientRows", () => {
 					isClosed: true,
 				},
 			],
-			creditAnalysis: null,
+			creditAnalysisByOpportunityId: new Map(),
 			carteraCreditBySifco: new Map([
 				[
 					"SIFCO-1",
@@ -241,7 +241,7 @@ describe("buildCarteraMatchedClientRows", () => {
 					isClosed: true,
 				},
 			],
-			creditAnalysis: null,
+			creditAnalysisByOpportunityId: new Map(),
 			carteraCreditBySifco: new Map([
 				[
 					"SIFCO-1",
@@ -269,6 +269,86 @@ describe("buildCarteraMatchedClientRows", () => {
 			"opp-1",
 			"opp-2",
 		]);
+	});
+
+	test("uses the analysis for each opportunity matching the current SIFCO", () => {
+		const analysis1 = { id: "analysis-1", maxPayment: "100.00" };
+		const analysis2 = { id: "analysis-2", maxPayment: "200.00" };
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{ id: "opp-1", numeroSifco: "SIFCO-1", isClosed: true },
+				{ id: "opp-2", numeroSifco: "SIFCO-2", isClosed: true },
+			],
+			creditAnalysisByOpportunityId: new Map([
+				["opp-1", analysis1],
+				["opp-2", analysis2],
+			]),
+			carteraCreditBySifco: new Map([
+				["SIFCO-1", { creditos: { numero_credito_sifco: "SIFCO-1" } }],
+				["SIFCO-2", { creditos: { numero_credito_sifco: "SIFCO-2" } }],
+			]),
+		});
+
+		expect(rows.map((row) => row.creditAnalysis)).toEqual([
+			analysis1,
+			analysis2,
+		]);
+	});
+
+	test("only returns SIFCO analyses owned by the sales user", () => {
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{
+					id: "opp-sales-1",
+					numeroSifco: "SIFCO-1",
+					assignedTo: "sales-1",
+					isClosed: true,
+				},
+				{
+					id: "opp-sales-2",
+					numeroSifco: "SIFCO-2",
+					assignedTo: "sales-2",
+					isClosed: true,
+				},
+			],
+			creditAnalysisByOpportunityId: new Map([
+				["opp-sales-1", { id: "analysis-sales-1" }],
+				["opp-sales-2", { id: "analysis-sales-2" }],
+			]),
+			carteraCreditBySifco: new Map([
+				["SIFCO-1", { creditos: { numero_credito_sifco: "SIFCO-1" } }],
+				["SIFCO-2", { creditos: { numero_credito_sifco: "SIFCO-2" } }],
+			]),
+			opportunityOwnerId: "sales-1",
+		});
+
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.carteraCredit?.numeroSifco).toBe("SIFCO-1");
+		expect(rows[0]?.creditAnalysis).toEqual({ id: "analysis-sales-1" });
+		expect(rows[0]?.opportunities.map((opportunity) => opportunity.id)).toEqual([
+			"opp-sales-1",
+		]);
+	});
+
+	test("does not assign an analysis when the SIFCO relation is ambiguous", () => {
+		const rows = buildCarteraMatchedClientRows({
+			lead,
+			leadOpportunities: [
+				{ id: "opp-1", numeroSifco: "SIFCO-1", isClosed: true },
+				{ id: "opp-2", numeroSifco: "SIFCO-1", isClosed: true },
+			],
+			creditAnalysisByOpportunityId: new Map([
+				["opp-1", { id: "analysis-1" }],
+				["opp-2", { id: "analysis-2" }],
+			]),
+			carteraCreditBySifco: new Map([
+				["SIFCO-1", { creditos: { numero_credito_sifco: "SIFCO-1" } }],
+			]),
+		});
+
+		expect(rows[0]?.creditAnalysis).toBeNull();
 	});
 });
 

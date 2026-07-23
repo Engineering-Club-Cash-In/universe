@@ -164,7 +164,14 @@ export function validateIntakeAnswers(
 		return `campaignFormKey no reconocido: ${campaignFormKey}`;
 	}
 
+	const seenFieldKeys = new Set<string>();
+
 	for (const answer of answers) {
+		if (seenFieldKeys.has(answer.fieldKey)) {
+			return `Campo duplicado: ${answer.fieldKey}`;
+		}
+		seenFieldKeys.add(answer.fieldKey);
+
 		const allowedValues = allowedFields[answer.fieldKey];
 
 		if (!allowedValues) {

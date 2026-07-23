@@ -2126,6 +2126,19 @@ export const cobrosRouter = {
 			);
 			if (promesasValidas.length === 0) return {};
 
+			// CB-020 (review Codex): getCredito() usa un cache de 5 min (TTL
+			// default) que createPago() intenta invalidar con un patrón que NO
+			// matchea la key real (bug preexistente y ajeno a este PR, en
+			// cartera-back-client.ts:873 — "credito:${sifco}" vs la key real
+			// "GET:.../credito?numero_credito_sifco=${sifco}:{}", confirmado con
+			// prueba directa: .includes() da false). Sin este endpoint acá abajo
+			// no vale la pena arreglar ESE bug ajeno, pero SÍ evitar que la
+			// persistencia de estadoPromesa dependa de un snapshot potencialmente
+			// viejo: se invalida la key real ANTES de leer, para esta llamada.
+			carteraBackClient.invalidateCache(
+				`/credito?numero_credito_sifco=${input.numeroSifco}`,
+			);
+
 			let credito: Awaited<ReturnType<typeof carteraBackClient.getCredito>>;
 			try {
 				credito = await carteraBackClient.getCredito(input.numeroSifco);

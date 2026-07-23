@@ -2049,6 +2049,14 @@ export const crmRouter = {
 					});
 				}
 
+				// Bloquear cualquier retroceso una vez alcanzada Formalización Final (90%+)
+				if (fromPercentage >= 90 && toPercentage < fromPercentage) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"La oportunidad ya alcanzó Formalización Final (90%) y no puede retroceder de etapa.",
+					});
+				}
+
 				// Validate credit detail approval when moving from <=40% to >=50%
 				if (fromPercentage <= 40 && toPercentage >= 50) {
 					// Check if credit detail has been approved

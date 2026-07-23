@@ -210,6 +210,9 @@ function AnalysisPage() {
 		useState<OpportunityForModal | null>(null);
 	const [selectedLeadForModal, setSelectedLeadForModal] =
 		useState<LeadForModal | null>(null);
+	const [selectedLeadOpportunityId, setSelectedLeadOpportunityId] = useState<
+		string | undefined
+	>();
 
 	// Check authentication and role
 	useEffect(() => {
@@ -325,6 +328,7 @@ function AnalysisPage() {
 
 	const handleOpenLeadModal = (opportunity: OpportunityForAnalysis) => {
 		if (!opportunity.lead) return;
+		setSelectedLeadOpportunityId(opportunity.id);
 		setSelectedLeadForModal({
 			id: opportunity.lead.id,
 			firstName: opportunity.lead.firstName,
@@ -720,6 +724,7 @@ function AnalysisPage() {
 				open={isLeadModalOpen}
 				onOpenChange={setIsLeadModalOpen}
 				lead={selectedLeadForModal}
+				opportunityId={selectedLeadOpportunityId}
 				readOnly
 			/>
 		</div>
@@ -829,19 +834,18 @@ function DisbursementSection({
 	};
 
 	const handleNavigateToLead = (leadId: string) => {
-		// Find the opportunity with this lead
-		const opp = opportunities?.find((o) => o.leadId === leadId);
-		if (opp) {
+		const opportunity = selectedOpportunityForModal;
+		if (opportunity?.lead?.id === leadId) {
 			const leadData = {
 				id: leadId,
-				firstName: opp.leadName?.split(" ")[0] || "",
-				lastName: opp.leadName?.split(" ").slice(1).join(" ") || "",
-				email: null,
-				phone: opp.leadPhone || null,
+				firstName: opportunity.lead.firstName,
+				lastName: opportunity.lead.lastName,
+				email: opportunity.lead.email,
+				phone: opportunity.lead.phone,
 				company: null,
 				source: "",
 				status: "qualified",
-				createdAt: opp.createdAt,
+				createdAt: opportunity.createdAt,
 			};
 			setIsOpportunityModalOpen(false);
 			// Delay opening second modal to allow first to fully close
@@ -1053,6 +1057,7 @@ function DisbursementSection({
 				open={isLeadModalOpen}
 				onOpenChange={setIsLeadModalOpen}
 				lead={selectedLeadForModal}
+				opportunityId={selectedOpportunityForModal?.id}
 				readOnly
 			/>
 		</div>

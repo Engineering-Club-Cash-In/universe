@@ -1181,16 +1181,6 @@ export const crmRouter = {
 					throw new ORPCError("NOT_FOUND", { message: "Lead no encontrado" });
 				}
 
-				// Sales users can only see analysis for their assigned leads
-				if (
-					context.userRole === "sales" &&
-					lead[0].assignedTo !== context.userId
-				) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para ver este análisis",
-					});
-				}
-
 				if (!input.opportunityId) {
 					return null;
 				}
@@ -1314,16 +1304,6 @@ export const crmRouter = {
 
 				if (lead.length === 0) {
 					throw new ORPCError("NOT_FOUND", { message: "Lead no encontrado" });
-				}
-
-				// Sales users can only update analysis for their assigned leads
-				if (
-					context.userRole === "sales" &&
-					lead[0].assignedTo !== context.userId
-				) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para actualizar este análisis",
-					});
 				}
 
 				const [opportunity] = await db

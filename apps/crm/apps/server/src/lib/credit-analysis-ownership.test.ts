@@ -114,6 +114,34 @@ describe("credit analysis ownership", () => {
 		expect(analysisReadIndex).toBeGreaterThan(permissionCheckIndex);
 	});
 
+	test("authorizes reading manual analysis by opportunity owner instead of lead owner", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/crm.ts"),
+			"utf8",
+		);
+		const handler = source.slice(
+			source.indexOf("getCreditAnalysisByLeadId: crmProcedure"),
+			source.indexOf("upsertCreditAnalysis: crmProcedure"),
+		);
+
+		expect(handler).not.toContain("lead[0].assignedTo !== context.userId");
+		expect(handler).toContain("opportunity.assignedTo");
+	});
+
+	test("authorizes saving manual analysis by opportunity owner instead of lead owner", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/crm.ts"),
+			"utf8",
+		);
+		const handler = source.slice(
+			source.indexOf("upsertCreditAnalysis: crmProcedure"),
+			source.indexOf("resetCreditAnalysis: crmProcedure"),
+		);
+
+		expect(handler).not.toContain("lead[0].assignedTo !== context.userId");
+		expect(handler).toContain("opportunity.assignedTo");
+	});
+
 	test("checks opportunity ownership before bank analysis side effects", () => {
 		const source = readFileSync(
 			join(import.meta.dir, "../routers/bank-analysis.ts"),

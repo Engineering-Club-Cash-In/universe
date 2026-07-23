@@ -273,12 +273,15 @@ async function notificarSinContacto(
 				: null;
 		const bucketNombre =
 			x.evento.bucket_nuevo_nombre ?? `bucket ${x.evento.bucket_nuevo}`;
+		const credito = `${x.evento.numero_credito_sifco} (${x.evento.cliente})`;
+		const asesor = x.evento.asesor || "Sin asesor asignado";
 		filas.push(
 			...filasNotificacionCobros({
 				casoId: x.casoId,
 				cobrosTipo: "sin_contacto_3d",
 				titulo: "Cliente vencido: 3 días hábiles sin contacto",
-				descripcion: `El crédito ${x.evento.numero_credito_sifco} (${x.evento.cliente}) lleva 3+ días hábiles en ${bucketNombre} sin registro de contacto. Es una falta pendiente por atender.`,
+				descripcion: `El crédito ${credito} lleva 3+ días hábiles en ${bucketNombre} sin registro de contacto. Es una falta pendiente por atender.`,
+				descripcionSupervisor: `El asesor ${asesor} lleva 3+ días hábiles sin contactar el crédito ${credito} en ${bucketNombre}. Falta sin atender.`,
 				asesorUserId,
 				supervisores,
 				usuarioSistema,

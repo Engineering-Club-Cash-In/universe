@@ -134,6 +134,7 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 			sifco: string;
 			cliente: string;
 			asesorId: number | null;
+			asesorNombre: string;
 			fechaPrometida: Date;
 		}> = [];
 
@@ -218,6 +219,7 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 						sifco,
 						cliente: credito.usuario?.nombre ?? "",
 						asesorId: credito.asesor?.asesor_id ?? null,
+						asesorNombre: credito.asesor?.nombre ?? "",
 						fechaPrometida: c.fechaPrometida,
 					});
 				}
@@ -274,6 +276,7 @@ async function notificarPromesasIncumplidas(
 		sifco: string;
 		cliente: string;
 		asesorId: number | null;
+		asesorNombre: string;
 		fechaPrometida: Date;
 	}>,
 ): Promise<void> {
@@ -311,18 +314,21 @@ async function notificarPromesasIncumplidas(
 		return;
 	}
 
-	const filas = pendientes.flatMap((t) =>
-		filasNotificacionCobros({
+	const filas = pendientes.flatMap((t) => {
+		const credito = `${t.sifco}${t.cliente ? ` (${t.cliente})` : ""}`;
+		const asesor = t.asesorNombre || "Sin asesor asignado";
+		return filasNotificacionCobros({
 			casoId: t.casoId,
 			cobrosTipo: "promesa_incumplida",
 			titulo: "Promesa de pago incumplida",
-			descripcion: `La promesa de pago del crédito ${t.sifco}${t.cliente ? ` (${t.cliente})` : ""} venció y la(s) cuota(s) prometida(s) siguen pendientes.`,
+			descripcion: `La promesa de pago del crédito ${credito} venció y la(s) cuota(s) prometida(s) siguen pendientes.`,
+			descripcionSupervisor: `El asesor ${asesor} tiene una promesa de pago incumplida sin gestionar: crédito ${credito} venció y la(s) cuota(s) siguen pendientes.`,
 			asesorUserId:
 				t.asesorId != null ? (mapaAsesor.get(t.asesorId) ?? null) : null,
 			supervisores,
 			usuarioSistema,
-		}),
-	);
+		});
+	});
 
 	if (filas.length > 0) {
 		await db.insert(notifications).values(filas);

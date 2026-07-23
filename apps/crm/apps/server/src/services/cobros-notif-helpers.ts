@@ -90,6 +90,12 @@ export function filasNotificacionCobros(params: {
 	cobrosTipo: CobrosNotifTipo;
 	titulo: string;
 	descripcion: string;
+	/**
+	 * Descripción alterna para las filas de SUPERVISOR — típicamente incluye el
+	 * nombre del asesor que no gestionó ("quién no lo tomó"). Si se omite, los
+	 * supervisores reciben la misma `descripcion` que el asesor.
+	 */
+	descripcionSupervisor?: string;
 	/** user.id del asesor (null si no se pudo enlazar por correo). */
 	asesorUserId: string | null;
 	/** Supervisores a los que escalar; [] cuando la alerta es solo del asesor. */
@@ -99,7 +105,6 @@ export function filasNotificacionCobros(params: {
 }): NewNotification[] {
 	const base = {
 		titulo: params.titulo,
-		descripcion: params.descripcion,
 		type: "reminder" as const,
 		status: "pending" as const,
 		cobrosTipo: params.cobrosTipo,
@@ -112,15 +117,18 @@ export function filasNotificacionCobros(params: {
 	if (params.asesorUserId) {
 		filas.push({
 			...base,
+			descripcion: params.descripcion,
 			createdBy: params.asesorUserId,
 			createdByRole: "cobros",
 			assignedToRole: "cobros",
 			assignedTo: params.asesorUserId,
 		});
 	}
+	const descSupervisor = params.descripcionSupervisor ?? params.descripcion;
 	for (const supervisorId of params.supervisores) {
 		filas.push({
 			...base,
+			descripcion: descSupervisor,
 			createdBy: params.usuarioSistema,
 			createdByRole: "cobros_supervisor",
 			assignedToRole: "cobros_supervisor",

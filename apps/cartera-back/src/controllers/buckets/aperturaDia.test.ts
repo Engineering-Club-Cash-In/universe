@@ -551,4 +551,27 @@ describe("regresiones de SQL (orden por enum / bucket a la fecha)", () => {
       "AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') ::date <=",
     );
   });
+
+  it("top3 y movimientos usan el predicado 'vencida a la fecha' (con rama legacy)", async () => {
+    // Una cuota que vencía antes de `f` pero se pagó DESPUÉS seguía vencida ese
+    // día. El predicado histórico (cuotaVencidaALaFecha) reemplaza al viejo
+    // `v.pagado = false`: acota el pago cubriente por fecha y trata la data
+    // legacy (pagado=true sin pago cubriente) como pagada. Sin él, la apertura
+    // de un día pasado sub-reporta las cuentas críticas de esa mañana.
+    //
+    // La cota de fecha en sí (COALESCE(pc.fecha_pago,...)) viaja en un sql.raw
+    // anidado que este extractor no aplana; lo que sí queda visible y es
+    // exclusivo del predicado nuevo es la rama legacy `v.pagado = true AND NOT
+    // EXISTS`, y la AUSENCIA del viejo `v.pagado = false`.
+    const capturadas = (await capturarSql()).map((s) => s.replace(/\s+/g, " "));
+    const historicas = capturadas.filter(
+      (s) => s.includes("ROW_NUMBER") || s.includes("LATERAL"),
+    );
+    // top3 (ROW_NUMBER) y movimientos (LATERAL).
+    expect(historicas.length).toBeGreaterThanOrEqual(2);
+    for (const s of historicas) {
+      expect(s).toContain("v .pagado = true AND NOT EXISTS");
+      expect(s).not.toContain("v .fecha_vencimiento::date < 2026-07-22 ::date AND v .pagado = false");
+    }
+  });
 });

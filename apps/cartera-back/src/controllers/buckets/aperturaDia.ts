@@ -38,13 +38,54 @@ import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
 
 // Fila de pago que realmente cubre una cuota (predicado espejo del motor de
 // moras — mismo criterio que cuotasProximas.pagoCubriente para no divergir).
-const pagoCubriente = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
+//
+// `hasta` (opcional): solo cuenta pagos registrados AL DÍA `hasta` o antes.
+// Necesario para las secciones que miran un día PASADO — sin esa cota, una
+// cuota que vencía el 10 pero se pagó el 15 se leería como no-vencida al
+// revisar el 10. Se usa `fecha_pago` (fallback a `fecha_aplicado` para pagos
+// viejos sin registrar), convertido a día GT. Sin `hasta` el predicado es el
+// clásico "pagó alguna vez".
+const pagoCubriente = (
+  cuotaIdCol: ReturnType<typeof sql.raw>,
+  hasta?: ReturnType<typeof sql>,
+) => sql`
   SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
   WHERE pc.cuota_id = ${cuotaIdCol}
     AND pc."paymentFalse" = false
     AND pc.pagado = true
     AND pc.validation_status IN ('validated', 'no_required')
-    AND COALESCE(pc.monto_aplicado, 0) > 0`;
+    AND COALESCE(pc.monto_aplicado, 0) > 0${
+      hasta
+        ? sql`
+    AND ${diaGTDe("COALESCE(pc.fecha_pago, pc.fecha_aplicado)")}::date <= ${hasta}`
+        : sql``
+    }`;
+
+/**
+ * Predicado "la cuota `v` seguía vencida al cierre del día `f`". Se usa en las
+ * secciones históricas (top3, movimientos) — el cumplimiento tiene su propia
+ * lógica porque ahí sí importa quién pagó, sin importar cuándo.
+ *
+ * Una cuota cuenta como vencida-a-la-fecha si venció antes de `f` y NO estaba
+ * pagada ESE día. "Pagada ese día" tiene dos formas:
+ *  - Pago real cubriente con fecha <= f  → pagoCubriente(v, f).
+ *  - Legado: `cuotas_credito.pagado = true` SIN ninguna fila de pago cubriente
+ *    (data vieja, ~2.7k filas en el schema real). Esas no traen fecha de pago,
+ *    así que no se pueden ubicar en el tiempo; se tratan como pagadas siempre
+ *    —el mismo criterio con el que el motor de moras ya convive— para no
+ *    inflar el histórico con miles de falsos vencidos.
+ * `v` es el alias de cuotas_credito en la subquery que lo llama.
+ */
+const cuotaVencidaALaFecha = (v: string, f: ReturnType<typeof sql>) => {
+  const vr = sql.raw(v);
+  return sql`
+    ${vr}.fecha_vencimiento::date < ${f}
+    AND NOT EXISTS (${pagoCubriente(sql.raw(`${v}.cuota_id`), f)})
+    AND NOT (
+      ${vr}.pagado = true
+      AND NOT EXISTS (${pagoCubriente(sql.raw(`${v}.cuota_id`))})
+    )`;
+};
 
 // Estados que NO devengan mora (espejo de ESTADOS_SIN_MORA en cuotasProximas.ts
 // / STATUS_EXCLUIDOS_MORA en latefee.ts).
@@ -449,9 +490,7 @@ async function getMovimientosDia(fecha?: string): Promise<MovimientoCredito[]> {
         MIN(v.fecha_vencimiento)::date AS mas_vieja
       FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito v
       WHERE v.credito_id = c.credito_id
-        AND v.fecha_vencimiento::date < ${f}
-        AND v.pagado = false
-        AND NOT EXISTS (${pagoCubriente(sql.raw("v.cuota_id"))})
+        AND ${cuotaVencidaALaFecha("v", f)}
     ) cv ON true
     WHERE ${diaGTDe("h.fecha")}::date = ${f}
       AND h.tipo_evento IN ('SUBIDA', 'BAJADA')
@@ -538,9 +577,7 @@ async function getTop3PorBucket(fecha?: string): Promise<Top3Bucket[]> {
               SELECT COUNT(*)
               FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito v
               WHERE v.credito_id = c.credito_id
-                AND v.fecha_vencimiento::date < ${f}
-                AND v.pagado = false
-                AND NOT EXISTS (${pagoCubriente(sql.raw("v.cuota_id"))})
+                AND ${cuotaVencidaALaFecha("v", f)}
             )
           END
         )::int AS cuotas_vencidas,
@@ -548,9 +585,7 @@ async function getTop3PorBucket(fecha?: string): Promise<Top3Bucket[]> {
           SELECT MIN(v.fecha_vencimiento)::date
           FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito v
           WHERE v.credito_id = c.credito_id
-            AND v.fecha_vencimiento::date < ${f}
-            AND v.pagado = false
-            AND NOT EXISTS (${pagoCubriente(sql.raw("v.cuota_id"))})
+            AND ${cuotaVencidaALaFecha("v", f)}
         ) AS cuota_vencida_mas_vieja
       FROM ${SQL_CARTERA_SCHEMA}.creditos c
       INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id

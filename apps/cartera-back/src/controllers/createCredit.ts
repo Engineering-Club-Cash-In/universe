@@ -697,7 +697,7 @@ if (creditosInversionistasData.length > 0) {
 // 3. GENERACIÓN DE FECHAS
 // ========================================
 
-const generatePaymentDates = (plazo: number, diaPagoMensual: 15 | 30): string[] => {
+const generatePaymentDates = (plazo: number, diaPagoMensual: number): string[] => {
   const fechas: string[] = [];
   const startDate = new Date();
 
@@ -956,9 +956,10 @@ export const createCreditCore = async (
   const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } =
     await insertCreditAndRelated(creditData, executor);
 
-  // día <= 20 → pago el 15, día > 20 → pago el 30
-  const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
-  const fechas = generatePaymentDates(creditData.plazo, diaPago);
+  // El día de pago ya viene validado (1-31) desde el CRM: 15, 30, o un día
+  // recomendado por el análisis de capacidad de pago. generatePaymentDates
+  // hace el clamp de fin de mes internamente, así que se usa tal cual.
+  const fechas = generatePaymentDates(creditData.plazo, creditData.dia_pago_mensual);
 
   const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
     newCredit.credito_id,

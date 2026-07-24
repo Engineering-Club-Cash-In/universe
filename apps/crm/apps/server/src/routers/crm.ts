@@ -1952,7 +1952,7 @@ export const crmRouter = {
 				tasaInteres: z.string().optional(),
 				cuotaMensual: z.string().optional(),
 				fechaInicio: z.string().optional(),
-				diaPagoMensual: z.union([z.literal(15), z.literal(30)]).optional(),
+				diaPagoMensual: z.number().int().min(1).max(31).optional(),
 				// Additional fields
 				seguro: z.number().optional(),
 				gps: z.number().optional(),
@@ -2011,6 +2011,36 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Oportunidad no encontrada",
 				});
+			}
+
+			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
+			// por el análisis de capacidad de pago (IA) del lead de esta oportunidad.
+			if (
+				input.diaPagoMensual !== undefined &&
+				input.diaPagoMensual !== 15 &&
+				input.diaPagoMensual !== 30
+			) {
+				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
+					null;
+				if (currentOpportunity[0].leadId) {
+					const [analysis] = await db
+						.select({
+							suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+						})
+						.from(creditAnalysis)
+						.where(eq(creditAnalysis.leadId, currentOpportunity[0].leadId))
+						.limit(1);
+					suggestedDays = analysis?.suggestedPaymentDays ?? null;
+				}
+				const isRecommended = suggestedDays?.some(
+					(d) => d.dia === input.diaPagoMensual,
+				);
+				if (!isRecommended) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
+					});
+				}
 			}
 
 			// Validate stage transitions

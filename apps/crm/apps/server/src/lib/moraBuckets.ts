@@ -29,6 +29,8 @@ export interface MoraBucket {
 	color: string | null;
 	/** Orden de presentación (embudo, filtros). */
 	orden: number;
+	/** Días de SLA para contactar al cliente desde que entra al bucket. */
+	diasSla: number | null;
 }
 
 export const MORA_BUCKETS: readonly MoraBucket[] = [
@@ -41,6 +43,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		prefijo: "B0",
 		color: null,
 		orden: 0,
+		diasSla: null,
 	},
 	{
 		key: "1",
@@ -51,6 +54,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		prefijo: "B1",
 		color: null,
 		orden: 1,
+		diasSla: 3,
 	},
 	{
 		key: "2",
@@ -61,6 +65,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		prefijo: "B2",
 		color: null,
 		orden: 2,
+		diasSla: 3,
 	},
 	{
 		key: "3",
@@ -71,6 +76,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		prefijo: "B3",
 		color: null,
 		orden: 3,
+		diasSla: 2,
 	},
 	{
 		key: "4",
@@ -81,6 +87,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		prefijo: "B4",
 		color: null,
 		orden: 4,
+		diasSla: 2,
 	},
 	{
 		key: "5",
@@ -91,6 +98,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		prefijo: "B5",
 		color: null,
 		orden: 5,
+		diasSla: 1,
 	},
 ] as const;
 
@@ -174,9 +182,10 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 		const mapped = Array.from(porNumero.values())
 			.sort((a, b) => a.orden - b.orden)
 			.map((b) => {
-				const fallbackEstado = MORA_BUCKETS.find(
+				const fallback = MORA_BUCKETS.find(
 					(f) => f.key === String(b.numero),
-				)?.estadoMora as string;
+				);
+				const fallbackEstado = fallback?.estadoMora as string;
 				const estadoMora =
 					b.estado_mora && ESTADOS_AGING_VALIDOS.has(b.estado_mora)
 						? b.estado_mora
@@ -190,6 +199,7 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 					prefijo: b.prefijo,
 					color: b.color,
 					orden: b.orden,
+					diasSla: b.dias_sla ?? fallback?.diasSla ?? null,
 				};
 			});
 		// Guard: catálogo vacío, o sin cubrir cada bucket conocido (siembra
@@ -279,6 +289,7 @@ export type BucketParaUI = {
 	prefijo: string | null;
 	color: string | null;
 	orden: number;
+	diasSla: number | null;
 };
 
 function mapearBucketsParaUI(): BucketParaUI[] {
@@ -289,6 +300,7 @@ function mapearBucketsParaUI(): BucketParaUI[] {
 			prefijo: b.prefijo,
 			color: b.color,
 			orden: b.orden,
+			diasSla: b.diasSla,
 		}))
 		.sort((a, b) => a.orden - b.orden);
 }

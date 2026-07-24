@@ -145,6 +145,7 @@ export const cobrosAppRouter = {
 	getBucketsHistorialCredito: cobrosRouter.getBucketsHistorialCredito,
 	getAgendaDia: cobrosRouter.getAgendaDia,
 	getColaDia: cobrosRouter.getColaDia,
+	actualizarDiasSlaBuckets: cobrosRouter.actualizarDiasSlaBuckets,
 	getRecordatoriosPremora: cobrosRouter.getRecordatoriosPremora,
 	getCreditosPorBucket: cobrosRouter.getCreditosPorBucket,
 	getPoolAsesoresPorBucket: cobrosRouter.getPoolAsesoresPorBucket,

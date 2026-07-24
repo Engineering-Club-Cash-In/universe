@@ -260,6 +260,121 @@ export interface CargaPorAsesorBucketResponse {
 	fecha: string;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// CB-023 · Apertura matutina del supervisor (GET /buckets/apertura).
+// ─────────────────────────────────────────────────────────────────────────
+
+/** De dónde vinieron los créditos que entraron a un bucket. */
+export interface AperturaCuentasNuevasOrigen {
+	desde: number;
+	tipo: "SUBIDA" | "BAJADA";
+	cantidad: number;
+}
+
+/** Transiciones de bucket del día, por bucket destino. */
+export interface AperturaCuentasNuevas {
+	bucket: number;
+	entradas: number; // SUBIDA + BAJADA que aterrizan en este bucket
+	subidas: number;
+	bajadas: number;
+	/** Desglose "2 subieron desde B0, 3 bajaron desde B2". */
+	origenes: AperturaCuentasNuevasOrigen[];
+}
+
+/**
+ * Un crédito que cambió de bucket hoy. Trae el contexto completo aunque la UI
+ * muestre solo algunas columnas — así crecer la tabla no toca backend.
+ */
+export interface AperturaMovimiento {
+	credito_id: number;
+	numero_credito_sifco: string | null;
+	cliente: string | null;
+	bucket_anterior: number | null;
+	bucket_nuevo: number;
+	tipo_evento: "SUBIDA" | "BAJADA";
+	/** Saltos de bucket del movimiento (B1→B3 = 2). */
+	saltos: number;
+	status_credito: string | null;
+	cuotas_vencidas: number;
+	monto_cuota: number;
+	monto_mora: number;
+	monto_adeudado: number;
+	dias_mora: number;
+	asesor_id: number | null;
+	asesor: string | null;
+	fecha: string;
+}
+
+/** Un crédito crítico dentro del top 3 de su bucket. */
+export interface AperturaTop3Fila {
+	credito_id: number;
+	numero_credito_sifco: string | null;
+	cliente: string | null;
+	bucket: number;
+	status_credito: string;
+	cuotas_vencidas: number;
+	monto_cuota: number;
+	monto_mora: number;
+	/** (cuotas_vencidas × monto_cuota) + monto_mora — el eje del ranking. */
+	monto_adeudado: number;
+	dias_mora: number;
+	asesor_id: number | null;
+	asesor: string | null;
+}
+
+export interface AperturaTop3Bucket {
+	bucket: number;
+	total_criticos: number;
+	peor_monto: number;
+	top: AperturaTop3Fila[];
+}
+
+/** Cumplimiento del día anterior (cuotas que vencían ayer). */
+export interface AperturaCumplimiento {
+	fecha: string;
+	cuentas_esperadas: number;
+	cuentas_pagadas: number;
+	pct: number; // 0..100, nunca NaN
+	monto_esperado: number;
+	monto_pagado: number;
+}
+
+/**
+ * Ingreso agregado al bucket del asesor: "2 cuentas entraron desde B1".
+ * No distingue subida de bajada: para quien recibe, ambas son trabajo nuevo.
+ */
+export interface AperturaAsignacionBucket {
+	desde: number | null;
+	bucket: number; // destino (= bucket que atiende el asesor)
+	cantidad: number;
+}
+
+/**
+ * "Asignación del día": cuentas que le cayeron HOY a cada asesor por
+ * transición de bucket. Es el DELTA del día, no el acumulado de carga — eso lo
+ * responde CB-018 en /cobros/carga.
+ */
+export interface AperturaAsignacionAsesor {
+	asesor_id: number | null;
+	asesor: string | null;
+	/** Cuentas que entraron hoy al bucket del asesor. */
+	ingresos: number;
+	/** Bucket(s) del pool del asesor (asesor_bucket): a qué está asignado a atender. */
+	buckets_pool: number[];
+	porBucket: AperturaAsignacionBucket[];
+}
+
+/** Payload de /buckets/apertura. */
+export interface AperturaDiaResponse {
+	fecha: string;
+	cuentas_nuevas: AperturaCuentasNuevas[];
+	cumplimiento: AperturaCumplimiento;
+	top3: AperturaTop3Bucket[];
+	asignacion: AperturaAsignacionAsesor[];
+	/** Detalle crédito por crédito de los movimientos del día. */
+	movimientos: AperturaMovimiento[];
+}
+
 /** CB-019: input de PATCH /buckets/asesor-bucket/:asesor_id/:bucket. */
 export interface ActualizarCapacidadAsesorBucketInput {
 	asesor_id: number;

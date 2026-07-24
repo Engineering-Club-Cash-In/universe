@@ -4,6 +4,7 @@
  */
 
 import type {
+	AperturaDiaResponse,
 	AsesorHistorialResponse,
 	BoletaPagoInversionista,
 	CargaPorAsesorBucketResponse,
@@ -1146,6 +1147,48 @@ export class CarteraBackClient {
 			data: CargaPorAsesorBucketResponse;
 		}>(`/buckets/carga?${queryParams}`, { method: "GET" });
 		return response.data ?? { buckets: [], porAsesor: [], fecha: "" };
+	}
+
+	// CB-023: apertura matutina del supervisor (cuentas nuevas por bucket,
+	// cumplimiento del día anterior, top 3 por bucket). Sin cache, misma razón
+	// que getCargaPorAsesorBucket: es una pantalla de decisión operativa donde
+	// la data desactualizada engaña; una reasignación tampoco invalida ningún
+	// substring que matchee "/buckets/apertura".
+	async getAperturaDia(
+		params: { fecha?: string } = {},
+	): Promise<AperturaDiaResponse> {
+		const queryParams = new URLSearchParams(
+			params.fecha ? { fecha: params.fecha } : {},
+		);
+		const qs = queryParams.toString();
+		const response = await this.request<{
+			success: boolean;
+			data: AperturaDiaResponse;
+		}>(`/buckets/apertura${qs ? `?${qs}` : ""}`, { method: "GET" });
+		return (
+			response.data ?? {
+				// Sin `fecha` el caller pidió HOY, así que el fallback tiene que
+				// resolverlo igual que el controller (día GT) — un string vacío
+				// dejaría la vista sin fecha en el encabezado.
+				fecha:
+					params.fecha ??
+					new Date().toLocaleDateString("sv-SE", {
+						timeZone: "America/Guatemala",
+					}),
+				cuentas_nuevas: [],
+				cumplimiento: {
+					fecha: "",
+					cuentas_esperadas: 0,
+					cuentas_pagadas: 0,
+					pct: 0,
+					monto_esperado: 0,
+					monto_pagado: 0,
+				},
+				top3: [],
+				asignacion: [],
+				movimientos: [],
+			}
+		);
 	}
 
 	// CB-019: escritura de capacidad_base/margen_alerta por asesor+bucket (antes

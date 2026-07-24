@@ -103,7 +103,8 @@ export function ConfigurarSlaModal({
 		return typeof val !== "number" || val < 1 || val > 30;
 	});
 
-	const isValid = !invalidBucket;
+	const catalogoListo = catalogo !== undefined;
+	const isValid = !invalidBucket && catalogoListo;
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -200,10 +201,16 @@ export function ConfigurarSlaModal({
 					<Button
 						onClick={() => updateMutation.mutate()}
 						disabled={!isValid || updateMutation.isPending}
-						title={!isValid ? "Debes ingresar valores entre 1 y 30 días para todos los buckets" : ""}
+						title={
+							!catalogoListo
+								? "Esperando a que cargue el catálogo de buckets..."
+								: !isValid
+									? "Debes ingresar valores entre 1 y 30 días para todos los buckets"
+									: ""
+						}
 						className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
 					>
-						{updateMutation.isPending ? (
+						{updateMutation.isPending || !catalogoListo ? (
 							<Loader2 className="h-4 w-4 animate-spin" />
 						) : (
 							<Save className="h-4 w-4" />

@@ -74,6 +74,7 @@ import {
 	getBucketsParaUIAsync,
 	MORA_BUCKETS,
 	rangoCuotasPorEstadoMora,
+	refreshMoraBucketsCache,
 } from "../lib/moraBuckets";
 import {
 	adminProcedure,
@@ -2560,6 +2561,7 @@ export const cobrosRouter = {
 						message: res.message ?? "No se pudieron actualizar los días de SLA",
 					});
 				}
+				await refreshMoraBucketsCache();
 				return { success: true };
 			} catch (error) {
 				if (error instanceof ORPCError) throw error;

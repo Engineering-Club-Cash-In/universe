@@ -488,3 +488,67 @@ describe("errores de la base de datos", () => {
     });
   });
 });
+
+// ─────────────── Regresiones estructurales del SQL (review Codex) ───────────
+//
+// Dos bugs que no tiran error ni cambian el shape del resultado — solo
+// devuelven filas mal ordenadas o mal clasificadas. Se atrapan inspeccionando
+// el SQL emitido, no el resultado.
+describe("regresiones de SQL (orden por enum / bucket a la fecha)", () => {
+  const sqlDe = (query: any): string => {
+    const partes: string[] = [];
+    const walk = (n: any, d = 0) => {
+      if (n == null || d > 8) return;
+      if (typeof n === "string") return void partes.push(n);
+      if (Array.isArray(n)) return void n.forEach((x) => walk(x, d + 1));
+      if (typeof n === "object") {
+        if (typeof n.value === "string") partes.push(n.value);
+        else if (Array.isArray(n.value)) walk(n.value, d + 1);
+        if (n.queryChunks) walk(n.queryChunks, d + 1);
+      }
+    };
+    walk(query?.queryChunks);
+    return partes.join(" ");
+  };
+
+  const capturarSql = async (): Promise<string[]> => {
+    reset();
+    const capturadas: string[] = [];
+    const original = fakeDb.execute;
+    fakeDb.execute = async (query: any) => {
+      capturadas.push(sqlDe(query));
+      return original(query);
+    };
+    await getAperturaDia({ fecha: "2026-07-22" });
+    fakeDb.execute = original;
+    return capturadas;
+  };
+
+  it("movimientos ordena SUBIDA antes que BAJADA por CASE, NO por enum DESC", async () => {
+    // `tipo_evento` es enum ('INICIAL','SUBIDA','BAJADA'); Postgres ordena
+    // enums por orden de declaración, así que `ORDER BY tipo_evento DESC`
+    // pondría BAJADA antes que SUBIDA — con el LIMIT, cortaría lo grave.
+    const capturadas = (await capturarSql()).map((s) => s.replace(/\s+/g, " "));
+    // La query de movimientos es la única con el CASE de tipo_evento (top3 y
+    // cuentas nuevas no lo tienen).
+    const movimientos = capturadas.find((s) =>
+      s.includes("CASE h.tipo_evento WHEN 'SUBIDA'"),
+    );
+    expect(movimientos).toBeDefined();
+    expect(movimientos).not.toContain("ORDER BY h.tipo_evento DESC");
+  });
+
+  it("top3 deriva el bucket a la fecha (cota fecha <= f), no el bucket 'ahora'", async () => {
+    // Sin la cota de fecha, el bucket sería el ACTUAL mientras las cuotas se
+    // cuentan a la fecha pedida → foto incoherente al revisar un día pasado.
+    const capturadas = (await capturarSql()).map((s) => s.replace(/\s+/g, " "));
+    const top3 = capturadas.find((s) => s.includes("ROW_NUMBER"));
+    expect(top3).toBeDefined();
+    // La subquery del bucket acota por día: convierte h.fecha a día GT y lo
+    // compara con `<=`. (h.fecha viaja en un sql.raw aparte, por eso el match
+    // es sobre la porción de conversión + el operador de cota.)
+    expect(top3).toContain(
+      "AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') ::date <=",
+    );
+  });
+});

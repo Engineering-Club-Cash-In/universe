@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
-import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CB-023 · Buckets — Vista de APERTURA MATUTINA para el supervisor (8:00 AM).
@@ -82,6 +82,50 @@ const MAX_MOVIMIENTOS_DIA = 500;
  */
 const diaGTDe = (col: string) =>
   sql`(${sql.raw(col)} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')`;
+
+/**
+ * Bucket de un crédito TAL COMO ESTABA al cierre de un día `f` (no "ahora").
+ *
+ * `bucketActualSql` (lib/buckets-classification) da el bucket ACTUAL — su
+ * subquery toma el último `buckets_historial` sin cota de fecha. Sirve para la
+ * carga de hoy, pero en la apertura de un día PASADO desincroniza: las cuotas
+ * vencidas se cuentan a la fecha `f`, y si el crédito se movió de bucket
+ * DESPUÉS de `f`, quedaría rankeado bajo un bucket que no tenía ese día. Aquí
+ * el bucket se deriva del último evento CON `fecha <= f` para que ambos lados
+ * (bucket y cuotas) sean la misma foto.
+ *
+ * Con `f = hoy` el resultado coincide con `bucketActualSql` (todos los eventos
+ * pasan la cota), así que la vista del día actual no cambia. Los fallbacks por
+ * estado y por rango de mora son intencionalmente "de ahora": para un día
+ * pasado sin ningún INICIAL registrado no hay foto histórica que reconstruir,
+ * y es el mismo criterio que ya usa el resto del motor.
+ */
+const bucketALaFechaSql = (
+  credAlias: string,
+  moraAlias: string,
+  f: ReturnType<typeof sql>,
+) => {
+  const c = sql.raw(credAlias);
+  const m = sql.raw(moraAlias);
+  return sql`
+  COALESCE(
+    (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+      WHERE h.credito_id = ${c}.credito_id
+        AND ${diaGTDe("h.fecha")}::date <= ${f}
+      ORDER BY h.fecha DESC, h.historial_id DESC
+      LIMIT 1),
+    (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
+      WHERE b.activo = true
+        AND ${c}."statusCredit" = ANY (b.estados_incluidos)
+      ORDER BY b.numero LIMIT 1),
+    (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
+      WHERE b.activo = true
+        AND COALESCE(${m}.cuotas_atrasadas, 0) >= b.cuotas_min
+        AND (b.cuotas_max IS NULL OR COALESCE(${m}.cuotas_atrasadas, 0) <= b.cuotas_max)
+      ORDER BY b.numero LIMIT 1)
+  )
+`;
+};
 
 // ─────────────────────────── Tipos de respuesta ────────────────────────────
 
@@ -412,8 +456,16 @@ async function getMovimientosDia(fecha?: string): Promise<MovimientoCredito[]> {
     WHERE ${diaGTDe("h.fecha")}::date = ${f}
       AND h.tipo_evento IN ('SUBIDA', 'BAJADA')
     -- Lo más grave primero: subidas antes que bajadas, y dentro de cada una el
-    -- bucket destino más alto arriba.
-    ORDER BY h.tipo_evento DESC, h.bucket_nuevo DESC, h.historial_id DESC
+    -- bucket destino más alto arriba. El orden de SUBIDA/BAJADA va por CASE
+    -- explícito, NO por tipo_evento DESC: es un enum
+    -- ('INICIAL','SUBIDA','BAJADA') y Postgres ordena enums por su orden de
+    -- DECLARACIÓN, así que DESC pondría BAJADA (declarado después) antes que
+    -- SUBIDA — lo contrario de lo que queremos, y con el LIMIT un día pesado
+    -- cortaría las subidas (lo grave) dejando bajadas.
+    ORDER BY
+      CASE h.tipo_evento WHEN 'SUBIDA' THEN 0 ELSE 1 END,
+      h.bucket_nuevo DESC,
+      h.historial_id DESC
     LIMIT ${MAX_MOVIMIENTOS_DIA}
   `);
 
@@ -471,7 +523,9 @@ async function getTop3PorBucket(fecha?: string): Promise<Top3Bucket[]> {
         c.credito_id,
         c.numero_credito_sifco,
         u.nombre AS cliente,
-        ${bucketActualSql("c", "m")} AS bucket,
+        -- Bucket a la fecha f, NO "ahora": debe cuadrar con las cuotas
+        -- vencidas, que también se cuentan a f (ver bucketALaFechaSql).
+        ${bucketALaFechaSql("c", "m", f)} AS bucket,
         c."statusCredit" AS status_credito,
         c.cuota AS monto_cuota,
         COALESCE(m.monto_mora, 0) AS monto_mora,

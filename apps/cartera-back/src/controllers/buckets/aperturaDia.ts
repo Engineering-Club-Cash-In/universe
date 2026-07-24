@@ -679,7 +679,10 @@ async function getCumplimientoAyer(fecha?: string): Promise<Cumplimiento> {
       SELECT
         cu.cuota_id,
         c.cuota AS monto_cuota,
-        (cu.pagado = true OR EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))})) AS pagada
+        (
+          EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"), f)})
+          OR (cu.pagado = true AND NOT EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))}))
+        ) AS pagada
       FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
       INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = cu.credito_id
       WHERE cu.fecha_vencimiento::date = (${f} - INTERVAL '1 day')::date

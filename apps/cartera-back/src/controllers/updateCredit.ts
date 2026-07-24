@@ -97,7 +97,7 @@ const updateInstallments = async ({
   let capitalEnMemoria = capitalInicial;
 
   // 4️⃣ Amortización real: interés calculado sobre capital que va quedando
-  const actualizaciones = todosPagos.map((pago) => {
+  const actualizaciones = todosPagos.flatMap((pago) => {
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
     const ivaMes = interesMes.times(0.12).round(2);
 
@@ -111,7 +111,13 @@ const updateInstallments = async ({
     capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
     if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
-    return {
+    // Un pago con dinero aplicado (cuota pagada o parcial) es historia
+    // liquidada: sus restantes/membresías reflejan lo realmente cobrado y no
+    // deben pisarse con la re-proyección teórica. Avanza el capital en memoria
+    // (la cuota ocupa su lugar en el calendario) pero no se reescribe la fila.
+    if (new Big(pago.monto_aplicado ?? 0).gt(0)) return [];
+
+    return [{
       pago_id: pago.pago_id,
       datos: {
         cuota: cuotaMensual.toString(),
@@ -126,7 +132,7 @@ const updateInstallments = async ({
         membresias_pago: pago.validationStatus === "pending" ? pago.membresias_pago : "0",
         membresias_mes: pago.validationStatus === "pending" ? pago.membresias_mes : "0",
       },
-    };
+    }];
   });
 
   // 5️⃣ Ejecutar TODAS las actualizaciones en paralelo (batch update)

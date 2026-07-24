@@ -58,9 +58,12 @@ export function ConfigurarSlaModal({
 	});
 	const catalogoListo = catalogoCargadoData?.cargado === true;
 
-	// Cargar valores actuales desde el catálogo dinámico si está disponible
+	// Cargar valores actuales desde el catálogo dinámico. Solo cuando
+	// catalogoListo confirma que `catalogo` viene del catálogo dinámico real
+	// (no del fallback estático MORA_BUCKETS) — si no, se dejarían los
+	// defaults hardcodeados en `values` como si fueran la config real.
 	useEffect(() => {
-		if (catalogo && open) {
+		if (catalogo && open && catalogoListo) {
 			const initial: Record<number, number> = {};
 			for (const item of BUCKETS_CONFIG) {
 				const ui = bucketDeEstado(item.key, catalogo);
@@ -71,7 +74,7 @@ export function ConfigurarSlaModal({
 			}
 			setValues(initial);
 		}
-	}, [catalogo, open]);
+	}, [catalogo, open, catalogoListo]);
 
 	const updateMutation = useMutation({
 		mutationFn: async () => {

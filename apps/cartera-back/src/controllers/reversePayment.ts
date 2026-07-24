@@ -19,7 +19,6 @@ import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
-import { updateInstallments } from "./updateCredit";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
@@ -715,30 +714,15 @@ export const reversePayment = async ({ body, set }: any) => {
         reversionEspejo,
       };
     });
-try {
-  // En un INCOBRABLE NO se refrescan las cuotas: updateInstallments recalcula
-  // interes_restante/iva_12_restante de cada fila con `porcentaje_interes`
-  // (preservado en el castigo) y revivirían interés/IVA sobre un calendario
-  // que debe ser capital-only, corrompiendo el castigo tras la reversa.
-  if (result.creditData.creditos.statusCredit === "INCOBRABLE") {
-    console.log(
-      "⏭️ INCOBRABLE: se omite updateInstallments (cuota capital-only, no se recalcula interés)"
-    );
-  } else {
-    // Solo cuotas NO pagadas: con all:true se reescribían las cuotas ya
-    // pagadas del crédito (restantes teóricos + membresias_pago en 0),
-    // corrompiendo la historia liquidada cada vez que se revertía un pago.
-    await updateInstallments({
-      numero_credito_sifco: result.creditData.creditos.numero_credito_sifco,
-      nueva_cuota: Number(result.creditData.creditos.cuota),
-    });
-
-    console.log("✅ Cuotas pendientes recalculadas correctamente");
-  }
-} catch (updateError: any) {
-  console.error("⚠️ Error en UPDATE ALL STATEMENT:", updateError.message);
-  // NO hacer throw aquí porque la transacción ya se completó
-}
+// La reversión NO recalcula ninguna otra fila del crédito. La transacción de
+// arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).
+// Aquí vivía un updateInstallments({all: true}) (agregado en 0183a387, ene-2026)
+// que reescribía las cuotas YA PAGADAS del crédito: restantes teóricos,
+// cuota actual y membresias_pago/membresias_mes en 0 — corrompiendo la
+// historia liquidada en cada reversión (los INCOBRABLES ya lo omitían por un
+// clavo análogo, PR #890). La proyección teórica de las cuotas pendientes se
+// refresca por el flujo normal (siguiente pago aplicado o el botón manual
+// "Recalcular Pagos"), igual que antes de enero 2026.
     // ========================================================================
     // ✅ TRANSACCIÓN COMPLETADA - RETORNAR RESULTADO EXITOSO
     // ========================================================================

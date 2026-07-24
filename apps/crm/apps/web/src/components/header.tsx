@@ -22,6 +22,7 @@ import {
 	MessageSquare,
 	Scale,
 	Settings,
+	Sunrise,
 	Target,
 	TrendingUp,
 	UserCircle,
@@ -274,6 +275,14 @@ export default function Header() {
 											Cola del día
 										</Link>
 									</DropdownMenuItem>
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/apertura" className="cursor-pointer">
+												<Sunrise className="mr-2 h-4 w-4" />
+												Apertura del día
+											</Link>
+										</DropdownMenuItem>
+									)}
 									{PERMISSIONS.canAssignCobros(userRole) && (
 										<DropdownMenuItem asChild>
 											<Link to="/cobros/metas" className="cursor-pointer">
@@ -657,6 +666,12 @@ function MobileNav({
 											<ClipboardList />
 											Cola del día
 										</Link>
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link to="/cobros/apertura" className={MOBILE_LINK_CLASS}>
+												<Sunrise />
+												Apertura del día
+											</Link>
+										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>
 												<Target />

@@ -37,6 +37,7 @@ import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
 import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
 import { Route as CobrosCargaRouteImport } from './routes/cobros/carga'
 import { Route as CobrosBucketsRouteImport } from './routes/cobros/buckets'
+import { Route as CobrosAperturaRouteImport } from './routes/cobros/apertura'
 import { Route as CobrosAgendaRouteImport } from './routes/cobros/agenda'
 import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
@@ -197,6 +198,11 @@ const CobrosBucketsRoute = CobrosBucketsRouteImport.update({
   path: '/cobros/buckets',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosAperturaRoute = CobrosAperturaRouteImport.update({
+  id: '/cobros/apertura',
+  path: '/cobros/apertura',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosAgendaRoute = CobrosAgendaRouteImport.update({
   id: '/cobros/agenda',
   path: '/cobros/agenda',
@@ -306,6 +312,7 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/agenda': typeof CobrosAgendaRoute
+  '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cola': typeof CobrosColaRoute
@@ -354,6 +361,7 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/agenda': typeof CobrosAgendaRoute
+  '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cola': typeof CobrosColaRoute
@@ -403,6 +411,7 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/agenda': typeof CobrosAgendaRoute
+  '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cola': typeof CobrosColaRoute
@@ -453,6 +462,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/agenda'
+    | '/cobros/apertura'
     | '/cobros/buckets'
     | '/cobros/carga'
     | '/cobros/cola'
@@ -501,6 +511,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/agenda'
+    | '/cobros/apertura'
     | '/cobros/buckets'
     | '/cobros/carga'
     | '/cobros/cola'
@@ -549,6 +560,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/agenda'
+    | '/cobros/apertura'
     | '/cobros/buckets'
     | '/cobros/carga'
     | '/cobros/cola'
@@ -598,6 +610,7 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   CobrosIdRoute: typeof CobrosIdRoute
   CobrosAgendaRoute: typeof CobrosAgendaRoute
+  CobrosAperturaRoute: typeof CobrosAperturaRoute
   CobrosBucketsRoute: typeof CobrosBucketsRoute
   CobrosCargaRoute: typeof CobrosCargaRoute
   CobrosColaRoute: typeof CobrosColaRoute
@@ -834,6 +847,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosBucketsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/apertura': {
+      id: '/cobros/apertura'
+      path: '/cobros/apertura'
+      fullPath: '/cobros/apertura'
+      preLoaderRoute: typeof CobrosAperturaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/agenda': {
       id: '/cobros/agenda'
       path: '/cobros/agenda'
@@ -974,6 +994,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   CobrosIdRoute: CobrosIdRoute,
   CobrosAgendaRoute: CobrosAgendaRoute,
+  CobrosAperturaRoute: CobrosAperturaRoute,
   CobrosBucketsRoute: CobrosBucketsRoute,
   CobrosCargaRoute: CobrosCargaRoute,
   CobrosColaRoute: CobrosColaRoute,

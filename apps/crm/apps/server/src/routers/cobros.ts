@@ -91,6 +91,7 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		| "CANCELADO"
 		| "INCOBRABLE"
 		| "PENDIENTE_CANCELACION"
+		| "EN_CONVENIO"
 		| "MOROSO";
 	nombre_usuario?: string;
 	numero_credito_sifco?: string;
@@ -677,7 +678,13 @@ export const cobrosRouter = {
 
 					// Mapear filtro de estadoMora a parámetros de cartera-back
 					let cuotasAtrasadas: number | undefined;
-					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
+					let estadoCartera:
+						| "ACTIVO"
+						| "CANCELADO"
+						| "INCOBRABLE"
+						| "PENDIENTE_CANCELACION"
+						| "EN_CONVENIO"
+						| undefined;
 					const searchTerm = input.searchTerm?.trim() || "";
 					const numeroSifcoExacto = input.numeroSifco?.trim() || "";
 					const hasNumber = /\d/.test(searchTerm);
@@ -720,7 +727,11 @@ export const cobrosRouter = {
 								estadoCartera = "CANCELADO";
 								break;
 							case "en_convenio":
-								estadoCartera = "EN_CONVENIO" as typeof estadoCartera;
+								estadoCartera = "EN_CONVENIO";
+								break;
+							case "pendiente_cancelacion":
+								// Solo cambiar el estado, sin filtrar por cuotas
+								estadoCartera = "PENDIENTE_CANCELACION";
 								break;
 							default:
 								// Sin filtro, mantener ACTIVO como predeterminado
@@ -1049,6 +1060,8 @@ export const cobrosRouter = {
 							if (statusCredit === "CANCELADO") estadoContrato = "completado";
 							else if (statusCredit === "INCOBRABLE")
 								estadoContrato = "incobrable";
+							else if (statusCredit === "PENDIENTE_CANCELACION")
+								estadoContrato = "pendiente_cancelacion";
 
 							// Buscar la oportunidad por número SIFCO para obtener datos del vehículo
 							const numeroSifco = credito.creditos.numero_credito_sifco;
@@ -2217,6 +2230,8 @@ export const cobrosRouter = {
 				let estadoContrato = "activo";
 				if (statusCredit === "CANCELADO") estadoContrato = "completado";
 				else if (statusCredit === "INCOBRABLE") estadoContrato = "incobrable";
+				else if (statusCredit === "PENDIENTE_CANCELACION")
+					estadoContrato = "pendiente_cancelacion";
 
 				return {
 					// ID del caso de cobros (si existe)
@@ -3250,8 +3265,12 @@ export const cobrosRouter = {
 			// 1. Mapear estadoMora → params de cartera-back (mismo mapping que
 			// getTodosLosCreditos).
 			let cuotasAtrasadas: number | undefined;
-			let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined =
-				"ACTIVO";
+			let estadoCartera:
+				| "ACTIVO"
+				| "CANCELADO"
+				| "INCOBRABLE"
+				| "PENDIENTE_CANCELACION"
+				| undefined = "ACTIVO";
 			if (input.estadoMora) {
 				switch (input.estadoMora) {
 					case "al_dia":
@@ -3279,6 +3298,9 @@ export const cobrosRouter = {
 						break;
 					case "completado":
 						estadoCartera = "CANCELADO";
+						break;
+					case "pendiente_cancelacion":
+						estadoCartera = "PENDIENTE_CANCELACION";
 						break;
 					default:
 						estadoCartera = "ACTIVO";

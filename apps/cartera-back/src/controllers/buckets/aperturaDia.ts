@@ -34,6 +34,16 @@ import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
 // ⚠️ `dias_mora` se deriva de la cuota vencida MÁS VIEJA (MIN fecha_vencimiento
 // de las pendientes), NO de moras_credito.created_at — este último se reinicia
 // si la mora se desactiva y se vuelve a crear.
+//
+// ⚠️ ALCANCE HISTÓRICO. Bucket, cuotas vencidas y pago se calculan a la fecha
+// `f` (buckets_historial y pagos tienen fecha). Pero el DUEÑO del crédito
+// (creditos.asesor_id) y su STATUS (creditos."statusCredit") se leen del estado
+// ACTUAL: no hay historial continuo de status, y reconstruir el dueño exacto
+// desde credito_asesor_historial en cada sección no compensa para una vista que
+// se usa sobre todo HOY. Por eso el router acota la fecha a una ventana reciente
+// (APERTURA_DIAS_ATRAS en routers/buckets.ts): en pocos días dueño y status casi
+// no cambian, así que la foto sigue siendo fiel. Fuera de esa ventana el
+// endpoint responde 400 en vez de una foto silenciosamente incorrecta.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Fila de pago que realmente cubre una cuota (predicado espejo del motor de

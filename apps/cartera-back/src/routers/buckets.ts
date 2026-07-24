@@ -83,6 +83,29 @@ const esFecha = (s: string): boolean => {
   );
 };
 
+// Ventana en la que la apertura garantiza una foto FIEL a la fecha. Fuera de
+// aquí el dueño y el status del crédito se leerían del estado actual (el modelo
+// no guarda historial continuo de status), así que se acota en vez de devolver
+// una foto histórica silenciosamente incorrecta.
+const APERTURA_DIAS_ATRAS = 7;
+
+// Hoy en GT (YYYY-MM-DD). Espejo de la fecha default del controller.
+const hoyGT = (): string =>
+  new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
+
+// La fecha cae en [hoy - APERTURA_DIAS_ATRAS, hoy]. Sin futuras (no hay datos)
+// ni más atrás de la ventana. Asume `s` ya validada por esFecha. El mínimo se
+// deriva del DÍA GT (no de Date.now() en UTC) para no correrse por el offset
+// de zona horaria; con strings YYYY-MM-DD la comparación lexicográfica es
+// equivalente a la cronológica.
+const fechaEnRangoApertura = (s: string): boolean => {
+  const hoy = hoyGT();
+  const [y, m, d] = hoy.split("-").map(Number);
+  const minDate = new Date(Date.UTC(y, m - 1, d - APERTURA_DIAS_ATRAS));
+  const min = minDate.toISOString().slice(0, 10);
+  return s >= min && s <= hoy;
+};
+
 export const bucketsRouter = new Elysia()
   .use(authMiddleware)
 
@@ -617,6 +640,20 @@ export const bucketsRouter = new Elysia()
         if (query.fecha && !esFecha(query.fecha)) {
           set.status = 400;
           return { success: false, message: "[ERROR] fecha inválida (formato YYYY-MM-DD)" };
+        }
+        // La vista solo garantiza una foto FIEL de hoy y de la ventana reciente
+        // (APERTURA_DIAS_ATRAS). Más atrás, el dueño del crédito y su status se
+        // leen del estado ACTUAL —no del de esa fecha—, así que la foto
+        // histórica se degrada en silencio. En vez de reconstruir todo el
+        // estado a la fecha (el modelo no guarda historial continuo de status),
+        // se acota el rango a una ventana en la que dueño/status casi no cambian
+        // y la foto sigue siendo confiable. Fuera de rango → 400.
+        if (query.fecha && !fechaEnRangoApertura(query.fecha)) {
+          set.status = 400;
+          return {
+            success: false,
+            message: `[ERROR] fecha fuera de rango (hoy o hasta ${APERTURA_DIAS_ATRAS} días atrás, sin futuras)`,
+          };
         }
         const data = await getAperturaDia({ fecha: query.fecha });
         return { success: true, data };

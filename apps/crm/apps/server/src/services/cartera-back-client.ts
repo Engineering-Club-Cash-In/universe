@@ -1124,6 +1124,18 @@ export class CarteraBackClient {
 		);
 	}
 
+	async updateBucketsSLA(
+		configuraciones: Array<{ bucket: number; dias_sla: number }>,
+	): Promise<{ success: boolean; message?: string }> {
+		return this.request<{ success: boolean; message?: string }>(
+			"/buckets/dias-sla",
+			{
+				method: "PUT",
+				body: JSON.stringify({ configuraciones }),
+			},
+		);
+	}
+
 	// CB-018: carga de cuentas por asesor y bucket (dashboard gerencial) —
 	// cuentas asignadas, capacidad base, % utilización, sobrecarga y alerta de
 	// nueva posición. Fuente de la página /cobros/carga del CRM.

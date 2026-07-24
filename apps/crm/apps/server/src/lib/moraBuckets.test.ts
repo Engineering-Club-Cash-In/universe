@@ -219,6 +219,7 @@ describe("getBucketsParaUI", () => {
 				prefijo: "B0",
 				color: null,
 				orden: 0,
+				diasSla: null,
 			},
 			{
 				estadoMora: "mora_30",
@@ -226,6 +227,7 @@ describe("getBucketsParaUI", () => {
 				prefijo: "B1",
 				color: null,
 				orden: 1,
+				diasSla: 3,
 			},
 			{
 				estadoMora: "mora_60",
@@ -233,6 +235,7 @@ describe("getBucketsParaUI", () => {
 				prefijo: "B2",
 				color: null,
 				orden: 2,
+				diasSla: 3,
 			},
 			{
 				estadoMora: "mora_90",
@@ -240,6 +243,7 @@ describe("getBucketsParaUI", () => {
 				prefijo: "B3",
 				color: null,
 				orden: 3,
+				diasSla: 2,
 			},
 			{
 				estadoMora: "mora_120",
@@ -247,6 +251,7 @@ describe("getBucketsParaUI", () => {
 				prefijo: "B4",
 				color: null,
 				orden: 4,
+				diasSla: 2,
 			},
 			{
 				estadoMora: "mora_120_plus",
@@ -254,6 +259,7 @@ describe("getBucketsParaUI", () => {
 				prefijo: "B5",
 				color: null,
 				orden: 5,
+				diasSla: 1,
 			},
 		]);
 	});
@@ -278,6 +284,7 @@ describe("getBucketsParaUI", () => {
 			prefijo: "B0",
 			color: "#000",
 			orden: 0,
+			diasSla: null,
 		});
 		expect(ui[5]).toEqual({
 			estadoMora: "mora_120_plus",
@@ -285,6 +292,7 @@ describe("getBucketsParaUI", () => {
 			prefijo: "B5",
 			color: "#555",
 			orden: 5,
+			diasSla: 1,
 		});
 	});
 
@@ -336,6 +344,7 @@ describe("getBucketsParaUIAsync", () => {
 			prefijo: "B0",
 			color: "#000",
 			orden: 0,
+			diasSla: null,
 		});
 	});
 
@@ -360,6 +369,7 @@ describe("getBucketsParaUIAsync", () => {
 			prefijo: "B0",
 			color: null,
 			orden: 0,
+			diasSla: null,
 		});
 	});
 });

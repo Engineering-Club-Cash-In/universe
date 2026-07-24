@@ -74,6 +74,7 @@ import {
 	getBucketsParaUIAsync,
 	MORA_BUCKETS,
 	rangoCuotasPorEstadoMora,
+	refreshMoraBucketsCache,
 } from "../lib/moraBuckets";
 import {
 	adminProcedure,
@@ -2532,6 +2533,41 @@ export const cobrosRouter = {
 				console.error("[getColaDia] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message: "No se pudo obtener la cola del día",
+				});
+			}
+		}),
+
+	// CB-020: actualizar días de SLA (dias_sla) por bucket (B1-B5). Solo supervisor / admin.
+	actualizarDiasSlaBuckets: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				configuraciones: z.array(
+					z.object({
+						bucket: z.number().int().min(1).max(5),
+						diasSla: z.number().int().min(1).max(30),
+					}),
+				),
+			}),
+		)
+		.handler(async ({ input }) => {
+			try {
+				const payload = input.configuraciones.map((c) => ({
+					bucket: c.bucket,
+					dias_sla: c.diasSla,
+				}));
+				const res = await carteraBackClient.updateBucketsSLA(payload);
+				if (!res.success) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: res.message ?? "No se pudieron actualizar los días de SLA",
+					});
+				}
+				await refreshMoraBucketsCache();
+				return { success: true };
+			} catch (error) {
+				if (error instanceof ORPCError) throw error;
+				console.error("[actualizarDiasSlaBuckets] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "Error al actualizar la configuración de SLA",
 				});
 			}
 		}),

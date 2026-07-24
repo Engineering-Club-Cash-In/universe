@@ -15,6 +15,7 @@ import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucke
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
+import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo (= enum de statusCredit menos
@@ -669,6 +670,39 @@ export const bucketsRouter = new Elysia()
     {
       query: t.Object({
         fecha: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // CB-020: actualización de los días de SLA (dias_sla) para cada bucket (B1-B5).
+  .put(
+    "/buckets/dias-sla",
+    async ({ body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const result = await actualizarDiasSlaBuckets(body.configuraciones);
+        if (!result.success) {
+          set.status = 400;
+          return { success: false, message: result.message };
+        }
+        return result;
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudieron actualizar los días de SLA de los buckets",
+          error: String(err),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        configuraciones: t.Array(
+          t.Object({
+            bucket: t.Number(),
+            dias_sla: t.Number(),
+          }),
+        ),
       }),
     },
   );

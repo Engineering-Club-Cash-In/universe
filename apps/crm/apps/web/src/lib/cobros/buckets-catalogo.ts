@@ -131,6 +131,7 @@ export type BucketsCatalogoQueryData = {
 	prefijo: string | null;
 	color: string | null;
 	orden: number;
+	diasSla?: number | null;
 }[];
 
 /** Catálogo dinámico de buckets de aging (B0-B5), vía ORPC. Cachea 5 min en el server. */

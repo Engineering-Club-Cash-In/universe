@@ -725,13 +725,15 @@ try {
       "⏭️ INCOBRABLE: se omite updateInstallments (cuota capital-only, no se recalcula interés)"
     );
   } else {
+    // Solo cuotas NO pagadas: con all:true se reescribían las cuotas ya
+    // pagadas del crédito (restantes teóricos + membresias_pago en 0),
+    // corrompiendo la historia liquidada cada vez que se revertía un pago.
     await updateInstallments({
       numero_credito_sifco: result.creditData.creditos.numero_credito_sifco,
       nueva_cuota: Number(result.creditData.creditos.cuota),
-      all: true,
     });
 
-    console.log("✅ UPDATE ALL STATEMENT ejecutado correctamente");
+    console.log("✅ Cuotas pendientes recalculadas correctamente");
   }
 } catch (updateError: any) {
   console.error("⚠️ Error en UPDATE ALL STATEMENT:", updateError.message);

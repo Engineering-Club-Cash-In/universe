@@ -2020,15 +2020,17 @@ export const crmRouter = {
 				input.diaPagoMensual !== 15 &&
 				input.diaPagoMensual !== 30
 			) {
+				// Lead efectivo tras el update, no el actual (por si input.leadId también cambia)
+				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
 				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
 					null;
-				if (currentOpportunity[0].leadId) {
+				if (effectiveLeadId) {
 					const [analysis] = await db
 						.select({
 							suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
 						})
 						.from(creditAnalysis)
-						.where(eq(creditAnalysis.leadId, currentOpportunity[0].leadId))
+						.where(eq(creditAnalysis.leadId, effectiveLeadId))
 						.limit(1);
 					suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				}

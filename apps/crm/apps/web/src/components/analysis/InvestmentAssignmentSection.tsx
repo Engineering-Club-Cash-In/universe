@@ -964,6 +964,10 @@ export function InvestmentAssignmentSection({
 														(d: { dia: number; porcentaje: number }) =>
 															d.dia !== 15 && d.dia !== 30,
 													)
+													.filter(
+														(d, i, arr) =>
+															arr.findIndex((x) => x.dia === d.dia) === i,
+													)
 													.map((d: { dia: number; porcentaje: number }) => (
 														<SelectItem key={d.dia} value={d.dia.toString()}>
 															Día {d.dia} ({d.porcentaje}% recomendado en Análisis)

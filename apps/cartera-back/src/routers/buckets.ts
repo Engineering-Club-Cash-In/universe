@@ -14,6 +14,7 @@ import {
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
+import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo (= enum de statusCredit menos
@@ -597,6 +598,40 @@ export const bucketsRouter = new Elysia()
         asesor_nuevo_id: t.Union([t.Number(), t.String()]),
         motivo: t.String(),
         usuario_email: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // CB-023: vista de APERTURA MATUTINA del supervisor (8:00 AM). Devuelve el
+  // payload completo: cuentas nuevas por bucket (con el desglose de qué bucket
+  // vinieron), cumplimiento del día anterior, top 3 críticos por bucket, la
+  // asignación del día por asesor y el detalle crédito por crédito de los
+  // movimientos. `fecha` opcional (default hoy GT) para revisar días pasados.
+  .get(
+    "/buckets/apertura",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        // Validar la fecha ANTES del cast ::date (misma razón que el resto de
+        // endpoints: un typo debe dar 400, no reventar en PG).
+        if (query.fecha && !esFecha(query.fecha)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] fecha inválida (formato YYYY-MM-DD)" };
+        }
+        const data = await getAperturaDia({ fecha: query.fecha });
+        return { success: true, data };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener la apertura del día",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        fecha: t.Optional(t.String()),
       }),
     },
   );

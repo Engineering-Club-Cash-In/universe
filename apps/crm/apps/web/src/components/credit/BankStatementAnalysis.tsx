@@ -52,9 +52,10 @@ export function BankStatementAnalysis({
 	const [maxVariableDebtRatio, setMaxVariableDebtRatio] = useState("0.2");
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const queryClient = useQueryClient();
+	const hasOwner = !!coDebtorId || !!(leadId && opportunityId);
 
 	const queryKey = leadId
-		? ["creditAnalysis", "lead", leadId]
+		? ["creditAnalysis", "opportunity", opportunityId]
 		: ["creditAnalysis", "coDebtor", coDebtorId];
 
 	// Obtener estado del análisis desde el servidor
@@ -62,9 +63,11 @@ export function BankStatementAnalysis({
 		queryKey,
 		queryFn: () =>
 			client.getCreditAnalysisByLeadId(
-				leadId ? { leadId } : { coDebtorId: coDebtorId! },
+				leadId
+					? { leadId, opportunityId: opportunityId! }
+					: { coDebtorId: coDebtorId! },
 			),
-		enabled: !!(leadId || coDebtorId),
+		enabled: hasOwner,
 	});
 
 	// Verificar si hay un análisis exitoso (analyzedAt debe existir y no ser null)
@@ -82,13 +85,26 @@ export function BankStatementAnalysis({
 	const resetMutation = useMutation({
 		mutationFn: () =>
 			client.resetCreditAnalysis(
-				leadId ? { leadId } : { coDebtorId: coDebtorId! },
+				leadId
+					? { leadId, opportunityId: opportunityId! }
+					: { coDebtorId: coDebtorId! },
 			),
 		onSuccess: () => {
 			toast.success(
 				"Análisis reseteado. Puede volver a subir estados de cuenta.",
 			);
 			queryClient.invalidateQueries({ queryKey });
+			if (opportunityId) {
+				queryClient.invalidateQueries({
+					queryKey: ["getAnalysisChecklist", opportunityId],
+				});
+				queryClient.invalidateQueries({
+					queryKey: ["consolidatedCreditAnalysis", opportunityId],
+				});
+				queryClient.invalidateQueries({
+					queryKey: ["getConsolidatedCreditAnalysis", opportunityId],
+				});
+			}
 			onAnalysisComplete?.();
 		},
 		onError: (error) => {
@@ -103,7 +119,7 @@ export function BankStatementAnalysis({
 				files.map(async (file) => {
 					const { key } = await uploadFileToR2WithRetry(file, {
 						resourceType: "bank_statement",
-						resourceId: leadId || coDebtorId!,
+						resourceId: leadId ? opportunityId! : coDebtorId!,
 					});
 					return {
 						name: file.name,
@@ -115,7 +131,7 @@ export function BankStatementAnalysis({
 
 			return client.analyzeBankStatements({
 				...(leadId ? { leadId } : { coDebtorId: coDebtorId! }),
-				...(leadId && opportunityId ? { opportunityId } : {}),
+				...(leadId ? { opportunityId: opportunityId! } : {}),
 				files: filePayloads,
 				annualRate: Number.parseFloat(annualRate),
 				termMonths: Number.parseInt(termMonths),
@@ -128,6 +144,20 @@ export function BankStatementAnalysis({
 			setFiles([]);
 			// Invalidar query para obtener estado actualizado del servidor
 			queryClient.invalidateQueries({ queryKey });
+			if (opportunityId) {
+				queryClient.invalidateQueries({
+					queryKey: ["getAnalysisChecklist", opportunityId],
+				});
+				queryClient.invalidateQueries({
+					queryKey: ["consolidatedCreditAnalysis", opportunityId],
+				});
+				queryClient.invalidateQueries({
+					queryKey: ["getConsolidatedCreditAnalysis", opportunityId],
+				});
+				queryClient.invalidateQueries({
+					queryKey: ["getOpportunityDocuments", opportunityId],
+				});
+			}
 			onAnalysisComplete?.();
 		},
 		onError: (error) => {
@@ -175,6 +205,11 @@ export function BankStatementAnalysis({
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-3">
+				{leadId && !opportunityId && (
+					<p className="text-amber-700 text-xs">
+						Seleccione una oportunidad para consultar o crear su análisis.
+					</p>
+				)}
 				{/* File input */}
 				<div>
 					<input
@@ -305,6 +340,7 @@ export function BankStatementAnalysis({
 						isLoadingAnalysis ||
 						files.length === 0 ||
 						analyzeMutation.isPending ||
+						!hasOwner ||
 						!canAnalyze
 					}
 				>

@@ -14,6 +14,7 @@ import {
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
+import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo (= enum de statusCredit menos
@@ -80,6 +81,29 @@ const esFecha = (s: string): boolean => {
     d.getUTCMonth() === mes - 1 &&
     d.getUTCDate() === dia
   );
+};
+
+// Ventana en la que la apertura garantiza una foto FIEL a la fecha. Fuera de
+// aquí el dueño y el status del crédito se leerían del estado actual (el modelo
+// no guarda historial continuo de status), así que se acota en vez de devolver
+// una foto histórica silenciosamente incorrecta.
+export const APERTURA_DIAS_ATRAS = 7;
+
+// Hoy en GT (YYYY-MM-DD). Espejo de la fecha default del controller.
+export const hoyGT = (refDate = new Date()): string =>
+  refDate.toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
+
+// La fecha cae en [hoy - APERTURA_DIAS_ATRAS, hoy]. Sin futuras (no hay datos)
+// ni más atrás de la ventana. Asume `s` ya validada por esFecha. El mínimo se
+// deriva del DÍA GT (no de Date.now() en UTC) para no correrse por el offset
+// de zona horaria; con strings YYYY-MM-DD la comparación lexicográfica es
+// equivalente a la cronológica.
+export const fechaEnRangoApertura = (s: string, refHoy?: string): boolean => {
+  const hoy = refHoy ?? hoyGT();
+  const [y, m, d] = hoy.split("-").map(Number);
+  const minDate = new Date(Date.UTC(y, m - 1, d - APERTURA_DIAS_ATRAS));
+  const min = minDate.toISOString().slice(0, 10);
+  return s >= min && s <= hoy;
 };
 
 export const bucketsRouter = new Elysia()
@@ -597,6 +621,54 @@ export const bucketsRouter = new Elysia()
         asesor_nuevo_id: t.Union([t.Number(), t.String()]),
         motivo: t.String(),
         usuario_email: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // CB-023: vista de APERTURA MATUTINA del supervisor (8:00 AM). Devuelve el
+  // payload completo: cuentas nuevas por bucket (con el desglose de qué bucket
+  // vinieron), cumplimiento del día anterior, top 3 críticos por bucket, la
+  // asignación del día por asesor y el detalle crédito por crédito de los
+  // movimientos. `fecha` opcional (default hoy GT) para revisar días pasados.
+  .get(
+    "/buckets/apertura",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        // Validar la fecha ANTES del cast ::date (misma razón que el resto de
+        // endpoints: un typo debe dar 400, no reventar en PG).
+        if (query.fecha && !esFecha(query.fecha)) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] fecha inválida (formato YYYY-MM-DD)" };
+        }
+        // La vista solo garantiza una foto FIEL de hoy y de la ventana reciente
+        // (APERTURA_DIAS_ATRAS). Más atrás, el dueño del crédito y su status se
+        // leen del estado ACTUAL —no del de esa fecha—, así que la foto
+        // histórica se degrada en silencio. En vez de reconstruir todo el
+        // estado a la fecha (el modelo no guarda historial continuo de status),
+        // se acota el rango a una ventana en la que dueño/status casi no cambian
+        // y la foto sigue siendo confiable. Fuera de rango → 400.
+        if (query.fecha && !fechaEnRangoApertura(query.fecha)) {
+          set.status = 400;
+          return {
+            success: false,
+            message: `[ERROR] fecha fuera de rango (hoy o hasta ${APERTURA_DIAS_ATRAS} días atrás, sin futuras)`,
+          };
+        }
+        const data = await getAperturaDia({ fecha: query.fecha });
+        return { success: true, data };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener la apertura del día",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        fecha: t.Optional(t.String()),
       }),
     },
   );

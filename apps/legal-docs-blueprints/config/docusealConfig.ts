@@ -199,6 +199,13 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
     ],
   },
 
+  [ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
   // ===== INVERSIONES SOCIEDAD =====
   [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {
     signerCount: 1,

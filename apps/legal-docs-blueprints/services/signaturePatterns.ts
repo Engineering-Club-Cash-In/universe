@@ -184,6 +184,14 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Inversionista']
   },
 
+  // Anexos 1 y 2 - el bloque de firma no usa línea de guiones, ancla en la etiqueta.
+  // Aparece 2 veces (una por anexo), ambas del mismo firmante.
+  [ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO]: {
+    pattern: 'Firma del Inversionista',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
   // ===== INVERSIONES SOCIEDAD =====
   // Mismos patrones de firma que sus equivalentes de inversiones individuales
   [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {

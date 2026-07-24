@@ -230,6 +230,8 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         credito_id: creditos_inversionistas_espejo.credito_id,
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+        modalidad_facturacion:
+          creditos_inversionistas_espejo.modalidad_facturacion,
       });
 
     // ── 4.5.bis. Marcar las compras pendientes como aceptadas ──
@@ -258,6 +260,12 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       updateRes.map((r) => [r.credito_id, r.tipo_reinversion ?? null]),
     );
 
+    // Mapa credito_id → modalidad_facturacion del target (mismo criterio que
+    // tipo_reinversion: la fila que quedó en "pendiente_compra_cartera").
+    const modalidadFactPorCredito = new Map<number, string | null>(
+      updateRes.map((r) => [r.credito_id, r.modalidad_facturacion ?? null]),
+    );
+
     // Pool por crédito en el orden que vinieron los créditos en creditosRows.
     // Dentro de cada pool, CUBE va primero. Incluimos la modalidad
     // (tipo_reinversion del target en el espejo) para mostrarla en el
@@ -274,6 +282,8 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         | "reinversion_excedente"
         | "reinversion_combinada"
         | null,
+      modalidad_facturacion: (modalidadFactPorCredito.get(c.credito_id) ??
+        null) as "p2p_directa" | "factura_cube" | "factura_cube_pequeno" | null,
       rows: (rowsPorCredito.get(c.credito_id) ?? [])
         .sort((a, b) => {
           if (a.inversionista_id === CUBE_INVESTMENT_ID) return -1;

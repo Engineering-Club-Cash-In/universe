@@ -1446,6 +1446,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
               tipo_reinversion && tipo_reinversion !== "sin_reinversion"
                 ? tipo_reinversion
                 : null,
+            // Modalidad de facturación de esta compra (misma para todos los
+            // créditos de la operación); null si no se eligió → el email muestra "—".
+            modalidad_facturacion: modalidad_facturacion ?? null,
           })),
           usuarioNombre,
           usuarioEmail,

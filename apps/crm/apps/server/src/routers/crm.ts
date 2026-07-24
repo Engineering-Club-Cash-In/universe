@@ -775,8 +775,15 @@ export const crmRouter = {
 				});
 			}
 
-			// Sales users can only see their assigned leads
-			if (context.userRole === "sales" && lead.assignedTo !== context.userId) {
+			// Mismo criterio de visibilidad que getLeads: solo estos roles ven cualquier lead,
+			// el resto (sales, cobros, accounting, etc.) solo el suyo asignado.
+			const canSeeAllLeads =
+				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor" ||
+				context.userRole === "juridico" ||
+				context.userRole === "analyst";
+
+			if (!canSeeAllLeads && lead.assignedTo !== context.userId) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para ver este lead",
 				});

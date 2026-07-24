@@ -5375,6 +5375,66 @@ export const cobrosRouter = {
 		}),
 
 	// ────────────────────────────────────────────────────────────────────────
+	// CB-023 · Apertura matutina del supervisor (8:00 AM)
+	// Solo supervisor/admin (cobrosSupervisorProcedure): el ticket es "como
+	// supervisor". A diferencia de getAgendaDia, NO hay asesor forzado — no
+	// existe el caso "el cobrador ve la suya" para esta vista.
+	//
+	// Las 4 secciones vienen de /buckets/apertura. La "asignación del día" es
+	// el DELTA del día por asesor (a quién le cayó trabajo nuevo anoche), NO el
+	// dashboard de capacidad de CB-018.
+	// ────────────────────────────────────────────────────────────────────────
+	getAperturaDia: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				// YYYY-MM-DD opcional (default hoy GT en cartera-back).
+				// El regex solo valida la FORMA: 2026-02-30 la pasa. El refine hace
+				// round-trip contra Date para descartar fechas de calendario
+				// inexistentes — mismo criterio que `esFecha` en cartera-back
+				// (routers/buckets.ts), que si no las rechaza revientan en el
+				// ::date de Postgres. Validar aquí evita el viaje de ida y vuelta.
+				fecha: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/)
+					.refine(
+						(s) => {
+							const [y, m, d] = s.split("-").map(Number);
+							const fecha = new Date(Date.UTC(y, m - 1, d));
+							return (
+								fecha.getUTCFullYear() === y &&
+								fecha.getUTCMonth() === m - 1 &&
+								fecha.getUTCDate() === d
+							);
+						},
+						{ message: "Fecha inexistente en el calendario" },
+					)
+					.optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+			try {
+				return await carteraBackClient.getAperturaDia({ fecha: input.fecha });
+			} catch (err) {
+				// cartera-back-client.ts (request()) lanza Error en cualquier no-2xx
+				// (400/404/500) — el {success:false} del client method nunca se
+				// alcanza. Se mapea el mensaje real de cartera-back a BAD_REQUEST en
+				// vez de burbujear como 500 genérico (mismo patrón que
+				// actualizarCapacidadAsesorBucket / reasignarAsesor más abajo).
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						err instanceof Error
+							? err.message
+							: "No se pudo obtener la apertura del día",
+				});
+			}
+		}),
+
+	// ────────────────────────────────────────────────────────────────────────
 	// CB-019 · Configurar capacidad_base/margen_alerta por asesor+bucket
 	// Solo admin (a diferencia de getCargaPorAsesorBucket, que sigue siendo
 	// admin+supervisor): el supervisor puede ver el dashboard pero no editar

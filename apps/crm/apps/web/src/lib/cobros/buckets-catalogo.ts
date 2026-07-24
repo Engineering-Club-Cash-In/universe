@@ -139,6 +139,39 @@ export function useBucketsCatalogo() {
 }
 
 /**
+ * `estadoMora` de cada bucket numérico (0-5), en el orden fijo del seed B0-B5
+ * de cartera-back (espejo de `MORA_BUCKETS` en apps/server/src/lib/moraBuckets.ts).
+ * El índice del array ES el número de bucket — a diferencia de `orden` del
+ * catálogo dinámico (presentación, reordenable por un admin), esta lista es
+ * la identidad estable del bucket y no debe usarse para ordenar UI.
+ */
+const ESTADO_MORA_POR_NUMERO = [
+	"al_dia",
+	"mora_30",
+	"mora_60",
+	"mora_90",
+	"mora_120",
+	"mora_120_plus",
+] as const;
+
+/** Bucket combinado a partir del número (0-5) que devuelve getAperturaDia/getBucketsCarga. */
+export function bucketDeNumero(
+	numero: number,
+	catalogo: BucketsCatalogoQueryData | undefined,
+): BucketUI {
+	return bucketDeEstado(ESTADO_MORA_POR_NUMERO[numero], catalogo);
+}
+
+/** Fila cruda del catálogo dinámico para el bucket numérico (0-5), o undefined si no cargó / no está. */
+export function catalogoDeNumero(
+	numero: number,
+	catalogo: BucketsCatalogoQueryData | undefined,
+) {
+	const estadoMora = ESTADO_MORA_POR_NUMERO[numero];
+	return catalogo?.find((b) => b.estadoMora === estadoMora);
+}
+
+/**
  * Bucket combinado: catálogo dinámico (si trae el estado) sobreescribe
  * label/color; estados de status (no-aging) o catálogo aún no cargado caen
  * al default. Nunca retorna undefined — un estado sin match cae a

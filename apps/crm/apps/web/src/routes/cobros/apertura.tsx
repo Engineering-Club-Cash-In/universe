@@ -22,6 +22,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import {
 	type BucketsCatalogoQueryData,
+	catalogoDeNumero,
 	estiloBucket,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
@@ -169,14 +170,14 @@ function montoQ(v: number) {
 		: "Q0.00";
 }
 
-// Etiqueta y color del bucket numérico (0-5) desde el catálogo dinámico. El
-// catálogo se indexa por estadoMora, así que mapeamos por `orden` (= número de
-// bucket en el seed B0-B5); si no cargó, cae a un neutro.
+// Etiqueta y color del bucket numérico (0-5). `orden` es de presentación y
+// puede reordenarse sin tocar el bucket — el join correcto es por `numero` vía
+// catalogoDeNumero() (mapea a estadoMora, la identidad estable del catálogo).
 function bucketUI(
 	numero: number,
 	catalogo: BucketsCatalogoQueryData | undefined,
 ) {
-	const fila = catalogo?.find((b) => b.orden === numero);
+	const fila = catalogoDeNumero(numero, catalogo);
 	return {
 		label: fila?.prefijo || fila?.label || `B${numero}`,
 		nombre: fila?.label ?? "",
@@ -186,10 +187,17 @@ function bucketUI(
 
 // Todos los buckets del catálogo (0-5) para render — así el acordeón muestra
 // SIEMPRE las 6 secciones aunque un bucket no tenga críticos (un bucket vacío
-// es información, no ausencia — decisión CB-023).
+// es información, no ausencia — decisión CB-023). Se devuelven números de
+// bucket estables (0-5), NO `orden` (presentación, reordenable) — ordenados
+// por `orden` para respetar el orden de presentación del catálogo.
+const BUCKET_NUMEROS = [0, 1, 2, 3, 4, 5] as const;
 function bucketsOrdenados(catalogo: BucketsCatalogoQueryData | undefined) {
-	if (!catalogo || catalogo.length === 0) return [0, 1, 2, 3, 4, 5];
-	return [...catalogo].sort((a, b) => a.orden - b.orden).map((b) => b.orden);
+	if (!catalogo || catalogo.length === 0) return [...BUCKET_NUMEROS];
+	return [...BUCKET_NUMEROS].sort(
+		(a, b) =>
+			(catalogoDeNumero(a, catalogo)?.orden ?? a) -
+			(catalogoDeNumero(b, catalogo)?.orden ?? b),
+	);
 }
 
 /**

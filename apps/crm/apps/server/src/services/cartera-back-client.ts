@@ -1127,13 +1127,15 @@ export class CarteraBackClient {
 	async updateBucketsSLA(
 		configuraciones: Array<{ bucket: number; dias_sla: number }>,
 	): Promise<{ success: boolean; message?: string }> {
-		return this.request<{ success: boolean; message?: string }>(
+		const result = await this.request<{ success: boolean; message?: string }>(
 			"/buckets/dias-sla",
 			{
 				method: "PUT",
 				body: JSON.stringify({ configuraciones }),
 			},
 		);
+		this.cache.invalidate("/config/buckets");
+		return result;
 	}
 
 	// CB-018: carga de cuentas por asesor y bucket (dashboard gerencial) —

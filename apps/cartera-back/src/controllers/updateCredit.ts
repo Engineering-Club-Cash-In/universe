@@ -108,14 +108,23 @@ const updateInstallments = async ({
       .plus(membresiasFijoPorMes);
     const abonoCapital = cuotaMensual.minus(montosExtras);
 
-    capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
-    if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
-
     // Un pago con dinero aplicado (cuota pagada o parcial) es historia
     // liquidada: sus restantes/membresías reflejan lo realmente cobrado y no
-    // deben pisarse con la re-proyección teórica. Avanza el capital en memoria
-    // (la cuota ocupa su lugar en el calendario) pero no se reescribe la fila.
-    if (new Big(pago.monto_aplicado ?? 0).gt(0)) return [];
+    // deben pisarse con la re-proyección teórica. La cuota sigue ocupando su
+    // lugar en el calendario, pero su abono_capital real ya está descontado
+    // de creditos.capital (punto de partida de la proyección; ver
+    // aplicarPagoAlCredito, rama de cuota no completa): avanzar solo por lo
+    // que le falta amortizar evita descontarlo dos veces.
+    const aplicado = new Big(pago.monto_aplicado ?? 0);
+    let avanceCapital = abonoCapital;
+    if (aplicado.gt(0)) {
+      avanceCapital = abonoCapital.minus(new Big(pago.abono_capital ?? 0));
+      if (avanceCapital.lt(0)) avanceCapital = new Big(0);
+    }
+    capitalEnMemoria = capitalEnMemoria.minus(avanceCapital);
+    if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
+
+    if (aplicado.gt(0)) return [];
 
     return [{
       pago_id: pago.pago_id,

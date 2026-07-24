@@ -136,8 +136,12 @@ export function LeadDetailModal({
 		}),
 		enabled: open && !!lead?.id,
 	});
+	// Filtra por el formulario específico — evita mezclar respuestas de otro campaignFormKey
+	// que por coincidencia reuse el mismo fieldKey (ver INTAKE_FORM_FIELDS en el backend).
 	const intakeAnswers = new Map(
-		(intakeAnswersQuery.data?.data ?? []).map((a) => [a.fieldKey, a.fieldValue]),
+		(intakeAnswersQuery.data?.data ?? [])
+			.filter((a) => a.campaignFormKey === "credito_filtro_julio2026")
+			.map((a) => [a.fieldKey, a.fieldValue]),
 	);
 
 	const queryClient = useQueryClient();

@@ -108,8 +108,9 @@ export async function validatePublicLeadToken(
 
 	const origin = c.req.header("origin") || "";
 	const isLocalDev =
-		origin.startsWith("http://localhost:") ||
-		origin.startsWith("http://127.0.0.1:");
+		process.env.NODE_ENV !== "production" &&
+		(origin.startsWith("http://localhost:") ||
+			origin.startsWith("http://127.0.0.1:"));
 	const allowedOrigin = process.env.PORTAL_WEB_ORIGIN;
 
 	if (!isLocalDev && (!allowedOrigin || origin !== allowedOrigin)) {

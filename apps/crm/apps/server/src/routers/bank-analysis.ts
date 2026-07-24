@@ -20,6 +20,12 @@ import {
 	getBankStatementOpportunityDocumentType,
 } from "../lib/bank-statement-documents";
 import { updateChecklistForClientDocument } from "../lib/checklist";
+import {
+	assertOpportunityBelongsToLead,
+	canWriteOpportunityCreditAnalysis,
+	getCreditAnalysisOwnerCondition,
+	getCreditAnalysisResourceId,
+} from "../lib/credit-analysis-ownership";
 import { calculateCreditCapacity } from "../lib/financial-math";
 import { crmProcedure } from "../lib/orpc";
 import {
@@ -60,11 +66,20 @@ export const bankAnalysisRouter = {
 				})
 				.refine((data) => data.leadId || data.coDebtorId, {
 					message: "Debe proporcionar leadId o coDebtorId",
+				})
+				.refine((data) => !data.leadId || !!data.opportunityId, {
+					message: "Debe proporcionar opportunityId para analizar un lead",
+				})
+				.refine((data) => !(data.leadId && data.coDebtorId), {
+					message: "No puede analizar un lead y un co-deudor a la vez",
 				}),
 		)
 		.handler(async ({ input, context }) => {
 			const isForLead = !!input.leadId;
-			const resourceId = input.leadId || input.coDebtorId!;
+			const owner = isForLead
+				? { leadId: input.leadId!, opportunityId: input.opportunityId! }
+				: { coDebtorId: input.coDebtorId! };
+			const resourceId = getCreditAnalysisResourceId(owner);
 			const expectedPrefix = buildUploadPrefix("bank_statement", resourceId);
 
 			// 1. Verificar que el lead/co-deudor existe y el usuario tiene acceso
@@ -107,7 +122,7 @@ export const bankAnalysisRouter = {
 				| { id: string; vehicleId: string | null }
 				| undefined;
 
-			if (isForLead && input.opportunityId) {
+			if (isForLead) {
 				const [opportunity] = await db
 					.select({
 						id: opportunities.id,
@@ -116,7 +131,7 @@ export const bankAnalysisRouter = {
 						assignedTo: opportunities.assignedTo,
 					})
 					.from(opportunities)
-					.where(eq(opportunities.id, input.opportunityId))
+					.where(eq(opportunities.id, input.opportunityId!))
 					.limit(1);
 
 				if (!opportunity) {
@@ -125,9 +140,22 @@ export const bankAnalysisRouter = {
 					});
 				}
 
-				if (opportunity.leadId !== input.leadId) {
+				try {
+					assertOpportunityBelongsToLead(opportunity, input.leadId!);
+				} catch (error) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: "La oportunidad no pertenece al lead analizado",
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+				if (
+					!canWriteOpportunityCreditAnalysis(
+						context.userRole,
+						context.userId,
+						opportunity.assignedTo,
+					)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para analizar esta oportunidad",
 					});
 				}
 
@@ -185,9 +213,7 @@ export const bankAnalysisRouter = {
 				}
 
 				// 3. Incremento atómico del contador para evitar race conditions
-				const whereCondition = isForLead
-					? eq(creditAnalysis.leadId, input.leadId!)
-					: eq(creditAnalysis.coDebtorId, input.coDebtorId!);
+				const whereCondition = getCreditAnalysisOwnerCondition(owner);
 
 				const updateResult = await db
 					.update(creditAnalysis)
@@ -225,6 +251,7 @@ export const bankAnalysisRouter = {
 						const insertValues = isForLead
 							? {
 									leadId: input.leadId!,
+									opportunityId: input.opportunityId!,
 									attemptCount: 1,
 									createdBy: context.userId,
 								}

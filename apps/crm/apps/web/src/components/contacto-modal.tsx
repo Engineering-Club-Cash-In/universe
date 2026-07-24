@@ -174,6 +174,17 @@ export function ContactoModal({
 		return lista;
 	}, [telefonoPrincipal, telefonoAlternativo]);
 
+	const [internalOpen, setInternalOpen] = useState(false);
+	const isControlled = open !== undefined;
+	const isOpen = isControlled ? open : internalOpen;
+
+	const handleOpenChange = (newOpen: boolean) => {
+		if (!isControlled) {
+			setInternalOpen(newOpen);
+		}
+		onOpenChange?.(newOpen);
+	};
+
 	const [telefonoSeleccionado, setTelefonoSeleccionado] = useState(
 		() => telefonos[0] || telefonoPrincipal,
 	);
@@ -307,9 +318,7 @@ export function ContactoModal({
 					),
 			});
 			form.reset();
-			document
-				.querySelector<HTMLButtonElement>("[data-radix-dialog-close]")
-				?.click();
+			handleOpenChange(false);
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al registrar el contacto");
@@ -506,7 +515,7 @@ export function ContactoModal({
 	};
 
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
+		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
 			{children && <DialogTrigger asChild>{children}</DialogTrigger>}
 			<DialogContent className="max-h-[90vh] min-w-3xl max-w-4xl overflow-y-auto">
 				<DialogHeader>
@@ -1108,7 +1117,7 @@ export function ContactoModal({
 										cuotaFin as number | null | undefined,
 										!!incluyeMora,
 									) && (
-										<p className="text-red-500 text-sm">
+										<p className="text-muted-foreground text-sm">
 											{MENSAJE_RANGO_O_MORA_REQUERIDO}.
 										</p>
 									)

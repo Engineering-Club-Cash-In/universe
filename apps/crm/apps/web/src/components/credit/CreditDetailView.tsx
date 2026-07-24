@@ -74,7 +74,7 @@ type CreditCategory =
 	| "Hipotecario"
 	| "Vehículo";
 
-type PaymentDay = 15 | 30;
+type PaymentDay = number;
 
 // Tipo para inversionista seleccionado
 interface SelectedInversionista {
@@ -1056,11 +1056,18 @@ export function CreditDetailView({
 													<SelectValue placeholder="Seleccionar día" />
 												</SelectTrigger>
 												<SelectContent>
-													{[1, 5, 10, 15, 20, 25, 30].map((day) => (
-														<SelectItem key={day} value={String(day)}>
-															Día {day}
-														</SelectItem>
-													))}
+													<SelectItem value="15">Día 15</SelectItem>
+													<SelectItem value="30">Día 30</SelectItem>
+													{consolidatedCreditQuery.data?.lead?.suggestedPaymentDays
+														?.filter(
+															(d: { dia: number; porcentaje: number }) =>
+																d.dia !== 15 && d.dia !== 30,
+														)
+														.map((d: { dia: number; porcentaje: number }) => (
+															<SelectItem key={d.dia} value={String(d.dia)}>
+																Día {d.dia} ({d.porcentaje}% recomendado)
+															</SelectItem>
+														))}
 												</SelectContent>
 											</Select>
 										) : (

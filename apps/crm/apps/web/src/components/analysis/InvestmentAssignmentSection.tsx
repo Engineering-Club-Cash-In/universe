@@ -68,7 +68,7 @@ type CreditCategory =
 	| "Hipotecario"
 	| "Vehículo";
 
-type PaymentDay = 15 | 30;
+type PaymentDay = number;
 
 // Type for existing investor from DB
 type ExistingInvestor = {
@@ -950,7 +950,7 @@ export function InvestmentAssignmentSection({
 										<Select
 											value={editDiaPagoMensual.toString()}
 											onValueChange={(value) =>
-												setEditDiaPagoMensual(Number(value) as PaymentDay)
+												setEditDiaPagoMensual(Number(value))
 											}
 										>
 											<SelectTrigger>
@@ -959,8 +959,25 @@ export function InvestmentAssignmentSection({
 											<SelectContent>
 												<SelectItem value="15">15</SelectItem>
 												<SelectItem value="30">Fin de mes</SelectItem>
+												{selectedOpportunity.suggestedPaymentDays
+													?.filter(
+														(d: { dia: number; porcentaje: number }) =>
+															d.dia !== 15 && d.dia !== 30,
+													)
+													.map((d: { dia: number; porcentaje: number }) => (
+														<SelectItem key={d.dia} value={d.dia.toString()}>
+															Día {d.dia} ({d.porcentaje}% recomendado en Análisis)
+														</SelectItem>
+													))}
 											</SelectContent>
 										</Select>
+										{selectedOpportunity.suggestedPaymentDays &&
+											selectedOpportunity.suggestedPaymentDays.length > 0 && (
+												<p className="mt-1 text-[10px] text-muted-foreground">
+													Análisis de capacidad de pago sugiere estas fechas
+													según los ingresos detectados del cliente.
+												</p>
+											)}
 									</div>
 								</div>
 							</div>

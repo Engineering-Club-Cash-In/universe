@@ -184,6 +184,10 @@ export interface ContractData {
 		tasaInteresEnLetras: string;
 		diaPago: number;
 		diaPagoEnLetras: string;
+		// Valor crudo de opportunity.diaPagoMensual (sin el fallback a 1 de diaPago).
+		// Sirve para que jurídico detecte si el analista eligió un día recomendado
+		// por la IA (distinto de 15/30) sin confundirlo con el default de diaPago.
+		diaPagoMensualRaw: number | null;
 		seguro?: number;
 		seguroEnLetras?: string;
 		gps?: number;
@@ -517,6 +521,7 @@ export async function mapOpportunityToContractData(
 			tasaInteresEnLetras: numberToWords(Math.floor(tasaInteres)),
 			diaPago,
 			diaPagoEnLetras: numberToWords(diaPago),
+			diaPagoMensualRaw: opportunity.diaPagoMensual ?? null,
 			seguro,
 			seguroEnLetras: seguro ? numberToWordsQuetzales(seguro) : undefined,
 			gps,

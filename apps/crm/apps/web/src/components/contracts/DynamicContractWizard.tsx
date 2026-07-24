@@ -129,6 +129,9 @@ export interface CRMData {
 		cuotaMensual?: number;
 		porcentajeInteres?: number;
 		porcentajeMora?: number;
+		// Valor crudo de opportunity.diaPagoMensual. Si no es 15 ni 30, significa que
+		// el analista eligió uno de los 3 días recomendados por la IA en el 50%.
+		diaPagoMensualRaw?: number | null;
 	};
 	coDebtors?: CoDebtorData[];
 }
@@ -619,6 +622,12 @@ export function DynamicContractWizard({
 	// Date configuration states
 	const [fechaVencimiento, setFechaVencimiento] = useState<string>("");
 	const [diaPago, setDiaPago] = useState<string>("día quince"); // Default día 15
+	// Día recomendado por la IA que el analista eligió en el 50% (si aplica).
+	// Solo se llena cuando opportunity.diaPagoMensual no es 15 ni 30.
+	const [analysisSuggestedDay, setAnalysisSuggestedDay] = useState<{
+		dia: number;
+		label: string;
+	} | null>(null);
 
 	// Initialize co-debtor editable fields from CRM data
 	useEffect(() => {
@@ -818,6 +827,10 @@ export function DynamicContractWizard({
 			if (value === "último día") {
 				// Último día del mes
 				nuevoDia = new Date(anio, mes + 1, 0).getDate();
+			} else if (analysisSuggestedDay && value === analysisSuggestedDay.label) {
+				// Día recomendado por la IA que eligió el analista en el 50%
+				const diasEnMes = new Date(anio, mes + 1, 0).getDate();
+				nuevoDia = Math.min(analysisSuggestedDay.dia, diasEnMes);
 			} else {
 				// Día 15
 				nuevoDia = 15;
@@ -1233,14 +1246,23 @@ export function DynamicContractWizard({
 					let diaPagoDefault: string;
 					let diaVenc: number;
 
-					if (diaActual <= 20) {
+					const diaAnalisis = crmData.credito?.diaPagoMensualRaw;
+					const diasEnMesVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+
+					if (diaAnalisis && diaAnalisis !== 15 && diaAnalisis !== 30) {
+						// El analista eligió uno de los 3 días recomendados por la IA en el
+						// 50%: ese es el default aquí, en vez del algoritmo por fecha de hoy.
+						diaPagoDefault = `día ${numberToText(diaAnalisis)}`;
+						diaVenc = Math.min(diaAnalisis, diasEnMesVenc);
+						setAnalysisSuggestedDay({ dia: diaAnalisis, label: diaPagoDefault });
+					} else if (diaActual <= 20) {
 						// Del 1 al 20: día de pago es 15, vencimiento día 15 del mes siguiente
 						diaPagoDefault = "día quince";
 						diaVenc = 15;
 					} else {
 						// Del 21 al 31: día de pago es último día, vencimiento último día del mes siguiente
 						diaPagoDefault = "último día";
-						diaVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+						diaVenc = diasEnMesVenc;
 					}
 
 					const fechaStr = `${anioVenc}-${String(mesVenc + 1).padStart(2, "0")}-${String(diaVenc).padStart(2, "0")}`;
@@ -1792,6 +1814,12 @@ export function DynamicContractWizard({
 														<option value="último día">
 															Último día del mes
 														</option>
+														{analysisSuggestedDay && (
+															<option value={analysisSuggestedDay.label}>
+																Día {analysisSuggestedDay.dia} (elegido en
+																Análisis)
+															</option>
+														)}
 													</select>
 													<p className="text-muted-foreground text-xs">
 														Se usará: "{fieldValues.diaPago || "día quince"}"

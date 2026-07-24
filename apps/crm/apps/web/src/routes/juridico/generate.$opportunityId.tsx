@@ -216,6 +216,7 @@ function RouteComponent() {
 					mesesPrestamo: previewQuery.data.credito?.numeroCuotas,
 					cuotaMensual: previewQuery.data.credito?.cuotaMensual,
 					porcentajeInteres: previewQuery.data.credito?.tasaInteres,
+					diaPagoMensualRaw: previewQuery.data.credito?.diaPagoMensualRaw,
 				},
 				coDebtors: coDebtorsQuery.data?.map((cd) => ({
 					id: cd.id,

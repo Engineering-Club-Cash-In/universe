@@ -41,11 +41,13 @@ export const DEFAULT_CODIGO_POSTAL = "01001";
 /** Credit number prefix for CRM-generated credits */
 export const CREDIT_NUMBER_PREFIX = "CRM";
 
-function normalizePaymentDay(day: number | null | undefined): 15 | 30 | null {
+// El día de pago ya se validó al guardarlo en la oportunidad (assignInvestorAndAdvance):
+// siempre es 15, 30, o un día recomendado por el análisis de capacidad de pago del lead.
+// Aquí solo se confirma que sea un día de mes válido antes de mandarlo a cartera-back.
+function normalizePaymentDay(day: number | null | undefined): number | null {
 	if (day == null) return null;
-	if (day === 15 || day === 30) return day;
-	if (day === 31) return 30;
-	return null;
+	if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+	return day;
 }
 
 // ============================================================================
@@ -951,7 +953,7 @@ async function createCredit(
 			return {
 				success: false,
 				error:
-					"La oportunidad debe tener día de pago 15 o 30 para crear el crédito en cartera-back",
+					"La oportunidad debe tener un día de pago válido (1-31) para crear el crédito en cartera-back",
 			};
 		}
 

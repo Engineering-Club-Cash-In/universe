@@ -43,7 +43,7 @@ const fakeDb: any = {
   },
 };
 
-mock.module("../../database", () => ({ db: fakeDb }));
+mock.module("../../database", () => ({ db: fakeDb, client: {} }));
 
 const { getCargaPorAsesorBucket, resolverMargen } = await import("./cargaAsesorBucket");
 

@@ -39,7 +39,7 @@ const fakeDb: any = {
   },
 };
 
-mock.module("../../database", () => ({ db: fakeDb }));
+mock.module("../../database", () => ({ db: fakeDb, client: {} }));
 
 const schema = await import("../../database/db/schema");
 const { actualizarCapacidadAsesorBucket } = await import("./actualizarAsesorBucket");

@@ -45,7 +45,7 @@ const fakeDb: any = {
   },
 };
 
-mock.module("../../database", () => ({ db: fakeDb }));
+mock.module("../../database", () => ({ db: fakeDb, client: {} }));
 
 const {
   calcularMontoAdeudado,
@@ -573,5 +573,57 @@ describe("regresiones de SQL (orden por enum / bucket a la fecha)", () => {
       expect(s).toContain("v .pagado = true AND NOT EXISTS");
       expect(s).not.toContain("v .fecha_vencimiento::date < 2026-07-22 ::date AND v .pagado = false");
     }
+  });
+});
+
+// ──────────────── Validation de ventana acotada (fechaEnRangoApertura) ───────
+
+const { fechaEnRangoApertura, APERTURA_DIAS_ATRAS, hoyGT } = await import(
+  "../../routers/buckets"
+);
+
+describe("fechaEnRangoApertura (regresión cota de fechas en apertura)", () => {
+  it("acepta hoy (límite superior exacto)", () => {
+    const hoy = hoyGT();
+    expect(fechaEnRangoApertura(hoy)).toBe(true);
+  });
+
+  it(`acepta hoy - ${APERTURA_DIAS_ATRAS} días (límite inferior exacto)`, () => {
+    const hoy = "2026-07-24";
+    // 2026-07-24 - 7 días = 2026-07-17
+    expect(fechaEnRangoApertura("2026-07-17", hoy)).toBe(true);
+  });
+
+  it(`rechaza hoy - ${APERTURA_DIAS_ATRAS + 1} días (fuera de ventana)`, () => {
+    const hoy = "2026-07-24";
+    // 2026-07-24 - 8 días = 2026-07-16
+    expect(fechaEnRangoApertura("2026-07-16", hoy)).toBe(false);
+  });
+
+  it("rechaza fechas futuras (mañana o posterior)", () => {
+    const hoy = "2026-07-24";
+    expect(fechaEnRangoApertura("2026-07-25", hoy)).toBe(false);
+    expect(fechaEnRangoApertura("2026-08-01", hoy)).toBe(false);
+  });
+
+  it("calcula correctamente la cota en transiciones de fin de mes", () => {
+    // 2026-03-03 - 7 días = 2026-02-24
+    const hoy = "2026-03-03";
+    expect(fechaEnRangoApertura("2026-02-24", hoy)).toBe(true);
+    expect(fechaEnRangoApertura("2026-02-23", hoy)).toBe(false);
+  });
+
+  it("calcula correctamente la cota en transiciones de año bisiesto", () => {
+    // 2028 es bisiesto (29 días en feb). 2028-03-01 - 7 días = 2028-02-23
+    const hoy = "2028-03-01";
+    expect(fechaEnRangoApertura("2028-02-23", hoy)).toBe(true);
+    expect(fechaEnRangoApertura("2028-02-22", hoy)).toBe(false);
+  });
+
+  it("calcula correctamente la cota en transiciones de fin de año", () => {
+    // 2026-01-05 - 7 días = 2025-12-29
+    const hoy = "2026-01-05";
+    expect(fechaEnRangoApertura("2025-12-29", hoy)).toBe(true);
+    expect(fechaEnRangoApertura("2025-12-28", hoy)).toBe(false);
   });
 });

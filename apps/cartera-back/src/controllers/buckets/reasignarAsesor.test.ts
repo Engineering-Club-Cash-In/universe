@@ -77,7 +77,7 @@ const fakeDb: any = {
   transaction: async (cb: any) => cb(crearMutadores()),
 };
 
-mock.module("../../database", () => ({ db: fakeDb }));
+mock.module("../../database", () => ({ db: fakeDb, client: {} }));
 
 const schema = await import("../../database/db/schema");
 const {

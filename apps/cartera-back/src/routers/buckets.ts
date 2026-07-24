@@ -87,19 +87,19 @@ const esFecha = (s: string): boolean => {
 // aquí el dueño y el status del crédito se leerían del estado actual (el modelo
 // no guarda historial continuo de status), así que se acota en vez de devolver
 // una foto histórica silenciosamente incorrecta.
-const APERTURA_DIAS_ATRAS = 7;
+export const APERTURA_DIAS_ATRAS = 7;
 
 // Hoy en GT (YYYY-MM-DD). Espejo de la fecha default del controller.
-const hoyGT = (): string =>
-  new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
+export const hoyGT = (refDate = new Date()): string =>
+  refDate.toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
 
 // La fecha cae en [hoy - APERTURA_DIAS_ATRAS, hoy]. Sin futuras (no hay datos)
 // ni más atrás de la ventana. Asume `s` ya validada por esFecha. El mínimo se
 // deriva del DÍA GT (no de Date.now() en UTC) para no correrse por el offset
 // de zona horaria; con strings YYYY-MM-DD la comparación lexicográfica es
 // equivalente a la cronológica.
-const fechaEnRangoApertura = (s: string): boolean => {
-  const hoy = hoyGT();
+export const fechaEnRangoApertura = (s: string, refHoy?: string): boolean => {
+  const hoy = refHoy ?? hoyGT();
   const [y, m, d] = hoy.split("-").map(Number);
   const minDate = new Date(Date.UTC(y, m - 1, d - APERTURA_DIAS_ATRAS));
   const min = minDate.toISOString().slice(0, 10);

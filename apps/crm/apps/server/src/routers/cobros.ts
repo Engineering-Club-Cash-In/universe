@@ -5417,7 +5417,21 @@ export const cobrosRouter = {
 					message: "Integración con cartera-back no está habilitada",
 				});
 			}
-			return carteraBackClient.getAperturaDia({ fecha: input.fecha });
+			try {
+				return await carteraBackClient.getAperturaDia({ fecha: input.fecha });
+			} catch (err) {
+				// cartera-back-client.ts (request()) lanza Error en cualquier no-2xx
+				// (400/404/500) — el {success:false} del client method nunca se
+				// alcanza. Se mapea el mensaje real de cartera-back a BAD_REQUEST en
+				// vez de burbujear como 500 genérico (mismo patrón que
+				// actualizarCapacidadAsesorBucket / reasignarAsesor más abajo).
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						err instanceof Error
+							? err.message
+							: "No se pudo obtener la apertura del día",
+				});
+			}
 		}),
 
 	// ────────────────────────────────────────────────────────────────────────

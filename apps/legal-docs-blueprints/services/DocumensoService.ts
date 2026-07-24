@@ -85,7 +85,10 @@ async function findSignatureLinesInPDF(
 
     // 1. Obtener configuración del patrón para este tipo de contrato
     const patternConfig = getSignaturePattern(contractType);
-    console.log(`📋 Patrón a buscar: "${patternConfig.pattern}" (${patternConfig.signerCount} firmante(s))`);
+    // Cantidad de widgets de firma a colocar. Por defecto = signerCount, pero
+    // puede ser mayor si el mismo firmante firma en varios lugares (ej. 2 anexos).
+    const fieldCount = patternConfig.signatureFieldCount ?? patternConfig.signerCount;
+    console.log(`📋 Patrón a buscar: "${patternConfig.pattern}" (${patternConfig.signerCount} firmante(s), ${fieldCount} firma(s))`);
 
     // 2. Parsear PDF con pdfjs-dist para buscar el patrón con coordenadas reales
     const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
@@ -140,19 +143,19 @@ async function findSignatureLinesInPDF(
           console.log(`✓ Patrón ${foundPositions.length} encontrado en página ${pageNum} - PDF (${pdfX.toFixed(1)}, ${pdfY.toFixed(1)})`);
           
           // Si ya encontramos suficientes, salir
-          if (foundPositions.length >= patternConfig.signerCount) {
+          if (foundPositions.length >= fieldCount) {
             break;
           }
         }
       }
-      
+
       // Si ya encontramos suficientes, salir del loop de páginas
-      if (foundPositions.length >= patternConfig.signerCount) {
+      if (foundPositions.length >= fieldCount) {
         break;
       }
     }
 
-    console.log(`✓ Total encontradas: ${foundPositions.length} ocurrencias (esperadas: ${patternConfig.signerCount})`);
+    console.log(`✓ Total encontradas: ${foundPositions.length} ocurrencias (esperadas: ${fieldCount})`);
 
     if (foundPositions.length === 0) {
       console.warn(`⚠️ No se encontró el patrón "${pattern}" en el PDF`);
@@ -167,7 +170,7 @@ async function findSignatureLinesInPDF(
     // 5. Crear los campos con el orden correcto
     const fields: DocumensoField[] = [];
     
-    for (let index = 0; index < Math.min(foundPositions.length, patternConfig.signerCount); index++) {
+    for (let index = 0; index < Math.min(foundPositions.length, fieldCount); index++) {
       const pos = foundPositions[index];
       const { pageNum, pdfX, pdfY, pageHeight, scaleFactor } = pos;
 
@@ -193,10 +196,13 @@ async function findSignatureLinesInPDF(
       // Guardar coordenadas en log
       await logCoordinates(contractType, pattern, pageNum, pageHeight, scaleFactor, pdfX, pdfY, documensoX, documensoY);
 
-      // Campo de firma sobre la línea de firma
+      // Campo de firma sobre la línea de firma.
+      // Si hay más widgets que firmantes (mismo firmante en varios anexos),
+      // los widgets extra se asignan al último recipient disponible.
+      const recipientIndex = Math.min(index, patternConfig.signerCount - 1);
       fields.push({
         type: 'SIGNATURE',
-        recipientId: `recipient-${index}`,
+        recipientId: `recipient-${recipientIndex}`,
         page: pageNum,
         positionX: documensoX,
         positionY: documensoY,

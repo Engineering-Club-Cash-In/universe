@@ -754,7 +754,10 @@ export class WeeTrustService {
 			console.log(`[WeeTrust] Detectando líneas de firma para: ${contractType}`);
 
 			const patternConfig = getSignaturePattern(contractType);
-			console.log(`[WeeTrust] Patrón: "${patternConfig.pattern}" (${patternConfig.signerCount} firmante(s))`);
+			// Cantidad de widgets de firma a colocar. Por defecto = signerCount, pero
+			// puede ser mayor si el mismo firmante firma en varios lugares (ej. 2 anexos).
+			const fieldCount = patternConfig.signatureFieldCount ?? patternConfig.signerCount;
+			console.log(`[WeeTrust] Patrón: "${patternConfig.pattern}" (${patternConfig.signerCount} firmante(s), ${fieldCount} firma(s))`);
 
 			const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
 			const pdfDocument = await loadingTask.promise;
@@ -798,11 +801,11 @@ export class WeeTrustService {
 
 						console.log(`[WeeTrust] Patrón encontrado en página ${pageNum} - (${textItem.transform[4].toFixed(1)}, ${textItem.transform[5].toFixed(1)})`);
 
-						if (foundPositions.length >= patternConfig.signerCount) break;
+						if (foundPositions.length >= fieldCount) break;
 					}
 				}
 
-				if (foundPositions.length >= patternConfig.signerCount) break;
+				if (foundPositions.length >= fieldCount) break;
 			}
 
 			if (foundPositions.length === 0) {
@@ -822,9 +825,12 @@ export class WeeTrustService {
 			// Convertir coordenadas PDF a coordenadas WeeTrust
 			const positions: WeeTrustSignaturePosition[] = [];
 
-			for (let i = 0; i < Math.min(foundPositions.length, signerEmails.length); i++) {
+			// Colocamos un widget por cada posición encontrada (hasta fieldCount).
+			// Si hay más widgets que firmantes (mismo firmante en varios anexos),
+			// los widgets extra se asignan al último email disponible.
+			for (let i = 0; i < foundPositions.length && signerEmails.length > 0; i++) {
 				const pos = foundPositions[i];
-				const email = signerEmails[i];
+				const email = signerEmails[Math.min(i, signerEmails.length - 1)];
 
 				// WeeTrust usa coordenadas donde Y=0 está arriba
 				// PDF usa coordenadas donde Y=0 está abajo

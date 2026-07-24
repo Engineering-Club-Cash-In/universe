@@ -4,12 +4,14 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	ClipboardList,
+	Clock,
 	Loader2,
 	Phone,
 	UserRound,
 } from "lucide-react";
 import { useState } from "react";
 import { BucketMultiSelect } from "@/components/cobros/bucket-multi-select";
+import { ConfigurarSlaModal } from "@/components/cobros/configurar-sla-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -204,6 +206,7 @@ function ColaDiaPage() {
 	const [filtro, setFiltro] = useState<Filtro>("todos");
 	const [bucketsSel, setBucketsSel] = useState<number[] | null>(null);
 	const [page, setPage] = useState(1);
+	const [isSlaModalOpen, setIsSlaModalOpen] = useState(false);
 
 	const asesorIdInput =
 		esSupervisor && asesorSel !== "todos" ? Number(asesorSel) : undefined;
@@ -290,7 +293,20 @@ function ColaDiaPage() {
 								<ClipboardList className="h-5 w-5" />
 							</div>
 							<div>
-								<CardTitle className="text-xl">Cola del día</CardTitle>
+								<div className="flex items-center gap-3">
+									<CardTitle className="text-xl">Cola del día</CardTitle>
+									{esSupervisor && (
+										<Button
+											variant="outline"
+											size="sm"
+											className="gap-2 border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 dark:hover:bg-indigo-900/60 font-semibold"
+											onClick={() => setIsSlaModalOpen(true)}
+										>
+											<Clock className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+											Configurar SLA
+										</Button>
+									)}
+								</div>
 								<CardDescription>
 									Cuentas priorizadas para gestionar hoy: SLA vencido, promesas
 									de pago que vencen hoy, promesas incumplidas y cuentas sin
@@ -489,6 +505,11 @@ function ColaDiaPage() {
 						</CardContent>
 					</Card>
 				)}
+			<ConfigurarSlaModal
+				open={isSlaModalOpen}
+				onOpenChange={setIsSlaModalOpen}
+				catalogo={bucketsCatalogo.data}
+			/>
 		</div>
 	);
 }

@@ -337,3 +337,14 @@ export async function getBucketsParaUIAsync(): Promise<BucketParaUI[]> {
 	}
 	return mapearBucketsParaUI();
 }
+
+/**
+ * True si el catálogo dinámico de cartera-back logró cargarse al menos una
+ * vez (aunque esté expirado / pendiente de refresh). False si seguimos en
+ * el fallback estático MORA_BUCKETS — ej. cold-start antes del primer fetch,
+ * o cartera-back caído. Lo usa CB-020 (config de SLA) para no dejar guardar
+ * con dias_sla placeholder del fallback como si fueran los valores reales.
+ */
+export function isDynamicCatalogLoaded(): boolean {
+	return dynamicBucketsCache !== null;
+}

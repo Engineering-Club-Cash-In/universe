@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertCircle, Clock, Loader2, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -52,6 +52,12 @@ export function ConfigurarSlaModal({
 		5: 1,
 	});
 
+	const { data: catalogoCargadoData } = useQuery({
+		...orpc.getBucketsCatalogoCargado.queryOptions(),
+		enabled: open,
+	});
+	const catalogoListo = catalogoCargadoData?.cargado === true;
+
 	// Cargar valores actuales desde el catálogo dinámico si está disponible
 	useEffect(() => {
 		if (catalogo && open) {
@@ -103,7 +109,6 @@ export function ConfigurarSlaModal({
 		return typeof val !== "number" || val < 1 || val > 30;
 	});
 
-	const catalogoListo = catalogo !== undefined;
 	const isValid = !invalidBucket && catalogoListo;
 
 	return (

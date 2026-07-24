@@ -72,6 +72,7 @@ import {
 	ESTADOS_AGING_VALIDOS,
 	estadoMoraPorCuotas,
 	getBucketsParaUIAsync,
+	isDynamicCatalogLoaded,
 	MORA_BUCKETS,
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
@@ -1653,6 +1654,14 @@ export const cobrosRouter = {
 	// evita que el frontend mantenga sus propias copias hardcodeadas.
 	getBucketsCatalogo: cobrosProcedure.handler(async () => {
 		return getBucketsParaUIAsync();
+	}),
+
+	// CB-020: si el catálogo dinámico ya cargó al menos una vez (vs. seguir en
+	// el fallback estático MORA_BUCKETS). Lo usa el modal de config de SLA para
+	// no dejar guardar dias_sla placeholder como si fueran los valores reales.
+	getBucketsCatalogoCargado: cobrosProcedure.handler(async () => {
+		await getBucketsParaUIAsync();
+		return { cargado: isDynamicCatalogLoaded() };
 	}),
 
 	// CB-006: histórico de migraciones de bucket (motor COBROS-02) desde

@@ -40,13 +40,15 @@ export async function actualizarDiasSlaBuckets(
 		}
 	}
 
-	for (const config of configs) {
-		await db.execute(sql`
-			UPDATE ${SQL_CARTERA_SCHEMA}.buckets
-			SET dias_sla = ${config.dias_sla}
-			WHERE numero = ${config.bucket}
-		`);
-	}
+	await db.transaction(async (tx) => {
+		for (const config of configs) {
+			await tx.execute(sql`
+				UPDATE ${SQL_CARTERA_SCHEMA}.buckets
+				SET dias_sla = ${config.dias_sla}
+				WHERE numero = ${config.bucket}
+			`);
+		}
+	});
 
 	return { success: true };
 }

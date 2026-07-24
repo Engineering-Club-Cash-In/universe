@@ -61,6 +61,11 @@ import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
+import {
+	assertOpportunityBelongsToLead,
+	canWriteOpportunityCreditAnalysis,
+	getCreditAnalysisOwnerCondition,
+} from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
@@ -145,6 +150,7 @@ type CarteraClientCredit = {
 type ClientRowOpportunity = {
 	id: string;
 	title?: string;
+	assignedTo?: string | null;
 	value?: string | null;
 	creditType?: string | null;
 	numeroSifco: string | null;
@@ -398,24 +404,35 @@ export function buildCarteraOnlyClientRow(credit: CarteraClientCredit) {
 export function buildCarteraMatchedClientRows(params: {
 	lead: MatchedClientLead;
 	leadOpportunities: ClientRowOpportunity[];
-	creditAnalysis: unknown;
+	creditAnalysisByOpportunityId: ReadonlyMap<string, unknown>;
 	carteraCreditBySifco: Map<string, CarteraClientCredit>;
+	opportunityOwnerId?: string;
 }): MatchedClientRow[] {
 	const rows: MatchedClientRow[] = [];
+	const leadOpportunities = params.opportunityOwnerId
+		? params.leadOpportunities.filter(
+				(opportunity) =>
+					opportunity.assignedTo === params.opportunityOwnerId,
+			)
+		: params.leadOpportunities;
 
 	for (const [sifco, credit] of params.carteraCreditBySifco) {
-		const matchingOpportunities = params.leadOpportunities.filter(
+		const matchingOpportunities = leadOpportunities.filter(
 			(opp) => opp.numeroSifco === sifco,
 		);
 		if (matchingOpportunities.length === 0) continue;
+		const matchingOpportunity =
+			matchingOpportunities.length === 1 ? matchingOpportunities[0] : null;
 
 		rows.push({
 			...params.lead,
 			rowId: `${params.lead.id}-${sifco}`,
-			opportunities: params.leadOpportunities,
-			creditAnalysis: params.creditAnalysis,
+			opportunities: leadOpportunities,
+			creditAnalysis: matchingOpportunity
+				? (params.creditAnalysisByOpportunityId.get(matchingOpportunity.id) ?? null)
+				: null,
 			totalClosedValue: getCarteraCreditAmount(credit),
-			closedOpportunitiesCount: params.leadOpportunities.filter(
+			closedOpportunitiesCount: leadOpportunities.filter(
 				(opp) => opp.isClosed,
 			).length,
 			crmMatchStatus: "matched",
@@ -1177,10 +1194,14 @@ export const crmRouter = {
 			z
 				.object({
 					leadId: z.string().uuid().optional(),
+					opportunityId: z.string().uuid().optional(),
 					coDebtorId: z.string().uuid().optional(),
 				})
 				.refine((data) => data.leadId || data.coDebtorId, {
 					message: "Debe proporcionar leadId o coDebtorId",
+				})
+				.refine((data) => !(data.leadId && data.coDebtorId), {
+					message: "No puede consultar un lead y un co-deudor a la vez",
 				}),
 		)
 		.handler(async ({ input, context }) => {
@@ -1206,10 +1227,51 @@ export const crmRouter = {
 					});
 				}
 
+				if (!input.opportunityId) {
+					return null;
+				}
+
+				const [opportunity] = await db
+					.select({
+						leadId: opportunities.leadId,
+						assignedTo: opportunities.assignedTo,
+					})
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+				if (!opportunity) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+				try {
+					assertOpportunityBelongsToLead(opportunity, input.leadId);
+				} catch (error) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+				if (
+					!canWriteOpportunityCreditAnalysis(
+						context.userRole,
+						context.userId,
+						opportunity.assignedTo,
+					)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para ver este análisis",
+					});
+				}
+
 				const analysis = await db
 					.select()
 					.from(creditAnalysis)
-					.where(eq(creditAnalysis.leadId, input.leadId))
+					.where(
+						getCreditAnalysisOwnerCondition({
+							leadId: input.leadId,
+							opportunityId: input.opportunityId,
+						}),
+					)
 					.limit(1);
 
 				return analysis[0] || null;
@@ -1246,6 +1308,7 @@ export const crmRouter = {
 			z
 				.object({
 					leadId: z.string().uuid().optional(),
+					opportunityId: z.string().uuid().optional(),
 					coDebtorId: z.string().uuid().optional(),
 					monthlyFixedIncome: z.number().min(0).optional(),
 					monthlyVariableIncome: z.number().min(0).optional(),
@@ -1255,12 +1318,15 @@ export const crmRouter = {
 					maxPayment: z.number().min(0).optional(),
 					maxCreditAmount: z.number().min(0).optional(),
 				})
-				.refine((data) => data.leadId || data.coDebtorId, {
-					message: "Debe proporcionar leadId o coDebtorId",
+				.refine((data) => data.coDebtorId || (data.leadId && data.opportunityId), {
+					message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
+				})
+				.refine((data) => !(data.leadId && data.coDebtorId), {
+					message: "No puede guardar un lead y un co-deudor a la vez",
 				}),
 		)
 		.handler(async ({ input, context }) => {
-			const { leadId, coDebtorId, ...analysisData } = input;
+			const { leadId, opportunityId, coDebtorId, ...analysisData } = input;
 
 			// Convert numbers to strings for decimal fields
 			const dataForDb = {
@@ -1296,11 +1362,48 @@ export const crmRouter = {
 					});
 				}
 
+				const [opportunity] = await db
+					.select({
+						leadId: opportunities.leadId,
+						assignedTo: opportunities.assignedTo,
+					})
+					.from(opportunities)
+					.where(eq(opportunities.id, opportunityId!))
+					.limit(1);
+				if (!opportunity) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+				try {
+					assertOpportunityBelongsToLead(opportunity, leadId);
+				} catch (error) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+				if (
+					!canWriteOpportunityCreditAnalysis(
+						context.userRole,
+						context.userId,
+						opportunity.assignedTo,
+					)
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para actualizar este análisis",
+					});
+				}
+
+				const ownerCondition = getCreditAnalysisOwnerCondition({
+					leadId,
+					opportunityId: opportunityId!,
+				});
+
 				// Check if analysis already exists
 				const existing = await db
 					.select()
 					.from(creditAnalysis)
-					.where(eq(creditAnalysis.leadId, leadId))
+					.where(ownerCondition)
 					.limit(1);
 
 				if (existing.length > 0) {
@@ -1311,7 +1414,7 @@ export const crmRouter = {
 							analyzedAt: existing[0].analyzedAt ?? new Date(),
 							updatedAt: new Date(),
 						})
-						.where(eq(creditAnalysis.leadId, leadId))
+						.where(ownerCondition)
 						.returning();
 					return updated[0];
 				}
@@ -1320,6 +1423,7 @@ export const crmRouter = {
 					.insert(creditAnalysis)
 					.values({
 						leadId,
+						opportunityId: opportunityId!,
 						...dataForDb,
 						createdBy: context.userId,
 						analyzedAt: new Date(),
@@ -1384,10 +1488,14 @@ export const crmRouter = {
 			z
 				.object({
 					leadId: z.string().uuid().optional(),
+					opportunityId: z.string().uuid().optional(),
 					coDebtorId: z.string().uuid().optional(),
 				})
-				.refine((data) => data.leadId || data.coDebtorId, {
-					message: "Debe proporcionar leadId o coDebtorId",
+				.refine((data) => data.coDebtorId || (data.leadId && data.opportunityId), {
+					message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
+				})
+				.refine((data) => !(data.leadId && data.coDebtorId), {
+					message: "No puede resetear un lead y un co-deudor a la vez",
 				}),
 		)
 		.handler(async ({ input, context }) => {
@@ -1401,9 +1509,31 @@ export const crmRouter = {
 				});
 			}
 
-			const whereCondition = input.leadId
-				? eq(creditAnalysis.leadId, input.leadId)
-				: eq(creditAnalysis.coDebtorId, input.coDebtorId!);
+			if (input.leadId) {
+				const [opportunity] = await db
+					.select({ leadId: opportunities.leadId })
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId!))
+					.limit(1);
+				if (!opportunity) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+				try {
+					assertOpportunityBelongsToLead(opportunity, input.leadId);
+				} catch (error) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
+
+			const whereCondition = getCreditAnalysisOwnerCondition(
+				input.leadId
+					? { leadId: input.leadId, opportunityId: input.opportunityId! }
+					: { coDebtorId: input.coDebtorId! },
+			);
 
 			const deleted = await db
 				.delete(creditAnalysis)
@@ -3452,6 +3582,10 @@ export const crmRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const { limit, offset } = input;
+			const opportunityOwnerCondition =
+				context.userRole === "sales"
+					? eq(opportunities.assignedTo, context.userId)
+					: undefined;
 			const searchValue = input.search?.trim();
 			// Solo se busca por nombre o por No. SIFCO (no email ni teléfono). El
 			// filtro lo hace cartera: nombre vía nombre_usuario y, si el término es
@@ -3468,23 +3602,21 @@ export const crmRouter = {
 			// DB local los SIFCOs relevantes y se los pasamos a cartera para que
 			// pagine solo ese subconjunto.
 			//  - leadId: solo los créditos de ese lead (modal de detalle)
-			//  - rol sales: solo los créditos de los leads asignados al asesor
+			//  - rol sales: solo los créditos de las oportunidades asignadas al asesor
 			let scopedSifcos: string[] | undefined;
 			if (input.leadId) {
-				// Un asesor solo puede abrir leads asignados a él: sin este check, un
-				// sales podría pasar ?idLead=<uuid ajeno> y ver datos de un cliente
-				// que no le corresponde. Admin/supervisor pueden ver cualquiera.
+				// Un asesor solo puede abrir las oportunidades asignadas a él.
+				// Admin/supervisor pueden ver cualquiera.
 				const leadConditions = [
 					eq(opportunities.leadId, input.leadId),
 					isNotNull(opportunities.numeroSifco),
 				];
-				if (context.userRole === "sales") {
-					leadConditions.push(eq(leads.assignedTo, context.userId));
+				if (opportunityOwnerCondition) {
+					leadConditions.push(opportunityOwnerCondition);
 				}
 				const opps = await db
 					.select({ numeroSifco: opportunities.numeroSifco })
 					.from(opportunities)
-					.leftJoin(leads, eq(opportunities.leadId, leads.id))
 					.where(and(...leadConditions));
 				scopedSifcos = opps
 					.map((o) => o.numeroSifco)
@@ -3493,10 +3625,9 @@ export const crmRouter = {
 				const opps = await db
 					.select({ numeroSifco: opportunities.numeroSifco })
 					.from(opportunities)
-					.leftJoin(leads, eq(opportunities.leadId, leads.id))
 					.where(
 						and(
-							eq(leads.assignedTo, context.userId),
+							opportunityOwnerCondition,
 							isNotNull(opportunities.numeroSifco),
 						),
 					);
@@ -3547,7 +3678,12 @@ export const crmRouter = {
 								leadId: opportunities.leadId,
 							})
 							.from(opportunities)
-							.where(inArray(opportunities.numeroSifco, pageSifcos))
+							.where(
+								and(
+									inArray(opportunities.numeroSifco, pageSifcos),
+									opportunityOwnerCondition,
+								),
+							)
 					: [];
 
 			const sifcoToLeadId = new Map<string, string>();
@@ -3610,6 +3746,7 @@ export const crmRouter = {
 								id: opportunities.id,
 								title: opportunities.title,
 								leadId: opportunities.leadId,
+								assignedTo: opportunities.assignedTo,
 								value: opportunities.value,
 								creditType: opportunities.creditType,
 								numeroSifco: opportunities.numeroSifco,
@@ -3624,7 +3761,12 @@ export const crmRouter = {
 							})
 							.from(opportunities)
 							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-							.where(inArray(opportunities.leadId, matchedLeadIds))
+							.where(
+								and(
+									inArray(opportunities.leadId, matchedLeadIds),
+									opportunityOwnerCondition,
+								),
+							)
 							.orderBy(desc(opportunities.createdAt))
 					: [];
 
@@ -3638,6 +3780,7 @@ export const crmRouter = {
 						acc[leadId].push({
 							id: opp.id,
 							title: opp.title,
+							assignedTo: opp.assignedTo,
 							value: opp.value,
 							creditType: opp.creditType,
 							numeroSifco: opp.numeroSifco,
@@ -3654,12 +3797,15 @@ export const crmRouter = {
 				{} as Record<string, any[]>,
 			);
 
-			// 4) Análisis de crédito de esos leads
-			const creditAnalysisByLead =
-				matchedLeadIds.length > 0
+			// 4) Análisis de crédito de las oportunidades que corresponden a esos SIFCO
+			const matchedOpportunityIds = leadsOpportunities.map(
+				(opportunity) => opportunity.id,
+			);
+			const creditAnalysisByOpportunity =
+				matchedOpportunityIds.length > 0
 					? await db
 							.select({
-								leadId: creditAnalysis.leadId,
+								opportunityId: creditAnalysis.opportunityId,
 								monthlyFixedIncome: creditAnalysis.monthlyFixedIncome,
 								monthlyVariableIncome: creditAnalysis.monthlyVariableIncome,
 								monthlyFixedExpenses: creditAnalysis.monthlyFixedExpenses,
@@ -3671,16 +3817,18 @@ export const crmRouter = {
 								analyzedAt: creditAnalysis.analyzedAt,
 							})
 							.from(creditAnalysis)
-							.where(inArray(creditAnalysis.leadId, matchedLeadIds))
+							.where(
+								inArray(creditAnalysis.opportunityId, matchedOpportunityIds),
+							)
 					: [];
-			const creditAnalysisMap = creditAnalysisByLead.reduce(
+			const creditAnalysisByOpportunityId = creditAnalysisByOpportunity.reduce(
 				(acc, ca) => {
-					if (ca.leadId) {
-						acc[ca.leadId] = ca;
+					if (ca.opportunityId) {
+						acc.set(ca.opportunityId, ca);
 					}
 					return acc;
 				},
-				{} as Record<string, (typeof creditAnalysisByLead)[0]>,
+				new Map<string, (typeof creditAnalysisByOpportunity)[0]>(),
 			);
 
 			// 5) Construir filas en el orden en que cartera devolvió los créditos.
@@ -3695,8 +3843,10 @@ export const crmRouter = {
 					return buildCarteraMatchedClientRows({
 						lead,
 						leadOpportunities: opportunitiesByLead[leadId] || [],
-						creditAnalysis: creditAnalysisMap[leadId] || null,
+						creditAnalysisByOpportunityId,
 						carteraCreditBySifco: new Map([[sifco, credit]]),
+						opportunityOwnerId:
+							context.userRole === "sales" ? context.userId : undefined,
 					});
 				}
 				// Sin match CRM: las filas "sólo cartera" no aplican en vistas acotadas.
@@ -4629,14 +4779,17 @@ export const crmRouter = {
 								.where(eq(vehicles.id, opportunity.vehicleId))
 								.limit(1)
 						: Promise.resolve([]),
-					// Credit analysis (if lead exists)
-					opportunity.leadId
-						? db
-								.select()
-								.from(creditAnalysis)
-								.where(eq(creditAnalysis.leadId, opportunity.leadId))
-								.limit(1)
-						: Promise.resolve([]),
+					// Credit analysis for this opportunity only
+					db
+						.select()
+						.from(creditAnalysis)
+						.where(
+							and(
+								eq(creditAnalysis.opportunityId, input.opportunityId),
+								isNotNull(creditAnalysis.analyzedAt),
+							),
+						)
+						.limit(1),
 				]);
 
 			const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
@@ -4765,7 +4918,27 @@ export const crmRouter = {
 
 			// Early return if checklist already exists and is still aligned
 			if (existingChecklist) {
+				const savedCapacityItem = (
+					existingChecklist.checklistData as {
+						sections?: {
+							verificaciones?: {
+								items?: Array<{
+									type?: string;
+									completed?: boolean;
+									analysisId?: string;
+								}>;
+							};
+						};
+					}
+				).sections?.verificaciones?.items?.find(
+					(item) => item.type === "capacidad_pago",
+				);
+				const hasStaleCreditAnalysis =
+					(savedCapacityItem?.completed ?? false) !== !!creditAnalysisExists ||
+					(savedCapacityItem?.analysisId ?? null) !==
+						(creditAnalysisExists?.id ?? null);
 				if (
+					hasStaleCreditAnalysis ||
 					hasStaleAnalysisChecklistVehicleState(
 						existingChecklist.checklistData as any,
 						opportunity.vehicleId,
@@ -6652,14 +6825,12 @@ export const crmRouter = {
 
 			// 2. Obtener análisis del lead (si existe)
 			let leadAnalysis = null;
-			if (opportunity.leadId) {
-				const [analysis] = await db
-					.select()
-					.from(creditAnalysis)
-					.where(eq(creditAnalysis.leadId, opportunity.leadId))
-					.limit(1);
-				leadAnalysis = analysis || null;
-			}
+			const [analysis] = await db
+				.select()
+				.from(creditAnalysis)
+				.where(eq(creditAnalysis.opportunityId, input.opportunityId))
+				.limit(1);
+			leadAnalysis = analysis || null;
 
 			// 3. Obtener co-deudores de la oportunidad
 			const coDebtorsList = await db

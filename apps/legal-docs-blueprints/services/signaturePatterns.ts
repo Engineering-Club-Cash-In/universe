@@ -177,6 +177,13 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Inversionista']
   },
 
+  // Contrato de Participación y Administración de Cartera (inversionista individual)
+  [ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA]: {
+    pattern: 'EL INVERSIONISTA___________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
   // ===== INVERSIONES SOCIEDAD =====
   // Mismos patrones de firma que sus equivalentes de inversiones individuales
   [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {

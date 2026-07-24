@@ -4,6 +4,7 @@ import { Building, Loader2, Mail, Phone, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { getOpportunityCreditAnalysisInput } from "@/lib/credit-analysis";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
@@ -94,6 +95,7 @@ type LeadDetailModalProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	lead: LeadForModal | null;
+	opportunityId?: string;
 	readOnly?: boolean;
 	onEdit?: () => void;
 };
@@ -102,6 +104,7 @@ export function LeadDetailModal({
 	open,
 	onOpenChange,
 	lead,
+	opportunityId,
 	readOnly = false,
 	onEdit,
 }: LeadDetailModalProps) {
@@ -113,12 +116,17 @@ export function LeadDetailModal({
 		enabled: open && !!lead?.id,
 	});
 
+	const creditAnalysisInput = getOpportunityCreditAnalysisInput(
+		lead?.id,
+		opportunityId,
+	);
+
 	// Query for credit analysis data
 	const creditAnalysisQuery = useQuery({
 		...orpc.getCreditAnalysisByLeadId.queryOptions({
-			input: { leadId: lead?.id ?? "" },
+			input: creditAnalysisInput ?? { leadId: "", opportunityId: "" },
 		}),
-		enabled: open && !!lead?.id,
+		enabled: open && !!creditAnalysisInput,
 	});
 
 	// Respuestas de formulario de captación (llave-valor)

@@ -99,6 +99,13 @@
 			"when": 1773705600000,
 			"tag": "0018_add_campaign_tracking",
 			"breakpoints": true
+		},
+		{
+			"idx": 14,
+			"version": "7",
+			"when": 1784839926000,
+			"tag": "0027_add_credit_analysis_opportunity",
+			"breakpoints": true
 		}
 	]
 }

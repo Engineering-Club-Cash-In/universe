@@ -627,6 +627,7 @@ function OpportunityDocumentsPage() {
 				open={isLeadModalOpen}
 				onOpenChange={setIsLeadModalOpen}
 				lead={selectedLeadForModal}
+				opportunityId={opportunityId}
 				readOnly
 			/>
 		</div>

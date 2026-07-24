@@ -81,6 +81,7 @@ function carryForwardVerificationItems(
 
 	for (const nextItem of nextItems ?? []) {
 		if (!nextItem.type) continue;
+		if (nextItem.type === "capacidad_pago") continue;
 
 		const previousItem = previousByType.get(nextItem.type);
 		if (!previousItem) continue;

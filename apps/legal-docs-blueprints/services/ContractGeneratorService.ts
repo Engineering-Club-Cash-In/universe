@@ -301,6 +301,15 @@ export class ContractGeneratorService {
       requiredFields: []
     });
 
+    // Contrato de Participación y Administración de Cartera (mismo doc para hombre y mujer)
+    this.registerTemplate({
+      type: ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA,
+      templateFilename: 'inversiones/contrato_participacion_administracion_cartera/contrato_participacion_administracion_cartera.docx',
+      templateFilenameFemale: 'inversiones/contrato_participacion_administracion_cartera/contrato_participacion_administracion_cartera.docx',
+      description: 'Contrato de Participación y Administración de Cartera - Inversionista Individual',
+      requiredFields: []
+    });
+
     // ===== INVERSIONES SOCIEDAD =====
     this.registerTemplate({
       type: ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,

@@ -87,20 +87,22 @@ export function ModalCancelCredit({
   const gps = Number(credit?.gps ?? 0);
   const mora = Number(credit?.mora ?? 0);
 
-  // Cuotas restantes - multiplica interes, membresias, seguro, iva
+  // Cuotas restantes - multiplica interes, membresias, seguro, iva, gps
   const numCuotas = Math.max(0, Math.floor(Number(cuotasRestantes || 0)));
   const totalInteres = interes * numCuotas;
   const totalMembresias = membresias * numCuotas;
   const totalSeguro = seguro * numCuotas;
   const totalIva = iva * numCuotas;
-  const totalCuotas = totalInteres + totalMembresias + totalSeguro + totalIva;
+  const totalGps = gps * numCuotas;
+  const totalCuotas =
+    totalInteres + totalMembresias + totalSeguro + totalIva + totalGps;
 
   const totalMotivos = motivos.reduce((acc, curr) => acc + curr.monto, 0);
   const totalCamposExtra =
     Number(traspaso || 0) +
     Number(garantiaMobiliaria || 0) +
     Number(otros || 0);
-  const total = capital + totalCuotas + gps + mora + totalMotivos + totalCamposExtra;
+  const total = capital + totalCuotas + mora + totalMotivos + totalCamposExtra;
 
   const handleClose = () => {
     setMotivos([]);
@@ -285,7 +287,7 @@ export function ModalCancelCredit({
                       Cuotas restantes
                     </h3>
                     <p className="text-xs text-blue-500">
-                      Multiplica interés, membresía, seguro e IVA
+                      Multiplica interés, membresía, seguro, IVA y GPS
                     </p>
                   </div>
                 </div>
@@ -336,6 +338,14 @@ export function ModalCancelCredit({
                           Q{fmt(totalIva)}
                         </span>
                       </div>
+                      {gps > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">GPS</span>
+                          <span className="font-medium text-cyan-700">
+                            Q{fmt(totalGps)}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex justify-between pt-1 border-t border-blue-100">
                         <span className="font-semibold text-gray-700">
                           Subtotal cuotas

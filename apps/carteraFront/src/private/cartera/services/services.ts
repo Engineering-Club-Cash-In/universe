@@ -1997,8 +1997,9 @@ export interface AplicarPagoResponse {
    * - "error": falló — correr "Recalcular Pagos" manualmente.
    * - "revisar_pendientes_validacion": hay pagos registrados sin validar que
    *   quedaron fuera — recalcular a mano después de validarlos.
-   * - "revisar_parciales": hay cuota con pago parcial aplicado — el recálculo
-   *   automático se omitió para no reescribir su historial; usar el botón.
+   * - "revisar_parciales": hay cuota con pago parcial aplicado — NI el
+   *   recálculo automático NI el botón "Recalcular Pagos" son seguros ahí
+   *   (ambos redistribuirían el parcial); revisar el reparto con el equipo.
    * - "omitido_solo_interes": crédito solo-interés, no aplica el recálculo.
    */
   recalculo_pendientes?:

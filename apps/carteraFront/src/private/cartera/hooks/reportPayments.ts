@@ -61,7 +61,7 @@ export function useAplicarPago() {
         );
       } else if (data.recalculo_pendientes === "revisar_parciales") {
         alert(
-          "El abono se aplicó, pero este crédito tiene una cuota con pago PARCIAL aplicado: el recálculo automático se omitió para no reescribir su historial. Corré 'Recalcular Pagos' manualmente en este crédito."
+          "El abono se aplicó, pero este crédito tiene una cuota con pago PARCIAL aplicado y el recálculo automático se omitió para no reescribir ese pago. OJO: NO corras 'Recalcular Pagos' aquí sin revisarlo antes con el equipo — el botón también redistribuiría el pago parcial. Revisen el reparto de esa cuota manualmente."
         );
       } else if (data.recalculo_pendientes === "omitido_solo_interes") {
         alert(

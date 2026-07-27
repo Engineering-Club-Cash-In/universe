@@ -3076,8 +3076,11 @@ export async function aplicarAbonoCapitalInversionistas(
         .limit(1);
       if (parcialAplicado) {
         recalculo_pendientes = "revisar_parciales";
+        // OJO: aquí NO se recomienda el botón "Recalcular Pagos": su modo con
+        // numero_cuota también redistribuye el parcial aplicado (reescribiría
+        // el reparto validado). Este caso requiere revisión manual del reparto.
         console.log(
-          "⚠️ Cuota con pago parcial aplicado: recálculo automático omitido — usar Recalcular Pagos manual"
+          "⚠️ Cuota con pago parcial aplicado: recálculo automático omitido — revisar el reparto manualmente (el botón también redistribuiría el parcial)"
         );
       } else {
         await recalcularPagosCredito({

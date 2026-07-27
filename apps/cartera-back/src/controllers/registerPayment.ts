@@ -31,7 +31,6 @@ import {
   getRequestedInstallmentFloor,
   getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
-  INCOBRABLE_CAPITAL_TOLERANCE,
   recomputeCreditAfterCapital,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldRejectZeroAppliedNormalValidation,
@@ -2653,127 +2652,6 @@ async function aplicarPagoNormalEnTx(
         deuda_total_nueva: nueva_deuda_total.toString(),
       },
     };
-}
-
-/**
- * Dictamen de consistencia para un pago que YA está aplicado: detecta estados
- * parciales dejados por la implementación PRE-transacción de
- * aplicarPagoAlCredito, que marcaba `validated` antes de cerrar la cuota y
- * distribuir a inversionistas (una caída entre medias dejaba el pago validado
- * con la cuota abierta o sin distribución). Con la transacción actual esos
- * estados ya no se producen; esto protege los reintentos sobre pagos
- * históricos: /aplicar-pago solo responde el 200 idempotente (que habilita a
- * facturar) si el estado descendiente está completo. Solo LEE, no repara.
- */
-export async function verificarPagoValidadoCompleto(
-  pago_id: number
-): Promise<{ completo: boolean; motivo?: string }> {
-  const [pago] = await db
-    .select()
-    .from(pagos_credito)
-    .where(eq(pagos_credito.pago_id, pago_id))
-    .limit(1);
-
-  // Sin crédito/cuota asociada (o abono a capital, que no cierra cuotas):
-  // no hay cierre de cuota ni distribución por-cuota que verificar.
-  if (
-    !pago ||
-    pago.credito_id === null ||
-    pago.cuota_id === null ||
-    pago.validationStatus !== "validated"
-  ) {
-    return { completo: true };
-  }
-
-  const [credito] = await db
-    .select()
-    .from(creditos)
-    .where(eq(creditos.credito_id, pago.credito_id))
-    .limit(1);
-  const [cuota] = await db
-    .select()
-    .from(cuotas_credito)
-    .where(eq(cuotas_credito.cuota_id, pago.cuota_id))
-    .limit(1);
-  if (!credito || !cuota) {
-    return { completo: true };
-  }
-
-  const pagosValidados = await db
-    .select({
-      pago_id: pagos_credito.pago_id,
-      monto_aplicado: pagos_credito.monto_aplicado,
-    })
-    .from(pagos_credito)
-    .where(
-      and(
-        eq(pagos_credito.cuota_id, pago.cuota_id),
-        eq(pagos_credito.validationStatus, "validated"),
-        eq(pagos_credito.paymentFalse, false)
-      )
-    );
-
-  // Mismo criterio de cierre que aplicarPagoAlCredito. Para INCOBRABLE la
-  // regla es capital==0; como el abono de este pago YA está descontado del
-  // crédito, se evalúa el capital actual directamente.
-  let cuotaDeberiaEstarPagada: boolean;
-  if (credito.statusCredit === "INCOBRABLE") {
-    cuotaDeberiaEstarPagada = new Big(credito.capital ?? 0).lte(
-      INCOBRABLE_CAPITAL_TOLERANCE
-    );
-  } else {
-    const cuotaAmount = new Big(credito.cuota ?? 0);
-    const totalAplicado = pagosValidados.reduce(
-      (acc, p) => acc.plus(new Big(p.monto_aplicado ?? 0)),
-      new Big(0)
-    );
-    cuotaDeberiaEstarPagada =
-      cuotaAmount.gt(0) && totalAplicado.gte(cuotaAmount.minus(0.01));
-  }
-
-  if (cuotaDeberiaEstarPagada && !cuota.pagado) {
-    return {
-      completo: false,
-      motivo:
-        "los pagos validados cubren la cuota pero quedó sin marcarse como pagada (cierre interrumpido)",
-    };
-  }
-
-  if (cuota.pagado && pagosValidados.length > 0) {
-    // Si el crédito tiene inversionistas, TODO pago validated de una cuota
-    // cerrada debe tener sus filas en pagos_credito_inversionistas (el cierre
-    // de cuota barre y distribuye los pendientes).
-    const [tieneInversionistas] = await db
-      .select({ credito_id: creditos_inversionistas.credito_id })
-      .from(creditos_inversionistas)
-      .where(eq(creditos_inversionistas.credito_id, pago.credito_id))
-      .limit(1);
-
-    if (tieneInversionistas) {
-      const conDistribucion = await db
-        .selectDistinct({ pago_id: pagos_credito_inversionistas.pago_id })
-        .from(pagos_credito_inversionistas)
-        .where(
-          inArray(
-            pagos_credito_inversionistas.pago_id,
-            pagosValidados.map((p) => p.pago_id)
-          )
-        );
-      const distribuidos = new Set(conDistribucion.map((p) => p.pago_id));
-      const sinDistribuir = pagosValidados
-        .map((p) => p.pago_id)
-        .filter((id) => !distribuidos.has(id));
-
-      if (sinDistribuir.length > 0) {
-        return {
-          completo: false,
-          motivo: `la cuota está cerrada pero falta la distribución a inversionistas del/los pago(s) ${sinDistribuir.join(", ")}`,
-        };
-      }
-    }
-  }
-
-  return { completo: true };
 }
 
 /**

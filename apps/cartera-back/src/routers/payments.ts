@@ -536,12 +536,18 @@ export const paymentRouter = new Elysia()
         };
       }
 
-      // Verificar que el pago no esté ya validado (incluye abono a capital aplicado)
+      // Ya validado (incluye abono a capital aplicado): respuesta idempotente
+      // 200 en lugar de 400. Si el response de un intento previo se perdió
+      // (cliente desconectado a media petición), el reintento de
+      // "Validar y Facturar" debe poder continuar hacia la facturación en vez
+      // de morir aquí; /facturar-pago-completo tiene su propio guard contra
+      // doble facturación.
       if (esPagoAplicado(pagoExiste.validationStatus)) {
-        set.status = 400;
         return {
-          success: false,
-          message: "Este pago ya ha sido validado previamente",
+          success: true,
+          applied: false,
+          alreadyValidated: true,
+          message: "Este pago ya había sido validado previamente",
         };
       }
 

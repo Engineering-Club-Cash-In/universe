@@ -3044,7 +3044,8 @@ export async function aplicarAbonoCapitalInversionistas(
     | "ok"
     | "error"
     | "omitido_solo_interes"
-    | "revisar_pendientes_validacion" = "ok";
+    | "revisar_pendientes_validacion"
+    | "revisar_parciales" = "ok";
   if (credito.no_amortiza_capital) {
     // Crédito solo-interés: recalcularPagosCredito no conoce el flag y
     // convertiría en amortización de capital la diferencia cuota − interés
@@ -3056,31 +3057,55 @@ export async function aplicarAbonoCapitalInversionistas(
     );
   } else {
     try {
-      await recalcularPagosCredito({
-        numero_credito_sifco: credito.numero_credito_sifco,
-      });
-      // Pagos ya registrados (pagado=true) pero aún SIN validar por conta
-      // quedan fuera del recálculo (solo toma pendientes): si conta los valida
-      // después de este abono, confirmaría su reparto viejo. Se reporta para
-      // correr "Recalcular Pagos" a mano después de validarlos.
-      const [pendienteValidacion] = await db
+      // Cuotas abiertas con pagos PARCIALES ya aplicados (monto_aplicado>0 y
+      // pagado=false): recalcular automáticamente redistribuiría su reparto
+      // histórico ya validado — el capital del crédito ya se movió con los
+      // montos originales y una reversa restauraría montos reescritos. En ese
+      // caso se omite el recálculo automático y se manda al botón manual.
+      const [parcialAplicado] = await db
         .select({ pago_id: pagos_credito.pago_id })
         .from(pagos_credito)
         .where(
           and(
             eq(pagos_credito.credito_id, credito_id),
-            eq(pagos_credito.pagado, true),
-            eq(pagos_credito.validationStatus, "pending")
+            eq(pagos_credito.pagado, false),
+            gt(pagos_credito.monto_aplicado, "0"),
+            ne(pagos_credito.pago_id, pago_id)
           )
         )
         .limit(1);
-      if (pendienteValidacion) {
-        recalculo_pendientes = "revisar_pendientes_validacion";
+      if (parcialAplicado) {
+        recalculo_pendientes = "revisar_parciales";
         console.log(
-          "⚠️ Hay pagos registrados pendientes de validación: recalcular a mano después de validarlos"
+          "⚠️ Cuota con pago parcial aplicado: recálculo automático omitido — usar Recalcular Pagos manual"
         );
       } else {
-        console.log(`✅ Recibos pendientes recalculados con el capital nuevo`);
+        await recalcularPagosCredito({
+          numero_credito_sifco: credito.numero_credito_sifco,
+        });
+        // Pagos ya registrados (pagado=true) pero aún SIN validar por conta
+        // quedan fuera del recálculo (solo toma pendientes): si conta los valida
+        // después de este abono, confirmaría su reparto viejo. Se reporta para
+        // correr "Recalcular Pagos" a mano después de validarlos.
+        const [pendienteValidacion] = await db
+          .select({ pago_id: pagos_credito.pago_id })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.credito_id, credito_id),
+              eq(pagos_credito.pagado, true),
+              eq(pagos_credito.validationStatus, "pending")
+            )
+          )
+          .limit(1);
+        if (pendienteValidacion) {
+          recalculo_pendientes = "revisar_pendientes_validacion";
+          console.log(
+            "⚠️ Hay pagos registrados pendientes de validación: recalcular a mano después de validarlos"
+          );
+        } else {
+          console.log(`✅ Recibos pendientes recalculados con el capital nuevo`);
+        }
       }
     } catch (error) {
       // El abono ya quedó aplicado y distribuido; no se revierte por esto. Pero

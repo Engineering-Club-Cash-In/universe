@@ -59,6 +59,10 @@ export function useAplicarPago() {
         alert(
           "El abono se aplicó y se recalcularon las cuotas pendientes, pero hay pagos registrados SIN validar que quedaron fuera: después de validarlos, corré 'Recalcular Pagos' manualmente."
         );
+      } else if (data.recalculo_pendientes === "revisar_parciales") {
+        alert(
+          "El abono se aplicó, pero este crédito tiene una cuota con pago PARCIAL aplicado: el recálculo automático se omitió para no reescribir su historial. Corré 'Recalcular Pagos' manualmente en este crédito."
+        );
       } else if (data.recalculo_pendientes === "omitido_solo_interes") {
         alert(
           "Abono aplicado. Crédito solo-interés: el recálculo automático no aplica para este formato."

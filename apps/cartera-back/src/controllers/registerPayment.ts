@@ -3096,6 +3096,9 @@ export async function aplicarAbonoCapitalInversionistas(
       // abono_* guardados, así que DEBEN entrar al recálculo para que ese
       // reparto se refresque con el capital nuevo antes de que conta los
       // valide (si no, validarían el split viejo → mismo bug del abono).
+      // paymentFalse=false: un pago anulado conserva monto_aplicado y su
+      // status, pero ya no es un parcial vivo — no debe bloquear el recálculo
+      // (mismo filtro que usan las sumas de cuota en la validación).
       const [parcialAplicado] = await db
         .select({ pago_id: pagos_credito.pago_id })
         .from(pagos_credito)
@@ -3103,6 +3106,7 @@ export async function aplicarAbonoCapitalInversionistas(
           and(
             eq(pagos_credito.credito_id, credito_id),
             eq(pagos_credito.pagado, false),
+            eq(pagos_credito.paymentFalse, false),
             gt(pagos_credito.monto_aplicado, "0"),
             ne(pagos_credito.validationStatus, "pending"),
             ne(pagos_credito.pago_id, pago_id)

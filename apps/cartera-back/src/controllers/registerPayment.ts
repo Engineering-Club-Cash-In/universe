@@ -3057,11 +3057,17 @@ export async function aplicarAbonoCapitalInversionistas(
     );
   } else {
     try {
-      // Cuotas abiertas con pagos PARCIALES ya aplicados (monto_aplicado>0 y
-      // pagado=false): recalcular automáticamente redistribuiría su reparto
-      // histórico ya validado — el capital del crédito ya se movió con los
-      // montos originales y una reversa restauraría montos reescritos. En ese
-      // caso se omite el recálculo automático y se manda al botón manual.
+      // Cuotas abiertas con pagos PARCIALES ya aplicados (monto_aplicado>0,
+      // pagado=false y validationStatus≠'pending'): recalcular automáticamente
+      // redistribuiría su reparto histórico ya validado — el capital del
+      // crédito ya se movió con los montos originales y una reversa
+      // restauraría montos reescritos. En ese caso se omite el recálculo
+      // automático y se manda a revisión manual.
+      // Los parciales solo REGISTRADOS ('pending') NO bloquean: su reparto aún
+      // no tocó el capital y `aplicarPagoAlCredito` lo aplicará después con los
+      // abono_* guardados, así que DEBEN entrar al recálculo para que ese
+      // reparto se refresque con el capital nuevo antes de que conta los
+      // valide (si no, validarían el split viejo → mismo bug del abono).
       const [parcialAplicado] = await db
         .select({ pago_id: pagos_credito.pago_id })
         .from(pagos_credito)
@@ -3070,6 +3076,7 @@ export async function aplicarAbonoCapitalInversionistas(
             eq(pagos_credito.credito_id, credito_id),
             eq(pagos_credito.pagado, false),
             gt(pagos_credito.monto_aplicado, "0"),
+            ne(pagos_credito.validationStatus, "pending"),
             ne(pagos_credito.pago_id, pago_id)
           )
         )

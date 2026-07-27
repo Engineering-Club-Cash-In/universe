@@ -310,6 +310,16 @@ export class ContractGeneratorService {
       requiredFields: []
     });
 
+    // Anexos 1 y 2 - Confirmación de Participación y Designación de Beneficiario
+    // (mismo doc para hombre y mujer; incluye lista repetible de beneficiarios)
+    this.registerTemplate({
+      type: ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO,
+      templateFilename: 'inversiones/anexos_confirmacion_participacion_beneficiario/anexos_confirmacion_participacion_beneficiario.docx',
+      templateFilenameFemale: 'inversiones/anexos_confirmacion_participacion_beneficiario/anexos_confirmacion_participacion_beneficiario.docx',
+      description: 'Anexos 1 y 2 - Confirmación de Participación y Designación de Beneficiario',
+      requiredFields: []
+    });
+
     // ===== INVERSIONES SOCIEDAD =====
     this.registerTemplate({
       type: ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,

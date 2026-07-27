@@ -3032,33 +3032,40 @@ export async function aplicarAbonoCapitalInversionistas(
     })
     .where(eq(pagos_credito.pago_id, pago_id));
 
-  // 5️⃣ Re-sembrar los recibos de las cuotas SIGUIENTES con el capital nuevo.
+  // 5️⃣ Re-sembrar los recibos PENDIENTES con el capital nuevo.
   // Sin esto, el próximo pago se aplicaría con el interés pre-sembrado sobre el
   // capital viejo (y de ahí saldrían factura y liquidación infladas). Se
-  // recalcula desde la cuota siguiente a la del abono, manteniendo la cuota
-  // mensual del crédito. El espejo NO se toca aquí: lo maneja la liquidación
-  // del inversionista.
-  let recalculo_pendientes: "ok" | "error" = "ok";
-  try {
-    const [cuotaAbono] = await db
-      .select({ numero_cuota: cuotas_credito.numero_cuota })
-      .from(cuotas_credito)
-      .innerJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
-      .where(eq(pagos_credito.pago_id, pago_id))
-      .limit(1);
-
-    const desdeCuota = (cuotaAbono?.numero_cuota ?? 0) + 1;
-    await recalcularPagosCredito({
-      numero_credito_sifco: credito.numero_credito_sifco,
-      numero_cuota: desdeCuota,
-    });
-    console.log(`✅ Recibos recalculados desde la cuota ${desdeCuota} con el capital nuevo`);
-  } catch (error) {
-    // El abono ya quedó aplicado y distribuido; no se revierte por esto. Pero
-    // NO puede pasar silencioso: los recibos quedarían con interés viejo, así
-    // que se reporta en la respuesta para correr Recalcular Pagos a mano.
-    recalculo_pendientes = "error";
-    console.error("❌ Error recalculando recibos post-abono (correr Recalcular Pagos manual):", error);
+  // recalculan SOLO los pagos pendientes (pagado=false): eso cubre también la
+  // cuota de referencia del abono cuando aún no está pagada (abono antes de la
+  // primera cuota), y nunca toca pagos ya aplicados — este mismo abono queda
+  // pagado=true y fuera del recálculo. La cuota mensual del crédito no cambia.
+  // El espejo NO se toca aquí: lo maneja la liquidación del inversionista.
+  let recalculo_pendientes: "ok" | "error" | "omitido_solo_interes" = "ok";
+  if (credito.no_amortiza_capital) {
+    // Crédito solo-interés: recalcularPagosCredito no conoce el flag y
+    // convertiría en amortización de capital la diferencia cuota − interés
+    // nuevo, contra el contrato. Se mantiene el comportamiento actual (sin
+    // re-siembra automática) hasta definir la re-siembra para este formato.
+    recalculo_pendientes = "omitido_solo_interes";
+    console.log(
+      "⚠️ Crédito solo-interés (no_amortiza_capital): recálculo automático omitido"
+    );
+  } else {
+    try {
+      await recalcularPagosCredito({
+        numero_credito_sifco: credito.numero_credito_sifco,
+      });
+      console.log(`✅ Recibos pendientes recalculados con el capital nuevo`);
+    } catch (error) {
+      // El abono ya quedó aplicado y distribuido; no se revierte por esto. Pero
+      // NO puede pasar silencioso: los recibos quedarían con interés viejo, así
+      // que se reporta en la respuesta para correr Recalcular Pagos a mano.
+      recalculo_pendientes = "error";
+      console.error(
+        "❌ Error recalculando recibos post-abono (correr Recalcular Pagos manual):",
+        error
+      );
+    }
   }
 
   console.log(`✅ ========== ABONO APLICADO EXITOSAMENTE ==========\n`);

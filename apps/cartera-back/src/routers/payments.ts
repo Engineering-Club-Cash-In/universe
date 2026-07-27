@@ -13,7 +13,7 @@ import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
 import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
-import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
+import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago, verificarPagoValidadoCompleto } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
@@ -542,7 +542,23 @@ export const paymentRouter = new Elysia()
       // "Validar y Facturar" debe poder continuar hacia la facturación en vez
       // de morir aquí; /facturar-pago-completo tiene su propio guard contra
       // doble facturación.
+      //
+      // PERO antes se verifica que el estado descendiente (cierre de cuota y
+      // distribución a inversionistas) esté completo: la implementación
+      // pre-transacción marcaba validated ANTES de esos pasos, así que un
+      // pago histórico interrumpido puede estar validated con la cuota o la
+      // distribución a medias — facturar sobre eso saldría con montos
+      // incorrectos. En ese caso se responde 409 para frenar el flujo.
       if (esPagoAplicado(pagoExiste.validationStatus)) {
+        const estado = await verificarPagoValidadoCompleto(pagoId);
+        if (!estado.completo) {
+          set.status = 409;
+          return {
+            success: false,
+            requiresReview: true,
+            message: `El pago ya estaba validado pero quedó incompleto de un intento anterior: ${estado.motivo}. Corregir (p. ej. re-validar con soporte) antes de facturar.`,
+          };
+        }
         return {
           success: true,
           applied: false,

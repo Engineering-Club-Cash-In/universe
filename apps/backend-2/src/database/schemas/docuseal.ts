@@ -38,6 +38,7 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "contrato_servicios_cash_in_inversor_general",
   "designacion_beneficiario",
   "contrato_participacion_administracion_cartera",
+  "anexos_confirmacion_participacion_beneficiario",
   // ===== INVERSIONES SOCIEDAD =====
   "acuerdo_inversion_cash_in_sociedad",
   "carta_confirmacion_inversion_inicial_sociedad",

@@ -3040,7 +3040,11 @@ export async function aplicarAbonoCapitalInversionistas(
   // primera cuota), y nunca toca pagos ya aplicados — este mismo abono queda
   // pagado=true y fuera del recálculo. La cuota mensual del crédito no cambia.
   // El espejo NO se toca aquí: lo maneja la liquidación del inversionista.
-  let recalculo_pendientes: "ok" | "error" | "omitido_solo_interes" = "ok";
+  let recalculo_pendientes:
+    | "ok"
+    | "error"
+    | "omitido_solo_interes"
+    | "revisar_pendientes_validacion" = "ok";
   if (credito.no_amortiza_capital) {
     // Crédito solo-interés: recalcularPagosCredito no conoce el flag y
     // convertiría en amortización de capital la diferencia cuota − interés
@@ -3055,7 +3059,29 @@ export async function aplicarAbonoCapitalInversionistas(
       await recalcularPagosCredito({
         numero_credito_sifco: credito.numero_credito_sifco,
       });
-      console.log(`✅ Recibos pendientes recalculados con el capital nuevo`);
+      // Pagos ya registrados (pagado=true) pero aún SIN validar por conta
+      // quedan fuera del recálculo (solo toma pendientes): si conta los valida
+      // después de este abono, confirmaría su reparto viejo. Se reporta para
+      // correr "Recalcular Pagos" a mano después de validarlos.
+      const [pendienteValidacion] = await db
+        .select({ pago_id: pagos_credito.pago_id })
+        .from(pagos_credito)
+        .where(
+          and(
+            eq(pagos_credito.credito_id, credito_id),
+            eq(pagos_credito.pagado, true),
+            eq(pagos_credito.validationStatus, "pending")
+          )
+        )
+        .limit(1);
+      if (pendienteValidacion) {
+        recalculo_pendientes = "revisar_pendientes_validacion";
+        console.log(
+          "⚠️ Hay pagos registrados pendientes de validación: recalcular a mano después de validarlos"
+        );
+      } else {
+        console.log(`✅ Recibos pendientes recalculados con el capital nuevo`);
+      }
     } catch (error) {
       // El abono ya quedó aplicado y distribuido; no se revierte por esto. Pero
       // NO puede pasar silencioso: los recibos quedarían con interés viejo, así

@@ -1992,6 +1992,18 @@ export interface AplicarPagoResponse {
   success: boolean;
   applied?: boolean;
   message: string;
+  /**
+   * Estado del recálculo automático de recibos tras aplicar un abono a capital:
+   * - "error": falló — correr "Recalcular Pagos" manualmente.
+   * - "revisar_pendientes_validacion": hay pagos registrados sin validar que
+   *   quedaron fuera — recalcular a mano después de validarlos.
+   * - "omitido_solo_interes": crédito solo-interés, no aplica el recálculo.
+   */
+  recalculo_pendientes?:
+    | "ok"
+    | "error"
+    | "omitido_solo_interes"
+    | "revisar_pendientes_validacion";
   data?: {
     credito_id: number;
     capital_anterior: string;

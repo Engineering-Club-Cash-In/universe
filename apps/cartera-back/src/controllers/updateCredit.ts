@@ -2034,12 +2034,18 @@ export const recalcularPagosCredito = async ({
     // Amortización de esta cuota
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
     const ivaMes = interesMes.times(0.12).round(2);
-    const abonoCapital = cuotaMensual
+    let abonoCapital = cuotaMensual
       .minus(interesMes)
       .minus(ivaMes)
       .minus(seguroFijo)
       .minus(gpsFijo)
       .minus(membresiasFijo);
+
+    // Tope: un recibo nunca proyecta más capital del que queda en el crédito
+    // (tras un abono grande la última porción es menor a la de una cuota
+    // normal), y con saldo 0 las cuotas restantes ya no llevan capital. Sin
+    // esto se sobre-cobraría capital y se sobre-distribuiría a inversionistas.
+    if (abonoCapital.gt(capitalEnMemoria)) abonoCapital = capitalEnMemoria;
 
     capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
     if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);

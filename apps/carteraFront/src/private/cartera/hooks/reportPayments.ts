@@ -49,11 +49,25 @@ export function useAplicarPago() {
     mutationFn: (pagoId: number) => pagosService.aplicarPago(pagoId),
     
     onSuccess: (data) => {
-    
+      // ⚠️ Estado del recálculo de recibos tras un abono a capital: si quedó
+      // pendiente, operaciones debe correr "Recalcular Pagos" a mano.
+      if (data.recalculo_pendientes === "error") {
+        alert(
+          "El abono se aplicó, pero FALLÓ el recálculo de las cuotas pendientes. Corré 'Recalcular Pagos' manualmente en este crédito."
+        );
+      } else if (data.recalculo_pendientes === "revisar_pendientes_validacion") {
+        alert(
+          "El abono se aplicó y se recalcularon las cuotas pendientes, pero hay pagos registrados SIN validar que quedaron fuera: después de validarlos, corré 'Recalcular Pagos' manualmente."
+        );
+      } else if (data.recalculo_pendientes === "omitido_solo_interes") {
+        alert(
+          "Abono aplicado. Crédito solo-interés: el recálculo automático no aplica para este formato."
+        );
+      }
 
       // 🔄 Invalidar la caché para refrescar la tabla
-      queryClient.invalidateQueries({ 
-        queryKey: ["pagos-inversionistas"] 
+      queryClient.invalidateQueries({
+        queryKey: ["pagos-inversionistas"]
       });
 
       // 📊 Log adicional si se aplicó al crédito

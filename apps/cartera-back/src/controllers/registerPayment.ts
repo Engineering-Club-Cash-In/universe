@@ -2362,6 +2362,34 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       console.log(
         `📊 Cuota ${pago.cuota_id}: aplicado ${totalAplicadoEnCuota.toFixed(2)} / esperado ${cuotaAmount.toFixed(2)} (otros validated: ${otrosPagosValidados.length}) → ${cuotaCompleta ? "COMPLETA" : "incompleta"}`
       );
+
+      // Recibos MENORES a la cuota mensual: tras un abono grande, el recálculo
+      // topa el capital del último recibo (y los de cola quedan solo con
+      // seguro/GPS/membresías), así que su total real es menor a
+      // `credito.cuota` y la suma de arriba nunca los daría por completos.
+      // Si este pago dejó el recibo con TODOS sus restantes en 0, la cuota
+      // cierra — mismo criterio con el que el registro ya marcó la fila como
+      // pagada (shouldMarkInstallmentPaymentPaid) y el recálculo decide
+      // `pagado` al redistribuir. No afecta cuotas normales (su recibo suma la
+      // cuota completa y cierran por la suma) ni parciales (dejan restantes).
+      // El override de INCOBRABLE de abajo sigue mandando sobre esto.
+      if (!cuotaCompleta) {
+        const restantesRecibo = new Big(pago.interes_restante ?? 0)
+          .plus(pago.iva_12_restante ?? 0)
+          .plus(pago.seguro_restante ?? 0)
+          .plus(pago.gps_restante ?? 0)
+          .plus(pago.membresias ?? 0)
+          .plus(pago.capital_restante ?? 0);
+        if (
+          restantesRecibo.lte(0.01) &&
+          new Big(pago.monto_aplicado ?? 0).gt(0)
+        ) {
+          cuotaCompleta = true;
+          console.log(
+            `📊 Cuota ${pago.cuota_id}: recibo menor a la cuota mensual cubierto por completo (restantes en 0) → COMPLETA`
+          );
+        }
+      }
     }
 
     // INCOBRABLE: la cuota se cierra SI Y SOLO SI el capital del crédito llega

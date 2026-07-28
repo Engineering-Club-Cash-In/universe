@@ -1298,6 +1298,10 @@ function RouteComponent() {
 											emailCliente={caso.emailContacto || ""}
 											metodoInicial="llamada"
 											variante="promesa"
+											montoSugerido={
+												Number(caso.montoEnMora || 0) +
+												Number(caso.cuotaMensual || 0)
+											}
 											cuotasDisponibles={cuotas
 												.filter(
 													(c: any) =>
@@ -1630,6 +1634,14 @@ function RouteComponent() {
 																).toLocaleDateString("es-GT")}
 															</div>
 														)}
+														{contacto.proximoPaso && (
+															<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
+																<span className="font-medium">
+																	Próximo paso:{" "}
+																</span>
+																{contacto.proximoPaso}
+															</div>
+														)}
 														<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
 															<span>
 																Por: {contacto.realizadoPor || "Sin asignar"}
@@ -1771,6 +1783,17 @@ function RouteComponent() {
 															{tieneRango && promesa.incluyeMora && (
 																<Badge variant="outline">+ Mora</Badge>
 															)}
+															{promesa.montoComprometido != null && (
+																<Badge variant="outline">
+																	Q
+																	{Number(
+																		promesa.montoComprometido,
+																	).toLocaleString("es-GT", {
+																		minimumFractionDigits: 2,
+																		maximumFractionDigits: 2,
+																	})}
+																</Badge>
+															)}
 															<span className="text-muted-foreground text-sm">
 																{fechaPrometida
 																	? formatFechaGT(fechaPrometida)
@@ -1797,6 +1820,14 @@ function RouteComponent() {
 														<div className="rounded bg-green-50 p-2 text-sm">
 															<span className="font-medium">Compromiso: </span>
 															{promesa.compromisosPago}
+														</div>
+													)}
+													{promesa.proximoPaso && (
+														<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
+															<span className="font-medium">
+																Próximo paso:{" "}
+															</span>
+															{promesa.proximoPaso}
 														</div>
 													)}
 													<div className="mt-2 text-muted-foreground text-xs">

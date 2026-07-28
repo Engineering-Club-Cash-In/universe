@@ -42,7 +42,8 @@ import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import {
-	countScheduledPaidInstallments,
+	countRemainingInstallments,
+	resolveCreditContractSummary,
 	resolveInstallmentAmount,
 } from "../lib/cobros-credit-detail";
 import {
@@ -2187,16 +2188,13 @@ export const cobrosRouter = {
 				];
 				const cuota0 = todasLasCuotas.find((c) => c.numero_cuota === 0);
 				const fechaInicioCuota0 = cuota0?.fecha_vencimiento || null;
-				const cuotasPagadasCount = countScheduledPaidInstallments(
-					creditoCompleto.cuotasPagadas,
-				);
 				const totalCuotas = creditoCompleto.credito.plazo || 0;
-				let cuotasRestantes = totalCuotas;
-				if (cuota0?.pagado) {
-					cuotasRestantes = totalCuotas - cuotasPagadasCount + 1;
-				} else {
-					cuotasRestantes = totalCuotas - cuotasPagadasCount;
-				}
+				const cuotasRestantes = countRemainingInstallments(
+					creditoCompleto.credito.statusCredit,
+					totalCuotas,
+					creditoCompleto.cuotasPagadas,
+					Boolean(cuota0?.pagado),
+				);
 
 				// 6. Mapear datos correctamente
 				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
@@ -2242,6 +2240,12 @@ export const cobrosRouter = {
 				else if (statusCredit === "INCOBRABLE") estadoContrato = "incobrable";
 				else if (statusCredit === "PENDIENTE_CANCELACION")
 					estadoContrato = "pendiente_cancelacion";
+				const contractSummary = resolveCreditContractSummary(
+					statusCredit,
+					creditoCompleto.cuotasPagadas,
+					creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
+					creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual || "0.00",
+				);
 
 				return {
 					// ID del caso de cobros (si existe)
@@ -2270,12 +2274,8 @@ export const cobrosRouter = {
 					etiquetas: casoCobro?.etiquetas || [],
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
-					montoFinanciado:
-						creditoCompleto.credito.capital ??
-						creditoCompleto.credito.deudatotal ??
-						"0.00",
-					cuotaMensual:
-						creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual,
+					montoFinanciado: contractSummary.principal,
+					cuotaMensual: contractSummary.installment,
 					numeroCuotas: creditoCompleto.credito.plazo,
 					fechaInicio: creditoCompleto.credito.fecha_creacion,
 					diaPagoMensual,

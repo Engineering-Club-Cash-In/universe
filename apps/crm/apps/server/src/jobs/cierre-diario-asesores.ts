@@ -20,15 +20,14 @@
  *  - Paso B 'subida'/'bajada': créditos que cambiaron de bucket ese día, con su
  *    ruta (bucket_anterior → bucket). Definición confirmada por Jhairo Nájera
  *    (responsable CB-024): el reporte muestra "hoy subieron N / bajaron M". La
- *    atribución va por `asesor_id` (dueño ACTUAL del crédito, NOT NULL) y NO
- *    por `asesor_atribucion_id` (buckets_historial.asesor_id) ni por el pool
- *    del bucket de origen — ver el comentario en
- *    _generarCierreMovimientosBucket para el porqué de cada descarte. El
- *    asesor en cartera-back tiene id numérico distinto al user.id (texto) del
- *    CRM — se resuelve cruzando por NOMBRE contra el pool completo de
- *    /buckets/pool (ver construirMapaAsesorUsuarioPorCarga). Se reemplaza
- *    completo (DELETE + INSERT) en cada corrida: son datos derivados de
- *    cartera-back, recalculables, sin un "contacto" que ancle un ON CONFLICT.
+ *    atribución va por `evento.asesor` (nombre del dueño del crédito, tal como
+ *    lo trae CADA fila de getBucketsHistorial) — ver resolverAsesorId para el
+ *    porqué de descartar `asesor_atribucion_id` y los mapas externos
+ *    (pool/carga) que se probaron antes. El asesor en cartera-back no tiene
+ *    id de usuario del CRM propio — se resuelve cruzando por nombre contra
+ *    `user.name`. Se reemplaza completo (DELETE + INSERT) en cada corrida:
+ *    son datos derivados de cartera-back, recalculables, sin un "contacto"
+ *    que ancle un ON CONFLICT.
  */
 
 import { inArray } from "drizzle-orm";
@@ -120,63 +119,41 @@ async function _generarCierreContactos(client: RawClient, fecha: string) {
 	);
 }
 
-// Buckets fijos del funnel operativo (B0-B5) — se recorren para armar el pool
-// completo de asesores, igual que en getCierreDiarioPorRango (routers/cobros.ts).
-const BUCKETS_NUMEROS = [0, 1, 2, 3, 4, 5] as const;
-
 /**
- * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando por NOMBRE.
+ * Mapa `nombre normalizado → user.id (CRM)`. Cruzar por nombre en vez de
+ * asesor_id/email porque el nombre viaja EN CADA FILA del evento
+ * (`getBucketsHistorial().data[].asesor`), sin necesitar una llamada aparte
+ * a un pool o catálogo que puede cambiar entre el movimiento y esta corrida.
  *
- * NO se usa `getCargaPorAsesorBucket` (como antes): esa lista solo incluye
- * asesores con al menos un crédito ACTUALMENTE en el funnel operativo
- * (excluye CANCELADO/PENDIENTE_CANCELACION/EN_CONVENIO/CAIDO — ver
- * STATUS_BUCKET_FUERA en cartera-back). `getBucketsHistorial` no tiene ese
- * filtro: si el único crédito de un asesor se resolvió (se pagó, se canceló)
- * ENTRE el movimiento de bucket y esta corrida (00:15 GT del día siguiente),
- * ese asesor desaparecía del mapa y su movimiento se descartaba en silencio
- * — un caso frecuente en cobros, no un edge case (hallado por Codex en PR
- * #1185).
- *
- * En su lugar, el pool sale de `getPoolAsesoresPorBucket` (6 llamadas, una
- * por bucket) — es `asesor_bucket WHERE activo=true` tal cual, sin depender
- * de créditos ni de su estado. Ese endpoint no trae email, así que el cruce
- * con `user` del CRM va por NOMBRE normalizado (trim + lowercase) en vez de
- * correo — menos preciso que el email, pero los nombres son únicos en la
- * práctica y es preferible a perder movimientos reales.
+ * Se descartaron dos fuentes externas antes de llegar acá, ambas por la misma
+ * clase de bug (mapa construido de un catálogo "vigente ahora", que puede
+ * haber perdido al asesor entre el evento y la corrida — 00:15 GT del día
+ * siguiente):
+ *   - `getCargaPorAsesorBucket`: excluye créditos CANCELADO/
+ *     PENDIENTE_CANCELACION/EN_CONVENIO/CAIDO (STATUS_BUCKET_FUERA en
+ *     cartera-back) — si el único crédito del asesor se resolvió antes de la
+ *     corrida, desaparecía del mapa (hallado por Codex en PR #1185, 1er round).
+ *   - `getPoolAsesoresPorBucket`: solo pool ACTIVO ahora — si desactivan al
+ *     asesor del pool entre el evento y la corrida, mismo problema, y además
+ *     el DELETE+INSERT de abajo podía BORRAR filas ya capturadas en una
+ *     corrida anterior si un re-run perdía a ese asesor del mapa (hallado por
+ *     Codex en PR #1185, 2do round).
+ * Usar el nombre que trae el propio evento es inmune a ambos: no depende de
+ * ningún estado "actual" externo al evento mismo.
  */
-async function construirMapaAsesorUsuarioPorCarga(): Promise<
-	Map<number, string>
-> {
-	const [pools, usuarios] = await Promise.all([
-		Promise.all(
-			BUCKETS_NUMEROS.map((bucket) =>
-				carteraBackClient.getPoolAsesoresPorBucket(bucket),
-			),
-		),
-		db.select({ id: user.id, name: user.name }).from(user),
-	]);
-	const nombreToUserId = new Map(
-		usuarios.map((u) => [u.name.trim().toLowerCase(), u.id]),
-	);
-	const mapa = new Map<number, string>();
-	for (const pool of pools) {
-		for (const a of pool) {
-			if (mapa.has(a.asesor_id)) continue;
-			const userId = nombreToUserId.get(a.nombre.trim().toLowerCase());
-			if (userId) mapa.set(a.asesor_id, userId);
-		}
-	}
-	return mapa;
+function resolverAsesorId(
+	nombreAsesor: string | null,
+	nombreToUserId: ReadonlyMap<string, string>,
+): string | null {
+	if (!nombreAsesor) return null;
+	return nombreToUserId.get(nombreAsesor.trim().toLowerCase()) ?? null;
 }
 
 async function _generarCierreMovimientosBucket(fecha: string) {
-	const mapaAsesorUsuario = await construirMapaAsesorUsuarioPorCarga();
-	if (mapaAsesorUsuario.size === 0) {
-		console.log(
-			"[CierreDiarioAsesor] Sin mapa asesor→usuario, se omiten movimientos de bucket",
-		);
-		return;
-	}
+	const usuarios = await db.select({ id: user.id, name: user.name }).from(user);
+	const nombreToUserId = new Map(
+		usuarios.map((u) => [u.name.trim().toLowerCase(), u.id]),
+	);
 
 	type FilaMovimiento = {
 		asesorId: string;
@@ -204,26 +181,21 @@ async function _generarCierreMovimientosBucket(fecha: string) {
 		});
 		for (const evento of resp.data ?? []) {
 			if (evento.bucket_anterior == null) continue;
-			// Se atribuye por evento.asesor_id — el dueño ACTUAL del crédito
-			// (creditos.asesor_id, NOT NULL, "hoy siempre hay dueño" según la
-			// decisión de raíz 2026-07-07 de cartera-back). NO
-			// asesor_atribucion_id (buckets_historial.asesor_id): ese campo lo
-			// deja NULL el proceso automático nocturno (latefee.ts:1181, comentario
-			// "Opción B: se llena con el nuevo flujo de pago" — no implementado
-			// todavía), así que filtrar por él descarta el 100% de los movimientos
-			// del motor normal, no solo un caso borde (hallado por Codex en PR
-			// #1183 tras el primer intento con asesor_atribucion_id). El costo
-			// aceptado: si el crédito se reasigna después de moverse de bucket, la
-			// atribución "sigue" al nuevo dueño en vez de quedar congelada al
-			// momento del evento — trade-off necesario porque la alternativa es
-			// cero movimientos reportados, siempre.
-			// Tampoco se usa el pool del bucket de origen: varios asesores
-			// comparten bucket (B2 lo atienden 3), así que por pool un mismo
-			// movimiento se contaba varias veces y los totales no cuadraban con
-			// los eventos reales. Eventos sin asesor, o cuyo asesor no cruza con un
-			// usuario del CRM, se omiten.
-			if (evento.asesor_id == null) continue;
-			const asesorId = mapaAsesorUsuario.get(evento.asesor_id);
+			// Se atribuye por evento.asesor (nombre) — el dueño ACTUAL del crédito
+			// al momento del evento (creditos.asesor_id vía el JOIN de
+			// cartera-back, "hoy siempre hay dueño" según la decisión de raíz
+			// 2026-07-07 de ese repo). NO asesor_atribucion_id
+			// (buckets_historial.asesor_id): ese campo lo deja NULL el proceso
+			// automático nocturno (latefee.ts:1181, "se llena con el nuevo flujo
+			// de pago" — no implementado todavía), así que filtrar por él descarta
+			// el 100% de los movimientos del motor normal (hallado por Codex en
+			// PR #1183). Tampoco el pool del bucket de origen: varios asesores
+			// comparten bucket, un mismo movimiento se contaba varias veces. Y NO
+			// un mapa externo (pool/carga) resuelto aparte: ambos dependían de un
+			// catálogo "vigente ahora" que puede haber perdido al asesor entre el
+			// evento y esta corrida — ver resolverAsesorId. Eventos sin asesor, o
+			// cuyo nombre no cruza con un usuario del CRM, se omiten.
+			const asesorId = resolverAsesorId(evento.asesor, nombreToUserId);
 			if (!asesorId) continue;
 			filas.push({
 				asesorId,

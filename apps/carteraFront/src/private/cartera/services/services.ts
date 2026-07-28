@@ -2003,10 +2003,12 @@ export interface AplicarPagoResponse {
    *   (ambos redistribuirían el parcial); revisar el reparto con el equipo.
    *   (Un pago solo registrado sin validar — parcial o completo — NO cae aquí:
    *   ese sí se recalcula para que conta lo valide con el reparto nuevo.)
-   * - "revisar_sobrante": tras recalcular, hay un pago registrado sin validar
-   *   cuyo monto supera lo que pide el recibo nuevo (ej. pagó la cuota
-   *   completa y el abono dejó el último recibo más chico) — decidir saldo a
-   *   favor/devolución con el equipo ANTES de validar ese pago.
+   * - "revisar_sobrante": el abono se aplicó y se recalculó bien, pero hay un
+   *   pago PENDIENTE de validar cuyo monto supera lo que pide su recibo nuevo
+   *   (ej. pagó la cuota completa y el abono dejó el último recibo más chico)
+   *   — NO validar ese pago pendiente hasta decidir con el equipo si el
+   *   sobrante va como saldo a favor o devolución. Solo es un aviso: el botón
+   *   de validar sigue funcionando igual.
    * - "omitido_solo_interes": crédito solo-interés, no aplica el recálculo.
    */
   recalculo_pendientes?:

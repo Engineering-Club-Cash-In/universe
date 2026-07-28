@@ -1782,7 +1782,9 @@ function RouteComponent() {
 								<p className="text-muted-foreground text-sm">Cuota Mensual</p>
 								<p className="font-medium">
 									Q
-									{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+									{Number(
+										caso.cuotaMensualHistorica ?? caso.cuotaMensual,
+									).toLocaleString("es-GT", {
 										minimumFractionDigits: 2,
 										maximumFractionDigits: 2,
 									})}

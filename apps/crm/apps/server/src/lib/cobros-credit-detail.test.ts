@@ -4,6 +4,7 @@ import {
 	countRemainingInstallments,
 	countScheduledPaidInstallments,
 	resolveCreditContractSummary,
+	resolveHistoricalInstallment,
 	resolveInstallmentAmount,
 	resolveOperationalInstallment,
 } from "./cobros-credit-detail";
@@ -31,10 +32,22 @@ describe("resolveOperationalInstallment", () => {
 		expect(routerSource).toContain(
 			"cuotaMensualHistorica: contractSummary.installment",
 		);
-		expect(detailSource.match(/caso\.cuotaMensualHistorica/g)).toHaveLength(1);
+		expect(routerSource).toContain("resolveHistoricalInstallment(");
+		expect(routerSource).not.toContain(
+			"creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual",
+		);
+		expect(detailSource.match(/caso\.cuotaMensualHistorica/g)).toHaveLength(2);
 		expect(detailSource).toContain(
 			"caso.cuotaMensualHistorica ?? caso.cuotaMensual",
 		);
+	});
+});
+
+describe("resolveHistoricalInstallment", () => {
+	it("uses the cartera installment only when it is positive", () => {
+		expect(resolveHistoricalInstallment("2323.10", "1900.00")).toBe("2323.10");
+		expect(resolveHistoricalInstallment("0.00", "1900.00")).toBe("1900.00");
+		expect(resolveHistoricalInstallment(null, "1900.00")).toBe("1900.00");
 	});
 });
 

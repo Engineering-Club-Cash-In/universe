@@ -44,6 +44,7 @@ import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-perce
 import {
 	countRemainingInstallments,
 	resolveCreditContractSummary,
+	resolveHistoricalInstallment,
 	resolveInstallmentAmount,
 	resolveOperationalInstallment,
 } from "../lib/cobros-credit-detail";
@@ -2245,7 +2246,10 @@ export const cobrosRouter = {
 					statusCredit,
 					creditoCompleto.cuotasPagadas,
 					creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
-					creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual || "0.00",
+					resolveHistoricalInstallment(
+						creditoCompleto.credito.cuota,
+						oportunidadData?.cuotaMensual,
+					),
 					creditoCompleto.contractSummary,
 				);
 

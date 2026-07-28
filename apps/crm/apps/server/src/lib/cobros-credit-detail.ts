@@ -18,6 +18,16 @@ export function resolveOperationalInstallment(
 	return statusCredit === "CANCELADO" ? "0.00" : historicalInstallment;
 }
 
+export function resolveHistoricalInstallment(
+	carteraInstallment: string | null | undefined,
+	opportunityInstallment: string | null | undefined,
+): string {
+	const carteraAmount = Number(carteraInstallment);
+	return Number.isFinite(carteraAmount) && carteraAmount > 0
+		? carteraInstallment ?? "0.00"
+		: opportunityInstallment ?? "0.00";
+}
+
 type CreditDetailRow = {
 	abono_capital?: string | null;
 	cuota?: string | null;

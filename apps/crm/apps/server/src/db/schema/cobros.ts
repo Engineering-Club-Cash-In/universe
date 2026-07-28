@@ -38,6 +38,19 @@ export const metodoContactoEnum = pgEnum("metodo_contacto", [
 	"carta_notarial",
 ]);
 
+// CB-025: catálogo de resultados PROVISIONAL — "Definición de listo" del
+// ticket deja pendiente el catálogo final (qué cuenta como contacto
+// efectivo, si "contactado" debe partirse en más resultados, etc.). Decisión
+// de negocio sin cerrar, no técnica.
+// Para AGREGAR un valor cuando negocio decida: `ALTER TYPE public.estado_contacto
+// ADD VALUE 'nuevo_valor'` es seguro (no bloquea, no requiere rescribir tabla).
+// Para QUITAR o RENOMBRAR uno existente: Postgres no lo permite directo sobre
+// un pgEnum nativo — requiere crear un tipo nuevo, migrar la columna
+// (`ALTER TABLE ... ALTER COLUMN ... TYPE nuevo_tipo USING ...`) y actualizar
+// filas existentes. Si el catálogo final termina necesitando renombrar/quitar
+// valores, considerar migrar esta columna de enum a texto libre + lista de
+// valores válidos en TypeScript en ese momento — mucho más barato de cambiar
+// después que un pgEnum.
 export const estadoContactoEnum = pgEnum("estado_contacto", [
 	"contactado",
 	"no_contesta",
@@ -221,10 +234,22 @@ export const contactosCobros = pgTable(
 		cuotaFin: integer("cuota_fin"),
 		incluyeMora: boolean("incluye_mora").notNull().default(false),
 		estadoPromesa: estadoPromesaEnum("estado_promesa"),
+		// CB-025: monto que el cliente dijo que va a pagar. Informativo — NO lo
+		// lee evaluarPromesa, cumplida/incumplida sigue viniendo solo de
+		// cuota_inicio/cuota_fin/incluye_mora contra cartera-back. Opcional.
+		montoComprometido: decimal("monto_comprometido", {
+			precision: 12,
+			scale: 2,
+		}),
 
 		// Próximo seguimiento
 		requiereSeguimiento: boolean("requiere_seguimiento").default(false),
 		fechaProximoContacto: timestamp("fecha_proximo_contacto"),
+		// CB-025: qué hacer en el próximo contacto (fechaProximoContacto solo
+		// dice CUÁNDO, no QUÉ). Texto libre a propósito — el AC del ticket solo
+		// pide "próximo paso", sin catálogo cerrado (ver nota en
+		// estadoContactoEnum sobre catálogos pendientes de negocio).
+		proximoPaso: text("proximo_paso"),
 
 		// Usuario que realizó el contacto
 		realizadoPor: text("realizado_por")

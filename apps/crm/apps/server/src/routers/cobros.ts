@@ -431,11 +431,23 @@ export const createContactoCobrosSchema = z
 		compromisosPago: z.string().optional(),
 		requiereSeguimiento: z.boolean().default(false),
 		fechaProximoContacto: z.date().optional(),
+		// CB-025: qué hacer, no cuándo (eso es fechaProximoContacto). Texto
+		// libre, opcional — sin catálogo cerrado (ver nota en
+		// estadoContactoEnum sobre catálogos pendientes de negocio).
+		proximoPaso: z.string().optional(),
 		// CB-020: promesa de pago atada a cuotas — solo relevantes cuando
 		// estadoContacto = 'promesa_pago'.
 		cuotaInicio: z.number().int().positive().optional(),
 		cuotaFin: z.number().int().positive().optional(),
 		incluyeMora: z.boolean().default(false),
+		// CB-025: informativo, no participa en evaluarPromesa — por eso sin
+		// .refine() que lo exija. Mismo regex que montoAcordado/
+		// montoCuotaConvenio (createConvenioPago, arriba) para no dejar pasar
+		// basura a una columna numeric(12,2).
+		montoComprometido: z
+			.string()
+			.regex(/^\d+(\.\d{1,2})?$/, "Formato de monto inválido")
+			.optional(),
 	})
 	// CB-020: promesa_pago exige rango de cuotas y/o mora — una
 	// promesa vacía de ambos no verifica nada real. El web (PR
@@ -1489,10 +1501,12 @@ export const cobrosRouter = {
 					compromisosPago: contactosCobros.compromisosPago,
 					requiereSeguimiento: contactosCobros.requiereSeguimiento,
 					fechaProximoContacto: contactosCobros.fechaProximoContacto,
+					proximoPaso: contactosCobros.proximoPaso,
 					cuotaInicio: contactosCobros.cuotaInicio,
 					cuotaFin: contactosCobros.cuotaFin,
 					incluyeMora: contactosCobros.incluyeMora,
 					estadoPromesa: contactosCobros.estadoPromesa,
+					montoComprometido: contactosCobros.montoComprometido,
 					realizadoPorId: contactosCobros.realizadoPor,
 					realizadoPor: user.name,
 				})

@@ -18,6 +18,10 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+	CurrencyInput,
+	normalizeForSubmit,
+} from "@/components/ui/currency-input";
+import {
 	Dialog,
 	DialogClose,
 	DialogContent,
@@ -118,6 +122,10 @@ interface ContactoModalProps {
 	// $id.tsx filtra por fechaVencimiento < hoy antes de pasarlas — reusa la
 	// data que ya carga vía getHistorialPagos, no duplica el fetch aquí.
 	cuotasDisponibles?: Array<{ numeroCuota: number }>;
+	// CB-025: mora + cuota del caso, en crudo (sin formatear), para sugerir
+	// un monto en la variante "promesa". El caller ya lo tiene en memoria
+	// (misma fórmula que montoAdeudado) — no dispara query nueva.
+	montoSugerido?: number;
 	// Variables para plantillas de mensaje
 	fechaPago?: string;
 	cuotaMensual?: string;
@@ -143,6 +151,7 @@ export function ContactoModal({
 	onOpenChange,
 	variante = "completo",
 	cuotasDisponibles = [],
+	montoSugerido,
 	fechaPago = "",
 	cuotaMensual = "",
 	placa = "",
@@ -272,6 +281,10 @@ export function ContactoModal({
 			cuotaInicio: undefined as number | undefined,
 			cuotaFin: undefined as number | undefined,
 			incluyeMora: false,
+			// CB-025: monto que el cliente prometió pagar — informativo, opcional.
+			montoComprometido: "",
+			// CB-025: qué hacer en el próximo contacto — texto libre, opcional.
+			proximoPaso: "",
 		},
 		onSubmit: async ({ value }) => {
 			// NO ELIMINAR sin también quitar el botón submit de canSubmit
@@ -303,6 +316,14 @@ export function ContactoModal({
 			client.createContactoCobros({
 				casoCobroId,
 				...data,
+				// Enter dispara submit sin pasar por el onBlur del CurrencyInput
+				// (que es donde normalmente se limpia un punto colgante como
+				// "2500.") — se normaliza también acá, justo antes de armar el
+				// payload, para no depender de que el campo haya perdido foco
+				// (Codex, PR #1191, ronda 3).
+				montoComprometido:
+					normalizeForSubmit(data.montoComprometido) || undefined,
+				proximoPaso: data.proximoPaso || undefined,
 			}),
 		onSuccess: () => {
 			toast.success("Contacto registrado correctamente");
@@ -1123,6 +1144,33 @@ export function ContactoModal({
 									)
 								}
 							</form.Subscribe>
+
+							{/* CB-025: monto que el cliente dijo que va a pagar —
+							    informativo, opcional. No participa en evaluarPromesa. */}
+							<form.Field name="montoComprometido">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor="montoComprometido">
+											Monto comprometido (opcional)
+										</Label>
+										<CurrencyInput
+											id="montoComprometido"
+											value={field.state.value}
+											onChange={(value) => field.handleChange(value)}
+										/>
+										{montoSugerido != null && montoSugerido > 0 && (
+											<p className="text-muted-foreground text-sm">
+												Debe Q
+												{montoSugerido.toLocaleString("es-GT", {
+													minimumFractionDigits: 2,
+													maximumFractionDigits: 2,
+												})}{" "}
+												entre mora y cuota.
+											</p>
+										)}
+									</div>
+								)}
+							</form.Field>
 						</div>
 					)}
 
@@ -1230,6 +1278,25 @@ export function ContactoModal({
 									</form.Field>
 								)
 							}
+						</form.Field>
+
+						{/* CB-025: qué hacer, no cuándo (la fecha de arriba). Texto libre,
+						    opcional, en ambas variantes — el AC del ticket aplica a
+						    cualquier gestión, no solo a promesas. */}
+						<form.Field name="proximoPaso">
+							{(field) => (
+								<div className="space-y-2">
+									<Label htmlFor="proximoPaso">
+										¿Cuál es el próximo paso? (opcional)
+									</Label>
+									<Textarea
+										id="proximoPaso"
+										placeholder="Ej. Llamar de nuevo, enviar carta notarial, escalar a jurídico..."
+										value={field.state.value}
+										onChange={(e) => field.handleChange(e.target.value)}
+									/>
+								</div>
+							)}
 						</form.Field>
 					</div>
 

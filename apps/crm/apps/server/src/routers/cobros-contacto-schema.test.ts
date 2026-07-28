@@ -74,4 +74,43 @@ describe("createContactoCobrosSchema — promesa_pago", () => {
 		);
 		expect(result.success).toBe(true);
 	});
+
+	// CB-025: montoComprometido es informativo y opcional — no debe volverse
+	// obligatorio por accidente al tocar este schema en el futuro.
+	test("promesa con montoComprometido → válido", () => {
+		const result = createContactoCobrosSchema.safeParse(
+			base({ incluyeMora: true, montoComprometido: "2500.00" }),
+		);
+		expect(result.success).toBe(true);
+	});
+
+	test("promesa sin montoComprometido → sigue siendo válido (opcional)", () => {
+		const result = createContactoCobrosSchema.safeParse(
+			base({ incluyeMora: true }),
+		);
+		expect(result.success).toBe(true);
+	});
+
+	test("montoComprometido con formato inválido → inválido (code review)", () => {
+		const result = createContactoCobrosSchema.safeParse(
+			base({ incluyeMora: true, montoComprometido: "2,500.00" }),
+		);
+		expect(result.success).toBe(false);
+	});
+
+	// CB-025: proximoPaso es texto libre y opcional — sin catálogo cerrado,
+	// no debe volverse obligatorio por accidente al tocar este schema.
+	test("promesa con proximoPaso → válido", () => {
+		const result = createContactoCobrosSchema.safeParse(
+			base({ incluyeMora: true, proximoPaso: "Llamar de nuevo el viernes" }),
+		);
+		expect(result.success).toBe(true);
+	});
+
+	test("promesa sin proximoPaso → sigue siendo válido (opcional)", () => {
+		const result = createContactoCobrosSchema.safeParse(
+			base({ incluyeMora: true }),
+		);
+		expect(result.success).toBe(true);
+	});
 });

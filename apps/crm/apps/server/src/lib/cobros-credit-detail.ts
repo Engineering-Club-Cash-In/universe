@@ -35,12 +35,13 @@ export function resolveCreditContractSummary(
 		originalPrincipal?: string | null;
 		installment?: string | null;
 	},
-): { principal: string; installment: string } {
+): { principal: string | null; installment: string } {
 	if (statusCredit !== "CANCELADO") {
 		return { principal: fallbackPrincipal, installment: fallbackInstallment };
 	}
 
 	const rows = paidRows ?? [];
+	const hasResetEvidence = rows.some((row) => row.validationStatus === "reset");
 	const principalCents = rows.reduce(
 		(total, row) => total + toCents(row.abono_capital),
 		0,
@@ -48,22 +49,26 @@ export function resolveCreditContractSummary(
 	const resetInstallment = rows.find(
 		(row) => row.validationStatus === "reset" && row.cuota != null,
 	)?.cuota;
-	const installment =
-		resetInstallment ?? rows.find((row) => row.cuota != null)?.cuota;
+	const authoritativePrincipal =
+		authoritativeSummary?.originalPrincipal &&
+		toCents(authoritativeSummary.originalPrincipal) > 0
+			? authoritativeSummary.originalPrincipal
+			: undefined;
+	const authoritativeInstallment =
+		authoritativeSummary?.installment &&
+		toCents(authoritativeSummary.installment) > 0
+			? authoritativeSummary.installment
+			: undefined;
 
 	return {
 		principal:
-			(authoritativeSummary?.originalPrincipal &&
-			toCents(authoritativeSummary.originalPrincipal) > 0
-				? authoritativeSummary.originalPrincipal
-				: undefined) ||
-			(principalCents > 0 ? fromCents(principalCents) : fallbackPrincipal),
+			authoritativePrincipal ??
+			(hasResetEvidence && principalCents > 0
+				? fromCents(principalCents)
+				: null),
 		installment:
-			(authoritativeSummary?.installment &&
-			toCents(authoritativeSummary.installment) > 0
-				? authoritativeSummary.installment
-				: undefined) ||
-			installment ||
+			authoritativeInstallment ??
+			(hasResetEvidence ? resetInstallment : undefined) ??
 			fallbackInstallment,
 	};
 }

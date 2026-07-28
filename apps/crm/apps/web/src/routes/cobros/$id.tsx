@@ -1768,11 +1768,12 @@ function RouteComponent() {
 							<div>
 								<p className="text-muted-foreground text-sm">Capital Activo</p>
 								<p className="font-medium">
-									Q
-									{Number(caso.montoFinanciado || 0).toLocaleString("es-GT", {
-										minimumFractionDigits: 2,
-										maximumFractionDigits: 2,
-									})}
+									{caso.montoFinanciado == null
+										? "No disponible"
+										: `Q${Number(caso.montoFinanciado).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}`}
 								</p>
 							</div>
 							<div>

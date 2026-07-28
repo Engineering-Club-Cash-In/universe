@@ -3,19 +3,29 @@ import { resolve } from "node:path";
 import {
 	canResetCreditByStatus,
 	canViewCreditDetailByStatus,
+	isAmbiguousOriginalPrincipalPayment,
 	isCreditClosingPayment,
 	isOriginalPrincipalPayment,
 	withActiveCancellation,
 } from "./creditDetailPolicy";
 
 describe("credit closing payments", () => {
-	it("accepts system resets with reset or validated status only", () => {
+	it("accepts reset status regardless of registerBy", () => {
 		expect(
 			isCreditClosingPayment({
 				validationStatus: "reset",
-				registerBy: "system_reset",
+				registerBy: "user",
 			}),
 		).toBeTrue();
+		expect(
+			isCreditClosingPayment({
+				validationStatus: "reset",
+				registerBy: null,
+			}),
+		).toBeTrue();
+	});
+
+	it("accepts validated status only for system resets", () => {
 		expect(
 			isCreditClosingPayment({
 				validationStatus: "validated",
@@ -24,12 +34,15 @@ describe("credit closing payments", () => {
 		).toBeTrue();
 	});
 
-	it("rejects ordinary validated, other registerBy, pending, and capital payments", () => {
+	it("rejects ordinary validated, pending, and capital payments", () => {
 		for (const payment of [
 			{ validationStatus: "validated", registerBy: "user" },
 			{ validationStatus: "validated", registerBy: "other" },
 			{ validationStatus: "pending", registerBy: "system_reset" },
 			{ validationStatus: "capital", registerBy: "system_reset" },
+			{ validationStatus: "no_required", registerBy: "system_reset" },
+			{ validationStatus: "unknown", registerBy: "system_reset" },
+			{ validationStatus: null, registerBy: "system_reset" },
 		]) {
 			expect(isCreditClosingPayment(payment)).toBeFalse();
 		}
@@ -37,7 +50,7 @@ describe("credit closing payments", () => {
 });
 
 describe("original principal payments", () => {
-	it("accepts reversal-aware validation statuses regardless of payment flags", () => {
+	it("accepts applied statuses when they are not marked false", () => {
 		for (const validationStatus of [
 			"validated",
 			"capital_validated",
@@ -47,10 +60,38 @@ describe("original principal payments", () => {
 				isOriginalPrincipalPayment({
 					validationStatus,
 					pagado: false,
-					paymentFalse: true,
+					paymentFalse: false,
 				}),
 			).toBeTrue();
 		}
+	});
+
+	it("rejects and identifies ambiguous applied partials", () => {
+		for (const validationStatus of ["validated", "capital_validated"]) {
+			const payment = {
+				validationStatus,
+				pagado: false,
+				paymentFalse: true,
+			};
+
+			expect(isOriginalPrincipalPayment(payment)).toBeFalse();
+			expect(isAmbiguousOriginalPrincipalPayment(payment)).toBeTrue();
+		}
+
+		const resetPayment = {
+			validationStatus: "reset",
+			pagado: false,
+			paymentFalse: true,
+		};
+		expect(isOriginalPrincipalPayment(resetPayment)).toBeFalse();
+		expect(isAmbiguousOriginalPrincipalPayment(resetPayment)).toBeFalse();
+		expect(
+			isAmbiguousOriginalPrincipalPayment({
+				validationStatus: "validated",
+				pagado: true,
+				paymentFalse: true,
+			}),
+		).toBeFalse();
 	});
 
 	it("accepts no_required only when paid and not marked false", () => {
@@ -58,7 +99,7 @@ describe("original principal payments", () => {
 			isOriginalPrincipalPayment({
 				validationStatus: "no_required",
 				pagado: true,
-				paymentFalse: false,
+				paymentFalse: null,
 			}),
 		).toBeTrue();
 
@@ -78,6 +119,7 @@ describe("original principal payments", () => {
 			{ validationStatus: "unknown", pagado: true, paymentFalse: false },
 		]) {
 			expect(isOriginalPrincipalPayment(payment)).toBeFalse();
+			expect(isAmbiguousOriginalPrincipalPayment(payment)).toBeFalse();
 		}
 	});
 });
@@ -188,5 +230,33 @@ describe("credit detail no-current-installment branch", () => {
 		)?.[0];
 
 		expect(branch).toContain("asesor: currentCredit.asesores,");
+	});
+});
+
+describe("credit detail contract summary wiring", () => {
+	it("sums eligible principal while gating publication on closing payments", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "credits.ts"),
+		).text();
+		const contractSummary = source.match(
+			/const contractSummary[\s\S]*?(?=\n\s*\/\/ 2\.)/,
+		)?.[0];
+
+		expect(contractSummary).toContain("eligiblePayments.reduce(");
+		expect(contractSummary).toContain("closingPayments.length > 0");
+		expect(contractSummary).toContain("!hasAmbiguousPrincipalPayments");
+		expect(contractSummary).not.toContain("closingPayments.reduce(");
+	});
+});
+
+describe("credit closure paymentFalse wiring", () => {
+	it("preserves explicit false-payment rows and keeps applied partials", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "credits.ts"),
+		).text();
+		const caseExpression =
+			/paymentFalse:\s*sql<boolean>`CASE\s+WHEN \$\{pagos_credito\.paymentFalse\} IS TRUE THEN TRUE\s+WHEN \$\{pagos_credito\.validationStatus\} IN \('validated', 'capital_validated'\) THEN FALSE\s+ELSE TRUE\s+END`/g;
+
+		expect(source.match(caseExpression)).toHaveLength(2);
 	});
 });

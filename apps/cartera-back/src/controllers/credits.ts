@@ -42,6 +42,7 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   CREDIT_DETAIL_STATUSES,
   canResetCreditByStatus,
+  isAmbiguousOriginalPrincipalPayment,
   isCreditClosingPayment,
   isOriginalPrincipalPayment,
   withActiveCancellation,
@@ -88,6 +89,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
               .where(eq(pagos_credito.credito_id, creditoId));
             const eligiblePayments = payments.filter(isOriginalPrincipalPayment);
             const closingPayments = eligiblePayments.filter(isCreditClosingPayment);
+            const hasAmbiguousPrincipalPayments = payments.some(
+              isAmbiguousOriginalPrincipalPayment,
+            );
 
             return {
               originalPrincipal: (() => {
@@ -95,14 +99,14 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
                   (total, payment) => total.plus(payment.abono_capital ?? 0),
                   new Big(0),
                 );
-                return principal.gt(0) ? principal.toFixed(2) : null;
+                return closingPayments.length > 0 &&
+                  !hasAmbiguousPrincipalPayments &&
+                  principal.gt(0)
+                  ? principal.toFixed(2)
+                  : null;
               })(),
               installment:
                 closingPayments.find((payment) => payment.cuota != null)?.cuota ??
-                eligiblePayments.find(
-                  (payment) => payment.validationStatus === "reset" && payment.cuota != null
-                )?.cuota ??
-                eligiblePayments.find((payment) => payment.cuota != null)?.cuota ??
                 null,
             };
           })()
@@ -1585,7 +1589,11 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       const pagosNoPagados = await tx
         .update(pagos_credito)
         .set({
-          paymentFalse: true,
+          paymentFalse: sql<boolean>`CASE
+            WHEN ${pagos_credito.paymentFalse} IS TRUE THEN TRUE
+            WHEN ${pagos_credito.validationStatus} IN ('validated', 'capital_validated') THEN FALSE
+            ELSE TRUE
+          END`,
           capital_restante: "0",
           interes_restante: "0",
           iva_12_restante: "0",
@@ -1986,7 +1994,11 @@ export async function resetCredit({
     await db
       .update(pagos_credito)
       .set({
-        paymentFalse: true,
+        paymentFalse: sql<boolean>`CASE
+          WHEN ${pagos_credito.paymentFalse} IS TRUE THEN TRUE
+          WHEN ${pagos_credito.validationStatus} IN ('validated', 'capital_validated') THEN FALSE
+          ELSE TRUE
+        END`,
         capital_restante: "0",
         interes_restante: "0",
         iva_12_restante: "0",

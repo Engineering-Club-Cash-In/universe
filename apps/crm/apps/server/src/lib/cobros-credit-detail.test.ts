@@ -36,7 +36,7 @@ describe("resolveCreditContractSummary", () => {
 		).toEqual({ principal: "51875.08", installment: "2323.10" });
 	});
 
-	it("uses fallbacks without paid principal", () => {
+	it("returns no principal without paid principal or reset evidence", () => {
 		expect(
 			resolveCreditContractSummary(
 				"CANCELADO",
@@ -44,7 +44,7 @@ describe("resolveCreditContractSummary", () => {
 				"100.00",
 				"20.00",
 			),
-		).toEqual({ principal: "100.00", installment: "20.00" });
+		).toEqual({ principal: null, installment: "20.00" });
 	});
 
 	it("prefers an authoritative cancelled summary including off-schedule capital", () => {
@@ -63,12 +63,35 @@ describe("resolveCreditContractSummary", () => {
 		expect(
 			resolveCreditContractSummary(
 				"CANCELADO",
-				[{ abono_capital: "30000.00", cuota: "2200.00" }],
+				[
+					{
+						abono_capital: "30000.00",
+						cuota: "2200.00",
+						validationStatus: "reset",
+					},
+				],
 				"0.00",
 				"0.00",
 				{ originalPrincipal: "0.00", installment: "0" },
 			),
 		).toEqual({ principal: "30000.00", installment: "2200.00" });
+	});
+
+	it("returns no principal for a validated partial payment without reset evidence", () => {
+		expect(
+			resolveCreditContractSummary(
+				"CANCELADO",
+				[
+					{
+						abono_capital: "30000.00",
+						cuota: "2200.00",
+						validationStatus: "validated",
+					},
+				],
+				"51875.08",
+				"2323.10",
+			),
+		).toEqual({ principal: null, installment: "2323.10" });
 	});
 });
 

@@ -248,6 +248,8 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setSaldoAFavorUser(0);
         setFileToUpload(null);
         setArchivosParaSubir([]);
+        formik.resetForm();
+        setResetBuscador(true);
         setErrorCredito(
           "El crédito ya está cancelado y solo está disponible para consulta en el historial."
         );

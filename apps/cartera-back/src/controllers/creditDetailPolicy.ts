@@ -24,9 +24,23 @@ export function isOriginalPrincipalPayment(payment: {
 	}
 
 	return (
-		payment.validationStatus === "validated" ||
-		payment.validationStatus === "capital_validated" ||
-		payment.validationStatus === "reset"
+		(payment.validationStatus === "validated" ||
+			payment.validationStatus === "capital_validated" ||
+			payment.validationStatus === "reset") &&
+		payment.paymentFalse !== true
+	);
+}
+
+export function isAmbiguousOriginalPrincipalPayment(payment: {
+	validationStatus: string | null;
+	pagado: boolean | null;
+	paymentFalse: boolean | null;
+}): boolean {
+	return (
+		(payment.validationStatus === "validated" ||
+			payment.validationStatus === "capital_validated") &&
+		payment.pagado === false &&
+		payment.paymentFalse === true
 	);
 }
 
@@ -35,9 +49,9 @@ export function isCreditClosingPayment(payment: {
 	registerBy: string | null;
 }): boolean {
 	return (
-		payment.registerBy === "system_reset" &&
-		(payment.validationStatus === "reset" ||
-			payment.validationStatus === "validated")
+		payment.validationStatus === "reset" ||
+		(payment.validationStatus === "validated" &&
+			payment.registerBy === "system_reset")
 	);
 }
 

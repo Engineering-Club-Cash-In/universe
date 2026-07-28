@@ -42,6 +42,7 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   CREDIT_DETAIL_STATUSES,
   canResetCreditByStatus,
+  isScheduledCreditInstallment,
   withActiveCancellation,
 } from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
@@ -89,7 +90,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         : undefined;
 
     // 2. Consultar todas las cuotas pagadas (pagado = true)
-    const cuotasPagadas = await db
+    const cuotasPagadasConCierre = await db
       .select({
         // Campos de cuotas_credito
         cuota_id: cuotas_credito.cuota_id,
@@ -138,6 +139,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       )
       .orderBy(cuotas_credito.numero_cuota);
+
+    const cuotasPagadas = cuotasPagadasConCierre.filter((row) => isScheduledCreditInstallment(row.validationStatus));
 
     // 4. Calcular la cuota que toca este mes (según meses transcurridos desde fecha_creacion)
     const fechaInicio = new Date(currentCredit.creditos.fecha_creacion);

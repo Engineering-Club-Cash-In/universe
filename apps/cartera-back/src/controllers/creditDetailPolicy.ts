@@ -22,6 +22,10 @@ export function canResetCreditByStatus(
 	return status === "PENDIENTE_CANCELACION";
 }
 
+export const isScheduledCreditInstallment = (
+	validationStatus: string | null | undefined,
+): boolean => validationStatus !== "reset";
+
 export function withActiveCancellation<T extends object, C>(
 	detail: T,
 	cancelacion: C | undefined,

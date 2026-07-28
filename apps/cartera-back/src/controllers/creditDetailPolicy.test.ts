@@ -3,10 +3,19 @@ import { resolve } from "node:path";
 import {
 	canResetCreditByStatus,
 	canViewCreditDetailByStatus,
+	isScheduledCreditInstallment,
 	withActiveCancellation,
 } from "./creditDetailPolicy";
 
 describe("credit detail visibility", () => {
+	it("excludes only reset credit installments from scheduled installments", () => {
+		for (const status of ["validated", "pending", null, undefined]) {
+			expect(isScheduledCreditInstallment(status)).toBeTrue();
+		}
+
+		expect(isScheduledCreditInstallment("reset")).toBeFalse();
+	});
+
 	it("only allows resetting credits pending cancellation", () => {
 		expect(canResetCreditByStatus("PENDIENTE_CANCELACION")).toBeTrue();
 

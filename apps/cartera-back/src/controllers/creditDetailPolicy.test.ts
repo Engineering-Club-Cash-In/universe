@@ -6,6 +6,7 @@ import {
 	isAmbiguousOriginalPrincipalPayment,
 	isCreditClosingPayment,
 	isOriginalPrincipalPayment,
+	isValidResetCreditInput,
 	withActiveCancellation,
 } from "./creditDetailPolicy";
 
@@ -125,16 +126,12 @@ describe("original principal payments", () => {
 });
 
 describe("credit detail visibility", () => {
-	it("only allows resetting credits pending cancellation", () => {
+	it("allows pending cancellation and only ready bad-debt continuations", () => {
 		expect(canResetCreditByStatus("PENDIENTE_CANCELACION")).toBeTrue();
+		expect(canResetCreditByStatus("INCOBRABLE")).toBeFalse();
+		expect(canResetCreditByStatus("INCOBRABLE", true)).toBeTrue();
 
-		for (const status of [
-			"CANCELADO",
-			"INCOBRABLE",
-			"ACTIVO",
-			null,
-			undefined,
-		]) {
+		for (const status of ["CANCELADO", "ACTIVO", null]) {
 			expect(canResetCreditByStatus(status)).toBeFalse();
 		}
 	});
@@ -258,5 +255,145 @@ describe("credit closure paymentFalse wiring", () => {
 			/paymentFalse:\s*sql<boolean>`CASE\s+WHEN \$\{pagos_credito\.paymentFalse\} IS TRUE THEN TRUE\s+WHEN \$\{pagos_credito\.validationStatus\} IN \('validated', 'capital_validated'\) THEN FALSE\s+ELSE TRUE\s+END`/g;
 
 		expect(source.match(caseExpression)).toHaveLength(2);
+	});
+});
+
+describe("reset credit bad-debt continuation wiring", () => {
+	it("requires matching bad-debt and credit capital without a system reset payment", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "credits.ts"),
+		).text();
+		const resetCredit = source.match(
+			/export async function resetCredit[\s\S]*?(?=\nexport )/,
+		)?.[0];
+
+		expect(resetCredit).toContain(
+			"monto_incobrable: bad_debts.monto_incobrable",
+		);
+		expect(resetCredit).toContain(".from(bad_debts)");
+		expect(resetCredit).toContain("pago_id: pagos_credito.pago_id");
+		expect(resetCredit).toContain(
+			'eq(pagos_credito.registerBy, "system_reset")',
+		);
+		expect(resetCredit).toContain("montoIncobrableBig.eq(creditoCapitalBig)");
+		expect(resetCredit).toContain("montoIncobrableBig.eq(badDebtCapitalBig)");
+		expect(resetCredit).toContain(
+			"canResetCreditByStatus(credito.statusCredit, incobrableContinuationReady)",
+		);
+	});
+});
+
+describe("reset credit router validation wiring", () => {
+	it("uses the reset input guard without coercing montoIncobrable", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "../routers/credits.ts"),
+		).text();
+		const route = source.match(
+			/\.post\("\/resetCredit"[\s\S]*?(?=\n\s*\.get\()/,
+		)?.[0];
+
+		expect(route).toContain("isValidResetCreditInput");
+		expect(route).not.toContain("Number(montoIncobrable)");
+	});
+});
+
+describe("reset credit input validation", () => {
+	const validInput = {
+		creditId: 1,
+		montoIncobrable: 10.5,
+		montoBoleta: 20,
+		url_boletas: ["https://example.com/boleta"],
+		cuota: 0,
+		banco_id: 2,
+		numeroAutorizacion: "ABC-123",
+	};
+
+	it("accepts numeric and decimal-string boleta bodies", () => {
+		expect(isValidResetCreditInput(validInput)).toBeTrue();
+		expect(
+			isValidResetCreditInput({ ...validInput, montoIncobrable: 0 }),
+		).toBeTrue();
+		expect(
+			isValidResetCreditInput({ ...validInput, montoBoleta: " 20.50 " }),
+		).toBeTrue();
+	});
+
+	it("rejects invalid credit IDs and bank IDs", () => {
+		for (const value of ["1", [1], Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+			expect(
+				isValidResetCreditInput({ ...validInput, creditId: value }),
+			).toBeFalse();
+			expect(
+				isValidResetCreditInput({ ...validInput, banco_id: value }),
+			).toBeFalse();
+		}
+	});
+
+	it("rejects invalid bad-debt amounts", () => {
+		for (const value of [
+			"10",
+			[10],
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			-1,
+		]) {
+			expect(
+				isValidResetCreditInput({ ...validInput, montoIncobrable: value }),
+			).toBeFalse();
+		}
+	});
+
+	it("rejects invalid installment and boleta amounts", () => {
+		expect(isValidResetCreditInput({ ...validInput, cuota: -1 })).toBeFalse();
+		for (const value of [
+			"",
+			"   ",
+			"1e2",
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			-1,
+		]) {
+			expect(
+				isValidResetCreditInput({ ...validInput, montoBoleta: value }),
+			).toBeFalse();
+		}
+	});
+
+	it("rejects non-string URLs and authorization numbers", () => {
+		expect(
+			isValidResetCreditInput({ ...validInput, url_boletas: ["ok", 1] }),
+		).toBeFalse();
+		expect(
+			isValidResetCreditInput({ ...validInput, numeroAutorizacion: 123 }),
+		).toBeFalse();
+	});
+});
+
+describe("reset credit atomic closing payment wiring", () => {
+	it("locks and rechecks before inserting the system reset payment", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "credits.ts"),
+		).text();
+		const resetCredit = source.match(
+			/export async function resetCredit[\s\S]*?(?=\nexport )/,
+		)?.[0];
+		const transaction = resetCredit?.match(
+			/db\.transaction\(async \(tx\) => \{[\s\S]*?\n\s*\}\)/,
+		)?.[0];
+
+		expect(transaction).toContain('.for("update")');
+		expect(transaction).toContain(".from(pagos_credito)");
+		expect(transaction).toContain(
+			'eq(pagos_credito.registerBy, "system_reset")',
+		);
+		expect(transaction).toContain("tx.insert(pagos_credito)");
+		if (!transaction)
+			throw new Error("No se encontró la transacción de cierre");
+		expect(transaction.indexOf('.for("update")')).toBeLessThan(
+			transaction.indexOf(".from(pagos_credito)"),
+		);
+		expect(transaction.indexOf(".from(pagos_credito)")).toBeLessThan(
+			transaction.indexOf("tx.insert(pagos_credito)"),
+		);
 	});
 });

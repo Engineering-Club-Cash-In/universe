@@ -14,6 +14,60 @@ export const ORIGINAL_PRINCIPAL_PAYMENT_STATUSES = [
 	"reset",
 ] as const;
 
+export type StrictResetCreditInput = {
+	creditId: number;
+	montoIncobrable?: number;
+	montoBoleta: number | string;
+	url_boletas: string[];
+	cuota: number;
+	banco_id: number;
+	numeroAutorizacion?: string;
+};
+
+export function isValidResetCreditInput(
+	input: Record<string, unknown>,
+): input is StrictResetCreditInput {
+	const {
+		creditId,
+		montoIncobrable,
+		montoBoleta,
+		url_boletas,
+		cuota,
+		banco_id,
+		numeroAutorizacion,
+	} = input;
+	const montoBoletaValido =
+		(typeof montoBoleta === "number" &&
+			Number.isFinite(montoBoleta) &&
+			montoBoleta >= 0) ||
+		(typeof montoBoleta === "string" &&
+			/^\d+(?:\.\d+)?$/.test(montoBoleta.trim()) &&
+			Number.isFinite(Number(montoBoleta.trim())));
+
+	return (
+		typeof creditId === "number" &&
+		Number.isFinite(creditId) &&
+		Number.isInteger(creditId) &&
+		creditId > 0 &&
+		montoBoletaValido &&
+		Array.isArray(url_boletas) &&
+		url_boletas.every((url) => typeof url === "string") &&
+		typeof cuota === "number" &&
+		Number.isFinite(cuota) &&
+		Number.isInteger(cuota) &&
+		cuota >= 0 &&
+		typeof banco_id === "number" &&
+		Number.isFinite(banco_id) &&
+		Number.isInteger(banco_id) &&
+		banco_id > 0 &&
+		(montoIncobrable === undefined ||
+			(typeof montoIncobrable === "number" &&
+				Number.isFinite(montoIncobrable) &&
+				montoIncobrable >= 0)) &&
+		(numeroAutorizacion === undefined || typeof numeroAutorizacion === "string")
+	);
+}
+
 export function isOriginalPrincipalPayment(payment: {
 	validationStatus: string | null;
 	pagado: boolean | null;
@@ -66,8 +120,12 @@ export function canViewCreditDetailByStatus(
 
 export function canResetCreditByStatus(
 	status: string | null | undefined,
+	incobrableContinuationReady = false,
 ): boolean {
-	return status === "PENDIENTE_CANCELACION";
+	return (
+		status === "PENDIENTE_CANCELACION" ||
+		(status === "INCOBRABLE" && incobrableContinuationReady)
+	);
 }
 
 export function withActiveCancellation<T extends object, C>(

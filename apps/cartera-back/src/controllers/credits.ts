@@ -1860,8 +1860,49 @@ export async function resetCredit({
     if (!credito) {
       throw new Error("Crédito no encontrado.");
     }
-    if (!canResetCreditByStatus(credito.statusCredit)) {
-      throw new Error("El crédito no está pendiente de cancelación.");
+
+    let incobrableContinuationReady = false;
+    if (credito.statusCredit === "INCOBRABLE") {
+      const [badDebt] = await db
+        .select({ monto_incobrable: bad_debts.monto_incobrable })
+        .from(bad_debts)
+        .where(eq(bad_debts.credit_id, creditId))
+        .limit(1);
+      const [existingClosingPayment] = await db
+        .select({ pago_id: pagos_credito.pago_id })
+        .from(pagos_credito)
+        .where(
+          and(
+            eq(pagos_credito.credito_id, creditId),
+            eq(pagos_credito.registerBy, "system_reset")
+          )
+        )
+        .limit(1);
+
+      try {
+        if (
+          montoIncobrable !== undefined &&
+          Number.isFinite(montoIncobrable) &&
+          badDebt &&
+          !existingClosingPayment
+        ) {
+          const montoIncobrableBig = new Big(montoIncobrable);
+          const creditoCapitalBig = new Big(credito.capital ?? 0);
+          const badDebtCapitalBig = new Big(badDebt.monto_incobrable ?? 0);
+          incobrableContinuationReady =
+            montoIncobrableBig.gt(0) &&
+            montoIncobrableBig.eq(creditoCapitalBig) &&
+            montoIncobrableBig.eq(badDebtCapitalBig);
+        }
+      } catch {
+        incobrableContinuationReady = false;
+      }
+    }
+
+    if (!canResetCreditByStatus(credito.statusCredit, incobrableContinuationReady)) {
+      throw new Error(
+        "El crédito no está pendiente de cancelación ni listo para continuar como incobrable."
+      );
     }
 
     // 3. Determinar el estado del crédito
@@ -1940,9 +1981,32 @@ export async function resetCredit({
     const cuotaId = cuotaEncontrada?.cuota_id;
 
     // 10. Insertar pago de cierre con abonos reales
-    const [nuevoPago] = await db
-      .insert(pagos_credito)
-      .values({
+    const nuevoPago = await db.transaction(async (tx) => {
+      const [lockedCredit] = await tx
+        .select()
+        .from(creditos)
+        .where(eq(creditos.credito_id, creditId))
+        .limit(1)
+        .for("update");
+      if (!lockedCredit) {
+        throw new Error("Crédito no encontrado.");
+      }
+
+      const [existingClosingPayment] = await tx
+        .select({ pago_id: pagos_credito.pago_id })
+        .from(pagos_credito)
+        .where(
+          and(
+            eq(pagos_credito.credito_id, creditId),
+            eq(pagos_credito.registerBy, "system_reset")
+          )
+        )
+        .limit(1);
+      if (existingClosingPayment) {
+        throw new Error("El crédito ya tiene un pago de cierre system_reset.");
+      }
+
+      const [insertedPayment] = await tx.insert(pagos_credito).values({
         credito_id: credito.credito_id,
         cuota_id: cuotaId,
         cuota: credito.cuota?.toString() ?? "0",
@@ -1984,8 +2048,9 @@ export async function resetCredit({
         registerBy: "system_reset",
         pagoConvenio: "0",
         monto_aplicado: totalMontoPago.toString(),
-      })
-      .returning();
+      }).returning();
+      return insertedPayment;
+    });
 
     // 11. Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
     //     paymentFalse=true). Además se ponen los *_restante en 0: algunas queries de

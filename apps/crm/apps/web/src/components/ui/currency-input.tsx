@@ -22,10 +22,17 @@ function formatWithSeparators(raw: string, locale: string) {
 
 function sanitize(input: string) {
 	const clean = input.replace(/,/g, "").replace(/[^0-9.]/g, "");
+	if (!clean) return { normalized: "", intPart: "", decPart: null };
 	const parts = clean.split(".");
-	const intPart = parts[0] ?? "";
+	// "" antes del punto (".50") → "0" — un decimal(12,2) no acepta ".50".
+	const intPart = parts[0] || "0";
 	const hasDecimal = parts.length > 1;
-	const decPart = hasDecimal ? parts.slice(1).join("").slice(0, 2) : null;
+	const rawDecPart = hasDecimal ? parts.slice(1).join("").slice(0, 2) : null;
+	// Punto colgante sin dígitos ("2500.") no es un decimal válido — se
+	// descarta el punto hasta que el usuario escriba al menos un dígito
+	// (Codex, PR #1191: este string a medias pasaba el sanitize pero
+	// reventaba el regex del backend en createContactoCobrosSchema).
+	const decPart = rawDecPart === "" ? null : rawDecPart;
 	const normalized = decPart !== null ? `${intPart}.${decPart}` : intPart;
 	return { normalized, intPart, decPart };
 }

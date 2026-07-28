@@ -39,7 +39,10 @@ import {
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
-import { CREDIT_DETAIL_STATUSES } from "./creditDetailPolicy";
+import {
+  CREDIT_DETAIL_STATUSES,
+  withActiveCancellation,
+} from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 
 
@@ -67,34 +70,22 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     const creditoId = currentCredit.creditos.credito_id;
 
     // 2. Si el crédito está cancelado o pendiente de cancelación, verificar si hay cancelación activa
-    if (
+    const cancelacionActiva =
       currentCredit.creditos.statusCredit === "CANCELADO" ||
       currentCredit.creditos.statusCredit === "PENDIENTE_CANCELACION"
-    ) {
-      // Buscar la info de cancelación (solo si está activa)
-      const cancelacion = await db
-        .select()
-        .from(credit_cancelations)
-        .where(
-          and(
-            eq(credit_cancelations.credit_id, creditoId),
-            eq(credit_cancelations.activo, true)
-          )
-        )
-        .limit(1);
-
-      // Solo retornar flujo CANCELADO si hay una cancelación activa
-      if (cancelacion.length > 0) {
-        return {
-          credito: currentCredit.creditos,
-          usuario: currentCredit.usuarios,
-          asesor: currentCredit.asesores,
-          cancelacion: cancelacion[0],
-          flujo: "CANCELADO",
-        };
-      }
-      // Si no hay cancelación activa, continuar con el flujo normal
-    }
+        ? (
+            await db
+              .select()
+              .from(credit_cancelations)
+              .where(
+                and(
+                  eq(credit_cancelations.credit_id, creditoId),
+                  eq(credit_cancelations.activo, true)
+                )
+              )
+              .limit(1)
+          )[0]
+        : undefined;
 
     // 2. Consultar todas las cuotas pagadas (pagado = true)
     const cuotasPagadas = await db
@@ -314,7 +305,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
     // 🔥 VALIDACIÓN: Si no hay cuota actual, retornar datos sin cuota activa
     if (!cuotaActualDataResult || cuotaActualDataResult.length === 0) {
-      return {
+      return withActiveCancellation({
         flujo: "ACTIVO",
         credito: currentCredit.creditos,
         usuario: currentCredit.usuarios,
@@ -329,7 +320,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         convenioActivo: null,
         cuotasEnConvenio: [],
         pagosConvenio: [],
-      };
+      }, cancelacionActiva);
     }
 
     const cuotaActualData = cuotaActualDataResult[0];
@@ -449,7 +440,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       }
     }
 
-    return {
+    return withActiveCancellation({
       flujo: "ACTIVO",
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
@@ -471,7 +462,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           : null,
       cuotasEnConvenio,
       pagosConvenio,
-    };
+    }, cancelacionActiva);
   } catch (error) {
     console.error("[getCreditoByNumero] Error:", error);
     return { message: "Error consultando crédito", error: String(error) };

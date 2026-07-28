@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { canViewCreditDetailByStatus } from "./creditDetailPolicy";
+import {
+	canViewCreditDetailByStatus,
+	withActiveCancellation,
+} from "./creditDetailPolicy";
 
 describe("credit detail visibility", () => {
 	it("permite consultar créditos cancelados desde el historial de cobros", () => {
@@ -22,5 +25,27 @@ describe("credit detail visibility", () => {
 		expect(canViewCreditDetailByStatus("CAIDO")).toBeFalse();
 		expect(canViewCreditDetailByStatus(null)).toBeFalse();
 		expect(canViewCreditDetailByStatus(undefined)).toBeFalse();
+	});
+});
+
+describe("cancelled credit detail", () => {
+	it("combina la cancelación activa con el detalle normal", () => {
+		const cuotasPagadas = [{ numero_cuota: 1 }];
+		const cuotasPendientes = [{ numero_cuota: 2 }];
+		const cuotasAtrasadas = [{ numero_cuota: 3 }];
+		const detail = {
+			flujo: "ACTIVO",
+			cuotasPagadas,
+			cuotasPendientes,
+			cuotasAtrasadas,
+			moraActual: "125.00",
+		};
+		const cancelacion = { id: 7, activo: true };
+
+		expect(withActiveCancellation(detail, cancelacion)).toEqual({
+			...detail,
+			flujo: "CANCELADO",
+			cancelacion,
+		});
 	});
 });

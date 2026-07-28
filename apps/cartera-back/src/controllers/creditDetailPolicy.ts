@@ -15,3 +15,12 @@ export function canViewCreditDetailByStatus(
 		(CREDIT_DETAIL_STATUSES as readonly string[]).includes(status)
 	);
 }
+
+export function withActiveCancellation<T extends object, C>(
+	detail: T,
+	cancelacion: C | undefined,
+) {
+	return cancelacion
+		? { ...detail, cancelacion, flujo: "CANCELADO" as const }
+		: detail;
+}

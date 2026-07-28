@@ -25,8 +25,8 @@
  *    del bucket de origen — ver el comentario en
  *    _generarCierreMovimientosBucket para el porqué de cada descarte. El
  *    asesor en cartera-back tiene id numérico distinto al user.id (texto) del
- *    CRM — se resuelve cruzando por correo con `email_asesor` de
- *    /buckets/carga (ver construirMapaAsesorUsuarioPorCarga). Se reemplaza
+ *    CRM — se resuelve cruzando por NOMBRE contra el pool completo de
+ *    /buckets/pool (ver construirMapaAsesorUsuarioPorCarga). Se reemplaza
  *    completo (DELETE + INSERT) en cada corrida: son datos derivados de
  *    cartera-back, recalculables, sin un "contacto" que ancle un ON CONFLICT.
  */
@@ -120,30 +120,51 @@ async function _generarCierreContactos(client: RawClient, fecha: string) {
 	);
 }
 
+// Buckets fijos del funnel operativo (B0-B5) — se recorren para armar el pool
+// completo de asesores, igual que en getCierreDiarioPorRango (routers/cobros.ts).
+const BUCKETS_NUMEROS = [0, 1, 2, 3, 4, 5] as const;
+
 /**
- * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando por correo.
+ * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando por NOMBRE.
  *
- * El correo sale de `/buckets/carga` (`email_asesor`) y NO de
- * construirMapaAsesorUsuario/getAdvisors: en getAdvisors el correo de varios
- * asesores está desactualizado (`cobros@…`, `@sepresta.com`) y no cruza con el
- * `user.email` del CRM, mientras que `/buckets/carga` trae el correo vigente.
+ * NO se usa `getCargaPorAsesorBucket` (como antes): esa lista solo incluye
+ * asesores con al menos un crédito ACTUALMENTE en el funnel operativo
+ * (excluye CANCELADO/PENDIENTE_CANCELACION/EN_CONVENIO/CAIDO — ver
+ * STATUS_BUCKET_FUERA en cartera-back). `getBucketsHistorial` no tiene ese
+ * filtro: si el único crédito de un asesor se resolvió (se pagó, se canceló)
+ * ENTRE el movimiento de bucket y esta corrida (00:15 GT del día siguiente),
+ * ese asesor desaparecía del mapa y su movimiento se descartaba en silencio
+ * — un caso frecuente en cobros, no un edge case (hallado por Codex en PR
+ * #1185).
+ *
+ * En su lugar, el pool sale de `getPoolAsesoresPorBucket` (6 llamadas, una
+ * por bucket) — es `asesor_bucket WHERE activo=true` tal cual, sin depender
+ * de créditos ni de su estado. Ese endpoint no trae email, así que el cruce
+ * con `user` del CRM va por NOMBRE normalizado (trim + lowercase) en vez de
+ * correo — menos preciso que el email, pero los nombres son únicos en la
+ * práctica y es preferible a perder movimientos reales.
  */
 async function construirMapaAsesorUsuarioPorCarga(): Promise<
 	Map<number, string>
 > {
-	const [carga, usuarios] = await Promise.all([
-		carteraBackClient.getCargaPorAsesorBucket({}),
-		db.select({ id: user.id, email: user.email }).from(user),
+	const [pools, usuarios] = await Promise.all([
+		Promise.all(
+			BUCKETS_NUMEROS.map((bucket) =>
+				carteraBackClient.getPoolAsesoresPorBucket(bucket),
+			),
+		),
+		db.select({ id: user.id, name: user.name }).from(user),
 	]);
-	const emailToUserId = new Map(
-		usuarios.map((u) => [u.email.trim().toLowerCase(), u.id]),
+	const nombreToUserId = new Map(
+		usuarios.map((u) => [u.name.trim().toLowerCase(), u.id]),
 	);
 	const mapa = new Map<number, string>();
-	for (const a of carga.porAsesor) {
-		const email = a.email_asesor?.trim().toLowerCase();
-		if (!email) continue;
-		const userId = emailToUserId.get(email);
-		if (userId) mapa.set(a.asesor_id, userId);
+	for (const pool of pools) {
+		for (const a of pool) {
+			if (mapa.has(a.asesor_id)) continue;
+			const userId = nombreToUserId.get(a.nombre.trim().toLowerCase());
+			if (userId) mapa.set(a.asesor_id, userId);
+		}
 	}
 	return mapa;
 }

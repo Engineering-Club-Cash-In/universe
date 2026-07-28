@@ -15,6 +15,7 @@ import {
   cuentasEmpresa,
 } from "../database/db";
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
@@ -3162,7 +3163,35 @@ export async function aplicarAbonoCapitalInversionistas(
           )
         )
         .limit(1);
-      if (parcialAplicado) {
+      // Cuota "MIXTA": un pago VALIDADO (ya aplicado) convive con un pago
+      // PENDIENTE en la misma cuota — típico parcial validado + cierre sin
+      // validar. El cierre volteó pagado=true en toda la cuota, así que el
+      // guard de arriba no lo ve. El recálculo redistribuiría el pendiente
+      // contra el saldo COMPLETO del mes sin descontar lo que el validado ya
+      // consumió → reparto doblado al validarse. Mismo tratamiento: revisión
+      // manual.
+      const pcValidado = alias(pagos_credito, "pc_validado");
+      const [cuotaMixta] = await db
+        .select({ pago_id: pagos_credito.pago_id })
+        .from(pagos_credito)
+        .innerJoin(
+          pcValidado,
+          eq(pagos_credito.cuota_id, pcValidado.cuota_id)
+        )
+        .where(
+          and(
+            eq(pagos_credito.credito_id, credito_id),
+            eq(pagos_credito.validationStatus, "pending"),
+            eq(pagos_credito.paymentFalse, false),
+            gt(pagos_credito.monto_aplicado, "0"),
+            ne(pagos_credito.pago_id, pago_id),
+            eq(pcValidado.validationStatus, "validated"),
+            eq(pcValidado.paymentFalse, false),
+            gt(pcValidado.monto_aplicado, "0")
+          )
+        )
+        .limit(1);
+      if (parcialAplicado || cuotaMixta) {
         recalculo_pendientes = "revisar_parciales";
         // OJO: aquí NO se recomienda el botón "Recalcular Pagos": su modo con
         // numero_cuota también redistribuye el parcial aplicado (reescribiría

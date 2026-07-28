@@ -309,6 +309,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         flujo: "ACTIVO",
         credito: currentCredit.creditos,
         usuario: currentCredit.usuarios,
+        asesor: currentCredit.asesores,
         cuotaActual: null,
         cuotaActualPagada: false,
         cuotaActualStatus: null,

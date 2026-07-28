@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
 import {
 	canViewCreditDetailByStatus,
 	withActiveCancellation,
@@ -47,5 +48,18 @@ describe("cancelled credit detail", () => {
 			flujo: "CANCELADO",
 			cancelacion,
 		});
+	});
+});
+
+describe("credit detail no-current-installment branch", () => {
+	it("maps the advisor in the no-current-installment return", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "credits.ts"),
+		).text();
+		const branch = source.match(
+			/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,
+		)?.[0];
+
+		expect(branch).toContain("asesor: currentCredit.asesores,");
 	});
 });

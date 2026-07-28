@@ -2031,6 +2031,11 @@ export const recalcularPagosCredito = async ({
   const porcentajeInteres = new Big(credito.porcentaje_interes ?? 0).div(100);
   const cuotaMensual = new Big(credito.cuota);
   let capitalEnMemoria = new Big(credito.capital);
+  // Un sobre-abono (o data histórica) puede dejar el capital del crédito en
+  // negativo; para la amortización un saldo negativo no existe. Sin este
+  // clamp, el tope de abajo asignaría el negativo como abono_capital y los
+  // recibos quedarían con capital_restante/abono_capital negativos.
+  if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
   // 5️⃣ Procesar cada cuota en orden
   const actualizaciones: { pago_id: number; datos: Record<string, unknown> }[] = [];

@@ -1,11 +1,26 @@
 import { describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
 import {
+	canResetCreditByStatus,
 	canViewCreditDetailByStatus,
 	withActiveCancellation,
 } from "./creditDetailPolicy";
 
 describe("credit detail visibility", () => {
+	it("only allows resetting credits pending cancellation", () => {
+		expect(canResetCreditByStatus("PENDIENTE_CANCELACION")).toBeTrue();
+
+		for (const status of [
+			"CANCELADO",
+			"INCOBRABLE",
+			"ACTIVO",
+			null,
+			undefined,
+		]) {
+			expect(canResetCreditByStatus(status)).toBeFalse();
+		}
+	});
+
 	it("permite consultar créditos cancelados desde el historial de cobros", () => {
 		expect(canViewCreditDetailByStatus("CANCELADO")).toBeTrue();
 	});
@@ -43,11 +58,18 @@ describe("cancelled credit detail", () => {
 		};
 		const cancelacion = { id: 7, activo: true };
 
-		expect(withActiveCancellation(detail, cancelacion)).toEqual({
-			...detail,
-			flujo: "CANCELADO",
+		const result = withActiveCancellation(
+			detail,
 			cancelacion,
-		});
+			"PENDIENTE_CANCELACION",
+		);
+
+		expect(result).toHaveProperty("cuotasPagadas", cuotasPagadas);
+		expect(result).toHaveProperty("cuotasPendientes", cuotasPendientes);
+		expect(result).toHaveProperty("cuotasAtrasadas", cuotasAtrasadas);
+		expect(result).toHaveProperty("moraActual", "125.00");
+		expect(result).toHaveProperty("flujo", "CANCELADO");
+		expect(result).toHaveProperty("cancelacion", cancelacion);
 	});
 
 	it("marca como cancelado el detalle sin cancelación activa", () => {

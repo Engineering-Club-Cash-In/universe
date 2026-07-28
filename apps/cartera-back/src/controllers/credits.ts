@@ -41,6 +41,7 @@ import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./paym
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   CREDIT_DETAIL_STATUSES,
+  canResetCreditByStatus,
   withActiveCancellation,
 } from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
@@ -1807,6 +1808,9 @@ export async function resetCredit({
       .where(eq(creditos.credito_id, creditId));
     if (!credito) {
       throw new Error("Crédito no encontrado.");
+    }
+    if (!canResetCreditByStatus(credito.statusCredit)) {
+      throw new Error("El crédito no está pendiente de cancelación.");
     }
 
     // 3. Determinar el estado del crédito

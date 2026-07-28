@@ -16,6 +16,12 @@ export function canViewCreditDetailByStatus(
 	);
 }
 
+export function canResetCreditByStatus(
+	status: string | null | undefined,
+): boolean {
+	return status === "PENDIENTE_CANCELACION";
+}
+
 export function withActiveCancellation<T extends object, C>(
 	detail: T,
 	cancelacion: C | undefined,

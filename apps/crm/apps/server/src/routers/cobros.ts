@@ -495,6 +495,10 @@ export const createContactoCobrosSchema = z
 		},
 	);
 
+// Buckets fijos del funnel operativo (B0-B5) — CB-024 los recorre para armar
+// el pool real de cada asesor desde `getPoolAsesoresPorBucket`.
+const BUCKETS_NUMEROS = [0, 1, 2, 3, 4, 5] as const;
+
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
 	getDashboardStats: cobrosProcedure
@@ -5665,14 +5669,17 @@ export const cobrosRouter = {
 			// (no histórico del día), por eso se consulta acá y no se guarda en el
 			// snapshot: guardar "el pool de ayer" no tendría sentido operativo.
 			//
-			// El pool sale de `getAperturaDia` (`asignacion[].buckets_pool`), que
-			// cartera-back ya deriva de su tabla `asesor_bucket`. NO se consulta esa
-			// tabla por SQL desde el CRM: la base de cartera es de otro proyecto y
-			// todo acceso va por su API. Tampoco se deriva de `/buckets/carga`: ese
-			// endpoint devuelve los buckets DONDE EL ASESOR TIENE CRÉDITOS, con los
-			// residuos de créditos que se movieron pero siguen asignados a él
-			// (`elegible: false`) — por eso mostraba a Jorge en B2/B3/B4 cuando su
-			// pool real es solo B3.
+			// El pool sale de `getPoolAsesoresPorBucket` (una llamada por bucket
+			// 0-5, en paralelo) — es `asesor_bucket WHERE bucket=X AND activo=true`
+			// tal cual, SIN depender de que el asesor tenga cuentas o movimientos
+			// en el rango consultado. Descartado `getAperturaDia().asignacion`
+			// (usado antes, review Codex #1183): esa lista sale de un JOIN que
+			// arranca `FROM buckets_historial`, así que solo incluye asesores que
+			// tuvieron un movimiento de bucket EN `fechaFin` — un asesor activo sin
+			// transiciones ese día quedaba con pool vacío en el reporte. Tampoco se
+			// usa `/buckets/carga`: esa devuelve los buckets DONDE EL ASESOR TIENE
+			// CRÉDITOS, con los residuos de créditos que se movieron pero siguen
+			// asignados a él (`elegible: false`) — mismo problema, otra forma.
 			//
 			// El cruce asesor↔usuario va por `email_asesor` de `/buckets/carga`: es
 			// el único lugar con el correo vigente. En getAdvisors el correo de
@@ -5683,9 +5690,11 @@ export const cobrosRouter = {
 			// la etiqueta de pool.
 			const poolPorAsesor = new Map<string, number[]>();
 			try {
-				const [carga, apertura] = await Promise.all([
+				const [carga, ...poolsPorBucket] = await Promise.all([
 					carteraBackClient.getCargaPorAsesorBucket({}),
-					carteraBackClient.getAperturaDia({ fecha: input.fechaFin }),
+					...BUCKETS_NUMEROS.map((bucket) =>
+						carteraBackClient.getPoolAsesoresPorBucket(bucket),
+					),
 				]);
 				const emailToUserId = new Map(
 					filas.map((f) => [f.asesorEmail.trim().toLowerCase(), f.asesorId]),
@@ -5697,14 +5706,18 @@ export const cobrosRouter = {
 					const userId = emailToUserId.get(email);
 					if (userId) asesorCarteraToUserId.set(a.asesor_id, userId);
 				}
-				for (const asignacion of apertura.asignacion) {
-					if (asignacion.asesor_id == null) continue;
-					const userId = asesorCarteraToUserId.get(asignacion.asesor_id);
-					if (!userId) continue;
-					poolPorAsesor.set(
-						userId,
-						[...asignacion.buckets_pool].sort((x, y) => x - y),
-					);
+				poolsPorBucket.forEach((pool, i) => {
+					const bucket = BUCKETS_NUMEROS[i];
+					for (const a of pool) {
+						const userId = asesorCarteraToUserId.get(a.asesor_id);
+						if (!userId) continue;
+						const buckets = poolPorAsesor.get(userId) ?? [];
+						buckets.push(bucket);
+						poolPorAsesor.set(userId, buckets);
+					}
+				});
+				for (const [userId, buckets] of poolPorAsesor) {
+					poolPorAsesor.set(userId, [...buckets].sort((x, y) => x - y));
 				}
 			} catch (error) {
 				console.error("[getCierreDiarioPorRango] Pool de buckets:", error);

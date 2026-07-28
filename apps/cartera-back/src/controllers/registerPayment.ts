@@ -2246,8 +2246,52 @@ export async function insertarPago({
  * - Si pagado = false: Solo actualiza el pago para validarlo
  * - Si pagado = true: Aplica los abonos al crédito
  * @param pago_id - ID del pago a aplicar
+ *
+ * 🔒 Serializa TODO /aplicar-pago (validación normal, reset y abono a
+ * capital) con el MISMO advisory lock por crédito que usa insertPayment.
+ * Sin esto, validar un pago del mismo crédito en plena ventana de un abono
+ * (entre el update de creditos.capital y el recálculo) aplicaría el split
+ * viejo pre-abono, o marcaría la fila validated para que el recálculo la
+ * salte. La lectura real del pago ocurre adentro, YA bajo el lock.
  */
 export async function aplicarPagoAlCredito(pago_id: number) {
+  // Pre-lectura mínima: solo para conocer el crédito a serializar.
+  const [pagoPre] = await db
+    .select({ credito_id: pagos_credito.credito_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pago_id))
+    .limit(1);
+  const creditoIdLock = pagoPre?.credito_id ?? null;
+  if (creditoIdLock === null) {
+    // Sin crédito no hay qué serializar; la lógica interna ya maneja estos
+    // casos (pago inexistente o credito_id null).
+    return aplicarPagoAlCreditoSinLock(pago_id);
+  }
+  const lockConn: PaymentAdvisoryLockConnection = await client.connect();
+  try {
+    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+      PAYMENT_ADVISORY_LOCK_NAMESPACE,
+      creditoIdLock,
+    ]);
+    return await aplicarPagoAlCreditoSinLock(pago_id);
+  } finally {
+    // 🔓 Liberar el lock y devolver la conexión al pool, pase lo que pase.
+    try {
+      await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        creditoIdLock,
+      ]);
+    } catch (unlockError) {
+      console.error(
+        "⚠️ Error liberando advisory lock de aplicar-pago:",
+        unlockError
+      );
+    }
+    lockConn.release();
+  }
+}
+
+async function aplicarPagoAlCreditoSinLock(pago_id: number) {
   try {
     console.log("🔄 Iniciando aplicación de pago al crédito:", pago_id);
 
@@ -2881,41 +2925,9 @@ export async function aplicarAbonoCapitalInversionistas(
   abono_capital: number | string,
   pago_id: number
 ) {
-  // 🔒 Mismo advisory lock por crédito que insertPayment: serializa el abono
-  // completo (espejo + update del crédito + recálculo de recibos) contra un
-  // registro concurrente del mismo crédito. Sin esto, un /newPayment que ya
-  // leyó el saldo pre-abono puede commitear justo después del recálculo y el
-  // recibo recién registrado se queda con el split viejo (TOCTOU).
-  const lockConn: PaymentAdvisoryLockConnection = await client.connect();
-  try {
-    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
-      PAYMENT_ADVISORY_LOCK_NAMESPACE,
-      credito_id,
-    ]);
-    return await aplicarAbonoCapitalInversionistasSinLock(
-      credito_id,
-      abono_capital,
-      pago_id
-    );
-  } finally {
-    // 🔓 Liberar el lock y devolver la conexión al pool, pase lo que pase.
-    try {
-      await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
-        PAYMENT_ADVISORY_LOCK_NAMESPACE,
-        credito_id,
-      ]);
-    } catch (unlockError) {
-      console.error("⚠️ Error liberando advisory lock del abono:", unlockError);
-    }
-    lockConn.release();
-  }
-}
-
-async function aplicarAbonoCapitalInversionistasSinLock(
-  credito_id: number,
-  abono_capital: number | string,
-  pago_id: number
-) {
+  // 🔒 NO toma el lock aquí: su único caller es aplicarPagoAlCredito, que ya
+  // serializa TODO /aplicar-pago (normal, reset y capital) con el advisory
+  // lock por crédito. Tomarlo de nuevo en otra conexión sería deadlock.
   console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
 
   // Distribuir abono a capital en tabla espejo. El pago_id deja cada fila
@@ -3166,22 +3178,41 @@ async function aplicarAbonoCapitalInversionistasSinLock(
         // inversionista), así que si hay alguna NO se recalcula nada y se
         // manda a revisión del equipo. La cuota que vence HOY no cuenta como
         // vencida (fecha GT).
+        // Una fila ANULADA (paymentFalse) también cuenta si su cuota sigue
+        // sin pagarse: la cuota vencida existe aunque su única fila esté
+        // anulada — sin esto, el recálculo la re-sembraría y se saltaría
+        // esta regla conservadora.
         const hoyGuatemala = new Date().toLocaleDateString("en-CA", {
           timeZone: "America/Guatemala",
         });
         const [cuotaVencida] = await db
           .select({ pago_id: pagos_credito.pago_id })
           .from(pagos_credito)
+          .innerJoin(
+            cuotas_credito,
+            eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+          )
           .where(
             and(
               eq(pagos_credito.credito_id, credito_id),
-              eq(pagos_credito.paymentFalse, false),
               lt(pagos_credito.fecha_vencimiento, hoyGuatemala),
+              ne(pagos_credito.pago_id, pago_id),
               or(
-                eq(pagos_credito.pagado, false),
-                eq(pagos_credito.validationStatus, "pending")
-              ),
-              ne(pagos_credito.pago_id, pago_id)
+                // Fila viva sin aplicar: no pagada o registrada sin validar
+                and(
+                  eq(pagos_credito.paymentFalse, false),
+                  or(
+                    eq(pagos_credito.pagado, false),
+                    eq(pagos_credito.validationStatus, "pending")
+                  )
+                ),
+                // Fila anulada de una cuota que sigue sin pagarse
+                and(
+                  eq(pagos_credito.paymentFalse, true),
+                  eq(pagos_credito.pagado, false),
+                  eq(cuotas_credito.pagado, false)
+                )
+              )
             )
           )
           .limit(1);

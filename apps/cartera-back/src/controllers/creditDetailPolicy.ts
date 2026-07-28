@@ -19,12 +19,14 @@ export function isOriginalPrincipalPayment(payment: {
 	pagado: boolean | null;
 	paymentFalse: boolean | null;
 }): boolean {
+	if (payment.validationStatus === "no_required") {
+		return payment.pagado === true && payment.paymentFalse !== true;
+	}
+
 	return (
-		payment.pagado === true &&
-		payment.paymentFalse !== true &&
-		(ORIGINAL_PRINCIPAL_PAYMENT_STATUSES as readonly string[]).includes(
-			payment.validationStatus ?? "",
-		)
+		payment.validationStatus === "validated" ||
+		payment.validationStatus === "capital_validated" ||
+		payment.validationStatus === "reset"
 	);
 }
 

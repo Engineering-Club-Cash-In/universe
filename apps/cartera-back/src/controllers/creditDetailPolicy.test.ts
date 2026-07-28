@@ -37,9 +37,8 @@ describe("credit closing payments", () => {
 });
 
 describe("original principal payments", () => {
-	it("includes every original-principal validation status", () => {
+	it("accepts reversal-aware validation statuses regardless of payment flags", () => {
 		for (const validationStatus of [
-			"no_required",
 			"validated",
 			"capital_validated",
 			"reset",
@@ -47,19 +46,36 @@ describe("original principal payments", () => {
 			expect(
 				isOriginalPrincipalPayment({
 					validationStatus,
-					pagado: true,
-					paymentFalse: false,
+					pagado: false,
+					paymentFalse: true,
 				}),
 			).toBeTrue();
 		}
 	});
 
-	it("excludes pending, capital, unpaid, and false payments", () => {
+	it("accepts no_required only when paid and not marked false", () => {
+		expect(
+			isOriginalPrincipalPayment({
+				validationStatus: "no_required",
+				pagado: true,
+				paymentFalse: false,
+			}),
+		).toBeTrue();
+
+		for (const payment of [
+			{ validationStatus: "no_required", pagado: false, paymentFalse: false },
+			{ validationStatus: "no_required", pagado: true, paymentFalse: true },
+		]) {
+			expect(isOriginalPrincipalPayment(payment)).toBeFalse();
+		}
+	});
+
+	it("rejects pending, capital, null, and unknown statuses", () => {
 		for (const payment of [
 			{ validationStatus: "pending", pagado: true, paymentFalse: false },
 			{ validationStatus: "capital", pagado: true, paymentFalse: false },
-			{ validationStatus: "validated", pagado: false, paymentFalse: false },
-			{ validationStatus: "validated", pagado: true, paymentFalse: true },
+			{ validationStatus: null, pagado: null, paymentFalse: null },
+			{ validationStatus: "unknown", pagado: true, paymentFalse: false },
 		]) {
 			expect(isOriginalPrincipalPayment(payment)).toBeFalse();
 		}

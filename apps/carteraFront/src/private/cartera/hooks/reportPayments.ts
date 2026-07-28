@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/apiError";
 import {
   getPagosConInversionistasService,
@@ -49,24 +50,43 @@ export function useAplicarPago() {
     mutationFn: (pagoId: number) => pagosService.aplicarPago(pagoId),
     
     onSuccess: (data) => {
-      // ⚠️ Estado del recálculo de recibos tras un abono a capital: si quedó
-      // pendiente, operaciones debe correr "Recalcular Pagos" a mano.
+      // ⚠️ Estado del recálculo de recibos tras un abono a capital. Los avisos
+      // que requieren acción van en toast GRANDE y persistente (no se cierra
+      // solo) para que conta no los pase por alto.
+      const avisoGrande = {
+        duration: Infinity,
+        closeButton: true,
+        style: {
+          width: "560px",
+          maxWidth: "92vw",
+          fontSize: "1.05rem",
+          padding: "20px",
+        },
+      } as const;
+
       if (data.recalculo_pendientes === "error") {
-        alert(
-          "El abono se aplicó, pero FALLÓ el recálculo de las cuotas pendientes. Corré 'Recalcular Pagos' manualmente en este crédito."
-        );
-      } else if (data.recalculo_pendientes === "revisar_pendientes_validacion") {
-        alert(
-          "El abono se aplicó y se recalcularon las cuotas pendientes, pero hay pagos registrados SIN validar que quedaron fuera: después de validarlos, corré 'Recalcular Pagos' manualmente."
-        );
+        toast.error("🚨 NO SE RECALCULARON LAS CUOTAS", {
+          ...avisoGrande,
+          description:
+            "El abono se aplicó, pero FALLÓ el recálculo de las cuotas pendientes. Corré 'Recalcular Pagos' manualmente en este crédito.",
+        });
+      } else if (data.recalculo_pendientes === "revisar_vencidas") {
+        toast.warning("⚠️ CUOTAS VENCIDAS — NO SE RECALCULÓ", {
+          ...avisoGrande,
+          description:
+            "El abono se aplicó, pero este crédito tiene cuotas VENCIDAS sin aplicar y el recálculo automático se omitió para no cambiarles el interés que ya se debía. Revisen con el equipo cómo tratar esas cuotas antes de correr 'Recalcular Pagos'.",
+        });
       } else if (data.recalculo_pendientes === "revisar_parciales") {
-        alert(
-          "El abono se aplicó, pero este crédito tiene una cuota con pago PARCIAL aplicado y el recálculo automático se omitió para no reescribir ese pago. OJO: NO corras 'Recalcular Pagos' aquí sin revisarlo antes con el equipo — el botón también redistribuiría el pago parcial. Revisen el reparto de esa cuota manualmente."
-        );
+        toast.warning("⚠️ PAGO PARCIAL — NO SE RECALCULÓ", {
+          ...avisoGrande,
+          description:
+            "El abono se aplicó, pero este crédito tiene una cuota con pago PARCIAL aplicado y el recálculo automático se omitió para no reescribir ese pago. OJO: NO corras 'Recalcular Pagos' aquí sin revisarlo antes con el equipo — el botón también redistribuiría el pago parcial. Revisen el reparto de esa cuota manualmente.",
+        });
       } else if (data.recalculo_pendientes === "omitido_solo_interes") {
-        alert(
-          "Abono aplicado. Crédito solo-interés: el recálculo automático no aplica para este formato."
-        );
+        toast.info("Abono aplicado", {
+          description:
+            "Crédito solo-interés: el recálculo automático no aplica para este formato.",
+        });
       }
 
       // 🔄 Invalidar la caché para refrescar la tabla

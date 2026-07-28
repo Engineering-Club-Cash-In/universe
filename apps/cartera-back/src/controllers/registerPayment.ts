@@ -14,7 +14,7 @@ import {
   pagos_credito_inversionistas,
   cuentasEmpresa,
 } from "../database/db";
-import { eq, and, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
+import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
@@ -3063,16 +3063,17 @@ export async function aplicarAbonoCapitalInversionistas(
   // 5️⃣ Re-sembrar los recibos PENDIENTES con el capital nuevo.
   // Sin esto, el próximo pago se aplicaría con el interés pre-sembrado sobre el
   // capital viejo (y de ahí saldrían factura y liquidación infladas). Se
-  // recalculan SOLO los pagos pendientes (pagado=false): eso cubre también la
-  // cuota de referencia del abono cuando aún no está pagada (abono antes de la
-  // primera cuota), y nunca toca pagos ya aplicados — este mismo abono queda
-  // pagado=true y fuera del recálculo. La cuota mensual del crédito no cambia.
+  // recalcula lo que AÚN NO SE APLICÓ al crédito: cuotas no pagadas Y pagos
+  // registrados sin validar por conta (pending) — esos no han movido capital
+  // y al validarse aplicarían el split viejo si no se refrescan. Nunca toca
+  // pagos ya aplicados/validados — este mismo abono queda capital_validated y
+  // fuera del recálculo. La cuota mensual del crédito no cambia.
   // El espejo NO se toca aquí: lo maneja la liquidación del inversionista.
   let recalculo_pendientes:
     | "ok"
     | "error"
     | "omitido_solo_interes"
-    | "revisar_pendientes_validacion"
+    | "revisar_vencidas"
     | "revisar_parciales" = "ok";
   if (credito.no_amortiza_capital) {
     // Crédito solo-interés: recalcularPagosCredito no conoce el flag y
@@ -3122,30 +3123,41 @@ export async function aplicarAbonoCapitalInversionistas(
           "⚠️ Cuota con pago parcial aplicado: recálculo automático omitido — revisar el reparto manualmente (el botón también redistribuiría el parcial)"
         );
       } else {
-        await recalcularPagosCredito({
-          numero_credito_sifco: credito.numero_credito_sifco,
+        // Cuotas VENCIDAS sin aplicar (no pagadas, o registradas sin validar):
+        // su interés corresponde a meses en los que el capital viejo todavía
+        // estaba prestado completo. Recalcularlas con el capital post-abono
+        // repreciaría deuda histórica a favor del cliente (y en contra del
+        // inversionista), así que si hay alguna NO se recalcula nada y se
+        // manda a revisión del equipo. La cuota que vence HOY no cuenta como
+        // vencida (fecha GT).
+        const hoyGuatemala = new Date().toLocaleDateString("en-CA", {
+          timeZone: "America/Guatemala",
         });
-        // Pagos ya registrados (pagado=true) pero aún SIN validar por conta
-        // quedan fuera del recálculo (solo toma pendientes): si conta los valida
-        // después de este abono, confirmaría su reparto viejo. Se reporta para
-        // correr "Recalcular Pagos" a mano después de validarlos.
-        const [pendienteValidacion] = await db
+        const [cuotaVencida] = await db
           .select({ pago_id: pagos_credito.pago_id })
           .from(pagos_credito)
           .where(
             and(
               eq(pagos_credito.credito_id, credito_id),
-              eq(pagos_credito.pagado, true),
-              eq(pagos_credito.validationStatus, "pending")
+              eq(pagos_credito.paymentFalse, false),
+              lt(pagos_credito.fecha_vencimiento, hoyGuatemala),
+              or(
+                eq(pagos_credito.pagado, false),
+                eq(pagos_credito.validationStatus, "pending")
+              ),
+              ne(pagos_credito.pago_id, pago_id)
             )
           )
           .limit(1);
-        if (pendienteValidacion) {
-          recalculo_pendientes = "revisar_pendientes_validacion";
+        if (cuotaVencida) {
+          recalculo_pendientes = "revisar_vencidas";
           console.log(
-            "⚠️ Hay pagos registrados pendientes de validación: recalcular a mano después de validarlos"
+            "⚠️ Crédito con cuotas vencidas sin aplicar: recálculo automático omitido — revisar con el equipo cómo tratar el interés de las vencidas antes de recalcular"
           );
         } else {
+          await recalcularPagosCredito({
+            numero_credito_sifco: credito.numero_credito_sifco,
+          });
           console.log(`✅ Recibos pendientes recalculados con el capital nuevo`);
         }
       }

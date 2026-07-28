@@ -1995,20 +1995,21 @@ export interface AplicarPagoResponse {
   /**
    * Estado del recálculo automático de recibos tras aplicar un abono a capital:
    * - "error": falló — correr "Recalcular Pagos" manualmente.
-   * - "revisar_pendientes_validacion": hay pagos registrados sin validar que
-   *   quedaron fuera — recalcular a mano después de validarlos.
+   * - "revisar_vencidas": el crédito tiene cuotas VENCIDAS sin aplicar — no se
+   *   recalculó nada para no repreciar el interés de meses ya debidos; revisar
+   *   con el equipo cómo tratarlas antes de recalcular.
    * - "revisar_parciales": hay cuota con pago parcial YA APLICADO al crédito —
    *   NI el recálculo automático NI el botón "Recalcular Pagos" son seguros ahí
    *   (ambos redistribuirían el parcial); revisar el reparto con el equipo.
-   *   (Un parcial solo registrado, aún sin validar, NO cae aquí: ese sí se
-   *   recalcula para que conta lo valide con el reparto nuevo.)
+   *   (Un pago solo registrado sin validar — parcial o completo — NO cae aquí:
+   *   ese sí se recalcula para que conta lo valide con el reparto nuevo.)
    * - "omitido_solo_interes": crédito solo-interés, no aplica el recálculo.
    */
   recalculo_pendientes?:
     | "ok"
     | "error"
     | "omitido_solo_interes"
-    | "revisar_pendientes_validacion"
+    | "revisar_vencidas"
     | "revisar_parciales";
   data?: {
     credito_id: number;

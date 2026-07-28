@@ -39,6 +39,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
+import { toDateStrGT } from "./lib/guatemala-month-window";
 import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
@@ -1346,34 +1347,43 @@ function scheduleAtMidnightGT() {
 scheduleAtMidnightGT();
 
 // CB-024: cierre diario de asesores — snapshot de gestión (contactos
-// efectivos manuales, promesas, movimientos de bucket) a las 22:00 GT
-// (= 04:00 UTC) todos los días. Re-correr el mismo día es seguro: los
-// contactos van con ON CONFLICT DO NOTHING y los movimientos se reemplazan
-// completos (DELETE + INSERT), así que un deploy tardío recupera el snapshot
-// del día sin duplicar.
+// efectivos manuales, promesas, movimientos de bucket) a las 00:15 GT
+// (= 06:15 UTC) todos los días, del día que ACABA DE TERMINAR (ayer GT).
+//
+// NO a las 22:00 GT: los movimientos de bucket los genera `procesarMoras` en
+// cartera-back a las 23:59 GT (schedule.ts:37 de ese repo) — correr antes
+// significa preguntar por el día de hoy ANTES de que esas filas existan, y
+// como el job nunca vuelve a visitar un día ya cerrado, esos movimientos se
+// pierden para siempre, todos los días (hallado por Codex en PR #1183).
+//
+// Re-correr el mismo día es seguro: los contactos van con ON CONFLICT DO
+// NOTHING y los movimientos se reemplazan completos (DELETE + INSERT), así
+// que un deploy tardío recupera el snapshot del día sin duplicar.
+function ayerGT(): string {
+	return toDateStrGT(new Date(Date.now() - 24 * 60 * 60 * 1000));
+}
 function scheduleAtCierreDiarioGT() {
 	const now = new Date();
 	const next = new Date();
-	next.setUTCHours(4, 0, 0, 0); // 22:00 GT
+	next.setUTCHours(6, 15, 0, 0); // 00:15 GT
 	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
 	setTimeout(async () => {
-		await generarCierreDiario().catch(console.error);
+		await generarCierreDiario(ayerGT()).catch(console.error);
 		scheduleAtCierreDiarioGT();
 	}, next.getTime() - now.getTime());
 }
 scheduleAtCierreDiarioGT();
-// Recuperación al boot SOLO si ya pasaron las 22:00 GT (deploy tardío recupera
-// el snapshot de hoy; re-correr no duplica, ver arriba). Si el boot cae justo
-// dentro de la ventana de las 22:00, el advisory lock del job hace que el
-// segundo runner salga sin hacer nada. Antes de las 22:00 GT NO se corre: se
-// deja que el timeout programado lo lance a la hora.
+// Recuperación al boot SOLO si ya pasaron las 00:15 GT (deploy tardío recupera
+// el snapshot de ayer; re-correr no duplica, ver arriba). Antes de las 00:15
+// GT NO se corre: se deja que el timeout programado lo lance a la hora.
 setTimeout(() => {
 	const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
-	if (horaGT >= 22) {
-		generarCierreDiario().catch(console.error);
+	const minutoGT = new Date().getUTCMinutes();
+	if (horaGT > 0 || (horaGT === 0 && minutoGT >= 15)) {
+		generarCierreDiario(ayerGT()).catch(console.error);
 	} else {
 		console.log(
-			"[CierreDiarioAsesor] Boot antes de las 22:00 GT; se omite la recuperación (el timeout programado lo lanzará a la hora)",
+			"[CierreDiarioAsesor] Boot antes de las 00:15 GT; se omite la recuperación (el timeout programado lo lanzará a la hora)",
 		);
 	}
 }, 25_000);

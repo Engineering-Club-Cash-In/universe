@@ -32,6 +32,7 @@ import {
 } from "./controllers/vehicles";
 import type { db } from "./db";
 import { otps } from "./db/schema/otp";
+import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
@@ -1343,6 +1344,39 @@ function scheduleAtMidnightGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtMidnightGT();
+
+// CB-024: cierre diario de asesores — snapshot de gestión (contactos
+// efectivos manuales, promesas, movimientos de bucket) a las 22:00 GT
+// (= 04:00 UTC) todos los días. Re-correr el mismo día es seguro: los
+// contactos van con ON CONFLICT DO NOTHING y los movimientos se reemplazan
+// completos (DELETE + INSERT), así que un deploy tardío recupera el snapshot
+// del día sin duplicar.
+function scheduleAtCierreDiarioGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(4, 0, 0, 0); // 22:00 GT
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await generarCierreDiario().catch(console.error);
+		scheduleAtCierreDiarioGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtCierreDiarioGT();
+// Recuperación al boot SOLO si ya pasaron las 22:00 GT (deploy tardío recupera
+// el snapshot de hoy; re-correr no duplica, ver arriba). Si el boot cae justo
+// dentro de la ventana de las 22:00, el advisory lock del job hace que el
+// segundo runner salga sin hacer nada. Antes de las 22:00 GT NO se corre: se
+// deja que el timeout programado lo lance a la hora.
+setTimeout(() => {
+	const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
+	if (horaGT >= 22) {
+		generarCierreDiario().catch(console.error);
+	} else {
+		console.log(
+			"[CierreDiarioAsesor] Boot antes de las 22:00 GT; se omite la recuperación (el timeout programado lo lanzará a la hora)",
+		);
+	}
+}, 25_000);
 
 export default {
 	port: process.env.PORT || 3000,

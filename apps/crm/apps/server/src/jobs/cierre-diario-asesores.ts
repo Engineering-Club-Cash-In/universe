@@ -225,17 +225,24 @@ async function _generarCierreMovimientosBucket(fecha: string) {
 	// Resolver caso_cobro_id por número SIFCO — un crédito de cartera-back puede
 	// no tener caso creado todavía en CRM (queda NULL; la UI navega por SIFCO).
 	// El filtro va EN LA QUERY: traer casos_cobros entera para descartar en JS
-	// crecía con la tabla, no con los pocos SIFCO del día.
+	// crecía con la tabla, no con los pocos SIFCO del día. En lotes de 1000
+	// (mismo CHUNK_SIZE que controllers/vehicles.ts): con hasta 500 páginas de
+	// movimientos, `sifcos` puede acercarse al límite de bind params de
+	// Postgres (~65535) igual que el INSERT de más abajo.
 	const sifcos = [...new Set(filas.map((f) => f.numeroCreditoSifco))];
-	const casos = sifcos.length
-		? await db
-				.select({
-					id: casosCobros.id,
-					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-				})
-				.from(casosCobros)
-				.where(inArray(casosCobros.numeroCreditoSifco, sifcos))
-		: [];
+	const CHUNK_SIZE = 1000;
+	const casos: { id: string; numeroCreditoSifco: string | null }[] = [];
+	for (let i = 0; i < sifcos.length; i += CHUNK_SIZE) {
+		const chunk = sifcos.slice(i, i + CHUNK_SIZE);
+		const parte = await db
+			.select({
+				id: casosCobros.id,
+				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			})
+			.from(casosCobros)
+			.where(inArray(casosCobros.numeroCreditoSifco, chunk));
+		casos.push(...parte);
+	}
 	const sifcoToCasoId = new Map(
 		casos
 			.filter((c) => c.numeroCreditoSifco)

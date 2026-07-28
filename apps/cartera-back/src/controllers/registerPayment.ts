@@ -2697,6 +2697,25 @@ async function aplicarPagoNormalEnTx(
         .set({ pagado: true })
         .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
 
+      // Cerrada la cuota, TODAS las filas validadas que la pagaron quedan
+      // pagado=true — en particular el cierre diferido que viajó como parcial
+      // (ver arriba): si quedara validated+pagado=false en cuota cerrada, el
+      // guard de parciales del abono a capital (pagado=false, monto>0,
+      // status≠pending) la tomaría como parcial vivo y saltaría el recálculo
+      // automático con revisar_parciales para siempre. También evita que el
+      // recálculo re-siembre estas filas como si fueran recibos abiertos.
+      await tx
+        .update(pagos_credito)
+        .set({ pagado: true })
+        .where(
+          and(
+            eq(pagos_credito.cuota_id, pago.cuota_id),
+            eq(pagos_credito.paymentFalse, false),
+            eq(pagos_credito.validationStatus, "validated"),
+            gt(pagos_credito.monto_aplicado, "0")
+          )
+        );
+
       // Limpiar `*_restante` huérfanos del resto de pagos de la cuota.
       // Si quedaron descuadrados por bugs históricos (pagos partidos
       // sin sincronización), ya no van a polucionar lecturas futuras

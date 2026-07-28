@@ -1,5 +1,17 @@
 import Big from "big.js";
-import { eq, and, or, inArray, asc, gt, lte, gte, sql } from "drizzle-orm";
+import {
+  eq,
+  and,
+  or,
+  inArray,
+  notInArray,
+  isNull,
+  asc,
+  gt,
+  lte,
+  gte,
+  sql,
+} from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { db } from "../database";
 import {
@@ -1977,14 +1989,28 @@ export const recalcularPagosCredito = async ({
   // distribuido a inversionistas — su reparto guardado recién se aplica al
   // validarse, así que refrescarlo aquí es seguro y necesario: si quedaran
   // fuera, conta validaría el split viejo (interés pre-abono).
+  // Las filas de ABONO A CAPITAL (validationStatus 'capital'/'capital_validated')
+  // NUNCA entran al recálculo: su split es capital puro (abono_capital = monto),
+  // no un reparto de cuota. Redistribuirlas aquí les reescribe el split como si
+  // fueran pago de cuota — y si la cuota ya está cubierta por el pago mensual,
+  // les toca puro cero. Caso real: abono registrado sin aplicar, un "Recalcular
+  // Pagos" intermedio le dejó abono_capital en 0 y al aplicarse restó Q0 del
+  // crédito. También cubre abonos ya aplicados que quedaron con pagado=false.
+  const filaNoEsAbonoCapital = or(
+    isNull(pagos_credito.validationStatus),
+    notInArray(pagos_credito.validationStatus, ["capital", "capital_validated"]),
+  );
+
   const whereConditions =
     numero_cuota !== undefined
       ? and(
           eq(pagos_credito.credito_id, credito.credito_id),
           gte(cuotas_credito.numero_cuota, numero_cuota),
+          filaNoEsAbonoCapital,
         )
       : and(
           eq(pagos_credito.credito_id, credito.credito_id),
+          filaNoEsAbonoCapital,
           or(
             eq(pagos_credito.pagado, false),
             // Pagos registrados sin validar: solo con monto_aplicado > 0.

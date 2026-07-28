@@ -38,9 +38,11 @@ function sanitize(input: string) {
 
 // Valor final a enviar (onBlur / submit) — a diferencia de sanitize(), acá sí
 // se descarta un punto sin dígitos o una parte entera vacía: "2500." → "2500",
-// ".50" → "0.50". Un decimal(12,2) no acepta ninguno de los dos crudos
-// (Codex, PR #1191).
-function normalizeForSubmit(raw: string) {
+// ".50" → "0.50". Un decimal(12,2) no acepta ninguno de los dos crudos.
+// Exportada para que quien envía el formulario (ej. Enter dispara submit sin
+// pasar por el onBlur del input) pueda limpiar el valor justo antes de
+// mandarlo, sin duplicar esta lógica (Codex, PR #1191, ronda 3).
+export function normalizeForSubmit(raw: string) {
 	if (!raw) return raw;
 	const [intPart, decPart] = raw.split(".");
 	if (decPart === undefined) return raw;

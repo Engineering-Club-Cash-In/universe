@@ -17,7 +17,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CurrencyInput } from "@/components/ui/currency-input";
+import {
+	CurrencyInput,
+	normalizeForSubmit,
+} from "@/components/ui/currency-input";
 import {
 	Dialog,
 	DialogClose,
@@ -313,8 +316,13 @@ export function ContactoModal({
 			client.createContactoCobros({
 				casoCobroId,
 				...data,
-				// "" no es un decimal válido — undefined omite la columna.
-				montoComprometido: data.montoComprometido || undefined,
+				// Enter dispara submit sin pasar por el onBlur del CurrencyInput
+				// (que es donde normalmente se limpia un punto colgante como
+				// "2500.") — se normaliza también acá, justo antes de armar el
+				// payload, para no depender de que el campo haya perdido foco
+				// (Codex, PR #1191, ronda 3).
+				montoComprometido:
+					normalizeForSubmit(data.montoComprometido) || undefined,
 				proximoPaso: data.proximoPaso || undefined,
 			}),
 		onSuccess: () => {

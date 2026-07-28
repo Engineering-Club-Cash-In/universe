@@ -2106,7 +2106,16 @@ export const recalcularPagosCredito = async ({
       rem.capital.eq(0);
 
     for (const pago of pagosOrdenados) {
-      const montoAplicado = new Big(pago.monto_aplicado ?? 0);
+      // Pagos ANULADOS (paymentFalse): conservan monto_aplicado, pero esa
+      // plata ya no existe — no debe consumir el saldo de la cuota ni marcar
+      // nada como pagado. Se tratan como monto 0 y caen a la rama de abajo:
+      // la fila se re-siembra como recibo limpio (abonos 0, restantes del
+      // saldo vigente). No se excluyen del SELECT a propósito: tras anular,
+      // esta fila suele ser el destino que el próximo registro sobreescribe,
+      // y así cascadea contra el saldo nuevo en vez del sembrado viejo.
+      const montoAplicado = pago.paymentFalse
+        ? new Big(0)
+        : new Big(pago.monto_aplicado ?? 0);
 
       if (montoAplicado.gt(0)) {
         // Distribuir monto_aplicado contra el saldo restante en orden de prioridad

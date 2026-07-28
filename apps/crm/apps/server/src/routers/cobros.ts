@@ -41,7 +41,10 @@ import {
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
-import { countScheduledPaidInstallments } from "../lib/cobros-credit-detail";
+import {
+	countScheduledPaidInstallments,
+	resolveInstallmentAmount,
+} from "../lib/cobros-credit-detail";
 import {
 	PLANTILLAS_MENSAJES,
 	interpolar as interpolarPlantilla,
@@ -404,7 +407,9 @@ export const cobrosRouter = {
 			if (isCarteraBackEnabled()) {
 				try {
 					console.log(
-						`[Cobros] Obteniendo stats desde Cartera-Back endpoint /stats${input?.emailCobrador ? `?email=${input.emailCobrador}` : ""}`,
+						`[Cobros] Obteniendo stats desde Cartera-Back endpoint /stats${
+							input?.emailCobrador ? `?email=${input.emailCobrador}` : ""
+						}`,
 					);
 
 					// Usar el nuevo endpoint de stats de cartera-back
@@ -744,7 +749,15 @@ export const cobrosRouter = {
 					}
 
 					console.log(
-						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}, etiquetas=${input.etiquetas?.join(",") || ""}`,
+						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${
+							Math.floor((input.offset || 0) / (input.limit || 50)) + 1
+						}, perPage=${
+							input.limit || 50
+						}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${
+							input.time
+						}, emailCobrador=${input.emailCobrador}, search=${
+							input.searchTerm || ""
+						}, etiquetas=${input.etiquetas?.join(",") || ""}`,
 					);
 
 					// Si hay filtro de etiquetas, primero resolver en CRM la lista de
@@ -798,7 +811,11 @@ export const cobrosRouter = {
 							.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 							.where(
 								and(
-									sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replace(/[\s-]+/g, "") + "%"}`,
+									sql`LOWER(REPLACE(REPLACE(${
+										vehicles.licensePlate
+									}, '-', ''), ' ', '')) LIKE ${
+										"%" + searchTerm.toLowerCase().replace(/[\s-]+/g, "") + "%"
+									}`,
 									sql`${opportunities.numeroSifco} IS NOT NULL`,
 								),
 							);
@@ -1521,7 +1538,10 @@ export const cobrosRouter = {
 			// Notificar al nuevo cobrador asignado
 			await createNotification({
 				titulo: "Caso de cobro asignado",
-				descripcion: `Se te ha asignado el caso de cobro #${input.casoCobroId.slice(0, 8)}`,
+				descripcion: `Se te ha asignado el caso de cobro #${input.casoCobroId.slice(
+					0,
+					8,
+				)}`,
 				type: "aviso",
 				createdBy: context.user.id,
 				createdByRole: context.user.role,
@@ -1632,11 +1652,15 @@ export const cobrosRouter = {
 							.sort((a, b) => a.numero_cuota - b.numero_cuota)
 							.map((cuota) => {
 								const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
+								const montoCuota = resolveInstallmentAmount(
+									cuota.cuota,
+									creditoCompleto.credito.cuota,
+								);
 								const montoPagadoReal =
 									cuota.pagado && cuota.monto_boleta
 										? Number(cuota.monto_boleta)
 										: cuota.pagado
-											? Number(creditoCompleto.credito.cuota)
+											? Number(montoCuota)
 											: null;
 
 								return {
@@ -1644,7 +1668,7 @@ export const cobrosRouter = {
 									id: cuota.cuota_id.toString(),
 									numeroCuota: cuota.numero_cuota,
 									fechaVencimiento: cuota.fecha_vencimiento,
-									montoCuota: creditoCompleto.credito.cuota,
+									montoCuota,
 									fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
 									montoPagado: montoPagadoReal,
 									montoMora: montoMora.toString(),
@@ -2076,8 +2100,9 @@ export const cobrosRouter = {
 						montoAsegurado: opp.vehiculoMontoAsegurado,
 					};
 					leadInfo = {
-						nombre:
-							`${opp.leadFirstName || ""} ${opp.leadLastName || ""}`.trim(),
+						nombre: `${opp.leadFirstName || ""} ${
+							opp.leadLastName || ""
+						}`.trim(),
 						email: opp.leadEmail,
 						telefono: opp.leadTelefono,
 					};
@@ -2432,7 +2457,9 @@ export const cobrosRouter = {
 				};
 			} catch (error) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: `Error obteniendo historial de pagos: ${error instanceof Error ? error.message : String(error)}`,
+					message: `Error obteniendo historial de pagos: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
 				});
 			}
 		}),
@@ -2517,7 +2544,9 @@ export const cobrosRouter = {
 				};
 			} catch (error) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: `Error obteniendo crédito de cartera-back: ${error instanceof Error ? error.message : String(error)}`,
+					message: `Error obteniendo crédito de cartera-back: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
 				});
 			}
 		}),
@@ -2624,8 +2653,8 @@ export const cobrosRouter = {
 							inv.reinversion ?? inv.tipo_reinversion !== "sin_reinversion",
 						tipoReinversion: inv.tipo_reinversion ?? "sin_reinversion",
 						banco: inv.banco_id
-							? (bancosMap.get(inv.banco_id) ?? null)
-							: (inv.banco ?? null),
+							? bancosMap.get(inv.banco_id) ?? null
+							: inv.banco ?? null,
 						tipoCuenta: inv.tipo_cuenta ?? null,
 						numeroCuenta: inv.numero_cuenta ?? null,
 						moneda: inv.moneda ?? "quetzales",
@@ -2646,7 +2675,9 @@ export const cobrosRouter = {
 					error instanceof Error ? error.stack : "No stack",
 				);
 				throw new ORPCError("BAD_REQUEST", {
-					message: `Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}`,
+					message: `Error obteniendo inversionistas: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
 				});
 			}
 		}),
@@ -2729,7 +2760,9 @@ export const cobrosRouter = {
 				};
 			} catch (error) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: `Error obteniendo detalle de inversionista: ${error instanceof Error ? error.message : String(error)}`,
+					message: `Error obteniendo detalle de inversionista: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
 				});
 			}
 		}),
@@ -2783,7 +2816,9 @@ export const cobrosRouter = {
 				*/
 			} catch (error) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: `Error obteniendo inversionistas del crédito: ${error instanceof Error ? error.message : String(error)}`,
+					message: `Error obteniendo inversionistas del crédito: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
 				});
 			}
 		}),
@@ -2853,7 +2888,9 @@ export const cobrosRouter = {
 					error instanceof Error ? error.stack : "No stack",
 				);
 				throw new ORPCError("BAD_REQUEST", {
-					message: `Error obteniendo asesores: ${error instanceof Error ? error.message : String(error)}`,
+					message: `Error obteniendo asesores: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
 				});
 			}
 		}),
@@ -3335,7 +3372,11 @@ export const cobrosRouter = {
 					.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 					.where(
 						and(
-							sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replaceAll(/[\s-]+/g, "") + "%"}`,
+							sql`LOWER(REPLACE(REPLACE(${
+								vehicles.licensePlate
+							}, '-', ''), ' ', '')) LIKE ${
+								"%" + searchTerm.toLowerCase().replaceAll(/[\s-]+/g, "") + "%"
+							}`,
 							sql`${opportunities.numeroSifco} IS NOT NULL`,
 						),
 					);

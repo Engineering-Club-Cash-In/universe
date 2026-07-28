@@ -3,19 +3,10 @@ import { resolve } from "node:path";
 import {
 	canResetCreditByStatus,
 	canViewCreditDetailByStatus,
-	isScheduledCreditInstallment,
 	withActiveCancellation,
 } from "./creditDetailPolicy";
 
 describe("credit detail visibility", () => {
-	it("excludes only reset credit installments from scheduled installments", () => {
-		for (const status of ["validated", "pending", null, undefined]) {
-			expect(isScheduledCreditInstallment(status)).toBeTrue();
-		}
-
-		expect(isScheduledCreditInstallment("reset")).toBeFalse();
-	});
-
 	it("only allows resetting credits pending cancellation", () => {
 		expect(canResetCreditByStatus("PENDIENTE_CANCELACION")).toBeTrue();
 
@@ -92,6 +83,26 @@ describe("cancelled credit detail", () => {
 });
 
 describe("credit detail no-current-installment branch", () => {
+	it("loads and returns active mora before the terminal branch", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "credits.ts"),
+		).text();
+		const moraQueryIndex = source.indexOf("const moraActual = await db");
+		const noCurrentBranchIndex = source.indexOf("if (!cuotaActualDataResult");
+		const branch = source.match(
+			/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,
+		)?.[0];
+
+		expect(moraQueryIndex).toBeGreaterThan(-1);
+		expect(moraQueryIndex).toBeLessThan(noCurrentBranchIndex);
+		expect(branch).toContain(
+			"moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,",
+		);
+		expect(branch).toContain(
+			"mora: moraActual.length > 0 ? moraActual[0] : null,",
+		);
+	});
+
 	it("maps the advisor in the no-current-installment return", async () => {
 		const source = await Bun.file(
 			resolve(import.meta.dir, "credits.ts"),

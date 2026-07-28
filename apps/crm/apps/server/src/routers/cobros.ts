@@ -41,6 +41,7 @@ import {
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
+import { countScheduledPaidInstallments } from "../lib/cobros-credit-detail";
 import {
 	PLANTILLAS_MENSAJES,
 	interpolar as interpolarPlantilla,
@@ -2179,7 +2180,9 @@ export const cobrosRouter = {
 				];
 				const cuota0 = todasLasCuotas.find((c) => c.numero_cuota === 0);
 				const fechaInicioCuota0 = cuota0?.fecha_vencimiento || null;
-				const cuotasPagadasCount = creditoCompleto.cuotasPagadas?.length || 0;
+				const cuotasPagadasCount = countScheduledPaidInstallments(
+					creditoCompleto.cuotasPagadas,
+				);
 				const totalCuotas = creditoCompleto.credito.plazo || 0;
 				let cuotasRestantes = totalCuotas;
 				if (cuota0?.pagado) {

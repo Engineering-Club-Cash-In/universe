@@ -298,6 +298,7 @@ export interface CarteraCuotaCredito {
 	pago?: CarteraPagoCredito;
 	// Campos adicionales de pago (opcionales)
 	pago_id?: number;
+	validationStatus?: ValidationStatusEnum | null;
 	monto_boleta?: string; // decimal
 	abono_capital?: string; // decimal
 	abono_interes?: string; // decimal

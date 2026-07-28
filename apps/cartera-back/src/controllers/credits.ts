@@ -42,7 +42,6 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   CREDIT_DETAIL_STATUSES,
   canResetCreditByStatus,
-  isScheduledCreditInstallment,
   withActiveCancellation,
 } from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
@@ -90,7 +89,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         : undefined;
 
     // 2. Consultar todas las cuotas pagadas (pagado = true)
-    const cuotasPagadasConCierre = await db
+    const cuotasPagadas = await db
       .select({
         // Campos de cuotas_credito
         cuota_id: cuotas_credito.cuota_id,
@@ -139,9 +138,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       )
       .orderBy(cuotas_credito.numero_cuota);
-
-    const cuotasPagadas = cuotasPagadasConCierre.filter((row) => isScheduledCreditInstallment(row.validationStatus));
-
     // 4. Calcular la cuota que toca este mes (según meses transcurridos desde fecha_creacion)
     const fechaInicio = new Date(currentCredit.creditos.fecha_creacion);
     const hoy = new Date();
@@ -256,6 +252,16 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       )
       .orderBy(cuotas_credito.numero_cuota);
 
+    const moraActual = await db
+      .select()
+      .from(moras_credito)
+      .where(
+        and(
+          eq(moras_credito.credito_id, creditoId),
+          eq(moras_credito.activa, true)
+        )
+      );
+
     // 6. Consultar si la cuota actual ya fue pagada
     const cuotaActualDataResult = await db
       .select({
@@ -320,8 +326,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         cuotasPendientes,
         cuotasAtrasadas,
         cuotasPagadas,
-        moraActual: 0,
-        mora: null,
+        moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+        mora: moraActual.length > 0 ? moraActual[0] : null,
         convenioActivo: null,
         cuotasEnConvenio: [],
         pagosConvenio: [],
@@ -337,16 +343,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // La cuota actual del mes con toda su info
     const cuotaActual = cuotaActualData;
     const cuotaActualStatus = cuotaActualData.validationStatus;
-
-    const moraActual = await db
-      .select()
-      .from(moras_credito)
-      .where(
-        and(
-          eq(moras_credito.credito_id, creditoId),
-          eq(moras_credito.activa, true)
-        )
-      );
 
     const convenioActivo = await db
       .select()

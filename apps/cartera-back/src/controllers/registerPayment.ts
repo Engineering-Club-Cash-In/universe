@@ -2881,6 +2881,41 @@ export async function aplicarAbonoCapitalInversionistas(
   abono_capital: number | string,
   pago_id: number
 ) {
+  // 🔒 Mismo advisory lock por crédito que insertPayment: serializa el abono
+  // completo (espejo + update del crédito + recálculo de recibos) contra un
+  // registro concurrente del mismo crédito. Sin esto, un /newPayment que ya
+  // leyó el saldo pre-abono puede commitear justo después del recálculo y el
+  // recibo recién registrado se queda con el split viejo (TOCTOU).
+  const lockConn: PaymentAdvisoryLockConnection = await client.connect();
+  try {
+    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+      PAYMENT_ADVISORY_LOCK_NAMESPACE,
+      credito_id,
+    ]);
+    return await aplicarAbonoCapitalInversionistasSinLock(
+      credito_id,
+      abono_capital,
+      pago_id
+    );
+  } finally {
+    // 🔓 Liberar el lock y devolver la conexión al pool, pase lo que pase.
+    try {
+      await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        credito_id,
+      ]);
+    } catch (unlockError) {
+      console.error("⚠️ Error liberando advisory lock del abono:", unlockError);
+    }
+    lockConn.release();
+  }
+}
+
+async function aplicarAbonoCapitalInversionistasSinLock(
+  credito_id: number,
+  abono_capital: number | string,
+  pago_id: number
+) {
   console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
 
   // Distribuir abono a capital en tabla espejo. El pago_id deja cada fila

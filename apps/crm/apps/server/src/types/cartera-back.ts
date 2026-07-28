@@ -260,6 +260,20 @@ export interface CargaPorAsesorBucketResponse {
 	fecha: string;
 }
 
+/**
+ * Fila de GET /buckets/pool-por-asesor: TODOS los asesores con sus buckets
+ * activos del pool, sin filtrar por créditos actuales (a diferencia de
+ * /buckets/carga). `email_cash_in` es el campo confiable para cruzar contra
+ * `user.email` del CRM — el `email` de /advisor está desactualizado para
+ * varios asesores.
+ */
+export interface PoolPorAsesorRow {
+	asesor_id: number;
+	nombre: string;
+	email_cash_in: string | null;
+	buckets: number[];
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // CB-023 · Apertura matutina del supervisor (GET /buckets/apertura).
 // ─────────────────────────────────────────────────────────────────────────

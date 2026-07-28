@@ -11,6 +11,7 @@ import {
   getAsesoresPorBucket,
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
+import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
@@ -428,6 +429,30 @@ export const bucketsRouter = new Elysia()
         return {
           success: false,
           message: "[ERROR] No se pudo obtener el pool de asesores del bucket",
+          error: String(err),
+        };
+      }
+    },
+  )
+
+  // Catálogo completo de asesores con sus buckets activos del pool (contraparte
+  // "invertida" de /buckets/pool/:bucket, que da los asesores de UN bucket).
+  // No pasa por creditos — no descarta asesores sin cuentas activas en el
+  // funnel (a diferencia de /buckets/carga). Incluye email_cash_in para que el
+  // CRM pueda cruzar contra su propio user.email sin depender del email
+  // desactualizado de /advisor.
+  .get(
+    "/buckets/pool-por-asesor",
+    async ({ set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const data = await getPoolPorAsesor();
+        return { success: true, data };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener el pool por asesor",
           error: String(err),
         };
       }

@@ -20,6 +20,7 @@ import {
 	LayoutDashboard,
 	Menu,
 	MessageSquare,
+	Moon,
 	Scale,
 	Settings,
 	Sunrise,
@@ -315,6 +316,14 @@ export default function Header() {
 											<Link to="/cobros/carga" className="cursor-pointer">
 												<Gauge className="mr-2 h-4 w-4" />
 												Carga de Cuentas
+											</Link>
+										</DropdownMenuItem>
+									)}
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/cierre" className="cursor-pointer">
+												<Moon className="mr-2 h-4 w-4" />
+												Cierre Diario
 											</Link>
 										</DropdownMenuItem>
 									)}
@@ -697,6 +706,12 @@ function MobileNav({
 											<Link to="/cobros/carga" className={MOBILE_LINK_CLASS}>
 												<Gauge />
 												Carga de Cuentas
+											</Link>
+										)}
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link to="/cobros/cierre" className={MOBILE_LINK_CLASS}>
+												<Moon />
+												Cierre Diario
 											</Link>
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (

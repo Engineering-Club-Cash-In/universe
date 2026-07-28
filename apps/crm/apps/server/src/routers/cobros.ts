@@ -495,10 +495,6 @@ export const createContactoCobrosSchema = z
 		},
 	);
 
-// Buckets fijos del funnel operativo (B0-B5) — CB-024 los recorre para armar
-// el pool real de cada asesor desde `getPoolAsesoresPorBucket`.
-const BUCKETS_NUMEROS = [0, 1, 2, 3, 4, 5] as const;
-
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
 	getDashboardStats: cobrosProcedure
@@ -5650,7 +5646,10 @@ export const cobrosRouter = {
 					asesorEmail: user.email,
 					contactosEfectivos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.esEfectivoManual})`,
 					promesasObtenidas: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} = 'promesa_pago' AND NOT ${esAutomatico})`,
-					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND NOT ${esAutomatico})`,
+					// Promesa se reporta aparte (línea de arriba) — no cuenta en el
+					// denominador de "efectivos/total", sería mezclar dos categorías
+					// excluyentes en un mismo ratio.
+					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} != 'promesa_pago' AND NOT ${esAutomatico})`,
 					// Movimientos que SALIERON del bucket del pool del asesor ese día.
 					subieron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'subida')`,
 					bajaron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'bajada')`,
@@ -5669,55 +5668,31 @@ export const cobrosRouter = {
 			// (no histórico del día), por eso se consulta acá y no se guarda en el
 			// snapshot: guardar "el pool de ayer" no tendría sentido operativo.
 			//
-			// El pool sale de `getPoolAsesoresPorBucket` (una llamada por bucket
-			// 0-5, en paralelo) — es `asesor_bucket WHERE bucket=X AND activo=true`
-			// tal cual, SIN depender de que el asesor tenga cuentas o movimientos
-			// en el rango consultado. Descartado `getAperturaDia().asignacion`
-			// (usado antes, review Codex #1183): esa lista sale de un JOIN que
-			// arranca `FROM buckets_historial`, así que solo incluye asesores que
-			// tuvieron un movimiento de bucket EN `fechaFin` — un asesor activo sin
-			// transiciones ese día quedaba con pool vacío en el reporte. Tampoco se
-			// usa `/buckets/carga`: esa devuelve los buckets DONDE EL ASESOR TIENE
-			// CRÉDITOS, con los residuos de créditos que se movieron pero siguen
-			// asignados a él (`elegible: false`) — mismo problema, otra forma.
-			//
-			// El cruce asesor↔usuario va por `email_asesor` de `/buckets/carga`: es
-			// el único lugar con el correo vigente. En getAdvisors el correo de
-			// varios asesores está desactualizado (`cobros@…`, `@sepresta.com`) y
-			// no cruza con el `user.email` del CRM.
+			// Fuente: getPoolPorAsesor() (/buckets/pool-por-asesor) — catálogo
+			// COMPLETO de asesores con sus buckets activos, sin pasar por
+			// creditos (no depende de que el asesor tenga cuentas activas ahora
+			// mismo). Reemplaza el intento anterior (getAdvisors + N ×
+			// getPoolAsesoresPorBucket cruzados por el email de /advisor): ese
+			// email está desactualizado para varios asesores (Diego Gomez,
+			// Samuel Gamboa) y no coincidía con `user.email` del CRM.
+			// `email_cash_in` (expuesto por este endpoint) sí coincide. Mismo
+			// patrón de bug de exclusión-por-créditos-activos ya corregido en
+			// cierre-diario-asesores.ts (CB-024, commit 4e6f1ce5).
 			//
 			// Best-effort: si cartera-back falla, el reporte sigue sirviendo sin
 			// la etiqueta de pool.
 			const poolPorAsesor = new Map<string, number[]>();
 			try {
-				const [carga, ...poolsPorBucket] = await Promise.all([
-					carteraBackClient.getCargaPorAsesorBucket({}),
-					...BUCKETS_NUMEROS.map((bucket) =>
-						carteraBackClient.getPoolAsesoresPorBucket(bucket),
-					),
-				]);
+				const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
 				const emailToUserId = new Map(
 					filas.map((f) => [f.asesorEmail.trim().toLowerCase(), f.asesorId]),
 				);
-				const asesorCarteraToUserId = new Map<number, string>();
-				for (const a of carga.porAsesor) {
-					const email = a.email_asesor?.trim().toLowerCase();
+				for (const a of asesoresConBuckets) {
+					const email = a.email_cash_in?.trim().toLowerCase();
 					if (!email) continue;
 					const userId = emailToUserId.get(email);
-					if (userId) asesorCarteraToUserId.set(a.asesor_id, userId);
-				}
-				poolsPorBucket.forEach((pool, i) => {
-					const bucket = BUCKETS_NUMEROS[i];
-					for (const a of pool) {
-						const userId = asesorCarteraToUserId.get(a.asesor_id);
-						if (!userId) continue;
-						const buckets = poolPorAsesor.get(userId) ?? [];
-						buckets.push(bucket);
-						poolPorAsesor.set(userId, buckets);
-					}
-				});
-				for (const [userId, buckets] of poolPorAsesor) {
-					poolPorAsesor.set(userId, [...buckets].sort((x, y) => x - y));
+					if (!userId) continue;
+					poolPorAsesor.set(userId, [...a.buckets].sort((x, y) => x - y));
 				}
 			} catch (error) {
 				console.error("[getCierreDiarioPorRango] Pool de buckets:", error);

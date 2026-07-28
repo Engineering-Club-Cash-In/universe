@@ -17,17 +17,21 @@
  *    ON CONFLICT (contacto_id) DO NOTHING — un contacto ya registrado es
  *    histórico inmutable, nunca se duplica.
  *
- *  - Paso B 'subida'/'bajada': créditos que cambiaron de bucket ese día, con su
- *    ruta (bucket_anterior → bucket). Definición confirmada por Jhairo Nájera
- *    (responsable CB-024): el reporte muestra "hoy subieron N / bajaron M". La
- *    atribución va por `evento.asesor` (nombre del dueño del crédito, tal como
- *    lo trae CADA fila de getBucketsHistorial) — ver resolverAsesorId para el
- *    porqué de descartar `asesor_atribucion_id` y los mapas externos
- *    (pool/carga) que se probaron antes. El asesor en cartera-back no tiene
- *    id de usuario del CRM propio — se resuelve cruzando por nombre contra
- *    `user.name`. Se reemplaza completo (DELETE + INSERT) en cada corrida:
- *    son datos derivados de cartera-back, recalculables, sin un "contacto"
- *    que ancle un ON CONFLICT.
+ *  - Paso B 'subida'/'bajada': de los créditos que un asesor tenía AL EMPEZAR
+ *    el día, cuáles subieron y cuáles bajaron de bucket. Definición del
+ *    usuario: "de mis créditos de la mañana, cuántos subieron y cuántos
+ *    bajaron" — no "a quién se le atribuye cada evento puntual" (enfoque
+ *    anterior, descartado por problemas de escala — ver
+ *    resolverIdsDuenoManana para el detalle y el porqué de los intentos
+ *    previos). El dueño de la mañana es el dueño ACTUAL que ya trae
+ *    getBucketsHistorial, salvo que el crédito se haya reasignado HOY (ahí se
+ *    retrocede al asesor_anterior_id de esa reasignación, vía
+ *    credito_asesor_historial/getAsesorHistorial acotado al día). El asesor
+ *    en cartera-back no tiene id de usuario del CRM propio — se resuelve
+ *    cruzando `asesor_id` numérico → `email_cash_in` (getPoolPorAsesor()) →
+ *    `user.email` (constraint único en ambos extremos). Se reemplaza completo
+ *    (DELETE + INSERT) en cada corrida: son datos derivados de cartera-back,
+ *    recalculables, sin un "contacto" que ancle un ON CONFLICT.
  */
 
 import { inArray } from "drizzle-orm";
@@ -120,49 +124,147 @@ async function _generarCierreContactos(client: RawClient, fecha: string) {
 }
 
 /**
- * Mapa `nombre normalizado → user.id (CRM)`. Cruzar por nombre en vez de
- * asesor_id/email porque el nombre viaja EN CADA FILA del evento
- * (`getBucketsHistorial().data[].asesor`), sin necesitar una llamada aparte
- * a un pool o catálogo que puede cambiar entre el movimiento y esta corrida.
- *
- * Se descartaron dos fuentes externas antes de llegar acá, ambas por la misma
- * clase de bug (mapa construido de un catálogo "vigente ahora", que puede
- * haber perdido al asesor entre el evento y la corrida — 00:15 GT del día
- * siguiente):
- *   - `getCargaPorAsesorBucket`: excluye créditos CANCELADO/
- *     PENDIENTE_CANCELACION/EN_CONVENIO/CAIDO (STATUS_BUCKET_FUERA en
- *     cartera-back) — si el único crédito del asesor se resolvió antes de la
- *     corrida, desaparecía del mapa (hallado por Codex en PR #1185, 1er round).
- *   - `getPoolAsesoresPorBucket`: solo pool ACTIVO ahora — si desactivan al
- *     asesor del pool entre el evento y la corrida, mismo problema, y además
- *     el DELETE+INSERT de abajo podía BORRAR filas ya capturadas en una
- *     corrida anterior si un re-run perdía a ese asesor del mapa (hallado por
- *     Codex en PR #1185, 2do round).
- * Usar el nombre que trae el propio evento es inmune a ambos: no depende de
- * ningún estado "actual" externo al evento mismo.
+ * Mapa `asesor_id numérico (cartera-back) → user.id (CRM)`, cruzando por
+ * email (`email_cash_in` de getPoolPorAsesor() vs `user.email`, ambos con
+ * constraint único). Reemplaza un cruce anterior por `user.name` — sin
+ * constraint de unicidad en ese campo, dos asesores con el mismo nombre
+ * (caso real en dev: "Lucia Salvatierra" x2) se pisaban en silencio y
+ * atribuían mal el movimiento.
  */
+async function mapaAsesorIdAUserId(
+	usuarios: readonly { id: string; email: string }[],
+): Promise<Map<number, string>> {
+	const emailToUserId = new Map(
+		usuarios.map((u) => [u.email.trim().toLowerCase(), u.id]),
+	);
+	const asesores = await carteraBackClient.getPoolPorAsesor();
+	const mapa = new Map<number, string>();
+	for (const a of asesores) {
+		const email = a.email_cash_in?.trim().toLowerCase();
+		if (!email) continue;
+		const userId = emailToUserId.get(email);
+		if (userId) mapa.set(a.asesor_id, userId);
+	}
+	return mapa;
+}
+
 function resolverAsesorId(
-	nombreAsesor: string | null,
-	nombreToUserId: ReadonlyMap<string, string>,
+	asesorIdCartera: number | null,
+	asesorIdToUserId: ReadonlyMap<number, string>,
 ): string | null {
-	if (!nombreAsesor) return null;
-	return nombreToUserId.get(nombreAsesor.trim().toLowerCase()) ?? null;
+	if (asesorIdCartera == null) return null;
+	return asesorIdToUserId.get(asesorIdCartera) ?? null;
+}
+
+/**
+ * Dueño de cada crédito AL EMPEZAR el día que se está cerrando (no el dueño
+ * actual al momento de la corrida, 00:15 GT del día siguiente).
+ *
+ * Reemplaza un enfoque anterior ("¿de quién era el crédito exactamente en el
+ * instante del movimiento?", resuelto reconstruyendo desde TODO el histórico
+ * de `credito_asesor_historial`) por uno más simple y acotado en escala,
+ * alineado a cómo se define el cierre: "de mis créditos de la mañana, cuántos
+ * subieron y cuántos bajaron" (definición del usuario, no "a quién se le
+ * atribuye cada evento puntual"). El enfoque anterior tenía dos problemas de
+ * fondo hallados por Codex en PR #1185 (5to round):
+ *   - Sin filtro por crédito ni ventana de fecha razonable, la consulta traía
+ *     la bitácora COMPLETA del sistema (crece sin límite con el tiempo).
+ *   - Paginación por OFFSET sobre `ORDER BY fecha DESC` mientras
+ *     `latefee.ts` (23:59 GT) puede seguir insertando filas nuevas 16 minutos
+ *     antes de esta corrida (00:15 GT) — un insert a mitad de la paginación
+ *     desplaza todo y puede saltarse silenciosamente la fila que se busca.
+ *
+ * Este enfoque solo necesita las reasignaciones de HOY (`desde: fecha, hasta:
+ * fecha` — acotado, no la bitácora completa): para un crédito reasignado hoy,
+ * el dueño de la mañana es `asesor_anterior` de esa reasignación (retroceder
+ * un paso). Para el resto de créditos (la mayoría — la reasignación
+ * automática solo ocurre si el asesor deja de ser elegible en el bucket
+ * destino, ver `latefee.ts` FASE 3), no hubo cambio hoy, así que el dueño
+ * ACTUAL que ya trae `getBucketsHistorial().data[].asesor` YA ES el dueño de
+ * la mañana — no hace falta reconstruir nada.
+ *
+ * No cubre reasignaciones MANUALES intra-día (supervisor reasigna a mano
+ * durante la jornada, no a medianoche) que no dejen rastro en `desde: fecha,
+ * hasta: fecha` de forma coherente con "mañana" — ese caso es igual de raro
+ * que los que ya se aceptaron como fallback en versiones anteriores.
+ *
+ * Devuelve, por cada evento (identificado por su posición en `eventos`), el
+ * asesor_id numérico (cartera-back) del dueño de la mañana a usar.
+ */
+async function resolverIdsDuenoManana(
+	eventos: readonly { credito_id: number; asesorId: number | null }[],
+	fecha: string,
+): Promise<(number | null)[]> {
+	if (eventos.length === 0) return [];
+
+	// Reasignaciones SOLO de hoy — acotado, no la bitácora completa del
+	// sistema. En un día normal son pocas decenas, cabe en 1-2 páginas.
+	const reasignacionesHoy: {
+		credito_id: number;
+		asesor_anterior_id: number | null;
+	}[] = [];
+	let page = 1;
+	const pageSize = 200;
+	const MAX_PAGINAS_HISTORIAL = 50;
+	let truncadoHistorial = false;
+	for (; page <= MAX_PAGINAS_HISTORIAL; page++) {
+		const resp = await carteraBackClient.getAsesorHistorial({
+			desde: fecha,
+			hasta: fecha,
+			page,
+			pageSize,
+		});
+		reasignacionesHoy.push(
+			...resp.data.map((r) => ({
+				credito_id: r.credito_id,
+				asesor_anterior_id: r.asesor_anterior_id,
+			})),
+		);
+		if (page >= resp.pagination.totalPages) break;
+		if (page === MAX_PAGINAS_HISTORIAL) truncadoHistorial = true;
+	}
+	if (truncadoHistorial) {
+		console.warn(
+			`[CierreDiarioAsesor] ${fecha}: se alcanzó el tope de ${MAX_PAGINAS_HISTORIAL} páginas de reasignaciones del día — posible totalPages corrupto de cartera-back`,
+		);
+	}
+
+	// Si un crédito tuvo VARIAS reasignaciones en el mismo día, el dueño de la
+	// mañana es el `asesor_anterior_id` de la PRIMERA (la más antigua) — las
+	// intermedias ya no son "la mañana". La respuesta viene ordenada
+	// `fecha DESC, historial_id DESC` (asesorHistorial.ts), así que la última
+	// del array es la más antigua del día.
+	const duenoMananaPorCredito = new Map<number, number | null>();
+	for (const r of reasignacionesHoy) {
+		duenoMananaPorCredito.set(r.credito_id, r.asesor_anterior_id);
+	}
+
+	return eventos.map((evento) => {
+		if (!duenoMananaPorCredito.has(evento.credito_id)) return evento.asesorId;
+		const asesorAnteriorId = duenoMananaPorCredito.get(evento.credito_id);
+		// asesor_anterior_id nullable (siembra/primera asignación, o asesor
+		// borrado) — sin dato de "antes", el mejor fallback disponible sigue
+		// siendo el dueño actual del evento.
+		return asesorAnteriorId ?? evento.asesorId;
+	});
 }
 
 async function _generarCierreMovimientosBucket(fecha: string) {
-	const usuarios = await db.select({ id: user.id, name: user.name }).from(user);
-	const nombreToUserId = new Map(
-		usuarios.map((u) => [u.name.trim().toLowerCase(), u.id]),
-	);
+	const usuarios = await db
+		.select({ id: user.id, email: user.email })
+		.from(user);
+	const asesorIdToUserId = await mapaAsesorIdAUserId(usuarios);
 
-	type FilaMovimiento = {
-		asesorId: string;
-		numeroCreditoSifco: string;
-		bucketAnterior: number;
-		bucketNuevo: number;
+	type EventoBucket = {
+		credito_id: number;
+		numero_credito_sifco: string;
+		fecha: string;
+		asesorId: number | null;
+		bucket_anterior: number;
+		bucket_nuevo: number;
 		tipo: "subida" | "bajada";
 	};
-	const filas: FilaMovimiento[] = [];
+	const eventos: EventoBucket[] = [];
 
 	let page = 1;
 	const pageSize = 200;
@@ -181,37 +283,59 @@ async function _generarCierreMovimientosBucket(fecha: string) {
 		});
 		for (const evento of resp.data ?? []) {
 			if (evento.bucket_anterior == null) continue;
-			// Se atribuye por evento.asesor (nombre) — el dueño ACTUAL del crédito
-			// al momento del evento (creditos.asesor_id vía el JOIN de
-			// cartera-back, "hoy siempre hay dueño" según la decisión de raíz
-			// 2026-07-07 de ese repo). NO asesor_atribucion_id
-			// (buckets_historial.asesor_id): ese campo lo deja NULL el proceso
-			// automático nocturno (latefee.ts:1181, "se llena con el nuevo flujo
-			// de pago" — no implementado todavía), así que filtrar por él descarta
-			// el 100% de los movimientos del motor normal (hallado por Codex en
-			// PR #1183). Tampoco el pool del bucket de origen: varios asesores
-			// comparten bucket, un mismo movimiento se contaba varias veces. Y NO
-			// un mapa externo (pool/carga) resuelto aparte: ambos dependían de un
-			// catálogo "vigente ahora" que puede haber perdido al asesor entre el
-			// evento y esta corrida — ver resolverAsesorId. Eventos sin asesor, o
-			// cuyo nombre no cruza con un usuario del CRM, se omiten.
-			const asesorId = resolverAsesorId(evento.asesor, nombreToUserId);
-			if (!asesorId) continue;
-			filas.push({
-				asesorId,
-				numeroCreditoSifco: evento.numero_credito_sifco,
-				bucketAnterior: evento.bucket_anterior,
-				bucketNuevo: evento.bucket_nuevo,
+			eventos.push({
+				credito_id: evento.credito_id,
+				numero_credito_sifco: evento.numero_credito_sifco,
+				fecha: evento.fecha,
+				asesorId: evento.asesor_id,
+				bucket_anterior: evento.bucket_anterior,
+				bucket_nuevo: evento.bucket_nuevo,
 				tipo: evento.tipo_evento === "SUBIDA" ? "subida" : "bajada",
 			});
 		}
-		const totalPages = resp.pagination?.totalPages ?? 1;
-		if (page >= totalPages) break;
+		if (typeof resp.pagination?.totalPages !== "number") {
+			console.warn(
+				`[CierreDiarioAsesor] ${fecha}: pagination.totalPages ausente/corrupto en getBucketsHistorial (página ${page}) — se asume sin más páginas, revisar cartera-back`,
+			);
+			break;
+		}
+		if (page >= resp.pagination.totalPages) break;
 		if (page === MAX_PAGINAS) truncado = true;
 	}
 	if (truncado) {
 		console.warn(
 			`[CierreDiarioAsesor] ${fecha}: se alcanzó el tope de ${MAX_PAGINAS} páginas de movimientos de bucket — posible totalPages corrupto de cartera-back`,
+		);
+	}
+
+	type FilaMovimiento = {
+		asesorId: string;
+		numeroCreditoSifco: string;
+		bucketAnterior: number;
+		bucketNuevo: number;
+		tipo: "subida" | "bajada";
+	};
+	const filas: FilaMovimiento[] = [];
+
+	const idsDueno = await resolverIdsDuenoManana(eventos, fecha);
+	let descartados = 0;
+	eventos.forEach((evento, i) => {
+		const asesorId = resolverAsesorId(idsDueno[i], asesorIdToUserId);
+		if (!asesorId) {
+			descartados++;
+			return;
+		}
+		filas.push({
+			asesorId,
+			numeroCreditoSifco: evento.numero_credito_sifco,
+			bucketAnterior: evento.bucket_anterior,
+			bucketNuevo: evento.bucket_nuevo,
+			tipo: evento.tipo,
+		});
+	});
+	if (descartados > 0) {
+		console.warn(
+			`[CierreDiarioAsesor] ${fecha}: ${descartados} movimiento(s) de bucket descartado(s) — asesor_id sin cruce a user.email (sin pool activo o email_cash_in no coincide)`,
 		);
 	}
 

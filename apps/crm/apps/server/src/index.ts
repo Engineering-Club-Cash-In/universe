@@ -1377,8 +1377,9 @@ scheduleAtCierreDiarioGT();
 // el snapshot de ayer; re-correr no duplica, ver arriba). Antes de las 00:15
 // GT NO se corre: se deja que el timeout programado lo lance a la hora.
 setTimeout(() => {
-	const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
-	const minutoGT = new Date().getUTCMinutes();
+	const bootNow = new Date();
+	const horaGT = (bootNow.getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
+	const minutoGT = bootNow.getUTCMinutes();
 	if (horaGT > 0 || (horaGT === 0 && minutoGT >= 15)) {
 		generarCierreDiario(ayerGT()).catch(console.error);
 	} else {

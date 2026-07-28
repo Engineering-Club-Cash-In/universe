@@ -47,6 +47,7 @@ import type {
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
 	PaginatedResponse,
+	PoolPorAsesorRow,
 	ResumenGlobalInversionista,
 	ReversePagoInput,
 	UpdateCreditoInput,
@@ -1237,6 +1238,19 @@ export class CarteraBackClient {
 			success: boolean;
 			data: { asesor_id: number; nombre: string }[];
 		}>(`/buckets/pool/${bucket}`, { method: "GET" }, true);
+		return response.data ?? [];
+	}
+
+	// Catálogo COMPLETO de asesores con sus buckets activos del pool, sin pasar
+	// por creditos (no depende de que el asesor tenga cuentas activas ahora
+	// mismo). Trae `email_cash_in` para cruzar contra `user.email` del CRM sin
+	// depender del `email` de getAdvisors (desactualizado para varios
+	// asesores).
+	async getPoolPorAsesor(): Promise<PoolPorAsesorRow[]> {
+		const response = await this.request<{
+			success: boolean;
+			data: PoolPorAsesorRow[];
+		}>("/buckets/pool-por-asesor", { method: "GET" }, true);
 		return response.data ?? [];
 	}
 

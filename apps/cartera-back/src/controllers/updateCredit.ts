@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { eq, and, inArray, asc, gt, lte, gte, sql } from "drizzle-orm";
+import { eq, and, or, inArray, asc, gt, lte, gte, sql } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { db } from "../database";
 import {
@@ -1971,7 +1971,12 @@ export const recalcularPagosCredito = async ({
 
   // 2️⃣ Obtener pagos con su cuota
   // Si numero_cuota está definido → desde esa cuota en adelante (pagadas y no pagadas)
-  // Si no → solo no pagadas
+  // Si no → solo lo que AÚN NO SE APLICÓ al crédito: cuotas no pagadas y
+  // también pagos ya registrados como pagados pero SIN validar por conta
+  // (validationStatus='pending', vivos). Esos pagos no han movido capital ni
+  // distribuido a inversionistas — su reparto guardado recién se aplica al
+  // validarse, así que refrescarlo aquí es seguro y necesario: si quedaran
+  // fuera, conta validaría el split viejo (interés pre-abono).
   const whereConditions =
     numero_cuota !== undefined
       ? and(
@@ -1980,7 +1985,14 @@ export const recalcularPagosCredito = async ({
         )
       : and(
           eq(pagos_credito.credito_id, credito.credito_id),
-          eq(pagos_credito.pagado, false),
+          or(
+            eq(pagos_credito.pagado, false),
+            and(
+              eq(pagos_credito.pagado, true),
+              eq(pagos_credito.validationStatus, "pending"),
+              eq(pagos_credito.paymentFalse, false),
+            ),
+          ),
         );
 
   const rows = await db

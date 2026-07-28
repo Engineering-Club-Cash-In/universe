@@ -42,6 +42,7 @@ import {
 } from "./registerPaymentPolicy";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
+  withPaymentAdvisoryLock,
   type PaymentAdvisoryLockConnection,
 } from "../utils/paymentAdvisoryLock";
 
@@ -3469,8 +3470,32 @@ export async function actualizarCuentaPago(
  * Aplica un monto adicional a los restantes de un pago existente.
  * Recibe pago_id y monto, distribuye en orden: interés → IVA → seguro → GPS → membresías → capital.
  * Actualiza solo ese pago y llama a inversionistas.
+ *
+ * 🔒 Escritor de filas de pago: corre bajo el MISMO advisory lock por crédito
+ * que registrar/aplicar/revalidar. Sin él, usarlo en plena ventana del
+ * recálculo post-abono cruzaría dos escritores (el recálculo pisa el monto
+ * manual, o la validación manual queda con el reparto pre-abono).
  */
 export async function aplicarMontoAPago(pago_id: number, monto: number, fecha_pago?: string, validationStatus?: string) {
+  // Pre-lectura mínima: solo para conocer el crédito a serializar. La
+  // lectura real del pago ocurre adentro, ya bajo el lock.
+  const [pagoPre] = await db
+    .select({ credito_id: pagos_credito.credito_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pago_id))
+    .limit(1);
+  const creditoIdLock = pagoPre?.credito_id ?? null;
+  if (creditoIdLock === null) {
+    // Sin crédito no hay qué serializar (pago inexistente o credito_id null);
+    // la lógica interna maneja esos casos.
+    return aplicarMontoAPagoSinLock(pago_id, monto, fecha_pago, validationStatus);
+  }
+  return withPaymentAdvisoryLock(creditoIdLock, () =>
+    aplicarMontoAPagoSinLock(pago_id, monto, fecha_pago, validationStatus)
+  );
+}
+
+async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pago?: string, validationStatus?: string) {
   try {
     // 1. Obtener el pago
     const [pago] = await db

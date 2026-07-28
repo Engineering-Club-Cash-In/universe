@@ -20,9 +20,15 @@ export type AsesorConBuckets = {
 };
 
 /**
- * TODOS los asesores con sus buckets activos del pool (asesor_bucket WHERE
- * activo=true), SIN filtrar por créditos actuales. Un asesor sin ninguna fila
- * activa en asesor_bucket no aparece en el resultado (sin pool asignado).
+ * TODOS los asesores (LEFT JOIN a asesor_bucket WHERE activo=true) — un
+ * asesor SIEMPRE aparece en el resultado aunque no tenga pool activo ahora
+ * mismo (`buckets: []`). Antes era INNER JOIN: un asesor con pool
+ * desactivado/migrado entre el evento del día y la corrida del cierre (00:15
+ * GT) desaparecía por completo del mapa, y el CRM no podía atribuirle NINGÚN
+ * movimiento de bucket de ese día — mismo bug de fondo que motivó todo el
+ * rediseño de atribución (mezclar identidad del asesor con su estado ACTUAL
+ * de pool). email_cash_in/nombre no dependen de asesor_bucket, así que el
+ * LEFT JOIN no pierde identidad, solo puede dejar `buckets` vacío.
  */
 export async function getPoolPorAsesor(): Promise<AsesorConBuckets[]> {
   const rows = await db
@@ -33,7 +39,7 @@ export async function getPoolPorAsesor(): Promise<AsesorConBuckets[]> {
       bucket: asesor_bucket.bucket,
     })
     .from(asesores)
-    .innerJoin(
+    .leftJoin(
       asesor_bucket,
       and(eq(asesor_bucket.asesor_id, asesores.asesor_id), eq(asesor_bucket.activo, true)),
     )
@@ -49,7 +55,9 @@ export async function getPoolPorAsesor(): Promise<AsesorConBuckets[]> {
         buckets: [],
       });
     }
-    porAsesor.get(r.asesor_id)!.buckets.push(r.bucket);
+    if (r.bucket != null) {
+      porAsesor.get(r.asesor_id)!.buckets.push(r.bucket);
+    }
   }
   return Array.from(porAsesor.values());
 }

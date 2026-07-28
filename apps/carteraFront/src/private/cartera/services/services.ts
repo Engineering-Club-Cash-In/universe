@@ -1992,6 +1992,32 @@ export interface AplicarPagoResponse {
   success: boolean;
   applied?: boolean;
   message: string;
+  /**
+   * Estado del recálculo automático de recibos tras aplicar un abono a capital:
+   * - "error": falló — correr "Recalcular Pagos" manualmente.
+   * - "revisar_vencidas": el crédito tiene cuotas VENCIDAS sin aplicar — no se
+   *   recalculó nada para no repreciar el interés de meses ya debidos; revisar
+   *   con el equipo cómo tratarlas antes de recalcular.
+   * - "revisar_parciales": hay cuota con pago parcial YA APLICADO al crédito —
+   *   NI el recálculo automático NI el botón "Recalcular Pagos" son seguros ahí
+   *   (ambos redistribuirían el parcial); revisar el reparto con el equipo.
+   *   (Un pago solo registrado sin validar — parcial o completo — NO cae aquí:
+   *   ese sí se recalcula para que conta lo valide con el reparto nuevo.)
+   * - "revisar_sobrante": el abono se aplicó y se recalculó bien, pero hay un
+   *   pago PENDIENTE de validar cuyo monto supera lo que pide su recibo nuevo
+   *   (ej. pagó la cuota completa y el abono dejó el último recibo más chico)
+   *   — NO validar ese pago pendiente hasta decidir con el equipo si el
+   *   sobrante va como saldo a favor o devolución. Solo es un aviso: el botón
+   *   de validar sigue funcionando igual.
+   * - "omitido_solo_interes": crédito solo-interés, no aplica el recálculo.
+   */
+  recalculo_pendientes?:
+    | "ok"
+    | "error"
+    | "omitido_solo_interes"
+    | "revisar_vencidas"
+    | "revisar_parciales"
+    | "revisar_sobrante";
   data?: {
     credito_id: number;
     capital_anterior: string;

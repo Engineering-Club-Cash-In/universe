@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, ne, sql } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -10,7 +10,7 @@ import {
   calcularCoberturaCuota,
   shouldRejectZeroAppliedNormalValidation,
 } from "./registerPaymentPolicy";
-import { PAYMENT_ADVISORY_LOCK_NAMESPACE } from "../utils/paymentAdvisoryLock";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
@@ -40,11 +40,13 @@ export const revalidatePayment = async ({ body, set }: any) => {
     console.log(`📋 Crédito ID: ${credito_id}`);
     console.log(`🧾 Pago ID: ${pago_id}`);
 
-    // 🔥 INICIAR TRANSACCIÓN ATÓMICA
-    const result = await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(${PAYMENT_ADVISORY_LOCK_NAMESPACE}, ${credito_id})`
-      );
+    // 🔥 TRANSACCIÓN ATÓMICA bajo el lock por crédito. El lock se espera en
+    // el pool DEDICADO (withPaymentAdvisoryLock), NO dentro de la tx: antes,
+    // cada waiter del pg_advisory_xact_lock retenía una conexión del pool de
+    // trabajo mientras esperaba, y suficientes waiters dejaban sin conexión
+    // al dueño del lock (deadlock de pool).
+    const result = await withPaymentAdvisoryLock(credito_id, () =>
+      db.transaction(async (tx) => {
       // 2️⃣ OBTENER DATOS DEL PAGO
       const [pago] = await tx
         .select()
@@ -218,7 +220,8 @@ export const revalidatePayment = async ({ body, set }: any) => {
         numero_credito_sifco: credito.numero_credito_sifco,
         cuota: credito.cuota
       };
-    });
+      })
+    );
 
     if ("success" in result && result.success === false) {
       set.status = 400;

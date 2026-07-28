@@ -2448,6 +2448,7 @@ async function aplicarPagoNormalEnTx(
     const cuotaAmount = new Big(credito.cuota ?? 0);
     let totalAplicadoEnCuota = new Big(pago.monto_aplicado ?? 0);
     let cuotaCompleta = false;
+    let cierreDiferido = false;
 
     if (pago.cuota_id !== null && cuotaAmount.gt(0)) {
       const otrosPagosValidados = await tx
@@ -2517,8 +2518,16 @@ async function aplicarPagoNormalEnTx(
             )
             .limit(1);
           if (hermanoPendiente) {
+            // La fila de cierre viene marcada pagado=true desde el registro
+            // (dejó su recibo en 0). Si se queda así ya validada, la mora
+            // tomaría la cuota como satisfecha aunque el hermano nunca se
+            // valide (latefee/procesarMoras excluyen cuotas con una fila viva
+            // pagado=true validated/no_required con monto>0). Mientras el
+            // cierre esté diferido, la fila viaja como parcial (pagado=false);
+            // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
+            cierreDiferido = pago.pagado === true;
             console.log(
-              `📊 Cuota ${pago.cuota_id}: recibo en 0 pero hay otro pago pendiente sin validar (${hermanoPendiente.pago_id}) → NO se cierra con este pago`
+              `📊 Cuota ${pago.cuota_id}: recibo en 0 pero hay otro pago pendiente sin validar (${hermanoPendiente.pago_id}) → NO se cierra con este pago${cierreDiferido ? " (se difiere también su pagado=true)" : ""}`
             );
           } else {
             cuotaCompleta = true;
@@ -2561,10 +2570,15 @@ async function aplicarPagoNormalEnTx(
     if (!cuotaCompleta) {
       console.log("⚠️ La cuota aún no se cierra con este pago");
 
-      // Validar el pago
+      // Validar el pago. Si es un cierre diferido, suelta también su
+      // pagado=true de registro (ver comentario en el guard de arriba).
       await tx
         .update(pagos_credito)
-        .set({ validationStatus: "validated", fecha_aplicado: new Date() })
+        .set({
+          validationStatus: "validated",
+          fecha_aplicado: new Date(),
+          ...(cierreDiferido ? { pagado: false } : {}),
+        })
         .where(eq(pagos_credito.pago_id, pago_id));
 
       const abonoCapitalPago = new Big(pago.abono_capital ?? 0);

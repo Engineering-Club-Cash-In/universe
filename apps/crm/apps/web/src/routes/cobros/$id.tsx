@@ -1298,9 +1298,17 @@ function RouteComponent() {
 											emailCliente={caso.emailContacto || ""}
 											metodoInicial="llamada"
 											variante="promesa"
+											// Mismo criterio que el card "Total a Pagar" de arriba
+											// (líneas ~728-742): con convenio activo la mora se
+											// reemplaza por la cuota del convenio, no se suma a
+											// ella — si no, la sugerencia acá no coincide con lo
+											// que el asesor ve en pantalla (Codex, PR #1191).
 											montoSugerido={
-												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
+												caso.cuotaConvenio != null
+													? Number(caso.cuotaConvenio) +
+														Number(caso.cuotaMensual || 0)
+													: Number(caso.montoEnMora || 0) +
+														Number(caso.cuotaMensual || 0)
 											}
 											cuotasDisponibles={cuotas
 												.filter(

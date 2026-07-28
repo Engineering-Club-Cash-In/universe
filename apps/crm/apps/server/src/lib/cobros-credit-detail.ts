@@ -11,6 +11,13 @@ export function resolveInstallmentAmount(
 	return rowAmount ?? currentCreditAmount;
 }
 
+export function resolveOperationalInstallment(
+	statusCredit: string,
+	historicalInstallment: string,
+): string {
+	return statusCredit === "CANCELADO" ? "0.00" : historicalInstallment;
+}
+
 type CreditDetailRow = {
 	abono_capital?: string | null;
 	cuota?: string | null;

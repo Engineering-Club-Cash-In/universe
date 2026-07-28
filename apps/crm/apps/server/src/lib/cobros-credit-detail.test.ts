@@ -1,10 +1,42 @@
 import { describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
 import {
 	countRemainingInstallments,
 	countScheduledPaidInstallments,
 	resolveCreditContractSummary,
 	resolveInstallmentAmount,
+	resolveOperationalInstallment,
 } from "./cobros-credit-detail";
+
+describe("resolveOperationalInstallment", () => {
+	it("zeros cancelled installments", () => {
+		expect(resolveOperationalInstallment("CANCELADO", "2323.10")).toBe("0.00");
+	});
+
+	it("preserves active installments", () => {
+		expect(resolveOperationalInstallment("ACTIVO", "2323.10")).toBe("2323.10");
+	});
+
+	it("keeps the historical amount limited to the contractual display", async () => {
+		const [routerSource, detailSource] = await Promise.all([
+			Bun.file(resolve(import.meta.dir, "../routers/cobros.ts")).text(),
+			Bun.file(
+				resolve(import.meta.dir, "../../../web/src/routes/cobros/$id.tsx"),
+			).text(),
+		]);
+
+		expect(routerSource).toMatch(
+			/cuotaMensual:\s*resolveOperationalInstallment\(\s*statusCredit,\s*contractSummary\.installment,?\s*\)/,
+		);
+		expect(routerSource).toContain(
+			"cuotaMensualHistorica: contractSummary.installment",
+		);
+		expect(detailSource.match(/caso\.cuotaMensualHistorica/g)).toHaveLength(1);
+		expect(detailSource).toContain(
+			"caso.cuotaMensualHistorica ?? caso.cuotaMensual",
+		);
+	});
+});
 
 describe("resolveCreditContractSummary", () => {
 	it("preserves active fallbacks", () => {

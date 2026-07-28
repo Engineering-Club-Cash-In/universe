@@ -45,6 +45,7 @@ import {
 	countRemainingInstallments,
 	resolveCreditContractSummary,
 	resolveInstallmentAmount,
+	resolveOperationalInstallment,
 } from "../lib/cobros-credit-detail";
 import {
 	PLANTILLAS_MENSAJES,
@@ -2276,7 +2277,11 @@ export const cobrosRouter = {
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
 					montoFinanciado: contractSummary.principal,
-					cuotaMensual: contractSummary.installment,
+					cuotaMensual: resolveOperationalInstallment(
+						statusCredit,
+						contractSummary.installment,
+					),
+					cuotaMensualHistorica: contractSummary.installment,
 					numeroCuotas: creditoCompleto.credito.plazo,
 					fechaInicio: creditoCompleto.credito.fecha_creacion,
 					diaPagoMensual,

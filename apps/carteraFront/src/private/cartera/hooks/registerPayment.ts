@@ -737,7 +737,7 @@ const handleAbonoOtros = () => {
     processInvestors.mutate({ pago_id, credito_id, fecha_periodo }, {});
   }
 
-async function handleResetCredito() {
+async function handleResetCredito(montoIncobrable = 0) {
  
   console.log(cuotaSeleccionada, " cuotaSeleccionada");
         const cuotaApagarValue =
@@ -765,7 +765,7 @@ async function handleResetCredito() {
     url_boletas: url_boletas,
     cuota: cuotaActualInfo?.numero || 0,
     banco_id: formik.values.banco_id,
-    montoIncobrable: montoBaseBadDebt,
+    montoIncobrable: montoIncobrable,
     numeroAutorizacion: formik.values.numeroAutorizacion || undefined,
   }, {
     onSuccess: (data) => {

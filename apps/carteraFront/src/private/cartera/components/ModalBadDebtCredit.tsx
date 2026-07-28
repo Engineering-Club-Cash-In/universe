@@ -19,7 +19,7 @@ export function ModalBadDebtCredit({
   open: boolean;
   onClose: () => void;
   creditId: number;
-  onSuccess?: () => void;
+  onSuccess?: (montoIncobrable: number) => void;
   montoBase: number; // Monto base de lo incobrable (por si lo quieres mostrar)
 }) {
   const [motivo, setMotivo] = useState("");
@@ -37,7 +37,8 @@ export function ModalBadDebtCredit({
       alert("Debes escribir el motivo para marcar como incobrable.");
       return;
     }
-    if (!monto || isNaN(Number(monto)) || Number(monto) <= 0) {
+    const montoIncobrable = Number(monto);
+    if (!monto || isNaN(montoIncobrable) || montoIncobrable <= 0) {
       alert("El monto incobrable debe ser mayor a cero.");
       return;
     }
@@ -47,13 +48,13 @@ export function ModalBadDebtCredit({
         accion: "INCOBRABLE",
         motivo,
         observaciones,
-        monto_cancelacion: Number(monto),
+        monto_cancelacion: montoIncobrable,
       },
       {
         onSuccess: (data) => {
           alert(data.message || "Crédito marcado como incobrable correctamente");
           handleClose();
-          if (onSuccess) onSuccess();
+          if (onSuccess) onSuccess(montoIncobrable);
         },
         onError: (error) => {
           alert(error.message || "No se pudo marcar como incobrable");

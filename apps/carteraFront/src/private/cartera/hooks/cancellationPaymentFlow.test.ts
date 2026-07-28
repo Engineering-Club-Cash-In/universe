@@ -29,3 +29,25 @@ describe("finalized credit form reset wiring", () => {
 		expect(guard).toContain("setResetBuscador(true);");
 	});
 });
+
+describe("bad debt amount wiring", () => {
+	it("propagates the selected amount through the modal, form, and reset request", async () => {
+		const componentsDir = resolve(import.meta.dir, "../components");
+		const [modalSource, formSource, hookSource] = await Promise.all([
+			Bun.file(resolve(componentsDir, "ModalBadDebtCredit.tsx")).text(),
+			Bun.file(resolve(componentsDir, "PagoForm.tsx")).text(),
+			Bun.file(resolve(import.meta.dir, "registerPayment.ts")).text(),
+		]);
+
+		expect(modalSource).toMatch(
+			/onSuccess\?: \(montoIncobrable: number\) => void/,
+		);
+		expect(modalSource).toMatch(/monto_cancelacion: montoIncobrable/);
+		expect(modalSource).toMatch(/onSuccess\(montoIncobrable\)/);
+		expect(formSource).toMatch(
+			/onSuccess=\{async \(montoIncobrable\) => \{[\s\S]*?handleResetCredito\(montoIncobrable\)/,
+		);
+		expect(hookSource).toMatch(/handleResetCredito\(montoIncobrable = 0\)/);
+		expect(hookSource).toMatch(/montoIncobrable: montoIncobrable/);
+	});
+});

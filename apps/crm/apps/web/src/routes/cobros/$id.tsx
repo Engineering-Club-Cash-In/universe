@@ -631,7 +631,9 @@ function RouteComponent() {
 									</div>
 									<p className="font-bold text-blue-600 text-lg uppercase tracking-tight">
 										Q
-										{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+										{Number(
+											caso.cuotaMensualHistorica ?? caso.cuotaMensual,
+										).toLocaleString("es-GT", {
 											minimumFractionDigits: 2,
 											maximumFractionDigits: 2,
 										})}

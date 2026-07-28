@@ -2448,6 +2448,7 @@ async function aplicarPagoNormalEnTx(
     const cuotaAmount = new Big(credito.cuota ?? 0);
     let totalAplicadoEnCuota = new Big(pago.monto_aplicado ?? 0);
     let cuotaCompleta = false;
+    let cierreDiferido = false;
 
     if (pago.cuota_id !== null && cuotaAmount.gt(0)) {
       const otrosPagosValidados = await tx
@@ -2495,10 +2496,45 @@ async function aplicarPagoNormalEnTx(
           restantesRecibo.lte(0.01) &&
           new Big(pago.monto_aplicado ?? 0).gt(0)
         ) {
-          cuotaCompleta = true;
-          console.log(
-            `📊 Cuota ${pago.cuota_id}: recibo menor a la cuota mensual cubierto por completo (restantes en 0) → COMPLETA`
-          );
+          // Cuota partida en varios pagos: la fila de CIERRE queda con
+          // restantes 0 aunque un parcial anterior siga pendiente de validar.
+          // Si conta valida el cierre PRIMERO, cerrar aquí marcaría la cuota
+          // pagada y distribuiría a inversionistas solo con el pago de cola
+          // (la suma de arriba solo cuenta hermanos ya validados). Con otro
+          // pago pendiente vivo de la misma cuota NO se cierra: este pago se
+          // valida sin cerrar (RAMA A) y la cuota cierra al validar el último
+          // hermano, cuando la suma de validados alcanza.
+          const [hermanoPendiente] = await tx
+            .select({ pago_id: pagos_credito.pago_id })
+            .from(pagos_credito)
+            .where(
+              and(
+                eq(pagos_credito.cuota_id, pago.cuota_id),
+                eq(pagos_credito.validationStatus, "pending"),
+                eq(pagos_credito.paymentFalse, false),
+                gt(pagos_credito.monto_aplicado, "0"),
+                ne(pagos_credito.pago_id, pago_id)
+              )
+            )
+            .limit(1);
+          if (hermanoPendiente) {
+            // La fila de cierre viene marcada pagado=true desde el registro
+            // (dejó su recibo en 0). Si se queda así ya validada, la mora
+            // tomaría la cuota como satisfecha aunque el hermano nunca se
+            // valide (latefee/procesarMoras excluyen cuotas con una fila viva
+            // pagado=true validated/no_required con monto>0). Mientras el
+            // cierre esté diferido, la fila viaja como parcial (pagado=false);
+            // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
+            cierreDiferido = pago.pagado === true;
+            console.log(
+              `📊 Cuota ${pago.cuota_id}: recibo en 0 pero hay otro pago pendiente sin validar (${hermanoPendiente.pago_id}) → NO se cierra con este pago${cierreDiferido ? " (se difiere también su pagado=true)" : ""}`
+            );
+          } else {
+            cuotaCompleta = true;
+            console.log(
+              `📊 Cuota ${pago.cuota_id}: recibo menor a la cuota mensual cubierto por completo (restantes en 0) → COMPLETA`
+            );
+          }
         }
       }
     }
@@ -2534,10 +2570,15 @@ async function aplicarPagoNormalEnTx(
     if (!cuotaCompleta) {
       console.log("⚠️ La cuota aún no se cierra con este pago");
 
-      // Validar el pago
+      // Validar el pago. Si es un cierre diferido, suelta también su
+      // pagado=true de registro (ver comentario en el guard de arriba).
       await tx
         .update(pagos_credito)
-        .set({ validationStatus: "validated", fecha_aplicado: new Date() })
+        .set({
+          validationStatus: "validated",
+          fecha_aplicado: new Date(),
+          ...(cierreDiferido ? { pagado: false } : {}),
+        })
         .where(eq(pagos_credito.pago_id, pago_id));
 
       const abonoCapitalPago = new Big(pago.abono_capital ?? 0);
@@ -2655,6 +2696,25 @@ async function aplicarPagoNormalEnTx(
         .update(cuotas_credito)
         .set({ pagado: true })
         .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+
+      // Cerrada la cuota, TODAS las filas validadas que la pagaron quedan
+      // pagado=true — en particular el cierre diferido que viajó como parcial
+      // (ver arriba): si quedara validated+pagado=false en cuota cerrada, el
+      // guard de parciales del abono a capital (pagado=false, monto>0,
+      // status≠pending) la tomaría como parcial vivo y saltaría el recálculo
+      // automático con revisar_parciales para siempre. También evita que el
+      // recálculo re-siembre estas filas como si fueran recibos abiertos.
+      await tx
+        .update(pagos_credito)
+        .set({ pagado: true })
+        .where(
+          and(
+            eq(pagos_credito.cuota_id, pago.cuota_id),
+            eq(pagos_credito.paymentFalse, false),
+            eq(pagos_credito.validationStatus, "validated"),
+            gt(pagos_credito.monto_aplicado, "0")
+          )
+        );
 
       // Limpiar `*_restante` huérfanos del resto de pagos de la cuota.
       // Si quedaron descuadrados por bugs históricos (pagos partidos

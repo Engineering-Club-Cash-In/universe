@@ -1,6 +1,6 @@
 import Big from "big.js";
 import z from "zod";
-import { db, client } from "../database";
+import { db, lockPool } from "../database";
 import { withCapitalContext } from "../utils/withAuditContext";
 import {
   creditos,
@@ -599,7 +599,9 @@ export const insertPayment = async ({ body, set }: any) => {
     // validación anti-sobreaplicación no los detiene porque ambos leen el
     // estado previo. El lock obliga a que el segundo espere a que el primero
     // termine y vea el saldo ya actualizado.
-    lockConn = await client.connect();
+    // Conexión del pool DEDICADO de locks: los waiters de pg_advisory_lock no
+    // deben consumir conexiones del pool de trabajo (deadlock de pool).
+    lockConn = await lockPool.connect();
     lockedCreditoId = credito_id;
     await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
       PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -2268,7 +2270,11 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     // casos (pago inexistente o credito_id null).
     return aplicarPagoAlCreditoSinLock(pago_id);
   }
-  const lockConn: PaymentAdvisoryLockConnection = await client.connect();
+  // Conexión del pool DEDICADO de locks: un waiter bloqueado en
+  // pg_advisory_lock retiene su conexión; si viviera en el pool de trabajo
+  // podría agotarlo y el dueño del lock ya no tendría conexiones para sus
+  // queries (drizzle) → deadlock de pool.
+  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
   try {
     await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
       PAYMENT_ADVISORY_LOCK_NAMESPACE,

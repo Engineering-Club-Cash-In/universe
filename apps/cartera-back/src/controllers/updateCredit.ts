@@ -1987,10 +1987,16 @@ export const recalcularPagosCredito = async ({
           eq(pagos_credito.credito_id, credito.credito_id),
           or(
             eq(pagos_credito.pagado, false),
+            // Pagos registrados sin validar: solo con monto_aplicado > 0.
+            // Los recibos especiales de solo mora/otros/convenio se guardan
+            // pagado=true con monto_aplicado=0 — no son pago de cuota, no
+            // tienen split que refrescar, y reescribirlos aquí los volvería
+            // recibos de cuota (incluso volteando su pagado).
             and(
               eq(pagos_credito.pagado, true),
               eq(pagos_credito.validationStatus, "pending"),
               eq(pagos_credito.paymentFalse, false),
+              gt(pagos_credito.monto_aplicado, "0"),
             ),
           ),
         );

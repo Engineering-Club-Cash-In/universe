@@ -7,6 +7,38 @@ export const CREDIT_DETAIL_STATUSES = [
 	"CANCELADO",
 ] as const;
 
+export const ORIGINAL_PRINCIPAL_PAYMENT_STATUSES = [
+	"no_required",
+	"validated",
+	"capital_validated",
+	"reset",
+] as const;
+
+export function isOriginalPrincipalPayment(payment: {
+	validationStatus: string | null;
+	pagado: boolean | null;
+	paymentFalse: boolean | null;
+}): boolean {
+	return (
+		payment.pagado === true &&
+		payment.paymentFalse !== true &&
+		(ORIGINAL_PRINCIPAL_PAYMENT_STATUSES as readonly string[]).includes(
+			payment.validationStatus ?? "",
+		)
+	);
+}
+
+export function isCreditClosingPayment(payment: {
+	validationStatus: string | null;
+	registerBy: string | null;
+}): boolean {
+	return (
+		payment.registerBy === "system_reset" &&
+		(payment.validationStatus === "reset" ||
+			payment.validationStatus === "validated")
+	);
+}
+
 export function canViewCreditDetailByStatus(
 	status: string | null | undefined,
 ): boolean {

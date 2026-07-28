@@ -46,6 +46,30 @@ describe("resolveCreditContractSummary", () => {
 			),
 		).toEqual({ principal: "100.00", installment: "20.00" });
 	});
+
+	it("prefers an authoritative cancelled summary including off-schedule capital", () => {
+		expect(
+			resolveCreditContractSummary(
+				"CANCELADO",
+				[{ abono_capital: "30000.00", cuota: "2200.00" }],
+				"0.00",
+				"0.00",
+				{ originalPrincipal: "51875.08", installment: "2323.10" },
+			),
+		).toEqual({ principal: "51875.08", installment: "2323.10" });
+	});
+
+	it("falls back to paid rows when authoritative values are zero", () => {
+		expect(
+			resolveCreditContractSummary(
+				"CANCELADO",
+				[{ abono_capital: "30000.00", cuota: "2200.00" }],
+				"0.00",
+				"0.00",
+				{ originalPrincipal: "0.00", installment: "0" },
+			),
+		).toEqual({ principal: "30000.00", installment: "2200.00" });
+	});
 });
 
 describe("countRemainingInstallments", () => {

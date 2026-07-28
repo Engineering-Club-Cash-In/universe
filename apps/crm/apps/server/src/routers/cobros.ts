@@ -2245,6 +2245,7 @@ export const cobrosRouter = {
 					creditoCompleto.cuotasPagadas,
 					creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
 					creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual || "0.00",
+					creditoCompleto.contractSummary,
 				);
 
 				return {

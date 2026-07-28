@@ -251,6 +251,10 @@ export interface CarteraConvenio {
 
 export interface CreditoDirectoResponse {
 	credito: CarteraCredito;
+	contractSummary?: {
+		originalPrincipal?: string | null;
+		installment?: string | null;
+	};
 	usuario: CarteraUsuario;
 	asesor: CarteraAsesorCredito | null;
 	cuotasPagadas: CarteraCuotaCredito[];

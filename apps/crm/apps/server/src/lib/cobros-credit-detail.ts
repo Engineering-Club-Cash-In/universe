@@ -31,6 +31,10 @@ export function resolveCreditContractSummary(
 	paidRows: readonly CreditDetailRow[] | null | undefined,
 	fallbackPrincipal: string,
 	fallbackInstallment: string,
+	authoritativeSummary?: {
+		originalPrincipal?: string | null;
+		installment?: string | null;
+	},
 ): { principal: string; installment: string } {
 	if (statusCredit !== "CANCELADO") {
 		return { principal: fallbackPrincipal, installment: fallbackInstallment };
@@ -49,8 +53,18 @@ export function resolveCreditContractSummary(
 
 	return {
 		principal:
-			principalCents > 0 ? fromCents(principalCents) : fallbackPrincipal,
-		installment: installment ?? fallbackInstallment,
+			(authoritativeSummary?.originalPrincipal &&
+			toCents(authoritativeSummary.originalPrincipal) > 0
+				? authoritativeSummary.originalPrincipal
+				: undefined) ||
+			(principalCents > 0 ? fromCents(principalCents) : fallbackPrincipal),
+		installment:
+			(authoritativeSummary?.installment &&
+			toCents(authoritativeSummary.installment) > 0
+				? authoritativeSummary.installment
+				: undefined) ||
+			installment ||
+			fallbackInstallment,
 	};
 }
 

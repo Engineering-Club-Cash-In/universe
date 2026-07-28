@@ -3,8 +3,68 @@ import { resolve } from "node:path";
 import {
 	canResetCreditByStatus,
 	canViewCreditDetailByStatus,
+	isCreditClosingPayment,
+	isOriginalPrincipalPayment,
 	withActiveCancellation,
 } from "./creditDetailPolicy";
+
+describe("credit closing payments", () => {
+	it("accepts system resets with reset or validated status only", () => {
+		expect(
+			isCreditClosingPayment({
+				validationStatus: "reset",
+				registerBy: "system_reset",
+			}),
+		).toBeTrue();
+		expect(
+			isCreditClosingPayment({
+				validationStatus: "validated",
+				registerBy: "system_reset",
+			}),
+		).toBeTrue();
+	});
+
+	it("rejects ordinary validated, other registerBy, pending, and capital payments", () => {
+		for (const payment of [
+			{ validationStatus: "validated", registerBy: "user" },
+			{ validationStatus: "validated", registerBy: "other" },
+			{ validationStatus: "pending", registerBy: "system_reset" },
+			{ validationStatus: "capital", registerBy: "system_reset" },
+		]) {
+			expect(isCreditClosingPayment(payment)).toBeFalse();
+		}
+	});
+});
+
+describe("original principal payments", () => {
+	it("includes every original-principal validation status", () => {
+		for (const validationStatus of [
+			"no_required",
+			"validated",
+			"capital_validated",
+			"reset",
+		]) {
+			expect(
+				isOriginalPrincipalPayment({
+					validationStatus,
+					pagado: true,
+					paymentFalse: false,
+				}),
+			).toBeTrue();
+		}
+	});
+
+	it("excludes pending, capital, unpaid, and false payments", () => {
+		for (const payment of [
+			{ validationStatus: "pending", pagado: true, paymentFalse: false },
+			{ validationStatus: "capital", pagado: true, paymentFalse: false },
+			{ validationStatus: "validated", pagado: false, paymentFalse: false },
+			{ validationStatus: "validated", pagado: true, paymentFalse: true },
+		]) {
+			expect(isOriginalPrincipalPayment(payment)).toBeFalse();
+		}
+	});
+});
 
 describe("credit detail visibility", () => {
 	it("only allows resetting credits pending cancellation", () => {

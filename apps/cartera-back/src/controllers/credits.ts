@@ -42,6 +42,8 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   CREDIT_DETAIL_STATUSES,
   canResetCreditByStatus,
+  isCreditClosingPayment,
+  isOriginalPrincipalPayment,
   withActiveCancellation,
 } from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
@@ -69,6 +71,42 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
     const currentCredit = creditoData[0];
     const creditoId = currentCredit.creditos.credito_id;
+
+    const contractSummary =
+      currentCredit.creditos.statusCredit === "CANCELADO"
+        ? await (async () => {
+            const payments = await db
+              .select({
+                abono_capital: pagos_credito.abono_capital,
+                cuota: pagos_credito.cuota,
+                validationStatus: pagos_credito.validationStatus,
+                registerBy: pagos_credito.registerBy,
+                pagado: pagos_credito.pagado,
+                paymentFalse: pagos_credito.paymentFalse,
+              })
+              .from(pagos_credito)
+              .where(eq(pagos_credito.credito_id, creditoId));
+            const eligiblePayments = payments.filter(isOriginalPrincipalPayment);
+            const closingPayments = eligiblePayments.filter(isCreditClosingPayment);
+
+            return {
+              originalPrincipal: (() => {
+                const principal = eligiblePayments.reduce(
+                  (total, payment) => total.plus(payment.abono_capital ?? 0),
+                  new Big(0),
+                );
+                return principal.gt(0) ? principal.toFixed(2) : null;
+              })(),
+              installment:
+                closingPayments.find((payment) => payment.cuota != null)?.cuota ??
+                eligiblePayments.find(
+                  (payment) => payment.validationStatus === "reset" && payment.cuota != null
+                )?.cuota ??
+                eligiblePayments.find((payment) => payment.cuota != null)?.cuota ??
+                null,
+            };
+          })()
+        : undefined;
 
     // 2. Si el crédito está cancelado o pendiente de cancelación, verificar si hay cancelación activa
     const cancelacionActiva =
@@ -335,6 +373,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         convenioActivo: null,
         cuotasEnConvenio: [],
         pagosConvenio: [],
+        ...(contractSummary ? { contractSummary } : {}),
       }, cancelacionActiva, currentCredit.creditos.statusCredit);
     }
 
@@ -467,6 +506,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           : null,
       cuotasEnConvenio,
       pagosConvenio,
+      ...(contractSummary ? { contractSummary } : {}),
     }, cancelacionActiva, currentCredit.creditos.statusCredit);
   } catch (error) {
     console.error("[getCreditoByNumero] Error:", error);

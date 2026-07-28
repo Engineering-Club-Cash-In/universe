@@ -5630,9 +5630,12 @@ export const cobrosRouter = {
 			}
 
 			// Un contacto generado por el sistema (premora / envío masivo) no es
-			// gestión del asesor. `es_efectivo_manual` ya lo excluye en el job,
-			// pero las promesas se cuentan por estado, así que el filtro se aplica
-			// acá con el mismo criterio (prefijo de comentario).
+			// gestión del asesor. `es_efectivo_manual` ya lo excluye en el job. Acá
+			// se aplica el mismo criterio (prefijo de comentario) a promesas Y al
+			// total: el denominador de "efectivos/total" que pide el reporte es
+			// "de lo que el asesor REGISTRÓ, cuánto contestó" — un envío automático
+			// no es un intento del asesor, así que si se cuela en el total infla el
+			// denominador y hace ver el ratio peor de lo real.
 			const esAutomatico = sql`(${contactosCobros.comentarios} LIKE ${`${PREFIJO_PREMORA_AUTO}%`} OR ${contactosCobros.comentarios} LIKE ${`${PREFIJO_WSP_MASIVO}%`})`;
 
 			const filas = await db
@@ -5643,7 +5646,7 @@ export const cobrosRouter = {
 					asesorEmail: user.email,
 					contactosEfectivos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.esEfectivoManual})`,
 					promesasObtenidas: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} = 'promesa_pago' AND NOT ${esAutomatico})`,
-					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto')`,
+					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND NOT ${esAutomatico})`,
 					// Movimientos que SALIERON del bucket del pool del asesor ese día.
 					subieron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'subida')`,
 					bajaron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'bajada')`,

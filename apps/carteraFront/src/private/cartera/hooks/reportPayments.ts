@@ -82,6 +82,12 @@ export function useAplicarPago() {
           description:
             "El abono se aplicó, pero este crédito tiene una cuota con pago PARCIAL aplicado y el recálculo automático se omitió para no reescribir ese pago. OJO: NO corras 'Recalcular Pagos' aquí sin revisarlo antes con el equipo — el botón también redistribuiría el pago parcial. Revisen el reparto de esa cuota manualmente.",
         });
+      } else if (data.recalculo_pendientes === "revisar_sobrante") {
+        toast.warning("⚠️ PAGO CON SOBRANTE — REVISAR ANTES DE VALIDAR", {
+          ...avisoGrande,
+          description:
+            "Se recalcularon las cuotas, pero hay un pago registrado SIN validar que trae más dinero del que pide el recibo nuevo (el abono achicó la cuota). NO lo validen todavía: revisen con el equipo si va como saldo a favor o devolución.",
+        });
       } else if (data.recalculo_pendientes === "omitido_solo_interes") {
         toast.info("Abono aplicado", {
           description:

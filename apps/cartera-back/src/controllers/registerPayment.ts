@@ -3074,7 +3074,8 @@ export async function aplicarAbonoCapitalInversionistas(
     | "error"
     | "omitido_solo_interes"
     | "revisar_vencidas"
-    | "revisar_parciales" = "ok";
+    | "revisar_parciales"
+    | "revisar_sobrante" = "ok";
   if (credito.no_amortiza_capital) {
     // Crédito solo-interés: recalcularPagosCredito no conoce el flag y
     // convertiría en amortización de capital la diferencia cuota − interés
@@ -3158,7 +3159,50 @@ export async function aplicarAbonoCapitalInversionistas(
           await recalcularPagosCredito({
             numero_credito_sifco: credito.numero_credito_sifco,
           });
-          console.log(`✅ Recibos pendientes recalculados con el capital nuevo`);
+          // Pagos registrados SIN validar cuyo monto quedó por ENCIMA del
+          // recibo recalculado (ej.: pagaron la cuota completa y el abono dejó
+          // el último recibo más chico): el reparto nuevo no usa toda la
+          // boleta, y ese resto no llegaría ni al crédito ni a inversionistas
+          // al validar. Se reporta para que el equipo decida (saldo a favor /
+          // devolución) ANTES de validar ese pago.
+          const candidatosSobrante = await db
+            .select({
+              monto_aplicado: pagos_credito.monto_aplicado,
+              pago_del_mes: pagos_credito.pago_del_mes,
+              mora: pagos_credito.mora,
+              otros: pagos_credito.otros,
+              pagoConvenio: pagos_credito.pagoConvenio,
+            })
+            .from(pagos_credito)
+            .where(
+              and(
+                eq(pagos_credito.credito_id, credito_id),
+                eq(pagos_credito.paymentFalse, false),
+                eq(pagos_credito.validationStatus, "pending"),
+                gt(pagos_credito.monto_aplicado, "0"),
+                ne(pagos_credito.pago_id, pago_id)
+              )
+            );
+          // monto_aplicado legacy puede cargar mora/otros/convenio: se restan
+          // para no marcar sobrante falso. Tolerancia de centavos por redondeo.
+          const haySobrante = candidatosSobrante.some((p) =>
+            new Big(p.monto_aplicado ?? 0)
+              .minus(p.pago_del_mes ?? 0)
+              .minus(p.mora ?? 0)
+              .minus(p.otros ?? 0)
+              .minus(p.pagoConvenio ?? 0)
+              .gt(0.05)
+          );
+          if (haySobrante) {
+            recalculo_pendientes = "revisar_sobrante";
+            console.log(
+              "⚠️ Pago registrado sin validar con monto mayor al recibo recalculado: revisar sobrante (saldo a favor/devolución) antes de validarlo"
+            );
+          } else {
+            console.log(
+              `✅ Recibos pendientes recalculados con el capital nuevo`
+            );
+          }
         }
       }
     } catch (error) {

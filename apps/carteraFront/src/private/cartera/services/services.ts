@@ -2003,6 +2003,10 @@ export interface AplicarPagoResponse {
    *   (ambos redistribuirían el parcial); revisar el reparto con el equipo.
    *   (Un pago solo registrado sin validar — parcial o completo — NO cae aquí:
    *   ese sí se recalcula para que conta lo valide con el reparto nuevo.)
+   * - "revisar_sobrante": tras recalcular, hay un pago registrado sin validar
+   *   cuyo monto supera lo que pide el recibo nuevo (ej. pagó la cuota
+   *   completa y el abono dejó el último recibo más chico) — decidir saldo a
+   *   favor/devolución con el equipo ANTES de validar ese pago.
    * - "omitido_solo_interes": crédito solo-interés, no aplica el recálculo.
    */
   recalculo_pendientes?:
@@ -2010,7 +2014,8 @@ export interface AplicarPagoResponse {
     | "error"
     | "omitido_solo_interes"
     | "revisar_vencidas"
-    | "revisar_parciales";
+    | "revisar_parciales"
+    | "revisar_sobrante";
   data?: {
     credito_id: number;
     capital_anterior: string;

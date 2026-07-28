@@ -1717,7 +1717,10 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   };
 }
 
-export async function getPagosDelMesActual(credito_id: number) {
+export async function getPagosDelMesActual(
+  credito_id: number,
+  executor: Pick<typeof db, "select"> = db
+) {
   const hoy = new Date(
     new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
   );
@@ -1725,7 +1728,7 @@ export async function getPagosDelMesActual(credito_id: number) {
   const anio = hoy.getFullYear();
 
   // Trae todos los pagos válidos de este mes y año
-  const pagos = await db
+  const pagos = await executor
     .select({ monto_boleta: pagos_credito.monto_boleta })
     .from(pagos_credito)
     .where(

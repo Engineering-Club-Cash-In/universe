@@ -359,6 +359,12 @@ function RouteComponent() {
 				status: opp.status,
 				expectedCloseDate: opp.expectedCloseDate ?? null,
 				createdAt: opp.createdAt,
+				nit: opp.nit,
+				categoria: opp.categoria,
+				diaPagoMensual: opp.diaPagoMensual,
+				royalti: opp.royalti,
+				porcentajeRoyalti: opp.porcentajeRoyalti,
+				inversionistas: opp.inversionistas,
 				lead: opp.lead?.id
 					? {
 							id: opp.lead.id,

@@ -477,9 +477,9 @@ export function PagoForm() {
         onClose={() => setOpenBadDebt(false)}
         creditId={creditoCanceladoInfo?.credito.credito_id || 0}
         montoBase={montoBaseBadDebt}
-        onSuccess={async () => {
+        onSuccess={async (montoIncobrable) => {
           setOpenBadDebt(false);
-          await handleResetCredito();
+          await handleResetCredito(montoIncobrable);
         }}
       />
 

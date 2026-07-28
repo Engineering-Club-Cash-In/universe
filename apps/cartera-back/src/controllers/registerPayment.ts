@@ -1,7 +1,7 @@
 import Big from "big.js";
 import z from "zod";
 import { db, lockPool } from "../database";
-import { withCapitalContext } from "../utils/withAuditContext";
+import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
 import {
   creditos,
   usuarios,
@@ -2324,9 +2324,14 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
         throw new Error("No se puede aplicar el abono: credito_id es null");
       }
       console.log("credito cancelado correctamente ");
-      db.update(pagos_credito)
-        .set({ validationStatus: "validated" })
-        .where(eq(pagos_credito.pago_id, pago_id));
+      // OJO: NO cambiar validationStatus a "validated". La facturación
+      // identifica las cancelaciones por status "reset" (cofidi.ts:
+      // esCancelacion) para repartir intereses por cuota_inversionista en
+      // vez de monto_aportado; pisar el status rompería ese cálculo. El
+      // update que vivía aquí nunca se ejecutó (le faltaba el await y las
+      // queries de drizzle son lazy), así que el comportamiento real de
+      // prod siempre fue conservar "reset" — se elimina para que el código
+      // diga lo que hace.
       return {
         success: true,
         applied: false,
@@ -2351,13 +2356,51 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       };
     }
 
-    // 2. CARGAR EL CRÉDITO
-    // (lo necesitamos tanto para evaluar si la cuota cierra como para
-    // actualizar capital/deuda en ambas ramas).
     if (pago.credito_id === null) {
       throw new Error("No se puede aplicar el pago: credito_id es null");
     }
-    const [credito] = await db
+
+    // TODAS las escrituras del flujo normal (validar el pago, capital/deuda
+    // del crédito, cierre de cuota, limpieza de restantes y distribución a
+    // inversionistas) van en UNA transacción. Si el proceso muere a medio
+    // camino (cliente desconectado, caída del server), se hace rollback
+    // completo y el reintento parte de cero — sin capital doble-descontado ni
+    // distribuciones a medias. Aquí adentro NO hay llamadas externas (la
+    // facturación con SAT vive en otro endpoint), así que la tx es corta.
+    return await db.transaction(async (tx) =>
+      aplicarPagoNormalEnTx(tx as unknown as AplicarPagoTx, pago, pago_id)
+    );
+  } catch (error) {
+    console.error("❌ Error al aplicar pago al crédito:", error);
+    throw error;
+  }
+}
+
+// Ejecutor mínimo que cubre tanto `db` como una transacción de drizzle.
+type AplicarPagoTx = Pick<
+  typeof db,
+  "query" | "select" | "selectDistinct" | "insert" | "update" | "execute"
+>;
+
+/**
+ * Flujo normal de aplicar-pago (RAMA A / RAMA B) dentro de una transacción.
+ * `setCapitalSource(tx, "PAGO")` reemplaza a `withCapitalContext` (que abre su
+ * propia transacción) para etiquetar el trigger de historial de capital en
+ * ESTA misma tx.
+ */
+async function aplicarPagoNormalEnTx(
+  tx: AplicarPagoTx,
+  pago: typeof pagos_credito.$inferSelect,
+  pago_id: number
+) {
+    if (pago.credito_id === null) {
+      throw new Error("No se puede aplicar el pago: credito_id es null");
+    }
+
+    // 2. CARGAR EL CRÉDITO
+    // (lo necesitamos tanto para evaluar si la cuota cierra como para
+    // actualizar capital/deuda en ambas ramas).
+    const [credito] = await tx
       .select()
       .from(creditos)
       .where(eq(creditos.credito_id, pago.credito_id))
@@ -2390,7 +2433,7 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     let cuotaCompleta = false;
 
     if (pago.cuota_id !== null && cuotaAmount.gt(0)) {
-      const otrosPagosValidados = await db
+      const otrosPagosValidados = await tx
         .select({ monto_aplicado: pagos_credito.monto_aplicado })
         .from(pagos_credito)
         .where(
@@ -2475,7 +2518,7 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       console.log("⚠️ La cuota aún no se cierra con este pago");
 
       // Validar el pago
-      await db
+      await tx
         .update(pagos_credito)
         .set({ validationStatus: "validated", fecha_aplicado: new Date() })
         .where(eq(pagos_credito.pago_id, pago_id));
@@ -2499,17 +2542,16 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
         });
         const nuevoCapitalParc = recomputedParc.capital;
 
-        await withCapitalContext(null, "PAGO", null, (tx) =>
-          tx
-            .update(creditos)
-            .set({
-              capital: nuevoCapitalParc.toString(),
-              deudatotal: recomputedParc.deudaTotal.toString(),
-              iva_12: recomputedParc.iva.toString(),
-              cuota_interes: recomputedParc.cuotaInteres.toString(),
-            })
-            .where(eq(creditos.credito_id, pago.credito_id!))
-        );
+        await setCapitalSource(tx, "PAGO");
+        await tx
+          .update(creditos)
+          .set({
+            capital: nuevoCapitalParc.toString(),
+            deudatotal: recomputedParc.deudaTotal.toString(),
+            iva_12: recomputedParc.iva.toString(),
+            cuota_interes: recomputedParc.cuotaInteres.toString(),
+          })
+          .where(eq(creditos.credito_id, pago.credito_id!));
 
         console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
         console.log("✅ Capital aplicado al crédito (cuota aún abierta)");
@@ -2573,27 +2615,26 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     console.log("📊 Nueva deuda total:", nueva_deuda_total.toString());
 
     // 6. ACTUALIZAR EL CRÉDITO
-    await withCapitalContext(null, "PAGO", null, (tx) =>
-      tx
-        .update(creditos)
-        .set({
-          capital: nuevo_capital.toString(),
-          deudatotal: nueva_deuda_total.toString(),
-          iva_12: iva_12.toString(),
-          cuota_interes: cuota_interes.toString(),
-        })
-        .where(eq(creditos.credito_id, pago.credito_id!))
-    );
+    await setCapitalSource(tx, "PAGO");
+    await tx
+      .update(creditos)
+      .set({
+        capital: nuevo_capital.toString(),
+        deudatotal: nueva_deuda_total.toString(),
+        iva_12: iva_12.toString(),
+        cuota_interes: cuota_interes.toString(),
+      })
+      .where(eq(creditos.credito_id, pago.credito_id!));
 
     // 7. VALIDAR EL PAGO y registrar fecha de aplicación
-    await db
+    await tx
       .update(pagos_credito)
       .set({ validationStatus: "validated", fecha_aplicado: new Date() })
       .where(eq(pagos_credito.pago_id, pago_id));
 
     if (pago.cuota_id !== null) {
       // Marcar la cuota como pagada
-      await db
+      await tx
         .update(cuotas_credito)
         .set({ pagado: true })
         .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
@@ -2602,7 +2643,7 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       // Si quedaron descuadrados por bugs históricos (pagos partidos
       // sin sincronización), ya no van a polucionar lecturas futuras
       // ni reactivar el camino "tiene restantes" si alguien revalida.
-      await db
+      await tx
         .update(pagos_credito)
         .set({
           capital_restante: "0",
@@ -2637,7 +2678,7 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     //    a processAndReplaceCreditInvestors, que descuenta del monto_aportado
     //    de cada inversionista — eso NO es idempotente.
     const pagosValidadosCuota = pago.cuota_id !== null
-      ? await db
+      ? await tx
           .select({ pago_id: pagos_credito.pago_id })
           .from(pagos_credito)
           .where(
@@ -2650,7 +2691,7 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       : [{ pago_id }];
 
     const yaDistribuidos = pagosValidadosCuota.length > 0
-      ? await db
+      ? await tx
           .selectDistinct({ pago_id: pagos_credito_inversionistas.pago_id })
           .from(pagos_credito_inversionistas)
           .where(
@@ -2671,7 +2712,12 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     );
 
     for (const distPagoId of pagosADistribuir) {
-      await insertPagosCreditoInversionistasV2(distPagoId, pago.credito_id);
+      await insertPagosCreditoInversionistasV2(
+        distPagoId,
+        pago.credito_id,
+        undefined,
+        tx
+      );
     }
 
     return {
@@ -2686,10 +2732,6 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
         deuda_total_nueva: nueva_deuda_total.toString(),
       },
     };
-  } catch (error) {
-    console.error("❌ Error al aplicar pago al crédito:", error);
-    throw error;
-  }
 }
 
 /**

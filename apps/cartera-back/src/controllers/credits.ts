@@ -39,6 +39,7 @@ import {
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
+import { CREDIT_DETAIL_STATUSES } from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 
 
@@ -51,13 +52,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .where(
         and(
           eq(creditos.numero_credito_sifco, numero_credito_sifco),
-          inArray(creditos.statusCredit, [
-            "ACTIVO",
-            "PENDIENTE_CANCELACION",
-            "MOROSO",
-            "EN_CONVENIO",
-            "INCOBRABLE"
-          ])
+          inArray(creditos.statusCredit, [...CREDIT_DETAIL_STATUSES])
         )
       )
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))

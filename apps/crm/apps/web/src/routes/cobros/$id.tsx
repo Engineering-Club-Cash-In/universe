@@ -631,7 +631,9 @@ function RouteComponent() {
 									</div>
 									<p className="font-bold text-blue-600 text-lg uppercase tracking-tight">
 										Q
-										{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+										{Number(
+											caso.cuotaMensualHistorica ?? caso.cuotaMensual,
+										).toLocaleString("es-GT", {
 											minimumFractionDigits: 2,
 											maximumFractionDigits: 2,
 										})}
@@ -1768,18 +1770,21 @@ function RouteComponent() {
 							<div>
 								<p className="text-muted-foreground text-sm">Capital Activo</p>
 								<p className="font-medium">
-									Q
-									{Number(caso.montoFinanciado || 0).toLocaleString("es-GT", {
-										minimumFractionDigits: 2,
-										maximumFractionDigits: 2,
-									})}
+									{caso.montoFinanciado == null
+										? "No disponible"
+										: `Q${Number(caso.montoFinanciado).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}`}
 								</p>
 							</div>
 							<div>
 								<p className="text-muted-foreground text-sm">Cuota Mensual</p>
 								<p className="font-medium">
 									Q
-									{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+									{Number(
+										caso.cuotaMensualHistorica ?? caso.cuotaMensual,
+									).toLocaleString("es-GT", {
 										minimumFractionDigits: 2,
 										maximumFractionDigits: 2,
 									})}

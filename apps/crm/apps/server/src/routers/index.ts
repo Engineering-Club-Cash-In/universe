@@ -192,6 +192,8 @@ export const cobrosAppRouter = {
 	getCobranzaDiaria: cobrosRouter.getCobranzaDiaria,
 	getCobranzaDiariaDetalle: cobrosRouter.getCobranzaDiariaDetalle,
 	getDescuentosCRM: cobrosRouter.getDescuentosCRM,
+	getCierreDiarioPorRango: cobrosRouter.getCierreDiarioPorRango,
+	getDetalleCierrePorAsesor: cobrosRouter.getDetalleCierrePorAsesor,
 
 	// Seguimientos programados
 	createSeguimiento: seguimientosRouter.createSeguimiento,

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
 	boolean,
 	check,
+	date,
 	decimal,
 	index,
 	integer,
@@ -9,6 +10,7 @@ import {
 	pgTable,
 	text,
 	timestamp,
+	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
@@ -387,5 +389,61 @@ export const seguimientosProgramados = pgTable(
 	},
 	(table) => [
 		check("intervalo_dias_positive", sql`${table.intervaloDias} > 0`),
+	],
+);
+
+// CB-024: snapshot de cierre diario de cobros, DETALLE por crédito. Job corre
+// 22:00 GT todos los días con dos orígenes distintos en la misma tabla
+// (columna `tipo` los distingue):
+//   - 'contacto': una fila por cada contacto real del día (INSERT ... ON
+//     CONFLICT (contacto_id) DO NOTHING — un contacto ya registrado es
+//     histórico inmutable, nunca se duplica en un re-run).
+//   - 'subida'/'bajada': una fila por cada crédito que SALIÓ del bucket del
+//     pool del asesor ese día, con su ruta (bucketAnterior → bucket). Se
+//     reemplazan completos (DELETE + INSERT del día) porque son datos
+//     derivados de cartera-back, recalculables en cada corrida.
+// Los agregados (efectivos, promesas, subieron, bajaron) se calculan agrupando
+// esta misma tabla — no se guardan aparte.
+export const cierreCreditoTipoEnum = pgEnum("cierre_credito_tipo", [
+	"contacto",
+	"subida",
+	"bajada",
+]);
+
+export const cierreDiarioCreditoCobros = pgTable(
+	"cierre_diario_credito_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		fecha: date("fecha").notNull(),
+		asesorId: text("asesor_id")
+			.notNull()
+			.references(() => user.id),
+		tipo: cierreCreditoTipoEnum("tipo").notNull(),
+
+		casoCobroId: uuid("caso_cobro_id").references(() => casosCobros.id),
+		numeroCreditoSifco: text("numero_credito_sifco"),
+
+		// Solo aplica cuando tipo='contacto'
+		contactoId: uuid("contacto_id").references(() => contactosCobros.id),
+		estadoContacto: estadoContactoEnum("estado_contacto"),
+		// El cliente CONTESTÓ y el contacto fue manual del asesor. Categorías
+		// excluyentes: 'promesa_pago' NO suma acá (cuenta como promesa aparte);
+		// 'no_contesta'/'numero_equivocado' no cuentan en ninguna. Excluye además
+		// los contactos automáticos del sistema, identificados por prefijo de
+		// comentario (ver send-premora-reminders.ts y cobros.ts:createMassWhatsapp).
+		esEfectivoManual: boolean("es_efectivo_manual").notNull().default(false),
+		fechaContacto: timestamp("fecha_contacto"),
+
+		// Solo aplican cuando tipo='subida'/'bajada' — la ruta del movimiento.
+		bucketAnterior: integer("bucket_anterior"), // de dónde salió (pool del asesor)
+		bucket: integer("bucket"), // a dónde fue
+
+		generadoEn: timestamp("generado_en").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("idx_cierre_detalle_contacto_unico")
+			.on(table.contactoId)
+			.where(sql`${table.contactoId} IS NOT NULL`),
+		index("idx_cierre_detalle_fecha_asesor").on(table.fecha, table.asesorId),
 	],
 );

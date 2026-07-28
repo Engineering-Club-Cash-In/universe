@@ -12,6 +12,7 @@ import {
 	inArray,
 	isNotNull,
 	isNull,
+	lte,
 	max,
 	or,
 	sql,
@@ -22,6 +23,7 @@ import { user } from "../db/schema/auth";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
 	casosCobros,
+	cierreDiarioCreditoCobros,
 	contactosCobros,
 	contratosFinanciamiento,
 	conveniosPago,
@@ -43,6 +45,10 @@ import {
 import { quotations } from "../db/schema/quotations";
 import { recordatoriosPremora } from "../db/schema/recordatorios-premora";
 import { vehicles } from "../db/schema/vehicles";
+import {
+	PREFIJO_PREMORA_AUTO,
+	PREFIJO_WSP_MASIVO,
+} from "../jobs/cierre-diario-asesores";
 import {
 	deriveHasCapitalData,
 	recalculateCobrosPercentagesWithFallback,
@@ -5598,6 +5604,163 @@ export const cobrosRouter = {
 				page: input.page ?? 1,
 				pageSize: input.pageSize ?? 20,
 			});
+		}),
+
+	// CB-024: reporte de cierre diario por rango — agrupa el DETALLE guardado
+	// por generarCierreDiario (job de 22:00 GT) en cierre_diario_credito_cobros,
+	// no recalcula en vivo contra contactos_cobros/cartera-back. Permite
+	// ventanas dinámicas (ej. lun→vie de la semana actual).
+	getCierreDiarioPorRango: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+				asesorIds: z.array(z.string()).optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const conditions = [
+				gte(cierreDiarioCreditoCobros.fecha, input.fechaInicio),
+				lte(cierreDiarioCreditoCobros.fecha, input.fechaFin),
+			];
+			if (input.asesorIds && input.asesorIds.length > 0) {
+				conditions.push(
+					inArray(cierreDiarioCreditoCobros.asesorId, input.asesorIds),
+				);
+			}
+
+			// Un contacto generado por el sistema (premora / envío masivo) no es
+			// gestión del asesor. `es_efectivo_manual` ya lo excluye en el job. Acá
+			// se aplica el mismo criterio (prefijo de comentario) a promesas Y al
+			// total: el denominador de "efectivos/total" que pide el reporte es
+			// "de lo que el asesor REGISTRÓ, cuánto contestó" — un envío automático
+			// no es un intento del asesor, así que si se cuela en el total infla el
+			// denominador y hace ver el ratio peor de lo real.
+			const esAutomatico = sql`(${contactosCobros.comentarios} LIKE ${`${PREFIJO_PREMORA_AUTO}%`} OR ${contactosCobros.comentarios} LIKE ${`${PREFIJO_WSP_MASIVO}%`})`;
+
+			const filas = await db
+				.select({
+					asesorId: cierreDiarioCreditoCobros.asesorId,
+					asesorNombre: user.name,
+					// Se usa abajo para cruzar con el pool de buckets de cartera-back.
+					asesorEmail: user.email,
+					contactosEfectivos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.esEfectivoManual})`,
+					promesasObtenidas: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} = 'promesa_pago' AND NOT ${esAutomatico})`,
+					// Promesa se reporta aparte (línea de arriba) — no cuenta en el
+					// denominador de "efectivos/total", sería mezclar dos categorías
+					// excluyentes en un mismo ratio.
+					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} != 'promesa_pago' AND NOT ${esAutomatico})`,
+					// Movimientos que SALIERON del bucket del pool del asesor ese día.
+					subieron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'subida')`,
+					bajaron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'bajada')`,
+				})
+				.from(cierreDiarioCreditoCobros)
+				.innerJoin(user, eq(cierreDiarioCreditoCobros.asesorId, user.id))
+				.leftJoin(
+					contactosCobros,
+					eq(cierreDiarioCreditoCobros.contactoId, contactosCobros.id),
+				)
+				.where(and(...conditions))
+				.groupBy(cierreDiarioCreditoCobros.asesorId, user.name, user.email)
+				.orderBy(asc(user.name));
+
+			// Pool de buckets al que está asignado cada asesor. Es config ESTABLE
+			// (no histórico del día), por eso se consulta acá y no se guarda en el
+			// snapshot: guardar "el pool de ayer" no tendría sentido operativo.
+			//
+			// Fuente: getPoolPorAsesor() (/buckets/pool-por-asesor) — catálogo
+			// COMPLETO de asesores con sus buckets activos, sin pasar por
+			// creditos (no depende de que el asesor tenga cuentas activas ahora
+			// mismo). Reemplaza el intento anterior (getAdvisors + N ×
+			// getPoolAsesoresPorBucket cruzados por el email de /advisor): ese
+			// email está desactualizado para varios asesores (Diego Gomez,
+			// Samuel Gamboa) y no coincidía con `user.email` del CRM.
+			// `email_cash_in` (expuesto por este endpoint) sí coincide. Mismo
+			// patrón de bug de exclusión-por-créditos-activos ya corregido en
+			// cierre-diario-asesores.ts (CB-024, commit 4e6f1ce5).
+			//
+			// Best-effort: si cartera-back falla, el reporte sigue sirviendo sin
+			// la etiqueta de pool.
+			const poolPorAsesor = new Map<string, number[]>();
+			try {
+				const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
+				const emailToUserId = new Map(
+					filas.map((f) => [f.asesorEmail.trim().toLowerCase(), f.asesorId]),
+				);
+				for (const a of asesoresConBuckets) {
+					const email = a.email_cash_in?.trim().toLowerCase();
+					if (!email) continue;
+					const userId = emailToUserId.get(email);
+					if (!userId) continue;
+					poolPorAsesor.set(userId, [...a.buckets].sort((x, y) => x - y));
+				}
+			} catch (error) {
+				console.error("[getCierreDiarioPorRango] Pool de buckets:", error);
+			}
+
+			return filas.map((f) => ({
+				asesorId: f.asesorId,
+				asesorNombre: f.asesorNombre,
+				contactosEfectivos: Number(f.contactosEfectivos),
+				promesasObtenidas: Number(f.promesasObtenidas),
+				totalContactos: Number(f.totalContactos),
+				subieron: Number(f.subieron),
+				bajaron: Number(f.bajaron),
+				bucketsPool: poolPorAsesor.get(f.asesorId) ?? [],
+			}));
+		}),
+
+	// CB-024: detalle de créditos detrás de los agregados de un asesor+rango —
+	// alimenta el acordeón. Lee cierre_diario_credito_cobros (snapshot ya
+	// generado), no consulta contactos_cobros/cartera-back en vivo.
+	getDetalleCierrePorAsesor: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				asesorId: z.string(),
+				fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+				fechaFin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const filas = await db
+				.select({
+					id: cierreDiarioCreditoCobros.id,
+					tipo: cierreDiarioCreditoCobros.tipo,
+					casoCobroId: cierreDiarioCreditoCobros.casoCobroId,
+					numeroCreditoSifco: cierreDiarioCreditoCobros.numeroCreditoSifco,
+					estadoContacto: cierreDiarioCreditoCobros.estadoContacto,
+					esEfectivoManual: cierreDiarioCreditoCobros.esEfectivoManual,
+					fechaContacto: cierreDiarioCreditoCobros.fechaContacto,
+					bucketAnterior: cierreDiarioCreditoCobros.bucketAnterior,
+					bucket: cierreDiarioCreditoCobros.bucket,
+					fecha: cierreDiarioCreditoCobros.fecha,
+					// Origen del contacto, para que la UI pueda explicar por qué una
+					// fila 'contactado' no cuenta como efectiva: los envíos que genera
+					// el sistema (premora, WhatsApp masivo) quedan en el historial pero
+					// no son gestión del asesor. Se derivan del prefijo de comentario,
+					// mismo criterio que usa el job (no hay columna de origen en
+					// contactos_cobros).
+					origen: sql<string>`CASE
+						WHEN ${contactosCobros.comentarios} LIKE ${`${PREFIJO_PREMORA_AUTO}%`} THEN 'premora'
+						WHEN ${contactosCobros.comentarios} LIKE ${`${PREFIJO_WSP_MASIVO}%`} THEN 'wsp_masivo'
+						ELSE 'manual'
+					END`,
+				})
+				.from(cierreDiarioCreditoCobros)
+				.leftJoin(
+					contactosCobros,
+					eq(cierreDiarioCreditoCobros.contactoId, contactosCobros.id),
+				)
+				.where(
+					and(
+						eq(cierreDiarioCreditoCobros.asesorId, input.asesorId),
+						gte(cierreDiarioCreditoCobros.fecha, input.fechaInicio),
+						lte(cierreDiarioCreditoCobros.fecha, input.fechaFin),
+					),
+				)
+				.orderBy(desc(cierreDiarioCreditoCobros.fecha));
+
+			return filas;
 		}),
 };
 

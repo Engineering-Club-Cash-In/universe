@@ -113,7 +113,7 @@ export interface CreateCreditoInput {
 	no_poliza?: string;
 	aseguradora?: string;
 	como_se_entero?: string;
-	dia_pago_mensual?: 15 | 30;
+	dia_pago_mensual?: number;
 	membresias_pago?: number;
 	categoria?: string;
 	nit?: string;

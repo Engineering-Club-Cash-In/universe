@@ -277,8 +277,8 @@ describe("reset credit bad-debt continuation wiring", () => {
 		);
 		expect(resetCredit).toContain("montoIncobrableBig.eq(creditoCapitalBig)");
 		expect(resetCredit).toContain("montoIncobrableBig.eq(badDebtCapitalBig)");
-		expect(resetCredit).toContain(
-			"canResetCreditByStatus(credito.statusCredit, incobrableContinuationReady)",
+		expect(resetCredit).toMatch(
+			/canResetCreditByStatus\(\s*credito\.statusCredit,\s*incobrableContinuationReady,?\s*\)/,
 		);
 	});
 });
@@ -370,25 +370,79 @@ describe("reset credit input validation", () => {
 });
 
 describe("reset credit atomic closing payment wiring", () => {
-	it("locks and rechecks before inserting the system reset payment", async () => {
+	it("keeps every reset write in one transaction", async () => {
 		const source = await Bun.file(
 			resolve(import.meta.dir, "credits.ts"),
 		).text();
 		const resetCredit = source.match(
 			/export async function resetCredit[\s\S]*?(?=\nexport )/,
 		)?.[0];
-		const transaction = resetCredit?.match(
-			/db\.transaction\(async \(tx\) => \{[\s\S]*?\n\s*\}\)/,
-		)?.[0];
+		const transactionStart = resetCredit?.indexOf(
+			"db.transaction(async (tx) => {",
+		);
+		const transactionEnd = resetCredit?.indexOf("\n    });", transactionStart);
+		const transaction =
+			resetCredit &&
+			transactionStart !== undefined &&
+			transactionStart >= 0 &&
+			transactionEnd !== undefined &&
+			transactionEnd >= 0
+				? resetCredit.slice(transactionStart, transactionEnd + 7)
+				: undefined;
+		if (!transaction || !resetCredit || transactionStart === undefined)
+			throw new Error("No se encontró la transacción de cierre");
+		const beforeTransaction = resetCredit.slice(0, transactionStart);
+		const lockIndex = transaction.indexOf('.for("update")');
+		const orderedReads = [
+			".from(moras_credito)",
+			".from(bad_debts)",
+			".from(pagos_credito)",
+			".from(credit_cancelations)",
+			".from(montos_adicionales)",
+			"getPagosDelMesActual(credito.credito_id, tx)",
+			".from(cuotas_credito)",
+		];
 
 		expect(transaction).toContain('.for("update")');
+		expect(
+			transaction.slice(0, lockIndex).match(/await\s+(?:db|tx)\s*\./g),
+		).toHaveLength(1);
+		expect(transaction.slice(0, lockIndex)).toMatch(
+			/await\s+tx\s*\.select\(\)[\s\S]*?\.from\(creditos\)[\s\S]*?\.where\(eq\(creditos\.credito_id, creditId\)\)/,
+		);
+		expect(beforeTransaction).not.toMatch(
+			/await\s+db\s*\.(?:select|insert|update|delete|execute|query)\b/,
+		);
+		for (const read of orderedReads) {
+			expect(transaction.indexOf(read)).toBeGreaterThan(lockIndex);
+		}
 		expect(transaction).toContain(".from(pagos_credito)");
 		expect(transaction).toContain(
 			'eq(pagos_credito.registerBy, "system_reset")',
 		);
 		expect(transaction).toContain("tx.insert(pagos_credito)");
-		if (!transaction)
-			throw new Error("No se encontró la transacción de cierre");
+		expect(transaction).toMatch(/tx\s*\.update\(pagos_credito\)/);
+		expect(transaction).toMatch(/tx\s*\.insert\(cuotas_credito\)/);
+		expect(transaction).toMatch(/tx\s*\.update\(creditos_inversionistas\)/);
+		expect(transaction).toContain("tx.insert(boletas)");
+		expect(transaction).toContain("tx.insert(bad_debts)");
+		expect(transaction).toContain("setCapitalSource(tx");
+		expect(transaction).toContain("distribuirAbonoCapitalEspejo(");
+		expect(transaction).toMatch(
+			/distribuirAbonoCapitalEspejo\([\s\S]*?tx,?\s*\)/,
+		);
+		expect(transaction).toMatch(
+			/insertPagosCreditoInversionistasV2\([\s\S]*?undefined,\s*tx,?\s*\)/,
+		);
+		expect(transaction).not.toMatch(/await db\.(?:insert|update|delete)/);
+		expect(transaction).not.toContain("withCapitalContext");
+		expect(transaction).toContain('statusCredit === "INCOBRABLE"');
+		expect(
+			transaction.lastIndexOf("return { nuevoPago, statusCredit }"),
+		).toBeGreaterThan(transaction.lastIndexOf("tx.insert(bad_debts)"));
+		expect(
+			transaction.lastIndexOf("return { nuevoPago, statusCredit }"),
+		).toBeGreaterThan(transaction.lastIndexOf(".update(creditos)"));
 		expect(transaction.indexOf('.for("update")')).toBeLessThan(
 			transaction.indexOf(".from(pagos_credito)"),
 		);

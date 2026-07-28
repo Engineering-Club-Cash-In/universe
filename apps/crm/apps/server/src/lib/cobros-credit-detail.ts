@@ -54,6 +54,8 @@ export function resolveCreditContractSummary(
 		toCents(authoritativeSummary.originalPrincipal) > 0
 			? authoritativeSummary.originalPrincipal
 			: undefined;
+	const hasAuthoritativeNullPrincipal =
+		authoritativeSummary?.originalPrincipal === null;
 	const authoritativeInstallment =
 		authoritativeSummary?.installment &&
 		toCents(authoritativeSummary.installment) > 0
@@ -61,11 +63,12 @@ export function resolveCreditContractSummary(
 			: undefined;
 
 	return {
-		principal:
-			authoritativePrincipal ??
-			(hasResetEvidence && principalCents > 0
-				? fromCents(principalCents)
-				: null),
+		principal: hasAuthoritativeNullPrincipal
+			? null
+			: authoritativePrincipal ??
+				(hasResetEvidence && principalCents > 0
+					? fromCents(principalCents)
+					: null),
 		installment:
 			authoritativeInstallment ??
 			(hasResetEvidence ? resetInstallment : undefined) ??

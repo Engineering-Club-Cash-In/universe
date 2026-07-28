@@ -93,6 +93,24 @@ describe("resolveCreditContractSummary", () => {
 			),
 		).toEqual({ principal: null, installment: "2323.10" });
 	});
+
+	it("preserves an authoritative null instead of reconstructing principal", () => {
+		expect(
+			resolveCreditContractSummary(
+				"CANCELADO",
+				[
+					{
+						abono_capital: "30000.00",
+						cuota: "2200.00",
+						validationStatus: "reset",
+					},
+				],
+				"0.00",
+				"0.00",
+				{ originalPrincipal: null, installment: "2200.00" },
+			),
+		).toEqual({ principal: null, installment: "2200.00" });
+	});
 });
 
 describe("countRemainingInstallments", () => {

@@ -2312,6 +2312,22 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     if (!pago) {
       throw new Error(`Pago ${pago_id} no encontrado`);
     }
+    // 🔒 Re-chequeo BAJO EL LOCK: dos /aplicar-pago del mismo pago pueden
+    // pasar el pre-check del router antes de que alguno tome el lock (doble
+    // click / reintento); el segundo entra aquí cuando el primero ya aplicó.
+    // Esta lectura ocurre ya con el lock tomado, así que ver un status
+    // aplicado es definitivo — se rechaza en vez de volver a mover capital y
+    // re-distribuir a inversionistas.
+    if (
+      pago.validationStatus === "validated" ||
+      pago.validationStatus === "capital_validated"
+    ) {
+      return {
+        success: false,
+        applied: false,
+        message: `El pago ${pago_id} ya fue aplicado (${pago.validationStatus}); no se aplica dos veces.`,
+      };
+    }
     if (pago.validationStatus === "capital") {
       return applyCapitalPaymentAndBuildResponse(
         pago,

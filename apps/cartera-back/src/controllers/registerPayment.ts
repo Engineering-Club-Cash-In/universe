@@ -2495,10 +2495,37 @@ async function aplicarPagoNormalEnTx(
           restantesRecibo.lte(0.01) &&
           new Big(pago.monto_aplicado ?? 0).gt(0)
         ) {
-          cuotaCompleta = true;
-          console.log(
-            `📊 Cuota ${pago.cuota_id}: recibo menor a la cuota mensual cubierto por completo (restantes en 0) → COMPLETA`
-          );
+          // Cuota partida en varios pagos: la fila de CIERRE queda con
+          // restantes 0 aunque un parcial anterior siga pendiente de validar.
+          // Si conta valida el cierre PRIMERO, cerrar aquí marcaría la cuota
+          // pagada y distribuiría a inversionistas solo con el pago de cola
+          // (la suma de arriba solo cuenta hermanos ya validados). Con otro
+          // pago pendiente vivo de la misma cuota NO se cierra: este pago se
+          // valida sin cerrar (RAMA A) y la cuota cierra al validar el último
+          // hermano, cuando la suma de validados alcanza.
+          const [hermanoPendiente] = await tx
+            .select({ pago_id: pagos_credito.pago_id })
+            .from(pagos_credito)
+            .where(
+              and(
+                eq(pagos_credito.cuota_id, pago.cuota_id),
+                eq(pagos_credito.validationStatus, "pending"),
+                eq(pagos_credito.paymentFalse, false),
+                gt(pagos_credito.monto_aplicado, "0"),
+                ne(pagos_credito.pago_id, pago_id)
+              )
+            )
+            .limit(1);
+          if (hermanoPendiente) {
+            console.log(
+              `📊 Cuota ${pago.cuota_id}: recibo en 0 pero hay otro pago pendiente sin validar (${hermanoPendiente.pago_id}) → NO se cierra con este pago`
+            );
+          } else {
+            cuotaCompleta = true;
+            console.log(
+              `📊 Cuota ${pago.cuota_id}: recibo menor a la cuota mensual cubierto por completo (restantes en 0) → COMPLETA`
+            );
+          }
         }
       }
     }

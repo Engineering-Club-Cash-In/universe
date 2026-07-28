@@ -20,11 +20,10 @@
  *  - Paso B 'subida'/'bajada': créditos que cambiaron de bucket ese día, con su
  *    ruta (bucket_anterior → bucket). Definición confirmada por Jhairo Nájera
  *    (responsable CB-024): el reporte muestra "hoy subieron N / bajaron M". La
- *    atribución va por `asesor_atribucion_id` (el asesor que tenía el crédito
- *    AL MOMENTO del evento, congelado en buckets_historial) y NO por
- *    `asesor_id` (dueño ACTUAL del crédito, que cambia si lo reasignan
- *    después) ni por el pool del bucket de origen: varios asesores comparten
- *    bucket, así que por pool un mismo movimiento se contaba varias veces. El
+ *    atribución va por `asesor_id` (dueño ACTUAL del crédito, NOT NULL) y NO
+ *    por `asesor_atribucion_id` (buckets_historial.asesor_id) ni por el pool
+ *    del bucket de origen — ver el comentario en
+ *    _generarCierreMovimientosBucket para el porqué de cada descarte. El
  *    asesor en cartera-back tiene id numérico distinto al user.id (texto) del
  *    CRM — se resuelve cruzando por correo con `email_asesor` de
  *    /buckets/carga (ver construirMapaAsesorUsuarioPorCarga). Se reemplaza
@@ -184,20 +183,26 @@ async function _generarCierreMovimientosBucket(fecha: string) {
 		});
 		for (const evento of resp.data ?? []) {
 			if (evento.bucket_anterior == null) continue;
-			// Se atribuye al asesor que tenía el crédito AL MOMENTO del evento
-			// (asesor_atribucion_id, que sale de buckets_historial.asesor_id) — NO
-			// evento.asesor_id, que es el dueño ACTUAL del crédito (sale de
-			// creditos.asesor_id, ver bucketsHistorial.ts en cartera-back). Si el
-			// crédito se reasigna después de moverse de bucket, usar el dueño
-			// actual cambiaría retroactivamente a quién se le atribuye el
-			// movimiento — contradice que el cierre es una foto congelada del día.
+			// Se atribuye por evento.asesor_id — el dueño ACTUAL del crédito
+			// (creditos.asesor_id, NOT NULL, "hoy siempre hay dueño" según la
+			// decisión de raíz 2026-07-07 de cartera-back). NO
+			// asesor_atribucion_id (buckets_historial.asesor_id): ese campo lo
+			// deja NULL el proceso automático nocturno (latefee.ts:1181, comentario
+			// "Opción B: se llena con el nuevo flujo de pago" — no implementado
+			// todavía), así que filtrar por él descarta el 100% de los movimientos
+			// del motor normal, no solo un caso borde (hallado por Codex en PR
+			// #1183 tras el primer intento con asesor_atribucion_id). El costo
+			// aceptado: si el crédito se reasigna después de moverse de bucket, la
+			// atribución "sigue" al nuevo dueño en vez de quedar congelada al
+			// momento del evento — trade-off necesario porque la alternativa es
+			// cero movimientos reportados, siempre.
 			// Tampoco se usa el pool del bucket de origen: varios asesores
 			// comparten bucket (B2 lo atienden 3), así que por pool un mismo
 			// movimiento se contaba varias veces y los totales no cuadraban con
-			// los eventos reales. Eventos sin asesor de atribución, o cuyo asesor
-			// no cruza con un usuario del CRM, se omiten.
-			if (evento.asesor_atribucion_id == null) continue;
-			const asesorId = mapaAsesorUsuario.get(evento.asesor_atribucion_id);
+			// los eventos reales. Eventos sin asesor, o cuyo asesor no cruza con un
+			// usuario del CRM, se omiten.
+			if (evento.asesor_id == null) continue;
+			const asesorId = mapaAsesorUsuario.get(evento.asesor_id);
 			if (!asesorId) continue;
 			filas.push({
 				asesorId,

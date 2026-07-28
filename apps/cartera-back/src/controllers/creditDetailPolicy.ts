@@ -19,8 +19,13 @@ export function canViewCreditDetailByStatus(
 export function withActiveCancellation<T extends object, C>(
 	detail: T,
 	cancelacion: C | undefined,
+	statusCredit: string | null | undefined,
 ) {
-	return cancelacion
-		? { ...detail, cancelacion, flujo: "CANCELADO" as const }
-		: detail;
+	if (!cancelacion && statusCredit !== "CANCELADO") return detail;
+
+	return {
+		...detail,
+		...(cancelacion ? { cancelacion } : {}),
+		flujo: "CANCELADO" as const,
+	};
 }

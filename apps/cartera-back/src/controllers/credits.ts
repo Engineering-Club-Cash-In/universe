@@ -321,7 +321,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         convenioActivo: null,
         cuotasEnConvenio: [],
         pagosConvenio: [],
-      }, cancelacionActiva);
+      }, cancelacionActiva, currentCredit.creditos.statusCredit);
     }
 
     const cuotaActualData = cuotaActualDataResult[0];
@@ -463,7 +463,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           : null,
       cuotasEnConvenio,
       pagosConvenio,
-    }, cancelacionActiva);
+    }, cancelacionActiva, currentCredit.creditos.statusCredit);
   } catch (error) {
     console.error("[getCreditoByNumero] Error:", error);
     return { message: "Error consultando crédito", error: String(error) };

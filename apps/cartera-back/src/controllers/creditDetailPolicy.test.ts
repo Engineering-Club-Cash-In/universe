@@ -49,6 +49,15 @@ describe("cancelled credit detail", () => {
 			cancelacion,
 		});
 	});
+
+	it("marca como cancelado el detalle sin cancelación activa", () => {
+		const detail = { flujo: "ACTIVO", cuotasPagadas: [] };
+
+		expect(withActiveCancellation(detail, undefined, "CANCELADO")).toEqual({
+			...detail,
+			flujo: "CANCELADO",
+		});
+	});
 });
 
 describe("credit detail no-current-installment branch", () => {

@@ -2160,19 +2160,28 @@ export const crmRouter = {
 			}
 
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
-			// por el análisis de capacidad de pago (IA) de esta oportunidad.
+			// por el análisis de esta oportunidad Y del lead que quedará asignado
+			// (si leadId también cambia, el análisis del lead anterior ya no aplica).
 			if (
 				input.diaPagoMensual !== undefined &&
 				input.diaPagoMensual !== 15 &&
 				input.diaPagoMensual !== 30
 			) {
-				const [analysis] = await db
-					.select({
-						suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
-					})
-					.from(creditAnalysis)
-					.where(eq(creditAnalysis.opportunityId, id))
-					.limit(1);
+				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
+				const [analysis] = effectiveLeadId
+					? await db
+							.select({
+								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+							})
+							.from(creditAnalysis)
+							.where(
+								and(
+									eq(creditAnalysis.opportunityId, id),
+									eq(creditAnalysis.leadId, effectiveLeadId),
+								),
+							)
+							.limit(1)
+					: [];
 				const suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				const isRecommended = suggestedDays?.some(
 					(d) => d.dia === input.diaPagoMensual,

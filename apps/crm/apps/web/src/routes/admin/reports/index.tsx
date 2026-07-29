@@ -1090,6 +1090,22 @@ function RouteComponent() {
 								</>
 							)}
 						</TabsList>
+						{canAccessCobranzaReport && (
+							<>
+								<ScenarioModal
+									open={scenarioOpen === "monto"}
+									onOpenChange={(o) => setScenarioOpen(o ? "monto" : null)}
+									config={montoACobrarConfig}
+									baseData={montoCobrarData?.data}
+								/>
+								<ScenarioModal
+									open={scenarioOpen === "facturacion"}
+									onOpenChange={(o) => setScenarioOpen(o ? "facturacion" : null)}
+									config={facturacionConfig}
+									baseData={facturacionMesData}
+								/>
+							</>
+						)}
 						{canAccessClosedCreditsReport && (
 							<TabsContent value="creditos" className="space-y-6">
 								{creditosCerradosCard}
@@ -2710,18 +2726,6 @@ function RouteComponent() {
 						</Dialog>
 
 						{/* Modales de simulación de escenarios */}
-						<ScenarioModal
-							open={scenarioOpen === "monto"}
-							onOpenChange={(o) => setScenarioOpen(o ? "monto" : null)}
-							config={montoACobrarConfig}
-							baseData={montoCobrarData?.data}
-						/>
-						<ScenarioModal
-							open={scenarioOpen === "facturacion"}
-							onOpenChange={(o) => setScenarioOpen(o ? "facturacion" : null)}
-							config={facturacionConfig}
-							baseData={facturacionMesData}
-						/>
 						<ScenarioModal
 							open={scenarioOpen === "cobertura"}
 							onOpenChange={(o) => setScenarioOpen(o ? "cobertura" : null)}

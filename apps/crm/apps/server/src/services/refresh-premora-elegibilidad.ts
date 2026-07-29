@@ -156,7 +156,12 @@ export async function refreshPremoraElegibilidad(): Promise<ElegibilidadResumen>
 		let autoRevocados = 0;
 		if (aRevocar.length > 0) {
 			const ids = aRevocar.map((c) => c.id);
-			await db
+			// Filtrar por activo=true + RETURNING (review Codex P2): si otra corrida
+			// (el job y el recálculo manual solapados) ya revocó estas configs, el
+			// UPDATE no las vuelve a tocar y `revocadas` trae SOLO las que ESTA
+			// corrida apagó de verdad. Así no se duplican notificaciones al gerente
+			// ni se sobre-cuentan las revocaciones.
+			const revocadas = await db
 				.update(premoraReduccionConfig)
 				.set({
 					activo: false,
@@ -164,10 +169,20 @@ export async function refreshPremoraElegibilidad(): Promise<ElegibilidadResumen>
 					revocadoMotivo: "auto",
 					updatedAt: sql`now()`,
 				})
-				.where(inArray(premoraReduccionConfig.id, ids));
-			autoRevocados = aRevocar.length;
+				.where(
+					and(
+						inArray(premoraReduccionConfig.id, ids),
+						eq(premoraReduccionConfig.activo, true),
+					),
+				)
+				.returning({
+					numeroCreditoSifco: premoraReduccionConfig.numeroCreditoSifco,
+				});
+			autoRevocados = revocadas.length;
 
-			await notificarAutoRevoke(aRevocar.map((c) => c.numeroCreditoSifco));
+			if (revocadas.length > 0) {
+				await notificarAutoRevoke(revocadas.map((r) => r.numeroCreditoSifco));
+			}
 		}
 
 		const resumen = resumenVacio({

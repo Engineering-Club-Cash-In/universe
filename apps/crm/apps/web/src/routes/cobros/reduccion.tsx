@@ -272,9 +272,10 @@ function ReduccionRecordatoriosPage() {
 					</h1>
 					<p className="mt-1 text-muted-foreground">
 						Los clientes que pagan al día 4 cuotas seguidas pueden recibir menos
-						recordatorios premora. El sistema los marca elegibles; tú decides
-						qué pasos quitarles. El recordatorio del día de vencimiento (D-0)
-						siempre se envía.
+						recordatorios premora (se toleran hasta 2 días de gracia después del
+						vencimiento). El sistema los marca elegibles; tú decides qué pasos
+						quitarles. El recordatorio del día de vencimiento (D-0) siempre se
+						envía.
 					</p>
 				</div>
 				<Button

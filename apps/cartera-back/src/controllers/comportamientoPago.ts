@@ -8,17 +8,27 @@ import { sql } from "drizzle-orm";
 // reducción de recordatorios premora (la tabla y el módulo del gerente viven
 // allá; cartera-back solo responde el dato de pago que solo existe aquí).
 //
-// "Al día" = una cuota YA VENCIDA cuyo pago cubriente entró en fecha:
-//   fecha_pago <= fecha_vencimiento.
+// "Al día" = una cuota cuyo pago cubriente entró DENTRO de la gracia:
+//   fecha_pago <= fecha_vencimiento + DIAS_GRACIA.
 // "Cubriente" = mismo predicado que premora/procesarMoras (pago real,
 // validado, monto_aplicado > 0) — así las etiquetas de pagado no inflan la
 // racha con pagos falsos o sin plata.
 //
-// La RACHA es el número de cuotas ya vencidas pagadas al día contando desde la
+// GRACIA (confirmada por negocio): 2 días. Una cuota solo se EVALÚA una vez
+// pasada su ventana de gracia (venc + 2 < hoy); dentro de la gracia es como una
+// cuota aún no vencida (no cuenta ni rompe), así un cliente puntual no se cae de
+// elegibles por ir 1 día pasado su vencimiento.
+//
+// La RACHA es el número de cuotas ya evaluadas pagadas al día contando desde la
 // más reciente (mayor numero_cuota) hacia atrás, hasta el primer atraso. Un
-// atraso = cuota vencida pagada TARDE o cuota vencida SIN pago cubriente (mora
-// hoy). Elegible (>=4) lo decide el CRM; aquí solo devolvemos la racha cruda.
+// atraso = cuota pagada TARDE (después de la gracia) o cuota SIN pago cubriente
+// ya pasada la gracia (mora). Elegible (>=4) lo decide el CRM; aquí devolvemos
+// la racha cruda.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Días de gracia después del vencimiento que todavía cuentan como "al día".
+// Confirmado por negocio (Gerente de Cobros). Cambiar aquí si se ajusta.
+const DIAS_GRACIA = 2;
 
 // Pago que realmente cubre una cuota (espejo de pagoCubriente en
 // cuotasProximas.ts / latefee.ts — mantener alineados). Dos formas del MISMO
@@ -94,8 +104,10 @@ export async function getComportamientoPago(
 
   const res = await db.execute<any>(sql`
     WITH vencidas AS (
-      -- Cuotas YA vencidas (< hoy GT; la que vence hoy aún no cuenta) de
-      -- créditos ACTIVOS, con la fecha del pago cubriente más temprano.
+      -- Cuotas ya pasadas de su GRACIA (venc + DIAS_GRACIA < hoy GT) de créditos
+      -- ACTIVOS, con la fecha del pago cubriente más temprano. Una cuota dentro
+      -- de su gracia (o que vence hoy/futura) aún no se evalúa: no cuenta ni
+      -- rompe la racha.
       SELECT
         c.credito_id,
         c.numero_credito_sifco,
@@ -104,7 +116,7 @@ export async function getComportamientoPago(
         (${pagoCubrienteFecha(sql.raw("cu.cuota_id"))}) AS fecha_pago_cubriente
       FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
       INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = cu.credito_id
-      WHERE cu.fecha_vencimiento::date < ${hoyGT}
+      WHERE cu.fecha_vencimiento::date < (${hoyGT} - ${DIAS_GRACIA})
         AND c."statusCredit" = 'ACTIVO'
         ${filtroSifco}
     ),
@@ -113,7 +125,9 @@ export async function getComportamientoPago(
         credito_id,
         numero_credito_sifco,
         numero_cuota,
-        (fecha_pago_cubriente IS NOT NULL AND fecha_pago_cubriente <= venc)
+        -- Al día = pago cubriente dentro de la gracia (venc + DIAS_GRACIA).
+        (fecha_pago_cubriente IS NOT NULL
+          AND fecha_pago_cubriente <= venc + ${DIAS_GRACIA})
           AS al_dia
       FROM vencidas
     ),

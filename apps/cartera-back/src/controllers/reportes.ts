@@ -132,6 +132,14 @@ export async function getMontoACobrarPeriodo({
         AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
         AND pc.fecha_vencimiento::date <= ${fechaFin}::date
     ),
+    participacion_externa_actual AS (
+      SELECT
+        ci.credito_id,
+        COALESCE(SUM(ci.porcentaje_participacion_inversionista::numeric / 100) FILTER (WHERE i.permite_distribucion = false), 0) AS participacion_externa_actual
+      FROM cartera.creditos_inversionistas ci
+      INNER JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+      GROUP BY ci.credito_id
+    ),
     per_credito AS (
       SELECT
         p.fecha_venc::date                                             AS bucket,
@@ -142,6 +150,7 @@ export async function getMontoACobrarPeriodo({
         COALESCE(c.seguro_10_cuotas::numeric, 0)                       AS seguro,
         COALESCE(c.gps::numeric, 0)                                    AS gps,
         COALESCE(c.membresias_pago::numeric, 0)                        AS mem,
+        COALESCE(MAX(pea.participacion_externa_actual), 0)             AS participacion_externa_actual,
         COALESCE(cap_anterior.total_restante, c.capital::numeric)       AS cap_ant,
         MAX(mora_real.cuotas_atrasadas)                                 AS cuotas_atrasadas,
         CASE WHEN MAX(mora_real.cuotas_atrasadas) > 0
@@ -151,6 +160,7 @@ export async function getMontoACobrarPeriodo({
       INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
       INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
       INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
+      LEFT JOIN participacion_externa_actual pea ON pea.credito_id = c.credito_id
       LEFT JOIN LATERAL (
         SELECT COALESCE(mh.monto_nuevo, 0) AS monto_mora
         FROM cartera.moras_historial mh
@@ -300,9 +310,24 @@ export async function getMontoACobrarPeriodo({
         MAX(acum_seguro)                        AS acum_seguro,
         MAX(acum_gps)                           AS acum_gps,
         MAX(acum_mem)                           AS acum_mem,
+        MAX(participacion_externa_actual)       AS participacion_externa_actual,
         COUNT(*)::int                           AS cuotas_count
       FROM calc_acum
       GROUP BY DATE_TRUNC(${pg}, bucket::timestamp), credito_id
+    ),
+    split_participacion_actual AS (
+      SELECT
+        pbc.*,
+        (participacion_externa_actual < 0 OR participacion_externa_actual > 1) AS participacion_invalida,
+        ROUND((CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) * participacion_externa_actual, 2) AS capital_inv_participacion_actual,
+        (CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) - ROUND((CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) * participacion_externa_actual, 2) AS capital_cube_participacion_actual,
+        ROUND((CASE WHEN NOT excluido_factura THEN interes + iva ELSE 0 END) * participacion_externa_actual, 2) AS interes_iva_inv_participacion_actual,
+        (CASE WHEN NOT excluido_factura THEN interes + iva ELSE 0 END) - ROUND((CASE WHEN NOT excluido_factura THEN interes + iva ELSE 0 END) * participacion_externa_actual, 2) AS interes_iva_cube_participacion_actual,
+        ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) * participacion_externa_actual, 2) AS acum_capital_inv_participacion_actual,
+        (CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) - ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) * participacion_externa_actual, 2) AS acum_capital_cube_participacion_actual,
+        ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) * participacion_externa_actual, 2) AS acum_interes_iva_inv_participacion_actual,
+        (CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) - ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) * participacion_externa_actual, 2) AS acum_interes_iva_cube_participacion_actual
+      FROM per_bucket_credit pbc
     ),
     -- Interés a inversionistas: lo efectivamente distribuido a inversionistas EXTERNOS
     -- (inversionistas.permite_distribucion = false → se ignoran los nuestros), tomado de
@@ -321,7 +346,7 @@ export async function getMontoACobrarPeriodo({
       GROUP BY DATE_TRUNC(${pg}, (pci.fecha_pago AT TIME ZONE 'America/Guatemala')::timestamp)
     )
     SELECT
-      COALESCE(per_bucket_credit.bucket, ip.pagos_bucket) AS bucket,
+      COALESCE(split_participacion_actual.bucket, ip.pagos_bucket) AS bucket,
       COALESCE(SUM(cuotas_count), 0)::int                                                        AS cuotas_count,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END), 0)               AS total_cuota,
       COALESCE(SUM(CASE WHEN NOT excluido_factura THEN interes     ELSE 0 END), 0)               AS total_interes,
@@ -360,14 +385,25 @@ export async function getMontoACobrarPeriodo({
       -- Interés a inversionistas (lo distribuido a externos). Por período: lo pagado en ese
       -- bucket. Acumulado: suma corrida hasta el bucket (el último bucket = gran total).
       COALESCE(MAX(ip.total_interes_inversionista), 0)                                            AS total_interes_inversionista,
-      COALESCE(SUM(COALESCE(MAX(ip.total_interes_inversionista), 0)) OVER (ORDER BY COALESCE(per_bucket_credit.bucket, ip.pagos_bucket)), 0)   AS acum_total_interes_inversionista
+      COALESCE(SUM(COALESCE(MAX(ip.total_interes_inversionista), 0)) OVER (ORDER BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket)), 0)   AS acum_total_interes_inversionista,
     -- FULL JOIN: el resultado se arma desde la unión de buckets de ambas fuentes, para que un
     -- período con pagos a inversionistas pero SIN cuotas pendientes (posible en vista
     -- día/semana) no se pierda ni subestime la columna.
-    FROM per_bucket_credit
-    FULL JOIN inv_pagos_por_bucket ip ON ip.pagos_bucket = per_bucket_credit.bucket
-    GROUP BY COALESCE(per_bucket_credit.bucket, ip.pagos_bucket)
-    ORDER BY COALESCE(per_bucket_credit.bucket, ip.pagos_bucket) ASC
+      COALESCE(SUM(capital_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS capital_inv_participacion_actual,
+      COALESCE(SUM(capital_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS capital_cube_participacion_actual,
+      COALESCE(SUM(interes_iva_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS interes_iva_inv_participacion_actual,
+      COALESCE(SUM(interes_iva_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS interes_iva_cube_participacion_actual,
+      COALESCE(SUM(acum_capital_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_capital_inv_participacion_actual,
+      COALESCE(SUM(acum_capital_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_capital_cube_participacion_actual,
+      COALESCE(SUM(acum_interes_iva_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_interes_iva_inv_participacion_actual,
+      COALESCE(SUM(acum_interes_iva_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_interes_iva_cube_participacion_actual,
+      COUNT(credito_id) FILTER (WHERE participacion_invalida)::int AS creditos_participacion_invalida,
+      COALESCE(SUM(cuotas_count) FILTER (WHERE participacion_invalida), 0)::int AS cuotas_participacion_invalida,
+      true AS participacion_actual
+    FROM split_participacion_actual
+    FULL JOIN inv_pagos_por_bucket ip ON ip.pagos_bucket = split_participacion_actual.bucket
+    GROUP BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket)
+    ORDER BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket) ASC
   `);
 
   return result.rows;

@@ -27,6 +27,7 @@ import { user } from "../db/schema/auth";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
 import { notifications } from "../db/schema/notifications";
+import { premoraReduccionConfig } from "../db/schema/premora-reduccion";
 import { recordatoriosPremora } from "../db/schema/recordatorios-premora";
 import {
 	interpolar,
@@ -99,6 +100,8 @@ export interface PremoraResumen {
 	fallidos: number;
 	contactosRegistrados: number;
 	notificacionesD0: number;
+	/** CB-010: recordatorios NO enviados por reducción configurada (paga bien). */
+	omitidosPorReduccion: number;
 }
 
 const resumenVacio = (extra?: Partial<PremoraResumen>): PremoraResumen => ({
@@ -110,6 +113,7 @@ const resumenVacio = (extra?: Partial<PremoraResumen>): PremoraResumen => ({
 	fallidos: 0,
 	contactosRegistrados: 0,
 	notificacionesD0: 0,
+	omitidosPorReduccion: 0,
 	...extra,
 });
 
@@ -209,6 +213,30 @@ export async function sendPremoraReminders(
 			enviadosPrevios.map((e) => `${e.cuotaId}:${e.tipo}`),
 		);
 
+		// CB-010: reducciones ACTIVAS del batch — qué días del embudo (D-5/D-3/
+		// D-1) NO se le mandan a cada crédito que "paga bien". El Gerente las
+		// configura sobre los elegibles; el auto-revoke las apaga cuando el
+		// crédito deja de pagar al día. D-0 nunca se remueve (se valida al
+		// configurar y, por si acaso, el check de abajo solo aplica a dias >= 1).
+		const reducciones = await db
+			.select({
+				numeroCreditoSifco: premoraReduccionConfig.numeroCreditoSifco,
+				pasosRemovidos: premoraReduccionConfig.pasosRemovidos,
+			})
+			.from(premoraReduccionConfig)
+			.where(
+				and(
+					eq(premoraReduccionConfig.activo, true),
+					inArray(premoraReduccionConfig.numeroCreditoSifco, sifcos),
+				),
+			);
+		const pasosRemovidosPorSifco = new Map<string, Set<number>>(
+			reducciones.map((r) => [
+				r.numeroCreditoSifco,
+				new Set(r.pasosRemovidos ?? []),
+			]),
+		);
+
 		// Casos de cobros TAMBIÉN inactivos (review Codex): el sync cierra los
 		// casos curados con activo=false, y premora apunta justo a créditos al
 		// día (los curados). El caso —aunque cerrado— trae el teléfono
@@ -282,6 +310,19 @@ export async function sendPremoraReminders(
 
 			if (enviadoSet.has(`${cuota.cuota_id}:${tipo}`)) {
 				resumen.yaEnviados++;
+				continue;
+			}
+
+			// CB-010: si el crédito "paga bien" y el Gerente le quitó ESTE paso
+			// del embudo, no se envía (ni se reclama: es una omisión deliberada,
+			// no un envío pendiente). D-0 (dias=0) nunca está en pasosRemovidos.
+			if (
+				cuota.dias_para_vencer >= 1 &&
+				pasosRemovidosPorSifco
+					.get(cuota.numero_credito_sifco)
+					?.has(cuota.dias_para_vencer)
+			) {
+				resumen.omitidosPorReduccion++;
 				continue;
 			}
 
@@ -496,7 +537,7 @@ export async function sendPremoraReminders(
 		}
 
 		console.log(
-			`${LOG_PREFIX} Resumen: ${resumen.enviados} enviados · ${resumen.yaEnviados} ya enviados · ${resumen.sinTelefono} sin teléfono · ${resumen.sinTelefonoAsesor} sin tel. asesor · ${resumen.fallidos} fallidos · ${resumen.contactosRegistrados} contactos · ${resumen.notificacionesD0} notif. D-0`,
+			`${LOG_PREFIX} Resumen: ${resumen.enviados} enviados · ${resumen.yaEnviados} ya enviados · ${resumen.omitidosPorReduccion} omitidos por reducción · ${resumen.sinTelefono} sin teléfono · ${resumen.sinTelefonoAsesor} sin tel. asesor · ${resumen.fallidos} fallidos · ${resumen.contactosRegistrados} contactos · ${resumen.notificacionesD0} notif. D-0`,
 		);
 		return resumen;
 	} catch (error) {

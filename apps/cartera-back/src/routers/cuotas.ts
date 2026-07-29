@@ -1,6 +1,7 @@
 // routes/cuotas.ts — COBROS-02 · Premora (CC2-11): cuotas próximas a vencer.
 import { Elysia, t } from "elysia";
 import { authMiddleware } from "./midleware";
+import { getComportamientoPago } from "../controllers/comportamientoPago";
 import { getCuotasProximasVencer } from "../controllers/cuotasProximas";
 
 export const cuotasRouter = new Elysia()
@@ -127,6 +128,74 @@ export const cuotasRouter = new Elysia()
         solo_al_dia: t.Optional(t.String()),
         buckets: t.Optional(t.String()),
         asesor_id: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        per_page: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // CB-010 · Comportamiento de pago — racha de cuotas pagadas AL DÍA por
+  // crédito. Lo consume el job diario de elegibilidad del CRM (reducción de
+  // recordatorios premora). Sin gate de rol (solo autenticación), igual que
+  // /cuotas/proximas-vencer: la cuenta de servicio del CRM debe poder llamarlo.
+  .get(
+    "/cuotas/comportamiento-pago",
+    async ({ query, set, user }: any) => {
+      if (!user) {
+        set.status = 401;
+        return { success: false, message: "[ERROR] No autenticado" };
+      }
+      try {
+        // sifcos: CSV opcional para recálculo puntual. Vacío = toda la cartera
+        // activa (el job refresca todo). Cada token es un número de crédito.
+        let sifcos: string[] | undefined;
+        if (query.sifcos != null && String(query.sifcos).trim() !== "") {
+          sifcos = String(query.sifcos)
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+          if (sifcos.length === 0) sifcos = undefined;
+        }
+        // page / per_page: paginación OPCIONAL (el job del CRM recorre toda la
+        // cartera de a lotes). per_page se topa a 1000. Sin ellos → todas las
+        // filas de un jalón (compatibilidad con un consumidor no paginado).
+        let perPage: number | undefined;
+        if (query.per_page != null && String(query.per_page).trim() !== "") {
+          const s = String(query.per_page).trim();
+          if (!/^\d{1,4}$/.test(s) || Number(s) < 1 || Number(s) > 1000) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "[ERROR] per_page inválido (entero 1-1000)",
+            };
+          }
+          perPage = Number(s);
+        }
+        let page: number | undefined;
+        if (query.page != null && String(query.page).trim() !== "") {
+          const s = String(query.page).trim();
+          if (!/^\d{1,6}$/.test(s) || Number(s) < 1) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "[ERROR] page inválido (entero positivo)",
+            };
+          }
+          page = Number(s);
+        }
+        return await getComportamientoPago({ sifcos, page, perPage });
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener el comportamiento de pago",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        sifcos: t.Optional(t.String()),
         page: t.Optional(t.String()),
         per_page: t.Optional(t.String()),
       }),

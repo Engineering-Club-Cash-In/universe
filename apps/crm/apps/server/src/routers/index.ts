@@ -20,6 +20,7 @@ import { messagingRouter } from "./messaging";
 import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
 import { notificationsRouter } from "./notifications";
+import { premoraReduccionRouter } from "./premora-reduccion";
 import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
@@ -194,6 +195,16 @@ export const cobrosAppRouter = {
 	getDescuentosCRM: cobrosRouter.getDescuentosCRM,
 	getCierreDiarioPorRango: cobrosRouter.getCierreDiarioPorRango,
 	getDetalleCierrePorAsesor: cobrosRouter.getDetalleCierrePorAsesor,
+
+	// CB-010: reducción de recordatorios premora (módulo del Gerente de Cobros)
+	getCreditosElegiblesReduccion:
+		premoraReduccionRouter.getCreditosElegiblesReduccion,
+	getReduccionesConfiguradas: premoraReduccionRouter.getReduccionesConfiguradas,
+	getReduccionesAutoRevocadas:
+		premoraReduccionRouter.getReduccionesAutoRevocadas,
+	configurarReduccion: premoraReduccionRouter.configurarReduccion,
+	revocarReduccion: premoraReduccionRouter.revocarReduccion,
+	recalcularElegibilidad: premoraReduccionRouter.recalcularElegibilidad,
 
 	// Seguimientos programados
 	createSeguimiento: seguimientosRouter.createSeguimiento,

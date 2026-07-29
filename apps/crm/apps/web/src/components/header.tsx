@@ -4,6 +4,7 @@ import {
 	Banknote,
 	BarChart3,
 	Bell,
+	BellOff,
 	Briefcase,
 	Building2,
 	Calculator,
@@ -297,6 +298,14 @@ export default function Header() {
 											<Link to="/cobros/buckets" className="cursor-pointer">
 												<Layers className="mr-2 h-4 w-4" />
 												Historial de Buckets
+											</Link>
+										</DropdownMenuItem>
+									)}
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/reduccion" className="cursor-pointer">
+												<BellOff className="mr-2 h-4 w-4" />
+												Reducción de recordatorios
 											</Link>
 										</DropdownMenuItem>
 									)}
@@ -691,6 +700,15 @@ function MobileNav({
 											<Link to="/cobros/buckets" className={MOBILE_LINK_CLASS}>
 												<Layers />
 												Historial de Buckets
+											</Link>
+										)}
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link
+												to="/cobros/reduccion"
+												className={MOBILE_LINK_CLASS}
+											>
+												<BellOff />
+												Reducción de recordatorios
 											</Link>
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (

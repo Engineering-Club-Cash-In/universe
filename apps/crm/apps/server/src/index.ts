@@ -52,6 +52,7 @@ import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
 import { checkPromesasPago } from "./services/check-promesas-pago";
+import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
 
 const app = new Hono();
@@ -1260,6 +1261,26 @@ app.post("/api/premora/run", async (c) => {
 	});
 });
 
+// CB-010: corrida MANUAL del job de elegibilidad de la reducción de
+// recordatorios (refresca la foto de "paga bien" desde cartera y hace el
+// auto-revoke). Mismo gate que premora (admin/cobros_supervisor, POST con
+// Origin validado). Útil para repoblar el tracking sin reiniciar el server.
+app.post("/api/premora/elegibilidad/run", async (c) => {
+	if (!esOrigenConfiable(c.req.header("origin"))) {
+		return c.json({ error: "Origen no permitido" }, 403);
+	}
+	const context = await createContext({ context: c });
+	if (!context.session?.user?.id) {
+		return c.json({ error: "No autorizado" }, 401);
+	}
+	const userRole = context.session.user.role;
+	if (!userRole || !PERMISSIONS.canAssignCobros(userRole)) {
+		return c.json({ error: "No tienes permiso para correr este job" }, 403);
+	}
+	const resumen = await refreshPremoraElegibilidad();
+	return c.json({ success: true, resumen });
+});
+
 // Job periódico de notificaciones de cobros (cada hora)
 setInterval(
 	async () => {
@@ -1294,8 +1315,34 @@ function scheduleAtPremoraGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtPremoraGT();
-setTimeout(() => {
-	sendPremoraReminders().catch(console.error);
+
+// CB-010: elegibilidad de la reducción de recordatorios, diario a las 7:00 GT
+// (= 13:00 UTC) — UNA HORA ANTES del funnel premora, para que la foto de "paga
+// bien" y el auto-revoke queden frescos antes de que se decidan los envíos del
+// día. Idempotente (upsert de la foto + revoca solo configs ya inactivas por
+// segunda vez no reactiva nada), así que el run de boot recupera sin efectos.
+function scheduleAtElegibilidadGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(13, 0, 0, 0); // 07:00 GT
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await refreshPremoraElegibilidad().catch(console.error);
+		scheduleAtElegibilidadGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtElegibilidadGT();
+
+// Recuperación al boot (deploy tardío): la elegibilidad se refresca ANTES del
+// envío premora y este ESPERA a que termine (review Codex P2). En el path
+// diario no se solapan (07:00 vs 08:00), pero en el boot ambos se disparan
+// juntos; si premora corriera primero leería reducciones stale y saltaría
+// D-5/D-3/D-1 de un crédito que ya debía auto-revocarse (el WhatsApp perdido no
+// se recupera después). Premora es idempotente (claims), así que re-correr al
+// boot no duplica mensajes.
+setTimeout(async () => {
+	await refreshPremoraElegibilidad().catch(console.error);
+	await sendPremoraReminders().catch(console.error);
 }, 15_000);
 
 // COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d),

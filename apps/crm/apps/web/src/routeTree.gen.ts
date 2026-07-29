@@ -32,6 +32,7 @@ import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
 import { Route as CrmClientsRouteImport } from './routes/crm/clients'
 import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
+import { Route as CobrosReduccionRouteImport } from './routes/cobros/reduccion'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
 import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
@@ -172,6 +173,11 @@ const CrmClientsRoute = CrmClientsRouteImport.update({
 const CobrosReportesRoute = CobrosReportesRouteImport.update({
   id: '/cobros/reportes',
   path: '/cobros/reportes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CobrosReduccionRoute = CobrosReduccionRouteImport.update({
+  id: '/cobros/reduccion',
+  path: '/cobros/reduccion',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CobrosReasignacionesRoute = CobrosReasignacionesRouteImport.update({
@@ -325,6 +331,7 @@ export interface FileRoutesByFullPath {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
+  '/cobros/reduccion': typeof CobrosReduccionRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
@@ -375,6 +382,7 @@ export interface FileRoutesByTo {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
+  '/cobros/reduccion': typeof CobrosReduccionRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
@@ -426,6 +434,7 @@ export interface FileRoutesById {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
+  '/cobros/reduccion': typeof CobrosReduccionRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
@@ -478,6 +487,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
+    | '/cobros/reduccion'
     | '/cobros/reportes'
     | '/crm/clients'
     | '/crm/companies'
@@ -528,6 +538,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
+    | '/cobros/reduccion'
     | '/cobros/reportes'
     | '/crm/clients'
     | '/crm/companies'
@@ -578,6 +589,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
+    | '/cobros/reduccion'
     | '/cobros/reportes'
     | '/crm/clients'
     | '/crm/companies'
@@ -629,6 +641,7 @@ export interface RootRouteChildren {
   CobrosColaRoute: typeof CobrosColaRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
+  CobrosReduccionRoute: typeof CobrosReduccionRoute
   CobrosReportesRoute: typeof CobrosReportesRoute
   CrmClientsRoute: typeof CrmClientsRoute
   CrmCompaniesRoute: typeof CrmCompaniesRoute
@@ -823,6 +836,13 @@ declare module '@tanstack/react-router' {
       path: '/cobros/reportes'
       fullPath: '/cobros/reportes'
       preLoaderRoute: typeof CobrosReportesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cobros/reduccion': {
+      id: '/cobros/reduccion'
+      path: '/cobros/reduccion'
+      fullPath: '/cobros/reduccion'
+      preLoaderRoute: typeof CobrosReduccionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cobros/reasignaciones': {
@@ -1021,6 +1041,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosColaRoute: CobrosColaRoute,
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
+  CobrosReduccionRoute: CobrosReduccionRoute,
   CobrosReportesRoute: CobrosReportesRoute,
   CrmClientsRoute: CrmClientsRoute,
   CrmCompaniesRoute: CrmCompaniesRoute,

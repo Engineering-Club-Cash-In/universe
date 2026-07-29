@@ -13,7 +13,7 @@
  * Nunca lanza al caller: devuelve un resumen y loguea (patrón premora).
  */
 
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
@@ -58,6 +58,13 @@ export async function refreshPremoraElegibilidad(): Promise<ElegibilidadResumen>
 			return resumenVacio({ skipped: true, reason: "cartera_back_disabled" });
 		}
 
+		// Marca de esta corrida: las filas que se refrescan quedan con
+		// `calculadoAt = runInicio`; las que NO aparezcan hoy (crédito cancelado,
+		// ya no ACTIVO o sin cuotas evaluables) quedan con un calculadoAt más
+		// viejo y se limpian abajo. Se usa un único instante (no now() por fila)
+		// para que la comparación de "no tocado" sea exacta.
+		const runInicio = new Date();
+
 		// 1. Comportamiento de pago de TODA la cartera activa, recorriendo todas
 		// las páginas (la cartera puede ser de miles; el endpoint pagina).
 		const PER_PAGE = 500;
@@ -89,6 +96,7 @@ export async function refreshPremoraElegibilidad(): Promise<ElegibilidadResumen>
 						ultimaCuotaEvaluada: f.ultima_cuota_evaluada,
 						totalVencidas: f.total_vencidas,
 						elegible,
+						calculadoAt: runInicio,
 					};
 				});
 				await db
@@ -105,12 +113,29 @@ export async function refreshPremoraElegibilidad(): Promise<ElegibilidadResumen>
 							ultimaCuotaEvaluada: sql`excluded.ultima_cuota_evaluada`,
 							totalVencidas: sql`excluded.total_vencidas`,
 							elegible: sql`excluded.elegible`,
-							calculadoAt: sql`now()`,
+							calculadoAt: sql`excluded.calculado_at`,
 							updatedAt: sql`now()`,
 						},
 					});
 			}
 		}
+
+		// 2b. Limpiar elegibilidad STALE: cualquier fila que NO se refrescó en
+		//     esta corrida (calculadoAt < runInicio) ya no está en la cartera
+		//     evaluable → deja de ser elegible. Sin esto, un crédito cancelado o
+		//     que dejó de ser ACTIVO seguiría apareciendo como configurable en el
+		//     módulo del gerente (que confía en elegible=true). El fetch fue
+		//     exitoso (si cartera falla, fetchAllPages lanza y no llegamos acá),
+		//     así que un resultado vacío es un "nadie califica hoy" legítimo.
+		await db
+			.update(premoraPagoTracking)
+			.set({ elegible: false, updatedAt: sql`now()` })
+			.where(
+				and(
+					lt(premoraPagoTracking.calculadoAt, runInicio),
+					eq(premoraPagoTracking.elegible, true),
+				),
+			);
 
 		// 3. Auto-revoke: cualquier config ACTIVA cuyo crédito ya NO es elegible
 		//    (bajó la racha o dejó de estar en la cartera activa) se apaga. Se

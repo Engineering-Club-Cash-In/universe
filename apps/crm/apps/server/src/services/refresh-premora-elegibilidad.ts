@@ -146,52 +146,41 @@ export async function refreshPremoraElegibilidad(): Promise<ElegibilidadResumen>
 				),
 			);
 
-		// 3. Auto-revoke: cualquier config ACTIVA cuyo crédito ya NO es elegible
-		//    (bajó la racha o dejó de estar en la cartera activa) se apaga. Se
-		//    compara contra el set fresco — no contra la tabla tracking — para
-		//    cubrir también a los créditos que desaparecieron del resultado.
-		const configsActivas = await db
-			.select({
-				id: premoraReduccionConfig.id,
-				numeroCreditoSifco: premoraReduccionConfig.numeroCreditoSifco,
+		// 3. Auto-revoke: apagar toda config ACTIVA cuyo crédito ya NO es elegible.
+		//    Se decide contra el TRACKING PERSISTIDO (no el set en memoria de esta
+		//    corrida) porque el tracking ya es "newest-wins" por el setWhere de
+		//    arriba, así que es la fuente autoritativa aunque haya corridas
+		//    solapadas (review Codex P2). Solo se revoca si NO existe un tracking
+		//    del crédito que sea elegible O que lo haya tocado una corrida MÁS
+		//    NUEVA (calculado_at > runInicio) — en ese caso manda la corrida nueva
+		//    y esta (más vieja) se abstiene, evitando revocaciones/avisos falsos.
+		//    RETURNING + activo=true → solo cuenta/notifica lo que ESTA corrida
+		//    apagó de verdad (sin duplicar con una corrida concurrente).
+		const revocadas = await db
+			.update(premoraReduccionConfig)
+			.set({
+				activo: false,
+				revocadoAt: sql`now()`,
+				revocadoMotivo: "auto",
+				updatedAt: sql`now()`,
 			})
-			.from(premoraReduccionConfig)
-			.where(eq(premoraReduccionConfig.activo, true));
+			.where(
+				and(
+					eq(premoraReduccionConfig.activo, true),
+					sql`NOT EXISTS (
+						SELECT 1 FROM premora_pago_tracking t
+						WHERE t.numero_credito_sifco = ${premoraReduccionConfig.numeroCreditoSifco}
+							AND (t.elegible = true OR t.calculado_at > ${runInicio})
+					)`,
+				),
+			)
+			.returning({
+				numeroCreditoSifco: premoraReduccionConfig.numeroCreditoSifco,
+			});
+		const autoRevocados = revocadas.length;
 
-		const aRevocar = configsActivas.filter(
-			(c) => !elegibleSet.has(c.numeroCreditoSifco),
-		);
-
-		let autoRevocados = 0;
-		if (aRevocar.length > 0) {
-			const ids = aRevocar.map((c) => c.id);
-			// Filtrar por activo=true + RETURNING (review Codex P2): si otra corrida
-			// (el job y el recálculo manual solapados) ya revocó estas configs, el
-			// UPDATE no las vuelve a tocar y `revocadas` trae SOLO las que ESTA
-			// corrida apagó de verdad. Así no se duplican notificaciones al gerente
-			// ni se sobre-cuentan las revocaciones.
-			const revocadas = await db
-				.update(premoraReduccionConfig)
-				.set({
-					activo: false,
-					revocadoAt: sql`now()`,
-					revocadoMotivo: "auto",
-					updatedAt: sql`now()`,
-				})
-				.where(
-					and(
-						inArray(premoraReduccionConfig.id, ids),
-						eq(premoraReduccionConfig.activo, true),
-					),
-				)
-				.returning({
-					numeroCreditoSifco: premoraReduccionConfig.numeroCreditoSifco,
-				});
-			autoRevocados = revocadas.length;
-
-			if (revocadas.length > 0) {
-				await notificarAutoRevoke(revocadas.map((r) => r.numeroCreditoSifco));
-			}
+		if (revocadas.length > 0) {
+			await notificarAutoRevoke(revocadas.map((r) => r.numeroCreditoSifco));
 		}
 
 		const resumen = resumenVacio({

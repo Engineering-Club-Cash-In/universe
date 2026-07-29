@@ -18,6 +18,7 @@ import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
 import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
+import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -1710,6 +1711,10 @@ export async function falsePayment(pago_id: number, credito_id: number) {
       "No payment found to mark as false with the given criteria"
     );
   }
+
+  // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
+  // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
+  await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
 
   return {
     message: "Payment marked as false successfully",

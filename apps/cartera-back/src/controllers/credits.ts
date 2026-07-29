@@ -1,6 +1,8 @@
 import { db } from "../database/index";
 import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
+import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import {
+  ajuste_fecha_ideal_pago,
   aseguradoras,
   asesores,
   bad_debts,
@@ -71,6 +73,14 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     const currentCredit = creditoData[0];
     const creditoId = currentCredit.creditos.credito_id;
 
+    // Ingreso adicional por día IA (si aplicó al crear el crédito). A lo sumo
+    // 1 fila por crédito — ver ajuste_fecha_ideal_pago en schema.ts.
+    const [ajusteFechaIdeal] = await db
+      .select()
+      .from(ajuste_fecha_ideal_pago)
+      .where(eq(ajuste_fecha_ideal_pago.credito_id, creditoId))
+      .limit(1);
+
     // 2. Si el crédito está cancelado o pendiente de cancelación, verificar si hay cancelación activa
     if (
       currentCredit.creditos.statusCredit === "CANCELADO" ||
@@ -96,6 +106,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           asesor: currentCredit.asesores,
           cancelacion: cancelacion[0],
           flujo: "CANCELADO",
+          ajusteFechaIdeal: ajusteFechaIdeal ?? null,
         };
       }
       // Si no hay cancelación activa, continuar con el flujo normal
@@ -317,6 +328,28 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .orderBy(cuotas_credito.fecha_vencimiento)
       .limit(1);
 
+    // Cuánto hay que cobrar este mes: cuota + ajuste pendiente si la cuota 1
+    // sigue sin pagarse (mismo criterio de registerPayment.ts, consultado
+    // directo para no depender de fecha_vencimiento ni de validaciones
+    // pendientes de otras listas).
+    const [cuota1Row] = await db
+      .select({ pagado: cuotas_credito.pagado })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, creditoId),
+          eq(cuotas_credito.numero_cuota, 1)
+        )
+      )
+      .limit(1);
+    const cuota1Pendiente = cuota1Row?.pagado === false;
+    const cuotaMensualAPagar =
+      cuota1Pendiente && ajusteFechaIdeal && !ajusteFechaIdeal.fecha_cobro
+        ? new Big(currentCredit.creditos.cuota)
+            .plus(ajusteFechaIdeal.monto_total)
+            .toFixed(2)
+        : currentCredit.creditos.cuota;
+
     // 🔥 VALIDACIÓN: Si no hay cuota actual, retornar datos sin cuota activa
     if (!cuotaActualDataResult || cuotaActualDataResult.length === 0) {
       return {
@@ -334,6 +367,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         convenioActivo: null,
         cuotasEnConvenio: [],
         pagosConvenio: [],
+        ajusteFechaIdeal: ajusteFechaIdeal ?? null,
+        cuotaMensualAPagar,
       };
     }
 
@@ -476,6 +511,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           : null,
       cuotasEnConvenio,
       pagosConvenio,
+      ajusteFechaIdeal: ajusteFechaIdeal ?? null,
+      cuotaMensualAPagar,
     };
   } catch (error) {
     console.error("[getCreditoByNumero] Error:", error);
@@ -1577,6 +1614,12 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
         console.log(`🚫 Anulados (paymentFalse) ${pagoIds.length} pagos no pagados del crédito #${creditId}`);
       }
 
+      // Si alguno de estos pagos anulados era el que cobró un ajuste por fecha
+      // ideal de pago, resetearlo a pendiente (a lo sumo 1 fila por crédito).
+      for (const pid of pagoIds) {
+        await resetAjusteFechaIdealSiPagoInvalidado(pid, tx);
+      }
+
       // d) Las cuotas no pagadas NO se borran: se conservan como histórico. Sus pagos quedaron
       //    anulados arriba, así que no aportan saldo en las vistas activas.
 
@@ -1949,7 +1992,7 @@ export async function resetCredit({
     //     paymentFalse=true). Además se ponen los *_restante en 0: algunas queries de
     //     cuotas pendientes/atrasadas (getCreditoByNumero, reportes) NO filtran paymentFalse,
     //     así que sin esto mostrarían "deuda fantasma" con los restantes viejos.
-    await db
+    const pagosAnuladosReset = await db
       .update(pagos_credito)
       .set({
         paymentFalse: true,
@@ -1966,7 +2009,14 @@ export async function resetCredit({
           eq(pagos_credito.credito_id, credito.credito_id),
           eq(pagos_credito.pagado, false)
         )
-      );
+      )
+      .returning({ pago_id: pagos_credito.pago_id });
+
+    // Si alguno de estos pagos anulados era el que cobró un ajuste por fecha
+    // ideal de pago, resetearlo a pendiente (a lo sumo 1 fila por crédito).
+    for (const { pago_id: pidAnulado } of pagosAnuladosReset) {
+      await resetAjusteFechaIdealSiPagoInvalidado(pidAnulado);
+    }
 
     // 12.1 Crear cuota correlativa (MAX(numero_cuota) + 1) para enlazar el pago de cierre
     const [maxCuotaRow] = await db

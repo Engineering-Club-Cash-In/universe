@@ -4059,6 +4059,24 @@ export const cobrosRouter = {
 			});
 		}),
 
+	getMoraRecuperacionPorAsesor: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				mes: z.number(),
+				anio: z.number(),
+				asesores: z.array(z.number()).optional(),
+				emailCobrador: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+			return carteraBackClient.getMoraRecuperacionPorAsesor(input);
+		}),
+
 	// ========================================================================
 	// CUOTAS POR FECHA (reemplaza Pagos Esperados + Pagos No Recibidos)
 	// ========================================================================

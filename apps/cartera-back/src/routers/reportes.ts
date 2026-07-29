@@ -1,9 +1,9 @@
 import { Elysia } from "elysia";
-import { db } from "../database";
 import { buildActivePortfolioRows, buildActivePortfolioWorkbook, getActivePortfolioCredits } from "../controllers/activePortfolioReport";
-import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMontoACobrar, getMontoACobrarPeriodo, getReinversionLiquidaciones } from "../controllers/reportes";
-import { getVehiclesBySifcoMap } from "../services/crm.service";
 import { getCobranzaDiaria, getCobranzaDiariaDetalle } from "../controllers/cobranzaDiariaReporte";
+import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMoraRecuperacionPorAsesor, getReinversionLiquidaciones } from "../controllers/reportes";
+import { db } from "../database";
+import { getVehiclesBySifcoMap } from "../services/crm.service";
 import { authMiddleware } from "./midleware";
 
 const PERIODOS_VALIDOS = ["anio", "trimestre", "mes", "semana", "dia"] as const;
@@ -362,6 +362,39 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/mora-cobrada-por-asesor]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/mora-recuperacion-por-asesor", async ({ query, set }) => {
+    try {
+      const { mes, anio, asesores, email_cobrador } = query as Record<string, string>;
+      const mesNum = Number(mes);
+      const anioNum = Number(anio);
+      if (!Number.isInteger(mesNum) || mesNum < 1 || mesNum > 12) {
+        set.status = 400;
+        return { error: "Parámetro 'mes' inválido (1-12)" };
+      }
+      if (!Number.isInteger(anioNum) || anioNum < 2000 || anioNum > 2100) {
+        set.status = 400;
+        return { error: "Parámetro 'anio' inválido" };
+      }
+      const asesoresIds = asesores
+        ? asesores.split(",").map((value) => Number(value.trim())).filter((id) => Number.isInteger(id) && id > 0)
+        : undefined;
+      if (asesores && !asesoresIds?.length) {
+        set.status = 400;
+        return { error: "Parámetro 'asesores' inválido" };
+      }
+      return getMoraRecuperacionPorAsesor({
+        mes: mesNum,
+        anio: anioNum,
+        asesores: asesoresIds,
+        emailCobrador: email_cobrador,
+      });
+    } catch (error) {
+      console.error("[/reportes/mora-recuperacion-por-asesor]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

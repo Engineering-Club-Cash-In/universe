@@ -480,6 +480,27 @@ export type MoraCobradaPorAsesorResponse = {
 	totalCobrado: string;
 };
 
+export type MoraRecuperacionPorAsesorResponse = {
+	periodo: { inicio: string; fin: string };
+	metadata: {
+		alcance: "live" | "historico";
+		atribucionAsesor: "actual";
+	};
+	totales: MoraRecoveryMetric;
+	porAsesor: (MoraRecoveryMetric & {
+		asesorId: number | null;
+		nombre: string;
+	})[];
+};
+
+export type MoraRecoveryMetric = {
+	esperado: string;
+	cobradoEnSnapshot: string;
+	cobradoFueraSnapshot: string;
+	excedenteEnSnapshot: string;
+	pendiente: string;
+};
+
 // ============================================================================
 // HTTP CLIENT
 // ============================================================================
@@ -1783,6 +1804,27 @@ export class CarteraBackClient {
 		// "Actualizar" podría devolver un hit stale tras registrar/ajustar un pago.
 		return this.request<MoraCobradaPorAsesorResponse>(
 			`/reportes/mora-cobrada-por-asesor?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+	}
+
+	async getMoraRecuperacionPorAsesor(params: {
+		mes: number;
+		anio: number;
+		asesores?: number[];
+		emailCobrador?: string;
+	}): Promise<MoraRecuperacionPorAsesorResponse> {
+		const queryParams = new URLSearchParams({
+			mes: String(params.mes),
+			anio: String(params.anio),
+		});
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		if (params.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
+		return this.request<MoraRecuperacionPorAsesorResponse>(
+			`/reportes/mora-recuperacion-por-asesor?${queryParams}`,
 			{ method: "GET" },
 			false,
 		);

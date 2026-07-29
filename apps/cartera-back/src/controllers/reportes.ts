@@ -1,6 +1,12 @@
 import { sql } from "drizzle-orm";
 import { db } from "../database";
-import { snapCte } from "./moraHistorial";
+import {
+  type MoraRecoverySourceRow,
+  buildMoraRecoveryQuery,
+  buildMoraRecoveryReport,
+  getMoraRecoveryPeriod,
+} from "./moraRecuperacion";
+import { snapCte } from "./moraSnapshotSql";
 
 type Periodo = "anio" | "trimestre" | "mes" | "semana" | "dia";
 
@@ -1369,6 +1375,39 @@ export async function getMoraCobradaPorAsesor({
   const totalCobrado = porAsesor.reduce((s, r) => s + Number(r.cobrado), 0).toFixed(2);
 
   return { periodo: { inicio, fin }, porAsesor, totalCobrado };
+}
+
+export async function getMoraRecuperacionPorAsesor({
+  mes,
+  anio,
+  asesores,
+  emailCobrador,
+}: {
+  mes: number;
+  anio: number;
+  asesores?: number[];
+  emailCobrador?: string;
+}) {
+  const period = getMoraRecoveryPeriod({ mes, anio, hoy: hoyGTStr() });
+
+  const result = await db.execute<{
+    asesor_id: number | null;
+    nombre: string | null;
+    esperado: string;
+    cobrado_en_snapshot: string;
+    cobrado_fuera_snapshot: string;
+  }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
+
+  return buildMoraRecoveryReport(
+    result.rows.map((row): MoraRecoverySourceRow => ({
+      asesorId: row.asesor_id,
+      nombre: row.nombre ?? "Sin asignar",
+      esperado: row.esperado,
+      cobradoEnSnapshot: row.cobrado_en_snapshot,
+      cobradoFueraSnapshot: row.cobrado_fuera_snapshot,
+    })),
+    period,
+  );
 }
 
 export async function getCuotasPorFecha({

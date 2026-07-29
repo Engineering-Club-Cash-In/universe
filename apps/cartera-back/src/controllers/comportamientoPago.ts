@@ -47,8 +47,12 @@ const filtroPagoCubriente = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
 // primer abono parcial (quizá anterior al vencimiento) y clasificaría "al día"
 // una cuota que en realidad se terminó de pagar TARDE. El MAX es la fecha real
 // de completado y es la dirección conservadora para la elegibilidad.
+// fecha_pago es timestamp UTC naive → se convierte al DÍA GT antes del ::date
+// (review Codex P2), mismo patrón que payments.ts/reports.ts y consistente con
+// hoyGT; si no, un pago de la noche del último día de gracia (GT) caería al día
+// UTC siguiente y rompería la racha por error.
 const pagoCubrienteFecha = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
-  SELECT MAX(pc.fecha_pago::date)
+  SELECT MAX((pc.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date)
   FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
   WHERE ${filtroPagoCubriente(cuotaIdCol)}`;
 

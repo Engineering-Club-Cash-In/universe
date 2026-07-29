@@ -1315,9 +1315,6 @@ function scheduleAtPremoraGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtPremoraGT();
-setTimeout(() => {
-	sendPremoraReminders().catch(console.error);
-}, 15_000);
 
 // CB-010: elegibilidad de la reducción de recordatorios, diario a las 7:00 GT
 // (= 13:00 UTC) — UNA HORA ANTES del funnel premora, para que la foto de "paga
@@ -1335,9 +1332,18 @@ function scheduleAtElegibilidadGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtElegibilidadGT();
-setTimeout(() => {
-	refreshPremoraElegibilidad().catch(console.error);
-}, 10_000);
+
+// Recuperación al boot (deploy tardío): la elegibilidad se refresca ANTES del
+// envío premora y este ESPERA a que termine (review Codex P2). En el path
+// diario no se solapan (07:00 vs 08:00), pero en el boot ambos se disparan
+// juntos; si premora corriera primero leería reducciones stale y saltaría
+// D-5/D-3/D-1 de un crédito que ya debía auto-revocarse (el WhatsApp perdido no
+// se recupera después). Premora es idempotente (claims), así que re-correr al
+// boot no duplica mensajes.
+setTimeout(async () => {
+	await refreshPremoraElegibilidad().catch(console.error);
+	await sendPremoraReminders().catch(console.error);
+}, 15_000);
 
 // COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d),
 // diario a las 8:00 GT — DESPUÉS de que la subida de bucket de medianoche ya

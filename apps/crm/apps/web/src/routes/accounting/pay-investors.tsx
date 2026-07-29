@@ -10,6 +10,7 @@ import {
 	Download,
 	Eye,
 	FileCheck,
+	FileText,
 	Loader2,
 	Search,
 	Send,
@@ -115,6 +116,7 @@ interface ResumenInversionista {
 	boleta_pendiente?: BoletaPendiente | null;
 	boleta_liquidacion?: BoletaPendiente | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
+	reporte_liquidacion_url?: string | null;
 }
 
 type EstadoBoletaFilter = "all" | "pending" | "liquidated";
@@ -664,6 +666,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 		useState(false);
 	const tieneBoleta = inv.boleta_pendiente != null;
 	const tieneBoletaLiquidacion = inv.boleta_liquidacion != null;
+	const reporteLiquidacionUrl = inv.reporte_liquidacion_url ?? null;
 	const estadoResumen =
 		inv.estado_liquidacion_resumen ?? (tieneBoleta ? "uploaded" : "pending");
 	const montoPrincipal = inv.total_cuota ?? inv.total_a_recibir_con_reinversion;
@@ -779,18 +782,33 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				{/* Acción */}
 				<div className="px-4 pt-1 pb-4">
 					{estadoResumen === "liquidated" ? (
-						tieneBoletaLiquidacion ? (
-							<Button
-								variant="ghost"
-								size="sm"
-								className="h-8 w-full gap-1.5 text-xs"
-								onClick={() =>
-									window.open(inv.boleta_liquidacion!.boleta_url, "_blank")
-								}
-							>
-								<Eye className="h-3.5 w-3.5" />
-								Ver boleta
-							</Button>
+						tieneBoletaLiquidacion || reporteLiquidacionUrl ? (
+							<div className="flex gap-2">
+								{tieneBoletaLiquidacion && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-8 flex-1 gap-1.5 text-xs"
+										onClick={() =>
+											window.open(inv.boleta_liquidacion!.boleta_url, "_blank")
+										}
+									>
+										<Eye className="h-3.5 w-3.5" />
+										Ver boleta
+									</Button>
+								)}
+								{reporteLiquidacionUrl && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-8 flex-1 gap-1.5 text-xs"
+										onClick={() => window.open(reporteLiquidacionUrl, "_blank")}
+									>
+										<FileText className="h-3.5 w-3.5" />
+										Reporte
+									</Button>
+								)}
+							</div>
 						) : (
 							<div className="flex h-8 w-full items-center justify-center rounded-md bg-muted font-medium text-muted-foreground text-xs">
 								Completada

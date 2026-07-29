@@ -27,8 +27,19 @@ export type MoraDisplayAsesor = MoraRecoveryAsesor &
 
 export function buildMoraDisplayRows(
 	porAsesor: MoraSnapshotAsesor[],
-	recuperacion: MoraRecoveryAsesor[],
+	recuperacion: MoraRecoveryAsesor[] | undefined,
+	verCobrado = true,
 ): MoraDisplayAsesor[] {
+	if (!verCobrado || !recuperacion) {
+		return porAsesor.map((asesor) => ({
+			...asesor,
+			esperado: asesor.totalEnMora.sumaMora,
+			cobradoEnSnapshot: "0",
+			cobradoFueraSnapshot: "0",
+			excedenteEnSnapshot: "0",
+			pendiente: asesor.totalEnMora.sumaMora,
+		}));
+	}
 	const snapshotPorAsesor = new Map<number, MoraSnapshotAsesor>(
 		porAsesor.map((asesor) => [asesor.asesorId, asesor]),
 	);

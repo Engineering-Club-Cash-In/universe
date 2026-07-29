@@ -176,14 +176,32 @@ describe("buildMoraRecoveryReport", () => {
 	});
 
 	it("permite el mes actual provisional antes del día 6 y rechaza ciclos futuros", () => {
-		expect(
-			getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-06-03" }),
-		).toMatchObject({ alcance: "live" });
+		for (const dia of ["01", "02", "03", "04", "05"]) {
+			expect(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: `2026-06-${dia}` }),
+			).toMatchObject({ fechaSnapshot: `2026-06-${dia}`, alcance: "live" });
+		}
 		expect(() =>
 			getMoraRecoveryPeriod({ mes: 7, anio: 2026, hoy: "2026-06-03" }),
 		).toThrow("ciclo futuro");
 		expect(() =>
 			getMoraRecoveryPeriod({ mes: 1, anio: 2027, hoy: "2026-12-20" }),
 		).toThrow("ciclo futuro");
+	});
+
+	it("usa el snapshot histórico de apertura desde el día 6", () => {
+		const period = getMoraRecoveryPeriod({
+			mes: 6,
+			anio: 2026,
+			hoy: "2026-06-06",
+		});
+		const query = new PgDialect().sqlToQuery(buildMoraRecoveryQuery(period));
+
+		expect(period).toMatchObject({
+			fechaSnapshot: "2026-06-06",
+			alcance: "historico",
+		});
+		expect(query.sql).toContain("moras_historial");
+		expect(query.sql).not.toContain("mora_activa");
 	});
 });

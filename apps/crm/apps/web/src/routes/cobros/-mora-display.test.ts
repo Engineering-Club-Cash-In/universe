@@ -52,4 +52,37 @@ describe("buildMoraDisplayRows", () => {
 			}),
 		]);
 	});
+
+	test("ignora recuperación cacheada en modo hoy", () => {
+		const rows = buildMoraDisplayRows(
+			[
+				{
+					asesorId: 7,
+					nombre: "Ana",
+					totalEnMora: { cantidad: 1, sumaMora: "100.00" },
+				},
+			],
+			[
+				{
+					asesorId: 7,
+					nombre: "Ana",
+					esperado: "999.00",
+					cobradoEnSnapshot: "500.00",
+					cobradoFueraSnapshot: "0.00",
+					excedenteEnSnapshot: "0.00",
+					pendiente: "499.00",
+				},
+			],
+			false,
+		);
+
+		expect(rows).toEqual([
+			expect.objectContaining({
+				asesorId: 7,
+				esperado: "100.00",
+				cobradoEnSnapshot: "0",
+				pendiente: "100.00",
+			}),
+		]);
+	});
 });

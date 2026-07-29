@@ -68,7 +68,7 @@ export function getMoraRecoveryPeriod({
 		inicio,
 		fin,
 		fechaSnapshot,
-		alcance: fechaSnapshot < hoy ? "historico" : "live",
+		alcance: inicio <= hoy ? "historico" : "live",
 	};
 }
 

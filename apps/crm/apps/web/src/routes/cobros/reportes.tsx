@@ -206,22 +206,15 @@ function TabMora({
 	});
 	const verCobrado = modo === "mes";
 	const esperadoSnapshot = Number(
-		recuperacion?.totales.esperado ?? totalConGerencia,
+		verCobrado
+			? (recuperacion?.totales.esperado ?? totalConGerencia)
+			: totalConGerencia,
 	);
 
-	const filasAsesor = useMemo<MoraDisplayAsesor[]>(() => {
-		if (!recuperacion) {
-			return porAsesor.map((asesor) => ({
-				...asesor,
-				esperado: asesor.totalEnMora.sumaMora,
-				cobradoEnSnapshot: "0",
-				cobradoFueraSnapshot: "0",
-				excedenteEnSnapshot: "0",
-				pendiente: asesor.totalEnMora.sumaMora,
-			}));
-		}
-		return buildMoraDisplayRows(porAsesor, recuperacion.porAsesor);
-	}, [porAsesor, recuperacion]);
+	const filasAsesor = useMemo<MoraDisplayAsesor[]>(
+		() => buildMoraDisplayRows(porAsesor, recuperacion?.porAsesor, verCobrado),
+		[porAsesor, recuperacion, verCobrado],
+	);
 
 	const ultimaAct = dataUpdatedAt ? fmtTime(new Date(dataUpdatedAt)) : null;
 
@@ -335,7 +328,7 @@ function TabMora({
 				</div>
 			)}
 
-			{recuperacion?.metadata.alcance === "historico" && (
+			{verCobrado && recuperacion?.metadata.alcance === "historico" && (
 				<div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-blue-800 text-sm">
 					La mora corresponde al corte histórico; el asesor mostrado es su
 					asignación actual.

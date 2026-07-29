@@ -162,6 +162,9 @@ export const PERMISSIONS = {
 	canAccessClosedCreditsReport: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
+	canAccessCobranzaReport: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
+
 	canAccessTiempoCierreReport: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
 

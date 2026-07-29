@@ -15,7 +15,7 @@ import {
 	gtDateStrToDate,
 } from "../lib/guatemala-month-window";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
-import { adminProcedure } from "../lib/orpc";
+import { adminProcedure, cobranzaReportProcedure } from "../lib/orpc";
 import {
 	carteraBackClient,
 	type FacturacionMesResponse,
@@ -444,7 +444,7 @@ export const reportesCarteraRouter = {
 	// REPORTE: MONTO A COBRARSE POR PERÍODO (lógica cartera web, con acumulado)
 	// ========================================================================
 
-	getMontoACobrarPeriodo: adminProcedure
+	getMontoACobrarPeriodo: cobranzaReportProcedure
 		.input(
 			z.object({
 				periodo: z
@@ -474,7 +474,7 @@ export const reportesCarteraRouter = {
 	// REPORTE: FACTURADO DEL MES VS ESPERADO
 	// ========================================================================
 
-	getFacturacionMes: adminProcedure
+	getFacturacionMes: cobranzaReportProcedure
 		.input(
 			z.object({
 				mes: z.number().min(1).max(12),

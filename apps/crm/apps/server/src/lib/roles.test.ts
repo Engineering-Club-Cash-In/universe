@@ -23,3 +23,14 @@ describe("taller role permissions", () => {
 		expect(PERMISSIONS.canAccessVehicles(ROLES.INVESTMENT_MANAGER)).toBe(false);
 	});
 });
+
+describe("cobranza report permissions", () => {
+	it("limits the cobranza report to admin and cobros supervisors", () => {
+		expect(PERMISSIONS.canAccessCobranzaReport(ROLES.ADMIN)).toBe(true);
+		expect(PERMISSIONS.canAccessCobranzaReport(ROLES.COBROS_SUPERVISOR)).toBe(
+			true,
+		);
+		expect(PERMISSIONS.canAccessCobranzaReport(ROLES.COBROS)).toBe(false);
+		expect(PERMISSIONS.canAccessCobranzaReport(ROLES.ANALYST)).toBe(false);
+	});
+});

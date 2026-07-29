@@ -105,6 +105,7 @@ export function getMontoACobrarParticipacionTotals(
 	rows: Array<
 		Pick<
 			MontoACobrarParticipacionRow,
+			| "cuotas_count"
 			| "capital_inv_participacion_actual"
 			| "capital_cube_participacion_actual"
 			| "interes_iva_inv_participacion_actual"
@@ -116,7 +117,7 @@ export function getMontoACobrarParticipacionTotals(
 	>,
 	acumulado: boolean,
 ): ParticipacionTotals {
-	const last = rows.at(-1);
+	const last = rows.findLast((row) => row.cuotas_count > 0);
 	const numeric = (value: string) => Number.parseFloat(value) || 0;
 	const creditosInvalidosRango = rows.find(
 		(row) => row.creditos_participacion_invalida_rango !== undefined,

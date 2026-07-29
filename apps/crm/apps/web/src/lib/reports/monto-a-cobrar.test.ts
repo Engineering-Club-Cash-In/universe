@@ -65,6 +65,7 @@ test("totaliza el split sin modificar el total original", () => {
 	const totals = getMontoACobrarParticipacionTotals(
 		[
 			{
+				cuotas_count: 1,
 				capital_inv_participacion_actual: "10",
 				capital_cube_participacion_actual: "90",
 				interes_iva_inv_participacion_actual: "5",
@@ -90,6 +91,7 @@ test("totaliza el split sin modificar el total original", () => {
 test("usa el conteo distinct del rango y conserva las cuotas entre buckets", () => {
 	const rows = [
 		{
+			cuotas_count: 1,
 			capital_inv_participacion_actual: "0",
 			capital_cube_participacion_actual: "0",
 			interes_iva_inv_participacion_actual: "0",
@@ -99,6 +101,7 @@ test("usa el conteo distinct del rango y conserva las cuotas entre buckets", () 
 			cuotas_participacion_invalida: 1,
 		},
 		{
+			cuotas_count: 2,
 			capital_inv_participacion_actual: "0",
 			capital_cube_participacion_actual: "0",
 			interes_iva_inv_participacion_actual: "0",
@@ -108,6 +111,7 @@ test("usa el conteo distinct del rango y conserva las cuotas entre buckets", () 
 			cuotas_participacion_invalida: 2,
 		},
 		{
+			cuotas_count: 3,
 			capital_inv_participacion_actual: "0",
 			capital_cube_participacion_actual: "0",
 			interes_iva_inv_participacion_actual: "0",
@@ -129,6 +133,7 @@ test("usa el conteo distinct del rango y conserva las cuotas entre buckets", () 
 test("usa dos créditos distintos del conteo escalar del rango", () => {
 	const rows = [
 		{
+			cuotas_count: 1,
 			capital_inv_participacion_actual: "0",
 			capital_cube_participacion_actual: "0",
 			interes_iva_inv_participacion_actual: "0",
@@ -147,6 +152,7 @@ test("usa dos créditos distintos del conteo escalar del rango", () => {
 test("conserva el fallback legacy cuando el conteo del rango no existe", () => {
 	const rows = [
 		{
+			cuotas_count: 1,
 			capital_inv_participacion_actual: "0",
 			capital_cube_participacion_actual: "0",
 			interes_iva_inv_participacion_actual: "0",
@@ -155,6 +161,7 @@ test("conserva el fallback legacy cuando el conteo del rango no existe", () => {
 			cuotas_participacion_invalida: 1,
 		},
 		{
+			cuotas_count: 2,
 			capital_inv_participacion_actual: "0",
 			capital_cube_participacion_actual: "0",
 			interes_iva_inv_participacion_actual: "0",
@@ -177,6 +184,7 @@ test("conserva el fallback legacy cuando el conteo del rango no existe", () => {
 test("el acumulado usa el último período y no suma valores ya acumulados", () => {
 	const rows = [
 		{
+			cuotas_count: 1,
 			capital_inv_participacion_actual: "10",
 			capital_cube_participacion_actual: "90",
 			interes_iva_inv_participacion_actual: "5",
@@ -185,6 +193,7 @@ test("el acumulado usa el último período y no suma valores ya acumulados", () 
 			cuotas_participacion_invalida: 1,
 		},
 		{
+			cuotas_count: 2,
 			capital_inv_participacion_actual: "20",
 			capital_cube_participacion_actual: "180",
 			interes_iva_inv_participacion_actual: "10",
@@ -201,5 +210,37 @@ test("el acumulado usa el último período y no suma valores ya acumulados", () 
 	expect(getMontoACobrarParticipacionTotals(rows, true)).toMatchObject({
 		capitalInv: 20,
 		capitalCube: 180,
+	});
+});
+
+test("el acumulado conserva el split ante un último bucket solo de pagos", () => {
+	const rows = [
+		{
+			cuotas_count: 1,
+			capital_inv_participacion_actual: "20",
+			capital_cube_participacion_actual: "180",
+			interes_iva_inv_participacion_actual: "10",
+			interes_iva_cube_participacion_actual: "90",
+			creditos_participacion_invalida: 0,
+			creditos_participacion_invalida_rango: 0,
+			cuotas_participacion_invalida: 0,
+		},
+		{
+			cuotas_count: 0,
+			capital_inv_participacion_actual: "0",
+			capital_cube_participacion_actual: "0",
+			interes_iva_inv_participacion_actual: "0",
+			interes_iva_cube_participacion_actual: "0",
+			creditos_participacion_invalida: 0,
+			creditos_participacion_invalida_rango: 0,
+			cuotas_participacion_invalida: 0,
+		},
+	];
+
+	expect(getMontoACobrarParticipacionTotals(rows, true)).toMatchObject({
+		capitalInv: 20,
+		capitalCube: 180,
+		interesIvaInv: 10,
+		interesIvaCube: 90,
 	});
 });

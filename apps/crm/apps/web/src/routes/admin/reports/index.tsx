@@ -1670,6 +1670,7 @@ function RouteComponent() {
 																				);
 																	const splitTotals = getMontoACobrarParticipacionTotals(
 																		rows.map((row) => ({
+																			cuotas_count: row.cuotas_count,
 																			capital_inv_participacion_actual: a ? row.acum_capital_inv_participacion_actual : row.capital_inv_participacion_actual,
 																			capital_cube_participacion_actual: a ? row.acum_capital_cube_participacion_actual : row.capital_cube_participacion_actual,
 																			interes_iva_inv_participacion_actual: a ? row.acum_interes_iva_inv_participacion_actual : row.interes_iva_inv_participacion_actual,

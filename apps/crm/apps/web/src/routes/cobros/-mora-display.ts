@@ -25,6 +25,16 @@ type MoraRecoveryAsesor = {
 export type MoraDisplayAsesor = MoraRecoveryAsesor &
 	Partial<Omit<MoraSnapshotAsesor, "asesorId" | "nombre">>;
 
+export function getMoraSnapshotDate(
+	modo: "hoy" | "mes",
+	mesAnio: string,
+	hoy: string,
+) {
+	if (modo === "hoy") return undefined;
+	const apertura = `${mesAnio}-05`;
+	return apertura > hoy ? hoy : apertura;
+}
+
 export function buildMoraDisplayRows(
 	porAsesor: MoraSnapshotAsesor[],
 	recuperacion: MoraRecoveryAsesor[] | undefined,

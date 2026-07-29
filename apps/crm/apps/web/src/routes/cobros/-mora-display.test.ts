@@ -1,5 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { buildMoraDisplayRows } from "./-mora-display";
+import { buildMoraDisplayRows, getMoraSnapshotDate } from "./-mora-display";
+
+describe("getMoraSnapshotDate", () => {
+	test("mantiene Hoy en vivo y usa el cierre del día 5 para meses iniciados", () => {
+		expect(getMoraSnapshotDate("hoy", "2026-06", "2026-06-06")).toBeUndefined();
+		expect(getMoraSnapshotDate("mes", "2026-06", "2026-06-06")).toBe(
+			"2026-06-05",
+		);
+	});
+
+	test("conserva el provisional antes del día 5 y los límites de año", () => {
+		expect(getMoraSnapshotDate("mes", "2026-06", "2026-06-03")).toBe(
+			"2026-06-03",
+		);
+		expect(getMoraSnapshotDate("mes", "2025-12", "2026-01-06")).toBe(
+			"2025-12-05",
+		);
+		expect(getMoraSnapshotDate("mes", "2026-01", "2026-02-06")).toBe(
+			"2026-01-05",
+		);
+	});
+});
 
 describe("buildMoraDisplayRows", () => {
 	test("conserva Sin asignar y mezcla los buckets completos por asesor", () => {

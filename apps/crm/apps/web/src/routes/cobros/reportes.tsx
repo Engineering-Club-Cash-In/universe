@@ -38,6 +38,7 @@ import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 import {
 	buildMoraDisplayRows,
+	getMoraSnapshotDate,
 	type MoraBucket,
 	type MoraDisplayAsesor,
 } from "./-mora-display";
@@ -135,13 +136,8 @@ function TabMora({
 		setMesAnio(next);
 	};
 
-	// Fecha snapshot = día 6 del mes elegido, clamp a hoy (nunca futura).
 	const hoy = todayGTISO();
-	const fechaSnapshot = useMemo(() => {
-		if (modo === "hoy") return undefined;
-		const dia6 = `${mesAnio}-06`;
-		return dia6 > hoy ? hoy : dia6;
-	}, [modo, mesAnio, hoy]);
+	const fechaSnapshot = getMoraSnapshotDate(modo, mesAnio, hoy);
 
 	const { data: asesoresData } = useQuery({
 		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),

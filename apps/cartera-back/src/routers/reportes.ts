@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { buildActivePortfolioRows, buildActivePortfolioWorkbook, getActivePortfolioCredits } from "../controllers/activePortfolioReport";
 import { getCobranzaDiaria, getCobranzaDiariaDetalle } from "../controllers/cobranzaDiariaReporte";
+import { MoraRecoveryFuturePeriodError } from "../controllers/moraRecuperacion";
 import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMoraRecuperacionPorAsesor, getReinversionLiquidaciones } from "../controllers/reportes";
 import { db } from "../database";
 import { getVehiclesBySifcoMap } from "../services/crm.service";
@@ -387,13 +388,17 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Parámetro 'asesores' inválido" };
       }
-      return getMoraRecuperacionPorAsesor({
+      return await getMoraRecuperacionPorAsesor({
         mes: mesNum,
         anio: anioNum,
         asesores: asesoresIds,
         emailCobrador: email_cobrador,
       });
     } catch (error) {
+      if (error instanceof MoraRecoveryFuturePeriodError) {
+        set.status = 400;
+        return { error: error.message };
+      }
       console.error("[/reportes/mora-recuperacion-por-asesor]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };

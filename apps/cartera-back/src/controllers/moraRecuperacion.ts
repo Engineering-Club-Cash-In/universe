@@ -39,6 +39,13 @@ export type MoraRecoveryPeriod = {
 	alcance: "live" | "historico";
 };
 
+export class MoraRecoveryFuturePeriodError extends Error {
+	constructor() {
+		super("No se puede consultar un ciclo futuro");
+		this.name = "MoraRecoveryFuturePeriodError";
+	}
+}
+
 export function getMoraRecoveryPeriod({
 	mes,
 	anio,
@@ -48,6 +55,10 @@ export function getMoraRecoveryPeriod({
 	anio: number;
 	hoy: string;
 }): MoraRecoveryPeriod {
+	const [anioActual, mesActual] = hoy.split("-").map(Number);
+	if (anio > anioActual || (anio === anioActual && mes > mesActual)) {
+		throw new MoraRecoveryFuturePeriodError();
+	}
 	const inicio = `${anio}-${String(mes).padStart(2, "0")}-06`;
 	const finMes = mes === 12 ? 1 : mes + 1;
 	const finAnio = mes === 12 ? anio + 1 : anio;
@@ -83,7 +94,7 @@ export function buildMoraRecoveryQuery({
 		: sql``;
 	const snapshotCte =
 		alcance === "historico"
-			? sql`${snapCte(fechaSnapshot)}, snapshot_por_credito AS (
+			? sql`${snapCte(fechaSnapshot, false)}, snapshot_por_credito AS (
       SELECT s.credito_id, s.monto::numeric AS esperado
       FROM snap s
       WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 AND s.cuotas > 0

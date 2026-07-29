@@ -68,6 +68,37 @@ describe("buildMoraRecoveryReport", () => {
 		]);
 	});
 
+	it("usa un snapshot estrictamente anterior al inicio y cuenta el pago del día 6", () => {
+		const period = getMoraRecoveryPeriod({
+			mes: 6,
+			anio: 2026,
+			hoy: "2026-07-29",
+		});
+		const query = new PgDialect().sqlToQuery(buildMoraRecoveryQuery(period));
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "100",
+					cobradoEnSnapshot: "40",
+					cobradoFueraSnapshot: "0",
+				},
+			],
+			period,
+		);
+
+		expect(query.sql).toContain(
+			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date < $1::date",
+		);
+		expect(report.totales).toMatchObject({
+			esperado: "100.00",
+			cobradoEnSnapshot: "40.00",
+			cobradoFueraSnapshot: "0.00",
+			pendiente: "60.00",
+		});
+	});
+
 	it("separa cobrado del snapshot, fuera, excedente y pendiente sin truncar", () => {
 		const report = buildMoraRecoveryReport(rows, {
 			inicio: "2026-06-06",
@@ -142,5 +173,17 @@ describe("buildMoraRecoveryReport", () => {
 				pendiente: "60.00",
 			}),
 		]);
+	});
+
+	it("permite el mes actual provisional antes del día 6 y rechaza ciclos futuros", () => {
+		expect(
+			getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-06-03" }),
+		).toMatchObject({ alcance: "live" });
+		expect(() =>
+			getMoraRecoveryPeriod({ mes: 7, anio: 2026, hoy: "2026-06-03" }),
+		).toThrow("ciclo futuro");
+		expect(() =>
+			getMoraRecoveryPeriod({ mes: 1, anio: 2027, hoy: "2026-12-20" }),
+		).toThrow("ciclo futuro");
 	});
 });

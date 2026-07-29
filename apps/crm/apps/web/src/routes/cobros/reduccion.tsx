@@ -390,6 +390,9 @@ function ReduccionRecordatoriosPage() {
 													<TableCell className="text-right">
 														<Button
 															size="sm"
+															// Con selección múltiple activa se usa el botón de lote
+															// ("Configurar seleccionados"); los individuales se apagan.
+															disabled={seleccionados.size > 0}
 															onClick={() =>
 																abrirDialogUno(c.numeroCreditoSifco, c.cliente)
 															}

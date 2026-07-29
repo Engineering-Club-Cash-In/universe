@@ -337,6 +337,7 @@ export type MontoACobrarPeriodoRow = {
 	acum_interes_iva_inv_participacion_actual: string;
 	acum_interes_iva_cube_participacion_actual: string;
 	creditos_participacion_invalida: number;
+	creditos_participacion_invalida_rango?: number;
 	cuotas_participacion_invalida: number;
 	participacion_actual: boolean;
 };

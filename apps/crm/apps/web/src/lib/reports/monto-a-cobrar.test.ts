@@ -70,6 +70,7 @@ test("totaliza el split sin modificar el total original", () => {
 				interes_iva_inv_participacion_actual: "5",
 				interes_iva_cube_participacion_actual: "7",
 				creditos_participacion_invalida: 1,
+				creditos_participacion_invalida_rango: 1,
 				cuotas_participacion_invalida: 2,
 			},
 		],
@@ -83,6 +84,93 @@ test("totaliza el split sin modificar el total original", () => {
 		interesIvaCube: 7,
 		creditosInvalidos: 1,
 		cuotasInvalidas: 2,
+	});
+});
+
+test("usa el conteo distinct del rango y conserva las cuotas entre buckets", () => {
+	const rows = [
+		{
+			capital_inv_participacion_actual: "0",
+			capital_cube_participacion_actual: "0",
+			interes_iva_inv_participacion_actual: "0",
+			interes_iva_cube_participacion_actual: "0",
+			creditos_participacion_invalida: 1,
+			creditos_participacion_invalida_rango: 1,
+			cuotas_participacion_invalida: 1,
+		},
+		{
+			capital_inv_participacion_actual: "0",
+			capital_cube_participacion_actual: "0",
+			interes_iva_inv_participacion_actual: "0",
+			interes_iva_cube_participacion_actual: "0",
+			creditos_participacion_invalida: 1,
+			creditos_participacion_invalida_rango: 1,
+			cuotas_participacion_invalida: 2,
+		},
+		{
+			capital_inv_participacion_actual: "0",
+			capital_cube_participacion_actual: "0",
+			interes_iva_inv_participacion_actual: "0",
+			interes_iva_cube_participacion_actual: "0",
+			creditos_participacion_invalida: 1,
+			creditos_participacion_invalida_rango: 1,
+			cuotas_participacion_invalida: 3,
+		},
+	];
+
+	for (const acumulado of [false, true]) {
+		expect(getMontoACobrarParticipacionTotals(rows, acumulado)).toMatchObject({
+			creditosInvalidos: 1,
+			cuotasInvalidas: 6,
+		});
+	}
+});
+
+test("usa dos créditos distintos del conteo escalar del rango", () => {
+	const rows = [
+		{
+			capital_inv_participacion_actual: "0",
+			capital_cube_participacion_actual: "0",
+			interes_iva_inv_participacion_actual: "0",
+			interes_iva_cube_participacion_actual: "0",
+			creditos_participacion_invalida: 1,
+			creditos_participacion_invalida_rango: 2,
+			cuotas_participacion_invalida: 1,
+		},
+	];
+
+	expect(getMontoACobrarParticipacionTotals(rows, false)).toMatchObject({
+		creditosInvalidos: 2,
+	});
+});
+
+test("conserva el fallback legacy cuando el conteo del rango no existe", () => {
+	const rows = [
+		{
+			capital_inv_participacion_actual: "0",
+			capital_cube_participacion_actual: "0",
+			interes_iva_inv_participacion_actual: "0",
+			interes_iva_cube_participacion_actual: "0",
+			creditos_participacion_invalida: 1,
+			cuotas_participacion_invalida: 1,
+		},
+		{
+			capital_inv_participacion_actual: "0",
+			capital_cube_participacion_actual: "0",
+			interes_iva_inv_participacion_actual: "0",
+			interes_iva_cube_participacion_actual: "0",
+			creditos_participacion_invalida: 1,
+			cuotas_participacion_invalida: 2,
+		},
+	];
+
+	expect(getMontoACobrarParticipacionTotals(rows, false)).toMatchObject({
+		creditosInvalidos: 2,
+		cuotasInvalidas: 3,
+	});
+	expect(getMontoACobrarParticipacionTotals(rows, true)).toMatchObject({
+		creditosInvalidos: 1,
+		cuotasInvalidas: 3,
 	});
 });
 

@@ -329,6 +329,10 @@ export async function getMontoACobrarPeriodo({
         (CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) - ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) * participacion_externa_actual, 2) AS acum_interes_iva_cube_participacion_actual
       FROM per_bucket_credit pbc
     ),
+    participacion_invalida_rango AS (
+      SELECT COUNT(DISTINCT credito_id) FILTER (WHERE participacion_invalida)::int AS creditos_participacion_invalida_rango
+      FROM split_participacion_actual
+    ),
     -- Interés a inversionistas: lo efectivamente distribuido a inversionistas EXTERNOS
     -- (inversionistas.permite_distribucion = false → se ignoran los nuestros), tomado de
     -- pagos_credito_inversionistas como interés + IVA (abono_interes + abono_iva_12),
@@ -398,10 +402,12 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(acum_interes_iva_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_interes_iva_inv_participacion_actual,
       COALESCE(SUM(acum_interes_iva_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_interes_iva_cube_participacion_actual,
       COUNT(credito_id) FILTER (WHERE participacion_invalida)::int AS creditos_participacion_invalida,
+      COALESCE(MAX(pir.creditos_participacion_invalida_rango), 0)::int AS creditos_participacion_invalida_rango,
       COALESCE(SUM(cuotas_count) FILTER (WHERE participacion_invalida), 0)::int AS cuotas_participacion_invalida,
       true AS participacion_actual
     FROM split_participacion_actual
     FULL JOIN inv_pagos_por_bucket ip ON ip.pagos_bucket = split_participacion_actual.bucket
+    CROSS JOIN participacion_invalida_rango pir
     GROUP BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket)
     ORDER BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket) ASC
   `);

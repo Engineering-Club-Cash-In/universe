@@ -1675,6 +1675,7 @@ function RouteComponent() {
 																			interes_iva_inv_participacion_actual: a ? row.acum_interes_iva_inv_participacion_actual : row.interes_iva_inv_participacion_actual,
 																			interes_iva_cube_participacion_actual: a ? row.acum_interes_iva_cube_participacion_actual : row.interes_iva_cube_participacion_actual,
 																			creditos_participacion_invalida: row.creditos_participacion_invalida,
+																			creditos_participacion_invalida_rango: row.creditos_participacion_invalida_rango,
 																			cuotas_participacion_invalida: row.cuotas_participacion_invalida,
 																		})),
 																		a,

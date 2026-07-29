@@ -28,6 +28,7 @@ export type MontoACobrarParticipacionRow = {
 	acum_interes_iva_inv_participacion_actual: string;
 	acum_interes_iva_cube_participacion_actual: string;
 	creditos_participacion_invalida: number;
+	creditos_participacion_invalida_rango?: number;
 	cuotas_participacion_invalida: number;
 	participacion_actual: boolean;
 };
@@ -109,6 +110,7 @@ export function getMontoACobrarParticipacionTotals(
 			| "interes_iva_inv_participacion_actual"
 			| "interes_iva_cube_participacion_actual"
 			| "creditos_participacion_invalida"
+			| "creditos_participacion_invalida_rango"
 			| "cuotas_participacion_invalida"
 		>
 	>,
@@ -116,14 +118,29 @@ export function getMontoACobrarParticipacionTotals(
 ): ParticipacionTotals {
 	const last = rows.at(-1);
 	const numeric = (value: string) => Number.parseFloat(value) || 0;
+	const creditosInvalidosRango = rows.find(
+		(row) => row.creditos_participacion_invalida_rango !== undefined,
+	)?.creditos_participacion_invalida_rango;
+	const creditosInvalidosLegacy = acumulado && last
+		? last.creditos_participacion_invalida
+		: rows.reduce(
+				(total, row) => total + row.creditos_participacion_invalida,
+				0,
+			);
+	const creditosInvalidos =
+		creditosInvalidosRango ?? creditosInvalidosLegacy;
+	const cuotasInvalidas = rows.reduce(
+		(total, row) => total + row.cuotas_participacion_invalida,
+		0,
+	);
 	if (acumulado && last) {
 		return {
 			capitalInv: numeric(last.capital_inv_participacion_actual),
 			capitalCube: numeric(last.capital_cube_participacion_actual),
 			interesIvaInv: numeric(last.interes_iva_inv_participacion_actual),
 			interesIvaCube: numeric(last.interes_iva_cube_participacion_actual),
-			creditosInvalidos: last.creditos_participacion_invalida,
-			cuotasInvalidas: last.cuotas_participacion_invalida,
+			creditosInvalidos,
+			cuotasInvalidas,
 		};
 	}
 	return rows.reduce<ParticipacionTotals>(
@@ -137,10 +154,8 @@ export function getMontoACobrarParticipacionTotals(
 			interesIvaCube:
 				total.interesIvaCube +
 				numeric(row.interes_iva_cube_participacion_actual),
-			creditosInvalidos:
-				total.creditosInvalidos + row.creditos_participacion_invalida,
-			cuotasInvalidas:
-				total.cuotasInvalidas + row.cuotas_participacion_invalida,
+			creditosInvalidos,
+			cuotasInvalidas,
 		}),
 		{
 			capitalInv: 0,

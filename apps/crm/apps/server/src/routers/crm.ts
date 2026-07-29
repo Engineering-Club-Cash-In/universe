@@ -66,6 +66,7 @@ import {
 	getCreditAnalysisOwnerCondition,
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
+import { getDiaPagoOriginalSistema } from "../lib/fecha-ideal-pago-ajuste";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
@@ -1598,6 +1599,7 @@ export const crmRouter = {
 				cuotaMensual: opportunities.cuotaMensual,
 				fechaInicio: opportunities.fechaInicio,
 				diaPagoMensual: opportunities.diaPagoMensual,
+				diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 				// Additional credit fields
 				seguro: opportunities.seguro,
 				gps: opportunities.gps,
@@ -1806,6 +1808,7 @@ export const crmRouter = {
 						cuotaMensual: opportunities.cuotaMensual,
 						fechaInicio: opportunities.fechaInicio,
 						diaPagoMensual: opportunities.diaPagoMensual,
+						diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 						numeroSifco: opportunities.numeroSifco,
 						nit: opportunities.nit,
 						assignedTo: opportunities.assignedTo,
@@ -2083,6 +2086,12 @@ export const crmRouter = {
 				cuotaMensual: z.string().optional(),
 				fechaInicio: z.string().optional(),
 				diaPagoMensual: z.number().int().min(1).max(31).optional(),
+				// Marca si el día viene de la opción "recomendado por IA" del select,
+				// aunque coincida numéricamente con 15/30. Se revalida server-side
+				// contra suggestedPaymentDays. Requerido cuando se envía diaPagoMensual
+				// (ver .refine() abajo). No es columna de opportunities — se destructura
+				// fuera de updateData más abajo.
+				elegidoDesdeRecomendacionIA: z.boolean().optional(),
 				// Additional fields
 				seguro: z.number().optional(),
 				gps: z.number().optional(),
@@ -2109,7 +2118,16 @@ export const crmRouter = {
 				loanPurpose: z.enum(["personal", "business"]).optional(),
 				// Optimistic locking - prevents race conditions on concurrent updates
 				expectedUpdatedAt: z.string().datetime().optional(),
-			}),
+			}).refine(
+				(data) =>
+					data.diaPagoMensual === undefined ||
+					data.elegidoDesdeRecomendacionIA !== undefined,
+				{
+					message:
+						"elegidoDesdeRecomendacionIA es requerido cuando se envía diaPagoMensual",
+					path: ["elegidoDesdeRecomendacionIA"],
+				},
+			),
 		)
 		.handler(async ({ input, context }) => {
 			const {
@@ -2127,6 +2145,7 @@ export const crmRouter = {
 				expectedCloseDate,
 				fechaInicio,
 				expectedUpdatedAt,
+				elegidoDesdeRecomendacionIA,
 				...updateData
 			} = input;
 
@@ -2145,10 +2164,24 @@ export const crmRouter = {
 
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de capacidad de pago (IA) del lead de esta oportunidad.
+			//
+			// diaPagoOriginalSistema (día que el sistema hubiera asignado por
+			// default) se recalcula cuando diaPagoMensual cambia por esta vía, o
+			// cuando cambia la intención con el mismo día (el flag entrante difiere
+			// de si el estado actual ya implica IA). Se compara contra el valor y el
+			// flag ACTUALES en DB, no solo contra "input presente": los forms
+			// (opportunities.tsx, CreditDetailView) reenvían diaPagoMensual en cada
+			// guardado reflejando el estado vigente, así que un guardado que no
+			// tocó este campo nunca dispara una recaptura accidental.
+			const cambioDeIntencion =
+				input.diaPagoMensual !== undefined &&
+				input.elegidoDesdeRecomendacionIA !==
+					(currentOpportunity[0].diaPagoOriginalSistema != null);
+			let diaPagoOriginalSistemaUpdate: number | null | undefined;
 			if (
 				input.diaPagoMensual !== undefined &&
-				input.diaPagoMensual !== 15 &&
-				input.diaPagoMensual !== 30
+				(input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
+					cambioDeIntencion)
 			) {
 				// Lead efectivo tras el update, no el actual (por si input.leadId también cambia)
 				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
@@ -2164,15 +2197,28 @@ export const crmRouter = {
 						.limit(1);
 					suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				}
-				const isRecommended = suggestedDays?.some(
-					(d) => d.dia === input.diaPagoMensual,
-				);
-				if (!isRecommended) {
-					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
-					});
+
+				if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
+					const isRecommended = suggestedDays?.some(
+						(d) => d.dia === input.diaPagoMensual,
+					);
+					if (!isRecommended) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
+						});
+					}
 				}
+
+				// Por el flag del front, revalidado contra suggestedDays — el valor
+				// numérico solo no distingue intención cuando la IA recomienda
+				// justo 15 o 30 (mismo criterio que assignInvestorAndAdvance).
+				const esDiaIA =
+					elegidoDesdeRecomendacionIA &&
+					(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ?? false);
+				diaPagoOriginalSistemaUpdate = esDiaIA
+					? getDiaPagoOriginalSistema()
+					: null;
 			}
 
 			// Validate stage transitions
@@ -2478,6 +2524,9 @@ export const crmRouter = {
 					}),
 					...(gastosAdministrativos !== undefined && {
 						gastosAdministrativos: String(gastosAdministrativos),
+					}),
+					...(diaPagoOriginalSistemaUpdate !== undefined && {
+						diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
 					}),
 					// Update analysisStatus if it changed during stage transition
 					...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
@@ -3336,6 +3385,41 @@ export const crmRouter = {
 				approvedBy: opportunity.creditDetailApprovedBy || null,
 				approvedAt: opportunity.creditDetailApprovedAt || null,
 			};
+		}),
+
+	// Desglose del ingreso adicional por fecha ideal de pago. null si el
+	// crédito aún no existe en cartera-back o no tuvo ajuste.
+	getAjusteFechaIdealPago: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [opportunity] = await db
+				.select({ numeroSifco: opportunities.numeroSifco })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (!opportunity.numeroSifco) {
+				return { ajuste: null };
+			}
+
+			try {
+				const credito = await carteraBackClient.getCredito(
+					opportunity.numeroSifco,
+				);
+				return { ajuste: credito.ajusteFechaIdeal ?? null };
+			} catch (error) {
+				console.error(
+					`[getAjusteFechaIdealPago] No se pudo consultar cartera-back para ${opportunity.numeroSifco}:`,
+					error,
+				);
+				return { ajuste: null };
+			}
 		}),
 
 	getOpportunityHistory: crmProcedure
@@ -6284,6 +6368,10 @@ export const crmRouter = {
 				]),
 				nit: z.string(),
 				diaPagoMensual: z.number().int().min(1).max(31),
+				// Marca si el día viene de la opción "recomendado por IA" del select,
+				// aunque coincida numéricamente con 15/30 (ver esDiaIA). Se revalida
+				// server-side contra suggestedPaymentDays. Requerido, sin default.
+				elegidoDesdeRecomendacionIA: z.boolean(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -6313,21 +6401,24 @@ export const crmRouter = {
 				});
 			}
 
+			// Se consulta siempre (no solo si el día no es 15/30): también decide
+			// esDiaIA más abajo.
+			let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
+				null;
+			if (opportunity.leadId) {
+				const [analysis] = await db
+					.select({
+						suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+					})
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.leadId, opportunity.leadId))
+					.limit(1);
+				suggestedDays = analysis?.suggestedPaymentDays ?? null;
+			}
+
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de capacidad de pago (IA) del lead de esta oportunidad.
 			if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
-				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
-					null;
-				if (opportunity.leadId) {
-					const [analysis] = await db
-						.select({
-							suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
-						})
-						.from(creditAnalysis)
-						.where(eq(creditAnalysis.leadId, opportunity.leadId))
-						.limit(1);
-					suggestedDays = analysis?.suggestedPaymentDays ?? null;
-				}
 				const isRecommended = suggestedDays?.some(
 					(d) => d.dia === input.diaPagoMensual,
 				);
@@ -6504,6 +6595,15 @@ export const crmRouter = {
 				});
 			}
 
+			// Solo días recomendados por IA generan el ajuste al cierre (no 15/30
+			// manual) — es el día contra el que se compara diaPagoOriginalSistema
+			// para calcular el ingreso adicional. Se determina por el flag del
+			// front, revalidado contra suggestedDays: el valor numérico solo no
+			// distingue intención cuando la IA recomienda justo 15 o 30.
+			const esDiaIA =
+				input.elegidoDesdeRecomendacionIA &&
+				(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ?? false);
+
 			// Update opportunity and record history in a transaction for atomicity
 			await db.transaction(async (tx) => {
 				// Update opportunity with combined investors and move to 80%
@@ -6515,6 +6615,11 @@ export const crmRouter = {
 						categoria: input.categoria,
 						nit: input.nit,
 						diaPagoMensual: input.diaPagoMensual,
+						// Se captura AHORA (momento de la asignación) porque depende de qué
+						// día es "hoy" en este instante — no se puede recalcular después.
+						diaPagoOriginalSistema: esDiaIA
+							? getDiaPagoOriginalSistema()
+							: null,
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));

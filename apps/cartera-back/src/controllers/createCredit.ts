@@ -3,6 +3,7 @@ import z from "zod";
 import { db } from "../database";
 import {
   aseguradoras,
+  ajuste_fecha_ideal_pago,
   creditos,
   creditos_rubros_otros,
   creditos_inversionistas,
@@ -236,6 +237,24 @@ const creditSchema = z.object({
     )
     .optional()
     .default([]),
+
+  // Ingreso adicional (sin capital) por elegir un día de pago IA que cae
+  // después del día que el sistema hubiera asignado por default. Ya viene
+  // calculado desde el CRM (ver fecha-ideal-pago-ajuste.ts); aquí solo se
+  // valida forma y se persiste tal cual en ajuste_fecha_ideal_pago, ligado
+  // al crédito recién creado. Ausente cuando no aplicó ningún ajuste.
+  ajuste_fecha_ideal: z
+    .object({
+      dia_pago_original_sistema: z.number().int().min(1).max(31),
+      dia_pago_mensual_elegido: z.number().int().min(1).max(31),
+      dias_diferencia: z.number().int().positive(),
+      dias_del_mes: z.number().int().min(28).max(31),
+      monto_interes: z.number().min(0),
+      monto_membresia: z.number().min(0),
+      monto_servicios: z.number().min(0),
+      monto_total: z.number().min(0),
+    })
+    .optional(),
 });
 
 // ========================================
@@ -829,6 +848,9 @@ const insertPayments = async (
     membresias: creditDataForInsert.membresias?.toString() ?? "0",
     membresias_pago:  "0",
     membresias_mes:  "0",
+    // Este "otros" de cuota 0 es gastosAdministrativos (CRM); el de cuota 1
+    // (registerPayment.ts) es boleta manual + ajuste por fecha ideal — dos
+    // conceptos distintos que comparten nombre de campo.
     otros: creditData.otros?.toString() ?? "0",
     mora: "0",
     monto_boleta_cuota: "0",
@@ -847,6 +869,10 @@ const insertPayments = async (
 
   // Cuota mensual
   const cuotaMensual = new Big(creditDataForInsert.cuota);
+
+  // El ingreso adicional por fecha ideal de pago (ajuste_fecha_ideal_pago) no
+  // se proyecta en pago_del_mes/otros acá: registerPayment.ts es la única
+  // fuente de verdad, lo lee de la tabla en tiempo real al pagar la cuota 1.
 
   // Pagos para cada cuota regular (MES A MES)
   for (let i = 0; i < cuotasInsertadas.length; i++) {
@@ -980,7 +1006,41 @@ export const createCreditCore = async (
     executor
   );
 
+  // Aditivo: no toca la cuota 0 recién insertada, solo la referencia por credito_id.
+  if (creditData.ajuste_fecha_ideal) {
+    await insertAjusteFechaIdeal(
+      newCredit.credito_id,
+      creditData.ajuste_fecha_ideal,
+      executor
+    );
+  }
+
   return { newCredit, creditDataForInsert };
+};
+
+// ========================================
+// 6. AJUSTE POR FECHA IDEAL DE PAGO (opcional, aditivo)
+// ========================================
+
+// Inserta el desglose del ingreso adicional por día IA (ver comentario en
+// creditSchema). Es un insert completamente separado del de la cuota 0 en
+// insertPayments — no la toca ni depende de ella.
+const insertAjusteFechaIdeal = async (
+  creditoId: number,
+  ajuste: NonNullable<CreditData["ajuste_fecha_ideal"]>,
+  executor: DbExecutor = db
+): Promise<void> => {
+  await executor.insert(ajuste_fecha_ideal_pago).values({
+    credito_id: creditoId,
+    dia_pago_original_sistema: ajuste.dia_pago_original_sistema,
+    dia_pago_mensual_elegido: ajuste.dia_pago_mensual_elegido,
+    dias_diferencia: ajuste.dias_diferencia,
+    dias_del_mes: ajuste.dias_del_mes,
+    monto_interes: ajuste.monto_interes.toString(),
+    monto_membresia: ajuste.monto_membresia.toString(),
+    monto_servicios: ajuste.monto_servicios.toString(),
+    monto_total: ajuste.monto_total.toString(),
+  });
 };
 
 // Construye el CreditData de un insoluto a partir de los datos mínimos de una

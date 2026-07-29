@@ -328,6 +328,18 @@ export type MontoACobrarPeriodoRow = {
 	acum_total_membresias: string;
 	total_interes_inversionista: string;
 	acum_total_interes_inversionista: string;
+	capital_inv_participacion_actual: string;
+	capital_cube_participacion_actual: string;
+	interes_iva_inv_participacion_actual: string;
+	interes_iva_cube_participacion_actual: string;
+	acum_capital_inv_participacion_actual: string;
+	acum_capital_cube_participacion_actual: string;
+	acum_interes_iva_inv_participacion_actual: string;
+	acum_interes_iva_cube_participacion_actual: string;
+	creditos_participacion_invalida: number;
+	creditos_participacion_invalida_rango?: number;
+	cuotas_participacion_invalida: number;
+	participacion_actual: boolean;
 };
 
 export type FlujoCuotasRubro = {

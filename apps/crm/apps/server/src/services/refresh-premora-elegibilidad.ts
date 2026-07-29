@@ -116,6 +116,12 @@ export async function refreshPremoraElegibilidad(): Promise<ElegibilidadResumen>
 							calculadoAt: sql`excluded.calculado_at`,
 							updatedAt: sql`now()`,
 						},
+						// "El más nuevo gana" por fila (review Codex P2): solo aplica si
+						// la corrida entrante es MÁS RECIENTE que lo guardado. Si el job
+						// programado y un recálculo manual se solapan, una corrida vieja
+						// y lenta no puede re-escribir elegible=true sobre lo que una
+						// corrida más nueva ya dejó (incluido el 2b que sella runInicio).
+						setWhere: sql`${premoraPagoTracking.calculadoAt} < excluded.calculado_at`,
 					});
 			}
 		}
@@ -127,9 +133,12 @@ export async function refreshPremoraElegibilidad(): Promise<ElegibilidadResumen>
 		//     módulo del gerente (que confía en elegible=true). El fetch fue
 		//     exitoso (si cartera falla, fetchAllPages lanza y no llegamos acá),
 		//     así que un resultado vacío es un "nadie califica hoy" legítimo.
+		//     Se SELLA calculadoAt = runInicio (review Codex P2): así una corrida
+		//     vieja y lenta que aún tenía el crédito no puede re-escribir
+		//     elegible=true encima (el setWhere del upsert la rechaza por antigua).
 		await db
 			.update(premoraPagoTracking)
-			.set({ elegible: false, updatedAt: sql`now()` })
+			.set({ elegible: false, calculadoAt: runInicio, updatedAt: sql`now()` })
 			.where(
 				and(
 					lt(premoraPagoTracking.calculadoAt, runInicio),

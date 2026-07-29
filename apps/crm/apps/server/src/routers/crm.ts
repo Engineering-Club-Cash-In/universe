@@ -2160,26 +2160,20 @@ export const crmRouter = {
 			}
 
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
-			// por el análisis de capacidad de pago (IA) del lead de esta oportunidad.
+			// por el análisis de capacidad de pago (IA) de esta oportunidad.
 			if (
 				input.diaPagoMensual !== undefined &&
 				input.diaPagoMensual !== 15 &&
 				input.diaPagoMensual !== 30
 			) {
-				// Lead efectivo tras el update, no el actual (por si input.leadId también cambia)
-				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
-				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
-					null;
-				if (effectiveLeadId) {
-					const [analysis] = await db
-						.select({
-							suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
-						})
-						.from(creditAnalysis)
-						.where(eq(creditAnalysis.leadId, effectiveLeadId))
-						.limit(1);
-					suggestedDays = analysis?.suggestedPaymentDays ?? null;
-				}
+				const [analysis] = await db
+					.select({
+						suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+					})
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.opportunityId, id))
+					.limit(1);
+				const suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				const isRecommended = suggestedDays?.some(
 					(d) => d.dia === input.diaPagoMensual,
 				);
@@ -6168,16 +6162,17 @@ export const crmRouter = {
 							.where(inArray(vehicles.id, vehicleIds))
 					: [];
 
-			// Fetch suggested payment days (fecha ideal de pago) from the lead's credit analysis
+			// Fetch suggested payment days (fecha ideal de pago) del análisis de esta oportunidad
+			const opportunityIds = opps.map((o) => o.id);
 			const creditAnalysisData =
-				leadIds.length > 0
+				opportunityIds.length > 0
 					? await db
 							.select({
-								leadId: creditAnalysis.leadId,
+								opportunityId: creditAnalysis.opportunityId,
 								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
 							})
 							.from(creditAnalysis)
-							.where(inArray(creditAnalysis.leadId, leadIds))
+							.where(inArray(creditAnalysis.opportunityId, opportunityIds))
 					: [];
 
 			// Create maps for quick lookup
@@ -6185,8 +6180,11 @@ export const crmRouter = {
 			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
 			const creditAnalysisMap = new Map(
 				creditAnalysisData
-					.filter((ca): ca is typeof ca & { leadId: string } => !!ca.leadId)
-					.map((ca) => [ca.leadId, ca.suggestedPaymentDays]),
+					.filter(
+						(ca): ca is typeof ca & { opportunityId: string } =>
+							!!ca.opportunityId,
+					)
+					.map((ca) => [ca.opportunityId, ca.suggestedPaymentDays]),
 			);
 
 			// Map results
@@ -6230,9 +6228,7 @@ export const crmRouter = {
 					categoria: opp.categoria,
 					nit: opp.nit,
 					diaPagoMensual: opp.diaPagoMensual,
-					suggestedPaymentDays: opp.leadId
-						? creditAnalysisMap.get(opp.leadId) ?? null
-						: null,
+					suggestedPaymentDays: creditAnalysisMap.get(opp.id) ?? null,
 					createdAt: opp.createdAt,
 					updatedAt: opp.updatedAt,
 					creditType: opp.creditType,
@@ -6337,20 +6333,16 @@ export const crmRouter = {
 			}
 
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
-			// por el análisis de capacidad de pago (IA) del lead de esta oportunidad.
+			// por el análisis de capacidad de pago (IA) de esta oportunidad.
 			if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
-				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
-					null;
-				if (opportunity.leadId) {
-					const [analysis] = await db
-						.select({
-							suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
-						})
-						.from(creditAnalysis)
-						.where(eq(creditAnalysis.leadId, opportunity.leadId))
-						.limit(1);
-					suggestedDays = analysis?.suggestedPaymentDays ?? null;
-				}
+				const [analysis] = await db
+					.select({
+						suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+					})
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.opportunityId, input.opportunityId))
+					.limit(1);
+				const suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				const isRecommended = suggestedDays?.some(
 					(d) => d.dia === input.diaPagoMensual,
 				);

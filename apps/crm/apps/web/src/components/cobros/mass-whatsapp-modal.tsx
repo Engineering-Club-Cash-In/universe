@@ -111,6 +111,7 @@ const ESTADO_MORA_LABELS: Record<string, string> = {
 	mora_90: "Mora 90",
 	mora_120: "Mora 120+",
 	incobrable: "Incobrable",
+	pendiente_cancelacion: "Pendiente Cancelación",
 	completado: "Completado",
 };
 

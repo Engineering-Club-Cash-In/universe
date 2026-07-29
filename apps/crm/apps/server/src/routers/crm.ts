@@ -1181,10 +1181,36 @@ export const crmRouter = {
 					throw new ORPCError("NOT_FOUND", { message: "Lead no encontrado" });
 				}
 
-				// Sales users can only see analysis for their assigned leads
+				if (!input.opportunityId) {
+					return null;
+				}
+
+				const [opportunity] = await db
+					.select({
+						leadId: opportunities.leadId,
+						assignedTo: opportunities.assignedTo,
+					})
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+				if (!opportunity) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+				try {
+					assertOpportunityBelongsToLead(opportunity, input.leadId);
+				} catch (error) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
 				if (
-					context.userRole === "sales" &&
-					lead[0].assignedTo !== context.userId
+					!canWriteOpportunityCreditAnalysis(
+						context.userRole,
+						context.userId,
+						opportunity.assignedTo,
+					)
 				) {
 					throw new ORPCError("FORBIDDEN", {
 						message: "No tienes permiso para ver este análisis",
@@ -1314,16 +1340,6 @@ export const crmRouter = {
 
 				if (lead.length === 0) {
 					throw new ORPCError("NOT_FOUND", { message: "Lead no encontrado" });
-				}
-
-				// Sales users can only update analysis for their assigned leads
-				if (
-					context.userRole === "sales" &&
-					lead[0].assignedTo !== context.userId
-				) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para actualizar este análisis",
-					});
 				}
 
 				const [opportunity] = await db
@@ -2208,6 +2224,14 @@ export const crmRouter = {
 				if (vehicleRequirementError) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: vehicleRequirementError,
+					});
+				}
+
+				// Bloquear cualquier retroceso una vez alcanzada Formalización Final (90%+)
+				if (fromPercentage >= 90 && toPercentage < fromPercentage) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"La oportunidad ya alcanzó Formalización Final (90%) y no puede retroceder de etapa.",
 					});
 				}
 
@@ -3861,10 +3885,9 @@ export const crmRouter = {
 			const opps = await db
 				.select({ numeroSifco: opportunities.numeroSifco })
 				.from(opportunities)
-				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.where(
 					and(
-						eq(leads.assignedTo, context.userId),
+						eq(opportunities.assignedTo, context.userId),
 						isNotNull(opportunities.numeroSifco),
 					),
 				);

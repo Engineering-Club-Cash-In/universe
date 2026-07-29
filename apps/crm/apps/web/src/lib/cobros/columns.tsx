@@ -45,6 +45,7 @@ function getEstadoBadge(estado: string) {
 		mora_120: "bg-red-200 text-red-900",
 		mora_120_plus: "bg-red-300 text-red-950",
 		incobrable: "bg-gray-100 text-gray-800",
+		pendiente_cancelacion: "bg-purple-100 text-purple-800",
 		completado: "bg-blue-100 text-blue-800",
 	};
 
@@ -57,6 +58,7 @@ function getEstadoBadge(estado: string) {
 		mora_120: "Mora 120+",
 		mora_120_plus: "Mora 120+",
 		incobrable: "Incobrable",
+		pendiente_cancelacion: "Pendiente Cancelación",
 		completado: "Completado",
 	};
 

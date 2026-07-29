@@ -87,6 +87,7 @@ import {
 } from "@/lib/reports/scenario-configs";
 import { PERMISSIONS } from "@/lib/roles";
 import { Combobox } from "@/components/ui/combobox";
+import { getReportTabs } from "./-tabs";
 import { client, orpc, queryClient } from "@/utils/orpc";
 type SimulacionInversionistaResult = {
 	success: boolean;
@@ -565,7 +566,16 @@ function RouteComponent() {
 	const canAccessClosedCreditsReport = userRole
 		? PERMISSIONS.canAccessClosedCreditsReport(userRole)
 		: false;
-	const canAccessReports = isAdmin || canAccessClosedCreditsReport;
+	const canAccessCobranzaReport = userRole
+		? PERMISSIONS.canAccessCobranzaReport(userRole)
+		: false;
+	const canAccessReports =
+		isAdmin || canAccessClosedCreditsReport || canAccessCobranzaReport;
+	const reportTabs = getReportTabs({
+		canAccessClosedCreditsReport,
+		canAccessCobranzaReport,
+		isAdmin,
+	});
 
 	const dashboardData = useQuery({
 		...orpc.getDashboardExecutivo.queryOptions({
@@ -605,7 +615,7 @@ function RouteComponent() {
 				fechaFin: montoCobrarRange.fechaFin,
 			},
 		}),
-		enabled: isAdmin,
+		enabled: canAccessCobranzaReport,
 	});
 	const montoCobrarData = montoCobrarQuery.data as
 		| { data: MontoACobrarPeriodoRow[] }
@@ -615,7 +625,7 @@ function RouteComponent() {
 		...orpc.getFacturacionMes.queryOptions({
 			input: { mes: facturacionMes.mes, anio: facturacionMes.anio },
 		}),
-		enabled: isAdmin,
+		enabled: canAccessCobranzaReport,
 	});
 	const facturacionMesData = facturacionMesQuery.data as
 		| FacturacionMesResponse
@@ -1058,16 +1068,7 @@ function RouteComponent() {
 				</div>
 			</div>
 
-			{!isAdmin && canAccessClosedCreditsReport && creditosCerradosCard}
-
-			{isAdmin && (
-				<>
-					<Tabs
-						defaultValue={
-							canAccessClosedCreditsReport ? "creditos" : "cobranza"
-						}
-						className="space-y-6"
-					>
+			<Tabs defaultValue={reportTabs.defaultTab} className="space-y-6">
 						<TabsList>
 							{canAccessClosedCreditsReport && (
 								<TabsTrigger value="creditos">Créditos cerrados</TabsTrigger>
@@ -1076,18 +1077,26 @@ function RouteComponent() {
 							    secciones (TabsContent value="resumen" / "graficas") se
 							    conservan más abajo por si se quieren reutilizar; para
 							    volver a mostrarlas, reañadir aquí sus TabsTrigger. */}
-							<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
-							<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
-							<TabsTrigger value="colocacion">Colocación</TabsTrigger>
-							<TabsTrigger value="proyeccion-liquidaciones">
-								Proyección Liquidaciones
-							</TabsTrigger>
+							{canAccessCobranzaReport && (
+								<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
+							)}
+							{isAdmin && (
+								<>
+									<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
+									<TabsTrigger value="colocacion">Colocación</TabsTrigger>
+									<TabsTrigger value="proyeccion-liquidaciones">
+										Proyección Liquidaciones
+									</TabsTrigger>
+								</>
+							)}
 						</TabsList>
 						{canAccessClosedCreditsReport && (
 							<TabsContent value="creditos" className="space-y-6">
 								{creditosCerradosCard}
 							</TabsContent>
 						)}
+						{isAdmin && (
+							<>
 						<TabsContent value="resumen" className="space-y-6">
 							{/* Enlaces a otros reportes - TODO: Implementar rutas */}
 							<div className="grid gap-4 md:grid-cols-4">
@@ -1314,6 +1323,9 @@ function RouteComponent() {
 								</CardContent>
 							</Card>
 						</TabsContent>
+							</>
+						)}
+						{canAccessCobranzaReport && (
 						<TabsContent value="cobranza" className="space-y-6">
 							{/* Reporte: Monto a Cobrarse por Período */}
 							<Card>
@@ -1929,6 +1941,9 @@ function RouteComponent() {
 								</CardContent>
 							</Card>
 						</TabsContent>
+						)}
+						{isAdmin && (
+							<>
 						<TabsContent value="inversiones" className="space-y-6">
 							{/* Reporte: Flujo de Cuotas de Inversiones */}
 							<Card>
@@ -3476,9 +3491,9 @@ function RouteComponent() {
 								);
 							})()}
 						</TabsContent>
+							</>
+						)}
 					</Tabs>
-				</>
-			)}
 		</div>
 	);
 }

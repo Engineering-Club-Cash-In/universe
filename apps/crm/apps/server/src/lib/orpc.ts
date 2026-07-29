@@ -261,6 +261,35 @@ const requireClosedCreditsReport = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireCobranzaReport = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessCobranzaReport(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Cobranza report access required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 const requireTiempoCierreReport = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -598,6 +627,7 @@ export const cobrosSupervisorProcedure = publicProcedure.use(
 export const closedCreditsReportProcedure = publicProcedure.use(
 	requireClosedCreditsReport,
 );
+export const cobranzaReportProcedure = publicProcedure.use(requireCobranzaReport);
 export const tiempoCierreReportProcedure = publicProcedure.use(
 	requireTiempoCierreReport,
 );

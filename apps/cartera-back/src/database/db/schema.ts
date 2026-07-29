@@ -48,6 +48,15 @@
     "pendiente_devolucion",
   ]);
 
+  // Régimen fiscal bajo el que se factura una compra de cartera. Vive por
+  // operación (no es un atributo global del inversionista): el mismo
+  // inversionista puede tener distinta modalidad en compras distintas.
+  export const modalidadFacturacionEnum = customSchema.enum("modalidad_facturacion", [
+    "p2p_directa",
+    "factura_cube",
+    "factura_cube_pequeno",
+  ]);
+
   export const estadoDevolucionEnum = customSchema.enum("estado_devolucion", [
     "NO_APLICA",
     "PENDIENTE_AUTORIZACION",
@@ -506,6 +515,35 @@
     created_at: timestamp("created_at").defaultNow(), // opcional, para seguimiento
   });
 
+  // ====================================================================
+  // modalidad_facturacion_spread
+  // ====================================================================
+  // Catálogo fijo de "tasas promocionales": por rango de monto_aportado Y
+  // modalidad de facturación, define el spread (% Inversionista) y la tasa
+  // final que ve el cliente. Formato LARGO: una fila por (bracket, modalidad),
+  // porque tanto el spread como la tasa cambian según la modalidad.
+  // Fuente: tabla de finanzas (Excel "Tablas Spread para Facturación
+  // Inversionistas"). Si finanzas cambia las tasas, se actualiza a mano.
+  // ====================================================================
+  export const modalidad_facturacion_spread = customSchema.table(
+    "modalidad_facturacion_spread",
+    {
+      id: serial("id").primaryKey(),
+      monto_desde: numeric("monto_desde", { precision: 18, scale: 2 }).notNull(),
+      monto_hasta: numeric("monto_hasta", { precision: 18, scale: 2 }), // null = sin límite superior
+      modalidad: modalidadFacturacionEnum("modalidad").notNull(),
+      spread: numeric("spread", { precision: 18, scale: 10 }).notNull(), // % Inversionista de esta modalidad
+      tasa: numeric("tasa", { precision: 18, scale: 10 }).notNull(), // tasa final que ve el cliente
+      created_at: timestamp("created_at").notNull().defaultNow(),
+    },
+    (t) => ({
+      uxMontoModalidad: uniqueIndex("ux_modalidad_facturacion_spread_monto_modalidad").on(
+        t.monto_desde,
+        t.modalidad,
+      ),
+    }),
+  );
+
   export const creditos_inversionistas = customSchema.table(
     "creditos_inversionistas",
     {
@@ -549,6 +587,11 @@
       aceptada_at: timestamp("aceptada_at", { withTimezone: true }),
       aceptada_por: text("aceptada_por"),
       compra_cartera_extendida_at: timestamp("compra_cartera_extendida_at", { withTimezone: true }),
+      // Modalidad de facturación bajo la que se hizo esta compra/participación.
+      // Nullable: registros existentes quedan sin migrar (decisión de negocio).
+      modalidad_facturacion: modalidadFacturacionEnum("modalidad_facturacion"),
+      modalidad_facturacion_spread_id: integer("modalidad_facturacion_spread_id")
+        .references(() => modalidad_facturacion_spread.id),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
@@ -582,6 +625,11 @@
       fecha: timestamp("fecha", { withTimezone: true }).notNull().$default(() => new Date()),
       created_at: timestamp("created_at", { withTimezone: true }).notNull().$default(() => new Date()),
       updated_at: timestamp("updated_at", { withTimezone: true }),
+      // Modalidad de facturación elegida en esta operación puntual (solo
+      // aplica a compra_cartera). Nullable: operaciones viejas quedan sin migrar.
+      modalidad_facturacion: modalidadFacturacionEnum("modalidad_facturacion"),
+      modalidad_facturacion_spread_id: integer("modalidad_facturacion_spread_id")
+        .references(() => modalidad_facturacion_spread.id),
     },
     (t) => ({
       ixStatus: index("ix_compras_credito_inv_status").on(t.status),

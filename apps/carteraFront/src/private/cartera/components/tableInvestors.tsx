@@ -31,11 +31,17 @@ import {
   inversionistasService,
   notificarContabilidadBoletas,
   formatMensajeFallido,
+  MODALIDAD_FACTURACION_LABELS,
   type Investor,
   type InvestorPayload,
+  type ModalidadFacturacion,
 } from "../services/services";
 import { useLiquidateByInvestor } from "../hooks/liquidateAllInvestor";
 import { useDownloadReporteNoLiquidados } from "../hooks/downloadReporteNoLiquidados";
+import {
+  useResolverModalidadFacturacionSpread,
+  useModalidadFacturacionSpreadByModalidad,
+} from "../hooks/useModalidadFacturacion";
 import { InvestorModal } from "./modalInvestor";
 import { useFalsePayments } from "../hooks/falsePayments";
 import {
@@ -620,6 +626,77 @@ export function TableInvestors() {
   const manualValido =
     compraCarteraManualList.length > 0 &&
     compraCarteraManualList.every((c) => Number(c.monto) > 0);
+
+  // ─── Modalidad de Facturación ─────────────────────────────────────────
+  // Solo aplica a compra_cartera (el backend rechaza el campo en
+  // reinversión). Mismo patrón que el CRM: pre-elección automática por
+  // monto (vía /resolver), anulable manualmente entre los 8 brackets de la
+  // modalidad (vía /por-modalidad) — disponible tanto en modo automático
+  // como en "Asignación manual", a pedido del negocio.
+  const esCompraConModalidad = compraCarteraTipoOperacion === "compra_cartera";
+  const [compraCarteraModalidad, setCompraCarteraModalidad] =
+    useState<ModalidadFacturacion>("p2p_directa");
+  const [compraCarteraSpreadOverrideId, setCompraCarteraSpreadOverrideId] =
+    useState<number | null>(null);
+
+  const compraCarteraMontoEfectivo = compraCarteraManual
+    ? montoTotalManual
+    : Number(compraCarteraMonto) || 0;
+
+  // Debounce del monto que alimenta la resolución: evita una ráfaga de
+  // requests por cada dígito tecleado y el parpadeo del warning.
+  const [compraCarteraMontoDebounced, setCompraCarteraMontoDebounced] =
+    useState(compraCarteraMontoEfectivo);
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setCompraCarteraMontoDebounced(compraCarteraMontoEfectivo),
+      350,
+    );
+    return () => clearTimeout(timer);
+  }, [compraCarteraMontoEfectivo]);
+
+  // Se resetea la anulación manual al cambiar monto o modalidad, para no
+  // arrastrar una elección que ya no aplica al contexto nuevo.
+  useEffect(() => {
+    setCompraCarteraSpreadOverrideId(null);
+  }, [compraCarteraModalidad, compraCarteraMontoDebounced]);
+
+  const modalidadResolverQuery = useResolverModalidadFacturacionSpread(
+    compraCarteraMontoDebounced,
+    compraCarteraOpen && esCompraConModalidad,
+  );
+  const modalidadPorModalidadQuery = useModalidadFacturacionSpreadByModalidad(
+    compraCarteraModalidad,
+    compraCarteraOpen && esCompraConModalidad,
+  );
+  const compraCarteraOverrideRow = compraCarteraSpreadOverrideId
+    ? modalidadPorModalidadQuery.data?.find(
+        (r) => r.id === compraCarteraSpreadOverrideId,
+      )
+    : undefined;
+  const compraCarteraSpreadRow =
+    compraCarteraOverrideRow ??
+    modalidadResolverQuery.data?.find(
+      (r) => r.modalidad === compraCarteraModalidad,
+    );
+  const compraCarteraPctInvCalc = compraCarteraSpreadRow
+    ? Number(compraCarteraSpreadRow.spread)
+    : undefined;
+  const compraCarteraPctCashInCalc =
+    compraCarteraPctInvCalc !== undefined
+      ? 100 - compraCarteraPctInvCalc
+      : undefined;
+  // Con monto ingresado pero sin bracket válido (ej. < Q25,000) y SIN
+  // anulación manual activa, el backend responde sin filas: bloqueamos el
+  // confirmar. Con override activo no aplica (el operador ya eligió una
+  // fila válida, sin importar el monto).
+  const compraCarteraBracketFaltante =
+    esCompraConModalidad &&
+    !compraCarteraSpreadOverrideId &&
+    !modalidadResolverQuery.isLoading &&
+    !modalidadResolverQuery.isError &&
+    compraCarteraMontoDebounced > 0 &&
+    !compraCarteraSpreadRow;
 
   // Inversionista objetivo para los botones del header: el de la lista filtrada (currentInv)
   // o, si no tiene créditos y no aparece en la lista, el del catálogo (para igual permitir editar/comprar)
@@ -2574,6 +2651,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           if (!open) {
             setCompraCarteraOpen(false);
             setCompraCarteraInvId(null);
+            setCompraCarteraSpreadOverrideId(null);
           }
         }}
       >
@@ -2647,6 +2725,40 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </SelectContent>
               </Select>
             </div>
+            {esCompraConModalidad && (
+              <div>
+                <label
+                  htmlFor="compra-modalidad-fact"
+                  className="text-sm font-medium text-gray-700"
+                >
+                  Modalidad de Facturación
+                </label>
+                <Select
+                  value={compraCarteraModalidad}
+                  onValueChange={(v) =>
+                    setCompraCarteraModalidad(v as ModalidadFacturacion)
+                  }
+                >
+                  <SelectTrigger
+                    id="compra-modalidad-fact"
+                    className="mt-1 w-full !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="!bg-white !border-gray-200 !text-gray-900 z-[70]">
+                    <SelectItem value="p2p_directa">
+                      {MODALIDAD_FACTURACION_LABELS.p2p_directa}
+                    </SelectItem>
+                    <SelectItem value="factura_cube">
+                      {MODALIDAD_FACTURACION_LABELS.factura_cube}
+                    </SelectItem>
+                    <SelectItem value="factura_cube_pequeno">
+                      {MODALIDAD_FACTURACION_LABELS.factura_cube_pequeno}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             {/* Toggle: Asignación manual */}
             <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
               <div className="pr-3">
@@ -2754,52 +2866,130 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 />
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="compra-pct-inv" className="text-sm font-medium text-gray-700">
-                  % Inversionista
-                </label>
-                <Input
-                  id="compra-pct-inv"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="1"
-                  value={compraCarteraPctInv}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setCompraCarteraPctInv(val);
-                    const num = Number(val);
-                    if (!isNaN(num) && num >= 0 && num <= 100) {
-                      setCompraCarteraPctCashIn(String(100 - num));
-                    }
-                  }}
-                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
-                />
+            {esCompraConModalidad ? (
+              // % Inversionista: pre-elegido por el sistema según monto +
+              // modalidad, pero editable — el combobox solo permite elegir
+              // entre los spreads válidos de la modalidad actual (los 8
+              // brackets), sin importar si corresponde al monto. % Cash In
+              // y Tasa se derivan del spread elegido.
+              compraCarteraBracketFaltante ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  El monto ingresado no cae en ningún rango del catálogo
+                  (mínimo Q25,000). Ajusta el monto.
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label
+                        htmlFor="compra-pct-inv"
+                        className="text-sm font-medium text-gray-700"
+                      >
+                        % Inversionista
+                      </label>
+                      <Select
+                        value={compraCarteraSpreadRow?.id?.toString() ?? ""}
+                        onValueChange={(v) =>
+                          setCompraCarteraSpreadOverrideId(Number(v))
+                        }
+                      >
+                        <SelectTrigger
+                          id="compra-pct-inv"
+                          className="mt-1 w-full !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                        >
+                          {/* Texto explícito: Radix solo registra el texto de
+                              un SelectItem cuando el dropdown se abre al menos
+                              una vez, así que un valor pre-seleccionado por
+                              monto (sin que el usuario haya abierto el combo)
+                              se vería en blanco si dependemos del lookup automático. */}
+                          <SelectValue placeholder="—">
+                            {compraCarteraSpreadRow
+                              ? `${Number(compraCarteraSpreadRow.spread).toFixed(4)}%`
+                              : undefined}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent className="!bg-white !border-gray-200 !text-gray-900 z-[70]">
+                          {modalidadPorModalidadQuery.data?.map((row) => (
+                            <SelectItem key={row.id} value={row.id.toString()}>
+                              {Number(row.spread).toFixed(4)}%
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">
+                        % Cash In
+                      </label>
+                      <div className="mt-1 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800">
+                        {compraCarteraPctCashInCalc !== undefined
+                          ? `${compraCarteraPctCashInCalc.toFixed(4)}%`
+                          : "—"}
+                      </div>
+                    </div>
+                  </div>
+                  {compraCarteraSpreadRow && (
+                    <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                      <span className="text-xs font-medium text-emerald-700">
+                        Tasa del inversionista
+                      </span>
+                      <span className="text-sm font-bold text-emerald-800">
+                        {Number(compraCarteraSpreadRow.tasa).toFixed(4)}%
+                      </span>
+                    </div>
+                  )}
+                </>
+              )
+            ) : (
+              // Reinversión: la modalidad de facturación no aplica (el
+              // backend la rechaza), el % se sigue ingresando a mano.
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="compra-pct-inv" className="text-sm font-medium text-gray-700">
+                    % Inversionista
+                  </label>
+                  <Input
+                    id="compra-pct-inv"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="1"
+                    value={compraCarteraPctInv}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCompraCarteraPctInv(val);
+                      const num = Number(val);
+                      if (!isNaN(num) && num >= 0 && num <= 100) {
+                        setCompraCarteraPctCashIn(String(100 - num));
+                      }
+                    }}
+                    className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-gray-700">
+                    % Cash In
+                  </label>
+                  <Input
+                    id="compra-pct-cashin"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="1"
+                    value={compraCarteraPctCashIn}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCompraCarteraPctCashIn(val);
+                      const num = Number(val);
+                      if (!isNaN(num) && num >= 0 && num <= 100) {
+                        setCompraCarteraPctInv(String(100 - num));
+                      }
+                    }}
+                    className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                  />
+                </div>
               </div>
-              <div>
-                <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-gray-700">
-                  % Cash In
-                </label>
-                <Input
-                  id="compra-pct-cashin"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="1"
-                  value={compraCarteraPctCashIn}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setCompraCarteraPctCashIn(val);
-                    const num = Number(val);
-                    if (!isNaN(num) && num >= 0 && num <= 100) {
-                      setCompraCarteraPctInv(String(100 - num));
-                    }
-                  }}
-                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
-                />
-              </div>
-            </div>
+            )}
           </div>
           <DialogFooter>
             <button
@@ -2807,6 +2997,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               onClick={() => {
                 setCompraCarteraOpen(false);
                 setCompraCarteraInvId(null);
+                setCompraCarteraSpreadOverrideId(null);
               }}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
@@ -2818,7 +3009,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 agregarInvCredito.isPending ||
                 (compraCarteraManual
                   ? !manualValido
-                  : !compraCarteraMonto || Number(compraCarteraMonto) <= 0)
+                  : !compraCarteraMonto || Number(compraCarteraMonto) <= 0) ||
+                (esCompraConModalidad &&
+                  (!compraCarteraSpreadRow ||
+                    // El debounce todavía no alcanzó al monto tecleado: el
+                    // spread mostrado podría no corresponder al monto actual.
+                    compraCarteraMontoEfectivo !== compraCarteraMontoDebounced ||
+                    modalidadResolverQuery.isFetching))
               }
               onClick={() => {
                 if (!compraCarteraInvId) return;
@@ -2829,14 +3026,28 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   ? montoTotalManual
                   : Number(compraCarteraMonto);
                 if (compraCarteraManual ? !manualValido : montoTotal <= 0) return;
+                if (esCompraConModalidad && !compraCarteraSpreadRow) return;
                 agregarInvCredito.mutate(
                   {
                     inversionista_id: compraCarteraInvId,
                     monto_aportado: montoTotal,
                     tipo_operacion: compraCarteraTipoOperacion,
                     tipo_reinversion: compraCarteraTipoReinversion,
-                    porcentaje_inversion: Number(compraCarteraPctInv),
-                    porcentaje_cash_in: Number(compraCarteraPctCashIn),
+                    modalidad_facturacion: esCompraConModalidad
+                      ? compraCarteraModalidad
+                      : undefined,
+                    // Solo se manda con anulación manual explícita: sin
+                    // esto, el backend re-resuelve y valida por monto.
+                    modalidad_facturacion_spread_id: esCompraConModalidad
+                      ? compraCarteraOverrideRow?.id
+                      : undefined,
+                    // La modalidad ya define el % en compra_cartera (el
+                    // backend lo recalcula e ignora estos dos si vinieran);
+                    // en reinversión siguen siendo los que ingresa el operador.
+                    ...(!esCompraConModalidad && {
+                      porcentaje_inversion: Number(compraCarteraPctInv),
+                      porcentaje_cash_in: Number(compraCarteraPctCashIn),
+                    }),
                     ...(compraCarteraManual && {
                       manual: compraCarteraManualList.map((c) => ({
                         credito_id: c.credito_id,
@@ -2853,6 +3064,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       );
                       setCompraCarteraOpen(false);
                       setCompraCarteraInvId(null);
+                      setCompraCarteraSpreadOverrideId(null);
                       refetch();
                       refetchTotales();
                     },

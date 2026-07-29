@@ -32,7 +32,7 @@ const DIAS_GRACIA = 2;
 
 // Pago que realmente cubre una cuota (espejo de pagoCubriente en
 // cuotasProximas.ts / latefee.ts — mantener alineados). Dos formas del MISMO
-// predicado: la fecha (MIN, escalar) para clasificar al día vs tarde, y el
+// predicado: la fecha de COMPLETADO (para clasificar al día vs tarde) y el
 // EXISTS (SELECT 1) para el NOT EXISTS de "cuota aún sin pagar".
 const filtroPagoCubriente = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
     pc.cuota_id = ${cuotaIdCol}
@@ -41,8 +41,14 @@ const filtroPagoCubriente = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
     AND pc.validation_status IN ('validated', 'no_required')
     AND COALESCE(pc.monto_aplicado, 0) > 0`;
 
+// Fecha en que la cuota quedó COMPLETADA = el ÚLTIMO pago cubriente (MAX), no el
+// primero (review Codex P2). Cuando una cuota se paga en abonos, al completarse
+// el flujo marca TODAS sus filas de pago como pagado=true; un MIN tomaría el
+// primer abono parcial (quizá anterior al vencimiento) y clasificaría "al día"
+// una cuota que en realidad se terminó de pagar TARDE. El MAX es la fecha real
+// de completado y es la dirección conservadora para la elegibilidad.
 const pagoCubrienteFecha = (cuotaIdCol: ReturnType<typeof sql.raw>) => sql`
-  SELECT MIN(pc.fecha_pago::date)
+  SELECT MAX(pc.fecha_pago::date)
   FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
   WHERE ${filtroPagoCubriente(cuotaIdCol)}`;
 
@@ -105,7 +111,7 @@ export async function getComportamientoPago(
   const res = await db.execute<any>(sql`
     WITH vencidas AS (
       -- Cuotas ya pasadas de su GRACIA (venc + DIAS_GRACIA < hoy GT) de créditos
-      -- ACTIVOS, con la fecha del pago cubriente más temprano. Una cuota dentro
+      -- ACTIVOS, con la fecha de COMPLETADO (último pago cubriente). Una cuota dentro
       -- de su gracia (o que vence hoy/futura) aún no se evalúa: no cuenta ni
       -- rompe la racha.
       SELECT

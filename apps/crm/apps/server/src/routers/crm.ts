@@ -1217,42 +1217,6 @@ export const crmRouter = {
 					});
 				}
 
-				if (!input.opportunityId) {
-					return null;
-				}
-
-				const [opportunity] = await db
-					.select({
-						leadId: opportunities.leadId,
-						assignedTo: opportunities.assignedTo,
-					})
-					.from(opportunities)
-					.where(eq(opportunities.id, input.opportunityId))
-					.limit(1);
-				if (!opportunity) {
-					throw new ORPCError("NOT_FOUND", {
-						message: "Oportunidad no encontrada",
-					});
-				}
-				try {
-					assertOpportunityBelongsToLead(opportunity, input.leadId);
-				} catch (error) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: error instanceof Error ? error.message : String(error),
-					});
-				}
-				if (
-					!canWriteOpportunityCreditAnalysis(
-						context.userRole,
-						context.userId,
-						opportunity.assignedTo,
-					)
-				) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para ver este análisis",
-					});
-				}
-
 				const analysis = await db
 					.select()
 					.from(creditAnalysis)
@@ -6178,6 +6142,7 @@ export const crmRouter = {
 					? await db
 							.select({
 								opportunityId: creditAnalysis.opportunityId,
+								leadId: creditAnalysis.leadId,
 								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
 							})
 							.from(creditAnalysis)
@@ -6187,13 +6152,19 @@ export const crmRouter = {
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
 			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
+			// Se guarda también el leadId del análisis: si la oportunidad fue
+			// reasignada a otro lead sin volver a vincular el análisis, no se debe
+			// mostrar el día recomendado del cliente anterior.
 			const creditAnalysisMap = new Map(
 				creditAnalysisData
 					.filter(
 						(ca): ca is typeof ca & { opportunityId: string } =>
 							!!ca.opportunityId,
 					)
-					.map((ca) => [ca.opportunityId, ca.suggestedPaymentDays]),
+					.map((ca) => [
+						ca.opportunityId,
+						{ leadId: ca.leadId, suggestedPaymentDays: ca.suggestedPaymentDays },
+					]),
 			);
 
 			// Map results
@@ -6237,7 +6208,10 @@ export const crmRouter = {
 					categoria: opp.categoria,
 					nit: opp.nit,
 					diaPagoMensual: opp.diaPagoMensual,
-					suggestedPaymentDays: creditAnalysisMap.get(opp.id) ?? null,
+					suggestedPaymentDays:
+						creditAnalysisMap.get(opp.id)?.leadId === opp.leadId
+							? (creditAnalysisMap.get(opp.id)?.suggestedPaymentDays ?? null)
+							: null,
 					createdAt: opp.createdAt,
 					updatedAt: opp.updatedAt,
 					creditType: opp.creditType,
@@ -6342,15 +6316,23 @@ export const crmRouter = {
 			}
 
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
-			// por el análisis de capacidad de pago (IA) de esta oportunidad.
+			// por el análisis de esta oportunidad Y del lead actual (si la oportunidad
+			// fue reasignada a otro lead, el análisis anterior ya no aplica).
 			if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
-				const [analysis] = await db
-					.select({
-						suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
-					})
-					.from(creditAnalysis)
-					.where(eq(creditAnalysis.opportunityId, input.opportunityId))
-					.limit(1);
+				const [analysis] = opportunity.leadId
+					? await db
+							.select({
+								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+							})
+							.from(creditAnalysis)
+							.where(
+								and(
+									eq(creditAnalysis.opportunityId, input.opportunityId),
+									eq(creditAnalysis.leadId, opportunity.leadId),
+								),
+							)
+							.limit(1)
+					: [];
 				const suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				const isRecommended = suggestedDays?.some(
 					(d) => d.dia === input.diaPagoMensual,

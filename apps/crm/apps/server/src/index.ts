@@ -52,6 +52,7 @@ import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
 import { checkPromesasPago } from "./services/check-promesas-pago";
+import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
 
 const app = new Hono();
@@ -1260,6 +1261,26 @@ app.post("/api/premora/run", async (c) => {
 	});
 });
 
+// CB-010: corrida MANUAL del job de elegibilidad de la reducción de
+// recordatorios (refresca la foto de "paga bien" desde cartera y hace el
+// auto-revoke). Mismo gate que premora (admin/cobros_supervisor, POST con
+// Origin validado). Útil para repoblar el tracking sin reiniciar el server.
+app.post("/api/premora/elegibilidad/run", async (c) => {
+	if (!esOrigenConfiable(c.req.header("origin"))) {
+		return c.json({ error: "Origen no permitido" }, 403);
+	}
+	const context = await createContext({ context: c });
+	if (!context.session?.user?.id) {
+		return c.json({ error: "No autorizado" }, 401);
+	}
+	const userRole = context.session.user.role;
+	if (!userRole || !PERMISSIONS.canAssignCobros(userRole)) {
+		return c.json({ error: "No tienes permiso para correr este job" }, 403);
+	}
+	const resumen = await refreshPremoraElegibilidad();
+	return c.json({ success: true, resumen });
+});
+
 // Job periódico de notificaciones de cobros (cada hora)
 setInterval(
 	async () => {
@@ -1297,6 +1318,26 @@ scheduleAtPremoraGT();
 setTimeout(() => {
 	sendPremoraReminders().catch(console.error);
 }, 15_000);
+
+// CB-010: elegibilidad de la reducción de recordatorios, diario a las 7:00 GT
+// (= 13:00 UTC) — UNA HORA ANTES del funnel premora, para que la foto de "paga
+// bien" y el auto-revoke queden frescos antes de que se decidan los envíos del
+// día. Idempotente (upsert de la foto + revoca solo configs ya inactivas por
+// segunda vez no reactiva nada), así que el run de boot recupera sin efectos.
+function scheduleAtElegibilidadGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(13, 0, 0, 0); // 07:00 GT
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await refreshPremoraElegibilidad().catch(console.error);
+		scheduleAtElegibilidadGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtElegibilidadGT();
+setTimeout(() => {
+	refreshPremoraElegibilidad().catch(console.error);
+}, 10_000);
 
 // COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d),
 // diario a las 8:00 GT — DESPUÉS de que la subida de bucket de medianoche ya

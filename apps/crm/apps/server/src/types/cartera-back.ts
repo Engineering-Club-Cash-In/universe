@@ -1108,6 +1108,35 @@ export interface CarteraCuotasProximasResponse {
 	data: CarteraCuotaProximaVencer[];
 }
 
+/**
+ * CB-010: comportamiento de pago de un crédito activo — racha de cuotas ya
+ * vencidas pagadas AL DÍA (fecha_pago <= vencimiento) desde la más reciente
+ * hacia atrás hasta el primer atraso. Elegibilidad (racha >= 4) la decide el CRM.
+ */
+export interface CarteraComportamientoPago {
+	credito_id: number;
+	numero_credito_sifco: string;
+	racha: number;
+	ultima_cuota_evaluada: number;
+	total_vencidas: number;
+	/** Nombre del titular (de cartera.usuarios — completo para todo crédito). */
+	cliente: string | null;
+	/** Cuota mensual del crédito (decimal como string). */
+	cuota_mensual: string;
+	/** Próxima cuota sin pagar que vence (YYYY-MM-DD) o null si no hay. */
+	proxima_fecha_pago: string | null;
+}
+
+export interface CarteraComportamientoPagoResponse {
+	success: boolean;
+	total: number;
+	/** Presentes solo cuando se pidió paginación (el job recorre todas las páginas). */
+	page?: number;
+	perPage?: number;
+	totalPages?: number;
+	data: CarteraComportamientoPago[];
+}
+
 // ============================================================================
 // FACTURACIÓN
 // ============================================================================

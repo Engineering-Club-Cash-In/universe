@@ -18,6 +18,7 @@ import type {
 	CarteraBucketHistorialEvento,
 	CarteraBucketsHistorialResponse,
 	CarteraColaDiaResponse,
+	CarteraComportamientoPagoResponse,
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
 	CarteraInversionista,
@@ -1064,6 +1065,26 @@ export class CarteraBackClient {
 		if (opts.perPage != null) queryParams.set("per_page", String(opts.perPage));
 		return this.request<CarteraCuotasProximasResponse>(
 			`/cuotas/proximas-vencer?${queryParams}`,
+			{ method: "GET" },
+		);
+	}
+
+	// CB-010: comportamiento de pago (racha de cuotas al día por crédito). Lo
+	// consume el job diario de elegibilidad de la reducción de recordatorios.
+	// Sin cache: es una foto que se calcula una vez al día y debe reflejar los
+	// pagos más recientes. `sifcos` opcional para recálculo puntual; page/perPage
+	// para recorrer toda la cartera de a lotes (fetchAllPages).
+	async getComportamientoPago(
+		opts: { sifcos?: string[]; page?: number; perPage?: number } = {},
+	): Promise<CarteraComportamientoPagoResponse> {
+		const qs = new URLSearchParams();
+		if (opts.sifcos && opts.sifcos.length > 0)
+			qs.set("sifcos", opts.sifcos.join(","));
+		if (opts.page != null) qs.set("page", String(opts.page));
+		if (opts.perPage != null) qs.set("per_page", String(opts.perPage));
+		const suffix = qs.toString() ? `?${qs}` : "";
+		return this.request<CarteraComportamientoPagoResponse>(
+			`/cuotas/comportamiento-pago${suffix}`,
 			{ method: "GET" },
 		);
 	}

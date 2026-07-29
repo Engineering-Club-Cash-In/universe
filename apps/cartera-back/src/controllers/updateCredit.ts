@@ -1,5 +1,17 @@
 import Big from "big.js";
-import { eq, and, inArray, asc, gt, lte, gte, sql } from "drizzle-orm";
+import {
+  eq,
+  and,
+  or,
+  inArray,
+  notInArray,
+  isNull,
+  asc,
+  gt,
+  lte,
+  gte,
+  sql,
+} from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { db } from "../database";
 import {
@@ -1977,16 +1989,48 @@ export const recalcularPagosCredito = async ({
 
   // 2️⃣ Obtener pagos con su cuota
   // Si numero_cuota está definido → desde esa cuota en adelante (pagadas y no pagadas)
-  // Si no → solo no pagadas
+  // Si no → solo lo que AÚN NO SE APLICÓ al crédito: cuotas no pagadas y
+  // también pagos ya registrados como pagados pero SIN validar por conta
+  // (validationStatus='pending', vivos). Esos pagos no han movido capital ni
+  // distribuido a inversionistas — su reparto guardado recién se aplica al
+  // validarse, así que refrescarlo aquí es seguro y necesario: si quedaran
+  // fuera, conta validaría el split viejo (interés pre-abono).
+  // Las filas de ABONO A CAPITAL (validationStatus 'capital'/'capital_validated')
+  // NUNCA entran al recálculo: su split es capital puro (abono_capital = monto),
+  // no un reparto de cuota. Redistribuirlas aquí les reescribe el split como si
+  // fueran pago de cuota — y si la cuota ya está cubierta por el pago mensual,
+  // les toca puro cero. Caso real: abono registrado sin aplicar, un "Recalcular
+  // Pagos" intermedio le dejó abono_capital en 0 y al aplicarse restó Q0 del
+  // crédito. También cubre abonos ya aplicados que quedaron con pagado=false.
+  const filaNoEsAbonoCapital = or(
+    isNull(pagos_credito.validationStatus),
+    notInArray(pagos_credito.validationStatus, ["capital", "capital_validated"]),
+  );
+
   const whereConditions =
     numero_cuota !== undefined
       ? and(
           eq(pagos_credito.credito_id, credito.credito_id),
           gte(cuotas_credito.numero_cuota, numero_cuota),
+          filaNoEsAbonoCapital,
         )
       : and(
           eq(pagos_credito.credito_id, credito.credito_id),
-          eq(pagos_credito.pagado, false),
+          filaNoEsAbonoCapital,
+          or(
+            eq(pagos_credito.pagado, false),
+            // Pagos registrados sin validar: solo con monto_aplicado > 0.
+            // Los recibos especiales de solo mora/otros/convenio se guardan
+            // pagado=true con monto_aplicado=0 — no son pago de cuota, no
+            // tienen split que refrescar, y reescribirlos aquí los volvería
+            // recibos de cuota (incluso volteando su pagado).
+            and(
+              eq(pagos_credito.pagado, true),
+              eq(pagos_credito.validationStatus, "pending"),
+              eq(pagos_credito.paymentFalse, false),
+              gt(pagos_credito.monto_aplicado, "0"),
+            ),
+          ),
         );
 
   const rows = await db
@@ -2025,6 +2069,11 @@ export const recalcularPagosCredito = async ({
   const porcentajeInteres = new Big(credito.porcentaje_interes ?? 0).div(100);
   const cuotaMensual = new Big(credito.cuota);
   let capitalEnMemoria = new Big(credito.capital);
+  // Un sobre-abono (o data histórica) puede dejar el capital del crédito en
+  // negativo; para la amortización un saldo negativo no existe. Sin este
+  // clamp, el tope de abajo asignaría el negativo como abono_capital y los
+  // recibos quedarían con capital_restante/abono_capital negativos.
+  if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
   // 5️⃣ Procesar cada cuota en orden
   const actualizaciones: { pago_id: number; datos: Record<string, unknown> }[] = [];
@@ -2040,12 +2089,18 @@ export const recalcularPagosCredito = async ({
     // Amortización de esta cuota
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
     const ivaMes = interesMes.times(0.12).round(2);
-    const abonoCapital = cuotaMensual
+    let abonoCapital = cuotaMensual
       .minus(interesMes)
       .minus(ivaMes)
       .minus(seguroFijo)
       .minus(gpsFijo)
       .minus(membresiasFijo);
+
+    // Tope: un recibo nunca proyecta más capital del que queda en el crédito
+    // (tras un abono grande la última porción es menor a la de una cuota
+    // normal), y con saldo 0 las cuotas restantes ya no llevan capital. Sin
+    // esto se sobre-cobraría capital y se sobre-distribuiría a inversionistas.
+    if (abonoCapital.gt(capitalEnMemoria)) abonoCapital = capitalEnMemoria;
 
     capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
     if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
@@ -2094,7 +2149,16 @@ export const recalcularPagosCredito = async ({
       rem.capital.eq(0);
 
     for (const pago of pagosOrdenados) {
-      const montoAplicado = new Big(pago.monto_aplicado ?? 0);
+      // Pagos ANULADOS (paymentFalse): conservan monto_aplicado, pero esa
+      // plata ya no existe — no debe consumir el saldo de la cuota ni marcar
+      // nada como pagado. Se tratan como monto 0 y caen a la rama de abajo:
+      // la fila se re-siembra como recibo limpio (abonos 0, restantes del
+      // saldo vigente). No se excluyen del SELECT a propósito: tras anular,
+      // esta fila suele ser el destino que el próximo registro sobreescribe,
+      // y así cascadea contra el saldo nuevo en vez del sembrado viejo.
+      const montoAplicado = pago.paymentFalse
+        ? new Big(0)
+        : new Big(pago.monto_aplicado ?? 0);
 
       if (montoAplicado.gt(0)) {
         // Distribuir monto_aplicado contra el saldo restante en orden de prioridad

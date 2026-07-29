@@ -4,6 +4,8 @@ import { db } from "../database";
 import Big from "big.js";
 import { obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
 
+type AbonoCapitalExecutor = Pick<typeof db, "select" | "insert">;
+
 export async function createAbonoCapital(data: {
   credito_id: number;
   inversionista_id: number;
@@ -62,12 +64,13 @@ export async function distribuirAbonoCapitalEspejo(
   credito_id: number,
   monto_abono_capital: number | string,
   tipo: "CANCELACION" | "CAPITAL" = "CAPITAL",
-  pago_id?: number
+  pago_id?: number,
+  executor: AbonoCapitalExecutor = db
 ) {
   const abonoBig = new Big(monto_abono_capital);
 
   // 1. Traer inversionistas del espejo
-  const invsEspejo = await db
+  const invsEspejo = await executor
       .select({
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -111,7 +114,7 @@ export async function distribuirAbonoCapitalEspejo(
 
       // Una fila propia por (pago, inversionista): nunca se suma sobre una
       // fila previa, así revertir el pago no le toca lo suyo a otros pagos.
-      const [nuevo] = await db
+      const [nuevo] = await executor
         .insert(abonos_capital)
         .values({
           credito_id,
@@ -358,4 +361,3 @@ export async function updateAbonoCapital(
     };
   }
 }
-

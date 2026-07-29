@@ -478,11 +478,22 @@ export const applyCapitalPaymentAndBuildResponse = async (
     throw new Error("No se puede aplicar el abono: credito_id es null");
   }
 
-  await applyCapitalAbono(pago.credito_id, pago.abono_capital ?? "0", pagoId);
+  const resultado = await applyCapitalAbono(
+    pago.credito_id,
+    pago.abono_capital ?? "0",
+    pagoId
+  );
   console.log("⚠️ El pago es un abono directo a capital");
+  // Propagar el estado del recálculo de recibos pendientes: si falló (o se
+  // omitió por solo-interés), el caller debe enterarse para correr
+  // "Recalcular Pagos" a mano — no puede quedarse solo en los logs.
+  const recalculo_pendientes = (
+    resultado as { recalculo_pendientes?: string } | null | undefined
+  )?.recalculo_pendientes;
   return {
     success: true,
     applied: false,
+    ...(recalculo_pendientes ? { recalculo_pendientes } : {}),
     message:
       "Pago validado como abono a capital , se abonó a inversionistas correctamente",
   };

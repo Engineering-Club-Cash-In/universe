@@ -62,6 +62,12 @@ export type OpportunityForModal = {
 	createdAt: Date;
 	source?: string | null;
 	loanPurpose?: string | null;
+	nit?: string | null;
+	categoria?: string | null;
+	diaPagoMensual?: number | null;
+	royalti?: string | null;
+	porcentajeRoyalti?: string | null;
+	inversionistas?: string | null;
 	lead?: {
 		id: string;
 		firstName: string;

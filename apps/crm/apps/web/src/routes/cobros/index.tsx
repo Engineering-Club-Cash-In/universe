@@ -603,6 +603,11 @@ function RouteComponent() {
 			color: "bg-gray-100 text-gray-800",
 		},
 		{
+			key: "pendiente_cancelacion",
+			label: "Pendiente Cancelación",
+			color: "bg-purple-100 text-purple-800",
+		},
+		{
 			key: "completado",
 			label: "Completado",
 			color: "bg-blue-100 text-blue-800",

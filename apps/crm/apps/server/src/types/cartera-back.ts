@@ -206,6 +206,17 @@ export interface GetCreditosPorBucketParams {
 	asesor_id?: number;
 }
 
+/** CB-027: filtros de GET /payment-agreements/listado. */
+export interface GetConveniosListadoParams {
+	estado?: "active" | "completed" | "inactive" | "all";
+	numeroCreditoSifco?: string;
+	nombreUsuario?: string;
+	asesorId?: number;
+	emailAsesor?: string;
+	page?: number;
+	perPage?: number;
+}
+
 /** CB-018: filtros de GET /buckets/carga (carga por asesor y bucket). */
 export interface GetCargaPorAsesorBucketParams {
 	bucket?: number;
@@ -511,6 +522,55 @@ export interface CarteraConvenio {
 	observaciones?: string | null;
 	created_by?: number | null;
 	cuotaConvenioAPagar?: string | null;
+	/**
+	 * CB-027: plan de pagos del convenio (numero_cuota/fecha_vencimiento/
+	 * fecha_pago). Anidado DENTRO de convenioActivo, no top-level en
+	 * CreditoDirectoResponse — carteraFront ya espera este campo así
+	 * (cardInfo.tsx, registerPayment.ts spread solo result.convenioActivo).
+	 */
+	cuotasConvenioMensuales?: CarteraConvenioCuota[];
+}
+
+/** Fila de `convenio_cuotas` — plan de pagos del convenio (CB-027). */
+export interface CarteraConvenioCuota {
+	cuota_convenio_id: number;
+	convenio_id: number;
+	numero_cuota: number;
+	fecha_vencimiento: string;
+	/** null = pendiente. */
+	fecha_pago: string | null;
+	created_at?: string | null;
+}
+
+/** Fila de `GET /payment-agreements/listado` (CB-027). */
+export interface CarteraConvenioListado {
+	convenio_id: number;
+	credito_id: number;
+	numero_credito_sifco: string;
+	cliente_nombre: string;
+	asesor_id: number | null;
+	asesor_nombre: string | null;
+	asesor_email: string | null;
+	monto_total_convenio: string;
+	cuota_mensual: string;
+	numero_meses: number;
+	monto_pagado: string;
+	monto_pendiente: string;
+	pagos_realizados: number;
+	pagos_pendientes: number;
+	fecha_convenio: string;
+	activo: boolean;
+	completado: boolean;
+	motivo: string | null;
+	/** monto_pagado / monto_total_convenio * 100, calculado en cartera-back. */
+	progreso: string;
+	/**
+	 * Último bucket registrado en buckets_historial ANTES de que el crédito
+	 * saliera del funnel por el convenio (misma fuente que `bucket_previo` de
+	 * GET /buckets/credito/:sifco). null = sin traza en historial.
+	 */
+	bucket_previo: number | null;
+	bucket_previo_prefijo: string | null;
 }
 
 export interface CreditoDirectoResponse {
@@ -969,6 +1029,14 @@ export interface CarteraBucketActualCredito {
 	 * acá y una fecha inventada produciría un falso "gestión agotada".
 	 */
 	fecha_entrada_bucket: string | null;
+	/**
+	 * CB-027: último bucket registrado en buckets_historial, SIN el filtro de
+	 * fuera_funnel. Con convenio activo el motor deja de escribir transiciones
+	 * (sale del funnel) — esta fila queda congelada en el bucket real previo a
+	 * la salida. null = sin traza en historial.
+	 */
+	bucket_previo: number | null;
+	bucket_previo_prefijo: string | null;
 }
 
 // ============================================================================

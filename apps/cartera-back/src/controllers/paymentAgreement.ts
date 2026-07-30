@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNull, lte, sql, sum } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql, sum } from "drizzle-orm";
 import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { db } from "../database";
 import {
@@ -13,6 +13,7 @@ import {
   boletas,
   convenio_cuotas,
   moras_credito,
+  asesores,
 } from "../database/db";
 import Big from "big.js";
 import { createMora } from "./latefee";
@@ -1526,5 +1527,258 @@ export const updateConvenioStatus = async (
   } catch (error) {
     console.error("Error updating convenio status:", error);
     return { success: false, message: "Error updating convenio status", error };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CB-027 — Listado paginado de convenios para el CRM.
+//
+// Distinto de getPaymentAgreements: esa función no pagina, no trae
+// cliente/SIFCO/asesor y hace un N+1 (una query de pagos por convenio) — sirve
+// para el detalle de un crédito puntual, no para una tabla de "todos los
+// convenios". Acá se resuelve con UNA query con joins.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface ListPaymentAgreementsFilters {
+  estado?: "active" | "completed" | "inactive" | "all";
+  numero_credito_sifco?: string;
+  nombre_usuario?: string;
+  asesor_id?: number;
+  email_asesor?: string;
+  page?: number;
+  perPage?: number;
+}
+
+/**
+ * % de avance de un convenio (monto_pagado / monto_total_convenio * 100),
+ * como string con 2 decimales para consistencia con el resto de campos
+ * numéricos que cartera-back expone como string (evita drift de
+ * precisión flotante en el JSON de la API). "0.00" si el total es 0/negativo
+ * — nunca divide por cero.
+ */
+export function calcularProgresoConvenio(
+  montoTotalConvenio: string | number,
+  montoPagado: string | number
+): string {
+  const total = Number(montoTotalConvenio) || 0;
+  const pagado = Number(montoPagado) || 0;
+  if (total <= 0) return "0.00";
+  return ((pagado / total) * 100).toFixed(2);
+}
+
+export async function listPaymentAgreements(filters: ListPaymentAgreementsFilters = {}) {
+  try {
+    const {
+      estado = "active",
+      numero_credito_sifco,
+      nombre_usuario,
+      asesor_id,
+      email_asesor,
+      page = 1,
+      perPage = 25,
+    } = filters;
+
+    const conditions = [];
+
+    if (estado === "active") {
+      conditions.push(eq(convenios_pago.activo, true));
+      conditions.push(eq(convenios_pago.completado, false));
+    } else if (estado === "completed") {
+      conditions.push(eq(convenios_pago.completado, true));
+    } else if (estado === "inactive") {
+      conditions.push(eq(convenios_pago.activo, false));
+    }
+
+    // Búsqueda libre (SIFCO o cliente): el CRM manda el mismo texto en ambos
+    // campos para "buscar por SIFCO o cliente" — combinarlos con AND (como
+    // antes) exigía que un crédito matcheara AMBOS a la vez, imposible al
+    // buscar por nombre (el SIFCO nunca contiene el nombre del cliente), lo
+    // que rompía la búsqueda por cliente en silencio. Con OR, cualquiera de
+    // los dos que coincida es suficiente — semántica correcta tanto si el
+    // caller manda uno solo como si manda los dos con el mismo texto.
+    if (numero_credito_sifco && nombre_usuario) {
+      conditions.push(
+        or(
+          sql`${creditos.numero_credito_sifco} ILIKE ${`%${numero_credito_sifco}%`}`,
+          sql`${usuarios.nombre} ILIKE ${`%${nombre_usuario}%`}`
+        )
+      );
+    } else if (numero_credito_sifco) {
+      conditions.push(
+        sql`${creditos.numero_credito_sifco} ILIKE ${`%${numero_credito_sifco}%`}`
+      );
+    } else if (nombre_usuario) {
+      conditions.push(sql`${usuarios.nombre} ILIKE ${`%${nombre_usuario}%`}`);
+    }
+    if (asesor_id !== undefined) {
+      conditions.push(eq(creditos.asesor_id, asesor_id));
+    }
+    if (email_asesor) {
+      conditions.push(
+        sql`${platform_users.email} ILIKE ${`%${email_asesor}%`}`
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const baseQuery = db
+      .select({
+        convenio_id: convenios_pago.convenio_id,
+        credito_id: convenios_pago.credito_id,
+        numero_credito_sifco: creditos.numero_credito_sifco,
+        cliente_nombre: usuarios.nombre,
+        asesor_id: creditos.asesor_id,
+        asesor_nombre: asesores.nombre,
+        asesor_email: asesores.emailCashIn,
+        monto_total_convenio: convenios_pago.monto_total_convenio,
+        cuota_mensual: convenios_pago.cuota_mensual,
+        numero_meses: convenios_pago.numero_meses,
+        monto_pagado: convenios_pago.monto_pagado,
+        monto_pendiente: convenios_pago.monto_pendiente,
+        pagos_realizados: convenios_pago.pagos_realizados,
+        pagos_pendientes: convenios_pago.pagos_pendientes,
+        fecha_convenio: convenios_pago.fecha_convenio,
+        activo: convenios_pago.activo,
+        completado: convenios_pago.completado,
+        motivo: convenios_pago.motivo,
+      })
+      .from(convenios_pago)
+      .innerJoin(creditos, eq(creditos.credito_id, convenios_pago.credito_id))
+      .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+      .leftJoin(asesores, eq(asesores.asesor_id, creditos.asesor_id))
+      .leftJoin(
+        platform_users,
+        eq(platform_users.asesor_id, asesores.asesor_id)
+      );
+
+    const rows = whereClause
+      ? await baseQuery
+          .where(whereClause)
+          .orderBy(desc(convenios_pago.fecha_convenio))
+          .limit(perPage)
+          .offset((page - 1) * perPage)
+      : await baseQuery
+          .orderBy(desc(convenios_pago.fecha_convenio))
+          .limit(perPage)
+          .offset((page - 1) * perPage);
+
+    const countQuery = db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(convenios_pago)
+      .innerJoin(creditos, eq(creditos.credito_id, convenios_pago.credito_id))
+      .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+      .leftJoin(asesores, eq(asesores.asesor_id, creditos.asesor_id))
+      .leftJoin(
+        platform_users,
+        eq(platform_users.asesor_id, asesores.asesor_id)
+      );
+
+    const [{ count: totalCount }] = whereClause
+      ? await countQuery.where(whereClause)
+      : await countQuery;
+
+    // CB-027: último bucket registrado en buckets_historial ANTES de que el
+    // crédito saliera del funnel por el convenio. Misma fuente y mismo
+    // patrón (CTE + DISTINCT ON) que bucketActualCredito.ts — única query
+    // real de "último bucket de un crédito", resuelta UNA vez para todos los
+    // créditos de la página (no una subquery correlacionada por fila). El
+    // motor deja de escribir transiciones para créditos EN_CONVENIO, así que
+    // esta fila queda congelada en el bucket real previo a la salida.
+    // null = sin traza en historial.
+    const creditoIds = [...new Set(rows.map((r) => r.credito_id))];
+    const bucketPrevioPorCredito = new Map<
+      number,
+      { bucket_previo: number | null; bucket_previo_prefijo: string | null }
+    >();
+    if (creditoIds.length > 0) {
+      const bucketRows = await db.execute<{
+        credito_id: number;
+        // NOT NULL en el schema (buckets_historial.bucket_nuevo), pero se
+        // tipa nullable acá porque viene de una columna de SELECT — mismo
+        // criterio defensivo que bucketActualCredito.ts:139 (no confiar en
+        // el constraint vigente frente a datos legacy o migraciones futuras;
+        // Number(null) da 0, que es un bucket B0 real, no "sin dato").
+        bucket_previo: number | null;
+        bucket_previo_prefijo: string | null;
+      }>(sql`
+        WITH ultima_entrada AS (
+          SELECT DISTINCT ON (h.credito_id)
+            h.credito_id, h.bucket_nuevo, h.fecha, h.historial_id
+          FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+          WHERE h.credito_id IN (${sql.join(creditoIds, sql`, `)})
+          ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
+        )
+        SELECT
+          ue.credito_id,
+          ue.bucket_nuevo AS bucket_previo,
+          b.prefijo AS bucket_previo_prefijo
+        FROM ultima_entrada ue
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.buckets b
+          ON b.numero = ue.bucket_nuevo AND b.activo = true
+      `);
+      for (const row of bucketRows.rows) {
+        bucketPrevioPorCredito.set(Number(row.credito_id), {
+          bucket_previo:
+            row.bucket_previo == null ? null : Number(row.bucket_previo),
+          bucket_previo_prefijo: row.bucket_previo_prefijo ?? null,
+        });
+      }
+    }
+
+    const data = rows.map((r) => {
+      const progreso = calcularProgresoConvenio(
+        r.monto_total_convenio,
+        r.monto_pagado
+      );
+      const bucketPrevio = bucketPrevioPorCredito.get(r.credito_id);
+      return {
+        ...r,
+        progreso,
+        bucket_previo: bucketPrevio?.bucket_previo ?? null,
+        bucket_previo_prefijo: bucketPrevio?.bucket_previo_prefijo ?? null,
+      };
+    });
+
+    return {
+      success: true,
+      data,
+      page,
+      perPage,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / perPage)),
+    };
+  } catch (error) {
+    console.error("Error listing payment agreements:", error);
+    return {
+      success: false,
+      data: [],
+      page: filters.page ?? 1,
+      perPage: filters.perPage ?? 25,
+      totalCount: 0,
+      totalPages: 1,
+      message: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}
+
+// Cuotas del plan de pago de un convenio (tabla convenio_cuotas). No trae
+// monto: cada cuota vale `convenios_pago.cuota_mensual` (la tabla no tiene
+// columna de monto propia — ver schema.ts).
+export async function getConvenioCuotas(convenio_id: number) {
+  try {
+    const cuotas = await db
+      .select()
+      .from(convenio_cuotas)
+      .where(eq(convenio_cuotas.convenio_id, convenio_id))
+      .orderBy(asc(convenio_cuotas.numero_cuota));
+
+    return { success: true, data: cuotas };
+  } catch (error) {
+    console.error("Error getting convenio cuotas:", error);
+    return {
+      success: false,
+      data: [],
+      message: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }

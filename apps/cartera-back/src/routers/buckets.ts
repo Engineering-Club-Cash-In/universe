@@ -5,6 +5,7 @@ import {
   getBucketsHistorial,
   getBucketsHistorialCredito,
 } from "../controllers/buckets/bucketsHistorial";
+import { getBucketActualPorSifco } from "../controllers/buckets/bucketActualCredito";
 import { getAsesorHistorial } from "../controllers/buckets/asesorHistorial";
 import { getCreditosWithUserByMesAnio } from "../controllers/credits";
 import {
@@ -404,6 +405,41 @@ export const bucketsRouter = new Elysia()
         return {
           success: false,
           message: "[ERROR] No se pudo obtener el histórico del crédito",
+          error: String(err),
+        };
+      }
+    },
+  )
+
+  // Bucket ACTUAL de UN crédito por número SIFCO (badge del detalle de cobros
+  // en el CRM). Keyed por numero_credito_sifco —no credito_id— porque es lo
+  // que el handler del CRM ya tiene resuelto. Sin cache del lado del cliente:
+  // el badge debe reflejar el motor al instante (mismo criterio que
+  // /buckets/historial).
+  .get(
+    "/buckets/credito/:numero_credito_sifco",
+    async ({ params, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const numero = String(params.numero_credito_sifco ?? "").trim();
+        if (!numero || numero.length > 100) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "[ERROR] numero_credito_sifco inválido",
+          };
+        }
+        const data = await getBucketActualPorSifco(numero);
+        if (!data) {
+          set.status = 404;
+          return { success: false, message: "[ERROR] Crédito no encontrado" };
+        }
+        return { success: true, data };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener el bucket actual del crédito",
           error: String(err),
         };
       }

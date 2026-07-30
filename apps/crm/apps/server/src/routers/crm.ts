@@ -1182,16 +1182,6 @@ export const crmRouter = {
 					throw new ORPCError("NOT_FOUND", { message: "Lead no encontrado" });
 				}
 
-				// Sales users can only see analysis for their assigned leads
-				if (
-					context.userRole === "sales" &&
-					lead[0].assignedTo !== context.userId
-				) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para ver este análisis",
-					});
-				}
-
 				if (!input.opportunityId) {
 					return null;
 				}
@@ -1315,16 +1305,6 @@ export const crmRouter = {
 
 				if (lead.length === 0) {
 					throw new ORPCError("NOT_FOUND", { message: "Lead no encontrado" });
-				}
-
-				// Sales users can only update analysis for their assigned leads
-				if (
-					context.userRole === "sales" &&
-					lead[0].assignedTo !== context.userId
-				) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para actualizar este análisis",
-					});
 				}
 
 				const [opportunity] = await db
@@ -2163,7 +2143,8 @@ export const crmRouter = {
 			}
 
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
-			// por el análisis de capacidad de pago (IA) del lead de esta oportunidad.
+			// por el análisis de esta oportunidad Y del lead que quedará asignado
+			// (si leadId también cambia, el análisis del lead anterior ya no aplica).
 			//
 			// diaPagoOriginalSistema (día que el sistema hubiera asignado por
 			// default) se recalcula cuando diaPagoMensual cambia por esta vía, o
@@ -2183,8 +2164,10 @@ export const crmRouter = {
 				(input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
 					cambioDeIntencion)
 			) {
-				// Lead efectivo tras el update, no el actual (por si input.leadId también cambia)
 				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
+				// Se consulta sin importar si el día es 15/30: esDiaIA (más abajo)
+				// necesita saber si la IA recomendó justo ese día aunque no requiera
+				// validación contra suggestedDays.
 				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
 					null;
 				if (effectiveLeadId) {
@@ -2193,7 +2176,12 @@ export const crmRouter = {
 							suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
 						})
 						.from(creditAnalysis)
-						.where(eq(creditAnalysis.leadId, effectiveLeadId))
+						.where(
+							and(
+								eq(creditAnalysis.opportunityId, id),
+								eq(creditAnalysis.leadId, effectiveLeadId),
+							),
+						)
 						.limit(1);
 					suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				}
@@ -2254,6 +2242,14 @@ export const crmRouter = {
 				if (vehicleRequirementError) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: vehicleRequirementError,
+					});
+				}
+
+				// Bloquear cualquier retroceso una vez alcanzada Formalización Final (90%+)
+				if (fromPercentage >= 90 && toPercentage < fromPercentage) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"La oportunidad ya alcanzó Formalización Final (90%) y no puede retroceder de etapa.",
 					});
 				}
 
@@ -3945,10 +3941,9 @@ export const crmRouter = {
 			const opps = await db
 				.select({ numeroSifco: opportunities.numeroSifco })
 				.from(opportunities)
-				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.where(
 					and(
-						eq(leads.assignedTo, context.userId),
+						eq(opportunities.assignedTo, context.userId),
 						isNotNull(opportunities.numeroSifco),
 					),
 				);
@@ -6229,25 +6224,36 @@ export const crmRouter = {
 							.where(inArray(vehicles.id, vehicleIds))
 					: [];
 
-			// Fetch suggested payment days (fecha ideal de pago) from the lead's credit analysis
+			// Fetch suggested payment days (fecha ideal de pago) del análisis de esta oportunidad
+			const opportunityIds = opps.map((o) => o.id);
 			const creditAnalysisData =
-				leadIds.length > 0
+				opportunityIds.length > 0
 					? await db
 							.select({
+								opportunityId: creditAnalysis.opportunityId,
 								leadId: creditAnalysis.leadId,
 								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
 							})
 							.from(creditAnalysis)
-							.where(inArray(creditAnalysis.leadId, leadIds))
+							.where(inArray(creditAnalysis.opportunityId, opportunityIds))
 					: [];
 
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
 			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
+			// Se guarda también el leadId del análisis: si la oportunidad fue
+			// reasignada a otro lead sin volver a vincular el análisis, no se debe
+			// mostrar el día recomendado del cliente anterior.
 			const creditAnalysisMap = new Map(
 				creditAnalysisData
-					.filter((ca): ca is typeof ca & { leadId: string } => !!ca.leadId)
-					.map((ca) => [ca.leadId, ca.suggestedPaymentDays]),
+					.filter(
+						(ca): ca is typeof ca & { opportunityId: string } =>
+							!!ca.opportunityId,
+					)
+					.map((ca) => [
+						ca.opportunityId,
+						{ leadId: ca.leadId, suggestedPaymentDays: ca.suggestedPaymentDays },
+					]),
 			);
 
 			// Map results
@@ -6291,9 +6297,10 @@ export const crmRouter = {
 					categoria: opp.categoria,
 					nit: opp.nit,
 					diaPagoMensual: opp.diaPagoMensual,
-					suggestedPaymentDays: opp.leadId
-						? creditAnalysisMap.get(opp.leadId) ?? null
-						: null,
+					suggestedPaymentDays:
+						creditAnalysisMap.get(opp.id)?.leadId === opp.leadId
+							? (creditAnalysisMap.get(opp.id)?.suggestedPaymentDays ?? null)
+							: null,
 					createdAt: opp.createdAt,
 					updatedAt: opp.updatedAt,
 					creditType: opp.creditType,
@@ -6411,13 +6418,19 @@ export const crmRouter = {
 						suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
 					})
 					.from(creditAnalysis)
-					.where(eq(creditAnalysis.leadId, opportunity.leadId))
+					.where(
+						and(
+							eq(creditAnalysis.opportunityId, input.opportunityId),
+							eq(creditAnalysis.leadId, opportunity.leadId),
+						),
+					)
 					.limit(1);
 				suggestedDays = analysis?.suggestedPaymentDays ?? null;
 			}
 
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
-			// por el análisis de capacidad de pago (IA) del lead de esta oportunidad.
+			// por el análisis de esta oportunidad Y del lead actual (si la oportunidad
+			// fue reasignada a otro lead, el análisis anterior ya no aplica).
 			if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
 				const isRecommended = suggestedDays?.some(
 					(d) => d.dia === input.diaPagoMensual,

@@ -328,6 +328,18 @@ export type MontoACobrarPeriodoRow = {
 	acum_total_membresias: string;
 	total_interes_inversionista: string;
 	acum_total_interes_inversionista: string;
+	capital_inv_participacion_actual: string;
+	capital_cube_participacion_actual: string;
+	interes_iva_inv_participacion_actual: string;
+	interes_iva_cube_participacion_actual: string;
+	acum_capital_inv_participacion_actual: string;
+	acum_capital_cube_participacion_actual: string;
+	acum_interes_iva_inv_participacion_actual: string;
+	acum_interes_iva_cube_participacion_actual: string;
+	creditos_participacion_invalida: number;
+	creditos_participacion_invalida_rango?: number;
+	cuotas_participacion_invalida: number;
+	participacion_actual: boolean;
 };
 
 export type FlujoCuotasRubro = {
@@ -478,6 +490,27 @@ export type MoraCobradaPorAsesorResponse = {
 	periodo: { inicio: string; fin: string };
 	porAsesor: { asesorId: number; nombre: string; cobrado: string }[];
 	totalCobrado: string;
+};
+
+export type MoraRecuperacionPorAsesorResponse = {
+	periodo: { inicio: string; fin: string };
+	metadata: {
+		alcance: "live" | "historico";
+		atribucionAsesor: "actual";
+	};
+	totales: MoraRecoveryMetric;
+	porAsesor: (MoraRecoveryMetric & {
+		asesorId: number | null;
+		nombre: string;
+	})[];
+};
+
+export type MoraRecoveryMetric = {
+	esperado: string;
+	cobradoEnSnapshot: string;
+	cobradoFueraSnapshot: string;
+	excedenteEnSnapshot: string;
+	pendiente: string;
 };
 
 // ============================================================================
@@ -1783,6 +1816,27 @@ export class CarteraBackClient {
 		// "Actualizar" podría devolver un hit stale tras registrar/ajustar un pago.
 		return this.request<MoraCobradaPorAsesorResponse>(
 			`/reportes/mora-cobrada-por-asesor?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+	}
+
+	async getMoraRecuperacionPorAsesor(params: {
+		mes: number;
+		anio: number;
+		asesores?: number[];
+		emailCobrador?: string;
+	}): Promise<MoraRecuperacionPorAsesorResponse> {
+		const queryParams = new URLSearchParams({
+			mes: String(params.mes),
+			anio: String(params.anio),
+		});
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		if (params.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
+		return this.request<MoraRecuperacionPorAsesorResponse>(
+			`/reportes/mora-recuperacion-por-asesor?${queryParams}`,
 			{ method: "GET" },
 			false,
 		);

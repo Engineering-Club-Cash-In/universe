@@ -19,6 +19,7 @@ import {
 } from "../services/services";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { canEnterCancellationPaymentFlow } from "./cancellationPaymentFlow";
 import { useResetCredit } from "./resetCredit";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { useAuth } from "@/Provider/authProvider";
@@ -232,6 +233,28 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
     setErrorCredito(null);
     try {
       const result = await getCreditoByNumero(numero_credito_sifco);
+      if (
+        result.flujo === "CANCELADO" &&
+        !canEnterCancellationPaymentFlow(result.credito?.statusCredit)
+      ) {
+        setDataCredito(null);
+        setCreditoCanceladoInfo(null);
+        setCuotaActualInfo(null);
+        setCuotasAtrasadasInfo(null);
+        setCuotasPendientesInfo(null);
+        setConvenioActivoInfo(null);
+        setPermiteAbonoCapital(false);
+        setCuotaSeleccionada(0);
+        setSaldoAFavorUser(0);
+        setFileToUpload(null);
+        setArchivosParaSubir([]);
+        formik.resetForm();
+        setResetBuscador(true);
+        setErrorCredito(
+          "El crédito ya está cancelado y solo está disponible para consulta en el historial."
+        );
+        return;
+      }
       setDataCredito(result);
 
       // FLUJO CANCELADO
@@ -714,7 +737,7 @@ const handleAbonoOtros = () => {
     processInvestors.mutate({ pago_id, credito_id, fecha_periodo }, {});
   }
 
-async function handleResetCredito() {
+async function handleResetCredito(montoIncobrable = 0) {
  
   console.log(cuotaSeleccionada, " cuotaSeleccionada");
         const cuotaApagarValue =
@@ -742,7 +765,7 @@ async function handleResetCredito() {
     url_boletas: url_boletas,
     cuota: cuotaActualInfo?.numero || 0,
     banco_id: formik.values.banco_id,
-    montoIncobrable: montoBaseBadDebt,
+    montoIncobrable: montoIncobrable,
     numeroAutorizacion: formik.values.numeroAutorizacion || undefined,
   }, {
     onSuccess: (data) => {

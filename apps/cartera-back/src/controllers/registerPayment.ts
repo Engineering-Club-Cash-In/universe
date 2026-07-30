@@ -1,7 +1,7 @@
 import Big from "big.js";
 import z from "zod";
-import { db, client } from "../database";
-import { withCapitalContext } from "../utils/withAuditContext";
+import { db, lockPool } from "../database";
+import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
 import {
   ajuste_fecha_ideal_pago,
   creditos,
@@ -15,12 +15,14 @@ import {
   pagos_credito_inversionistas,
   cuentasEmpresa,
 } from "../database/db";
-import { eq, and, lte, asc, desc, sql, gt, or, ne, inArray, isNull } from "drizzle-orm";
+import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
+import { recalcularPagosCredito } from "./updateCredit";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
@@ -42,6 +44,7 @@ import {
 } from "./registerPaymentPolicy";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
+  withPaymentAdvisoryLock,
   type PaymentAdvisoryLockConnection,
 } from "../utils/paymentAdvisoryLock";
 
@@ -599,7 +602,9 @@ export const insertPayment = async ({ body, set }: any) => {
     // validación anti-sobreaplicación no los detiene porque ambos leen el
     // estado previo. El lock obliga a que el segundo espere a que el primero
     // termine y vea el saldo ya actualizado.
-    lockConn = await client.connect();
+    // Conexión del pool DEDICADO de locks: los waiters de pg_advisory_lock no
+    // deben consumir conexiones del pool de trabajo (deadlock de pool).
+    lockConn = await lockPool.connect();
     lockedCreditoId = credito_id;
     await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
       PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -2340,8 +2345,56 @@ export async function insertarPago({
  * - Si pagado = false: Solo actualiza el pago para validarlo
  * - Si pagado = true: Aplica los abonos al crédito
  * @param pago_id - ID del pago a aplicar
+ *
+ * 🔒 Serializa TODO /aplicar-pago (validación normal, reset y abono a
+ * capital) con el MISMO advisory lock por crédito que usa insertPayment.
+ * Sin esto, validar un pago del mismo crédito en plena ventana de un abono
+ * (entre el update de creditos.capital y el recálculo) aplicaría el split
+ * viejo pre-abono, o marcaría la fila validated para que el recálculo la
+ * salte. La lectura real del pago ocurre adentro, YA bajo el lock.
  */
 export async function aplicarPagoAlCredito(pago_id: number) {
+  // Pre-lectura mínima: solo para conocer el crédito a serializar.
+  const [pagoPre] = await db
+    .select({ credito_id: pagos_credito.credito_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pago_id))
+    .limit(1);
+  const creditoIdLock = pagoPre?.credito_id ?? null;
+  if (creditoIdLock === null) {
+    // Sin crédito no hay qué serializar; la lógica interna ya maneja estos
+    // casos (pago inexistente o credito_id null).
+    return aplicarPagoAlCreditoSinLock(pago_id);
+  }
+  // Conexión del pool DEDICADO de locks: un waiter bloqueado en
+  // pg_advisory_lock retiene su conexión; si viviera en el pool de trabajo
+  // podría agotarlo y el dueño del lock ya no tendría conexiones para sus
+  // queries (drizzle) → deadlock de pool.
+  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  try {
+    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+      PAYMENT_ADVISORY_LOCK_NAMESPACE,
+      creditoIdLock,
+    ]);
+    return await aplicarPagoAlCreditoSinLock(pago_id);
+  } finally {
+    // 🔓 Liberar el lock y devolver la conexión al pool, pase lo que pase.
+    try {
+      await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        creditoIdLock,
+      ]);
+    } catch (unlockError) {
+      console.error(
+        "⚠️ Error liberando advisory lock de aplicar-pago:",
+        unlockError
+      );
+    }
+    lockConn.release();
+  }
+}
+
+async function aplicarPagoAlCreditoSinLock(pago_id: number) {
   try {
     console.log("🔄 Iniciando aplicación de pago al crédito:", pago_id);
 
@@ -2355,6 +2408,22 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     if (!pago) {
       throw new Error(`Pago ${pago_id} no encontrado`);
     }
+    // 🔒 Re-chequeo BAJO EL LOCK: dos /aplicar-pago del mismo pago pueden
+    // pasar el pre-check del router antes de que alguno tome el lock (doble
+    // click / reintento); el segundo entra aquí cuando el primero ya aplicó.
+    // Esta lectura ocurre ya con el lock tomado, así que ver un status
+    // aplicado es definitivo — se rechaza en vez de volver a mover capital y
+    // re-distribuir a inversionistas.
+    if (
+      pago.validationStatus === "validated" ||
+      pago.validationStatus === "capital_validated"
+    ) {
+      return {
+        success: false,
+        applied: false,
+        message: `El pago ${pago_id} ya fue aplicado (${pago.validationStatus}); no se aplica dos veces.`,
+      };
+    }
     if (pago.validationStatus === "capital") {
       return applyCapitalPaymentAndBuildResponse(
         pago,
@@ -2367,9 +2436,14 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         throw new Error("No se puede aplicar el abono: credito_id es null");
       }
       console.log("credito cancelado correctamente ");
-      db.update(pagos_credito)
-        .set({ validationStatus: "validated" })
-        .where(eq(pagos_credito.pago_id, pago_id));
+      // OJO: NO cambiar validationStatus a "validated". La facturación
+      // identifica las cancelaciones por status "reset" (cofidi.ts:
+      // esCancelacion) para repartir intereses por cuota_inversionista en
+      // vez de monto_aportado; pisar el status rompería ese cálculo. El
+      // update que vivía aquí nunca se ejecutó (le faltaba el await y las
+      // queries de drizzle son lazy), así que el comportamiento real de
+      // prod siempre fue conservar "reset" — se elimina para que el código
+      // diga lo que hace.
       return {
         success: true,
         applied: false,
@@ -2394,13 +2468,51 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       };
     }
 
-    // 2. CARGAR EL CRÉDITO
-    // (lo necesitamos tanto para evaluar si la cuota cierra como para
-    // actualizar capital/deuda en ambas ramas).
     if (pago.credito_id === null) {
       throw new Error("No se puede aplicar el pago: credito_id es null");
     }
-    const [credito] = await db
+
+    // TODAS las escrituras del flujo normal (validar el pago, capital/deuda
+    // del crédito, cierre de cuota, limpieza de restantes y distribución a
+    // inversionistas) van en UNA transacción. Si el proceso muere a medio
+    // camino (cliente desconectado, caída del server), se hace rollback
+    // completo y el reintento parte de cero — sin capital doble-descontado ni
+    // distribuciones a medias. Aquí adentro NO hay llamadas externas (la
+    // facturación con SAT vive en otro endpoint), así que la tx es corta.
+    return await db.transaction(async (tx) =>
+      aplicarPagoNormalEnTx(tx as unknown as AplicarPagoTx, pago, pago_id)
+    );
+  } catch (error) {
+    console.error("❌ Error al aplicar pago al crédito:", error);
+    throw error;
+  }
+}
+
+// Ejecutor mínimo que cubre tanto `db` como una transacción de drizzle.
+type AplicarPagoTx = Pick<
+  typeof db,
+  "query" | "select" | "selectDistinct" | "insert" | "update" | "execute"
+>;
+
+/**
+ * Flujo normal de aplicar-pago (RAMA A / RAMA B) dentro de una transacción.
+ * `setCapitalSource(tx, "PAGO")` reemplaza a `withCapitalContext` (que abre su
+ * propia transacción) para etiquetar el trigger de historial de capital en
+ * ESTA misma tx.
+ */
+async function aplicarPagoNormalEnTx(
+  tx: AplicarPagoTx,
+  pago: typeof pagos_credito.$inferSelect,
+  pago_id: number
+) {
+    if (pago.credito_id === null) {
+      throw new Error("No se puede aplicar el pago: credito_id es null");
+    }
+
+    // 2. CARGAR EL CRÉDITO
+    // (lo necesitamos tanto para evaluar si la cuota cierra como para
+    // actualizar capital/deuda en ambas ramas).
+    const [credito] = await tx
       .select()
       .from(creditos)
       .where(eq(creditos.credito_id, pago.credito_id))
@@ -2431,9 +2543,10 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     const cuotaAmount = new Big(credito.cuota ?? 0);
     let totalAplicadoEnCuota = new Big(pago.monto_aplicado ?? 0);
     let cuotaCompleta = false;
+    let cierreDiferido = false;
 
     if (pago.cuota_id !== null && cuotaAmount.gt(0)) {
-      const otrosPagosValidados = await db
+      const otrosPagosValidados = await tx
         .select({ monto_aplicado: pagos_credito.monto_aplicado })
         .from(pagos_credito)
         .where(
@@ -2456,6 +2569,69 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       console.log(
         `📊 Cuota ${pago.cuota_id}: aplicado ${totalAplicadoEnCuota.toFixed(2)} / esperado ${cuotaAmount.toFixed(2)} (otros validated: ${otrosPagosValidados.length}) → ${cuotaCompleta ? "COMPLETA" : "incompleta"}`
       );
+
+      // Recibos MENORES a la cuota mensual: tras un abono grande, el recálculo
+      // topa el capital del último recibo (y los de cola quedan solo con
+      // seguro/GPS/membresías), así que su total real es menor a
+      // `credito.cuota` y la suma de arriba nunca los daría por completos.
+      // Si este pago dejó el recibo con TODOS sus restantes en 0, la cuota
+      // cierra — mismo criterio con el que el registro ya marcó la fila como
+      // pagada (shouldMarkInstallmentPaymentPaid) y el recálculo decide
+      // `pagado` al redistribuir. No afecta cuotas normales (su recibo suma la
+      // cuota completa y cierran por la suma) ni parciales (dejan restantes).
+      // El override de INCOBRABLE de abajo sigue mandando sobre esto.
+      if (!cuotaCompleta) {
+        const restantesRecibo = new Big(pago.interes_restante ?? 0)
+          .plus(pago.iva_12_restante ?? 0)
+          .plus(pago.seguro_restante ?? 0)
+          .plus(pago.gps_restante ?? 0)
+          .plus(pago.membresias ?? 0)
+          .plus(pago.capital_restante ?? 0);
+        if (
+          restantesRecibo.lte(0.01) &&
+          new Big(pago.monto_aplicado ?? 0).gt(0)
+        ) {
+          // Cuota partida en varios pagos: la fila de CIERRE queda con
+          // restantes 0 aunque un parcial anterior siga pendiente de validar.
+          // Si conta valida el cierre PRIMERO, cerrar aquí marcaría la cuota
+          // pagada y distribuiría a inversionistas solo con el pago de cola
+          // (la suma de arriba solo cuenta hermanos ya validados). Con otro
+          // pago pendiente vivo de la misma cuota NO se cierra: este pago se
+          // valida sin cerrar (RAMA A) y la cuota cierra al validar el último
+          // hermano, cuando la suma de validados alcanza.
+          const [hermanoPendiente] = await tx
+            .select({ pago_id: pagos_credito.pago_id })
+            .from(pagos_credito)
+            .where(
+              and(
+                eq(pagos_credito.cuota_id, pago.cuota_id),
+                eq(pagos_credito.validationStatus, "pending"),
+                eq(pagos_credito.paymentFalse, false),
+                gt(pagos_credito.monto_aplicado, "0"),
+                ne(pagos_credito.pago_id, pago_id)
+              )
+            )
+            .limit(1);
+          if (hermanoPendiente) {
+            // La fila de cierre viene marcada pagado=true desde el registro
+            // (dejó su recibo en 0). Si se queda así ya validada, la mora
+            // tomaría la cuota como satisfecha aunque el hermano nunca se
+            // valide (latefee/procesarMoras excluyen cuotas con una fila viva
+            // pagado=true validated/no_required con monto>0). Mientras el
+            // cierre esté diferido, la fila viaja como parcial (pagado=false);
+            // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
+            cierreDiferido = pago.pagado === true;
+            console.log(
+              `📊 Cuota ${pago.cuota_id}: recibo en 0 pero hay otro pago pendiente sin validar (${hermanoPendiente.pago_id}) → NO se cierra con este pago${cierreDiferido ? " (se difiere también su pagado=true)" : ""}`
+            );
+          } else {
+            cuotaCompleta = true;
+            console.log(
+              `📊 Cuota ${pago.cuota_id}: recibo menor a la cuota mensual cubierto por completo (restantes en 0) → COMPLETA`
+            );
+          }
+        }
+      }
     }
 
     // INCOBRABLE: la cuota se cierra SI Y SOLO SI el capital del crédito llega
@@ -2489,10 +2665,15 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     if (!cuotaCompleta) {
       console.log("⚠️ La cuota aún no se cierra con este pago");
 
-      // Validar el pago
-      await db
+      // Validar el pago. Si es un cierre diferido, suelta también su
+      // pagado=true de registro (ver comentario en el guard de arriba).
+      await tx
         .update(pagos_credito)
-        .set({ validationStatus: "validated", fecha_aplicado: new Date() })
+        .set({
+          validationStatus: "validated",
+          fecha_aplicado: new Date(),
+          ...(cierreDiferido ? { pagado: false } : {}),
+        })
         .where(eq(pagos_credito.pago_id, pago_id));
 
       const abonoCapitalPago = new Big(pago.abono_capital ?? 0);
@@ -2514,17 +2695,16 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         });
         const nuevoCapitalParc = recomputedParc.capital;
 
-        await withCapitalContext(null, "PAGO", null, (tx) =>
-          tx
-            .update(creditos)
-            .set({
-              capital: nuevoCapitalParc.toString(),
-              deudatotal: recomputedParc.deudaTotal.toString(),
-              iva_12: recomputedParc.iva.toString(),
-              cuota_interes: recomputedParc.cuotaInteres.toString(),
-            })
-            .where(eq(creditos.credito_id, pago.credito_id!))
-        );
+        await setCapitalSource(tx, "PAGO");
+        await tx
+          .update(creditos)
+          .set({
+            capital: nuevoCapitalParc.toString(),
+            deudatotal: recomputedParc.deudaTotal.toString(),
+            iva_12: recomputedParc.iva.toString(),
+            cuota_interes: recomputedParc.cuotaInteres.toString(),
+          })
+          .where(eq(creditos.credito_id, pago.credito_id!));
 
         console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
         console.log("✅ Capital aplicado al crédito (cuota aún abierta)");
@@ -2588,36 +2768,54 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     console.log("📊 Nueva deuda total:", nueva_deuda_total.toString());
 
     // 6. ACTUALIZAR EL CRÉDITO
-    await withCapitalContext(null, "PAGO", null, (tx) =>
-      tx
-        .update(creditos)
-        .set({
-          capital: nuevo_capital.toString(),
-          deudatotal: nueva_deuda_total.toString(),
-          iva_12: iva_12.toString(),
-          cuota_interes: cuota_interes.toString(),
-        })
-        .where(eq(creditos.credito_id, pago.credito_id!))
-    );
+    await setCapitalSource(tx, "PAGO");
+    await tx
+      .update(creditos)
+      .set({
+        capital: nuevo_capital.toString(),
+        deudatotal: nueva_deuda_total.toString(),
+        iva_12: iva_12.toString(),
+        cuota_interes: cuota_interes.toString(),
+      })
+      .where(eq(creditos.credito_id, pago.credito_id!));
 
     // 7. VALIDAR EL PAGO y registrar fecha de aplicación
-    await db
+    await tx
       .update(pagos_credito)
       .set({ validationStatus: "validated", fecha_aplicado: new Date() })
       .where(eq(pagos_credito.pago_id, pago_id));
 
     if (pago.cuota_id !== null) {
       // Marcar la cuota como pagada
-      await db
+      await tx
         .update(cuotas_credito)
         .set({ pagado: true })
         .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+
+      // Cerrada la cuota, TODAS las filas validadas que la pagaron quedan
+      // pagado=true — en particular el cierre diferido que viajó como parcial
+      // (ver arriba): si quedara validated+pagado=false en cuota cerrada, el
+      // guard de parciales del abono a capital (pagado=false, monto>0,
+      // status≠pending) la tomaría como parcial vivo y saltaría el recálculo
+      // automático con revisar_parciales para siempre. También evita que el
+      // recálculo re-siembre estas filas como si fueran recibos abiertos.
+      await tx
+        .update(pagos_credito)
+        .set({ pagado: true })
+        .where(
+          and(
+            eq(pagos_credito.cuota_id, pago.cuota_id),
+            eq(pagos_credito.paymentFalse, false),
+            eq(pagos_credito.validationStatus, "validated"),
+            gt(pagos_credito.monto_aplicado, "0")
+          )
+        );
 
       // Limpiar `*_restante` huérfanos del resto de pagos de la cuota.
       // Si quedaron descuadrados por bugs históricos (pagos partidos
       // sin sincronización), ya no van a polucionar lecturas futuras
       // ni reactivar el camino "tiene restantes" si alguien revalida.
-      await db
+      await tx
         .update(pagos_credito)
         .set({
           capital_restante: "0",
@@ -2652,7 +2850,7 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     //    a processAndReplaceCreditInvestors, que descuenta del monto_aportado
     //    de cada inversionista — eso NO es idempotente.
     const pagosValidadosCuota = pago.cuota_id !== null
-      ? await db
+      ? await tx
           .select({ pago_id: pagos_credito.pago_id })
           .from(pagos_credito)
           .where(
@@ -2665,7 +2863,7 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       : [{ pago_id }];
 
     const yaDistribuidos = pagosValidadosCuota.length > 0
-      ? await db
+      ? await tx
           .selectDistinct({ pago_id: pagos_credito_inversionistas.pago_id })
           .from(pagos_credito_inversionistas)
           .where(
@@ -2686,7 +2884,12 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     );
 
     for (const distPagoId of pagosADistribuir) {
-      await insertPagosCreditoInversionistasV2(distPagoId, pago.credito_id);
+      await insertPagosCreditoInversionistasV2(
+        distPagoId,
+        pago.credito_id,
+        undefined,
+        tx
+      );
     }
 
     return {
@@ -2701,10 +2904,6 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         deuda_total_nueva: nueva_deuda_total.toString(),
       },
     };
-  } catch (error) {
-    console.error("❌ Error al aplicar pago al crédito:", error);
-    throw error;
-  }
 }
 
 /**
@@ -2947,6 +3146,9 @@ export async function aplicarAbonoCapitalInversionistas(
   abono_capital: number | string,
   pago_id: number
 ) {
+  // 🔒 NO toma el lock aquí: su único caller es aplicarPagoAlCredito, que ya
+  // serializa TODO /aplicar-pago (normal, reset y capital) con el advisory
+  // lock por crédito. Tomarlo de nuevo en otra conexión sería deadlock.
   console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
 
   // Distribuir abono a capital en tabla espejo. El pago_id deja cada fila
@@ -3126,10 +3328,215 @@ export async function aplicarAbonoCapitalInversionistas(
     })
     .where(eq(pagos_credito.pago_id, pago_id));
 
+  // 5️⃣ Re-sembrar los recibos PENDIENTES con el capital nuevo.
+  // Sin esto, el próximo pago se aplicaría con el interés pre-sembrado sobre el
+  // capital viejo (y de ahí saldrían factura y liquidación infladas). Se
+  // recalcula lo que AÚN NO SE APLICÓ al crédito: cuotas no pagadas Y pagos
+  // registrados sin validar por conta (pending) — esos no han movido capital
+  // y al validarse aplicarían el split viejo si no se refrescan. Nunca toca
+  // pagos ya aplicados/validados — este mismo abono queda capital_validated y
+  // fuera del recálculo. La cuota mensual del crédito no cambia.
+  // El espejo NO se toca aquí: lo maneja la liquidación del inversionista.
+  let recalculo_pendientes:
+    | "ok"
+    | "error"
+    | "omitido_solo_interes"
+    | "revisar_vencidas"
+    | "revisar_parciales"
+    | "revisar_sobrante" = "ok";
+  if (credito.no_amortiza_capital) {
+    // Crédito solo-interés: recalcularPagosCredito no conoce el flag y
+    // convertiría en amortización de capital la diferencia cuota − interés
+    // nuevo, contra el contrato. Se mantiene el comportamiento actual (sin
+    // re-siembra automática) hasta definir la re-siembra para este formato.
+    recalculo_pendientes = "omitido_solo_interes";
+    console.log(
+      "⚠️ Crédito solo-interés (no_amortiza_capital): recálculo automático omitido"
+    );
+  } else {
+    try {
+      // Cuotas abiertas con pagos PARCIALES ya aplicados (monto_aplicado>0,
+      // pagado=false y validationStatus≠'pending'): recalcular automáticamente
+      // redistribuiría su reparto histórico ya validado — el capital del
+      // crédito ya se movió con los montos originales y una reversa
+      // restauraría montos reescritos. En ese caso se omite el recálculo
+      // automático y se manda a revisión manual.
+      // Los parciales solo REGISTRADOS ('pending') NO bloquean: su reparto aún
+      // no tocó el capital y `aplicarPagoAlCredito` lo aplicará después con los
+      // abono_* guardados, así que DEBEN entrar al recálculo para que ese
+      // reparto se refresque con el capital nuevo antes de que conta los
+      // valide (si no, validarían el split viejo → mismo bug del abono).
+      // paymentFalse=false: un pago anulado conserva monto_aplicado y su
+      // status, pero ya no es un parcial vivo — no debe bloquear el recálculo
+      // (mismo filtro que usan las sumas de cuota en la validación).
+      const [parcialAplicado] = await db
+        .select({ pago_id: pagos_credito.pago_id })
+        .from(pagos_credito)
+        .where(
+          and(
+            eq(pagos_credito.credito_id, credito_id),
+            eq(pagos_credito.pagado, false),
+            eq(pagos_credito.paymentFalse, false),
+            gt(pagos_credito.monto_aplicado, "0"),
+            ne(pagos_credito.validationStatus, "pending"),
+            ne(pagos_credito.pago_id, pago_id)
+          )
+        )
+        .limit(1);
+      // Cuota "MIXTA": un pago VALIDADO (ya aplicado) convive con un pago
+      // PENDIENTE en la misma cuota — típico parcial validado + cierre sin
+      // validar. El cierre volteó pagado=true en toda la cuota, así que el
+      // guard de arriba no lo ve. El recálculo redistribuiría el pendiente
+      // contra el saldo COMPLETO del mes sin descontar lo que el validado ya
+      // consumió → reparto doblado al validarse. Mismo tratamiento: revisión
+      // manual.
+      const pcValidado = alias(pagos_credito, "pc_validado");
+      const [cuotaMixta] = await db
+        .select({ pago_id: pagos_credito.pago_id })
+        .from(pagos_credito)
+        .innerJoin(
+          pcValidado,
+          eq(pagos_credito.cuota_id, pcValidado.cuota_id)
+        )
+        .where(
+          and(
+            eq(pagos_credito.credito_id, credito_id),
+            eq(pagos_credito.validationStatus, "pending"),
+            eq(pagos_credito.paymentFalse, false),
+            gt(pagos_credito.monto_aplicado, "0"),
+            ne(pagos_credito.pago_id, pago_id),
+            eq(pcValidado.validationStatus, "validated"),
+            eq(pcValidado.paymentFalse, false),
+            gt(pcValidado.monto_aplicado, "0")
+          )
+        )
+        .limit(1);
+      if (parcialAplicado || cuotaMixta) {
+        recalculo_pendientes = "revisar_parciales";
+        // OJO: aquí NO se recomienda el botón "Recalcular Pagos": su modo con
+        // numero_cuota también redistribuye el parcial aplicado (reescribiría
+        // el reparto validado). Este caso requiere revisión manual del reparto.
+        console.log(
+          "⚠️ Cuota con pago parcial aplicado: recálculo automático omitido — revisar el reparto manualmente (el botón también redistribuiría el parcial)"
+        );
+      } else {
+        // Cuotas VENCIDAS sin aplicar (no pagadas, o registradas sin validar):
+        // su interés corresponde a meses en los que el capital viejo todavía
+        // estaba prestado completo. Recalcularlas con el capital post-abono
+        // repreciaría deuda histórica a favor del cliente (y en contra del
+        // inversionista), así que si hay alguna NO se recalcula nada y se
+        // manda a revisión del equipo. La cuota que vence HOY no cuenta como
+        // vencida (fecha GT).
+        // Una fila ANULADA (paymentFalse) también cuenta si su cuota sigue
+        // sin pagarse: la cuota vencida existe aunque su única fila esté
+        // anulada — sin esto, el recálculo la re-sembraría y se saltaría
+        // esta regla conservadora.
+        const hoyGuatemala = new Date().toLocaleDateString("en-CA", {
+          timeZone: "America/Guatemala",
+        });
+        const [cuotaVencida] = await db
+          .select({ pago_id: pagos_credito.pago_id })
+          .from(pagos_credito)
+          .innerJoin(
+            cuotas_credito,
+            eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+          )
+          .where(
+            and(
+              eq(pagos_credito.credito_id, credito_id),
+              lt(pagos_credito.fecha_vencimiento, hoyGuatemala),
+              ne(pagos_credito.pago_id, pago_id),
+              or(
+                // Fila viva sin aplicar: no pagada o registrada sin validar
+                and(
+                  eq(pagos_credito.paymentFalse, false),
+                  or(
+                    eq(pagos_credito.pagado, false),
+                    eq(pagos_credito.validationStatus, "pending")
+                  )
+                ),
+                // Fila anulada de una cuota que sigue sin pagarse
+                and(
+                  eq(pagos_credito.paymentFalse, true),
+                  eq(pagos_credito.pagado, false),
+                  eq(cuotas_credito.pagado, false)
+                )
+              )
+            )
+          )
+          .limit(1);
+        if (cuotaVencida) {
+          recalculo_pendientes = "revisar_vencidas";
+          console.log(
+            "⚠️ Crédito con cuotas vencidas sin aplicar: recálculo automático omitido — revisar con el equipo cómo tratar el interés de las vencidas antes de recalcular"
+          );
+        } else {
+          await recalcularPagosCredito({
+            numero_credito_sifco: credito.numero_credito_sifco,
+          });
+          // Pagos registrados SIN validar cuyo monto quedó por ENCIMA del
+          // recibo recalculado (ej.: pagaron la cuota completa y el abono dejó
+          // el último recibo más chico): el reparto nuevo no usa toda la
+          // boleta, y ese resto no llegaría ni al crédito ni a inversionistas
+          // al validar. Se reporta para que el equipo decida (saldo a favor /
+          // devolución) ANTES de validar ese pago.
+          const candidatosSobrante = await db
+            .select({
+              monto_aplicado: pagos_credito.monto_aplicado,
+              pago_del_mes: pagos_credito.pago_del_mes,
+              mora: pagos_credito.mora,
+              otros: pagos_credito.otros,
+              pagoConvenio: pagos_credito.pagoConvenio,
+            })
+            .from(pagos_credito)
+            .where(
+              and(
+                eq(pagos_credito.credito_id, credito_id),
+                eq(pagos_credito.paymentFalse, false),
+                eq(pagos_credito.validationStatus, "pending"),
+                gt(pagos_credito.monto_aplicado, "0"),
+                ne(pagos_credito.pago_id, pago_id)
+              )
+            );
+          // monto_aplicado legacy puede cargar mora/otros/convenio: se restan
+          // para no marcar sobrante falso. Tolerancia de centavos por redondeo.
+          const haySobrante = candidatosSobrante.some((p) =>
+            new Big(p.monto_aplicado ?? 0)
+              .minus(p.pago_del_mes ?? 0)
+              .minus(p.mora ?? 0)
+              .minus(p.otros ?? 0)
+              .minus(p.pagoConvenio ?? 0)
+              .gt(0.05)
+          );
+          if (haySobrante) {
+            recalculo_pendientes = "revisar_sobrante";
+            console.log(
+              "⚠️ Pago registrado sin validar con monto mayor al recibo recalculado: revisar sobrante (saldo a favor/devolución) antes de validarlo"
+            );
+          } else {
+            console.log(
+              `✅ Recibos pendientes recalculados con el capital nuevo`
+            );
+          }
+        }
+      }
+    } catch (error) {
+      // El abono ya quedó aplicado y distribuido; no se revierte por esto. Pero
+      // NO puede pasar silencioso: los recibos quedarían con interés viejo, así
+      // que se reporta en la respuesta para correr Recalcular Pagos a mano.
+      recalculo_pendientes = "error";
+      console.error(
+        "❌ Error recalculando recibos post-abono (correr Recalcular Pagos manual):",
+        error
+      );
+    }
+  }
+
   console.log(`✅ ========== ABONO APLICADO EXITOSAMENTE ==========\n`);
 
   return {
     message: "Abono a capital aplicado exitosamente",
+    recalculo_pendientes,
     credito_id,
     pago_id,
     abono_total: abonoCapitalBig.toString(),
@@ -3218,8 +3625,32 @@ export async function actualizarCuentaPago(
  * Aplica un monto adicional a los restantes de un pago existente.
  * Recibe pago_id y monto, distribuye en orden: interés → IVA → seguro → GPS → membresías → capital.
  * Actualiza solo ese pago y llama a inversionistas.
+ *
+ * 🔒 Escritor de filas de pago: corre bajo el MISMO advisory lock por crédito
+ * que registrar/aplicar/revalidar. Sin él, usarlo en plena ventana del
+ * recálculo post-abono cruzaría dos escritores (el recálculo pisa el monto
+ * manual, o la validación manual queda con el reparto pre-abono).
  */
 export async function aplicarMontoAPago(pago_id: number, monto: number, fecha_pago?: string, validationStatus?: string) {
+  // Pre-lectura mínima: solo para conocer el crédito a serializar. La
+  // lectura real del pago ocurre adentro, ya bajo el lock.
+  const [pagoPre] = await db
+    .select({ credito_id: pagos_credito.credito_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pago_id))
+    .limit(1);
+  const creditoIdLock = pagoPre?.credito_id ?? null;
+  if (creditoIdLock === null) {
+    // Sin crédito no hay qué serializar (pago inexistente o credito_id null);
+    // la lógica interna maneja esos casos.
+    return aplicarMontoAPagoSinLock(pago_id, monto, fecha_pago, validationStatus);
+  }
+  return withPaymentAdvisoryLock(creditoIdLock, () =>
+    aplicarMontoAPagoSinLock(pago_id, monto, fecha_pago, validationStatus)
+  );
+}
+
+async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pago?: string, validationStatus?: string) {
   try {
     // 1. Obtener el pago
     const [pago] = await db

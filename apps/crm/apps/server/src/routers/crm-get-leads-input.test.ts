@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { leadSourceEnum } from "../db/schema/crm";
 import {
 	buildCarteraMatchedClientRows,
@@ -453,5 +455,19 @@ describe("getClientCreditsPageFromCartera", () => {
 
 		expect(received[0]?.nombre_usuario).toBe("Juan");
 		expect(received[0]?.numeros_credito_sifco).toEqual(["X-1", "X-2"]);
+	});
+});
+
+describe("getLeadsAsClientsStats", () => {
+	test("scopes sales stats by opportunity owner without joining leads", () => {
+		const source = readFileSync(join(import.meta.dir, "crm.ts"), "utf8");
+		const handler = source.slice(
+			source.indexOf("getLeadsAsClientsStats: crmProcedure"),
+			source.indexOf("exportClientsForMarketing: crmProcedure"),
+		);
+
+		expect(handler).toContain("eq(opportunities.assignedTo, context.userId)");
+		expect(handler).not.toContain(".leftJoin(leads");
+		expect(handler).not.toContain("eq(leads.assignedTo, context.userId)");
 	});
 });

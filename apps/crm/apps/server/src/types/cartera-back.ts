@@ -286,6 +286,10 @@ export interface CarteraAjusteFechaIdeal {
 
 export interface CreditoDirectoResponse {
 	credito: CarteraCredito;
+	contractSummary?: {
+		originalPrincipal?: string | null;
+		installment?: string | null;
+	};
 	usuario: CarteraUsuario;
 	asesor: CarteraAsesorCredito | null;
 	cuotasPagadas: CarteraCuotaCredito[];
@@ -334,6 +338,8 @@ export interface CarteraCuotaCredito {
 	pago?: CarteraPagoCredito;
 	// Campos adicionales de pago (opcionales)
 	pago_id?: number;
+	cuota?: string | null;
+	validationStatus?: ValidationStatusEnum | null;
 	monto_boleta?: string; // decimal
 	abono_capital?: string; // decimal
 	abono_interes?: string; // decimal

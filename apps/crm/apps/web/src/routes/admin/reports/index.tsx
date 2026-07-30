@@ -69,6 +69,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
+import { getMontoACobrarParticipacionTotals } from "@/lib/reports/monto-a-cobrar";
 import type {
 	ComparativoHistoricoRow,
 	FacturacionMesResponse,
@@ -86,6 +87,7 @@ import {
 } from "@/lib/reports/scenario-configs";
 import { PERMISSIONS } from "@/lib/roles";
 import { Combobox } from "@/components/ui/combobox";
+import { getReportTabs } from "./-tabs";
 import { client, orpc, queryClient } from "@/utils/orpc";
 type SimulacionInversionistaResult = {
 	success: boolean;
@@ -413,6 +415,17 @@ function fillMissingPeriods(
 				acum_total_membresias: "0",
 				total_interes_inversionista: "0",
 				acum_total_interes_inversionista: "0",
+				capital_inv_participacion_actual: "0",
+				capital_cube_participacion_actual: "0",
+				interes_iva_inv_participacion_actual: "0",
+				interes_iva_cube_participacion_actual: "0",
+				acum_capital_inv_participacion_actual: "0",
+				acum_capital_cube_participacion_actual: "0",
+				acum_interes_iva_inv_participacion_actual: "0",
+				acum_interes_iva_cube_participacion_actual: "0",
+				creditos_participacion_invalida: 0,
+				cuotas_participacion_invalida: 0,
+				participacion_actual: true,
 			}
 		);
 	});
@@ -553,7 +566,16 @@ function RouteComponent() {
 	const canAccessClosedCreditsReport = userRole
 		? PERMISSIONS.canAccessClosedCreditsReport(userRole)
 		: false;
-	const canAccessReports = isAdmin || canAccessClosedCreditsReport;
+	const canAccessCobranzaReport = userRole
+		? PERMISSIONS.canAccessCobranzaReport(userRole)
+		: false;
+	const canAccessReports =
+		isAdmin || canAccessClosedCreditsReport || canAccessCobranzaReport;
+	const reportTabs = getReportTabs({
+		canAccessClosedCreditsReport,
+		canAccessCobranzaReport,
+		isAdmin,
+	});
 
 	const dashboardData = useQuery({
 		...orpc.getDashboardExecutivo.queryOptions({
@@ -593,7 +615,7 @@ function RouteComponent() {
 				fechaFin: montoCobrarRange.fechaFin,
 			},
 		}),
-		enabled: isAdmin,
+		enabled: canAccessCobranzaReport,
 	});
 	const montoCobrarData = montoCobrarQuery.data as
 		| { data: MontoACobrarPeriodoRow[] }
@@ -603,7 +625,7 @@ function RouteComponent() {
 		...orpc.getFacturacionMes.queryOptions({
 			input: { mes: facturacionMes.mes, anio: facturacionMes.anio },
 		}),
-		enabled: isAdmin,
+		enabled: canAccessCobranzaReport,
 	});
 	const facturacionMesData = facturacionMesQuery.data as
 		| FacturacionMesResponse
@@ -1046,16 +1068,7 @@ function RouteComponent() {
 				</div>
 			</div>
 
-			{!isAdmin && canAccessClosedCreditsReport && creditosCerradosCard}
-
-			{isAdmin && (
-				<>
-					<Tabs
-						defaultValue={
-							canAccessClosedCreditsReport ? "creditos" : "cobranza"
-						}
-						className="space-y-6"
-					>
+			<Tabs defaultValue={reportTabs.defaultTab} className="space-y-6">
 						<TabsList>
 							{canAccessClosedCreditsReport && (
 								<TabsTrigger value="creditos">Créditos cerrados</TabsTrigger>
@@ -1064,18 +1077,42 @@ function RouteComponent() {
 							    secciones (TabsContent value="resumen" / "graficas") se
 							    conservan más abajo por si se quieren reutilizar; para
 							    volver a mostrarlas, reañadir aquí sus TabsTrigger. */}
-							<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
-							<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
-							<TabsTrigger value="colocacion">Colocación</TabsTrigger>
-							<TabsTrigger value="proyeccion-liquidaciones">
-								Proyección Liquidaciones
-							</TabsTrigger>
+							{canAccessCobranzaReport && (
+								<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
+							)}
+							{isAdmin && (
+								<>
+									<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
+									<TabsTrigger value="colocacion">Colocación</TabsTrigger>
+									<TabsTrigger value="proyeccion-liquidaciones">
+										Proyección Liquidaciones
+									</TabsTrigger>
+								</>
+							)}
 						</TabsList>
+						{canAccessCobranzaReport && (
+							<>
+								<ScenarioModal
+									open={scenarioOpen === "monto"}
+									onOpenChange={(o) => setScenarioOpen(o ? "monto" : null)}
+									config={montoACobrarConfig}
+									baseData={montoCobrarData?.data}
+								/>
+								<ScenarioModal
+									open={scenarioOpen === "facturacion"}
+									onOpenChange={(o) => setScenarioOpen(o ? "facturacion" : null)}
+									config={facturacionConfig}
+									baseData={facturacionMesData}
+								/>
+							</>
+						)}
 						{canAccessClosedCreditsReport && (
 							<TabsContent value="creditos" className="space-y-6">
 								{creditosCerradosCard}
 							</TabsContent>
 						)}
+						{isAdmin && (
+							<>
 						<TabsContent value="resumen" className="space-y-6">
 							{/* Enlaces a otros reportes - TODO: Implementar rutas */}
 							<div className="grid gap-4 md:grid-cols-4">
@@ -1302,6 +1339,9 @@ function RouteComponent() {
 								</CardContent>
 							</Card>
 						</TabsContent>
+							</>
+						)}
+						{canAccessCobranzaReport && (
 						<TabsContent value="cobranza" className="space-y-6">
 							{/* Reporte: Monto a Cobrarse por Período */}
 							<Card>
@@ -1311,9 +1351,9 @@ function RouteComponent() {
 											<CalendarDays className="h-5 w-5 text-blue-500" />
 											<div>
 												<CardTitle>Monto a Cobrarse por Período</CardTitle>
-												<CardDescription>
-													Cuotas pendientes desglosadas por rubro (capital,
-													interés, seguro, etc.)
+													<CardDescription>
+														Cuotas pendientes desglosadas por rubro (capital,
+														interés, seguro, etc.). Según participación actual.
 												</CardDescription>
 											</div>
 										</div>
@@ -1391,6 +1431,17 @@ function RouteComponent() {
 									)}
 									{!!montoCobrarData?.data.length && (
 										<>
+											{(() => {
+												const totals = getMontoACobrarParticipacionTotals(
+													montoCobrarData.data,
+													false,
+												);
+												return totals.creditosInvalidos > 0 ? (
+													<p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
+														Participación actual inválida en {totals.creditosInvalidos} crédito(s) y {totals.cuotasInvalidas} cuota(s); sus montos no se incluyen en el desglose Inv./CUBE.
+													</p>
+												) : null;
+											})()}
 											{/* Gráfica de barras apiladas */}
 											<ResponsiveContainer width="100%" height={350}>
 												<BarChart
@@ -1496,9 +1547,13 @@ function RouteComponent() {
 															<TableHead className="text-right">
 																Membresías
 															</TableHead>
-															<TableHead className="text-right">
-																Interés Inv. (referencia)
-															</TableHead>
+																	<TableHead className="text-right">
+																		Interés Inv. pagado (referencia)
+																	</TableHead>
+																	<TableHead className="text-right">Capital Inv.</TableHead>
+																	<TableHead className="text-right">Capital CUBE</TableHead>
+																	<TableHead className="text-right">Interés + IVA Inv.</TableHead>
+																	<TableHead className="text-right">Interés + IVA CUBE</TableHead>
 															<TableHead className="text-right">
 																Total Mora
 															</TableHead>
@@ -1533,9 +1588,13 @@ function RouteComponent() {
 															const membresias = a
 																? row.acum_total_membresias
 																: row.total_membresias;
-															const interesInversionista = a
-																? row.acum_total_interes_inversionista
-																: row.total_interes_inversionista;
+																	const interesInversionista = a
+																		? row.acum_total_interes_inversionista
+																		: row.total_interes_inversionista;
+																	const capitalInv = a ? row.acum_capital_inv_participacion_actual : row.capital_inv_participacion_actual;
+																	const capitalCube = a ? row.acum_capital_cube_participacion_actual : row.capital_cube_participacion_actual;
+																	const interesIvaInv = a ? row.acum_interes_iva_inv_participacion_actual : row.interes_iva_inv_participacion_actual;
+																	const interesIvaCube = a ? row.acum_interes_iva_cube_participacion_actual : row.interes_iva_cube_participacion_actual;
 															const total =
 																Number.parseFloat(cuota) +
 																Number.parseFloat(interes) +
@@ -1575,6 +1634,10 @@ function RouteComponent() {
 																	<TableCell className="text-right">
 																		{formatCurrency(interesInversionista)}
 																	</TableCell>
+																	<TableCell className="text-right">{formatCurrency(capitalInv)}</TableCell>
+																	<TableCell className="text-right">{formatCurrency(capitalCube)}</TableCell>
+																	<TableCell className="text-right">{formatCurrency(interesIvaInv)}</TableCell>
+																	<TableCell className="text-right">{formatCurrency(interesIvaCube)}</TableCell>
 																	<TableCell className="text-right">
 																		<div>{formatCurrency(row.total_mora)}</div>
 																		<div
@@ -1626,13 +1689,26 @@ function RouteComponent() {
 																val("acum_total_seguro") +
 																val("acum_total_gps") +
 																val("acum_total_membresias");
-															const totalCred =
-																a && lastRow
-																	? lastRow.cuotas_count
-																	: rows.reduce(
-																			(acc, r) => acc + r.cuotas_count,
-																			0,
-																		);
+																	const totalCred =
+																		a && lastRow
+																			? lastRow.cuotas_count
+																			: rows.reduce(
+																					(acc, r) => acc + r.cuotas_count,
+																					0,
+																				);
+																	const splitTotals = getMontoACobrarParticipacionTotals(
+																		rows.map((row) => ({
+																			cuotas_count: row.cuotas_count,
+																			capital_inv_participacion_actual: a ? row.acum_capital_inv_participacion_actual : row.capital_inv_participacion_actual,
+																			capital_cube_participacion_actual: a ? row.acum_capital_cube_participacion_actual : row.capital_cube_participacion_actual,
+																			interes_iva_inv_participacion_actual: a ? row.acum_interes_iva_inv_participacion_actual : row.interes_iva_inv_participacion_actual,
+																			interes_iva_cube_participacion_actual: a ? row.acum_interes_iva_cube_participacion_actual : row.interes_iva_cube_participacion_actual,
+																			creditos_participacion_invalida: row.creditos_participacion_invalida,
+																			creditos_participacion_invalida_rango: row.creditos_participacion_invalida_rango,
+																			cuotas_participacion_invalida: row.cuotas_participacion_invalida,
+																		})),
+																		a,
+																	);
 															return (
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
 																	<TableCell>Total</TableCell>
@@ -1688,10 +1764,14 @@ function RouteComponent() {
 																			val(
 																				a
 																					? "acum_total_interes_inversionista"
-																					: "total_interes_inversionista",
-																			),
-																		)}
-																	</TableCell>
+																							: "total_interes_inversionista",
+																						),
+																					)}
+																				</TableCell>
+																				<TableCell className="text-right">{formatCurrency(splitTotals.capitalInv)}</TableCell>
+																				<TableCell className="text-right">{formatCurrency(splitTotals.capitalCube)}</TableCell>
+																				<TableCell className="text-right">{formatCurrency(splitTotals.interesIvaInv)}</TableCell>
+																				<TableCell className="text-right">{formatCurrency(splitTotals.interesIvaCube)}</TableCell>
 																	<TableCell className="text-right">
 																		{formatCurrency(val("total_mora"))}
 																	</TableCell>
@@ -1877,6 +1957,9 @@ function RouteComponent() {
 								</CardContent>
 							</Card>
 						</TabsContent>
+						)}
+						{isAdmin && (
+							<>
 						<TabsContent value="inversiones" className="space-y-6">
 							{/* Reporte: Flujo de Cuotas de Inversiones */}
 							<Card>
@@ -2643,18 +2726,6 @@ function RouteComponent() {
 						</Dialog>
 
 						{/* Modales de simulación de escenarios */}
-						<ScenarioModal
-							open={scenarioOpen === "monto"}
-							onOpenChange={(o) => setScenarioOpen(o ? "monto" : null)}
-							config={montoACobrarConfig}
-							baseData={montoCobrarData?.data}
-						/>
-						<ScenarioModal
-							open={scenarioOpen === "facturacion"}
-							onOpenChange={(o) => setScenarioOpen(o ? "facturacion" : null)}
-							config={facturacionConfig}
-							baseData={facturacionMesData}
-						/>
 						<ScenarioModal
 							open={scenarioOpen === "cobertura"}
 							onOpenChange={(o) => setScenarioOpen(o ? "cobertura" : null)}
@@ -3424,9 +3495,9 @@ function RouteComponent() {
 								);
 							})()}
 						</TabsContent>
+							</>
+						)}
 					</Tabs>
-				</>
-			)}
 		</div>
 	);
 }

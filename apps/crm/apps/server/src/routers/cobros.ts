@@ -42,6 +42,13 @@ import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import {
+	countRemainingInstallments,
+	resolveCreditContractSummary,
+	resolveHistoricalInstallment,
+	resolveInstallmentAmount,
+	resolveOperationalInstallment,
+} from "../lib/cobros-credit-detail";
+import {
 	PLANTILLAS_MENSAJES,
 	interpolar as interpolarPlantilla,
 	prepararTelefonoAsesorParaEnvio,
@@ -91,6 +98,7 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		| "CANCELADO"
 		| "INCOBRABLE"
 		| "PENDIENTE_CANCELACION"
+		| "EN_CONVENIO"
 		| "MOROSO";
 	nombre_usuario?: string;
 	numero_credito_sifco?: string;
@@ -677,7 +685,13 @@ export const cobrosRouter = {
 
 					// Mapear filtro de estadoMora a parámetros de cartera-back
 					let cuotasAtrasadas: number | undefined;
-					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
+					let estadoCartera:
+						| "ACTIVO"
+						| "CANCELADO"
+						| "INCOBRABLE"
+						| "PENDIENTE_CANCELACION"
+						| "EN_CONVENIO"
+						| undefined;
 					const searchTerm = input.searchTerm?.trim() || "";
 					const numeroSifcoExacto = input.numeroSifco?.trim() || "";
 					const hasNumber = /\d/.test(searchTerm);
@@ -720,7 +734,11 @@ export const cobrosRouter = {
 								estadoCartera = "CANCELADO";
 								break;
 							case "en_convenio":
-								estadoCartera = "EN_CONVENIO" as typeof estadoCartera;
+								estadoCartera = "EN_CONVENIO";
+								break;
+							case "pendiente_cancelacion":
+								// Solo cambiar el estado, sin filtrar por cuotas
+								estadoCartera = "PENDIENTE_CANCELACION";
 								break;
 							default:
 								// Sin filtro, mantener ACTIVO como predeterminado
@@ -1049,6 +1067,8 @@ export const cobrosRouter = {
 							if (statusCredit === "CANCELADO") estadoContrato = "completado";
 							else if (statusCredit === "INCOBRABLE")
 								estadoContrato = "incobrable";
+							else if (statusCredit === "PENDIENTE_CANCELACION")
+								estadoContrato = "pendiente_cancelacion";
 
 							// Buscar la oportunidad por número SIFCO para obtener datos del vehículo
 							const numeroSifco = credito.creditos.numero_credito_sifco;
@@ -1618,11 +1638,15 @@ export const cobrosRouter = {
 							.sort((a, b) => a.numero_cuota - b.numero_cuota)
 							.map((cuota) => {
 								const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
+								const montoCuota = resolveInstallmentAmount(
+									cuota.cuota,
+									creditoCompleto.credito.cuota,
+								);
 								const montoPagadoReal =
 									cuota.pagado && cuota.monto_boleta
 										? Number(cuota.monto_boleta)
 										: cuota.pagado
-											? Number(creditoCompleto.credito.cuota)
+											? Number(montoCuota)
 											: null;
 
 								return {
@@ -1630,7 +1654,7 @@ export const cobrosRouter = {
 									id: cuota.cuota_id.toString(),
 									numeroCuota: cuota.numero_cuota,
 									fechaVencimiento: cuota.fecha_vencimiento,
-									montoCuota: creditoCompleto.credito.cuota,
+									montoCuota,
 									fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
 									montoPagado: montoPagadoReal,
 									montoMora: montoMora.toString(),
@@ -2166,14 +2190,13 @@ export const cobrosRouter = {
 				];
 				const cuota0 = todasLasCuotas.find((c) => c.numero_cuota === 0);
 				const fechaInicioCuota0 = cuota0?.fecha_vencimiento || null;
-				const cuotasPagadasCount = creditoCompleto.cuotasPagadas?.length || 0;
 				const totalCuotas = creditoCompleto.credito.plazo || 0;
-				let cuotasRestantes = totalCuotas;
-				if (cuota0?.pagado) {
-					cuotasRestantes = totalCuotas - cuotasPagadasCount + 1;
-				} else {
-					cuotasRestantes = totalCuotas - cuotasPagadasCount;
-				}
+				const cuotasRestantes = countRemainingInstallments(
+					creditoCompleto.credito.statusCredit,
+					totalCuotas,
+					creditoCompleto.cuotasPagadas,
+					Boolean(cuota0?.pagado),
+				);
 
 				// 6. Mapear datos correctamente
 				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
@@ -2217,6 +2240,18 @@ export const cobrosRouter = {
 				let estadoContrato = "activo";
 				if (statusCredit === "CANCELADO") estadoContrato = "completado";
 				else if (statusCredit === "INCOBRABLE") estadoContrato = "incobrable";
+				else if (statusCredit === "PENDIENTE_CANCELACION")
+					estadoContrato = "pendiente_cancelacion";
+				const contractSummary = resolveCreditContractSummary(
+					statusCredit,
+					creditoCompleto.cuotasPagadas,
+					creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
+					resolveHistoricalInstallment(
+						creditoCompleto.credito.cuota,
+						oportunidadData?.cuotaMensual,
+					),
+					creditoCompleto.contractSummary,
+				);
 
 				return {
 					// ID del caso de cobros (si existe)
@@ -2245,12 +2280,12 @@ export const cobrosRouter = {
 					etiquetas: casoCobro?.etiquetas || [],
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
-					montoFinanciado:
-						creditoCompleto.credito.capital ??
-						creditoCompleto.credito.deudatotal ??
-						"0.00",
-					cuotaMensual:
-						creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual,
+					montoFinanciado: contractSummary.principal,
+					cuotaMensual: resolveOperationalInstallment(
+						statusCredit,
+						contractSummary.installment,
+					),
+					cuotaMensualHistorica: contractSummary.installment,
 					numeroCuotas: creditoCompleto.credito.plazo,
 					fechaInicio: creditoCompleto.credito.fecha_creacion,
 					diaPagoMensual,
@@ -3250,8 +3285,12 @@ export const cobrosRouter = {
 			// 1. Mapear estadoMora → params de cartera-back (mismo mapping que
 			// getTodosLosCreditos).
 			let cuotasAtrasadas: number | undefined;
-			let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined =
-				"ACTIVO";
+			let estadoCartera:
+				| "ACTIVO"
+				| "CANCELADO"
+				| "INCOBRABLE"
+				| "PENDIENTE_CANCELACION"
+				| undefined = "ACTIVO";
 			if (input.estadoMora) {
 				switch (input.estadoMora) {
 					case "al_dia":
@@ -3279,6 +3318,9 @@ export const cobrosRouter = {
 						break;
 					case "completado":
 						estadoCartera = "CANCELADO";
+						break;
+					case "pendiente_cancelacion":
+						estadoCartera = "PENDIENTE_CANCELACION";
 						break;
 					default:
 						estadoCartera = "ACTIVO";
@@ -4015,6 +4057,24 @@ export const cobrosRouter = {
 				asesores: input.asesores,
 				emailCobrador: input.emailCobrador,
 			});
+		}),
+
+	getMoraRecuperacionPorAsesor: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				mes: z.number(),
+				anio: z.number(),
+				asesores: z.array(z.number()).optional(),
+				emailCobrador: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+			return carteraBackClient.getMoraRecuperacionPorAsesor(input);
 		}),
 
 	// ========================================================================

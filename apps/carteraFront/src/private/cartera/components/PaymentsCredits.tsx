@@ -516,6 +516,34 @@ const handleDownloadExcel = async () => {
       return mesOk && anioOk;
     })
     : [];
+
+  // Último pago aplicado de cada cuota abierta: sus "restantes" son el estado real de la cuota
+  const ultimosAplicados = React.useMemo(() => {
+    const porCuota = new Map<number, { pago_id: number; fecha: number }>();
+    for (const item of pagosFiltrados as any[]) {
+      const p = item?.pago;
+      if (!p || p.cuota_pagada === true || p.paymentFalse === true) continue;
+      if (!p.fecha_aplicado || Number(p.monto_aplicado ?? 0) <= 0) continue;
+      // Los abonos a capital no cargan los restantes de la cuota
+      if (p.validationStatus === "capital" || p.validationStatus === "capital_validated") continue;
+      // Si la fila ya no tiene restantes (cuota cubierta esperando validación de
+      // un cierre pendiente), no hay "restantes actuales" que señalar
+      const restantesCuota =
+        Number(p.capital_restante ?? 0) +
+        Number(p.interes_restante ?? 0) +
+        Number(p.iva_12_restante ?? 0) +
+        Number(p.seguro_restante ?? 0) +
+        Number(p.gps_restante ?? 0);
+      if (restantesCuota <= 0) continue;
+      const fecha = new Date(p.fecha_aplicado).getTime();
+      const actual = porCuota.get(p.numero_cuota);
+      if (!actual || fecha > actual.fecha || (fecha === actual.fecha && p.pago_id > actual.pago_id)) {
+        porCuota.set(p.numero_cuota, { pago_id: p.pago_id, fecha });
+      }
+    }
+    return new Set([...porCuota.values()].map((v) => v.pago_id));
+  }, [pagosFiltrados]);
+
   return (
     <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <div className="w-full max-w-[1600px] mx-auto">
@@ -744,6 +772,11 @@ const handleDownloadExcel = async () => {
                       </TableCell>
                       <TableCell className="text-center text-green-700 font-bold">
                         {formatCurrency(item.pago.monto_aplicado)}
+                        {ultimosAplicados.has(item.pago.pago_id) && (
+                          <span className="block mx-auto mt-1 w-fit px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold whitespace-nowrap">
+                            Último aplicado · restantes actuales
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-center font-semibold">
                         {formatDate(item.pago.fecha_pago)}

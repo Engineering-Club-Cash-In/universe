@@ -789,12 +789,18 @@ function RouteComponent() {
 	// transiciones para créditos fuera del funnel, así que la última fila de
 	// buckets_historial queda CONGELADA en el bucket real previo al convenio
 	// — eso es `bucket_previo`. null = sin traza (crédito nunca procesado por
-	// el motor): se muestra igual, no se oculta info real por falta de backfill.
+	// el motor) O error real degradado a null por el server (getBucketActualCredito
+	// atrapa cualquier excepción y devuelve null) — en ambos casos se muestra
+	// igual, no se oculta info real. Pero mientras la query sigue en vuelo
+	// (isPending, data aún undefined) NO hay que tratarlo como "sin traza":
+	// eso mostraría la card de un convenio no-B2 antes de que llegue la
+	// respuesta real, solo para ocultarla un instante después.
 	// esBucketB2 resuelve el número contra el catálogo dinámico en vez de
 	// comparar el literal 2 (ver su doc en buckets-catalogo.ts).
 	const bucketPrevio = motorBucket?.bucket_previo ?? null;
 	const mostrarConvenio =
 		!!caso.convenioActivo &&
+		!bucketActual.isPending &&
 		(bucketPrevio === null || esBucketB2(bucketPrevio, bucketsCatalogo.data));
 
 	const getEstadoContacto = (estado: string) => {

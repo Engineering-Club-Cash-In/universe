@@ -2188,6 +2188,7 @@ if (facturasExistentes.length > 0) {
         factura_fecha_anulacion: facturas_electronicas.fecha_anulacion,
         factura_motivo_anulacion: facturas_electronicas.motivo_anulacion,
         factura_tipo_documento: facturas_electronicas.tipo_documento,
+        factura_emisor_nit: facturas_electronicas.emisor_nit,
         
         // Datos del pago
         pago_id: pagos_credito.pago_id,
@@ -2405,9 +2406,85 @@ if (facturasExistentes.length > 0) {
       }
       
       // 🔥 Error de documento no encontrado
-      else if (descripcionError.includes('no existe') || 
+      else if (descripcionError.includes('no existe') ||
                descripcionError.includes('not found') ||
-               descripcionError.includes('No se encontró')) {
+               descripcionError.includes('No se encontró') ||
+               descripcionError.includes('no ha sido emitido')) {
+        // Puede ser una factura "fantasma": el certificador devolvió UUID al
+        // certificar pero nunca la emitió a SAT, así que no hay nada que anular
+        // allá y dejarla ACTIVA en la BD sería mantener el fantasma. Antes de
+        // sincronizar se CONFIRMA con un GET usando el emisor propio de la
+        // factura (el mensaje de arriba puede venir de un emisor equivocado del
+        // loop). Solo si SAT tampoco la devuelve ahí, se marca ANULADA en BD.
+        // Si el GET falla (red) o la encuentra, sigue el flujo de error normal.
+        try {
+          const emisorConfGet = Object.values(EMISORES_CONFIG).find(
+            (c) => c.config.emisor.nit === facturaCompleta.factura_emisor_nit
+          );
+          if (emisorConfGet) {
+            const satGet = new SATClientService(
+              {
+                requestor: emisorConfGet.satConfig.requestor,
+                user: emisorConfGet.satConfig.user || emisorConfGet.satConfig.requestor,
+                userName: emisorConfGet.satConfig.userName,
+                entity: emisorConfGet.config.emisor.nit,
+              },
+              emisorConfGet.satConfig.endpointUrl
+            );
+            const enSat = await satGet.obtenerPorUUID(uuid);
+            if (!enSat.encontrado) {
+              const [facturaSincronizada] = await db
+                .update(facturas_electronicas)
+                .set({
+                  status: "ANULADA",
+                  fecha_anulacion: new Date(),
+                  motivo_anulacion: `${motivo} (sin anular en SAT: el documento nunca fue emitido — ${descripcionError})`,
+                  anulada_por: userId,
+                })
+                .where(eq(facturas_electronicas.uuid, uuid))
+                .returning();
+
+              // Misma limpieza best-effort del desglose genérico que en la anulación normal.
+              try {
+                await db.execute(
+                  sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${facturaSincronizada.factura_id} AND pago_id IS NULL`
+                );
+              } catch (limpiezaError) {
+                console.error(
+                  '⚠️ No se pudo limpiar el desglose genérico (NO afecta la anulación):',
+                  (limpiezaError as Error).message
+                );
+              }
+
+              console.log('🧹 Factura fantasma sincronizada: ANULADA solo en BD (no existía en SAT)');
+              set.status = 200;
+              return {
+                success: true,
+                anulada_solo_en_sistema: true,
+                mensaje: `Factura ${facturaCompleta.factura_serie}-${facturaCompleta.factura_numero} anulada solo en el sistema: SAT no tiene el documento (el certificador nunca lo emitió)`,
+                data: {
+                  factura: {
+                    factura_id: facturaSincronizada.factura_id,
+                    serie: facturaSincronizada.serie,
+                    numero: facturaSincronizada.numero,
+                    uuid: facturaSincronizada.uuid,
+                    status: facturaSincronizada.status,
+                    monto_total: facturaSincronizada.monto_total,
+                    fecha_anulacion: facturaSincronizada.fecha_anulacion,
+                    motivo_anulacion: facturaSincronizada.motivo_anulacion,
+                    anulada_por: facturaSincronizada.anulada_por,
+                  },
+                  descripcion_cofidi: descripcionError,
+                },
+              };
+            }
+          }
+        } catch (verificacionError) {
+          console.error(
+            '⚠️ No se pudo confirmar con GET si la factura existe en SAT (sigue el error normal):',
+            (verificacionError as Error).message
+          );
+        }
         mensajeUsuario = 'La factura no fue encontrada en el sistema SAT';
         codigoError = 'FACTURA_NO_EXISTE_SAT';
         sugerencia = 'Verifique que la factura haya sido certificada correctamente';
@@ -3171,7 +3248,7 @@ if (facturasExistentes.length > 0) {
     "/facturar-generico",
     async ({ body, set, request }) => {
       try {
-        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo} = body;
+        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo, fecha_vencimiento} = body;
 
         // Si no viene created_by en el body, extraerlo del token
         let created_by = bodyCreatedBy;
@@ -3298,7 +3375,7 @@ if (facturasExistentes.length > 0) {
         console.log(`💰 Total factura: Q${totalFactura.toFixed(2)}`);
 
         // ============================================
-        // 4️⃣ CONSTRUIR COMPLEMENTOS (1 ABONO, FECHA HOY)
+        // 4️⃣ CONSTRUIR COMPLEMENTOS (1 ABONO, FECHA HOY O fecha_vencimiento)
         // ============================================
         const fechaHoy = new Date().toISOString().split("T")[0];
 
@@ -3308,7 +3385,7 @@ if (facturasExistentes.length > 0) {
             abonos: [
               {
                 numeroAbono: 1,
-                fechaVencimiento: fechaHoy,
+                fechaVencimiento: fecha_vencimiento ?? fechaHoy,
                 montoAbono: parseFloat(totalFactura.toFixed(2)),
               },
             ],
@@ -3461,6 +3538,9 @@ if (facturasExistentes.length > 0) {
           t.Literal("AUTOCASH"),
         ]),
         credito_nuevo: t.Optional(t.Boolean({ default: false })),
+        // Opcional: fecha de vencimiento del abono cambiario (yyyy-mm-dd).
+        // Si no viene, se usa la fecha de hoy (comportamiento original).
+        fecha_vencimiento: t.Optional(t.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" })),
       }),
     }
   )

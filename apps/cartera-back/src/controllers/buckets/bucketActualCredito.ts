@@ -85,10 +85,20 @@ export async function getBucketActualPorSifco(
       -- bucketActualSql (estado que fuerza bucket / rango de cuotas), no existe
       -- tal fecha: null, no se inventa (mismo criterio "degradar sin inventar
       -- dato" que colaDia.ts, que directamente excluye esos créditos).
+      -- ue.fecha es un timestamp SIN zona (columna timestamp, no timestamptz;
+      -- servidor en GMT/UTC, verificado con SHOW timezone). Un ::text directo
+      -- da "2026-07-08 15:30:00" sin ningún indicio de zona — new Date() del
+      -- lado del CRM lo reinterpreta como hora LOCAL del proceso Node/Bun, no
+      -- UTC, corriendo la ventana de gestión B1 hasta 6h si ese proceso no
+      -- corre en UTC (findings de Codex en PR #1204). AT TIME ZONE 'UTC'
+      -- convierte a timestamptz ETIQUETANDO el valor como UTC (no lo
+      -- desplaza, el servidor ya guarda en UTC) y to_json sobre eso sí emite
+      -- el offset +00:00 explícito — TZ-independiente en new Date(), igual
+      -- que fechaContacto (que llega vía Date real de drizzle, siempre UTC).
       CASE
         WHEN a.fuera THEN NULL
         WHEN ue.bucket_nuevo IS NOT NULL AND ue.bucket_nuevo = a.bucket
-          THEN ue.fecha::text
+          THEN to_json(ue.fecha AT TIME ZONE 'UTC')#>>'{}'
         ELSE NULL
       END AS fecha_entrada_bucket,
       b.prefijo, b.nombre, b.color, b.estado_mora

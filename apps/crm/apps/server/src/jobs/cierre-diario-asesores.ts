@@ -38,6 +38,10 @@ import { inArray } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
+import {
+	PREFIJO_PREMORA_AUTO,
+	PREFIJO_WSP_MASIVO,
+} from "../lib/gestion-temprana-b1";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import { carteraBackClient } from "../services/cartera-back-client";
 
@@ -45,13 +49,20 @@ import { carteraBackClient } from "../services/cartera-back-client";
  * Prefijos con los que el sistema marca los contactos que genera solo
  * (`contactos_cobros` no tiene columna de origen). Los escriben
  * send-premora-reminders.ts y cobros.ts::enviarWhatsappMasivoCobros; acá se
- * leen para excluirlos de la gestión del asesor. Se exportan porque el reporte
- * (routers/cobros.ts) aplica el mismo criterio al contar promesas y al
+ * leen para excluirlos de la gestión del asesor. Se re-exportan porque el
+ * reporte (routers/cobros.ts) aplica el mismo criterio al contar promesas y al
  * etiquetar el origen en el detalle — así el filtro de escritura y el de
  * lectura no pueden divergir.
+ *
+ * CB-026: la definición vive ahora en lib/gestion-temprana-b1.ts, que es un
+ * módulo PURO y por eso lo puede importar también el web (este archivo arrastra
+ * `db` y `carteraBackClient`, que no pueden entrar al bundle del browser). Una
+ * sola definición, dos consumidores.
  */
-export const PREFIJO_PREMORA_AUTO = "Recordatorio automático";
-export const PREFIJO_WSP_MASIVO = "Envío masivo de WhatsApp";
+export {
+	PREFIJO_PREMORA_AUTO,
+	PREFIJO_WSP_MASIVO,
+} from "../lib/gestion-temprana-b1";
 
 // Two-component advisory lock key: namespace=1 (cobros jobs), key=2 (cierre diario asesor)
 const CIERRE_DIARIO_LOCK = [1, 2] as const;

@@ -948,6 +948,29 @@ export interface CarteraBucketCatalogo {
 	dias_sla: number | null;
 }
 
+/** Bucket ACTUAL de un crédito según el motor (GET /buckets/credito/:numero_credito_sifco). */
+export interface CarteraBucketActualCredito {
+	credito_id: number;
+	numero_credito_sifco: string;
+	/** 0-5, o null si el crédito salió del funnel (ver `fuera_funnel`) o no se pudo derivar. */
+	bucket: number | null;
+	prefijo: string | null;
+	nombre: string | null;
+	color: string | null;
+	estado_mora: string | null;
+	/** true = statusCredit fuera del funnel (EN_CONVENIO/CANCELADO/CAIDO/...): sin bucket por diseño. */
+	fuera_funnel: boolean;
+	/**
+	 * CB-026: fecha en que el crédito ENTRÓ al bucket actual (ISO), de la última
+	 * fila de `buckets_historial`. null = el bucket se derivó por fallback
+	 * (estado que lo fuerza / rango de cuotas) y no hay fecha de entrada
+	 * confiable, o el crédito está fuera del funnel. Los consumidores deben
+	 * degradar, nunca asumir una fecha: la gestión temprana B1 se cuenta desde
+	 * acá y una fecha inventada produciría un falso "gestión agotada".
+	 */
+	fecha_entrada_bucket: string | null;
+}
+
 // ============================================================================
 // HISTORIAL DE BUCKETS (motor COBROS-02, GET /buckets/historial)
 // ============================================================================

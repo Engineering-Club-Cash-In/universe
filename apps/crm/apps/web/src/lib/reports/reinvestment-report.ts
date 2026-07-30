@@ -343,11 +343,17 @@ export function getReportState(input: {
 	if (input.error) return "error";
 	const model = buildReinvestmentReportModel(input.data);
 	if (!model.compatible) return input.data ? "incompatible" : "empty";
-	if (model.data.cantidad_liquidaciones === 0) return "empty";
+	const hasReportActivity =
+		model.data.cantidad_liquidaciones > 0 ||
+		model.data.comprasMes.some((purchase) => purchase.cantidad > 0);
+	if (!hasReportActivity) return "empty";
 	if (!model.reconciliations.destinations || !model.reconciliations.modes) {
 		return "error";
 	}
-	if (Object.values(model.totals).every((value) => cents(value) === 0)) {
+	if (
+		model.data.cantidad_liquidaciones > 0 &&
+		Object.values(model.totals).every((value) => cents(value) === 0)
+	) {
 		return "registered-zero";
 	}
 	if (!model.data.detalle_estado.disponible) return "partial";

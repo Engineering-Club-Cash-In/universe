@@ -613,6 +613,22 @@ describe("presentación fail-closed", () => {
 });
 
 describe("getReportState", () => {
+	const purchaseOnlyResponse = () => {
+		const data = response();
+		data.porTipo = {};
+		data.interesNeto = {
+			conFactura: { interes: "0.00", iva: "0.00", neto: "0.00" },
+			sinFactura: { interes: "0.00", isr: "0.00", neto: "0.00" },
+			cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
+		};
+		data.pagosExtras = { abonos_capital: "0.00", cancelaciones: "0.00" };
+		data.porInversionista = [];
+		data.detalleInteresNeto = [];
+		data.detallePagosExtras = [];
+		data.cantidad_liquidaciones = 0;
+		return data;
+	};
+
 	test("distingue carga, error, vacío, parcial y listo", () => {
 		expect(getReportState({ pending: true, error: false })).toBe("loading");
 		expect(getReportState({ pending: false, error: true })).toBe("error");
@@ -653,6 +669,31 @@ describe("getReportState", () => {
 		expect(
 			getReportState({ pending: false, error: false, data: mismatch }),
 		).toBe("error");
+	});
+
+	test("conserva compras conciliadas aunque no existan liquidaciones", () => {
+		const purchases = purchaseOnlyResponse();
+
+		expect(buildReinvestmentReportModel(purchases).reconciled).toBe(true);
+		expect(
+			getReportState({ pending: false, error: false, data: purchases }),
+		).toBe("ready");
+		expect(
+			buildSecondarySummaryPresentation(purchases).find(
+				(summary) => summary.key === "purchases",
+			)?.total,
+		).toBe(80);
+	});
+
+	test("mantiene vacío un mes compatible sin liquidaciones ni compras", () => {
+		const empty = purchaseOnlyResponse();
+		empty.comprasMes = [];
+		empty.detalleComprasMes = [];
+
+		expect(buildReinvestmentReportModel(empty).reconciled).toBe(true);
+		expect(
+			getReportState({ pending: false, error: false, data: empty }),
+		).toBe("empty");
 	});
 
 	test("distingue liquidaciones registradas sin flujo ni posición", () => {

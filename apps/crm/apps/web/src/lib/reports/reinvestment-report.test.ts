@@ -327,6 +327,100 @@ test("reemplazo conserva export Excel por inversionista con destinos y capital a
 	expect(buildInvestorExportRows({})).toEqual([]);
 });
 
+test("rechaza inversionistas con campos monetarios no numéricos", () => {
+	const nan = response();
+	nan.porInversionista = [
+		{
+			inversionista_id: 1,
+			nombre: "Ana",
+			tipo_reinversion: "reinversion_capital",
+			reinversion_capital: "NaN",
+			reinversion_interes: "0.00",
+			reinversion: "0.00",
+			a_recibir: "0.00",
+			monto_aportado: "0.00",
+			capital_activo: "0.00",
+		},
+	];
+	expect(buildReinvestmentReportModel(nan).compatible).toBe(false);
+	expect(getReportState({ pending: false, error: false, data: nan })).toBe(
+		"incompatible",
+	);
+
+	const nonnumeric = response();
+	nonnumeric.porInversionista = [
+		{
+			inversionista_id: 1,
+			nombre: "Ana",
+			tipo_reinversion: "reinversion_capital",
+			reinversion_capital: "0.00",
+			reinversion_interes: "0.00",
+			reinversion: "0.00",
+			a_recibir: "no-numérico",
+			monto_aportado: "0.00",
+			capital_activo: "0.00",
+		},
+	];
+	expect(buildReinvestmentReportModel(nonnumeric).compatible).toBe(false);
+	expect(
+		getReportState({ pending: false, error: false, data: nonnumeric }),
+	).toBe("incompatible");
+});
+
+test("acepta campos monetarios válidos y conserva capital activo sin flujo", () => {
+	const zero = response();
+	zero.porTipo = {
+		sin_reinversion: {
+			reinversion_capital: "0.00",
+			reinversion_interes: "0.00",
+			reinversion_total: "0.00",
+			total_capital: "0.00",
+			total_interes: "0.00",
+			total_iva: "0.00",
+			total_isr: "0.00",
+			total_cuota: "0.00",
+			iva_facturado: "0.00",
+			total_distribuido: "0.00",
+			cantidad_liquidaciones: 1,
+		},
+	};
+	zero.interesNeto = {
+		conFactura: { interes: "0.00", iva: "0.00", neto: "0.00" },
+		sinFactura: { interes: "0.00", isr: "0.00", neto: "0.00" },
+		cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
+	};
+	zero.pagosExtras = { abonos_capital: "0.00", cancelaciones: "0.00" };
+	zero.porInversionista = [
+		{
+			inversionista_id: 1,
+			nombre: "Ana",
+			tipo_reinversion: "sin_reinversion",
+			reinversion_capital: "0.00",
+			reinversion_interes: "0.00",
+			reinversion: "0.00",
+			a_recibir: "0.00",
+			monto_aportado: "0.00",
+			capital_activo: "1250.00",
+		},
+	];
+	zero.comprasMes = [];
+	zero.detalleInteresNeto = [];
+	zero.detallePagosExtras = [];
+	zero.detalleComprasMes = [];
+
+	const model = buildReinvestmentReportModel(zero);
+	expect(model.compatible).toBe(true);
+	expect(model.totals).toEqual({
+		distributed: 0,
+		paid: 0,
+		reinvested: 0,
+		active: 1250,
+	});
+	expect(getReportState({ pending: false, error: false, data: zero })).toBe(
+		"ready",
+	);
+});
+
 test("presentación restaura los tres subresúmenes canónicos y sus fórmulas", () => {
 	expect(buildSecondarySummaryPresentation(response())).toEqual([
 		{

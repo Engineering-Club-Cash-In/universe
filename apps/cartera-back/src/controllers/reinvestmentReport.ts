@@ -78,6 +78,22 @@ export function buildInvestorPosition(
   };
 }
 
+type InvestorPosition = {
+  reinversion: string;
+  a_recibir: string;
+  monto_aportado: string;
+  capital_activo: string;
+};
+
+export function shouldIncludeInvestorPosition(position: InvestorPosition) {
+  return (
+    Number(position.reinversion) !== 0 ||
+    Number(position.a_recibir) !== 0 ||
+    Number(position.monto_aportado) !== 0 ||
+    Number(position.capital_activo) !== 0
+  );
+}
+
 type ReconciliationResponse = {
   interesNeto: {
     conFactura: { neto: string };

@@ -7,6 +7,7 @@ import {
   buildInvestorPosition,
   buildNetInterestDetail,
   getPublicReinvestmentDetailError,
+  shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
 
 test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {
@@ -127,6 +128,24 @@ describe("buildInvestorPosition", () => {
       capital_activo: "900000.00",
     });
   });
+});
+
+test("el reporte conserva y totaliza al inversionista con capital activo y flujo cero", () => {
+  const investor = {
+    reinversion: "0.00",
+    a_recibir: "0.00",
+    monto_aportado: "0.00",
+    capital_activo: "1250.00",
+  };
+  const retained = [investor].filter(shouldIncludeInvestorPosition);
+
+  expect(retained).toEqual([investor]);
+  expect(
+    retained.reduce(
+      (total, investor) => total + Number(investor.capital_activo),
+      0,
+    ),
+  ).toBe(1250);
 });
 
 test("capital activo usa el espejo completo y excluye créditos cerrados", async () => {

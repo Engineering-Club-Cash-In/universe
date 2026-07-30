@@ -46,9 +46,8 @@ export function getCompatibleReportData(
 			(row) =>
 				isRecord(row) &&
 				typeof row.inversionista_id === "number" &&
-				hasStringFields(row, [
-					"nombre",
-					"tipo_reinversion",
+				hasStringFields(row, ["nombre", "tipo_reinversion"]) &&
+				hasMoneyFields(row, [
 					"reinversion_capital",
 					"reinversion_interes",
 					"reinversion",

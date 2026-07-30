@@ -15,6 +15,7 @@ import {
 	buildInvestorPosition,
 	buildNetInterestDetail,
 	getPublicReinvestmentDetailError,
+	shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
 
 type Periodo = "anio" | "trimestre" | "mes" | "semana" | "dia";
@@ -1071,13 +1072,7 @@ export async function getReinversionLiquidaciones({
         ...position,
       };
     }
-  ).filter(
-    // La liquidación manda: si no aportó nada (todo en cero), no se muestra.
-    (p) =>
-      Number(p.reinversion) !== 0 ||
-      Number(p.a_recibir) !== 0 ||
-      Number(p.monto_aportado) !== 0
-  );
+  ).filter(shouldIncludeInvestorPosition);
 
   // Compras del mes: solo operación de compra (no reinversión) y solo las
   // COMPLETADAS (status = 'completado'); las pendientes no se cuentan. La fecha

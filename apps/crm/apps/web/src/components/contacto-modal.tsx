@@ -107,7 +107,9 @@ interface ContactoModalProps {
 	telefonoPrincipal: string;
 	telefonoAlternativo?: string;
 	emailCliente?: string;
-	metodoInicial: "llamada" | "whatsapp" | "email";
+	// CB-026: "sms" es un canal registrable desde que se agregó al enum
+	// metodo_contacto — es uno de los 3 que la gestión temprana B1 exige agotar.
+	metodoInicial: "llamada" | "whatsapp" | "sms" | "email";
 	children?: React.ReactNode;
 	// Modo controlado opcional (cuando el padre maneja el estado open)
 	open?: boolean;
@@ -352,6 +354,8 @@ export function ContactoModal({
 				return <Phone className="h-4 w-4" />;
 			case "whatsapp":
 				return <MessageCircle className="h-4 w-4" />;
+			case "sms":
+				return <MessageSquare className="h-4 w-4" />;
 			case "email":
 				return <Mail className="h-4 w-4" />;
 			default:
@@ -591,6 +595,7 @@ export function ContactoModal({
 												<SelectContent>
 													<SelectItem value="llamada">📞 Llamada</SelectItem>
 													<SelectItem value="whatsapp">💬 WhatsApp</SelectItem>
+													<SelectItem value="sms">📱 SMS</SelectItem>
 													<SelectItem value="email">📧 Email</SelectItem>
 													<SelectItem value="visita_domicilio">
 														🏠 Visita Domicilio

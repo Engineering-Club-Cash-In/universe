@@ -126,6 +126,8 @@ const BUCKET_DESCONOCIDO: BucketUI = {
 const DEFAULT_POR_KEY = new Map(DEFAULT_BUCKETS.map((b) => [b.key, b]));
 
 export type BucketsCatalogoQueryData = {
+	/** Número real de bucket (0-5) del catálogo dinámico — identidad estable, no `orden`. */
+	numero: number;
 	estadoMora: string;
 	label: string;
 	prefijo: string | null;
@@ -155,21 +157,72 @@ const ESTADO_MORA_POR_NUMERO = [
 	"mora_120_plus",
 ] as const;
 
-/** Bucket combinado a partir del número (0-5) que devuelve getAperturaDia/getBucketsCarga. */
+/**
+ * Bucket combinado a partir del número (0-5) que devuelve getAperturaDia/getBucketsCarga.
+ *
+ * Resuelve la fila por `numero` directo (`catalogoDeNumero`) en vez de pasar
+ * por `ESTADO_MORA_POR_NUMERO[numero]` → buscar por estado: si un admin
+ * reasigna qué `estado_mora` corresponde a qué `numero` en el catálogo, esa
+ * ruta seguía devolviendo la fila VIEJA que ocupaba esa posición en el array
+ * hardcodeado, no la fila real del bucket pedido (Codex, PR #1205 — mismo
+ * defecto que ya se corrigió en `numeroDeEstadoMora`, acá en la dirección
+ * inversa número→fila). Sin catálogo (aún no cargó), cae al default vía
+ * `bucketDeEstado` con el estado hardcodeado — ahí no hay catálogo real que
+ * pueda haberse reasignado.
+ */
 export function bucketDeNumero(
 	numero: number,
 	catalogo: BucketsCatalogoQueryData | undefined,
 ): BucketUI {
+	const fila = catalogoDeNumero(numero, catalogo);
+	if (fila) return bucketDeEstado(fila.estadoMora, catalogo);
 	return bucketDeEstado(ESTADO_MORA_POR_NUMERO[numero], catalogo);
 }
 
-/** Fila cruda del catálogo dinámico para el bucket numérico (0-5), o undefined si no cargó / no está. */
+/**
+ * Inverso de `bucketDeNumero`: número de bucket (0-5) a partir de un
+ * `estadoMora`, o null si no matchea ninguno (pseudo-buckets de status como
+ * "en_convenio"/"pagado" no tienen número — no son filas de aging).
+ *
+ * Usa el `numero` que el catálogo dinámico ya trae por fila (fuente real,
+ * `cartera.buckets.numero`) en vez de reindexar `estadoMora` contra
+ * `ESTADO_MORA_POR_NUMERO`. Reindexar por string se desalinea si un admin
+ * reasigna qué `estado_mora` corresponde a qué `numero` en el catálogo — el
+ * string seguiría matcheando una posición vieja del array hardcodeado, no el
+ * bucket real (Codex, PR #1205: hacía exactamente eso y podía marcar
+ * divergencia motor/CRM aunque ambos usaran la misma fila del catálogo).
+ * `ESTADO_MORA_POR_NUMERO` queda solo de fallback cuando el catálogo dinámico
+ * aún no cargó.
+ */
+export function numeroDeEstadoMora(
+	estadoMora: string | null | undefined,
+	catalogo: BucketsCatalogoQueryData | undefined,
+): number | null {
+	if (!estadoMora) return null;
+	if (catalogo) {
+		const fila = catalogo.find((b) => b.estadoMora === estadoMora);
+		if (fila) return fila.numero;
+	}
+	const numero = ESTADO_MORA_POR_NUMERO.indexOf(
+		estadoMora as (typeof ESTADO_MORA_POR_NUMERO)[number],
+	);
+	return numero === -1 ? null : numero;
+}
+
+/**
+ * Fila cruda del catálogo dinámico para el bucket numérico (0-5), o undefined
+ * si no cargó / no está.
+ *
+ * Busca por `b.numero === numero` directo — la fila ya trae su `numero` real
+ * (CB-026). Antes buscaba por `b.estadoMora === ESTADO_MORA_POR_NUMERO[numero]`,
+ * que devolvía la fila equivocada si un admin reasignaba qué `estado_mora`
+ * corresponde a qué `numero` en `cartera.buckets` (Codex, PR #1205).
+ */
 export function catalogoDeNumero(
 	numero: number,
 	catalogo: BucketsCatalogoQueryData | undefined,
 ) {
-	const estadoMora = ESTADO_MORA_POR_NUMERO[numero];
-	return catalogo?.find((b) => b.estadoMora === estadoMora);
+	return catalogo?.find((b) => b.numero === numero);
 }
 
 /**

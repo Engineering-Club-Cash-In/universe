@@ -214,6 +214,7 @@ describe("getBucketsParaUI", () => {
 
 		expect(ui).toEqual([
 			{
+				numero: 0,
 				estadoMora: "al_dia",
 				label: "Cartera Sana",
 				prefijo: "B0",
@@ -222,6 +223,7 @@ describe("getBucketsParaUI", () => {
 				diasSla: null,
 			},
 			{
+				numero: 1,
 				estadoMora: "mora_30",
 				label: "Alerta Temprana",
 				prefijo: "B1",
@@ -230,6 +232,7 @@ describe("getBucketsParaUI", () => {
 				diasSla: 3,
 			},
 			{
+				numero: 2,
 				estadoMora: "mora_60",
 				label: "Gestión Activa",
 				prefijo: "B2",
@@ -238,6 +241,7 @@ describe("getBucketsParaUI", () => {
 				diasSla: 3,
 			},
 			{
+				numero: 3,
 				estadoMora: "mora_90",
 				label: "Rescate",
 				prefijo: "B3",
@@ -246,6 +250,7 @@ describe("getBucketsParaUI", () => {
 				diasSla: 2,
 			},
 			{
+				numero: 4,
 				estadoMora: "mora_120",
 				label: "Última Instancia / Pre Jurídico",
 				prefijo: "B4",
@@ -254,6 +259,7 @@ describe("getBucketsParaUI", () => {
 				diasSla: 2,
 			},
 			{
+				numero: 5,
 				estadoMora: "mora_120_plus",
 				label: "Jurídico",
 				prefijo: "B5",
@@ -279,6 +285,7 @@ describe("getBucketsParaUI", () => {
 
 		expect(ui.map((b) => b.orden)).toEqual([0, 1, 2, 3, 4, 5]);
 		expect(ui[0]).toEqual({
+			numero: 0,
 			estadoMora: "al_dia",
 			label: "Cartera Sana",
 			prefijo: "B0",
@@ -287,6 +294,7 @@ describe("getBucketsParaUI", () => {
 			diasSla: null,
 		});
 		expect(ui[5]).toEqual({
+			numero: 5,
 			estadoMora: "mora_120_plus",
 			label: "Jurídico",
 			prefijo: "B5",
@@ -339,6 +347,7 @@ describe("getBucketsParaUIAsync", () => {
 		const ui = await getBucketsParaUIAsync();
 
 		expect(ui[0]).toEqual({
+			numero: 0,
 			estadoMora: "al_dia",
 			label: "Cartera Sana",
 			prefijo: "B0",
@@ -364,6 +373,7 @@ describe("getBucketsParaUIAsync", () => {
 		const ui = await getBucketsParaUIAsync();
 
 		expect(ui[0]).toEqual({
+			numero: 0,
 			estadoMora: "al_dia",
 			label: "Cartera Sana",
 			prefijo: "B0",

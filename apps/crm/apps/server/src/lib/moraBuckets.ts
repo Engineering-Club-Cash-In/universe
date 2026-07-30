@@ -284,6 +284,14 @@ export function estadoMoraPorCuotas(cuotas: number): string {
 }
 
 export type BucketParaUI = {
+	/**
+	 * Número real de bucket (0-5) del catálogo dinámico — `key` es su forma
+	 * string. CB-026: el web lo usa para comparar divergencia motor/estadoMora
+	 * por NÚMERO en vez de reindexar `estadoMora` contra el array hardcodeado
+	 * ESTADO_MORA_POR_NUMERO, que puede desalinearse si un admin reasigna qué
+	 * estado_mora corresponde a qué numero en cartera.buckets (Codex, PR #1205).
+	 */
+	numero: number;
 	estadoMora: string;
 	label: string;
 	prefijo: string | null;
@@ -295,6 +303,7 @@ export type BucketParaUI = {
 function mapearBucketsParaUI(): BucketParaUI[] {
 	return activeBuckets()
 		.map((b) => ({
+			numero: Number(b.key),
 			estadoMora: b.estadoMora,
 			label: b.label,
 			prefijo: b.prefijo,

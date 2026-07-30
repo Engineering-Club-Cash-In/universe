@@ -1659,12 +1659,14 @@ export const cobrosRouter = {
 
 			if (!puedeVerTodos) {
 				const email = context.session?.user?.email?.trim().toLowerCase();
-				const advisors = await carteraBackClient.getAdvisors({
-					page: 1,
-					perPage: 500,
-				});
-				const propio = (advisors.data ?? []).find(
-					(a) => a.email?.trim().toLowerCase() === email,
+				// email_cash_in, NO getAdvisors()/platform_users.email: ese campo
+				// está desactualizado para varios asesores (Diego Gomez, Samuel
+				// Gamboa) y no coincide con el login real del CRM — mismo patrón ya
+				// corregido en getCierreDiarioPorRango (ver ese comentario, arriba
+				// en este archivo).
+				const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
+				const propio = asesoresConBuckets.find(
+					(a) => a.email_cash_in?.trim().toLowerCase() === email,
 				);
 				if (!propio) {
 					return {

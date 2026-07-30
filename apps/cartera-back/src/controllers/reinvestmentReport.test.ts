@@ -114,19 +114,37 @@ describe("buildNetInterestDetail", () => {
 });
 
 describe("buildInvestorPosition", () => {
-  test("capital activo suma monto posterior y reinversión", () => {
-    expect(buildInvestorPosition(770_924.47, 29_075.53, false)).toEqual({
+  test("capital activo incluye otro crédito vigente sin alterar el monto del período", () => {
+    expect(buildInvestorPosition(770_924.47, 900_000, 29_075.53, false)).toEqual({
       monto_aportado: "770924.47",
-      capital_activo: "800000.00",
+      capital_activo: "900000.00",
     });
   });
 
   test("mayo 2026 normaliza el histórico sin duplicar la reinversión", () => {
-    expect(buildInvestorPosition(800_000, 29_075.53, true)).toEqual({
+    expect(buildInvestorPosition(800_000, 900_000, 29_075.53, true)).toEqual({
       monto_aportado: "770924.47",
-      capital_activo: "800000.00",
+      capital_activo: "900000.00",
     });
   });
+});
+
+test("capital activo usa el espejo completo y excluye créditos cerrados", async () => {
+  const source = await Bun.file(
+    new URL("./reportes.ts", import.meta.url),
+  ).text();
+  const activeCapitalQuery = source.slice(
+    source.indexOf("const capitalActivoRows"),
+    source.indexOf("const montoAportadoRows"),
+  );
+
+  expect(activeCapitalQuery).toContain(
+    "FROM cartera.creditos_inversionistas_espejo ce",
+  );
+  expect(activeCapitalQuery).toContain(
+    "cr.\"statusCredit\" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')",
+  );
+  expect(activeCapitalQuery).toContain("GROUP BY ce.inversionista_id");
 });
 
 test("respuesta completa concilia los tres detalles y no duplica CUBE", () => {

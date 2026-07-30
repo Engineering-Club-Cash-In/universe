@@ -1001,6 +1001,31 @@ export async function getReinversionLiquidaciones({
     ORDER BY i.nombre
   `);
 
+  // Capital operativo actual desde el espejo canónico. La reinversión ya está
+  // reflejada aquí, por lo que no se suma nuevamente desde la liquidación.
+  const capitalActivoRows = await db.execute(sql`
+    SELECT
+      ce.inversionista_id,
+      COALESCE(SUM(ce.monto_aportado::numeric), 0) AS capital_activo
+    FROM cartera.creditos_inversionistas_espejo ce
+    JOIN cartera.creditos cr ON cr.credito_id = ce.credito_id
+    WHERE ce.inversionista_id IN (
+      SELECT DISTINCT l.inversionista_id
+      FROM cartera.liquidaciones l
+      WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    )
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+    GROUP BY ce.inversionista_id
+  `);
+  const capitalActivoPorInv = new Map<number, number>();
+  for (const r of capitalActivoRows.rows as Record<string, unknown>[]) {
+    capitalActivoPorInv.set(
+      Number(r.inversionista_id),
+      Number(r.capital_activo ?? 0)
+    );
+  }
+
   // Monto aportado que le quedó al inversionista DESPUÉS de la liquidación
   // (sin reinversiones), desde historico_liquidaciones_espejo.
   // ⚠️ Mayo 2026 fue la primera vez que se usó y el histórico quedó CON la
@@ -1031,6 +1056,7 @@ export async function getReinversionLiquidaciones({
       const montoHist = montoAportadoPorInv.get(id) ?? 0;
       const position = buildInvestorPosition(
         montoHist,
+        capitalActivoPorInv.get(id) ?? 0,
         reinversion,
         esMayo2026
       );

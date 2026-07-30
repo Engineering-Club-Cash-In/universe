@@ -66,15 +66,15 @@ export function buildNetInterestDetail(input: NetInterestInput) {
 
 export function buildInvestorPosition(
   historicalAmount: number,
+  currentActiveCapital: number,
   reinvestment: number,
   isMay2026: boolean,
 ) {
   const historical = cents(historicalAmount);
-  const reinvested = cents(reinvestment);
-  const contributed = isMay2026 ? historical - reinvested : historical;
+  const contributed = isMay2026 ? historical - cents(reinvestment) : historical;
   return {
     monto_aportado: money(contributed),
-    capital_activo: money(contributed + reinvested),
+    capital_activo: money(cents(currentActiveCapital)),
   };
 }
 

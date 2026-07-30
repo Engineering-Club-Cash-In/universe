@@ -126,6 +126,8 @@ const BUCKET_DESCONOCIDO: BucketUI = {
 const DEFAULT_POR_KEY = new Map(DEFAULT_BUCKETS.map((b) => [b.key, b]));
 
 export type BucketsCatalogoQueryData = {
+	/** Número real de bucket (0-5) del catálogo dinámico — identidad estable, no `orden`. */
+	numero: number;
 	estadoMora: string;
 	label: string;
 	prefijo: string | null;
@@ -168,12 +170,15 @@ export function bucketDeNumero(
  * `estadoMora`, o null si no matchea ninguno (pseudo-buckets de status como
  * "en_convenio"/"pagado" no tienen número — no son filas de aging).
  *
- * Preferir el catálogo dinámico (`catalogo`) sobre `ESTADO_MORA_POR_NUMERO`
- * cuando esté cargado: es la fuente de verdad real del puente número↔estado
- * (`cartera.buckets.estado_mora`), evita comparar dos catálogos de string
- * mantenidos por separado que podrían divergir en nombre para el mismo
- * concepto (ver detalle de caso, badge de bucket: comparar por NÚMERO, no
- * por string, es justamente lo que evita ese falso positivo).
+ * Usa el `numero` que el catálogo dinámico ya trae por fila (fuente real,
+ * `cartera.buckets.numero`) en vez de reindexar `estadoMora` contra
+ * `ESTADO_MORA_POR_NUMERO`. Reindexar por string se desalinea si un admin
+ * reasigna qué `estado_mora` corresponde a qué `numero` en el catálogo — el
+ * string seguiría matcheando una posición vieja del array hardcodeado, no el
+ * bucket real (Codex, PR #1205: hacía exactamente eso y podía marcar
+ * divergencia motor/CRM aunque ambos usaran la misma fila del catálogo).
+ * `ESTADO_MORA_POR_NUMERO` queda solo de fallback cuando el catálogo dinámico
+ * aún no cargó.
  */
 export function numeroDeEstadoMora(
 	estadoMora: string | null | undefined,
@@ -182,12 +187,7 @@ export function numeroDeEstadoMora(
 	if (!estadoMora) return null;
 	if (catalogo) {
 		const fila = catalogo.find((b) => b.estadoMora === estadoMora);
-		if (fila) {
-			const numero = ESTADO_MORA_POR_NUMERO.indexOf(
-				fila.estadoMora as (typeof ESTADO_MORA_POR_NUMERO)[number],
-			);
-			if (numero !== -1) return numero;
-		}
+		if (fila) return fila.numero;
 	}
 	const numero = ESTADO_MORA_POR_NUMERO.indexOf(
 		estadoMora as (typeof ESTADO_MORA_POR_NUMERO)[number],

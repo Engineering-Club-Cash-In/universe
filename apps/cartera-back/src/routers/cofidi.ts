@@ -2188,7 +2188,6 @@ if (facturasExistentes.length > 0) {
         factura_fecha_anulacion: facturas_electronicas.fecha_anulacion,
         factura_motivo_anulacion: facturas_electronicas.motivo_anulacion,
         factura_tipo_documento: facturas_electronicas.tipo_documento,
-        factura_emisor_nit: facturas_electronicas.emisor_nit,
         
         // Datos del pago
         pago_id: pagos_credito.pago_id,
@@ -2255,85 +2254,6 @@ if (facturasExistentes.length > 0) {
       };
     }
 
-    // 🧹 Sincronización de facturas "fantasma": el certificador devolvió UUID
-    // al certificar pero nunca emitió el DTE a SAT, así que allá no hay nada
-    // que anular (ni nota de crédito que aplicar). Se CONFIRMA con un GET
-    // usando el emisor propio de la factura y, solo si SAT tampoco la
-    // devuelve, se marca ANULADA en BD. Devuelve la respuesta 200 o null si no
-    // aplica (existe en SAT, emisor desconocido o falló la consulta — en esos
-    // casos el caller sigue su flujo de error normal).
-    const sincronizarSiEsFantasma = async (contexto: string) => {
-      try {
-        const emisorConfGet = Object.values(EMISORES_CONFIG).find(
-          (c) => c.config.emisor.nit === facturaCompleta.factura_emisor_nit
-        );
-        if (!emisorConfGet) return null;
-
-        const satGet = new SATClientService(
-          {
-            requestor: emisorConfGet.satConfig.requestor,
-            user: emisorConfGet.satConfig.user || emisorConfGet.satConfig.requestor,
-            userName: emisorConfGet.satConfig.userName,
-            entity: emisorConfGet.config.emisor.nit,
-          },
-          emisorConfGet.satConfig.endpointUrl
-        );
-        const enSat = await satGet.obtenerPorUUID(uuid);
-        if (enSat.encontrado) return null;
-
-        const [facturaSincronizada] = await db
-          .update(facturas_electronicas)
-          .set({
-            status: "ANULADA",
-            fecha_anulacion: new Date(),
-            motivo_anulacion: `${motivo} (sin anular en SAT: el documento nunca fue emitido — ${contexto})`,
-            anulada_por: userId,
-          })
-          .where(eq(facturas_electronicas.uuid, uuid))
-          .returning();
-
-        // Misma limpieza best-effort del desglose genérico que en la anulación normal.
-        try {
-          await db.execute(
-            sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${facturaSincronizada.factura_id} AND pago_id IS NULL`
-          );
-        } catch (limpiezaError) {
-          console.error(
-            '⚠️ No se pudo limpiar el desglose genérico (NO afecta la anulación):',
-            (limpiezaError as Error).message
-          );
-        }
-
-        console.log('🧹 Factura fantasma sincronizada: ANULADA solo en BD (no existía en SAT)');
-        set.status = 200;
-        return {
-          success: true,
-          anulada_solo_en_sistema: true,
-          mensaje: `Factura ${facturaCompleta.factura_serie}-${facturaCompleta.factura_numero} anulada solo en el sistema: SAT no tiene el documento (el certificador nunca lo emitió)`,
-          data: {
-            factura: {
-              factura_id: facturaSincronizada.factura_id,
-              serie: facturaSincronizada.serie,
-              numero: facturaSincronizada.numero,
-              uuid: facturaSincronizada.uuid,
-              status: facturaSincronizada.status,
-              monto_total: facturaSincronizada.monto_total,
-              fecha_anulacion: facturaSincronizada.fecha_anulacion,
-              motivo_anulacion: facturaSincronizada.motivo_anulacion,
-              anulada_por: facturaSincronizada.anulada_por,
-            },
-            descripcion_cofidi: contexto,
-          },
-        };
-      } catch (verificacionError) {
-        console.error(
-          '⚠️ No se pudo confirmar con GET si la factura existe en SAT (sigue el flujo normal):',
-          (verificacionError as Error).message
-        );
-        return null;
-      }
-    };
-
     // 🔥 VALIDACIÓN: Verificar período válido para anular
     const fechaCertificacion = facturaCompleta.factura_fecha_certificacion
       ? new Date(facturaCompleta.factura_fecha_certificacion)
@@ -2350,14 +2270,6 @@ if (facturasExistentes.length > 0) {
     const esMismoPeriodo = (anioFactura === anioActual && mesFactura === mesActual);
 
     if (!esMismoPeriodo) {
-      // Antes de rechazar por período: si la factura es un fantasma nunca
-      // emitido a SAT, la restricción de período no aplica (no hay anulación
-      // ni nota de crédito que hacer allá) y se sincroniza la BD directamente.
-      // Sin esto, un fantasma descubierto en un mes posterior quedaría ACTIVA
-      // para siempre.
-      const sync = await sincronizarSiEsFantasma('detectada al intentar anular fuera de período');
-      if (sync) return sync;
-
       const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -2493,16 +2405,13 @@ if (facturasExistentes.length > 0) {
       }
       
       // 🔥 Error de documento no encontrado
+      // "no ha sido emitido" = factura fantasma (el certificador devolvió UUID
+      // pero nunca la emitió a SAT). La corrección del estado en BD es MANUAL
+      // por decisión del equipo: este endpoint solo reporta el error claro.
       else if (descripcionError.includes('no existe') ||
                descripcionError.includes('not found') ||
                descripcionError.includes('No se encontró') ||
                descripcionError.includes('no ha sido emitido')) {
-        // Ojo: este mensaje puede venir de un emisor equivocado del loop de
-        // anulación; el helper re-confirma contra SAT con el emisor propio de
-        // la factura antes de sincronizar.
-        const sync = await sincronizarSiEsFantasma(descripcionError);
-        if (sync) return sync;
-
         mensajeUsuario = 'La factura no fue encontrada en el sistema SAT';
         codigoError = 'FACTURA_NO_EXISTE_SAT';
         sugerencia = 'Verifique que la factura haya sido certificada correctamente';

@@ -498,14 +498,18 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           ? {
               ...convenioActivo[0],
               cuotaConvenioAPagar,
+              // CB-027: plan de pagos del convenio (convenio_cuotas) —
+              // numero_cuota, fecha_vencimiento, fecha_pago. Distinto de
+              // cuotasEnConvenio (que son cuotas_credito reales, sin el
+              // calendario propio del convenio). Anidado DENTRO de
+              // convenioActivo, no top-level: carteraFront ya lee este campo
+              // así (cardInfo.tsx, registerPayment.ts spread solo
+              // result.convenioActivo) — un top-level sibling nunca le llega.
+              cuotasConvenioMensuales,
             }
           : null,
       cuotasEnConvenio,
       pagosConvenio,
-      // CB-027: plan de pagos del convenio (convenio_cuotas) — numero_cuota,
-      // fecha_vencimiento, fecha_pago. Distinto de cuotasEnConvenio (que son
-      // cuotas_credito reales, sin el calendario propio del convenio).
-      cuotasConvenioMensuales,
     };
   } catch (error) {
     console.error("[getCreditoByNumero] Error:", error);

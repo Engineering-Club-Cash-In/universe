@@ -8,9 +8,10 @@ import {
 } from "./moraRecuperacion";
 import { snapCte } from "./moraSnapshotSql";
 import {
+	allocateRoundedAmounts,
+	allocateRoundedPurchaseAmounts,
 	assertModeReconciliation,
 	assertReportReconciliation,
-	allocateRoundedAmounts,
 	buildInvestorPosition,
 	buildNetInterestDetail,
 	getPublicReinvestmentDetailError,
@@ -837,6 +838,7 @@ export async function getReinversionLiquidaciones({
       total_isr: string;
       total_cuota: string;
       total_distribuido: string;
+      cantidad_liquidaciones: number;
     }
   > = {};
   let cantidad = 0;
@@ -854,6 +856,7 @@ export async function getReinversionLiquidaciones({
       total_isr: Number(r.total_isr ?? 0).toFixed(2),
       total_cuota: Number(r.total_cuota ?? 0).toFixed(2),
       total_distribuido: Number(r.total_distribuido ?? 0).toFixed(2),
+      cantidad_liquidaciones: Number(r.cantidad ?? 0),
     };
     cantidad += Number(r.cantidad ?? 0);
   }
@@ -1207,14 +1210,14 @@ export async function getReinversionLiquidaciones({
     WHERE ${comprasMesPredicate}
     ORDER BY ${fechaCompra}, i.nombre
   `);
-    detalleComprasMes = (
-      comprasDetalleRows.rows as Record<string, unknown>[]
-    ).map((r) => ({
-      fecha: String(r.fecha),
-      inversionista: String(r.inversionista),
-      modalidad: String(r.modalidad),
-      monto: Number(r.monto ?? 0).toFixed(2),
-    }));
+    detalleComprasMes = allocateRoundedPurchaseAmounts(
+      (comprasDetalleRows.rows as Record<string, unknown>[]).map((r) => ({
+        fecha: String(r.fecha),
+        inversionista: String(r.inversionista),
+        modalidad: String(r.modalidad),
+        monto: String(r.monto ?? 0),
+      }))
+    );
   } catch (error) {
     console.error(
       "No fue posible recuperar el detalle del reporte de reinversión",

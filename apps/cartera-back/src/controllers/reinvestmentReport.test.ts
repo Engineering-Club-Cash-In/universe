@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   allocateRoundedAmounts,
+  allocateRoundedPurchaseAmounts,
   assertModeReconciliation,
+  assertReportReconciliation,
   buildInvestorPosition,
   buildNetInterestDetail,
   getPublicReinvestmentDetailError,
-  assertReportReconciliation,
 } from "./reinvestmentReport";
 
 test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {
@@ -33,6 +34,43 @@ test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {
       detalleComprasMes: [],
     }),
   ).toMatchObject({ pagosExtras: true });
+});
+
+test("distribuye residuos de compras por modalidad sin cambiar cantidad ni orden", () => {
+  const purchases = allocateRoundedPurchaseAmounts([
+    { modalidad: "sin_reinversion", referencia: "A", monto: "33.333333" },
+    { modalidad: "reinversion_capital", referencia: "B", monto: "10.005" },
+    { modalidad: "sin_reinversion", referencia: "C", monto: "33.333333" },
+    { modalidad: "reinversion_capital", referencia: "D", monto: "10.005" },
+    { modalidad: "sin_reinversion", referencia: "E", monto: "33.333333" },
+  ]);
+
+  expect(purchases.map((row) => row.referencia)).toEqual(["A", "B", "C", "D", "E"]);
+  expect(purchases.map((row) => row.monto)).toEqual([
+    "33.34",
+    "10.00",
+    "33.33",
+    "10.01",
+    "33.33",
+  ]);
+  expect(purchases).toHaveLength(5);
+  expect(
+    assertReportReconciliation({
+      interesNeto: {
+        conFactura: { neto: "0.00" },
+        sinFactura: { neto: "0.00" },
+        cube: { neto: "0.00" },
+      },
+      pagosExtras: { abonos_capital: "0.00", cancelaciones: "0.00" },
+      comprasMes: [
+        { tipo: "sin_reinversion", cantidad: 3, monto: "100.00" },
+        { tipo: "reinversion_capital", cantidad: 2, monto: "20.01" },
+      ],
+      detalleInteresNeto: [],
+      detallePagosExtras: [],
+      detalleComprasMes: purchases,
+    }),
+  ).toMatchObject({ comprasMes: true });
 });
 
 describe("buildNetInterestDetail", () => {
@@ -314,26 +352,13 @@ test("cada modalidad concilia destinos y composición fiscal real", () => {
       total_isr: "0.35",
       total_cuota: "4.65",
       total_distribuido: "54.65",
+      cantidad_liquidaciones: 1,
     }),
   ).toBe(true);
 });
 
-test("una modalidad admite solo un centavo por redondeo independiente de componentes", () => {
+test("una modalidad admite el redondeo acumulado de sus liquidaciones", () => {
   expect(
-    assertModeReconciliation({
-      reinversion_capital: "34.27",
-      reinversion_interes: "0.00",
-      reinversion_total: "34.27",
-      total_capital: "33.34",
-      total_interes: "1.01",
-      iva_facturado: "0.00",
-      total_isr: "0.07",
-      total_cuota: "0.00",
-      total_distribuido: "34.27",
-    }),
-  ).toBe(true);
-
-  expect(() =>
     assertModeReconciliation({
       reinversion_capital: "34.27",
       reinversion_interes: "0.00",
@@ -344,6 +369,22 @@ test("una modalidad admite solo un centavo por redondeo independiente de compone
       total_isr: "0.07",
       total_cuota: "0.00",
       total_distribuido: "34.27",
+      cantidad_liquidaciones: 2,
+    }),
+  ).toBe(true);
+
+  expect(() =>
+    assertModeReconciliation({
+      reinversion_capital: "34.27",
+      reinversion_interes: "0.00",
+      reinversion_total: "34.27",
+      total_capital: "33.36",
+      total_interes: "1.01",
+      iva_facturado: "0.00",
+      total_isr: "0.07",
+      total_cuota: "0.00",
+      total_distribuido: "34.27",
+      cantidad_liquidaciones: 2,
     }),
   ).toThrow("Modalidad no concilia");
 });
@@ -359,6 +400,7 @@ test("una modalidad con composición o destinos descuadrados no se publica", () 
     total_isr: "0.35",
     total_cuota: "4.65",
     total_distribuido: "54.65",
+    cantidad_liquidaciones: 1,
   };
   expect(() =>
     assertModeReconciliation({ ...base, total_distribuido: "54.64" }),

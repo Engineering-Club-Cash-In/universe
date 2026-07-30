@@ -177,6 +177,7 @@ export type ReinversionLiquidacionesResponse = {
 			total_cuota: string;
 			iva_facturado: string;
 			total_distribuido: string;
+			cantidad_liquidaciones: number;
 		}
 	>;
 	/**

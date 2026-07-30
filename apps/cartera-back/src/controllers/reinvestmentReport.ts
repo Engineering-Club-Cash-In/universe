@@ -27,6 +27,20 @@ export function allocateRoundedAmounts(values: (number | string)[]) {
   return allocated.map(money);
 }
 
+export function allocateRoundedPurchaseAmounts<
+  T extends { modalidad: string; monto: number | string },
+>(rows: T[]) {
+  const allocated = rows.map((row) => ({ ...row, monto: String(row.monto) }));
+  for (const modalidad of new Set(rows.map((row) => row.modalidad))) {
+    const modeRows = allocated.filter((row) => row.modalidad === modalidad);
+    const amounts = allocateRoundedAmounts(modeRows.map((row) => row.monto));
+    modeRows.forEach((row, index) => {
+      row.monto = amounts[index];
+    });
+  }
+  return allocated;
+}
+
 export const PUBLIC_REINVESTMENT_DETAIL_ERROR =
   "Los detalles no están disponibles para este período. Intenta nuevamente más tarde.";
 
@@ -190,6 +204,7 @@ type ModeReconciliation = {
   total_isr: string;
   total_cuota: string;
   total_distribuido: string;
+  cantidad_liquidaciones: number;
 };
 
 export function assertModeReconciliation(mode: ModeReconciliation) {
@@ -204,11 +219,11 @@ export function assertModeReconciliation(mode: ModeReconciliation) {
       mode.total_interes,
       mode.iva_facturado,
     ]) - cents(mode.total_isr);
-  // Stored components are rounded independently, so their composition can
-  // differ by one cent even while the stored destinations reconcile exactly.
+  // Each liquidation can contribute at most one cent of independent component
+  // rounding while the stored destinations still reconcile exactly.
   if (
     distributed !== destinations ||
-    Math.abs(distributed - composition) > 1
+    Math.abs(distributed - composition) > mode.cantidad_liquidaciones
   ) {
     throw new Error("Modalidad no concilia");
   }

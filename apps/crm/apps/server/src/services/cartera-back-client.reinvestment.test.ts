@@ -17,6 +17,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			total_cuota: "4.65",
 			iva_facturado: "0.00",
 			total_distribuido: "44.65",
+			cantidad_liquidaciones: 1,
 		},
 	},
 	interesNeto: {
@@ -102,6 +103,7 @@ test("cliente HTTP propaga íntegro el contrato real de reinversión sin reconst
 	expect(actual.detalleInteresNeto).toEqual(expected.detalleInteresNeto);
 	expect(actual.detallePagosExtras).toEqual(expected.detallePagosExtras);
 	expect(actual.detalleComprasMes).toEqual(expected.detalleComprasMes);
+	expect(actual.porTipo.reinversion_capital.cantidad_liquidaciones).toBe(1);
 	expect(requestedUrl).toBe(
 		"https://cartera.test/reportes/reinversion-liquidaciones?mes=7&anio=2026",
 	);
@@ -131,6 +133,7 @@ test("router CRM devuelve sin pérdida el contrato recibido de cartera-back", as
 	expect(actual.detalleComprasMes).toHaveLength(2);
 	expect(actual.porInversionista[0]?.capital_activo).toBe("1000.00");
 	expect(actual.detalle_estado.disponible).toBe(false);
+	expect(actual.porTipo.reinversion_capital.cantidad_liquidaciones).toBe(1);
 });
 
 test("error total de cartera-back se propaga y no se convierte en datos parciales", async () => {

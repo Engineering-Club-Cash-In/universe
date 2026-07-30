@@ -397,6 +397,7 @@ export type ReinversionLiquidacionesResponse = {
 			/** IVA real facturado; excluye el IVA referencial sin factura. */
 			iva_facturado: string;
 			total_distribuido: string;
+			cantidad_liquidaciones: number;
 		}
 	>;
 	/**

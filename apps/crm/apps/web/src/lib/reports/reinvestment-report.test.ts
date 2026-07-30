@@ -27,6 +27,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			total_cuota: "111.20",
 			iva_facturado: "1.20",
 			total_distribuido: "111.20",
+			cantidad_liquidaciones: 1,
 		},
 		reinversion_capital: {
 			reinversion_capital: "50.00",
@@ -39,6 +40,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			total_cuota: "4.65",
 			iva_facturado: "0.00",
 			total_distribuido: "54.65",
+			cantidad_liquidaciones: 1,
 		},
 	},
 	interesNeto: {
@@ -115,6 +117,24 @@ test("modelo ejecutivo concilia pagado + reinvertido con flujo liquidado", () =>
 		contract: true,
 	});
 	expect(model.rows.map((row) => row.type)).toContain("reinversion_capital");
+});
+
+test("acepta dos centavos de deriva para dos liquidaciones", () => {
+	const data = response();
+	data.porTipo.sin_reinversion.total_capital = "100.02";
+	data.porTipo.sin_reinversion.cantidad_liquidaciones = 2;
+
+	expect(buildReinvestmentReportModel(data).reconciliations.modes).toBe(true);
+	expect(getReportState({ pending: false, error: false, data })).toBe("ready");
+});
+
+test("rechaza la deriva que supera la cantidad de liquidaciones", () => {
+	const data = response();
+	data.porTipo.sin_reinversion.total_capital = "100.03";
+	data.porTipo.sin_reinversion.cantidad_liquidaciones = 2;
+
+	expect(buildReinvestmentReportModel(data).reconciliations.modes).toBe(false);
+	expect(getReportState({ pending: false, error: false, data })).toBe("error");
 });
 
 test("presentación por modalidad conserva destinos, ecuación y composición contable", () => {
@@ -236,6 +256,7 @@ test("variable, excedente y combinada no fabrican fórmulas por destino", () => 
 				total_cuota: "71.20",
 				iva_facturado: "1.20",
 				total_distribuido: "111.20",
+				cantidad_liquidaciones: 1,
 			},
 		};
 		const row = buildReinvestmentReportModel(data).rows[0];
@@ -272,6 +293,11 @@ test("contrato anterior o malformado falla de forma controlada y no concilia", (
 	expect(
 		getReportState({ pending: false, error: false, data: malformed }),
 	).toBe("incompatible");
+
+	const missingModeCount = response() as unknown as Record<string, unknown>;
+	delete (missingModeCount.porTipo as Record<string, Record<string, unknown>>)
+		.sin_reinversion.cantidad_liquidaciones;
+	expect(buildReinvestmentReportModel(missingModeCount).compatible).toBe(false);
 });
 
 test("reemplazo conserva export Excel por inversionista con destinos y capital activo", () => {
@@ -549,6 +575,7 @@ describe("getReportState", () => {
 				total_cuota: "0.00",
 				iva_facturado: "0.00",
 				total_distribuido: "0.00",
+				cantidad_liquidaciones: 1,
 			},
 		};
 		zero.interesNeto = {

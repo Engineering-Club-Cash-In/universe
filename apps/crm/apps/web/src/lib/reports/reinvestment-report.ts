@@ -31,8 +31,12 @@ export function getCompatibleReportData(
 	if (!isRecord(input) || input.contrato_version !== 2) return undefined;
 	if (!isRecord(input.porTipo)) return undefined;
 	if (
-		!Object.values(input.porTipo).every((row) =>
-			hasMoneyFields(row, MODE_MONEY_FIELDS),
+		!Object.values(input.porTipo).every(
+			(row) =>
+				isRecord(row) &&
+				hasMoneyFields(row, MODE_MONEY_FIELDS) &&
+				Number.isInteger(row.cantidad_liquidaciones) &&
+				Number(row.cantidad_liquidaciones) >= 0,
 		)
 	)
 		return undefined;
@@ -200,12 +204,14 @@ export function buildReinvestmentReportModel(input: unknown) {
 				},
 				reconciled:
 					sumCents([paid, reinvested]) === cents(distributed) &&
-					sumCents([
-						composition.capital,
-						composition.interest,
-						composition.billedVat,
-						-composition.withheldIsr,
-					]) === cents(distributed),
+					Math.abs(
+						sumCents([
+							composition.capital,
+							composition.interest,
+							composition.billedVat,
+							-composition.withheldIsr,
+						]) - cents(distributed),
+					) <= value.cantidad_liquidaciones,
 			};
 		})
 		.filter((row) => row.distributed !== 0 || row.active !== 0);

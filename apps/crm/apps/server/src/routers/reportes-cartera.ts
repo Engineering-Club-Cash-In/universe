@@ -27,6 +27,14 @@ import {
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 
+export function fetchReinvestmentLiquidaciones(
+	input: { mes: number; anio: number },
+	client: Pick<typeof carteraBackClient, "getReinversionLiquidaciones"> =
+		carteraBackClient,
+) {
+	return client.getReinversionLiquidaciones(input);
+}
+
 export const reportesCarteraRouter = {
 	// ========================================================================
 	// REPORTE DE CARTERA COMPLETO
@@ -532,7 +540,7 @@ export const reportesCarteraRouter = {
 				});
 			}
 
-			return carteraBackClient.getReinversionLiquidaciones({
+			return fetchReinvestmentLiquidaciones({
 				mes: input.mes,
 				anio: input.anio,
 			});

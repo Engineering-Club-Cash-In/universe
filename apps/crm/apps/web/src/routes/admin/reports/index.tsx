@@ -35,6 +35,7 @@ import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { PeriodDatePicker } from "@/components/reports/period-date-picker";
 import { ReportCard } from "@/components/reports/report-card";
+import { ReinvestmentReport } from "@/components/reports/reinvestment-report";
 import { ScenarioModal } from "@/components/reports/scenario-modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -68,6 +69,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
+import { buildInvestorExportRows } from "@/lib/reports/reinvestment-report";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { getMontoACobrarParticipacionTotals } from "@/lib/reports/monto-a-cobrar";
 import type {
@@ -133,84 +135,11 @@ const COLORS = {
 	incobrable: "#7f1d1d",
 };
 
-// Modalidades de reinversión a mostrar en "Cuotas → Reinversión".
-// El monto de cada una es la suma de `liquidaciones.reinversion_total`.
-// Se omiten `reinversion_interes` ("solo interés", no se usa) y `sin_reinversion`.
-const REINVERSION_MODALIDADES: { tipo: string; label: string }[] = [
-	{ tipo: "reinversion_capital", label: "Reinversión de Capital" },
-	{ tipo: "reinversion_total", label: "Interés compuesto" },
-	{ tipo: "reinversion_variable", label: "Reinversión Variable" },
-	{
-		tipo: "reinversion_excedente",
-		label: "Reinversión Excedente (monto fijo a recibir)",
-	},
-	{
-		tipo: "reinversion_combinada",
-		label: "Reinversión Combinada (combinaciones de modalidades)",
-	},
-];
-
-// Modalidades a mostrar en "Cuotas → A Recibir" (efectivo neto = total_cuota).
-// Incluye `sin_reinversion`; sigue omitiendo `reinversion_interes`.
-const A_RECIBIR_MODALIDADES: { tipo: string; label: string }[] = [
-	{ tipo: "sin_reinversion", label: "Sin Reinversión" },
-	...REINVERSION_MODALIDADES,
-];
-
-// Etiqueta corta de la modalidad de reinversión, para el chip por inversionista.
-const MODALIDAD_LABEL: Record<string, string> = {
-	sin_reinversion: "Sin reinversión",
-	reinversion_capital: "Capital",
-	reinversion_interes: "Interés",
-	reinversion_total: "Interés compuesto",
-	reinversion_variable: "Variable",
-	reinversion_excedente: "Excedente",
-	reinversion_combinada: "Combinada",
-};
-
-// Borde de color por modalidad (outline, sin relleno) para diferenciarlas.
-const MODALIDAD_CHIP_CLASS: Record<string, string> = {
-	sin_reinversion: "border-muted-foreground/30 text-muted-foreground",
-	reinversion_capital: "border-blue-400 text-blue-600 dark:text-blue-400",
-	reinversion_interes: "border-cyan-400 text-cyan-600 dark:text-cyan-400",
-	reinversion_total:
-		"border-emerald-400 text-emerald-600 dark:text-emerald-400",
-	reinversion_variable: "border-amber-400 text-amber-600 dark:text-amber-400",
-	reinversion_excedente:
-		"border-violet-400 text-violet-600 dark:text-violet-400",
-	reinversion_combinada: "border-pink-400 text-pink-600 dark:text-pink-400",
-};
-
-// Estilo compartido para cada sub-sección del reporte de Flujo de Cuotas:
-// panel enmarcado, título con divisor y encabezados de tabla refinados
-// (mayúsculas, muted, números tabulares para alinear montos).
-const SECCION_REPORTE_CLASS =
-	"rounded-xl border bg-card p-4 shadow-sm " +
-	"[&>p:first-child]:border-b [&>p:first-child]:pb-2.5 [&>p:first-child]:text-foreground " +
-	"[&_thead_th]:h-9 [&_thead_th]:text-[11px] [&_thead_th]:font-semibold [&_thead_th]:uppercase [&_thead_th]:tracking-wider [&_thead_th]:text-muted-foreground " +
-	"[&_table]:tabular-nums";
-
 /** Mes por defecto (actual) en formato "YYYY-MM" para el <input type="month">. */
 function getDefaultFlujoMes(): string {
 	const todayGt = formatDateInput(new Date());
 	const [year, month] = todayGt.split("-");
 	return `${year}-${month}`;
-}
-
-/** Convierte "YYYY-MM" al rango de fechas [primer día, último día] del mes. */
-function mesToRange(mesStr: string): {
-	fechaInicio: string;
-	fechaFin: string;
-} {
-	const [year, month] = mesStr.split("-").map(Number);
-	const fechaInicio = `${year}-${String(month).padStart(2, "0")}-01`;
-	const nextM = month === 12 ? 1 : month + 1;
-	const nextY = month === 12 ? year + 1 : year;
-	const lastDay = new Date(
-		`${nextY}-${String(nextM).padStart(2, "0")}-01T12:00:00`,
-	);
-	lastDay.setDate(lastDay.getDate() - 1);
-	return { fechaInicio, fechaFin: formatDateInput(lastDay) };
 }
 
 const MESES = [
@@ -505,9 +434,6 @@ function RouteComponent() {
 		anio: new Date().getFullYear(),
 	}));
 	const [flujoMes, setFlujoMes] = useState(getDefaultFlujoMes);
-	// Rango derivado (primer/último día del mes) para los reportes que aún
-	// consumen el endpoint por rango de fechas (secciones 2 y 3).
-	const flujoCuotasRange = mesToRange(flujoMes);
 	const [flujoAnioStr, flujoMesStr] = flujoMes.split("-");
 	const flujoMesNum = Number(flujoMesStr);
 	const flujoAnioNum = Number(flujoAnioStr);
@@ -530,8 +456,6 @@ function RouteComponent() {
 			anio === flujoAnioActual && mes > flujoMesActual ? flujoMesActual : mes;
 		setFlujoMes(`${anio}-${String(m).padStart(2, "0")}`);
 	};
-	// Filtro de modalidad (solo front) para el Desglose por Inversionista.
-	const [modalidadFiltro, setModalidadFiltro] = useState<string[]>([]);
 	const [comparativoAnio, setComparativoAnio] = useState(() =>
 		new Date().getFullYear(),
 	);
@@ -631,7 +555,7 @@ function RouteComponent() {
 		| FacturacionMesResponse
 		| undefined;
 
-	// Sección "Cuotas → Reinversión": se calcula desde la tabla de liquidaciones.
+	// Reporte mensual final de inversión y reinversión.
 	const reinversionLiquidacionesQuery = useQuery({
 		...orpc.getReinversionLiquidaciones.queryOptions({
 			input: { mes: flujoMesNum, anio: flujoAnioNum },
@@ -887,6 +811,27 @@ function RouteComponent() {
 		} finally {
 			setIsExportingCerrados(false);
 		}
+	};
+	const exportReinvestmentInvestorsExcel = () => {
+		const rows = buildInvestorExportRows(reinversionData);
+		if (rows.length === 0) {
+			toast.error("No hay detalle compatible para exportar.");
+			return;
+		}
+		const worksheet = XLSX.utils.json_to_sheet(rows);
+		worksheet["!cols"] = [
+			{ wch: 30 },
+			{ wch: 24 },
+			{ wch: 18 },
+			{ wch: 18 },
+			{ wch: 18 },
+		];
+		const workbook = XLSX.utils.book_new();
+		XLSX.utils.book_append_sheet(workbook, worksheet, "Por Inversionista");
+		XLSX.writeFile(
+			workbook,
+			`flujo-inversionistas-${flujoAnioNum}-${String(flujoMesNum).padStart(2, "0")}.xlsx`,
+		);
 	};
 
 	const closedCreditsRows = closedCreditsReport.data?.rows ?? [];
@@ -1961,51 +1906,49 @@ function RouteComponent() {
 						{isAdmin && (
 							<>
 						<TabsContent value="inversiones" className="space-y-6">
-							{/* Reporte: Flujo de Cuotas de Inversiones */}
 							<Card>
 								<CardHeader>
 									<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 										<div>
-											<CardTitle className="flex items-center gap-2">
-												<TrendingUp className="h-5 w-5" />
-												Flujo de Cuotas de Inversiones
-											</CardTitle>
+											<CardTitle>Inversión y reinversión</CardTitle>
 											<CardDescription>
-												Cuotas esperadas hacia reinversión y hacia pago en
-												efectivo, por período
+												Capital liquidado, distribución y posición activa.
 											</CardDescription>
 										</div>
 										<div className="flex items-center gap-2">
 											<Select
 												value={String(flujoMesNum)}
-												onValueChange={(v) =>
-													setFlujoMesAnio(flujoAnioNum, Number(v))
+												onValueChange={(value) =>
+													setFlujoMesAnio(flujoAnioNum, Number(value))
 												}
 											>
 												<SelectTrigger className="w-36" aria-label="Mes">
 													<SelectValue />
 												</SelectTrigger>
 												<SelectContent>
-													{mesesDisponibles.map((m) => (
-														<SelectItem key={m.num} value={String(m.num)}>
-															{m.nombre}
+													{mesesDisponibles.map((month) => (
+														<SelectItem
+															key={month.num}
+															value={String(month.num)}
+														>
+															{month.nombre}
 														</SelectItem>
 													))}
 												</SelectContent>
 											</Select>
 											<Select
 												value={String(flujoAnioNum)}
-												onValueChange={(v) =>
-													setFlujoMesAnio(Number(v), flujoMesNum)
+												onValueChange={(value) =>
+													setFlujoMesAnio(Number(value), flujoMesNum)
 												}
 											>
 												<SelectTrigger className="w-24" aria-label="Año">
 													<SelectValue />
 												</SelectTrigger>
 												<SelectContent>
-													{aniosDisponibles.map((a) => (
-														<SelectItem key={a} value={String(a)}>
-															{a}
+													{aniosDisponibles.map((year) => (
+														<SelectItem key={year} value={String(year)}>
+															{year}
 														</SelectItem>
 													))}
 												</SelectContent>
@@ -2013,616 +1956,15 @@ function RouteComponent() {
 										</div>
 									</div>
 								</CardHeader>
-								<CardContent className="space-y-8">
-									{/* Sección 1: Cuotas → Reinversión (desde liquidaciones) */}
-									<div className={SECCION_REPORTE_CLASS}>
-										<p className="mb-2 font-semibold text-sm">
-											Cuotas → Reinversión
-										</p>
-										{reinversionLiquidacionesQuery.isPending ? (
-											<div className="py-4 text-center text-muted-foreground text-sm">
-												Cargando...
-											</div>
-										) : reinversionLiquidacionesQuery.isError ? (
-											<div className="py-4 text-center text-destructive text-sm">
-												Error al cargar datos.
-											</div>
-										) : reinversionData ? (
-											(() => {
-												const filas = REINVERSION_MODALIDADES.map((m) => {
-													const d = reinversionData.porTipo[m.tipo];
-													return {
-														...m,
-														capital: Number(d?.reinversion_capital ?? 0),
-														interes: Number(d?.reinversion_interes ?? 0),
-														total: Number(d?.reinversion_total ?? 0),
-													};
-												}).filter((f) => f.total !== 0);
-												const totales = filas.reduce(
-													(a, f) => ({
-														capital: a.capital + f.capital,
-														interes: a.interes + f.interes,
-														total: a.total + f.total,
-													}),
-													{ capital: 0, interes: 0, total: 0 },
-												);
-												return (
-													<Table>
-														<TableHeader>
-															<TableRow>
-																<TableHead>Modalidad de Reinversión</TableHead>
-																<TableHead className="text-right">
-																	Capital
-																</TableHead>
-																<TableHead className="text-right">
-																	Interés
-																</TableHead>
-																<TableHead className="text-right">
-																	Reinversión Total
-																</TableHead>
-															</TableRow>
-														</TableHeader>
-														<TableBody>
-															{filas.map((f) => (
-																<TableRow key={f.tipo}>
-																	<TableCell>{f.label}</TableCell>
-																	<TableCell className="text-right">
-																		{dash(f.capital)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(f.interes)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(f.total)}
-																	</TableCell>
-																</TableRow>
-															))}
-															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Total </TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.capital)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.interes)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.total)}
-																</TableCell>
-															</TableRow>
-														</TableBody>
-													</Table>
-												);
-											})()
-										) : null}
-									</div>
-
-									{/* Sección 2: Cuotas → A Recibir (efectivo neto = total_cuota) */}
-									<div className={SECCION_REPORTE_CLASS}>
-										<p className="mb-2 font-semibold text-sm">
-											Cuotas → A Recibir
-										</p>
-										{reinversionLiquidacionesQuery.isPending ? (
-											<div className="py-4 text-center text-muted-foreground text-sm">
-												Cargando...
-											</div>
-										) : reinversionLiquidacionesQuery.isError ? (
-											<div className="py-4 text-center text-destructive text-sm">
-												Error al cargar datos.
-											</div>
-										) : reinversionData ? (
-											(() => {
-												const filas = A_RECIBIR_MODALIDADES.map((m) => {
-													const d = reinversionData.porTipo[m.tipo];
-													return {
-														...m,
-														capital: Number(d?.total_capital ?? 0),
-														interes: Number(d?.total_interes ?? 0),
-														iva: Number(d?.total_iva ?? 0),
-														isr: Number(d?.total_isr ?? 0),
-														total: Number(d?.total_cuota ?? 0),
-													};
-												}).filter(
-													(f) =>
-														f.capital !== 0 ||
-														f.interes !== 0 ||
-														f.iva !== 0 ||
-														f.isr !== 0 ||
-														f.total !== 0,
-												);
-												const totales = filas.reduce(
-													(a, f) => ({
-														capital: a.capital + f.capital,
-														interes: a.interes + f.interes,
-														iva: a.iva + f.iva,
-														isr: a.isr + f.isr,
-														total: a.total + f.total,
-													}),
-													{ capital: 0, interes: 0, iva: 0, isr: 0, total: 0 },
-												);
-												return (
-													<Table>
-														<TableHeader>
-															<TableRow>
-																<TableHead>Modalidad de Reinversión</TableHead>
-																<TableHead className="text-right">
-																	Capital
-																</TableHead>
-																<TableHead className="text-right">
-																	Interés
-																</TableHead>
-																<TableHead className="text-right">
-																	IVA 12%
-																</TableHead>
-																<TableHead className="text-right">
-																	ISR
-																</TableHead>
-																<TableHead className="text-right">
-																	Total a Recibir
-																</TableHead>
-															</TableRow>
-														</TableHeader>
-														<TableBody>
-															{filas.map((f) => (
-																<TableRow key={f.tipo}>
-																	<TableCell>{f.label}</TableCell>
-																	<TableCell className="text-right">
-																		{dash(f.capital)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(f.interes)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(f.iva)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(f.isr)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(f.total)}
-																	</TableCell>
-																</TableRow>
-															))}
-															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Total a Recibir</TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.capital)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.interes)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.iva)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.isr)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.total)}
-																</TableCell>
-															</TableRow>
-														</TableBody>
-													</Table>
-												);
-											})()
-										) : null}
-									</div>
-
-									{/* Sección: Interés Neto (agrupado por si el inversionista emite factura) */}
-									{reinversionData &&
-										(() => {
-											const cf = reinversionData.interesNeto.conFactura;
-											const sf = reinversionData.interesNeto.sinFactura;
-											const cube = reinversionData.interesNeto.cube;
-											const totalInteres =
-												Number(cf.interes) +
-												Number(sf.interes) +
-												Number(cube.interes);
-											const totalIva = Number(cf.iva) + Number(cube.iva);
-											const totalIsr = Number(sf.isr);
-											const totalNeto =
-												Number(cf.neto) + Number(sf.neto) + Number(cube.neto);
-											return (
-												<div className={SECCION_REPORTE_CLASS}>
-													<p className="mb-2 font-semibold text-sm">
-														Interés Neto
-													</p>
-													<Table>
-														<TableHeader>
-															<TableRow>
-																<TableHead>Tipo</TableHead>
-																<TableHead className="text-right">
-																	Interés
-																</TableHead>
-																<TableHead className="text-right">
-																	IVA 12%
-																</TableHead>
-																<TableHead className="text-right">
-																	ISR
-																</TableHead>
-																<TableHead className="text-right">
-																	Interés Neto
-																</TableHead>
-															</TableRow>
-														</TableHeader>
-														<TableBody>
-															<TableRow>
-																<TableCell>Inversionista Con Factura</TableCell>
-																<TableCell className="text-right">
-																	{dash(cf.interes)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(cf.iva)}
-																</TableCell>
-																<TableCell className="text-right text-muted-foreground">
-																	—
-																</TableCell>
-																<TableCell className="text-right font-semibold">
-																	{dash(cf.neto)}
-																</TableCell>
-															</TableRow>
-															<TableRow>
-																<TableCell>Inversionista Sin Factura</TableCell>
-																<TableCell className="text-right">
-																	{dash(sf.interes)}
-																</TableCell>
-																<TableCell className="text-right text-muted-foreground">
-																	—
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(sf.isr)}
-																</TableCell>
-																<TableCell className="text-right font-semibold">
-																	{dash(sf.neto)}
-																</TableCell>
-															</TableRow>
-
-															<TableRow>
-																<TableCell>Residuo CUBE</TableCell>
-																<TableCell className="text-right">
-																	{dash(cube.interes)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(cube.iva)}
-																</TableCell>
-																<TableCell className="text-right text-muted-foreground">
-																	—
-																</TableCell>
-																<TableCell className="text-right font-semibold">
-																	{dash(cube.neto)}
-																</TableCell>
-															</TableRow>
-															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Total</TableCell>
-																<TableCell className="text-right">
-																	{dash(totalInteres)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totalIva)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totalIsr)}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totalNeto)}
-																</TableCell>
-															</TableRow>
-														</TableBody>
-													</Table>
-												</div>
-											);
-										})()}
-
-									{/* Sección 3: Pagos Extras Recibidos */}
-									{reinversionData &&
-										(() => {
-											const pe = reinversionData.pagosExtras;
-											const totalExtras =
-												Number(pe.abonos_capital) + Number(pe.cancelaciones);
-											return (
-												<div className={SECCION_REPORTE_CLASS}>
-													<p className="mb-2 font-semibold text-sm">
-														Pagos Extras Recibidos
-													</p>
-													<Table>
-														<TableHeader>
-															<TableRow>
-																<TableHead>Tipo</TableHead>
-																<TableHead className="text-right">
-																	Monto
-																</TableHead>
-															</TableRow>
-														</TableHeader>
-														<TableBody>
-															<TableRow>
-																<TableCell>Abonos Extra a Capital</TableCell>
-																<TableCell className="text-right">
-																	{dash(pe.abonos_capital)}
-																</TableCell>
-															</TableRow>
-															<TableRow>
-																<TableCell>Cancelaciones</TableCell>
-																<TableCell className="text-right">
-																	{dash(pe.cancelaciones)}
-																</TableCell>
-															</TableRow>
-															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Total</TableCell>
-																<TableCell className="text-right">
-																	{dash(totalExtras)}
-																</TableCell>
-															</TableRow>
-														</TableBody>
-													</Table>
-												</div>
-											);
-										})()}
-
-									{/* Sección: Compras en el Mes (compra_cartera, por fecha_completada) */}
-									<div className={SECCION_REPORTE_CLASS}>
-										<p className="mb-2 font-semibold text-sm">
-											Compras en el Mes
-										</p>
-										{reinversionLiquidacionesQuery.isPending ? (
-											<div className="py-4 text-center text-muted-foreground text-sm">
-												Cargando...
-											</div>
-										) : reinversionLiquidacionesQuery.isError ? (
-											<div className="py-4 text-center text-destructive text-sm">
-												Error al cargar datos
-											</div>
-										) : !reinversionData?.comprasMes?.length ? (
-											<div className="py-4 text-center text-muted-foreground text-sm">
-												Sin compras en el período seleccionado
-											</div>
-										) : (
-											(() => {
-												const filas = reinversionData.comprasMes;
-												const totales = filas.reduce(
-													(a, f) => ({
-														cantidad: a.cantidad + f.cantidad,
-														monto: a.monto + Number(f.monto),
-													}),
-													{ cantidad: 0, monto: 0 },
-												);
-												return (
-													<Table>
-														<TableHeader>
-															<TableRow>
-																<TableHead>Modalidad</TableHead>
-																<TableHead className="text-right">
-																	Cantidad
-																</TableHead>
-																<TableHead className="text-right">
-																	Monto
-																</TableHead>
-															</TableRow>
-														</TableHeader>
-														<TableBody>
-															{filas.map((row) => (
-																<TableRow key={row.tipo}>
-																	<TableCell>
-																		{MODALIDAD_LABEL[row.tipo] ?? row.tipo}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{row.cantidad}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(row.monto)}
-																	</TableCell>
-																</TableRow>
-															))}
-															<TableRow className="border-t-2 bg-muted/50 font-bold">
-																<TableCell>Total</TableCell>
-																<TableCell className="text-right">
-																	{totales.cantidad}
-																</TableCell>
-																<TableCell className="text-right">
-																	{dash(totales.monto)}
-																</TableCell>
-															</TableRow>
-														</TableBody>
-													</Table>
-												);
-											})()
-										)}
-									</div>
-
-									{/* Sección 4: Desglose por Inversionista (desde liquidaciones) */}
-									<div className={SECCION_REPORTE_CLASS}>
-										<div className="mb-2 flex items-center justify-between">
-											<p className="font-semibold text-sm">
-												Desglose por Inversionista
-											</p>
-											{(reinversionData?.porInversionista?.length ?? 0) > 0 && (
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={() => {
-														const fuente =
-															reinversionData?.porInversionista ?? [];
-														const data =
-															modalidadFiltro.length === 0
-																? fuente
-																: fuente.filter((r) =>
-																		modalidadFiltro.includes(
-																			r.tipo_reinversion,
-																		),
-																	);
-														const rows = data.map((r) => ({
-															Inversionista: r.nombre,
-															Modalidad:
-																MODALIDAD_LABEL[r.tipo_reinversion] ??
-																r.tipo_reinversion,
-															Reinversión: r.reinversion,
-															"A Recibir": r.a_recibir,
-															"Monto Aportado": r.monto_aportado,
-														}));
-														const ws = XLSX.utils.json_to_sheet(rows);
-														ws["!cols"] = [
-															{ wch: 30 },
-															{ wch: 18 },
-															{ wch: 18 },
-															{ wch: 18 },
-															{ wch: 18 },
-														];
-														const wb = XLSX.utils.book_new();
-														XLSX.utils.book_append_sheet(
-															wb,
-															ws,
-															"Por Inversionista",
-														);
-														XLSX.writeFile(
-															wb,
-															`flujo-inversionistas-${flujoCuotasRange.fechaInicio}-${flujoCuotasRange.fechaFin}.xlsx`,
-														);
-													}}
-												>
-													<Download className="mr-2 h-4 w-4" />
-													Exportar Excel
-												</Button>
-											)}
-										</div>
-										{reinversionLiquidacionesQuery.isPending ? (
-											<div className="py-4 text-center text-muted-foreground text-sm">
-												Cargando...
-											</div>
-										) : reinversionLiquidacionesQuery.isError ? (
-											<div className="py-4 text-center text-destructive text-sm">
-												Error al cargar datos
-											</div>
-										) : !reinversionData?.porInversionista?.length ? (
-											<div className="py-4 text-center text-muted-foreground text-sm">
-												Sin datos para el período seleccionado
-											</div>
-										) : (
-											(() => {
-												const todas = reinversionData.porInversionista;
-												const presentes = new Set(
-													todas.map((f) => f.tipo_reinversion),
-												);
-												const modalidades = Object.keys(MODALIDAD_LABEL).filter(
-													(t) => presentes.has(t),
-												);
-												const filas =
-													modalidadFiltro.length === 0
-														? todas
-														: todas.filter((f) =>
-																modalidadFiltro.includes(f.tipo_reinversion),
-															);
-												const totales = filas.reduce(
-													(a, f) => ({
-														reinversion: a.reinversion + Number(f.reinversion),
-														a_recibir: a.a_recibir + Number(f.a_recibir),
-														monto_aportado:
-															a.monto_aportado + Number(f.monto_aportado),
-													}),
-													{ reinversion: 0, a_recibir: 0, monto_aportado: 0 },
-												);
-												return (
-													<>
-														<div className="mb-3 flex flex-wrap items-center gap-1.5">
-															<span className="text-muted-foreground text-xs">
-																Modalidad:
-															</span>
-															{modalidades.map((tipo) => {
-																const activo = modalidadFiltro.includes(tipo);
-																return (
-																	<button
-																		key={tipo}
-																		type="button"
-																		onClick={() =>
-																			setModalidadFiltro((prev) =>
-																				prev.includes(tipo)
-																					? prev.filter((t) => t !== tipo)
-																					: [...prev, tipo],
-																			)
-																		}
-																		className={`rounded border px-2 py-0.5 text-xs transition-colors ${
-																			activo
-																				? "bg-muted font-medium text-foreground"
-																				: "text-muted-foreground"
-																		}`}
-																	>
-																		{MODALIDAD_LABEL[tipo] ?? tipo}
-																	</button>
-																);
-															})}
-															{modalidadFiltro.length > 0 && (
-																<button
-																	type="button"
-																	onClick={() => setModalidadFiltro([])}
-																	className="text-muted-foreground text-xs underline"
-																>
-																	Limpiar
-																</button>
-															)}
-														</div>
-														<Table>
-															<TableHeader>
-																<TableRow>
-																	<TableHead>Inversionista</TableHead>
-																	<TableHead>Modalidad</TableHead>
-																	<TableHead className="text-right">
-																		Reinversión
-																	</TableHead>
-																	<TableHead className="text-right">
-																		A Recibir
-																	</TableHead>
-																	<TableHead className="text-right">
-																		Monto Aportado
-																	</TableHead>
-																</TableRow>
-															</TableHeader>
-															<TableBody>
-																{filas.map((row) => (
-																	<TableRow key={row.inversionista_id}>
-																		<TableCell className="font-medium">
-																			{row.nombre}
-																		</TableCell>
-																		<TableCell>
-																			<span
-																				className={`inline-block rounded border px-1.5 py-0.5 font-normal text-[10px] ${
-																					MODALIDAD_CHIP_CLASS[
-																						row.tipo_reinversion
-																					] ??
-																					"border-muted-foreground/30 text-muted-foreground"
-																				}`}
-																			>
-																				{MODALIDAD_LABEL[
-																					row.tipo_reinversion
-																				] ?? row.tipo_reinversion}
-																			</span>
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{dash(row.reinversion)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{dash(row.a_recibir)}
-																		</TableCell>
-																		<TableCell className="text-right">
-																			{dash(row.monto_aportado)}
-																		</TableCell>
-																	</TableRow>
-																))}
-																<TableRow className="border-t-2 bg-muted/50 font-bold">
-																	<TableCell colSpan={2}>Total</TableCell>
-																	<TableCell className="text-right">
-																		{dash(totales.reinversion)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(totales.a_recibir)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{dash(totales.monto_aportado)}
-																	</TableCell>
-																</TableRow>
-															</TableBody>
-														</Table>
-													</>
-												);
-											})()
-										)}
-									</div>
+								<CardContent className="pt-6">
+									<ReinvestmentReport
+										data={reinversionData}
+										isPending={reinversionLiquidacionesQuery.isPending}
+										isError={reinversionLiquidacionesQuery.isError}
+										periodLabel={`${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`}
+										onRetry={() => reinversionLiquidacionesQuery.refetch()}
+										onExportInvestors={exportReinvestmentInvestorsExcel}
+									/>
 								</CardContent>
 							</Card>
 						</TabsContent>

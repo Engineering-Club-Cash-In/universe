@@ -104,6 +104,8 @@ interface CarteraBackClientConfig {
 	circuitBreakerTimeout: number;
 	enableCache: boolean;
 	cacheTtl: number;
+	accessTokenProvider: () => Promise<string>;
+	fetchTransport: typeof globalThis.fetch;
 }
 
 export interface ResumenGlobalInversionistasFilters {
@@ -124,6 +126,8 @@ const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	circuitBreakerTimeout: 60000,
 	enableCache: process.env.CARTERA_BACK_ENABLE_CACHE === "true",
 	cacheTtl: Number.parseInt(process.env.CARTERA_BACK_CACHE_TTL || "300000"), // 5 minutes
+	accessTokenProvider: getCarteraAccessToken,
+	fetchTransport: globalThis.fetch,
 };
 
 // ============================================================================
@@ -373,11 +377,11 @@ export type FlujoCuotasInversionesResponse = {
 };
 
 export type ReinversionLiquidacionesResponse = {
+	/** Versión runtime del contrato de conciliación por modalidad. */
+	contrato_version: 2;
 	/**
-	 * Por modalidad (`tipo_reinversion`), campos crudos de la liquidación:
-	 * - `reinversion_total` → sección "Cuotas → Reinversión".
-	 * - `total_capital` / `total_interes` / `total_iva` / `total_isr` / `total_cuota`
-	 *   → sección "Cuotas → A Recibir".
+	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
+	 * `reinversion_total` el capital que permanece colocado.
 	 */
 	porTipo: Record<
 		string,
@@ -390,6 +394,9 @@ export type ReinversionLiquidacionesResponse = {
 			total_iva: string;
 			total_isr: string;
 			total_cuota: string;
+			/** IVA real facturado; excluye el IVA referencial sin factura. */
+			iva_facturado: string;
+			total_distribuido: string;
 		}
 	>;
 	/**
@@ -414,9 +421,36 @@ export type ReinversionLiquidacionesResponse = {
 		reinversion: string;
 		a_recibir: string;
 		monto_aportado: string;
+		capital_activo: string;
 	}[];
 	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
 	comprasMes: { tipo: string; cantidad: number; monto: string }[];
+	detalleInteresNeto: {
+		inversionista_id: number;
+		inversionista: string;
+		referencia: string;
+		tratamiento_fiscal: "con_factura" | "sin_factura" | "cube";
+		interes: string;
+		iva: string;
+		isr: string;
+		neto: string;
+	}[];
+	detallePagosExtras: {
+		fecha: string;
+		credito: string;
+		tipo: "abono_capital" | "cancelacion";
+		monto: string;
+	}[];
+	detalleComprasMes: {
+		fecha: string;
+		inversionista: string;
+		modalidad: string;
+		monto: string;
+	}[];
+	detalle_estado: {
+		disponible: boolean;
+		error: string | null;
+	};
 	cantidad_liquidaciones: number;
 };
 
@@ -557,7 +591,7 @@ export class CarteraBackClient {
 		): Promise<RequestInit> => {
 			const token = forceRefresh
 				? await invalidateAndReauth()
-				: await getCarteraAccessToken();
+				: await this.config.accessTokenProvider();
 			return {
 				...options,
 				headers: {
@@ -576,7 +610,7 @@ export class CarteraBackClient {
 			try {
 				const response = await this.circuitBreaker.execute(async () => {
 					const requestOptions = await buildRequestOptions();
-					const res = await fetch(url, requestOptions);
+					const res = await this.config.fetchTransport(url, requestOptions);
 
 					if (!res.ok) {
 						const errorText = await res.text();
@@ -592,7 +626,10 @@ export class CarteraBackClient {
 							if (!didReauth) {
 								didReauth = true;
 								const retryOptions = await buildRequestOptions(true);
-								const retryRes = await fetch(url, retryOptions);
+								const retryRes = await this.config.fetchTransport(
+									url,
+									retryOptions,
+								);
 								if (retryRes.ok) return retryRes;
 								const retryText = await retryRes.text();
 								let retryData: { error?: string; message?: string } = {};

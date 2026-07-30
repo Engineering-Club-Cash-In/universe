@@ -158,11 +158,11 @@ export type FlujoCuotasInversionesResponse = {
 };
 
 export type ReinversionLiquidacionesResponse = {
+	contrato_version: 2;
 	/**
-	 * Por modalidad (`tipo_reinversion`), campos crudos de la liquidación:
-	 * - `reinversion_total` → sección "Cuotas → Reinversión".
-	 * - `total_capital` / `total_interes` / `total_iva` / `total_isr` / `total_cuota`
-	 *   → sección "Cuotas → A Recibir".
+	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
+	 * `reinversion_total` el flujo que permanece colocado; juntos forman el
+	 * flujo liquidado presentado por la UI.
 	 */
 	porTipo: Record<
 		string,
@@ -175,6 +175,8 @@ export type ReinversionLiquidacionesResponse = {
 			total_iva: string;
 			total_isr: string;
 			total_cuota: string;
+			iva_facturado: string;
+			total_distribuido: string;
 		}
 	>;
 	/**
@@ -199,9 +201,36 @@ export type ReinversionLiquidacionesResponse = {
 		reinversion: string;
 		a_recibir: string;
 		monto_aportado: string;
+		capital_activo: string;
 	}[];
 	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
 	comprasMes: { tipo: string; cantidad: number; monto: string }[];
+	detalleInteresNeto: {
+		inversionista_id: number;
+		inversionista: string;
+		referencia: string;
+		tratamiento_fiscal: "con_factura" | "sin_factura" | "cube";
+		interes: string;
+		iva: string;
+		isr: string;
+		neto: string;
+	}[];
+	detallePagosExtras: {
+		fecha: string;
+		credito: string;
+		tipo: "abono_capital" | "cancelacion";
+		monto: string;
+	}[];
+	detalleComprasMes: {
+		fecha: string;
+		inversionista: string;
+		modalidad: string;
+		monto: string;
+	}[];
+	detalle_estado: {
+		disponible: boolean;
+		error: string | null;
+	};
 	cantidad_liquidaciones: number;
 };
 

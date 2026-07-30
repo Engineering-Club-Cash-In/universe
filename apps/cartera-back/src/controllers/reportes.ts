@@ -1,12 +1,19 @@
 import { sql } from "drizzle-orm";
 import { db } from "../database";
 import {
-  type MoraRecoverySourceRow,
-  buildMoraRecoveryQuery,
-  buildMoraRecoveryReport,
-  getMoraRecoveryPeriod,
+	type MoraRecoverySourceRow,
+	buildMoraRecoveryQuery,
+	buildMoraRecoveryReport,
+	getMoraRecoveryPeriod,
 } from "./moraRecuperacion";
 import { snapCte } from "./moraSnapshotSql";
+import {
+	assertModeReconciliation,
+	assertReportReconciliation,
+	buildInvestorPosition,
+	buildNetInterestDetail,
+	getPublicReinvestmentDetailError,
+} from "./reinvestmentReport";
 
 type Periodo = "anio" | "trimestre" | "mes" | "semana" | "dia";
 
@@ -799,8 +806,15 @@ export async function getReinversionLiquidaciones({
       COALESCE(SUM(l.total_capital::numeric), 0)            AS total_capital,
       COALESCE(SUM(l.total_interes::numeric), 0)            AS total_interes,
       COALESCE(SUM(l.total_iva::numeric), 0)                AS total_iva,
+      COALESCE(SUM(CASE
+        WHEN l.total_isr::numeric > 0 THEN 0
+        ELSE l.total_iva::numeric
+      END), 0)                                              AS iva_facturado,
       COALESCE(SUM(l.total_isr::numeric), 0)                AS total_isr,
       COALESCE(SUM(l.total_cuota::numeric), 0)              AS total_cuota,
+      COALESCE(SUM(
+        l.total_cuota::numeric + l.reinversion_total::numeric
+      ), 0)                                                 AS total_distribuido,
       COUNT(*)::int                                          AS cantidad
     FROM cartera.liquidaciones l
     JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
@@ -818,8 +832,10 @@ export async function getReinversionLiquidaciones({
       total_capital: string;
       total_interes: string;
       total_iva: string;
+      iva_facturado: string;
       total_isr: string;
       total_cuota: string;
+      total_distribuido: string;
     }
   > = {};
   let cantidad = 0;
@@ -833,8 +849,10 @@ export async function getReinversionLiquidaciones({
       total_capital: Number(r.total_capital ?? 0).toFixed(2),
       total_interes: Number(r.total_interes ?? 0).toFixed(2),
       total_iva: Number(r.total_iva ?? 0).toFixed(2),
+      iva_facturado: Number(r.iva_facturado ?? 0).toFixed(2),
       total_isr: Number(r.total_isr ?? 0).toFixed(2),
       total_cuota: Number(r.total_cuota ?? 0).toFixed(2),
+      total_distribuido: Number(r.total_distribuido ?? 0).toFixed(2),
     };
     cantidad += Number(r.cantidad ?? 0);
   }
@@ -1007,7 +1025,11 @@ export async function getReinversionLiquidaciones({
       const id = Number(r.inversionista_id);
       const reinversion = Number(r.reinversion ?? 0);
       const montoHist = montoAportadoPorInv.get(id) ?? 0;
-      const montoAportado = esMayo2026 ? montoHist - reinversion : montoHist;
+      const position = buildInvestorPosition(
+        montoHist,
+        reinversion,
+        esMayo2026
+      );
       return {
         inversionista_id: id,
         nombre: String(r.nombre),
@@ -1016,7 +1038,7 @@ export async function getReinversionLiquidaciones({
         reinversion_interes: Number(r.reinversion_interes ?? 0).toFixed(2),
         reinversion: reinversion.toFixed(2),
         a_recibir: Number(r.a_recibir ?? 0).toFixed(2),
-        monto_aportado: montoAportado.toFixed(2),
+        ...position,
       };
     }
   ).filter(
@@ -1032,16 +1054,19 @@ export async function getReinversionLiquidaciones({
   // efectiva prioriza fecha_completada y cae a updated_at cuando es NULL
   // (columna nueva, registros viejos) — mismo criterio que utils/comprasAjuste.ts.
   const fechaCompra = sql`COALESCE(c.fecha_completada, c.updated_at)`;
+  const comprasMesPredicate = sql`
+    c.tipo_operacion = 'compra_cartera'
+    AND c.status = 'completado'
+    AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+    AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+  `;
   const comprasRows = await db.execute(sql`
     SELECT
       COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo,
-      COUNT(DISTINCT (c.inversionista_id, ${fechaCompra}))::int AS cantidad,
+      COUNT(*)::int AS cantidad,
       COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
     FROM cartera.compras_credito_inversionista c
-    WHERE c.tipo_operacion = 'compra_cartera'
-      AND c.status = 'completado'
-      AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
-      AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    WHERE ${comprasMesPredicate}
     GROUP BY c.tipo_reinversion
     ORDER BY monto DESC
   `);
@@ -1053,31 +1078,196 @@ export async function getReinversionLiquidaciones({
     })
   );
 
+  let detalleInteresNeto: ReturnType<typeof buildNetInterestDetail>[] = [];
+  let detallePagosExtras: {
+    fecha: string;
+    credito: string;
+    tipo: "abono_capital" | "cancelacion";
+    monto: string;
+  }[] = [];
+  let detalleComprasMes: {
+    fecha: string;
+    inversionista: string;
+    modalidad: string;
+    monto: string;
+  }[] = [];
+  let detalleEstado: { disponible: boolean; error: string | null } = {
+    disponible: true,
+    error: null,
+  };
+
+  try {
+    const interesDetalleRows = await db.execute(sql`
+    SELECT
+      l.inversionista_id,
+      i.nombre AS inversionista,
+      'LIQ-' || l.liquidacion_id::text AS referencia,
+      l.total_interes AS interes,
+      l.total_iva AS iva,
+      l.total_isr AS isr
+    FROM cartera.liquidaciones l
+    JOIN cartera.inversionistas i ON i.inversionista_id = l.inversionista_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    ORDER BY i.nombre, l.liquidacion_id
+  `);
+    detalleInteresNeto = (
+      interesDetalleRows.rows as Record<string, unknown>[]
+    ).map((r) =>
+      buildNetInterestDetail({
+        inversionista_id: Number(r.inversionista_id),
+        inversionista: String(r.inversionista),
+        referencia: String(r.referencia),
+        interes: Number(r.interes ?? 0),
+        iva: Number(r.iva ?? 0),
+        isr: Number(r.isr ?? 0),
+      })
+    );
+    if (interesCube !== 0) {
+      detalleInteresNeto.push({
+        inversionista_id: 86,
+        inversionista: "CUBE",
+        referencia: "Participación CUBE",
+        tratamiento_fiscal: "cube",
+        interes: interesCube.toFixed(2),
+        iva: (interesCube * 0.12).toFixed(2),
+        isr: "0.00",
+        neto: (interesCube * 1.12).toFixed(2),
+      });
+    }
+
+    const extrasDetalleRows = await db.execute(sql`
+    SELECT
+      (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date::text AS fecha,
+      cr.numero_credito_sifco AS credito,
+      CASE WHEN a.tipo = 'CAPITAL' THEN 'abono_capital' ELSE 'cancelacion' END AS tipo,
+      a.monto
+    FROM cartera.abonos_capital a
+    JOIN cartera.liquidaciones l ON l.liquidacion_id = a.liquidacion_id
+    JOIN cartera.creditos cr ON cr.credito_id = a.credito_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    ORDER BY l.fecha_liquidacion, cr.numero_credito_sifco
+  `);
+    detallePagosExtras = (
+      extrasDetalleRows.rows as Record<string, unknown>[]
+    ).map((r) => ({
+      fecha: String(r.fecha),
+      credito: String(r.credito),
+      tipo: String(r.tipo) as "abono_capital" | "cancelacion",
+      monto: Number(r.monto ?? 0).toFixed(2),
+    }));
+    const manualDetalleRows = await db.execute(sql`
+    SELECT
+      (MAX(l.fecha_liquidacion) AT TIME ZONE 'America/Guatemala')::date::text AS fecha,
+      cr.numero_credito_sifco AS credito,
+      SUM(pe.abono_capital::numeric) AS monto,
+      COALESCE(MAX(ce.monto_aportado::numeric), 0) AS monto_aportado,
+      bool_and(ce.id IS NULL) AS sin_fila
+    FROM cartera.pagos_credito_inversionistas_espejo pe
+    JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+    JOIN cartera.creditos cr ON cr.credito_id = pe.credito_id
+    LEFT JOIN cartera.creditos_inversionistas_espejo ce
+      ON ce.credito_id = pe.credito_id
+     AND ce.inversionista_id = pe.inversionista_id
+    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+      AND pe.abono_capital::numeric >= 2000
+      AND pe.abono_capital_id IS NULL
+      AND cr."statusCredit" <> 'ACTIVO'
+    GROUP BY pe.credito_id, pe.inversionista_id, cr.numero_credito_sifco
+    HAVING COALESCE(MAX(ce.monto_aportado::numeric), 0) = 0 OR bool_and(ce.id IS NULL)
+    ORDER BY fecha, cr.numero_credito_sifco
+  `);
+    detallePagosExtras.push(
+      ...(manualDetalleRows.rows as Record<string, unknown>[]).map((r) => ({
+        fecha: String(r.fecha),
+        credito: String(r.credito),
+        tipo: "cancelacion" as const,
+        monto: Number(r.monto ?? 0).toFixed(2),
+      }))
+    );
+
+    const comprasDetalleRows = await db.execute(sql`
+    SELECT
+      (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date::text AS fecha,
+      i.nombre AS inversionista,
+      COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS modalidad,
+      c.monto_aportado AS monto
+    FROM cartera.compras_credito_inversionista c
+    JOIN cartera.inversionistas i ON i.inversionista_id = c.inversionista_id
+    WHERE ${comprasMesPredicate}
+    ORDER BY ${fechaCompra}, i.nombre
+  `);
+    detalleComprasMes = (
+      comprasDetalleRows.rows as Record<string, unknown>[]
+    ).map((r) => ({
+      fecha: String(r.fecha),
+      inversionista: String(r.inversionista),
+      modalidad: String(r.modalidad),
+      monto: Number(r.monto ?? 0).toFixed(2),
+    }));
+  } catch (error) {
+    console.error(
+      "No fue posible recuperar el detalle del reporte de reinversión",
+      error,
+    );
+    detalleInteresNeto = [];
+    detallePagosExtras = [];
+    detalleComprasMes = [];
+    detalleEstado = {
+      disponible: false,
+      error: getPublicReinvestmentDetailError(error),
+    };
+  }
+
+  const interesNeto = {
+    conFactura: {
+      interes: conFactura.interes.toFixed(2),
+      iva: conFactura.iva.toFixed(2),
+      neto: (conFactura.interes + conFactura.iva).toFixed(2),
+    },
+    sinFactura: {
+      interes: sinFactura.interes.toFixed(2),
+      isr: sinFactura.isr.toFixed(2),
+      neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
+    },
+    cube: {
+      interes: interesCube.toFixed(2),
+      iva: (interesCube * 0.12).toFixed(2),
+      neto: (interesCube * 1.12).toFixed(2),
+    },
+  };
+  const pagosExtras = {
+    abonos_capital: abonosCapital.toFixed(2),
+    cancelaciones: cancelaciones.toFixed(2),
+  };
+
+  if (detalleEstado.disponible) {
+    assertReportReconciliation({
+      interesNeto,
+      pagosExtras,
+      comprasMes,
+      detalleInteresNeto,
+      detallePagosExtras,
+      detalleComprasMes,
+    });
+  }
+  for (const modalidad of Object.values(porTipo)) {
+    assertModeReconciliation(modalidad);
+  }
+
   return {
+    contrato_version: 2 as const,
     porTipo,
     porInversionista,
     comprasMes,
-    interesNeto: {
-      conFactura: {
-        interes: conFactura.interes.toFixed(2),
-        iva: conFactura.iva.toFixed(2),
-        neto: (conFactura.interes + conFactura.iva).toFixed(2),
-      },
-      sinFactura: {
-        interes: sinFactura.interes.toFixed(2),
-        isr: sinFactura.isr.toFixed(2),
-        neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
-      },
-      cube: {
-        interes: interesCube.toFixed(2),
-        iva: (interesCube * 0.12).toFixed(2),
-        neto: (interesCube * 1.12).toFixed(2),
-      },
-    },
-    pagosExtras: {
-      abonos_capital: abonosCapital.toFixed(2),
-      cancelaciones: cancelaciones.toFixed(2),
-    },
+    detalleInteresNeto,
+    detallePagosExtras,
+    detalleComprasMes,
+    detalle_estado: detalleEstado,
+    interesNeto,
+    pagosExtras,
     cantidad_liquidaciones: cantidad,
   };
 }

@@ -6158,6 +6158,7 @@ export const crmRouter = {
 					categoria: opportunities.categoria,
 					nit: opportunities.nit,
 					diaPagoMensual: opportunities.diaPagoMensual,
+					diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 					creditType: opportunities.creditType,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
@@ -6297,6 +6298,7 @@ export const crmRouter = {
 					categoria: opp.categoria,
 					nit: opp.nit,
 					diaPagoMensual: opp.diaPagoMensual,
+					diaPagoOriginalSistema: opp.diaPagoOriginalSistema,
 					suggestedPaymentDays:
 						creditAnalysisMap.get(opp.id)?.leadId === opp.leadId
 							? (creditAnalysisMap.get(opp.id)?.suggestedPaymentDays ?? null)

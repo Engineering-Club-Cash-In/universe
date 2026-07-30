@@ -208,9 +208,12 @@ export function InvestmentAssignmentSection({
 				(selectedOpportunity.diaPagoMensual as PaymentDay) ||
 					getDefaultDiaPago(),
 			);
-			// Se resetea al cambiar de oportunidad — no se puede inferir con
-			// certeza si un diaPagoMensual precargado vino de una elección IA.
-			setElegidoDesdeRecomendacionIA(false);
+			// Se inicializa según lo ya guardado en la oportunidad: si tiene
+			// diaPagoOriginalSistema, el diaPagoMensual precargado vino de una
+			// elección IA (mismo criterio que CreditDetailView.tsx).
+			setElegidoDesdeRecomendacionIA(
+				selectedOpportunity.diaPagoOriginalSistema != null,
+			);
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
 			setIsEditingExisting(false);

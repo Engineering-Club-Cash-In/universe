@@ -180,6 +180,28 @@ export function bucketDeNumero(
 }
 
 /**
+ * CB-027: ¿el bucket numérico dado es B2 ("Gestión Activa")? Usado para
+ * decidir si mostrar la card de convenio en el detalle de un caso, cuando
+ * `bucketPrevio` es el último bucket registrado en buckets_historial ANTES
+ * de que el crédito entrara en convenio (ver $id.tsx).
+ *
+ * NO compara `numero === 2`: `cartera.buckets.numero` es config dinámica (un
+ * admin puede reasignar qué número corresponde a qué etapa — mismo tipo de
+ * bug que el commit 78c92c9c / PR #1205 corrigió en otro lado). Resuelve la
+ * fila real vía `bucketDeNumero` (catálogo dinámico con fallback a
+ * ESTADO_MORA_POR_NUMERO) y compara por `key`, que es la clave estable
+ * ("mora_60" = B2 en el catálogo semilla, independiente de qué `numero` DB
+ * tenga asignado hoy).
+ */
+export function esBucketB2(
+	numero: number | null,
+	catalogo: BucketsCatalogoQueryData | undefined,
+): boolean {
+	if (numero === null) return false;
+	return bucketDeNumero(numero, catalogo).key === "mora_60";
+}
+
+/**
  * Inverso de `bucketDeNumero`: número de bucket (0-5) a partir de un
  * `estadoMora`, o null si no matchea ninguno (pseudo-buckets de status como
  * "en_convenio"/"pagado" no tienen número — no son filas de aging).

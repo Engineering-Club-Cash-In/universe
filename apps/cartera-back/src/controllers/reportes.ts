@@ -11,6 +11,7 @@ import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
   canonicalizePurchaseSummaries,
+	calculateActiveCapital,
 	assertModeReconciliation,
 	assertReportReconciliation,
   buildCubeNetInterest,
@@ -986,13 +987,28 @@ export async function getReinversionLiquidaciones({
   `);
 
   // Capital operativo actual desde el espejo canónico. La reinversión ya está
-  // reflejada aquí, por lo que no se suma nuevamente desde la liquidación.
+  // reflejada aquí, por lo que no se suma nuevamente desde la liquidación. Las
+  // compras aún no aceptadas ya incrementaron el espejo y se restan por posición.
   const capitalActivoRows = await db.execute(sql`
+    WITH pending_purchase_deltas AS (
+      SELECT
+        c.credito_id,
+        c.inversionista_id,
+        SUM(c.monto_aportado::numeric) AS monto_pendiente
+      FROM cartera.compras_credito_inversionista c
+      WHERE c.tipo_operacion = 'compra_cartera'
+        AND c.status = 'pendiente_compra_cartera'
+      GROUP BY c.credito_id, c.inversionista_id
+    )
     SELECT
       ce.inversionista_id,
-      COALESCE(SUM(ce.monto_aportado::numeric), 0) AS capital_activo
+      COALESCE(SUM(ce.monto_aportado::numeric), 0) AS monto_espejo,
+      COALESCE(SUM(ppd.monto_pendiente), 0) AS monto_compra_pendiente
     FROM cartera.creditos_inversionistas_espejo ce
     JOIN cartera.creditos cr ON cr.credito_id = ce.credito_id
+    LEFT JOIN pending_purchase_deltas ppd
+      ON ppd.credito_id = ce.credito_id
+     AND ppd.inversionista_id = ce.inversionista_id
     WHERE ce.inversionista_id IN (
       SELECT DISTINCT l.inversionista_id
       FROM cartera.liquidaciones l
@@ -1006,7 +1022,10 @@ export async function getReinversionLiquidaciones({
   for (const r of capitalActivoRows.rows as Record<string, unknown>[]) {
     capitalActivoPorInv.set(
       Number(r.inversionista_id),
-      Number(r.capital_activo ?? 0)
+      calculateActiveCapital(
+        Number(r.monto_espejo ?? 0),
+        Number(r.monto_compra_pendiente ?? 0),
+      )
     );
   }
 

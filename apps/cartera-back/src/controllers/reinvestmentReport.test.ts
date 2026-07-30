@@ -4,6 +4,7 @@ import {
   allocateRoundedPurchaseAmounts,
   assertModeReconciliation,
   assertReportReconciliation,
+  calculateActiveCapital,
   buildCubeNetInterest,
   canonicalizePurchaseSummaries,
   buildNetInterestDetail,
@@ -154,15 +155,40 @@ test("el reporte conserva y totaliza al inversionista con capital activo y flujo
   ).toBe(1250);
 });
 
-test("capital activo usa el espejo completo y excluye créditos cerrados", async () => {
+test("capital activo conserva la posición aceptada al restar una compra pendiente", () => {
+  expect(calculateActiveCapital(1250, 250)).toBe(1000);
+});
+
+test("capital activo resta múltiples compras pendientes ya agregadas", () => {
+  expect(calculateActiveCapital(1250, 250 + 100)).toBe(900);
+});
+
+test("capital activo no resta compras completadas", () => {
+  expect(calculateActiveCapital(1250, 0)).toBe(1250);
+});
+
+test("capital activo agrega compras pendientes por posición antes de restarlas", async () => {
   const source = await Bun.file(
     new URL("./reportes.ts", import.meta.url),
   ).text();
+  const activeCapitalStart = source.indexOf("const capitalActivoRows");
   const activeCapitalQuery = source.slice(
-    source.indexOf("const capitalActivoRows"),
-    source.indexOf("const montoAportadoRows"),
+    activeCapitalStart,
+    source.indexOf("const porInversionista", activeCapitalStart),
   );
 
+  expect(activeCapitalQuery).toContain("WITH pending_purchase_deltas AS");
+  expect(activeCapitalQuery).toContain("c.tipo_operacion = 'compra_cartera'");
+  expect(activeCapitalQuery).toContain("c.status = 'pendiente_compra_cartera'");
+  expect(activeCapitalQuery).toContain(
+    "GROUP BY c.credito_id, c.inversionista_id",
+  );
+  expect(activeCapitalQuery).toContain(
+    "SUM(ce.monto_aportado::numeric), 0) AS monto_espejo",
+  );
+  expect(activeCapitalQuery).toContain(
+    "SUM(ppd.monto_pendiente), 0) AS monto_compra_pendiente",
+  );
   expect(activeCapitalQuery).toContain(
     "FROM cartera.creditos_inversionistas_espejo ce",
   );
@@ -170,6 +196,9 @@ test("capital activo usa el espejo completo y excluye créditos cerrados", async
     "cr.\"statusCredit\" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')",
   );
   expect(activeCapitalQuery).toContain("GROUP BY ce.inversionista_id");
+  expect(activeCapitalQuery).toContain(
+    "calculateActiveCapital(\n        Number(r.monto_espejo ?? 0),\n        Number(r.monto_compra_pendiente ?? 0)",
+  );
 });
 
 test("el resumen de compras canoniza NULL y sin_reinversion en la misma modalidad", async () => {

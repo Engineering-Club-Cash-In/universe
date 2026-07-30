@@ -105,6 +105,13 @@ export function shouldIncludeInvestorPosition(position: InvestorPosition) {
   );
 }
 
+export function calculateActiveCapital(
+  mirrorAmount: number | string,
+  pendingPurchaseAmount: number | string,
+) {
+  return Number(mirrorAmount) - Number(pendingPurchaseAmount);
+}
+
 type NoVerificadoInterestDetail = {
   tratamiento_fiscal: "no_verificado";
   interes: string;

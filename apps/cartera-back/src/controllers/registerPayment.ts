@@ -1854,6 +1854,38 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
     const fechaVenc = ultimaCuotaPagada?.fecha_vencimiento ?? null;
     const estaAlDia = ultimaCuotaPagada && fechaVenc && fechaVenc >= hoy;
 
+    // Se marca cobrado acá, antes de la bifurcación de abono a capital / saldo
+    // a favor, para que corra siempre — sin importar a dónde vaya el sobrante
+    // — y solo si quedó un pago_id que lo respalde (cuota1PagoId), evitando
+    // que el dinero quede "cobrado" sin ningún pago real detrás.
+    if (ajusteFechaIdealId !== undefined && cuota1PagoId !== undefined) {
+      // try/catch propio: un fallo acá no debe tumbar la respuesta del pago
+      // (que ya se aplicó con éxito) con un 500 que invite a reintentar y
+      // duplicar el cobro. Best-effort, reconciliable manualmente si falla.
+      try {
+        await db
+          .update(ajuste_fecha_ideal_pago)
+          .set({ fecha_cobro: new Date(), pago_id: cuota1PagoId })
+          .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+        console.log(
+          `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${cuota1PagoId}).`
+        );
+      } catch (ajusteError) {
+        console.error(
+          `❌ No se pudo marcar como cobrado el ajuste #${ajusteFechaIdealId} ` +
+            `(pago_id=${cuota1PagoId}) — el pago SÍ se registró con éxito. ` +
+            `Requiere reconciliación manual:`,
+          ajusteError
+        );
+      }
+    } else if (ajusteFechaIdealId !== undefined) {
+      console.warn(
+        `⚠️ Ajuste por fecha ideal de pago #${ajusteFechaIdealId}: se dedujo del ` +
+          `disponible pero no se escribió ningún pago de la cuota 1 en este loop. ` +
+          `NO se marca como cobrado — revisar manualmente.`
+      );
+    }
+
     if ((estaAlDia || permiteAbonoCapital) && abonoCapital.gt(0)) {
       console.log("\n💰 ========== ABONO DIRECTO A CAPITAL ==========");
       console.log(`💵 Monto: Q${abonoCapital.toString()}`);
@@ -2029,37 +2061,6 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       console.log(
         `✅ Saldo a favor del usuario quedó en $${newSaldoAFavor.toString()}`
       );
-
-      // Se marca cobrado recién aquí, con el pago ya registrado con éxito, y
-      // solo si quedó un pago_id que lo respalde (cuota1PagoId) — evita que el
-      // dinero quede "cobrado" sin ningún pago real detrás.
-      if (ajusteFechaIdealId !== undefined && cuota1PagoId !== undefined) {
-        // try/catch propio: un fallo acá no debe tumbar la respuesta del pago
-        // (que ya se aplicó con éxito) con un 500 que invite a reintentar y
-        // duplicar el cobro. Best-effort, reconciliable manualmente si falla.
-        try {
-          await db
-            .update(ajuste_fecha_ideal_pago)
-            .set({ fecha_cobro: new Date(), pago_id: cuota1PagoId })
-            .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
-          console.log(
-            `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${cuota1PagoId}).`
-          );
-        } catch (ajusteError) {
-          console.error(
-            `❌ No se pudo marcar como cobrado el ajuste #${ajusteFechaIdealId} ` +
-              `(pago_id=${cuota1PagoId}) — el pago SÍ se registró con éxito. ` +
-              `Requiere reconciliación manual:`,
-            ajusteError
-          );
-        }
-      } else if (ajusteFechaIdealId !== undefined) {
-        console.warn(
-          `⚠️ Ajuste por fecha ideal de pago #${ajusteFechaIdealId}: se dedujo del ` +
-            `disponible pero no se escribió ningún pago de la cuota 1 en este loop. ` +
-            `NO se marca como cobrado — revisar manualmente.`
-        );
-      }
 
       console.log("✅ Pago realizado con éxito");
 

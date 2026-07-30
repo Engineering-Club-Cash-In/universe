@@ -17,6 +17,16 @@ export type BucketActualCredito = {
   /** true = statusCredit en STATUS_BUCKET_FUERA (EN_CONVENIO, CANCELADO...): sin bucket POR DISEÑO. */
   fuera_funnel: boolean;
   /**
+   * CB-027: último bucket registrado en buckets_historial, SIN el filtro de
+   * fuera_funnel que sí aplica a `bucket`. Cuando el crédito sale del funnel
+   * (p.ej. EN_CONVENIO), el motor deja de escribir transiciones para él
+   * (`if (bucketNuevo === null) continue`, latefee.ts) — la última fila queda
+   * congelada en el bucket real previo a la salida. null = sin traza en
+   * historial (crédito nunca procesado por el motor).
+   */
+  bucket_previo: number | null;
+  bucket_previo_prefijo: string | null;
+  /**
    * CB-026: fecha en que el crédito ENTRÓ al bucket actual (ISO), tomada de la
    * última fila de buckets_historial. null cuando el bucket NO vino de esa fila
    * sino de un branch de fallback de bucketActualSql (estado que fuerza bucket
@@ -51,6 +61,8 @@ export async function getBucketActualPorSifco(
     color: string | null;
     estado_mora: string | null;
     fecha_entrada_bucket: string | null;
+    bucket_previo: number | null;
+    bucket_previo_prefijo: string | null;
   }>(sql`
     WITH actual AS (
       SELECT
@@ -101,11 +113,15 @@ export async function getBucketActualPorSifco(
           THEN to_json(ue.fecha AT TIME ZONE 'UTC')#>>'{}'
         ELSE NULL
       END AS fecha_entrada_bucket,
-      b.prefijo, b.nombre, b.color, b.estado_mora
+      b.prefijo, b.nombre, b.color, b.estado_mora,
+      ue.bucket_nuevo AS bucket_previo,
+      bp.prefijo AS bucket_previo_prefijo
     FROM actual a
     LEFT JOIN ultima_entrada ue ON ue.credito_id = a.credito_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.buckets b
       ON b.numero = a.bucket AND b.activo = true AND a.fuera = false
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.buckets bp
+      ON bp.numero = ue.bucket_nuevo AND bp.activo = true
   `);
 
   const row = res.rows?.[0];
@@ -120,5 +136,7 @@ export async function getBucketActualPorSifco(
     estado_mora: row.estado_mora ?? null,
     fuera_funnel: Boolean(row.fuera),
     fecha_entrada_bucket: row.fecha_entrada_bucket ?? null,
+    bucket_previo: row.bucket_previo == null ? null : Number(row.bucket_previo),
+    bucket_previo_prefijo: row.bucket_previo_prefijo ?? null,
   };
 }

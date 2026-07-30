@@ -18,6 +18,7 @@ import {
 import Big from "big.js";
 import { createMora } from "./latefee";
 import { getPagosDelMesActual } from "./payments";
+import { calcularProgresoConvenio } from "./paymentAgreement-helpers";
 import { creditRouter } from "../routers";
 
 interface CreatePaymentAgreementInput {
@@ -1549,23 +1550,6 @@ export interface ListPaymentAgreementsFilters {
   perPage?: number;
 }
 
-/**
- * % de avance de un convenio (monto_pagado / monto_total_convenio * 100),
- * como string con 2 decimales para consistencia con el resto de campos
- * numéricos que cartera-back expone como string (evita drift de
- * precisión flotante en el JSON de la API). "0.00" si el total es 0/negativo
- * — nunca divide por cero.
- */
-export function calcularProgresoConvenio(
-  montoTotalConvenio: string | number,
-  montoPagado: string | number
-): string {
-  const total = Number(montoTotalConvenio) || 0;
-  const pagado = Number(montoPagado) || 0;
-  if (total <= 0) return "0.00";
-  return ((pagado / total) * 100).toFixed(2);
-}
-
 export async function listPaymentAgreements(filters: ListPaymentAgreementsFilters = {}) {
   try {
     const {
@@ -1614,8 +1598,15 @@ export async function listPaymentAgreements(filters: ListPaymentAgreementsFilter
       conditions.push(eq(creditos.asesor_id, asesor_id));
     }
     if (email_asesor) {
+      // asesores.emailCashIn, NO platform_users.email: poolPorAsesor.ts ya
+      // documenta que el email de platform_users/advisor está desactualizado
+      // para varios asesores, mientras email_cash_in es el que coincide con
+      // el email real del usuario en el CRM — y es el mismo campo que este
+      // endpoint ya devuelve como `asesor_email`, así que filtrar por otro
+      // campo distinto al mostrado podía ocultar convenios cuyo asesor_email
+      // visible sí matcheaba.
       conditions.push(
-        sql`${platform_users.email} ILIKE ${`%${email_asesor}%`}`
+        sql`${asesores.emailCashIn} ILIKE ${`%${email_asesor}%`}`
       );
     }
 
@@ -1645,11 +1636,7 @@ export async function listPaymentAgreements(filters: ListPaymentAgreementsFilter
       .from(convenios_pago)
       .innerJoin(creditos, eq(creditos.credito_id, convenios_pago.credito_id))
       .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
-      .leftJoin(asesores, eq(asesores.asesor_id, creditos.asesor_id))
-      .leftJoin(
-        platform_users,
-        eq(platform_users.asesor_id, asesores.asesor_id)
-      );
+      .leftJoin(asesores, eq(asesores.asesor_id, creditos.asesor_id));
 
     const rows = whereClause
       ? await baseQuery
@@ -1667,11 +1654,7 @@ export async function listPaymentAgreements(filters: ListPaymentAgreementsFilter
       .from(convenios_pago)
       .innerJoin(creditos, eq(creditos.credito_id, convenios_pago.credito_id))
       .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
-      .leftJoin(asesores, eq(asesores.asesor_id, creditos.asesor_id))
-      .leftJoin(
-        platform_users,
-        eq(platform_users.asesor_id, asesores.asesor_id)
-      );
+      .leftJoin(asesores, eq(asesores.asesor_id, creditos.asesor_id));
 
     const [{ count: totalCount }] = whereClause
       ? await countQuery.where(whereClause)

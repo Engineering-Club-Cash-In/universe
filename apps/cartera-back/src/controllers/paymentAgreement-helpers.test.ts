@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { calcularProgresoConvenio } from "./paymentAgreement";
+import { calcularProgresoConvenio } from "./paymentAgreement-helpers";
 
 describe("calcularProgresoConvenio", () => {
   it("calcula el porcentaje de avance con 2 decimales", () => {

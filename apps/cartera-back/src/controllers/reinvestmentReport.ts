@@ -10,6 +10,16 @@ type NetInterestInput = {
 const cents = (value: number | string) => Math.round(Number(value) * 100);
 const money = (valueInCents: number) => (valueInCents / 100).toFixed(2);
 
+export function buildCubeNetInterest(value: number) {
+  const interest = cents(value);
+  const tax = cents(value * 0.12);
+  return {
+    interes: money(interest),
+    iva: money(tax),
+    neto: money(interest + tax),
+  };
+}
+
 export function allocateRoundedAmounts(values: (number | string)[]) {
   const rawCents = values.map((value) => Number(value) * 100);
   const allocated = rawCents.map(Math.round);

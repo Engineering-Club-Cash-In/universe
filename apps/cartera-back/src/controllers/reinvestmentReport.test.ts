@@ -4,11 +4,20 @@ import {
   allocateRoundedPurchaseAmounts,
   assertModeReconciliation,
   assertReportReconciliation,
+  buildCubeNetInterest,
   buildInvestorPosition,
   buildNetInterestDetail,
   getPublicReinvestmentDetailError,
   shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
+
+test("CUBE deriva el neto de los componentes redondeados", () => {
+  expect(buildCubeNetInterest(1.00447)).toEqual({
+    interes: "1.00",
+    iva: "0.12",
+    neto: "1.12",
+  });
+});
 
 test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {
   const amounts = allocateRoundedAmounts([

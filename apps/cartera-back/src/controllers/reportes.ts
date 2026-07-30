@@ -12,6 +12,7 @@ import {
 	allocateRoundedPurchaseAmounts,
 	assertModeReconciliation,
 	assertReportReconciliation,
+	buildCubeNetInterest,
 	buildInvestorPosition,
 	buildNetInterestDetail,
 	getPublicReinvestmentDetailError,
@@ -923,6 +924,7 @@ export async function getReinversionLiquidaciones({
   const interesCube = Number(
     (cubeRows.rows[0] as Record<string, unknown>)?.interes_cube ?? 0
   );
+  const interesNetoCube = buildCubeNetInterest(interesCube);
 
   // Pagos extras recibidos (abonos a capital / cancelaciones) de las
   // liquidaciones del mes, leídos directo del abono.
@@ -1154,10 +1156,10 @@ export async function getReinversionLiquidaciones({
         inversionista: "CUBE",
         referencia: "Participación CUBE",
         tratamiento_fiscal: "cube",
-        interes: interesCube.toFixed(2),
-        iva: (interesCube * 0.12).toFixed(2),
+        interes: interesNetoCube.interes,
+        iva: interesNetoCube.iva,
         isr: "0.00",
-        neto: (interesCube * 1.12).toFixed(2),
+        neto: interesNetoCube.neto,
       });
     }
 
@@ -1264,11 +1266,7 @@ export async function getReinversionLiquidaciones({
       isr: sinFactura.isr.toFixed(2),
       neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
     },
-    cube: {
-      interes: interesCube.toFixed(2),
-      iva: (interesCube * 0.12).toFixed(2),
-      neto: (interesCube * 1.12).toFixed(2),
-    },
+    cube: interesNetoCube,
   };
   const pagosExtras = {
     abonos_capital: abonosCapital.toFixed(2),

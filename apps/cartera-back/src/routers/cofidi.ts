@@ -2255,7 +2255,7 @@ if (facturasExistentes.length > 0) {
     }
 
     // 🔥 VALIDACIÓN: Verificar período válido para anular
-    const fechaCertificacion = facturaCompleta.factura_fecha_certificacion 
+    const fechaCertificacion = facturaCompleta.factura_fecha_certificacion
       ? new Date(facturaCompleta.factura_fecha_certificacion)
       : new Date(facturaCompleta.factura_fecha_emision);
     
@@ -2270,9 +2270,9 @@ if (facturasExistentes.length > 0) {
     const esMismoPeriodo = (anioFactura === anioActual && mesFactura === mesActual);
 
     if (!esMismoPeriodo) {
-      const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+      const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-      
+
       set.status = 422;
       return {
         success: false,
@@ -2405,9 +2405,13 @@ if (facturasExistentes.length > 0) {
       }
       
       // 🔥 Error de documento no encontrado
-      else if (descripcionError.includes('no existe') || 
+      // "no ha sido emitido" = factura fantasma (el certificador devolvió UUID
+      // pero nunca la emitió a SAT). La corrección del estado en BD es MANUAL
+      // por decisión del equipo: este endpoint solo reporta el error claro.
+      else if (descripcionError.includes('no existe') ||
                descripcionError.includes('not found') ||
-               descripcionError.includes('No se encontró')) {
+               descripcionError.includes('No se encontró') ||
+               descripcionError.includes('no ha sido emitido')) {
         mensajeUsuario = 'La factura no fue encontrada en el sistema SAT';
         codigoError = 'FACTURA_NO_EXISTE_SAT';
         sugerencia = 'Verifique que la factura haya sido certificada correctamente';
@@ -3171,7 +3175,7 @@ if (facturasExistentes.length > 0) {
     "/facturar-generico",
     async ({ body, set, request }) => {
       try {
-        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo} = body;
+        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo, fecha_vencimiento} = body;
 
         // Si no viene created_by en el body, extraerlo del token
         let created_by = bodyCreatedBy;
@@ -3298,7 +3302,7 @@ if (facturasExistentes.length > 0) {
         console.log(`💰 Total factura: Q${totalFactura.toFixed(2)}`);
 
         // ============================================
-        // 4️⃣ CONSTRUIR COMPLEMENTOS (1 ABONO, FECHA HOY)
+        // 4️⃣ CONSTRUIR COMPLEMENTOS (1 ABONO, FECHA HOY O fecha_vencimiento)
         // ============================================
         const fechaHoy = new Date().toISOString().split("T")[0];
 
@@ -3308,7 +3312,7 @@ if (facturasExistentes.length > 0) {
             abonos: [
               {
                 numeroAbono: 1,
-                fechaVencimiento: fechaHoy,
+                fechaVencimiento: fecha_vencimiento ?? fechaHoy,
                 montoAbono: parseFloat(totalFactura.toFixed(2)),
               },
             ],
@@ -3461,6 +3465,9 @@ if (facturasExistentes.length > 0) {
           t.Literal("AUTOCASH"),
         ]),
         credito_nuevo: t.Optional(t.Boolean({ default: false })),
+        // Opcional: fecha de vencimiento del abono cambiario (yyyy-mm-dd).
+        // Si no viene, se usa la fecha de hoy (comportamiento original).
+        fecha_vencimiento: t.Optional(t.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" })),
       }),
     }
   )

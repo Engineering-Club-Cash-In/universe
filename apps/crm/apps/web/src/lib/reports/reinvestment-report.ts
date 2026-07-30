@@ -6,13 +6,22 @@ const sumCents = (values: (number | string)[]) =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 const isMoney = (value: unknown): value is string =>
-	typeof value === "string" &&
-	value.trim().length > 0 &&
-	Number.isFinite(Number(value));
+	typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value);
 const hasMoneyFields = (value: unknown, fields: string[]) =>
 	isRecord(value) && fields.every((field) => isMoney(value[field]));
 const hasStringFields = (value: unknown, fields: string[]) =>
 	isRecord(value) && fields.every((field) => typeof value[field] === "string");
+const isNonnegativeInteger = (value: unknown) =>
+	typeof value === "number" && Number.isInteger(value) && value >= 0;
+const MODES = new Set([
+	"sin_reinversion",
+	"reinversion_capital",
+	"reinversion_interes",
+	"reinversion_total",
+	"reinversion_variable",
+	"reinversion_excedente",
+	"reinversion_combinada",
+]);
 
 const MODE_MONEY_FIELDS = [
 	"reinversion_capital",
@@ -33,12 +42,12 @@ export function getCompatibleReportData(
 	if (!isRecord(input) || input.contrato_version !== 2) return undefined;
 	if (!isRecord(input.porTipo)) return undefined;
 	if (
+		!Object.keys(input.porTipo).every((key) => MODES.has(key)) ||
 		!Object.values(input.porTipo).every(
 			(row) =>
 				isRecord(row) &&
 				hasMoneyFields(row, MODE_MONEY_FIELDS) &&
-				Number.isInteger(row.cantidad_liquidaciones) &&
-				Number(row.cantidad_liquidaciones) >= 0,
+				isNonnegativeInteger(row.cantidad_liquidaciones),
 		)
 	)
 		return undefined;
@@ -47,14 +56,16 @@ export function getCompatibleReportData(
 		!input.porInversionista.every(
 			(row) =>
 				isRecord(row) &&
-				typeof row.inversionista_id === "number" &&
+				isNonnegativeInteger(row.inversionista_id) &&
+				typeof row.nombre === "string" &&
+				row.nombre.trim().length > 0 &&
+				MODES.has(String(row.tipo_reinversion)) &&
 				hasStringFields(row, ["nombre", "tipo_reinversion"]) &&
 				hasMoneyFields(row, [
 					"reinversion_capital",
 					"reinversion_interes",
 					"reinversion",
 					"a_recibir",
-					"monto_aportado",
 					"capital_activo",
 				]),
 		)
@@ -62,8 +73,7 @@ export function getCompatibleReportData(
 		return undefined;
 	if (
 		!isRecord(input.interesNeto) ||
-		!hasMoneyFields(input.interesNeto.conFactura, ["interes", "iva", "neto"]) ||
-		!hasMoneyFields(input.interesNeto.sinFactura, ["interes", "isr", "neto"]) ||
+		!hasMoneyFields(input.interesNeto.noVerificado, ["interes"]) ||
 		!hasMoneyFields(input.interesNeto.cube, ["interes", "iva", "neto"])
 	)
 		return undefined;
@@ -73,8 +83,8 @@ export function getCompatibleReportData(
 		!input.comprasMes.every(
 			(row) =>
 				isRecord(row) &&
-				typeof row.tipo === "string" &&
-				typeof row.cantidad === "number" &&
+				MODES.has(String(row.tipo)) &&
+				isNonnegativeInteger(row.cantidad) &&
 				isMoney(row.monto),
 		)
 	)
@@ -84,13 +94,17 @@ export function getCompatibleReportData(
 		!input.detalleInteresNeto.every(
 			(row) =>
 				isRecord(row) &&
-				typeof row.inversionista_id === "number" &&
+				isNonnegativeInteger(row.inversionista_id) &&
 				hasStringFields(row, [
 					"inversionista",
 					"referencia",
 					"tratamiento_fiscal",
 				]) &&
-				hasMoneyFields(row, ["interes", "iva", "isr", "neto"]),
+				((row.tratamiento_fiscal === "no_verificado" &&
+					hasMoneyFields(row, ["interes", "iva", "isr"]) &&
+					!("neto" in row)) ||
+					(row.tratamiento_fiscal === "cube" &&
+						hasMoneyFields(row, ["interes", "iva", "isr", "neto"]))),
 		)
 	)
 		return undefined;
@@ -98,15 +112,17 @@ export function getCompatibleReportData(
 		!Array.isArray(input.detallePagosExtras) ||
 		!input.detallePagosExtras.every(
 			(row) =>
-				hasStringFields(row, ["fecha", "credito", "tipo"]) &&
+				hasStringFields(row, ["fecha", "credito"]) &&
 				isRecord(row) &&
+				(row.tipo === "abono_capital" || row.tipo === "cancelacion") &&
 				isMoney(row.monto),
 		) ||
 		!Array.isArray(input.detalleComprasMes) ||
 		!input.detalleComprasMes.every(
 			(row) =>
-				hasStringFields(row, ["fecha", "inversionista", "modalidad"]) &&
+				hasStringFields(row, ["fecha", "inversionista"]) &&
 				isRecord(row) &&
+				MODES.has(String(row.modalidad)) &&
 				isMoney(row.monto),
 		)
 	)
@@ -115,10 +131,13 @@ export function getCompatibleReportData(
 		!isRecord(input.detalle_estado) ||
 		typeof input.detalle_estado.disponible !== "boolean" ||
 		!(
-			input.detalle_estado.error === null ||
-			typeof input.detalle_estado.error === "string"
+			(input.detalle_estado.disponible === true &&
+				input.detalle_estado.error === null) ||
+			(input.detalle_estado.disponible === false &&
+				typeof input.detalle_estado.error === "string" &&
+				input.detalle_estado.error.trim().length > 0)
 		) ||
-		typeof input.cantidad_liquidaciones !== "number"
+		!isNonnegativeInteger(input.cantidad_liquidaciones)
 	)
 		return undefined;
 	return input as ReinversionLiquidacionesResponse;
@@ -153,6 +172,9 @@ export type ReinvestmentModeRow = {
 		interest: number;
 	};
 	reconciled: boolean;
+	roundingResidual: number | null;
+	compositionStatus: "exact" | "tolerance" | "failed" | "unavailable";
+	historicalModeVerified: false;
 };
 
 const incompatibleModel = {
@@ -167,6 +189,7 @@ const incompatibleModel = {
 		extras: false,
 		purchases: false,
 		contract: false,
+		composition: "failed" as const,
 	},
 	reconciled: false,
 };
@@ -186,6 +209,16 @@ export function buildReinvestmentReportModel(input: unknown) {
 				withheldIsr: Number(value.total_isr),
 				distributed,
 			};
+			const hasAmbiguousFiscal =
+				Number(value.total_iva) !== 0 || Number(value.total_isr) !== 0;
+			const roundingResidual = Math.abs(
+				sumCents([
+					composition.capital,
+					composition.interest,
+					composition.billedVat,
+					-composition.withheldIsr,
+				]) - cents(distributed),
+			);
 			return {
 				type,
 				label: labels[type] ?? type,
@@ -205,14 +238,17 @@ export function buildReinvestmentReportModel(input: unknown) {
 				},
 				reconciled:
 					sumCents([paid, reinvested]) === cents(distributed) &&
-					Math.abs(
-						sumCents([
-							composition.capital,
-							composition.interest,
-							composition.billedVat,
-							-composition.withheldIsr,
-						]) - cents(distributed),
-					) <= value.cantidad_liquidaciones,
+					(hasAmbiguousFiscal ||
+						roundingResidual <= value.cantidad_liquidaciones),
+				roundingResidual: hasAmbiguousFiscal ? null : roundingResidual / 100,
+				compositionStatus: hasAmbiguousFiscal
+					? "unavailable"
+					: roundingResidual === 0
+						? "exact"
+						: roundingResidual <= value.cantidad_liquidaciones
+							? "tolerance"
+							: "failed",
+				historicalModeVerified: false,
 			};
 		})
 		.filter((row) => row.distributed !== 0 || row.active !== 0);
@@ -234,19 +270,12 @@ export function buildReinvestmentReportModel(input: unknown) {
 	const cubeRows = data.detalleInteresNeto.filter(
 		(row) => row.tratamiento_fiscal === "cube",
 	);
-	const interestCategories = [
-		["con_factura", data.interesNeto.conFactura.neto],
-		["sin_factura", data.interesNeto.sinFactura.neto],
-		["cube", data.interesNeto.cube.neto],
-	] as const;
-	const interestByCategory = interestCategories.every(
-		([category, summary]) =>
-			sumCents(
-				data.detalleInteresNeto
-					.filter((row) => row.tratamiento_fiscal === category)
-					.map((row) => row.neto),
-			) === cents(summary),
+	const noVerificadoRows = data.detalleInteresNeto.filter(
+		(row) => row.tratamiento_fiscal === "no_verificado",
 	);
+	const noVerificadoMatches =
+		sumCents(noVerificadoRows.map((row) => row.interes)) ===
+		cents(data.interesNeto.noVerificado.interes);
 	const extrasByCategory =
 		sumCents(
 			data.detallePagosExtras
@@ -260,9 +289,8 @@ export function buildReinvestmentReportModel(input: unknown) {
 		) === cents(data.pagosExtras.cancelaciones);
 	const purchasesByMode = data.comprasMes.every(
 		(summary) =>
-			data.detalleComprasMes.filter(
-				(row) => row.modalidad === summary.tipo,
-			).length === summary.cantidad &&
+			data.detalleComprasMes.filter((row) => row.modalidad === summary.tipo)
+				.length === summary.cantidad &&
 			sumCents(
 				data.detalleComprasMes
 					.filter((row) => row.modalidad === summary.tipo)
@@ -275,18 +303,14 @@ export function buildReinvestmentReportModel(input: unknown) {
 			cents(roundedTotals.distributed),
 		modes: rows.every((row) => row.reconciled),
 		interest:
-			sumCents(data.detalleInteresNeto.map((row) => row.neto)) ===
-				sumCents([
-					data.interesNeto.conFactura.neto,
-					data.interesNeto.sinFactura.neto,
-					data.interesNeto.cube.neto,
-				]) &&
-			interestByCategory &&
+			noVerificadoMatches &&
+			sumCents(cubeRows.map((row) => row.neto)) ===
+				cents(data.interesNeto.cube.neto) &&
 			cubeRows.length <= 1 &&
-			data.detalleInteresNeto.every((row) =>
-				interestCategories.some(
-					([category]) => category === row.tratamiento_fiscal,
-				),
+			data.detalleInteresNeto.every(
+				(row) =>
+					row.tratamiento_fiscal === "no_verificado" ||
+					row.tratamiento_fiscal === "cube",
 			),
 		extras:
 			sumCents(data.detallePagosExtras.map((row) => row.monto)) ===
@@ -306,6 +330,13 @@ export function buildReinvestmentReportModel(input: unknown) {
 				data.comprasMes.some((summary) => summary.tipo === row.modalidad),
 			),
 		contract: data.detalle_estado.disponible,
+		composition: rows.some((row) => row.compositionStatus === "unavailable")
+			? "unavailable"
+			: rows.some((row) => row.compositionStatus === "failed")
+				? "failed"
+				: rows.some((row) => row.compositionStatus === "tolerance")
+					? "tolerance"
+					: "exact",
 	};
 	return {
 		compatible: true as const,
@@ -352,13 +383,14 @@ export function getReportState(input: {
 	if (!model.reconciliations.destinations || !model.reconciliations.modes) {
 		return "error";
 	}
+	if (!model.data.detalle_estado.disponible) return "partial";
 	if (
 		model.data.cantidad_liquidaciones > 0 &&
+		!model.data.comprasMes.some((purchase) => purchase.cantidad > 0) &&
 		Object.values(model.totals).every((value) => cents(value) === 0)
 	) {
 		return "registered-zero";
 	}
-	if (!model.data.detalle_estado.disponible) return "partial";
 	if (!model.reconciled) return "error";
 	return "ready";
 }
@@ -366,8 +398,22 @@ export function getReportState(input: {
 export function getReconciliationPresentation(
 	state: ReportState,
 	reconciled: boolean,
-): "verified" | "unavailable" | "failed" {
+	model?: ReturnType<typeof buildReinvestmentReportModel>,
+): "verified" | "tolerance" | "unavailable" | "failed" {
 	if (state === "partial") return "unavailable";
+	if (
+		state === "ready" &&
+		model?.rows.some((row) => row.compositionStatus === "unavailable")
+	)
+		return "unavailable";
+	if (
+		state === "ready" &&
+		reconciled &&
+		model?.rows.some(
+			(row) => row.roundingResidual !== null && row.roundingResidual !== 0,
+		)
+	)
+		return "tolerance";
 	return state === "ready" && reconciled ? "verified" : "failed";
 }
 
@@ -410,13 +456,12 @@ function destinationFormula(
 	};
 }
 
-function getDestinationFormulas(
-	row: ReinvestmentModeRow,
-): {
+function getDestinationFormulas(row: ReinvestmentModeRow): {
 	paid: DestinationFormula;
 	reinvested: DestinationFormula;
 } | null {
-	if (NO_SPLIT_TYPES.has(row.type)) return null;
+	// La modalidad procede del perfil actual, no de un snapshot histórico.
+	if (NO_SPLIT_TYPES.has(row.type) || !row.historicalModeVerified) return null;
 	const capital = {
 		label: "Capital" as const,
 		value: row.composition.capital,
@@ -507,28 +552,22 @@ export function buildSecondarySummaryPresentation(
 ): SecondarySummaryPresentation[] {
 	const data = getCompatibleReportData(input);
 	if (!data) return [];
-	const conFactura = data.interesNeto.conFactura;
-	const sinFactura = data.interesNeto.sinFactura;
+	const noVerificado = data.interesNeto.noVerificado;
 	const cube = data.interesNeto.cube;
 	return [
 		{
 			key: "interest",
-			label: "Interés neto",
-			total: amount([conFactura.neto, sinFactura.neto, cube.neto]),
+			label: "Interés registrado",
+			total: amount([noVerificado.interes, cube.interes]),
 			items: [
 				{
-					label: "Con factura",
-					value: Number(conFactura.neto),
-					formula: `${q(Number(conFactura.interes))} + ${q(Number(conFactura.iva))} IVA = ${q(Number(conFactura.neto))}`,
-				},
-				{
-					label: "Sin factura",
-					value: Number(sinFactura.neto),
-					formula: `${q(Number(sinFactura.interes))} − ${q(Number(sinFactura.isr))} ISR = ${q(Number(sinFactura.neto))}`,
+					label: "Sin asignación fiscal",
+					value: Number(noVerificado.interes),
+					formula: `${q(Number(noVerificado.interes))} interés registrado sin asignación fiscal`,
 				},
 				{
 					label: "CUBE",
-					value: Number(cube.neto),
+					value: Number(cube.interes),
 					formula: `${q(Number(cube.interes))} + ${q(Number(cube.iva))} IVA = ${q(Number(cube.neto))}`,
 				},
 			],
@@ -569,9 +608,9 @@ export function buildInvestorExportRows(input: unknown) {
 	if (!data) return [];
 	return data.porInversionista.map((row) => ({
 		Inversionista: row.nombre,
-		Modalidad: row.tipo_reinversion,
+		"Modalidad actual": row.tipo_reinversion,
 		Pagado: row.a_recibir,
 		Reinvertido: row.reinversion,
-		"Capital activo": row.capital_activo,
+		"Capital activo actual": row.capital_activo,
 	}));
 }

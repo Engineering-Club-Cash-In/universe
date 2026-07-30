@@ -4,8 +4,8 @@ import {
 	buildReinvestmentReportModel,
 	buildSecondarySummaryPresentation,
 	canRenderSecondaryDetails,
-	getMonthlyFooterPresentation,
 	getModePresentation,
+	getMonthlyFooterPresentation,
 	getPublicPartialDetailMessage,
 	getReconciliationPresentation,
 	getReportState,
@@ -44,8 +44,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 		},
 	},
 	interesNeto: {
-		conFactura: { interes: "10.00", iva: "1.20", neto: "11.20" },
-		sinFactura: { interes: "5.00", isr: "0.35", neto: "4.65" },
+		noVerificado: { interes: "15.00" },
 		cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
 	},
 	pagosExtras: { abonos_capital: "20.00", cancelaciones: "30.00" },
@@ -56,21 +55,19 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			inversionista_id: 1,
 			inversionista: "Ana",
 			referencia: "LIQ-1",
-			tratamiento_fiscal: "con_factura",
+			tratamiento_fiscal: "no_verificado",
 			interes: "10.00",
-			iva: "1.20",
+			iva: "0.00",
 			isr: "0.00",
-			neto: "11.20",
 		},
 		{
 			inversionista_id: 2,
 			inversionista: "Luis",
 			referencia: "LIQ-2",
-			tratamiento_fiscal: "sin_factura",
+			tratamiento_fiscal: "no_verificado",
 			interes: "5.00",
 			iva: "0.00",
-			isr: "0.35",
-			neto: "4.65",
+			isr: "0.00",
 		},
 	],
 	detallePagosExtras: [
@@ -115,11 +112,12 @@ test("modelo ejecutivo concilia pagado + reinvertido con flujo liquidado", () =>
 		extras: true,
 		purchases: true,
 		contract: true,
+		composition: "unavailable",
 	});
 	expect(model.rows.map((row) => row.type)).toContain("reinversion_capital");
 });
 
-test("acepta dos centavos de deriva para dos liquidaciones", () => {
+test("conserva la conciliación canónica aunque la metadata fiscal tenga deriva", () => {
 	const data = response();
 	data.porTipo.sin_reinversion.total_capital = "100.02";
 	data.porTipo.sin_reinversion.cantidad_liquidaciones = 2;
@@ -128,16 +126,97 @@ test("acepta dos centavos de deriva para dos liquidaciones", () => {
 	expect(getReportState({ pending: false, error: false, data })).toBe("ready");
 });
 
-test("rechaza la deriva que supera la cantidad de liquidaciones", () => {
+test("IVA e ISR registrados sin asignación fiscal dejan la composición no disponible", () => {
 	const data = response();
-	data.porTipo.sin_reinversion.total_capital = "100.03";
-	data.porTipo.sin_reinversion.cantidad_liquidaciones = 2;
+	data.porTipo.sin_reinversion.iva_facturado = "0.00";
+	data.porTipo.sin_reinversion.total_iva = "1.20";
+	data.porTipo.sin_reinversion.total_isr = "0.35";
+	data.porTipo.sin_reinversion.total_cuota = "110.85";
+	data.porTipo.sin_reinversion.total_distribuido = "110.85";
+	const model = buildReinvestmentReportModel(data);
+
+	expect(getReportState({ pending: false, error: false, data })).toBe("ready");
+	expect(model.rows[0]?.compositionStatus).toBe("unavailable");
+	expect(model.reconciliations.composition).toBe("unavailable");
+	expect(getReconciliationPresentation("ready", model.reconciled, model)).toBe(
+		"unavailable",
+	);
+});
+
+test("distingue una conciliación exacta de una dentro de tolerancia", () => {
+	const exactData = response();
+	exactData.porTipo.sin_reinversion = {
+		reinversion_capital: "0.00",
+		reinversion_interes: "0.00",
+		reinversion_total: "0.00",
+		total_capital: "100.00",
+		total_interes: "0.00",
+		total_iva: "0.00",
+		total_isr: "0.00",
+		total_cuota: "100.00",
+		iva_facturado: "0.00",
+		total_distribuido: "100.00",
+		cantidad_liquidaciones: 1,
+	};
+	exactData.porTipo.reinversion_capital = {
+		reinversion_capital: "50.00",
+		reinversion_interes: "0.00",
+		reinversion_total: "50.00",
+		total_capital: "100.00",
+		total_interes: "0.00",
+		total_iva: "0.00",
+		total_isr: "0.00",
+		total_cuota: "50.00",
+		iva_facturado: "0.00",
+		total_distribuido: "100.00",
+		cantidad_liquidaciones: 1,
+	};
+	const exact = buildReinvestmentReportModel(exactData);
+	expect(getReconciliationPresentation("ready", exact.reconciled, exact)).toBe(
+		"verified",
+	);
+
+	const tolerated = structuredClone(exactData);
+	tolerated.porTipo.sin_reinversion = {
+		reinversion_capital: "0.00",
+		reinversion_interes: "0.00",
+		reinversion_total: "0.00",
+		total_capital: "100.01",
+		total_interes: "0.00",
+		total_iva: "0.00",
+		total_isr: "0.00",
+		total_cuota: "100.00",
+		iva_facturado: "0.00",
+		total_distribuido: "100.00",
+		cantidad_liquidaciones: 1,
+	};
+	const model = buildReinvestmentReportModel(tolerated);
+	expect(model.reconciled).toBe(true);
+	expect(getReconciliationPresentation("ready", model.reconciled, model)).toBe(
+		"tolerance",
+	);
+
+	const beyondTolerance = structuredClone(exactData);
+	beyondTolerance.porTipo.sin_reinversion = {
+		...tolerated.porTipo.sin_reinversion,
+		total_capital: "100.02",
+	};
+	const failed = buildReinvestmentReportModel(beyondTolerance);
+	expect(failed.reconciled).toBe(false);
+	expect(
+		getReconciliationPresentation("ready", failed.reconciled, failed),
+	).toBe("failed");
+});
+
+test("rechaza un destino que no concilia", () => {
+	const data = response();
+	data.porTipo.sin_reinversion.total_distribuido = "100.03";
 
 	expect(buildReinvestmentReportModel(data).reconciliations.modes).toBe(false);
 	expect(getReportState({ pending: false, error: false, data })).toBe("error");
 });
 
-test("presentación por modalidad conserva destinos, ecuación y composición contable", () => {
+test("modalidad actual no presenta fórmulas históricas sin snapshot", () => {
 	const model = buildReinvestmentReportModel(response());
 	const row = model.rows.find((item) => item.type === "reinversion_capital");
 	expect(row).toBeDefined();
@@ -146,102 +225,18 @@ test("presentación por modalidad conserva destinos, ecuación y composición co
 		paid: 4.65,
 		reinvested: 50,
 		distributed: 54.65,
-		equation: "Q4.65 pagado + Q50.00 reinvertido = Q54.65 flujo liquidado.",
-		composition: {
-			capital: 50,
-			interest: 5,
-			billedVat: 0,
-			withheldIsr: 0.35,
-			distributed: 54.65,
-		},
-		splitAvailable: true,
-		destinations: {
-			paid: {
-				parts: [{ label: "Rendimiento fiscal neto", value: 4.65 }],
-				result: 4.65,
-				sentence:
-					"Pagado a inversionistas se forma con Q4.65 de rendimiento fiscal neto y da Q4.65.",
-			},
-			reinvested: {
-				parts: [{ label: "Capital", value: 50 }],
-				result: 50,
-				sentence: "Reinvertido se forma con Q50.00 de capital y da Q50.00.",
-			},
-		},
+		splitAvailable: false,
+		destinations: null,
 	});
 });
 
-test("capital, interés y total explican qué forma cada destino", () => {
-	const base = response().porTipo.reinversion_capital;
-	const cases = [
-		{
-			type: "sin_reinversion",
-			paid: 54.65,
-			reinvested: 0,
-			paidParts: ["Capital", "Rendimiento fiscal neto"],
-			reinvestedParts: [],
-		},
-		{
-			type: "reinversion_capital",
-			paid: 4.65,
-			reinvested: 50,
-			paidParts: ["Rendimiento fiscal neto"],
-			reinvestedParts: ["Capital"],
-		},
-		{
-			type: "reinversion_interes",
-			paid: 50,
-			reinvested: 4.65,
-			paidParts: ["Capital"],
-			reinvestedParts: ["Rendimiento fiscal neto"],
-		},
-		{
-			type: "reinversion_total",
-			paid: 0,
-			reinvested: 54.65,
-			paidParts: [],
-			reinvestedParts: ["Capital", "Rendimiento fiscal neto"],
-		},
-	] as const;
-
-	for (const item of cases) {
-		const data = response();
-		data.porTipo = {
-			[item.type]: {
-				...base,
-				reinversion_capital:
-					item.type === "reinversion_capital" ||
-					item.type === "reinversion_total"
-						? "50.00"
-						: "0.00",
-				reinversion_interes:
-					item.type === "reinversion_interes" ||
-					item.type === "reinversion_total"
-						? "4.65"
-						: "0.00",
-				reinversion_total: item.reinvested.toFixed(2),
-				total_cuota: item.paid.toFixed(2),
-			},
-		};
-		const row = buildReinvestmentReportModel(data).rows[0];
-		expect(row).toBeDefined();
-		if (!row) throw new Error(`Falta modalidad ${item.type}`);
-			const presentation = getModePresentation(row);
-			expect(presentation.destinations?.paid.parts.map((part) => part.label)).toEqual(
-				[...item.paidParts],
-			);
-			expect(
-				presentation.destinations?.reinvested.parts.map((part) => part.label),
-			).toEqual([...item.reinvestedParts]);
-		expect(presentation.destinations?.paid.result).toBe(item.paid);
-		expect(presentation.destinations?.reinvested.result).toBe(item.reinvested);
-		expect(presentation.destinations?.paid.sentence).toContain(
-			"Pagado a inversionistas",
-		);
-		expect(presentation.destinations?.reinvested.sentence).toContain(
-			"Reinvertido",
-		);
-	}
+test("cambio de modalidad actual no reclasifica ni verifica el flujo histórico", () => {
+	const data = response();
+	data.porTipo = { reinversion_total: data.porTipo.reinversion_capital };
+	const row = buildReinvestmentReportModel(data).rows[0];
+	expect(row?.label).toBe("Interés compuesto");
+	if (!row) throw new Error("Se esperaba una modalidad");
+	expect(getModePresentation(row).destinations).toBeNull();
 });
 
 test("suprime fórmulas de una modalidad actual que no concilia con destinos históricos", () => {
@@ -332,6 +327,57 @@ test("contrato anterior o malformado falla de forma controlada y no concilia", (
 	expect(buildReinvestmentReportModel(missingModeCount).compatible).toBe(false);
 });
 
+test("contrato web rechaza categorías, ids y conteos fuera del contrato", () => {
+	const invalidCategory = response() as unknown as Record<string, unknown>;
+	(
+		invalidCategory.detalleInteresNeto as Record<string, unknown>[]
+	)[0].tratamiento_fiscal = "inventado";
+	expect(buildReinvestmentReportModel(invalidCategory).compatible).toBe(false);
+
+	const invalidCount = response() as unknown as Record<string, unknown>;
+	(invalidCount.comprasMes as Record<string, unknown>[])[0].cantidad = 1.5;
+	expect(buildReinvestmentReportModel(invalidCount).compatible).toBe(false);
+
+	const invalidId = response() as unknown as Record<string, unknown>;
+	invalidId.porInversionista = [
+		{
+			inversionista_id: -1,
+			nombre: "Ana",
+			tipo_reinversion: "sin_reinversion",
+			reinversion_capital: "0.00",
+			reinversion_interes: "0.00",
+			reinversion: "0.00",
+			a_recibir: "0.00",
+			capital_activo: "0.00",
+		},
+	];
+	expect(buildReinvestmentReportModel(invalidId).compatible).toBe(false);
+
+	const invalidMoney = response() as unknown as Record<string, unknown>;
+	(invalidMoney.pagosExtras as Record<string, unknown>).abonos_capital =
+		"-0.01";
+	expect(buildReinvestmentReportModel(invalidMoney).compatible).toBe(false);
+	for (const value of ["1e2", "0x10"]) {
+		const invalidDecimal = response() as unknown as Record<string, unknown>;
+		(invalidDecimal.pagosExtras as Record<string, unknown>).abonos_capital =
+			value;
+		expect(buildReinvestmentReportModel(invalidDecimal).compatible).toBe(false);
+	}
+
+	const invalidMode = response() as unknown as Record<string, unknown>;
+	invalidMode.porTipo = { inventado: response().porTipo.sin_reinversion };
+	expect(buildReinvestmentReportModel(invalidMode).compatible).toBe(false);
+
+	for (const detalle_estado of [
+		{ disponible: true, error: "contradictorio" },
+		{ disponible: false, error: " " },
+	]) {
+		const contradictory = response() as unknown as Record<string, unknown>;
+		contradictory.detalle_estado = detalle_estado;
+		expect(buildReinvestmentReportModel(contradictory).compatible).toBe(false);
+	}
+});
+
 test("reemplazo conserva export Excel por inversionista con destinos y capital activo", () => {
 	const data = response();
 	data.porInversionista = [
@@ -343,17 +389,16 @@ test("reemplazo conserva export Excel por inversionista con destinos y capital a
 			reinversion_interes: "0.00",
 			reinversion: "50.00",
 			a_recibir: "4.65",
-			monto_aportado: "950.00",
 			capital_activo: "1000.00",
 		},
 	];
 	expect(buildInvestorExportRows(data)).toEqual([
 		{
 			Inversionista: "Ana",
-			Modalidad: "reinversion_capital",
+			"Modalidad actual": "reinversion_capital",
 			Pagado: "4.65",
 			Reinvertido: "50.00",
-			"Capital activo": "1000.00",
+			"Capital activo actual": "1000.00",
 		},
 	]);
 	expect(buildInvestorExportRows({})).toEqual([]);
@@ -370,7 +415,6 @@ test("rechaza inversionistas con campos monetarios no numéricos", () => {
 			reinversion_interes: "0.00",
 			reinversion: "0.00",
 			a_recibir: "0.00",
-			monto_aportado: "0.00",
 			capital_activo: "0.00",
 		},
 	];
@@ -389,7 +433,6 @@ test("rechaza inversionistas con campos monetarios no numéricos", () => {
 			reinversion_interes: "0.00",
 			reinversion: "0.00",
 			a_recibir: "no-numérico",
-			monto_aportado: "0.00",
 			capital_activo: "0.00",
 		},
 	];
@@ -429,8 +472,7 @@ test("acepta campos monetarios válidos y conserva capital activo sin flujo", ()
 		},
 	};
 	zero.interesNeto = {
-		conFactura: { interes: "0.00", iva: "0.00", neto: "0.00" },
-		sinFactura: { interes: "0.00", isr: "0.00", neto: "0.00" },
+		noVerificado: { interes: "0.00" },
 		cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
 	};
 	zero.pagosExtras = { abonos_capital: "0.00", cancelaciones: "0.00" };
@@ -443,7 +485,6 @@ test("acepta campos monetarios válidos y conserva capital activo sin flujo", ()
 			reinversion_interes: "0.00",
 			reinversion: "0.00",
 			a_recibir: "0.00",
-			monto_aportado: "0.00",
 			capital_activo: "1250.00",
 		},
 	];
@@ -469,18 +510,13 @@ test("presentación restaura los tres subresúmenes canónicos y sus fórmulas",
 	expect(buildSecondarySummaryPresentation(response())).toEqual([
 		{
 			key: "interest",
-			label: "Interés neto",
-			total: 15.85,
+			label: "Interés registrado",
+			total: 15,
 			items: [
 				{
-					label: "Con factura",
-					value: 11.2,
-					formula: "Q10.00 + Q1.20 IVA = Q11.20",
-				},
-				{
-					label: "Sin factura",
-					value: 4.65,
-					formula: "Q5.00 − Q0.35 ISR = Q4.65",
+					label: "Sin asignación fiscal",
+					value: 15,
+					formula: "Q15.00 interés registrado sin asignación fiscal",
 				},
 				{
 					label: "CUBE",
@@ -519,14 +555,13 @@ test("footer mensual presenta la misma conciliación que el modelo", () => {
 		paid: 115.85,
 		reinvested: 50,
 		distributed: 165.85,
-		equation:
-			"Q115.85 pagado + Q50.00 reinvertido = Q165.85 flujo liquidado.",
+		equation: "Q115.85 pagado + Q50.00 reinvertido = Q165.85 flujo liquidado.",
 	});
 });
 
 test("modelo fail-closed marca no reconciliado cualquier detalle descuadrado, incluido CUBE", () => {
 	const interestMismatch = response();
-	interestMismatch.detalleInteresNeto[0].neto = "10.20";
+	interestMismatch.detalleInteresNeto[0].interes = "10.20";
 	expect(buildReinvestmentReportModel(interestMismatch).reconciled).toBe(false);
 
 	const cubeMismatch = response();
@@ -588,9 +623,9 @@ test("dos compras del mismo inversionista, fecha y modalidad concilian como dos 
 
 	const model = buildReinvestmentReportModel(purchases);
 	expect(model.reconciliations.purchases).toBe(true);
-	expect(getReportState({ pending: false, error: false, data: purchases })).toBe(
-		"ready",
-	);
+	expect(
+		getReportState({ pending: false, error: false, data: purchases }),
+	).toBe("ready");
 });
 
 test("ruta Admin reportes entrega query real, estados y respuesta íntegra al componente productivo", async () => {
@@ -612,7 +647,9 @@ test("ruta Admin reportes entrega query real, estados y respuesta íntegra al co
 	expect(queryWiring).toContain(
 		"orpc.getReinversionLiquidaciones.queryOptions",
 	);
-	expect(queryWiring).toContain("input: { mes: flujoMesNum, anio: flujoAnioNum }");
+	expect(queryWiring).toContain(
+		"input: { mes: flujoMesNum, anio: flujoAnioNum }",
+	);
 	expect(renderWiring).toContain("data={reinversionData}");
 	expect(renderWiring).toContain(
 		"isPending={reinversionLiquidacionesQuery.isPending}",
@@ -627,10 +664,27 @@ test("ruta Admin reportes entrega query real, estados y respuesta íntegra al co
 	expect(renderWiring).not.toContain("detalleComprasMes:");
 });
 
+test("UI y export nombran el capital como posición actual", async () => {
+	const component = await Bun.file(
+		new URL(
+			"../../components/reports/reinvestment-report.tsx",
+			import.meta.url,
+		),
+	).text();
+	expect(component).toContain("Capital activo actual");
+	expect(component).toMatch(
+		/getReconciliationPresentation\(\s*state,\s*model\.reconciled,\s*model,?\s*\)/,
+	);
+	const report = await Bun.file(
+		new URL("./reinvestment-report.ts", import.meta.url),
+	).text();
+	expect(report).toContain('"Capital activo actual": row.capital_activo');
+});
+
 test("el modelo no permite descuadres compensados entre subcategorías", () => {
 	const interest = response();
-	interest.detalleInteresNeto[0].neto = "10.20";
-	interest.detalleInteresNeto[1].neto = "5.65";
+	interest.detalleInteresNeto[0].interes = "10.20";
+	interest.detalleInteresNeto[1].interes = "5.00";
 	expect(buildReinvestmentReportModel(interest).reconciliations.interest).toBe(
 		false,
 	);
@@ -638,7 +692,9 @@ test("el modelo no permite descuadres compensados entre subcategorías", () => {
 	const extras = response();
 	extras.detallePagosExtras[0].monto = "19.00";
 	extras.detallePagosExtras[1].monto = "31.00";
-	expect(buildReinvestmentReportModel(extras).reconciliations.extras).toBe(false);
+	expect(buildReinvestmentReportModel(extras).reconciliations.extras).toBe(
+		false,
+	);
 });
 
 describe("presentación fail-closed", () => {
@@ -661,8 +717,7 @@ describe("getReportState", () => {
 		const data = response();
 		data.porTipo = {};
 		data.interesNeto = {
-			conFactura: { interes: "0.00", iva: "0.00", neto: "0.00" },
-			sinFactura: { interes: "0.00", isr: "0.00", neto: "0.00" },
+			noVerificado: { interes: "0.00" },
 			cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
 		};
 		data.pagosExtras = { abonos_capital: "0.00", cancelaciones: "0.00" };
@@ -697,7 +752,7 @@ describe("getReportState", () => {
 
 	test("una respuesta completa descuadrada fuerza error", () => {
 		const mismatch = response();
-		mismatch.detalleInteresNeto[0].neto = "10.20";
+		mismatch.detalleInteresNeto[0].interes = "10.20";
 		expect(
 			getReportState({ pending: false, error: false, data: mismatch }),
 		).toBe("error");
@@ -713,6 +768,100 @@ describe("getReportState", () => {
 		expect(
 			getReportState({ pending: false, error: false, data: mismatch }),
 		).toBe("error");
+	});
+
+	test("detalle parcial precede a registered-zero", () => {
+		const zero = response();
+		zero.porTipo = Object.fromEntries(
+			Object.keys(zero.porTipo).map((type) => [
+				type,
+				{
+					reinversion_capital: "0.00",
+					reinversion_interes: "0.00",
+					reinversion_total: "0.00",
+					total_capital: "0.00",
+					total_interes: "0.00",
+					total_iva: "0.00",
+					total_isr: "0.00",
+					total_cuota: "0.00",
+					iva_facturado: "0.00",
+					total_distribuido: "0.00",
+					cantidad_liquidaciones: 1,
+				},
+			]),
+		);
+		zero.comprasMes = [];
+		zero.detalleComprasMes = [];
+		zero.detalleInteresNeto = [];
+		zero.detallePagosExtras = [];
+		zero.interesNeto = {
+			noVerificado: { interes: "0.00" },
+			cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
+		};
+		zero.pagosExtras = { abonos_capital: "0.00", cancelaciones: "0.00" };
+		zero.porInversionista = [];
+		zero.detalle_estado = { disponible: false, error: "No disponible" };
+		expect(getReportState({ pending: false, error: false, data: zero })).toBe(
+			"partial",
+		);
+	});
+
+	test("liquidaciones en cero con compra completada se mantienen como actividad", () => {
+		const data = response();
+		data.porTipo = {
+			sin_reinversion: {
+				reinversion_capital: "0.00",
+				reinversion_interes: "0.00",
+				reinversion_total: "0.00",
+				total_capital: "0.00",
+				total_interes: "0.00",
+				total_iva: "0.00",
+				total_isr: "0.00",
+				total_cuota: "0.00",
+				iva_facturado: "0.00",
+				total_distribuido: "0.00",
+				cantidad_liquidaciones: 1,
+			},
+		};
+		data.interesNeto = {
+			noVerificado: { interes: "0.00" },
+			cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
+		};
+		data.pagosExtras = { abonos_capital: "0.00", cancelaciones: "0.00" };
+		data.porInversionista = [];
+		data.comprasMes = [{ tipo: "sin_reinversion", cantidad: 1, monto: "0.00" }];
+		data.detalleInteresNeto = [];
+		data.detallePagosExtras = [];
+		data.detalleComprasMes = [
+			{
+				fecha: "2026-07-03",
+				inversionista: "Ana",
+				modalidad: "sin_reinversion",
+				monto: "0.00",
+			},
+		];
+		data.cantidad_liquidaciones = 1;
+		expect(getReportState({ pending: false, error: false, data })).toBe(
+			"ready",
+		);
+	});
+
+	test("compra completada de valor cero no se presenta como registered-zero", () => {
+		const purchases = purchaseOnlyResponse();
+		purchases.comprasMes = [
+			{ tipo: "sin_reinversion", cantidad: 1, monto: "0.00" },
+		];
+		purchases.detalleComprasMes = [
+			{
+				fecha: "2026-07-03",
+				inversionista: "Ana",
+				modalidad: "sin_reinversion",
+				monto: "0.00",
+			},
+		];
+		expect(
+			getReportState({ pending: false, error: false, data: purchases }),
+		).toBe("ready");
 	});
 
 	test("conserva compras conciliadas aunque no existan liquidaciones", () => {
@@ -735,9 +884,9 @@ describe("getReportState", () => {
 		empty.detalleComprasMes = [];
 
 		expect(buildReinvestmentReportModel(empty).reconciled).toBe(true);
-		expect(
-			getReportState({ pending: false, error: false, data: empty }),
-		).toBe("empty");
+		expect(getReportState({ pending: false, error: false, data: empty })).toBe(
+			"empty",
+		);
 	});
 
 	test("distingue liquidaciones registradas sin flujo ni posición", () => {
@@ -758,8 +907,7 @@ describe("getReportState", () => {
 			},
 		};
 		zero.interesNeto = {
-			conFactura: { interes: "0.00", iva: "0.00", neto: "0.00" },
-			sinFactura: { interes: "0.00", isr: "0.00", neto: "0.00" },
+			noVerificado: { interes: "0.00" },
 			cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
 		};
 		zero.pagosExtras = { abonos_capital: "0.00", cancelaciones: "0.00" };

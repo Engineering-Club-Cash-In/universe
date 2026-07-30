@@ -16,20 +16,20 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import type {
+	DestinationFormula,
+	ReinvestmentModeRow,
+} from "@/lib/reports/reinvestment-report";
 import {
 	buildReinvestmentReportModel,
 	buildSecondarySummaryPresentation,
 	canRenderSecondaryDetails,
-	getMonthlyFooterPresentation,
 	getModePresentation,
+	getMonthlyFooterPresentation,
 	getPublicPartialDetailMessage,
 	getReconciliationPresentation,
 	getReportState,
 	REGISTERED_ZERO_ACTIVITY_COPY,
-} from "@/lib/reports/reinvestment-report";
-import type {
-	DestinationFormula,
-	ReinvestmentModeRow,
 } from "@/lib/reports/reinvestment-report";
 import type { ReinversionLiquidacionesResponse } from "@/lib/reports/scenario";
 
@@ -62,7 +62,10 @@ export function ReinvestmentReport({
 
 	if (state === "loading")
 		return (
-			<div className="py-14 text-center text-muted-foreground" aria-live="polite">
+			<div
+				className="py-14 text-center text-muted-foreground"
+				aria-live="polite"
+			>
 				Cargando distribución de {periodLabel}…
 			</div>
 		);
@@ -93,21 +96,25 @@ export function ReinvestmentReport({
 		);
 	if (state === "registered-zero")
 		return (
-			<div className="space-y-2 py-14 text-center" role="status">
-				<p className="font-medium text-foreground">
+			<output className="block space-y-2 py-14 text-center">
+				<span className="block font-medium text-foreground">
 					{REGISTERED_ZERO_ACTIVITY_COPY}
-				</p>
-				<p className="text-muted-foreground text-sm">
+				</span>
+				<span className="block text-muted-foreground text-sm">
 					El período {periodLabel} contiene registros, pero su posición y flujo
 					liquidado son Q0.00.
-				</p>
-			</div>
+				</span>
+			</output>
 		);
 
 	const model = buildReinvestmentReportModel(data);
 	if (!model.compatible) return null;
 	const safeData = model.data;
-	const reconciliation = getReconciliationPresentation(state, model.reconciled);
+	const reconciliation = getReconciliationPresentation(
+		state,
+		model.reconciled,
+		model,
+	);
 	const showSecondaryDetails = canRenderSecondaryDetails(state);
 	const currency = (value: number | string) =>
 		new Intl.NumberFormat("es-GT", {
@@ -133,10 +140,14 @@ export function ReinvestmentReport({
 					<Metric label="Reinvertido" value={model.totals.reinvested} />
 					<Metric label="Flujo liquidado" value={model.totals.distributed} />
 				</div>
-				{reconciliation === "verified" ? (
+				{reconciliation === "verified" || reconciliation === "tolerance" ? (
 					<div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-emerald-900 text-sm">
 						<CheckCircle2 className="h-4 w-4" />
-						<strong>Conciliación verificada:</strong>
+						<strong>
+							{reconciliation === "verified"
+								? "Conciliación verificada:"
+								: "Dentro de tolerancia de redondeo:"}
+						</strong>
 						<span>
 							{currency(model.totals.paid)} pagado +{" "}
 							{currency(model.totals.reinvested)} reinvertido ={" "}
@@ -144,13 +155,10 @@ export function ReinvestmentReport({
 						</span>
 					</div>
 				) : (
-					<div
-						className="mt-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 text-sm"
-						role="status"
-					>
+					<output className="mt-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
 						<AlertCircle className="h-4 w-4 shrink-0" />
 						<strong>Conciliación no disponible para este período.</strong>
-					</div>
+					</output>
 				)}
 			</section>
 
@@ -158,11 +166,11 @@ export function ReinvestmentReport({
 				<div className="mb-3 flex flex-wrap items-center justify-between gap-3">
 					<div>
 						<h3 id="investment-modes" className="font-semibold text-lg">
-							Destino del flujo por modalidad
+							Destino del flujo por modalidad actual
 						</h3>
 						<p className="text-muted-foreground text-sm">
-							Cada fila concilia lo pagado y reinvertido con el flujo
-							liquidado.
+							La modalidad es la actual; no existe snapshot histórico para
+							verificar el destino.
 						</p>
 					</div>
 					<div className="flex flex-wrap gap-2">
@@ -186,7 +194,7 @@ export function ReinvestmentReport({
 					<Table className="min-w-[720px]">
 						<TableHeader>
 							<TableRow>
-								<TableHead>Modalidad</TableHead>
+								<TableHead>Modalidad actual</TableHead>
 								<TableHead className="text-right">Pagado</TableHead>
 								<TableHead className="text-right">Reinvertido</TableHead>
 								<TableHead className="text-right">Flujo liquidado</TableHead>
@@ -197,7 +205,9 @@ export function ReinvestmentReport({
 							{model.rows.map((row) => (
 								<TableRow
 									key={row.type}
-									data-state={selectedModeRow?.type === row.type ? "selected" : undefined}
+									data-state={
+										selectedModeRow?.type === row.type ? "selected" : undefined
+									}
 								>
 									<TableCell className="font-medium">{row.label}</TableCell>
 									<TableCell className="text-right">
@@ -245,41 +255,42 @@ export function ReinvestmentReport({
 					</Table>
 				</TableOverflow>
 				{selectedModeRow ? (
-					<ModeReconciliation
-						row={selectedModeRow}
-						currency={currency}
-					/>
+					<ModeReconciliation row={selectedModeRow} currency={currency} />
 				) : null}
 				{showInvestors ? (
 					<div className="mt-4">
 						<TableOverflow label="Detalle por inversionista">
 							<Table className="min-w-[720px]">
-							<TableHeader>
-								<TableRow>
-									<TableHead>Inversionista</TableHead>
-									<TableHead>Modalidad</TableHead>
-									<TableHead className="text-right">Pagado</TableHead>
-									<TableHead className="text-right">Reinvertido</TableHead>
-									<TableHead className="text-right">Capital activo</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{safeData.porInversionista.map((item) => (
-									<TableRow key={item.inversionista_id}>
-										<TableCell className="font-medium">{item.nombre}</TableCell>
-										<TableCell>{item.tipo_reinversion}</TableCell>
-										<TableCell className="text-right">
-											{currency(item.a_recibir)}
-										</TableCell>
-										<TableCell className="text-right">
-											{currency(item.reinversion)}
-										</TableCell>
-										<TableCell className="text-right">
-											{currency(item.capital_activo)}
-										</TableCell>
+								<TableHeader>
+									<TableRow>
+										<TableHead>Inversionista</TableHead>
+										<TableHead>Modalidad actual</TableHead>
+										<TableHead className="text-right">Pagado</TableHead>
+										<TableHead className="text-right">Reinvertido</TableHead>
+										<TableHead className="text-right">
+											Capital activo actual
+										</TableHead>
 									</TableRow>
-								))}
-							</TableBody>
+								</TableHeader>
+								<TableBody>
+									{safeData.porInversionista.map((item) => (
+										<TableRow key={item.inversionista_id}>
+											<TableCell className="font-medium">
+												{item.nombre}
+											</TableCell>
+											<TableCell>{item.tipo_reinversion}</TableCell>
+											<TableCell className="text-right">
+												{currency(item.a_recibir)}
+											</TableCell>
+											<TableCell className="text-right">
+												{currency(item.reinversion)}
+											</TableCell>
+											<TableCell className="text-right">
+												{currency(item.capital_activo)}
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
 							</Table>
 						</TableOverflow>
 					</div>
@@ -291,12 +302,9 @@ export function ReinvestmentReport({
 					Rendimiento y movimientos del mes
 				</h3>
 				{!showSecondaryDetails ? (
-					<p
-						className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm"
-						role="status"
-					>
+					<output className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm">
 						{getPublicPartialDetailMessage()}
-					</p>
+					</output>
 				) : (
 					<>
 						<div className="grid gap-3 lg:grid-cols-3">
@@ -463,29 +471,36 @@ function ModeReconciliation({
 				</div>
 				<div>
 					<h5 className="font-semibold">Composición contable del flujo</h5>
-					<dl className="mt-3 divide-y rounded-md border bg-background">
-						<LedgerRow
-							label="Capital liquidado"
-							value={currency(row.composition.capital)}
-						/>
-						<LedgerRow
-							label="+ Interés bruto"
-							value={currency(row.composition.interest)}
-						/>
-						<LedgerRow
-							label="+ IVA facturado"
-							value={currency(row.composition.billedVat)}
-						/>
-						<LedgerRow
-							label="− ISR retenido"
-							value={currency(row.composition.withheldIsr)}
-						/>
-						<LedgerRow
-							label="= Flujo liquidado"
-							value={currency(row.composition.distributed)}
-							total
-						/>
-					</dl>
+					{row.compositionStatus === "unavailable" ? (
+						<p className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm">
+							La composición fiscal no está disponible: IVA e ISR registrados no
+							tienen tratamiento inmutable.
+						</p>
+					) : (
+						<dl className="mt-3 divide-y rounded-md border bg-background">
+							<LedgerRow
+								label="Capital liquidado"
+								value={currency(row.composition.capital)}
+							/>
+							<LedgerRow
+								label="+ Interés bruto"
+								value={currency(row.composition.interest)}
+							/>
+							<LedgerRow
+								label="+ IVA facturado"
+								value={currency(row.composition.billedVat)}
+							/>
+							<LedgerRow
+								label="− ISR retenido"
+								value={currency(row.composition.withheldIsr)}
+							/>
+							<LedgerRow
+								label="= Flujo liquidado"
+								value={currency(row.composition.distributed)}
+								total
+							/>
+						</dl>
+					)}
 					<p className="mt-3 text-muted-foreground text-sm">
 						Esta composición explica el flujo distribuido entre efectivo y
 						reinversión. No representa montos adicionales.
@@ -515,11 +530,7 @@ function Destination({
 			<strong className="mt-1 block text-2xl">{value}</strong>
 			<p className="mt-1 text-muted-foreground text-sm">{description}</p>
 			{formula ? (
-				<div
-					className="mt-4 border-t pt-3"
-					role="group"
-					aria-label={formula.sentence}
-				>
+				<fieldset className="mt-4 border-t pt-3" aria-label={formula.sentence}>
 					<div
 						className="flex flex-wrap items-stretch gap-1.5"
 						aria-hidden="true"
@@ -545,7 +556,7 @@ function Destination({
 						/>
 					</div>
 					<p className="sr-only">{formula.sentence}</p>
-				</div>
+				</fieldset>
 			) : null}
 		</div>
 	);
@@ -571,7 +582,7 @@ function FormulaPart({
 			<span className="block break-words text-muted-foreground text-xs">
 				{label}
 			</span>
-			<strong className="block tabular-nums text-sm">{value}</strong>
+			<strong className="block text-sm tabular-nums">{value}</strong>
 		</div>
 	);
 }
@@ -670,7 +681,7 @@ function DetailTable({
 	if (detail === "interest") {
 		if (data.detalleInteresNeto.length === 0) return <NoDetail />;
 		return (
-			<TableOverflow label="Detalle de interés neto">
+			<TableOverflow label="Detalle de interés registrado">
 				<Table className="min-w-[760px]">
 					<TableHeader>
 						<TableRow>
@@ -679,7 +690,7 @@ function DetailTable({
 							<TableHead className="text-right">Interés</TableHead>
 							<TableHead className="text-right">IVA</TableHead>
 							<TableHead className="text-right">ISR</TableHead>
-							<TableHead className="text-right">Neto</TableHead>
+							<TableHead className="text-right">Neto derivado</TableHead>
 						</TableRow>
 					</TableHeader>
 					<TableBody>
@@ -704,7 +715,7 @@ function DetailTable({
 									{currency(row.isr)}
 								</TableCell>
 								<TableCell className="text-right font-medium">
-									{currency(row.neto)}
+									{row.tratamiento_fiscal === "cube" ? currency(row.neto) : "—"}
 								</TableCell>
 							</TableRow>
 						))}
@@ -779,14 +790,12 @@ function TableOverflow({
 	label: string;
 }) {
 	return (
-		<div
+		<section
 			className="w-full overflow-x-auto rounded-md border"
-			role="region"
 			aria-label={label}
-			tabIndex={0}
 		>
 			{children}
-		</div>
+		</section>
 	);
 }
 

@@ -180,14 +180,8 @@ export type ReinversionLiquidacionesResponse = {
 			cantidad_liquidaciones: number;
 		}
 	>;
-	/**
-	 * Interés neto agrupado por si el inversionista emite factura:
-	 * - `conFactura`: neto = interés + IVA.
-	 * - `sinFactura`: neto = interés − ISR.
-	 */
 	interesNeto: {
-		conFactura: { interes: string; iva: string; neto: string };
-		sinFactura: { interes: string; isr: string; neto: string };
+		noVerificado: { interes: string };
 		cube: { interes: string; iva: string; neto: string };
 	};
 	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
@@ -201,21 +195,31 @@ export type ReinversionLiquidacionesResponse = {
 		reinversion_interes: string;
 		reinversion: string;
 		a_recibir: string;
-		monto_aportado: string;
 		capital_activo: string;
 	}[];
 	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
 	comprasMes: { tipo: string; cantidad: number; monto: string }[];
-	detalleInteresNeto: {
-		inversionista_id: number;
-		inversionista: string;
-		referencia: string;
-		tratamiento_fiscal: "con_factura" | "sin_factura" | "cube";
-		interes: string;
-		iva: string;
-		isr: string;
-		neto: string;
-	}[];
+	detalleInteresNeto: (
+		| {
+				inversionista_id: number;
+				inversionista: string;
+				referencia: string;
+				interes: string;
+				iva: string;
+				isr: string;
+				tratamiento_fiscal: "no_verificado";
+		  }
+		| {
+				inversionista_id: number;
+				inversionista: string;
+				referencia: string;
+				tratamiento_fiscal: "cube";
+				interes: string;
+				iva: string;
+				isr: string;
+				neto: string;
+		  }
+	)[];
 	detallePagosExtras: {
 		fecha: string;
 		credito: string;

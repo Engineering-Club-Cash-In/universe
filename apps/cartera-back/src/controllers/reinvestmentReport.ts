@@ -51,6 +51,24 @@ export function allocateRoundedPurchaseAmounts<
   return allocated;
 }
 
+export function canonicalizePurchaseSummaries(
+  rows: { tipo: string | null; cantidad: number; monto: string }[],
+) {
+  const summaries = new Map<string, { cantidad: number; monto: number }>();
+  for (const row of rows) {
+    const tipo = row.tipo ?? "sin_reinversion";
+    const current = summaries.get(tipo) ?? { cantidad: 0, monto: 0 };
+    current.cantidad += row.cantidad;
+    current.monto += Number(row.monto);
+    summaries.set(tipo, current);
+  }
+  return [...summaries.entries()].map(([tipo, summary]) => ({
+    tipo,
+    cantidad: summary.cantidad,
+    monto: summary.monto.toFixed(2),
+  }));
+}
+
 export const PUBLIC_REINVESTMENT_DETAIL_ERROR =
   "Los detalles no están disponibles para este período. Intenta nuevamente más tarde.";
 
@@ -59,39 +77,23 @@ export function getPublicReinvestmentDetailError(_error: unknown) {
 }
 
 export function buildNetInterestDetail(input: NetInterestInput) {
-  const sinFactura = cents(input.isr) > 0;
   const interest = cents(input.interes);
-  const tax = sinFactura ? cents(input.isr) : cents(input.iva);
   return {
     inversionista_id: input.inversionista_id,
     inversionista: input.inversionista,
     referencia: input.referencia,
-    tratamiento_fiscal: sinFactura ? "sin_factura" : "con_factura",
+    // No existe una marca fiscal inmutable en la liquidación. ISR e IVA por sí
+    // solos no prueban que se emitió factura, por lo que no se asignan fiscalmente.
+    tratamiento_fiscal: "no_verificado",
     interes: money(interest),
-    iva: money(sinFactura ? 0 : tax),
-    isr: money(sinFactura ? tax : 0),
-    neto: money(sinFactura ? interest - tax : interest + tax),
-  };
-}
-
-export function buildInvestorPosition(
-  historicalAmount: number,
-  currentActiveCapital: number,
-  reinvestment: number,
-  isMay2026: boolean,
-) {
-  const historical = cents(historicalAmount);
-  const contributed = isMay2026 ? historical - cents(reinvestment) : historical;
-  return {
-    monto_aportado: money(contributed),
-    capital_activo: money(cents(currentActiveCapital)),
+    iva: money(cents(input.iva)),
+    isr: money(cents(input.isr)),
   };
 }
 
 type InvestorPosition = {
   reinversion: string;
   a_recibir: string;
-  monto_aportado: string;
   capital_activo: string;
 };
 
@@ -99,23 +101,32 @@ export function shouldIncludeInvestorPosition(position: InvestorPosition) {
   return (
     Number(position.reinversion) !== 0 ||
     Number(position.a_recibir) !== 0 ||
-    Number(position.monto_aportado) !== 0 ||
     Number(position.capital_activo) !== 0
   );
 }
 
+type NoVerificadoInterestDetail = {
+  tratamiento_fiscal: "no_verificado";
+  interes: string;
+  iva: string;
+  isr: string;
+  neto?: never;
+};
+type CubeInterestDetail = {
+  tratamiento_fiscal: "cube";
+  interes: string;
+  iva: string;
+  isr: string;
+  neto: string;
+};
 type ReconciliationResponse = {
   interesNeto: {
-    conFactura: { neto: string };
-    sinFactura: { neto: string };
+    noVerificado: { interes: string };
     cube: { neto: string };
   };
   pagosExtras: { abonos_capital: string; cancelaciones: string };
   comprasMes: { tipo: string; cantidad: number; monto: string }[];
-  detalleInteresNeto: {
-    tratamiento_fiscal: string;
-    neto: string;
-  }[];
+  detalleInteresNeto: (NoVerificadoInterestDetail | CubeInterestDetail)[];
   detallePagosExtras: { tipo: string; monto: string }[];
   detalleComprasMes: { modalidad: string; monto: string }[];
 };
@@ -125,39 +136,20 @@ const sumCents = (values: (number | string)[]) =>
 
 export function assertReportReconciliation(response: ReconciliationResponse) {
   const cubeRows = response.detalleInteresNeto.filter(
-    (row) => row.tratamiento_fiscal === "cube",
+    (row): row is CubeInterestDetail => row.tratamiento_fiscal === "cube",
   );
-  const interestSummary = sumCents([
-    response.interesNeto.conFactura.neto,
-    response.interesNeto.sinFactura.neto,
-    response.interesNeto.cube.neto,
-  ]);
-  const interestDetail = sumCents(
-    response.detalleInteresNeto.map((row) => row.neto),
+  const noVerificadoRows = response.detalleInteresNeto.filter(
+    (row): row is NoVerificadoInterestDetail =>
+      row.tratamiento_fiscal === "no_verificado",
   );
-  const interestCategories = [
-    ["con_factura", response.interesNeto.conFactura.neto],
-    ["sin_factura", response.interesNeto.sinFactura.neto],
-    ["cube", response.interesNeto.cube.neto],
-  ] as const;
-  const interestByCategory = interestCategories.every(
-    ([category, summary]) =>
-      sumCents(
-        response.detalleInteresNeto
-          .filter((row) => row.tratamiento_fiscal === category)
-          .map((row) => row.neto),
-      ) === cents(summary),
-  );
-  const hasUnknownInterestCategory = response.detalleInteresNeto.some(
-    (row) =>
-      !interestCategories.some(
-        ([category]) => category === row.tratamiento_fiscal,
-      ),
-  );
+  const noVerificadoMatches =
+    sumCents(noVerificadoRows.map((row) => row.interes)) ===
+      cents(response.interesNeto.noVerificado.interes);
+  const cubeMatches = sumCents(cubeRows.map((row) => row.neto)) ===
+    cents(response.interesNeto.cube.neto);
   if (
-    interestDetail !== interestSummary ||
-    !interestByCategory ||
-    hasUnknownInterestCategory ||
+    !noVerificadoMatches ||
+    !cubeMatches ||
     cubeRows.length > 1
   ) {
     throw new Error("Detalle de interés neto no concilia");
@@ -239,18 +231,7 @@ export function assertModeReconciliation(mode: ModeReconciliation) {
     mode.total_cuota,
     mode.reinversion_total,
   ]);
-  const composition =
-    sumCents([
-      mode.total_capital,
-      mode.total_interes,
-      mode.iva_facturado,
-    ]) - cents(mode.total_isr);
-  // Each liquidation can contribute at most one cent of independent component
-  // rounding while the stored destinations still reconcile exactly.
-  if (
-    distributed !== destinations ||
-    Math.abs(distributed - composition) > mode.cantidad_liquidaciones
-  ) {
+  if (distributed !== destinations) {
     throw new Error("Modalidad no concilia");
   }
   return true;

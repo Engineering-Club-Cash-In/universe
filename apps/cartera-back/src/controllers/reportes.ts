@@ -8,13 +8,13 @@ import {
 } from "./moraRecuperacion";
 import { snapCte } from "./moraSnapshotSql";
 import {
-	allocateRoundedAmounts,
-	allocateRoundedPurchaseAmounts,
+  allocateRoundedAmounts,
+  allocateRoundedPurchaseAmounts,
+  canonicalizePurchaseSummaries,
 	assertModeReconciliation,
 	assertReportReconciliation,
-	buildCubeNetInterest,
-	buildInvestorPosition,
-	buildNetInterestDetail,
+  buildCubeNetInterest,
+  buildNetInterestDetail,
 	getPublicReinvestmentDetailError,
 	shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
@@ -810,10 +810,7 @@ export async function getReinversionLiquidaciones({
       COALESCE(SUM(l.total_capital::numeric), 0)            AS total_capital,
       COALESCE(SUM(l.total_interes::numeric), 0)            AS total_interes,
       COALESCE(SUM(l.total_iva::numeric), 0)                AS total_iva,
-      COALESCE(SUM(CASE
-        WHEN l.total_isr::numeric > 0 THEN 0
-        ELSE l.total_iva::numeric
-      END), 0)                                              AS iva_facturado,
+      0                                                     AS iva_facturado,
       COALESCE(SUM(l.total_isr::numeric), 0)                AS total_isr,
       COALESCE(SUM(l.total_cuota::numeric), 0)              AS total_cuota,
       COALESCE(SUM(
@@ -863,35 +860,19 @@ export async function getReinversionLiquidaciones({
     cantidad += Number(r.cantidad ?? 0);
   }
 
-  // Interés neto, agrupado según el tratamiento fiscal *guardado en la propia
-  // liquidación* (no según el flag actual del inversionista, que puede cambiar
-  // y reclasificaría meses históricos). Una liquidación sin factura es la que
-  // tiene ISR retenido (`total_isr > 0`); las con factura tienen IVA y sin ISR.
-  //   - Con factura:  neto = interés + IVA
-  //   - Sin factura:  neto = interés − ISR
+  // No hay una marca fiscal inmutable en las liquidaciones. ISR/IVA no bastan
+  // para probar facturación, por lo que el interés se publica sin asignación.
   const facturaRows = await db.execute(sql`
     SELECT
-      (l.total_isr::numeric > 0)                   AS sin_factura,
-      COALESCE(SUM(l.total_interes::numeric), 0)   AS total_interes,
-      COALESCE(SUM(l.total_iva::numeric), 0)       AS total_iva,
-      COALESCE(SUM(l.total_isr::numeric), 0)       AS total_isr
+      COALESCE(SUM(l.total_interes::numeric), 0) AS total_interes
     FROM cartera.liquidaciones l
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    GROUP BY (l.total_isr::numeric > 0)
   `);
 
-  const conFactura = { interes: 0, iva: 0 };
-  const sinFactura = { interes: 0, isr: 0 };
+  let interesNoVerificado = 0;
   for (const r of facturaRows.rows as Record<string, unknown>[]) {
-    const interes = Number(r.total_interes ?? 0);
-    if (r.sin_factura === true) {
-      sinFactura.interes += interes;
-      sinFactura.isr += Number(r.total_isr ?? 0);
-    } else {
-      conFactura.interes += interes;
-      conFactura.iva += Number(r.total_iva ?? 0);
-    }
+    interesNoVerificado += Number(r.total_interes ?? 0);
   }
 
   // Interés de CUBE: no se almacena como tal sino que se deriva de las filas de
@@ -1029,49 +1010,18 @@ export async function getReinversionLiquidaciones({
     );
   }
 
-  // Monto aportado que le quedó al inversionista DESPUÉS de la liquidación
-  // (sin reinversiones), desde historico_liquidaciones_espejo.
-  // ⚠️ Mayo 2026 fue la primera vez que se usó y el histórico quedó CON la
-  // reinversión sumada; para ese mes se descuenta la reinversión.
-  const montoAportadoRows = await db.execute(sql`
-    SELECT
-      h.inversionista_id,
-      COALESCE(SUM(h.monto_aportado::numeric), 0) AS monto_aportado
-    FROM cartera.historico_liquidaciones_espejo h
-    JOIN cartera.liquidaciones l ON l.liquidacion_id = h.liquidacion_id
-    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
-      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    GROUP BY h.inversionista_id
-  `);
-  const montoAportadoPorInv = new Map<number, number>();
-  for (const r of montoAportadoRows.rows as Record<string, unknown>[]) {
-    montoAportadoPorInv.set(
-      Number(r.inversionista_id),
-      Number(r.monto_aportado ?? 0)
-    );
-  }
-  const esMayo2026 = anio === 2026 && mes === 5;
-
   const porInversionista = (porInvRows.rows as Record<string, unknown>[]).map(
     (r) => {
       const id = Number(r.inversionista_id);
-      const reinversion = Number(r.reinversion ?? 0);
-      const montoHist = montoAportadoPorInv.get(id) ?? 0;
-      const position = buildInvestorPosition(
-        montoHist,
-        capitalActivoPorInv.get(id) ?? 0,
-        reinversion,
-        esMayo2026
-      );
       return {
         inversionista_id: id,
         nombre: String(r.nombre),
         tipo_reinversion: String(r.tipo_reinversion ?? "sin_reinversion"),
         reinversion_capital: Number(r.reinversion_capital ?? 0).toFixed(2),
         reinversion_interes: Number(r.reinversion_interes ?? 0).toFixed(2),
-        reinversion: reinversion.toFixed(2),
+        reinversion: Number(r.reinversion ?? 0).toFixed(2),
         a_recibir: Number(r.a_recibir ?? 0).toFixed(2),
-        ...position,
+        capital_activo: Number(capitalActivoPorInv.get(id) ?? 0).toFixed(2),
       };
     }
   ).filter(shouldIncludeInvestorPosition);
@@ -1094,15 +1044,15 @@ export async function getReinversionLiquidaciones({
       COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
     FROM cartera.compras_credito_inversionista c
     WHERE ${comprasMesPredicate}
-    GROUP BY c.tipo_reinversion
+    GROUP BY COALESCE(c.tipo_reinversion::text, 'sin_reinversion')
     ORDER BY monto DESC
   `);
-  const comprasMes = (comprasRows.rows as Record<string, unknown>[]).map(
-    (r) => ({
+  const comprasMes = canonicalizePurchaseSummaries(
+    (comprasRows.rows as Record<string, unknown>[]).map((r) => ({
       tipo: String(r.tipo ?? "sin_reinversion"),
       cantidad: Number(r.cantidad ?? 0),
       monto: Number(r.monto ?? 0).toFixed(2),
-    })
+    })),
   );
 
   let detalleInteresNeto: ReturnType<typeof buildNetInterestDetail>[] = [];
@@ -1256,15 +1206,8 @@ export async function getReinversionLiquidaciones({
   }
 
   const interesNeto = {
-    conFactura: {
-      interes: conFactura.interes.toFixed(2),
-      iva: conFactura.iva.toFixed(2),
-      neto: (conFactura.interes + conFactura.iva).toFixed(2),
-    },
-    sinFactura: {
-      interes: sinFactura.interes.toFixed(2),
-      isr: sinFactura.isr.toFixed(2),
-      neto: (sinFactura.interes - sinFactura.isr).toFixed(2),
+    noVerificado: {
+      interes: interesNoVerificado.toFixed(2),
     },
     cube: interesNetoCube,
   };

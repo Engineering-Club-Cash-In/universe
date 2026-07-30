@@ -5,7 +5,7 @@ import {
   assertModeReconciliation,
   assertReportReconciliation,
   buildCubeNetInterest,
-  buildInvestorPosition,
+  canonicalizePurchaseSummaries,
   buildNetInterestDetail,
   getPublicReinvestmentDetailError,
   shouldIncludeInvestorPosition,
@@ -30,8 +30,7 @@ test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {
   expect(
     assertReportReconciliation({
       interesNeto: {
-        conFactura: { neto: "0.00" },
-        sinFactura: { neto: "0.00" },
+        noVerificado: { interes: "0.00" },
         cube: { neto: "0.00" },
       },
       pagosExtras: { abonos_capital: "100.00", cancelaciones: "0.00" },
@@ -67,8 +66,7 @@ test("distribuye residuos de compras por modalidad sin cambiar cantidad ni orden
   expect(
     assertReportReconciliation({
       interesNeto: {
-        conFactura: { neto: "0.00" },
-        sinFactura: { neto: "0.00" },
+        noVerificado: { interes: "0.00" },
         cube: { neto: "0.00" },
       },
       pagosExtras: { abonos_capital: "0.00", cancelaciones: "0.00" },
@@ -84,7 +82,7 @@ test("distribuye residuos de compras por modalidad sin cambiar cantidad ni orden
 });
 
 describe("buildNetInterestDetail", () => {
-  test("con factura suma IVA al interés", () => {
+  test("sin evidencia fiscal conserva IVA e ISR registrados sin publicar neto", () => {
     expect(
       buildNetInterestDetail({
         inversionista_id: 1,
@@ -95,15 +93,14 @@ describe("buildNetInterestDetail", () => {
         isr: 0,
       }),
     ).toMatchObject({
-      tratamiento_fiscal: "con_factura",
+      tratamiento_fiscal: "no_verificado",
       interes: "100.00",
       iva: "12.00",
       isr: "0.00",
-      neto: "112.00",
     });
   });
 
-  test("sin factura resta ISR y no incorpora el IVA informativo", () => {
+test("ISR registrado no se convierte en neto fiscal", () => {
     expect(
       buildNetInterestDetail({
         inversionista_id: 2,
@@ -114,28 +111,29 @@ describe("buildNetInterestDetail", () => {
         isr: 7,
       }),
     ).toMatchObject({
-      tratamiento_fiscal: "sin_factura",
+      tratamiento_fiscal: "no_verificado",
       interes: "100.00",
-      iva: "0.00",
+      iva: "12.00",
       isr: "7.00",
-      neto: "93.00",
     });
   });
 });
 
-describe("buildInvestorPosition", () => {
-  test("capital activo incluye otro crédito vigente sin alterar el monto del período", () => {
-    expect(buildInvestorPosition(770_924.47, 900_000, 29_075.53, false)).toEqual({
-      monto_aportado: "770924.47",
-      capital_activo: "900000.00",
-    });
-  });
-
-  test("mayo 2026 normaliza el histórico sin duplicar la reinversión", () => {
-    expect(buildInvestorPosition(800_000, 900_000, 29_075.53, true)).toEqual({
-      monto_aportado: "770924.47",
-      capital_activo: "900000.00",
-    });
+test("interés con ISR positivo que redondea a cero no infiere factura ni IVA", () => {
+  expect(
+    buildNetInterestDetail({
+      inversionista_id: 3,
+      inversionista: "Marta",
+      referencia: "LIQ-3",
+      interes: 0.05,
+      iva: 0.01,
+      isr: 0.0035,
+    }),
+  ).toMatchObject({
+    tratamiento_fiscal: "no_verificado",
+    interes: "0.05",
+    iva: "0.01",
+    isr: "0.00",
   });
 });
 
@@ -143,7 +141,6 @@ test("el reporte conserva y totaliza al inversionista con capital activo y flujo
   const investor = {
     reinversion: "0.00",
     a_recibir: "0.00",
-    monto_aportado: "0.00",
     capital_activo: "1250.00",
   };
   const retained = [investor].filter(shouldIncludeInvestorPosition);
@@ -175,11 +172,50 @@ test("capital activo usa el espejo completo y excluye créditos cerrados", async
   expect(activeCapitalQuery).toContain("GROUP BY ce.inversionista_id");
 });
 
+test("el resumen de compras canoniza NULL y sin_reinversion en la misma modalidad", async () => {
+  const source = await Bun.file(
+    new URL("./reportes.ts", import.meta.url),
+  ).text();
+  const purchasesQuery = source.slice(
+    source.indexOf("const comprasRows"),
+    source.indexOf("let detalleInteresNeto"),
+  );
+
+  expect(purchasesQuery).toContain(
+    "GROUP BY COALESCE(c.tipo_reinversion::text, 'sin_reinversion')",
+  );
+});
+
+test("compras legacy NULL y sin_reinversion se agregan bajo una sola llave pública", () => {
+  expect(canonicalizePurchaseSummaries([
+    { tipo: null, cantidad: 1, monto: "10.00" },
+    { tipo: "sin_reinversion", cantidad: 2, monto: "20.00" },
+  ])).toEqual([{ tipo: "sin_reinversion", cantidad: 3, monto: "30.00" }]);
+});
+
+test("el contrato v2 no publica monto_aportado histórico incorrecto", async () => {
+  const source = await Bun.file(
+    new URL("./reportes.ts", import.meta.url),
+  ).text();
+
+  expect(source).not.toContain("const montoAportadoRows");
+  expect(source).not.toContain("monto_aportado: Number");
+});
+
+test("consulta de interés no deja una coma antes de FROM", async () => {
+  const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
+  const query = source.slice(
+    source.indexOf("const facturaRows"),
+    source.indexOf("let interesNoVerificado"),
+  );
+
+  expect(query).not.toContain("AS total_interes,\n    FROM");
+});
+
 test("respuesta completa concilia los tres detalles y no duplica CUBE", () => {
   const response = {
     interesNeto: {
-      conFactura: { neto: "112.00" },
-      sinFactura: { neto: "93.00" },
+      noVerificado: { interes: "205.00" },
       cube: { neto: "22.40" },
     },
     pagosExtras: { abonos_capital: "30.00", cancelaciones: "70.00" },
@@ -188,9 +224,9 @@ test("respuesta completa concilia los tres detalles y no duplica CUBE", () => {
       { tipo: "reinversion_capital", cantidad: 1, monto: "20.00" },
     ],
     detalleInteresNeto: [
-      { tratamiento_fiscal: "con_factura", neto: "112.00" },
-      { tratamiento_fiscal: "sin_factura", neto: "93.00" },
-      { tratamiento_fiscal: "cube", neto: "22.40" },
+      { tratamiento_fiscal: "no_verificado" as const, interes: "112.00", iva: "0.00", isr: "0.00" },
+      { tratamiento_fiscal: "no_verificado" as const, interes: "93.00", iva: "0.00", isr: "0.00" },
+      { tratamiento_fiscal: "cube" as const, interes: "20.00", iva: "2.40", isr: "0.00", neto: "22.40" },
     ],
     detallePagosExtras: [
       { tipo: "abono_capital", monto: "30.00" },
@@ -213,8 +249,7 @@ test("dos compras del mismo inversionista, fecha y modalidad cuentan como dos op
   expect(
     assertReportReconciliation({
       interesNeto: {
-        conFactura: { neto: "0.00" },
-        sinFactura: { neto: "0.00" },
+        noVerificado: { interes: "0.00" },
         cube: { neto: "0.00" },
       },
       pagosExtras: { abonos_capital: "0.00", cancelaciones: "0.00" },
@@ -247,7 +282,7 @@ test("el resumen de compras cuenta filas de operación con la misma granularidad
   ).text();
   const purchasesQuery = source.slice(
     source.indexOf("const comprasRows"),
-    source.indexOf("const comprasMes = ("),
+    source.indexOf("let detalleInteresNeto"),
   );
 
   expect(purchasesQuery).toContain("COUNT(*)::int AS cantidad");
@@ -270,15 +305,14 @@ test("respuesta completa rechaza CUBE duplicado o cualquier detalle descuadrado"
   expect(() =>
     assertReportReconciliation({
       interesNeto: {
-        conFactura: { neto: "0.00" },
-        sinFactura: { neto: "0.00" },
+        noVerificado: { interes: "0.00" },
         cube: { neto: "22.40" },
       },
       pagosExtras: { abonos_capital: "0.00", cancelaciones: "0.00" },
       comprasMes: [],
       detalleInteresNeto: [
-        { tratamiento_fiscal: "cube", neto: "22.40" },
-        { tratamiento_fiscal: "cube", neto: "22.40" },
+        { tratamiento_fiscal: "cube" as const, interes: "20.00", iva: "2.40", isr: "0.00", neto: "22.40" },
+        { tratamiento_fiscal: "cube" as const, interes: "20.00", iva: "2.40", isr: "0.00", neto: "22.40" },
       ],
       detallePagosExtras: [],
       detalleComprasMes: [],
@@ -289,8 +323,7 @@ test("respuesta completa rechaza CUBE duplicado o cualquier detalle descuadrado"
 test("cada clase de descuadre impide publicar una respuesta completa", () => {
   const valid = {
     interesNeto: {
-      conFactura: { neto: "112.00" },
-      sinFactura: { neto: "93.00" },
+      noVerificado: { interes: "205.00" },
       cube: { neto: "22.40" },
     },
     pagosExtras: { abonos_capital: "30.00", cancelaciones: "70.00" },
@@ -298,9 +331,9 @@ test("cada clase de descuadre impide publicar una respuesta completa", () => {
       { tipo: "sin_reinversion", cantidad: 1, monto: "100.00" },
     ],
     detalleInteresNeto: [
-      { tratamiento_fiscal: "con_factura", neto: "112.00" },
-      { tratamiento_fiscal: "sin_factura", neto: "93.00" },
-      { tratamiento_fiscal: "cube", neto: "22.40" },
+      { tratamiento_fiscal: "no_verificado" as const, interes: "112.00", iva: "0.00", isr: "0.00" },
+      { tratamiento_fiscal: "no_verificado" as const, interes: "93.00", iva: "0.00", isr: "0.00" },
+      { tratamiento_fiscal: "cube" as const, interes: "20.00", iva: "2.40", isr: "0.00", neto: "22.40" },
     ],
     detallePagosExtras: [{ tipo: "abono_capital", monto: "30.00" }, { tipo: "cancelacion", monto: "70.00" }],
     detalleComprasMes: [{ modalidad: "sin_reinversion", monto: "100.00" }],
@@ -310,7 +343,7 @@ test("cada clase de descuadre impide publicar una respuesta completa", () => {
     assertReportReconciliation({
       ...valid,
       detalleInteresNeto: valid.detalleInteresNeto.map((row, index) =>
-        index === 0 ? { ...row, neto: "111.99" } : row,
+        index === 0 ? { ...row, interes: "111.99" } : row,
       ),
     }),
   ).toThrow("Detalle de interés neto no concilia");
@@ -336,8 +369,7 @@ test("cada clase de descuadre impide publicar una respuesta completa", () => {
 test("los subresúmenes no permiten descuadres compensados entre categorías", () => {
   const base = {
     interesNeto: {
-      conFactura: { neto: "112.00" },
-      sinFactura: { neto: "93.00" },
+      noVerificado: { interes: "205.00" },
       cube: { neto: "0.00" },
     },
     pagosExtras: { abonos_capital: "30.00", cancelaciones: "70.00" },
@@ -346,8 +378,7 @@ test("los subresúmenes no permiten descuadres compensados entre categorías", (
       { tipo: "reinversion_capital", cantidad: 1, monto: "20.00" },
     ],
     detalleInteresNeto: [
-      { tratamiento_fiscal: "con_factura", neto: "111.00" },
-      { tratamiento_fiscal: "sin_factura", neto: "94.00" },
+      { tratamiento_fiscal: "no_verificado" as const, interes: "204.00", iva: "0.00", isr: "0.00" },
     ],
     detallePagosExtras: [
       { tipo: "abono_capital", monto: "29.00" },
@@ -366,8 +397,7 @@ test("los subresúmenes no permiten descuadres compensados entre categorías", (
     assertReportReconciliation({
       ...base,
       detalleInteresNeto: [
-        { tratamiento_fiscal: "con_factura", neto: "112.00" },
-        { tratamiento_fiscal: "sin_factura", neto: "93.00" },
+        { tratamiento_fiscal: "no_verificado" as const, interes: "205.00", iva: "0.00", isr: "0.00" },
       ],
     }),
   ).toThrow("Detalle de pagos extras no concilia");
@@ -375,8 +405,7 @@ test("los subresúmenes no permiten descuadres compensados entre categorías", (
     assertReportReconciliation({
       ...base,
       detalleInteresNeto: [
-        { tratamiento_fiscal: "con_factura", neto: "112.00" },
-        { tratamiento_fiscal: "sin_factura", neto: "93.00" },
+        { tratamiento_fiscal: "no_verificado" as const, interes: "205.00", iva: "0.00", isr: "0.00" },
       ],
       detallePagosExtras: [
         { tipo: "abono_capital", monto: "30.00" },
@@ -386,7 +415,7 @@ test("los subresúmenes no permiten descuadres compensados entre categorías", (
   ).toThrow("Detalle de compras del mes no concilia");
 });
 
-test("cada modalidad concilia destinos y composición fiscal real", () => {
+test("cada modalidad concilia destinos sin afirmar composición fiscal", () => {
   expect(
     assertModeReconciliation({
       reinversion_capital: "50.00",
@@ -419,20 +448,12 @@ test("una modalidad admite el redondeo acumulado de sus liquidaciones", () => {
     }),
   ).toBe(true);
 
-  expect(() =>
-    assertModeReconciliation({
-      reinversion_capital: "34.27",
-      reinversion_interes: "0.00",
-      reinversion_total: "34.27",
-      total_capital: "33.36",
-      total_interes: "1.01",
-      iva_facturado: "0.00",
-      total_isr: "0.07",
-      total_cuota: "0.00",
-      total_distribuido: "34.27",
-      cantidad_liquidaciones: 2,
-    }),
-  ).toThrow("Modalidad no concilia");
+  expect(assertModeReconciliation({
+    reinversion_capital: "34.27", reinversion_interes: "0.00",
+    reinversion_total: "34.27", total_capital: "33.36", total_interes: "1.01",
+    iva_facturado: "0.00", total_isr: "0.07", total_cuota: "0.00",
+    total_distribuido: "34.27", cantidad_liquidaciones: 2,
+  })).toBe(true);
 });
 
 test("una modalidad con composición o destinos descuadrados no se publica", () => {

@@ -16,6 +16,7 @@ import {
 	FileText,
 	Gauge,
 	Gavel,
+	Handshake,
 	Landmark,
 	Layers,
 	LayoutDashboard,
@@ -275,6 +276,12 @@ export default function Header() {
 										<Link to="/cobros/cola" className="cursor-pointer">
 											<ClipboardList className="mr-2 h-4 w-4" />
 											Cola del día
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/cobros/convenios" className="cursor-pointer">
+											<Handshake className="mr-2 h-4 w-4" />
+											Convenios
 										</Link>
 									</DropdownMenuItem>
 									{PERMISSIONS.canAssignCobros(userRole) && (
@@ -683,6 +690,10 @@ function MobileNav({
 										<Link to="/cobros/cola" className={MOBILE_LINK_CLASS}>
 											<ClipboardList />
 											Cola del día
+										</Link>
+										<Link to="/cobros/convenios" className={MOBILE_LINK_CLASS}>
+											<Handshake />
+											Convenios
 										</Link>
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<Link to="/cobros/apertura" className={MOBILE_LINK_CLASS}>

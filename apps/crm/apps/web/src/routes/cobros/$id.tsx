@@ -74,6 +74,7 @@ import {
 	bucketDeEstado,
 	bucketDeNumero,
 	catalogoDeNumero,
+	esBucketB2,
 	estiloBucket,
 	numeroDeEstadoMora,
 	useBucketsCatalogo,
@@ -485,14 +486,6 @@ function RouteComponent() {
 		enabled: !!session && !!casoDetails.data?.id,
 	});
 
-	// Obtener convenios de pago (solo para casos)
-	const conveniosPago = useQuery({
-		...orpc.getConveniosPago.queryOptions({
-			input: { casoCobroId: casoDetails.data?.id || "" },
-		}),
-		enabled: !!session && !!casoDetails.data?.id,
-	});
-
 	// Obtener historial de pagos del contrato
 	const historialPagos = useQuery({
 		...orpc.getHistorialPagos.queryOptions({
@@ -721,7 +714,6 @@ function RouteComponent() {
 	const contactos = (historialContactos.data || []).filter(
 		(c: any) => c.estadoContacto !== "promesa_pago",
 	);
-	const convenios = conveniosPago.data || [];
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
 
@@ -790,6 +782,26 @@ function RouteComponent() {
 			: estadoMoraDivergente
 				? `${bucketPrefijo} · ${bucketUI.label} (mora calculada: ${getEstadoLabel(caso.estadoMora)})`
 				: `${bucketPrefijo} · ${bucketUI.label}`;
+
+	// CB-027: con convenio activo, cartera-back saca el crédito del funnel
+	// (bucketDeCredito → null, statusCredit=EN_CONVENIO), así que "es B2" no se
+	// puede leer del bucket actual. El motor de buckets deja de escribir
+	// transiciones para créditos fuera del funnel, así que la última fila de
+	// buckets_historial queda CONGELADA en el bucket real previo al convenio
+	// — eso es `bucket_previo`. null = sin traza (crédito nunca procesado por
+	// el motor) O error real degradado a null por el server (getBucketActualCredito
+	// atrapa cualquier excepción y devuelve null) — en ambos casos se muestra
+	// igual, no se oculta info real. Pero mientras la query sigue en vuelo
+	// (isPending, data aún undefined) NO hay que tratarlo como "sin traza":
+	// eso mostraría la card de un convenio no-B2 antes de que llegue la
+	// respuesta real, solo para ocultarla un instante después.
+	// esBucketB2 resuelve el número contra el catálogo dinámico en vez de
+	// comparar el literal 2 (ver su doc en buckets-catalogo.ts).
+	const bucketPrevio = motorBucket?.bucket_previo ?? null;
+	const mostrarConvenio =
+		!!caso.convenioActivo &&
+		!bucketActual.isPending &&
+		(bucketPrevio === null || esBucketB2(bucketPrevio, bucketsCatalogo.data));
 
 	const getEstadoContacto = (estado: string) => {
 		const estados: Record<string, { label: string; color: string }> = {
@@ -2711,54 +2723,171 @@ function RouteComponent() {
 						</CardContent>
 					</Card>
 
-					{/* Convenios Activos */}
-					{convenios.length > 0 && (
+					{/* Convenio de Pago (CB-027) — dato REAL de cartera-back, no la tabla
+					    legacy del CRM. Solo se muestra si hay convenio activo y el
+					    crédito venía de B2 (o sin traza de bucket en historial). */}
+					{mostrarConvenio && caso.convenioActivo && (
 						<Card>
 							<CardHeader>
 								<CardTitle className="flex items-center gap-2">
 									<Shield className="h-5 w-5" />
-									Convenios de Pago
+									Convenio de Pago
 								</CardTitle>
+								<CardDescription>
+									Plan de pago acordado para regularizar el crédito
+								</CardDescription>
 							</CardHeader>
-							<CardContent>
-								<div className="space-y-3">
-									{convenios.map((convenio: any) => (
-										<div key={convenio.id} className="rounded border p-3">
-											<div className="mb-2 flex items-center justify-between">
-												<Badge
-													variant={convenio.activo ? "default" : "secondary"}
-												>
-													{convenio.activo ? "Activo" : "Inactivo"}
-												</Badge>
-												{convenio.cumplido && (
-													<Badge className="bg-green-100 text-green-800">
-														Cumplido
-													</Badge>
-												)}
-											</div>
-											<div className="space-y-1 text-sm">
-												<p>
-													<span className="font-medium">Monto:</span> Q
-													{Number(convenio.montoAcordado).toLocaleString()}
-												</p>
-												<p>
-													<span className="font-medium">Cuotas:</span>{" "}
-													{convenio.cuotasCumplidas}/
-													{convenio.numeroCuotasConvenio}
-												</p>
-												<p>
-													<span className="font-medium">Cuota:</span> Q
-													{Number(convenio.montoCuotaConvenio).toLocaleString()}
-												</p>
-												{convenio.condicionesEspeciales && (
-													<p className="mt-2 text-muted-foreground text-xs">
-														{convenio.condicionesEspeciales}
-													</p>
-												)}
-											</div>
+							<CardContent className="space-y-4">
+								<div className="rounded border p-3">
+									<div className="mb-3 flex items-center justify-between">
+										<Badge
+											variant={
+												caso.convenioActivo.activo ? "default" : "secondary"
+											}
+										>
+											{caso.convenioActivo.activo ? "Activo" : "Inactivo"}
+										</Badge>
+										{caso.convenioActivo.completado && (
+											<Badge className="bg-green-100 text-green-800">
+												Cumplido
+											</Badge>
+										)}
+									</div>
+
+									<div className="grid grid-cols-2 gap-3 text-sm">
+										<div>
+											<p className="text-muted-foreground">Monto total</p>
+											<p className="font-medium">
+												Q
+												{Number(
+													caso.convenioActivo.montoTotalConvenio,
+												).toLocaleString("es-GT", {
+													minimumFractionDigits: 2,
+													maximumFractionDigits: 2,
+												})}
+											</p>
 										</div>
-									))}
+										<div>
+											<p className="text-muted-foreground">Cuota mensual</p>
+											<p className="font-medium">
+												Q
+												{Number(
+													caso.convenioActivo.cuotaMensual,
+												).toLocaleString("es-GT", {
+													minimumFractionDigits: 2,
+													maximumFractionDigits: 2,
+												})}
+											</p>
+										</div>
+										<div>
+											<p className="text-muted-foreground">Pagos realizados</p>
+											<p className="font-medium">
+												{caso.convenioActivo.pagosRealizados} /{" "}
+												{caso.convenioActivo.numeroMeses}
+											</p>
+										</div>
+										<div>
+											<p className="text-muted-foreground">Pendiente</p>
+											<p className="font-medium text-red-600">
+												Q
+												{Number(
+													caso.convenioActivo.montoPendiente,
+												).toLocaleString("es-GT", {
+													minimumFractionDigits: 2,
+													maximumFractionDigits: 2,
+												})}
+											</p>
+										</div>
+									</div>
+
+									{/* Barra de progreso: monto pagado vs. monto total */}
+									<div className="mt-3">
+										<div className="mb-1 flex items-center justify-between text-muted-foreground text-xs">
+											<span>Progreso del convenio</span>
+											<span>
+												Q
+												{Number(caso.convenioActivo.montoPagado).toLocaleString(
+													"es-GT",
+													{
+														maximumFractionDigits: 0,
+													},
+												)}{" "}
+												de Q
+												{Number(
+													caso.convenioActivo.montoTotalConvenio,
+												).toLocaleString("es-GT", {
+													maximumFractionDigits: 0,
+												})}
+											</span>
+										</div>
+										<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+											<div
+												className="h-full rounded-full bg-green-500"
+												style={{
+													width: `${Math.min(
+														100,
+														(Number(caso.convenioActivo.montoPagado) /
+															Math.max(
+																1,
+																Number(caso.convenioActivo.montoTotalConvenio),
+															)) *
+															100,
+													)}%`,
+												}}
+											/>
+										</div>
+									</div>
+
+									{(caso.convenioActivo.motivo ||
+										caso.convenioActivo.observaciones) && (
+										<div className="mt-3 space-y-1 text-muted-foreground text-xs">
+											{caso.convenioActivo.motivo && (
+												<p>
+													<span className="font-medium">Motivo:</span>{" "}
+													{caso.convenioActivo.motivo}
+												</p>
+											)}
+											{caso.convenioActivo.observaciones && (
+												<p>
+													<span className="font-medium">Observaciones:</span>{" "}
+													{caso.convenioActivo.observaciones}
+												</p>
+											)}
+										</div>
+									)}
 								</div>
+
+								{/* Plan de cuotas del convenio */}
+								{caso.convenioCuotas && caso.convenioCuotas.length > 0 && (
+									<div>
+										<p className="mb-2 font-medium text-sm">Plan de pagos</p>
+										<div className="space-y-1">
+											{caso.convenioCuotas.map((cuota) => {
+												const pagada = !!cuota.fechaPago;
+												return (
+													<div
+														key={cuota.numeroCuota}
+														className="flex items-center justify-between rounded border px-3 py-2 text-sm"
+													>
+														<span>Cuota #{cuota.numeroCuota}</span>
+														<span className="text-muted-foreground">
+															Vence: {formatFechaLocal(cuota.fechaVencimiento)}
+														</span>
+														<Badge
+															className={
+																pagada
+																	? "bg-green-100 text-green-800"
+																	: "bg-yellow-100 text-yellow-800"
+															}
+														>
+															{pagada ? "Pagada" : "Pendiente"}
+														</Badge>
+													</div>
+												);
+											})}
+										</div>
+									</div>
+								)}
 							</CardContent>
 						</Card>
 					)}

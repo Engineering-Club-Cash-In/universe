@@ -35,6 +35,7 @@ import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosReduccionRouteImport } from './routes/cobros/reduccion'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
+import { Route as CobrosConveniosRouteImport } from './routes/cobros/convenios'
 import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
 import { Route as CobrosCierreRouteImport } from './routes/cobros/cierre'
 import { Route as CobrosCargaRouteImport } from './routes/cobros/carga'
@@ -190,6 +191,11 @@ const CobrosMetasRoute = CobrosMetasRouteImport.update({
   path: '/cobros/metas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosConveniosRoute = CobrosConveniosRouteImport.update({
+  id: '/cobros/convenios',
+  path: '/cobros/convenios',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosColaRoute = CobrosColaRouteImport.update({
   id: '/cobros/cola',
   path: '/cobros/cola',
@@ -329,6 +335,7 @@ export interface FileRoutesByFullPath {
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
+  '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -380,6 +387,7 @@ export interface FileRoutesByTo {
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
+  '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -432,6 +440,7 @@ export interface FileRoutesById {
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
+  '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -485,6 +494,7 @@ export interface FileRouteTypes {
     | '/cobros/carga'
     | '/cobros/cierre'
     | '/cobros/cola'
+    | '/cobros/convenios'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -536,6 +546,7 @@ export interface FileRouteTypes {
     | '/cobros/carga'
     | '/cobros/cierre'
     | '/cobros/cola'
+    | '/cobros/convenios'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -587,6 +598,7 @@ export interface FileRouteTypes {
     | '/cobros/carga'
     | '/cobros/cierre'
     | '/cobros/cola'
+    | '/cobros/convenios'
     | '/cobros/metas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -639,6 +651,7 @@ export interface RootRouteChildren {
   CobrosCargaRoute: typeof CobrosCargaRoute
   CobrosCierreRoute: typeof CobrosCierreRoute
   CobrosColaRoute: typeof CobrosColaRoute
+  CobrosConveniosRoute: typeof CobrosConveniosRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
   CobrosReduccionRoute: typeof CobrosReduccionRoute
@@ -859,6 +872,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosMetasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/convenios': {
+      id: '/cobros/convenios'
+      path: '/cobros/convenios'
+      fullPath: '/cobros/convenios'
+      preLoaderRoute: typeof CobrosConveniosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/cola': {
       id: '/cobros/cola'
       path: '/cobros/cola'
@@ -1039,6 +1059,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosCargaRoute: CobrosCargaRoute,
   CobrosCierreRoute: CobrosCierreRoute,
   CobrosColaRoute: CobrosColaRoute,
+  CobrosConveniosRoute: CobrosConveniosRoute,
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
   CobrosReduccionRoute: CobrosReduccionRoute,

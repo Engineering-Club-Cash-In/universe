@@ -1520,6 +1520,11 @@ export const cobrosRouter = {
 			return contactos;
 		}),
 
+	// LEGACY (tabla CRM `convenios_pago`, no cartera-back): nunca se llama desde
+	// la web (0 usos en apps/web) — el convenio real de negocio vive en
+	// cartera-back y llega vía getDetallesCreditoCarteraBack.convenioActivo y
+	// getConveniosListado (CB-027). Se deja intacto por compatibilidad, no
+	// escribir código nuevo contra esta tabla.
 	// Crear convenio de pago
 	createConvenioPago: cobrosProcedure
 		.input(
@@ -1612,6 +1617,106 @@ export const cobrosRouter = {
 				.orderBy(desc(conveniosPago.createdAt));
 
 			return convenios;
+		}),
+
+	// CB-027: listado paginado de convenios REALES de cartera-back (cliente,
+	// SIFCO, asesor, progreso) para la página /cobros/convenios. Mismo patrón
+	// de "asesor forzado" que getColaDia/getAgendaDia — el rol cobros solo ve
+	// sus propios convenios (match por email contra cartera-back.getAdvisors).
+	getConveniosListado: cobrosProcedure
+		.input(
+			z.object({
+				estado: z.enum(["active", "completed", "inactive", "all"]).optional(),
+				// Búsqueda libre: matchea SIFCO O nombre de cliente (cartera-back
+				// combina ambos con OR — mandar el mismo texto a los dos campos NO
+				// exige que ambos matcheen a la vez, que era el bug original).
+				busqueda: z.string().optional(),
+				asesorId: z.number().int().positive().optional(),
+				page: z.number().int().positive().optional(),
+				perPage: z.number().int().min(1).max(100).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!isCarteraBackEnabled()) {
+				return {
+					success: true,
+					sinAsesor: false,
+					asesorForzado: null,
+					items: [],
+					total: 0,
+					page: 1,
+					perPage: input.perPage ?? 25,
+					totalPages: 1,
+				};
+			}
+
+			const puedeVerTodos = PERMISSIONS.canAssignCobros(context.userRole ?? "");
+			const page = input.page ?? 1;
+			const perPage = input.perPage ?? 25;
+
+			let asesorForzado: { asesorId: number; nombre: string } | null = null;
+			let asesorIdFiltro: number | undefined = input.asesorId;
+
+			if (!puedeVerTodos) {
+				const email = context.session?.user?.email?.trim().toLowerCase();
+				// email_cash_in, NO getAdvisors()/platform_users.email: ese campo
+				// está desactualizado para varios asesores (Diego Gomez, Samuel
+				// Gamboa) y no coincide con el login real del CRM — mismo patrón ya
+				// corregido en getCierreDiarioPorRango (ver ese comentario, arriba
+				// en este archivo).
+				const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
+				const propio = asesoresConBuckets.find(
+					(a) => a.email_cash_in?.trim().toLowerCase() === email,
+				);
+				if (!propio) {
+					return {
+						success: true,
+						sinAsesor: true,
+						asesorForzado: null,
+						items: [],
+						total: 0,
+						page,
+						perPage,
+						totalPages: 1,
+					};
+				}
+				asesorForzado = { asesorId: propio.asesor_id, nombre: propio.nombre };
+				asesorIdFiltro = propio.asesor_id;
+			}
+
+			try {
+				const resultado = await carteraBackClient.getConveniosListado({
+					estado: input.estado,
+					numeroCreditoSifco: input.busqueda,
+					nombreUsuario: input.busqueda,
+					asesorId: asesorIdFiltro,
+					page,
+					perPage,
+				});
+
+				return {
+					success: true,
+					sinAsesor: false,
+					asesorForzado,
+					items: resultado.data,
+					total: resultado.total,
+					page: resultado.page,
+					perPage: resultado.perPage,
+					totalPages: resultado.totalPages,
+				};
+			} catch (error) {
+				// No devolver success:false disfrazado de 200: React Query solo
+				// marca isError ante un fallo real de transporte/oRPC, así que un
+				// {success:false, items:[]} silencioso caía en el mismo branch que
+				// "0 convenios" en la UI — un outage de cartera-back se veía
+				// idéntico a "no hay convenios". Se propaga como error real (mismo
+				// criterio que el resto de procedures de este router, p.ej.
+				// getColaDia, que no atrapan su propia excepción de cartera-back).
+				console.error("[getConveniosListado] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "No se pudieron cargar los convenios de pago",
+				});
+			}
 		}),
 
 	// Asignar responsable de cobros
@@ -3254,7 +3359,8 @@ export const cobrosRouter = {
 				const montoEnMora = Number(creditoCompleto.moraActual ?? 0);
 
 				const tieneMoraActiva = creditoCompleto.mora != null;
-				const tieneConvenioActivo = creditoCompleto.convenioActivo != null;
+				const convenioActivoData = creditoCompleto.convenioActivo ?? null;
+				const tieneConvenioActivo = convenioActivoData != null;
 				let estadoMora: string | null = "al_dia";
 				if (tieneConvenioActivo) {
 					estadoMora = "en_convenio";
@@ -3295,11 +3401,38 @@ export const cobrosRouter = {
 					montoEnMora: montoEnMora.toFixed(2),
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
-					cuotaConvenio: tieneConvenioActivo
-						? Number(
-								creditoCompleto.convenioActivo!.cuota_mensual ?? 0,
-							).toFixed(2)
+					cuotaConvenio: convenioActivoData
+						? Number(convenioActivoData.cuota_mensual ?? 0).toFixed(2)
 						: null,
+					// CB-027: convenio completo (para la card "Convenios de Pago") + su
+					// plan de pagos. null cuando no hay convenio activo.
+					convenioActivo: convenioActivoData
+						? {
+								convenioId: convenioActivoData.convenio_id,
+								montoTotalConvenio: convenioActivoData.monto_total_convenio,
+								cuotaMensual: convenioActivoData.cuota_mensual,
+								numeroMeses: convenioActivoData.numero_meses,
+								montoPagado: convenioActivoData.monto_pagado ?? "0",
+								montoPendiente: convenioActivoData.monto_pendiente ?? "0",
+								pagosRealizados: convenioActivoData.pagos_realizados ?? 0,
+								pagosPendientes: convenioActivoData.pagos_pendientes ?? 0,
+								activo: convenioActivoData.activo,
+								completado: convenioActivoData.completado,
+								fechaConvenio: convenioActivoData.fecha_convenio,
+								motivo: convenioActivoData.motivo ?? null,
+								observaciones: convenioActivoData.observaciones ?? null,
+							}
+						: null,
+					// CB-027 review fix: cartera-back anida cuotasConvenioMensuales
+					// DENTRO de convenioActivo (no top-level) — carteraFront ya
+					// esperaba ese shape (cardInfo.tsx, registerPayment.ts).
+					convenioCuotas: (
+						convenioActivoData?.cuotasConvenioMensuales ?? []
+					).map((c) => ({
+						numeroCuota: c.numero_cuota,
+						fechaVencimiento: c.fecha_vencimiento,
+						fechaPago: c.fecha_pago,
+					})),
 
 					// Datos de contacto (del caso de cobros primero, fallback al lead)
 					telefonoPrincipal:
@@ -5718,7 +5851,10 @@ export const cobrosRouter = {
 					if (!email) continue;
 					const userId = emailToUserId.get(email);
 					if (!userId) continue;
-					poolPorAsesor.set(userId, [...a.buckets].sort((x, y) => x - y));
+					poolPorAsesor.set(
+						userId,
+						[...a.buckets].sort((x, y) => x - y),
+					);
 				}
 			} catch (error) {
 				console.error("[getCierreDiarioPorRango] Pool de buckets:", error);

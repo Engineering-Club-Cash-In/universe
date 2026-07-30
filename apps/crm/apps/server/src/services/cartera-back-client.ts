@@ -20,6 +20,8 @@ import type {
 	CarteraBucketsHistorialResponse,
 	CarteraColaDiaResponse,
 	CarteraComportamientoPagoResponse,
+	CarteraConvenioCuota,
+	CarteraConvenioListado,
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
 	CarteraInversionista,
@@ -42,6 +44,7 @@ import type {
 	GetBucketsHistorialParams,
 	GetCargaPorAsesorBucketParams,
 	GetColaDiaSLAParams,
+	GetConveniosListadoParams,
 	GetCreditosPorBucketParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
@@ -1141,6 +1144,52 @@ export class CarteraBackClient {
 			total: response.totalCount,
 			totalPages: response.totalPages,
 		};
+	}
+
+	// CB-027: listado paginado de convenios de pago (con cliente/SIFCO/asesor
+	// vía joins en cartera-back). Fuente de la tabla de la página
+	// /cobros/convenios del CRM. Sin cache: el progreso cambia con cada pago.
+	async getConveniosListado(
+		params: GetConveniosListadoParams = {},
+	): Promise<PaginatedResponse<CarteraConvenioListado>> {
+		const queryParams = new URLSearchParams({
+			...(params.estado && { estado: params.estado }),
+			...(params.numeroCreditoSifco && {
+				numero_credito_sifco: params.numeroCreditoSifco,
+			}),
+			...(params.nombreUsuario && { nombre_usuario: params.nombreUsuario }),
+			...(params.asesorId !== undefined && {
+				asesor_id: String(params.asesorId),
+			}),
+			...(params.emailAsesor && { email_asesor: params.emailAsesor }),
+			...(params.page && { page: params.page.toString() }),
+			...(params.perPage && { perPage: params.perPage.toString() }),
+		});
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraConvenioListado[];
+			page: number;
+			perPage: number;
+			totalCount: number;
+			totalPages: number;
+		}>(`/payment-agreements/listado?${queryParams}`, { method: "GET" });
+		return {
+			data: response.data ?? [],
+			page: response.page,
+			perPage: response.perPage,
+			total: response.totalCount,
+			totalPages: response.totalPages,
+		};
+	}
+
+	// CB-027: plan de pagos (convenio_cuotas) de un convenio puntual — usado
+	// como fallback si `cuotasConvenioMensuales` no viene embebido en /credito.
+	async getConvenioCuotas(convenioId: number): Promise<CarteraConvenioCuota[]> {
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraConvenioCuota[];
+		}>(`/payment-agreements/${convenioId}/cuotas`, { method: "GET" });
+		return response.data ?? [];
 	}
 
 	// CB-020: universo SLA de la Cola del Día — créditos del POOL de buckets

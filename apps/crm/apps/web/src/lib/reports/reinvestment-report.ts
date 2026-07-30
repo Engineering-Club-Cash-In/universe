@@ -6,7 +6,9 @@ const sumCents = (values: (number | string)[]) =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 const isMoney = (value: unknown): value is string =>
-	typeof value === "string" && Number.isFinite(Number(value));
+	typeof value === "string" &&
+	value.trim().length > 0 &&
+	Number.isFinite(Number(value));
 const hasMoneyFields = (value: unknown, fields: string[]) =>
 	isRecord(value) && fields.every((field) => isMoney(value[field]));
 const hasStringFields = (value: unknown, fields: string[]) =>
@@ -443,6 +445,12 @@ function getDestinationFormulas(
 	>;
 	const parts = partsByType[row.type as keyof typeof partsByType];
 	if (!parts) return null;
+	if (
+		sumCents(parts.paid.map((part) => part.value)) !== cents(row.paid) ||
+		sumCents(parts.reinvested.map((part) => part.value)) !==
+			cents(row.reinvested)
+	)
+		return null;
 	return {
 		paid: destinationFormula("Pagado a inversionistas", parts.paid, row.paid),
 		reinvested: destinationFormula(
@@ -454,14 +462,15 @@ function getDestinationFormulas(
 }
 
 export function getModePresentation(row: ReinvestmentModeRow) {
-	const splitAvailable = !NO_SPLIT_TYPES.has(row.type);
+	const destinations = getDestinationFormulas(row);
+	const splitAvailable = destinations !== null;
 	return {
 		paid: row.paid,
 		reinvested: row.reinvested,
 		distributed: row.distributed,
 		equation: `${q(row.paid)} pagado + ${q(row.reinvested)} reinvertido = ${q(row.distributed)} flujo liquidado.`,
 		composition: row.composition,
-		destinations: getDestinationFormulas(row),
+		destinations,
 		splitAvailable,
 		splitNote: splitAvailable
 			? null

@@ -175,6 +175,13 @@ test("capital, interés y total explican qué forma cada destino", () => {
 	const base = response().porTipo.reinversion_capital;
 	const cases = [
 		{
+			type: "sin_reinversion",
+			paid: 54.65,
+			reinvested: 0,
+			paidParts: ["Capital", "Rendimiento fiscal neto"],
+			reinvestedParts: [],
+		},
+		{
 			type: "reinversion_capital",
 			paid: 4.65,
 			reinvested: 50,
@@ -235,6 +242,31 @@ test("capital, interés y total explican qué forma cada destino", () => {
 			"Reinvertido",
 		);
 	}
+});
+
+test("suprime fórmulas de una modalidad actual que no concilia con destinos históricos", () => {
+	const data = response();
+	data.porTipo = {
+		reinversion_total: {
+			...data.porTipo.reinversion_capital,
+			reinversion_capital: "0.00",
+			reinversion_interes: "0.00",
+			reinversion_total: "0.00",
+			total_cuota: "54.65",
+		},
+	};
+
+	const model = buildReinvestmentReportModel(data);
+	const row = model.rows[0];
+	expect(row).toBeDefined();
+	if (!row) throw new Error("Falta modalidad histórica reclasificada");
+
+	expect(model.reconciliations.destinations).toBe(true);
+	expect(row).toMatchObject({ paid: 54.65, reinvested: 0, distributed: 54.65 });
+	expect(getModePresentation(row)).toMatchObject({
+		destinations: null,
+		splitAvailable: false,
+	});
 });
 
 test("variable, excedente y combinada no fabrican fórmulas por destino", () => {
@@ -365,6 +397,18 @@ test("rechaza inversionistas con campos monetarios no numéricos", () => {
 	expect(
 		getReportState({ pending: false, error: false, data: nonnumeric }),
 	).toBe("incompatible");
+});
+
+test("rechaza campos monetarios vacíos o con solo whitespace", () => {
+	for (const value of ["", "   "]) {
+		const data = response();
+		data.porTipo.sin_reinversion.total_cuota = value;
+
+		expect(buildReinvestmentReportModel(data).compatible).toBe(false);
+		expect(getReportState({ pending: false, error: false, data })).toBe(
+			"incompatible",
+		);
+	}
 });
 
 test("acepta campos monetarios válidos y conserva capital activo sin flujo", () => {

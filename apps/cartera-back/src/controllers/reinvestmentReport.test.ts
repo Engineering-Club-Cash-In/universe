@@ -1,11 +1,39 @@
 import { describe, expect, test } from "bun:test";
 import {
+  allocateRoundedAmounts,
   assertModeReconciliation,
   buildInvestorPosition,
   buildNetInterestDetail,
   getPublicReinvestmentDetailError,
   assertReportReconciliation,
 } from "./reinvestmentReport";
+
+test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {
+  const amounts = allocateRoundedAmounts([
+    "33.333333",
+    "33.333333",
+    "33.333333",
+  ]);
+
+  expect(amounts).toEqual(["33.34", "33.33", "33.33"]);
+  expect(
+    assertReportReconciliation({
+      interesNeto: {
+        conFactura: { neto: "0.00" },
+        sinFactura: { neto: "0.00" },
+        cube: { neto: "0.00" },
+      },
+      pagosExtras: { abonos_capital: "100.00", cancelaciones: "0.00" },
+      comprasMes: [],
+      detalleInteresNeto: [],
+      detallePagosExtras: amounts.map((monto) => ({
+        tipo: "abono_capital",
+        monto,
+      })),
+      detalleComprasMes: [],
+    }),
+  ).toMatchObject({ pagosExtras: true });
+});
 
 describe("buildNetInterestDetail", () => {
   test("con factura suma IVA al interés", () => {
@@ -288,6 +316,36 @@ test("cada modalidad concilia destinos y composición fiscal real", () => {
       total_distribuido: "54.65",
     }),
   ).toBe(true);
+});
+
+test("una modalidad admite solo un centavo por redondeo independiente de componentes", () => {
+  expect(
+    assertModeReconciliation({
+      reinversion_capital: "34.27",
+      reinversion_interes: "0.00",
+      reinversion_total: "34.27",
+      total_capital: "33.34",
+      total_interes: "1.01",
+      iva_facturado: "0.00",
+      total_isr: "0.07",
+      total_cuota: "0.00",
+      total_distribuido: "34.27",
+    }),
+  ).toBe(true);
+
+  expect(() =>
+    assertModeReconciliation({
+      reinversion_capital: "34.27",
+      reinversion_interes: "0.00",
+      reinversion_total: "34.27",
+      total_capital: "33.35",
+      total_interes: "1.01",
+      iva_facturado: "0.00",
+      total_isr: "0.07",
+      total_cuota: "0.00",
+      total_distribuido: "34.27",
+    }),
+  ).toThrow("Modalidad no concilia");
 });
 
 test("una modalidad con composición o destinos descuadrados no se publica", () => {

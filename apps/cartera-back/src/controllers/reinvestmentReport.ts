@@ -10,6 +10,23 @@ type NetInterestInput = {
 const cents = (value: number | string) => Math.round(Number(value) * 100);
 const money = (valueInCents: number) => (valueInCents / 100).toFixed(2);
 
+export function allocateRoundedAmounts(values: (number | string)[]) {
+  const rawCents = values.map((value) => Number(value) * 100);
+  const allocated = rawCents.map(Math.round);
+  const remainder = cents(values.reduce((total, value) => total + Number(value), 0)) -
+    allocated.reduce((total, value) => total + value, 0);
+  const direction = Math.sign(remainder);
+  const order = rawCents
+    .map((value, index) => ({ index, remainder: value - allocated[index] }))
+    .sort((a, b) => direction * (b.remainder - a.remainder));
+
+  for (let index = 0; index < Math.abs(remainder); index++) {
+    allocated[order[index].index] += direction;
+  }
+
+  return allocated.map(money);
+}
+
 export const PUBLIC_REINVESTMENT_DETAIL_ERROR =
   "Los detalles no están disponibles para este período. Intenta nuevamente más tarde.";
 
@@ -187,7 +204,12 @@ export function assertModeReconciliation(mode: ModeReconciliation) {
       mode.total_interes,
       mode.iva_facturado,
     ]) - cents(mode.total_isr);
-  if (distributed !== destinations || distributed !== composition) {
+  // Stored components are rounded independently, so their composition can
+  // differ by one cent even while the stored destinations reconcile exactly.
+  if (
+    distributed !== destinations ||
+    Math.abs(distributed - composition) > 1
+  ) {
     throw new Error("Modalidad no concilia");
   }
   return true;

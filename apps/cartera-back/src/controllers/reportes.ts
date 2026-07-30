@@ -10,6 +10,7 @@ import { snapCte } from "./moraSnapshotSql";
 import {
 	assertModeReconciliation,
 	assertReportReconciliation,
+	allocateRoundedAmounts,
 	buildInvestorPosition,
 	buildNetInterestDetail,
 	getPublicReinvestmentDetailError,
@@ -1155,7 +1156,7 @@ export async function getReinversionLiquidaciones({
       fecha: String(r.fecha),
       credito: String(r.credito),
       tipo: String(r.tipo) as "abono_capital" | "cancelacion",
-      monto: Number(r.monto ?? 0).toFixed(2),
+      monto: String(r.monto ?? 0),
     }));
     const manualDetalleRows = await db.execute(sql`
     SELECT
@@ -1184,9 +1185,16 @@ export async function getReinversionLiquidaciones({
         fecha: String(r.fecha),
         credito: String(r.credito),
         tipo: "cancelacion" as const,
-        monto: Number(r.monto ?? 0).toFixed(2),
+        monto: String(r.monto ?? 0),
       }))
     );
+    for (const tipo of ["abono_capital", "cancelacion"] as const) {
+      const rows = detallePagosExtras.filter((row) => row.tipo === tipo);
+      const amounts = allocateRoundedAmounts(rows.map((row) => row.monto));
+      rows.forEach((row, index) => {
+        row.monto = amounts[index];
+      });
+    }
 
     const comprasDetalleRows = await db.execute(sql`
     SELECT

@@ -16,6 +16,7 @@ import {
 	Mail,
 	MapPin,
 	MessageCircle,
+	MessageSquare,
 	Pencil,
 	Phone,
 	Play,
@@ -26,6 +27,11 @@ import {
 	X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import {
+	etiquetaMetodoContacto,
+	evaluarGestionTempranaB1,
+	type ResultadoGestionB1,
+} from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
@@ -66,7 +72,10 @@ import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import {
 	bucketDeEstado,
+	bucketDeNumero,
+	catalogoDeNumero,
 	estiloBucket,
+	numeroDeEstadoMora,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
 import { formatFechaLocal } from "@/lib/date-utils";
@@ -178,10 +187,158 @@ const ETIQUETA_COLORS: Record<string, string> = {
 	reclamo: "bg-pink-100 text-pink-800",
 };
 
+// Ícono por canal de contacto. A nivel de módulo (no dentro de RouteComponent)
+// porque lo usan tanto el Historial de Contactos como la tarjeta de gestión
+// temprana, y no depende de ningún estado del componente.
+function getMetodoIcon(metodo: string) {
+	switch (metodo) {
+		case "llamada":
+			return <Phone className="h-3 w-3" />;
+		case "whatsapp":
+			return <MessageCircle className="h-3 w-3" />;
+		case "sms":
+			return <MessageSquare className="h-3 w-3" />;
+		case "email":
+			return <Mail className="h-3 w-3" />;
+		default:
+			return <Phone className="h-3 w-3" />;
+	}
+}
+
 // Helper para detectar si es un UUID o un ID numérico
 function isUUID(id: string): boolean {
 	return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
 		id,
+	);
+}
+
+/**
+ * CB-026: resumen de la gestión temprana de una cuenta B1 — un badge por cada
+ * uno de los 3 canales que hay que agotar (WhatsApp / llamada / SMS) más el
+ * estado global. La regla vive en `server/src/lib/gestion-temprana-b1` (módulo
+ * puro, testeado); acá solo se pinta lo que esa función ya decidió.
+ *
+ * Solo se monta cuando `gestion.aplica` — el caller filtra bucket ≠ B1 y falta
+ * de fecha de entrada, así que este componente nunca se pregunta si debe existir.
+ */
+function GestionTempranaCard({
+	gestion,
+	fechaEntradaBucket,
+}: {
+	gestion: Extract<ResultadoGestionB1, { aplica: true }>;
+	fechaEntradaBucket: string | null;
+}) {
+	const intentados = gestion.canales.filter((c) => c.intentos > 0).length;
+	const entrada = fechaEntradaBucket ? new Date(fechaEntradaBucket) : null;
+
+	// El estilo del contenedor comunica el estado de un vistazo: ámbar solo
+	// cuando falta gestión (lo único accionable), neutro cuando ya se agotó
+	// (éxito de proceso, no error → no va en rojo) y verde cuando el cliente
+	// respondió y ya no hay que insistir.
+	const estiloTarjeta =
+		gestion.estado === "incompleta"
+			? "border-amber-300 dark:border-amber-800"
+			: gestion.estado === "respondio"
+				? "border-emerald-300 dark:border-emerald-800"
+				: undefined;
+
+	return (
+		<Card className={estiloTarjeta}>
+			<CardHeader>
+				<CardTitle className="flex items-center gap-2">
+					<Users className="h-5 w-5" />
+					Gestión Temprana (B1)
+				</CardTitle>
+				<CardDescription>
+					3 intentos en 3 canales distintos
+					{entrada
+						? ` — desde que la cuenta entró a B1 el ${formatFechaGT(entrada)}`
+						: null}
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="space-y-3">
+				<div className="flex flex-wrap items-center gap-2">
+					<span className="font-medium text-sm">
+						{intentados} / {gestion.canales.length} canales
+					</span>
+					<span className="inline-flex flex-wrap items-center gap-1">
+						{gestion.canales.map((canal) => {
+							const etiqueta = etiquetaMetodoContacto(canal.canal);
+							const clase = canal.contesto
+								? "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+								: canal.datoInvalido
+									? "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+									: canal.intentos > 0
+										? "border-transparent bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300"
+										: "text-muted-foreground";
+							const detalle = canal.contesto
+								? "contestó"
+								: canal.datoInvalido
+									? "número equivocado"
+									: canal.intentos > 0
+										? `${canal.intentos} ${canal.intentos === 1 ? "intento" : "intentos"}`
+										: "sin intentar";
+							return (
+								<Badge
+									key={canal.canal}
+									variant="outline"
+									className={`gap-1 text-[10px] ${clase}`}
+									title={
+										canal.ultimoIntento
+											? `Último intento: ${formatFechaGT(canal.ultimoIntento)}`
+											: undefined
+									}
+								>
+									{getMetodoIcon(canal.canal)}
+									{etiqueta}: {detalle}
+								</Badge>
+							);
+						})}
+					</span>
+				</div>
+
+				{gestion.estado === "incompleta" && (
+					<div className="flex items-start gap-2 rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950/30 dark:text-yellow-300">
+						<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+						<span>
+							Falta intentar por{" "}
+							<span className="font-medium">
+								{gestion.canalesFaltantes
+									.map((c) => etiquetaMetodoContacto(c))
+									.join(", ")}
+							</span>
+							. La gestión temprana no está agotada.
+						</span>
+					</div>
+				)}
+
+				{gestion.estado === "agotada" && (
+					<p className="text-muted-foreground text-sm">
+						Gestión temprana agotada: se intentó por los 3 canales sin respuesta
+						del cliente.
+					</p>
+				)}
+
+				{gestion.estado === "respondio" && (
+					<p className="text-emerald-700 text-sm dark:text-emerald-400">
+						{gestion.canalQueContesto
+							? `El cliente respondió por ${etiquetaMetodoContacto(gestion.canalQueContesto)}. No es necesario intentar los canales restantes.`
+							: "No es necesario intentar los canales restantes."}
+						{gestion.tienePromesa
+							? " Se registró un compromiso de pago."
+							: null}
+					</p>
+				)}
+
+				{gestion.otrosCanales > 0 && (
+					<p className="text-muted-foreground text-xs">
+						+{gestion.otrosCanales}{" "}
+						{gestion.otrosCanales === 1 ? "intento" : "intentos"} por otros
+						medios (no cuentan para los 3 canales).
+					</p>
+				)}
+			</CardContent>
+		</Card>
 	);
 }
 
@@ -223,6 +380,13 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 
 	const bucketsCatalogo = useBucketsCatalogo();
+
+	// Bucket REAL del motor (cartera-back), no derivado de estadoMora.
+	// Degrada a null en cualquier error → el badge cae al estadoMora.
+	const bucketActual = useQuery({
+		...orpc.getBucketActualCredito.queryOptions({ input: { creditoId: id } }),
+		enabled: !!session && !!id,
+	});
 
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
@@ -266,6 +430,22 @@ function RouteComponent() {
 			),
 		[historialContactos.data],
 	);
+
+	// CB-026: gestión temprana B1 — 3 intentos en 3 canales distintos.
+	// Lee historialContactos.data en CRUDO, no `contactos`: esa lista excluye
+	// promesa_pago a propósito (van en su propia tarjeta), pero una promesa ES
+	// el resultado más fuerte de un intento y satisface el early exit del
+	// ticket. La regla vive en el server (módulo puro compartido), no acá.
+	const gestionB1 = useMemo(
+		() =>
+			evaluarGestionTempranaB1({
+				bucket: bucketActual.data?.bucket ?? null,
+				fechaEntradaBucket: bucketActual.data?.fecha_entrada_bucket ?? null,
+				contactos: historialContactos.data ?? [],
+			}),
+		[bucketActual.data, historialContactos.data],
+	);
+
 	const estadoPromesasPago = useQuery({
 		...orpc.getEstadoPromesasPago.queryOptions({
 			input: {
@@ -567,18 +747,49 @@ function RouteComponent() {
 	const getEstadoLabel = (estado: string | null | undefined) =>
 		bucketDeEstado(estado, bucketsCatalogo.data).label;
 
-	const getMetodoIcon = (metodo: string) => {
-		switch (metodo) {
-			case "llamada":
-				return <Phone className="h-3 w-3" />;
-			case "whatsapp":
-				return <MessageCircle className="h-3 w-3" />;
-			case "email":
-				return <Mail className="h-3 w-3" />;
-			default:
-				return <Phone className="h-3 w-3" />;
-		}
-	};
+	// Badge de bucket del header: si el motor devolvió un bucket (0-5), se
+	// muestra "B1 · Alerta Temprana" con el color del catálogo dinámico. Si el
+	// crédito salió del funnel (en convenio, cancelado), si el motor aún no
+	// respondió, o si falló, se cae al badge de estadoMora de siempre — nunca
+	// se muestra un bucket inventado (mismo criterio que BUCKET_DESCONOCIDO).
+	const motorBucket = bucketActual.data;
+	const bucketNumero = motorBucket?.bucket ?? null;
+	const bucketCatalogo =
+		bucketNumero !== null
+			? catalogoDeNumero(bucketNumero, bucketsCatalogo.data)
+			: undefined;
+	const bucketUI =
+		bucketNumero !== null
+			? bucketDeNumero(bucketNumero, bucketsCatalogo.data)
+			: null;
+	const bucketPrefijo =
+		motorBucket?.prefijo ||
+		bucketCatalogo?.prefijo ||
+		(bucketNumero !== null ? `B${bucketNumero}` : null);
+	// Divergencia motor vs. estadoMora calculado en vivo: solo en el tooltip,
+	// el badge siempre muestra el MOTOR (es la fuente operativa: pool de
+	// asesores y SLA se derivan de ahí).
+	// Se compara por NÚMERO de bucket, no por el string estado_mora: son dos
+	// catálogos de texto mantenidos por separado (cartera.buckets.estado_mora
+	// en cartera-back vs. estadoMoraEnum en el CRM) que podrían divergir en
+	// nombre para el mismo concepto — comparar por número evita ese falso
+	// positivo. Si `caso.estadoMora` no mapea a ningún número (pseudo-estado
+	// de status como "pagado"), no hay nada que comparar y no se marca divergencia.
+	const numeroPorEstadoMoraCaso = numeroDeEstadoMora(
+		caso.estadoMora,
+		bucketsCatalogo.data,
+	);
+	const estadoMoraDivergente =
+		bucketUI !== null &&
+		bucketNumero !== null &&
+		numeroPorEstadoMoraCaso !== null &&
+		numeroPorEstadoMoraCaso !== bucketNumero;
+	const bucketTitle =
+		bucketUI === null
+			? undefined
+			: estadoMoraDivergente
+				? `${bucketPrefijo} · ${bucketUI.label} (mora calculada: ${getEstadoLabel(caso.estadoMora)})`
+				: `${bucketPrefijo} · ${bucketUI.label}`;
 
 	const getEstadoContacto = (estado: string) => {
 		const estados: Record<string, { label: string; color: string }> = {
@@ -628,9 +839,23 @@ function RouteComponent() {
 						</p>
 					</div>
 				</div>
-				<Badge variant="outline" style={getEstadoBadge(caso.estadoMora || "")}>
-					{getEstadoLabel(caso.estadoMora || "")}
-				</Badge>
+				{bucketUI ? (
+					<Badge
+						variant="outline"
+						className="whitespace-nowrap font-semibold"
+						style={estiloBucket(bucketUI.colorHex)}
+						title={bucketTitle}
+					>
+						{bucketPrefijo} · {bucketUI.label}
+					</Badge>
+				) : (
+					<Badge
+						variant="outline"
+						style={getEstadoBadge(caso.estadoMora || "")}
+					>
+						{getEstadoLabel(caso.estadoMora || "")}
+					</Badge>
+				)}
 			</div>
 
 			<div className="grid gap-6 lg:grid-cols-3">
@@ -666,16 +891,9 @@ function RouteComponent() {
 										<span className="font-medium">Días de Mora:</span>
 									</div>
 									<p>
-										{caso.estadoMora === "mora_30"
-											? "30"
-											: caso.estadoMora === "mora_60"
-												? "60"
-												: caso.estadoMora === "mora_90"
-													? "90"
-													: caso.estadoMora === "mora_120"
-														? "120+"
-														: "0"}{" "}
-										días
+										{caso.diasMoraMaximo && caso.diasMoraMaximo > 0
+											? `${caso.diasMoraMaximo} ${caso.diasMoraMaximo === 1 ? "día" : "días"}`
+											: "Sin mora"}
 									</p>
 								</div>
 								<div className="space-y-2">
@@ -1561,6 +1779,22 @@ function RouteComponent() {
 						</CardContent>
 					</Card>
 
+					{/* CB-026: Gestión temprana B1 — 3 intentos en 3 canales distintos.
+					    No se renderiza si el crédito no es B1, si no hay fecha de
+					    entrada al bucket, ni mientras cargan las queries que la
+					    alimentan (con contactos vacíos la regla diría "faltan 3
+					    canales" y parpadearía esa alerta antes de tener los datos). */}
+					{!bucketActual.isPending &&
+						!historialContactos.isPending &&
+						gestionB1.aplica && (
+							<GestionTempranaCard
+								gestion={gestionB1}
+								fechaEntradaBucket={
+									bucketActual.data?.fecha_entrada_bucket ?? null
+								}
+							/>
+						)}
+
 					{/* Historial de Contactos */}
 					<Card>
 						<CardHeader>
@@ -1598,10 +1832,9 @@ function RouteComponent() {
 															<div className="flex items-center gap-2">
 																{getMetodoIcon(contacto.metodoContacto)}
 																<span className="font-medium">
-																	{contacto.metodoContacto
-																		?.charAt(0)
-																		.toUpperCase() +
-																		contacto.metodoContacto?.slice(1)}
+																	{etiquetaMetodoContacto(
+																		contacto.metodoContacto,
+																	)}
 																</span>
 																<Badge className={estadoInfo.color}>
 																	{estadoInfo.label}

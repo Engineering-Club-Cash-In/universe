@@ -163,6 +163,38 @@ export function bucketDeNumero(
 	return bucketDeEstado(ESTADO_MORA_POR_NUMERO[numero], catalogo);
 }
 
+/**
+ * Inverso de `bucketDeNumero`: número de bucket (0-5) a partir de un
+ * `estadoMora`, o null si no matchea ninguno (pseudo-buckets de status como
+ * "en_convenio"/"pagado" no tienen número — no son filas de aging).
+ *
+ * Preferir el catálogo dinámico (`catalogo`) sobre `ESTADO_MORA_POR_NUMERO`
+ * cuando esté cargado: es la fuente de verdad real del puente número↔estado
+ * (`cartera.buckets.estado_mora`), evita comparar dos catálogos de string
+ * mantenidos por separado que podrían divergir en nombre para el mismo
+ * concepto (ver detalle de caso, badge de bucket: comparar por NÚMERO, no
+ * por string, es justamente lo que evita ese falso positivo).
+ */
+export function numeroDeEstadoMora(
+	estadoMora: string | null | undefined,
+	catalogo: BucketsCatalogoQueryData | undefined,
+): number | null {
+	if (!estadoMora) return null;
+	if (catalogo) {
+		const fila = catalogo.find((b) => b.estadoMora === estadoMora);
+		if (fila) {
+			const numero = ESTADO_MORA_POR_NUMERO.indexOf(
+				fila.estadoMora as (typeof ESTADO_MORA_POR_NUMERO)[number],
+			);
+			if (numero !== -1) return numero;
+		}
+	}
+	const numero = ESTADO_MORA_POR_NUMERO.indexOf(
+		estadoMora as (typeof ESTADO_MORA_POR_NUMERO)[number],
+	);
+	return numero === -1 ? null : numero;
+}
+
 /** Fila cruda del catálogo dinámico para el bucket numérico (0-5), o undefined si no cargó / no está. */
 export function catalogoDeNumero(
 	numero: number,

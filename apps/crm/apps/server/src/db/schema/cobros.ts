@@ -30,9 +30,24 @@ export const estadoMoraEnum = pgEnum("estado_mora", [
 	"incobrable", // Declarado incobrable
 ]);
 
+// CB-026: los 3 canales de la gestión temprana B1 son llamada / whatsapp /
+// sms. `sms` se agregó a ESTE enum (no a uno aparte) porque el mismo tipo es
+// la columna de 4 lugares — contactos_cobros.metodo_contacto,
+// notificaciones_cobros.canal, seguimientos_programados.metodo_contacto y
+// casos_cobros.metodo_contacto_proximo — y partirlo obligaría a mantener dos
+// catálogos de canal en paralelo.
+// AGREGAR un valor es aditivo y seguro: `ALTER TYPE ... ADD VALUE` no reescribe
+// tabla ni toma lock exclusivo, y ninguna de las 4 columnas tiene CHECK ni
+// índice parcial que enumere valores. QUITARLO después NO se puede en caliente
+// (ver la nota de estado_contacto abajo) — el valor es irreversible en la
+// práctica.
+// Nota: el orden de este array es cosmético. `ADD VALUE` sin BEFORE/AFTER
+// agrega la etiqueta al FINAL del orden de sort de Postgres; nadie hace
+// ORDER BY sobre esta columna, así que la divergencia es inocua.
 export const metodoContactoEnum = pgEnum("metodo_contacto", [
 	"llamada",
 	"whatsapp",
+	"sms",
 	"email",
 	"visita_domicilio",
 	"carta_notarial",

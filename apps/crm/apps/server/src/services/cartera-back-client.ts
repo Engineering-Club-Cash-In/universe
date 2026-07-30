@@ -14,6 +14,7 @@ import type {
 	CarteraBackConnectionError,
 	CarteraBackError,
 	CarteraBackValidationError,
+	CarteraBucketActualCredito,
 	CarteraBucketCatalogo,
 	CarteraBucketHistorialEvento,
 	CarteraBucketsHistorialResponse,
@@ -1032,6 +1033,23 @@ export class CarteraBackClient {
 			data: CarteraBucketHistorialEvento[];
 		}>(`/buckets/historial/credito/${creditoId}`, { method: "GET" });
 		return response.data ?? [];
+	}
+
+	/**
+	 * Bucket ACTUAL de un crédito (motor COBROS-02) por número SIFCO. Sin
+	 * cache a propósito: getCredito() sí cachea 5 min y este badge debe
+	 * reflejar el motor al instante (mismo criterio que getBucketsHistorial).
+	 */
+	async getBucketActualCredito(
+		numeroSifco: string,
+	): Promise<CarteraBucketActualCredito | null> {
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraBucketActualCredito;
+		}>(`/buckets/credito/${encodeURIComponent(numeroSifco)}`, {
+			method: "GET",
+		});
+		return response?.data ?? null;
 	}
 
 	/**

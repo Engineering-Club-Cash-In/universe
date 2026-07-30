@@ -96,6 +96,7 @@ import {
 	type EstadoPromesa,
 	evaluarPromesa,
 } from "../lib/promesa-pago";
+import { resolverNumeroSifco } from "../lib/resolver-numero-sifco";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	sendWhatsappTemplate,
@@ -1745,6 +1746,25 @@ export const cobrosRouter = {
 			}
 		}),
 
+	// Bucket ACTUAL del motor (COBROS-02) para el badge del detalle de cobros.
+	// Acepta el mismo `creditoId` que getDetallesCreditoCarteraBack (número
+	// SIFCO o UUID de caso) para que la página pase el param de la ruta tal
+	// cual. Degrada a null en vez de tirar error: el badge del cliente cae al
+	// estadoMora existente cuando esto falla o el motor no tiene bucket.
+	getBucketActualCredito: cobrosProcedure
+		.input(z.object({ creditoId: z.string().min(1).max(100) }))
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) return null;
+			try {
+				const numeroSifco = await resolverNumeroSifco(input.creditoId);
+				if (!numeroSifco) return null;
+				return await carteraBackClient.getBucketActualCredito(numeroSifco);
+			} catch (error) {
+				console.error("[getBucketActualCredito] Error:", error);
+				return null;
+			}
+		}),
+
 	// CC2-11: Agenda del día — cuotas que vencen HOY (D-0) hasta D-5 de créditos
 	// al día, agrupadas por urgencia. El rol cobros SOLO ve su agenda: se fuerza
 	// server-side matcheando su email de login contra los asesores de cartera
@@ -2902,23 +2922,15 @@ export const cobrosRouter = {
 			}
 
 			try {
-				let numeroSifco: string = input.creditoId ?? "";
+				const creditoIdInput = input.creditoId ?? "";
 
 				// 0. Si el creditoId es un UUID (viene de una notificación), resolverlo
 				//    al numeroCreditoSifco del caso de cobros antes de consultar cartera-back.
-				const UUID_REGEX =
-					/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-				if (UUID_REGEX.test(numeroSifco)) {
-					const [casoPorUUID] = await db
-						.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
-						.from(casosCobros)
-						.where(eq(casosCobros.id, numeroSifco))
-						.limit(1);
-					if (!casoPorUUID?.numeroCreditoSifco) {
-						throw new ORPCError("NOT_FOUND", { message: "Caso no encontrado" });
-					}
-					numeroSifco = casoPorUUID.numeroCreditoSifco;
+				const numeroSifcoResuelto = await resolverNumeroSifco(creditoIdInput);
+				if (numeroSifcoResuelto === null) {
+					throw new ORPCError("NOT_FOUND", { message: "Caso no encontrado" });
 				}
+				let numeroSifco: string = numeroSifcoResuelto;
 
 				// 1. Buscar referencia por sifco número de crédito
 				let reference = await db

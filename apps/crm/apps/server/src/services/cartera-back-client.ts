@@ -3,6 +3,7 @@
  * Type-safe HTTP client with retry logic, circuit breaker, and caching
  */
 
+import { z } from "zod";
 import type {
 	BoletaPagoInversionista,
 	CarteraAsesor,
@@ -104,6 +105,8 @@ interface CarteraBackClientConfig {
 	circuitBreakerTimeout: number;
 	enableCache: boolean;
 	cacheTtl: number;
+	accessTokenProvider: () => Promise<string>;
+	fetchTransport: typeof globalThis.fetch;
 }
 
 export interface ResumenGlobalInversionistasFilters {
@@ -124,6 +127,8 @@ const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	circuitBreakerTimeout: 60000,
 	enableCache: process.env.CARTERA_BACK_ENABLE_CACHE === "true",
 	cacheTtl: Number.parseInt(process.env.CARTERA_BACK_CACHE_TTL || "300000"), // 5 minutes
+	accessTokenProvider: getCarteraAccessToken,
+	fetchTransport: globalThis.fetch,
 };
 
 // ============================================================================
@@ -373,11 +378,11 @@ export type FlujoCuotasInversionesResponse = {
 };
 
 export type ReinversionLiquidacionesResponse = {
+	/** Versión runtime del contrato de conciliación por modalidad. */
+	contrato_version: 2;
 	/**
-	 * Por modalidad (`tipo_reinversion`), campos crudos de la liquidación:
-	 * - `reinversion_total` → sección "Cuotas → Reinversión".
-	 * - `total_capital` / `total_interes` / `total_iva` / `total_isr` / `total_cuota`
-	 *   → sección "Cuotas → A Recibir".
+	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
+	 * `reinversion_total` el capital que permanece colocado.
 	 */
 	porTipo: Record<
 		string,
@@ -390,16 +395,14 @@ export type ReinversionLiquidacionesResponse = {
 			total_iva: string;
 			total_isr: string;
 			total_cuota: string;
+			/** IVA real facturado; excluye el IVA referencial sin factura. */
+			iva_facturado: string;
+			total_distribuido: string;
+			cantidad_liquidaciones: number;
 		}
 	>;
-	/**
-	 * Interés neto agrupado por si el inversionista emite factura:
-	 * - `conFactura`: neto = interés + IVA.
-	 * - `sinFactura`: neto = interés − ISR.
-	 */
 	interesNeto: {
-		conFactura: { interes: string; iva: string; neto: string };
-		sinFactura: { interes: string; isr: string; neto: string };
+		noVerificado: { interes: string };
 		cube: { interes: string; iva: string; neto: string };
 	};
 	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
@@ -413,12 +416,154 @@ export type ReinversionLiquidacionesResponse = {
 		reinversion_interes: string;
 		reinversion: string;
 		a_recibir: string;
-		monto_aportado: string;
+		capital_activo: string;
 	}[];
 	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
 	comprasMes: { tipo: string; cantidad: number; monto: string }[];
+	detalleInteresNeto: (
+		| {
+				inversionista_id: number;
+				inversionista: string;
+				referencia: string;
+				interes: string;
+				iva: string;
+				isr: string;
+				tratamiento_fiscal: "no_verificado";
+		  }
+		| {
+				inversionista_id: number;
+				inversionista: string;
+				referencia: string;
+				tratamiento_fiscal: "cube";
+				interes: string;
+				iva: string;
+				isr: string;
+				neto: string;
+		  }
+	)[];
+	detallePagosExtras: {
+		fecha: string;
+		credito: string;
+		tipo: "abono_capital" | "cancelacion";
+		monto: string;
+	}[];
+	detalleComprasMes: {
+		fecha: string;
+		inversionista: string;
+		modalidad: string;
+		monto: string;
+	}[];
+	detalle_estado: {
+		disponible: boolean;
+		error: string | null;
+	};
 	cantidad_liquidaciones: number;
 };
+
+const reinversionModes = [
+	"sin_reinversion",
+	"reinversion_capital",
+	"reinversion_interes",
+	"reinversion_total",
+	"reinversion_variable",
+	"reinversion_excedente",
+	"reinversion_combinada",
+] as const;
+const moneySchema = z.string().regex(/^\d+(?:\.\d+)?$/);
+const countSchema = z.number().int().nonnegative();
+const idSchema = z.number().int().nonnegative();
+const modeSummarySchema = z.object({
+	reinversion_capital: moneySchema,
+	reinversion_interes: moneySchema,
+	reinversion_total: moneySchema,
+	total_capital: moneySchema,
+	total_interes: moneySchema,
+	total_iva: moneySchema,
+	total_isr: moneySchema,
+	total_cuota: moneySchema,
+	iva_facturado: moneySchema,
+	total_distribuido: moneySchema,
+	cantidad_liquidaciones: countSchema,
+});
+const reinversionLiquidacionesSchema = z.object({
+	contrato_version: z.literal(2),
+	porTipo: z.record(z.enum(reinversionModes), modeSummarySchema),
+	interesNeto: z.object({
+		noVerificado: z.object({ interes: moneySchema }),
+		cube: z.object({
+			interes: moneySchema,
+			iva: moneySchema,
+			neto: moneySchema,
+		}),
+	}),
+	pagosExtras: z.object({
+		abonos_capital: moneySchema,
+		cancelaciones: moneySchema,
+	}),
+	porInversionista: z.array(
+		z.object({
+			inversionista_id: idSchema,
+			nombre: z.string().trim().min(1),
+			tipo_reinversion: z.enum(reinversionModes),
+			reinversion_capital: moneySchema,
+			reinversion_interes: moneySchema,
+			reinversion: moneySchema,
+			a_recibir: moneySchema,
+			capital_activo: moneySchema,
+		}),
+	),
+	comprasMes: z.array(
+		z.object({
+			tipo: z.enum(reinversionModes),
+			cantidad: countSchema,
+			monto: moneySchema,
+		}),
+	),
+	detalleInteresNeto: z.array(
+		z.discriminatedUnion("tratamiento_fiscal", [
+			z.object({
+				inversionista_id: idSchema,
+				inversionista: z.string().trim().min(1),
+				referencia: z.string().trim().min(1),
+				tratamiento_fiscal: z.literal("no_verificado"),
+				interes: moneySchema,
+				iva: moneySchema,
+				isr: moneySchema,
+			}),
+			z.object({
+				inversionista_id: idSchema,
+				inversionista: z.string().trim().min(1),
+				referencia: z.string().trim().min(1),
+				tratamiento_fiscal: z.literal("cube"),
+				interes: moneySchema,
+				iva: moneySchema,
+				isr: moneySchema,
+				neto: moneySchema,
+			}),
+		]),
+	),
+	detallePagosExtras: z.array(
+		z.object({
+			fecha: z.string().trim().min(1),
+			credito: z.string().trim().min(1),
+			tipo: z.enum(["abono_capital", "cancelacion"]),
+			monto: moneySchema,
+		}),
+	),
+	detalleComprasMes: z.array(
+		z.object({
+			fecha: z.string().trim().min(1),
+			inversionista: z.string().trim().min(1),
+			modalidad: z.enum(reinversionModes),
+			monto: moneySchema,
+		}),
+	),
+	detalle_estado: z.discriminatedUnion("disponible", [
+		z.object({ disponible: z.literal(true), error: z.null() }),
+		z.object({ disponible: z.literal(false), error: z.string().trim().min(1) }),
+	]),
+	cantidad_liquidaciones: countSchema,
+});
 
 export type FlujoPorInversionistaRow = {
 	inversionista_id: number;
@@ -557,7 +702,7 @@ export class CarteraBackClient {
 		): Promise<RequestInit> => {
 			const token = forceRefresh
 				? await invalidateAndReauth()
-				: await getCarteraAccessToken();
+				: await this.config.accessTokenProvider();
 			return {
 				...options,
 				headers: {
@@ -576,7 +721,7 @@ export class CarteraBackClient {
 			try {
 				const response = await this.circuitBreaker.execute(async () => {
 					const requestOptions = await buildRequestOptions();
-					const res = await fetch(url, requestOptions);
+					const res = await this.config.fetchTransport(url, requestOptions);
 
 					if (!res.ok) {
 						const errorText = await res.text();
@@ -592,7 +737,10 @@ export class CarteraBackClient {
 							if (!didReauth) {
 								didReauth = true;
 								const retryOptions = await buildRequestOptions(true);
-								const retryRes = await fetch(url, retryOptions);
+								const retryRes = await this.config.fetchTransport(
+									url,
+									retryOptions,
+								);
 								if (retryRes.ok) return retryRes;
 								const retryText = await retryRes.text();
 								let retryData: { error?: string; message?: string } = {};
@@ -1754,11 +1902,14 @@ export class CarteraBackClient {
 		// Sin cache: el reporte debe reflejar liquidaciones recién creadas/ajustadas.
 		// Con cache activo, tras crear liquidaciones el mes podía seguir devolviendo
 		// los totales previos hasta expirar el TTL.
-		return this.request<ReinversionLiquidacionesResponse>(
+		const data = await this.request<unknown>(
 			`/reportes/reinversion-liquidaciones?${qp}`,
 			{ method: "GET" },
 			false,
 		);
+		const parsed = reinversionLiquidacionesSchema.safeParse(data);
+		if (!parsed.success) throw new Error("Contrato de reinversión inválido");
+		return parsed.data;
 	}
 
 	async getFlujoCuotasPorInversionista(params: {

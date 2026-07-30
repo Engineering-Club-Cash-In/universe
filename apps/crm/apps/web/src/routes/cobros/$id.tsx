@@ -1781,11 +1781,18 @@ function RouteComponent() {
 
 					{/* CB-026: Gestión temprana B1 — 3 intentos en 3 canales distintos.
 					    No se renderiza si el crédito no es B1, si no hay fecha de
-					    entrada al bucket, ni mientras cargan las queries que la
+					    entrada al bucket, mientras cargan las queries que la
 					    alimentan (con contactos vacíos la regla diría "faltan 3
-					    canales" y parpadearía esa alerta antes de tener los datos). */}
+					    canales" y parpadearía esa alerta antes de tener los datos),
+					    ni si historialContactos falló: con TanStack Query un error
+					    deja isPending=false y data=undefined — indistinguible de
+					    "0 contactos" para el memo de gestionB1 (usa `?? []`). Sin
+					    este guard, un error transitorio de red mostraría "faltan
+					    3 canales" con datos reales ocultos, y el asesor podría
+					    re-hacer intentos ya registrados (Codex, PR #1205). */}
 					{!bucketActual.isPending &&
 						!historialContactos.isPending &&
+						!historialContactos.isError &&
 						gestionB1.aplica && (
 							<GestionTempranaCard
 								gestion={gestionB1}

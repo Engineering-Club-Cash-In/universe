@@ -157,11 +157,25 @@ const ESTADO_MORA_POR_NUMERO = [
 	"mora_120_plus",
 ] as const;
 
-/** Bucket combinado a partir del número (0-5) que devuelve getAperturaDia/getBucketsCarga. */
+/**
+ * Bucket combinado a partir del número (0-5) que devuelve getAperturaDia/getBucketsCarga.
+ *
+ * Resuelve la fila por `numero` directo (`catalogoDeNumero`) en vez de pasar
+ * por `ESTADO_MORA_POR_NUMERO[numero]` → buscar por estado: si un admin
+ * reasigna qué `estado_mora` corresponde a qué `numero` en el catálogo, esa
+ * ruta seguía devolviendo la fila VIEJA que ocupaba esa posición en el array
+ * hardcodeado, no la fila real del bucket pedido (Codex, PR #1205 — mismo
+ * defecto que ya se corrigió en `numeroDeEstadoMora`, acá en la dirección
+ * inversa número→fila). Sin catálogo (aún no cargó), cae al default vía
+ * `bucketDeEstado` con el estado hardcodeado — ahí no hay catálogo real que
+ * pueda haberse reasignado.
+ */
 export function bucketDeNumero(
 	numero: number,
 	catalogo: BucketsCatalogoQueryData | undefined,
 ): BucketUI {
+	const fila = catalogoDeNumero(numero, catalogo);
+	if (fila) return bucketDeEstado(fila.estadoMora, catalogo);
 	return bucketDeEstado(ESTADO_MORA_POR_NUMERO[numero], catalogo);
 }
 
@@ -195,13 +209,20 @@ export function numeroDeEstadoMora(
 	return numero === -1 ? null : numero;
 }
 
-/** Fila cruda del catálogo dinámico para el bucket numérico (0-5), o undefined si no cargó / no está. */
+/**
+ * Fila cruda del catálogo dinámico para el bucket numérico (0-5), o undefined
+ * si no cargó / no está.
+ *
+ * Busca por `b.numero === numero` directo — la fila ya trae su `numero` real
+ * (CB-026). Antes buscaba por `b.estadoMora === ESTADO_MORA_POR_NUMERO[numero]`,
+ * que devolvía la fila equivocada si un admin reasignaba qué `estado_mora`
+ * corresponde a qué `numero` en `cartera.buckets` (Codex, PR #1205).
+ */
 export function catalogoDeNumero(
 	numero: number,
 	catalogo: BucketsCatalogoQueryData | undefined,
 ) {
-	const estadoMora = ESTADO_MORA_POR_NUMERO[numero];
-	return catalogo?.find((b) => b.estadoMora === estadoMora);
+	return catalogo?.find((b) => b.numero === numero);
 }
 
 /**

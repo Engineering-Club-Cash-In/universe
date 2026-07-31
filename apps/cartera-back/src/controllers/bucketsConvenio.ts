@@ -264,13 +264,19 @@ export async function procesarBucketsConvenio(): Promise<BucketsConvenioResultad
       }
     }
 
-    // (B) cuota del convenio: vencida e impaga (fecha_pago IS NULL). El pago del
-    //     convenio vive acá, no en cuotas_credito — por eso hay que mirar esta fuente.
+    // (B) cuota del convenio: vencida e IMPAGA. El pago del convenio vive acá, no
+    //     en cuotas_credito. "Impaga" por MONTO, no solo por fecha_pago:
+    //     processConvenioPayment solo marca fecha_pago con un pago >= cuota_mensual,
+    //     así que un parcial acumulativo (Q60+Q40) deja fecha_pago NULL aunque la
+    //     cuota esté saldada → la cuota K está cubierta si monto_pagado >= K*cuota_mensual.
     const cuotasDeConvenio = await db
       .select({
         credito_id: convenios_pago.credito_id,
         fecha_vencimiento: convenio_cuotas.fecha_vencimiento,
         fecha_pago: convenio_cuotas.fecha_pago,
+        numero_cuota: convenio_cuotas.numero_cuota,
+        monto_pagado: convenios_pago.monto_pagado,
+        cuota_mensual: convenios_pago.cuota_mensual,
       })
       .from(convenio_cuotas)
       .innerJoin(
@@ -285,7 +291,14 @@ export async function procesarBucketsConvenio(): Promise<BucketsConvenioResultad
         ),
       );
     for (const cc of cuotasDeConvenio) {
-      if (cc.fecha_pago === null && estaVencidaGT(cc.fecha_vencimiento, hoy)) {
+      // Cubierta por monto (parcial acumulativo) aunque fecha_pago siga NULL.
+      const cubierta =
+        Number(cc.monto_pagado) >= cc.numero_cuota * Number(cc.cuota_mensual);
+      if (
+        cc.fecha_pago === null &&
+        !cubierta &&
+        estaVencidaGT(cc.fecha_vencimiento, hoy)
+      ) {
         fechasAtrasadasPorCredito
           .get(cc.credito_id)
           ?.add(claveFecha(cc.fecha_vencimiento));

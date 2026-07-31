@@ -40,19 +40,16 @@ export async function getConvenioProximosVencer(dias: number[]) {
         LIMIT 1) AS bucket,
       -- monto_cuota = TOTAL a pagar del mes = cuota normal del crédito + cuota
       -- del convenio ("ambas cosas"). Es lo que el cliente debe ese día.
-      -- monto_convenio = lo que RESTA de esta cuota del convenio: si es la cuota en
-      -- curso (numero_cuota = pagos_realizados+1) y ya hubo un abono PARCIAL (que
-      -- movió monto_pagado pero no marcó fecha_pago), se resta lo abonado para no
-      -- sobre-cobrar en el WhatsApp. Las cuotas futuras van por la cuota completa.
-      ROUND((c.cuota + GREATEST(
-        CASE WHEN cc.numero_cuota = cp.pagos_realizados + 1
-             THEN (cp.pagos_realizados + 1) * cp.cuota_mensual - cp.monto_pagado
-             ELSE cp.cuota_mensual END, 0))::numeric, 2)::text AS monto_cuota,
+      -- monto_convenio = lo que RESTA de ESTA cuota del convenio, medido por MONTO
+      -- (no por fecha_pago): monto_pagado se aplica en orden, así que lo que resta
+      -- de la cuota K = K*cuota_mensual - monto_pagado, acotado a [0, cuota_mensual].
+      -- Cubre el abono PARCIAL (aunque no complete la cuota ni marque fecha_pago) y
+      -- los parciales ACUMULATIVOS (Q60+Q40) sin sobre-cobrar en el WhatsApp.
+      ROUND((c.cuota + LEAST(cp.cuota_mensual, GREATEST(0,
+        cc.numero_cuota * cp.cuota_mensual - cp.monto_pagado)))::numeric, 2)::text AS monto_cuota,
       ROUND(c.cuota::numeric, 2)::text AS monto_normal,
-      ROUND(GREATEST(
-        CASE WHEN cc.numero_cuota = cp.pagos_realizados + 1
-             THEN (cp.pagos_realizados + 1) * cp.cuota_mensual - cp.monto_pagado
-             ELSE cp.cuota_mensual END, 0)::numeric, 2)::text AS monto_convenio,
+      ROUND(LEAST(cp.cuota_mensual, GREATEST(0,
+        cc.numero_cuota * cp.cuota_mensual - cp.monto_pagado))::numeric, 2)::text AS monto_convenio,
       -- Compatibilidad de forma con CarteraCuotaProximaVencer (no aplican acá).
       '0.00'::text AS monto_mora,
       0::int AS cuotas_atrasadas,
@@ -70,6 +67,11 @@ export async function getConvenioProximosVencer(dias: number[]) {
     INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
     WHERE cc.fecha_pago IS NULL
+      -- No recordar cuotas ya CUBIERTAS por parciales acumulativos: si
+      -- monto_pagado ya alcanza K*cuota_mensual, la cuota K está saldada aunque
+      -- fecha_pago siga NULL (processConvenioPayment solo marca fecha_pago con un
+      -- pago >= cuota_mensual). Sin esto se mandaría un WhatsApp con convenio=0.
+      AND cp.monto_pagado < cc.numero_cuota * cp.cuota_mensual
       AND (cc.fecha_vencimiento::date - ${hoyGT}) IN (${diasList})
     ORDER BY dias_para_vencer ASC, u.nombre ASC, cc.cuota_convenio_id ASC
   `);

@@ -53,6 +53,7 @@ import externalContractsRouter from "./routes/external-contracts";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
 import { checkPromesasPago } from "./services/check-promesas-pago";
 import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
+import { sendConvenioReminders } from "./services/send-convenio-reminders";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
 
 const app = new Hono();
@@ -1261,6 +1262,73 @@ app.post("/api/premora/run", async (c) => {
 	});
 });
 
+// COBROS-02: corrida MANUAL de los recordatorios de CONVENIO (pruebas /
+// re-corridas). Mismo gate que premora (admin/cobros_supervisor). `force` salta
+// el gate CONVENIO_WHATSAPP_ENABLED. `?sifco=` y `?dias=` iguales que premora.
+app.post("/api/convenio/recordatorios/run", async (c) => {
+	if (!esOrigenConfiable(c.req.header("origin"))) {
+		return c.json({ error: "Origen no permitido" }, 403);
+	}
+	const context = await createContext({ context: c });
+	if (!context.session?.user?.id) {
+		return c.json({ error: "No autorizado" }, 401);
+	}
+	const userRole = context.session.user.role;
+	if (!userRole || !PERMISSIONS.canAssignCobros(userRole)) {
+		return c.json(
+			{ error: "No tienes permiso para correr recordatorios de convenio" },
+			403,
+		);
+	}
+
+	const sifcoParam = c.req.query("sifco");
+	let sifcos: string[] | undefined;
+	if (sifcoParam != null) {
+		sifcos = sifcoParam
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		if (sifcos.length === 0) {
+			return c.json(
+				{ error: "sifco presente pero vacío: no se corre el batch completo" },
+				400,
+			);
+		}
+	}
+
+	const diasParam = c.req.query("dias");
+	let dias: number[] | undefined;
+	if (diasParam != null) {
+		const tokens = diasParam
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		dias = tokens.map((s) => Number(s)).filter((n) => Number.isInteger(n));
+		const validos = [5, 3, 1, 0];
+		if (
+			tokens.length === 0 ||
+			dias.length !== tokens.length ||
+			dias.some((d) => !validos.includes(d))
+		) {
+			return c.json(
+				{ error: "dias inválido o vacío: solo se aceptan 5, 3, 1 y 0 (CSV)" },
+				400,
+			);
+		}
+	}
+
+	const testMode = isTestModeEnabled();
+	const resumen = await sendConvenioReminders({ force: true, sifcos, dias });
+	return c.json({
+		success: true,
+		testMode,
+		telefonoTest: testMode ? getTestPhone() : null,
+		filtroSifco: sifcos ?? null,
+		filtroDias: dias ?? null,
+		resumen,
+	});
+});
+
 // CB-010: corrida MANUAL del job de elegibilidad de la reducción de
 // recordatorios (refresca la foto de "paga bien" desde cartera y hace el
 // auto-revoke). Mismo gate que premora (admin/cobros_supervisor, POST con
@@ -1315,6 +1383,27 @@ function scheduleAtPremoraGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtPremoraGT();
+
+// COBROS-02: recordatorios de CONVENIO, diario a las 8:05 GT (= 14:05 UTC), 5
+// min DESPUÉS del funnel premora — así corren después de la subida de bucket de
+// medianoche (job de cartera) y no compiten con premora. Idempotente
+// (recordatorios_convenio), el run de boot recupera sin duplicar.
+function scheduleAtConvenioGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(14, 5, 0, 0); // 08:05 GT
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await sendConvenioReminders().catch(console.error);
+		scheduleAtConvenioGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtConvenioGT();
+
+// Recuperación al boot (deploy tardío): idempotente por los claims.
+setTimeout(() => {
+	sendConvenioReminders().catch(console.error);
+}, 20_000);
 
 // CB-010: elegibilidad de la reducción de recordatorios, diario a las 7:00 GT
 // (= 13:00 UTC) — UNA HORA ANTES del funnel premora, para que la foto de "paga

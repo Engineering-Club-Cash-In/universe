@@ -254,6 +254,10 @@ export async function createPaymentAgreement(
         completado: false,
         motivo: reason,
         observaciones: observations,
+        // Snapshot de las cuotas reestructuradas por el convenio. Data ya disponible
+        // en `pagos`. Se usa después para excluirlas del conteo de bucket (el job de
+        // convenios). Dedup por si dos pagos apuntan a la misma cuota.
+        cuotas_convenio: [...new Set(pagos.map((item) => item.cuota.cuota_id))],
         created_by,
       })
       .returning();
@@ -788,6 +792,37 @@ export async function processConvenioPayment(
       })
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
+
+    // 9.b COBROS-02 — SALIDA POR COMPLETADO: si el convenio quedó saldado, sacar
+    // el crédito de EN_CONVENIO (antes quedaba atrapado ahí = gap). Las cuotas que
+    // el convenio reestructuró (cuotas_convenio) quedaron pagadas POR el convenio
+    // pero NUNCA se marcaron en cuotas_credito (la creación no las toca). Al salir
+    // de EN_CONVENIO el motor de mora las vuelve a mirar: con pagado=false las
+    // contaría como atraso viejo y resucitaría una mora que el convenio ya saldó.
+    // Por eso se marcan pagadas AQUÍ, en el mismo momento en que el crédito deja
+    // el convenio — sin esto la salida sería dañina. (Solo aplica a convenios con
+    // cuotas_convenio poblada: los nuevos siempre, los viejos tras el backfill.)
+    if (convenioCompletado) {
+      const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
+      if (cuotasReestructuradas.length > 0) {
+        await db
+          .update(cuotas_credito)
+          .set({ pagado: true })
+          .where(inArray(cuotas_credito.cuota_id, cuotasReestructuradas));
+      }
+      await db
+        .update(creditos)
+        .set({ statusCredit: "ACTIVO" })
+        .where(
+          and(
+            eq(creditos.credito_id, convenio.credito_id),
+            eq(creditos.statusCredit, "EN_CONVENIO"),
+          ),
+        );
+      console.log(
+        `✅ Convenio ${convenio.convenio_id} COMPLETADO → crédito ${convenio.credito_id} sale de EN_CONVENIO (ACTIVO); ${cuotasReestructuradas.length} cuota(s) reestructurada(s) marcadas pagadas.`,
+      );
+    }
 
     // 10. 🔥 SI SE COMPLETÓ LA CUOTA DEL CONVENIO, MARCAR LA CUOTA COMO PAGADA
    if (pagoCompleto) {

@@ -2,6 +2,7 @@
 import { Elysia, t } from "elysia";
 import { authMiddleware } from "./midleware";
 import { getComportamientoPago } from "../controllers/comportamientoPago";
+import { getConvenioProximosVencer } from "../controllers/convenioProximos";
 import { getCuotasProximasVencer } from "../controllers/cuotasProximas";
 
 export const cuotasRouter = new Elysia()
@@ -132,6 +133,44 @@ export const cuotasRouter = new Elysia()
         per_page: t.Optional(t.String()),
       }),
     },
+  )
+
+  // COBROS-02 · Recordatorios de CONVENIO — cuotas del convenio próximas a vencer
+  // (día GT) de créditos EN_CONVENIO. Hermano de /cuotas/proximas-vencer para el
+  // job de recordatorios de convenio del CRM. Sin gate de rol (solo auth), igual
+  // que premora: la cuenta de servicio del CRM debe poder llamarlo.
+  .get(
+    "/convenio/proximas-vencer",
+    async ({ query, set, user }: any) => {
+      if (!user) {
+        set.status = 401;
+        return { success: false, message: "[ERROR] No autenticado" };
+      }
+      try {
+        const raw = String(query.dias ?? "5,3,1,0");
+        const tokens = raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+        if (
+          tokens.length === 0 ||
+          tokens.some((s: string) => !/^\d{1,2}$/.test(s) || Number(s) > 60)
+        ) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "[ERROR] dias inválido (CSV de enteros 0-60, ej. 5,3,1,0)",
+          };
+        }
+        const dias = [...new Set(tokens.map(Number))];
+        return await getConvenioProximosVencer(dias);
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener las cuotas de convenio próximas a vencer",
+          error: String(err),
+        };
+      }
+    },
+    { query: t.Object({ dias: t.Optional(t.String()) }) },
   )
 
   // CB-010 · Comportamiento de pago — racha de cuotas pagadas AL DÍA por

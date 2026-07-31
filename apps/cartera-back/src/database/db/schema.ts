@@ -1296,6 +1296,13 @@
     motivo: text("motivo"),
     observaciones: text("observaciones"),
 
+    // Snapshot de las cuotas (cuota_id) que se metieron al convenio al momento de
+    // crearlo. NO cambia con reversas/borrados posteriores de pagos. Se usa para
+    // que el job de buckets EXCLUYA estas cuotas del conteo de atraso (son las que
+    // el convenio ya reestructuró). Ver convenios_pagos_resume (pivot pago_id) —
+    // se eligió esta columna por durabilidad ante reversas.
+    cuotas_convenio: integer("cuotas_convenio").array(),
+
     created_by: integer("created_by")
       .references(() => platform_users.id),
 

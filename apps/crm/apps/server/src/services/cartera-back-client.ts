@@ -22,6 +22,7 @@ import type {
 	CarteraComportamientoPagoResponse,
 	CarteraConvenioCuota,
 	CarteraConvenioListado,
+	CarteraConvenioProximosResponse,
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
 	CarteraInversionista,
@@ -1086,6 +1087,19 @@ export class CarteraBackClient {
 		if (opts.perPage != null) queryParams.set("per_page", String(opts.perPage));
 		return this.request<CarteraCuotasProximasResponse>(
 			`/cuotas/proximas-vencer?${queryParams}`,
+			{ method: "GET" },
+		);
+	}
+
+	// COBROS-02: cuotas de CONVENIO próximas a vencer (créditos EN_CONVENIO). Lo
+	// consume el job diario de recordatorios de convenio del CRM. Sin cache: foto
+	// del día, debe reflejar los pagos del convenio más recientes.
+	async getConvenioProximosVencer(
+		dias: number[] = [5, 3, 1, 0],
+	): Promise<CarteraConvenioProximosResponse> {
+		const queryParams = new URLSearchParams({ dias: dias.join(",") });
+		return this.request<CarteraConvenioProximosResponse>(
+			`/convenio/proximas-vencer?${queryParams}`,
 			{ method: "GET" },
 		);
 	}

@@ -1200,6 +1200,27 @@ export interface CarteraCuotasProximasResponse {
 }
 
 /**
+ * COBROS-02 · Cuota de CONVENIO próxima a vencer (créditos EN_CONVENIO). Misma
+ * forma que CarteraCuotaProximaVencer + el desglose del monto: en convenio el
+ * cliente paga AMBAS el mismo día (cuota normal + cuota del convenio), así que
+ * `monto_cuota` = TOTAL (normal + convenio) y se exponen las dos partes.
+ * `cuota_id` es el cuota_convenio_id (para la idempotencia del recordatorio).
+ */
+export interface CarteraConvenioProximoVencer
+	extends CarteraCuotaProximaVencer {
+	/** Cuota normal del crédito (parte del total). */
+	monto_normal: string;
+	/** Cuota del convenio (parte del total). */
+	monto_convenio: string;
+}
+
+export interface CarteraConvenioProximosResponse {
+	success: boolean;
+	total: number;
+	data: CarteraConvenioProximoVencer[];
+}
+
+/**
  * CB-010: comportamiento de pago de un crédito activo — racha de cuotas ya
  * vencidas pagadas AL DÍA (fecha_pago <= vencimiento) desde la más reciente
  * hacia atrás hasta el primer atraso. Elegibilidad (racha >= 4) la decide el CRM.

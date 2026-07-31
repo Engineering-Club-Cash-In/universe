@@ -1240,10 +1240,17 @@ export async function getCreditosWithUserByMesAnio(
     try {
       const idsSql = sql.join(creditosIds.map((id) => sql`${id}`), sql`, `);
       const ultimos = await db.execute<{ credito_id: number; bucket_nuevo: number }>(sql`
-        SELECT DISTINCT ON (credito_id) credito_id, bucket_nuevo
-        FROM ${SQL_CARTERA_SCHEMA}.buckets_historial
-        WHERE credito_id IN (${idsSql})
-        ORDER BY credito_id, fecha DESC, historial_id DESC`);
+        SELECT DISTINCT ON (h.credito_id) h.credito_id, h.bucket_nuevo
+        FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+        INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = h.credito_id
+        WHERE h.credito_id IN (${idsSql})
+          -- EN_CONVENIO: solo su historial de convenio (status_credito='EN_CONVENIO').
+          -- Sin esto, en rutas SIN el guard de estados_credito (/getAllCredits,
+          -- estado=EN_CONVENIO, o la rama ACTIVO que incluye EN_CONVENIO) el mapper
+          -- tomaría el bucket VIEJO pre-convenio. Sin fila del job → undefined →
+          -- el mapper cae a bucketDeCredito (null para EN_CONVENIO) (Codex #1223).
+          AND (c."statusCredit" <> 'EN_CONVENIO' OR h.status_credito = 'EN_CONVENIO')
+        ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC`);
       for (const r of ultimos.rows) {
         ultimoBucketMap.set(Number(r.credito_id), Number(r.bucket_nuevo));
       }

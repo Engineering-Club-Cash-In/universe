@@ -24,6 +24,17 @@ describe("plantillas masivas de cobros", () => {
 		}
 	});
 
+	// CB-012: cada plantilla debe llevar el contacto del asesor (canal de soporte)
+	// para que el cliente sepa a quién acudir. Antes solo se testeaba en bienvenida
+	// y pre_mora — este invariante cubre TODAS (incl. las que se agreguen a futuro),
+	// que es justo lo que pide el ticket ("en todas, no solo las nuevas"). Junto con
+	// el aviso de no-responder de arriba, garantiza el par teléfono + no-reply.
+	test("incluyen el teléfono del asesor en todas las plantillas (CB-012)", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			expect(plantilla.cuerpo, plantilla.id).toContain("{telefonoAsesor}");
+		}
+	});
+
 	test("colocan el aviso antes de la firma cuando existe", () => {
 		for (const plantilla of PLANTILLAS_MENSAJES) {
 			const warningIndex = plantilla.cuerpo.indexOf(NO_REPLY_WARNING);

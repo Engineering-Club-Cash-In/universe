@@ -45,9 +45,13 @@ export async function getConvenioProximosVencer(dias: number[]) {
       -- de la cuota K = K*cuota_mensual - monto_pagado, acotado a [0, cuota_mensual].
       -- Cubre el abono PARCIAL (aunque no complete la cuota ni marque fecha_pago) y
       -- los parciales ACUMULATIVOS (Q60+Q40) sin sobre-cobrar en el WhatsApp.
-      ROUND((c.cuota + LEAST(cp.cuota_mensual, GREATEST(0,
+      -- monto_normal = la cuota normal del crédito de ESE mes SOLO si sigue impaga
+      -- (norm.monto, calculado en el LATERAL de abajo cruzando cuotas_credito por
+      -- fecha con el mismo criterio que premora). Si ya la pagó, es 0 → el
+      -- recordatorio pide solo el convenio, sin sobre-cobrar una cuota ya pagada.
+      ROUND((COALESCE(norm.monto, 0) + LEAST(cp.cuota_mensual, GREATEST(0,
         cc.numero_cuota * cp.cuota_mensual - cp.monto_pagado)))::numeric, 2)::text AS monto_cuota,
-      ROUND(c.cuota::numeric, 2)::text AS monto_normal,
+      ROUND(COALESCE(norm.monto, 0)::numeric, 2)::text AS monto_normal,
       ROUND(LEAST(cp.cuota_mensual, GREATEST(0,
         cc.numero_cuota * cp.cuota_mensual - cp.monto_pagado))::numeric, 2)::text AS monto_convenio,
       -- Compatibilidad de forma con CarteraCuotaProximaVencer (no aplican acá).
@@ -66,6 +70,28 @@ export async function getConvenioProximosVencer(dias: number[]) {
       ON c.credito_id = cp.credito_id AND c."statusCredit" = 'EN_CONVENIO'
     INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
+    -- Cuota normal del crédito que vence el MISMO día que esta cuota del convenio
+    -- (el convenio le presta las fechas). Vale c.cuota solo si sigue impaga con el
+    -- criterio de premora (sin pago cubriente ni boleta pendiente); si ya la pagó, 0.
+    LEFT JOIN LATERAL (
+      SELECT CASE
+        WHEN cu2.pagado = false
+          AND NOT EXISTS (
+            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
+             WHERE pc.cuota_id = cu2.cuota_id AND pc."paymentFalse" = false
+               AND pc.pagado = true AND pc.validation_status IN ('validated', 'no_required')
+               AND COALESCE(pc.monto_aplicado, 0) > 0)
+          AND NOT EXISTS (
+            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pr
+             WHERE pr.cuota_id = cu2.cuota_id AND pr."paymentFalse" = false
+               AND pr.validation_status = 'pending' AND COALESCE(pr.monto_boleta, 0) > 0)
+        THEN c.cuota ELSE 0 END AS monto
+      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu2
+      WHERE cu2.credito_id = c.credito_id
+        AND cu2.fecha_vencimiento::date = cc.fecha_vencimiento::date
+      ORDER BY cu2.cuota_id
+      LIMIT 1
+    ) norm ON true
     WHERE cc.fecha_pago IS NULL
       -- No recordar cuotas ya CUBIERTAS por parciales acumulativos: si
       -- monto_pagado ya alcanza K*cuota_mensual, la cuota K está saldada aunque

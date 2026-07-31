@@ -40,6 +40,17 @@ export const STATUS_BUCKET_FUERA = [
   "CAIDO",
 ];
 
+// Estados fuera de los READERS de presentación (tabla por bucket, capacidad, Cola
+// del Día, apertura, badge). Igual que STATUS_BUCKET_FUERA pero SIN EN_CONVENIO:
+// esos créditos SÍ deben verse — el job de buckets de convenio les siembra su
+// bucket/asesor y hay que atenderlos, no dejarlos en el olvido. Ojo: es SOLO para
+// lectura/visibilidad; el bucketeo automático (bucketDeCredito) y el motor de mora
+// siguen usando STATUS_BUCKET_FUERA, que excluye EN_CONVENIO (ese lo maneja el job
+// de convenios). No cambia ninguna operación de escritura.
+export const STATUS_READER_FUERA = STATUS_BUCKET_FUERA.filter(
+  (s) => s !== "EN_CONVENIO",
+);
+
 /**
  * Bucket de un crédito (0-5) resuelto contra el catálogo dinámico `catalogo`.
  * Orden: (1) estado fuera del funnel → null; (2) estado que fuerza un bucket

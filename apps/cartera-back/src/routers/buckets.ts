@@ -21,15 +21,17 @@ import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasS
 import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
 import { StatusCredit } from "../database/db/schema";
 
-// Estados DENTRO del funnel operativo (= enum de statusCredit menos
-// STATUS_BUCKET_FUERA): ACTIVO/MOROSO clasifican por cuotas de la mora activa;
-// INCOBRABLE entra a B5 vía `buckets.estados_incluidos`. Se pasa como
-// whitelist al listado para que "sin filtro de bucket" = todo el funnel
-// (nunca CANCELADO/PENDIENTE_CANCELACION/EN_CONVENIO/CAIDO).
+// Estados DENTRO del funnel operativo: ACTIVO/MOROSO clasifican por cuotas de la
+// mora activa; INCOBRABLE entra a B5 vía `buckets.estados_incluidos`; EN_CONVENIO
+// entra para que se VEA en la tabla (su bucket lo lleva el job de convenios) — hay
+// que atenderlo, no dejarlo en el olvido. Se pasa como whitelist al listado para
+// que "sin filtro de bucket" = todo el funnel visible (nunca CANCELADO/
+// PENDIENTE_CANCELACION/CAIDO). Es SOLO listado: no cambia ninguna escritura.
 const STATUS_FUNNEL: StatusCredit[] = [
   StatusCredit.ACTIVO,
   StatusCredit.MOROSO,
   StatusCredit.INCOBRABLE,
+  StatusCredit.EN_CONVENIO,
 ];
 
 // Gate de rol server-side: el histórico expone data de TODOS los créditos

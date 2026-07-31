@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
-import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { STATUS_READER_FUERA } from "../../lib/buckets-classification";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CB-023 · Buckets — Vista de APERTURA MATUTINA para el supervisor (8:00 AM).
@@ -545,7 +545,7 @@ async function getMovimientosDia(fecha?: string): Promise<MovimientoCredito[]> {
 /** Bloque 3: hasta 3 créditos más críticos por bucket + total de críticos. */
 async function getTop3PorBucket(fecha?: string): Promise<Top3Bucket[]> {
   const f = fechaSql(fecha);
-  const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+  const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
 
   // cuotas_vencidas_reales EN VIVO (CASE de estados sin mora, espejo de
   // cuotasProximas.ts). monto_adeudado = vencidas × cuota + recargo.
@@ -667,7 +667,7 @@ async function getTop3PorBucket(fecha?: string): Promise<Top3Bucket[]> {
 /** Bloque 2: cumplimiento del día ANTERIOR (cuotas que vencían `fecha - 1`). */
 async function getCumplimientoAyer(fecha?: string): Promise<Cumplimiento> {
   const f = fechaSql(fecha);
-  const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+  const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
   const res = await db.execute<{
     fecha_ayer: string;
     cuentas_esperadas: number;

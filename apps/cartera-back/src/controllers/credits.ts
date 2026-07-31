@@ -41,7 +41,7 @@ import {
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
-import { bucketDeCredito, BucketCatalogo, getBucketsCatalogo, STATUS_BUCKET_FUERA } from "./latefee";
+import { bucketDeCredito, BucketCatalogo, getBucketsCatalogo, STATUS_READER_FUERA } from "./latefee";
 
 // Fallback B0-B5 — usado si el catálogo dinámico `cartera.buckets` no
 // responde (DB caída, migración pendiente). Incluye `estados_incluidos` en B5
@@ -877,7 +877,7 @@ export async function getCreditosWithUserByMesAnio(
   if (buckets_numeros && buckets_numeros.length > 0) {
     console.log(`🔎 Filtrando por bucket(s) [motor]: ${buckets_numeros.join(", ")}`);
     const numerosSql = sql.join(buckets_numeros.map((n) => sql`${n}`), sql`, `);
-    const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+    const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
     conditions.push(sql`${creditos.statusCredit} NOT IN (${fueraSql})`);
     conditions.push(sql`COALESCE(
       (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
@@ -1399,7 +1399,7 @@ export async function getCreditosWithUserByMesAnio(
         // el historial (review Codex): un crédito que tuvo bucket y luego pasó
         // a CANCELADO/EN_CONVENIO/etc. conservaría su último bucket como
         // zombie — el motor ya no lo trackea, así que bucket = null.
-        const fueraDelFunnel = STATUS_BUCKET_FUERA.includes(
+        const fueraDelFunnel = STATUS_READER_FUERA.includes(
           row.creditos.statusCredit,
         );
         const numeroBucket = fueraDelFunnel

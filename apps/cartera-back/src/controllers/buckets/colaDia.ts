@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
-import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { STATUS_READER_FUERA } from "../../lib/buckets-classification";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CB-020 · Buckets — Cola del Día (universo SLA).
@@ -82,7 +82,7 @@ export async function getColaDiaSLA(
 	// quedarían en la Cola del Día indefinidamente aunque ya no se cobren
 	// activamente (review Codex).
 	const statusFueraSql = sql.join(
-		STATUS_BUCKET_FUERA.map((s) => sql`${s}`),
+		STATUS_READER_FUERA.map((s) => sql`${s}`),
 		sql`, `,
 	);
 

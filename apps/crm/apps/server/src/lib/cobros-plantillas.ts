@@ -29,6 +29,10 @@ export interface VariablesPlantilla {
 	cuotasAtraso: number;
 	telefonoAsesor: string;
 	nombreAsesor: string;
+	/** COBROS-02 convenio: parte del convenio del total mensual (opcional). */
+	montoConvenio?: string;
+	/** COBROS-02 convenio: parte de la cuota normal del total mensual (opcional). */
+	montoNormal?: string;
 }
 
 export interface PlantillaMensaje {
@@ -89,7 +93,9 @@ export function interpolar(
 		.replace(/{montoMora}/g, v(variables.montoMora))
 		.replace(/{cuotasAtraso}/g, v(variables.cuotasAtraso))
 		.replace(/{telefonoAsesor}/g, v(variables.telefonoAsesor))
-		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor));
+		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor))
+		.replace(/{montoConvenio}/g, v(variables.montoConvenio ?? ""))
+		.replace(/{montoNormal}/g, v(variables.montoNormal ?? ""));
 }
 
 /**
@@ -221,6 +227,70 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		asunto: "Hoy es su día de pago",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
 		cuerpo: `Estimado(a) {clienteNombre}, buen día. Le saludamos de Clubcashin.com para recordarle que HOY {fechaPago} vence la cuota de su crédito por Q{cuotaMensual}. Quedamos a la espera de su comprobante de pago.
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REALIZÓ SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	// ── Recordatorios de CONVENIO (COBROS-02): créditos EN_CONVENIO. El cliente
+	// paga AMBAS cada mes — la cuota normal Y la del convenio, mismo día. {cuotaMensual}
+	// es el TOTAL (normal + convenio); {montoNormal}/{montoConvenio} el desglose.
+	// Los envía send-convenio-reminders.ts. Mismo esquema de 5 bloques.
+	{
+		id: "convenio_5",
+		nombre: "Convenio — 5 días antes",
+		etapa: "en_convenio",
+		asunto: "Recordatorio: su pago de convenio vence en 5 días",
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que el {fechaPago} (en 5 días) vence su pago de este mes por Q{cuotaMensual}: su cuota del crédito (Q{montoNormal}) más su cuota del convenio (Q{montoConvenio}).
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REALIZÓ SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "convenio_3",
+		nombre: "Convenio — 3 días antes",
+		etapa: "en_convenio",
+		asunto: "Recordatorio: su pago de convenio vence en 3 días",
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que el {fechaPago} (en 3 días) vence su pago de este mes por Q{cuotaMensual}: su cuota del crédito (Q{montoNormal}) más su cuota del convenio (Q{montoConvenio}).
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REALIZÓ SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "convenio_1",
+		nombre: "Convenio — 1 día antes",
+		etapa: "en_convenio",
+		asunto: "Recordatorio: su pago de convenio vence mañana",
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que MAÑANA {fechaPago} vence su pago de este mes por Q{cuotaMensual}: su cuota del crédito (Q{montoNormal}) más su cuota del convenio (Q{montoConvenio}).
+
+${COBROS_CUENTAS_PAGO}
+
+Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor}. SI YA REALIZÓ SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+
+${COBROS_NO_REPLY_WARNING}
+
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+	},
+	{
+		id: "convenio_0",
+		nombre: "Convenio — día de pago (D-0)",
+		etapa: "en_convenio",
+		asunto: "Hoy vence su pago de convenio",
+		cuerpo: `Estimado(a) {clienteNombre}, buen día. Le saludamos de Clubcashin.com para recordarle que HOY {fechaPago} vence su pago de este mes por Q{cuotaMensual}: su cuota del crédito (Q{montoNormal}) más su cuota del convenio (Q{montoConvenio}). Quedamos a la espera de su comprobante de pago.
 
 ${COBROS_CUENTAS_PAGO}
 

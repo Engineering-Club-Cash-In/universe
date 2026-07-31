@@ -21,6 +21,7 @@ export * from "./notifications";
 export * from "./otp";
 export * from "./premora-reduccion";
 export * from "./quotations";
+export * from "./recordatorios-convenio";
 export * from "./recordatorios-premora";
 export * from "./renap";
 export * from "./vehicles";

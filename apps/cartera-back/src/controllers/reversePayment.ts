@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, not, inArray, sql } from "drizzle-orm";
+import { eq, and, not, desc, inArray, isNotNull, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -12,6 +12,7 @@ import {
   boletas,
   pagos_credito_inversionistas,
   convenios_pago,
+  convenio_cuotas,
   facturas_electronicas,
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
@@ -927,6 +928,60 @@ export async function reverseConvenioPayment(
       })
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
+
+    // COBROS-02: reabrir en `convenio_cuotas` las cuotas que el reverso "despagó".
+    // convenio_cuotas es donde vive el pago DEL CONVENIO, y tanto el endpoint de
+    // recordatorios como el job de buckets tratan SOLO `fecha_pago IS NULL` como
+    // impaga. Si el reverso reduce las cuotas completas pagadas (aunque el convenio
+    // siga activo — reversa de una cuota NO final), hay que reabrir las últimas N
+    // pagadas o quedarían invisibles (ni cuentan atraso ni recuerdan).
+    const cuotasAReabrir = convenio.pagos_realizados - nuevosPagosRealizados;
+    if (cuotasAReabrir > 0) {
+      const pagadas = await db
+        .select({ id: convenio_cuotas.cuota_convenio_id })
+        .from(convenio_cuotas)
+        .where(
+          and(
+            eq(convenio_cuotas.convenio_id, convenio.convenio_id),
+            isNotNull(convenio_cuotas.fecha_pago),
+          ),
+        )
+        .orderBy(desc(convenio_cuotas.fecha_pago), desc(convenio_cuotas.numero_cuota))
+        .limit(cuotasAReabrir);
+      if (pagadas.length > 0) {
+        await db
+          .update(convenio_cuotas)
+          .set({ fecha_pago: null })
+          .where(
+            inArray(
+              convenio_cuotas.cuota_convenio_id,
+              pagadas.map((p) => p.id),
+            ),
+          );
+      }
+    }
+
+    // Si además la reversa "des-completa" el convenio (estaba completado y vuelve a
+    // activo), DESHACER la salida por completado que hizo processConvenioPayment
+    // (paso 9.b): regresar el crédito a EN_CONVENIO y volver a marcar IMPAGAS las
+    // cuotas reestructuradas (cuotas_convenio). Sin esto el crédito se queda ACTIVO
+    // con un convenio vivo → sale de los jobs de convenio y entra a mora normal.
+    if (convenio.completado === true && convenioActivo === true) {
+      const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
+      if (cuotasReestructuradas.length > 0) {
+        await db
+          .update(cuotas_credito)
+          .set({ pagado: false })
+          .where(inArray(cuotas_credito.cuota_id, cuotasReestructuradas));
+      }
+      await db
+        .update(creditos)
+        .set({ statusCredit: "EN_CONVENIO" })
+        .where(eq(creditos.credito_id, credito_id));
+      console.log(
+        `↩️ Convenio ${convenio.convenio_id} des-completado por reversa → crédito ${credito_id} vuelve a EN_CONVENIO; ${cuotasReestructuradas.length} cuota(s) reestructurada(s) vuelven a impagas.`,
+      );
+    }
 
     console.log("🔄 ========== FIN REVERSIÓN DE PAGO ==========\n");
 

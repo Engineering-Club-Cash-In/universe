@@ -1,5 +1,6 @@
 import schedule from 'node-schedule';
 import { procesarMoras } from './src/controllers/latefee';
+import { procesarBucketsConvenio } from './src/controllers/bucketsConvenio';
 import { upsertEfectividadAsesores } from './src/controllers/paymentsByAdvisor';
 import { expirarCompraCarteraVencidas } from './src/controllers/expirarCompraCartera';
 import { generarCierreMensual, periodoObjetivo } from './src/controllers/cierreMensual';
@@ -41,6 +42,23 @@ export function iniciarTareasProgramadas() {
       console.log('✅ procesarMoras ejecutado correctamente');
     } catch (error) {
       console.error('❌ Error al ejecutar procesarMoras:', error);
+    }
+  });
+
+  // 🤝 Buckets de CONVENIO - 00:30 hora Guatemala (después de procesarMoras 23:59).
+  //    El motor de mora EXCLUYE EN_CONVENIO; este job es el dueño de sus
+  //    transiciones de bucket (mide cuotas_credito atrasadas EXCLUYENDO las que el
+  //    convenio reestructuró). 1ª corrida auto-siembra INICIAL de todos los
+  //    EN_CONVENIO. No pisa a procesarMoras (otros créditos, otro advisory lock).
+  schedule.scheduleJob({ rule: '30 0 * * *', tz: TZ_GUATEMALA }, async () => {
+    console.log('🤝 Ejecutando procesarBucketsConvenio a las 00:30 Guatemala...');
+    try {
+      const res = await procesarBucketsConvenio();
+      console.log(
+        `✅ bucketsConvenio: creditos=${res.creditos}, iniciales=${res.iniciales}, subidas=${res.subidas}, bajadas=${res.bajadas}, reasignados=${res.reasignados}`,
+      );
+    } catch (error) {
+      console.error('❌ Error al ejecutar procesarBucketsConvenio:', error);
     }
   });
 

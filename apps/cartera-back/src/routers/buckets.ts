@@ -18,6 +18,7 @@ import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualiz
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
+import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo (= enum de statusCredit menos
@@ -766,4 +767,24 @@ export const bucketsRouter = new Elysia()
         ),
       }),
     },
-  );
+  )
+
+  // COBROS-02 · Motor de buckets de CONVENIO — trigger manual. El motor de mora
+  // excluye EN_CONVENIO, así que este job es el dueño de sus transiciones. La 1ª
+  // corrida auto-siembra la LÍNEA BASE (INICIAL) de todos los EN_CONVENIO (la
+  // "carga inicial" a buckets_historial); después mantiene SUBIDA/BAJADA. Corre
+  // solo a diario (schedule.ts), pero se expone para dispararlo a mano.
+  .post("/buckets/convenio/procesar", async ({ set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    try {
+      const result = await procesarBucketsConvenio();
+      return { success: true, message: "Buckets de convenio procesados", result };
+    } catch (err) {
+      set.status = 500;
+      return {
+        success: false,
+        message: "[ERROR] No se pudieron procesar los buckets de convenio",
+        error: String(err),
+      };
+    }
+  });

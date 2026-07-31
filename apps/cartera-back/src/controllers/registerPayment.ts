@@ -384,11 +384,34 @@ const obtenerInfoCompletaCredito = async (
     }
 
     console.log(cuotaApagar,"cuota a pagar");
-    const cuotasPendientesUnicas = Array.from(
-      new Map(
-        cuotasPendientes.map((item) => [item.cuotas_credito.cuota_id, item])
-      ).values()
+    // Dedupe por NUMERO_CUOTA, no por cuota_id: hay créditos con cuotas_credito
+    // duplicadas (mismo numero_cuota, cuota_id distinto — artefacto del flujo
+    // viejo de abonos). Si sobreviven ambas copias, la cascada cobra la misma
+    // cuota N veces y corre los tramos una casilla (caso crédito 793, cuota 17:
+    // el tramo de la 18 cerró la 17 fantasma y la 19 nunca recibió el suyo).
+    // Nos quedamos con la copia más reciente (mayor cuota_id): es la que trae
+    // el recibo re-sembrado vigente.
+    const porNumeroCuota = new Map<number, (typeof cuotasPendientes)[number]>();
+    for (const item of cuotasPendientes) {
+      const previo = porNumeroCuota.get(item.cuotas_credito.numero_cuota);
+      if (
+        !previo ||
+        item.cuotas_credito.cuota_id > previo.cuotas_credito.cuota_id
+      ) {
+        porNumeroCuota.set(item.cuotas_credito.numero_cuota, item);
+      }
+    }
+    const cuotasPendientesUnicas = Array.from(porNumeroCuota.values());
+    const cuotaIdsPendientes = new Set(
+      cuotasPendientes.map((item) => item.cuotas_credito.cuota_id)
     );
+    if (cuotaIdsPendientes.size > cuotasPendientesUnicas.length) {
+      console.warn(
+        `⚠️ Crédito ${credito_id}: cuotas_credito DUPLICADAS detectadas en pendientes ` +
+          `(${cuotaIdsPendientes.size} cuota_id para ${cuotasPendientesUnicas.length} números de cuota). ` +
+          `Se usa solo la copia más reciente de cada numero_cuota.`
+      );
+    }
     const numerosCuotas = cuotasPendientesUnicas.map((item) => item.cuotas_credito.numero_cuota);
     console.log("Números de cuotas pendientes:", numerosCuotas);
 

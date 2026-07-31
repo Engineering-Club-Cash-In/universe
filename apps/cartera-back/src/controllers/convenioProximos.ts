@@ -89,6 +89,10 @@ export async function getConvenioProximosVencer(dias: number[]) {
       FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu2
       WHERE cu2.credito_id = c.credito_id
         AND cu2.fecha_vencimiento::date = cc.fecha_vencimiento::date
+        -- No sumar como "normal" una cuota que YA es del convenio (misma fecha):
+        -- esa cuota ya está representada en la cuota del convenio → sería doble
+        -- cobro. Se excluyen las de cp.cuotas_convenio, igual que el source A del job.
+        AND NOT (cu2.cuota_id = ANY(COALESCE(cp.cuotas_convenio, '{}'::int[])))
       ORDER BY cu2.cuota_id
       LIMIT 1
     ) norm ON true

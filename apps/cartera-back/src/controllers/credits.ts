@@ -763,6 +763,23 @@ export async function getCreditosWithUserByMesAnio(
     if (estados_credito && estados_credito.length > 0) {
       console.log(`🔎 Filtrando por estados seleccionables: ${estados_credito.join(", ")}`);
       conditions.push(inArray(creditos.statusCredit, estados_credito));
+      // EN_CONVENIO solo aparece en el listado del funnel si el job de convenios YA
+      // le sembró su bucket (fila status_credito='EN_CONVENIO' en buckets_historial).
+      // Sin eso no hay bucket confiable —la derivación viva no entiende convenios— y
+      // saldría con bucket:null (fila que la tabla por bucket no sabe ubicar) o un
+      // bucket viejo pre-convenio. Aplica con y SIN filtro de bucket (sin filtro el
+      // guard del COALESCE de abajo no corre). Ventana ≤ próxima corrida del job
+      // nocturno; el crédito no queda en el olvido (review Codex #1223).
+      if (estados_credito.some((s) => s === "EN_CONVENIO")) {
+        conditions.push(sql`(
+          ${creditos.statusCredit} <> 'EN_CONVENIO'
+          OR EXISTS (
+            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+            WHERE h.credito_id = ${creditos.credito_id}
+              AND h.status_credito = 'EN_CONVENIO'
+          )
+        )`);
+      }
     }
 
     if (asesor_id) {

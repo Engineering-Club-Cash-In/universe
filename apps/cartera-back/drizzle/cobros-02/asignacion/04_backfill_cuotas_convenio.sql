@@ -23,8 +23,11 @@
 
 BEGIN;
 
--- ⇦ Sandbox de pruebas. Cambiar a `cartera` cuando toque el ambiente real.
-SET LOCAL search_path TO cartera_cobros2;
+-- Apunta a PRODUCCIÓN (`cartera`) por defecto: es el ambiente real del backfill,
+-- y correrlo contra el schema equivocado deja las filas de prod en NULL (los
+-- convenios viejos se bucketearían de más). Para el sandbox de COBROS-02 cambiar
+-- a `cartera_cobros2` (ya corrido ahí).
+SET LOCAL search_path TO cartera;
 
 UPDATE convenios_pago cp
    SET cuotas_convenio = sub.cuotas,

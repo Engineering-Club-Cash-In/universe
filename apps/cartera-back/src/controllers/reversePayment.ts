@@ -928,6 +928,29 @@ export async function reverseConvenioPayment(
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
 
+    // COBROS-02: si la reversa "des-completa" el convenio (estaba completado y
+    // vuelve a estar activo), DESHACER la salida por completado que hizo
+    // processConvenioPayment (paso 9.b): regresar el crédito a EN_CONVENIO y
+    // volver a marcar IMPAGAS las cuotas reestructuradas (cuotas_convenio). Sin
+    // esto el crédito se queda ACTIVO con un convenio vivo → sale de los jobs de
+    // convenio (bucket/recordatorios) y entra a mora/premora normal. Simétrico.
+    if (convenio.completado === true && convenioActivo === true) {
+      const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
+      if (cuotasReestructuradas.length > 0) {
+        await db
+          .update(cuotas_credito)
+          .set({ pagado: false })
+          .where(inArray(cuotas_credito.cuota_id, cuotasReestructuradas));
+      }
+      await db
+        .update(creditos)
+        .set({ statusCredit: "EN_CONVENIO" })
+        .where(eq(creditos.credito_id, credito_id));
+      console.log(
+        `↩️ Convenio ${convenio.convenio_id} des-completado por reversa → crédito ${credito_id} vuelve a EN_CONVENIO; ${cuotasReestructuradas.length} cuota(s) reestructurada(s) vuelven a impagas.`,
+      );
+    }
+
     console.log("🔄 ========== FIN REVERSIÓN DE PAGO ==========\n");
 
     // 8. Retornar resultado

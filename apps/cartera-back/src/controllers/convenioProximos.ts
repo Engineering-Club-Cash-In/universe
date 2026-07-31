@@ -54,7 +54,7 @@ export async function getConvenioProximosVencer(dias: number[]) {
       a.telefono AS telefono_asesor
     FROM ${SQL_CARTERA_SCHEMA}.convenio_cuotas cc
     INNER JOIN ${SQL_CARTERA_SCHEMA}.convenios_pago cp
-      ON cp.convenio_id = cc.convenio_id AND cp.completado = false
+      ON cp.convenio_id = cc.convenio_id AND cp.completado = false AND cp.activo = true
     INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c
       ON c.credito_id = cp.credito_id AND c."statusCredit" = 'EN_CONVENIO'
     INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id

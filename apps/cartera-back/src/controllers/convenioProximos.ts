@@ -40,9 +40,19 @@ export async function getConvenioProximosVencer(dias: number[]) {
         LIMIT 1) AS bucket,
       -- monto_cuota = TOTAL a pagar del mes = cuota normal del crédito + cuota
       -- del convenio ("ambas cosas"). Es lo que el cliente debe ese día.
-      ROUND((c.cuota + cp.cuota_mensual)::numeric, 2)::text AS monto_cuota,
+      -- monto_convenio = lo que RESTA de esta cuota del convenio: si es la cuota en
+      -- curso (numero_cuota = pagos_realizados+1) y ya hubo un abono PARCIAL (que
+      -- movió monto_pagado pero no marcó fecha_pago), se resta lo abonado para no
+      -- sobre-cobrar en el WhatsApp. Las cuotas futuras van por la cuota completa.
+      ROUND((c.cuota + GREATEST(
+        CASE WHEN cc.numero_cuota = cp.pagos_realizados + 1
+             THEN (cp.pagos_realizados + 1) * cp.cuota_mensual - cp.monto_pagado
+             ELSE cp.cuota_mensual END, 0))::numeric, 2)::text AS monto_cuota,
       ROUND(c.cuota::numeric, 2)::text AS monto_normal,
-      ROUND(cp.cuota_mensual::numeric, 2)::text AS monto_convenio,
+      ROUND(GREATEST(
+        CASE WHEN cc.numero_cuota = cp.pagos_realizados + 1
+             THEN (cp.pagos_realizados + 1) * cp.cuota_mensual - cp.monto_pagado
+             ELSE cp.cuota_mensual END, 0)::numeric, 2)::text AS monto_convenio,
       -- Compatibilidad de forma con CarteraCuotaProximaVencer (no aplican acá).
       '0.00'::text AS monto_mora,
       0::int AS cuotas_atrasadas,

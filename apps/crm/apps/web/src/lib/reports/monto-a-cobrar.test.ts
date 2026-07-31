@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	fillMissingMontoACobrarPeriods,
 	getMontoACobrarParticipacionTotals,
+	getMontoACobrarViewRow,
 } from "./monto-a-cobrar";
 
 describe("fillMissingMontoACobrarPeriods", () => {
@@ -58,6 +59,71 @@ describe("fillMissingMontoACobrarPeriods", () => {
 			cuotas_participacion_invalida: 0,
 			participacion_actual: true,
 		});
+	});
+});
+
+const montoRow = {
+	bucket: "2026-07-01",
+	cuotas_count: 2,
+	total_cuota: "100",
+	total_interes: "10",
+	total_iva: "1.2",
+	total_seguro: "3",
+	total_gps: "4",
+	total_membresias: "5",
+	total_mora: "6",
+	mora_count: 1,
+	total_credits: 2,
+	credits_con_mora: 1,
+	acum_total_cuota: "200",
+	acum_total_interes: "20",
+	acum_total_iva: "2.4",
+	acum_total_seguro: "6",
+	acum_total_gps: "8",
+	acum_total_membresias: "10",
+	total_interes_inversionista: "7",
+	acum_total_interes_inversionista: "14",
+	capital_inv_participacion_actual: "40",
+	capital_cube_participacion_actual: "60",
+	interes_iva_inv_participacion_actual: "4.48",
+	interes_iva_cube_participacion_actual: "6.72",
+	acum_capital_inv_participacion_actual: "80",
+	acum_capital_cube_participacion_actual: "120",
+	acum_interes_iva_inv_participacion_actual: "8.96",
+	acum_interes_iva_cube_participacion_actual: "13.44",
+	creditos_participacion_invalida: 0,
+	cuotas_participacion_invalida: 0,
+	participacion_actual: true,
+};
+
+test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
+	expect(getMontoACobrarViewRow(montoRow, false)).toEqual({
+		capital: 100,
+		interesIva: 11.2,
+		servicios: 7,
+		membresias: 5,
+		interesInversionista: 7,
+		capitalInv: 40,
+		capitalCube: 60,
+		interesIvaInv: 4.48,
+		interesIvaCube: 6.72,
+		totalMora: 6,
+		total: 123.2,
+	});
+});
+
+test("conserva la semántica acumulada en los rubros consolidados", () => {
+	expect(getMontoACobrarViewRow(montoRow, true)).toMatchObject({
+		capital: 200,
+		interesIva: 22.4,
+		servicios: 14,
+		membresias: 10,
+		interesInversionista: 14,
+		capitalInv: 80,
+		capitalCube: 120,
+		interesIvaInv: 8.96,
+		interesIvaCube: 13.44,
+		total: 246.4,
 	});
 });
 

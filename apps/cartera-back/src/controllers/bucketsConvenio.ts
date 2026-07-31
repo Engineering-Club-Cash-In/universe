@@ -234,6 +234,7 @@ export async function procesarBucketsConvenio(): Promise<BucketsConvenioResultad
         and(
           inArray(convenios_pago.credito_id, creditoIds),
           eq(convenios_pago.completado, false),
+          eq(convenios_pago.activo, true),
         ),
       );
 
@@ -280,6 +281,7 @@ export async function procesarBucketsConvenio(): Promise<BucketsConvenioResultad
         and(
           inArray(convenios_pago.credito_id, creditoIds),
           eq(convenios_pago.completado, false),
+          eq(convenios_pago.activo, true),
         ),
       );
     for (const cc of cuotasDeConvenio) {

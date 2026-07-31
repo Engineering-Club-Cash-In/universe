@@ -256,8 +256,18 @@ export async function createPaymentAgreement(
         observaciones: observations,
         // Snapshot de las cuotas reestructuradas por el convenio. Data ya disponible
         // en `pagos`. Se usa después para excluirlas del conteo de bucket (el job de
-        // convenios). Dedup por si dos pagos apuntan a la misma cuota.
-        cuotas_convenio: [...new Set(pagos.map((item) => item.cuota.cuota_id))],
+        // convenios) y marcarlas pagadas al completar. Se EXCLUYE el pago solo-mora
+        // (pagado=true, monto_aplicado=0) — mismo filtro que agreementPaymentsData
+        // (pivot): esa cuota no es una cuota del convenio; si entrara, se saltaría
+        // del atraso y se marcaría pagada aunque solo se pagó la mora. Dedup por si
+        // dos pagos apuntan a la misma cuota.
+        cuotas_convenio: [
+          ...new Set(
+            pagos
+              .filter((item) => item.pago.pagado !== true)
+              .map((item) => item.cuota.cuota_id),
+          ),
+        ],
         created_by,
       })
       .returning();

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, not, inArray, sql } from "drizzle-orm";
+import { eq, and, not, desc, inArray, isNotNull, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -12,6 +12,7 @@ import {
   boletas,
   pagos_credito_inversionistas,
   convenios_pago,
+  convenio_cuotas,
   facturas_electronicas,
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
@@ -946,8 +947,31 @@ export async function reverseConvenioPayment(
         .update(creditos)
         .set({ statusCredit: "EN_CONVENIO" })
         .where(eq(creditos.credito_id, credito_id));
+
+      // Reabrir también la ÚLTIMA cuota del convenio que quedó pagada: el pago
+      // reversado fue el que la marcó. El endpoint de recordatorios y el job de
+      // buckets solo miran convenio_cuotas con fecha_pago IS NULL, así que sin
+      // esto la cuota reabierta no volvería a contar como atrasada ni a recordar.
+      const [ultimaPagada] = await db
+        .select({ id: convenio_cuotas.cuota_convenio_id })
+        .from(convenio_cuotas)
+        .where(
+          and(
+            eq(convenio_cuotas.convenio_id, convenio.convenio_id),
+            isNotNull(convenio_cuotas.fecha_pago),
+          ),
+        )
+        .orderBy(desc(convenio_cuotas.fecha_pago), desc(convenio_cuotas.numero_cuota))
+        .limit(1);
+      if (ultimaPagada) {
+        await db
+          .update(convenio_cuotas)
+          .set({ fecha_pago: null })
+          .where(eq(convenio_cuotas.cuota_convenio_id, ultimaPagada.id));
+      }
+
       console.log(
-        `↩️ Convenio ${convenio.convenio_id} des-completado por reversa → crédito ${credito_id} vuelve a EN_CONVENIO; ${cuotasReestructuradas.length} cuota(s) reestructurada(s) vuelven a impagas.`,
+        `↩️ Convenio ${convenio.convenio_id} des-completado por reversa → crédito ${credito_id} vuelve a EN_CONVENIO; ${cuotasReestructuradas.length} cuota(s) reestructurada(s) vuelven a impagas; se reabrió la última cuota del convenio.`,
       );
     }
 

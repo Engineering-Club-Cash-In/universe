@@ -686,7 +686,7 @@ export function TableInvestors() {
     compraCarteraPctInvCalc !== undefined
       ? 100 - compraCarteraPctInvCalc
       : undefined;
-  // Con monto ingresado pero sin bracket válido (ej. < Q25,000) y SIN
+  // Con monto ingresado pero sin bracket válido (ej. < Q1,000) y SIN
   // anulación manual activa, el backend responde sin filas: bloqueamos el
   // confirmar. Con override activo no aplica (el operador ya eligió una
   // fila válida, sin importar el monto).
@@ -2875,7 +2875,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               compraCarteraBracketFaltante ? (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                   El monto ingresado no cae en ningún rango del catálogo
-                  (mínimo Q25,000). Ajusta el monto.
+                  (mínimo Q1,000). Ajusta el monto.
                 </p>
               ) : (
                 <>

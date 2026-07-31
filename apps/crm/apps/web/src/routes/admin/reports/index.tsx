@@ -71,7 +71,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
 import { buildInvestorExportRows } from "@/lib/reports/reinvestment-report";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
-import { getMontoACobrarParticipacionTotals } from "@/lib/reports/monto-a-cobrar";
+import {
+	getMontoACobrarParticipacionTotals,
+	getMontoACobrarViewRow,
+} from "@/lib/reports/monto-a-cobrar";
 import type {
 	ComparativoHistoricoRow,
 	FacturacionMesResponse,
@@ -181,21 +184,17 @@ const FACTURACION_RUBROS: { key: keyof FacturacionMesRubro; label: string }[] =
 	];
 
 const MONTO_COBRAR_COLORS = {
-	total_cuota: "#3b82f6",
-	total_interes: "#10b981",
-	total_iva: "#eab308",
-	total_seguro: "#f97316",
-	total_gps: "#8b5cf6",
-	total_membresias: "#ec4899",
+	capital: "#3b82f6",
+	interesIva: "#10b981",
+	servicios: "#f97316",
+	membresias: "#ec4899",
 } as const;
 
 const MONTO_COBRAR_LABELS: Record<keyof typeof MONTO_COBRAR_COLORS, string> = {
-	total_cuota: "Capital",
-	total_interes: "Interés",
-	total_iva: "IVA 12%",
-	total_seguro: "Seguro",
-	total_gps: "GPS",
-	total_membresias: "Membresías",
+	capital: "Capital",
+	interesIva: "Interés + IVA",
+	servicios: "Servicios (Seguro + GPS)",
+	membresias: "Membresías",
 };
 
 const GUATEMALA_TIME_ZONE = "America/Guatemala";
@@ -1396,32 +1395,19 @@ function RouteComponent() {
 														montoCobrarRange.fechaInicio,
 														montoCobrarRange.fechaFin,
 													).map((row: MontoACobrarPeriodoRow) => {
-														const a = montoCobrarAcumulado;
+														const view = getMontoACobrarViewRow(
+															row,
+															montoCobrarAcumulado,
+														);
 														return {
 															bucket: formatBucket(
 																row.bucket,
 																montoCobrarPeriodo,
 															),
-															total_cuota: Number.parseFloat(
-																a ? row.acum_total_cuota : row.total_cuota,
-															),
-															total_interes: Number.parseFloat(
-																a ? row.acum_total_interes : row.total_interes,
-															),
-															total_iva: Number.parseFloat(
-																a ? row.acum_total_iva : row.total_iva,
-															),
-															total_seguro: Number.parseFloat(
-																a ? row.acum_total_seguro : row.total_seguro,
-															),
-															total_gps: Number.parseFloat(
-																a ? row.acum_total_gps : row.total_gps,
-															),
-															total_membresias: Number.parseFloat(
-																a
-																	? row.acum_total_membresias
-																	: row.total_membresias,
-															),
+															capital: view.capital,
+															interesIva: view.interesIva,
+															servicios: view.servicios,
+															membresias: view.membresias,
 														};
 													})}
 												>
@@ -1479,32 +1465,31 @@ function RouteComponent() {
 															<TableHead className="text-right">
 																Capital
 															</TableHead>
-															<TableHead className="text-right">
-																Interés
-															</TableHead>
-															<TableHead className="text-right">
-																IVA 12%
-															</TableHead>
-															<TableHead className="text-right">
-																Seguro
-															</TableHead>
-															<TableHead className="text-right">GPS</TableHead>
-															<TableHead className="text-right">
-																Membresías
-															</TableHead>
-																	<TableHead className="text-right">
-																		Interés Inv. pagado (referencia)
-																	</TableHead>
-																	<TableHead className="text-right">Capital Inv.</TableHead>
-																	<TableHead className="text-right">Capital CUBE</TableHead>
-																	<TableHead className="text-right">Interés + IVA Inv.</TableHead>
-																	<TableHead className="text-right">Interés + IVA CUBE</TableHead>
-															<TableHead className="text-right">
-																Total Mora
-															</TableHead>
-															<TableHead className="text-right font-bold">
-																Total
-															</TableHead>
+													<TableHead className="text-right">
+														Interés + IVA
+													</TableHead>
+													<TableHead className="text-right">
+														Servicios (Seguro + GPS)
+													</TableHead>
+													<TableHead className="text-right">
+														Membresías
+													</TableHead>
+													<TableHead className="text-right">
+														Total Mora
+													</TableHead>
+													<TableHead className="text-right font-bold">
+														Total
+													</TableHead>
+													<TableHead className="border-l bg-muted/30 text-right">
+														<div className="text-[10px] text-muted-foreground uppercase tracking-wide">
+															Detalle complementario
+														</div>
+														Interés Inv. pagado (referencia)
+													</TableHead>
+													<TableHead className="bg-muted/30 text-right">Capital Inv.</TableHead>
+													<TableHead className="bg-muted/30 text-right">Capital CUBE</TableHead>
+													<TableHead className="bg-muted/30 text-right">Interés + IVA Inv.</TableHead>
+													<TableHead className="bg-muted/30 text-right">Interés + IVA CUBE</TableHead>
 														</TableRow>
 													</TableHeader>
 													<TableBody>
@@ -1513,40 +1498,11 @@ function RouteComponent() {
 															montoCobrarPeriodo,
 															montoCobrarRange.fechaInicio,
 															montoCobrarRange.fechaFin,
-														).map((row: MontoACobrarPeriodoRow) => {
-															const a = montoCobrarAcumulado;
-															const cuota = a
-																? row.acum_total_cuota
-																: row.total_cuota;
-															const interes = a
-																? row.acum_total_interes
-																: row.total_interes;
-															const iva = a
-																? row.acum_total_iva
-																: row.total_iva;
-															const seguro = a
-																? row.acum_total_seguro
-																: row.total_seguro;
-															const gps = a
-																? row.acum_total_gps
-																: row.total_gps;
-															const membresias = a
-																? row.acum_total_membresias
-																: row.total_membresias;
-																	const interesInversionista = a
-																		? row.acum_total_interes_inversionista
-																		: row.total_interes_inversionista;
-																	const capitalInv = a ? row.acum_capital_inv_participacion_actual : row.capital_inv_participacion_actual;
-																	const capitalCube = a ? row.acum_capital_cube_participacion_actual : row.capital_cube_participacion_actual;
-																	const interesIvaInv = a ? row.acum_interes_iva_inv_participacion_actual : row.interes_iva_inv_participacion_actual;
-																	const interesIvaCube = a ? row.acum_interes_iva_cube_participacion_actual : row.interes_iva_cube_participacion_actual;
-															const total =
-																Number.parseFloat(cuota) +
-																Number.parseFloat(interes) +
-																Number.parseFloat(iva) +
-																Number.parseFloat(seguro) +
-																Number.parseFloat(gps) +
-																Number.parseFloat(membresias);
+													).map((row: MontoACobrarPeriodoRow) => {
+														const view = getMontoACobrarViewRow(
+															row,
+															montoCobrarAcumulado,
+														);
 															return (
 																<TableRow key={row.bucket}>
 																	<TableCell>
@@ -1558,33 +1514,20 @@ function RouteComponent() {
 																	<TableCell className="text-right">
 																		{row.cuotas_count}
 																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(cuota)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(interes)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(iva)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(seguro)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(gps)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(membresias)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(interesInversionista)}
-																	</TableCell>
-																	<TableCell className="text-right">{formatCurrency(capitalInv)}</TableCell>
-																	<TableCell className="text-right">{formatCurrency(capitalCube)}</TableCell>
-																	<TableCell className="text-right">{formatCurrency(interesIvaInv)}</TableCell>
-																	<TableCell className="text-right">{formatCurrency(interesIvaCube)}</TableCell>
-																	<TableCell className="text-right">
-																		<div>{formatCurrency(row.total_mora)}</div>
+															<TableCell className="text-right">
+																{formatCurrency(view.capital)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(view.interesIva)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(view.servicios)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(view.membresias)}
+															</TableCell>
+															<TableCell className="text-right">
+																<div>{formatCurrency(view.totalMora)}</div>
 																		<div
 																			className="text-muted-foreground text-xs"
 																			title="% de créditos del período con mora activa"
@@ -1599,9 +1542,24 @@ function RouteComponent() {
 																			%
 																		</div>
 																	</TableCell>
-																	<TableCell className="text-right font-bold">
-																		{formatCurrency(total)}
-																	</TableCell>
+															<TableCell className="text-right font-bold">
+																{formatCurrency(view.total)}
+															</TableCell>
+															<TableCell className="border-l bg-muted/10 text-right">
+																{formatCurrency(view.interesInversionista)}
+															</TableCell>
+															<TableCell className="bg-muted/10 text-right">
+																{formatCurrency(view.capitalInv)}
+															</TableCell>
+															<TableCell className="bg-muted/10 text-right">
+																{formatCurrency(view.capitalCube)}
+															</TableCell>
+															<TableCell className="bg-muted/10 text-right">
+																{formatCurrency(view.interesIvaInv)}
+															</TableCell>
+															<TableCell className="bg-muted/10 text-right">
+																{formatCurrency(view.interesIvaCube)}
+															</TableCell>
 																</TableRow>
 															);
 														})}
@@ -1627,13 +1585,23 @@ function RouteComponent() {
 																			(lastRow[key] as string) || "0",
 																		)
 																	: sum(key);
-															const grandTotal =
-																val("acum_total_cuota") +
-																val("acum_total_interes") +
-																val("acum_total_iva") +
-																val("acum_total_seguro") +
-																val("acum_total_gps") +
-																val("acum_total_membresias");
+														const capitalTotal = val(
+															a ? "acum_total_cuota" : "total_cuota",
+														);
+														const interesIvaTotal =
+															val(a ? "acum_total_interes" : "total_interes") +
+															val(a ? "acum_total_iva" : "total_iva");
+														const serviciosTotal =
+															val(a ? "acum_total_seguro" : "total_seguro") +
+															val(a ? "acum_total_gps" : "total_gps");
+														const membresiasTotal = val(
+															a ? "acum_total_membresias" : "total_membresias",
+														);
+														const grandTotal =
+															capitalTotal +
+															interesIvaTotal +
+															serviciosTotal +
+															membresiasTotal;
 																	const totalCred =
 																		a && lastRow
 																			? lastRow.cuotas_count
@@ -1660,51 +1628,25 @@ function RouteComponent() {
 																	<TableCell className="text-right">
 																		{totalCred}
 																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			val(
-																				a ? "acum_total_cuota" : "total_cuota",
-																			),
-																		)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			val(
-																				a
-																					? "acum_total_interes"
-																					: "total_interes",
-																			),
-																		)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			val(a ? "acum_total_iva" : "total_iva"),
-																		)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			val(
-																				a
-																					? "acum_total_seguro"
-																					: "total_seguro",
-																			),
-																		)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			val(a ? "acum_total_gps" : "total_gps"),
-																		)}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(
-																			val(
-																				a
-																					? "acum_total_membresias"
-																					: "total_membresias",
-																			),
-																		)}
-																	</TableCell>
-																	<TableCell className="text-right">
+															<TableCell className="text-right">
+																{formatCurrency(capitalTotal)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(interesIvaTotal)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(serviciosTotal)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(membresiasTotal)}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(val("total_mora"))}
+															</TableCell>
+															<TableCell className="text-right">
+																{formatCurrency(grandTotal)}
+															</TableCell>
+															<TableCell className="border-l bg-muted/10 text-right">
 																		{formatCurrency(
 																			val(
 																				a
@@ -1713,16 +1655,10 @@ function RouteComponent() {
 																						),
 																					)}
 																				</TableCell>
-																				<TableCell className="text-right">{formatCurrency(splitTotals.capitalInv)}</TableCell>
-																				<TableCell className="text-right">{formatCurrency(splitTotals.capitalCube)}</TableCell>
-																				<TableCell className="text-right">{formatCurrency(splitTotals.interesIvaInv)}</TableCell>
-																				<TableCell className="text-right">{formatCurrency(splitTotals.interesIvaCube)}</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(val("total_mora"))}
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{formatCurrency(grandTotal)}
-																	</TableCell>
+																	<TableCell className="bg-muted/10 text-right">{formatCurrency(splitTotals.capitalInv)}</TableCell>
+																	<TableCell className="bg-muted/10 text-right">{formatCurrency(splitTotals.capitalCube)}</TableCell>
+																	<TableCell className="bg-muted/10 text-right">{formatCurrency(splitTotals.interesIvaInv)}</TableCell>
+																	<TableCell className="bg-muted/10 text-right">{formatCurrency(splitTotals.interesIvaCube)}</TableCell>
 																</TableRow>
 															);
 														})()}

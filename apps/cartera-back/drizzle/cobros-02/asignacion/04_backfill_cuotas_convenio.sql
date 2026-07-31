@@ -37,6 +37,11 @@ UPDATE convenios_pago cp
            array_agg(DISTINCT pc.cuota_id) AS cuotas
       FROM convenios_pagos_resume r
       JOIN pagos_credito pc ON pc.pago_id = r.pago_id
+     -- Excluir el pago SOLO-MORA (pagado=true, monto_aplicado=0): no es una cuota
+     -- del convenio. Mismo filtro que createPaymentAgreement (pago.pagado !== true)
+     -- — si entrara, esa cuota normal se saltaría del atraso y podría marcarse
+     -- pagada al completar aunque solo se pagó la mora.
+     WHERE pc.pagado IS NOT TRUE
      GROUP BY r.convenio_id
   ) sub
  WHERE cp.convenio_id = sub.convenio_id

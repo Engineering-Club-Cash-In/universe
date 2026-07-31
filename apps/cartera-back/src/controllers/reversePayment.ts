@@ -929,12 +929,43 @@ export async function reverseConvenioPayment(
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
 
-    // COBROS-02: si la reversa "des-completa" el convenio (estaba completado y
-    // vuelve a estar activo), DESHACER la salida por completado que hizo
-    // processConvenioPayment (paso 9.b): regresar el crédito a EN_CONVENIO y
-    // volver a marcar IMPAGAS las cuotas reestructuradas (cuotas_convenio). Sin
-    // esto el crédito se queda ACTIVO con un convenio vivo → sale de los jobs de
-    // convenio (bucket/recordatorios) y entra a mora/premora normal. Simétrico.
+    // COBROS-02: reabrir en `convenio_cuotas` las cuotas que el reverso "despagó".
+    // convenio_cuotas es donde vive el pago DEL CONVENIO, y tanto el endpoint de
+    // recordatorios como el job de buckets tratan SOLO `fecha_pago IS NULL` como
+    // impaga. Si el reverso reduce las cuotas completas pagadas (aunque el convenio
+    // siga activo — reversa de una cuota NO final), hay que reabrir las últimas N
+    // pagadas o quedarían invisibles (ni cuentan atraso ni recuerdan).
+    const cuotasAReabrir = convenio.pagos_realizados - nuevosPagosRealizados;
+    if (cuotasAReabrir > 0) {
+      const pagadas = await db
+        .select({ id: convenio_cuotas.cuota_convenio_id })
+        .from(convenio_cuotas)
+        .where(
+          and(
+            eq(convenio_cuotas.convenio_id, convenio.convenio_id),
+            isNotNull(convenio_cuotas.fecha_pago),
+          ),
+        )
+        .orderBy(desc(convenio_cuotas.fecha_pago), desc(convenio_cuotas.numero_cuota))
+        .limit(cuotasAReabrir);
+      if (pagadas.length > 0) {
+        await db
+          .update(convenio_cuotas)
+          .set({ fecha_pago: null })
+          .where(
+            inArray(
+              convenio_cuotas.cuota_convenio_id,
+              pagadas.map((p) => p.id),
+            ),
+          );
+      }
+    }
+
+    // Si además la reversa "des-completa" el convenio (estaba completado y vuelve a
+    // activo), DESHACER la salida por completado que hizo processConvenioPayment
+    // (paso 9.b): regresar el crédito a EN_CONVENIO y volver a marcar IMPAGAS las
+    // cuotas reestructuradas (cuotas_convenio). Sin esto el crédito se queda ACTIVO
+    // con un convenio vivo → sale de los jobs de convenio y entra a mora normal.
     if (convenio.completado === true && convenioActivo === true) {
       const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
       if (cuotasReestructuradas.length > 0) {
@@ -947,31 +978,8 @@ export async function reverseConvenioPayment(
         .update(creditos)
         .set({ statusCredit: "EN_CONVENIO" })
         .where(eq(creditos.credito_id, credito_id));
-
-      // Reabrir también la ÚLTIMA cuota del convenio que quedó pagada: el pago
-      // reversado fue el que la marcó. El endpoint de recordatorios y el job de
-      // buckets solo miran convenio_cuotas con fecha_pago IS NULL, así que sin
-      // esto la cuota reabierta no volvería a contar como atrasada ni a recordar.
-      const [ultimaPagada] = await db
-        .select({ id: convenio_cuotas.cuota_convenio_id })
-        .from(convenio_cuotas)
-        .where(
-          and(
-            eq(convenio_cuotas.convenio_id, convenio.convenio_id),
-            isNotNull(convenio_cuotas.fecha_pago),
-          ),
-        )
-        .orderBy(desc(convenio_cuotas.fecha_pago), desc(convenio_cuotas.numero_cuota))
-        .limit(1);
-      if (ultimaPagada) {
-        await db
-          .update(convenio_cuotas)
-          .set({ fecha_pago: null })
-          .where(eq(convenio_cuotas.cuota_convenio_id, ultimaPagada.id));
-      }
-
       console.log(
-        `↩️ Convenio ${convenio.convenio_id} des-completado por reversa → crédito ${credito_id} vuelve a EN_CONVENIO; ${cuotasReestructuradas.length} cuota(s) reestructurada(s) vuelven a impagas; se reabrió la última cuota del convenio.`,
+        `↩️ Convenio ${convenio.convenio_id} des-completado por reversa → crédito ${credito_id} vuelve a EN_CONVENIO; ${cuotasReestructuradas.length} cuota(s) reestructurada(s) vuelven a impagas.`,
       );
     }
 

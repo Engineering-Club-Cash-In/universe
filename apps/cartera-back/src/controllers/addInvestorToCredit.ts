@@ -399,7 +399,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     // modalidad_facturacion_spread_id, es una anulación manual: el operador
     // puede elegir cualquiera de los 8 brackets de la modalidad (no tiene
     // que ser el que corresponde al monto), siempre que el monto sea válido
-    // para el catálogo (el piso de Q25,000 es duro, sin excepción — se
+    // para el catálogo (el piso de Q1,000 es duro, sin excepción — se
     // valida abajo con resolveModalidadFacturacionSpread).
     // ================================================================
     if (tipo_operacion !== "compra_cartera" && modalidad_facturacion) {
@@ -456,7 +456,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         }
         // El pricing usa la fila elegida (modalidadFacturacionSpreadRow) sin
         // importar su bracket — pero el monto igual debe ser válido para el
-        // catálogo (piso de Q25,000 duro, sin excepción). Este resolve solo
+        // catálogo (piso de Q1,000 duro, sin excepción). Este resolve solo
         // se usa para ese chequeo; el resultado se descarta.
         const bracketDelMonto = await resolveModalidadFacturacionSpread(
           monto_aportado,

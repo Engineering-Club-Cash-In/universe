@@ -33,7 +33,7 @@ export const modalidadFacturacionRouter = new Elysia()
    * Dado un monto aportado, devuelve las 3 modalidades del bracket
    * correspondiente (cada una con su spread y su tasa), para que el front
    * muestre las opciones. 404 si el monto no cae en ningún bracket (ej. por
-   * debajo del mínimo Q25,000).
+   * debajo del mínimo Q1,000).
    * Response: { data: [{ id, monto_desde, monto_hasta, modalidad, spread, tasa }] }
    */
   .get(

@@ -607,7 +607,7 @@ function LiquidacionesInversionistas() {
 									{compraBracketFaltante ? (
 										<p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
 											El monto ingresado no cae en ningún rango del catálogo
-											(mínimo Q25,000). Ajusta el monto.
+											(mínimo Q1,000). Ajusta el monto.
 										</p>
 									) : (
 										<>

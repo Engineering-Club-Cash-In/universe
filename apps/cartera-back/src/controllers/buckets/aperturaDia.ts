@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
-import { STATUS_READER_FUERA } from "../../lib/buckets-classification";
+import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CB-023 · Buckets — Vista de APERTURA MATUTINA para el supervisor (8:00 AM).
@@ -545,7 +545,14 @@ async function getMovimientosDia(fecha?: string): Promise<MovimientoCredito[]> {
 /** Bloque 3: hasta 3 créditos más críticos por bucket + total de críticos. */
 async function getTop3PorBucket(fecha?: string): Promise<Top3Bucket[]> {
   const f = fechaSql(fecha);
-  const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
+  // EN_CONVENIO SÍ queda EXCLUIDO aquí (STATUS_BUCKET_FUERA, no READER): este
+  // bloque calcula cuotas_vencidas/monto_adeudado leyendo SOLO cuotas_credito,
+  // y para un convenio esa cuenta no representa el modelo AMBAS (cuota normal
+  // no reestructurada + convenio_cuotas) — de hecho ESTADOS_SIN_MORA lo pone en
+  // 0 y el WHERE cuotas_vencidas > 0 lo botaría igual. Mostrarlo aquí daría un
+  // ranking falso; el convenio ya se atiende por la tabla de buckets y la cola
+  // del día (review Codex #1223).
+  const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
 
   // cuotas_vencidas_reales EN VIVO (CASE de estados sin mora, espejo de
   // cuotasProximas.ts). monto_adeudado = vencidas × cuota + recargo.
@@ -667,7 +674,13 @@ async function getTop3PorBucket(fecha?: string): Promise<Top3Bucket[]> {
 /** Bloque 2: cumplimiento del día ANTERIOR (cuotas que vencían `fecha - 1`). */
 async function getCumplimientoAyer(fecha?: string): Promise<Cumplimiento> {
   const f = fechaSql(fecha);
-  const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
+  // EN_CONVENIO queda EXCLUIDO del % de cumplimiento (STATUS_BUCKET_FUERA, no
+  // READER): esta CTE mide esperado/pagado con SOLO cuotas_credito/pagos_credito,
+  // que no entiende el modelo AMBAS del convenio — contaría de más las cuotas
+  // reestructuradas, ignoraría la cuota del convenio, y marcaría "pagada" una
+  // normal con la parte del convenio impaga. Un número torcido en la cifra que
+  // el supervisor lee cada mañana es peor que ausente (review Codex #1223).
+  const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
   const res = await db.execute<{
     fecha_ayer: string;
     cuentas_esperadas: number;

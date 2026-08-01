@@ -40,6 +40,17 @@ export const STATUS_BUCKET_FUERA = [
   "CAIDO",
 ];
 
+// Estados fuera de los READERS de presentación (tabla por bucket, capacidad, Cola
+// del Día, apertura, badge). Igual que STATUS_BUCKET_FUERA pero SIN EN_CONVENIO:
+// esos créditos SÍ deben verse — el job de buckets de convenio les siembra su
+// bucket/asesor y hay que atenderlos, no dejarlos en el olvido. Ojo: es SOLO para
+// lectura/visibilidad; el bucketeo automático (bucketDeCredito) y el motor de mora
+// siguen usando STATUS_BUCKET_FUERA, que excluye EN_CONVENIO (ese lo maneja el job
+// de convenios). No cambia ninguna operación de escritura.
+export const STATUS_READER_FUERA = STATUS_BUCKET_FUERA.filter(
+  (s) => s !== "EN_CONVENIO",
+);
+
 /**
  * Bucket de un crédito (0-5) resuelto contra el catálogo dinámico `catalogo`.
  * Orden: (1) estado fuera del funnel → null; (2) estado que fuerza un bucket
@@ -91,14 +102,26 @@ export const bucketActualSql = (credAlias: string, moraAlias: string) => {
   COALESCE(
     (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
       WHERE h.credito_id = ${c}.credito_id
+        -- EN_CONVENIO: su bucket lo lleva SOLO el job de convenios (filas con
+        -- status_credito='EN_CONVENIO'). Se ignora el historial viejo pre-convenio
+        -- (p.ej. el B3 que tenía como MOROSO) — sería un bucket zombie hasta que el
+        -- job lo reclasifique (review Codex #1223).
+        AND (${c}."statusCredit" <> 'EN_CONVENIO' OR h.status_credito = 'EN_CONVENIO')
       ORDER BY h.fecha DESC, h.historial_id DESC
       LIMIT 1),
+    -- El fallback VIVO (estado/rango de mora) NO aplica a EN_CONVENIO: sin fila del
+    -- job su bucket es DESCONOCIDO (null), no B0 — la derivación viva no entiende
+    -- convenios y, como al crear el convenio se borra la mora, caería a B0 ("al
+    -- día") en la ventana previa a la 1ª corrida del job. null → badge sin bucket /
+    -- no cuenta en capacidad, hasta que el job lo siembre (review Codex #1223).
     (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
       WHERE b.activo = true
+        AND ${c}."statusCredit" <> 'EN_CONVENIO'
         AND ${c}."statusCredit" = ANY (b.estados_incluidos)
       ORDER BY b.numero LIMIT 1),
     (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
       WHERE b.activo = true
+        AND ${c}."statusCredit" <> 'EN_CONVENIO'
         AND COALESCE(${m}.cuotas_atrasadas, 0) >= b.cuotas_min
         AND (b.cuotas_max IS NULL OR COALESCE(${m}.cuotas_atrasadas, 0) <= b.cuotas_max)
       ORDER BY b.numero LIMIT 1)

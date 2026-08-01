@@ -3,7 +3,7 @@ import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
 import {
   bucketActualSql,
-  STATUS_BUCKET_FUERA,
+  STATUS_READER_FUERA,
 } from "../../lib/buckets-classification";
 
 export type BucketActualCredito = {
@@ -14,7 +14,7 @@ export type BucketActualCredito = {
   nombre: string | null;
   color: string | null;
   estado_mora: string | null;
-  /** true = statusCredit en STATUS_BUCKET_FUERA (EN_CONVENIO, CANCELADO...): sin bucket POR DISEÑO. */
+  /** true = statusCredit en STATUS_READER_FUERA (CANCELADO/PENDIENTE_CANCELACION/CAIDO): sin bucket POR DISEÑO. EN_CONVENIO NO va acá: sí se muestra su bucket (lo lleva el job de convenios). */
   fuera_funnel: boolean;
   /**
    * CB-027: último bucket registrado en buckets_historial, SIN el filtro de
@@ -48,7 +48,7 @@ export async function getBucketActualPorSifco(
   numero_credito_sifco: string,
 ): Promise<BucketActualCredito | null> {
   const fueraSql = sql.join(
-    STATUS_BUCKET_FUERA.map((s) => sql`${s}`),
+    STATUS_READER_FUERA.map((s) => sql`${s}`),
     sql`, `,
   );
   const res = await db.execute<{

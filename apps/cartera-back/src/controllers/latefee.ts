@@ -60,12 +60,13 @@ export function isOverdueInstallmentForMora(
 // consumidores existentes.
 import {
   STATUS_BUCKET_FUERA,
+  STATUS_READER_FUERA,
   bucketDeCredito,
   type BucketCatalogo,
   type BucketCatalogoCompleto,
 } from "../lib/buckets-classification";
 
-export { STATUS_BUCKET_FUERA, bucketDeCredito };
+export { STATUS_BUCKET_FUERA, STATUS_READER_FUERA, bucketDeCredito };
 export type { BucketCatalogo, BucketCatalogoCompleto };
 
 // Fallback B0-B5 — mismo seed seed que 0001_buckets_catalogo.sql +

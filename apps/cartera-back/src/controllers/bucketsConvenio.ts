@@ -41,12 +41,21 @@ import {
 //   - El bucket = MESES ATRASADOS = cantidad de fechas de vencimiento distintas,
 //     pasadas, con algo impago, uniendo:
 //       (A) cuotas_credito vencidas e impagas que NO entraron al convenio
-//           (se EXCLUYEN las de `convenios_pago.cuotas_convenio` — esas "born-overdue"
-//            ya viven como cuotas del convenio, contarlas de nuevo sería doble), y
-//       (B) convenio_cuotas vencidas e impagas (fecha_pago IS NULL).
+//           (se EXCLUYEN las de `convenios_pago.cuotas_convenio` — esas ya viven
+//            como cuotas del convenio, contarlas de nuevo sería doble), y
+//       (B) cuotas del convenio (convenio_cuotas) que vencen DESPUÉS de la fecha
+//           del convenio y no se pagaron.
 //     Se unen por fecha (el convenio le presta las fechas a las cuotas → normal y
 //     convenio del mismo mes vencen el mismo día): un mes atrasado = 1, aunque deba
 //     ambas ("una cuota atrasada, no por 3"). Nivel por RANGO del catálogo (B1=1…).
+//   - BORRÓN Y CUENTA NUEVA (regla de negocio, NO se mueve): al hacer el convenio,
+//     la deuda vieja que absorbió NO cuenta como atraso → un convenio recién hecho
+//     cae a B0. Las cuotas del convenio HEREDAN las fechas de las cuotas viejas del
+//     crédito, así que las primeras "nacen vencidas" (fecha_venc <= fecha_convenio):
+//     esas se ignoran en (B). El crédito solo SUBE por incumplir cuotas que vencen
+//     DESPUÉS del acuerdo. Y los pagos (monto_pagado) se acreditan a esas cuotas de
+//     adelante en orden (la j-ésima está cubierta si monto_pagado >= j*cuota_mensual)
+//     → un cliente al día se queda en B0, no sube por la deuda regularizada.
 //   - Sin días de gracia (igual que el job de mora).
 //   - SÍ reasigna asesor al pool del bucket que le toca (mismo criterio que el
 //     motor de mora), INCLUYENDO en la siembra INICIAL: estos créditos nunca
@@ -80,6 +89,25 @@ function claveFecha(fecha_vencimiento: Date | string): string {
   const zona = "America/Guatemala";
   const d = toZonedTime(fecha_vencimiento, zona);
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+/**
+ * ¿La cuota del convenio NACIÓ vencida? = su fecha de vencimiento es <= la fecha
+ * en que se hizo el convenio. Esas son la DEUDA VIEJA que el acuerdo regularizó
+ * (borrón y cuenta nueva): NO cuentan como atraso. Las cuotas del convenio heredan
+ * las fechas de las cuotas viejas del crédito, así que sin este corte un convenio
+ * recién hecho caería a B1 en vez de B0. Comparación por DÍA en hora Guatemala.
+ */
+function nacioConElConvenio(
+  fecha_vencimiento: Date | string,
+  fecha_convenio: Date | string,
+): boolean {
+  const zona = "America/Guatemala";
+  const venc = toZonedTime(fecha_vencimiento, zona);
+  venc.setHours(0, 0, 0, 0);
+  const conv = toZonedTime(fecha_convenio, zona);
+  conv.setHours(0, 0, 0, 0);
+  return venc.getTime() <= conv.getTime();
 }
 
 /**
@@ -264,16 +292,20 @@ export async function procesarBucketsConvenio(): Promise<BucketsConvenioResultad
       }
     }
 
-    // (B) cuota del convenio: vencida e IMPAGA. El pago del convenio vive acá, no
-    //     en cuotas_credito. "Impaga" por MONTO, no solo por fecha_pago:
-    //     processConvenioPayment solo marca fecha_pago con un pago >= cuota_mensual,
-    //     así que un parcial acumulativo (Q60+Q40) deja fecha_pago NULL aunque la
-    //     cuota esté saldada → la cuota K está cubierta si monto_pagado >= K*cuota_mensual.
+    // (B) cuota del convenio que vence DESPUÉS del acuerdo, vencida e IMPAGA. El
+    //     pago del convenio vive acá, no en cuotas_credito. Las que NACIERON vencidas
+    //     (fecha_venc <= fecha_convenio) son la deuda vieja regularizada → NO cuentan
+    //     (borrón y cuenta nueva). Sobre las de adelante se re-indexa: la j-ésima cuota
+    //     posterior al acuerdo está CUBIERTA si monto_pagado >= j*cuota_mensual — así
+    //     el pago del cliente se acredita a lo de adelante (no a la deuda vieja) y un
+    //     cliente al día se queda en B0. El monto cubre parciales acumulativos (Q60+Q40)
+    //     que dejan fecha_pago NULL, así que no se usa fecha_pago.
     const cuotasDeConvenio = await db
       .select({
         credito_id: convenios_pago.credito_id,
+        convenio_id: convenio_cuotas.convenio_id,
+        fecha_convenio: convenios_pago.fecha_convenio,
         fecha_vencimiento: convenio_cuotas.fecha_vencimiento,
-        fecha_pago: convenio_cuotas.fecha_pago,
         numero_cuota: convenio_cuotas.numero_cuota,
         monto_pagado: convenios_pago.monto_pagado,
         cuota_mensual: convenios_pago.cuota_mensual,
@@ -290,18 +322,32 @@ export async function procesarBucketsConvenio(): Promise<BucketsConvenioResultad
           eq(convenios_pago.activo, true),
         ),
       );
+
+    // Agrupar por convenio para re-indexar las cuotas de ADELANTE (las que vencen
+    // después del acuerdo). El ordinal `j` es la posición SOLO entre esas (ignora
+    // las que nacieron vencidas), y sirve para la cobertura por monto.
+    const cuotasPorConvenio = new Map<number, (typeof cuotasDeConvenio)[number][]>();
     for (const cc of cuotasDeConvenio) {
-      // Cubierta por monto (parcial acumulativo) aunque fecha_pago siga NULL.
-      const cubierta =
-        Number(cc.monto_pagado) >= cc.numero_cuota * Number(cc.cuota_mensual);
-      if (
-        cc.fecha_pago === null &&
-        !cubierta &&
-        estaVencidaGT(cc.fecha_vencimiento, hoy)
-      ) {
-        fechasAtrasadasPorCredito
-          .get(cc.credito_id)
-          ?.add(claveFecha(cc.fecha_vencimiento));
+      const lista = cuotasPorConvenio.get(cc.convenio_id) ?? [];
+      lista.push(cc);
+      cuotasPorConvenio.set(cc.convenio_id, lista);
+    }
+    for (const [, lista] of cuotasPorConvenio) {
+      lista.sort((a, b) => a.numero_cuota - b.numero_cuota);
+      let ordinalAdelante = 0;
+      for (const cc of lista) {
+        // Deuda vieja que el convenio regularizó (nació vencida) → no cuenta.
+        if (nacioConElConvenio(cc.fecha_vencimiento, cc.fecha_convenio)) continue;
+        ordinalAdelante += 1;
+        // La j-ésima cuota de adelante está cubierta si el monto pagado ya alcanza
+        // j cuotas mensuales (los pagos se acreditan de adelante hacia atrás).
+        const cubierta =
+          Number(cc.monto_pagado) >= ordinalAdelante * Number(cc.cuota_mensual);
+        if (!cubierta && estaVencidaGT(cc.fecha_vencimiento, hoy)) {
+          fechasAtrasadasPorCredito
+            .get(cc.credito_id)
+            ?.add(claveFecha(cc.fecha_vencimiento));
+        }
       }
     }
 

@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
-import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { bucketActualSql, STATUS_READER_FUERA } from "../../lib/buckets-classification";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CB-018 · Buckets — Carga de cuentas por asesor y bucket (dashboard gerencial).
@@ -140,7 +140,7 @@ async function getCuentasPorAsesorYBucket(params: {
   bucket?: number;
   asesor_id?: number;
 }): Promise<CargaBucketFila[]> {
-  const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+  const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
   const bucketFilter =
     params.bucket !== undefined ? sql`AND bucket_actual.bucket = ${params.bucket}` : sql``;
   const asesorFilter =

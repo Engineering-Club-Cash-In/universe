@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
-import { STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { STATUS_READER_FUERA } from "../../lib/buckets-classification";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CB-020 · Buckets — Cola del Día (universo SLA).
@@ -82,7 +82,7 @@ export async function getColaDiaSLA(
 	// quedarían en la Cola del Día indefinidamente aunque ya no se cobren
 	// activamente (review Codex).
 	const statusFueraSql = sql.join(
-		STATUS_BUCKET_FUERA.map((s) => sql`${s}`),
+		STATUS_READER_FUERA.map((s) => sql`${s}`),
 		sql`, `,
 	);
 
@@ -93,6 +93,13 @@ export async function getColaDiaSLA(
       SELECT DISTINCT ON (h.credito_id)
         h.credito_id, h.bucket_nuevo, h.fecha
       FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = h.credito_id
+      -- EN_CONVENIO: su bucket lo lleva SOLO el job de convenios (filas con
+      -- status_credito='EN_CONVENIO'). Sin este filtro, un convenio recién creado
+      -- —aún sin fila del job— entraría a la cola con su bucket/fecha/pool VIEJO
+      -- pre-convenio (mismo criterio que bucketActualSql). Sin fila del job no hay
+      -- última_entrada → no entra a la cola hasta que el job lo siembre (Codex #1223).
+      WHERE (c."statusCredit" <> 'EN_CONVENIO' OR h.status_credito = 'EN_CONVENIO')
       ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
     )
   `;

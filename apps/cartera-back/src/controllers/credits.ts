@@ -41,7 +41,13 @@ import {
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
-import { bucketDeCredito, BucketCatalogo, getBucketsCatalogo, STATUS_BUCKET_FUERA } from "./latefee";
+import {
+  bucketDeCredito,
+  BucketCatalogo,
+  getBucketsCatalogo,
+  STATUS_BUCKET_FUERA,
+  STATUS_READER_FUERA,
+} from "./latefee";
 
 // Fallback B0-B5 — usado si el catálogo dinámico `cartera.buckets` no
 // responde (DB caída, migración pendiente). Incluye `estados_incluidos` en B5
@@ -757,6 +763,23 @@ export async function getCreditosWithUserByMesAnio(
     if (estados_credito && estados_credito.length > 0) {
       console.log(`🔎 Filtrando por estados seleccionables: ${estados_credito.join(", ")}`);
       conditions.push(inArray(creditos.statusCredit, estados_credito));
+      // EN_CONVENIO solo aparece en el listado del funnel si el job de convenios YA
+      // le sembró su bucket (fila status_credito='EN_CONVENIO' en buckets_historial).
+      // Sin eso no hay bucket confiable —la derivación viva no entiende convenios— y
+      // saldría con bucket:null (fila que la tabla por bucket no sabe ubicar) o un
+      // bucket viejo pre-convenio. Aplica con y SIN filtro de bucket (sin filtro el
+      // guard del COALESCE de abajo no corre). Ventana ≤ próxima corrida del job
+      // nocturno; el crédito no queda en el olvido (review Codex #1223).
+      if (estados_credito.some((s) => s === "EN_CONVENIO")) {
+        conditions.push(sql`(
+          ${creditos.statusCredit} <> 'EN_CONVENIO'
+          OR EXISTS (
+            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+            WHERE h.credito_id = ${creditos.credito_id}
+              AND h.status_credito = 'EN_CONVENIO'
+          )
+        )`);
+      }
     }
 
     if (asesor_id) {
@@ -877,7 +900,17 @@ export async function getCreditosWithUserByMesAnio(
   if (buckets_numeros && buckets_numeros.length > 0) {
     console.log(`🔎 Filtrando por bucket(s) [motor]: ${buckets_numeros.join(", ")}`);
     const numerosSql = sql.join(buckets_numeros.map((n) => sql`${n}`), sql`, `);
-    const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+    const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
+    // La derivación VIVA (branches 2 y 3 del COALESCE) solo aplica a estados que
+    // bucketDeCredito realmente bucketea. EN_CONVENIO pasa el filtro de arriba
+    // (para verse en la lista) pero su bucket sale SOLO de buckets_historial —lo
+    // que sembró el job de convenios—: sin el guard, el branch de mora lo caería
+    // a B0 (0 cuotas_atrasadas) y aparecería como B0 en el filtro mientras el
+    // mapper manda bucket: null (bucketDeCredito devuelve null para EN_CONVENIO),
+    // dejando filas que el front no puede pintar ni filtrar. Con el guard, filtro
+    // y mapper concuerdan: bucket del historial, o excluido si el job aún no lo
+    // sembró (review Codex #1223).
+    const bucketFueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
     conditions.push(sql`${creditos.statusCredit} NOT IN (${fueraSql})`);
     conditions.push(sql`COALESCE(
       (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
@@ -886,10 +919,12 @@ export async function getCreditosWithUserByMesAnio(
         LIMIT 1),
       (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
         WHERE b.activo = true
+          AND ${creditos.statusCredit} NOT IN (${bucketFueraSql})
           AND ${creditos.statusCredit} = ANY (b.estados_incluidos)
         ORDER BY b.numero LIMIT 1),
       (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
         WHERE b.activo = true
+          AND ${creditos.statusCredit} NOT IN (${bucketFueraSql})
           AND COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= b.cuotas_min
           AND (b.cuotas_max IS NULL OR COALESCE(${moras_credito.cuotas_atrasadas}, 0) <= b.cuotas_max)
         ORDER BY b.numero LIMIT 1)
@@ -1205,10 +1240,17 @@ export async function getCreditosWithUserByMesAnio(
     try {
       const idsSql = sql.join(creditosIds.map((id) => sql`${id}`), sql`, `);
       const ultimos = await db.execute<{ credito_id: number; bucket_nuevo: number }>(sql`
-        SELECT DISTINCT ON (credito_id) credito_id, bucket_nuevo
-        FROM ${SQL_CARTERA_SCHEMA}.buckets_historial
-        WHERE credito_id IN (${idsSql})
-        ORDER BY credito_id, fecha DESC, historial_id DESC`);
+        SELECT DISTINCT ON (h.credito_id) h.credito_id, h.bucket_nuevo
+        FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+        INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = h.credito_id
+        WHERE h.credito_id IN (${idsSql})
+          -- EN_CONVENIO: solo su historial de convenio (status_credito='EN_CONVENIO').
+          -- Sin esto, en rutas SIN el guard de estados_credito (/getAllCredits,
+          -- estado=EN_CONVENIO, o la rama ACTIVO que incluye EN_CONVENIO) el mapper
+          -- tomaría el bucket VIEJO pre-convenio. Sin fila del job → undefined →
+          -- el mapper cae a bucketDeCredito (null para EN_CONVENIO) (Codex #1223).
+          AND (c."statusCredit" <> 'EN_CONVENIO' OR h.status_credito = 'EN_CONVENIO')
+        ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC`);
       for (const r of ultimos.rows) {
         ultimoBucketMap.set(Number(r.credito_id), Number(r.bucket_nuevo));
       }
@@ -1397,9 +1439,14 @@ export async function getCreditosWithUserByMesAnio(
         // Último bucket del motor; fallback al derivado vivo solo si el motor
         // aún no vio el crédito (sin INICIAL). Fuera del funnel NO se consulta
         // el historial (review Codex): un crédito que tuvo bucket y luego pasó
-        // a CANCELADO/EN_CONVENIO/etc. conservaría su último bucket como
-        // zombie — el motor ya no lo trackea, así que bucket = null.
-        const fueraDelFunnel = STATUS_BUCKET_FUERA.includes(
+        // a CANCELADO/CAÍDO/etc. conservaría su último bucket como zombie — el
+        // motor ya no lo trackea, así que bucket = null.
+        // EN_CONVENIO es la excepción (NO está en STATUS_READER_FUERA): el job
+        // de convenios SÍ lo trackea, así que toma su bucket de ultimoBucketMap
+        // (historial). Sin INICIAL aún, bucketDeCredito devuelve null para
+        // EN_CONVENIO y el filtro SQL de arriba también lo excluye — ambos
+        // concuerdan, sin filas con bucket null.
+        const fueraDelFunnel = STATUS_READER_FUERA.includes(
           row.creditos.statusCredit,
         );
         const numeroBucket = fueraDelFunnel

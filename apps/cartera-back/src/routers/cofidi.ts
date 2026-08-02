@@ -2267,11 +2267,21 @@ if (facturasExistentes.length > 0) {
       ? new Date(facturaCompleta.factura_fecha_certificacion)
       : new Date(facturaCompleta.factura_fecha_emision);
     
+    // 🌎 Todo el cálculo va en hora de Guatemala (UTC-6 fijo, sin horario de verano).
+    // El contenedor corre en UTC, así que con getDate()/getMonth() locales el corte
+    // del día 5 se adelantaría 6 horas: el 5 a las 18:00 GT ya es día 6 en UTC y se
+    // perdería la última tarde de la ventana de gracia.
+    // Mismo patrón que certificarFacturaHelper: restar 6h y leer con getUTC*.
     const hoy = new Date();
-    const mesFactura = fechaCertificacion.getMonth();
-    const anioFactura = fechaCertificacion.getFullYear();
-    const mesActual = hoy.getMonth();
-    const anioActual = hoy.getFullYear();
+    hoy.setUTCHours(hoy.getUTCHours() - 6);
+
+    // ⚠️ fecha_emision/fecha_certificacion se persisten YA en hora Guatemala
+    // (certificarFacturaHelper les resta 6h antes de guardar), así que se leen con
+    // getUTC* para no volver a desplazarlas con la zona horaria del proceso.
+    const mesFactura = fechaCertificacion.getUTCMonth();
+    const anioFactura = fechaCertificacion.getUTCFullYear();
+    const mesActual = hoy.getUTCMonth();
+    const anioActual = hoy.getUTCFullYear();
 
     const esMismoPeriodo = (anioFactura === anioActual && mesFactura === mesActual);
 
@@ -2281,7 +2291,7 @@ if (facturasExistentes.length > 0) {
     const mesAnterior = mesActual === 0 ? 11 : mesActual - 1;
     const anioDelMesAnterior = mesActual === 0 ? anioActual - 1 : anioActual;
     const esPeriodoAnterior = (anioFactura === anioDelMesAnterior && mesFactura === mesAnterior);
-    const enDiasDeGracia = esPeriodoAnterior && hoy.getDate() <= DIAS_GRACIA_ANULACION;
+    const enDiasDeGracia = esPeriodoAnterior && hoy.getUTCDate() <= DIAS_GRACIA_ANULACION;
 
     if (!esMismoPeriodo && !enDiasDeGracia) {
       const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -2304,7 +2314,7 @@ if (facturasExistentes.length > 0) {
     }
 
     if (enDiasDeGracia) {
-      console.log(`⏳ Anulación dentro de los ${DIAS_GRACIA_ANULACION} días de gracia (factura del período anterior, hoy es ${hoy.getDate()})`);
+      console.log(`⏳ Anulación dentro de los ${DIAS_GRACIA_ANULACION} días de gracia (factura del período anterior, hoy es ${hoy.getUTCDate()} en Guatemala)`);
       console.log('⚠️ SAT tiene la última palabra: si responde OK, igual hay que verificar en el portal');
     }
 

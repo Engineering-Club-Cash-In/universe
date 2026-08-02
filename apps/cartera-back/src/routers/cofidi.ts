@@ -67,6 +67,14 @@ for (const [, value] of Object.entries(EMISORES_CONFIG)) {
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
+// 🗓️ Días de gracia para anular una factura del período anterior.
+// Contabilidad confirmó que SAT permite anular durante los primeros días del mes
+// siguiente. Antes cortábamos el día 1 a las 00:00, así que una factura emitida a
+// fin de mes se quedaba sin ventana real para corregirse.
+// Ojo: esto solo ABRE la puerta — la última palabra la tiene COFIDI/SAT, que
+// responde con PERIODO_IVA_CERRADO si el plazo real ya venció.
+export const DIAS_GRACIA_ANULACION = 5;
+
 function generarIdInternoRandom(): string {
   return Math.floor(10000000 + Math.random() * 90000000).toString();
 }
@@ -2265,11 +2273,17 @@ if (facturasExistentes.length > 0) {
     const mesActual = hoy.getMonth();
     const anioActual = hoy.getFullYear();
 
-    // SAT Guatemala permite anular hasta el 10 del mes siguiente (aproximado)
-    // Para ser seguros, solo permitimos anular facturas del mes actual
     const esMismoPeriodo = (anioFactura === anioActual && mesFactura === mesActual);
 
-    if (!esMismoPeriodo) {
+    // 🗓️ Días de gracia: una factura del período INMEDIATAMENTE anterior todavía
+    // se puede intentar anular durante los primeros DIAS_GRACIA_ANULACION días del
+    // mes actual. El salto de año (diciembre → enero) se maneja explícitamente.
+    const mesAnterior = mesActual === 0 ? 11 : mesActual - 1;
+    const anioDelMesAnterior = mesActual === 0 ? anioActual - 1 : anioActual;
+    const esPeriodoAnterior = (anioFactura === anioDelMesAnterior && mesFactura === mesAnterior);
+    const enDiasDeGracia = esPeriodoAnterior && hoy.getDate() <= DIAS_GRACIA_ANULACION;
+
+    if (!esMismoPeriodo && !enDiasDeGracia) {
       const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -2282,10 +2296,16 @@ if (facturasExistentes.length > 0) {
           factura_del_periodo: `${nombresMeses[mesFactura]} ${anioFactura}`,
           periodo_actual: `${nombresMeses[mesActual]} ${anioActual}`,
           fecha_factura: fechaCertificacion.toISOString().split('T')[0],
-          restriccion_sat: 'Solo se pueden anular facturas del período actual de IVA'
+          dias_gracia: DIAS_GRACIA_ANULACION,
+          restriccion_sat: `Se pueden anular facturas del período actual, y las del período anterior solo durante los primeros ${DIAS_GRACIA_ANULACION} días del mes`
         },
         sugerencia: 'Para corregir facturas de períodos cerrados, debe emitir una Nota de Crédito en lugar de anular'
       };
+    }
+
+    if (enDiasDeGracia) {
+      console.log(`⏳ Anulación dentro de los ${DIAS_GRACIA_ANULACION} días de gracia (factura del período anterior, hoy es ${hoy.getDate()})`);
+      console.log('⚠️ SAT tiene la última palabra: si responde OK, igual hay que verificar en el portal');
     }
 
     console.log('✅ Factura encontrada y validada');
@@ -2503,6 +2523,13 @@ if (facturasExistentes.length > 0) {
       return {
         success: true,
         mensaje: `Factura ${facturaCompleta.factura_serie}-${facturaCompleta.factura_numero} anulada exitosamente`,
+        // ⏳ Si se usaron los días de gracia, el front lo dice en el toast: un OK de
+        // COFIDI sobre el período anterior no garantiza que SAT lo haya aceptado,
+        // así que quien anula tiene que verificarlo en el portal.
+        anulado_en_dias_gracia: enDiasDeGracia,
+        ...(enDiasDeGracia && {
+          advertencia: `Se anuló usando los ${DIAS_GRACIA_ANULACION} días de gracia del período anterior. Confirmá en el portal de SAT que quedó anulada.`
+        }),
         data: {
           // Datos de COFIDI/SAT
           confirmacion_sat: {

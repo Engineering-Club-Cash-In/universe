@@ -886,13 +886,6 @@ export async function processAndReplaceCreditInvestors(
     throw new Error("Credit not found");
   }
 
-  // 1.5 Verificar si el inversionista tiene permite_distribucion
-  const inversionista = await txOrDb.query.inversionistas.findFirst({
-    where: (i, { eq }) => eq(i.inversionista_id, inversionista_id),
-  });
-
-  const permiteDistribucion = inversionista?.permite_distribucion ?? false;
-
   // 2. Fetch all investors for this credit
   // Determine which table to query based on updateMirror flag
   let investors;
@@ -985,16 +978,26 @@ export async function processAndReplaceCreditInvestors(
         .where(eq(creditos_inversionistas.id, inv.id));
     }
 
-    // Si permite_distribucion = true, también actualizar la OTRA tabla con los mismos valores
-    if (permiteDistribucion) {
-      const otraTabla = updateMirror ? creditos_inversionistas : creditos_inversionistas_espejo;
-      const otraSetData = otraTabla === creditos_inversionistas_espejo ? { ...setData, updated_at: new Date() } : setData;
-      await txOrDb.update(otraTabla).set(otraSetData)
-        .where(and(
-          eq(otraTabla.inversionista_id, inversionista_id),
-          eq(otraTabla.credito_id, credito_id)
-        ));
-    }
+    // NOTA (eliminado): aquí existía un bloque `if (permiteDistribucion)` que, para los
+    // inversionistas internos/propios (`permite_distribucion = true`), copiaba `setData`
+    // a la OTRA tabla — es decir, al liquidar (updateMirror=true) también pisaba
+    // `creditos_inversionistas` (el padre) con el valor calculado para el espejo.
+    //
+    // Se quitó porque:
+    //   1. Liquidar debe tocar SOLO el espejo, igual que para los externos. La
+    //      transacción de `liquidateByInvestorId` no escribe el padre en ningún otro punto.
+    //   2. El padre de los internos ya se mantiene por su cuenta: `insertPagosCreditoInversionistasV2`
+    //      no filtra por `permite_distribucion` y les registra los pagos directo en
+    //      `creditos_inversionistas`. No dependía de esta copia.
+    //   3. La copia no recalculaba desde el padre: lo sobrescribía con el resultado del
+    //      espejo. Cuando ambos venían desfasados, el padre daba un salto irreal (caso
+    //      real: crédito INCOBRABLE con padre en 0.00 volvía a ~Q128k de saldo vivo, que
+    //      además alimenta el split Cube-vs-inversionista de `reportes.ts`).
+    //
+    // Este era el único punto de cartera-back donde `permite_distribucion` alteraba una
+    // ESCRITURA; el resto de sus usos son filtros de lectura. Si alguna vez se necesita
+    // sincronizar padre↔espejo para internos, debe hacerse con su propio recálculo y no
+    // copiando valores de la otra tabla.
   }
 
   // 6. Return the new updated data (could re-fetch if you want actual DB values)

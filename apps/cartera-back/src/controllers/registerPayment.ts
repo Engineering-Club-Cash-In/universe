@@ -30,6 +30,8 @@ import {
   getCoveredOpenInstallment,
   getCoveredInstallmentNumbers,
   esPagoSoloCapital,
+  puedeAplicarAbonoSoloCapital,
+  debeRechazarAbonoCapitalNoAplicado,
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
   getRequestedInstallmentFloor,
@@ -407,16 +409,22 @@ const obtenerInfoCompletaCredito = async (
       (item) => !cuotasCubiertas.has(item.cuotas_credito.numero_cuota)
     );
     // El abono solo-capital NO usa el loop de cuotas (su monto efectivo es 0),
-    // así que puede entrar aunque todas las cuotas abiertas estén cubiertas:
-    // es justamente la salida que sugiere el mensaje de abajo.
+    // así que puede entrar aunque todas las cuotas abiertas estén cubiertas —
+    // pero SÓLO si el crédito permite abonos a capital. Sin ese permiso la
+    // sección 7 no corre y dejarlo pasar cambiaría el 409 por una boleta
+    // perdida en silencio (todos los insolutos traen el permiso en false).
+    const abonoSoloCapitalAplicable = puedeAplicarAbonoSoloCapital({
+      esSoloCapital,
+      permiteAbonoCapital: info.credito.permite_abono_capital,
+    });
     if (
-      !esSoloCapital &&
+      !abonoSoloCapitalAplicable &&
       cuotasPendientes.length > 0 &&
       cuotasPagables.length === 0
     ) {
       set.status = 409;
       throw new Error(
-        `${CUOTA_INTEGRITY_ERROR_PREFIX} todas las cuotas abiertas del crédito INCOBRABLE ya están cubiertas por pagos validados. Registre el pago como abono a capital o revalide los pagos existentes.`
+        `${CUOTA_INTEGRITY_ERROR_PREFIX} todas las cuotas abiertas del crédito INCOBRABLE ya están cubiertas por pagos validados o pendientes. Habilite permite_abono_capital para registrar abonos directos a capital, o revalide los pagos existentes.`
       );
     }
 
@@ -2046,6 +2054,29 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         },
       };
     } else {
+      // Llegar acá con un abono a capital significa que la sección 7 NO corrió
+      // (ni estaAlDia ni permite_abono_capital) y que el loop de cuotas tampoco
+      // aplicó nada, porque el monto efectivo era 0: antes se respondía
+      // `success: true` con CERO filas en pagos_credito y la boleta se perdía en
+      // silencio. Sólo rechazamos si de verdad no se escribió nada (las ramas de
+      // mora y la de sólo-otros insertan su propia fila antes de este punto).
+      if (
+        debeRechazarAbonoCapitalNoAplicado({
+          abonoCapital,
+          cuotasCompletas: cuotas_completas,
+          cuotasParciales: cuotas_parciales,
+          moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
+          pagoSoloOtros: montoBoleta.eq(otrosBig),
+        })
+      ) {
+        set.status = 409;
+        return {
+          success: false,
+          message:
+            "El pago es un abono directo a capital pero el crédito no lo permite (permite_abono_capital) y no está al día. Habilite el permiso o registre el pago como pago normal.",
+        };
+      }
+
       const newSaldoAFavor = saldoAFavor.plus(disponible_restante);
       await db
         .update(usuarios)

@@ -376,23 +376,6 @@ export const getCoveredOpenInstallment = ({
 };
 
 /**
- * Números de cuota abiertos que ya están cubiertos por pagos vivos.
- *
- * Sólo para INCOBRABLES: ahí la cuota NO se cierra al cubrir el monto
- * contractual, sino cuando el capital del crédito llega a 0 (ver
- * `shouldIncobrableInstallmentBePaid`, regla del PR #887), así que una cuota
- * "cubierta pero abierta" es el estado normal de un insoluto a medio pagar, no
- * una inconsistencia. El caller filtra esas cuotas de las pendientes para que
- * el pago nuevo caiga en la siguiente cuota CON saldo: si lo dejáramos entrar,
- * su saldo neto daría 0 en todos los rubros y se insertaría una fila pending
- * con `monto_aplicado = 0` (nunca validable) que además duplica la boleta.
- *
- * Cuenta los pending vivos (`incluirPendientes`) porque el loop de insertPayment
- * también los cuenta como hermanos al calcular el saldo de la cuota: el criterio
- * del skip tiene que ser el mismo o la fila en cero vuelve por esa vía. El gate
- * normal (`getCoveredOpenInstallment`) sigue mirando sólo `validated`.
- */
-/**
  * ¿El pago va COMPLETO a abono directo a capital, sin efectivo para cuotas?
  *
  * Espeja la aritmética de `calcularMontoEfectivo` (boleta − otros − abono
@@ -420,6 +403,72 @@ export const esPagoSoloCapital = ({
   return montoEfectivo.lte(0);
 };
 
+/**
+ * ¿El abono solo-capital va a ser realmente atendido por la sección 7?
+ *
+ * Esa sección exige `(estaAlDia || permite_abono_capital) && abonoCapital > 0`.
+ * En un INCOBRABLE `estaAlDia` es siempre false (no tiene cuota pagada vigente),
+ * y todos los insolutos traen `permite_abono_capital = false` por default de la
+ * columna, así que sin permiso el abono NO se aplica: dejarlo pasar el guard de
+ * "todas las cuotas cubiertas" sólo cambiaría un 409 por una boleta perdida.
+ * Se ignora el disyunto `estaAlDia` a propósito: no es computable en
+ * `obtenerInfoCompletaCredito` y en insolutos nunca es true.
+ */
+export const puedeAplicarAbonoSoloCapital = ({
+  esSoloCapital,
+  permiteAbonoCapital,
+}: {
+  esSoloCapital: boolean;
+  permiteAbonoCapital?: boolean | null;
+}): boolean => esSoloCapital && permiteAbonoCapital === true;
+
+/**
+ * ¿Hay que rechazar el pago porque traía abono a capital, no se aplicó y no se
+ * escribió NADA?
+ *
+ * Es el camino en que insertPayment respondía `success: true` con cero filas en
+ * `pagos_credito` (la sección 7 no corrió por falta de permiso y el loop de
+ * cuotas tampoco, porque el monto efectivo era 0): la boleta se perdía en
+ * silencio. Sólo es seguro rechazar si nada se insertó antes — de ahí que se
+ * exija cero cuotas aplicadas, cero mora aplicada y que no sea el pago de sólo
+ * `otros`, que inserta su propia fila.
+ */
+export const debeRechazarAbonoCapitalNoAplicado = ({
+  abonoCapital,
+  cuotasCompletas,
+  cuotasParciales,
+  moraAplicada,
+  pagoSoloOtros,
+}: {
+  abonoCapital: BigInput;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  pagoSoloOtros: boolean;
+}): boolean =>
+  new Big(abonoCapital ?? 0).gt(0) &&
+  cuotasCompletas === 0 &&
+  cuotasParciales === 0 &&
+  new Big(moraAplicada ?? 0).lte(0) &&
+  !pagoSoloOtros;
+
+/**
+ * Números de cuota abiertos que ya están cubiertos por pagos vivos.
+ *
+ * Sólo para INCOBRABLES: ahí la cuota NO se cierra al cubrir el monto
+ * contractual, sino cuando el capital del crédito llega a 0 (ver
+ * `shouldIncobrableInstallmentBePaid`, regla del PR #887), así que una cuota
+ * "cubierta pero abierta" es el estado normal de un insoluto a medio pagar, no
+ * una inconsistencia. El caller filtra esas cuotas de las pendientes para que
+ * el pago nuevo caiga en la siguiente cuota CON saldo: si lo dejáramos entrar,
+ * su saldo neto daría 0 en todos los rubros y se insertaría una fila pending
+ * con `monto_aplicado = 0` (nunca validable) que además duplica la boleta.
+ *
+ * Cuenta los pending vivos (`incluirPendientes`) porque el loop de insertPayment
+ * también los cuenta como hermanos al calcular el saldo de la cuota: el criterio
+ * del skip tiene que ser el mismo o la fila en cero vuelve por esa vía. El gate
+ * normal (`getCoveredOpenInstallment`) sigue mirando sólo `validated`.
+ */
 export const getCoveredInstallmentNumbers = ({
   montoCuota,
   cuotas,

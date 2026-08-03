@@ -319,6 +319,92 @@ describe("registerPaymentPolicy - pago solo capital", () => {
   });
 });
 
+describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {
+  it("el bypass del guard sólo aplica si el crédito permite abono a capital", () => {
+    expect(
+      registerPaymentPolicy.puedeAplicarAbonoSoloCapital({
+        esSoloCapital: true,
+        permiteAbonoCapital: true,
+      }),
+    ).toBe(true);
+
+    // Todos los insolutos tienen permite_abono_capital = false (default de la
+    // columna): sin permiso la sección 7 no corre y el abono se perdería.
+    expect(
+      registerPaymentPolicy.puedeAplicarAbonoSoloCapital({
+        esSoloCapital: true,
+        permiteAbonoCapital: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      registerPaymentPolicy.puedeAplicarAbonoSoloCapital({
+        esSoloCapital: false,
+        permiteAbonoCapital: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("rechaza el abono a capital que quedó sin aplicar y sin nada escrito", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        abonoCapital: 5000,
+        cuotasCompletas: 0,
+        cuotasParciales: 0,
+        moraAplicada: 0,
+        pagoSoloOtros: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("no rechaza si ya se escribió algo (cuotas o mora o pago de sólo otros)", () => {
+    const base = {
+      abonoCapital: 5000,
+      cuotasCompletas: 0,
+      cuotasParciales: 0,
+      moraAplicada: 0,
+      pagoSoloOtros: false,
+    };
+
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        ...base,
+        cuotasCompletas: 1,
+      }),
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        ...base,
+        cuotasParciales: 1,
+      }),
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        ...base,
+        moraAplicada: 120,
+      }),
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        ...base,
+        pagoSoloOtros: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("no rechaza un pago sin abono directo a capital", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        abonoCapital: 0,
+        cuotasCompletas: 0,
+        cuotasParciales: 0,
+        moraAplicada: 0,
+        pagoSoloOtros: false,
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("registerPaymentPolicy - resumen de abonos de cuota", () => {
   const resumir = (
     input: Parameters<

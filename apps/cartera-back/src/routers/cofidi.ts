@@ -2354,9 +2354,12 @@ if (facturasExistentes.length > 0) {
       return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
     };
 
-    const fechaEmisionRaw = facturaCompleta.factura_fecha_certificacion || facturaCompleta.factura_fecha_emision;
-    const fechaEmisionDate = new Date(fechaEmisionRaw);
-    const fechaEmisionDocumento = formatearFechaSAT(fechaEmisionDate);
+    // 📄 FechaEmisionDocumentoAnular tiene que coincidir con la FechaHoraEmision del
+    // DTE original, y `fecha_emision` se persiste justamente desde ese campo. Se reusa
+    // `fechaPeriodo` (la misma fecha con la que se decidió el período) para que la
+    // validación y el XML no puedan discrepar. Tomando la certificación, las facturas
+    // backdateadas mandaban a SAT una fecha que no es la del DTE.
+    const fechaEmisionDocumento = formatearFechaSAT(fechaPeriodo);
     // ⏰ Se reusa el mismo `hoy` ya desplazado a hora de Guatemala con el que se
     // decidió la ventana de gracia. Si acá se usara `new Date()` en el contenedor
     // (UTC), una anulación de la noche del 5 viajaría a SAT como día 6 y quedaría
@@ -2364,7 +2367,7 @@ if (facturasExistentes.length > 0) {
     const fechaHoraAnulacion = formatearFechaSAT(hoy);
 
     console.log('🔍 ========== FECHAS PREPARADAS ==========');
-    console.log('📅 Fecha emisión original (BD):', fechaEmisionRaw);
+    console.log('📅 Fecha emisión original (BD):', facturaCompleta.factura_fecha_emision);
     console.log('📅 Fecha emisión formateada (XML):', fechaEmisionDocumento);
     console.log('📅 Fecha/hora anulación (XML):', fechaHoraAnulacion);
     console.log('📋 Tipo documento:', facturaCompleta.factura_tipo_documento);

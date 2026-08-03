@@ -1357,14 +1357,6 @@ if (facturasExistentes.length > 0) {
             const calc = calcularIvaExacto(parseFloat(totalInv.toFixed(2)));
             console.log(`      💼 Factura ${inv.nombre}: Q${totalInv.toFixed(2)} (antes Q${parteAntes.toFixed(2)} + después Q${parteDespues.toFixed(2)})`);
 
-            // 🧾 Mismo acumulado que en el flujo estándar. Acá los redirigidos a
-            //    CUBE ya quedaron fuera de parteInvPorId (se descartan dentro de
-            //    calcularReparto), así que basta el criterio no-CUBE/no-autofactura.
-            if (cuentaParaRubroInv(inv, false)) {
-              invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calc.total);
-              invNoEmiteIva = invNoEmiteIva.plus(calc.montoImpuesto);
-            }
-
             const itemsInv = [
               {
                 numeroLinea: 1,
@@ -1407,6 +1399,16 @@ if (facturasExistentes.length > 0) {
                 customSatConfig: inversionistaConfig?.satConfig,
                 nitsFallback: nitsDisponibles.slice(1),
               });
+
+              // 🧾 Mismo acumulado que en el flujo estándar: SOLO lo ya
+              //    certificado en SAT. Acá los redirigidos a CUBE ya quedaron
+              //    fuera de parteInvPorId (se descartan dentro de
+              //    calcularReparto), así que basta el criterio
+              //    no-CUBE/no-autofactura.
+              if (cuentaParaRubroInv(inv, false)) {
+                invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calc.total);
+                invNoEmiteIva = invNoEmiteIva.plus(calc.montoImpuesto);
+              }
 
               facturasGeneradas.push({
                 tipo: "INTERESES",
@@ -1700,14 +1702,6 @@ if (facturasExistentes.length > 0) {
           const calc = calcularIvaExacto(parseFloat(parteInversionista.toFixed(2)));
           console.log(`   💼 Factura ${inv.nombre}: Q${parteInversionista.toFixed(2)} (Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto})`);
 
-          // 🧾 Acumular lo facturado a inversionistas que NO se autofacturan:
-          //    es el respaldo del rubro INTERES_INVERSIONISTAS cuando pci aún
-          //    está en 0 (pago parcial). Se suma con el MISMO IVA del DTE.
-          if (cuentaParaRubroInv(inv, redirigirACube)) {
-            invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calc.total);
-            invNoEmiteIva = invNoEmiteIva.plus(calc.montoImpuesto);
-          }
-
           const itemsIntereses = [
             {
               numeroLinea: 1,
@@ -1760,6 +1754,18 @@ if (facturasExistentes.length > 0) {
               customSatConfig: inversionistaConfig?.satConfig,
               nitsFallback: nitsDisponibles.slice(1),
             });
+
+            // 🧾 Acumular lo facturado a inversionistas que NO se autofacturan:
+            //    es el respaldo del rubro INTERES_INVERSIONISTAS cuando pci aún
+            //    está en 0 (pago parcial). Se suma con el MISMO IVA del DTE.
+            //    Va DESPUÉS de certificar: si el DTE falla en SAT pero otra
+            //    factura del pago sí sale, el desglose igual se escribe, y el
+            //    DTE faltante se remedia con /facturar-generico, que agrega su
+            //    PROPIA fila → contarlo acá lo duplicaría en el snapshot.
+            if (cuentaParaRubroInv(inv, redirigirACube)) {
+              invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calc.total);
+              invNoEmiteIva = invNoEmiteIva.plus(calc.montoImpuesto);
+            }
 
             facturasGeneradas.push({
               tipo: "INTERESES",

@@ -102,6 +102,18 @@ describe("decidirRubroInteresInversionistas", () => {
     ).toEqual({ monto_total: "0.00", monto_iva: "0.00" });
   });
 
+  it("8. montos grandes: no pierde precisión al redondear", () => {
+    expect(
+      decidirRubroInteresInversionistas({
+        interesFlujoOk: true,
+        pciTotal: new Big(0),
+        pciIva: new Big(0),
+        corridaTotal: new Big("123456789.994"),
+        corridaIva: new Big("13226441.786"),
+      })
+    ).toEqual({ monto_total: "123456789.99", monto_iva: "13226441.79" });
+  });
+
   it("7c. corrida negativa con pci en 0 → null (no se escribe rubro)", () => {
     expect(
       decidirRubroInteresInversionistas({
@@ -142,5 +154,15 @@ describe("cuentaParaRubroInv", () => {
 
   it("emite_factura null/undefined se trata como false → true", () => {
     expect(cuentaParaRubroInv({ nombre: "Juan Perez", emite_factura: null }, false)).toBe(true);
+  });
+
+  it("sin la propiedad emite_factura → true", () => {
+    expect(cuentaParaRubroInv({ nombre: "Juan Perez" }, false)).toBe(true);
+  });
+
+  it("CUBE en mixed-case sigue excluido (heurística case-insensitive)", () => {
+    expect(
+      cuentaParaRubroInv({ nombre: "Cube Investments S.A.", emite_factura: false }, false)
+    ).toBe(false);
   });
 });

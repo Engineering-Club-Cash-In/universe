@@ -6,6 +6,10 @@ import { authMiddleware } from "./midleware";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
 import { generarHTMLFacturaPro } from "../cofidi/functions";
+import {
+  cuentaParaRubroInv,
+  decidirRubroInteresInversionistas,
+} from "../cofidi/rubroInteresInversionistas";
 import { db } from "../database";
 import {
   compras_credito_inversionista,
@@ -942,6 +946,15 @@ if (facturasExistentes.length > 0) {
       // participación), NO escribimos los rubros INTERES / INTERES_INVERSIONISTAS,
       // para no atribuir todo el interés a inversionistas con interesCubeConIva=0.
       let interesFlujoOk = false;
+      // 🧾 Lo que en ESTA corrida se facturó a inversionistas no-CUBE que NO se
+      //    autofacturan (mismas reglas que la query de pci). Sirve de fallback
+      //    para el rubro INTERES_INVERSIONISTAS en pagos PARCIALES: ahí pci
+      //    todavía está en 0 (se llena al completarse la cuota) pero los DTEs
+      //    de los inversionistas SÍ salieron, y el snapshot los perdía.
+      //    El IVA se acumula por-inversionista (el mismo que fue al DTE) para
+      //    que el renglón cuadre exacto con lo emitido.
+      let invNoEmiteFacturadoConIva = new Big(0);
+      let invNoEmiteIva = new Big(0);
 
       if (!hayInteresEnPago) {
         console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses (ambos flujos)");
@@ -1344,6 +1357,14 @@ if (facturasExistentes.length > 0) {
             const calc = calcularIvaExacto(parseFloat(totalInv.toFixed(2)));
             console.log(`      💼 Factura ${inv.nombre}: Q${totalInv.toFixed(2)} (antes Q${parteAntes.toFixed(2)} + después Q${parteDespues.toFixed(2)})`);
 
+            // 🧾 Mismo acumulado que en el flujo estándar. Acá los redirigidos a
+            //    CUBE ya quedaron fuera de parteInvPorId (se descartan dentro de
+            //    calcularReparto), así que basta el criterio no-CUBE/no-autofactura.
+            if (cuentaParaRubroInv(inv, false)) {
+              invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calc.total);
+              invNoEmiteIva = invNoEmiteIva.plus(calc.montoImpuesto);
+            }
+
             const itemsInv = [
               {
                 numeroLinea: 1,
@@ -1679,6 +1700,14 @@ if (facturasExistentes.length > 0) {
           const calc = calcularIvaExacto(parseFloat(parteInversionista.toFixed(2)));
           console.log(`   💼 Factura ${inv.nombre}: Q${parteInversionista.toFixed(2)} (Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto})`);
 
+          // 🧾 Acumular lo facturado a inversionistas que NO se autofacturan:
+          //    es el respaldo del rubro INTERES_INVERSIONISTAS cuando pci aún
+          //    está en 0 (pago parcial). Se suma con el MISMO IVA del DTE.
+          if (cuentaParaRubroInv(inv, redirigirACube)) {
+            invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calc.total);
+            invNoEmiteIva = invNoEmiteIva.plus(calc.montoImpuesto);
+          }
+
           const itemsIntereses = [
             {
               numeroLinea: 1,
@@ -1966,15 +1995,19 @@ if (facturasExistentes.length > 0) {
         // INTERES_INVERSIONISTAS → dejamos ambos rubros sin escribir.
         if (interesFlujoOk) {
           pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
-          // INTERES_INVERSIONISTAS: monto + IVA directo de pci (no recalcular el
-          // IVA) para que coincida con el reparto real. Solo si hay monto.
-          if (invFacturadoTotal.gt(0)) {
-            rubrosDesglose.push({
-              rubro: "INTERES_INVERSIONISTAS",
-              monto_total: invFacturadoTotal.toFixed(2),
-              monto_iva: invFacturadoIva.toFixed(2),
-            });
-          }
+        }
+        // INTERES_INVERSIONISTAS: pci manda cuando ya tiene reparto (no se
+        // recalcula el IVA); si pci está en 0 porque el pago es PARCIAL, se usa
+        // lo realmente facturado en esta corrida para no perder DTEs emitidos.
+        const rubroInv = decidirRubroInteresInversionistas({
+          interesFlujoOk,
+          pciTotal: invFacturadoTotal,
+          pciIva: invFacturadoIva,
+          corridaTotal: invNoEmiteFacturadoConIva,
+          corridaIva: invNoEmiteIva,
+        });
+        if (rubroInv) {
+          rubrosDesglose.push({ rubro: "INTERES_INVERSIONISTAS", ...rubroInv });
         }
         pushRubro("MEMBRESIA", pagoData.membresias_pago, true);
         pushRubro("SEGURO", pagoData.abono_seguro, true);

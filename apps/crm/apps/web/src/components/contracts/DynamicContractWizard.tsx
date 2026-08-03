@@ -1578,11 +1578,14 @@ export function DynamicContractWizard({
 		if (dia && mes && anio) {
 			const monthIndex = monthsSpanish.indexOf(mes.toLowerCase());
 			if (monthIndex !== -1) {
-				// Usar el año tal como viene
+				// El año viene con 2 dígitos ("26"). `new Date(26, ...)` lo mapea a
+				// 1926, así que hay que llevarlo a 4 dígitos antes de construir la fecha.
+				const anioNum = Number.parseInt(anio, 10);
+				const anioCompleto = anioNum < 100 ? 2000 + anioNum : anioNum;
 				contractDate = new Date(
-					Number.parseInt(anio),
+					anioCompleto,
 					monthIndex,
-					Number.parseInt(dia),
+					Number.parseInt(dia, 10),
 				);
 			}
 		}

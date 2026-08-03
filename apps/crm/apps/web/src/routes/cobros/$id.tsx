@@ -1558,6 +1558,7 @@ function RouteComponent() {
 													monto: Number(c.montoCuota ?? caso.cuotaMensual ?? 0),
 												}))}
 											montoMora={Number(caso.montoEnMora || 0)}
+											esConvenio={caso.cuotaConvenio != null}
 											fechaPago={String(caso.diaPagoMensual || 15)}
 											cuotaMensual={Number(
 												caso.cuotaMensual || 0,

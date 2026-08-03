@@ -138,6 +138,9 @@ interface ContactoModalProps {
 	// CB-025: mora del caso SOLA (sin cuotas), para la fila "Mora" del selector
 	// y el total en vivo. En crudo.
 	montoMora?: number;
+	// Codex PR #1228: con convenio activo, el monto comprometido es el total del
+	// convenio (montoSugerido), no la suma cuotas+mora — el selector no lo pisa.
+	esConvenio?: boolean;
 	// Variables para plantillas de mensaje
 	fechaPago?: string;
 	cuotaMensual?: string;
@@ -165,6 +168,7 @@ export function ContactoModal({
 	cuotasDisponibles = [],
 	montoSugerido,
 	montoMora = 0,
+	esConvenio = false,
 	fechaPago = "",
 	cuotaMensual = "",
 	placa = "",
@@ -448,33 +452,64 @@ export function ContactoModal({
 			"cuotaFin",
 			numerosAtrasados[numerosAtrasados.length - 1],
 		);
+		// Con convenio el monto comprometido es el total del convenio
+		// (montoSugerido = cuotaConvenio + cuota), no la suma cuotas+mora — no lo
+		// pisamos con totalDeSeleccion (Codex PR #1228).
 		form.setFieldValue(
 			"montoComprometido",
-			totalDeSeleccion(todas, true).toFixed(2),
+			esConvenio && montoSugerido != null
+				? montoSugerido.toFixed(2)
+				: totalDeSeleccion(todas, true).toFixed(2),
 		);
 	}, [isOpen, esPromesa, numerosAtrasados]);
 
+	// La selección se mantiene como un RUN CONTIGUO de la lista de atrasadas
+	// (Codex PR #1228): sin esto, destildar una cuota del medio dejaba un hueco
+	// pero el rango guardado seguía siendo [min,max] e incluía la excluida → el
+	// server la evaluaba igual. Acá seleccionar rellena huecos y destildar
+	// recorta desde un extremo, así el rango nunca contiene una cuota sin marcar.
 	const alternarCuotaPromesa = (numero: number) => {
-		const siguiente = new Set(cuotasPromesa);
-		if (siguiente.has(numero)) siguiente.delete(numero);
-		else siguiente.add(numero);
+		const orden = numerosAtrasados;
+		const idx = orden.indexOf(numero);
+		if (idx === -1) return;
+		const marcados = orden
+			.map((n, k) => (cuotasPromesa.has(n) ? k : -1))
+			.filter((k) => k >= 0);
+		let i = marcados.length ? marcados[0] : -1;
+		let j = marcados.length ? marcados[marcados.length - 1] : -1;
+		if (cuotasPromesa.has(numero)) {
+			// Destildar: recorta desde la más vieja si es el borde inferior; si es
+			// el borde superior o una intermedia, conserva [i..idx-1].
+			if (idx === i) i = idx + 1;
+			else j = idx - 1;
+		} else if (i === -1) {
+			i = idx;
+			j = idx;
+		} else {
+			// Marcar: extiende el run para incluir idx (rellena cualquier hueco).
+			i = Math.min(i, idx);
+			j = Math.max(j, idx);
+		}
+		const siguiente =
+			i < 0 || i > j ? new Set<number>() : new Set(orden.slice(i, j + 1));
 		setCuotasPromesa(siguiente);
-		const orden = [...siguiente].sort((a, b) => a - b);
-		// El rango guardado es min..max de lo seleccionado (el modelo del backend
-		// es un rango, no un set). Destildar una cuota intermedia igual la deja
-		// dentro del rango — caso borde; las atrasadas casi siempre son contiguas.
-		form.setFieldValue("cuotaInicio", orden.length ? orden[0] : undefined);
+		const nums = [...siguiente].sort((a, b) => a - b);
+		form.setFieldValue("cuotaInicio", nums.length ? nums[0] : undefined);
 		form.setFieldValue(
 			"cuotaFin",
-			orden.length ? orden[orden.length - 1] : undefined,
+			nums.length ? nums[nums.length - 1] : undefined,
 		);
-		// El monto sigue a la selección (editable después si prometió un parcial).
-		form.setFieldValue(
-			"montoComprometido",
-			totalDeSeleccion(siguiente, !!form.getFieldValue("incluyeMora")).toFixed(
-				2,
-			),
-		);
+		// El monto sigue a la selección (editable). Con convenio no se toca: es el
+		// total del convenio, no la suma cuotas+mora (Codex PR #1228).
+		if (!esConvenio) {
+			form.setFieldValue(
+				"montoComprometido",
+				totalDeSeleccion(
+					siguiente,
+					!!form.getFieldValue("incluyeMora"),
+				).toFixed(2),
+			);
+		}
 	};
 
 	const getIconoMetodo = (metodo: string) => {
@@ -1201,10 +1236,14 @@ export function ContactoModal({
 												checked={field.state.value}
 												onCheckedChange={(ch) => {
 													field.handleChange(!!ch);
-													form.setFieldValue(
-														"montoComprometido",
-														totalDeSeleccion(cuotasPromesa, !!ch).toFixed(2),
-													);
+													// Con convenio el monto es el total del convenio; no
+													// lo pisamos con la suma cuotas+mora (Codex PR #1228).
+													if (!esConvenio) {
+														form.setFieldValue(
+															"montoComprometido",
+															totalDeSeleccion(cuotasPromesa, !!ch).toFixed(2),
+														);
+													}
 												}}
 											/>
 											<div className="flex-1">

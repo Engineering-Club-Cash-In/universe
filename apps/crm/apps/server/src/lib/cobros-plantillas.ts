@@ -310,7 +310,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		etapa: "pre_mora",
 		asunto: "Recordatorio: su cuota vence en 5 días",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 5 días). Además su crédito registra {cuotasAtraso} cuota(s) vencida(s) y Q{montoMora} de mora.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 5 días). Además su crédito tiene {cuotasAtraso} cuota(s) atrasada(s) que han generado mora.
 
 ${COBROS_CUENTAS_PAGO}
 
@@ -326,7 +326,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		etapa: "pre_mora",
 		asunto: "Recordatorio: su cuota vence en 3 días",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 3 días). Además su crédito registra {cuotasAtraso} cuota(s) vencida(s) y Q{montoMora} de mora.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence el {fechaPago} (en 3 días). Además su crédito tiene {cuotasAtraso} cuota(s) atrasada(s) que han generado mora.
 
 ${COBROS_CUENTAS_PAGO}
 
@@ -342,7 +342,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		etapa: "pre_mora",
 		asunto: "Recordatorio: su cuota vence mañana",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence MAÑANA {fechaPago}. Además su crédito registra {cuotasAtraso} cuota(s) vencida(s) y Q{montoMora} de mora.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin.com. Le recordamos que la próxima cuota de su crédito por Q{cuotaMensual} vence MAÑANA {fechaPago}. Además su crédito tiene {cuotasAtraso} cuota(s) atrasada(s) que han generado mora.
 
 ${COBROS_CUENTAS_PAGO}
 
@@ -358,7 +358,7 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		etapa: "pre_mora",
 		asunto: "Hoy es su día de pago",
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Estimado(a) {clienteNombre}, buen día. Le saludamos de Clubcashin.com para recordarle que HOY {fechaPago} vence la cuota de su crédito por Q{cuotaMensual}. Además su crédito registra {cuotasAtraso} cuota(s) vencida(s) y Q{montoMora} de mora.
+		cuerpo: `Estimado(a) {clienteNombre}, buen día. Le saludamos de Clubcashin.com para recordarle que HOY {fechaPago} vence la cuota de su crédito por Q{cuotaMensual}. Además su crédito tiene {cuotasAtraso} cuota(s) atrasada(s) que han generado mora.
 
 ${COBROS_CUENTAS_PAGO}
 

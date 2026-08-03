@@ -953,7 +953,7 @@ function RouteComponent() {
 									<div className="flex items-center gap-2 text-sm">
 										<Banknote className="h-4 w-4 text-muted-foreground" />
 										<span className="font-medium">
-											Total a Pagar{" "}
+											Total Parcial{" "}
 											<span className="text-muted-foreground text-xs">
 												{caso.cuotaConvenio != null
 													? "(Convenio + Cuota)"
@@ -1120,16 +1120,16 @@ function RouteComponent() {
 												</span>
 												<span>+</span>
 												<span>
-													Cuota:{" "}
+													Cuotas ({caso.cuotasVencidas}):{" "}
 													<strong>
 														Q
-														{Number(caso.cuotaMensual || 0).toLocaleString(
-															"es-GT",
-															{
-																minimumFractionDigits: 2,
-																maximumFractionDigits: 2,
-															},
-														)}
+														{(
+															Number(caso.cuotasVencidas || 0) *
+															Number(caso.cuotaMensual || 0)
+														).toLocaleString("es-GT", {
+															minimumFractionDigits: 2,
+															maximumFractionDigits: 2,
+														})}
 													</strong>
 												</span>
 											</div>
@@ -1138,7 +1138,8 @@ function RouteComponent() {
 											Q
 											{(
 												Number(caso.montoEnMora) +
-												Number(caso.cuotaMensual || 0)
+												Number(caso.cuotasVencidas || 0) *
+													Number(caso.cuotaMensual || 0)
 											).toLocaleString()}
 										</p>
 									</div>
@@ -1419,7 +1420,8 @@ function RouteComponent() {
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
 											montoAdeudado={(
 												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
+												Number(caso.cuotasVencidas || 0) *
+													Number(caso.cuotaMensual || 0)
 											).toLocaleString("es-GT", {
 												minimumFractionDigits: 2,
 												maximumFractionDigits: 2,
@@ -1455,7 +1457,8 @@ function RouteComponent() {
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
 											montoAdeudado={(
 												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
+												Number(caso.cuotasVencidas || 0) *
+													Number(caso.cuotaMensual || 0)
 											).toLocaleString("es-GT", {
 												minimumFractionDigits: 2,
 												maximumFractionDigits: 2,
@@ -1494,7 +1497,8 @@ function RouteComponent() {
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
 											montoAdeudado={(
 												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
+												Number(caso.cuotasVencidas || 0) *
+													Number(caso.cuotaMensual || 0)
 											).toLocaleString("es-GT", {
 												minimumFractionDigits: 2,
 												maximumFractionDigits: 2,
@@ -1538,7 +1542,8 @@ function RouteComponent() {
 													? Number(caso.cuotaConvenio) +
 														Number(caso.cuotaMensual || 0)
 													: Number(caso.montoEnMora || 0) +
-														Number(caso.cuotaMensual || 0)
+														Number(caso.cuotasVencidas || 0) *
+															Number(caso.cuotaMensual || 0)
 											}
 											cuotasDisponibles={cuotas
 												.filter(
@@ -1547,7 +1552,12 @@ function RouteComponent() {
 														c.fechaVencimiento &&
 														new Date(c.fechaVencimiento) < new Date(),
 												)
-												.map((c: any) => ({ numeroCuota: c.numeroCuota }))}
+												.map((c: any) => ({
+													numeroCuota: c.numeroCuota,
+													fechaVencimiento: c.fechaVencimiento,
+													monto: Number(c.montoCuota ?? caso.cuotaMensual ?? 0),
+												}))}
+											montoMora={Number(caso.montoEnMora || 0)}
 											fechaPago={String(caso.diaPagoMensual || 15)}
 											cuotaMensual={Number(
 												caso.cuotaMensual || 0,
@@ -1556,7 +1566,8 @@ function RouteComponent() {
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
 											montoAdeudado={(
 												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
+												Number(caso.cuotasVencidas || 0) *
+													Number(caso.cuotaMensual || 0)
 											).toLocaleString("es-GT", {
 												minimumFractionDigits: 2,
 												maximumFractionDigits: 2,

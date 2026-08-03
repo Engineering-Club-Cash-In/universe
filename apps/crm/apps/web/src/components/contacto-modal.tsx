@@ -538,7 +538,11 @@ export function ContactoModal({
 				? montoSugerido.toFixed(2)
 				: totalDeSeleccion(todas, true).toFixed(2),
 		);
-	}, [isOpen, esPromesa, numerosAtrasados]);
+		// promesaActiva?.id (no el objeto, que cambia de identidad cada render):
+		// re-siembra cuando la promesa activa CARGA tarde o un refetch la cambia con
+		// el modal abierto — sin esto el form quedaba con defaults de promesa nueva
+		// y al guardar sobrescribía la activa con datos viejos (Codex PR #1232).
+	}, [isOpen, esPromesa, numerosAtrasados, promesaActiva?.id]);
 
 	// La selección se mantiene como un RUN CONTIGUO de la lista de atrasadas
 	// (Codex PR #1228): sin esto, destildar una cuota del medio dejaba un hueco

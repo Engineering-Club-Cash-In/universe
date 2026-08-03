@@ -517,6 +517,10 @@ export const createContactoCobrosSchema = z
 // CB-029: la promesa ACTIVA de un caso = pendiente cuya fecha prometida no ha
 // pasado (día GT). A lo sumo una — sirve para el guard "una sola activa por
 // caso". El frontend detecta la misma con el estado ya recalculado.
+// estado_promesa NULL (promesa vieja aún sin evaluar) cuenta como pendiente —
+// mismo criterio que getColaDia/getEstadoPromesasPago (`estadoPromesa ??
+// 'pendiente'`); sin el isNull, un caso con una promesa NULL futura burlaba el
+// guard y se podía insertar una segunda activa (Codex PR #1232).
 async function promesaActivaDelCaso(casoCobroId: string) {
 	const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
 	const [row] = await db
@@ -526,7 +530,10 @@ async function promesaActivaDelCaso(casoCobroId: string) {
 			and(
 				eq(contactosCobros.casoCobroId, casoCobroId),
 				eq(contactosCobros.estadoContacto, "promesa_pago"),
-				eq(contactosCobros.estadoPromesa, "pendiente"),
+				or(
+					eq(contactosCobros.estadoPromesa, "pendiente"),
+					isNull(contactosCobros.estadoPromesa),
+				),
 				gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
 			),
 		)

@@ -31,6 +31,11 @@ import { useAuth } from "@/Provider/authProvider";
 import { useFacturarGenerico, useFacturasGenericas, useAnularFactura, useExportFacturasExcel } from "../hooks/cofidi";
 import { DatePickerMUI } from "./calendar";
 import type { FacturaGenericaItem, EmisorKey, TipoFacturaGenerica } from "../services/services";
+import {
+  DIAS_GRACIA_ANULACION,
+  esAnulacionEnDiasDeGracia,
+  fechaPeriodoFactura,
+} from "@/lib/anulacionPeriodo";
 
 // --- Utilidades ---
 const formatCurrency = (val?: string | number | null) =>
@@ -138,6 +143,13 @@ export function FacturasGenericas() {
   const facturas: FacturaGenericaItem[] = data?.data?.facturas || [];
   const pagination = data?.data?.pagination;
 
+  // ⏳ Si la factura es del período anterior y estamos dentro de los días de gracia,
+  // el modal avisa que el resultado hay que verificarlo en SAT.
+  const facturaSeleccionada = facturas.find((f) => f.uuid === facturaParaAnular);
+  const anulacionConDiasDeGracia = esAnulacionEnDiasDeGracia(
+    fechaPeriodoFactura(facturaSeleccionada)
+  );
+
   // Función para anular factura
   const handleAnular = () => {
     if (!motivoAnulacion.trim()) {
@@ -162,7 +174,18 @@ export function FacturasGenericas() {
       {
         onSuccess: (response) => {
           if (response.success) {
-            toast.success("Factura anulada exitosamente", { id: "anulando-factura" });
+            if (response.anulado_en_dias_gracia) {
+              // ⏳ Puede ser un OK engañoso: al ser del período anterior hay que confirmarlo
+              toast.success("Factura anulada — verificá en SAT", {
+                id: "anulando-factura",
+                description:
+                  response.advertencia ||
+                  `Se anuló usando los ${DIAS_GRACIA_ANULACION} días de gracia. Confirmá en el portal de SAT que quedó anulada.`,
+                duration: 12000,
+              });
+            } else {
+              toast.success("Factura anulada exitosamente", { id: "anulando-factura" });
+            }
             setFacturaParaAnular(null);
             setMotivoAnulacion("");
             refetch();
@@ -964,6 +987,21 @@ export function FacturasGenericas() {
               Esta acción es <span className="font-bold text-red-600">IRREVERSIBLE</span>.
               Ingresa el motivo de anulación:
             </p>
+
+            {anulacionConDiasDeGracia && (
+              <div className="bg-amber-50 border-2 border-amber-400 rounded-lg p-4 mb-4">
+                <p className="text-amber-900 font-bold text-sm mb-1 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  Factura del período anterior
+                </p>
+                <p className="text-amber-900 text-sm">
+                  Vamos a intentar este proceso con los{" "}
+                  <span className="font-bold">{DIAS_GRACIA_ANULACION} días de gracia</span>.
+                  Después de realizarlo, <span className="font-bold">verificá en el portal
+                  de SAT</span> si la factura realmente se anuló.
+                </p>
+              </div>
+            )}
 
             <textarea
               value={motivoAnulacion}

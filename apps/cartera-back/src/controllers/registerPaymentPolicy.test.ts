@@ -178,6 +178,76 @@ describe("registerPaymentPolicy - cuotas cubiertas de INCOBRABLES", () => {
     ]).toEqual([]);
   });
 
+  // El loop de insertPayment calcula el saldo de la cuota contra los hermanos
+  // vivos validated Y pending, así que el skip tiene que usar el mismo criterio:
+  // si no, la cuota entra al loop con saldo neto 0 y nace otra fila en cero.
+  it("cuenta los pagos pending para la cobertura (mismo criterio del loop)", () => {
+    const cuotas = [
+      {
+        cuotaId: 40,
+        numeroCuota: 1,
+        pagos: [
+          {
+            pago_id: 50,
+            validationStatus: "validated",
+            paymentFalse: false,
+            abono_capital: "3000.00",
+          },
+          {
+            pago_id: 51,
+            validationStatus: "pending",
+            paymentFalse: false,
+            abono_capital: "750.00",
+          },
+        ],
+      },
+    ];
+
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas,
+      }),
+    ]).toEqual([1]);
+
+    // Paridad con develop: el gate normal NO cuenta pendings, así que este
+    // mismo escenario no es una inconsistencia para un crédito no INCOBRABLE.
+    expect(
+      registerPaymentPolicy.getCoveredOpenInstallment({
+        montoCuota: "3750.00",
+        cuotas,
+      }),
+    ).toBeNull();
+  });
+
+  it("un pending anulado (paymentFalse) no cuenta como cobertura", () => {
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 50,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "3000.00",
+              },
+              {
+                pago_id: 51,
+                validationStatus: "pending",
+                paymentFalse: true,
+                abono_capital: "750.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ]).toEqual([]);
+  });
+
   it("los abonos directos a capital (capital_validated) no cuentan como cobertura", () => {
     expect([
       ...registerPaymentPolicy.getCoveredInstallmentNumbers({

@@ -331,9 +331,11 @@ type CuotaAbiertaConPagos = {
 const getCoveredOpenInstallments = ({
   montoCuota,
   cuotas,
+  incluirPendientes = false,
 }: {
   montoCuota: BigInput;
   cuotas: CuotaAbiertaConPagos[];
+  incluirPendientes?: boolean;
 }) => {
   const cuotasLogicas = new Map<number, CuotaAbiertaConPagos>();
   for (const cuota of cuotas) {
@@ -351,6 +353,7 @@ const getCoveredOpenInstallments = ({
       calcularCoberturaCuota({
         montoCuota,
         pagos: cuota.pagos,
+        incluirPendientes,
       }).cuotaCompleta
   );
 };
@@ -383,6 +386,11 @@ export const getCoveredOpenInstallment = ({
  * el pago nuevo caiga en la siguiente cuota CON saldo: si lo dejáramos entrar,
  * su saldo neto daría 0 en todos los rubros y se insertaría una fila pending
  * con `monto_aplicado = 0` (nunca validable) que además duplica la boleta.
+ *
+ * Cuenta los pending vivos (`incluirPendientes`) porque el loop de insertPayment
+ * también los cuenta como hermanos al calcular el saldo de la cuota: el criterio
+ * del skip tiene que ser el mismo o la fila en cero vuelve por esa vía. El gate
+ * normal (`getCoveredOpenInstallment`) sigue mirando sólo `validated`.
  */
 export const getCoveredInstallmentNumbers = ({
   montoCuota,
@@ -392,9 +400,11 @@ export const getCoveredInstallmentNumbers = ({
   cuotas: CuotaAbiertaConPagos[];
 }): Set<number> =>
   new Set(
-    getCoveredOpenInstallments({ montoCuota, cuotas }).map(
-      (cuota) => cuota.numeroCuota
-    )
+    getCoveredOpenInstallments({
+      montoCuota,
+      cuotas,
+      incluirPendientes: true,
+    }).map((cuota) => cuota.numeroCuota)
   );
 
 export type ResumenAbonosCuota = {

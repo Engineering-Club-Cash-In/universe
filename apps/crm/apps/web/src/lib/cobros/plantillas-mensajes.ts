@@ -262,12 +262,12 @@ Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 		nombre: "Mora 30 días",
 		etapa: "mora_30",
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+		cuerpo: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
 
 Atentamente, 
 {nombreAsesor} 
 Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
 
 ${COBROS_NO_REPLY_WARNING}
 

@@ -123,11 +123,24 @@ interface ContactoModalProps {
 	// futuras aún no vencidas) para el selector de rango en variante "promesa".
 	// $id.tsx filtra por fechaVencimiento < hoy antes de pasarlas — reusa la
 	// data que ya carga vía getHistorialPagos, no duplica el fetch aquí.
-	cuotasDisponibles?: Array<{ numeroCuota: number }>;
+	// CB-025: se enriquece con monto y fecha de cada cuota para la lista de
+	// checkboxes (fila con monto + vencimiento) y el total en vivo. $id.tsx los
+	// saca de la misma data de getHistorialPagos — no dispara query nueva.
+	cuotasDisponibles?: Array<{
+		numeroCuota: number;
+		fechaVencimiento?: string | null;
+		monto?: number;
+	}>;
 	// CB-025: mora + cuota del caso, en crudo (sin formatear), para sugerir
 	// un monto en la variante "promesa". El caller ya lo tiene en memoria
 	// (misma fórmula que montoAdeudado) — no dispara query nueva.
 	montoSugerido?: number;
+	// CB-025: mora del caso SOLA (sin cuotas), para la fila "Mora" del selector
+	// y el total en vivo. En crudo.
+	montoMora?: number;
+	// Codex PR #1228: con convenio activo, el monto comprometido es el total del
+	// convenio (montoSugerido), no la suma cuotas+mora — el selector no lo pisa.
+	esConvenio?: boolean;
 	// Variables para plantillas de mensaje
 	fechaPago?: string;
 	cuotaMensual?: string;
@@ -154,6 +167,8 @@ export function ContactoModal({
 	variante = "completo",
 	cuotasDisponibles = [],
 	montoSugerido,
+	montoMora = 0,
+	esConvenio = false,
 	fechaPago = "",
 	cuotaMensual = "",
 	placa = "",
@@ -260,6 +275,54 @@ export function ContactoModal({
 
 	const esPromesa = variante === "promesa";
 
+	// CB-025 (simplificación de la promesa): cuotas atrasadas ordenadas — base
+	// del selector de pills y de los defaults "todo lo atrasado". Se memoiza
+	// sobre una FIRMA estable (join de los números), no sobre `cuotasDisponibles`
+	// directo: el padre lo pasa como un .map() nuevo en cada render, así que
+	// depender del array pisaría la selección del asesor en cada re-render.
+	const firmaCuotasAtrasadas = cuotasDisponibles
+		.map((c) => c.numeroCuota)
+		.join(",");
+	const numerosAtrasados = useMemo(
+		() =>
+			firmaCuotasAtrasadas === ""
+				? []
+				: firmaCuotasAtrasadas
+						.split(",")
+						.map(Number)
+						.sort((a, b) => a - b),
+		[firmaCuotasAtrasadas],
+	);
+
+	// CB-025: mismas cuotas pero con monto + fecha, para la LISTA de checkboxes.
+	// Firma rica (numero|monto|fecha) reconstruida dentro del memo → estable
+	// aunque el padre pase un .map() nuevo cada render (mismo patrón que arriba).
+	const firmaCuotasDetalle = cuotasDisponibles
+		.map((c) => `${c.numeroCuota}|${c.monto ?? 0}|${c.fechaVencimiento ?? ""}`)
+		.join(";");
+	const cuotasOrdenadas = useMemo(
+		() =>
+			firmaCuotasDetalle === ""
+				? []
+				: firmaCuotasDetalle
+						.split(";")
+						.map((s) => {
+							const [n, m, f] = s.split("|");
+							return {
+								numeroCuota: Number(n),
+								monto: Number(m),
+								fechaVencimiento: f || null,
+							};
+						})
+						.sort((a, b) => a.numeroCuota - b.numeroCuota),
+		[firmaCuotasDetalle],
+	);
+	const montoPorCuota = useMemo(() => {
+		const mapa = new Map<number, number>();
+		for (const c of cuotasOrdenadas) mapa.set(c.numeroCuota, c.monto);
+		return mapa;
+	}, [cuotasOrdenadas]);
+
 	const form = useForm({
 		defaultValues: {
 			metodoContacto: metodoInicial,
@@ -280,11 +343,23 @@ export function ContactoModal({
 			fechaProximoContacto: undefined as Date | undefined,
 			duracionLlamada: undefined as number | undefined,
 			// CB-020: rango de cuotas + mora — solo relevantes en variante promesa.
-			cuotaInicio: undefined as number | undefined,
-			cuotaFin: undefined as number | undefined,
-			incluyeMora: false,
+			// CB-025 (simplificación): la promesa arranca cubriendo TODO lo
+			// atrasado + mora ("va a pagar lo que debe", el caso común). El asesor
+			// solo destilda lo que no aplique. En "completo" siguen vacíos.
+			cuotaInicio: (esPromesa ? numerosAtrasados[0] : undefined) as
+				| number
+				| undefined,
+			cuotaFin: (esPromesa
+				? numerosAtrasados[numerosAtrasados.length - 1]
+				: undefined) as number | undefined,
+			incluyeMora: esPromesa,
 			// CB-025: monto que el cliente prometió pagar — informativo, opcional.
-			montoComprometido: "",
+			// En promesa se pre-llena con lo que debe (cuota + mora) para que el
+			// asesor no lo teclee; sigue editable.
+			montoComprometido:
+				esPromesa && montoSugerido != null && montoSugerido > 0
+					? montoSugerido.toFixed(2)
+					: "",
 			// CB-025: qué hacer en el próximo contacto — texto libre, opcional.
 			proximoPaso: "",
 		},
@@ -347,6 +422,95 @@ export function ContactoModal({
 			toast.error(error.message || "Error al registrar el contacto");
 		},
 	});
+
+	// CB-025 (simplificación): selección de cuotas de la promesa como Set (una
+	// pill por cuota). El backend guarda un RANGO contiguo (cuotaInicio..cuotaFin)
+	// y evaluarPromesa verifica todo ese rango — no se toca ese modelo: la pill
+	// solo maneja qué está seleccionado y se sincroniza a min..max del form.
+	const [cuotasPromesa, setCuotasPromesa] = useState<Set<number>>(
+		() => new Set(numerosAtrasados),
+	);
+
+	// CB-025: total en vivo = Σ montos de las cuotas seleccionadas + mora (si
+	// aplica). Alimenta el pre-llenado editable de "Monto comprometido".
+	const totalDeSeleccion = (seleccion: Set<number>, incluyeMora: boolean) => {
+		let total = 0;
+		for (const n of seleccion) total += montoPorCuota.get(n) ?? 0;
+		if (incluyeMora) total += montoMora;
+		return total;
+	};
+
+	// Al (re)abrir la promesa, re-sembrar la selección con todo lo atrasado y
+	// sincronizar el rango + el monto del form (por si cambiaron las cuotas).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `form`/montoPorCuota/montoMora son estables o derivan de las mismas cuotas; incluirlos re-sembraría en cada render y borraría la selección del asesor.
+	useEffect(() => {
+		if (!isOpen || !esPromesa) return;
+		const todas = new Set(numerosAtrasados);
+		setCuotasPromesa(todas);
+		form.setFieldValue("cuotaInicio", numerosAtrasados[0]);
+		form.setFieldValue(
+			"cuotaFin",
+			numerosAtrasados[numerosAtrasados.length - 1],
+		);
+		// Con convenio el monto comprometido es el total del convenio
+		// (montoSugerido = cuotaConvenio + cuota), no la suma cuotas+mora — no lo
+		// pisamos con totalDeSeleccion (Codex PR #1228).
+		form.setFieldValue(
+			"montoComprometido",
+			esConvenio && montoSugerido != null
+				? montoSugerido.toFixed(2)
+				: totalDeSeleccion(todas, true).toFixed(2),
+		);
+	}, [isOpen, esPromesa, numerosAtrasados]);
+
+	// La selección se mantiene como un RUN CONTIGUO de la lista de atrasadas
+	// (Codex PR #1228): sin esto, destildar una cuota del medio dejaba un hueco
+	// pero el rango guardado seguía siendo [min,max] e incluía la excluida → el
+	// server la evaluaba igual. Acá seleccionar rellena huecos y destildar
+	// recorta desde un extremo, así el rango nunca contiene una cuota sin marcar.
+	const alternarCuotaPromesa = (numero: number) => {
+		const orden = numerosAtrasados;
+		const idx = orden.indexOf(numero);
+		if (idx === -1) return;
+		const marcados = orden
+			.map((n, k) => (cuotasPromesa.has(n) ? k : -1))
+			.filter((k) => k >= 0);
+		let i = marcados.length ? marcados[0] : -1;
+		let j = marcados.length ? marcados[marcados.length - 1] : -1;
+		if (cuotasPromesa.has(numero)) {
+			// Destildar: recorta desde la más vieja si es el borde inferior; si es
+			// el borde superior o una intermedia, conserva [i..idx-1].
+			if (idx === i) i = idx + 1;
+			else j = idx - 1;
+		} else if (i === -1) {
+			i = idx;
+			j = idx;
+		} else {
+			// Marcar: extiende el run para incluir idx (rellena cualquier hueco).
+			i = Math.min(i, idx);
+			j = Math.max(j, idx);
+		}
+		const siguiente =
+			i < 0 || i > j ? new Set<number>() : new Set(orden.slice(i, j + 1));
+		setCuotasPromesa(siguiente);
+		const nums = [...siguiente].sort((a, b) => a - b);
+		form.setFieldValue("cuotaInicio", nums.length ? nums[0] : undefined);
+		form.setFieldValue(
+			"cuotaFin",
+			nums.length ? nums[nums.length - 1] : undefined,
+		);
+		// El monto sigue a la selección (editable). Con convenio no se toca: es el
+		// total del convenio, no la suma cuotas+mora (Codex PR #1228).
+		if (!esConvenio) {
+			form.setFieldValue(
+				"montoComprometido",
+				totalDeSeleccion(
+					siguiente,
+					!!form.getFieldValue("incluyeMora"),
+				).toFixed(2),
+			);
+		}
+	};
 
 	const getIconoMetodo = (metodo: string) => {
 		switch (metodo) {
@@ -566,14 +730,16 @@ export function ContactoModal({
 						e.stopPropagation();
 						form.handleSubmit();
 					}}
-					className="space-y-6"
+					className="space-y-4"
 				>
 					{/* Sección: Información del Contacto — oculta en variante "promesa":
 					    el método/estado/plantilla/envío no aplican, la promesa se
 					    registra sobre un contacto que ya ocurrió por otro medio. */}
 					{!esPromesa && (
-						<div className="space-y-4">
-							<h3 className="font-medium text-lg">Información del Contacto</h3>
+						<div className="space-y-3">
+							<h3 className="font-semibold text-base">
+								Información del Contacto
+							</h3>
 
 							<div className="grid grid-cols-2 gap-4">
 								<form.Field name="metodoContacto">
@@ -843,8 +1009,10 @@ export function ContactoModal({
 					)}
 
 					{/* Sección: Detalles de la Conversación */}
-					<div className="space-y-4">
-						<h3 className="font-medium text-lg">Detalles de la Conversación</h3>
+					<div className="space-y-3">
+						<h3 className="font-semibold text-base">
+							Detalles de la Conversación
+						</h3>
 
 						<form.Field
 							name="comentarios"
@@ -857,8 +1025,12 @@ export function ContactoModal({
 								<div className="space-y-2">
 									<Label>Comentarios *</Label>
 									<Textarea
-										placeholder="Describe qué se habló en el contacto, la actitud del cliente, etc."
-										className="min-h-[100px]"
+										placeholder={
+											esPromesa
+												? "Describe qué se habló, qué acordó y cualquier detalle del compromiso del cliente."
+												: "Describe qué se habló en el contacto, la actitud del cliente, etc."
+										}
+										className="min-h-[72px]"
 										value={field.state.value}
 										onChange={(e) => field.handleChange(e.target.value)}
 									/>
@@ -872,26 +1044,51 @@ export function ContactoModal({
 							)}
 						</form.Field>
 
-						<div className="grid grid-cols-2 gap-4">
-							<form.Field name="acuerdosAlcanzados">
-								{(field) => (
-									<div className="space-y-2">
-										<Label>Acuerdos Alcanzados</Label>
-										<Textarea
-											placeholder="Describe cualquier acuerdo o compromiso establecido"
-											value={field.state.value}
-											onChange={(e) => field.handleChange(e.target.value)}
-										/>
-									</div>
-								)}
-							</form.Field>
+						{/* CB-025: Acuerdos Alcanzados + Compromisos de Pago solo en la
+						    variante "completo". En la promesa quedaron redundantes con
+						    Comentarios + el selector de cuotas/mora + Monto comprometido,
+						    y Compromisos además era obligatorio (frenaba al asesor). */}
+						{!esPromesa && (
+							<div className="grid grid-cols-2 gap-4">
+								<form.Field name="acuerdosAlcanzados">
+									{(field) => (
+										<div className="space-y-2">
+											<Label>Acuerdos Alcanzados</Label>
+											<Textarea
+												placeholder="Describe cualquier acuerdo o compromiso establecido"
+												value={field.state.value}
+												onChange={(e) => field.handleChange(e.target.value)}
+											/>
+										</div>
+									)}
+								</form.Field>
 
-							<form.Field name="estadoContacto">
-								{(estadoField) => (
-									<form.Field
-										name="compromisosPago"
-										validators={{
-											onChange: ({ value, fieldApi }) => {
+								<form.Field name="estadoContacto">
+									{(estadoField) => (
+										<form.Field
+											name="compromisosPago"
+											validators={{
+												onChange: ({ value, fieldApi }) => {
+													const estadoContacto =
+														form.getFieldValue("estadoContacto");
+													const estadosExitosos = [
+														"contactado",
+														"promesa_pago",
+														"acuerdo_parcial",
+													];
+
+													// Requerir compromisos solo para contactos exitosos
+													if (
+														estadosExitosos.includes(estadoContacto) &&
+														(!value || value.trim() === "")
+													) {
+														return "El compromiso de pago es obligatorio cuando el contacto fue exitoso";
+													}
+													return undefined;
+												},
+											}}
+										>
+											{(field) => {
 												const estadoContacto =
 													form.getFieldValue("estadoContacto");
 												const estadosExitosos = [
@@ -899,237 +1096,206 @@ export function ContactoModal({
 													"promesa_pago",
 													"acuerdo_parcial",
 												];
+												const esRequerido =
+													estadosExitosos.includes(estadoContacto);
 
-												// Requerir compromisos solo para contactos exitosos
-												if (
-													estadosExitosos.includes(estadoContacto) &&
-													(!value || value.trim() === "")
-												) {
-													return "El compromiso de pago es obligatorio cuando el contacto fue exitoso";
-												}
-												return undefined;
-											},
-										}}
-									>
-										{(field) => {
-											const estadoContacto =
-												form.getFieldValue("estadoContacto");
-											const estadosExitosos = [
-												"contactado",
-												"promesa_pago",
-												"acuerdo_parcial",
-											];
-											const esRequerido =
-												estadosExitosos.includes(estadoContacto);
-
-											return (
-												<div className="space-y-2">
-													<Label>
-														Compromisos de Pago {esRequerido && "*"}
-													</Label>
-													<Textarea
-														placeholder="Fechas y montos específicos prometidos por el cliente"
-														value={field.state.value}
-														onChange={(e) => field.handleChange(e.target.value)}
-														className={
-															field.state.meta.isTouched &&
-															field.state.meta.errors.length > 0
-																? "border-red-500"
-																: ""
-														}
-													/>
-													{field.state.meta.isTouched &&
-														field.state.meta.errors.length > 0 && (
-															<p className="text-red-500 text-sm">
-																{field.state.meta.errors.join(", ")}
-															</p>
-														)}
-												</div>
-											);
-										}}
-									</form.Field>
-								)}
-							</form.Field>
-						</div>
+												return (
+													<div className="space-y-2">
+														<Label>
+															Compromisos de Pago {esRequerido && "*"}
+														</Label>
+														<Textarea
+															placeholder="Fechas y montos específicos prometidos por el cliente"
+															value={field.state.value}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+															className={
+																field.state.meta.isTouched &&
+																field.state.meta.errors.length > 0
+																	? "border-red-500"
+																	: ""
+															}
+														/>
+														{field.state.meta.isTouched &&
+															field.state.meta.errors.length > 0 && (
+																<p className="text-red-500 text-sm">
+																	{field.state.meta.errors.join(", ")}
+																</p>
+															)}
+													</div>
+												);
+											}}
+										</form.Field>
+									)}
+								</form.Field>
+							</div>
+						)}
 					</div>
 
-					{/* CB-020: Sección de cuotas — SOLO en variante promesa. cartera-back
-					    NO separa la mora por cuota (moras_credito es un monto agregado
-					    del crédito, no por cuota individual) — por eso el checkbox de
-					    mora es independiente del rango: puede haber rango sin mora,
-					    mora sin rango ("solo mora"), o ambos. */}
+					{/* CB-025: "¿Qué prometió pagar?" — SOLO en promesa. Lista de checkboxes
+					    (fila por cuota atrasada + fila de Mora) con monto y vencimiento, y el
+					    total en vivo. Guía ui-ux-pro-max: multi-select = checkbox column (#91),
+					    no comunicar selección solo con color (#37), touch target >=44px (#22).
+					    La selección se guarda como rango cuotaInicio..cuotaFin (ver
+					    alternarCuotaPromesa); Mora es independiente. */}
 					{esPromesa && (
-						<div className="space-y-4">
-							<h3 className="font-medium text-lg">¿Qué prometió pagar?</h3>
+						<div className="space-y-3">
+							<h3 className="font-semibold text-base">¿Qué prometió pagar?</h3>
+							<p className="text-muted-foreground text-sm">
+								Arranca con todo lo atrasado + mora; destilda lo que no aplique.
+							</p>
 
-							{cuotasDisponibles.length === 0 ? (
-								<p className="text-muted-foreground text-sm">
-									Este contrato no tiene cuotas atrasadas.
-								</p>
-							) : (
-								<div className="grid grid-cols-2 gap-4">
-									<form.Field
-										name="cuotaInicio"
-										validators={{
-											// listenTo cuotaFin: si el usuario baja cuotaFin por
-											// debajo de un cuotaInicio ya elegido, este validator
-											// re-corre aunque cuotaInicio no haya cambiado (mismo
-											// fix que cuotaFin de abajo, en la dirección opuesta).
-											onChangeListenTo: ["cuotaFin"],
-											onChange: ({ value, fieldApi }) => {
-												const cuotaFin =
-													fieldApi.form.getFieldValue("cuotaFin");
-												if (
-													value != null &&
-													cuotaFin != null &&
-													cuotaFin < value
-												) {
-													return "Debe ser menor o igual a la cuota final";
-												}
-												return undefined;
-											},
-										}}
-									>
-										{(field) => (
-											<div className="space-y-2">
-												<Label>Cuota desde</Label>
-												<Select
-													value={field.state.value?.toString() ?? ""}
-													onValueChange={(value) =>
-														field.handleChange(
-															value ? Number(value) : undefined,
-														)
-													}
+							<div className="overflow-hidden rounded-lg border">
+								{numerosAtrasados.length === 0 ? (
+									<p className="p-3 text-muted-foreground text-sm">
+										Este contrato no tiene cuotas atrasadas.
+									</p>
+								) : (
+									<div className="max-h-[200px] divide-y overflow-y-auto">
+										{cuotasOrdenadas.map((c) => {
+											const activa = cuotasPromesa.has(c.numeroCuota);
+											return (
+												<label
+													key={c.numeroCuota}
+													className={cn(
+														"flex min-h-[44px] cursor-pointer items-center gap-3 px-3 py-2 transition-colors",
+														activa ? "bg-primary/5" : "hover:bg-muted/50",
+													)}
 												>
-													<SelectTrigger>
-														<SelectValue placeholder="Sin cuota" />
-													</SelectTrigger>
-													<SelectContent>
-														{cuotasDisponibles.map((c) => (
-															<SelectItem
-																key={c.numeroCuota}
-																value={c.numeroCuota.toString()}
-															>
-																Cuota #{c.numeroCuota}
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
-												{field.state.meta.errors.length > 0 && (
-													<p className="text-red-500 text-sm">
-														{field.state.meta.errors.join(", ")}
-													</p>
-												)}
-											</div>
-										)}
-									</form.Field>
-
-									<form.Field
-										name="cuotaFin"
-										validators={{
-											// Espejo del validator de cuotaInicio: sin esto, cambiar
-											// SOLO cuotaFin a un valor menor que cuotaInicio ya
-											// elegido no muestra error ni bloquea el submit (el
-											// validator de cuotaInicio no se re-corre porque ese
-											// campo no cambió) — el .refine() del server sí lo
-											// atrapa, pero como error de red, no como UX inmediata.
-											onChangeListenTo: ["cuotaInicio"],
-											onChange: ({ value, fieldApi }) => {
-												const cuotaInicio =
-													fieldApi.form.getFieldValue("cuotaInicio");
-												if (
-													value != null &&
-													cuotaInicio != null &&
-													value < cuotaInicio
-												) {
-													return "Debe ser mayor o igual a la cuota inicial";
-												}
-												return undefined;
-											},
-										}}
-									>
-										{(field) => (
-											<div className="space-y-2">
-												<Label>Cuota hasta</Label>
-												<Select
-													value={field.state.value?.toString() ?? ""}
-													onValueChange={(value) =>
-														field.handleChange(
-															value ? Number(value) : undefined,
-														)
-													}
-												>
-													<SelectTrigger>
-														<SelectValue placeholder="Igual a 'desde' si es solo una" />
-													</SelectTrigger>
-													<SelectContent>
-														{cuotasDisponibles.map((c) => (
-															<SelectItem
-																key={c.numeroCuota}
-																value={c.numeroCuota.toString()}
-															>
-																Cuota #{c.numeroCuota}
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
-												{field.state.meta.errors.length > 0 && (
-													<p className="text-red-500 text-sm">
-														{field.state.meta.errors.join(", ")}
-													</p>
-												)}
-											</div>
-										)}
-									</form.Field>
-								</div>
-							)}
-
-							<form.Field
-								name="incluyeMora"
-								validators={{
-									// Re-corre cuando cuotaInicio/cuotaFin cambian (no solo
-									// cuando cambia este checkbox) para que canSubmit refleje
-									// la regla "rango O mora" en tiempo real — antes el error
-									// solo se mostraba como texto, sin bloquear el submit.
-									onChangeListenTo: ["cuotaInicio", "cuotaFin"],
-									onChange: ({ value, fieldApi }) => {
-										const cuotaInicio =
-											fieldApi.form.getFieldValue("cuotaInicio");
-										const cuotaFin = fieldApi.form.getFieldValue("cuotaFin");
-										return faltaRangoOMora(cuotaInicio, cuotaFin, value)
-											? MENSAJE_RANGO_O_MORA_REQUERIDO
-											: undefined;
-									},
-									// onChange no corre si el asesor nunca toca cuotas NI el
-									// checkbox (form arranca en undefined/undefined/false) —
-									// mismo patrón del bug de fecha (Codex, PR #1147): sin
-									// onSubmit, se podía guardar una promesa sin rango ni mora.
-									onSubmit: ({ value, fieldApi }) => {
-										const cuotaInicio =
-											fieldApi.form.getFieldValue("cuotaInicio");
-										const cuotaFin = fieldApi.form.getFieldValue("cuotaFin");
-										return faltaRangoOMora(cuotaInicio, cuotaFin, value)
-											? MENSAJE_RANGO_O_MORA_REQUERIDO
-											: undefined;
-									},
-								}}
-							>
-								{(field) => (
-									<div className="flex items-center space-x-2">
-										<Checkbox
-											id="incluyeMora"
-											checked={field.state.value}
-											onCheckedChange={(checked) =>
-												field.handleChange(!!checked)
-											}
-										/>
-										<Label htmlFor="incluyeMora">
-											Incluye pago de mora del crédito
-										</Label>
+													<Checkbox
+														checked={activa}
+														onCheckedChange={() =>
+															alternarCuotaPromesa(c.numeroCuota)
+														}
+													/>
+													<div className="flex-1">
+														<p className="font-medium text-sm">
+															Cuota #{c.numeroCuota}
+														</p>
+														{c.fechaVencimiento && (
+															<p className="text-muted-foreground text-xs">
+																Vence{" "}
+																{format(
+																	new Date(c.fechaVencimiento),
+																	"dd MMM yyyy",
+																	{
+																		locale: es,
+																	},
+																)}
+															</p>
+														)}
+													</div>
+													<span className="font-medium text-sm tabular-nums">
+														Q
+														{c.monto.toLocaleString("es-GT", {
+															minimumFractionDigits: 2,
+															maximumFractionDigits: 2,
+														})}
+													</span>
+												</label>
+											);
+										})}
 									</div>
 								)}
-							</form.Field>
 
+								{/* Mora como una fila más — mantiene el campo incluyeMora y sus
+								    validators (regla "rango O mora"). */}
+								<form.Field
+									name="incluyeMora"
+									validators={{
+										onChangeListenTo: ["cuotaInicio", "cuotaFin"],
+										onChange: ({ value, fieldApi }) => {
+											const cuotaInicio =
+												fieldApi.form.getFieldValue("cuotaInicio");
+											const cuotaFin = fieldApi.form.getFieldValue("cuotaFin");
+											return faltaRangoOMora(cuotaInicio, cuotaFin, value)
+												? MENSAJE_RANGO_O_MORA_REQUERIDO
+												: undefined;
+										},
+										onSubmit: ({ value, fieldApi }) => {
+											const cuotaInicio =
+												fieldApi.form.getFieldValue("cuotaInicio");
+											const cuotaFin = fieldApi.form.getFieldValue("cuotaFin");
+											return faltaRangoOMora(cuotaInicio, cuotaFin, value)
+												? MENSAJE_RANGO_O_MORA_REQUERIDO
+												: undefined;
+										},
+									}}
+								>
+									{(field) => (
+										<label
+											className={cn(
+												"flex min-h-[44px] cursor-pointer items-center gap-3 border-t px-3 py-2 transition-colors",
+												field.state.value
+													? "bg-primary/5"
+													: "hover:bg-muted/50",
+											)}
+										>
+											<Checkbox
+												checked={field.state.value}
+												onCheckedChange={(ch) => {
+													field.handleChange(!!ch);
+													// Con convenio el monto es el total del convenio; no
+													// lo pisamos con la suma cuotas+mora (Codex PR #1228).
+													if (!esConvenio) {
+														form.setFieldValue(
+															"montoComprometido",
+															totalDeSeleccion(cuotasPromesa, !!ch).toFixed(2),
+														);
+													}
+												}}
+											/>
+											<div className="flex-1">
+												<p className="font-medium text-sm">Mora</p>
+												<p className="text-muted-foreground text-xs">
+													Interés por atraso del crédito
+												</p>
+											</div>
+											<span className="font-medium text-sm tabular-nums">
+												Q
+												{montoMora.toLocaleString("es-GT", {
+													minimumFractionDigits: 2,
+													maximumFractionDigits: 2,
+												})}
+											</span>
+										</label>
+									)}
+								</form.Field>
+
+								{/* Total en vivo de lo seleccionado */}
+								<form.Subscribe
+									selector={(state) => [
+										state.values.cuotaInicio,
+										state.values.cuotaFin,
+										state.values.incluyeMora,
+										state.values.montoComprometido,
+									]}
+								>
+									{() => {
+										const total = totalDeSeleccion(
+											cuotasPromesa,
+											!!form.getFieldValue("incluyeMora"),
+										);
+										return (
+											<div className="flex items-center justify-between border-t bg-muted/40 px-3 py-2">
+												<span className="font-medium text-sm">
+													Total seleccionado
+												</span>
+												<span className="font-bold text-base tabular-nums">
+													Q
+													{total.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</span>
+											</div>
+										);
+									}}
+								</form.Subscribe>
+							</div>
+
+							{/* Validación "rango O mora" */}
 							<form.Subscribe
 								selector={(state) => [
 									state.values.cuotaInicio,
@@ -1142,37 +1308,28 @@ export function ContactoModal({
 										cuotaInicio as number | null | undefined,
 										cuotaFin as number | null | undefined,
 										!!incluyeMora,
-									) && (
+									) ? (
 										<p className="text-muted-foreground text-sm">
 											{MENSAJE_RANGO_O_MORA_REQUERIDO}.
 										</p>
-									)
+									) : null
 								}
 							</form.Subscribe>
 
-							{/* CB-025: monto que el cliente dijo que va a pagar —
-							    informativo, opcional. No participa en evaluarPromesa. */}
+							{/* CB-025: monto comprometido — se autollena con el total seleccionado
+							    (cuota + mora) y queda editable. Informativo: no participa en
+							    evaluarPromesa. */}
 							<form.Field name="montoComprometido">
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor="montoComprometido">
-											Monto comprometido (opcional)
+											Monto comprometido (editable)
 										</Label>
 										<CurrencyInput
 											id="montoComprometido"
 											value={field.state.value}
 											onChange={(value) => field.handleChange(value)}
 										/>
-										{montoSugerido != null && montoSugerido > 0 && (
-											<p className="text-muted-foreground text-sm">
-												Debe Q
-												{montoSugerido.toLocaleString("es-GT", {
-													minimumFractionDigits: 2,
-													maximumFractionDigits: 2,
-												})}{" "}
-												entre mora y cuota.
-											</p>
-										)}
 									</div>
 								)}
 							</form.Field>
@@ -1183,8 +1340,8 @@ export function ContactoModal({
 					    la fecha prometida y es obligatoria: no hay checkbox que la
 					    haga opcional (requiereSeguimiento arranca en true y no se
 					    puede desmarcar). */}
-					<div className="space-y-4">
-						<h3 className="font-medium text-lg">
+					<div className="space-y-3">
+						<h3 className="font-semibold text-base">
 							{esPromesa ? "Fecha Prometida" : "Próximo Seguimiento"}
 						</h3>
 

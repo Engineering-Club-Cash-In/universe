@@ -485,10 +485,25 @@ function RouteComponent() {
 		const estados = estadoPromesasPago.data as
 			| Record<string, EstadoPromesa>
 			| undefined;
+		// Medianoche GT de hoy (T06:00:00Z del día GT) — igual criterio que el
+		// backend (promesaActivaDelCaso). Codex PR #1232: una promesa VENCIDA (aún
+		// pendiente/null porque el recálculo no corrió) NO es activa; sin este
+		// chequeo, abrir el modal editaría/sobrescribiría una promesa histórica.
+		const hoyGtStr = new Intl.DateTimeFormat("en-CA", {
+			timeZone: "America/Guatemala",
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+		}).format(new Date());
+		const inicioHoyGt = new Date(`${hoyGtStr}T06:00:00.000Z`);
 		const candidatas = (promesasPago as any[])
 			.filter((p) => {
 				const estado = estados?.[p.id] ?? p.estadoPromesa ?? "pendiente";
-				return estado === "pendiente" && !!p.fechaProximoContacto;
+				return (
+					estado === "pendiente" &&
+					!!p.fechaProximoContacto &&
+					new Date(p.fechaProximoContacto) >= inicioHoyGt
+				);
 			})
 			.sort(
 				(a, b) =>

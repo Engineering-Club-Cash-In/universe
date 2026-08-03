@@ -2751,6 +2751,7 @@ export const cobrosRouter = {
 							slaHoy: clasificacion.slaHoy,
 							promesaHoy: clasificacion.promesaHoy,
 							incumplida: clasificacion.incumplida,
+							promesaProxima: clasificacion.promesaProxima,
 							sinContacto: clasificacion.sinContacto,
 							diasSinContacto,
 						}),

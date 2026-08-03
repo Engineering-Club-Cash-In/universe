@@ -2332,21 +2332,29 @@ if (facturasExistentes.length > 0) {
     // ============================================
     
     // 🔥 FORMATO SIN MILISEGUNDOS (como SAT lo espera)
+    // Se lee con getUTC* a propósito: las fechas que recibe ya vienen expresadas en
+    // hora de Guatemala (igual que fechaHoraEmision al certificar), así que con los
+    // getters locales se desplazarían según la zona horaria del proceso — que en el
+    // contenedor es UTC.
     const formatearFechaSAT = (fecha: Date): string => {
-      const year = fecha.getFullYear();
-  const month = String(fecha.getMonth() + 1).padStart(2, '0');
-  const day = String(fecha.getDate()).padStart(2, '0');
-  const hours = String(fecha.getHours()).padStart(2, '0');
-  const minutes = String(fecha.getMinutes()).padStart(2, '0');
-  const seconds = String(fecha.getSeconds()).padStart(2, '0');
-  
-  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+      const year = fecha.getUTCFullYear();
+      const month = String(fecha.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(fecha.getUTCDate()).padStart(2, '0');
+      const hours = String(fecha.getUTCHours()).padStart(2, '0');
+      const minutes = String(fecha.getUTCMinutes()).padStart(2, '0');
+      const seconds = String(fecha.getUTCSeconds()).padStart(2, '0');
+
+      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
     };
 
     const fechaEmisionRaw = facturaCompleta.factura_fecha_certificacion || facturaCompleta.factura_fecha_emision;
     const fechaEmisionDate = new Date(fechaEmisionRaw);
     const fechaEmisionDocumento = formatearFechaSAT(fechaEmisionDate);
-    const fechaHoraAnulacion = formatearFechaSAT(new Date());
+    // ⏰ Se reusa el mismo `hoy` ya desplazado a hora de Guatemala con el que se
+    // decidió la ventana de gracia. Si acá se usara `new Date()` en el contenedor
+    // (UTC), una anulación de la noche del 5 viajaría a SAT como día 6 y quedaría
+    // rechazada justo en las horas que la gracia acaba de habilitar.
+    const fechaHoraAnulacion = formatearFechaSAT(hoy);
 
     console.log('🔍 ========== FECHAS PREPARADAS ==========');
     console.log('📅 Fecha emisión original (BD):', fechaEmisionRaw);

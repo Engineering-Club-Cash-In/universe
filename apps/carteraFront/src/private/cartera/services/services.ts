@@ -2190,6 +2190,8 @@ export interface LiquidacionResumen {
   emite_factura: boolean;
   reinversion: string;
   status?: "activo" | "inactivo" | "pendiente_devolucion";
+  /** true = inversionista interno/propio (no externo). */
+  permite_distribucion?: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -2218,6 +2220,7 @@ export async function getResumenGlobalLiquidaciones(params: {
   anio: number;
   estado?: string;
   incluirSinMovimiento?: boolean;
+  incluirInternos?: boolean;
 }): Promise<LiquidacionResumen[]> {
   const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
     params: {
@@ -2225,6 +2228,7 @@ export async function getResumenGlobalLiquidaciones(params: {
       anio: params.anio,
       estado: params.estado ?? "liquidated",
       ...(params.incluirSinMovimiento ? { incluirSinMovimiento: "true" } : {}),
+      ...(params.incluirInternos ? { incluirInternos: "true" } : {}),
     },
   });
   return data;
@@ -2241,6 +2245,7 @@ export async function descargarResumenLiquidacionesExcel(params: {
   anio: number;
   estado?: string;
   incluirSinMovimiento?: boolean;
+  incluirInternos?: boolean;
 }): Promise<ResumenLiquidacionesExcelResponse> {
   const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
     params: {
@@ -2249,6 +2254,7 @@ export async function descargarResumenLiquidacionesExcel(params: {
       estado: params.estado ?? "liquidated",
       excel: "true",
       ...(params.incluirSinMovimiento ? { incluirSinMovimiento: "true" } : {}),
+      ...(params.incluirInternos ? { incluirInternos: "true" } : {}),
     },
   });
   return data;

@@ -29,6 +29,7 @@ import {
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
   getCoveredInstallmentNumbers,
+  esPagoSoloCapital,
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
   getRequestedInstallmentFloor,
@@ -272,7 +273,8 @@ const procesarPagoMora = async ({
 const obtenerInfoCompletaCredito = async (
   credito_id: number,
   set: SetContext,
-  cuotaApagar: number
+  cuotaApagar: number,
+  esSoloCapital = false
 ) => {
   try {
     // 📋 Query 1: Crédito + Usuario + Mora (1 fila)
@@ -404,7 +406,14 @@ const obtenerInfoCompletaCredito = async (
     const cuotasPagables = cuotasPendientes.filter(
       (item) => !cuotasCubiertas.has(item.cuotas_credito.numero_cuota)
     );
-    if (cuotasPendientes.length > 0 && cuotasPagables.length === 0) {
+    // El abono solo-capital NO usa el loop de cuotas (su monto efectivo es 0),
+    // así que puede entrar aunque todas las cuotas abiertas estén cubiertas:
+    // es justamente la salida que sugiere el mensaje de abajo.
+    if (
+      !esSoloCapital &&
+      cuotasPendientes.length > 0 &&
+      cuotasPagables.length === 0
+    ) {
       set.status = 409;
       throw new Error(
         `${CUOTA_INTEGRITY_ERROR_PREFIX} todas las cuotas abiertas del crédito INCOBRABLE ya están cubiertas por pagos validados. Registre el pago como abono a capital o revalide los pagos existentes.`
@@ -456,6 +465,12 @@ const obtenerInfoCompletaCredito = async (
 
       // 📊 Cuotas pendientes (array ordenado)
       cuotasPendientes: cuotasPendientesUnicas,
+
+      // 🔗 Cuota a la que se cuelga un abono directo a capital cuando no queda
+      // ninguna pendiente utilizable: la primera cuota abierta ANTES de filtrar
+      // las cubiertas del INCOBRABLE. En créditos normales es exactamente
+      // cuotasPendientes[0], así que no cambia nada para ellos.
+      cuotaReferenciaCapital: cuotasPendientes[0]?.cuotas_credito ?? null,
 
       // 👥 Inversionistas (array)
       inversionistas,
@@ -694,17 +709,28 @@ export const insertPayment = async ({ body, set }: any) => {
     // permite registrar otro pago sobre la misma cuota para no depender de
     // validación contable antes de reportar el abono complementario.
 
+    // Un pago que va COMPLETO a capital no consume cuotas: se resuelve en la
+    // sección 7 y nunca entra al loop, así que la validación de cuotas abiertas
+    // no aplica. Se calcula acá porque sólo depende del request.
+    const esSoloCapital = esPagoSoloCapital({
+      montoBoleta,
+      otros,
+      abonoDirectoCapital: abono_directo_capital ?? 0,
+    });
+
     // 1. Obtener toda la info del crédito UNA SOLA VEZ
     const creditoData = await obtenerInfoCompletaCredito(
       credito_id,
       set,
-      cuotaApagar
+      cuotaApagar,
+      esSoloCapital
     );
 
     const {
       credito,
       inversionistas,
       cuotasPendientes,
+      cuotaReferenciaCapital,
       saldoAFavor,
       mora,
       stats,
@@ -1885,8 +1911,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       const monthPaymentsBig = new Big(
         (await getPagosDelMesActual(credito_id)) ?? 0
       ).plus(abonoCapital);
+      // En un INCOBRABLE con todas las cuotas abiertas ya cubiertas la lista
+      // filtrada viene vacía y no hay cuota pagada con numero_cuota > 0: el
+      // abono se cuelga de la cuota cubierta (igual que los capital_validated
+      // históricos del crédito 9272, colgados de su cuota 1).
       const cuotaReferencia =
-        ultimaCuotaPagada ?? cuotasPendientes[0]?.cuotas_credito;
+        ultimaCuotaPagada ??
+        cuotasPendientes[0]?.cuotas_credito ??
+        cuotaReferenciaCapital;
 
       if (!cuotaReferencia?.cuota_id) {
         throw new Error(

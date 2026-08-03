@@ -277,6 +277,48 @@ describe("registerPaymentPolicy - cuotas cubiertas de INCOBRABLES", () => {
   });
 });
 
+describe("registerPaymentPolicy - pago solo capital", () => {
+  it("boleta completa destinada a abono a capital es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "5000.00",
+        otros: 0,
+        abonoDirectoCapital: 5000,
+      }),
+    ).toBe(true);
+  });
+
+  it("un pago mixto (parte capital, parte cuota) NO es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "5000.00",
+        otros: 0,
+        abonoDirectoCapital: 3000,
+      }),
+    ).toBe(false);
+  });
+
+  it("sin abono directo a capital nunca es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "5000.00",
+        otros: 0,
+        abonoDirectoCapital: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("descuenta otros: boleta 5000 con otros 200 y capital 4800 es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "5000.00",
+        otros: 200,
+        abonoDirectoCapital: 4800,
+      }),
+    ).toBe(true);
+  });
+});
+
 describe("registerPaymentPolicy - resumen de abonos de cuota", () => {
   const resumir = (
     input: Parameters<

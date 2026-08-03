@@ -392,6 +392,34 @@ export const getCoveredOpenInstallment = ({
  * del skip tiene que ser el mismo o la fila en cero vuelve por esa vía. El gate
  * normal (`getCoveredOpenInstallment`) sigue mirando sólo `validated`.
  */
+/**
+ * ¿El pago va COMPLETO a abono directo a capital, sin efectivo para cuotas?
+ *
+ * Espeja la aritmética de `calcularMontoEfectivo` (boleta − otros − abono
+ * directo; el saldo a favor NO entra, el cálculo real lo ignora). Si el efectivo
+ * queda en 0 el loop de cuotas ni siquiera corre, así que un pago solo-capital
+ * no depende de que existan cuotas abiertas con saldo: es la vía válida para
+ * abonar a un INCOBRABLE que ya tiene todas sus cuotas cubiertas.
+ */
+export const esPagoSoloCapital = ({
+  montoBoleta,
+  otros,
+  abonoDirectoCapital,
+}: {
+  montoBoleta: BigInput;
+  otros?: BigInput | null;
+  abonoDirectoCapital?: BigInput | null;
+}): boolean => {
+  const capital = new Big(abonoDirectoCapital ?? 0);
+  if (capital.lte(0)) return false;
+
+  const montoEfectivo = new Big(montoBoleta)
+    .minus(new Big(otros ?? 0))
+    .minus(capital);
+
+  return montoEfectivo.lte(0);
+};
+
 export const getCoveredInstallmentNumbers = ({
   montoCuota,
   cuotas,

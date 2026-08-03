@@ -317,27 +317,25 @@ export const calcularCoberturaCuota = ({
   };
 };
 
-export const getCoveredOpenInstallment = ({
+type CuotaAbiertaConPagos = {
+  cuotaId: number;
+  numeroCuota: number;
+  pagos: PagoCoberturaCuota[];
+};
+
+/**
+ * Cuotas ABIERTAS cuyos pagos vivos ya cubren el monto contractual, mergeadas
+ * por `numero_cuota` (hay créditos con filas duplicadas de la misma cuota:
+ * mismo numero_cuota, cuota_id distinto).
+ */
+const getCoveredOpenInstallments = ({
   montoCuota,
   cuotas,
-  statusCredit,
 }: {
   montoCuota: BigInput;
-  cuotas: {
-    cuotaId: number;
-    numeroCuota: number;
-    pagos: PagoCoberturaCuota[];
-  }[];
-  statusCredit?: string | null;
+  cuotas: CuotaAbiertaConPagos[];
 }) => {
-  // En INCOBRABLE la cuota NO se cierra al cubrir el monto contractual, sino
-  // cuando el capital del crédito llega a 0 (ver shouldIncobrableInstallmentBePaid,
-  // regla del PR #887). Ahí "cuota cubierta por pagos validados pero abierta" es
-  // el estado normal de un insoluto a medio pagar, no una inconsistencia: si no
-  // la exceptuamos, el crédito deja de aceptar pagos (casos 9272 y 9340).
-  if (statusCredit === "INCOBRABLE") return null;
-
-  const cuotasLogicas = new Map<number, (typeof cuotas)[number]>();
+  const cuotasLogicas = new Map<number, CuotaAbiertaConPagos>();
   for (const cuota of cuotas) {
     const existente = cuotasLogicas.get(cuota.numeroCuota);
     cuotasLogicas.set(
@@ -348,12 +346,23 @@ export const getCoveredOpenInstallment = ({
     );
   }
 
-  const inconsistente = [...cuotasLogicas.values()].find((cuota) =>
-    calcularCoberturaCuota({
-      montoCuota,
-      pagos: cuota.pagos,
-    }).cuotaCompleta
+  return [...cuotasLogicas.values()].filter(
+    (cuota) =>
+      calcularCoberturaCuota({
+        montoCuota,
+        pagos: cuota.pagos,
+      }).cuotaCompleta
   );
+};
+
+export const getCoveredOpenInstallment = ({
+  montoCuota,
+  cuotas,
+}: {
+  montoCuota: BigInput;
+  cuotas: CuotaAbiertaConPagos[];
+}) => {
+  const [inconsistente] = getCoveredOpenInstallments({ montoCuota, cuotas });
 
   return inconsistente
     ? {
@@ -362,6 +371,31 @@ export const getCoveredOpenInstallment = ({
       }
     : null;
 };
+
+/**
+ * Números de cuota abiertos que ya están cubiertos por pagos vivos.
+ *
+ * Sólo para INCOBRABLES: ahí la cuota NO se cierra al cubrir el monto
+ * contractual, sino cuando el capital del crédito llega a 0 (ver
+ * `shouldIncobrableInstallmentBePaid`, regla del PR #887), así que una cuota
+ * "cubierta pero abierta" es el estado normal de un insoluto a medio pagar, no
+ * una inconsistencia. El caller filtra esas cuotas de las pendientes para que
+ * el pago nuevo caiga en la siguiente cuota CON saldo: si lo dejáramos entrar,
+ * su saldo neto daría 0 en todos los rubros y se insertaría una fila pending
+ * con `monto_aplicado = 0` (nunca validable) que además duplica la boleta.
+ */
+export const getCoveredInstallmentNumbers = ({
+  montoCuota,
+  cuotas,
+}: {
+  montoCuota: BigInput;
+  cuotas: CuotaAbiertaConPagos[];
+}): Set<number> =>
+  new Set(
+    getCoveredOpenInstallments({ montoCuota, cuotas }).map(
+      (cuota) => cuota.numeroCuota
+    )
+  );
 
 export type ResumenAbonosCuota = {
   cuotaCerrada: boolean;

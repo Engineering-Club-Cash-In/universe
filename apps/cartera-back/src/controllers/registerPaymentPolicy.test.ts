@@ -96,11 +96,10 @@ describe("registerPaymentPolicy - integridad de cuotas abiertas", () => {
     ).toEqual({ cuotaId: 20, numeroCuota: 3 });
   });
 
-  it("no marca inconsistencia en un crédito INCOBRABLE con la cuota cubierta pero abierta", () => {
+  it("sigue detectando la inconsistencia con el escenario del insoluto (crédito normal)", () => {
     expect(
       registerPaymentPolicy.getCoveredOpenInstallment({
         montoCuota: "3750.00",
-        statusCredit: "INCOBRABLE",
         cuotas: [
           {
             cuotaId: 40,
@@ -116,39 +115,95 @@ describe("registerPaymentPolicy - integridad de cuotas abiertas", () => {
           },
         ],
       }),
-    ).toBeNull();
+    ).toEqual({ cuotaId: 40, numeroCuota: 1 });
   });
+});
 
-  it("sigue detectando la inconsistencia en un crédito no INCOBRABLE con el mismo escenario", () => {
-    const cuotas = [
-      {
-        cuotaId: 40,
-        numeroCuota: 1,
-        pagos: [
+describe("registerPaymentPolicy - cuotas cubiertas de INCOBRABLES", () => {
+  // Caso real crédito 9272 (cuota contractual 3750): la cuota 1 quedó cubierta
+  // por un pago validated, las 2-4 sólo tienen el recibo no_required.
+  it("lista la cuota cubierta por un pago validated", () => {
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas: [
           {
-            pago_id: 50,
-            validationStatus: "validated",
-            paymentFalse: false,
-            abono_capital: "3750.00",
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 50,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "3750.00",
+              },
+            ],
+          },
+          {
+            cuotaId: 41,
+            numeroCuota: 2,
+            pagos: [
+              {
+                pago_id: 51,
+                validationStatus: "no_required",
+                paymentFalse: false,
+                abono_capital: "0.00",
+              },
+            ],
           },
         ],
-      },
-    ];
-
-    expect(
-      registerPaymentPolicy.getCoveredOpenInstallment({
-        montoCuota: "3750.00",
-        statusCredit: "ACTIVO",
-        cuotas,
       }),
-    ).toEqual({ cuotaId: 40, numeroCuota: 1 });
+    ]).toEqual([1]);
+  });
 
-    expect(
-      registerPaymentPolicy.getCoveredOpenInstallment({
+  it("no lista una cuota con abono parcial que no la cubre", () => {
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
         montoCuota: "3750.00",
-        cuotas,
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 50,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "1000.00",
+              },
+            ],
+          },
+        ],
       }),
-    ).toEqual({ cuotaId: 40, numeroCuota: 1 });
+    ]).toEqual([]);
+  });
+
+  it("los abonos directos a capital (capital_validated) no cuentan como cobertura", () => {
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 60,
+                validationStatus: "capital_validated",
+                paymentFalse: false,
+                abono_capital: "5250.00",
+              },
+              {
+                pago_id: 61,
+                validationStatus: "capital_validated",
+                paymentFalse: false,
+                abono_capital: "1000.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ]).toEqual([]);
   });
 });
 

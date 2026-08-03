@@ -28,6 +28,7 @@ import {
   esDestinoSobrescribible,
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
+  getCoveredInstallmentNumbers,
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
   getRequestedInstallmentFloor,
@@ -372,15 +373,41 @@ const obtenerInfoCompletaCredito = async (
       cuota.pagos.push(item.pagos_credito);
       cuotasParaValidar.set(cuotaId, cuota);
     }
-    const cuotaInconsistente = getCoveredOpenInstallment({
-      montoCuota: info.credito.cuota ?? 0,
-      cuotas: [...cuotasParaValidar.values()],
-      statusCredit: info.credito.statusCredit,
-    });
-    if (cuotaInconsistente) {
+    // En INCOBRABLE una cuota cubierta pero abierta NO es una inconsistencia:
+    // esas cuotas sólo se cierran cuando el capital del crédito llega a 0 (ver
+    // shouldIncobrableInstallmentBePaid, regla del PR #887). En vez de rechazar
+    // el pago, las sacamos de las pendientes para que caiga en la siguiente
+    // cuota CON saldo; si entrara a una ya cubierta, su saldo neto daría 0 en
+    // todos los rubros y nacería una fila pending con monto_aplicado = 0
+    // (nunca validable) con la boleta duplicada. Casos 9272 y 9340.
+    const esIncobrable = info.credito.statusCredit === "INCOBRABLE";
+    const cuotasCubiertas = esIncobrable
+      ? getCoveredInstallmentNumbers({
+          montoCuota: info.credito.cuota ?? 0,
+          cuotas: [...cuotasParaValidar.values()],
+        })
+      : new Set<number>();
+
+    if (!esIncobrable) {
+      const cuotaInconsistente = getCoveredOpenInstallment({
+        montoCuota: info.credito.cuota ?? 0,
+        cuotas: [...cuotasParaValidar.values()],
+      });
+      if (cuotaInconsistente) {
+        set.status = 409;
+        throw new Error(
+          `${CUOTA_INTEGRITY_ERROR_PREFIX} la cuota ${cuotaInconsistente.numeroCuota} está abierta, pero sus pagos validados ya cubren el total. Revalide el pago antes de registrar uno nuevo.`
+        );
+      }
+    }
+
+    const cuotasPagables = cuotasPendientes.filter(
+      (item) => !cuotasCubiertas.has(item.cuotas_credito.numero_cuota)
+    );
+    if (cuotasPendientes.length > 0 && cuotasPagables.length === 0) {
       set.status = 409;
       throw new Error(
-        `${CUOTA_INTEGRITY_ERROR_PREFIX} la cuota ${cuotaInconsistente.numeroCuota} está abierta, pero sus pagos validados ya cubren el total. Revalide el pago antes de registrar uno nuevo.`
+        `${CUOTA_INTEGRITY_ERROR_PREFIX} todas las cuotas abiertas del crédito INCOBRABLE ya están cubiertas por pagos validados. Registre el pago como abono a capital o revalide los pagos existentes.`
       );
     }
 
@@ -392,8 +419,8 @@ const obtenerInfoCompletaCredito = async (
     // el tramo de la 18 cerró la 17 fantasma y la 19 nunca recibió el suyo).
     // Nos quedamos con la copia más reciente (mayor cuota_id): es la que trae
     // el recibo re-sembrado vigente.
-    const porNumeroCuota = new Map<number, (typeof cuotasPendientes)[number]>();
-    for (const item of cuotasPendientes) {
+    const porNumeroCuota = new Map<number, (typeof cuotasPagables)[number]>();
+    for (const item of cuotasPagables) {
       const previo = porNumeroCuota.get(item.cuotas_credito.numero_cuota);
       if (
         !previo ||
@@ -404,7 +431,7 @@ const obtenerInfoCompletaCredito = async (
     }
     const cuotasPendientesUnicas = Array.from(porNumeroCuota.values());
     const cuotaIdsPendientes = new Set(
-      cuotasPendientes.map((item) => item.cuotas_credito.cuota_id)
+      cuotasPagables.map((item) => item.cuotas_credito.cuota_id)
     );
     if (cuotaIdsPendientes.size > cuotasPendientesUnicas.length) {
       console.warn(

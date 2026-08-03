@@ -95,6 +95,61 @@ describe("registerPaymentPolicy - integridad de cuotas abiertas", () => {
       }),
     ).toEqual({ cuotaId: 20, numeroCuota: 3 });
   });
+
+  it("no marca inconsistencia en un crédito INCOBRABLE con la cuota cubierta pero abierta", () => {
+    expect(
+      registerPaymentPolicy.getCoveredOpenInstallment({
+        montoCuota: "3750.00",
+        statusCredit: "INCOBRABLE",
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 50,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "3750.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("sigue detectando la inconsistencia en un crédito no INCOBRABLE con el mismo escenario", () => {
+    const cuotas = [
+      {
+        cuotaId: 40,
+        numeroCuota: 1,
+        pagos: [
+          {
+            pago_id: 50,
+            validationStatus: "validated",
+            paymentFalse: false,
+            abono_capital: "3750.00",
+          },
+        ],
+      },
+    ];
+
+    expect(
+      registerPaymentPolicy.getCoveredOpenInstallment({
+        montoCuota: "3750.00",
+        statusCredit: "ACTIVO",
+        cuotas,
+      }),
+    ).toEqual({ cuotaId: 40, numeroCuota: 1 });
+
+    expect(
+      registerPaymentPolicy.getCoveredOpenInstallment({
+        montoCuota: "3750.00",
+        cuotas,
+      }),
+    ).toEqual({ cuotaId: 40, numeroCuota: 1 });
+  });
 });
 
 describe("registerPaymentPolicy - resumen de abonos de cuota", () => {

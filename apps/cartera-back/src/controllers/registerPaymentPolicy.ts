@@ -320,6 +320,7 @@ export const calcularCoberturaCuota = ({
 export const getCoveredOpenInstallment = ({
   montoCuota,
   cuotas,
+  statusCredit,
 }: {
   montoCuota: BigInput;
   cuotas: {
@@ -327,7 +328,15 @@ export const getCoveredOpenInstallment = ({
     numeroCuota: number;
     pagos: PagoCoberturaCuota[];
   }[];
+  statusCredit?: string | null;
 }) => {
+  // En INCOBRABLE la cuota NO se cierra al cubrir el monto contractual, sino
+  // cuando el capital del crédito llega a 0 (ver shouldIncobrableInstallmentBePaid,
+  // regla del PR #887). Ahí "cuota cubierta por pagos validados pero abierta" es
+  // el estado normal de un insoluto a medio pagar, no una inconsistencia: si no
+  // la exceptuamos, el crédito deja de aceptar pagos (casos 9272 y 9340).
+  if (statusCredit === "INCOBRABLE") return null;
+
   const cuotasLogicas = new Map<number, (typeof cuotas)[number]>();
   for (const cuota of cuotas) {
     const existente = cuotasLogicas.get(cuota.numeroCuota);

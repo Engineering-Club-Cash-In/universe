@@ -375,6 +375,7 @@ const obtenerInfoCompletaCredito = async (
     const cuotaInconsistente = getCoveredOpenInstallment({
       montoCuota: info.credito.cuota ?? 0,
       cuotas: [...cuotasParaValidar.values()],
+      statusCredit: info.credito.statusCredit,
     });
     if (cuotaInconsistente) {
       set.status = 409;

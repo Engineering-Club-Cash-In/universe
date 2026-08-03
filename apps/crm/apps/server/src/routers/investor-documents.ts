@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -8,9 +9,85 @@ import {
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
+	CarteraBackHttpError,
 	carteraBackClient,
 	type SimulacionInversionistaResult,
 } from "../services/cartera-back-client";
+
+// Duplicados que valida cartera al crear (controllers/investor.ts revisa email
+// → DPI → nombre y corta con 409 en el primero que choca). El código de máquina
+// es lo estable; el texto y el campo los ponemos acá para que el modal marque
+// exactamente qué dato hay que corregir.
+const DUPLICADOS_INVERSIONISTA = {
+	duplicate_dpi: {
+		campo: "dpi",
+		mensaje: "Ya existe un inversionista registrado con ese DPI",
+	},
+	duplicate_email: {
+		campo: "email",
+		mensaje: "Ya existe un inversionista registrado con ese email",
+	},
+	duplicate_nombre: {
+		campo: "nombre",
+		mensaje: "Ya existe un inversionista registrado con ese nombre",
+	},
+} as const;
+
+type CodigoDuplicado = keyof typeof DUPLICADOS_INVERSIONISTA;
+
+function esCodigoDuplicado(codigo?: string): codigo is CodigoDuplicado {
+	return !!codigo && codigo in DUPLICADOS_INVERSIONISTA;
+}
+
+// Traduce una falla de cartera-back a un error de oRPC con mensaje legible.
+// Sin esto, cualquier throw del cliente HTTP llega al navegador como
+// "Internal server error" (oRPC solo conserva el mensaje de los ORPCError),
+// y el usuario abre ticket en vez de corregir el DPI/email duplicado.
+export function toCarteraOrpcError(
+	error: unknown,
+	contexto: string,
+): ORPCError<any, any> {
+	if (error instanceof CarteraBackHttpError) {
+		// cartera manda el texto para el usuario en `message` y el código de
+		// máquina en `error` ("duplicate_dpi", "duplicate_email", ...).
+		const codigo = error.payload.error;
+		const detalle = [
+			error.payload.message?.trim(),
+			...(error.payload.errores ?? []),
+		]
+			.filter(Boolean)
+			.join(". ");
+
+		// Duplicado conocido: mandamos el campo culpable para que el modal lo
+		// marque, en vez de dejarle al usuario adivinar si fue el DPI o el email.
+		if (esCodigoDuplicado(codigo)) {
+			const { campo, mensaje } = DUPLICADOS_INVERSIONISTA[codigo];
+			return new ORPCError("CONFLICT", {
+				message: mensaje,
+				data: { codigo, campo },
+			});
+		}
+
+		if (error.status === 409) {
+			return new ORPCError("CONFLICT", {
+				message: detalle || "Ya existe un inversionista con esos datos",
+				data: { codigo },
+			});
+		}
+
+		if (error.status >= 400 && error.status < 500) {
+			return new ORPCError("BAD_REQUEST", {
+				message: detalle || `${contexto}: cartera rechazó la solicitud`,
+				data: { codigo },
+			});
+		}
+	}
+
+	console.error(`[${contexto}] error en cartera-back:`, error);
+	return new ORPCError("INTERNAL_SERVER_ERROR", {
+		message: `${contexto}: cartera no está respondiendo. Intenta de nuevo en unos minutos.`,
+	});
+}
 
 export const investorDocumentsRouter = {
 	getInvestorRendimiento: crmCobrosOrInvestmentsProcedure
@@ -148,10 +225,9 @@ export const investorDocumentsRouter = {
 
 	// Bancos — catálogo desde cartera-back (solo con transferencia: alimenta
 	// los comboboxes de crear/editar inversionista)
-	getBancosCartera: crmCobrosOrInvestmentsProcedure
-		.handler(async () => {
-			return carteraBackClient.getBancosTransferencia();
-		}),
+	getBancosCartera: crmCobrosOrInvestmentsProcedure.handler(async () => {
+		return carteraBackClient.getBancosTransferencia();
+	}),
 
 	// Editar inversionista — upsert en cartera-back + log
 	editarInversionista: crmCobrosOrInvestmentsProcedure
@@ -232,10 +308,7 @@ export const investorDocumentsRouter = {
 						context.session.user.name ?? context.session.user.email,
 				});
 			} catch (logError) {
-				console.error(
-					"Error al registrar log de cambio de status:",
-					logError,
-				);
+				console.error("Error al registrar log de cambio de status:", logError);
 			}
 
 			return { success: true, data: result };
@@ -281,24 +354,39 @@ export const investorDocumentsRouter = {
 				),
 		)
 		.handler(async ({ input, context }) => {
-			// 1. Crear inversionista en cartera-back
-			const createResult = await carteraBackClient.createInvestor({
-				operation: "CREATE",
-				nombre: input.nombre,
-				dpi: input.dpi ? Number(input.dpi) : null,
-				email: input.email ?? null,
-				banco: input.banco ?? null,
-				tipo_cuenta: input.tipoCuenta ?? null,
-				numero_cuenta: input.numeroCuenta ?? null,
-				tipo_reinversion: input.tipoReinversion ?? "sin_reinversion",
-				monto_reinversion: input.montoReinversion ?? null,
-				moneda: input.moneda ?? "quetzales",
-				emite_factura: input.emiteFactura ?? false,
-			});
+			// 1. Crear inversionista en cartera-back.
+			// Cartera valida duplicados (DPI / email / nombre) y responde 409; sin
+			// este try/catch el error viajaba como Error suelto y oRPC se lo
+			// entregaba al usuario como "Internal server error", que terminaba en
+			// ticket de soporte en vez de en una corrección del formulario.
+			let createResult: Awaited<
+				ReturnType<typeof carteraBackClient.createInvestor>
+			>;
+			try {
+				createResult = await carteraBackClient.createInvestor({
+					operation: "CREATE",
+					nombre: input.nombre,
+					dpi: input.dpi ? Number(input.dpi) : null,
+					email: input.email ?? null,
+					banco: input.banco ?? null,
+					tipo_cuenta: input.tipoCuenta ?? null,
+					numero_cuenta: input.numeroCuenta ?? null,
+					tipo_reinversion: input.tipoReinversion ?? "sin_reinversion",
+					monto_reinversion: input.montoReinversion ?? null,
+					moneda: input.moneda ?? "quetzales",
+					emite_factura: input.emiteFactura ?? false,
+				});
+			} catch (error) {
+				throw toCarteraOrpcError(error, "Crear inversionista");
+			}
 
 			const created = createResult.data?.[0];
 			if (!created?.inversionista_id) {
-				throw new Error("No se pudo crear el inversionista en cartera");
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						createResult.message ||
+						"No se pudo crear el inversionista en cartera",
+				});
 			}
 
 			// 2. Log de creación
@@ -320,21 +408,38 @@ export const investorDocumentsRouter = {
 			// (modalidadFacturacion ya viene garantizada por el .refine() del schema)
 			let compraResult = null;
 			if (input.hacerCompraCartera && input.montoCompraCartera) {
-				const tipoReinversionCompra: "sin_reinversion" | "reinversion_capital" | "reinversion_total" =
+				const tipoReinversionCompra:
+					| "sin_reinversion"
+					| "reinversion_capital"
+					| "reinversion_total" =
 					input.tipoReinversion === "reinversion_capital" ||
 					input.tipoReinversion === "reinversion_total"
 						? input.tipoReinversion
 						: "sin_reinversion";
-				compraResult = await carteraBackClient.compraCartera({
-					inversionista_id: created.inversionista_id,
-					monto_aportado: input.montoCompraCartera,
-					tipo_operacion: "compra_cartera",
-					tipo_reinversion: tipoReinversionCompra,
-					modalidad_facturacion: input.modalidadFacturacion,
-					modalidad_facturacion_spread_id: input.modalidadFacturacionSpreadId,
-					fecha_inicio_participacion:
-						input.fechaInicioParticipacion || undefined,
-				});
+				try {
+					compraResult = await carteraBackClient.compraCartera({
+						inversionista_id: created.inversionista_id,
+						monto_aportado: input.montoCompraCartera,
+						tipo_operacion: "compra_cartera",
+						tipo_reinversion: tipoReinversionCompra,
+						modalidad_facturacion: input.modalidadFacturacion,
+						modalidad_facturacion_spread_id: input.modalidadFacturacionSpreadId,
+						fecha_inicio_participacion:
+							input.fechaInicioParticipacion || undefined,
+					});
+				} catch (error) {
+					// El inversionista YA quedó creado: hay que decirlo explícito para
+					// que no lo vuelvan a crear (cartera respondería 409 duplicado).
+					const causa = toCarteraOrpcError(error, "Compra de cartera");
+					throw new ORPCError(causa.code, {
+						message: `El inversionista se creó (ID ${created.inversionista_id}), pero falló la compra de cartera: ${causa.message}. Regístrala desde su perfil, no vuelvas a crearlo.`,
+						data: {
+							...(typeof causa.data === "object" ? causa.data : {}),
+							inversionistaId: created.inversionista_id,
+							inversionistaCreado: true,
+						},
+					});
+				}
 
 				// Log de compra de cartera
 				await db.insert(investorActivityLog).values({

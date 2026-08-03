@@ -143,6 +143,16 @@ export class CarteraBackHttpError extends Error {
 	constructor(
 		message: string,
 		public readonly status: number,
+		// Body crudo que devolvió cartera-back. `message` suele traer el texto
+		// para el usuario ("Ya existe un inversionista con ese DPI") y `error`
+		// el código de máquina ("duplicate_dpi"); el `.message` de esta clase
+		// antepone el código, así que los callers que quieran mostrarle algo
+		// legible al usuario deben leer `payload.message`.
+		public readonly payload: {
+			error?: string;
+			message?: string;
+			errores?: string[];
+		} = {},
 	) {
 		super(message);
 		this.name = "CarteraBackHttpError";
@@ -752,11 +762,13 @@ export class CarteraBackClient {
 								throw new CarteraBackHttpError(
 									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
 									retryRes.status,
+									retryData,
 								);
 							}
 							throw new CarteraBackHttpError(
 								`Authentication failed: ${errorData.error || errorData.message}`,
 								res.status,
+								errorData,
 							);
 						}
 
@@ -764,12 +776,14 @@ export class CarteraBackClient {
 							throw new CarteraBackHttpError(
 								`Validation failed: ${errorData.error || errorData.message}`,
 								res.status,
+								errorData,
 							);
 						}
 
 						throw new CarteraBackHttpError(
 							`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
 							res.status,
+							errorData,
 						);
 					}
 

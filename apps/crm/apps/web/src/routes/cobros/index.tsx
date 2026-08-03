@@ -428,6 +428,17 @@ function RouteComponent() {
 		enabled: !!session,
 	});
 
+	// CB-029: resumen de promesas de pago del equipo (dashboard).
+	const resumenPromesas = useQuery({
+		...orpc.getResumenPromesas.queryOptions({ input: {} }),
+		enabled: !!session,
+	});
+	// El cliente ORPC infiere `{}` para varias queries de este archivo; casteo
+	// solo lo mío para no arrastrar el problema a los tiles nuevos.
+	const promesasStats = resumenPromesas.data as
+		| { activas: number; vencenHoy: number; incumplidas: number }
+		| undefined;
+
 	// Query para seguimientos pendientes (casos con proximoContacto)
 	const seguimientosQuery = useQuery({
 		...orpc.getCasosCobros.queryOptions({
@@ -801,6 +812,63 @@ function RouteComponent() {
 						</p>
 					</CardContent>
 				</Card>
+			</div>
+
+			{/* CB-029: resumen de Promesas de Pago del equipo — tiles clickeables
+			    hacia la Cola del Día. */}
+			<div className="grid gap-4 sm:grid-cols-3">
+				<Link to="/cobros/cola" className="block">
+					<Card className="h-full transition-colors hover:bg-muted/50">
+						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+							<CardTitle className="font-medium text-sm">
+								Promesas activas
+							</CardTitle>
+							<Target className="h-4 w-4 text-muted-foreground" />
+						</CardHeader>
+						<CardContent>
+							<div className="font-bold text-2xl">
+								{promesasStats?.activas ?? 0}
+							</div>
+							<p className="text-muted-foreground text-xs">
+								Compromisos vigentes del equipo
+							</p>
+						</CardContent>
+					</Card>
+				</Link>
+
+				<Link to="/cobros/cola" className="block">
+					<Card className="h-full transition-colors hover:bg-muted/50">
+						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+							<CardTitle className="font-medium text-sm">Vencen hoy</CardTitle>
+							<CalendarClock className="h-4 w-4 text-amber-600" />
+						</CardHeader>
+						<CardContent>
+							<div className="font-bold text-2xl text-amber-600">
+								{promesasStats?.vencenHoy ?? 0}
+							</div>
+							<p className="text-muted-foreground text-xs">
+								Promesas que vencen hoy
+							</p>
+						</CardContent>
+					</Card>
+				</Link>
+
+				<Link to="/cobros/cola" className="block">
+					<Card className="h-full transition-colors hover:bg-muted/50">
+						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+							<CardTitle className="font-medium text-sm">Incumplidas</CardTitle>
+							<TriangleAlert className="h-4 w-4 text-red-600" />
+						</CardHeader>
+						<CardContent>
+							<div className="font-bold text-2xl text-red-600">
+								{promesasStats?.incumplidas ?? 0}
+							</div>
+							<p className="text-muted-foreground text-xs">
+								Promesas que se cayeron
+							</p>
+						</CardContent>
+					</Card>
+				</Link>
 			</div>
 
 			{/* Embudo Visual de Estados - Acordeón */}

@@ -141,6 +141,21 @@ interface ContactoModalProps {
 	// Codex PR #1228: con convenio activo, el monto comprometido es el total del
 	// convenio (montoSugerido), no la suma cuotas+mora — el selector no lo pisa.
 	esConvenio?: boolean;
+	// CB-029: promesa activa del caso (una sola). Si viene, el modal abre en modo
+	// EDICIÓN: pre-carga estos valores y al guardar hace UPDATE de esta fila en
+	// vez de crear otra. $id.tsx la detecta con el estado ya recalculado.
+	promesaActiva?: {
+		id: string;
+		comentarios?: string | null;
+		acuerdosAlcanzados?: string | null;
+		cuotaInicio?: number | null;
+		cuotaFin?: number | null;
+		incluyeMora?: boolean | null;
+		montoComprometido?: string | null;
+		fechaProximoContacto?: string | Date | null;
+		fechaAlerta?: string | Date | null;
+		proximoPaso?: string | null;
+	} | null;
 	// Variables para plantillas de mensaje
 	fechaPago?: string;
 	cuotaMensual?: string;
@@ -169,6 +184,7 @@ export function ContactoModal({
 	montoSugerido,
 	montoMora = 0,
 	esConvenio = false,
+	promesaActiva = null,
 	fechaPago = "",
 	cuotaMensual = "",
 	placa = "",
@@ -274,6 +290,14 @@ export function ContactoModal({
 	};
 
 	const esPromesa = variante === "promesa";
+	// CB-029: modo edición de la promesa activa (una sola por caso).
+	const esEdicion = esPromesa && promesaActiva != null;
+	const aFecha = (v: string | Date | null | undefined) =>
+		v ? new Date(v) : undefined;
+	// D-1 respecto a la fecha prometida (ambas son medianoche GT = T06:00:00Z, así
+	// que restar 24h da la medianoche GT del día anterior). Default de la alerta.
+	const restarUnDiaGT = (fecha: Date) =>
+		new Date(fecha.getTime() - 24 * 60 * 60 * 1000);
 
 	// CB-025 (simplificación de la promesa): cuotas atrasadas ordenadas — base
 	// del selector de pills y de los defaults "todo lo atrasado". Se memoiza
@@ -334,34 +358,49 @@ export function ContactoModal({
 				| "promesa_pago"
 				| "acuerdo_parcial"
 				| "rechaza_pagar",
-			comentarios: "",
-			acuerdosAlcanzados: "",
+			comentarios: esEdicion ? (promesaActiva?.comentarios ?? "") : "",
+			acuerdosAlcanzados: esEdicion
+				? (promesaActiva?.acuerdosAlcanzados ?? "")
+				: "",
 			compromisosPago: "",
 			// La fecha prometida ES la fecha de próximo contacto — nunca opcional
 			// en la variante promesa (por eso arranca en true).
 			requiereSeguimiento: esPromesa,
-			fechaProximoContacto: undefined as Date | undefined,
+			fechaProximoContacto: (esEdicion
+				? aFecha(promesaActiva?.fechaProximoContacto)
+				: undefined) as Date | undefined,
+			// CB-029: "alerta programada". Edición: la guardada. Nueva: se pone D-1
+			// al elegir la fecha prometida (ver onSelect del calendario más abajo).
+			fechaAlerta: (esEdicion
+				? aFecha(promesaActiva?.fechaAlerta)
+				: undefined) as Date | undefined,
 			duracionLlamada: undefined as number | undefined,
 			// CB-020: rango de cuotas + mora — solo relevantes en variante promesa.
 			// CB-025 (simplificación): la promesa arranca cubriendo TODO lo
 			// atrasado + mora ("va a pagar lo que debe", el caso común). El asesor
-			// solo destilda lo que no aplique. En "completo" siguen vacíos.
-			cuotaInicio: (esPromesa ? numerosAtrasados[0] : undefined) as
-				| number
-				| undefined,
-			cuotaFin: (esPromesa
-				? numerosAtrasados[numerosAtrasados.length - 1]
-				: undefined) as number | undefined,
-			incluyeMora: esPromesa,
+			// solo destilda lo que no aplique. En "completo" siguen vacíos. En
+			// edición: el rango guardado de la promesa activa.
+			cuotaInicio: (esEdicion
+				? (promesaActiva?.cuotaInicio ?? undefined)
+				: esPromesa
+					? numerosAtrasados[0]
+					: undefined) as number | undefined,
+			cuotaFin: (esEdicion
+				? (promesaActiva?.cuotaFin ?? undefined)
+				: esPromesa
+					? numerosAtrasados[numerosAtrasados.length - 1]
+					: undefined) as number | undefined,
+			incluyeMora: esEdicion ? !!promesaActiva?.incluyeMora : esPromesa,
 			// CB-025: monto que el cliente prometió pagar — informativo, opcional.
 			// En promesa se pre-llena con lo que debe (cuota + mora) para que el
-			// asesor no lo teclee; sigue editable.
-			montoComprometido:
-				esPromesa && montoSugerido != null && montoSugerido > 0
+			// asesor no lo teclee; sigue editable. En edición: el monto guardado.
+			montoComprometido: esEdicion
+				? (promesaActiva?.montoComprometido ?? "")
+				: esPromesa && montoSugerido != null && montoSugerido > 0
 					? montoSugerido.toFixed(2)
 					: "",
 			// CB-025: qué hacer en el próximo contacto — texto libre, opcional.
-			proximoPaso: "",
+			proximoPaso: esEdicion ? (promesaActiva?.proximoPaso ?? "") : "",
 		},
 		onSubmit: async ({ value }) => {
 			// NO ELIMINAR sin también quitar el botón submit de canSubmit
@@ -393,6 +432,8 @@ export function ContactoModal({
 			client.createContactoCobros({
 				casoCobroId,
 				...data,
+				// CB-029: en edición, UPDATE de la promesa activa (no crea otra).
+				promesaContactoId: promesaActiva?.id,
 				// Enter dispara submit sin pasar por el onBlur del CurrencyInput
 				// (que es donde normalmente se limpia un punto colgante como
 				// "2500.") — se normaliza también acá, justo antes de armar el
@@ -403,7 +444,11 @@ export function ContactoModal({
 				proximoPaso: data.proximoPaso || undefined,
 			}),
 		onSuccess: () => {
-			toast.success("Contacto registrado correctamente");
+			toast.success(
+				esEdicion
+					? "Promesa actualizada correctamente"
+					: "Contacto registrado correctamente",
+			);
 			queryClient.invalidateQueries(
 				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
 			);
@@ -445,6 +490,38 @@ export function ContactoModal({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `form`/montoPorCuota/montoMora son estables o derivan de las mismas cuotas; incluirlos re-sembraría en cada render y borraría la selección del asesor.
 	useEffect(() => {
 		if (!isOpen || !esPromesa) return;
+		// CB-029: en EDICIÓN, re-sembrar TODOS los campos desde la promesa activa
+		// (no "todo lo atrasado"). Se hace acá y no solo en defaultValues porque el
+		// modal queda montado: si se reabre tras crear/editar, promesaActiva cambió
+		// pero defaultValues quedó en el valor de montaje — el effect corrige.
+		if (esEdicion) {
+			const ini = promesaActiva?.cuotaInicio ?? null;
+			const fin = promesaActiva?.cuotaFin ?? null;
+			setCuotasPromesa(
+				ini != null && fin != null
+					? new Set(numerosAtrasados.filter((n) => n >= ini && n <= fin))
+					: new Set<number>(),
+			);
+			form.setFieldValue("cuotaInicio", ini ?? undefined);
+			form.setFieldValue("cuotaFin", fin ?? undefined);
+			form.setFieldValue("incluyeMora", !!promesaActiva?.incluyeMora);
+			form.setFieldValue("comentarios", promesaActiva?.comentarios ?? "");
+			form.setFieldValue(
+				"acuerdosAlcanzados",
+				promesaActiva?.acuerdosAlcanzados ?? "",
+			);
+			form.setFieldValue(
+				"montoComprometido",
+				promesaActiva?.montoComprometido ?? "",
+			);
+			form.setFieldValue(
+				"fechaProximoContacto",
+				aFecha(promesaActiva?.fechaProximoContacto),
+			);
+			form.setFieldValue("fechaAlerta", aFecha(promesaActiva?.fechaAlerta));
+			form.setFieldValue("proximoPaso", promesaActiva?.proximoPaso ?? "");
+			return;
+		}
 		const todas = new Set(numerosAtrasados);
 		setCuotasPromesa(todas);
 		form.setFieldValue("cuotaInicio", numerosAtrasados[0]);
@@ -714,13 +791,19 @@ export function ContactoModal({
 						) : (
 							getIconoMetodo(metodoInicial)
 						)}
-						{esPromesa ? "Promesa de Pago" : "Registrar Contacto"} -{" "}
-						{clienteNombre}
+						{esEdicion
+							? "Editar Promesa de Pago"
+							: esPromesa
+								? "Promesa de Pago"
+								: "Registrar Contacto"}{" "}
+						- {clienteNombre}
 					</DialogTitle>
 					<DialogDescription>
-						{esPromesa
-							? "Registra lo hablado y la fecha en la que el cliente prometió pagar."
-							: "Registra los detalles de la interacción con el cliente y programa el próximo seguimiento."}
+						{esEdicion
+							? "Este caso ya tiene una promesa activa. Estás editándola (no se crea otra)."
+							: esPromesa
+								? "Registra lo hablado y la fecha en la que el cliente prometió pagar."
+								: "Registra los detalles de la interacción con el cliente y programa el próximo seguimiento."}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -1418,11 +1501,20 @@ export function ContactoModal({
 														<Calendar
 															mode="single"
 															selected={field.state.value}
-															onSelect={(date) =>
-																field.handleChange(
-																	date ? fechaAMedianocheGT(date) : date,
-																)
-															}
+															onSelect={(date) => {
+																const fecha = date
+																	? fechaAMedianocheGT(date)
+																	: undefined;
+																field.handleChange(fecha);
+																// CB-029: la alerta sigue a la fecha prometida
+																// (default D-1); editable en el campo de abajo.
+																if (esPromesa) {
+																	form.setFieldValue(
+																		"fechaAlerta",
+																		fecha ? restarUnDiaGT(fecha) : undefined,
+																	);
+																}
+															}}
 															disabled={(date) =>
 																date < new Date(new Date().setHours(0, 0, 0, 0))
 															}
@@ -1441,6 +1533,57 @@ export function ContactoModal({
 								)
 							}
 						</form.Field>
+
+						{/* CB-029: "alerta programada" — SOLO en promesa. Default D-1 (se
+						    setea al elegir la fecha prometida); editable. El job diario
+						    avisa al asesor ese día antes de que la promesa venza. */}
+						{esPromesa && (
+							<form.Field name="fechaAlerta">
+								{(field) => (
+									<div className="space-y-2">
+										<Label>Avisarme el (opcional)</Label>
+										<Popover>
+											<PopoverTrigger asChild>
+												<Button
+													type="button"
+													variant="outline"
+													className={cn(
+														"w-full justify-start text-left font-normal",
+														!field.state.value && "text-muted-foreground",
+													)}
+												>
+													<CalendarIcon className="mr-2 h-4 w-4" />
+													{field.state.value
+														? format(field.state.value, "dd MMM, yyyy", {
+																locale: es,
+															})
+														: "Por defecto, 1 día antes"}
+												</Button>
+											</PopoverTrigger>
+											<PopoverContent className="w-auto p-0" align="start">
+												<Calendar
+													mode="single"
+													selected={field.state.value}
+													onSelect={(date) =>
+														field.handleChange(
+															date ? fechaAMedianocheGT(date) : undefined,
+														)
+													}
+													disabled={(date) =>
+														date < new Date(new Date().setHours(0, 0, 0, 0))
+													}
+													locale={es}
+												/>
+											</PopoverContent>
+										</Popover>
+										<p className="text-muted-foreground text-xs">
+											Te recordamos ese día para darle seguimiento antes de que
+											venza.
+										</p>
+									</div>
+								)}
+							</form.Field>
+						)}
 
 						{/* CB-025: qué hacer, no cuándo (la fecha de arriba). Texto libre,
 						    opcional, en ambas variantes — el AC del ticket aplica a
@@ -1482,7 +1625,11 @@ export function ContactoModal({
 								>
 									{createContactoMutation.isPending
 										? "Guardando..."
-										: "Registrar Contacto"}
+										: esEdicion
+											? "Guardar Promesa"
+											: esPromesa
+												? "Registrar Promesa"
+												: "Registrar Contacto"}
 								</Button>
 							)}
 						</form.Subscribe>

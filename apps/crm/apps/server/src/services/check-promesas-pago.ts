@@ -18,6 +18,7 @@ import { and, eq, inArray, isNull, max, ne, or } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
+import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	derivarEstadoCredito,
 	type EstadoPromesa,
@@ -77,6 +78,7 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 				cuotaFin: contactosCobros.cuotaFin,
 				incluyeMora: contactosCobros.incluyeMora,
 				fechaProximoContacto: contactosCobros.fechaProximoContacto,
+				fechaAlerta: contactosCobros.fechaAlerta,
 			})
 			.from(contactosCobros)
 			.where(
@@ -137,6 +139,16 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 			asesorNombre: string;
 			fechaPrometida: Date;
 		}> = [];
+		// CB-029: promesas POR VENCER (fecha_alerta = hoy GT y aún pendientes) →
+		// recordatorio proactivo al asesor. Mismo patrón idempotente/retryable.
+		const porVencer: Array<{
+			casoId: string;
+			sifco: string;
+			cliente: string;
+			asesorId: number | null;
+			asesorNombre: string;
+			fechaPrometida: Date;
+		}> = [];
 
 		const hoy = new Date();
 		for (const [sifco, grupo] of promesasPorSifco) {
@@ -149,6 +161,11 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 				// Candidatas a notificar: toda promesa incumplida de este crédito
 				// (con su fecha prometida, que ancla el dedup por episodio).
 				const candidatos: Array<{
+					promesaId: string;
+					casoId: string;
+					fechaPrometida: Date;
+				}> = [];
+				const candidatosPorVencer: Array<{
 					promesaId: string;
 					casoId: string;
 					fechaPrometida: Date;
@@ -173,6 +190,23 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 							casoId: promesa.casoCobroId,
 							fechaPrometida: promesa.fechaProximoContacto,
 						});
+					}
+					// CB-029: sigue pendiente y su alerta cae HOY (GT) → por vencer. La
+					// alerta efectiva es la programada (fecha_alerta) o D-1 por default,
+					// así también aplica a promesas viejas sin fecha_alerta.
+					if (estado === "pendiente") {
+						const alertaEf =
+							promesa.fechaAlerta ??
+							new Date(
+								promesa.fechaProximoContacto.getTime() - 24 * 60 * 60 * 1000,
+							);
+						if (toDateStrGT(alertaEf) === toDateStrGT(hoy)) {
+							candidatosPorVencer.push({
+								promesaId: promesa.id,
+								casoId: promesa.casoCobroId,
+								fechaPrometida: promesa.fechaProximoContacto,
+							});
+						}
 					}
 					if (estado === "cumplida") resumen.cumplidas++;
 					else if (estado === "incumplida") resumen.incumplidas++;
@@ -223,6 +257,17 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 						fechaPrometida: c.fechaPrometida,
 					});
 				}
+				for (const c of candidatosPorVencer) {
+					if (idsRechazados.has(c.promesaId)) continue;
+					porVencer.push({
+						casoId: c.casoId,
+						sifco,
+						cliente: credito.usuario?.nombre ?? "",
+						asesorId: credito.asesor?.asesor_id ?? null,
+						asesorNombre: credito.asesor?.nombre ?? "",
+						fechaPrometida: c.fechaPrometida,
+					});
+				}
 			} catch (error) {
 				resumen.errores += grupo.length;
 				console.error(
@@ -244,6 +289,16 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 		} catch (err) {
 			console.error(
 				`${LOG_PREFIX} Error creando notificaciones de promesa incumplida:`,
+				err,
+			);
+		}
+
+		// CB-029: recordatorio proactivo (por vencer). También aislado del job.
+		try {
+			await notificarPromesasPorVencer(porVencer);
+		} catch (err) {
+			console.error(
+				`${LOG_PREFIX} Error creando notificaciones de promesa por vencer:`,
 				err,
 			);
 		}
@@ -353,6 +408,102 @@ async function maxNotifPromesaPorCaso(
 			and(
 				inArray(notifications.relatedEntityId, casoIds),
 				eq(notifications.cobrosTipo, "promesa_incumplida"),
+			),
+		)
+		.groupBy(notifications.relatedEntityId);
+	const map = new Map<string, Date>();
+	for (const r of rows) if (r.casoId && r.ultima) map.set(r.casoId, r.ultima);
+	return map;
+}
+
+/**
+ * CB-029 (Propósito proactivo): recordatorio al asesor de una promesa POR
+ * VENCER (su fecha_alerta cae hoy y sigue pendiente). SOLO al asesor — es un
+ * recordatorio, no un escalamiento. Idempotente: se deduplica con una ventana
+ * de ~20h (la alerta cae un solo día; el job corre a las 00:00 GT + boot, así
+ * que sin la ventana un doble run del mismo día duplicaría).
+ */
+async function notificarPromesasPorVencer(
+	porVencer: Array<{
+		casoId: string;
+		sifco: string;
+		cliente: string;
+		asesorId: number | null;
+		asesorNombre: string;
+		fechaPrometida: Date;
+	}>,
+): Promise<void> {
+	if (porVencer.length === 0) return;
+
+	// Una por caso: la promesa con la fecha prometida más próxima.
+	const porCaso = new Map<string, (typeof porVencer)[number]>();
+	for (const it of porVencer) {
+		const prev = porCaso.get(it.casoId);
+		if (!prev || it.fechaPrometida.getTime() < prev.fechaPrometida.getTime()) {
+			porCaso.set(it.casoId, it);
+		}
+	}
+	const items = [...porCaso.values()];
+	const casoIds = items.map((t) => t.casoId);
+
+	// Dedup: casos ya avisados con promesa_por_vencer en las últimas ~20h.
+	const ultimaNotif = await maxNotifPorVencerPorCaso(casoIds);
+	const corte = new Date().getTime() - 20 * 60 * 60 * 1000;
+	const pendientes = items.filter((t) => {
+		const notif = ultimaNotif.get(t.casoId);
+		return !notif || notif.getTime() < corte;
+	});
+	if (pendientes.length === 0) return;
+
+	const [mapaAsesor, usuarioSistema] = await Promise.all([
+		construirMapaAsesorUsuario(),
+		resolverUsuarioSistemaCobros(),
+	]);
+	if (!usuarioSistema) {
+		console.error(
+			`${LOG_PREFIX} Sin usuario sistema; no se crean notificaciones de promesa por vencer`,
+		);
+		return;
+	}
+
+	const filas = pendientes.flatMap((t) => {
+		const credito = `${t.sifco}${t.cliente ? ` (${t.cliente})` : ""}`;
+		const fechaStr = toDateStrGT(t.fechaPrometida);
+		return filasNotificacionCobros({
+			casoId: t.casoId,
+			cobrosTipo: "promesa_por_vencer",
+			titulo: "Promesa de pago por vencer",
+			descripcion: `La promesa de pago del crédito ${credito} vence el ${fechaStr}. Dale seguimiento antes de que se caiga.`,
+			asesorUserId:
+				t.asesorId != null ? (mapaAsesor.get(t.asesorId) ?? null) : null,
+			supervisores: [], // solo asesor
+			usuarioSistema,
+		});
+	});
+
+	if (filas.length > 0) {
+		await db.insert(notifications).values(filas);
+		console.log(
+			`${LOG_PREFIX} ${pendientes.length} promesa(s) por vencer → ${filas.length} notificación(es) creada(s)`,
+		);
+	}
+}
+
+/** max(created_at) por caso de las notificaciones promesa_por_vencer. */
+async function maxNotifPorVencerPorCaso(
+	casoIds: string[],
+): Promise<Map<string, Date>> {
+	if (casoIds.length === 0) return new Map();
+	const rows = await db
+		.select({
+			casoId: notifications.relatedEntityId,
+			ultima: max(notifications.createdAt),
+		})
+		.from(notifications)
+		.where(
+			and(
+				inArray(notifications.relatedEntityId, casoIds),
+				eq(notifications.cobrosTipo, "promesa_por_vencer"),
 			),
 		)
 		.groupBy(notifications.relatedEntityId);

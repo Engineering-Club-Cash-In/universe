@@ -34,6 +34,9 @@ export const CATEGORIAS_COLA_DIA = [
 	"sla_hoy",
 	"promesa_hoy",
 	"incumplida",
+	// CB-029: promesa aún NO vencida cuya alerta programada (fecha_alerta, default
+	// D-1) ya cayó. Baja prioridad (aparece, pero no salta la fila).
+	"promesa_proxima",
 	"sin_contacto",
 ] as const;
 
@@ -51,6 +54,9 @@ export interface CreditoParaClasificar {
 	promesas: Array<{
 		estadoPromesa: "pendiente" | "incumplida";
 		fechaPrometida: Date;
+		// CB-029: alerta programada (default D-1). Define cuándo una promesa futura
+		// entra a la cola como "promesa_proxima". null = usar D-1.
+		fechaAlerta?: Date | null;
 	}>;
 	/**
 	 * Días transcurridos desde el ÚLTIMO contacto registrado (cualquier tipo),
@@ -64,6 +70,7 @@ export interface ClasificacionColaDia {
 	slaHoy: boolean;
 	promesaHoy: boolean;
 	incumplida: boolean;
+	promesaProxima: boolean;
 	sinContacto: boolean;
 }
 
@@ -77,6 +84,7 @@ export function clasificarCreditoColaDia(
 
 	let promesaHoy = false;
 	let incumplida = false;
+	let promesaProxima = false;
 	for (const promesa of credito.promesas) {
 		const fechaStr = toDateStrGT(promesa.fechaPrometida);
 		if (promesa.estadoPromesa === "incumplida") {
@@ -85,19 +93,34 @@ export function clasificarCreditoColaDia(
 		}
 		// pendiente
 		if (fechaStr === hoyStr) promesaHoy = true;
-		else if (fechaStr < hoyStr) incumplida = true; // vencida, aún no marcada por el job nocturno
+		else if (fechaStr < hoyStr)
+			incumplida = true; // vencida, aún no marcada por el job nocturno
+		else {
+			// CB-029: futura → "próxima" si su alerta programada (o D-1 por
+			// default) ya cayó. Entra a la cola sin urgencia hasta que sea hoy.
+			const alertaEf =
+				promesa.fechaAlerta ??
+				new Date(promesa.fechaPrometida.getTime() - 24 * 60 * 60 * 1000);
+			if (toDateStrGT(alertaEf) <= hoyStr) promesaProxima = true;
+		}
 	}
 
 	const sinContacto =
 		credito.diasSinContacto != null &&
 		credito.diasSinContacto > UMBRAL_DIAS_SIN_CONTACTO;
 
-	return { slaHoy, promesaHoy, incumplida, sinContacto };
+	return { slaHoy, promesaHoy, incumplida, promesaProxima, sinContacto };
 }
 
 /** true si el crédito califica para AL MENOS una categoría (entra a la cola sin filtro). */
 export function calificaParaColaDia(c: ClasificacionColaDia): boolean {
-	return c.slaHoy || c.promesaHoy || c.incumplida || c.sinContacto;
+	return (
+		c.slaHoy ||
+		c.promesaHoy ||
+		c.incumplida ||
+		c.promesaProxima ||
+		c.sinContacto
+	);
 }
 
 /** true si el crédito califica para la categoría pedida (cola CON filtro). */
@@ -108,6 +131,7 @@ export function calificaParaFiltro(
 	if (filtro === "sla_hoy") return c.slaHoy;
 	if (filtro === "promesa_hoy") return c.promesaHoy;
 	if (filtro === "incumplida") return c.incumplida;
+	if (filtro === "promesa_proxima") return c.promesaProxima;
 	return c.sinContacto;
 }
 
@@ -121,5 +145,8 @@ export function ordenColaDia(c: ClasificacionColaDia): number {
 	if (c.slaHoy) return 0;
 	if (c.promesaHoy) return 1;
 	if (c.incumplida) return 2;
-	return 3; // sinContacto (única forma de calificar si llegamos aquí)
+	// CB-029: promesa próxima va DEBAJO de las urgentes (aún no vence), pero
+	// arriba de "sin contacto" — es un compromiso puntual, no inactividad.
+	if (c.promesaProxima) return 3;
+	return 4; // sinContacto
 }

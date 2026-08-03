@@ -478,6 +478,39 @@ function RouteComponent() {
 			!!(casoDetails.data?.numeroCreditoSifco || id),
 	});
 
+	// CB-029: promesa ACTIVA del caso = pendiente (estado recalculado) cuya fecha
+	// prometida no pasó. A lo sumo una; si abre el modal, se EDITA esa (no se crea
+	// otra que se sobreponga). El backend igual valida "una sola activa".
+	const promesaActiva = useMemo(() => {
+		const estados = estadoPromesasPago.data as
+			| Record<string, EstadoPromesa>
+			| undefined;
+		const candidatas = (promesasPago as any[])
+			.filter((p) => {
+				const estado = estados?.[p.id] ?? p.estadoPromesa ?? "pendiente";
+				return estado === "pendiente" && !!p.fechaProximoContacto;
+			})
+			.sort(
+				(a, b) =>
+					new Date(b.fechaProximoContacto).getTime() -
+					new Date(a.fechaProximoContacto).getTime(),
+			);
+		const p = candidatas[0];
+		if (!p) return null;
+		return {
+			id: p.id as string,
+			comentarios: p.comentarios,
+			acuerdosAlcanzados: p.acuerdosAlcanzados,
+			cuotaInicio: p.cuotaInicio,
+			cuotaFin: p.cuotaFin,
+			incluyeMora: p.incluyeMora,
+			montoComprometido: p.montoComprometido,
+			fechaProximoContacto: p.fechaProximoContacto,
+			fechaAlerta: p.fechaAlerta,
+			proximoPaso: p.proximoPaso,
+		};
+	}, [promesasPago, estadoPromesasPago.data]);
+
 	// Obtener seguimientos activos
 	const seguimientosActivos = useQuery({
 		...orpc.getSeguimientosActivos.queryOptions({
@@ -1559,6 +1592,7 @@ function RouteComponent() {
 												}))}
 											montoMora={Number(caso.montoEnMora || 0)}
 											esConvenio={caso.cuotaConvenio != null}
+											promesaActiva={promesaActiva}
 											fechaPago={String(caso.diaPagoMensual || 15)}
 											cuotaMensual={Number(
 												caso.cuotaMensual || 0,

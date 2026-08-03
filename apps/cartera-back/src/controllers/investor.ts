@@ -886,13 +886,6 @@ export async function processAndReplaceCreditInvestors(
     throw new Error("Credit not found");
   }
 
-  // 1.5 Verificar si el inversionista tiene permite_distribucion
-  const inversionista = await txOrDb.query.inversionistas.findFirst({
-    where: (i, { eq }) => eq(i.inversionista_id, inversionista_id),
-  });
-
-  const permiteDistribucion = inversionista?.permite_distribucion ?? false;
-
   // 2. Fetch all investors for this credit
   // Determine which table to query based on updateMirror flag
   let investors;
@@ -985,16 +978,26 @@ export async function processAndReplaceCreditInvestors(
         .where(eq(creditos_inversionistas.id, inv.id));
     }
 
-    // Si permite_distribucion = true, también actualizar la OTRA tabla con los mismos valores
-    if (permiteDistribucion) {
-      const otraTabla = updateMirror ? creditos_inversionistas : creditos_inversionistas_espejo;
-      const otraSetData = otraTabla === creditos_inversionistas_espejo ? { ...setData, updated_at: new Date() } : setData;
-      await txOrDb.update(otraTabla).set(otraSetData)
-        .where(and(
-          eq(otraTabla.inversionista_id, inversionista_id),
-          eq(otraTabla.credito_id, credito_id)
-        ));
-    }
+    // NOTA (eliminado): aquí existía un bloque `if (permiteDistribucion)` que, para los
+    // inversionistas internos/propios (`permite_distribucion = true`), copiaba `setData`
+    // a la OTRA tabla — es decir, al liquidar (updateMirror=true) también pisaba
+    // `creditos_inversionistas` (el padre) con el valor calculado para el espejo.
+    //
+    // Se quitó porque:
+    //   1. Liquidar debe tocar SOLO el espejo, igual que para los externos. La
+    //      transacción de `liquidateByInvestorId` no escribe el padre en ningún otro punto.
+    //   2. El padre de los internos ya se mantiene por su cuenta: `insertPagosCreditoInversionistasV2`
+    //      no filtra por `permite_distribucion` y les registra los pagos directo en
+    //      `creditos_inversionistas`. No dependía de esta copia.
+    //   3. La copia no recalculaba desde el padre: lo sobrescribía con el resultado del
+    //      espejo. Cuando ambos venían desfasados, el padre daba un salto irreal (caso
+    //      real: crédito INCOBRABLE con padre en 0.00 volvía a ~Q128k de saldo vivo, que
+    //      además alimenta el split Cube-vs-inversionista de `reportes.ts`).
+    //
+    // Este era el único punto de cartera-back donde `permite_distribucion` alteraba una
+    // ESCRITURA; el resto de sus usos son filtros de lectura. Si alguna vez se necesita
+    // sincronizar padre↔espejo para internos, debe hacerse con su propio recálculo y no
+    // copiando valores de la otra tabla.
   }
 
   // 6. Return the new updated data (could re-fetch if you want actual DB values)
@@ -6553,6 +6556,7 @@ interface InversionistaResumen {
     | "reinversion_total"
     | "reinversion_variable";
   status: "activo" | "inactivo" | "pendiente_devolucion";
+  permite_distribucion: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -6593,6 +6597,7 @@ interface InversionistaResumenRow {
     | "reinversion_total"
     | "reinversion_variable";
   status: "activo" | "inactivo" | "pendiente_devolucion";
+  permite_distribucion: boolean;
   banco_nombre: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -6764,11 +6769,16 @@ async function consultarResumenGlobalPorEstadoPago(
   inversionistaId?: number,
   mes?: number,
   anio?: number,
-  excel: boolean = false
+  excel: boolean = false,
+  // Por defecto solo se devuelven inversionistas externos (permite_distribucion = false).
+  // Con true se incluyen también los internos/propios.
+  incluirInternos: boolean = false
 ): Promise<InversionistaResumenRow[]> {
-  const condicionesWhere: any[] = [
-    eq(inversionistas.permite_distribucion, false),
-  ];
+  const condicionesWhere: any[] = [];
+
+  if (!incluirInternos) {
+    condicionesWhere.push(eq(inversionistas.permite_distribucion, false));
+  }
 
   if (inversionistaId) {
     condicionesWhere.push(eq(inversionistas.inversionista_id, inversionistaId));
@@ -6830,6 +6840,7 @@ async function consultarResumenGlobalPorEstadoPago(
     emite_factura: inversionistas.emite_factura,
     reinversion: inversionistas.tipo_reinversion,
     status: inversionistas.status,
+    permite_distribucion: inversionistas.permite_distribucion,
     banco_nombre: bancos.nombre,
     tipo_cuenta: inversionistas.tipo_cuenta,
     numero_cuenta: inversionistas.numero_cuenta,
@@ -7074,6 +7085,7 @@ async function consultarResumenGlobalPorEstadoPago(
     inversionistas.emite_factura,
     inversionistas.tipo_reinversion,
     inversionistas.status,
+    inversionistas.permite_distribucion,
     inversionistas.monto_reinversion,
     bancos.nombre,
     inversionistas.tipo_cuenta,
@@ -7093,7 +7105,7 @@ async function consultarResumenGlobalPorEstadoPago(
     .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
     .leftJoin(pe, and(...condicionesJoinPagos))
     .leftJoin(ce, and(eq(pe.credito_id, ce.credito_id), eq(pe.inversionista_id, ce.inversionista_id)))
-    .where(and(...condicionesWhere))
+    .where(condicionesWhere.length ? and(...condicionesWhere) : undefined)
     .groupBy(...groupByFields)
     .having(excel ? undefined : sql`COUNT(${pe.id}) > 0`);
 
@@ -7103,11 +7115,15 @@ async function consultarResumenGlobalPorEstadoPago(
 async function consultarResumenGlobalDesdeLiquidaciones(
   inversionistaId?: number,
   mes?: number,
-  anio?: number
+  anio?: number,
+  // Ver nota en consultarResumenGlobalPorEstadoPago: por defecto solo externos.
+  incluirInternos: boolean = false
 ): Promise<InversionistaResumenRow[]> {
-  const condicionesWhere: any[] = [
-    eq(inversionistas.permite_distribucion, false),
-  ];
+  const condicionesWhere: any[] = [];
+
+  if (!incluirInternos) {
+    condicionesWhere.push(eq(inversionistas.permite_distribucion, false));
+  }
 
   if (inversionistaId) {
     condicionesWhere.push(eq(inversionistas.inversionista_id, inversionistaId));
@@ -7131,6 +7147,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     emite_factura: inversionistas.emite_factura,
     reinversion: inversionistas.tipo_reinversion,
     status: inversionistas.status,
+    permite_distribucion: inversionistas.permite_distribucion,
     banco_nombre: bancos.nombre,
     tipo_cuenta: inversionistas.tipo_cuenta,
     numero_cuenta: inversionistas.numero_cuenta,
@@ -7161,6 +7178,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     inversionistas.emite_factura,
     inversionistas.tipo_reinversion,
     inversionistas.status,
+    inversionistas.permite_distribucion,
     bancos.nombre,
     inversionistas.tipo_cuenta,
     inversionistas.numero_cuenta,
@@ -7182,7 +7200,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
       eq(liquidaciones.inversionista_id, inversionistas.inversionista_id)
     )
     .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
-    .where(and(...condicionesWhere))
+    .where(condicionesWhere.length ? and(...condicionesWhere) : undefined)
     .groupBy(...groupByFields);
 
   return result as unknown as InversionistaResumenRow[];
@@ -7210,6 +7228,7 @@ function mapResumenRow(
     emite_factura: inv.emite_factura,
     reinversion: inv.reinversion,
     status: inv.status,
+    permite_distribucion: inv.permite_distribucion ?? false,
     banco: inv.banco_nombre,
     tipo_cuenta: inv.tipo_cuenta,
     numero_cuenta: inv.numero_cuenta,
@@ -7625,15 +7644,16 @@ export async function resumenGlobalLiquidaciones(
   anio?: number,
   estado: EstadoLiquidacionResumenFilter = "pending",
   excel: boolean = false,
-  incluirSinMovimiento: boolean = false
+  incluirSinMovimiento: boolean = false,
+  incluirInternos: boolean = false
 ): Promise<
   InversionistaResumenConEstado[] | { success: boolean; url: string; filename: string }
 > {
   // Para este endpoint el período se recibe validado desde la ruta.
   // Cuando estado=all, el mes/anio aplican a todo el corte consultado.
   const [noLiquidados, liquidados] = await Promise.all([
-    consultarResumenGlobalPorEstadoPago("NO_LIQUIDADO", inversionistaId, mes, anio, false),
-    consultarResumenGlobalDesdeLiquidaciones(inversionistaId, mes, anio),
+    consultarResumenGlobalPorEstadoPago("NO_LIQUIDADO", inversionistaId, mes, anio, false, incluirInternos),
+    consultarResumenGlobalDesdeLiquidaciones(inversionistaId, mes, anio, incluirInternos),
   ]);
 
   const inversionistaIds = Array.from(
@@ -7712,7 +7732,10 @@ export async function resumenGlobalLiquidaciones(
 
   if (incluirSinMovimiento) {
     const idsConMovimiento = new Set(result.map((r) => r.inversionista_id));
-    const filtros: any[] = [eq(inversionistas.permite_distribucion, false)];
+    const filtros: any[] = [];
+    if (!incluirInternos) {
+      filtros.push(eq(inversionistas.permite_distribucion, false));
+    }
     if (inversionistaId) {
       filtros.push(eq(inversionistas.inversionista_id, inversionistaId));
     }
@@ -7725,13 +7748,14 @@ export async function resumenGlobalLiquidaciones(
         emite_factura: inversionistas.emite_factura,
         reinversion: inversionistas.tipo_reinversion,
         status: inversionistas.status,
+        permite_distribucion: inversionistas.permite_distribucion,
         banco_nombre: bancos.nombre,
         tipo_cuenta: inversionistas.tipo_cuenta,
         numero_cuenta: inversionistas.numero_cuenta,
       })
       .from(inversionistas)
       .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
-      .where(and(...filtros));
+      .where(filtros.length ? and(...filtros) : undefined);
 
     const idsSinMovimiento = todos
       .filter((inv) => !idsConMovimiento.has(inv.inversionista_id))
@@ -7767,6 +7791,7 @@ export async function resumenGlobalLiquidaciones(
         emite_factura: inv.emite_factura,
         reinversion: inv.reinversion as InversionistaResumenRow["reinversion"],
         status: inv.status as InversionistaResumenRow["status"],
+        permite_distribucion: inv.permite_distribucion,
         banco_nombre: inv.banco_nombre,
         tipo_cuenta: inv.tipo_cuenta,
         numero_cuenta: inv.numero_cuenta,
@@ -7909,6 +7934,11 @@ export async function resumenTransferencias(
   ach: boolean,
   monedaFiltro: MonedaFiltroTransferencias = "todas"
 ): Promise<{ success: boolean; url: string; filename: string }> {
+  // ⚠️ Los `permite_distribucion = false` de abajo son DELIBERADOS y NO se deben
+  // parametrizar como se hizo en las queries de resumen (`incluirInternos`).
+  // Este archivo alimenta transferencias bancarias reales: incluir a los
+  // inversionistas internos/propios significaría girarle plata de Cube a Cube.
+  // Que aparezcan en la pantalla de liquidaciones no implica que deban cobrar aquí.
   const condicionesBanco = ach
     ? and(
         eq(inversionistas.permite_distribucion, false),

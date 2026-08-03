@@ -623,7 +623,7 @@ export const contractGenerationRouter = {
 				.where(
 					eq(contractGenerationSnapshots.opportunityId, input.opportunityId),
 				)
-				.orderBy(contractGenerationSnapshots.createdAt)
+				.orderBy(desc(contractGenerationSnapshots.createdAt))
 				.limit(1);
 
 			return snapshot || null;
@@ -726,6 +726,87 @@ export const contractGenerationRouter = {
 					];
 					const monthText = monthNames[monthIndex];
 
+					// === LEER LA FECHA ORIGINAL ANTES DE PISAR NADA ===
+					// Obligatorio hacerlo aquí: más abajo se sobreescriben mesTexto/ano
+					// con la fecha nueva, y compararlos después siempre daba "no cambió".
+					const mesContratoOriginal = monthNames.findIndex(
+						(m) => m === (newData.mesTexto as string | undefined)?.toLowerCase(),
+					);
+					const anioContratoOriginal = normalizarAnio(newData.ano);
+
+					const diaVencOriginal = newData.diaVencimiento
+						? Number.parseInt(String(newData.diaVencimiento), 10)
+						: null;
+					const mesVencOriginal = newData.mesVencimiento
+						? Number.parseInt(String(newData.mesVencimiento), 10) - 1
+						: null;
+					const anioVencOriginal = normalizarAnio(newData.anoVencimiento);
+
+					// === CALCULAR FECHA DE VENCIMIENTO ===
+					// Regla de negocio: el día de pago es el pactado con el cliente y NO
+					// cambia al regenerar. Lo único que se corre es el mes/año de
+					// vencimiento, la misma cantidad de meses que se movió la fecha del
+					// contrato, para que el plazo del crédito se respete.
+					// Ej: contrato 29/jul con vencimiento 15/ago -> se regenera al 03/ago
+					// (corrió 1 mes) -> el vencimiento pasa a 15/sep.
+					let mesVenc: number;
+					let anioVenc: number;
+					let diaVenc: number;
+
+					const puedeCorrerVencimiento =
+						mesContratoOriginal !== -1 &&
+						anioContratoOriginal !== null &&
+						diaVencOriginal !== null &&
+						mesVencOriginal !== null &&
+						anioVencOriginal !== null;
+
+					if (puedeCorrerVencimiento) {
+						const mesesCorridos =
+							year * 12 +
+							monthIndex -
+							(anioContratoOriginal * 12 + mesContratoOriginal);
+
+						const fechaVenc = new Date(
+							anioVencOriginal,
+							mesVencOriginal + mesesCorridos,
+							1,
+						);
+						mesVenc = fechaVenc.getMonth();
+						anioVenc = fechaVenc.getFullYear();
+
+						const diasEnMesVencOriginal = new Date(
+							anioVencOriginal,
+							mesVencOriginal + 1,
+							0,
+						).getDate();
+						const diasEnMesVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+
+						// "último día" es una regla, no un número: se recalcula sobre el
+						// mes destino (31 de agosto -> 30 de septiembre).
+						const pagoUltimoDia =
+							newData.diaPago === "último día" ||
+							diaVencOriginal === diasEnMesVencOriginal;
+
+						diaVenc = pagoUltimoDia
+							? diasEnMesVenc
+							: Math.min(diaVencOriginal, diasEnMesVenc);
+					} else {
+						// Sin fecha original utilizable en el snapshot: recalcular desde
+						// cero con el plazo, igual que la generación original.
+						const fechaVenc = new Date(year, monthIndex + termMonths + 1, 1);
+						mesVenc = fechaVenc.getMonth();
+						anioVenc = fechaVenc.getFullYear();
+
+						const diasEnMesVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+						if (day <= 20) {
+							diaVenc = 15;
+							if ("diaPago" in newData) newData.diaPago = "día quince";
+						} else {
+							diaVenc = diasEnMesVenc;
+							if ("diaPago" in newData) newData.diaPago = "último día";
+						}
+					}
+
 					// Convertir día a texto
 					const dayText = numberToSpanishText(day);
 					// Convertir año corto a texto (ej: 26 -> "veintiséis")
@@ -744,60 +825,6 @@ export const contractGenerationRouter = {
 					if ("anoTexto" in newData) newData.anoTexto = yearText;
 					if ("fechaInicioContrato" in newData)
 						newData.fechaInicioContrato = fullDateText;
-
-					// === CALCULAR DÍA DE PAGO Y FECHA DE VENCIMIENTO ===
-					// Regla: Del 1 al 20 -> día 15, Del 21 al 31 -> último día del mes
-					let diaPago: string;
-					let diaVenc: number;
-
-					// Obtener mes original del contrato para detectar si cambió
-					const mesContratoOriginalIndex = monthNames.findIndex(
-						(m) => m === newData.mesTexto?.toLowerCase(),
-					);
-					const mesContratoCambio =
-						mesContratoOriginalIndex !== -1 &&
-						mesContratoOriginalIndex !== monthIndex;
-
-					// Obtener mes y año de vencimiento original de los datos del contrato
-					const mesVencOriginal = newData.mesVencimiento
-						? Number.parseInt(newData.mesVencimiento) - 1
-						: null;
-					const anioVencOriginal = newData.anoVencimiento
-						? 2000 + Number.parseInt(newData.anoVencimiento)
-						: null;
-
-					let mesVenc: number;
-					let anioVenc: number;
-
-					// Si el mes del contrato cambió, recalcular la fecha de vencimiento con termMonths
-					// Si no cambió, mantener el mes/año original y solo ajustar el día
-					if (
-						mesContratoCambio ||
-						mesVencOriginal === null ||
-						anioVencOriginal === null
-					) {
-						// Recalcular fecha de vencimiento basándose en termMonths
-						const fechaVenc = new Date(year, monthIndex + termMonths, 1);
-						mesVenc = fechaVenc.getMonth();
-						anioVenc = fechaVenc.getFullYear();
-					} else {
-						// Mantener mes/año original
-						mesVenc = mesVencOriginal;
-						anioVenc = anioVencOriginal;
-					}
-
-					if (day <= 20) {
-						// Del 1 al 20: día de pago es "día quince"
-						diaPago = "día quince";
-						diaVenc = 15;
-					} else {
-						// Del 21 al 31: día de pago es "último día"
-						diaPago = "último día";
-						diaVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
-					}
-
-					// Actualizar campos de día de pago
-					if ("diaPago" in newData) newData.diaPago = diaPago;
 
 					// Actualizar campos de fecha de vencimiento
 					const mesVencText = monthNames[mesVenc];
@@ -926,6 +953,23 @@ export const contractGenerationRouter = {
 			}
 		}),
 };
+
+/**
+ * Normaliza un año que puede venir con 2 o 4 dígitos ("26" | "2026").
+ * Los snapshots viejos guardaron el año del contrato como 19xx porque
+ * `new Date(26, ...)` mapea los años 0-99 a 1900+, por eso se corrige el siglo.
+ */
+function normalizarAnio(valor: unknown): number | null {
+	if (valor === null || valor === undefined || valor === "") return null;
+	const anio =
+		typeof valor === "number"
+			? valor
+			: Number.parseInt(String(valor).trim(), 10);
+	if (!Number.isFinite(anio)) return null;
+	if (anio < 100) return 2000 + anio;
+	if (anio < 2000) return anio + 100; // 1926 -> 2026
+	return anio;
+}
 
 /**
  * Convierte nombre del mes en español a número

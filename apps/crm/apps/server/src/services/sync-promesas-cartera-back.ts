@@ -26,10 +26,11 @@
  * check-promesas-pago.ts / send-premora-reminders.ts).
  */
 
-import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { toDateStrGT } from "../lib/guatemala-month-window";
+import { esPromesaVigente } from "../lib/promesa-vigente";
 import { decidirEnvioReconciliacion } from "../lib/reconciliacion-promesas";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
@@ -51,6 +52,11 @@ export interface SyncPromesasResumen {
 	// resolvió) — señal fuerte de que algo está mal (ej. drift grande entre
 	// las dos DBs), no solo un par de casos sueltos.
 	fallaTotal?: boolean;
+	// Con qué modo se terminó enviando el batch. "evento" significa que se
+	// degradó por drift parcial y NO se limpiaron zombies en esta corrida.
+	modo?: "evento" | "reconciliacion_completa";
+	// Motivo de la degradación, presente solo cuando modo === "evento".
+	degradado?: "drift_parcial";
 }
 
 function resumenVacio(
@@ -66,10 +72,13 @@ export async function sincronizarPromesasCarteraBack(): Promise<SyncPromesasResu
 			return resumenVacio({ skipped: true, reason: "cartera_back_disabled" });
 		}
 
-		// Mismo predicado de "promesa activa" ya establecido en getColaDia:
-		// promesa_pago + fecha presente + estadoPromesa pendiente/incumplida/null
-		// (legacy). 'cumplida' es terminal, se excluye — ya se marcó
-		// activa=false vía push por evento cuando pasó a cumplida.
+		// Predicado compartido (lib/promesa-vigente.ts): promesa_pago + fecha
+		// todavía no vencida + pendiente/null. 'incumplida' NO entra: su fecha
+		// ya pasó, así que reenviarla con activa=true solo acumulaba filas
+		// muertas en el espejo corrida tras corrida (no rompía el freeze —
+		// cartera-back filtra por fecha del lado del read— pero era basura
+		// creciendo sin techo). 'cumplida' es terminal y ya se marcó
+		// activa=false vía push por evento.
 		const promesas = await db
 			.select({
 				id: contactosCobros.id,
@@ -80,17 +89,7 @@ export async function sincronizarPromesasCarteraBack(): Promise<SyncPromesasResu
 				fechaProximoContacto: contactosCobros.fechaProximoContacto,
 			})
 			.from(contactosCobros)
-			.where(
-				and(
-					eq(contactosCobros.estadoContacto, "promesa_pago"),
-					isNotNull(contactosCobros.fechaProximoContacto),
-					or(
-						eq(contactosCobros.estadoPromesa, "pendiente"),
-						eq(contactosCobros.estadoPromesa, "incumplida"),
-						isNull(contactosCobros.estadoPromesa),
-					),
-				),
-			);
+			.where(esPromesaVigente());
 
 		// Sin early-return con 0 promesas: el batch vacío es información real
 		// ("hoy no hay ninguna vigente") y debe llegar a cartera-back para que
@@ -142,11 +141,12 @@ export async function sincronizarPromesasCarteraBack(): Promise<SyncPromesasResu
 			});
 		}
 
-		// Guarda contra desactivación masiva por drift de datos — la regla vive
+		// Guarda contra desactivación indebida por drift de datos — la regla vive
 		// en lib/reconciliacion-promesas.ts (pura, con test propio) porque su
-		// filo es sutil: batch vacío significa "desactivá todo el espejo", que
-		// es correcto si de verdad no hay nada vigente hoy, y destructivo si
-		// había promesas que simplemente no resolvieron a un caso con SIFCO.
+		// filo es sutil: declarar el batch como "completo" hace que cartera-back
+		// desactive TODA fila activa ausente de él, y una fila ausente por drift
+		// (promesa vigente que no resolvió a un caso con SIFCO) sigue vigente —
+		// apagarla la destrabaría justo antes de procesarMoras.
 		const decision = decidirEnvioReconciliacion(
 			promesas.length,
 			payload.length,
@@ -158,6 +158,17 @@ export async function sincronizarPromesasCarteraBack(): Promise<SyncPromesasResu
 			);
 			return resumen;
 		}
+		resumen.modo = decision.modo;
+		if (decision.modo === "evento") {
+			// Degradado: se conserva el upsert de las que sí resolvieron, pero sin
+			// declarar el set como completo. Se pierde la limpieza de zombies de
+			// ESTA corrida (la próxima la hace, si el drift se resolvió); no se
+			// pierde correctitud del freeze.
+			resumen.degradado = decision.motivo;
+			console.error(
+				`${LOG_PREFIX} DEGRADADO a modo="evento" (${decision.motivo}): ${resumen.sinCaso} de ${promesas.length} promesas vigentes no resolvieron a un caso con SIFCO. Se sincroniza lo resuelto SIN desactivar ausentes (evita destrabar promesas todavía vigentes). Revisar drift entre contactos_cobros y casos_cobros.`,
+			);
+		}
 
 		//
 		// El endpoint acepta batch completo — un solo request, idempotente por
@@ -166,7 +177,7 @@ export async function sincronizarPromesasCarteraBack(): Promise<SyncPromesasResu
 		try {
 			const result = await carteraBackClient.syncPromesasPago(
 				payload,
-				"reconciliacion_completa",
+				decision.modo,
 			);
 			if (result.success) {
 				resumen.enviadas = result.actualizadas ?? payload.length;
@@ -198,13 +209,22 @@ export async function sincronizarPromesasCarteraBack(): Promise<SyncPromesasResu
 			console.error(`${LOG_PREFIX} Error llamando a cartera-back:`, error);
 		}
 
-		console.log(
-			`${LOG_PREFIX} total=${resumen.total} enviadas=${resumen.enviadas} sinCaso=${resumen.sinCaso} errores=${resumen.errores}` +
-				(resumen.noEncontradas
-					? ` noEncontradas=${resumen.noEncontradas.length}`
-					: "") +
-				(resumen.fallaTotal ? " fallaTotal=true" : ""),
-		);
+		// console.error (no .log) cuando se degradó: una corrida degradada NO
+		// limpió zombies, así que aunque enviadas/total se vean sanos, la
+		// reconciliación de esa noche quedó a medias. Debe salir por el canal
+		// que se alerta, no perdido entre los logs de rutina.
+		const linea =
+			`${LOG_PREFIX} total=${resumen.total} enviadas=${resumen.enviadas} sinCaso=${resumen.sinCaso} errores=${resumen.errores} modo=${resumen.modo}` +
+			(resumen.degradado ? ` degradado=${resumen.degradado}` : "") +
+			(resumen.noEncontradas
+				? ` noEncontradas=${resumen.noEncontradas.length}`
+				: "") +
+			(resumen.fallaTotal ? " fallaTotal=true" : "");
+		if (resumen.degradado || resumen.fallaTotal || resumen.errores > 0) {
+			console.error(linea);
+		} else {
+			console.log(linea);
+		}
 		return resumen;
 	} catch (error) {
 		console.error(`${LOG_PREFIX} Error fatal:`, error);

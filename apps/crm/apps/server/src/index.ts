@@ -1503,6 +1503,28 @@ function scheduleAtSyncPromesasGT() {
 }
 scheduleAtSyncPromesasGT();
 
+// Catch-up de arranque: si el proceso bootea DENTRO de la ventana 23:30–23:59
+// GT (deploy nocturno, reinicio, crash-loop), el schedule de arriba ya empujó
+// el timer a mañana y la reconciliación de ESTA noche nunca correría — pero
+// procesarMoras sí va a correr a las 23:59 con lo que haya en el espejo. Es
+// justo el peor momento para saltarla: un deploy en esa franja es lo que hace
+// más probable que se hayan perdido pushes por evento (Codex PR #1237).
+// Fuera de la ventana no se hace nada: correr el job en cualquier arranque lo
+// convertiría en un efecto secundario del deploy, y el batch declarado como
+// "set completo" no es algo que convenga disparar de más.
+{
+	const ahora = new Date();
+	const minutosUtc = ahora.getUTCHours() * 60 + ahora.getUTCMinutes();
+	const INICIO_VENTANA = 5 * 60 + 30; // 23:30 GT
+	const FIN_VENTANA = 5 * 60 + 59; // 23:59 GT (cuando arranca procesarMoras)
+	if (minutosUtc >= INICIO_VENTANA && minutosUtc < FIN_VENTANA) {
+		console.log(
+			"[SyncPromesasCarteraBack] Arranque dentro de la ventana 23:30–23:59 GT: ejecutando reconciliación de catch-up antes de procesarMoras.",
+		);
+		sincronizarPromesasCarteraBack().catch(console.error);
+	}
+}
+
 // CB-024: cierre diario de asesores — snapshot de gestión (contactos
 // efectivos manuales, promesas, movimientos de bucket) a las 00:15 GT
 // (= 06:15 UTC) todos los días, del día que ACABA DE TERMINAR (ayer GT).

@@ -3,21 +3,30 @@
  * (services/sync-promesas-cartera-back.ts).
  *
  * Vive acá, separada del job, porque la regla tiene un filo peligroso y
- * merece test propio: en modo "reconciliacion_completa" un batch vacío NO
- * significa "no hagas nada" — significa "desactivá todo el espejo". Eso es
- * exactamente lo que se quiere cuando de verdad no hay promesas vigentes
- * hoy (es la única forma de limpiar la última fila si su push de resolución
- * se perdió), y exactamente lo que NO se quiere cuando había promesas pero
- * ninguna resolvió a un caso con SIFCO: ahí el batch vacío es un síntoma de
- * drift de datos, y enviarlo destrabaría el freeze de créditos cuya promesa
- * sigue vigente.
+ * merece test propio: en modo "reconciliacion_completa" el batch se declara
+ * como el 100% de lo vigente, y cartera-back DESACTIVA toda fila activa
+ * ausente de él. Eso es exactamente lo que se quiere para limpiar promesas
+ * ya resueltas cuyo push se perdió, y exactamente lo que NO se quiere
+ * cuando el batch está incompleto por un problema de datos: ahí las filas
+ * ausentes corresponden a promesas TODAVÍA VIGENTES, y desactivarlas las
+ * destraba justo antes de que corra procesarMoras.
  *
  * Ante la duda, freeze stale (visible, se autodestraba solo por
- * fecha_promesa < hoy) antes que unfreeze masivo silencioso.
+ * fecha_promesa < hoy) antes que unfreeze incorrecto y silencioso.
  */
 
 export type DecisionReconciliacion =
-	| { enviar: true }
+	/** Batch completo y confiable: se declara como el set total de lo vigente. */
+	| { enviar: true; modo: "reconciliacion_completa" }
+	/**
+	 * Batch incompleto (alguna promesa vigente no resolvió a un caso con
+	 * SIFCO). Se envía igual para no perder el upsert de las que sí
+	 * resolvieron, pero degradado a "evento" para que cartera-back NO
+	 * desactive nada — las filas ausentes del batch no son promesas
+	 * resueltas, son promesas que no supimos resolver.
+	 */
+	| { enviar: true; modo: "evento"; motivo: "drift_parcial" }
+	/** Nada que enviar y nada que declarar: enviar [] apagaría todo el espejo. */
 	| { enviar: false; motivo: "drift_sin_sifco" };
 
 /**
@@ -28,10 +37,26 @@ export function decidirEnvioReconciliacion(
 	totalPromesasVigentes: number,
 	totalPayload: number,
 ): DecisionReconciliacion {
-	// Payload con contenido → siempre se envía.
-	if (totalPayload > 0) return { enviar: true };
-	// Payload vacío porque no hay NADA vigente hoy → se envía (limpia el espejo).
-	if (totalPromesasVigentes === 0) return { enviar: true };
-	// Payload vacío pero SÍ había promesas vigentes → drift, no se envía.
-	return { enviar: false, motivo: "drift_sin_sifco" };
+	const sinResolver = totalPromesasVigentes - totalPayload;
+
+	// Nada vigente hoy → batch vacío declarado como completo. Es la ÚNICA
+	// forma de desactivar la última fila del espejo si su push se perdió.
+	if (totalPromesasVigentes === 0) {
+		return { enviar: true, modo: "reconciliacion_completa" };
+	}
+
+	// Había promesas vigentes y NINGUNA resolvió → no se envía. Un [] acá
+	// sería indistinguible de "no hay nada vigente" y apagaría todo.
+	if (totalPayload === 0) {
+		return { enviar: false, motivo: "drift_sin_sifco" };
+	}
+
+	// Batch parcial → se envía lo resuelto, pero sin declararlo completo: las
+	// ausentes siguen vigentes, desactivarlas destrabaría su freeze.
+	if (sinResolver > 0) {
+		return { enviar: true, modo: "evento", motivo: "drift_parcial" };
+	}
+
+	// Todas resolvieron → el batch sí es el set completo.
+	return { enviar: true, modo: "reconciliacion_completa" };
 }

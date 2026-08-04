@@ -96,7 +96,8 @@ import {
 	type EstadoPromesa,
 	evaluarPromesa,
 } from "../lib/promesa-pago";
-import { pushPromesaActivaHaciaCarteraBack } from "../lib/push-promesa-cartera-back";
+import { pushPromesaActivaEnSegundoPlano } from "../lib/push-promesa-cartera-back";
+import { condicionesPromesaVigente } from "../lib/promesa-vigente";
 import { resolverNumeroSifco } from "../lib/resolver-numero-sifco";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -536,19 +537,13 @@ export const createContactoCobrosSchema = z
 // 'pendiente'`); sin el isNull, un caso con una promesa NULL futura burlaba el
 // guard y se podía insertar una segunda activa (Codex PR #1232).
 async function promesaActivaDelCaso(casoCobroId: string) {
-	const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
 	const [row] = await db
 		.select({ id: contactosCobros.id })
 		.from(contactosCobros)
 		.where(
 			and(
 				eq(contactosCobros.casoCobroId, casoCobroId),
-				eq(contactosCobros.estadoContacto, "promesa_pago"),
-				or(
-					eq(contactosCobros.estadoPromesa, "pendiente"),
-					isNull(contactosCobros.estadoPromesa),
-				),
-				gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
+				...condicionesPromesaVigente(),
 			),
 		)
 		.limit(1);
@@ -1226,6 +1221,10 @@ export const cobrosRouter = {
 					// solo agrega la señal de display de POR QUÉ.
 					// Sin índice nuevo: idx_contactos_cobros_caso_fecha ya lidera por
 					// caso_cobro_id y la página trae ≤50 casos (decisión explícita).
+					// El predicado de vigencia es el compartido (lib/promesa-vigente.ts):
+					// incluir 'incumplida' o no filtrar por fecha dejaba el badge
+					// "Promesa activa" pegado para siempre en casos con una promesa
+					// incumplida vieja.
 					const promesaPorCaso = new Set<string>();
 					const casoIdsPagina = [...casosPorSifco.values()].map((c) => c.id);
 					if (casoIdsPagina.length > 0) {
@@ -1235,13 +1234,7 @@ export const cobrosRouter = {
 							.where(
 								and(
 									inArray(contactosCobros.casoCobroId, casoIdsPagina),
-									eq(contactosCobros.estadoContacto, "promesa_pago"),
-									isNotNull(contactosCobros.fechaProximoContacto),
-									or(
-										eq(contactosCobros.estadoPromesa, "pendiente"),
-										eq(contactosCobros.estadoPromesa, "incumplida"),
-										isNull(contactosCobros.estadoPromesa),
-									),
+									...condicionesPromesaVigente(),
 								),
 							);
 						for (const row of promesasRows) {
@@ -1596,8 +1589,14 @@ export const cobrosRouter = {
 			// CB-030: promesa creada o editada → push best-effort hacia cartera-back
 			// para que procesarMoras la congele (o actualice el rango) desde la
 			// próxima corrida.
+			//
+			// SIN await: esto está en el camino de un request del asesor. El
+			// cliente de cartera-back reintenta 3 veces con timeout de 30s, así
+			// que esperarlo colgaría el guardado de la promesa hasta ~127s si
+			// cartera-back está caído — inaceptable para un push best-effort cuya
+			// red de seguridad es la reconciliación diaria (Codex PR #1237).
 			if (esPromesa) {
-				await pushPromesaActivaHaciaCarteraBack({
+				pushPromesaActivaEnSegundoPlano({
 					id: filas[0].id,
 					casoCobroId: datos.casoCobroId,
 					cuotaInicio: datos.cuotaInicio ?? null,
@@ -2530,9 +2529,15 @@ export const cobrosRouter = {
 			// "incumplida" NO empuja acá: el freeze en cartera-back ya se
 			// autodestraba por fecha_promesa < hoy (isOverdueInstallmentForMora),
 			// así que ese caso no depende de este push para ser correcto.
+			//
+			// SIN await, y con más razón que en createContactoCobros: acá el push
+			// va DENTRO de un loop, así que esperarlo multiplicaba el peor caso
+			// por la cantidad de promesas cumplidas (~127s cada una con
+			// cartera-back caído) en un endpoint que corre cada vez que un asesor
+			// abre un caso (Codex PR #1237).
 			for (const promesa of promesasValidas) {
 				if (resultado[promesa.id] === "cumplida") {
-					await pushPromesaActivaHaciaCarteraBack({
+					pushPromesaActivaEnSegundoPlano({
 						id: promesa.id,
 						numeroCreditoSifco: promesa.numeroCreditoSifco,
 						cuotaInicio: promesa.cuotaInicio,

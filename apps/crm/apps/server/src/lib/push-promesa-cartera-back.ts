@@ -21,6 +21,29 @@ import { carteraBackClient } from "../services/cartera-back-client";
 import { toDateStrGT } from "./guatemala-month-window";
 import { resolverNumeroSifco } from "./resolver-numero-sifco";
 
+/**
+ * Dispara el push SIN esperarlo. Para los call sites que están en el camino
+ * de un request de usuario (registrar/editar una promesa desde el modal):
+ * cartera-back tiene timeout de 30s y 3 reintentos con backoff, así que
+ * esperarlo puede colgar el request del asesor ~127s si el servicio está
+ * caído — para un push documentado como best-effort, cuya red de seguridad
+ * es la reconciliación diaria (Codex review PR #1237).
+ *
+ * La función interna ya traga todos sus errores, pero el .catch() queda
+ * igual como cinturón: una promesa rechazada sin manejar tumbaría el proceso
+ * bajo unhandledRejection.
+ */
+export function pushPromesaActivaEnSegundoPlano(
+	promesa: Parameters<typeof pushPromesaActivaHaciaCarteraBack>[0],
+): void {
+	void pushPromesaActivaHaciaCarteraBack(promesa).catch((error) => {
+		console.error(
+			"[pushPromesaActivaEnSegundoPlano] Error no manejado (no crítico, la reconciliación diaria corrige):",
+			error,
+		);
+	});
+}
+
 export async function pushPromesaActivaHaciaCarteraBack(promesa: {
 	id: string;
 	casoCobroId?: string;

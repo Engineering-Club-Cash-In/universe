@@ -729,7 +729,11 @@ export const insertPayment = async ({ body, set }: any) => {
     });
     // El pago de sólo otros se resuelve con su propio insert especial y tampoco
     // pasa por el loop de cuotas. Ambos flags salen puros del request.
-    const pagoSoloOtros = montoBoleta.eq(new Big(otros ?? 0));
+    // `gt(0)`: el schema admite monto_boleta 0, y un {boleta: 0, otros: 0} no es
+    // "sólo otros" — sin esto omitiría el guard de todas-cubiertas y sembraría
+    // una fila en cero.
+    const pagoSoloOtros =
+      montoBoleta.gt(0) && montoBoleta.eq(new Big(otros ?? 0));
 
     // 1. Obtener toda la info del crédito UNA SOLA VEZ
     const creditoData = await obtenerInfoCompletaCredito(

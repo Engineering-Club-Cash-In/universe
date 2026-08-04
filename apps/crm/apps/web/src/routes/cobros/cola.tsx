@@ -69,6 +69,8 @@ interface ColaItem {
 	incumplida: boolean;
 	promesaProxima: boolean;
 	sinContacto: boolean;
+	/** CB-030: ¿hay al menos una promesa vigente? Independiente de `incumplida`. */
+	promesaActiva: boolean;
 	diasSinContacto: number | null;
 }
 
@@ -204,20 +206,16 @@ function CategoriaBadges({ item }: { item: ColaItem }) {
 				</Badge>
 			)}
 			{/* CB-030: subestado genérico — el crédito tiene una promesa vigente
-			    congelando cuotas en cartera-back (ver latefee.ts). Se omite si ya
-			    hay un badge de promesa más específico (promesaHoy / incumplida) —
-			    no duplicar la misma señal.
-			    El `!incumplida` no es solo cosmético: `fechaPromesa` es la MÍNIMA
-			    del crédito y la query que la alimenta incluye promesas vencidas,
-			    así que por sí sola no implica vigencia. clasificarCreditoColaDia
-			    marca `incumplida` para toda promesa vencida (por estado O por
-			    fecha < hoy GT), de modo que descartarlas acá deja pasar solo
-			    créditos cuyas promesas están todas al día. La columna Bucket
-			    (aparte) ya viene congelada del servidor — este badge solo explica
-			    por qué, no la recalcula. */}
-			{!!item.fechaPromesa && !item.promesaHoy && !item.incumplida && (
-				<PromesaActivaBadge compact />
-			)}
+			    congelando cuotas en cartera-back (ver latefee.ts). Usa el flag
+			    `promesaActiva` que calcula el server (clasificarCreditoColaDia):
+			    NO se puede derivar de los otros flags, porque un crédito puede
+			    arrastrar una promesa incumplida vieja Y tener otra vigente nueva
+			    — el proxy `!incumplida` suprimía el badge justo en ese caso y
+			    dejaba la cola contradiciendo al detalle y al listado.
+			    Solo se omite si `promesaHoy` ya dice lo mismo con más precisión.
+			    La columna Bucket (aparte) ya viene congelada del servidor — este
+			    badge solo explica por qué, no la recalcula. */}
+			{item.promesaActiva && !item.promesaHoy && <PromesaActivaBadge compact />}
 		</span>
 	);
 }

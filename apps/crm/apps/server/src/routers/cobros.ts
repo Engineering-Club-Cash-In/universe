@@ -96,8 +96,8 @@ import {
 	type EstadoPromesa,
 	evaluarPromesa,
 } from "../lib/promesa-pago";
-import { pushPromesaActivaEnSegundoPlano } from "../lib/push-promesa-cartera-back";
 import { condicionesPromesaVigente } from "../lib/promesa-vigente";
+import { pushPromesaActivaEnSegundoPlano } from "../lib/push-promesa-cartera-back";
 import { resolverNumeroSifco } from "../lib/resolver-numero-sifco";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -2859,6 +2859,9 @@ export const cobrosRouter = {
 							promesaHoy: clasificacion.promesaHoy,
 							incumplida: clasificacion.incumplida,
 							promesaProxima: clasificacion.promesaProxima,
+							// CB-030: vigencia real, NO derivable de los otros flags —
+							// un crédito puede tener incumplida vieja + vigente nueva.
+							promesaActiva: clasificacion.promesaActiva,
 							sinContacto: clasificacion.sinContacto,
 							diasSinContacto,
 						}),

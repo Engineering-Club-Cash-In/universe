@@ -805,7 +805,9 @@ export const bucketsRouter = new Elysia()
     async ({ body, set, user }: any) => {
       if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
       try {
-        const result = await syncPromesasPago(body.promesas as PromesaSync[]);
+        const modo =
+          body.modo === "reconciliacion_completa" ? "reconciliacion_completa" : "evento";
+        const result = await syncPromesasPago(body.promesas as PromesaSync[], modo);
         if (!result.success) {
           set.status = 400;
           return result;
@@ -834,11 +836,20 @@ export const bucketsRouter = new Elysia()
           }),
           { minItems: 1 },
         ),
+        // CB-030 — "evento" (default, push de 1 promesa) no toca nada fuera de
+        // su propia fila. "reconciliacion_completa" (job diario del CRM, el
+        // array trae el set COMPLETO de promesas vigentes) además desactiva
+        // toda fila activa=true ausente del batch — sin esto, un push de
+        // cumplida/cancelada perdido dejaba el freeze zombie para siempre
+        // (Codex review PR #1234).
+        modo: t.Optional(
+          t.Union([t.Literal("evento"), t.Literal("reconciliacion_completa")]),
+        ),
       }),
       detail: {
         summary: "Sincronizar promesas de pago vigentes desde crm-server",
         description:
-          "Upsert idempotente por contacto_cobros_id. Resuelve numero_credito_sifco → credito_id. Usado por el push por evento y por el job de reconciliación diario del CRM.",
+          "Upsert idempotente por contacto_cobros_id. Resuelve numero_credito_sifco → credito_id. modo='evento' (default) para el push por evento; modo='reconciliacion_completa' para el job diario del CRM (desactiva filas ausentes del batch).",
         tags: ["Buckets", "Promesas de Pago"],
       },
     },

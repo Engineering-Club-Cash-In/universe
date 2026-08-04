@@ -4,7 +4,6 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
 	CalendarIcon,
-	ChevronDown,
 	Loader2,
 	Mail,
 	MessageCircle,
@@ -31,12 +30,6 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -141,6 +134,8 @@ interface ContactoModalProps {
 	// Codex PR #1228: con convenio activo, el monto comprometido es el total del
 	// convenio (montoSugerido), no la suma cuotas+mora — el selector no lo pisa.
 	esConvenio?: boolean;
+	/** Cuota mensual del convenio: se SUMA al total de cuotas seleccionadas. */
+	cuotaConvenio?: number;
 	// CB-029: promesa activa del caso (una sola). Si viene, el modal abre en modo
 	// EDICIÓN: pre-carga estos valores y al guardar hace UPDATE de esta fila en
 	// vez de crear otra. $id.tsx la detecta con el estado ya recalculado.
@@ -169,6 +164,16 @@ interface ContactoModalProps {
 	telefonoAsesor?: string;
 }
 
+/** Etiqueta del canal — el método ya no se elige dentro de la modal. */
+const CANAL_LABEL: Record<string, string> = {
+	llamada: "📞 Llamada",
+	whatsapp: "💬 WhatsApp",
+	sms: "📱 SMS",
+	email: "📧 Email",
+	visita_domicilio: "🏠 Visita a domicilio",
+	carta_notarial: "📋 Carta notarial",
+};
+
 export function ContactoModal({
 	casoCobroId,
 	clienteNombre,
@@ -184,6 +189,7 @@ export function ContactoModal({
 	montoSugerido,
 	montoMora = 0,
 	esConvenio = false,
+	cuotaConvenio,
 	promesaActiva = null,
 	fechaPago = "",
 	cuotaMensual = "",
@@ -485,6 +491,18 @@ export function ContactoModal({
 		return total;
 	};
 
+	/**
+	 * Monto que se propone comprometer: lo seleccionado (cuotas + mora) MÁS la
+	 * cuota del convenio, que es un cargo aparte del plan de regularización.
+	 * Antes, con convenio el monto quedaba congelado en `montoSugerido`
+	 * (= convenio + 1 cuota) y no se movía aunque el asesor marcara 3 cuotas
+	 * (Codex PR #1228 lo congeló para que el selector no lo pisara; el efecto
+	 * secundario era que la selección dejaba de reflejarse).
+	 */
+	const montoPromesaDe = (seleccion: Set<number>, incluyeMora: boolean) =>
+		totalDeSeleccion(seleccion, incluyeMora) +
+		(esConvenio ? (cuotaConvenio ?? 0) : 0);
+
 	// Al (re)abrir la promesa, re-sembrar la selección con todo lo atrasado y
 	// sincronizar el rango + el monto del form (por si cambiaron las cuotas).
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `form`/montoPorCuota/montoMora son estables o derivan de las mismas cuotas; incluirlos re-sembraría en cada render y borraría la selección del asesor.
@@ -529,14 +547,9 @@ export function ContactoModal({
 			"cuotaFin",
 			numerosAtrasados[numerosAtrasados.length - 1],
 		);
-		// Con convenio el monto comprometido es el total del convenio
-		// (montoSugerido = cuotaConvenio + cuota), no la suma cuotas+mora — no lo
-		// pisamos con totalDeSeleccion (Codex PR #1228).
 		form.setFieldValue(
 			"montoComprometido",
-			esConvenio && montoSugerido != null
-				? montoSugerido.toFixed(2)
-				: totalDeSeleccion(todas, true).toFixed(2),
+			montoPromesaDe(todas, true).toFixed(2),
 		);
 		// promesaActiva?.id (no el objeto, que cambia de identidad cada render):
 		// re-siembra cuando la promesa activa CARGA tarde o un refetch la cambia con
@@ -580,17 +593,11 @@ export function ContactoModal({
 			"cuotaFin",
 			nums.length ? nums[nums.length - 1] : undefined,
 		);
-		// El monto sigue a la selección (editable). Con convenio no se toca: es el
-		// total del convenio, no la suma cuotas+mora (Codex PR #1228).
-		if (!esConvenio) {
-			form.setFieldValue(
-				"montoComprometido",
-				totalDeSeleccion(
-					siguiente,
-					!!form.getFieldValue("incluyeMora"),
-				).toFixed(2),
-			);
-		}
+		// El monto sigue a la selección (editable).
+		form.setFieldValue(
+			"montoComprometido",
+			montoPromesaDe(siguiente, !!form.getFieldValue("incluyeMora")).toFixed(2),
+		);
 	};
 
 	const getIconoMetodo = (metodo: string) => {
@@ -616,6 +623,27 @@ export function ContactoModal({
 		| "email-api"
 		| "sms-api";
 
+	/**
+	 * Tras un envío AUTOMÁTICO (WhatsApp/Email/SMS) el contacto se registra solo:
+	 * antes el asesor enviaba y además tenía que darle "Registrar Contacto", y si
+	 * cerraba la modal el envío quedaba sin rastro en el historial.
+	 * Comentarios es obligatorio, así que si viene vacío se rellena con lo que
+	 * realmente pasó (canal + plantilla usada).
+	 */
+	const registrarTrasEnvio = (canal: string) => {
+		const actuales = String(form.getFieldValue("comentarios") ?? "").trim();
+		if (!actuales) {
+			const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === plantillaId);
+			form.setFieldValue(
+				"comentarios",
+				plantilla
+					? `${canal} enviado al cliente (plantilla: ${plantilla.nombre}).`
+					: `${canal} enviado al cliente.`,
+			);
+		}
+		void form.handleSubmit();
+	};
+
 	const whatsappApiMutation = useMutation({
 		mutationFn: (vars: { telefono: string; mensaje: string }) =>
 			client.enviarWhatsappCobros({
@@ -624,7 +652,9 @@ export function ContactoModal({
 				plantillaId: plantillaId || undefined,
 			}),
 		onSuccess: (res) => {
-			if (res.success) toast.success("WhatsApp enviado correctamente");
+			if (!res.success) return;
+			toast.success("WhatsApp enviado — registrando el contacto...");
+			registrarTrasEnvio("WhatsApp");
 		},
 		onError: (error: any) =>
 			toast.error(error?.message || "Error enviando WhatsApp"),
@@ -642,7 +672,9 @@ export function ContactoModal({
 				plantillaId: plantillaId || undefined,
 			}),
 		onSuccess: (res) => {
-			if (res.success) toast.success("Email enviado correctamente");
+			if (!res.success) return;
+			toast.success("Email enviado — registrando el contacto...");
+			registrarTrasEnvio("Email");
 		},
 		onError: (error: any) =>
 			toast.error(error?.message || "Error enviando email"),
@@ -656,7 +688,9 @@ export function ContactoModal({
 				plantillaId: plantillaId || undefined,
 			}),
 		onSuccess: (res) => {
-			if (res.success) toast.success("SMS enviado correctamente");
+			if (!res.success) return;
+			toast.success("SMS enviado — registrando el contacto...");
+			registrarTrasEnvio("SMS");
 		},
 		onError: (error: any) =>
 			toast.error(error?.message || "Error enviando SMS"),
@@ -768,8 +802,14 @@ export function ContactoModal({
 		}
 	};
 
+	// SMS también necesita la plantilla: antes solo se llegaba a SMS desde la
+	// modal de WhatsApp/Email (ya con el mensaje cargado) y reusaba ese texto.
+	// Con SMS como canal propio, sin esto el selector no aparecía y se enviaba
+	// un mensaje VACÍO.
 	const mostrarPlantillas =
-		metodoInicial === "whatsapp" || metodoInicial === "email";
+		metodoInicial === "whatsapp" ||
+		metodoInicial === "email" ||
+		metodoInicial === "sms";
 	const mensajeEditable = mensajePlantillaEditable(
 		metodoInicial,
 		mensajeEditado,
@@ -828,79 +868,14 @@ export function ContactoModal({
 								Información del Contacto
 							</h3>
 
-							<div className="grid grid-cols-2 gap-4">
-								<form.Field name="metodoContacto">
-									{(field) => (
-										<div className="space-y-2">
-											<Label>Método de Contacto</Label>
-											<Select
-												onValueChange={(value) =>
-													form.setFieldValue(
-														field.name,
-														value as typeof field.state.value,
-													)
-												}
-												defaultValue={field.state.value}
-											>
-												<SelectTrigger>
-													<SelectValue placeholder="Seleccionar método" />
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="llamada">📞 Llamada</SelectItem>
-													<SelectItem value="whatsapp">💬 WhatsApp</SelectItem>
-													<SelectItem value="sms">📱 SMS</SelectItem>
-													<SelectItem value="email">📧 Email</SelectItem>
-													<SelectItem value="visita_domicilio">
-														🏠 Visita Domicilio
-													</SelectItem>
-													<SelectItem value="carta_notarial">
-														📋 Carta Notarial
-													</SelectItem>
-												</SelectContent>
-											</Select>
-										</div>
-									)}
-								</form.Field>
-
-								<form.Field name="estadoContacto">
-									{(field) => (
-										<div className="space-y-2">
-											<Label>Estado del Contacto</Label>
-											<Select
-												onValueChange={(value) =>
-													form.setFieldValue(
-														field.name,
-														value as typeof field.state.value,
-													)
-												}
-												defaultValue={field.state.value}
-											>
-												<SelectTrigger>
-													<SelectValue placeholder="Estado del contacto" />
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="contactado">
-														✅ Contactado
-													</SelectItem>
-													<SelectItem value="no_contesta">
-														❌ No Contesta
-													</SelectItem>
-													<SelectItem value="numero_equivocado">
-														📱 Número Equivocado
-													</SelectItem>
-													{/* CB-020: "Promesa de Pago" se registra SOLO desde el
-													    botón dedicado (modal reducido) — no aquí. */}
-													<SelectItem value="acuerdo_parcial">
-														📝 Acuerdo Parcial
-													</SelectItem>
-													<SelectItem value="rechaza_pagar">
-														🚫 Rechaza Pagar
-													</SelectItem>
-												</SelectContent>
-											</Select>
-										</div>
-									)}
-								</form.Field>
+							{/* El canal lo define el botón que abrió la modal (Llamada / WhatsApp /
+							    Email): antes era un Select y se podía cambiar acá adentro, así que
+							    "Registrar Llamada" terminaba guardando un WhatsApp. Ahora es fijo. */}
+							<div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+								<span className="text-muted-foreground text-xs">Canal</span>
+								<span className="font-medium text-sm">
+									{CANAL_LABEL[metodoInicial] ?? metodoInicial}
+								</span>
 							</div>
 
 							{/* Selector de plantilla para WhatsApp y Email */}
@@ -972,26 +947,31 @@ export function ContactoModal({
 								</div>
 							)}
 
-							{/* Botones para ejecutar acción */}
-							<div className="flex flex-wrap gap-2">
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									onClick={() => ejecutarAccion("llamada")}
-									disabled={envioEnCurso}
-									className="flex items-center gap-2"
-								>
-									<Phone className="h-4 w-4" />
-									Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
-								</Button>
+							{/* Solo la acción del canal por el que se abrió la modal. Antes se
+							    mostraban los 4 (Llamar / WhatsApp / Email / SMS) sin importar el
+							    botón que la abrió, así que la modal parecía un menú de canales en
+							    vez del registro de UNA gestión. */}
+							<div className="flex flex-wrap items-center gap-2">
+								{metodoInicial === "llamada" && (
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={() => ejecutarAccion("llamada")}
+										disabled={envioEnCurso}
+										className="flex items-center gap-2"
+									>
+										<Phone className="h-4 w-4" />
+										Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
+									</Button>
+								)}
 
-								<DropdownMenu>
-									<DropdownMenuTrigger asChild>
+								{metodoInicial === "whatsapp" && (
+									<>
 										<Button
 											type="button"
-											variant="outline"
 											size="sm"
+											onClick={() => ejecutarAccion("whatsapp-api")}
 											disabled={envioEnCurso}
 											className="flex items-center gap-2"
 										>
@@ -1000,32 +980,29 @@ export function ContactoModal({
 											) : (
 												<MessageCircle className="h-4 w-4" />
 											)}
-											WhatsApp
-											{whatsappApiMutation.isPending ? null : (
-												<ChevronDown className="h-3 w-3" />
-											)}
+											{whatsappApiMutation.isPending
+												? "Enviando..."
+												: "Enviar WhatsApp"}
 										</Button>
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="start">
-										<DropdownMenuItem
-											onClick={() => ejecutarAccion("whatsapp-api")}
-										>
-											Enviar Directo (Automático)
-										</DropdownMenuItem>
-										<DropdownMenuItem
-											onClick={() => ejecutarAccion("whatsapp-link")}
-										>
-											Abrir WhatsApp Web (Manual)
-										</DropdownMenuItem>
-									</DropdownMenuContent>
-								</DropdownMenu>
-
-								<DropdownMenu>
-									<DropdownMenuTrigger asChild>
 										<Button
 											type="button"
-											variant="outline"
+											variant="ghost"
 											size="sm"
+											onClick={() => ejecutarAccion("whatsapp-link")}
+											disabled={envioEnCurso}
+											className="text-muted-foreground text-xs"
+										>
+											Abrir WhatsApp Web
+										</Button>
+									</>
+								)}
+
+								{metodoInicial === "email" && (
+									<>
+										<Button
+											type="button"
+											size="sm"
+											onClick={() => ejecutarAccion("email-api")}
 											disabled={envioEnCurso}
 											className="flex items-center gap-2"
 										>
@@ -1034,41 +1011,41 @@ export function ContactoModal({
 											) : (
 												<Mail className="h-4 w-4" />
 											)}
-											Email
-											{emailApiMutation.isPending ? null : (
-												<ChevronDown className="h-3 w-3" />
-											)}
+											{emailApiMutation.isPending
+												? "Enviando..."
+												: "Enviar correo"}
 										</Button>
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="start">
-										<DropdownMenuItem
-											onClick={() => ejecutarAccion("email-api")}
-										>
-											Enviar Directo (Automático)
-										</DropdownMenuItem>
-										<DropdownMenuItem
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
 											onClick={() => ejecutarAccion("email-link")}
+											disabled={envioEnCurso}
+											className="text-muted-foreground text-xs"
 										>
-											Abrir cliente de correo (Manual)
-										</DropdownMenuItem>
-									</DropdownMenuContent>
-								</DropdownMenu>
+											Abrir cliente de correo
+										</Button>
+									</>
+								)}
 
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									onClick={() => ejecutarAccion("sms-api")}
-									disabled={envioEnCurso}
-									className="flex items-center gap-2"
-								>
-									{smsApiMutation.isPending ? (
-										<Loader2 className="h-4 w-4 animate-spin" />
-									) : (
-										<MessageSquare className="h-4 w-4" />
-									)}
-									{smsApiMutation.isPending ? "Enviando SMS..." : "SMS"}
-								</Button>
+								{metodoInicial === "sms" && (
+									<Button
+										type="button"
+										size="sm"
+										onClick={() => ejecutarAccion("sms-api")}
+										disabled={envioEnCurso}
+										className="flex items-center gap-2"
+									>
+										{smsApiMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<MessageSquare className="h-4 w-4" />
+										)}
+										{smsApiMutation.isPending
+											? "Enviando SMS..."
+											: "Enviar SMS"}
+									</Button>
+								)}
 							</div>
 
 							<form.Field name="metodoContacto">
@@ -1131,92 +1108,50 @@ export function ContactoModal({
 							)}
 						</form.Field>
 
-						{/* CB-025: Acuerdos Alcanzados + Compromisos de Pago solo en la
-						    variante "completo". En la promesa quedaron redundantes con
-						    Comentarios + el selector de cuotas/mora + Monto comprometido,
-						    y Compromisos además era obligatorio (frenaba al asesor). */}
+						{/* Resultado del contacto — discreto y al final: el 95% de las veces
+						    es "Contactado" (default) y el asesor no debería detenerse acá. Los
+						    otros estados siguen disponibles porque Gestión Temprana B1 los usa
+						    para distinguir intento de contacto efectivo. */}
 						{!esPromesa && (
-							<div className="grid grid-cols-2 gap-4">
-								<form.Field name="acuerdosAlcanzados">
-									{(field) => (
-										<div className="space-y-2">
-											<Label>Acuerdos Alcanzados</Label>
-											<Textarea
-												placeholder="Describe cualquier acuerdo o compromiso establecido"
-												value={field.state.value}
-												onChange={(e) => field.handleChange(e.target.value)}
-											/>
-										</div>
-									)}
-								</form.Field>
-
-								<form.Field name="estadoContacto">
-									{(estadoField) => (
-										<form.Field
-											name="compromisosPago"
-											validators={{
-												onChange: ({ value, fieldApi }) => {
-													const estadoContacto =
-														form.getFieldValue("estadoContacto");
-													const estadosExitosos = [
-														"contactado",
-														"promesa_pago",
-														"acuerdo_parcial",
-													];
-
-													// Requerir compromisos solo para contactos exitosos
-													if (
-														estadosExitosos.includes(estadoContacto) &&
-														(!value || value.trim() === "")
-													) {
-														return "El compromiso de pago es obligatorio cuando el contacto fue exitoso";
-													}
-													return undefined;
-												},
-											}}
+							<form.Field name="estadoContacto">
+								{(field) => (
+									<div className="flex flex-wrap items-center gap-2">
+										<Label className="text-muted-foreground text-xs">
+											Resultado
+										</Label>
+										<Select
+											onValueChange={(value) =>
+												form.setFieldValue(
+													field.name,
+													value as typeof field.state.value,
+												)
+											}
+											defaultValue={field.state.value}
 										>
-											{(field) => {
-												const estadoContacto =
-													form.getFieldValue("estadoContacto");
-												const estadosExitosos = [
-													"contactado",
-													"promesa_pago",
-													"acuerdo_parcial",
-												];
-												const esRequerido =
-													estadosExitosos.includes(estadoContacto);
-
-												return (
-													<div className="space-y-2">
-														<Label>
-															Compromisos de Pago {esRequerido && "*"}
-														</Label>
-														<Textarea
-															placeholder="Fechas y montos específicos prometidos por el cliente"
-															value={field.state.value}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															className={
-																field.state.meta.isTouched &&
-																field.state.meta.errors.length > 0
-																	? "border-red-500"
-																	: ""
-															}
-														/>
-														{field.state.meta.isTouched &&
-															field.state.meta.errors.length > 0 && (
-																<p className="text-red-500 text-sm">
-																	{field.state.meta.errors.join(", ")}
-																</p>
-															)}
-													</div>
-												);
-											}}
-										</form.Field>
-									)}
-								</form.Field>
-							</div>
+											<SelectTrigger className="h-8 w-56 text-sm">
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="contactado">
+													✅ Contactado
+												</SelectItem>
+												<SelectItem value="no_contesta">
+													❌ No contestó
+												</SelectItem>
+												<SelectItem value="numero_equivocado">
+													📱 Número equivocado
+												</SelectItem>
+												<SelectItem value="acuerdo_parcial">
+													📝 Acuerdo parcial
+												</SelectItem>
+												<SelectItem value="rechaza_pagar">
+													🚫 Rechaza pagar
+												</SelectItem>
+											</SelectContent>
+										</Select>
+									</div>
+								)}
+							</form.Field>
 						)}
 					</div>
 
@@ -1323,14 +1258,10 @@ export function ContactoModal({
 												checked={field.state.value}
 												onCheckedChange={(ch) => {
 													field.handleChange(!!ch);
-													// Con convenio el monto es el total del convenio; no
-													// lo pisamos con la suma cuotas+mora (Codex PR #1228).
-													if (!esConvenio) {
-														form.setFieldValue(
-															"montoComprometido",
-															totalDeSeleccion(cuotasPromesa, !!ch).toFixed(2),
-														);
-													}
+													form.setFieldValue(
+														"montoComprometido",
+														montoPromesaDe(cuotasPromesa, !!ch).toFixed(2),
+													);
 												}}
 											/>
 											<div className="flex-1">
@@ -1360,23 +1291,43 @@ export function ContactoModal({
 									]}
 								>
 									{() => {
-										const total = totalDeSeleccion(
+										const seleccionado = totalDeSeleccion(
 											cuotasPromesa,
 											!!form.getFieldValue("incluyeMora"),
 										);
+										// La cuota del convenio se cobra ADEMÁS de las cuotas del crédito;
+										// se muestra como línea aparte para que se entienda el total.
+										const convenio = esConvenio ? (cuotaConvenio ?? 0) : 0;
+										const total = seleccionado + convenio;
 										return (
-											<div className="flex items-center justify-between border-t bg-muted/40 px-3 py-2">
-												<span className="font-medium text-sm">
-													Total seleccionado
-												</span>
-												<span className="font-bold text-base tabular-nums">
-													Q
-													{total.toLocaleString("es-GT", {
-														minimumFractionDigits: 2,
-														maximumFractionDigits: 2,
-													})}
-												</span>
-											</div>
+											<>
+												{convenio > 0 && (
+													<div className="flex items-center justify-between border-t px-3 py-2 text-sm">
+														<span className="text-muted-foreground">
+															Cuota de convenio
+														</span>
+														<span className="tabular-nums">
+															+Q
+															{convenio.toLocaleString("es-GT", {
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															})}
+														</span>
+													</div>
+												)}
+												<div className="flex items-center justify-between border-t bg-muted/40 px-3 py-2">
+													<span className="font-medium text-sm">
+														{convenio > 0 ? "Total" : "Total seleccionado"}
+													</span>
+													<span className="font-bold text-base tabular-nums">
+														Q
+														{total.toLocaleString("es-GT", {
+															minimumFractionDigits: 2,
+															maximumFractionDigits: 2,
+														})}
+													</span>
+												</div>
+											</>
 										);
 									}}
 								</form.Subscribe>
@@ -1432,110 +1383,86 @@ export function ContactoModal({
 							{esPromesa ? "Fecha Prometida" : "Próximo Seguimiento"}
 						</h3>
 
-						{!esPromesa && (
-							<form.Field name="requiereSeguimiento">
-								{(field) => (
-									<div className="flex items-center space-x-2">
-										<Checkbox
-											id="requiereSeguimiento"
-											checked={field.state.value}
-											onCheckedChange={(checked) => {
-												field.handleChange(!!checked);
-												if (!checked) {
-													form.setFieldValue("fechaProximoContacto", undefined);
-												}
-											}}
-										/>
-										<Label htmlFor="requiereSeguimiento">
-											Requiere seguimiento programado
-										</Label>
-									</div>
-								)}
-							</form.Field>
-						)}
-
-						<form.Field name="requiereSeguimiento">
-							{(seguimientoField) =>
-								(esPromesa || seguimientoField.state.value) && (
-									<form.Field
-										name="fechaProximoContacto"
-										validators={{
-											// onChange no corre si el campo nunca se toca (form
-											// arranca en undefined) — sin onSubmit, un asesor que
-											// nunca abre el calendario puede enviar la promesa sin
-											// fecha (Codex, PR #1147): la fila queda invisible para
-											// getEstadoPromesasPago (este mismo archivo filtra por
-											// fechaProximoContacto antes de armar promesaIds).
-											onChange: ({ value }) =>
-												esPromesa && !value
-													? "La fecha prometida es obligatoria"
-													: undefined,
-											onSubmit: ({ value }) =>
-												esPromesa && !value
-													? "La fecha prometida es obligatoria"
-													: undefined,
-										}}
-									>
-										{(field) => (
-											<div className="space-y-2">
-												<Label>
-													{esPromesa
-														? "Fecha en la que prometió pagar *"
-														: "Fecha de próximo contacto *"}
-												</Label>
-												<Popover>
-													<PopoverTrigger asChild>
-														<Button
-															type="button"
-															variant="outline"
-															className={cn(
-																"w-full justify-start text-left font-normal",
-																!field.state.value && "text-muted-foreground",
-															)}
-														>
-															<CalendarIcon className="mr-2 h-4 w-4" />
-															{field.state.value
-																? format(field.state.value, "dd MMM, yyyy", {
-																		locale: es,
-																	})
-																: "Seleccionar fecha"}
-														</Button>
-													</PopoverTrigger>
-													<PopoverContent className="w-auto p-0" align="start">
-														<Calendar
-															mode="single"
-															selected={field.state.value}
-															onSelect={(date) => {
-																const fecha = date
-																	? fechaAMedianocheGT(date)
-																	: undefined;
-																field.handleChange(fecha);
-																// CB-029: la alerta sigue a la fecha prometida
-																// (default D-1); editable en el campo de abajo.
-																if (esPromesa) {
-																	form.setFieldValue(
-																		"fechaAlerta",
-																		fecha ? restarUnDiaGT(fecha) : undefined,
-																	);
-																}
-															}}
-															disabled={(date) =>
-																date < new Date(new Date().setHours(0, 0, 0, 0))
-															}
-															locale={es}
-														/>
-													</PopoverContent>
-												</Popover>
-												{field.state.meta.errors.length > 0 && (
-													<p className="text-red-500 text-sm">
-														{field.state.meta.errors.join(", ")}
-													</p>
+						<form.Field
+							name="fechaProximoContacto"
+							validators={{
+								// onChange no corre si el campo nunca se toca (form
+								// arranca en undefined) — sin onSubmit, un asesor que
+								// nunca abre el calendario puede enviar la promesa sin
+								// fecha (Codex, PR #1147): la fila queda invisible para
+								// getEstadoPromesasPago (este mismo archivo filtra por
+								// fechaProximoContacto antes de armar promesaIds).
+								onChange: ({ value }) =>
+									esPromesa && !value
+										? "La fecha prometida es obligatoria"
+										: undefined,
+								onSubmit: ({ value }) =>
+									esPromesa && !value
+										? "La fecha prometida es obligatoria"
+										: undefined,
+							}}
+						>
+							{(field) => (
+								<div className="space-y-2">
+									<Label>
+										{esPromesa
+											? "Fecha en la que prometió pagar *"
+											: "Fecha de próximo contacto (opcional)"}
+									</Label>
+									<Popover>
+										<PopoverTrigger asChild>
+											<Button
+												type="button"
+												variant="outline"
+												className={cn(
+													"w-full justify-start text-left font-normal",
+													!field.state.value && "text-muted-foreground",
 												)}
-											</div>
-										)}
-									</form.Field>
-								)
-							}
+											>
+												<CalendarIcon className="mr-2 h-4 w-4" />
+												{field.state.value
+													? format(field.state.value, "dd MMM, yyyy", {
+															locale: es,
+														})
+													: "Seleccionar fecha"}
+											</Button>
+										</PopoverTrigger>
+										<PopoverContent className="w-auto p-0" align="start">
+											<Calendar
+												mode="single"
+												selected={field.state.value}
+												onSelect={(date) => {
+													const fecha = date
+														? fechaAMedianocheGT(date)
+														: undefined;
+													field.handleChange(fecha);
+													// Sin checkbox: el seguimiento lo define la propia fecha.
+													if (!esPromesa) {
+														form.setFieldValue("requiereSeguimiento", !!fecha);
+													}
+													// CB-029: la alerta sigue a la fecha prometida
+													// (default D-1); editable en el campo de abajo.
+													if (esPromesa) {
+														form.setFieldValue(
+															"fechaAlerta",
+															fecha ? restarUnDiaGT(fecha) : undefined,
+														);
+													}
+												}}
+												disabled={(date) =>
+													date < new Date(new Date().setHours(0, 0, 0, 0))
+												}
+												locale={es}
+											/>
+										</PopoverContent>
+									</Popover>
+									{field.state.meta.errors.length > 0 && (
+										<p className="text-red-500 text-sm">
+											{field.state.meta.errors.join(", ")}
+										</p>
+									)}
+								</div>
+							)}
 						</form.Field>
 
 						{/* CB-029: "alerta programada" — SOLO en promesa. Default D-1 (se
@@ -1632,7 +1559,7 @@ export function ContactoModal({
 						<form.Subscribe
 							selector={(state) => [state.canSubmit, state.isSubmitting]}
 						>
-							{([canSubmit, isSubmitting]) => (
+							{([canSubmit, _isSubmitting]) => (
 								<Button
 									type="submit"
 									disabled={!canSubmit || createContactoMutation.isPending}

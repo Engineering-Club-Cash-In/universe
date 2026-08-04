@@ -139,6 +139,7 @@ export const cobrosAppRouter = {
 	getHistorialContactos: cobrosRouter.getHistorialContactos,
 	getResumenPromesas: cobrosRouter.getResumenPromesas,
 	getAlertasPromesas: cobrosRouter.getAlertasPromesas,
+	getAlertasCaso: cobrosRouter.getAlertasCaso,
 	createConvenioPago: cobrosRouter.createConvenioPago,
 	getConveniosPago: cobrosRouter.getConveniosPago,
 	getConveniosListado: cobrosRouter.getConveniosListado,

@@ -95,6 +95,426 @@ describe("registerPaymentPolicy - integridad de cuotas abiertas", () => {
       }),
     ).toEqual({ cuotaId: 20, numeroCuota: 3 });
   });
+
+  it("sigue detectando la inconsistencia con el escenario del insoluto (crédito normal)", () => {
+    expect(
+      registerPaymentPolicy.getCoveredOpenInstallment({
+        montoCuota: "3750.00",
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 50,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "3750.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ cuotaId: 40, numeroCuota: 1 });
+  });
+});
+
+describe("registerPaymentPolicy - cuotas cubiertas de INCOBRABLES", () => {
+  // Caso real crédito 9272 (cuota contractual 3750): la cuota 1 quedó cubierta
+  // por un pago validated, las 2-4 sólo tienen el recibo no_required.
+  it("lista la cuota cubierta por un pago validated", () => {
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 50,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "3750.00",
+              },
+            ],
+          },
+          {
+            cuotaId: 41,
+            numeroCuota: 2,
+            pagos: [
+              {
+                pago_id: 51,
+                validationStatus: "no_required",
+                paymentFalse: false,
+                abono_capital: "0.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ]).toEqual([1]);
+  });
+
+  it("no lista una cuota con abono parcial que no la cubre", () => {
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 50,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "1000.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ]).toEqual([]);
+  });
+
+  // El loop de insertPayment calcula el saldo de la cuota contra los hermanos
+  // vivos validated Y pending, así que el skip tiene que usar el mismo criterio:
+  // si no, la cuota entra al loop con saldo neto 0 y nace otra fila en cero.
+  it("cuenta los pagos pending para la cobertura (mismo criterio del loop)", () => {
+    const cuotas = [
+      {
+        cuotaId: 40,
+        numeroCuota: 1,
+        pagos: [
+          {
+            pago_id: 50,
+            validationStatus: "validated",
+            paymentFalse: false,
+            abono_capital: "3000.00",
+          },
+          {
+            pago_id: 51,
+            validationStatus: "pending",
+            paymentFalse: false,
+            abono_capital: "750.00",
+          },
+        ],
+      },
+    ];
+
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas,
+      }),
+    ]).toEqual([1]);
+
+    // Paridad con develop: el gate normal NO cuenta pendings, así que este
+    // mismo escenario no es una inconsistencia para un crédito no INCOBRABLE.
+    expect(
+      registerPaymentPolicy.getCoveredOpenInstallment({
+        montoCuota: "3750.00",
+        cuotas,
+      }),
+    ).toBeNull();
+  });
+
+  it("un pending anulado (paymentFalse) no cuenta como cobertura", () => {
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 50,
+                validationStatus: "validated",
+                paymentFalse: false,
+                abono_capital: "3000.00",
+              },
+              {
+                pago_id: 51,
+                validationStatus: "pending",
+                paymentFalse: true,
+                abono_capital: "750.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ]).toEqual([]);
+  });
+
+  it("los abonos directos a capital (capital_validated) no cuentan como cobertura", () => {
+    expect([
+      ...registerPaymentPolicy.getCoveredInstallmentNumbers({
+        montoCuota: "3750.00",
+        cuotas: [
+          {
+            cuotaId: 40,
+            numeroCuota: 1,
+            pagos: [
+              {
+                pago_id: 60,
+                validationStatus: "capital_validated",
+                paymentFalse: false,
+                abono_capital: "5250.00",
+              },
+              {
+                pago_id: 61,
+                validationStatus: "capital_validated",
+                paymentFalse: false,
+                abono_capital: "1000.00",
+              },
+            ],
+          },
+        ],
+      }),
+    ]).toEqual([]);
+  });
+});
+
+describe("registerPaymentPolicy - pago solo capital", () => {
+  it("boleta completa destinada a abono a capital es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "5000.00",
+        otros: 0,
+        abonoDirectoCapital: 5000,
+      }),
+    ).toBe(true);
+  });
+
+  it("un pago mixto (parte capital, parte cuota) NO es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "5000.00",
+        otros: 0,
+        abonoDirectoCapital: 3000,
+      }),
+    ).toBe(false);
+  });
+
+  it("sin abono directo a capital nunca es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "5000.00",
+        otros: 0,
+        abonoDirectoCapital: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("descuenta otros: boleta 5000 con otros 200 y capital 4800 es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "5000.00",
+        otros: 200,
+        abonoDirectoCapital: 4800,
+      }),
+    ).toBe(true);
+  });
+
+  it("un request sobre-asignado (capital > boleta - otros) NO es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "1000.00",
+        otros: 0,
+        abonoDirectoCapital: 5000,
+      }),
+    ).toBe(false);
+  });
+
+  it("boleta en cero con capital pedido NO es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "0",
+        otros: 0,
+        abonoDirectoCapital: 5000,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("registerPaymentPolicy - pago solo otros", () => {
+  it("boleta igual a otros sin capital es solo-otros", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloOtros({
+        montoBoleta: "1000.00",
+        otros: 1000,
+        abonoDirectoCapital: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("capital colado descarta la clasificación (boleta==otros + capital)", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloOtros({
+        montoBoleta: "1000.00",
+        otros: 1000,
+        abonoDirectoCapital: 5000,
+      }),
+    ).toBe(false);
+  });
+
+  it("boleta en cero no clasifica", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloOtros({
+        montoBoleta: "0",
+        otros: 0,
+        abonoDirectoCapital: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("boleta distinta de otros no clasifica", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloOtros({
+        montoBoleta: "1000.00",
+        otros: 500,
+        abonoDirectoCapital: 0,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {
+  it("el bypass del guard sólo aplica si el crédito permite abono a capital", () => {
+    expect(
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
+        esSoloCapital: true,
+        permiteAbonoCapital: true,
+        pagoSoloOtros: false,
+      }),
+    ).toBe(true);
+
+    // Todos los insolutos tienen permite_abono_capital = false (default de la
+    // columna): sin permiso la sección 7 no corre y el abono se perdería.
+    expect(
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
+        esSoloCapital: true,
+        permiteAbonoCapital: false,
+        pagoSoloOtros: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
+        esSoloCapital: false,
+        permiteAbonoCapital: true,
+        pagoSoloOtros: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("el pago de sólo otros omite el guard aunque no permita abono a capital", () => {
+    expect(
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
+        esSoloCapital: false,
+        permiteAbonoCapital: false,
+        pagoSoloOtros: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("un pago normal nunca omite el guard", () => {
+    expect(
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
+        esSoloCapital: false,
+        permiteAbonoCapital: false,
+        pagoSoloOtros: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("el pago especial cae en la cuota de referencia cuando no quedan pendientes", () => {
+    expect(
+      registerPaymentPolicy.getSpecialPaymentCuotaId({
+        requestedInstallment: 1,
+        pendingInstallments: [],
+        fallbackCuotaId: 40,
+      }),
+    ).toBe(40);
+
+    // Sin fallback se conserva el 0 histórico.
+    expect(
+      registerPaymentPolicy.getSpecialPaymentCuotaId({
+        requestedInstallment: 1,
+        pendingInstallments: [],
+      }),
+    ).toBe(0);
+
+    // Con pendientes, el fallback no interfiere.
+    expect(
+      registerPaymentPolicy.getSpecialPaymentCuotaId({
+        requestedInstallment: 2,
+        pendingInstallments: [{ numeroCuota: 2, cuotaId: 41 }],
+        fallbackCuotaId: 40,
+      }),
+    ).toBe(41);
+  });
+
+  it("rechaza el abono a capital que quedó sin aplicar y sin nada escrito", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        abonoCapital: 5000,
+        cuotasCompletas: 0,
+        cuotasParciales: 0,
+        moraAplicada: 0,
+        otrosEspecialAplicado: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("no rechaza si ya se escribió algo (cuotas o mora o pago de sólo otros)", () => {
+    const base = {
+      abonoCapital: 5000,
+      cuotasCompletas: 0,
+      cuotasParciales: 0,
+      moraAplicada: 0,
+      otrosEspecialAplicado: false,
+    };
+
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        ...base,
+        cuotasCompletas: 1,
+      }),
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        ...base,
+        cuotasParciales: 1,
+      }),
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        ...base,
+        moraAplicada: 120,
+      }),
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        ...base,
+        otrosEspecialAplicado: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("no rechaza un pago sin abono directo a capital", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
+        abonoCapital: 0,
+        cuotasCompletas: 0,
+        cuotasParciales: 0,
+        moraAplicada: 0,
+        otrosEspecialAplicado: false,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("registerPaymentPolicy - resumen de abonos de cuota", () => {

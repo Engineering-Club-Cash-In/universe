@@ -339,6 +339,48 @@ describe("registerPaymentPolicy - pago solo capital", () => {
   });
 });
 
+describe("registerPaymentPolicy - pago solo otros", () => {
+  it("boleta igual a otros sin capital es solo-otros", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloOtros({
+        montoBoleta: "1000.00",
+        otros: 1000,
+        abonoDirectoCapital: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("capital colado descarta la clasificación (boleta==otros + capital)", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloOtros({
+        montoBoleta: "1000.00",
+        otros: 1000,
+        abonoDirectoCapital: 5000,
+      }),
+    ).toBe(false);
+  });
+
+  it("boleta en cero no clasifica", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloOtros({
+        montoBoleta: "0",
+        otros: 0,
+        abonoDirectoCapital: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("boleta distinta de otros no clasifica", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloOtros({
+        montoBoleta: "1000.00",
+        otros: 500,
+        abonoDirectoCapital: 0,
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {
   it("el bypass del guard sólo aplica si el crédito permite abono a capital", () => {
     expect(
@@ -422,7 +464,7 @@ describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {
         cuotasCompletas: 0,
         cuotasParciales: 0,
         moraAplicada: 0,
-        pagoSoloOtros: false,
+        otrosEspecialAplicado: false,
       }),
     ).toBe(true);
   });
@@ -433,7 +475,7 @@ describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {
       cuotasCompletas: 0,
       cuotasParciales: 0,
       moraAplicada: 0,
-      pagoSoloOtros: false,
+      otrosEspecialAplicado: false,
     };
 
     expect(
@@ -457,7 +499,7 @@ describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {
     expect(
       registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado({
         ...base,
-        pagoSoloOtros: true,
+        otrosEspecialAplicado: true,
       }),
     ).toBe(false);
   });
@@ -469,7 +511,7 @@ describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {
         cuotasCompletas: 0,
         cuotasParciales: 0,
         moraAplicada: 0,
-        pagoSoloOtros: false,
+        otrosEspecialAplicado: false,
       }),
     ).toBe(false);
   });

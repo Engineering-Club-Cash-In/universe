@@ -30,6 +30,7 @@ import {
   getCoveredOpenInstallment,
   getCoveredInstallmentNumbers,
   esPagoSoloCapital,
+  esPagoSoloOtros,
   puedeOmitirGuardTodasCubiertas,
   debeRechazarAbonoCapitalNoAplicado,
   CREDIT_PENDING_CANCELLATION_ERROR,
@@ -728,12 +729,14 @@ export const insertPayment = async ({ body, set }: any) => {
       abonoDirectoCapital: abono_directo_capital ?? 0,
     });
     // El pago de sólo otros se resuelve con su propio insert especial y tampoco
-    // pasa por el loop de cuotas. Ambos flags salen puros del request.
-    // `gt(0)`: el schema admite monto_boleta 0, y un {boleta: 0, otros: 0} no es
-    // "sólo otros" — sin esto omitiría el guard de todas-cubiertas y sembraría
-    // una fila en cero.
-    const pagoSoloOtros =
-      montoBoleta.gt(0) && montoBoleta.eq(new Big(otros ?? 0));
+    // pasa por el loop de cuotas. Ambos flags salen puros del request; el
+    // helper exige capital pedido en 0 (un request boleta==otros con capital
+    // colado sobre-asignaría) y boleta > 0.
+    const pagoSoloOtros = esPagoSoloOtros({
+      montoBoleta,
+      otros,
+      abonoDirectoCapital: abono_directo_capital ?? 0,
+    });
 
     // 1. Obtener toda la info del crédito UNA SOLA VEZ
     const creditoData = await obtenerInfoCompletaCredito(
@@ -2081,7 +2084,10 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           cuotasCompletas: cuotas_completas,
           cuotasParciales: cuotas_parciales,
           moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
-          pagoSoloOtros,
+          // Condición RUNTIME de la rama especial de otros (no la clasificación
+          // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
+          // capital colado, y acá lo que importa es qué se escribió.
+          otrosEspecialAplicado: montoBoleta.eq(otrosBig),
         })
       ) {
         set.status = 409;

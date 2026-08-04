@@ -421,6 +421,38 @@ export const esPagoSoloCapital = ({
 };
 
 /**
+ * ¿El pago es SOLO el rubro `otros` (monto_boleta == otros), sin nada más?
+ *
+ * Exige capital pedido en 0: un request con `boleta == otros` que además trae
+ * `abono_directo_capital` deja el efectivo en −capital (sobre-asignación — la
+ * sección 7 registraría el monto PEDIDO encima de la fila de otros, y una
+ * boleta de Q1,000 asignaría Q6,000). Ese request no es "sólo otros" y no debe
+ * omitir el guard de todas-cubiertas. El `gt(0)` existe porque el schema admite
+ * monto_boleta 0 y un {boleta: 0, otros: 0} tampoco clasifica.
+ *
+ * OJO: esto es la CLASIFICACIÓN del request (para el bypass del guard). La rama
+ * runtime que inserta la fila especial sigue siendo `monto_boleta == otros` a
+ * secas — para el predicado anti-pérdida lo que importa es qué se ESCRIBIÓ, no
+ * cómo clasifica (ver `debeRechazarAbonoCapitalNoAplicado`).
+ */
+export const esPagoSoloOtros = ({
+  montoBoleta,
+  otros,
+  abonoDirectoCapital,
+}: {
+  montoBoleta: BigInput;
+  otros?: BigInput | null;
+  abonoDirectoCapital?: BigInput | null;
+}): boolean => {
+  const boleta = new Big(montoBoleta);
+  return (
+    boleta.gt(0) &&
+    boleta.eq(new Big(otros ?? 0)) &&
+    new Big(abonoDirectoCapital ?? 0).eq(0)
+  );
+};
+
+/**
  * ¿Este pago puede saltarse el guard de "todas las cuotas abiertas cubiertas"?
  *
  * Sólo lo omiten las vías que NO necesitan una cuota con saldo:
@@ -431,8 +463,9 @@ export const esPagoSoloCapital = ({
  *    la columna, así que sin permiso el abono no se aplica y dejarlo pasar sólo
  *    cambiaría un 409 por una boleta perdida. El disyunto `estaAlDia` se ignora
  *    a propósito: no es computable en `obtenerInfoCompletaCredito`.
- *  - Sólo otros (`monto_boleta == otros`), que se registra con su propio insert
- *    especial y nunca toca el loop de cuotas.
+ *  - Sólo otros (`monto_boleta == otros` y SIN capital pedido — ver
+ *    `esPagoSoloOtros`), que se registra con su propio insert especial y nunca
+ *    toca el loop de cuotas.
  *
  * El pago de sólo mora queda FUERA a propósito: hoy es inalcanzable porque el
  * cron de moras excluye a los INCOBRABLES (ninguno tiene mora activa), así que
@@ -457,27 +490,32 @@ export const puedeOmitirGuardTodasCubiertas = ({
  * `pagos_credito` (la sección 7 no corrió por falta de permiso y el loop de
  * cuotas tampoco, porque el monto efectivo era 0): la boleta se perdía en
  * silencio. Sólo es seguro rechazar si nada se insertó antes — de ahí que se
- * exija cero cuotas aplicadas, cero mora aplicada y que no sea el pago de sólo
- * `otros`, que inserta su propia fila.
+ * exija cero cuotas aplicadas, cero mora aplicada y que la rama especial de
+ * `otros` no haya insertado ya su fila.
+ *
+ * `otrosEspecialAplicado` es la condición RUNTIME de esa rama (`monto_boleta ==
+ * otros`, sin mirar el capital) — NO la clasificación `esPagoSoloOtros`: acá
+ * importa qué se escribió, y la rama inserta aunque el request traiga capital
+ * colado. Usar la clasificación aquí respondería 409 sobre estado ya escrito.
  */
 export const debeRechazarAbonoCapitalNoAplicado = ({
   abonoCapital,
   cuotasCompletas,
   cuotasParciales,
   moraAplicada,
-  pagoSoloOtros,
+  otrosEspecialAplicado,
 }: {
   abonoCapital: BigInput;
   cuotasCompletas: number;
   cuotasParciales: number;
   moraAplicada: BigInput;
-  pagoSoloOtros: boolean;
+  otrosEspecialAplicado: boolean;
 }): boolean =>
   new Big(abonoCapital ?? 0).gt(0) &&
   cuotasCompletas === 0 &&
   cuotasParciales === 0 &&
   new Big(moraAplicada ?? 0).lte(0) &&
-  !pagoSoloOtros;
+  !otrosEspecialAplicado;
 
 /**
  * Números de cuota abiertos que ya están cubiertos por pagos vivos.

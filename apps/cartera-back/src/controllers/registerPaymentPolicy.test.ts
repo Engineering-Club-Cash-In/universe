@@ -343,3 +343,29 @@ describe("recomputeCreditAfterCapital", () => {
     expect(r.deudaTotal.toString()).toBe("1060");
   });
 });
+
+describe("crearEstampadorPagoConvenio", () => {
+  it("entrega el monto del convenio solo a la primera fila de la boleta", () => {
+    const estampar = registerPaymentPolicy.crearEstampadorPagoConvenio(981.86);
+
+    // Boleta que cierra una cuota, deja parcial la siguiente y abona capital:
+    // tres filas, pero el convenio se cobró una sola vez.
+    expect(estampar()).toBe("981.86");
+    expect(estampar()).toBe("0");
+    expect(estampar()).toBe("0");
+  });
+
+  it("estampa 0 en todas las filas cuando la boleta no aplicó al convenio", () => {
+    expect(registerPaymentPolicy.crearEstampadorPagoConvenio(0)()).toBe("0");
+    expect(registerPaymentPolicy.crearEstampadorPagoConvenio(null)()).toBe("0");
+    expect(registerPaymentPolicy.crearEstampadorPagoConvenio(undefined)()).toBe(
+      "0"
+    );
+  });
+
+  it("acepta el monto como string decimal (formato de la DB)", () => {
+    const estampar = registerPaymentPolicy.crearEstampadorPagoConvenio("981.86");
+    expect(estampar()).toBe("981.86");
+    expect(estampar()).toBe("0");
+  });
+});

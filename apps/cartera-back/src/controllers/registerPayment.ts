@@ -25,6 +25,7 @@ import { recalcularPagosCredito } from "./updateCredit";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
+  crearEstampadorPagoConvenio,
   esDestinoSobrescribible,
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
@@ -767,7 +768,11 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
 } else {
   console.log(`[INFO] Crédito #${credito_id} no está EN_CONVENIO, saltando procesamiento de convenio`);
 }
- 
+
+// Solo UNA fila de esta boleta puede cargar el pago_convenio (ver doc del
+// estampador en registerPaymentPolicy).
+const estamparPagoConvenio = crearEstampadorPagoConvenio(montoConvenio);
+
     console.log("monto convenio:", montoConvenio.toString());
     let disponible =montoEfectivo  
     // 🔥 PROCESAR MORA - Ahora solo pasas los IDs
@@ -1597,7 +1602,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
-                  pagoConvenio: montoConvenio.toString() || "0",
+                  pagoConvenio: estamparPagoConvenio(),
                   fecha_boleta: pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                   // Paridad con la rama UPDATE de cierre (que persiste pagoData
@@ -1720,7 +1725,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
-                  pagoConvenio: montoConvenio.toString() || "0",
+                  pagoConvenio: estamparPagoConvenio(),
                   fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                 })
@@ -1937,7 +1942,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         validationStatus: "capital" as const,
         paymentFalse: false,
         registerBy: registerBy,
-        pagoConvenio: montoConvenio.toString() || "0",
+        pagoConvenio: estamparPagoConvenio(),
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
         origen_pago: origen_pago,

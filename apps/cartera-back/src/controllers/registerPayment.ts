@@ -25,6 +25,7 @@ import { recalcularPagosCredito } from "./updateCredit";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
+  crearEstampadorPagoConvenio,
   esDestinoSobrescribible,
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
@@ -836,6 +837,7 @@ export const insertPayment = async ({ body, set }: any) => {
     // convenio) y RESTANDO lo acreditado del disponible. El convenio es deuda
     // APARTE (las cuotas viejas congeladas en su pivot): sin la resta, la
     // misma boleta acreditaba el convenio Y además pagaba cuotas corrientes.
+    let registroSoloConvenio = false;
     if (
       debeProcesarConvenio({
         statusCredit: creditoInfo.credito.statusCredit,
@@ -867,31 +869,34 @@ export const insertPayment = async ({ body, set }: any) => {
       console.log(
         `Convenio: aplicado $${montoConvenio.toString()}, disponible restante $${disponible_restante.toString()}`
       );
-      if (splitConvenio.requiereRegistroSoloConvenio) {
-        // El convenio consumió todo el disponible: el loop de cuotas ya no
-        // corre, así que la fila del pago (boleta/mora/otros/convenio) se
-        // registra aquí — igual que las filas de solo-mora — para no perderla.
-        await insertarPago({
-          numero_credito_sifco: credito.numero_credito_sifco,
-          numero_cuota: cuotaApagar,
-          cuotaId: cuotaIdPagoEspecial,
-          otros: otrosBig.toNumber(),
-          mora: resultadoMora.montoAplicadoMora,
-          boleta: montoBoleta.toNumber(),
-          urlBoletas: urlCompletas ?? [],
-          pagado: pagoEspecialCuota.pagado,
-          banco_id: banco_id ?? 0,
-          numeroAutorizacion: numeroAutorizacion ?? "",
-          registerBy: registerBy ?? "",
-          fecha_boleta,
-          monto_aplicado: pagoEspecialCuota.montoAplicado,
-          pagoConvenio: montoConvenio.toNumber(),
-        });
-        // El convenio ya quedó estampado en esta fila: en cero para que la
-        // rama de abono a capital (que también estampa `pagoConvenio`) no
-        // duplique el monto en una segunda fila del mismo pago.
-        montoConvenio = new Big(0);
-      }
+      registroSoloConvenio = splitConvenio.requiereRegistroSoloConvenio;
+    }
+
+    // Solo UNA fila de esta boleta puede cargar el pago_convenio (ver doc del
+    // estampador en registerPaymentPolicy). Se crea DESPUÉS del bloque de
+    // convenio para capturar el monto ya topado al pendiente real.
+    const estamparPagoConvenio = crearEstampadorPagoConvenio(montoConvenio);
+
+    if (registroSoloConvenio) {
+      // El convenio consumió todo el disponible: el loop de cuotas ya no
+      // corre, así que la fila del pago (boleta/mora/otros/convenio) se
+      // registra aquí — igual que las filas de solo-mora — para no perderla.
+      await insertarPago({
+        numero_credito_sifco: credito.numero_credito_sifco,
+        numero_cuota: cuotaApagar,
+        cuotaId: cuotaIdPagoEspecial,
+        otros: otrosBig.toNumber(),
+        mora: resultadoMora.montoAplicadoMora,
+        boleta: montoBoleta.toNumber(),
+        urlBoletas: urlCompletas ?? [],
+        pagado: pagoEspecialCuota.pagado,
+        banco_id: banco_id ?? 0,
+        numeroAutorizacion: numeroAutorizacion ?? "",
+        registerBy: registerBy ?? "",
+        fecha_boleta,
+        monto_aplicado: pagoEspecialCuota.montoAplicado,
+        pagoConvenio: Number(estamparPagoConvenio()),
+      });
     }
 
     let cuotas_completas = 0;
@@ -1629,7 +1634,7 @@ export const insertPayment = async ({ body, set }: any) => {
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
-                  pagoConvenio: montoConvenio.toString() || "0",
+                  pagoConvenio: estamparPagoConvenio(),
                   fecha_boleta: pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                   // Paridad con la rama UPDATE de cierre (que persiste pagoData
@@ -1752,7 +1757,7 @@ export const insertPayment = async ({ body, set }: any) => {
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
-                  pagoConvenio: montoConvenio.toString() || "0",
+                  pagoConvenio: estamparPagoConvenio(),
                   fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                 })
@@ -1969,7 +1974,7 @@ export const insertPayment = async ({ body, set }: any) => {
         validationStatus: "capital" as const,
         paymentFalse: false,
         registerBy: registerBy,
-        pagoConvenio: montoConvenio.toString() || "0",
+        pagoConvenio: estamparPagoConvenio(),
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
         origen_pago: origen_pago,

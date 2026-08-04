@@ -643,3 +643,24 @@ export const calcularAplicacionConvenio = ({
   }
   return { montoAplicar: pago.gt(0) ? pago : new Big(0), pagoCompleto: false };
 };
+
+/**
+ * El convenio se cobra UNA sola vez por boleta (processConvenioPayment), pero la
+ * boleta puede insertar varias filas en pagos_credito (cierre de una cuota +
+ * parcial de la siguiente + abono a capital). Si todas cargaran el monto, cada
+ * reverso restaría su pago_convenio de convenios_pago: la primera reversa deja
+ * el convenio en cero y la segunda revienta con "No se puede revertir más de lo
+ * que se ha pagado" (caso crédito 659 / convenio 98). Este estampador entrega
+ * el monto a la PRIMERA fila que lo pide y "0" a todas las demás.
+ */
+export const crearEstampadorPagoConvenio = (
+  montoConvenio: BigInput | null | undefined
+) => {
+  const monto = new Big(montoConvenio ?? 0);
+  let estampado = false;
+  return (): string => {
+    if (estampado || monto.lte(0)) return "0";
+    estampado = true;
+    return monto.toString();
+  };
+};

@@ -6,11 +6,12 @@ import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/apiError";
 import {
   type GetPaymentAgreementsFilters,
-  getPaymentAgreements, 
-  type CreatePaymentAgreementInput, 
-  createPaymentAgreement, 
+  getPaymentAgreements,
+  type CreatePaymentAgreementInput,
+  createPaymentAgreement,
   getCreditoByNumero,
-  togglePaymentAgreementStatus  // 🆕 Agregamos el import
+  togglePaymentAgreementStatus,  // 🆕 Agregamos el import
+  getPromesaActivaPorCredito,
 } from "../services/services";
 
 // 🎯 UN SOLO HOOK para todos los GET con filtros opcionales
@@ -78,6 +79,19 @@ export const useCreditoBySifco = (numero_credito_sifco: string) => {
     queryKey: ["credito", numero_credito_sifco],
     queryFn: () => getCreditoByNumero(numero_credito_sifco),
     enabled: !!numero_credito_sifco, // Solo ejecutar si hay sifco
+    staleTime: 1000 * 60 * 5, // 5 minutos
+    retry: 2,
+  });
+};
+
+// CB-030 — promesa de pago vigente de un crédito (o null). creditoId puede
+// venir undefined mientras el crédito relacionado aún no cargó; enabled
+// evita el fetch hasta que exista, así que el tipo lo refleja.
+export const usePromesaActivaPorCredito = (creditoId: number | undefined) => {
+  return useQuery({
+    queryKey: ["promesa-activa", creditoId],
+    queryFn: () => getPromesaActivaPorCredito(creditoId as number),
+    enabled: !!creditoId,
     staleTime: 1000 * 60 * 5, // 5 minutos
     retry: 2,
   });

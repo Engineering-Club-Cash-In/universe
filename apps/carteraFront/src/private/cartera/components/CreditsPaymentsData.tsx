@@ -48,7 +48,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
+import { usePaymentAgreements,useTogglePaymentAgreementStatus, usePromesaActivaPorCredito } from "../hooks/paymentagreement";
 import { toast } from "sonner";
 import { ModalCaidoCredit } from "./ModalCaidoCredit";
 
@@ -2003,8 +2003,28 @@ function DetallesCredito({
   item: any;
   fullWidth?: boolean;
 }) {
+  // CB-030: aviso de solo lectura, no es columna del grid — solo señala que
+  // el crédito tiene una promesa de pago vigente (registrada desde el CRM).
+  const { data: promesaActiva } = usePromesaActivaPorCredito(
+    item?.creditos?.credito_id
+  );
+
   return (
     <>
+      {promesaActiva && (
+        <div className="col-span-full bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+          <span className="font-bold text-blue-700">Promesa Pago:</span>{" "}
+          <span className="text-blue-900">
+            {new Date(
+              promesaActiva.fecha_promesa + "T12:00:00"
+            ).toLocaleDateString("es-ES", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })}
+          </span>
+        </div>
+      )}
       {fullWidth && (
         <div className="col-span-full">
           <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">

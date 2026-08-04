@@ -4646,3 +4646,21 @@ export async function getSimulacionInversionista(
   );
   return res.data;
 }
+
+// CB-030 — promesa de pago vigente de un crédito (o null). Solo lectura,
+// para el aviso "Promesa Pago: fecha" en el detalle del crédito.
+export type PromesaActivaCredito = {
+  fecha_promesa: string;
+  cuota_inicio: number | null;
+  cuota_fin: number | null;
+  incluye_mora: boolean;
+};
+
+export const getPromesaActivaPorCredito = async (
+  credito_id: number
+): Promise<PromesaActivaCredito | null> => {
+  const { data } = await api.get(
+    `${API_URL}/promesas-pago/activa/${credito_id}`
+  );
+  return data?.data ?? null;
+};

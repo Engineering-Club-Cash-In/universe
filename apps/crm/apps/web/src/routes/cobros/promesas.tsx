@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	CalendarClock,
+	CalendarDays,
 	ChevronRight,
 	Clock,
 	Loader2,
@@ -26,7 +27,7 @@ export const Route = createFileRoute("/cobros/promesas")({
 	component: RouteComponent,
 });
 
-type Categoria = "vencida" | "vence_hoy" | "por_vencer";
+type Categoria = "vencida" | "vence_hoy" | "por_vencer" | "programada";
 
 type AlertaPromesa = {
 	id: string;
@@ -89,9 +90,24 @@ const CATEGORIA_CONFIG: Record<
 		badge: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
 		fechaColor: "text-sky-600 dark:text-sky-400",
 	},
+	programada: {
+		label: "Próximas",
+		descripcion: "Aún dentro de plazo — sin acción pendiente todavía",
+		icon: CalendarDays,
+		card: "border-border",
+		iconWrap: "bg-muted",
+		iconColor: "text-muted-foreground",
+		badge: "bg-muted text-muted-foreground",
+		fechaColor: "text-muted-foreground",
+	},
 };
 
-const ORDEN_CATEGORIAS: Categoria[] = ["vencida", "vence_hoy", "por_vencer"];
+const ORDEN_CATEGORIAS: Categoria[] = [
+	"vencida",
+	"vence_hoy",
+	"por_vencer",
+	"programada",
+];
 
 function formatFechaGT(fecha: string | Date | null): string {
 	if (!fecha) return "Sin fecha";
@@ -212,6 +228,7 @@ function RouteComponent() {
 			vencida: [],
 			vence_hoy: [],
 			por_vencer: [],
+			programada: [],
 		};
 		for (const a of alertas) map[a.categoria].push(a);
 		return map;
@@ -249,7 +266,7 @@ function RouteComponent() {
 			</div>
 
 			{/* Resumen por categoría */}
-			<div className="grid gap-4 sm:grid-cols-3">
+			<div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
 				{ORDEN_CATEGORIAS.map((cat) => {
 					const config = CATEGORIA_CONFIG[cat];
 					const Icon = config.icon;

@@ -1641,11 +1641,15 @@ export const cobrosRouter = {
 	// esté fresco (una promesa ya pagada = cumplida, deja de ser alerta) y para
 	// que los grupos cuadren con las tiles de getResumenPromesas.
 	//
-	// Tres categorías, con la misma semántica que las notificaciones de CB-029:
+	// Cuatro categorías (las 3 primeras con la semántica de las notificaciones
+	// de CB-029):
 	//   - vencida    → incumplida, o pendiente cuya fecha ya pasó (prioridad alta)
 	//   - vence_hoy  → pendiente, fecha prometida = hoy
 	//   - por_vencer → pendiente, fecha futura y cuya alerta programada
 	//                  (fecha_alerta, default D-1) ya llegó
+	//   - programada → pendiente, fecha futura y cuya alerta AÚN no llega (sin
+	//                  acción pendiente todavía). Se incluye para que la página
+	//                  contenga TODO lo que cuenta la tile "activas".
 	//
 	// Scope por rol: el asesor ve solo sus casos (responsableCobros); el
 	// supervisor/admin ven el equipo completo (mismo criterio que getCasosCobros).
@@ -1654,31 +1658,15 @@ export const cobrosRouter = {
 		.handler(async ({ context }) => {
 			const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
 			const finHoyGt = new Date(inicioHoyGt.getTime() + 24 * 60 * 60 * 1000);
-			// fecha de alerta efectiva: la programada, o D-1 si nunca se guardó.
-			const alertaEfSql = sql`COALESCE(${contactosCobros.fechaAlerta}, ${contactosCobros.fechaProximoContacto} - interval '1 day')`;
 
-			const esVencida = or(
-				eq(contactosCobros.estadoPromesa, "incumplida"),
-				and(
-					eq(contactosCobros.estadoPromesa, "pendiente"),
-					lte(contactosCobros.fechaProximoContacto, inicioHoyGt),
-				),
-			);
-			const esVenceHoy = and(
-				eq(contactosCobros.estadoPromesa, "pendiente"),
-				gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
-				lte(contactosCobros.fechaProximoContacto, finHoyGt),
-			);
-			const esPorVencer = and(
-				eq(contactosCobros.estadoPromesa, "pendiente"),
-				gte(contactosCobros.fechaProximoContacto, finHoyGt),
-				sql`${alertaEfSql} < ${finHoyGt}`,
-			);
-
+			// Traemos todas las promesas vigentes (pendientes o incumplidas) del
+			// scope y clasificamos en JS: así las cotas de día son consistentes
+			// (siempre `<`, sin el borde lte/lt del SQL) y la página contiene todo
+			// lo que cuentan las tiles de getResumenPromesas.
 			const conditions = [
 				eq(contactosCobros.estadoContacto, "promesa_pago"),
 				eq(casosCobros.activo, true),
-				or(esVencida, esVenceHoy, esPorVencer),
+				inArray(contactosCobros.estadoPromesa, ["pendiente", "incumplida"]),
 			];
 			// Asesor (no puede ver todo): solo sus casos asignados.
 			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
@@ -1711,16 +1699,27 @@ export const cobrosRouter = {
 				.where(and(...conditions));
 
 			// Clasificación + orden en JS: vencidas primero (prioridad alta), luego
-			// vence hoy, luego por vencer; dentro de cada grupo, la más urgente
+			// vence hoy, por vencer, y al final las programadas (aún dentro de
+			// plazo, sin acción pendiente). Dentro de cada grupo, la más urgente
 			// (fecha más próxima) arriba.
-			const ordenCategoria = { vencida: 0, vence_hoy: 1, por_vencer: 2 };
+			const DIA_MS = 24 * 60 * 60 * 1000;
+			const ordenCategoria = {
+				vencida: 0,
+				vence_hoy: 1,
+				por_vencer: 2,
+				programada: 3,
+			};
 			const clasificar = (r: (typeof rows)[number]) => {
-				const fecha = r.fechaPrometida;
 				if (r.estadoPromesa === "incumplida") return "vencida" as const;
+				const fecha = r.fechaPrometida;
 				if (!fecha) return "vencida" as const;
 				if (fecha < inicioHoyGt) return "vencida" as const;
 				if (fecha < finHoyGt) return "vence_hoy" as const;
-				return "por_vencer" as const;
+				// Futura: ¿su alerta programada (fecha_alerta, o D-1) ya llegó?
+				const alertaEf = r.fechaAlerta ?? new Date(fecha.getTime() - DIA_MS);
+				return alertaEf < finHoyGt
+					? ("por_vencer" as const)
+					: ("programada" as const);
 			};
 
 			return rows

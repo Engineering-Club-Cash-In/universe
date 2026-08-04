@@ -281,6 +281,31 @@ async function registrarHistorialMora(params: {
 // que por eso podía contar más cuotas de las que createMora aceptaba y
 // rechazar la recreación de mora dejando el crédito huérfano (Codex review
 // PR #1234, comentario #5).
+
+// CB-030 — el equipo aplica 0007_promesas_pago_espejo.sql a mano, no como
+// parte de este deploy (restricción explícita del proyecto: sin migraciones
+// automáticas). Hasta que la corran, cualquier SELECT contra la tabla revienta
+// con "undefined_table" (42P01) — y esta función ahora la lee desde paths que
+// YA estaban en producción (createMora vía /mora, teardown de convenios), así
+// que sin este guard esos flujos existentes se rompen apenas se despliega el
+// código, no solo el freeze nuevo (Codex review PR #1235, comentario P1).
+// Fail-open: sin tabla = sin promesas conocidas, comportamiento pre-CB-030.
+async function promesasVigentesDelCredito(credito_id: number): Promise<PromesaVigente[]> {
+  try {
+    return await db
+      .select({
+        cuota_inicio: promesas_pago_espejo.cuota_inicio,
+        cuota_fin: promesas_pago_espejo.cuota_fin,
+        fecha_promesa: promesas_pago_espejo.fecha_promesa,
+      })
+      .from(promesas_pago_espejo)
+      .where(and(eq(promesas_pago_espejo.credito_id, credito_id), eq(promesas_pago_espejo.activa, true)));
+  } catch (err: any) {
+    if (err?.code === "42P01") return [];
+    throw err;
+  }
+}
+
 export async function contarCuotasVencidasReales(
   credito_id: number,
   statusCredit: string | null,
@@ -301,14 +326,7 @@ export async function contarCuotasVencidasReales(
       })
       .from(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, credito_id)),
-    db
-      .select({
-        cuota_inicio: promesas_pago_espejo.cuota_inicio,
-        cuota_fin: promesas_pago_espejo.cuota_fin,
-        fecha_promesa: promesas_pago_espejo.fecha_promesa,
-      })
-      .from(promesas_pago_espejo)
-      .where(and(eq(promesas_pago_espejo.credito_id, credito_id), eq(promesas_pago_espejo.activa, true))),
+    promesasVigentesDelCredito(credito_id),
   ]);
   const promesasPorCredito = new Map<number, PromesaVigente[]>([[credito_id, promesasDelCredito]]);
   return cuotasDelCredito.filter((c) =>
@@ -835,16 +853,30 @@ export async function procesarMoras() {
     // CB-030 — promesas de pago vigentes (espejo local, ver schema.ts), Map
     // por credito_id para el freeze por cuota en isOverdueInstallmentForMora.
     // Solo `activa = true`: una vez cumplida/cancelada, la fila deja de
-    // filtrar aquí sin necesidad de borrarla (rastro de auditoría).
-    const promesasActivas = await db
-      .select({
-        credito_id: promesas_pago_espejo.credito_id,
-        cuota_inicio: promesas_pago_espejo.cuota_inicio,
-        cuota_fin: promesas_pago_espejo.cuota_fin,
-        fecha_promesa: promesas_pago_espejo.fecha_promesa,
-      })
-      .from(promesas_pago_espejo)
-      .where(eq(promesas_pago_espejo.activa, true));
+    // filtrar aquí sin necesidad de borrarla (rastro de auditoría). La tabla
+    // se aplica a mano (0007_promesas_pago_espejo.sql, sin migración
+    // automática) — si aún no existe, fail-open a "sin promesas conocidas"
+    // en vez de tumbar el cron completo con undefined_table (Codex review
+    // PR #1235, comentario P1).
+    const promesasActivas = await (async () => {
+      try {
+        return await db
+          .select({
+            credito_id: promesas_pago_espejo.credito_id,
+            cuota_inicio: promesas_pago_espejo.cuota_inicio,
+            cuota_fin: promesas_pago_espejo.cuota_fin,
+            fecha_promesa: promesas_pago_espejo.fecha_promesa,
+          })
+          .from(promesas_pago_espejo)
+          .where(eq(promesas_pago_espejo.activa, true));
+      } catch (err: any) {
+        if (err?.code === "42P01") {
+          console.log("[MORA] ⏭️  promesas_pago_espejo aún no existe (migración pendiente) — sin freeze este ciclo.");
+          return [];
+        }
+        throw err;
+      }
+    })();
 
     const promesasPorCredito = new Map<number, PromesaVigente[]>();
     for (const p of promesasActivas) {

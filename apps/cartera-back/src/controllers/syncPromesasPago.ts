@@ -34,6 +34,24 @@ export type SyncPromesasResult = {
 	fallaTotal?: boolean;
 };
 
+// CB-030 — /^\d{4}-\d{2}-\d{2}$/ valida forma pero no calendario real: "2026-02-31"
+// matchea el regex y JS la "corrige" en silencio con rollover (new Date("2026-02-31")
+// → 2026-03-03), así que no sirve para detectar el error. El insert le pasa el string
+// crudo a la columna date de Postgres, que SÍ la rechaza — pero eso revienta el
+// insert dentro de la transacción y aborta el batch entero con 500, en vez de
+// reportarse por-fila en noValidas como el resto de datos inválidos (Codex review
+// PR #1235, comentario P2). Roundtrip contra los componentes numéricos: si
+// reconstruir la fecha con Date.UTC no devuelve los mismos año/mes/día, no existe.
+function fechaCalendarioValida(s: string): boolean {
+	const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+	if (!m) return false;
+	const anio = Number(m[1]);
+	const mes = Number(m[2]);
+	const dia = Number(m[3]);
+	const d = new Date(Date.UTC(anio, mes - 1, dia));
+	return d.getUTCFullYear() === anio && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
 function validarPromesa(p: PromesaSync): string | null {
 	if (typeof p.contacto_cobros_id !== "string" || p.contacto_cobros_id.trim() === "") {
 		return "contacto_cobros_id es requerido";
@@ -57,7 +75,7 @@ function validarPromesa(p: PromesaSync): string | null {
 	) {
 		return `cuota_inicio (${p.cuota_inicio}) no puede ser mayor que cuota_fin (${p.cuota_fin}) (contacto_cobros_id=${p.contacto_cobros_id})`;
 	}
-	if (typeof p.fecha_promesa !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(p.fecha_promesa)) {
+	if (typeof p.fecha_promesa !== "string" || !fechaCalendarioValida(p.fecha_promesa)) {
 		return `fecha_promesa inválida, formato YYYY-MM-DD (contacto_cobros_id=${p.contacto_cobros_id})`;
 	}
 	return null;
@@ -212,28 +230,38 @@ export type PromesaActivaCredito = {
  * Y fecha_promesa NO ha pasado — mismo criterio que el freeze en
  * isOverdueInstallmentForMora (latefee.ts). Si hay varias vigentes, se
  * devuelve la de fecha_promesa más próxima (la primera en vencer).
+ *
+ * La tabla se aplica a mano (0007_promesas_pago_espejo.sql, sin migración
+ * automática) — si aún no existe, fail-open a null (sin promesa vigente
+ * conocida) en vez de 500 en la pantalla de detalle de crédito (Codex review
+ * PR #1235, comentario P1).
  */
 export async function getPromesaActivaPorCredito(
 	creditoId: number,
 ): Promise<PromesaActivaCredito | null> {
 	const hoy = hoyGtISO();
-	const [fila] = await db
-		.select({
-			fecha_promesa: promesas_pago_espejo.fecha_promesa,
-			cuota_inicio: promesas_pago_espejo.cuota_inicio,
-			cuota_fin: promesas_pago_espejo.cuota_fin,
-			incluye_mora: promesas_pago_espejo.incluye_mora,
-		})
-		.from(promesas_pago_espejo)
-		.where(
-			and(
-				eq(promesas_pago_espejo.credito_id, creditoId),
-				eq(promesas_pago_espejo.activa, true),
-				gte(promesas_pago_espejo.fecha_promesa, hoy),
-			),
-		)
-		.orderBy(promesas_pago_espejo.fecha_promesa)
-		.limit(1);
+	try {
+		const [fila] = await db
+			.select({
+				fecha_promesa: promesas_pago_espejo.fecha_promesa,
+				cuota_inicio: promesas_pago_espejo.cuota_inicio,
+				cuota_fin: promesas_pago_espejo.cuota_fin,
+				incluye_mora: promesas_pago_espejo.incluye_mora,
+			})
+			.from(promesas_pago_espejo)
+			.where(
+				and(
+					eq(promesas_pago_espejo.credito_id, creditoId),
+					eq(promesas_pago_espejo.activa, true),
+					gte(promesas_pago_espejo.fecha_promesa, hoy),
+				),
+			)
+			.orderBy(promesas_pago_espejo.fecha_promesa)
+			.limit(1);
 
-	return fila ?? null;
+		return fila ?? null;
+	} catch (err: any) {
+		if (err?.code === "42P01") return null;
+		throw err;
+	}
 }

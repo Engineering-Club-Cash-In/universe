@@ -631,6 +631,15 @@ export function ContactoModal({
 	 * realmente pasó (canal + plantilla usada).
 	 */
 	const registrarTrasEnvio = (canal: string) => {
+		// Un envío saliente NO prueba que el cliente respondiera. Si el asesor no
+		// tocó el Resultado, se guarda como "no_contesta": `contactado` cuenta
+		// como respuesta en evaluarGestionTempranaB1 y un WhatsApp de una vía
+		// habría dado por respondida la gestión B1, apagando la alerta de los
+		// canales que faltaban (Codex). Si el asesor SÍ eligió un resultado
+		// (habló por WhatsApp y le contestaron), se respeta su elección.
+		if (!form.getFieldMeta("estadoContacto")?.isTouched) {
+			form.setFieldValue("estadoContacto", "no_contesta");
+		}
 		const actuales = String(form.getFieldValue("comentarios") ?? "").trim();
 		if (!actuales) {
 			const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === plantillaId);
@@ -696,10 +705,15 @@ export function ContactoModal({
 			toast.error(error?.message || "Error enviando SMS"),
 	});
 
+	// Incluye el registro automático: si solo mirara los envíos, el botón se
+	// re-habilitaba apenas respondía la API y el asesor podía volver a enviar
+	// (mensaje duplicado al cliente + contacto duplicado) antes de que cerrara
+	// la modal (Codex).
 	const envioEnCurso =
 		whatsappApiMutation.isPending ||
 		emailApiMutation.isPending ||
-		smsApiMutation.isPending;
+		smsApiMutation.isPending ||
+		createContactoMutation.isPending;
 
 	const ejecutarAccion = (metodo: AccionContacto) => {
 		const tel = telefonoSeleccionado || telefonoPrincipal;

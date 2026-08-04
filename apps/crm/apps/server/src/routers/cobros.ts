@@ -34,7 +34,6 @@ import {
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
 import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
-import { notifications } from "../db/schema/notifications";
 import {
 	clients,
 	leads,
@@ -43,6 +42,7 @@ import {
 	referenciasLead,
 	salesStages,
 } from "../db/schema/crm";
+import { notifications } from "../db/schema/notifications";
 import { quotations } from "../db/schema/quotations";
 import { recordatoriosPremora } from "../db/schema/recordatorios-premora";
 import { vehicles } from "../db/schema/vehicles";
@@ -1797,7 +1797,6 @@ export const cobrosRouter = {
 				});
 		}),
 
-
 	// CB-031 (ficha 360): alertas de ESTE caso — las notificaciones de cobros
 	// que ya generan los jobs (promesa por vencer / incumplida, cliente subido
 	// de bucket, 3 días sin contacto) y las asignaciones manuales. La campanita
@@ -1809,7 +1808,7 @@ export const cobrosRouter = {
 	// (titulo, createdAt) quedándose con la primera.
 	getAlertasCaso: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			const rows = await db
 				.select({
 					id: notifications.id,
@@ -1818,6 +1817,7 @@ export const cobrosRouter = {
 					cobrosTipo: notifications.cobrosTipo,
 					status: notifications.status,
 					createdAt: notifications.createdAt,
+					assignedTo: notifications.assignedTo,
 				})
 				.from(notifications)
 				.where(
@@ -1847,7 +1847,23 @@ export const cobrosRouter = {
 					desde: Date;
 				}
 			>();
+			// `filasNotificacionCobros` inserta UNA FILA POR DESTINATARIO (asesor +
+			// supervisores) para el MISMO evento. Sin colapsarlas, una sola alerta
+			// escalada se contaba como varias repeticiones y podía quedarse con la
+			// redacción dirigida al supervisor (Codex). Se deduplica por evento
+			// (tipo + instante) prefiriendo la fila del usuario que está mirando,
+			// que es la que trae el texto escrito para él.
+			const porEvento = new Map<string, (typeof rows)[number]>();
 			for (const r of rows) {
+				if (!r.createdAt) continue;
+				const claveEvento = `${r.cobrosTipo ?? r.titulo}|${r.createdAt.getTime()}`;
+				const previa = porEvento.get(claveEvento);
+				if (!previa || r.assignedTo === context.userId) {
+					porEvento.set(claveEvento, r);
+				}
+			}
+
+			for (const r of porEvento.values()) {
 				if (!r.createdAt) continue;
 				// cobros_tipo es null en las notificaciones que no vienen de los jobs
 				// de cobros (asignaciones manuales, seguimientos): ahí agrupa el título.

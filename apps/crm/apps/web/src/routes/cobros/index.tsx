@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { CapitalRangeFilter } from "@/components/cobros/capital-range-filter";
 import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
+import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
 import { DataTable } from "@/components/data-table";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
@@ -364,6 +365,9 @@ function RouteComponent() {
 		"cobros/capitalMax",
 		undefined,
 	);
+	// Click en una fila abre la vista previa del caso; la Ficha 360 se abre
+	// desde el panel (antes se navegaba directo y se perdía la lista).
+	const [casoPanel, setCasoPanel] = useState<string | null>(null);
 	const [excluirPagados, setExcluirPagados] = usePersistedState<boolean>(
 		"cobros/excluirPagados",
 		false,
@@ -1208,13 +1212,7 @@ function RouteComponent() {
 							/>
 						}
 						onRowClick={(row) => {
-							const linkId = row.numeroCredito || row.contratoId;
-							const tipoLink = row.casoCobroId ? "caso" : "contrato";
-							navigate({
-								to: "/cobros/$id",
-								params: { id: linkId },
-								search: { tipo: tipoLink },
-							});
+							setCasoPanel(row.numeroCredito || row.contratoId);
 						}}
 						filterContent={
 							<div className="flex w-full flex-col gap-3">
@@ -1428,6 +1426,12 @@ function RouteComponent() {
 					/>
 				</CardContent>
 			</Card>
+
+			<PanelGestionRapida
+				creditoId={casoPanel}
+				open={!!casoPanel}
+				onClose={() => setCasoPanel(null)}
+			/>
 		</div>
 	);
 }

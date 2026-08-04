@@ -1820,6 +1820,19 @@ export const cobrosRouter = {
 					assignedTo: notifications.assignedTo,
 				})
 				.from(notifications)
+				// Alcance: el rol `cobros` solo ve alertas de SUS casos. Sin este
+				// join, cualquier asesor podía pedir el UUID de otro caso y leer las
+				// alertas (y su descripción) de la cartera de un compañero — mismo
+				// criterio que getCasoCobroById/getAlertasPromesas (Codex).
+				.innerJoin(
+					casosCobros,
+					and(
+						eq(casosCobros.id, notifications.relatedEntityId),
+						PERMISSIONS.canViewAllCasosCobros(context.userRole)
+							? undefined
+							: eq(casosCobros.responsableCobros, context.userId),
+					),
+				)
 				.where(
 					and(
 						eq(notifications.relatedEntityId, input.casoCobroId),

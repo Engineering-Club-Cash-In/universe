@@ -1273,6 +1273,86 @@ function RouteComponent() {
 										</Button>
 									</ContactoModal>
 
+									<ContactoModal
+										casoCobroId={caso.id}
+										clienteNombre={caso.clienteNombre || ""}
+										telefonoPrincipal={caso.telefonoPrincipal || ""}
+										telefonoAlternativo={
+											caso.telefonoAlternativo
+												? String(caso.telefonoAlternativo)
+												: undefined
+										}
+										emailCliente={caso.emailContacto || ""}
+										metodoInicial="visita_domicilio"
+										fechaPago={String(caso.diaPagoMensual || 15)}
+										cuotaMensual={Number(
+											caso.cuotaMensual || 0,
+										).toLocaleString()}
+										placa={caso.vehiculoPlaca || ""}
+										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
+										montoAdeudado={(
+											Number(caso.montoEnMora || 0) +
+											Number(caso.cuotasVencidas || 0) *
+												Number(caso.cuotaMensual || 0)
+										).toLocaleString("es-GT", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
+										cuotasAtraso={caso.cuotasVencidas ?? 0}
+										estadoMora={caso.estadoMora || undefined}
+										fechaInicio={caso.fechaInicio || null}
+										nombreAsesor={caso.asesor?.nombre || ""}
+										telefonoAsesor={caso.asesor?.telefono || ""}
+									>
+										<Button
+											variant="outline"
+											className="flex items-center gap-2"
+										>
+											<MapPin className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+											Visita
+										</Button>
+									</ContactoModal>
+
+									<ContactoModal
+										casoCobroId={caso.id}
+										clienteNombre={caso.clienteNombre || ""}
+										telefonoPrincipal={caso.telefonoPrincipal || ""}
+										telefonoAlternativo={
+											caso.telefonoAlternativo
+												? String(caso.telefonoAlternativo)
+												: undefined
+										}
+										emailCliente={caso.emailContacto || ""}
+										metodoInicial="carta_notarial"
+										fechaPago={String(caso.diaPagoMensual || 15)}
+										cuotaMensual={Number(
+											caso.cuotaMensual || 0,
+										).toLocaleString()}
+										placa={caso.vehiculoPlaca || ""}
+										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
+										montoAdeudado={(
+											Number(caso.montoEnMora || 0) +
+											Number(caso.cuotasVencidas || 0) *
+												Number(caso.cuotaMensual || 0)
+										).toLocaleString("es-GT", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
+										cuotasAtraso={caso.cuotasVencidas ?? 0}
+										estadoMora={caso.estadoMora || undefined}
+										fechaInicio={caso.fechaInicio || null}
+										nombreAsesor={caso.asesor?.nombre || ""}
+										telefonoAsesor={caso.asesor?.telefono || ""}
+									>
+										<Button
+											variant="outline"
+											className="flex items-center gap-2"
+										>
+											<FileText className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+											Carta notarial
+										</Button>
+									</ContactoModal>
+
 									{/* CB-020: modal reducido — solo Detalles de la
 										    Conversación + fecha prometida (obligatoria). */}
 									<ContactoModal

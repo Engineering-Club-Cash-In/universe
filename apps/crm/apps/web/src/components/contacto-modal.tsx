@@ -102,7 +102,13 @@ interface ContactoModalProps {
 	emailCliente?: string;
 	// CB-026: "sms" es un canal registrable desde que se agregó al enum
 	// metodo_contacto — es uno de los 3 que la gestión temprana B1 exige agotar.
-	metodoInicial: "llamada" | "whatsapp" | "sms" | "email";
+	metodoInicial:
+		| "llamada"
+		| "whatsapp"
+		| "sms"
+		| "email"
+		| "visita_domicilio"
+		| "carta_notarial";
 	children?: React.ReactNode;
 	// Modo controlado opcional (cuando el padre maneja el estado open)
 	open?: boolean;
@@ -396,7 +402,10 @@ export function ContactoModal({
 				: esPromesa
 					? numerosAtrasados[numerosAtrasados.length - 1]
 					: undefined) as number | undefined,
-			incluyeMora: esEdicion ? !!promesaActiva?.incluyeMora : esPromesa,
+			// Con convenio la mora ya va absorbida en la cuota del convenio.
+			incluyeMora: esEdicion
+				? !!promesaActiva?.incluyeMora
+				: esPromesa && !esConvenio,
 			// CB-025: monto que el cliente prometió pagar — informativo, opcional.
 			// En promesa se pre-llena con lo que debe (cuota + mora) para que el
 			// asesor no lo teclee; sigue editable. En edición: el monto guardado.
@@ -500,8 +509,12 @@ export function ContactoModal({
 	 * secundario era que la selección dejaba de reflejarse).
 	 */
 	const montoPromesaDe = (seleccion: Set<number>, incluyeMora: boolean) =>
-		totalDeSeleccion(seleccion, incluyeMora) +
-		(esConvenio ? (cuotaConvenio ?? 0) : 0);
+		esConvenio
+			? // Con convenio la cuota del convenio REEMPLAZA la mora (mismo criterio
+				// que el card "Total a Cobrar" de la ficha, PR #1191): sumar ambas
+				// inflaba el monto comprometido (Codex).
+				totalDeSeleccion(seleccion, false) + (cuotaConvenio ?? 0)
+			: totalDeSeleccion(seleccion, incluyeMora);
 
 	// Al (re)abrir la promesa, re-sembrar la selección con todo lo atrasado y
 	// sincronizar el rango + el monto del form (por si cambiaron las cuotas).
@@ -547,9 +560,11 @@ export function ContactoModal({
 			"cuotaFin",
 			numerosAtrasados[numerosAtrasados.length - 1],
 		);
+		// Con convenio la mora no entra (la absorbe la cuota del convenio).
+		form.setFieldValue("incluyeMora", !esConvenio);
 		form.setFieldValue(
 			"montoComprometido",
-			montoPromesaDe(todas, true).toFixed(2),
+			montoPromesaDe(todas, !esConvenio).toFixed(2),
 		);
 		// promesaActiva?.id (no el objeto, que cambia de identidad cada render):
 		// re-siembra cuando la promesa activa CARGA tarde o un refetch la cambia con

@@ -322,27 +322,77 @@ describe("registerPaymentPolicy - pago solo capital", () => {
 describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {
   it("el bypass del guard sólo aplica si el crédito permite abono a capital", () => {
     expect(
-      registerPaymentPolicy.puedeAplicarAbonoSoloCapital({
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
         esSoloCapital: true,
         permiteAbonoCapital: true,
+        pagoSoloOtros: false,
       }),
     ).toBe(true);
 
     // Todos los insolutos tienen permite_abono_capital = false (default de la
     // columna): sin permiso la sección 7 no corre y el abono se perdería.
     expect(
-      registerPaymentPolicy.puedeAplicarAbonoSoloCapital({
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
         esSoloCapital: true,
         permiteAbonoCapital: false,
+        pagoSoloOtros: false,
       }),
     ).toBe(false);
 
     expect(
-      registerPaymentPolicy.puedeAplicarAbonoSoloCapital({
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
         esSoloCapital: false,
         permiteAbonoCapital: true,
+        pagoSoloOtros: false,
       }),
     ).toBe(false);
+  });
+
+  it("el pago de sólo otros omite el guard aunque no permita abono a capital", () => {
+    expect(
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
+        esSoloCapital: false,
+        permiteAbonoCapital: false,
+        pagoSoloOtros: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("un pago normal nunca omite el guard", () => {
+    expect(
+      registerPaymentPolicy.puedeOmitirGuardTodasCubiertas({
+        esSoloCapital: false,
+        permiteAbonoCapital: false,
+        pagoSoloOtros: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("el pago especial cae en la cuota de referencia cuando no quedan pendientes", () => {
+    expect(
+      registerPaymentPolicy.getSpecialPaymentCuotaId({
+        requestedInstallment: 1,
+        pendingInstallments: [],
+        fallbackCuotaId: 40,
+      }),
+    ).toBe(40);
+
+    // Sin fallback se conserva el 0 histórico.
+    expect(
+      registerPaymentPolicy.getSpecialPaymentCuotaId({
+        requestedInstallment: 1,
+        pendingInstallments: [],
+      }),
+    ).toBe(0);
+
+    // Con pendientes, el fallback no interfiere.
+    expect(
+      registerPaymentPolicy.getSpecialPaymentCuotaId({
+        requestedInstallment: 2,
+        pendingInstallments: [{ numeroCuota: 2, cuotaId: 41 }],
+        fallbackCuotaId: 40,
+      }),
+    ).toBe(41);
   });
 
   it("rechaza el abono a capital que quedó sin aplicar y sin nada escrito", () => {

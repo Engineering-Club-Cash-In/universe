@@ -97,17 +97,29 @@ export const shouldApplyStaleZeroRestanteAdjustment = ({
   new Big(missingAgainstInstallment).gt(0) &&
   new Big(availableRemaining).gte(missingAgainstInstallment);
 
+/**
+ * Cuota a la que se engancha un pago especial (sólo mora / sólo otros).
+ *
+ * `fallbackCuotaId` cubre el caso sin pendientes utilizables: un INCOBRABLE con
+ * todas sus cuotas abiertas ya cubiertas queda con la lista vacía y, sin este
+ * fallback, devolvía 0 — que `insertarPago` interpreta como "sin filtro" y
+ * termina heredando el `cuota_id` del pago más viejo del crédito. Mejor apuntar
+ * explícitamente a la cuota cubierta.
+ */
 export const getSpecialPaymentCuotaId = ({
   requestedInstallment,
   pendingInstallments,
+  fallbackCuotaId,
 }: {
   requestedInstallment: number;
   pendingInstallments: { numeroCuota: number; cuotaId: number }[];
+  fallbackCuotaId?: number | null;
 }) =>
   pendingInstallments.find(
     (installment) => installment.numeroCuota === requestedInstallment
   )?.cuotaId ??
   pendingInstallments[0]?.cuotaId ??
+  fallbackCuotaId ??
   0;
 
 export const getSpecialPaymentInstallmentFields = () => ({
@@ -404,23 +416,33 @@ export const esPagoSoloCapital = ({
 };
 
 /**
- * ¿El abono solo-capital va a ser realmente atendido por la sección 7?
+ * ¿Este pago puede saltarse el guard de "todas las cuotas abiertas cubiertas"?
  *
- * Esa sección exige `(estaAlDia || permite_abono_capital) && abonoCapital > 0`.
- * En un INCOBRABLE `estaAlDia` es siempre false (no tiene cuota pagada vigente),
- * y todos los insolutos traen `permite_abono_capital = false` por default de la
- * columna, así que sin permiso el abono NO se aplica: dejarlo pasar el guard de
- * "todas las cuotas cubiertas" sólo cambiaría un 409 por una boleta perdida.
- * Se ignora el disyunto `estaAlDia` a propósito: no es computable en
- * `obtenerInfoCompletaCredito` y en insolutos nunca es true.
+ * Sólo lo omiten las vías que NO necesitan una cuota con saldo:
+ *  - Solo-capital, pero **únicamente** si el crédito permite abonos a capital.
+ *    La sección 7 exige `(estaAlDia || permite_abono_capital) && abono > 0`; en
+ *    un INCOBRABLE `estaAlDia` es siempre false (no tiene cuota pagada vigente)
+ *    y todos los insolutos traen `permite_abono_capital = false` por default de
+ *    la columna, así que sin permiso el abono no se aplica y dejarlo pasar sólo
+ *    cambiaría un 409 por una boleta perdida. El disyunto `estaAlDia` se ignora
+ *    a propósito: no es computable en `obtenerInfoCompletaCredito`.
+ *  - Sólo otros (`monto_boleta == otros`), que se registra con su propio insert
+ *    especial y nunca toca el loop de cuotas.
+ *
+ * El pago de sólo mora queda FUERA a propósito: hoy es inalcanzable porque el
+ * cron de moras excluye a los INCOBRABLES (ninguno tiene mora activa), así que
+ * prefiero el 409 ruidoso a abrir una vía sin probar si eso llegara a cambiar.
  */
-export const puedeAplicarAbonoSoloCapital = ({
+export const puedeOmitirGuardTodasCubiertas = ({
   esSoloCapital,
   permiteAbonoCapital,
+  pagoSoloOtros,
 }: {
   esSoloCapital: boolean;
   permiteAbonoCapital?: boolean | null;
-}): boolean => esSoloCapital && permiteAbonoCapital === true;
+  pagoSoloOtros: boolean;
+}): boolean =>
+  (esSoloCapital && permiteAbonoCapital === true) || pagoSoloOtros;
 
 /**
  * ¿Hay que rechazar el pago porque traía abono a capital, no se aplicó y no se

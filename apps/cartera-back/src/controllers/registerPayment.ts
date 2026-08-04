@@ -30,7 +30,7 @@ import {
   getCoveredOpenInstallment,
   getCoveredInstallmentNumbers,
   esPagoSoloCapital,
-  puedeAplicarAbonoSoloCapital,
+  puedeOmitirGuardTodasCubiertas,
   debeRechazarAbonoCapitalNoAplicado,
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
@@ -276,7 +276,8 @@ const obtenerInfoCompletaCredito = async (
   credito_id: number,
   set: SetContext,
   cuotaApagar: number,
-  esSoloCapital = false
+  esSoloCapital = false,
+  pagoSoloOtros = false
 ) => {
   try {
     // 📋 Query 1: Crédito + Usuario + Mora (1 fila)
@@ -408,17 +409,18 @@ const obtenerInfoCompletaCredito = async (
     const cuotasPagables = cuotasPendientes.filter(
       (item) => !cuotasCubiertas.has(item.cuotas_credito.numero_cuota)
     );
-    // El abono solo-capital NO usa el loop de cuotas (su monto efectivo es 0),
-    // así que puede entrar aunque todas las cuotas abiertas estén cubiertas —
-    // pero SÓLO si el crédito permite abonos a capital. Sin ese permiso la
-    // sección 7 no corre y dejarlo pasar cambiaría el 409 por una boleta
-    // perdida en silencio (todos los insolutos traen el permiso en false).
-    const abonoSoloCapitalAplicable = puedeAplicarAbonoSoloCapital({
+    // Ni el abono solo-capital ni el pago de sólo otros usan el loop de cuotas,
+    // así que pueden entrar aunque todas las cuotas abiertas estén cubiertas.
+    // El solo-capital, eso sí, sólo si el crédito permite abonos a capital: sin
+    // ese permiso la sección 7 no corre y dejarlo pasar cambiaría el 409 por una
+    // boleta perdida (todos los insolutos traen el permiso en false).
+    const omiteGuardTodasCubiertas = puedeOmitirGuardTodasCubiertas({
       esSoloCapital,
       permiteAbonoCapital: info.credito.permite_abono_capital,
+      pagoSoloOtros,
     });
     if (
-      !abonoSoloCapitalAplicable &&
+      !omiteGuardTodasCubiertas &&
       cuotasPendientes.length > 0 &&
       cuotasPagables.length === 0
     ) {
@@ -725,13 +727,17 @@ export const insertPayment = async ({ body, set }: any) => {
       otros,
       abonoDirectoCapital: abono_directo_capital ?? 0,
     });
+    // El pago de sólo otros se resuelve con su propio insert especial y tampoco
+    // pasa por el loop de cuotas. Ambos flags salen puros del request.
+    const pagoSoloOtros = montoBoleta.eq(new Big(otros ?? 0));
 
     // 1. Obtener toda la info del crédito UNA SOLA VEZ
     const creditoData = await obtenerInfoCompletaCredito(
       credito_id,
       set,
       cuotaApagar,
-      esSoloCapital
+      esSoloCapital,
+      pagoSoloOtros
     );
 
     const {
@@ -750,6 +756,11 @@ export const insertPayment = async ({ body, set }: any) => {
         numeroCuota: cuota.cuotas_credito.numero_cuota,
         cuotaId: cuota.cuotas_credito.cuota_id,
       })),
+      // Sin pendientes utilizables (INCOBRABLE con todas las cuotas cubiertas)
+      // el pago especial se engancha a la cuota cubierta en vez de quedar en 0,
+      // que insertarPago traduce en "sin filtro" y hereda el cuota_id del pago
+      // más viejo del crédito.
+      fallbackCuotaId: cuotaReferenciaCapital?.cuota_id ?? null,
     });
     const pagoEspecialCuota = getSpecialPaymentInstallmentFields();
 
@@ -2066,7 +2077,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           cuotasCompletas: cuotas_completas,
           cuotasParciales: cuotas_parciales,
           moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
-          pagoSoloOtros: montoBoleta.eq(otrosBig),
+          pagoSoloOtros,
         })
       ) {
         set.status = 409;

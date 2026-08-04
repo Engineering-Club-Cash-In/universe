@@ -72,6 +72,18 @@ export interface ClasificacionColaDia {
 	incumplida: boolean;
 	promesaProxima: boolean;
 	sinContacto: boolean;
+	/**
+	 * CB-030: ¿tiene AL MENOS una promesa vigente (pendiente y con fecha >= hoy
+	 * GT)? Es independiente de `incumplida`: un crédito puede arrastrar una
+	 * promesa incumplida vieja Y tener una nueva vigente al mismo tiempo, y en
+	 * ese caso el bucket SÍ está congelado por la nueva.
+	 *
+	 * Se expone explícito porque la UI no puede derivarlo de los otros flags:
+	 * usar `!incumplida` como proxy suprimía el badge justo en ese escenario
+	 * mixto, dejando la cola en contradicción con el detalle y el listado, que
+	 * usan el predicado de vigencia real (Codex PR #1238).
+	 */
+	promesaActiva: boolean;
 }
 
 export function clasificarCreditoColaDia(
@@ -85,6 +97,11 @@ export function clasificarCreditoColaDia(
 	let promesaHoy = false;
 	let incumplida = false;
 	let promesaProxima = false;
+	// CB-030: vigente = pendiente Y fecha >= hoy GT. Mismo criterio que
+	// condicionesPromesaVigente (server) y esPromesaActiva (front). Se acumula
+	// aparte de `incumplida` a propósito: los dos pueden ser true a la vez
+	// cuando el crédito arrastra una promesa fallida vieja y tiene otra nueva.
+	let promesaActiva = false;
 	for (const promesa of credito.promesas) {
 		const fechaStr = toDateStrGT(promesa.fechaPrometida);
 		if (promesa.estadoPromesa === "incumplida") {
@@ -92,10 +109,13 @@ export function clasificarCreditoColaDia(
 			continue;
 		}
 		// pendiente
-		if (fechaStr === hoyStr) promesaHoy = true;
-		else if (fechaStr < hoyStr)
+		if (fechaStr === hoyStr) {
+			promesaHoy = true;
+			promesaActiva = true; // vence hoy pero sigue vigente el día entero
+		} else if (fechaStr < hoyStr)
 			incumplida = true; // vencida, aún no marcada por el job nocturno
 		else {
+			promesaActiva = true; // futura y pendiente
 			// CB-029: futura → "próxima" si su alerta programada (o D-1 por
 			// default) ya cayó. Entra a la cola sin urgencia hasta que sea hoy.
 			const alertaEf =
@@ -109,7 +129,14 @@ export function clasificarCreditoColaDia(
 		credito.diasSinContacto != null &&
 		credito.diasSinContacto > UMBRAL_DIAS_SIN_CONTACTO;
 
-	return { slaHoy, promesaHoy, incumplida, promesaProxima, sinContacto };
+	return {
+		slaHoy,
+		promesaHoy,
+		incumplida,
+		promesaProxima,
+		sinContacto,
+		promesaActiva,
+	};
 }
 
 /** true si el crédito califica para AL MENOS una categoría (entra a la cola sin filtro). */

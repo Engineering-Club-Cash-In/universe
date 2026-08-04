@@ -49,6 +49,7 @@ import {
 	PREFIJO_PREMORA_AUTO,
 	PREFIJO_WSP_MASIVO,
 } from "../jobs/cierre-diario-asesores";
+import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
 import {
 	deriveHasCapitalData,
 	recalculateCobrosPercentagesWithFallback,
@@ -1191,6 +1192,14 @@ export const cobrosRouter = {
 					const sifcosPagina = creditosResponse.data
 						.map((c) => c.creditos.numero_credito_sifco)
 						.filter((s): s is string => !!s);
+					// Con varios casos por el mismo SIFCO gana el activo y, a igualdad,
+					// el más reciente (agruparCasosVigentesPorSifco) — mismo criterio
+					// que getAgendaDia/getColaDia. Antes esto hacía un .set()
+					// incondicional sobre una query SIN ORDER BY, así que se quedaba
+					// con la fila que Postgres devolviera última: arbitraria. De ahí
+					// salen casoCobroId, etiquetas y promesaActiva de toda la tabla,
+					// o sea el listado podía mostrar los datos de un caso viejo y
+					// contradecir al detalle (Codex PR #1238).
 					const casosPorSifco = new Map<
 						string,
 						{ id: string; etiquetas: string[] }
@@ -1199,14 +1208,17 @@ export const cobrosRouter = {
 						const casosRows = await db
 							.select({
 								id: casosCobros.id,
-								numeroSifco: casosCobros.numeroCreditoSifco,
+								numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 								etiquetas: casosCobros.etiquetas,
+								activo: casosCobros.activo,
+								updatedAt: casosCobros.updatedAt,
 							})
 							.from(casosCobros)
 							.where(inArray(casosCobros.numeroCreditoSifco, sifcosPagina));
-						for (const row of casosRows) {
-							if (!row.numeroSifco) continue;
-							casosPorSifco.set(row.numeroSifco, {
+						for (const [sifco, row] of agruparCasosVigentesPorSifco(
+							casosRows,
+						)) {
+							casosPorSifco.set(sifco, {
 								id: row.id,
 								etiquetas: row.etiquetas ?? [],
 							});
@@ -2248,18 +2260,9 @@ export const cobrosRouter = {
 					})
 					.from(casosCobros)
 					.where(inArray(casosCobros.numeroCreditoSifco, sifcos));
-				const casoPorSifco = new Map<string, (typeof casos)[number]>();
-				for (const caso of casos) {
-					const sifco = caso.numeroCreditoSifco ?? "";
-					const previo = casoPorSifco.get(sifco);
-					const gana =
-						!previo ||
-						(Boolean(caso.activo) && !previo.activo) ||
-						(Boolean(caso.activo) === Boolean(previo.activo) &&
-							(caso.updatedAt?.getTime() ?? 0) >
-								(previo.updatedAt?.getTime() ?? 0));
-					if (gana) casoPorSifco.set(sifco, caso);
-				}
+				// Con varios casos por SIFCO gana el activo y a igualdad el más
+				// reciente — criterio compartido (lib/caso-vigente.ts).
+				const casoPorSifco = agruparCasosVigentesPorSifco(casos);
 
 				const oportunidades = await db
 					.select({
@@ -2791,19 +2794,8 @@ export const cobrosRouter = {
 				]);
 
 				// Con varios casos por SIFCO gana el activo y a igualdad el más
-				// reciente — mismo criterio que getAgendaDia.
-				const casoPorSifco = new Map<string, (typeof casos)[number]>();
-				for (const caso of casos) {
-					const sifco = caso.numeroCreditoSifco ?? "";
-					const previo = casoPorSifco.get(sifco);
-					const gana =
-						!previo ||
-						(Boolean(caso.activo) && !previo.activo) ||
-						(Boolean(caso.activo) === Boolean(previo.activo) &&
-							(caso.updatedAt?.getTime() ?? 0) >
-								(previo.updatedAt?.getTime() ?? 0));
-					if (gana) casoPorSifco.set(sifco, caso);
-				}
+				// reciente — criterio compartido (lib/caso-vigente.ts).
+				const casoPorSifco = agruparCasosVigentesPorSifco(casos);
 				const casoIds = [...casoPorSifco.values()].map((c) => c.id);
 				const leadPhonePorSifco = new Map(
 					oportunidades.map((o) => [o.numeroSifco ?? "", o.leadPhone]),
@@ -2978,6 +2970,9 @@ export const cobrosRouter = {
 							promesaHoy: clasificacion.promesaHoy,
 							incumplida: clasificacion.incumplida,
 							promesaProxima: clasificacion.promesaProxima,
+							// CB-030: vigencia real, NO derivable de los otros flags —
+							// un crédito puede tener incumplida vieja + vigente nueva.
+							promesaActiva: clasificacion.promesaActiva,
 							sinContacto: clasificacion.sinContacto,
 							diasSinContacto,
 						}),

@@ -32,6 +32,8 @@ import {
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
   getRequestedInstallmentFloor,
+  aplicarConvenioAlDisponible,
+  debeProcesarConvenio,
   getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
   recomputeCreditAfterCapital,
@@ -733,48 +735,12 @@ export const insertPayment = async ({ body, set }: any) => {
       abono_directo_capital ?? 0
     );
 
-    //  Llamás processConvenioPayment pasándole la info
-    // 3. Preparar pagoMetadata (con los datos del pago que está haciendo el usuario)
-  let montoConvenio = new Big(0);
-let pagoConvenio = null;
+    // El convenio se procesa DESPUÉS de la mora (bloque más abajo): orden
+    // canónico otros → mora → convenio, espejo del desglose del front.
+    let montoConvenio = new Big(0);
+    let pagoConvenio = null;
 
-if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
-  // 2. Preparar pagoMetadata (con los datos del pago que está haciendo el usuario)
-  const pagoMetadata = {
-    montoBoleta: montoBoleta.toString(),
-    llamada: llamada,
-    renuevo_o_nuevo: "Convenio",
-    observaciones: observaciones,
-    numeroAutorizacion: numeroAutorizacion,
-    banco_id: banco_id,
-    registerBy: usuario_id,
-    urlCompletas: urlCompletas,
-  };
-
-  // 3. 🔥 Llamar processConvenioPayment con TODA la info
-  pagoConvenio = await processConvenioPayment({
-    credito_id: credito_id,
-    monto_pago: montoEfectivo.toNumber(),
-    creditoInfo: creditoInfo,
-    pagoMetadata: pagoMetadata,
-  });
-
-  // 4. El resultado contiene:
-  console.log(pagoConvenio.success);
-  console.log(pagoConvenio.message);
-  console.log(pagoConvenio.convenio);
-  montoConvenio = new Big(pagoConvenio.monto_aplicado);
-  console.log("monto convenio:", montoConvenio.toString());
-} else {
-  console.log(`[INFO] Crédito #${credito_id} no está EN_CONVENIO, saltando procesamiento de convenio`);
-}
-
-// Solo UNA fila de esta boleta puede cargar el pago_convenio (ver doc del
-// estampador en registerPaymentPolicy).
-const estamparPagoConvenio = crearEstampadorPagoConvenio(montoConvenio);
-
-    console.log("monto convenio:", montoConvenio.toString());
-    let disponible =montoEfectivo  
+    let disponible = montoEfectivo;
     // 🔥 PROCESAR MORA - Ahora solo pasas los IDs
     const resultadoMora = await procesarPagoMora({
       credito_id: credito.credito_id,
@@ -865,6 +831,72 @@ const estamparPagoConvenio = crearEstampadorPagoConvenio(montoConvenio);
         pagos: [],
         saldo_a_favor: disponible.toString(),
       };
+    }
+
+    // 🔥 CONVENIO — después de la mora (orden canónico otros → mora →
+    // convenio) y RESTANDO lo acreditado del disponible. El convenio es deuda
+    // APARTE (las cuotas viejas congeladas en su pivot): sin la resta, la
+    // misma boleta acreditaba el convenio Y además pagaba cuotas corrientes.
+    let registroSoloConvenio = false;
+    if (
+      debeProcesarConvenio({
+        statusCredit: creditoInfo.credito.statusCredit,
+        disponible: disponible_restante,
+      })
+    ) {
+      pagoConvenio = await processConvenioPayment({
+        credito_id: credito_id,
+        monto_pago: disponible_restante.toNumber(),
+        creditoInfo: creditoInfo,
+        pagoMetadata: {
+          montoBoleta: montoBoleta.toString(),
+          llamada: llamada,
+          renuevo_o_nuevo: "Convenio",
+          observaciones: observaciones,
+          numeroAutorizacion: numeroAutorizacion,
+          banco_id: banco_id,
+          registerBy: usuario_id,
+          urlCompletas: urlCompletas,
+        },
+      });
+      montoConvenio = new Big(pagoConvenio.monto_aplicado);
+      const splitConvenio = aplicarConvenioAlDisponible({
+        disponible: disponible_restante,
+        montoConvenio,
+      });
+      disponible_restante = splitConvenio.disponibleRestante;
+      disponible = disponible_restante;
+      console.log(
+        `Convenio: aplicado $${montoConvenio.toString()}, disponible restante $${disponible_restante.toString()}`
+      );
+      registroSoloConvenio = splitConvenio.requiereRegistroSoloConvenio;
+    }
+
+    // Solo UNA fila de esta boleta puede cargar el pago_convenio (ver doc del
+    // estampador en registerPaymentPolicy). Se crea DESPUÉS del bloque de
+    // convenio para capturar el monto ya topado al pendiente real.
+    const estamparPagoConvenio = crearEstampadorPagoConvenio(montoConvenio);
+
+    if (registroSoloConvenio) {
+      // El convenio consumió todo el disponible: el loop de cuotas ya no
+      // corre, así que la fila del pago (boleta/mora/otros/convenio) se
+      // registra aquí — igual que las filas de solo-mora — para no perderla.
+      await insertarPago({
+        numero_credito_sifco: credito.numero_credito_sifco,
+        numero_cuota: cuotaApagar,
+        cuotaId: cuotaIdPagoEspecial,
+        otros: otrosBig.toNumber(),
+        mora: resultadoMora.montoAplicadoMora,
+        boleta: montoBoleta.toNumber(),
+        urlBoletas: urlCompletas ?? [],
+        pagado: pagoEspecialCuota.pagado,
+        banco_id: banco_id ?? 0,
+        numeroAutorizacion: numeroAutorizacion ?? "",
+        registerBy: registerBy ?? "",
+        fecha_boleta,
+        monto_aplicado: pagoEspecialCuota.montoAplicado,
+        pagoConvenio: Number(estamparPagoConvenio()),
+      });
     }
 
     let cuotas_completas = 0;
@@ -2100,6 +2132,7 @@ interface InsertarPagoParams {
   registerBy: string;
   fecha_boleta?: string;
   monto_aplicado: number;
+  pagoConvenio?: number;
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -2114,7 +2147,8 @@ export async function insertarPago({
   numeroAutorizacion,
   registerBy,
   fecha_boleta,
-  monto_aplicado
+  monto_aplicado,
+  pagoConvenio = 0
 }: InsertarPagoParams) {
   console.log(
     `Insertando pago para crédito SIFCO: ${numero_credito_sifco}, cuota: ${numero_cuota}, mora: ${mora}, otros: ${otros}`
@@ -2255,7 +2289,7 @@ export async function insertarPago({
       banco_id: banco_id ?? undefined,
       numeroAutorizacion: numeroAutorizacion ?? "",
       registerBy: registerBy,
-      pagoConvenio: "0",
+      pagoConvenio: pagoConvenio.toString(),
       monto_aplicado: monto_aplicado.toString(),
     })
     .returning();

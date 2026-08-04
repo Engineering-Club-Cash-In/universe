@@ -14,6 +14,7 @@ import {
   moras_credito,
 } from "../database/db";
 import Big from "big.js";
+import { calcularAplicacionConvenio } from "./registerPaymentPolicy";
 import { createMora } from "./latefee";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
@@ -739,19 +740,17 @@ export async function processConvenioPayment(
     const montoPagadoActualBig = new Big(convenio.monto_pagado);
     const montoPendienteActualBig = new Big(convenio.monto_pendiente);
 
-    // 4. Determinar el monto a aplicar
-    let montoAplicarBig: Big;
-    let pagoCompleto = false;
-
-    // Si el monto es >= a la cuota mensual, usar solo la cuota mensual
-    if (montoPagoBig.gte(cuotaMensualBig)) {
-      montoAplicarBig = cuotaMensualBig;
-      pagoCompleto = true;
-    } else {
-      // Si es menor, usar el monto completo
-      montoAplicarBig = montoPagoBig;
-      pagoCompleto = false;
-    }
+    // 4. Determinar el monto a aplicar — topado al MENOR entre la cuota
+    // mensual y el monto_pendiente REAL: tras un abono parcial previo el
+    // pendiente puede ser menor que la cuota mensual; sin el tope el ledger
+    // se iba a negativo y, como lo aplicado se resta del disponible en
+    // insertPayment, ese exceso se evaporaría del dinero del cliente.
+    const { montoAplicar: montoAplicarBig, pagoCompleto } =
+      calcularAplicacionConvenio({
+        montoPago: montoPagoBig,
+        cuotaMensual: cuotaMensualBig,
+        montoPendiente: montoPendienteActualBig,
+      });
 
     // 5. Calcular nuevo monto pagado
     const nuevoMontoPagadoBig = montoPagadoActualBig.plus(montoAplicarBig);

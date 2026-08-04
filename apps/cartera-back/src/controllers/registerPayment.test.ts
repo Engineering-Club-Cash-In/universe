@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import Big from "big.js";
 import {
+  aplicarConvenioAlDisponible,
   applyCapitalPaymentAndBuildResponse,
+  calcularAplicacionConvenio,
   calcularSaldoNetoCuota,
+  debeProcesarConvenio,
   esDestinoSobrescribible,
   getApplyPaymentHttpStatus,
   getCuotaIdForPaymentInsert,
@@ -862,5 +865,101 @@ describe("calcularSaldoNetoCuota", () => {
     });
     expect(r.interesRestante.toFixed(2)).toBe("177.86");
     expect(r.ivaRestante.toFixed(2)).toBe("21.34");
+  });
+});
+
+describe("convenio: split del disponible (orden otros → mora → convenio)", () => {
+  it("solo procesa convenio en créditos EN_CONVENIO con disponible", () => {
+    expect(
+      debeProcesarConvenio({ statusCredit: "EN_CONVENIO", disponible: 230 })
+    ).toBe(true);
+    expect(
+      debeProcesarConvenio({ statusCredit: "ACTIVO", disponible: 230 })
+    ).toBe(false);
+    expect(
+      debeProcesarConvenio({ statusCredit: "EN_CONVENIO", disponible: 0 })
+    ).toBe(false);
+    expect(
+      debeProcesarConvenio({ statusCredit: null, disponible: 230 })
+    ).toBe(false);
+  });
+
+  it("resta del disponible lo aplicado al convenio (parcial consume todo)", () => {
+    const split = aplicarConvenioAlDisponible({
+      disponible: 230,
+      montoConvenio: 230,
+    });
+    expect(split.disponibleRestante.toString()).toBe("0");
+    expect(split.requiereRegistroSoloConvenio).toBe(true);
+  });
+
+  it("deja el sobrante para cuotas cuando la boleta supera la cuota del convenio", () => {
+    const split = aplicarConvenioAlDisponible({
+      disponible: 1200,
+      montoConvenio: 981.86,
+    });
+    expect(split.disponibleRestante.toString()).toBe("218.14");
+    expect(split.requiereRegistroSoloConvenio).toBe(false);
+  });
+
+  it("sin monto de convenio no exige registro solo-convenio ni toca el disponible", () => {
+    const split = aplicarConvenioAlDisponible({
+      disponible: 500,
+      montoConvenio: 0,
+    });
+    expect(split.disponibleRestante.toString()).toBe("500");
+    expect(split.requiereRegistroSoloConvenio).toBe(false);
+  });
+});
+
+describe("calcularAplicacionConvenio (tope al pendiente real)", () => {
+  it("caso normal: pago cubre la cuota mensual y el pendiente sobra", () => {
+    const r = calcularAplicacionConvenio({
+      montoPago: 1500,
+      cuotaMensual: 1000,
+      montoPendiente: 6000,
+    });
+    expect(r.montoAplicar.toString()).toBe("1000");
+    expect(r.pagoCompleto).toBe(true);
+  });
+
+  it("parcial: pago menor a la cuota aplica completo sin marcar cuota", () => {
+    const r = calcularAplicacionConvenio({
+      montoPago: 400,
+      cuotaMensual: 1000,
+      montoPendiente: 1000,
+    });
+    expect(r.montoAplicar.toString()).toBe("400");
+    expect(r.pagoCompleto).toBe(false);
+  });
+
+  it("último tramo: el pendiente (< cuota mensual) topa lo aplicado — no se evapora dinero", () => {
+    // Repro del verifier: parcial previo dejó pendiente 600 < cuota 1000; un
+    // pago de 1500 debe aplicar 600 (no 1000 con pendiente a -400).
+    const r = calcularAplicacionConvenio({
+      montoPago: 1500,
+      cuotaMensual: 1000,
+      montoPendiente: 600,
+    });
+    expect(r.montoAplicar.toString()).toBe("600");
+    expect(r.pagoCompleto).toBe(true);
+  });
+
+  it("convenio ya saldado (pendiente <= 0): no aplica ni marca cuota", () => {
+    const r0 = calcularAplicacionConvenio({
+      montoPago: 500,
+      cuotaMensual: 1000,
+      montoPendiente: 0,
+    });
+    expect(r0.montoAplicar.toString()).toBe("0");
+    expect(r0.pagoCompleto).toBe(false);
+
+    const rNeg = calcularAplicacionConvenio({
+      montoPago: 500,
+      cuotaMensual: 1000,
+      montoPendiente: -50,
+    });
+    expect(rNeg.montoAplicar.toString()).toBe("0");
+    expect(rNeg.pagoCompleto).toBe(false);
   });
 });

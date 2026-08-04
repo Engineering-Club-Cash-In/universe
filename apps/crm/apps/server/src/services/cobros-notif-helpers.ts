@@ -6,7 +6,8 @@
  *  - El ASESOR del crédito es el de cartera (`asesor_id`), enlazado a un usuario
  *    del CRM por correo (`asesores.email_cash_in` == `user.email`) — mismo
  *    puente que usa la Agenda. `construirMapaAsesorUsuario` arma ese mapa una
- *    sola vez por corrida (getAdvisors va cacheado 5m en cartera-back).
+ *    sola vez por corrida, vía `getPoolPorAsesor` (única fuente con
+ *    email_cash_in; /advisor expone platform_users.email y está desfasado).
  *  - El SUPERVISOR son TODOS los `user.role = 'cobros_supervisor'` (no existe
  *    mapeo asesor→supervisor; hoy son uno o dos).
  */
@@ -31,11 +32,14 @@ export type CobrosNotifTipo =
 export async function construirMapaAsesorUsuario(): Promise<
 	Map<number, string>
 > {
-	const advisors = await carteraBackClient.getAdvisors({
-		page: 1,
-		perPage: 500,
-	});
-	const asesores = (advisors.data ?? []).filter((a) => Boolean(a.email));
+	// getPoolPorAsesor (email_cash_in), NO getAdvisors(): /advisor expone
+	// `platform_users.email` vía LEFT JOIN, que está desactualizado o no matchea
+	// para varios asesores (Diego Gomez, Samuel Gamboa, Caren Rivera) — con esa
+	// fuente sus notificaciones de cobros nunca se creaban. email_cash_in sí es
+	// el correo que coincide con el login del CRM.
+	const asesores = (await carteraBackClient.getPoolPorAsesor()).filter((a) =>
+		Boolean(a.email_cash_in),
+	);
 	if (asesores.length === 0) return new Map();
 
 	// La tabla `user` es de staff (decenas): traerla entera y matchear en JS
@@ -49,7 +53,9 @@ export async function construirMapaAsesorUsuario(): Promise<
 
 	const mapa = new Map<number, string>();
 	for (const a of asesores) {
-		const uid = emailToUser.get(a.email.trim().toLowerCase());
+		const uid = emailToUser.get(
+			(a.email_cash_in as string).trim().toLowerCase(),
+		);
 		if (uid) mapa.set(a.asesor_id, uid);
 	}
 	return mapa;

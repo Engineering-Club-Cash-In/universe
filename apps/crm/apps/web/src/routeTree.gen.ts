@@ -35,6 +35,7 @@ import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosReduccionRouteImport } from './routes/cobros/reduccion'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
 import { Route as CobrosPromesasRouteImport } from './routes/cobros/promesas'
+import { Route as CobrosMiDiaRouteImport } from './routes/cobros/mi-dia'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
 import { Route as CobrosConveniosRouteImport } from './routes/cobros/convenios'
 import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
@@ -192,6 +193,11 @@ const CobrosPromesasRoute = CobrosPromesasRouteImport.update({
   path: '/cobros/promesas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosMiDiaRoute = CobrosMiDiaRouteImport.update({
+  id: '/cobros/mi-dia',
+  path: '/cobros/mi-dia',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosMetasRoute = CobrosMetasRouteImport.update({
   id: '/cobros/metas',
   path: '/cobros/metas',
@@ -343,6 +349,7 @@ export interface FileRoutesByFullPath {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/metas': typeof CobrosMetasRoute
+  '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -396,6 +403,7 @@ export interface FileRoutesByTo {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/metas': typeof CobrosMetasRoute
+  '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -450,6 +458,7 @@ export interface FileRoutesById {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/metas': typeof CobrosMetasRoute
+  '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -505,6 +514,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/convenios'
     | '/cobros/metas'
+    | '/cobros/mi-dia'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -558,6 +568,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/convenios'
     | '/cobros/metas'
+    | '/cobros/mi-dia'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -611,6 +622,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/convenios'
     | '/cobros/metas'
+    | '/cobros/mi-dia'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -665,6 +677,7 @@ export interface RootRouteChildren {
   CobrosColaRoute: typeof CobrosColaRoute
   CobrosConveniosRoute: typeof CobrosConveniosRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
+  CobrosMiDiaRoute: typeof CobrosMiDiaRoute
   CobrosPromesasRoute: typeof CobrosPromesasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
   CobrosReduccionRoute: typeof CobrosReduccionRoute
@@ -885,6 +898,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosPromesasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/mi-dia': {
+      id: '/cobros/mi-dia'
+      path: '/cobros/mi-dia'
+      fullPath: '/cobros/mi-dia'
+      preLoaderRoute: typeof CobrosMiDiaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/metas': {
       id: '/cobros/metas'
       path: '/cobros/metas'
@@ -1081,6 +1101,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosColaRoute: CobrosColaRoute,
   CobrosConveniosRoute: CobrosConveniosRoute,
   CobrosMetasRoute: CobrosMetasRoute,
+  CobrosMiDiaRoute: CobrosMiDiaRoute,
   CobrosPromesasRoute: CobrosPromesasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
   CobrosReduccionRoute: CobrosReduccionRoute,

@@ -7,6 +7,7 @@ import {
 	type BucketsCatalogoQueryData,
 	bucketDeEstado,
 	estiloBucket,
+	labelBucketConCodigo,
 } from "@/lib/cobros/buckets-catalogo";
 import { parseFechaLocal } from "@/lib/date-utils";
 
@@ -47,7 +48,7 @@ function getEstadoBadge(
 	const bucket = bucketDeEstado(estado, catalogo);
 	return (
 		<Badge variant="outline" style={estiloBucket(bucket.colorHex)}>
-			{bucket.label}
+			{labelBucketConCodigo(bucket)}
 		</Badge>
 	);
 }

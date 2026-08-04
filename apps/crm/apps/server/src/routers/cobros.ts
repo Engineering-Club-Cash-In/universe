@@ -96,8 +96,8 @@ import {
 	type EstadoPromesa,
 	evaluarPromesa,
 } from "../lib/promesa-pago";
-import { pushPromesaActivaEnSegundoPlano } from "../lib/push-promesa-cartera-back";
 import { condicionesPromesaVigente } from "../lib/promesa-vigente";
+import { pushPromesaActivaEnSegundoPlano } from "../lib/push-promesa-cartera-back";
 import { resolverNumeroSifco } from "../lib/resolver-numero-sifco";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -2161,18 +2161,20 @@ export const cobrosRouter = {
 
 				// Asesor a filtrar EN EL SQL. El rol `cobros` queda FORZADO a su
 				// propio asesor (matcheo por correo, nunca ve otro); admin/supervisor
-				// eligen uno o ven todos. getAdvisors va cacheado (TTL 5m) → las 6
-				// llamadas por día resuelven el asesor de un solo hit real.
+				// eligen uno o ven todos.
 				let asesorForzado: { asesorId: number; nombre: string } | null = null;
 				let asesorIdFiltro: number | undefined;
 				if (!puedeVerTodos) {
 					const email = context.session?.user?.email?.trim().toLowerCase();
-					const advisors = await carteraBackClient.getAdvisors({
-						page: 1,
-						perPage: 500,
-					});
-					const propio = (advisors.data ?? []).find(
-						(a) => a.email?.trim().toLowerCase() === email,
+					// email_cash_in, NO getAdvisors()/platform_users.email: ese campo
+					// está desactualizado (o el LEFT JOIN a platform_users no matchea)
+					// para varios asesores — Diego Gomez, Samuel Gamboa, Caren Rivera —
+					// y su agenda salía vacía con "no estás vinculado a un asesor".
+					// Mismo patrón ya corregido en getConveniosListado /
+					// getCierreDiarioPorRango.
+					const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
+					const propio = asesoresConBuckets.find(
+						(a) => a.email_cash_in?.trim().toLowerCase() === email,
 					);
 					if (!propio) {
 						// Usuario cobros sin asesor de cartera vinculado por correo:
@@ -2679,12 +2681,12 @@ export const cobrosRouter = {
 				let asesorIdFiltro: number | undefined;
 				if (!puedeVerTodos) {
 					const email = context.session?.user?.email?.trim().toLowerCase();
-					const advisors = await carteraBackClient.getAdvisors({
-						page: 1,
-						perPage: 500,
-					});
-					const propio = (advisors.data ?? []).find(
-						(a) => a.email?.trim().toLowerCase() === email,
+					// email_cash_in, NO getAdvisors()/platform_users.email (ver el
+					// mismo comentario en getAgendaDia): con /advisor la cola salía
+					// vacía para los asesores cuyo platform_users.email no coincide.
+					const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
+					const propio = asesoresConBuckets.find(
+						(a) => a.email_cash_in?.trim().toLowerCase() === email,
 					);
 					if (!propio) {
 						return {
@@ -2761,8 +2763,22 @@ export const cobrosRouter = {
 							telefonoPrincipal: casosCobros.telefonoPrincipal,
 							activo: casosCobros.activo,
 							updatedAt: casosCobros.updatedAt,
+							// Vehículo (para identificar la cuenta en la lista, igual que
+							// la tabla del dashboard) — cartera-back no lo trae en la cola.
+							vehiculoMarca: vehicles.make,
+							vehiculoModelo: vehicles.model,
+							vehiculoYear: vehicles.year,
+							vehiculoPlaca: vehicles.licensePlate,
 						})
 						.from(casosCobros)
+						.leftJoin(
+							contratosFinanciamiento,
+							eq(casosCobros.contratoId, contratosFinanciamiento.id),
+						)
+						.leftJoin(
+							vehicles,
+							eq(contratosFinanciamiento.vehicleId, vehicles.id),
+						)
 						.where(inArray(casosCobros.numeroCreditoSifco, sifcos)),
 					db
 						.select({
@@ -2954,6 +2970,10 @@ export const cobrosRouter = {
 								) ??
 								null,
 							casoId: caso?.id ?? null,
+							vehiculoMarca: caso?.vehiculoMarca ?? null,
+							vehiculoModelo: caso?.vehiculoModelo ?? null,
+							vehiculoYear: caso?.vehiculoYear ?? null,
+							vehiculoPlaca: caso?.vehiculoPlaca ?? null,
 							slaHoy: clasificacion.slaHoy,
 							promesaHoy: clasificacion.promesaHoy,
 							incumplida: clasificacion.incumplida,
@@ -2962,6 +2982,33 @@ export const cobrosRouter = {
 							diasSinContacto,
 						}),
 					);
+
+				// Conteos por categoria sobre TODO el universo (antes de input.filtro),
+				// para la barra "Agenda de hoy" de /cobros/mi-dia. Reclasifica en un pase
+				// aparte para no tocar el pipeline paginado de `items`; el pool del asesor
+				// es chico. Cada conteo == lo que se ve al filtrar por esa categoria.
+				const conteos = (() => {
+					const cls = universo.data.map((credito) => {
+						const caso = casoPorSifco.get(credito.numero_credito_sifco);
+						return clasificarCreditoColaDia(
+							{
+								fechaLimiteSla: credito.fecha_limite_sla,
+								contactadoHoy: caso ? contactadoHoyPorCaso.has(caso.id) : false,
+								promesas: caso ? (promesasPorCaso.get(caso.id) ?? []) : [],
+								diasSinContacto: caso
+									? (diasSinContactoPorCaso.get(caso.id) ?? null)
+									: null,
+							},
+							hoy,
+						);
+					});
+					return Object.fromEntries(
+						CATEGORIAS_COLA_DIA.map((cat) => [
+							cat,
+							cls.filter((c) => calificaParaFiltro(c, cat)).length,
+						]),
+					) as Record<(typeof CATEGORIAS_COLA_DIA)[number], number>;
+				})();
 
 				const total = items.length;
 				const totalPages = Math.max(1, Math.ceil(total / perPage));
@@ -2973,6 +3020,7 @@ export const cobrosRouter = {
 					asesorForzado,
 					items: items.slice(offset, offset + perPage),
 					total,
+					conteos,
 					page,
 					perPage,
 					totalPages,

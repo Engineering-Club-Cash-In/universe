@@ -46,6 +46,7 @@ import {
 	type BucketUI,
 	bucketsParaRender,
 	estiloBucket,
+	labelBucketConCodigo,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
 import { getCobrosColumns } from "@/lib/cobros/columns";
@@ -131,7 +132,7 @@ function EmbudoRow({
 							className="whitespace-nowrap text-xs"
 							style={estiloBucket(estado.colorHex)}
 						>
-							{estado.label}
+							{labelBucketConCodigo(estado)}
 						</Badge>
 					</div>
 					<div className="relative flex-1">
@@ -1299,7 +1300,7 @@ function RouteComponent() {
 													setPage(1);
 												}}
 											>
-												{filtro.label}
+												{labelBucketConCodigo(filtro)}
 											</Badge>
 										))}
 									</div>

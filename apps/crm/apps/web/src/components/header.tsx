@@ -9,10 +9,8 @@ import {
 	Briefcase,
 	Building2,
 	Calculator,
-	CalendarClock,
 	Car,
 	ChevronDown,
-	ClipboardList,
 	Database,
 	FileText,
 	Gauge,
@@ -268,17 +266,14 @@ export default function Header() {
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>
-										<Link to="/cobros/agenda" className="cursor-pointer">
-											<CalendarClock className="mr-2 h-4 w-4" />
-											Agenda del día
+										<Link to="/cobros/mi-dia" className="cursor-pointer">
+											<Sunrise className="mr-2 h-4 w-4" />
+											Mi día
 										</Link>
 									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/cobros/cola" className="cursor-pointer">
-											<ClipboardList className="mr-2 h-4 w-4" />
-											Cola del día
-										</Link>
-									</DropdownMenuItem>
+									{/* "Agenda del día" y "Cola del día" salen del menú: ambas quedan
+									    unificadas en "Mi día". Sus rutas siguen vivas
+									    (/cobros/agenda, /cobros/cola) por si hay que volver. */}
 									<DropdownMenuItem asChild>
 										<Link to="/cobros/promesas" className="cursor-pointer">
 											<BellRing className="mr-2 h-4 w-4" />
@@ -690,13 +685,13 @@ function MobileNav({
 											<Banknote />
 											Dashboard
 										</Link>
-										<Link to="/cobros/agenda" className={MOBILE_LINK_CLASS}>
-											<CalendarClock />
-											Agenda del día
+										<Link to="/cobros/mi-dia" className={MOBILE_LINK_CLASS}>
+											<Sunrise />
+											Mi día
 										</Link>
-										<Link to="/cobros/cola" className={MOBILE_LINK_CLASS}>
-											<ClipboardList />
-											Cola del día
+										<Link to="/cobros/promesas" className={MOBILE_LINK_CLASS}>
+											<BellRing />
+											Alertas de Promesas
 										</Link>
 										<Link to="/cobros/convenios" className={MOBILE_LINK_CLASS}>
 											<Handshake />

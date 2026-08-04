@@ -21,6 +21,8 @@ import { orpc } from "@/utils/orpc";
 export interface BucketUI {
 	key: string;
 	label: string;
+	/** Prefijo "B0".."B5" del bucket de aging; null/undefined para estados de status. */
+	prefijo?: string | null;
 	/** Clase Tailwind bg+text, usada cuando no hay color dinámico (hex). */
 	colorClass: string;
 	/** Color hex de referencia (embudo, barras) — respaldo si el catálogo no trae color. */
@@ -31,6 +33,7 @@ export interface BucketUI {
 export const DEFAULT_BUCKETS: readonly BucketUI[] = [
 	{
 		key: "al_dia",
+		prefijo: "B0",
 		label: "Cartera Sana",
 		colorClass: "bg-green-100 text-green-800",
 		colorHex: "#22c55e",
@@ -52,6 +55,7 @@ export const DEFAULT_BUCKETS: readonly BucketUI[] = [
 	},
 	{
 		key: "mora_30",
+		prefijo: "B1",
 		label: "Alerta Temprana",
 		colorClass: "bg-yellow-100 text-yellow-800",
 		colorHex: "#eab308",
@@ -59,6 +63,7 @@ export const DEFAULT_BUCKETS: readonly BucketUI[] = [
 	},
 	{
 		key: "mora_60",
+		prefijo: "B2",
 		label: "Gestión Activa",
 		colorClass: "bg-orange-100 text-orange-800",
 		colorHex: "#f97316",
@@ -66,6 +71,7 @@ export const DEFAULT_BUCKETS: readonly BucketUI[] = [
 	},
 	{
 		key: "mora_90",
+		prefijo: "B3",
 		label: "Rescate",
 		colorClass: "bg-red-100 text-red-800",
 		colorHex: "#ef4444",
@@ -73,6 +79,7 @@ export const DEFAULT_BUCKETS: readonly BucketUI[] = [
 	},
 	{
 		key: "mora_120",
+		prefijo: "B4",
 		label: "Última Instancia / Pre Jurídico",
 		colorClass: "bg-red-200 text-red-900",
 		colorHex: "#b91c1c",
@@ -80,6 +87,7 @@ export const DEFAULT_BUCKETS: readonly BucketUI[] = [
 	},
 	{
 		key: "mora_120_plus",
+		prefijo: "B5",
 		label: "Jurídico",
 		colorClass: "bg-red-300 text-red-900",
 		colorHex: "#991b1b",
@@ -265,11 +273,21 @@ export function bucketDeEstado(
 
 	return {
 		key,
+		prefijo: dinamico.prefijo ?? base.prefijo ?? null,
 		label: dinamico.label || base.label,
 		colorClass: base.colorClass,
 		colorHex: dinamico.color || base.colorHex,
 		orden: dinamico.orden,
 	};
+}
+
+/**
+ * Label con el código de bucket adelante: "B1 - Alerta Temprana". Los estados
+ * de status (En Convenio, Incobrable, Completado…) no son buckets de aging y no
+ * tienen prefijo → se muestran tal cual, sin código.
+ */
+export function labelBucketConCodigo(b: BucketUI): string {
+	return b.prefijo ? `${b.prefijo} - ${b.label}` : b.label;
 }
 
 /** Lista de buckets para render (embudo, filtros), en el orden del catálogo dinámico si cargó, si no el default. */

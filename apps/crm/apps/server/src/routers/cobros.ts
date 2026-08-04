@@ -1499,10 +1499,15 @@ export const cobrosRouter = {
 			const esPromesa = datos.estadoContacto === "promesa_pago";
 			const estadoPromesa = esPromesa ? ("pendiente" as const) : undefined;
 
+			const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
 			let filas: (typeof contactosCobros.$inferSelect)[];
 			if (promesaContactoId) {
 				// CB-029: editar la promesa activa EN SITIO (una sola por caso). Se
 				// re-abre a 'pendiente' — el job/getEstadoPromesasPago la re-evalúa.
+				// El WHERE exige que la fila SIGA activa (pendiente/NULL y fecha no
+				// pasada): un promesaContactoId viejo (la promesa ya se cerró o venció
+				// entre que se abrió el modal y se guardó) NO debe reabrir/sobrescribir
+				// una promesa histórica cerrada (Codex PR #1232).
 				filas = await db
 					.update(contactosCobros)
 					.set({ ...datos, estadoPromesa })
@@ -1511,12 +1516,18 @@ export const cobrosRouter = {
 							eq(contactosCobros.id, promesaContactoId),
 							eq(contactosCobros.casoCobroId, datos.casoCobroId),
 							eq(contactosCobros.estadoContacto, "promesa_pago"),
+							or(
+								eq(contactosCobros.estadoPromesa, "pendiente"),
+								isNull(contactosCobros.estadoPromesa),
+							),
+							gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
 						),
 					)
 					.returning();
 				if (filas.length === 0) {
-					throw new ORPCError("NOT_FOUND", {
-						message: "No se encontró la promesa a editar",
+					throw new ORPCError("CONFLICT", {
+						message:
+							"La promesa ya no está activa (fue cerrada o venció); registra una nueva.",
 					});
 				}
 			} else {

@@ -148,6 +148,7 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 			asesorId: number | null;
 			asesorNombre: string;
 			fechaPrometida: Date;
+			fechaAlerta: Date;
 		}> = [];
 
 		const hoy = new Date();
@@ -169,6 +170,7 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 					promesaId: string;
 					casoId: string;
 					fechaPrometida: Date;
+					fechaAlerta: Date;
 				}> = [];
 				for (const promesa of grupo) {
 					if (!promesa.fechaProximoContacto) continue; // fecha obligatoria en el modal, defensivo
@@ -191,20 +193,25 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 							fechaPrometida: promesa.fechaProximoContacto,
 						});
 					}
-					// CB-029: sigue pendiente y su alerta cae HOY (GT) → por vencer. La
-					// alerta efectiva es la programada (fecha_alerta) o D-1 por default,
-					// así también aplica a promesas viejas sin fecha_alerta.
+					// CB-029: sigue pendiente y su alerta YA cayó (hoy o antes) → por
+					// vencer. La alerta efectiva es la programada (fecha_alerta) o D-1
+					// por default, así también aplica a promesas viejas sin fecha_alerta.
 					if (estado === "pendiente") {
 						const alertaEf =
 							promesa.fechaAlerta ??
 							new Date(
 								promesa.fechaProximoContacto.getTime() - 24 * 60 * 60 * 1000,
 							);
-						if (toDateStrGT(alertaEf) === toDateStrGT(hoy)) {
+						// `<=` (no `===`): si la alerta cayó hoy DESPUÉS del run de
+						// medianoche (promesa recién creada), el próximo run igual la agarra
+						// aunque su día ya pasó. El dedup por episodio (fecha_alerta) evita
+						// repetir día a día (Codex PR #1232).
+						if (toDateStrGT(alertaEf) <= toDateStrGT(hoy)) {
 							candidatosPorVencer.push({
 								promesaId: promesa.id,
 								casoId: promesa.casoCobroId,
 								fechaPrometida: promesa.fechaProximoContacto,
+								fechaAlerta: alertaEf,
 							});
 						}
 					}
@@ -266,6 +273,7 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 						asesorId: credito.asesor?.asesor_id ?? null,
 						asesorNombre: credito.asesor?.nombre ?? "",
 						fechaPrometida: c.fechaPrometida,
+						fechaAlerta: c.fechaAlerta,
 					});
 				}
 			} catch (error) {
@@ -431,6 +439,7 @@ async function notificarPromesasPorVencer(
 		asesorId: number | null;
 		asesorNombre: string;
 		fechaPrometida: Date;
+		fechaAlerta: Date;
 	}>,
 ): Promise<void> {
 	if (porVencer.length === 0) return;
@@ -446,15 +455,15 @@ async function notificarPromesasPorVencer(
 	const items = [...porCaso.values()];
 	const casoIds = items.map((t) => t.casoId);
 
-	// Dedup por DÍA DE ALERTA (GT): la alerta cae en un único día, así que si ya
-	// se notificó HOY no se repite — aunque un reinicio corra el job >20h después
-	// (boot path en index.ts) el mismo día GT (Codex PR #1232). Un episodio nuevo
-	// (otra fecha de alerta, otro día GT) sí vuelve a disparar.
+	// Dedup por EPISODIO (fecha de alerta): se salta si ya hay una
+	// promesa_por_vencer del caso creada EN/DESPUÉS de la fecha de alerta de ESTE
+	// episodio → fire-once por promesa. Cubre reinicios del mismo día (Codex #7) y
+	// alertas que cayeron tarde sin repetir día a día (Codex #9); un episodio
+	// nuevo (otra fecha de alerta, más reciente) vuelve a disparar.
 	const ultimaNotif = await maxNotifPorVencerPorCaso(casoIds);
-	const hoyStr = toDateStrGT(new Date());
 	const pendientes = items.filter((t) => {
 		const notif = ultimaNotif.get(t.casoId);
-		return !notif || toDateStrGT(notif) !== hoyStr;
+		return !notif || notif.getTime() < t.fechaAlerta.getTime();
 	});
 	if (pendientes.length === 0) return;
 

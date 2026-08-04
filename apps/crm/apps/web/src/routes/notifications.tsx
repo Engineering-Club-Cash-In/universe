@@ -210,6 +210,16 @@ const COBROS_TIPO_CONFIG: Record<
 		iconColor: "text-red-600 dark:text-red-400",
 		badge: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 	},
+	// CB-029/CB-031: recordatorio proactivo antes de que la promesa venza.
+	promesa_por_vencer: {
+		label: "Promesa por vencer",
+		border: "border-sky-200 dark:border-sky-900/50",
+		bg: "bg-sky-50/50 dark:bg-sky-950/20",
+		icon: Clock,
+		iconWrap: "bg-sky-100 dark:bg-sky-900/40",
+		iconColor: "text-sky-600 dark:text-sky-400",
+		badge: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+	},
 	cliente_subido: {
 		label: "Subió de bucket",
 		border: "border-amber-200 dark:border-amber-900/50",

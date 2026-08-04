@@ -1685,6 +1685,105 @@ export const cobrosRouter = {
 			};
 		}),
 
+	// CB-031: apartado "Alertas de Promesas" (/cobros/promesas). Lista las
+	// promesas que HOY requieren acción, leídas del estado VIVO de la promesa
+	// (contactos_cobros) — no de la tabla `notifications` — para que siempre
+	// esté fresco (una promesa ya pagada = cumplida, deja de ser alerta) y para
+	// que los grupos cuadren con las tiles de getResumenPromesas.
+	//
+	// Cuatro categorías (las 3 primeras con la semántica de las notificaciones
+	// de CB-029):
+	//   - vencida    → incumplida, o pendiente cuya fecha ya pasó (prioridad alta)
+	//   - vence_hoy  → pendiente, fecha prometida = hoy
+	//   - por_vencer → pendiente, fecha futura y cuya alerta programada
+	//                  (fecha_alerta, default D-1) ya llegó
+	//   - programada → pendiente, fecha futura y cuya alerta AÚN no llega (sin
+	//                  acción pendiente todavía). Se incluye para que la página
+	//                  contenga TODO lo que cuenta la tile "activas".
+	//
+	// Scope por rol: el asesor ve solo sus casos (responsableCobros); el
+	// supervisor/admin ven el equipo completo (mismo criterio que getCasosCobros).
+	getAlertasPromesas: cobrosProcedure
+		.input(z.object({}).optional())
+		.handler(async ({ context }) => {
+			const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
+			const finHoyGt = new Date(inicioHoyGt.getTime() + 24 * 60 * 60 * 1000);
+
+			// Traemos todas las promesas vigentes (pendientes o incumplidas) del
+			// scope y clasificamos en JS: así las cotas de día son consistentes
+			// (siempre `<`, sin el borde lte/lt del SQL) y la página contiene todo
+			// lo que cuentan las tiles de getResumenPromesas.
+			const conditions = [
+				eq(contactosCobros.estadoContacto, "promesa_pago"),
+				eq(casosCobros.activo, true),
+				inArray(contactosCobros.estadoPromesa, ["pendiente", "incumplida"]),
+			];
+			// Asesor (no puede ver todo): solo sus casos asignados.
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
+				conditions.push(eq(casosCobros.responsableCobros, context.userId));
+			}
+
+			const rows = await db
+				.select({
+					id: contactosCobros.id,
+					casoCobroId: contactosCobros.casoCobroId,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+					clienteNombre: clients.contactPerson,
+					asesorNombre: user.name,
+					fechaPrometida: contactosCobros.fechaProximoContacto,
+					fechaAlerta: contactosCobros.fechaAlerta,
+					montoComprometido: contactosCobros.montoComprometido,
+					cuotaInicio: contactosCobros.cuotaInicio,
+					cuotaFin: contactosCobros.cuotaFin,
+					incluyeMora: contactosCobros.incluyeMora,
+					estadoPromesa: contactosCobros.estadoPromesa,
+				})
+				.from(contactosCobros)
+				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
+				.leftJoin(
+					contratosFinanciamiento,
+					eq(casosCobros.contratoId, contratosFinanciamiento.id),
+				)
+				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+				.leftJoin(user, eq(casosCobros.responsableCobros, user.id))
+				.where(and(...conditions));
+
+			// Clasificación + orden en JS: vencidas primero (prioridad alta), luego
+			// vence hoy, por vencer, y al final las programadas (aún dentro de
+			// plazo, sin acción pendiente). Dentro de cada grupo, la más urgente
+			// (fecha más próxima) arriba.
+			const DIA_MS = 24 * 60 * 60 * 1000;
+			const ordenCategoria = {
+				vencida: 0,
+				vence_hoy: 1,
+				por_vencer: 2,
+				programada: 3,
+			};
+			const clasificar = (r: (typeof rows)[number]) => {
+				if (r.estadoPromesa === "incumplida") return "vencida" as const;
+				const fecha = r.fechaPrometida;
+				if (!fecha) return "vencida" as const;
+				if (fecha < inicioHoyGt) return "vencida" as const;
+				if (fecha < finHoyGt) return "vence_hoy" as const;
+				// Futura: ¿su alerta programada (fecha_alerta, o D-1) ya llegó?
+				const alertaEf = r.fechaAlerta ?? new Date(fecha.getTime() - DIA_MS);
+				return alertaEf < finHoyGt
+					? ("por_vencer" as const)
+					: ("programada" as const);
+			};
+
+			return rows
+				.map((r) => ({ ...r, categoria: clasificar(r) }))
+				.sort((a, b) => {
+					const diff =
+						ordenCategoria[a.categoria] - ordenCategoria[b.categoria];
+					if (diff !== 0) return diff;
+					const fa = a.fechaPrometida?.getTime() ?? 0;
+					const fb = b.fechaPrometida?.getTime() ?? 0;
+					return fa - fb;
+				});
+		}),
+
 	// LEGACY (tabla CRM `convenios_pago`, no cartera-back): nunca se llama desde
 	// la web (0 usos en apps/web) — el convenio real de negocio vive en
 	// cartera-back y llega vía getDetallesCreditoCarteraBack.convenioActivo y

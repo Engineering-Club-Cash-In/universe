@@ -817,7 +817,7 @@ function RouteComponent() {
 			{/* CB-029: resumen de Promesas de Pago del equipo — tiles clickeables
 			    hacia la Cola del Día. */}
 			<div className="grid gap-4 sm:grid-cols-3">
-				<Link to="/cobros/cola" className="block">
+				<Link to="/cobros/promesas" className="block">
 					<Card className="h-full transition-colors hover:bg-muted/50">
 						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 							<CardTitle className="font-medium text-sm">
@@ -836,7 +836,7 @@ function RouteComponent() {
 					</Card>
 				</Link>
 
-				<Link to="/cobros/cola" className="block">
+				<Link to="/cobros/promesas" className="block">
 					<Card className="h-full transition-colors hover:bg-muted/50">
 						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 							<CardTitle className="font-medium text-sm">Vencen hoy</CardTitle>
@@ -853,7 +853,7 @@ function RouteComponent() {
 					</Card>
 				</Link>
 
-				<Link to="/cobros/cola" className="block">
+				<Link to="/cobros/promesas" className="block">
 					<Card className="h-full transition-colors hover:bg-muted/50">
 						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 							<CardTitle className="font-medium text-sm">Incumplidas</CardTitle>

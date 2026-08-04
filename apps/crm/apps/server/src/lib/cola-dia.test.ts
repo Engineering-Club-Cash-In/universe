@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	type ClasificacionColaDia,
 	type CreditoParaClasificar,
 	calificaParaColaDia,
 	calificaParaFiltro,
@@ -21,6 +22,25 @@ function creditoBase(
 		contactadoHoy: false,
 		promesas: [],
 		diasSinContacto: null,
+		...overrides,
+	};
+}
+
+/**
+ * Clasificación armada a mano para probar calificaParaFiltro/ordenColaDia sin
+ * pasar por clasificarCreditoColaDia. Con defaults para que agregar una
+ * bandera nueva a ClasificacionColaDia no obligue a tocar cada literal.
+ */
+function clasificacionBase(
+	overrides: Partial<ClasificacionColaDia> = {},
+): ClasificacionColaDia {
+	return {
+		slaHoy: false,
+		promesaHoy: false,
+		incumplida: false,
+		promesaProxima: false,
+		sinContacto: false,
+		promesaActiva: false,
 		...overrides,
 	};
 }
@@ -157,55 +177,84 @@ describe("clasificarCreditoColaDia — solapes", () => {
 			incumplida: true,
 			promesaProxima: false,
 			sinContacto: true,
+			// La pendiente de hoy sigue vigente aunque arrastre una incumplida.
+			promesaActiva: true,
 		});
+	});
+});
+
+describe("clasificarCreditoColaDia — promesaActiva (CB-030)", () => {
+	test("incumplida vieja + pendiente FUTURA → promesaActiva true junto con incumplida", () => {
+		const c = clasificarCreditoColaDia(
+			creditoBase({
+				promesas: [
+					{ estadoPromesa: "incumplida", fechaPrometida: AYER },
+					{ estadoPromesa: "pendiente", fechaPrometida: MANANA },
+				],
+			}),
+			HOY,
+		);
+		// El caso que reportó Codex en el PR #1238: usar `!incumplida` como
+		// proxy escondía el badge aunque la promesa nueva esté congelando.
+		expect(c.incumplida).toBe(true);
+		expect(c.promesaActiva).toBe(true);
+	});
+
+	test("promesa pendiente que vence HOY → vigente el día entero", () => {
+		const c = clasificarCreditoColaDia(
+			creditoBase({
+				promesas: [{ estadoPromesa: "pendiente", fechaPrometida: HOY }],
+			}),
+			HOY,
+		);
+		expect(c.promesaActiva).toBe(true);
+	});
+
+	test("solo promesas vencidas (pendientes sin evaluar) → NO vigente", () => {
+		const c = clasificarCreditoColaDia(
+			creditoBase({
+				promesas: [{ estadoPromesa: "pendiente", fechaPrometida: AYER }],
+			}),
+			HOY,
+		);
+		expect(c.incumplida).toBe(true);
+		expect(c.promesaActiva).toBe(false);
+	});
+
+	test("solo incumplidas → NO vigente", () => {
+		const c = clasificarCreditoColaDia(
+			creditoBase({
+				promesas: [{ estadoPromesa: "incumplida", fechaPrometida: AYER }],
+			}),
+			HOY,
+		);
+		expect(c.promesaActiva).toBe(false);
+	});
+
+	test("sin promesas → NO vigente", () => {
+		expect(clasificarCreditoColaDia(creditoBase(), HOY).promesaActiva).toBe(
+			false,
+		);
 	});
 });
 
 describe("calificaParaColaDia / calificaParaFiltro", () => {
 	test("sin ninguna bandera → no califica para la cola", () => {
-		expect(
-			calificaParaColaDia({
-				slaHoy: false,
-				promesaHoy: false,
-				incumplida: false,
-				promesaProxima: false,
-				sinContacto: false,
-			}),
-		).toBe(false);
+		expect(calificaParaColaDia(clasificacionBase())).toBe(false);
 	});
 
 	test("con al menos una bandera → califica para la cola", () => {
-		expect(
-			calificaParaColaDia({
-				slaHoy: true,
-				promesaHoy: false,
-				incumplida: false,
-				promesaProxima: false,
-				sinContacto: false,
-			}),
-		).toBe(true);
+		expect(calificaParaColaDia(clasificacionBase({ slaHoy: true }))).toBe(true);
 	});
 
 	test("solo sinContacto también califica para la cola", () => {
-		expect(
-			calificaParaColaDia({
-				slaHoy: false,
-				promesaHoy: false,
-				incumplida: false,
-				promesaProxima: false,
-				sinContacto: true,
-			}),
-		).toBe(true);
+		expect(calificaParaColaDia(clasificacionBase({ sinContacto: true }))).toBe(
+			true,
+		);
 	});
 
 	test("calificaParaFiltro solo mira la categoría pedida", () => {
-		const c = {
-			slaHoy: true,
-			promesaHoy: false,
-			incumplida: false,
-			promesaProxima: false,
-			sinContacto: false,
-		};
+		const c = clasificacionBase({ slaHoy: true });
 		expect(calificaParaFiltro(c, "sla_hoy")).toBe(true);
 		expect(calificaParaFiltro(c, "promesa_hoy")).toBe(false);
 		expect(calificaParaFiltro(c, "incumplida")).toBe(false);
@@ -213,13 +262,11 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 	});
 
 	test("calificaParaFiltro('sin_contacto') solo mira sinContacto", () => {
-		const c = {
+		const c = clasificacionBase({
 			slaHoy: true,
 			promesaHoy: true,
 			incumplida: true,
-			promesaProxima: false,
-			sinContacto: false,
-		};
+		});
 		expect(calificaParaFiltro(c, "sin_contacto")).toBe(false);
 	});
 });
@@ -227,51 +274,34 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 describe("ordenColaDia", () => {
 	test("prioriza slaHoy sobre promesaHoy sobre incumplida sobre sinContacto", () => {
 		expect(
-			ordenColaDia({
-				slaHoy: true,
-				promesaHoy: true,
-				incumplida: true,
-				promesaProxima: false,
-				sinContacto: true,
-			}),
+			ordenColaDia(
+				clasificacionBase({
+					slaHoy: true,
+					promesaHoy: true,
+					incumplida: true,
+					sinContacto: true,
+				}),
+			),
 		).toBe(0);
 		expect(
-			ordenColaDia({
-				slaHoy: false,
-				promesaHoy: true,
-				incumplida: true,
-				promesaProxima: false,
-				sinContacto: true,
-			}),
+			ordenColaDia(
+				clasificacionBase({
+					promesaHoy: true,
+					incumplida: true,
+					sinContacto: true,
+				}),
+			),
 		).toBe(1);
 		expect(
-			ordenColaDia({
-				slaHoy: false,
-				promesaHoy: false,
-				incumplida: true,
-				promesaProxima: false,
-				sinContacto: true,
-			}),
+			ordenColaDia(clasificacionBase({ incumplida: true, sinContacto: true })),
 		).toBe(2);
 		// CB-029: promesa proxima va debajo de las urgentes (3), arriba de sin contacto (4).
 		expect(
-			ordenColaDia({
-				slaHoy: false,
-				promesaHoy: false,
-				incumplida: false,
-				promesaProxima: true,
-				sinContacto: true,
-			}),
+			ordenColaDia(
+				clasificacionBase({ promesaProxima: true, sinContacto: true }),
+			),
 		).toBe(3);
-		expect(
-			ordenColaDia({
-				slaHoy: false,
-				promesaHoy: false,
-				incumplida: false,
-				promesaProxima: false,
-				sinContacto: true,
-			}),
-		).toBe(4);
+		expect(ordenColaDia(clasificacionBase({ sinContacto: true }))).toBe(4);
 	});
 });
 

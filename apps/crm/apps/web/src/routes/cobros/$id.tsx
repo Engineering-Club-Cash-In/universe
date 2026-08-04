@@ -33,6 +33,7 @@ import {
 	type ResultadoGestionB1,
 } from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
+import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
 import { ContactoModal } from "@/components/contacto-modal";
@@ -79,6 +80,11 @@ import {
 	numeroDeEstadoMora,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import {
+	type EstadoPromesaUI,
+	inicioDelDiaGT,
+	tienePromesaActiva,
+} from "@/lib/cobros/promesa-activa";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -483,19 +489,14 @@ function RouteComponent() {
 	// otra que se sobreponga). El backend igual valida "una sola activa".
 	const promesaActiva = useMemo(() => {
 		const estados = estadoPromesasPago.data as
-			| Record<string, EstadoPromesa>
+			| Record<string, EstadoPromesaUI>
 			| undefined;
-		// Medianoche GT de hoy (T06:00:00Z del día GT) — igual criterio que el
-		// backend (promesaActivaDelCaso). Codex PR #1232: una promesa VENCIDA (aún
-		// pendiente/null porque el recálculo no corrió) NO es activa; sin este
-		// chequeo, abrir el modal editaría/sobrescribiría una promesa histórica.
-		const hoyGtStr = new Intl.DateTimeFormat("en-CA", {
-			timeZone: "America/Guatemala",
-			year: "numeric",
-			month: "2-digit",
-			day: "2-digit",
-		}).format(new Date());
-		const inicioHoyGt = new Date(`${hoyGtStr}T06:00:00.000Z`);
+		// Medianoche GT de hoy — mismo corte que el backend
+		// (condicionesPromesaVigente) y que el badge del header, vía el helper
+		// compartido. Codex PR #1232: una promesa VENCIDA (aún pendiente/null
+		// porque el recálculo no corrió) NO es activa; sin este chequeo, abrir
+		// el modal editaría/sobrescribiría una promesa histórica.
+		const inicioHoyGt = inicioDelDiaGT();
 		const candidatas = (promesasPago as any[])
 			.filter((p) => {
 				const estado = estados?.[p.id] ?? p.estadoPromesa ?? "pendiente";
@@ -851,6 +852,34 @@ function RouteComponent() {
 		!bucketActual.isPending &&
 		(bucketPrevio === null || esBucketB2(bucketPrevio, bucketsCatalogo.data));
 
+	// CB-030: subestado "Promesa activa" — se muestra JUNTO al bucket, nunca
+	// en su lugar. El bucket YA viene congelado desde el servidor mientras la
+	// promesa esté vigente (el motor de cartera-back excluye del conteo las
+	// cuotas cubiertas por su rango — ver isOverdueInstallmentForMora en
+	// latefee.ts); este badge solo EXPLICA por qué, no recalcula ni duplica
+	// el freeze en el cliente.
+	//
+	// Los gates son tres cosas distintas:
+	//  - isPending: sin ellos el badge parpadea mientras las queries resuelven
+	//    (misma lección que mostrarConvenio arriba, CB-027).
+	//  - isError: un error de TanStack Query deja isPending=false y
+	//    data=undefined, indistinguible de "0 promesas" — mismo razonamiento
+	//    que el guard de gestionB1 más abajo (Codex PR #1205). Sin esto, un
+	//    error transitorio de red esconde el badge y el asesor ve un bucket
+	//    congelado sin explicación, que es justo lo que CB-030 evita. Si falla
+	//    solo estadoPromesasPago, tienePromesaActiva caería a la columna DB,
+	//    que puede ir un ciclo atrás y afirmar vigente algo ya incumplido.
+	//  - promesasPago.length === 0 ||: estadoPromesasPago está `enabled` solo
+	//    cuando hay promesas, y en React Query v5 una query deshabilitada que
+	//    nunca fetcheó queda en isPending=true PARA SIEMPRE. Sin este escape,
+	//    el gate dependería de un pending que jamás se resuelve.
+	const mostrarPromesaActiva =
+		!historialContactos.isPending &&
+		!historialContactos.isError &&
+		!estadoPromesasPago.isError &&
+		(promesasPago.length === 0 || !estadoPromesasPago.isPending) &&
+		tienePromesaActiva(promesasPago, estadoPromesasPago.data);
+
 	const getEstadoContacto = (estado: string) => {
 		const estados: Record<string, { label: string; color: string }> = {
 			contactado: { label: "Contactado", color: "bg-green-100 text-green-800" },
@@ -899,23 +928,26 @@ function RouteComponent() {
 						</p>
 					</div>
 				</div>
-				{bucketUI ? (
-					<Badge
-						variant="outline"
-						className="whitespace-nowrap font-semibold"
-						style={estiloBucket(bucketUI.colorHex)}
-						title={bucketTitle}
-					>
-						{bucketPrefijo} · {bucketUI.label}
-					</Badge>
-				) : (
-					<Badge
-						variant="outline"
-						style={getEstadoBadge(caso.estadoMora || "")}
-					>
-						{getEstadoLabel(caso.estadoMora || "")}
-					</Badge>
-				)}
+				<div className="flex items-center gap-2">
+					{bucketUI ? (
+						<Badge
+							variant="outline"
+							className="whitespace-nowrap font-semibold"
+							style={estiloBucket(bucketUI.colorHex)}
+							title={bucketTitle}
+						>
+							{bucketPrefijo} · {bucketUI.label}
+						</Badge>
+					) : (
+						<Badge
+							variant="outline"
+							style={getEstadoBadge(caso.estadoMora || "")}
+						>
+							{getEstadoLabel(caso.estadoMora || "")}
+						</Badge>
+					)}
+					{mostrarPromesaActiva && <PromesaActivaBadge />}
+				</div>
 			</div>
 
 			<div className="grid gap-6 lg:grid-cols-3">

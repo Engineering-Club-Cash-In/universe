@@ -9,9 +9,11 @@ import {
 	Loader2,
 	Mail,
 	MapPin,
+	MessageCircle,
 	Phone,
 } from "lucide-react";
 import { useMemo } from "react";
+import { ContactoModal } from "@/components/contacto-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -79,6 +81,28 @@ interface ContactoPanel {
 	metodoContacto: string;
 	realizadoPor?: string | null;
 }
+
+/** Canales que se pueden disparar desde el panel (mismos de la ficha). */
+const CANALES = [
+	{
+		metodo: "llamada" as const,
+		label: "Llamar",
+		Icono: Phone,
+		color: "text-blue-600 dark:text-blue-400",
+	},
+	{
+		metodo: "whatsapp" as const,
+		label: "WhatsApp",
+		Icono: MessageCircle,
+		color: "text-green-600 dark:text-green-400",
+	},
+	{
+		metodo: "email" as const,
+		label: "Correo",
+		Icono: Mail,
+		color: "text-indigo-600 dark:text-indigo-400",
+	},
+];
 
 const ALERTA_LABEL: Record<string, string> = {
 	promesa_incumplida: "Promesa incumplida",
@@ -245,7 +269,7 @@ export function PanelGestionRapida({
 
 	return (
 		<Sheet open={open} onOpenChange={(v) => !v && onClose()}>
-			<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-lg">
+			<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-3xl">
 				<SheetHeader className="border-b p-4">
 					<SheetTitle>Gestión rápida</SheetTitle>
 				</SheetHeader>
@@ -296,139 +320,184 @@ export function PanelGestionRapida({
 							</div>
 						</div>
 
-						{/* Promesa vigente — lo más accionable, igual que en la ficha. */}
-						{promesaActiva && (
-							<div className="rounded-lg border border-emerald-200 p-3 dark:border-emerald-900/50">
+						{/* Dos columnas como el diseño: a la izquierda el dinero, a la
+						    derecha con quién hablar y qué prometió. */}
+						<div className="grid gap-4 md:grid-cols-2">
+							{/* Cobro de este mes */}
+							<div className="rounded-lg border p-3">
 								<div className="mb-2 flex items-center gap-2">
-									<HandCoins className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-									<span className="font-medium text-sm">Promesa de Pago</span>
-									<Badge
-										variant="outline"
-										className="ml-auto border-transparent bg-amber-100 text-[10px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-									>
-										Pendiente
-									</Badge>
+									<Banknote className="h-4 w-4 text-muted-foreground" />
+									<span className="font-medium text-sm">Cobro de este mes</span>
 								</div>
-								{promesaActiva.montoComprometido != null && (
-									<p className="font-bold text-2xl text-emerald-700 dark:text-emerald-400">
-										{money(promesaActiva.montoComprometido)}
-									</p>
-								)}
+								<p className="text-muted-foreground text-xs">Total a pagar</p>
+								<p className="font-bold text-2xl">{money(totalMes)}</p>
 								<div className="mt-2 grid grid-cols-2 gap-3">
-									<Dato label="Fecha compromiso">
-										{fechaGT(promesaActiva.fechaProximoContacto)}
+									<Dato
+										label="Monto en mora"
+										className={
+											Number(caso.montoEnMora ?? 0) > 0 ? "text-red-600" : ""
+										}
+									>
+										{money(caso.montoEnMora)}
 									</Dato>
-									<Dato label="Responsable">
-										{promesaActiva.realizadoPor ?? "—"}
+									<Dato label="Cuota mensual">{money(caso.cuotaMensual)}</Dato>
+									<Dato label="Saldo pendiente">{money(caso.deudaTotal)}</Dato>
+									<Dato
+										label="Días de atraso"
+										className={
+											(caso.diasMoraMaximo ?? 0) > 0 ? "text-red-600" : ""
+										}
+									>
+										{caso.diasMoraMaximo ?? 0}
+									</Dato>
+									<Dato label="Cuotas vencidas">
+										{caso.cuotasVencidas ?? 0}
+									</Dato>
+									<Dato label="Cuotas restantes">
+										{caso.cuotasRestantes ?? "—"}
+										{caso.numeroCuotas ? ` de ${caso.numeroCuotas}` : ""}
 									</Dato>
 								</div>
 							</div>
-						)}
 
-						{/* Cobro de este mes */}
-						<div className="rounded-lg border p-3">
-							<div className="mb-2 flex items-center gap-2">
-								<Banknote className="h-4 w-4 text-muted-foreground" />
-								<span className="font-medium text-sm">Cobro de este mes</span>
-							</div>
-							<p className="text-muted-foreground text-xs">Total a pagar</p>
-							<p className="font-bold text-2xl">{money(totalMes)}</p>
-							<div className="mt-2 grid grid-cols-2 gap-3">
-								<Dato
-									label="Monto en mora"
-									className={
-										Number(caso.montoEnMora ?? 0) > 0 ? "text-red-600" : ""
-									}
-								>
-									{money(caso.montoEnMora)}
-								</Dato>
-								<Dato label="Cuota mensual">{money(caso.cuotaMensual)}</Dato>
-								<Dato label="Saldo pendiente">{money(caso.deudaTotal)}</Dato>
-								<Dato
-									label="Días de atraso"
-									className={
-										(caso.diasMoraMaximo ?? 0) > 0 ? "text-red-600" : ""
-									}
-								>
-									{caso.diasMoraMaximo ?? 0}
-								</Dato>
-								<Dato label="Cuotas vencidas">{caso.cuotasVencidas ?? 0}</Dato>
-								<Dato label="Cuotas restantes">
-									{caso.cuotasRestantes ?? "—"}
-									{caso.numeroCuotas ? ` de ${caso.numeroCuotas}` : ""}
-								</Dato>
-							</div>
-						</div>
-
-						{/* Alertas */}
-						{alertas.length > 0 && (
-							<div className="rounded-lg border border-amber-200 p-3 dark:border-amber-900/50">
+							{/* Contacto */}
+							<div className="rounded-lg border p-3">
 								<div className="mb-2 flex items-center gap-2">
-									<AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-									<span className="font-medium text-sm">Alertas</span>
-									<Badge variant="secondary" className="ml-auto">
-										{alertas.length}
-									</Badge>
+									<Phone className="h-4 w-4 text-muted-foreground" />
+									<span className="font-medium text-sm">Contacto</span>
 								</div>
-								<ul className="space-y-1.5">
-									{alertas.slice(0, 4).map((a) => (
-										<li key={a.id} className="flex items-start gap-2 text-xs">
-											<span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
-											<span>
-												{ALERTA_LABEL[a.cobrosTipo ?? ""] ?? a.titulo}
-												{a.repeticiones > 1 && (
-													<span className="text-muted-foreground">
-														{" "}
-														· {a.repeticiones} avisos
-													</span>
-												)}
-											</span>
-										</li>
-									))}
-								</ul>
-							</div>
-						)}
-
-						{/* Contacto */}
-						<div className="rounded-lg border p-3">
-							<div className="mb-2 flex items-center gap-2">
-								<Phone className="h-4 w-4 text-muted-foreground" />
-								<span className="font-medium text-sm">Contacto</span>
-							</div>
-							<div className="space-y-2">
-								{telefonos.length > 0 ? (
-									<div className="flex flex-wrap gap-1.5">
-										{telefonos.map((t) => (
+								<div className="space-y-2">
+									{telefonos.length > 0 ? (
+										<div className="flex flex-wrap gap-1.5">
+											{telefonos.map((t) => (
+												<a
+													key={t}
+													href={`tel:${t}`}
+													className="rounded-md border px-2 py-1 font-medium text-xs transition-colors hover:bg-muted"
+												>
+													{t}
+												</a>
+											))}
+										</div>
+									) : (
+										<p className="text-muted-foreground text-xs">
+											Sin teléfono
+										</p>
+									)}
+									{caso.emailContacto && (
+										<p className="flex items-center gap-1.5 text-xs">
+											<Mail className="h-3 w-3 shrink-0 text-muted-foreground" />
 											<a
-												key={t}
-												href={`tel:${t}`}
-												className="rounded-md border px-2 py-1 font-medium text-xs transition-colors hover:bg-muted"
+												href={`mailto:${caso.emailContacto}`}
+												className="truncate hover:underline"
 											>
-												{t}
+												{caso.emailContacto}
 											</a>
+										</p>
+									)}
+									{caso.direccionContacto && (
+										<p className="flex items-start gap-1.5 text-muted-foreground text-xs">
+											<MapPin className="mt-0.5 h-3 w-3 shrink-0" />
+											{caso.direccionContacto}
+										</p>
+									)}
+								</div>
+
+								{/* Las mismas acciones de la ficha: se puede gestionar desde acá sin
+							    abrir el caso completo. */}
+								{caso.id && (
+									<div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3">
+										{CANALES.map(({ metodo, label, Icono, color }) => (
+											<ContactoModal
+												key={metodo}
+												casoCobroId={caso.id as string}
+												clienteNombre={caso.clienteNombre || ""}
+												telefonoPrincipal={caso.telefonoPrincipal || ""}
+												telefonoAlternativo={
+													caso.telefonoAlternativo || undefined
+												}
+												emailCliente={caso.emailContacto || ""}
+												metodoInicial={metodo}
+												placa={caso.vehiculoPlaca || ""}
+												marcaLineaModelo={`${caso.vehiculoMarca ?? ""} ${caso.vehiculoModelo ?? ""} ${caso.vehiculoYear ?? ""}`.trim()}
+												cuotaMensual={Number(
+													caso.cuotaMensual || 0,
+												).toLocaleString()}
+												cuotasAtraso={caso.cuotasVencidas ?? 0}
+												estadoMora={caso.estadoMora || undefined}
+												nombreAsesor={caso.asesor?.nombre || ""}
+											>
+												<Button
+													variant="outline"
+													size="sm"
+													className="h-8 text-xs"
+												>
+													<Icono className={`mr-1.5 h-3.5 w-3.5 ${color}`} />
+													{label}
+												</Button>
+											</ContactoModal>
 										))}
 									</div>
-								) : (
-									<p className="text-muted-foreground text-xs">Sin teléfono</p>
-								)}
-								{caso.emailContacto && (
-									<p className="flex items-center gap-1.5 text-xs">
-										<Mail className="h-3 w-3 shrink-0 text-muted-foreground" />
-										<a
-											href={`mailto:${caso.emailContacto}`}
-											className="truncate hover:underline"
-										>
-											{caso.emailContacto}
-										</a>
-									</p>
-								)}
-								{caso.direccionContacto && (
-									<p className="flex items-start gap-1.5 text-muted-foreground text-xs">
-										<MapPin className="mt-0.5 h-3 w-3 shrink-0" />
-										{caso.direccionContacto}
-									</p>
 								)}
 							</div>
+
+							{/* Alertas */}
+							{alertas.length > 0 && (
+								<div className="rounded-lg border border-amber-200 p-3 dark:border-amber-900/50">
+									<div className="mb-2 flex items-center gap-2">
+										<AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+										<span className="font-medium text-sm">Alertas</span>
+										<Badge variant="secondary" className="ml-auto">
+											{alertas.length}
+										</Badge>
+									</div>
+									<ul className="space-y-1.5">
+										{alertas.slice(0, 4).map((a) => (
+											<li key={a.id} className="flex items-start gap-2 text-xs">
+												<span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+												<span>
+													{ALERTA_LABEL[a.cobrosTipo ?? ""] ?? a.titulo}
+													{a.repeticiones > 1 && (
+														<span className="text-muted-foreground">
+															{" "}
+															· {a.repeticiones} avisos
+														</span>
+													)}
+												</span>
+											</li>
+										))}
+									</ul>
+								</div>
+							)}
+
+							{/* Promesa vigente — lo más accionable, igual que en la ficha. */}
+							{promesaActiva && (
+								<div className="rounded-lg border border-emerald-200 p-3 dark:border-emerald-900/50">
+									<div className="mb-2 flex items-center gap-2">
+										<HandCoins className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+										<span className="font-medium text-sm">Promesa de Pago</span>
+										<Badge
+											variant="outline"
+											className="ml-auto border-transparent bg-amber-100 text-[10px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+										>
+											Pendiente
+										</Badge>
+									</div>
+									{promesaActiva.montoComprometido != null && (
+										<p className="font-bold text-2xl text-emerald-700 dark:text-emerald-400">
+											{money(promesaActiva.montoComprometido)}
+										</p>
+									)}
+									<div className="mt-2 grid grid-cols-2 gap-3">
+										<Dato label="Fecha compromiso">
+											{fechaGT(promesaActiva.fechaProximoContacto)}
+										</Dato>
+										<Dato label="Responsable">
+											{promesaActiva.realizadoPor ?? "—"}
+										</Dato>
+									</div>
+								</div>
+							)}
 						</div>
 
 						{/* Últimas gestiones */}

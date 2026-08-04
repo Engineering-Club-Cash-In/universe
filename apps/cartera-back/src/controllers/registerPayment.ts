@@ -33,6 +33,7 @@ import {
   esPagoSoloCapital,
   esPagoSoloOtros,
   puedeOmitirGuardTodasCubiertas,
+  capitalSuprimidoPorConvenio,
   debeRechazarAbonoCapitalNoAplicado,
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
@@ -2115,22 +2116,21 @@ export const insertPayment = async ({ body, set }: any) => {
       // `success: true` con CERO filas en pagos_credito y la boleta se perdía en
       // silencio. Sólo rechazamos si de verdad no se escribió nada (las ramas de
       // mora y la de sólo-otros insertan su propia fila antes de este punto).
-      if (
-        debeRechazarAbonoCapitalNoAplicado({
-          abonoCapital,
-          cuotasCompletas: cuotas_completas,
-          cuotasParciales: cuotas_parciales,
-          moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
-          // Condición RUNTIME de la rama especial de otros (no la clasificación
-          // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
-          // capital colado, y acá lo que importa es qué se escribió.
-          otrosEspecialAplicado: montoBoleta.eq(otrosBig),
-          // Si el convenio consumió el disponible, convenios_pago y la fila
-          // solo-convenio YA están escritos: un 409 aquí invitaría a reintentar
-          // y aplicar el convenio dos veces.
-          convenioAplicado: montoConvenio,
-        })
-      ) {
+      const guardCapitalParams = {
+        abonoCapital,
+        cuotasCompletas: cuotas_completas,
+        cuotasParciales: cuotas_parciales,
+        moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
+        // Condición RUNTIME de la rama especial de otros (no la clasificación
+        // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
+        // capital colado, y acá lo que importa es qué se escribió.
+        otrosEspecialAplicado: montoBoleta.eq(otrosBig),
+        // Si el convenio consumió el disponible, convenios_pago y la fila
+        // solo-convenio YA están escritos: un 409 aquí invitaría a reintentar
+        // y aplicar el convenio dos veces.
+        convenioAplicado: montoConvenio,
+      };
+      if (debeRechazarAbonoCapitalNoAplicado(guardCapitalParams)) {
         set.status = 409;
         return {
           success: false,
@@ -2139,7 +2139,19 @@ export const insertPayment = async ({ body, set }: any) => {
         };
       }
 
-      const newSaldoAFavor = saldoAFavor.plus(disponible_restante);
+      // Capital que la sección 7 no aplicó y cuyo 409 se suprimió SOLO por el
+      // convenio: ya venía descontado de montoEfectivo, así que sin esto se
+      // evaporaría en silencio — se devuelve a saldo a favor.
+      const capitalDevuelto = capitalSuprimidoPorConvenio(guardCapitalParams);
+      if (capitalDevuelto.gt(0)) {
+        console.log(
+          `↩️ Abono a capital no aplicable (sin permiso) devuelto a saldo a favor: Q${capitalDevuelto.toString()}`
+        );
+      }
+
+      const newSaldoAFavor = saldoAFavor
+        .plus(disponible_restante)
+        .plus(capitalDevuelto);
       await db
         .update(usuarios)
         .set({ saldo_a_favor: newSaldoAFavor.toString() })
@@ -2160,8 +2172,9 @@ export const insertPayment = async ({ body, set }: any) => {
           cuotas_pagadas_parciales: cuotas_parciales,
           monto_aplicado: montoTotal,
           saldo_sobrante: "0.00",
+          capital_no_aplicado_a_saldo: capitalDevuelto.toString(),
         },
-        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. Ya no queda saldo disponible.`,
+        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}Ya no queda saldo disponible.`,
       };
     }
   } catch (error) {

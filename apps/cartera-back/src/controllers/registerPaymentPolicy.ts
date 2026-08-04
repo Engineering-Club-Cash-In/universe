@@ -900,3 +900,25 @@ export const calcularCuotasConvenioCompletadas = ({
   );
   return Math.min(meses, completadas);
 };
+
+/**
+ * Capital pedido que quedó SIN destino cuando el 409 se suprimió únicamente
+ * porque el convenio escribió estado: la sección 7 no corrió (sin permiso ni
+ * estaAlDia), el capital ya venía descontado de `montoEfectivo` y el saldo a
+ * favor solo acredita `disponible_restante` — sin esta devolución ese monto se
+ * evaporaría en silencio (P1 de Codex en #1246). Scoped a propósito: si mora/
+ * otros/cuotas ya suprimían el rechazo ANTES de existir el convenio, se
+ * conserva ese comportamiento pre-existente (ticket aparte).
+ */
+export const capitalSuprimidoPorConvenio = (params: {
+  abonoCapital: BigInput;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  otrosEspecialAplicado: boolean;
+  convenioAplicado: BigInput;
+}): Big =>
+  debeRechazarAbonoCapitalNoAplicado({ ...params, convenioAplicado: 0 }) &&
+  !debeRechazarAbonoCapitalNoAplicado(params)
+    ? new Big(params.abonoCapital ?? 0)
+    : new Big(0);

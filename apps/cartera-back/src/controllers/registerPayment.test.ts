@@ -5,6 +5,7 @@ import {
   applyCapitalPaymentAndBuildResponse,
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
+  capitalSuprimidoPorConvenio,
   calcularSaldoNetoCuota,
   debeProcesarConvenio,
   debeRechazarAbonoCapitalNoAplicado,
@@ -1043,5 +1044,55 @@ describe("debeRechazarAbonoCapitalNoAplicado con convenio", () => {
     ).toBe(true);
     // Sin el parámetro (callers viejos) conserva el comportamiento previo
     expect(debeRechazarAbonoCapitalNoAplicado(base)).toBe(true);
+  });
+});
+
+describe("capitalSuprimidoPorConvenio (devolución a saldo a favor)", () => {
+  const base = {
+    abonoCapital: 500,
+    cuotasCompletas: 0,
+    cuotasParciales: 0,
+    moraAplicada: 0,
+    otrosEspecialAplicado: false,
+  };
+
+  it("devuelve el capital cuando el 409 se suprimió solo por el convenio", () => {
+    expect(
+      capitalSuprimidoPorConvenio({ ...base, convenioAplicado: 230 }).toString()
+    ).toBe("500");
+  });
+
+  it("no devuelve nada si el guard igual rechaza (sin convenio)", () => {
+    // Aquí el 409 corre y el pago completo se rechaza: no hay nada que devolver.
+    expect(
+      capitalSuprimidoPorConvenio({ ...base, convenioAplicado: 0 }).toString()
+    ).toBe("0");
+  });
+
+  it("no cambia el comportamiento pre-existente cuando mora/otros ya suprimían", () => {
+    expect(
+      capitalSuprimidoPorConvenio({
+        ...base,
+        moraAplicada: 100,
+        convenioAplicado: 230,
+      }).toString()
+    ).toBe("0");
+    expect(
+      capitalSuprimidoPorConvenio({
+        ...base,
+        otrosEspecialAplicado: true,
+        convenioAplicado: 230,
+      }).toString()
+    ).toBe("0");
+  });
+
+  it("sin capital pedido no hay devolución", () => {
+    expect(
+      capitalSuprimidoPorConvenio({
+        ...base,
+        abonoCapital: 0,
+        convenioAplicado: 230,
+      }).toString()
+    ).toBe("0");
   });
 });

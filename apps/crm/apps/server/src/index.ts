@@ -55,6 +55,7 @@ import { checkPromesasPago } from "./services/check-promesas-pago";
 import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendConvenioReminders } from "./services/send-convenio-reminders";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
+import { sincronizarPromesasCarteraBack } from "./services/sync-promesas-cartera-back";
 
 const app = new Hono();
 const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
@@ -1481,6 +1482,48 @@ function scheduleAtMidnightGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtMidnightGT();
+
+// CB-030: reconciliación diaria de promesas de pago hacia cartera-back
+// (promesas_pago_espejo), a las 23:30 GT — 29 minutos ANTES de que
+// procesarMoras corra en cartera-back a las 23:59 GT (ver el comentario de
+// schedule.ts en ese repo, citado también en check-cobros-alertas.ts). El
+// push por evento (lib/push-promesa-cartera-back.ts) ya mantiene el espejo
+// fresco en el caso normal; esto es la red de seguridad que corrige drift
+// silencioso ANTES del cálculo que importa. Margen de ~30 min: suficiente
+// para absorber latencia sin arriesgar correr después de las 23:59 GT.
+function scheduleAtSyncPromesasGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(5, 30, 0, 0); // 23:30 GT (GT = UTC-6, sin DST)
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await sincronizarPromesasCarteraBack().catch(console.error);
+		scheduleAtSyncPromesasGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtSyncPromesasGT();
+
+// Catch-up de arranque: si el proceso bootea DENTRO de la ventana 23:30–23:59
+// GT (deploy nocturno, reinicio, crash-loop), el schedule de arriba ya empujó
+// el timer a mañana y la reconciliación de ESTA noche nunca correría — pero
+// procesarMoras sí va a correr a las 23:59 con lo que haya en el espejo. Es
+// justo el peor momento para saltarla: un deploy en esa franja es lo que hace
+// más probable que se hayan perdido pushes por evento (Codex PR #1237).
+// Fuera de la ventana no se hace nada: correr el job en cualquier arranque lo
+// convertiría en un efecto secundario del deploy, y el batch declarado como
+// "set completo" no es algo que convenga disparar de más.
+{
+	const ahora = new Date();
+	const minutosUtc = ahora.getUTCHours() * 60 + ahora.getUTCMinutes();
+	const INICIO_VENTANA = 5 * 60 + 30; // 23:30 GT
+	const FIN_VENTANA = 5 * 60 + 59; // 23:59 GT (cuando arranca procesarMoras)
+	if (minutosUtc >= INICIO_VENTANA && minutosUtc < FIN_VENTANA) {
+		console.log(
+			"[SyncPromesasCarteraBack] Arranque dentro de la ventana 23:30–23:59 GT: ejecutando reconciliación de catch-up antes de procesarMoras.",
+		);
+		sincronizarPromesasCarteraBack().catch(console.error);
+	}
+}
 
 // CB-024: cierre diario de asesores — snapshot de gestión (contactos
 // efectivos manuales, promesas, movimientos de bucket) a las 00:15 GT

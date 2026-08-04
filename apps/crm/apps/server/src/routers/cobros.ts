@@ -96,6 +96,8 @@ import {
 	type EstadoPromesa,
 	evaluarPromesa,
 } from "../lib/promesa-pago";
+import { pushPromesaActivaEnSegundoPlano } from "../lib/push-promesa-cartera-back";
+import { condicionesPromesaVigente } from "../lib/promesa-vigente";
 import { resolverNumeroSifco } from "../lib/resolver-numero-sifco";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -535,19 +537,13 @@ export const createContactoCobrosSchema = z
 // 'pendiente'`); sin el isNull, un caso con una promesa NULL futura burlaba el
 // guard y se podía insertar una segunda activa (Codex PR #1232).
 async function promesaActivaDelCaso(casoCobroId: string) {
-	const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
 	const [row] = await db
 		.select({ id: contactosCobros.id })
 		.from(contactosCobros)
 		.where(
 			and(
 				eq(contactosCobros.casoCobroId, casoCobroId),
-				eq(contactosCobros.estadoContacto, "promesa_pago"),
-				or(
-					eq(contactosCobros.estadoPromesa, "pendiente"),
-					isNull(contactosCobros.estadoPromesa),
-				),
-				gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
+				...condicionesPromesaVigente(),
 			),
 		)
 		.limit(1);
@@ -1217,6 +1213,35 @@ export const cobrosRouter = {
 						}
 					}
 
+					// CB-030: promesas ACTIVAS de los casos de ESTA página, en UNA
+					// query (mismo patrón batch que casosPorSifco arriba). Sirve para
+					// el subestado "Promesa activa" de la tabla — el bucket real que
+					// ya viene arriba (estadoMora, del motor de cartera-back) YA está
+					// congelado por el servidor mientras la promesa esté vigente; esto
+					// solo agrega la señal de display de POR QUÉ.
+					// Sin índice nuevo: idx_contactos_cobros_caso_fecha ya lidera por
+					// caso_cobro_id y la página trae ≤50 casos (decisión explícita).
+					// El predicado de vigencia es el compartido (lib/promesa-vigente.ts):
+					// incluir 'incumplida' o no filtrar por fecha dejaba el badge
+					// "Promesa activa" pegado para siempre en casos con una promesa
+					// incumplida vieja.
+					const promesaPorCaso = new Set<string>();
+					const casoIdsPagina = [...casosPorSifco.values()].map((c) => c.id);
+					if (casoIdsPagina.length > 0) {
+						const promesasRows = await db
+							.select({ casoCobroId: contactosCobros.casoCobroId })
+							.from(contactosCobros)
+							.where(
+								and(
+									inArray(contactosCobros.casoCobroId, casoIdsPagina),
+									...condicionesPromesaVigente(),
+								),
+							);
+						for (const row of promesasRows) {
+							promesaPorCaso.add(row.casoCobroId);
+						}
+					}
+
 					// Mapear los datos de Cartera-Back al formato esperado por el frontend
 					const contratos = await Promise.all(
 						creditosResponse.data.map(async (credito) => {
@@ -1303,6 +1328,10 @@ export const cobrosRouter = {
 								responsableNombre: null,
 								numeroCredito: numeroSifco || null,
 								etiquetas: (casoCobro?.etiquetas ?? null) as string[] | null,
+								// CB-030: subestado de display, NO altera estadoMora/bucket.
+								promesaActiva: casoCobro
+									? promesaPorCaso.has(casoCobro.id)
+									: false,
 								isPool:
 									credito.creditos.formato_credito
 										?.toUpperCase()
@@ -1555,6 +1584,27 @@ export const cobrosRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(casosCobros.id, datos.casoCobroId));
+			}
+
+			// CB-030: promesa creada o editada → push best-effort hacia cartera-back
+			// para que procesarMoras la congele (o actualice el rango) desde la
+			// próxima corrida.
+			//
+			// SIN await: esto está en el camino de un request del asesor. El
+			// cliente de cartera-back reintenta 3 veces con timeout de 30s, así
+			// que esperarlo colgaría el guardado de la promesa hasta ~127s si
+			// cartera-back está caído — inaceptable para un push best-effort cuya
+			// red de seguridad es la reconciliación diaria (Codex PR #1237).
+			if (esPromesa) {
+				pushPromesaActivaEnSegundoPlano({
+					id: filas[0].id,
+					casoCobroId: datos.casoCobroId,
+					cuotaInicio: datos.cuotaInicio ?? null,
+					cuotaFin: datos.cuotaFin ?? null,
+					incluyeMora: datos.incluyeMora ?? false,
+					fechaProximoContacto: datos.fechaProximoContacto ?? null,
+					activa: true,
+				});
 			}
 
 			return filas[0];
@@ -2470,6 +2520,32 @@ export const cobrosRouter = {
 						"[getEstadoPromesasPago] Error persistiendo estadoPromesa:",
 						r.reason,
 					);
+				}
+			}
+
+			// CB-030: promesa recién CUMPLIDA → push best-effort marcando
+			// activa=false en el espejo de cartera-back (destraba el freeze de
+			// inmediato en vez de esperar a que la fecha_promesa pase sola).
+			// "incumplida" NO empuja acá: el freeze en cartera-back ya se
+			// autodestraba por fecha_promesa < hoy (isOverdueInstallmentForMora),
+			// así que ese caso no depende de este push para ser correcto.
+			//
+			// SIN await, y con más razón que en createContactoCobros: acá el push
+			// va DENTRO de un loop, así que esperarlo multiplicaba el peor caso
+			// por la cantidad de promesas cumplidas (~127s cada una con
+			// cartera-back caído) en un endpoint que corre cada vez que un asesor
+			// abre un caso (Codex PR #1237).
+			for (const promesa of promesasValidas) {
+				if (resultado[promesa.id] === "cumplida") {
+					pushPromesaActivaEnSegundoPlano({
+						id: promesa.id,
+						numeroCreditoSifco: promesa.numeroCreditoSifco,
+						cuotaInicio: promesa.cuotaInicio,
+						cuotaFin: promesa.cuotaFin,
+						incluyeMora: promesa.incluyeMora,
+						fechaProximoContacto: promesa.fechaProximoContacto,
+						activa: false,
+					});
 				}
 			}
 

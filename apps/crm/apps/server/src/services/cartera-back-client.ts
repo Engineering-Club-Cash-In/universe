@@ -1241,6 +1241,51 @@ export class CarteraBackClient {
 		return result;
 	}
 
+	// CB-030 — sync de promesas de pago vigentes hacia el espejo local de
+	// cartera-back (contactos_cobros vive solo en esta DB del CRM; el job
+	// nocturno de mora/bucket de cartera-back necesita su propia copia para
+	// congelar cuotas cubiertas por una promesa vigente). Un solo método para
+	// dos disparadores: push por evento (array de 1) y la reconciliación
+	// diaria (array completo). Best-effort desde el caller: una falla de red
+	// no debe tumbar la operación de negocio que disparó el push — el job de
+	// reconciliación es la red de seguridad si un push se pierde.
+	// `modo` distingue los dos disparadores del lado de cartera-back:
+	// "evento" (default) solo hace upsert de las filas del batch;
+	// "reconciliacion_completa" ADEMÁS desactiva toda fila activa ausente del
+	// batch. Sin ese modo, un push de cumplida/cancelada perdido dejaría el
+	// freeze zombie para siempre — por eso el job diario debe mandarlo
+	// explícitamente, incluso con un batch vacío (= "hoy no hay ninguna
+	// promesa vigente", que es la única forma de limpiar la última).
+	async syncPromesasPago(
+		promesas: Array<{
+			contacto_cobros_id: string;
+			numero_credito_sifco: string;
+			cuota_inicio: number | null;
+			cuota_fin: number | null;
+			incluye_mora: boolean;
+			fecha_promesa: string;
+			activa: boolean;
+		}>,
+		modo: "evento" | "reconciliacion_completa" = "evento",
+	): Promise<{
+		success: boolean;
+		message?: string;
+		actualizadas?: number;
+		noEncontradas?: string[];
+		fallaTotal?: boolean;
+	}> {
+		return await this.request<{
+			success: boolean;
+			message?: string;
+			actualizadas?: number;
+			noEncontradas?: string[];
+			fallaTotal?: boolean;
+		}>("/promesas-pago/sync", {
+			method: "PUT",
+			body: JSON.stringify({ promesas, modo }),
+		});
+	}
+
 	// CB-018: carga de cuentas por asesor y bucket (dashboard gerencial) —
 	// cuentas asignadas, capacidad base, % utilización, sobrecarga y alerta de
 	// nueva posición. Fuente de la página /cobros/carga del CRM.

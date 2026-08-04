@@ -55,6 +55,7 @@ import { checkPromesasPago } from "./services/check-promesas-pago";
 import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendConvenioReminders } from "./services/send-convenio-reminders";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
+import { sincronizarPromesasCarteraBack } from "./services/sync-promesas-cartera-back";
 
 const app = new Hono();
 const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
@@ -1481,6 +1482,26 @@ function scheduleAtMidnightGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtMidnightGT();
+
+// CB-030: reconciliación diaria de promesas de pago hacia cartera-back
+// (promesas_pago_espejo), a las 23:30 GT — 29 minutos ANTES de que
+// procesarMoras corra en cartera-back a las 23:59 GT (ver el comentario de
+// schedule.ts en ese repo, citado también en check-cobros-alertas.ts). El
+// push por evento (lib/push-promesa-cartera-back.ts) ya mantiene el espejo
+// fresco en el caso normal; esto es la red de seguridad que corrige drift
+// silencioso ANTES del cálculo que importa. Margen de ~30 min: suficiente
+// para absorber latencia sin arriesgar correr después de las 23:59 GT.
+function scheduleAtSyncPromesasGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(5, 30, 0, 0); // 23:30 GT (GT = UTC-6, sin DST)
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await sincronizarPromesasCarteraBack().catch(console.error);
+		scheduleAtSyncPromesasGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtSyncPromesasGT();
 
 // CB-024: cierre diario de asesores — snapshot de gestión (contactos
 // efectivos manuales, promesas, movimientos de bucket) a las 00:15 GT

@@ -24,6 +24,7 @@ import {
 	type EstadoPromesa,
 	evaluarPromesa,
 } from "../lib/promesa-pago";
+import { pushPromesaActivaHaciaCarteraBack } from "../lib/push-promesa-cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
 import {
@@ -274,6 +275,27 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 						asesorNombre: credito.asesor?.nombre ?? "",
 						fechaPrometida: c.fechaPrometida,
 						fechaAlerta: c.fechaAlerta,
+					});
+				}
+
+				// CB-030: promesas recién CUMPLIDAS en esta corrida → push
+				// best-effort marcando activa=false en el espejo de cartera-back
+				// (destraba el freeze de inmediato). "incumplida" no empuja: el
+				// freeze en cartera-back ya se autodestraba por fecha_promesa <
+				// hoy, no depende de este push para ser correcto.
+				const promesaPorId = new Map(grupo.map((p) => [p.id, p]));
+				for (const { id, estado } of actualizaciones) {
+					if (estado !== "cumplida" || idsRechazados.has(id)) continue;
+					const promesa = promesaPorId.get(id);
+					if (!promesa) continue;
+					await pushPromesaActivaHaciaCarteraBack({
+						id: promesa.id,
+						numeroCreditoSifco: sifco,
+						cuotaInicio: promesa.cuotaInicio,
+						cuotaFin: promesa.cuotaFin,
+						incluyeMora: promesa.incluyeMora,
+						fechaProximoContacto: promesa.fechaProximoContacto,
+						activa: false,
 					});
 				}
 			} catch (error) {

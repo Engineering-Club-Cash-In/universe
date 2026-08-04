@@ -96,6 +96,7 @@ import {
 	type EstadoPromesa,
 	evaluarPromesa,
 } from "../lib/promesa-pago";
+import { pushPromesaActivaHaciaCarteraBack } from "../lib/push-promesa-cartera-back";
 import { resolverNumeroSifco } from "../lib/resolver-numero-sifco";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -1217,6 +1218,37 @@ export const cobrosRouter = {
 						}
 					}
 
+					// CB-030: promesas ACTIVAS de los casos de ESTA página, en UNA
+					// query (mismo patrón batch que casosPorSifco arriba). Sirve para
+					// el subestado "Promesa activa" de la tabla — el bucket real que
+					// ya viene arriba (estadoMora, del motor de cartera-back) YA está
+					// congelado por el servidor mientras la promesa esté vigente; esto
+					// solo agrega la señal de display de POR QUÉ.
+					// Sin índice nuevo: idx_contactos_cobros_caso_fecha ya lidera por
+					// caso_cobro_id y la página trae ≤50 casos (decisión explícita).
+					const promesaPorCaso = new Set<string>();
+					const casoIdsPagina = [...casosPorSifco.values()].map((c) => c.id);
+					if (casoIdsPagina.length > 0) {
+						const promesasRows = await db
+							.select({ casoCobroId: contactosCobros.casoCobroId })
+							.from(contactosCobros)
+							.where(
+								and(
+									inArray(contactosCobros.casoCobroId, casoIdsPagina),
+									eq(contactosCobros.estadoContacto, "promesa_pago"),
+									isNotNull(contactosCobros.fechaProximoContacto),
+									or(
+										eq(contactosCobros.estadoPromesa, "pendiente"),
+										eq(contactosCobros.estadoPromesa, "incumplida"),
+										isNull(contactosCobros.estadoPromesa),
+									),
+								),
+							);
+						for (const row of promesasRows) {
+							promesaPorCaso.add(row.casoCobroId);
+						}
+					}
+
 					// Mapear los datos de Cartera-Back al formato esperado por el frontend
 					const contratos = await Promise.all(
 						creditosResponse.data.map(async (credito) => {
@@ -1303,6 +1335,10 @@ export const cobrosRouter = {
 								responsableNombre: null,
 								numeroCredito: numeroSifco || null,
 								etiquetas: (casoCobro?.etiquetas ?? null) as string[] | null,
+								// CB-030: subestado de display, NO altera estadoMora/bucket.
+								promesaActiva: casoCobro
+									? promesaPorCaso.has(casoCobro.id)
+									: false,
 								isPool:
 									credito.creditos.formato_credito
 										?.toUpperCase()
@@ -1555,6 +1591,21 @@ export const cobrosRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(casosCobros.id, datos.casoCobroId));
+			}
+
+			// CB-030: promesa creada o editada → push best-effort hacia cartera-back
+			// para que procesarMoras la congele (o actualice el rango) desde la
+			// próxima corrida.
+			if (esPromesa) {
+				await pushPromesaActivaHaciaCarteraBack({
+					id: filas[0].id,
+					casoCobroId: datos.casoCobroId,
+					cuotaInicio: datos.cuotaInicio ?? null,
+					cuotaFin: datos.cuotaFin ?? null,
+					incluyeMora: datos.incluyeMora ?? false,
+					fechaProximoContacto: datos.fechaProximoContacto ?? null,
+					activa: true,
+				});
 			}
 
 			return filas[0];
@@ -2470,6 +2521,26 @@ export const cobrosRouter = {
 						"[getEstadoPromesasPago] Error persistiendo estadoPromesa:",
 						r.reason,
 					);
+				}
+			}
+
+			// CB-030: promesa recién CUMPLIDA → push best-effort marcando
+			// activa=false en el espejo de cartera-back (destraba el freeze de
+			// inmediato en vez de esperar a que la fecha_promesa pase sola).
+			// "incumplida" NO empuja acá: el freeze en cartera-back ya se
+			// autodestraba por fecha_promesa < hoy (isOverdueInstallmentForMora),
+			// así que ese caso no depende de este push para ser correcto.
+			for (const promesa of promesasValidas) {
+				if (resultado[promesa.id] === "cumplida") {
+					await pushPromesaActivaHaciaCarteraBack({
+						id: promesa.id,
+						numeroCreditoSifco: promesa.numeroCreditoSifco,
+						cuotaInicio: promesa.cuotaInicio,
+						cuotaFin: promesa.cuotaFin,
+						incluyeMora: promesa.incluyeMora,
+						fechaProximoContacto: promesa.fechaProximoContacto,
+						activa: false,
+					});
 				}
 			}
 

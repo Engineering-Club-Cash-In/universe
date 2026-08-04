@@ -5,6 +5,7 @@ import {
 	BarChart3,
 	Bell,
 	BellOff,
+	BellRing,
 	Briefcase,
 	Building2,
 	Calculator,
@@ -276,6 +277,12 @@ export default function Header() {
 										<Link to="/cobros/cola" className="cursor-pointer">
 											<ClipboardList className="mr-2 h-4 w-4" />
 											Cola del día
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/cobros/promesas" className="cursor-pointer">
+											<BellRing className="mr-2 h-4 w-4" />
+											Alertas de Promesas
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>

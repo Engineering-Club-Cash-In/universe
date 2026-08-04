@@ -56,6 +56,8 @@ interface CasoPanel {
 	cuotaMensual?: string | number | null;
 	cuotaConvenio?: string | number | null;
 	deudaTotal?: string | number | null;
+	diaPagoMensual?: number | null;
+	fechaInicio?: string | null;
 	numeroCuotas?: number | null;
 	cuotasRestantes?: number | null;
 	telefonoPrincipal?: string | null;
@@ -67,7 +69,7 @@ interface CasoPanel {
 	vehiculoModelo?: string | null;
 	vehiculoYear?: number | null;
 	vehiculoPlaca?: string | null;
-	asesor?: { nombre?: string | null } | null;
+	asesor?: { nombre?: string | null; telefono?: string | null } | null;
 }
 
 interface ContactoPanel {
@@ -425,7 +427,11 @@ export function PanelGestionRapida({
 												).toLocaleString()}
 												cuotasAtraso={caso.cuotasVencidas ?? 0}
 												estadoMora={caso.estadoMora || undefined}
+												montoAdeudado={money(totalMes).replace("Q", "")}
+												fechaPago={String(caso.diaPagoMensual || 15)}
+												fechaInicio={caso.fechaInicio || null}
 												nombreAsesor={caso.asesor?.nombre || ""}
+												telefonoAsesor={caso.asesor?.telefono || ""}
 											>
 												<Button
 													variant="outline"

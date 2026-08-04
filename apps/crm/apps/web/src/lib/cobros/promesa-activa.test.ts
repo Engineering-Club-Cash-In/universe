@@ -39,6 +39,39 @@ describe("inicioDelDiaGT", () => {
 	});
 });
 
+/**
+ * Invariante que hace equivalentes a esPromesaActiva (corta en `fecha >=
+ * medianoche GT`, sin gracia) y evaluarPromesa del server (marca incumplida
+ * en `fechaPrometida + 24h <= hoy`): las dos coinciden SOLO porque
+ * fechaProximoContacto se persiste normalizada a medianoche GT
+ * (fechaAMedianocheGT en contacto-modal.tsx, gtDateStrToDate en el server).
+ * Con esa normalización, +24h = medianoche del día siguiente = el mismo
+ * corte. Si alguien empieza a guardar la fecha con hora real, los dos
+ * predicados divergen hasta medio día sin que nada falle a la vista — por
+ * eso se fija acá.
+ */
+describe("invariante: fecha normalizada a medianoche GT", () => {
+	test("una promesa de hoy a medianoche GT sigue vigente a las 23:59 GT (último instante antes de que +24h la venza)", () => {
+		const casiMedianoche = new Date("2026-07-23T05:59:00.000Z"); // 23:59 GT del 22
+		expect(
+			esPromesaActiva(
+				promesaFixture({ fechaProximoContacto: HOY_GT }),
+				casiMedianoche,
+			),
+		).toBe(true);
+	});
+
+	test("esa misma promesa deja de estar vigente pasada la medianoche GT (= fin de la gracia de +24h del server)", () => {
+		const yaEsManana = new Date("2026-07-23T06:00:00.000Z"); // 00:00 GT del 23
+		expect(
+			esPromesaActiva(
+				promesaFixture({ fechaProximoContacto: HOY_GT }),
+				yaEsManana,
+			),
+		).toBe(false);
+	});
+});
+
 describe("esPromesaActiva", () => {
 	test("promesa_pago + fecha futura + pendiente → activa", () => {
 		expect(esPromesaActiva(promesaFixture(), AHORA)).toBe(true);

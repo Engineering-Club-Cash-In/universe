@@ -857,12 +857,27 @@ function RouteComponent() {
 	// promesa esté vigente (el motor de cartera-back excluye del conteo las
 	// cuotas cubiertas por su rango — ver isOverdueInstallmentForMora en
 	// latefee.ts); este badge solo EXPLICA por qué, no recalcula ni duplica
-	// el freeze en el cliente. Gates de isPending: misma lección que
-	// mostrarConvenio arriba (CB-027) — sin ellos el badge puede aparecer y
-	// desaparecer mientras estadoPromesasPago resuelve tarde.
+	// el freeze en el cliente.
+	//
+	// Los gates son tres cosas distintas:
+	//  - isPending: sin ellos el badge parpadea mientras las queries resuelven
+	//    (misma lección que mostrarConvenio arriba, CB-027).
+	//  - isError: un error de TanStack Query deja isPending=false y
+	//    data=undefined, indistinguible de "0 promesas" — mismo razonamiento
+	//    que el guard de gestionB1 más abajo (Codex PR #1205). Sin esto, un
+	//    error transitorio de red esconde el badge y el asesor ve un bucket
+	//    congelado sin explicación, que es justo lo que CB-030 evita. Si falla
+	//    solo estadoPromesasPago, tienePromesaActiva caería a la columna DB,
+	//    que puede ir un ciclo atrás y afirmar vigente algo ya incumplido.
+	//  - promesasPago.length === 0 ||: estadoPromesasPago está `enabled` solo
+	//    cuando hay promesas, y en React Query v5 una query deshabilitada que
+	//    nunca fetcheó queda en isPending=true PARA SIEMPRE. Sin este escape,
+	//    el gate dependería de un pending que jamás se resuelve.
 	const mostrarPromesaActiva =
 		!historialContactos.isPending &&
-		!estadoPromesasPago.isPending &&
+		!historialContactos.isError &&
+		!estadoPromesasPago.isError &&
+		(promesasPago.length === 0 || !estadoPromesasPago.isPending) &&
 		tienePromesaActiva(promesasPago, estadoPromesasPago.data);
 
 	const getEstadoContacto = (estado: string) => {

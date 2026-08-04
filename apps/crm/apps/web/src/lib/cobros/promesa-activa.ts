@@ -74,6 +74,14 @@ export function esPromesaActiva(
  * cuando trae el id, gana sobre la columna DB de `promesas` — misma
  * precedencia que ya usa la tarjeta "Promesas de Pago" en $id.tsx, para que
  * el badge del header nunca contradiga el cuerpo de la tarjeta.
+ *
+ * OJO con la ausencia de un id: NO significa "sin dato fresco". El endpoint
+ * excluye a propósito las promesas ya 'cumplida' del Record (son terminales,
+ * re-evaluarlas pisaría un resultado cerrado — ver routers/cobros.ts), así
+ * que para esas la ausencia es lo esperado y el fallback a la columna DB es
+ * el camino correcto, no una degradación. Si algún día el endpoint empieza a
+ * omitir ids por otro motivo (error parcial, truncado), esa distinción hay
+ * que hacerla explícita: acá ambos casos se ven igual.
  */
 export function tienePromesaActiva(
 	promesas: PromesaContactoUI[],

@@ -512,6 +512,19 @@ export const createContactoCobrosSchema = z
 			message: "Debes indicar ambas cuotas (desde y hasta) o ninguna",
 			path: ["cuotaFin"],
 		},
+	)
+	// CB-029 (Codex PR #1232): la alerta programada no puede ser POSTERIOR a la
+	// fecha prometida — una alerta post-vencimiento nunca dispararía (la promesa
+	// ya sería incumplida/cumplida). El modal ya lo capa en el picker.
+	.refine(
+		(v) =>
+			v.fechaAlerta == null ||
+			v.fechaProximoContacto == null ||
+			v.fechaAlerta <= v.fechaProximoContacto,
+		{
+			message: "La alerta no puede ser posterior a la fecha prometida",
+			path: ["fechaAlerta"],
+		},
 	);
 
 // CB-029: la promesa ACTIVA de un caso = pendiente cuya fecha prometida no ha

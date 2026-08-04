@@ -446,12 +446,15 @@ async function notificarPromesasPorVencer(
 	const items = [...porCaso.values()];
 	const casoIds = items.map((t) => t.casoId);
 
-	// Dedup: casos ya avisados con promesa_por_vencer en las últimas ~20h.
+	// Dedup por DÍA DE ALERTA (GT): la alerta cae en un único día, así que si ya
+	// se notificó HOY no se repite — aunque un reinicio corra el job >20h después
+	// (boot path en index.ts) el mismo día GT (Codex PR #1232). Un episodio nuevo
+	// (otra fecha de alerta, otro día GT) sí vuelve a disparar.
 	const ultimaNotif = await maxNotifPorVencerPorCaso(casoIds);
-	const corte = new Date().getTime() - 20 * 60 * 60 * 1000;
+	const hoyStr = toDateStrGT(new Date());
 	const pendientes = items.filter((t) => {
 		const notif = ultimaNotif.get(t.casoId);
-		return !notif || notif.getTime() < corte;
+		return !notif || toDateStrGT(notif) !== hoyStr;
 	});
 	if (pendientes.length === 0) return;
 

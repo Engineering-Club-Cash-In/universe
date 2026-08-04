@@ -1573,9 +1573,19 @@ export function ContactoModal({
 															date ? fechaAMedianocheGT(date) : undefined,
 														)
 													}
-													disabled={(date) =>
-														date < new Date(new Date().setHours(0, 0, 0, 0))
-													}
+													disabled={(date) => {
+														// Ni pasada, ni DESPUÉS de la fecha prometida: una
+														// alerta post-vencimiento nunca dispararía (la promesa
+														// ya sería incumplida/cumplida) — Codex PR #1232.
+														const fechaPromesa = form.getFieldValue(
+															"fechaProximoContacto",
+														);
+														return (
+															date <
+																new Date(new Date().setHours(0, 0, 0, 0)) ||
+															(fechaPromesa != null && date > fechaPromesa)
+														);
+													}}
 													locale={es}
 												/>
 											</PopoverContent>

@@ -71,6 +71,7 @@ import {
 } from "@/lib/quotation-display";
 import {
 	EXTRA_COST_FIELDS,
+	getSobreVehiculoDisbursement,
 	type ExtraCostFieldConfig,
 } from "@/lib/quotation-pdf-copy";
 import { PERMISSIONS } from "@/lib/roles";
@@ -108,7 +109,7 @@ import {
 	calculateQuotation,
 	GARANTIA_MOBILIARIA_INTERNO,
 	GPS_COST,
-} from "@/utils/quoter-calculations";
+} from "server/src/lib/quotation-calculator";
 
 // Tipo para los valores del formulario de cotización
 interface QuotationFormValues {
@@ -693,7 +694,26 @@ function QuoterPage() {
 
 	const quoterForm = useForm({
 		defaultValues: defaultQuotationValues,
-		onSubmit: async ({ value }) => {
+		onSubmit: async () => {
+			// Refresca el seguro justo antes de guardar: el servidor va a recalcularlo de
+			// todos modos, pero esto reduce la ventana de desfase entre lo que se mostró
+			// en pantalla y lo que termina persistido (ver hallazgo del doble cálculo de seguro).
+			const preSubmitValues = quoterForm.state.values;
+			if (preSubmitValues.insuredAmount > 0) {
+				await updateInsuranceCost(
+					preSubmitValues.insuredAmount,
+					preSubmitValues.vehicleType,
+					{
+						creditType: preSubmitValues.creditType,
+						condition: preSubmitValues.vehicleCondition,
+						isInterno,
+						origin: preSubmitValues.vehicleOrigin,
+					},
+				);
+			}
+			recalculate();
+			const value = quoterForm.state.values;
+
 			createQuotationMutation.mutate({
 				opportunityId: value.opportunityId || undefined,
 				vehicleId: value.vehicleId || undefined,
@@ -1371,6 +1391,7 @@ function QuoterPage() {
 			monthlyPayment: calculatedValues.monthlyPayment,
 			termMonths: values.termMonths,
 			interestRate: values.interestRate,
+			isInterno,
 			insuranceCost: values.insuranceCost,
 			gpsCost: values.gpsCost,
 			transferCost: values.transferCost,
@@ -2231,6 +2252,46 @@ function QuoterPage() {
 									</div>
 								</div>
 
+								<quoterForm.Subscribe selector={(state) => state.values}>
+									{(values) => {
+										if (
+											values.creditType !== "sobre_vehiculo" ||
+											!(values.downPayment > 0)
+										) {
+											return null;
+										}
+
+										const disbursement = getSobreVehiculoDisbursement(
+											values.downPayment,
+											values,
+										);
+										return (
+											<div className="mt-4 rounded-lg border border-green-500/50 bg-green-500/10 p-4">
+												<p className="text-muted-foreground text-sm">
+													Solicitado Q
+													{Number(values.downPayment).toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+													, después de descontar gastos aplicables (Q
+													{disbursement.additionalCosts.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+													), monto a recibir:
+												</p>
+												<p className="font-bold text-2xl text-green-700 dark:text-green-500">
+													Q
+													{disbursement.netDisbursement.toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</p>
+											</div>
+										);
+									}}
+								</quoterForm.Subscribe>
+
 								<div className="mt-6 flex gap-4">
 									<Button
 										type="submit"
@@ -2513,6 +2574,7 @@ function QuotationDetailDialog({
 			monthlyPayment: Number(quotation.monthlyPayment),
 			termMonths: quotation.termMonths,
 			interestRate: Number(quotation.interestRate),
+			isInterno: quotation.isInterno,
 			insuranceCost: Number(quotation.insuranceCost || 0),
 			gpsCost: Number(quotation.gpsCost || 0),
 			transferCost: Number(quotation.transferCost || 0),
@@ -2633,6 +2695,69 @@ function QuotationDetailDialog({
 									maximumFractionDigits: 2,
 								})}
 							</p>
+						</div>
+					</div>
+
+					{quotation.creditType === "sobre_vehiculo" &&
+						(() => {
+							const disbursement = getSobreVehiculoDisbursement(
+								quotation.downPayment,
+								quotation,
+							);
+							return (
+								<div className="rounded-lg border border-green-500/50 bg-green-500/10 p-4">
+									<p className="text-muted-foreground text-sm">
+										Solicitado Q
+										{Number(quotation.downPayment).toLocaleString("es-GT", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
+										, después de descontar gastos aplicables (Q
+										{disbursement.additionalCosts.toLocaleString("es-GT", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
+										), monto a recibir:
+									</p>
+									<p className="font-bold text-2xl text-green-700 dark:text-green-500">
+										Q
+										{disbursement.netDisbursement.toLocaleString("es-GT", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
+									</p>
+								</div>
+							);
+						})()}
+
+					{/* Desglose de gastos */}
+					<div>
+						<h3 className="mb-4 font-semibold text-lg">Desglose de Gastos</h3>
+						<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+							{EXTRA_COST_FIELDS.filter(
+								(field) =>
+									field.creditType === "all" ||
+									field.creditType === quotation.creditType,
+							).map((field) => {
+								const value =
+									Number(quotation[field.valueField as keyof typeof quotation]) ||
+									0;
+								return (
+									<div
+										key={field.name}
+										className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+									>
+										<span className="text-muted-foreground">{field.label}</span>
+										<span className="font-medium">
+											Q
+											{value.toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
+										</span>
+									</div>
+								);
+							})}
 						</div>
 					</div>
 

@@ -1,70 +1,21 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import {
+	type AmortizationRow,
+	CONTRATO_LEASING,
+	FIXED_ADMIN_COST,
+	GARANTIA_MOBILIARIA,
+	GARANTIA_MOBILIARIA_INTERNO,
+	generateAmortizationTable,
+} from "server/src/lib/quotation-calculator";
+import {
 	getQuotationPdfCopy,
 	getSobreVehiculoDisbursement,
 	type QuotationCreditType,
 	type QuotationExtraCosts,
 } from "./quotation-pdf-copy";
 
-// Tipo para filas de la tabla de amortización
-export interface AmortizationRow {
-	period: number;
-	initialBalance: number;
-	interestPlusVAT: number;
-	principal: number;
-	finalBalance: number;
-}
-
-// Función para generar tabla de amortización
-export function generateAmortizationTable(
-	totalFinanced: number,
-	monthlyRate: number,
-	termMonths: number,
-): AmortizationRow[] {
-	const table: AmortizationRow[] = [];
-	let balance = totalFinanced;
-	const r = monthlyRate / 100;
-	const VAT = 0.12; // 12% IVA
-
-	// Calcular la cuota base (sin seguro ni GPS)
-	const rWithVAT = r * (1 + VAT);
-	const factor = (1 + rWithVAT) ** termMonths;
-	const baseMonthlyPayment =
-		(totalFinanced * (rWithVAT * factor)) / (factor - 1);
-
-	// Período 0 (inicial)
-	const initialInterest = balance * r;
-	const initialInterestWithVAT = initialInterest * (1 + VAT);
-
-	table.push({
-		period: 0,
-		initialBalance: Math.round(balance * 100) / 100,
-		interestPlusVAT: Math.round(initialInterestWithVAT * 100) / 100,
-		principal: 0,
-		finalBalance: Math.round(balance * 100) / 100,
-	});
-
-	// Períodos 1 a termMonths
-	for (let i = 1; i <= termMonths; i++) {
-		const interest = balance * r;
-		const interestWithVAT = interest * (1 + VAT);
-		const principalPayment = baseMonthlyPayment - interestWithVAT;
-		const newBalance = balance - principalPayment;
-
-		table.push({
-			period: i,
-			initialBalance: Math.round(balance * 100) / 100,
-			interestPlusVAT: Math.round(interestWithVAT * 100) / 100,
-			principal: Math.round(principalPayment * 100) / 100,
-			finalBalance: Math.round((newBalance > 0 ? newBalance : 0) * 100) / 100,
-		});
-
-		balance = newBalance;
-	}
-
-	return table;
-}
+export { type AmortizationRow, generateAmortizationTable };
 
 // Define an interface for the quotation data
 interface QuotationData {
@@ -81,6 +32,7 @@ interface QuotationData {
 	monthlyPayment: number;
 	termMonths: number;
 	interestRate: number;
+	isInterno: boolean;
 	// Costos adicionales (únicos, no mensuales)
 	insuranceCost: number; // Seguro
 	gpsCost: number; // GPS
@@ -251,8 +203,41 @@ export function generateQuotationPdf(
 		doc.text(formatCurrency(quotation.transferCost), leftValueCol, y);
 
 		y += 7;
+		doc.setFont("helvetica", "bold");
 		doc.text("Gastos administrativos:", leftCol, y);
 		doc.text(formatCurrency(quotation.adminCost), leftValueCol, y);
+		doc.setFont("helvetica", "normal");
+
+		// Desglose de "Gastos administrativos" — usa las mismas constantes/valores
+		// que calculateQuotation() realmente suma en adminCost (garantía, royalty,
+		// leasing, admin fijo, interés, RCDP, GPS, seguro), NO los campos editables
+		// de la tabla de gastos extra (esos pueden desactivarse sin afectar el
+		// cálculo real). Estas líneas suman exactamente el total de arriba.
+		const garantia = quotation.isInterno
+			? GARANTIA_MOBILIARIA_INTERNO
+			: GARANTIA_MOBILIARIA;
+		const leasing = quotation.isInterno ? 0 : CONTRATO_LEASING;
+		const adminFijo = quotation.isInterno ? 0 : FIXED_ADMIN_COST;
+		const effectiveGpsCost = quotation.isInterno ? 0 : quotation.gpsCost;
+		const adminCostLines: { label: string; value: number }[] = [
+			{ label: "  Garantía mobiliaria", value: garantia },
+			{ label: "  Royalty", value: Number(quotation.extraCosts.royalty) || 0 },
+			{ label: "  Contrato leasing", value: leasing },
+			{ label: "  Admin. fijo", value: adminFijo },
+			{
+				label: "  Intereses",
+				value: Number(quotation.extraCosts.interestCost) || 0,
+			},
+			{ label: "  RCDP", value: Number(quotation.extraCosts.rcdpCost) || 0 },
+			{ label: "  GPS", value: effectiveGpsCost },
+			{ label: "  Seguro", value: quotation.insuranceCost },
+		];
+
+		for (const line of adminCostLines) {
+			y += 7;
+			doc.text(line.label, leftCol, y);
+			doc.text(formatCurrency(line.value), leftValueCol, y);
+		}
 
 		if (!options?.clientVersion) {
 			y += 7;

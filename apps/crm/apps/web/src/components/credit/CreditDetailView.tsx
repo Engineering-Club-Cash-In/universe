@@ -2809,6 +2809,7 @@ export function CreditDetailView({
 														monthlyPayment: Number(quotation.monthlyPayment),
 														termMonths: quotation.termMonths,
 														interestRate: Number(quotation.interestRate),
+														isInterno: quotation.isInterno ?? false,
 														insuranceCost: Number(quotation.insuranceCost),
 														gpsCost: Number(quotation.gpsCost),
 														transferCost: Number(quotation.transferCost),

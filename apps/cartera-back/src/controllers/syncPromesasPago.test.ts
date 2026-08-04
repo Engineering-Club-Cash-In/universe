@@ -125,6 +125,32 @@ describe("syncPromesasPago", () => {
 		expect(r.noValidas).toHaveLength(1);
 	});
 
+	it("cuota_inicio:0 (fuera del rango real, numero_cuota arranca en 1) se rechaza por-fila (Codex PR #1235, comentario #7)", async () => {
+		prepararEscenario({ creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }] });
+
+		const r = await syncPromesasPago([
+			promesa({ contacto_cobros_id: "c1", numero_credito_sifco: "S1" }),
+			promesa({ contacto_cobros_id: "c2", cuota_inicio: 0, cuota_fin: 2 }),
+		]);
+
+		expect(r.success).toBe(true);
+		expect(r.actualizadas).toBe(1);
+		expect(r.noValidas).toHaveLength(1);
+	});
+
+	it("cuota_inicio/cuota_fin fraccionarios se rechazan por-fila antes de llegar a la columna integer (Codex PR #1235, comentario #7)", async () => {
+		prepararEscenario({ creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }] });
+
+		const r = await syncPromesasPago([
+			promesa({ contacto_cobros_id: "c1", numero_credito_sifco: "S1" }),
+			promesa({ contacto_cobros_id: "c2", cuota_inicio: 1.5, cuota_fin: 3 }),
+		]);
+
+		expect(r.success).toBe(true);
+		expect(r.actualizadas).toBe(1);
+		expect(r.noValidas).toHaveLength(1);
+	});
+
 	it("una fila con formato inválido NO aborta el batch — las demás válidas se sincronizan igual", async () => {
 		prepararEscenario({ creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }] });
 

@@ -64,6 +64,19 @@ function validarPromesa(p: PromesaSync): string | null {
 	if (tieneInicio !== tieneFin) {
 		return `cuota_inicio y cuota_fin deben venir ambos o ninguno (contacto_cobros_id=${p.contacto_cobros_id})`;
 	}
+	// numero_cuota arranca en 1 (ver cuotas_credito en schema.ts) — 0, negativos
+	// o fraccionarios no corresponden a ninguna cuota real. Sin este check,
+	// cuota_inicio:0/cuota_fin:2 pasaba el chequeo de inicio<=fin y freezaba de
+	// más (numeroCuota>=0 es trivialmente cierto), y un valor fraccionario
+	// llegaba crudo a la columna integer de Postgres y reventaba el INSERT,
+	// abortando la transacción completa en vez de reportarse en noValidas
+	// (Codex review PR #1235).
+	if (
+		(p.cuota_inicio != null && (!Number.isInteger(p.cuota_inicio) || p.cuota_inicio <= 0)) ||
+		(p.cuota_fin != null && (!Number.isInteger(p.cuota_fin) || p.cuota_fin <= 0))
+	) {
+		return `cuota_inicio y cuota_fin deben ser enteros positivos (contacto_cobros_id=${p.contacto_cobros_id})`;
+	}
 	// Rango invertido no explota — simplemente nunca matchea ninguna cuota en
 	// cuotaCubiertaPorPromesa (numeroCuota < inicio || > fin siempre true) y
 	// falla en silencio a "no congela nada". Mejor rechazar acá que dejar una

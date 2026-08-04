@@ -33,6 +33,7 @@ import {
 	type ResultadoGestionB1,
 } from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
+import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
 import { ContactoModal } from "@/components/contacto-modal";
@@ -81,6 +82,7 @@ import {
 } from "@/lib/cobros/buckets-catalogo";
 import {
 	type EstadoPromesaUI,
+	inicioDelDiaGT,
 	tienePromesaActiva,
 } from "@/lib/cobros/promesa-activa";
 import { formatFechaLocal } from "@/lib/date-utils";
@@ -489,17 +491,12 @@ function RouteComponent() {
 		const estados = estadoPromesasPago.data as
 			| Record<string, EstadoPromesaUI>
 			| undefined;
-		// Medianoche GT de hoy (T06:00:00Z del día GT) — igual criterio que el
-		// backend (promesaActivaDelCaso). Codex PR #1232: una promesa VENCIDA (aún
-		// pendiente/null porque el recálculo no corrió) NO es activa; sin este
-		// chequeo, abrir el modal editaría/sobrescribiría una promesa histórica.
-		const hoyGtStr = new Intl.DateTimeFormat("en-CA", {
-			timeZone: "America/Guatemala",
-			year: "numeric",
-			month: "2-digit",
-			day: "2-digit",
-		}).format(new Date());
-		const inicioHoyGt = new Date(`${hoyGtStr}T06:00:00.000Z`);
+		// Medianoche GT de hoy — mismo corte que el backend
+		// (condicionesPromesaVigente) y que el badge del header, vía el helper
+		// compartido. Codex PR #1232: una promesa VENCIDA (aún pendiente/null
+		// porque el recálculo no corrió) NO es activa; sin este chequeo, abrir
+		// el modal editaría/sobrescribiría una promesa histórica.
+		const inicioHoyGt = inicioDelDiaGT();
 		const candidatas = (promesasPago as any[])
 			.filter((p) => {
 				const estado = estados?.[p.id] ?? p.estadoPromesa ?? "pendiente";
@@ -934,15 +931,7 @@ function RouteComponent() {
 							{getEstadoLabel(caso.estadoMora || "")}
 						</Badge>
 					)}
-					{mostrarPromesaActiva && (
-						<Badge
-							variant="outline"
-							className="whitespace-nowrap border-transparent bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
-							title="Promesa de pago vigente: las cuotas prometidas no generan mora ni suben el bucket mientras la promesa esté vigente. Si vence sin pago, el bucket refleja de inmediato la mora real acumulada."
-						>
-							Promesa activa
-						</Badge>
-					)}
+					{mostrarPromesaActiva && <PromesaActivaBadge />}
 				</div>
 			</div>
 

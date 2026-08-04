@@ -1,6 +1,7 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
 import { ContactoQuickAction } from "@/components/cobros/contacto-quick-action";
+import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -416,15 +417,7 @@ export function getCobrosColumns({
 				return (
 					<div className="flex flex-wrap items-center gap-1">
 						{getEstadoBadge(estadoVisual, catalogo)}
-						{row.original.promesaActiva && (
-							<Badge
-								variant="outline"
-								className="whitespace-nowrap border-transparent bg-blue-100 text-[10px] text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
-								title="Promesa de pago vigente — el estado mostrado ya refleja el freeze del motor"
-							>
-								Promesa activa
-							</Badge>
-						)}
+						{row.original.promesaActiva && <PromesaActivaBadge compact />}
 					</div>
 				);
 			},

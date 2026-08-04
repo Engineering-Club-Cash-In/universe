@@ -12,6 +12,7 @@ import {
 import { useState } from "react";
 import { BucketMultiSelect } from "@/components/cobros/bucket-multi-select";
 import { ConfigurarSlaModal } from "@/components/cobros/configurar-sla-modal";
+import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -205,17 +206,17 @@ function CategoriaBadges({ item }: { item: ColaItem }) {
 			{/* CB-030: subestado genérico — el crédito tiene una promesa vigente
 			    congelando cuotas en cartera-back (ver latefee.ts). Se omite si ya
 			    hay un badge de promesa más específico (promesaHoy / incumplida) —
-			    no duplicar la misma señal. `fechaPromesa` non-null ⟺ promesa
-			    activa, por construcción de la query del server. La columna Bucket
+			    no duplicar la misma señal.
+			    El `!incumplida` no es solo cosmético: `fechaPromesa` es la MÍNIMA
+			    del crédito y la query que la alimenta incluye promesas vencidas,
+			    así que por sí sola no implica vigencia. clasificarCreditoColaDia
+			    marca `incumplida` para toda promesa vencida (por estado O por
+			    fecha < hoy GT), de modo que descartarlas acá deja pasar solo
+			    créditos cuyas promesas están todas al día. La columna Bucket
 			    (aparte) ya viene congelada del servidor — este badge solo explica
 			    por qué, no la recalcula. */}
 			{!!item.fechaPromesa && !item.promesaHoy && !item.incumplida && (
-				<Badge
-					variant="outline"
-					className="border-transparent bg-blue-100 text-[10px] text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
-				>
-					Promesa activa
-				</Badge>
+				<PromesaActivaBadge compact />
 			)}
 		</span>
 	);

@@ -578,3 +578,68 @@ export const recomputeCreditAfterCapital = ({
 
   return { capital, cuotaInteres, iva, deudaTotal };
 };
+
+/**
+ * ¿El pago debe pasar por processConvenioPayment? Solo créditos EN_CONVENIO y
+ * solo si después de otros/abono-capital/mora todavía queda plata (orden
+ * canónico del split, espejo del desglose del front: otros → mora → convenio).
+ */
+export const debeProcesarConvenio = ({
+  statusCredit,
+  disponible,
+}: {
+  statusCredit?: string | null;
+  disponible: BigInput;
+}) => statusCredit === "EN_CONVENIO" && new Big(disponible).gt(0);
+
+/**
+ * Resta del disponible lo que se acreditó al convenio. El convenio es deuda
+ * APARTE (las cuotas viejas congeladas en su pivot): sin esta resta, la misma
+ * boleta acreditaba el convenio Y además pagaba cuotas corrientes (doble
+ * aplicación). `requiereRegistroSoloConvenio` marca el caso en que el convenio
+ * consumió todo: el loop de cuotas ya no corre y el caller debe insertar la
+ * fila del pago aquí para no perder boleta/mora/otros/convenio del historial.
+ */
+export const aplicarConvenioAlDisponible = ({
+  disponible,
+  montoConvenio,
+}: {
+  disponible: BigInput;
+  montoConvenio: BigInput;
+}): { disponibleRestante: Big; requiereRegistroSoloConvenio: boolean } => {
+  const restante = new Big(disponible).minus(montoConvenio);
+  return {
+    disponibleRestante: restante.gt(0) ? restante : new Big(0),
+    requiereRegistroSoloConvenio:
+      restante.lte(0) && new Big(montoConvenio).gt(0),
+  };
+};
+
+/**
+ * Cuánto aplicar al convenio en un pago. Topa al MENOR entre la cuota mensual
+ * y el monto_pendiente real: tras un abono parcial previo el pendiente puede
+ * ser menor que la cuota mensual, y sin este tope el ledger del convenio se
+ * iba a negativo — y como lo aplicado ahora SE RESTA del disponible, ese
+ * exceso fantasma se evaporaría del dinero del cliente sin pagar nada.
+ * `pagoCompleto` = el pago cubre el tope (>0): marca cuota del convenio y
+ * contadores; un tope en 0 (convenio ya saldado) nunca cuenta como completo.
+ */
+export const calcularAplicacionConvenio = ({
+  montoPago,
+  cuotaMensual,
+  montoPendiente,
+}: {
+  montoPago: BigInput;
+  cuotaMensual: BigInput;
+  montoPendiente: BigInput;
+}): { montoAplicar: Big; pagoCompleto: boolean } => {
+  const cuota = new Big(cuotaMensual);
+  const pendiente = new Big(montoPendiente);
+  const pago = new Big(montoPago);
+  let tope = cuota.lt(pendiente) ? cuota : pendiente;
+  if (tope.lt(0)) tope = new Big(0);
+  if (pago.gte(tope)) {
+    return { montoAplicar: tope, pagoCompleto: tope.gt(0) };
+  }
+  return { montoAplicar: pago.gt(0) ? pago : new Big(0), pagoCompleto: false };
+};

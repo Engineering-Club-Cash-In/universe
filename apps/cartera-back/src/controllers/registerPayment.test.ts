@@ -4,8 +4,10 @@ import {
   aplicarConvenioAlDisponible,
   applyCapitalPaymentAndBuildResponse,
   calcularAplicacionConvenio,
+  calcularCuotasConvenioCompletadas,
   calcularSaldoNetoCuota,
   debeProcesarConvenio,
+  debeRechazarAbonoCapitalNoAplicado,
   esDestinoSobrescribible,
   getApplyPaymentHttpStatus,
   getCuotaIdForPaymentInsert,
@@ -961,5 +963,85 @@ describe("calcularAplicacionConvenio (tope al pendiente real)", () => {
     });
     expect(rNeg.montoAplicar.toString()).toBe("0");
     expect(rNeg.pagoCompleto).toBe(false);
+  });
+});
+
+describe("calcularCuotasConvenioCompletadas (marcado por acumulado)", () => {
+  it("dos abonos de Q600 contra cuota de Q1,000 completan la cuota al segundo", () => {
+    // Tras el primer abono: pagado 600 → 0 cuotas completadas
+    expect(
+      calcularCuotasConvenioCompletadas({
+        montoPagado: 600,
+        cuotaMensual: 1000,
+        montoPendiente: 5400,
+        numeroMeses: 6,
+      })
+    ).toBe(0);
+    // Tras el segundo: pagado 1200 → 1 cuota completada
+    expect(
+      calcularCuotasConvenioCompletadas({
+        montoPagado: 1200,
+        cuotaMensual: 1000,
+        montoPendiente: 4800,
+        numeroMeses: 6,
+      })
+    ).toBe(1);
+  });
+
+  it("pendiente en cero completa TODAS las cuotas aunque la última sea menor por redondeo", () => {
+    // Caso 659: total 5891.15 / 6 = cuota 981.86; la última cuota real es
+    // 981.85 y el floor solo daría 5.
+    expect(
+      calcularCuotasConvenioCompletadas({
+        montoPagado: 5891.15,
+        cuotaMensual: 981.86,
+        montoPendiente: 0,
+        numeroMeses: 6,
+      })
+    ).toBe(6);
+  });
+
+  it("nunca reporta más cuotas que numeroMeses y tolera cuota inválida", () => {
+    expect(
+      calcularCuotasConvenioCompletadas({
+        montoPagado: 99999,
+        cuotaMensual: 1000,
+        montoPendiente: 10,
+        numeroMeses: 6,
+      })
+    ).toBe(6);
+    expect(
+      calcularCuotasConvenioCompletadas({
+        montoPagado: 500,
+        cuotaMensual: 0,
+        montoPendiente: 100,
+        numeroMeses: 6,
+      })
+    ).toBe(0);
+  });
+});
+
+describe("debeRechazarAbonoCapitalNoAplicado con convenio", () => {
+  const base = {
+    abonoCapital: 500,
+    cuotasCompletas: 0,
+    cuotasParciales: 0,
+    moraAplicada: 0,
+    otrosEspecialAplicado: false,
+  };
+
+  it("no rechaza (409) si el convenio ya escribió estado", () => {
+    // El reintento tras un 409 aplicaría el convenio dos veces.
+    expect(
+      debeRechazarAbonoCapitalNoAplicado({ ...base, convenioAplicado: 230 })
+    ).toBe(false);
+  });
+
+  it("sigue rechazando cuando de verdad no se escribió nada", () => {
+    expect(
+      debeRechazarAbonoCapitalNoAplicado({ ...base, convenioAplicado: 0 })
+    ).toBe(true);
+    // Sin el parámetro (callers viejos) conserva el comportamiento previo
+    expect(debeRechazarAbonoCapitalNoAplicado(base)).toBe(true);
   });
 });

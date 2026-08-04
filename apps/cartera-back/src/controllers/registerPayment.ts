@@ -2125,6 +2125,10 @@ export const insertPayment = async ({ body, set }: any) => {
           // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
           // capital colado, y acá lo que importa es qué se escribió.
           otrosEspecialAplicado: montoBoleta.eq(otrosBig),
+          // Si el convenio consumió el disponible, convenios_pago y la fila
+          // solo-convenio YA están escritos: un 409 aquí invitaría a reintentar
+          // y aplicar el convenio dos veces.
+          convenioAplicado: montoConvenio,
         })
       ) {
         set.status = 409;

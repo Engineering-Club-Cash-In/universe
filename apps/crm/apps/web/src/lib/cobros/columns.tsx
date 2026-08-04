@@ -38,6 +38,8 @@ export type ContratoCobranza = {
 	isPool?: boolean;
 	responsableCobros: string | null;
 	montoFinanciado: string;
+	/** CB-030: subestado de display — el bucket/estadoMora YA viene congelado del servidor. */
+	promesaActiva?: boolean;
 };
 
 function getEstadoBadge(
@@ -398,6 +400,9 @@ export function getCobrosColumns({
 		},
 		{
 			id: "estado",
+			// CB-030: accessorFn (usado para ordenar/filtrar) queda SIN CAMBIOS a
+			// propósito — sigue el estadoMora/bucket real (que YA viene congelado
+			// del servidor cuando aplica el freeze). No mezclar promesaActiva acá.
 			accessorFn: (row) =>
 				row.estadoContrato === "activo"
 					? row.estadoMora || "al_dia"
@@ -408,7 +413,20 @@ export function getCobrosColumns({
 					row.original.estadoContrato === "activo"
 						? row.original.estadoMora || "al_dia"
 						: row.original.estadoContrato;
-				return getEstadoBadge(estadoVisual, catalogo);
+				return (
+					<div className="flex flex-wrap items-center gap-1">
+						{getEstadoBadge(estadoVisual, catalogo)}
+						{row.original.promesaActiva && (
+							<Badge
+								variant="outline"
+								className="whitespace-nowrap border-transparent bg-blue-100 text-[10px] text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+								title="Promesa de pago vigente — el estado mostrado ya refleja el freeze del motor"
+							>
+								Promesa activa
+							</Badge>
+						)}
+					</div>
+				);
 			},
 		},
 	];

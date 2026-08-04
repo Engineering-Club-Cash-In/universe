@@ -79,6 +79,10 @@ import {
 	numeroDeEstadoMora,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import {
+	type EstadoPromesaUI,
+	tienePromesaActiva,
+} from "@/lib/cobros/promesa-activa";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -483,7 +487,7 @@ function RouteComponent() {
 	// otra que se sobreponga). El backend igual valida "una sola activa".
 	const promesaActiva = useMemo(() => {
 		const estados = estadoPromesasPago.data as
-			| Record<string, EstadoPromesa>
+			| Record<string, EstadoPromesaUI>
 			| undefined;
 		// Medianoche GT de hoy (T06:00:00Z del día GT) — igual criterio que el
 		// backend (promesaActivaDelCaso). Codex PR #1232: una promesa VENCIDA (aún
@@ -851,6 +855,19 @@ function RouteComponent() {
 		!bucketActual.isPending &&
 		(bucketPrevio === null || esBucketB2(bucketPrevio, bucketsCatalogo.data));
 
+	// CB-030: subestado "Promesa activa" — se muestra JUNTO al bucket, nunca
+	// en su lugar. El bucket YA viene congelado desde el servidor mientras la
+	// promesa esté vigente (el motor de cartera-back excluye del conteo las
+	// cuotas cubiertas por su rango — ver isOverdueInstallmentForMora en
+	// latefee.ts); este badge solo EXPLICA por qué, no recalcula ni duplica
+	// el freeze en el cliente. Gates de isPending: misma lección que
+	// mostrarConvenio arriba (CB-027) — sin ellos el badge puede aparecer y
+	// desaparecer mientras estadoPromesasPago resuelve tarde.
+	const mostrarPromesaActiva =
+		!historialContactos.isPending &&
+		!estadoPromesasPago.isPending &&
+		tienePromesaActiva(promesasPago, estadoPromesasPago.data);
+
 	const getEstadoContacto = (estado: string) => {
 		const estados: Record<string, { label: string; color: string }> = {
 			contactado: { label: "Contactado", color: "bg-green-100 text-green-800" },
@@ -899,23 +916,34 @@ function RouteComponent() {
 						</p>
 					</div>
 				</div>
-				{bucketUI ? (
-					<Badge
-						variant="outline"
-						className="whitespace-nowrap font-semibold"
-						style={estiloBucket(bucketUI.colorHex)}
-						title={bucketTitle}
-					>
-						{bucketPrefijo} · {bucketUI.label}
-					</Badge>
-				) : (
-					<Badge
-						variant="outline"
-						style={getEstadoBadge(caso.estadoMora || "")}
-					>
-						{getEstadoLabel(caso.estadoMora || "")}
-					</Badge>
-				)}
+				<div className="flex items-center gap-2">
+					{bucketUI ? (
+						<Badge
+							variant="outline"
+							className="whitespace-nowrap font-semibold"
+							style={estiloBucket(bucketUI.colorHex)}
+							title={bucketTitle}
+						>
+							{bucketPrefijo} · {bucketUI.label}
+						</Badge>
+					) : (
+						<Badge
+							variant="outline"
+							style={getEstadoBadge(caso.estadoMora || "")}
+						>
+							{getEstadoLabel(caso.estadoMora || "")}
+						</Badge>
+					)}
+					{mostrarPromesaActiva && (
+						<Badge
+							variant="outline"
+							className="whitespace-nowrap border-transparent bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+							title="Promesa de pago vigente: las cuotas prometidas no generan mora ni suben el bucket mientras la promesa esté vigente. Si vence sin pago, el bucket refleja de inmediato la mora real acumulada."
+						>
+							Promesa activa
+						</Badge>
+					)}
+				</div>
 			</div>
 
 			<div className="grid gap-6 lg:grid-cols-3">

@@ -269,7 +269,7 @@ export function PanelGestionRapida({
 
 	return (
 		<Sheet open={open} onOpenChange={(v) => !v && onClose()}>
-			<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-3xl">
+			<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-4xl lg:max-w-5xl">
 				<SheetHeader className="border-b p-4">
 					<SheetTitle>Gestión rápida</SheetTitle>
 				</SheetHeader>

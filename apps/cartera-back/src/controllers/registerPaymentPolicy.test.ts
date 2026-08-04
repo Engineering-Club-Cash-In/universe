@@ -317,6 +317,26 @@ describe("registerPaymentPolicy - pago solo capital", () => {
       }),
     ).toBe(true);
   });
+
+  it("un request sobre-asignado (capital > boleta - otros) NO es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "1000.00",
+        otros: 0,
+        abonoDirectoCapital: 5000,
+      }),
+    ).toBe(false);
+  });
+
+  it("boleta en cero con capital pedido NO es solo-capital", () => {
+    expect(
+      registerPaymentPolicy.esPagoSoloCapital({
+        montoBoleta: "0",
+        otros: 0,
+        abonoDirectoCapital: 5000,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("registerPaymentPolicy - abono solo-capital sin permiso", () => {

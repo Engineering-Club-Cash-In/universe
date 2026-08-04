@@ -395,6 +395,11 @@ export const getCoveredOpenInstallment = ({
  * queda en 0 el loop de cuotas ni siquiera corre, así que un pago solo-capital
  * no depende de que existan cuotas abiertas con saldo: es la vía válida para
  * abonar a un INCOBRABLE que ya tiene todas sus cuotas cubiertas.
+ *
+ * Exige efectivo EXACTAMENTE 0, no <= 0: un efectivo negativo significa que se
+ * pidió más capital del que trae la boleta (la sección 7 registra el monto
+ * PEDIDO, no el recibido — una boleta de Q1,000 registraría Q5,000 de capital),
+ * así que un request sobre-asignado no es solo-capital y el guard lo rechaza.
  */
 export const esPagoSoloCapital = ({
   montoBoleta,
@@ -412,7 +417,7 @@ export const esPagoSoloCapital = ({
     .minus(new Big(otros ?? 0))
     .minus(capital);
 
-  return montoEfectivo.lte(0);
+  return montoEfectivo.eq(0);
 };
 
 /**

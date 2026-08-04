@@ -15,6 +15,10 @@ const estado = {
 	selects: new Map<any, Fila[]>(),
 	inserts: [] as { tabla: any; filas: Fila[] }[],
 	updates: [] as { tabla: any; set: Fila }[],
+	// Error que deben lanzar insert/update en vez de resolver — para simular la
+	// tabla del espejo aún no migrada (undefined_table / 42P01) y cualquier otro
+	// fallo de DB que NO debe tragarse.
+	errorEscritura: null as any,
 };
 
 function crearBuilderSelect() {
@@ -48,6 +52,7 @@ function crearMutadores() {
 					const filas = Array.isArray(v) ? v : [v];
 					const chain: any = {
 						onConflictDoUpdate() {
+							if (estado.errorEscritura) return Promise.reject(estado.errorEscritura);
 							estado.inserts.push({ tabla, filas });
 							return Promise.resolve([]);
 						},
@@ -61,6 +66,7 @@ function crearMutadores() {
 				set(set: Fila) {
 					return {
 						where() {
+							if (estado.errorEscritura) return Promise.reject(estado.errorEscritura);
 							estado.updates.push({ tabla, set });
 							return Promise.resolve([]);
 						},
@@ -82,10 +88,11 @@ mock.module("../database", () => ({ db: fakeDb }));
 const { syncPromesasPago } = await import("./syncPromesasPago");
 const { creditos, promesas_pago_espejo } = await import("../database/db/schema");
 
-function prepararEscenario(opts: { creditosRows?: Fila[] }) {
+function prepararEscenario(opts: { creditosRows?: Fila[]; errorEscritura?: any }) {
 	estado.selects = new Map<any, Fila[]>([[creditos, opts.creditosRows ?? []]]);
 	estado.inserts = [];
 	estado.updates = [];
+	estado.errorEscritura = opts.errorEscritura ?? null;
 }
 
 const insertsEn = (tabla: any) => estado.inserts.filter((i) => i.tabla === tabla).flatMap((i) => i.filas);
@@ -173,6 +180,19 @@ describe("syncPromesasPago", () => {
 		expect(insertsEn(promesas_pago_espejo)).toHaveLength(0);
 	});
 
+	// El rango invertido {5,1} son DOS enteros positivos, así que pasa el guard de
+	// enteros y lo rechaza específicamente el check inicio>fin. Se afirma el
+	// mensaje (no solo success:false) para que, si alguien reordena las
+	// validaciones, quede claro cuál disparó.
+	it("rango invertido (cuota_inicio > cuota_fin) se rechaza por el check de rango, no por el de enteros", async () => {
+		prepararEscenario({ creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }] });
+
+		const r = await syncPromesasPago([promesa({ cuota_inicio: 5, cuota_fin: 1 })]);
+
+		expect(r.success).toBe(false);
+		expect(r.message).toContain("no puede ser mayor que cuota_fin");
+	});
+
 	it("SIFCO no resuelve a ningún crédito → noEncontradas, no bloquea otras filas válidas", async () => {
 		prepararEscenario({ creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }] });
 
@@ -256,5 +276,51 @@ describe("syncPromesasPago", () => {
 			expect(r.success).toBe(false);
 			expect(estado.updates).toHaveLength(0);
 		});
+	});
+});
+
+// CB-030 — 0007_promesas_pago_espejo.sql se aplica a mano (sin migraciones
+// automáticas). Los paths de LECTURA ya hacían fail-open ante undefined_table;
+// el de ESCRITURA no tenía guard, así que crm-server (push por evento y job de
+// reconciliación diario) recibía un 500 crudo en vez de una señal limpia
+// mientras la migración estuviera pendiente (Codex review PR #1235, comentario P2).
+describe("syncPromesasPago — tabla del espejo aún no migrada (42P01)", () => {
+	const undefinedTable = Object.assign(new Error('relation "promesas_pago_espejo" does not exist'), {
+		code: "42P01",
+	});
+
+	it("devuelve success:false con mensaje explícito, sin propagar el 500", async () => {
+		prepararEscenario({
+			creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }],
+			errorEscritura: undefinedTable,
+		});
+
+		const r = await syncPromesasPago([promesa()]);
+
+		expect(r.success).toBe(false);
+		expect(r.message).toContain("no migrado");
+		// No se reporta como aplicado: nada se escribió.
+		expect(r.actualizadas).toBeUndefined();
+	});
+
+	it("también cubre el UPDATE de desactivación en reconciliación completa", async () => {
+		prepararEscenario({
+			creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }],
+			errorEscritura: undefinedTable,
+		});
+
+		const r = await syncPromesasPago([], "reconciliacion_completa");
+
+		expect(r.success).toBe(false);
+		expect(r.message).toContain("no migrado");
+	});
+
+	it("un error de DB que NO es 42P01 se sigue propagando (no se traga)", async () => {
+		prepararEscenario({
+			creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }],
+			errorEscritura: Object.assign(new Error("deadlock detected"), { code: "40P01" }),
+		});
+
+		await expect(syncPromesasPago([promesa()])).rejects.toThrow("deadlock detected");
 	});
 });

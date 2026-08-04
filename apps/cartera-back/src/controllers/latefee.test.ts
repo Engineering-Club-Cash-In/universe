@@ -88,6 +88,9 @@ const fakeClient: any = {
 mock.module("../database", () => ({ db: fakeDb, client: fakeClient }));
 
 const { procesarMoras, isOverdueInstallmentForMora, elegirAsesorParaBucket } = await import("./latefee");
+// CB-030 — misma función que usa el freeze real (latefee la importa de acá,
+// no la reimplementa): si divergen, estos tests lo detectan.
+const { hoyGtISO } = await import("../lib/buckets-classification");
 const {
   creditos,
   cuotas_credito,
@@ -568,5 +571,90 @@ describe("elegirAsesorParaBucket", () => {
   it("asesor sin entrada en el mapa de carga cuenta como 0", () => {
     const carga = new Map([[3, 2]]); // el 9 no aparece → carga 0
     expect(elegirAsesorParaBucket([3, 9], carga, null)).toBe(9);
+  });
+});
+
+// CB-030 — el día calendario GT no puede depender del TZ del proceso.
+// `hoyGtISO` usaba toZonedTime(...).setHours(0,0,0,0) + toISOString(): setHours
+// opera en la zona del PROCESO y toISOString lee en UTC, así que con TZ del host
+// al este de UTC (Europe/Madrid, Asia/Tokyo) devolvía el día anterior a toda
+// hora. Y `fecha_vencimiento` (columna `date`) pasaba por toZonedTime, que le
+// resta 6h y la corre un día atrás cuando el driver la entrega como Date.
+// Efecto: promesa leída como vencida un día antes, freeze liberado temprano y
+// bucket subido de más (Codex review PR #1235).
+describe("día calendario GT — independiente del TZ del proceso (CB-030)", () => {
+  const diaGtRef = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Guatemala",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d);
+
+  it("hoyGtISO coincide con el día GT real en cada hora de 48h", () => {
+    const desalineadas: string[] = [];
+    for (let h = 0; h < 48; h++) {
+      const ahora = new Date(Date.UTC(2026, 7, 4, h, 30));
+      if (hoyGtISO(ahora) !== diaGtRef(ahora)) desalineadas.push(ahora.toISOString());
+    }
+    expect(desalineadas).toEqual([]);
+  });
+
+  it("hoyGtISO cruza de día exactamente a medianoche GT (06:00 UTC)", () => {
+    expect(hoyGtISO(new Date("2026-08-04T05:59:59.000Z"))).toBe("2026-08-03");
+    expect(hoyGtISO(new Date("2026-08-04T06:00:00.000Z"))).toBe("2026-08-04");
+  });
+
+  it("fecha_vencimiento date-only: string y Date dan el MISMO veredicto que el SQL (venc < hoy_gt)", () => {
+    const discrepancias: string[] = [];
+    for (let h = 0; h < 48; h++) {
+      const hoy = new Date(Date.UTC(2026, 7, 4, h, 30));
+      const diaGt = diaGtRef(hoy);
+      for (const venc of ["2026-08-03", "2026-08-04", "2026-08-05"]) {
+        const esperado = venc < diaGt; // semántica de `cu.fecha_vencimiento::date < hoy_gt`
+        const comoString = isOverdueInstallmentForMora(
+          { fecha_vencimiento: venc, pagado: false, statusCredit: "MOROSO" },
+          hoy,
+        );
+        const comoDate = isOverdueInstallmentForMora(
+          { fecha_vencimiento: new Date(`${venc}T00:00:00.000Z`), pagado: false, statusCredit: "MOROSO" },
+          hoy,
+        );
+        if (comoString !== esperado || comoDate !== esperado) {
+          discrepancias.push(`${hoy.toISOString()} venc=${venc} str=${comoString} date=${comoDate} esperado=${esperado}`);
+        }
+      }
+    }
+    expect(discrepancias).toEqual([]);
+  });
+
+  it("cuota que vence HOY en GT no está vencida (bound inclusivo, igual que el SQL)", () => {
+    const hoy = new Date("2026-08-04T20:00:00.000Z"); // 14:00 en GT
+    expect(
+      isOverdueInstallmentForMora(
+        { fecha_vencimiento: "2026-08-04", pagado: false, statusCredit: "MOROSO" },
+        hoy,
+      ),
+    ).toBe(false);
+    expect(
+      isOverdueInstallmentForMora(
+        { fecha_vencimiento: "2026-08-03", pagado: false, statusCredit: "MOROSO" },
+        hoy,
+      ),
+    ).toBe(true);
+  });
+
+  it("promesa que vence HOY en GT sigue congelando (>= hoy), tanto string como Date", () => {
+    const hoy = new Date("2026-08-04T20:00:00.000Z");
+    const cuota = { numero_cuota: 3, fecha_vencimiento: "2026-07-01", pagado: false, statusCredit: "MOROSO" };
+    for (const fecha_promesa of ["2026-08-04", new Date("2026-08-04T00:00:00.000Z")] as const) {
+      const mapa = new Map([[77, [{ cuota_inicio: 1, cuota_fin: 5, fecha_promesa }]]]);
+      expect(isOverdueInstallmentForMora(cuota, hoy, mapa, 77)).toBe(false);
+    }
+    // un día después ya no protege
+    for (const fecha_promesa of ["2026-08-03", new Date("2026-08-03T00:00:00.000Z")] as const) {
+      const mapa = new Map([[77, [{ cuota_inicio: 1, cuota_fin: 5, fecha_promesa }]]]);
+      expect(isOverdueInstallmentForMora(cuota, hoy, mapa, 77)).toBe(true);
+    }
   });
 });

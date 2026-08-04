@@ -2,11 +2,16 @@ import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { client, db } from "../database";
 import { asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, promesas_pago_espejo, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
 import Big from "big.js";
-import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
 import { stat } from "fs";
 import { validarCatalogoBuckets } from "../lib/buckets-validation";
+// CB-030 — `hoyGtISO` se IMPORTA (no se recalcula acá) para que el freeze real
+// y la lectura de carteraFront usen literalmente la misma función, no dos
+// algoritmos que hoy dan lo mismo y mañana divergen (Codex review PR #1235).
+// El resto del re-export de buckets-classification está más abajo, junto al
+// comentario que explica por qué esos tipos viven en otro archivo.
+import { hoyGtISO } from "../lib/buckets-classification";
 
 type MoraEventoTipo =
   | "CREACION"
@@ -33,35 +38,40 @@ export type PromesaVigente = {
   fecha_promesa: Date | string;
 };
 
-// CB-030 — fecha_promesa es columna `date` (sin hora): tanto si Postgres la
-// entrega como Date (medianoche UTC) o como string "YYYY-MM-DD", ambos casos
-// representan el mismo día calendario sin componente horario que zonificar.
-// Pasarla por toZonedTime (pensado para instantes reales, ver fecha_vencimiento
-// más abajo) le resta las 6h de GT y la corre un día para atrás — una promesa
-// con fecha_promesa=2026-08-04 se leía como vencida el 2026-08-03, un día
-// antes de lo real (Codex review PR #1234).
-function fechaPromesaISO(fechaPromesa: Date | string): string {
-  return typeof fechaPromesa === "string"
-    ? fechaPromesa.slice(0, 10)
-    : fechaPromesa.toISOString().slice(0, 10);
+// CB-030 — día calendario de una columna `date` de Postgres, como string
+// "YYYY-MM-DD". Tanto si el driver la entrega como string (node-postgres, el
+// caso real) o como Date a medianoche UTC, ambos representan el mismo día sin
+// componente horario que zonificar. Pasarla por toZonedTime (pensado para
+// instantes reales) le resta las 6h de GT y la corre un día para atrás — una
+// promesa con fecha_promesa=2026-08-04 se leía como vencida el 2026-08-03, un
+// día antes de lo real (Codex review PR #1234). getUTCFullYear/Month/Date en
+// vez de toISOString().slice(): el slice de un ISO string ya es UTC, pero
+// dejarlo explícito evita que alguien lo "arregle" a métodos locales después.
+function diaCalendarioISO(fecha: Date | string): string {
+  if (typeof fecha === "string") return fecha.slice(0, 10);
+  const anio = fecha.getUTCFullYear();
+  const mes = String(fecha.getUTCMonth() + 1).padStart(2, "0");
+  const dia = String(fecha.getUTCDate()).padStart(2, "0");
+  return `${anio}-${mes}-${dia}`;
 }
 
 // CB-030 — ¿esta cuota está cubierta por alguna promesa vigente en la lista?
 // Vigente = fecha_promesa NO ha pasado (>= hoy en GT, comparando strings
-// YYYY-MM-DD — ver fechaPromesaISO). Rango inclusivo en ambos extremos.
+// YYYY-MM-DD — ver diaCalendarioISO). Rango inclusivo en ambos extremos.
 // Promesas sin rango (cuota_inicio/cuota_fin null) NO cubren nada — el CRM
 // exige ambos bounds o ninguno, así que "ninguno" es una promesa de solo-mora,
-// sin cuotas que congelar aquí (ver §incluyeMora en procesarMoras).
+// sin cuotas que congelar aquí: la mora del crédito no se toca, solo se
+// excluyen cuotas del conteo, y sin rango no hay ninguna que excluir.
 function cuotaCubiertaPorPromesa(
   numeroCuota: number | undefined,
   promesas: PromesaVigente[] | undefined,
-  hoyGtISO: string,
+  hoyGt: string,
 ): boolean {
   if (!promesas || promesas.length === 0 || numeroCuota == null) return false;
   return promesas.some((p) => {
     if (p.cuota_inicio == null || p.cuota_fin == null) return false;
     if (numeroCuota < p.cuota_inicio || numeroCuota > p.cuota_fin) return false;
-    return fechaPromesaISO(p.fecha_promesa) >= hoyGtISO;
+    return diaCalendarioISO(p.fecha_promesa) >= hoyGt;
   });
 }
 
@@ -72,6 +82,12 @@ export function isOverdueInstallmentForMora(
     pagado: boolean | null;
     hasPaidPayment?: boolean | null;
     statusCredit?: string | null;
+    // Presente en las filas reales que arma procesarMoras (viene del JOIN con
+    // creditos) — se declara para que esas filas se pasen tal cual, sin
+    // destructurar. NO se lee de acá: el crédito para el freeze llega por el
+    // parámetro `creditoId`, porque contarCuotasVencidasReales consulta
+    // cuotas_credito sin ese JOIN y no lo tiene en la fila.
+    credito_id?: number | null;
   },
   hoy: Date,
   // CB-030 — Map<credito_id, promesas vigentes de ESE crédito>. Opcional:
@@ -80,14 +96,17 @@ export function isOverdueInstallmentForMora(
   promesasPorCredito?: Map<number, PromesaVigente[]>,
   creditoId?: number,
 ) {
-  const zona = "America/Guatemala";
-  const fechaVenc = toZonedTime(cuota.fecha_vencimiento, zona);
-  fechaVenc.setHours(0, 0, 0, 0);
+  // Comparación de día calendario como strings YYYY-MM-DD, igual que el SQL
+  // que esta función reemplazó (`cu.fecha_vencimiento::date < hoy_gt`).
+  // fecha_vencimiento es columna `date` — un día sin hora, no un instante — así
+  // que se lee tal cual (diaCalendarioISO) en vez de zonificarla: toZonedTime
+  // le restaba 6h y la corría un día atrás cuando el driver la entregaba como
+  // Date. "hoy" SÍ es un instante real, y se convierte a día GT con hoyGtISO
+  // (Intl, no depende del TZ del proceso — ver buckets-classification.ts).
+  const fechaVencISO = diaCalendarioISO(cuota.fecha_vencimiento);
+  const hoyGt = hoyGtISO(hoy);
 
-  const fechaHoy = toZonedTime(hoy, zona);
-  fechaHoy.setHours(0, 0, 0, 0);
-
-  const isOverdue = fechaVenc < fechaHoy;
+  const isOverdue = fechaVencISO < hoyGt;
   const isUnpaid = cuota.pagado === false && cuota.hasPaidPayment !== true;
   const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
 
@@ -96,7 +115,7 @@ export function isOverdueInstallmentForMora(
   const congeladaPorPromesa = cuotaCubiertaPorPromesa(
     cuota.numero_cuota ?? undefined,
     promesasDelCredito,
-    fechaHoy.toISOString().slice(0, 10),
+    hoyGt,
   );
 
   return isOverdue && isUnpaid && isEligible && !congeladaPorPromesa;
@@ -825,8 +844,6 @@ export async function updateMora({
 const PROCESAR_MORAS_LOCK_KEY = 728193;
 
 export async function procesarMoras() {
-  const zona = "America/Guatemala";
-
   // 🔒 Lock entre instancias: con varias réplicas del back, todas agendan el cron
   // (23:59 GT) y corrían EN PARALELO leyendo el mismo estado viejo → duplicaban
   // eventos en moras_historial y, peor, filas activa=true en moras_credito.
@@ -842,10 +859,14 @@ export async function procesarMoras() {
       return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0 };
     }
 
-    const hoy = toZonedTime(new Date(), zona);
-    hoy.setHours(0, 0, 0, 0);
+    // Instante real; el día calendario GT lo deriva isOverdueInstallmentForMora
+    // con hoyGtISO (Intl). Antes se pre-normalizaba con
+    // toZonedTime(...).setHours(0,0,0,0), que mezcla zona del proceso (setHours)
+    // con UTC (toISOString) y, con TZ del host al este de UTC, corría el día uno
+    // para atrás (Codex review PR #1235).
+    const hoy = new Date();
 
-    console.log("[INFO] Current Guatemala date (midnight):", hoy.toISOString());
+    console.log("[INFO] Current Guatemala date:", hoyGtISO(hoy));
     console.log("\n╔════════════════════════════════════════════════════════════");
     console.log("║ [JOB] 🚀 INICIANDO PROCESO DE MORAS (UPSERT)");
     console.log("╚════════════════════════════════════════════════════════════\n");

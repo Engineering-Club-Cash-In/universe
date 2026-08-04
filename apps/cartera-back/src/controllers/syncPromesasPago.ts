@@ -157,61 +157,82 @@ export async function syncPromesasPago(
 	let actualizadas = 0;
 	const noEncontradas: string[] = [];
 
-	await db.transaction(async (tx) => {
-		for (const p of promesasValidas) {
-			const creditoId = creditoIdPorSifco.get(p.numero_credito_sifco);
-			if (creditoId === undefined) {
-				noEncontradas.push(p.numero_credito_sifco);
-				continue;
-			}
+	try {
+		await db.transaction(async (tx) => {
+			for (const p of promesasValidas) {
+				const creditoId = creditoIdPorSifco.get(p.numero_credito_sifco);
+				if (creditoId === undefined) {
+					noEncontradas.push(p.numero_credito_sifco);
+					continue;
+				}
 
-			await tx
-				.insert(promesas_pago_espejo)
-				.values({
-					credito_id: creditoId,
-					contacto_cobros_id: p.contacto_cobros_id,
-					cuota_inicio: p.cuota_inicio,
-					cuota_fin: p.cuota_fin,
-					incluye_mora: p.incluye_mora,
-					fecha_promesa: p.fecha_promesa,
-					activa: p.activa,
-					updated_at: new Date(),
-				})
-				.onConflictDoUpdate({
-					target: promesas_pago_espejo.contacto_cobros_id,
-					set: {
+				await tx
+					.insert(promesas_pago_espejo)
+					.values({
 						credito_id: creditoId,
+						contacto_cobros_id: p.contacto_cobros_id,
 						cuota_inicio: p.cuota_inicio,
 						cuota_fin: p.cuota_fin,
 						incluye_mora: p.incluye_mora,
 						fecha_promesa: p.fecha_promesa,
 						activa: p.activa,
 						updated_at: new Date(),
-					},
-				});
-			actualizadas++;
-		}
+					})
+					.onConflictDoUpdate({
+						target: promesas_pago_espejo.contacto_cobros_id,
+						set: {
+							credito_id: creditoId,
+							cuota_inicio: p.cuota_inicio,
+							cuota_fin: p.cuota_fin,
+							incluye_mora: p.incluye_mora,
+							fecha_promesa: p.fecha_promesa,
+							activa: p.activa,
+							updated_at: new Date(),
+						},
+					});
+				actualizadas++;
+			}
 
-		// Reconciliación completa: el batch representa el 100% de lo vigente
-		// según crm-server ahora mismo. Cualquier fila activa=true que no
-		// aparezca en NINGUNA posición del batch original (ni siquiera las
-		// noEncontradas/noValidas, para no apagar por un error transitorio de
-		// resolución de sifco) ya no es vigente y se destraba.
-		if (modo === "reconciliacion_completa") {
-			const idsEnBatch = promesas.map((p) => p.contacto_cobros_id);
-			await tx
-				.update(promesas_pago_espejo)
-				.set({ activa: false, updated_at: new Date() })
-				.where(
-					and(
-						eq(promesas_pago_espejo.activa, true),
-						idsEnBatch.length > 0
-							? notInArray(promesas_pago_espejo.contacto_cobros_id, idsEnBatch)
-							: undefined,
-					),
-				);
+			// Reconciliación completa: el batch representa el 100% de lo vigente
+			// según crm-server ahora mismo. Cualquier fila activa=true que no
+			// aparezca en NINGUNA posición del batch original (ni siquiera las
+			// noEncontradas/noValidas, para no apagar por un error transitorio de
+			// resolución de sifco) ya no es vigente y se destraba.
+			if (modo === "reconciliacion_completa") {
+				const idsEnBatch = promesas.map((p) => p.contacto_cobros_id);
+				await tx
+					.update(promesas_pago_espejo)
+					.set({ activa: false, updated_at: new Date() })
+					.where(
+						and(
+							eq(promesas_pago_espejo.activa, true),
+							idsEnBatch.length > 0
+								? notInArray(promesas_pago_espejo.contacto_cobros_id, idsEnBatch)
+								: undefined,
+						),
+					);
+			}
+		});
+	} catch (err: any) {
+		// CB-030 — 0007_promesas_pago_espejo.sql se aplica a mano (sin migraciones
+		// automáticas en este proyecto). Hasta que la corran, todo INSERT/UPDATE acá
+		// revienta con undefined_table (42P01) y crm-server —que llama este endpoint
+		// tanto por push de evento como desde el job de reconciliación diario— recibe
+		// un 500 crudo en vez de una señal limpia. Los dos paths de LECTURA
+		// (promesasVigentesDelCredito en latefee.ts, getPromesaActivaPorCredito abajo)
+		// ya hacen fail-open por esta misma razón; el de escritura quedó sin guard
+		// (Codex review PR #1235, comentario P2). Acá NO se puede fail-open a
+		// "success:true": no se escribió nada, así que se reporta el fallo explícito
+		// para que el caller lo distinga de un sync realmente aplicado.
+		if (err?.code === "42P01") {
+			console.log("[PROMESAS] ⏭️  promesas_pago_espejo aún no existe (migración 0007 pendiente) — sync omitido.");
+			return {
+				success: false,
+				message: "[ERROR] Espejo de promesas no migrado aún (promesas_pago_espejo no existe): aplicar 0007_promesas_pago_espejo.sql",
+			};
 		}
-	});
+		throw err;
+	}
 
 	// promesasValidas.length===0 con el batch también vacío es reconciliación
 	// legítima de "nada vigente hoy", no una falla — fallaTotal solo aplica

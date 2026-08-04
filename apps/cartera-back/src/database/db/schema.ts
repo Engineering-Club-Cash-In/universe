@@ -375,6 +375,11 @@
       // valida). Sin rango explícito no hay nada que congelar por cuota.
       cuota_inicio: integer("cuota_inicio"),
       cuota_fin: integer("cuota_fin"),
+      // Fidelidad al espejo: es lo que el asesor pactó en el CRM, se guarda y se
+      // expone en el endpoint de lectura, pero HOY NINGÚN cálculo lo consume —
+      // el freeze de CB-030 es solo por rango de cuotas. Sirve de insumo para
+      // que Cobros decida después si la mora del período también se congela;
+      // hasta entonces, no buscar el consumidor: no existe.
       incluye_mora: boolean("incluye_mora").notNull().default(false),
       fecha_promesa: date("fecha_promesa").notNull(),
       activa: boolean("activa").notNull().default(true),

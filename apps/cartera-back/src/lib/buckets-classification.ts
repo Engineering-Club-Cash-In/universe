@@ -1,6 +1,36 @@
 import { sql } from "drizzle-orm";
 import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 
+const ZONA_GT = "America/Guatemala";
+
+// CB-030 — "hoy" en zona Guatemala, como string YYYY-MM-DD. Única fuente de
+// verdad para comparar contra `fecha_promesa` (columna date) en TODO lugar
+// donde se decide si una promesa sigue vigente — isOverdueInstallmentForMora
+// (latefee.ts, el freeze real, que la importa de aquí) y
+// getPromesaActivaPorCredito (syncPromesasPago.ts, solo lectura para
+// carteraFront). Antes cada uno calculaba "hoy" por su cuenta (uno en zona GT,
+// otro en UTC) — desalineados cerca de medianoche GT (=06:00 UTC), la promesa
+// podía verse vigente en un lado y vencida en el otro durante esa ventana.
+//
+// Implementación con Intl y NO con `toZonedTime(...).setHours(0,0,0,0)` +
+// toISOString(): esa combinación mezcla unidades — setHours opera en la zona
+// del PROCESO y toISOString lee en UTC, así que el resultado depende del TZ del
+// host. Con TZ en América (deploy actual) coincide, pero con TZ al este de UTC
+// (Europe/Madrid, Asia/Tokyo) devuelve el día anterior a TODA hora: la promesa
+// se leería vencida un día antes, el freeze se soltaría temprano y el bucket
+// subiría. Intl formatea directamente el día calendario en la zona pedida, sin
+// depender del TZ del proceso (Codex review PR #1235).
+const FORMATO_DIA_GT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: ZONA_GT,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+export function hoyGtISO(ahora: Date = new Date()): string {
+  return FORMATO_DIA_GT.format(ahora);
+}
+
 // Fila del catálogo de buckets relevante para la derivación.
 export type BucketCatalogo = {
   numero: number;

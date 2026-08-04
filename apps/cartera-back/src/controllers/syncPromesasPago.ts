@@ -1,0 +1,301 @@
+import { and, eq, gte, inArray, notInArray } from "drizzle-orm";
+import { db } from "../database";
+import { creditos, promesas_pago_espejo } from "../database/db/schema";
+import { hoyGtISO } from "../lib/buckets-classification";
+
+// CB-030 — payload que empuja crm-server (contactos_cobros vive en su propia
+// DB; esto es la copia local que consulta procesarMoras). Un solo endpoint
+// sirve DOS disparadores: push por evento (array de 1, en cuanto se crea o
+// resuelve una promesa) y el job de reconciliación diario (array completo de
+// promesas vigentes, idempotente — corrige drift de pushes fallidos).
+export type PromesaSync = {
+	contacto_cobros_id: string;
+	numero_credito_sifco: string;
+	cuota_inicio: number | null;
+	cuota_fin: number | null;
+	incluye_mora: boolean;
+	fecha_promesa: string; // YYYY-MM-DD
+	activa: boolean;
+};
+
+export type SyncPromesasResult = {
+	success: boolean;
+	message?: string;
+	actualizadas?: number;
+	noEncontradas?: string[]; // numero_credito_sifco que no resolvieron a un crédito
+	// filas rechazadas por validarPromesa (formato inválido) — no abortan el
+	// batch, ver syncPromesasPago.
+	noValidas?: string[];
+	// true cuando TODO el batch cayó en noEncontradas — distingue "nada que
+	// sincronizar" (payload vacío, actualizadas=0 normal) de "sync completo
+	// fallido" (actualizadas=0 porque NINGÚN sifco resolvió). success sigue
+	// true (la operación en sí no reventó), pero el caller debe tratar esto
+	// como una alerta, no como "listo".
+	fallaTotal?: boolean;
+};
+
+// CB-030 — /^\d{4}-\d{2}-\d{2}$/ valida forma pero no calendario real: "2026-02-31"
+// matchea el regex y JS la "corrige" en silencio con rollover (new Date("2026-02-31")
+// → 2026-03-03), así que no sirve para detectar el error. El insert le pasa el string
+// crudo a la columna date de Postgres, que SÍ la rechaza — pero eso revienta el
+// insert dentro de la transacción y aborta el batch entero con 500, en vez de
+// reportarse por-fila en noValidas como el resto de datos inválidos (Codex review
+// PR #1235, comentario P2). Roundtrip contra los componentes numéricos: si
+// reconstruir la fecha con Date.UTC no devuelve los mismos año/mes/día, no existe.
+function fechaCalendarioValida(s: string): boolean {
+	const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+	if (!m) return false;
+	const anio = Number(m[1]);
+	const mes = Number(m[2]);
+	const dia = Number(m[3]);
+	const d = new Date(Date.UTC(anio, mes - 1, dia));
+	return d.getUTCFullYear() === anio && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
+function validarPromesa(p: PromesaSync): string | null {
+	if (typeof p.contacto_cobros_id !== "string" || p.contacto_cobros_id.trim() === "") {
+		return "contacto_cobros_id es requerido";
+	}
+	if (typeof p.numero_credito_sifco !== "string" || p.numero_credito_sifco.trim() === "") {
+		return `numero_credito_sifco es requerido (contacto_cobros_id=${p.contacto_cobros_id})`;
+	}
+	const tieneInicio = p.cuota_inicio != null;
+	const tieneFin = p.cuota_fin != null;
+	if (tieneInicio !== tieneFin) {
+		return `cuota_inicio y cuota_fin deben venir ambos o ninguno (contacto_cobros_id=${p.contacto_cobros_id})`;
+	}
+	// numero_cuota arranca en 1 (ver cuotas_credito en schema.ts) — 0, negativos
+	// o fraccionarios no corresponden a ninguna cuota real. Sin este check,
+	// cuota_inicio:0/cuota_fin:2 pasaba el chequeo de inicio<=fin y freezaba de
+	// más (numeroCuota>=0 es trivialmente cierto), y un valor fraccionario
+	// llegaba crudo a la columna integer de Postgres y reventaba el INSERT,
+	// abortando la transacción completa en vez de reportarse en noValidas
+	// (Codex review PR #1235).
+	if (
+		(p.cuota_inicio != null && (!Number.isInteger(p.cuota_inicio) || p.cuota_inicio <= 0)) ||
+		(p.cuota_fin != null && (!Number.isInteger(p.cuota_fin) || p.cuota_fin <= 0))
+	) {
+		return `cuota_inicio y cuota_fin deben ser enteros positivos (contacto_cobros_id=${p.contacto_cobros_id})`;
+	}
+	// Rango invertido no explota — simplemente nunca matchea ninguna cuota en
+	// cuotaCubiertaPorPromesa (numeroCuota < inicio || > fin siempre true) y
+	// falla en silencio a "no congela nada". Mejor rechazar acá que dejar una
+	// promesa vigente que jamás protege ninguna cuota.
+	if (
+		p.cuota_inicio != null &&
+		p.cuota_fin != null &&
+		p.cuota_inicio > p.cuota_fin
+	) {
+		return `cuota_inicio (${p.cuota_inicio}) no puede ser mayor que cuota_fin (${p.cuota_fin}) (contacto_cobros_id=${p.contacto_cobros_id})`;
+	}
+	if (typeof p.fecha_promesa !== "string" || !fechaCalendarioValida(p.fecha_promesa)) {
+		return `fecha_promesa inválida, formato YYYY-MM-DD (contacto_cobros_id=${p.contacto_cobros_id})`;
+	}
+	return null;
+}
+
+/**
+ * CB-030 — upsert idempotente por contacto_cobros_id. Resuelve
+ * numero_credito_sifco → credito_id acá (cartera-back es dueño de esa
+ * correspondencia, el CRM solo conoce el SIFCO). Filas con SIFCO no
+ * resuelto (`noEncontradas`) o formato inválido (`noValidas`) se excluyen
+ * individualmente y NO abortan el resto del batch (un dato inconsistente
+ * no debe bloquear la sincronización de las demás promesas válidas).
+ *
+ * `modo: "reconciliacion_completa"` (job diario, el batch trae TODAS las
+ * promesas vigentes según crm-server) además desactiva cualquier fila
+ * activa=true del espejo cuyo contacto_cobros_id NO esté en el batch — sin
+ * esto, una promesa cumplida/cancelada cuyo push por evento se perdiera
+ * quedaría congelando cuotas para siempre, porque nunca vuelve a aparecer en
+ * ningún payload futuro (Codex review PR #1234). El push por evento (array de
+ * 1) usa el modo default y NO desactiva nada fuera de su propia fila.
+ */
+export async function syncPromesasPago(
+	promesas: PromesaSync[],
+	modo: "evento" | "reconciliacion_completa" = "evento",
+): Promise<SyncPromesasResult> {
+	if (!Array.isArray(promesas)) {
+		return { success: false, message: "Lista de promesas vacía" };
+	}
+	// [] es inválido en modo "evento" (no hay nada que pushear), pero es un
+	// valor legítimo en "reconciliacion_completa": representa "hoy no hay
+	// NINGUNA promesa vigente en crm-server" — si no se deja pasar, la última
+	// promesa activa de un crédito no se puede limpiar cuando su push por
+	// evento se pierde (Codex review PR #1234, comentario #4).
+	if (promesas.length === 0 && modo !== "reconciliacion_completa") {
+		return { success: false, message: "Lista de promesas vacía" };
+	}
+
+	const noValidas: string[] = [];
+	const promesasValidas = promesas.filter((p) => {
+		const error = validarPromesa(p);
+		if (error) {
+			noValidas.push(error);
+			return false;
+		}
+		return true;
+	});
+
+	if (promesasValidas.length === 0 && promesas.length > 0) {
+		return { success: false, message: `[ERROR] Ninguna promesa válida en el batch: ${noValidas.join(" | ")}` };
+	}
+
+	const sifcos = [...new Set(promesasValidas.map((p) => p.numero_credito_sifco))];
+	const creditosRows =
+		sifcos.length > 0
+			? await db
+					.select({ credito_id: creditos.credito_id, numero_credito_sifco: creditos.numero_credito_sifco })
+					.from(creditos)
+					.where(inArray(creditos.numero_credito_sifco, sifcos))
+			: [];
+
+	const creditoIdPorSifco = new Map<string, number>();
+	for (const c of creditosRows) {
+		if (c.numero_credito_sifco) creditoIdPorSifco.set(c.numero_credito_sifco, c.credito_id);
+	}
+
+	let actualizadas = 0;
+	const noEncontradas: string[] = [];
+
+	try {
+		await db.transaction(async (tx) => {
+			for (const p of promesasValidas) {
+				const creditoId = creditoIdPorSifco.get(p.numero_credito_sifco);
+				if (creditoId === undefined) {
+					noEncontradas.push(p.numero_credito_sifco);
+					continue;
+				}
+
+				await tx
+					.insert(promesas_pago_espejo)
+					.values({
+						credito_id: creditoId,
+						contacto_cobros_id: p.contacto_cobros_id,
+						cuota_inicio: p.cuota_inicio,
+						cuota_fin: p.cuota_fin,
+						incluye_mora: p.incluye_mora,
+						fecha_promesa: p.fecha_promesa,
+						activa: p.activa,
+						updated_at: new Date(),
+					})
+					.onConflictDoUpdate({
+						target: promesas_pago_espejo.contacto_cobros_id,
+						set: {
+							credito_id: creditoId,
+							cuota_inicio: p.cuota_inicio,
+							cuota_fin: p.cuota_fin,
+							incluye_mora: p.incluye_mora,
+							fecha_promesa: p.fecha_promesa,
+							activa: p.activa,
+							updated_at: new Date(),
+						},
+					});
+				actualizadas++;
+			}
+
+			// Reconciliación completa: el batch representa el 100% de lo vigente
+			// según crm-server ahora mismo. Cualquier fila activa=true que no
+			// aparezca en NINGUNA posición del batch original (ni siquiera las
+			// noEncontradas/noValidas, para no apagar por un error transitorio de
+			// resolución de sifco) ya no es vigente y se destraba.
+			if (modo === "reconciliacion_completa") {
+				const idsEnBatch = promesas.map((p) => p.contacto_cobros_id);
+				await tx
+					.update(promesas_pago_espejo)
+					.set({ activa: false, updated_at: new Date() })
+					.where(
+						and(
+							eq(promesas_pago_espejo.activa, true),
+							idsEnBatch.length > 0
+								? notInArray(promesas_pago_espejo.contacto_cobros_id, idsEnBatch)
+								: undefined,
+						),
+					);
+			}
+		});
+	} catch (err: any) {
+		// CB-030 — 0007_promesas_pago_espejo.sql se aplica a mano (sin migraciones
+		// automáticas en este proyecto). Hasta que la corran, todo INSERT/UPDATE acá
+		// revienta con undefined_table (42P01) y crm-server —que llama este endpoint
+		// tanto por push de evento como desde el job de reconciliación diario— recibe
+		// un 500 crudo en vez de una señal limpia. Los dos paths de LECTURA
+		// (promesasVigentesDelCredito en latefee.ts, getPromesaActivaPorCredito abajo)
+		// ya hacen fail-open por esta misma razón; el de escritura quedó sin guard
+		// (Codex review PR #1235, comentario P2). Acá NO se puede fail-open a
+		// "success:true": no se escribió nada, así que se reporta el fallo explícito
+		// para que el caller lo distinga de un sync realmente aplicado.
+		if (err?.code === "42P01") {
+			console.log("[PROMESAS] ⏭️  promesas_pago_espejo aún no existe (migración 0007 pendiente) — sync omitido.");
+			return {
+				success: false,
+				message: "[ERROR] Espejo de promesas no migrado aún (promesas_pago_espejo no existe): aplicar 0007_promesas_pago_espejo.sql",
+			};
+		}
+		throw err;
+	}
+
+	// promesasValidas.length===0 con el batch también vacío es reconciliación
+	// legítima de "nada vigente hoy", no una falla — fallaTotal solo aplica
+	// cuando SÍ había promesas que sincronizar y ninguna resolvió.
+	const fallaTotal =
+		promesasValidas.length > 0 &&
+		actualizadas === 0 &&
+		noEncontradas.length === promesasValidas.length;
+
+	return {
+		success: true,
+		actualizadas,
+		...(noEncontradas.length > 0 ? { noEncontradas } : {}),
+		...(noValidas.length > 0 ? { noValidas } : {}),
+		...(fallaTotal ? { fallaTotal: true } : {}),
+	};
+}
+
+export type PromesaActivaCredito = {
+	fecha_promesa: string;
+	cuota_inicio: number | null;
+	cuota_fin: number | null;
+	incluye_mora: boolean;
+};
+
+/**
+ * CB-030 — señal de solo lectura para el frontend de cartera-back
+ * (carteraFront): ¿este crédito tiene una promesa vigente? Vigente = activa
+ * Y fecha_promesa NO ha pasado — mismo criterio que el freeze en
+ * isOverdueInstallmentForMora (latefee.ts). Si hay varias vigentes, se
+ * devuelve la de fecha_promesa más próxima (la primera en vencer).
+ *
+ * La tabla se aplica a mano (0007_promesas_pago_espejo.sql, sin migración
+ * automática) — si aún no existe, fail-open a null (sin promesa vigente
+ * conocida) en vez de 500 en la pantalla de detalle de crédito (Codex review
+ * PR #1235, comentario P1).
+ */
+export async function getPromesaActivaPorCredito(
+	creditoId: number,
+): Promise<PromesaActivaCredito | null> {
+	const hoy = hoyGtISO();
+	try {
+		const [fila] = await db
+			.select({
+				fecha_promesa: promesas_pago_espejo.fecha_promesa,
+				cuota_inicio: promesas_pago_espejo.cuota_inicio,
+				cuota_fin: promesas_pago_espejo.cuota_fin,
+				incluye_mora: promesas_pago_espejo.incluye_mora,
+			})
+			.from(promesas_pago_espejo)
+			.where(
+				and(
+					eq(promesas_pago_espejo.credito_id, creditoId),
+					eq(promesas_pago_espejo.activa, true),
+					gte(promesas_pago_espejo.fecha_promesa, hoy),
+				),
+			)
+			.orderBy(promesas_pago_espejo.fecha_promesa)
+			.limit(1);
+
+		return fila ?? null;
+	} catch (err: any) {
+		if (err?.code === "42P01") return null;
+		throw err;
+	}
+}

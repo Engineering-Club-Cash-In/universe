@@ -1,12 +1,17 @@
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { client, db } from "../database";
-import { asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
+import { asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, promesas_pago_espejo, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
 import Big from "big.js";
-import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
 import { stat } from "fs";
 import { validarCatalogoBuckets } from "../lib/buckets-validation";
+// CB-030 — `hoyGtISO` se IMPORTA (no se recalcula acá) para que el freeze real
+// y la lectura de carteraFront usen literalmente la misma función, no dos
+// algoritmos que hoy dan lo mismo y mañana divergen (Codex review PR #1235).
+// El resto del re-export de buckets-classification está más abajo, junto al
+// comentario que explica por qué esos tipos viven en otro archivo.
+import { hoyGtISO } from "../lib/buckets-classification";
 
 type MoraEventoTipo =
   | "CREACION"
@@ -24,27 +29,96 @@ type MoraEventoOrigen =
 
 export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
 
+// CB-030 — promesa vigente para el freeze por cuota. Espejo local de una fila
+// de contactos_cobros (crm-server, otra DB) — ver promesas_pago_espejo en
+// schema.ts y el comentario ahí para el porqué de esta duplicación.
+export type PromesaVigente = {
+  cuota_inicio: number | null;
+  cuota_fin: number | null;
+  fecha_promesa: Date | string;
+};
+
+// CB-030 — día calendario de una columna `date` de Postgres, como string
+// "YYYY-MM-DD". Tanto si el driver la entrega como string (node-postgres, el
+// caso real) o como Date a medianoche UTC, ambos representan el mismo día sin
+// componente horario que zonificar. Pasarla por toZonedTime (pensado para
+// instantes reales) le resta las 6h de GT y la corre un día para atrás — una
+// promesa con fecha_promesa=2026-08-04 se leía como vencida el 2026-08-03, un
+// día antes de lo real (Codex review PR #1234). getUTCFullYear/Month/Date en
+// vez de toISOString().slice(): el slice de un ISO string ya es UTC, pero
+// dejarlo explícito evita que alguien lo "arregle" a métodos locales después.
+function diaCalendarioISO(fecha: Date | string): string {
+  if (typeof fecha === "string") return fecha.slice(0, 10);
+  const anio = fecha.getUTCFullYear();
+  const mes = String(fecha.getUTCMonth() + 1).padStart(2, "0");
+  const dia = String(fecha.getUTCDate()).padStart(2, "0");
+  return `${anio}-${mes}-${dia}`;
+}
+
+// CB-030 — ¿esta cuota está cubierta por alguna promesa vigente en la lista?
+// Vigente = fecha_promesa NO ha pasado (>= hoy en GT, comparando strings
+// YYYY-MM-DD — ver diaCalendarioISO). Rango inclusivo en ambos extremos.
+// Promesas sin rango (cuota_inicio/cuota_fin null) NO cubren nada — el CRM
+// exige ambos bounds o ninguno, así que "ninguno" es una promesa de solo-mora,
+// sin cuotas que congelar aquí: la mora del crédito no se toca, solo se
+// excluyen cuotas del conteo, y sin rango no hay ninguna que excluir.
+function cuotaCubiertaPorPromesa(
+  numeroCuota: number | undefined,
+  promesas: PromesaVigente[] | undefined,
+  hoyGt: string,
+): boolean {
+  if (!promesas || promesas.length === 0 || numeroCuota == null) return false;
+  return promesas.some((p) => {
+    if (p.cuota_inicio == null || p.cuota_fin == null) return false;
+    if (numeroCuota < p.cuota_inicio || numeroCuota > p.cuota_fin) return false;
+    return diaCalendarioISO(p.fecha_promesa) >= hoyGt;
+  });
+}
+
 export function isOverdueInstallmentForMora(
   cuota: {
+    numero_cuota?: number | null;
     fecha_vencimiento: Date | string;
     pagado: boolean | null;
     hasPaidPayment?: boolean | null;
     statusCredit?: string | null;
+    // Presente en las filas reales que arma procesarMoras (viene del JOIN con
+    // creditos) — se declara para que esas filas se pasen tal cual, sin
+    // destructurar. NO se lee de acá: el crédito para el freeze llega por el
+    // parámetro `creditoId`, porque contarCuotasVencidasReales consulta
+    // cuotas_credito sin ese JOIN y no lo tiene en la fila.
+    credito_id?: number | null;
   },
   hoy: Date,
+  // CB-030 — Map<credito_id, promesas vigentes de ESE crédito>. Opcional:
+  // sin este parámetro el comportamiento es IDÉNTICO al de antes (callers/
+  // tests existentes no lo pasan y no deben cambiar de resultado).
+  promesasPorCredito?: Map<number, PromesaVigente[]>,
+  creditoId?: number,
 ) {
-  const zona = "America/Guatemala";
-  const fechaVenc = toZonedTime(cuota.fecha_vencimiento, zona);
-  fechaVenc.setHours(0, 0, 0, 0);
+  // Comparación de día calendario como strings YYYY-MM-DD, igual que el SQL
+  // que esta función reemplazó (`cu.fecha_vencimiento::date < hoy_gt`).
+  // fecha_vencimiento es columna `date` — un día sin hora, no un instante — así
+  // que se lee tal cual (diaCalendarioISO) en vez de zonificarla: toZonedTime
+  // le restaba 6h y la corría un día atrás cuando el driver la entregaba como
+  // Date. "hoy" SÍ es un instante real, y se convierte a día GT con hoyGtISO
+  // (Intl, no depende del TZ del proceso — ver buckets-classification.ts).
+  const fechaVencISO = diaCalendarioISO(cuota.fecha_vencimiento);
+  const hoyGt = hoyGtISO(hoy);
 
-  const fechaHoy = toZonedTime(hoy, zona);
-  fechaHoy.setHours(0, 0, 0, 0);
-
-  const isOverdue = fechaVenc < fechaHoy;
+  const isOverdue = fechaVencISO < hoyGt;
   const isUnpaid = cuota.pagado === false && cuota.hasPaidPayment !== true;
   const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
 
-  return isOverdue && isUnpaid && isEligible;
+  const promesasDelCredito =
+    creditoId != null ? promesasPorCredito?.get(creditoId) : undefined;
+  const congeladaPorPromesa = cuotaCubiertaPorPromesa(
+    cuota.numero_cuota ?? undefined,
+    promesasDelCredito,
+    hoyGt,
+  );
+
+  return isOverdue && isUnpaid && isEligible && !congeladaPorPromesa;
 }
 
 // ============================================================
@@ -218,6 +292,67 @@ async function registrarHistorialMora(params: {
  * 3. If the mora amount = 0, the credit remains "ACTIVO".
  */
 
+// CB-030 — conteo REAL de cuotas vencidas para un crédito, promesa-aware
+// (excluye cuotas congeladas por una promesa de pago vigente, ver
+// isOverdueInstallmentForMora). Única fuente de este cálculo — antes vivía
+// duplicado en createMora y, sin el filtro de promesas, en
+// paymentAgreement.ts (updatePaymentAgreementStatus al eliminar un convenio),
+// que por eso podía contar más cuotas de las que createMora aceptaba y
+// rechazar la recreación de mora dejando el crédito huérfano (Codex review
+// PR #1234, comentario #5).
+
+// CB-030 — el equipo aplica 0007_promesas_pago_espejo.sql a mano, no como
+// parte de este deploy (restricción explícita del proyecto: sin migraciones
+// automáticas). Hasta que la corran, cualquier SELECT contra la tabla revienta
+// con "undefined_table" (42P01) — y esta función ahora la lee desde paths que
+// YA estaban en producción (createMora vía /mora, teardown de convenios), así
+// que sin este guard esos flujos existentes se rompen apenas se despliega el
+// código, no solo el freeze nuevo (Codex review PR #1235, comentario P1).
+// Fail-open: sin tabla = sin promesas conocidas, comportamiento pre-CB-030.
+async function promesasVigentesDelCredito(credito_id: number): Promise<PromesaVigente[]> {
+  try {
+    return await db
+      .select({
+        cuota_inicio: promesas_pago_espejo.cuota_inicio,
+        cuota_fin: promesas_pago_espejo.cuota_fin,
+        fecha_promesa: promesas_pago_espejo.fecha_promesa,
+      })
+      .from(promesas_pago_espejo)
+      .where(and(eq(promesas_pago_espejo.credito_id, credito_id), eq(promesas_pago_espejo.activa, true)));
+  } catch (err: any) {
+    if (err?.code === "42P01") return [];
+    throw err;
+  }
+}
+
+export async function contarCuotasVencidasReales(
+  credito_id: number,
+  statusCredit: string | null,
+): Promise<number> {
+  const hoyMora = new Date();
+  const [cuotasDelCredito, promesasDelCredito] = await Promise.all([
+    db
+      .select({
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        hasPaidPayment: sql<boolean>`EXISTS (
+          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
+          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+            AND pc."paymentFalse" = false AND pc.pagado = true
+            AND pc.validation_status IN ('validated', 'no_required')
+            AND COALESCE(pc.monto_aplicado, 0) > 0)`,
+      })
+      .from(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, credito_id)),
+    promesasVigentesDelCredito(credito_id),
+  ]);
+  const promesasPorCredito = new Map<number, PromesaVigente[]>([[credito_id, promesasDelCredito]]);
+  return cuotasDelCredito.filter((c) =>
+    isOverdueInstallmentForMora({ ...c, statusCredit }, hoyMora, promesasPorCredito, credito_id),
+  ).length;
+}
+
 export async function createMora({
   credito_id,
   monto_mora,
@@ -285,19 +420,9 @@ export async function createMora({
     // 🔥 Conteo REAL de cuotas vencidas (derivado de cuotas_credito), NO el cuotas_atrasadas
     // del request. Confiar en el valor enviado permitía inflarlo para esquivar el guard de
     // cordura: p.ej. Q27,953.44 pasaba con cuotas_atrasadas: 7 porque el umbral se volvía
-    // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras (isOverdueInstallmentForMora).
-    const ovRes = await db.execute<any>(sql`
-      SELECT COUNT(*)::int AS n
-      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
-      WHERE cu.credito_id = ${credito_id}
-        AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
-        AND cu.pagado = false
-        AND NOT EXISTS (
-          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
-          WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0)`);
-    const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
+    // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras y promesa-aware (CB-030) —
+    // ver contarCuotasVencidasReales, única fuente de este cálculo.
+    const cuotasReales = await contarCuotasVencidasReales(credito_id, credito.statusCredit);
 
     // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
     // (el caller no puede inflar el conteo para disparar el umbral del guard).
@@ -719,8 +844,6 @@ export async function updateMora({
 const PROCESAR_MORAS_LOCK_KEY = 728193;
 
 export async function procesarMoras() {
-  const zona = "America/Guatemala";
-
   // 🔒 Lock entre instancias: con varias réplicas del back, todas agendan el cron
   // (23:59 GT) y corrían EN PARALELO leyendo el mismo estado viejo → duplicaban
   // eventos en moras_historial y, peor, filas activa=true en moras_credito.
@@ -736,19 +859,63 @@ export async function procesarMoras() {
       return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0 };
     }
 
-    const hoy = toZonedTime(new Date(), zona);
-    hoy.setHours(0, 0, 0, 0);
+    // Instante real; el día calendario GT lo deriva isOverdueInstallmentForMora
+    // con hoyGtISO (Intl). Antes se pre-normalizaba con
+    // toZonedTime(...).setHours(0,0,0,0), que mezcla zona del proceso (setHours)
+    // con UTC (toISOString) y, con TZ del host al este de UTC, corría el día uno
+    // para atrás (Codex review PR #1235).
+    const hoy = new Date();
 
-    console.log("[INFO] Current Guatemala date (midnight):", hoy.toISOString());
+    console.log("[INFO] Current Guatemala date:", hoyGtISO(hoy));
     console.log("\n╔════════════════════════════════════════════════════════════");
     console.log("║ [JOB] 🚀 INICIANDO PROCESO DE MORAS (UPSERT)");
     console.log("╚════════════════════════════════════════════════════════════\n");
+
+    // CB-030 — promesas de pago vigentes (espejo local, ver schema.ts), Map
+    // por credito_id para el freeze por cuota en isOverdueInstallmentForMora.
+    // Solo `activa = true`: una vez cumplida/cancelada, la fila deja de
+    // filtrar aquí sin necesidad de borrarla (rastro de auditoría). La tabla
+    // se aplica a mano (0007_promesas_pago_espejo.sql, sin migración
+    // automática) — si aún no existe, fail-open a "sin promesas conocidas"
+    // en vez de tumbar el cron completo con undefined_table (Codex review
+    // PR #1235, comentario P1).
+    const promesasActivas = await (async () => {
+      try {
+        return await db
+          .select({
+            credito_id: promesas_pago_espejo.credito_id,
+            cuota_inicio: promesas_pago_espejo.cuota_inicio,
+            cuota_fin: promesas_pago_espejo.cuota_fin,
+            fecha_promesa: promesas_pago_espejo.fecha_promesa,
+          })
+          .from(promesas_pago_espejo)
+          .where(eq(promesas_pago_espejo.activa, true));
+      } catch (err: any) {
+        if (err?.code === "42P01") {
+          console.log("[MORA] ⏭️  promesas_pago_espejo aún no existe (migración pendiente) — sin freeze este ciclo.");
+          return [];
+        }
+        throw err;
+      }
+    })();
+
+    const promesasPorCredito = new Map<number, PromesaVigente[]>();
+    for (const p of promesasActivas) {
+      const lista = promesasPorCredito.get(p.credito_id) ?? [];
+      lista.push({
+        cuota_inicio: p.cuota_inicio,
+        cuota_fin: p.cuota_fin,
+        fecha_promesa: p.fecha_promesa,
+      });
+      promesasPorCredito.set(p.credito_id, lista);
+    }
 
     // 1. Get all installments WITH PROPER JOIN
     const cuotas = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         credito_id: cuotas_credito.credito_id,
+        numero_cuota: cuotas_credito.numero_cuota, // CB-030: rango de la promesa
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
         statusCredit: creditos.statusCredit,
@@ -776,8 +943,11 @@ export async function procesarMoras() {
 
     console.log(`[DEBUG] Total installments fetched: ${cuotas.length}`);
 
-    // 2. Filter overdue installments (excluyendo estados que no aplican)
-    const cuotasVencidas = cuotas.filter((c) => isOverdueInstallmentForMora(c, hoy));
+    // 2. Filter overdue installments (excluyendo estados que no aplican y
+    //    cuotas congeladas por una promesa de pago vigente — CB-030).
+    const cuotasVencidas = cuotas.filter((c) =>
+      isOverdueInstallmentForMora(c, hoy, promesasPorCredito, c.credito_id),
+    );
 
     console.log(`[DEBUG] Overdue installments found: ${cuotasVencidas.length}`);
 

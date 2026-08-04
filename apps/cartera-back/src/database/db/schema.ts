@@ -349,6 +349,49 @@
         .where(sql`${t.activa} = true`),
     ]
   );
+  // CB-030 — espejo LOCAL de promesas de pago vigentes, sincronizado desde
+  // crm-server (contactos_cobros vive en otra base de datos; cartera-back no
+  // puede leerla directo). procesarMoras (latefee.ts) consulta esta tabla
+  // para congelar SOLO las cuotas [cuota_inicio, cuota_fin] cubiertas por una
+  // promesa vigente — nunca el crédito completo. Ver isOverdueInstallmentForMora.
+  //
+  // NO usa un uniqueIndex parcial por credito_id (a diferencia de
+  // moras_credito_uq_activa): un crédito puede tener legítimamente 2+
+  // promesas vigentes cubriendo rangos de cuotas distintos. La unicidad va
+  // por contacto_cobros_id (idempotencia del upsert de sync), no por crédito.
+  export const promesas_pago_espejo = customSchema.table(
+    "promesas_pago_espejo",
+    {
+      promesa_espejo_id: serial("promesa_espejo_id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      // Id opaco de contactos_cobros (crm-server, otra DB) — SIN FK real,
+      // solo clave de idempotencia para el upsert de sync. varchar en vez de
+      // un tipo uuid nativo: mismo patrón que otros ids opacos externos en
+      // este schema (ver `uuid: varchar(...)` en otras tablas).
+      contacto_cobros_id: varchar("contacto_cobros_id", { length: 36 }).notNull(),
+      // null = promesa sin rango de cuotas (ambos o ninguno, el CRM ya lo
+      // valida). Sin rango explícito no hay nada que congelar por cuota.
+      cuota_inicio: integer("cuota_inicio"),
+      cuota_fin: integer("cuota_fin"),
+      // Fidelidad al espejo: es lo que el asesor pactó en el CRM, se guarda y se
+      // expone en el endpoint de lectura, pero HOY NINGÚN cálculo lo consume —
+      // el freeze de CB-030 es solo por rango de cuotas. Sirve de insumo para
+      // que Cobros decida después si la mora del período también se congela;
+      // hasta entonces, no buscar el consumidor: no existe.
+      incluye_mora: boolean("incluye_mora").notNull().default(false),
+      fecha_promesa: date("fecha_promesa").notNull(),
+      activa: boolean("activa").notNull().default(true),
+
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      uniqueIndex("promesas_pago_espejo_uq_contacto").on(t.contacto_cobros_id),
+      index("idx_promesas_espejo_credito_activa").on(t.credito_id, t.activa),
+    ]
+  );
   export const moras_condonaciones = customSchema.table("moras_condonaciones", {
     condonacion_id: serial("condonacion_id").primaryKey(),
     credito_id: integer("credito_id")

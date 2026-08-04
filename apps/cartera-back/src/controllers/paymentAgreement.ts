@@ -16,7 +16,7 @@ import {
   asesores,
 } from "../database/db";
 import Big from "big.js";
-import { createMora } from "./latefee";
+import { contarCuotasVencidasReales, createMora } from "./latefee";
 import { getPagosDelMesActual } from "./payments";
 import { calcularProgresoConvenio } from "./paymentAgreement-helpers";
 import { creditRouter } from "../routers";
@@ -1497,22 +1497,17 @@ export const updateConvenioStatus = async (
         return { success: false, message: "Crédito no encontrado" };
       }
 
-      // Contar cuotas vencidas con la MISMA lógica que createMora/procesarMoras
-      // (< hoy GT, impaga, sin pago cubriente validated/no_required CON plata real
-      // aplicada — monto_aplicado > 0, igual que el guard cuotasReales) para que el
-      // conteo coincida con el que recalcula createMora y no lo rechace por mismatch.
-      const ovRes = await db.execute<any>(sql`
-        SELECT COUNT(*)::int AS n
-        FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
-        WHERE cu.credito_id = ${creditoId}
-          AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
-          AND cu.pagado = false
-          AND NOT EXISTS (
-            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
-            WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-              AND pc.validation_status IN ('validated', 'no_required')
-              AND COALESCE(pc.monto_aplicado, 0) > 0)`);
-      const numCuotasAtrasadas = Number(ovRes.rows?.[0]?.n ?? 0);
+      // Contar cuotas vencidas con la MISMA función que usa createMora/procesarMoras
+      // (contarCuotasVencidasReales) para que el conteo coincida exacto con el que
+      // recalcula createMora y no lo rechace por mismatch — antes este conteo era un
+      // SQL crudo aparte que no conocía promesas_pago_espejo (CB-030): un crédito con
+      // cuotas congeladas por una promesa vigente contaba más acá que en createMora,
+      // que las excluye, y createMora rechazaba la recreación de mora dejando el
+      // crédito huérfano (convenio ya borrado, sin mora) — Codex review PR #1234,
+      // comentario #5. statusCredit="MOROSO" explícito: es el estado DESTINO (recién
+      // seteado abajo antes de llamar createMora), no el EN_CONVENIO actual — pasar
+      // ese excluiría todas las cuotas del conteo.
+      const numCuotasAtrasadas = await contarCuotasVencidasReales(creditoId, "MOROSO");
 
       console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
 

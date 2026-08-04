@@ -19,6 +19,11 @@ import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
 import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
+import {
+  getPromesaActivaPorCredito,
+  syncPromesasPago,
+  type PromesaSync,
+} from "../controllers/syncPromesasPago";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo: ACTIVO/MOROSO clasifican por cuotas de la
@@ -789,4 +794,102 @@ export const bucketsRouter = new Elysia()
         error: String(err),
       };
     }
-  });
+  })
+
+  // CB-030 — sync de promesas de pago vigentes (espejo local, contactos_cobros
+  // vive en la DB de crm-server). Un solo endpoint sirve dos disparadores:
+  // push por evento (array de 1) + reconciliación diaria (array completo,
+  // idempotente por contacto_cobros_id) — ver syncPromesasPago.ts.
+  .put(
+    "/promesas-pago/sync",
+    async ({ body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const modo =
+          body.modo === "reconciliacion_completa" ? "reconciliacion_completa" : "evento";
+        const result = await syncPromesasPago(body.promesas as PromesaSync[], modo);
+        if (!result.success) {
+          set.status = 400;
+          return result;
+        }
+        return result;
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo sincronizar promesas de pago",
+          error: String(err),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        // CB-030 — sin minItems: [] es inválido en modo "evento" (nada que
+        // pushear, syncPromesasPago lo rechaza igual), pero es el valor
+        // legítimo de "reconciliacion_completa" cuando crm-server no tiene
+        // NINGUNA promesa vigente hoy — de otro modo la última promesa activa
+        // de un crédito nunca se puede limpiar si su push de resolución se
+        // pierde (Codex review PR #1234, comentario #4).
+        promesas: t.Array(
+          t.Object({
+            contacto_cobros_id: t.String({ minLength: 1 }),
+            numero_credito_sifco: t.String({ minLength: 1 }),
+            cuota_inicio: t.Nullable(t.Number()),
+            cuota_fin: t.Nullable(t.Number()),
+            incluye_mora: t.Boolean(),
+            fecha_promesa: t.String(),
+            activa: t.Boolean(),
+          }),
+        ),
+        // CB-030 — "evento" (default, push de 1 promesa) no toca nada fuera de
+        // su propia fila. "reconciliacion_completa" (job diario del CRM, el
+        // array trae el set COMPLETO de promesas vigentes) además desactiva
+        // toda fila activa=true ausente del batch — sin esto, un push de
+        // cumplida/cancelada perdido dejaba el freeze zombie para siempre
+        // (Codex review PR #1234).
+        modo: t.Optional(
+          t.Union([t.Literal("evento"), t.Literal("reconciliacion_completa")]),
+        ),
+      }),
+      detail: {
+        summary: "Sincronizar promesas de pago vigentes desde crm-server",
+        description:
+          "Upsert idempotente por contacto_cobros_id. Resuelve numero_credito_sifco → credito_id. modo='evento' (default) para el push por evento; modo='reconciliacion_completa' para el job diario del CRM (desactiva filas ausentes del batch).",
+        tags: ["Buckets", "Promesas de Pago"],
+      },
+    },
+  )
+
+  // CB-030 — lectura para carteraFront: ¿este crédito tiene una promesa
+  // vigente? Solo lectura, cualquier usuario autenticado (authMiddleware del
+  // .use() de arriba ya cubre esto) — no requiere requireBucketsRole, es la
+  // misma pantalla de detalle de crédito que ya ve un ASESOR.
+  .get(
+    "/promesas-pago/activa/:credito_id",
+    async ({ params, set }: any) => {
+      const creditoId = Number(params.credito_id);
+      if (!Number.isInteger(creditoId) || creditoId <= 0) {
+        set.status = 400;
+        return { success: false, message: "[ERROR] credito_id inválido" };
+      }
+      try {
+        const promesa = await getPromesaActivaPorCredito(creditoId);
+        return { success: true, data: promesa };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo consultar la promesa de pago",
+          error: String(err),
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Promesa de pago vigente de un crédito (o null)",
+        description:
+          "Solo lectura, para mostrar el aviso 'Promesa Pago: fecha' en el detalle del crédito (carteraFront). Vigente = activa y fecha_promesa >= hoy.",
+        tags: ["Buckets", "Promesas de Pago"],
+      },
+    },
+  );

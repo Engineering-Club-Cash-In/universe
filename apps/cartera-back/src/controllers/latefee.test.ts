@@ -462,6 +462,19 @@ describe("isOverdueInstallmentForMora — freeze por promesa (CB-030)", () => {
     expect(result).toBe(false);
   });
 
+  it("fecha_promesa === hoy exacto → sigue vigente, congela (Codex PR #1234: toZonedTime corría la fecha date-only un día para atrás)", () => {
+    const promesas = new Map([
+      [1, [{ cuota_inicio: 4, cuota_fin: 6, fecha_promesa: "2026-05-26" }]], // === hoy
+    ]);
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
+      hoy,
+      promesas,
+      1,
+    );
+    expect(result).toBe(false);
+  });
+
   it("promesa sin rango (cuota_inicio/cuota_fin null) → NO congela ninguna cuota", () => {
     const promesas = new Map([
       [1, [{ cuota_inicio: null, cuota_fin: null, fecha_promesa: "2026-05-30" }]],

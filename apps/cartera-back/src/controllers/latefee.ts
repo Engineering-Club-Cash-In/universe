@@ -33,25 +33,35 @@ export type PromesaVigente = {
   fecha_promesa: Date | string;
 };
 
+// CB-030 — fecha_promesa es columna `date` (sin hora): tanto si Postgres la
+// entrega como Date (medianoche UTC) o como string "YYYY-MM-DD", ambos casos
+// representan el mismo día calendario sin componente horario que zonificar.
+// Pasarla por toZonedTime (pensado para instantes reales, ver fecha_vencimiento
+// más abajo) le resta las 6h de GT y la corre un día para atrás — una promesa
+// con fecha_promesa=2026-08-04 se leía como vencida el 2026-08-03, un día
+// antes de lo real (Codex review PR #1234).
+function fechaPromesaISO(fechaPromesa: Date | string): string {
+  return typeof fechaPromesa === "string"
+    ? fechaPromesa.slice(0, 10)
+    : fechaPromesa.toISOString().slice(0, 10);
+}
+
 // CB-030 — ¿esta cuota está cubierta por alguna promesa vigente en la lista?
-// Vigente = fecha_promesa NO ha pasado (>= hoy, mismo criterio de zona que el
-// resto de esta función). Rango inclusivo en ambos extremos. Promesas sin
-// rango (cuota_inicio/cuota_fin null) NO cubren nada — el CRM exige ambos
-// bounds o ninguno, así que "ninguno" es una promesa de solo-mora, sin cuotas
-// que congelar aquí (ver §incluyeMora en procesarMoras).
+// Vigente = fecha_promesa NO ha pasado (>= hoy en GT, comparando strings
+// YYYY-MM-DD — ver fechaPromesaISO). Rango inclusivo en ambos extremos.
+// Promesas sin rango (cuota_inicio/cuota_fin null) NO cubren nada — el CRM
+// exige ambos bounds o ninguno, así que "ninguno" es una promesa de solo-mora,
+// sin cuotas que congelar aquí (ver §incluyeMora en procesarMoras).
 function cuotaCubiertaPorPromesa(
   numeroCuota: number | undefined,
   promesas: PromesaVigente[] | undefined,
-  fechaHoyZonificada: Date,
+  hoyGtISO: string,
 ): boolean {
   if (!promesas || promesas.length === 0 || numeroCuota == null) return false;
-  const zona = "America/Guatemala";
   return promesas.some((p) => {
     if (p.cuota_inicio == null || p.cuota_fin == null) return false;
     if (numeroCuota < p.cuota_inicio || numeroCuota > p.cuota_fin) return false;
-    const fechaPromesa = toZonedTime(p.fecha_promesa, zona);
-    fechaPromesa.setHours(0, 0, 0, 0);
-    return fechaPromesa >= fechaHoyZonificada;
+    return fechaPromesaISO(p.fecha_promesa) >= hoyGtISO;
   });
 }
 
@@ -86,7 +96,7 @@ export function isOverdueInstallmentForMora(
   const congeladaPorPromesa = cuotaCubiertaPorPromesa(
     cuota.numero_cuota ?? undefined,
     promesasDelCredito,
-    fechaHoy,
+    fechaHoy.toISOString().slice(0, 10),
   );
 
   return isOverdue && isUnpaid && isEligible && !congeladaPorPromesa;

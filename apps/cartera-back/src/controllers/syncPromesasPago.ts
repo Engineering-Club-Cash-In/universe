@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, notInArray } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, promesas_pago_espejo } from "../database/db/schema";
 import { hoyGtISO } from "../lib/buckets-classification";
@@ -70,9 +70,18 @@ function validarPromesa(p: PromesaSync): string | null {
  * resuelto (`noEncontradas`) o formato inválido (`noValidas`) se excluyen
  * individualmente y NO abortan el resto del batch (un dato inconsistente
  * no debe bloquear la sincronización de las demás promesas válidas).
+ *
+ * `modo: "reconciliacion_completa"` (job diario, el batch trae TODAS las
+ * promesas vigentes según crm-server) además desactiva cualquier fila
+ * activa=true del espejo cuyo contacto_cobros_id NO esté en el batch — sin
+ * esto, una promesa cumplida/cancelada cuyo push por evento se perdiera
+ * quedaría congelando cuotas para siempre, porque nunca vuelve a aparecer en
+ * ningún payload futuro (Codex review PR #1234). El push por evento (array de
+ * 1) usa el modo default y NO desactiva nada fuera de su propia fila.
  */
 export async function syncPromesasPago(
 	promesas: PromesaSync[],
+	modo: "evento" | "reconciliacion_completa" = "evento",
 ): Promise<SyncPromesasResult> {
 	if (!Array.isArray(promesas) || promesas.length === 0) {
 		return { success: false, message: "Lista de promesas vacía" };
@@ -139,6 +148,26 @@ export async function syncPromesasPago(
 					},
 				});
 			actualizadas++;
+		}
+
+		// Reconciliación completa: el batch representa el 100% de lo vigente
+		// según crm-server ahora mismo. Cualquier fila activa=true que no
+		// aparezca en NINGUNA posición del batch original (ni siquiera las
+		// noEncontradas/noValidas, para no apagar por un error transitorio de
+		// resolución de sifco) ya no es vigente y se destraba.
+		if (modo === "reconciliacion_completa") {
+			const idsEnBatch = promesas.map((p) => p.contacto_cobros_id);
+			await tx
+				.update(promesas_pago_espejo)
+				.set({ activa: false, updated_at: new Date() })
+				.where(
+					and(
+						eq(promesas_pago_espejo.activa, true),
+						idsEnBatch.length > 0
+							? notInArray(promesas_pago_espejo.contacto_cobros_id, idsEnBatch)
+							: undefined,
+					),
+				);
 		}
 	});
 

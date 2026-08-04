@@ -14,6 +14,7 @@ type Fila = Record<string, any>;
 const estado = {
 	selects: new Map<any, Fila[]>(),
 	inserts: [] as { tabla: any; filas: Fila[] }[],
+	updates: [] as { tabla: any; set: Fila }[],
 };
 
 function crearBuilderSelect() {
@@ -55,6 +56,18 @@ function crearMutadores() {
 				},
 			};
 		},
+		update(tabla: any) {
+			return {
+				set(set: Fila) {
+					return {
+						where() {
+							estado.updates.push({ tabla, set });
+							return Promise.resolve([]);
+						},
+					};
+				},
+			};
+		},
 	};
 }
 
@@ -72,6 +85,7 @@ const { creditos, promesas_pago_espejo } = await import("../database/db/schema")
 function prepararEscenario(opts: { creditosRows?: Fila[] }) {
 	estado.selects = new Map<any, Fila[]>([[creditos, opts.creditosRows ?? []]]);
 	estado.inserts = [];
+	estado.updates = [];
 }
 
 const insertsEn = (tabla: any) => estado.inserts.filter((i) => i.tabla === tabla).flatMap((i) => i.filas);
@@ -154,5 +168,36 @@ describe("syncPromesasPago", () => {
 
 		expect(r.actualizadas).toBe(1);
 		expect(r.noValidas).toHaveLength(1);
+	});
+
+	describe("modo reconciliacion_completa (Codex PR #1234: filas zombie)", () => {
+		it("modo default (push por evento) NO desactiva nada fuera de su propia fila", async () => {
+			prepararEscenario({ creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }] });
+
+			await syncPromesasPago([promesa({ contacto_cobros_id: "c1", numero_credito_sifco: "S1" })]);
+
+			expect(estado.updates).toHaveLength(0);
+		});
+
+		it("reconciliacion_completa desactiva filas activas que ya NO vienen en el batch", async () => {
+			prepararEscenario({ creditosRows: [{ credito_id: 1, numero_credito_sifco: "S1" }] });
+
+			await syncPromesasPago(
+				[promesa({ contacto_cobros_id: "c1", numero_credito_sifco: "S1" })],
+				"reconciliacion_completa",
+			);
+
+			expect(estado.updates).toHaveLength(1);
+			expect(estado.updates[0].set).toMatchObject({ activa: false });
+		});
+
+		it("reconciliacion_completa NO desactiva si el batch viene vacío tras filtrar inválidas (evita apagar todo por un payload malformado)", async () => {
+			prepararEscenario({ creditosRows: [] });
+
+			const r = await syncPromesasPago([promesa({ fecha_promesa: "mala" })], "reconciliacion_completa");
+
+			expect(r.success).toBe(false);
+			expect(estado.updates).toHaveLength(0);
+		});
 	});
 });

@@ -8,23 +8,16 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	Clock,
-	ExternalLink,
 	Loader2,
 	Phone,
 	PhoneOff,
 	TriangleAlert,
 } from "lucide-react";
 import { useState } from "react";
+import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-	Sheet,
-	SheetClose,
-	SheetContent,
-	SheetHeader,
-	SheetTitle,
-} from "@/components/ui/sheet";
 import {
 	Table,
 	TableBody,
@@ -496,7 +489,7 @@ function MiDiaPage() {
 		cola: null,
 	});
 
-	const abrirFicha360 = (fila: FilaCaso) => {
+	const _abrirFicha360 = (fila: FilaCaso) => {
 		navigate({
 			to: "/cobros/$id",
 			params: { id: fila.numeroCreditoSifco },
@@ -868,76 +861,13 @@ function MiDiaPage() {
 				</CardContent>
 			</Card>
 
-			{/* Drawer "Gestión rápida" — STUB. El contenido real se arma junto con la
-			    Ficha 360 (mismo componente: uno como panel, otro como página) en otra
-			    iteración. Por ahora solo identidad + acceso a la 360. */}
-			<GestionRapidaDrawer
-				fila={detalle}
-				catalogo={catalogo}
+			{/* Mismo panel que usa el dashboard: se decide acá, se gestiona en la
+			    Ficha 360. */}
+			<PanelGestionRapida
+				creditoId={detalle?.numeroCreditoSifco ?? null}
+				open={!!detalle}
 				onClose={() => setDetalle(null)}
-				onAbrirFicha={(fila) => {
-					setDetalle(null);
-					abrirFicha360(fila);
-				}}
 			/>
 		</div>
-	);
-}
-
-function GestionRapidaDrawer({
-	fila,
-	catalogo,
-	onClose,
-	onAbrirFicha,
-}: {
-	fila: FilaCaso | null;
-	catalogo: BucketsCatalogoQueryData | undefined;
-	onClose: () => void;
-	onAbrirFicha: (fila: FilaCaso) => void;
-}) {
-	return (
-		<Sheet open={!!fila} onOpenChange={(open) => !open && onClose()}>
-			<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
-				<SheetHeader className="border-b p-4">
-					<SheetTitle>Gestión rápida</SheetTitle>
-				</SheetHeader>
-
-				{fila && (
-					<div className="flex-1 overflow-y-auto p-4">
-						<div className="font-medium text-lg">{fila.cliente}</div>
-						<div className="mt-1 font-mono text-muted-foreground text-xs">
-							Crédito {fila.numeroCreditoSifco || "—"}
-						</div>
-						<div className="mt-3 flex flex-wrap items-center gap-1.5">
-							<BucketBadge estadoKey={fila.bucketKey} catalogo={catalogo} />
-							{fila.cola && <CategoriaBadges item={fila.cola} />}
-						</div>
-
-						{/* Placeholder: el detalle real (cobro del mes, contacto, estado,
-						    promesa) llega con el componente compartido con la 360. */}
-						<div className="mt-6 rounded-lg border border-dashed p-4 text-center text-muted-foreground text-sm">
-							Vista rápida en construcción.
-							<br />
-							Por ahora, abrí la Ficha 360 para gestionar el caso.
-						</div>
-					</div>
-				)}
-
-				<div className="flex items-center justify-between gap-2 border-t p-4">
-					<SheetClose asChild>
-						<Button variant="outline">Cerrar</Button>
-					</SheetClose>
-					{fila && (
-						<Button
-							onClick={() => onAbrirFicha(fila)}
-							disabled={!fila.numeroCreditoSifco}
-						>
-							<ExternalLink className="mr-1 h-4 w-4" />
-							Abrir Ficha 360
-						</Button>
-					)}
-				</div>
-			</SheetContent>
-		</Sheet>
 	);
 }

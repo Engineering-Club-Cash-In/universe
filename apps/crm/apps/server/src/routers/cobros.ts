@@ -42,6 +42,7 @@ import {
 	referenciasLead,
 	salesStages,
 } from "../db/schema/crm";
+import { notifications } from "../db/schema/notifications";
 import { quotations } from "../db/schema/quotations";
 import { recordatoriosPremora } from "../db/schema/recordatorios-premora";
 import { vehicles } from "../db/schema/vehicles";
@@ -1794,6 +1795,108 @@ export const cobrosRouter = {
 					const fb = b.fechaPrometida?.getTime() ?? 0;
 					return fa - fb;
 				});
+		}),
+
+	// CB-031 (ficha 360): alertas de ESTE caso — las notificaciones de cobros
+	// que ya generan los jobs (promesa por vencer / incumplida, cliente subido
+	// de bucket, 3 días sin contacto) y las asignaciones manuales. La campanita
+	// las muestra mezcladas con todo el CRM; acá viven junto al caso que las
+	// originó, que es donde el asesor las va a leer.
+	//
+	// `filasNotificacionCobros` inserta UNA FILA POR DESTINATARIO (asesor +
+	// supervisores), así que la misma alerta llega repetida: se deduplica por
+	// (titulo, createdAt) quedándose con la primera.
+	getAlertasCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const rows = await db
+				.select({
+					id: notifications.id,
+					titulo: notifications.titulo,
+					descripcion: notifications.descripcion,
+					cobrosTipo: notifications.cobrosTipo,
+					status: notifications.status,
+					createdAt: notifications.createdAt,
+					assignedTo: notifications.assignedTo,
+				})
+				.from(notifications)
+				// Alcance: el rol `cobros` solo ve alertas de SUS casos. Sin este
+				// join, cualquier asesor podía pedir el UUID de otro caso y leer las
+				// alertas (y su descripción) de la cartera de un compañero — mismo
+				// criterio que getCasoCobroById/getAlertasPromesas (Codex).
+				.innerJoin(
+					casosCobros,
+					and(
+						eq(casosCobros.id, notifications.relatedEntityId),
+						PERMISSIONS.canViewAllCasosCobros(context.userRole)
+							? undefined
+							: eq(casosCobros.responsableCobros, context.userId),
+					),
+				)
+				.where(
+					and(
+						eq(notifications.relatedEntityId, input.casoCobroId),
+						eq(notifications.relatedEntityType, "collection_case"),
+					),
+				)
+				.orderBy(desc(notifications.createdAt))
+				.limit(50);
+
+			// Agrupa por TIPO de alerta, no por fila: los jobs son diarios, así que
+			// "Caso sin contacto reciente" se repite un día tras otro y llenaba la
+			// tarjeta con 15 copias del mismo aviso. Se muestra la más reciente de
+			// cada tipo con cuántas veces se repitió — el asesor necesita saber
+			// QUÉ pasa y desde cuándo, no leer el mismo aviso 15 veces.
+			const porTipo = new Map<
+				string,
+				{
+					id: string;
+					titulo: string;
+					descripcion: string | null;
+					cobrosTipo: string | null;
+					status: string;
+					createdAt: Date;
+					repeticiones: number;
+					desde: Date;
+				}
+			>();
+			// `filasNotificacionCobros` inserta UNA FILA POR DESTINATARIO (asesor +
+			// supervisores) para el MISMO evento. Sin colapsarlas, una sola alerta
+			// escalada se contaba como varias repeticiones y podía quedarse con la
+			// redacción dirigida al supervisor (Codex). Se deduplica por evento
+			// (tipo + instante) prefiriendo la fila del usuario que está mirando,
+			// que es la que trae el texto escrito para él.
+			const porEvento = new Map<string, (typeof rows)[number]>();
+			for (const r of rows) {
+				if (!r.createdAt) continue;
+				const claveEvento = `${r.cobrosTipo ?? r.titulo}|${r.createdAt.getTime()}`;
+				const previa = porEvento.get(claveEvento);
+				if (!previa || r.assignedTo === context.userId) {
+					porEvento.set(claveEvento, r);
+				}
+			}
+
+			for (const r of porEvento.values()) {
+				if (!r.createdAt) continue;
+				// cobros_tipo es null en las notificaciones que no vienen de los jobs
+				// de cobros (asignaciones manuales, seguimientos): ahí agrupa el título.
+				const clave = r.cobrosTipo ?? r.titulo;
+				const previa = porTipo.get(clave);
+				if (!previa) {
+					porTipo.set(clave, {
+						...r,
+						createdAt: r.createdAt,
+						repeticiones: 1,
+						desde: r.createdAt,
+					});
+					continue;
+				}
+				previa.repeticiones += 1;
+				// `rows` viene ordenado desc, así que la primera es la más reciente y
+				// la última que se ve de cada tipo es la más antigua.
+				if (r.createdAt < previa.desde) previa.desde = r.createdAt;
+			}
+			return [...porTipo.values()].slice(0, 10);
 		}),
 
 	// LEGACY (tabla CRM `convenios_pago`, no cartera-back): nunca se llama desde

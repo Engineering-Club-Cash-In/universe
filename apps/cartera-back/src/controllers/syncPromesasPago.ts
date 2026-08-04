@@ -83,7 +83,15 @@ export async function syncPromesasPago(
 	promesas: PromesaSync[],
 	modo: "evento" | "reconciliacion_completa" = "evento",
 ): Promise<SyncPromesasResult> {
-	if (!Array.isArray(promesas) || promesas.length === 0) {
+	if (!Array.isArray(promesas)) {
+		return { success: false, message: "Lista de promesas vacía" };
+	}
+	// [] es inválido en modo "evento" (no hay nada que pushear), pero es un
+	// valor legítimo en "reconciliacion_completa": representa "hoy no hay
+	// NINGUNA promesa vigente en crm-server" — si no se deja pasar, la última
+	// promesa activa de un crédito no se puede limpiar cuando su push por
+	// evento se pierde (Codex review PR #1234, comentario #4).
+	if (promesas.length === 0 && modo !== "reconciliacion_completa") {
 		return { success: false, message: "Lista de promesas vacía" };
 	}
 
@@ -97,15 +105,18 @@ export async function syncPromesasPago(
 		return true;
 	});
 
-	if (promesasValidas.length === 0) {
+	if (promesasValidas.length === 0 && promesas.length > 0) {
 		return { success: false, message: `[ERROR] Ninguna promesa válida en el batch: ${noValidas.join(" | ")}` };
 	}
 
 	const sifcos = [...new Set(promesasValidas.map((p) => p.numero_credito_sifco))];
-	const creditosRows = await db
-		.select({ credito_id: creditos.credito_id, numero_credito_sifco: creditos.numero_credito_sifco })
-		.from(creditos)
-		.where(inArray(creditos.numero_credito_sifco, sifcos));
+	const creditosRows =
+		sifcos.length > 0
+			? await db
+					.select({ credito_id: creditos.credito_id, numero_credito_sifco: creditos.numero_credito_sifco })
+					.from(creditos)
+					.where(inArray(creditos.numero_credito_sifco, sifcos))
+			: [];
 
 	const creditoIdPorSifco = new Map<string, number>();
 	for (const c of creditosRows) {
@@ -171,7 +182,13 @@ export async function syncPromesasPago(
 		}
 	});
 
-	const fallaTotal = actualizadas === 0 && noEncontradas.length === promesasValidas.length;
+	// promesasValidas.length===0 con el batch también vacío es reconciliación
+	// legítima de "nada vigente hoy", no una falla — fallaTotal solo aplica
+	// cuando SÍ había promesas que sincronizar y ninguna resolvió.
+	const fallaTotal =
+		promesasValidas.length > 0 &&
+		actualizadas === 0 &&
+		noEncontradas.length === promesasValidas.length;
 
 	return {
 		success: true,

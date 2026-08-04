@@ -824,6 +824,12 @@ export const bucketsRouter = new Elysia()
     },
     {
       body: t.Object({
+        // CB-030 — sin minItems: [] es inválido en modo "evento" (nada que
+        // pushear, syncPromesasPago lo rechaza igual), pero es el valor
+        // legítimo de "reconciliacion_completa" cuando crm-server no tiene
+        // NINGUNA promesa vigente hoy — de otro modo la última promesa activa
+        // de un crédito nunca se puede limpiar si su push de resolución se
+        // pierde (Codex review PR #1234, comentario #4).
         promesas: t.Array(
           t.Object({
             contacto_cobros_id: t.String({ minLength: 1 }),
@@ -834,7 +840,6 @@ export const bucketsRouter = new Elysia()
             fecha_promesa: t.String(),
             activa: t.Boolean(),
           }),
-          { minItems: 1 },
         ),
         // CB-030 — "evento" (default, push de 1 promesa) no toca nada fuera de
         // su propia fila. "reconciliacion_completa" (job diario del CRM, el

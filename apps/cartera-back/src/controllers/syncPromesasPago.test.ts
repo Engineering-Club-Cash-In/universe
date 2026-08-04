@@ -199,5 +199,23 @@ describe("syncPromesasPago", () => {
 			expect(r.success).toBe(false);
 			expect(estado.updates).toHaveLength(0);
 		});
+
+		it("reconciliacion_completa con batch [] (nada vigente hoy) desactiva TODAS las filas activas (Codex PR #1234, comentario #4)", async () => {
+			prepararEscenario({ creditosRows: [] });
+
+			const r = await syncPromesasPago([], "reconciliacion_completa");
+
+			expect(r.success).toBe(true);
+			expect(r.actualizadas).toBe(0);
+			expect(r.fallaTotal).toBeUndefined(); // batch vacío legítimo, no es una falla
+			expect(estado.updates).toHaveLength(1);
+			expect(estado.updates[0].set).toMatchObject({ activa: false });
+		});
+
+		it("modo evento con batch [] sigue siendo inválido (no tiene sentido pushear nada)", async () => {
+			const r = await syncPromesasPago([], "evento");
+			expect(r.success).toBe(false);
+			expect(estado.updates).toHaveLength(0);
+		});
 	});
 });

@@ -20,7 +20,8 @@ import { carteraBackClient } from "./cartera-back-client";
 export type CobrosNotifTipo =
 	| "promesa_incumplida"
 	| "cliente_subido"
-	| "sin_contacto_3d";
+	| "sin_contacto_3d"
+	| "promesa_por_vencer";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del

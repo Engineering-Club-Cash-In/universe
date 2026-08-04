@@ -66,6 +66,7 @@ interface ColaItem {
 	slaHoy: boolean;
 	promesaHoy: boolean;
 	incumplida: boolean;
+	promesaProxima: boolean;
 	sinContacto: boolean;
 	diasSinContacto: number | null;
 }
@@ -94,6 +95,7 @@ type Filtro =
 	| "sla_hoy"
 	| "promesa_hoy"
 	| "incumplida"
+	| "promesa_proxima"
 	| "sin_contacto";
 
 const PER_PAGE_COLA = 25;
@@ -103,6 +105,7 @@ const FILTROS: Array<{ value: Filtro; label: string }> = [
 	{ value: "sla_hoy", label: "SLA vence hoy" },
 	{ value: "promesa_hoy", label: "Promesa vence hoy" },
 	{ value: "incumplida", label: "Promesa incumplida" },
+	{ value: "promesa_proxima", label: "Promesa próxima" },
 	{ value: "sin_contacto", label: "+5 días sin contacto" },
 ];
 
@@ -181,6 +184,14 @@ function CategoriaBadges({ item }: { item: ColaItem }) {
 					className="border-transparent bg-slate-200 text-[10px] text-slate-800 dark:bg-slate-800 dark:text-slate-300"
 				>
 					Incumplida
+				</Badge>
+			)}
+			{item.promesaProxima && (
+				<Badge
+					variant="outline"
+					className="border-transparent bg-sky-100 text-[10px] text-sky-800 dark:bg-sky-900/40 dark:text-sky-300"
+				>
+					Promesa próxima
 				</Badge>
 			)}
 			{item.sinContacto && (
@@ -299,7 +310,7 @@ function ColaDiaPage() {
 										<Button
 											variant="outline"
 											size="sm"
-											className="gap-2 border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 dark:hover:bg-indigo-900/60 font-semibold"
+											className="gap-2 border-indigo-200 bg-indigo-50/80 font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
 											onClick={() => setIsSlaModalOpen(true)}
 										>
 											<Clock className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />

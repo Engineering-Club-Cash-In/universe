@@ -260,6 +260,11 @@ export const contactosCobros = pgTable(
 		// Próximo seguimiento
 		requiereSeguimiento: boolean("requiere_seguimiento").default(false),
 		fechaProximoContacto: timestamp("fecha_proximo_contacto"),
+		// CB-029: "alerta programada" — cuándo avisar al asesor ANTES de que venza
+		// la promesa (default = fecha prometida − 1 día, editable). El job diario
+		// dispara la notificación promesa_por_vencer cuando fecha_alerta = hoy (GT).
+		// Solo aplica a filas con estadoContacto = 'promesa_pago'.
+		fechaAlerta: timestamp("fecha_alerta"),
 		// CB-025: qué hacer en el próximo contacto (fechaProximoContacto solo
 		// dice CUÁNDO, no QUÉ). Texto libre a propósito — el AC del ticket solo
 		// pide "próximo paso", sin catálogo cerrado (ver nota en

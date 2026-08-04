@@ -61,6 +61,9 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	"promesa_incumplida",
 	"cliente_subido",
 	"sin_contacto_3d",
+	// CB-029: recordatorio proactivo al asesor de una promesa que está por vencer
+	// (se dispara el día de su fecha_alerta, default D-1). Solo al asesor.
+	"promesa_por_vencer",
 ]);
 
 // Notifications table

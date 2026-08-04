@@ -432,6 +432,12 @@ export const createContactoCobrosSchema = z
 		compromisosPago: z.string().optional(),
 		requiereSeguimiento: z.boolean().default(false),
 		fechaProximoContacto: z.date().optional(),
+		// CB-029: "alerta programada" — cuándo avisar al asesor antes del
+		// vencimiento (default D-1 lo pone el modal). Solo para promesa_pago.
+		fechaAlerta: z.date().optional(),
+		// CB-029: si viene, se EDITA esa promesa activa en vez de crear una nueva
+		// (una sola promesa activa por caso; el modal lo pasa al abrir en edición).
+		promesaContactoId: z.string().uuid().optional(),
 		// CB-025: qué hacer, no cuándo (eso es fechaProximoContacto). Texto
 		// libre, opcional — sin catálogo cerrado (ver nota en
 		// estadoContactoEnum sobre catálogos pendientes de negocio).
@@ -506,7 +512,47 @@ export const createContactoCobrosSchema = z
 			message: "Debes indicar ambas cuotas (desde y hasta) o ninguna",
 			path: ["cuotaFin"],
 		},
+	)
+	// CB-029 (Codex PR #1232): la alerta programada no puede ser POSTERIOR a la
+	// fecha prometida — una alerta post-vencimiento nunca dispararía (la promesa
+	// ya sería incumplida/cumplida). El modal ya lo capa en el picker.
+	.refine(
+		(v) =>
+			v.fechaAlerta == null ||
+			v.fechaProximoContacto == null ||
+			v.fechaAlerta <= v.fechaProximoContacto,
+		{
+			message: "La alerta no puede ser posterior a la fecha prometida",
+			path: ["fechaAlerta"],
+		},
 	);
+
+// CB-029: la promesa ACTIVA de un caso = pendiente cuya fecha prometida no ha
+// pasado (día GT). A lo sumo una — sirve para el guard "una sola activa por
+// caso". El frontend detecta la misma con el estado ya recalculado.
+// estado_promesa NULL (promesa vieja aún sin evaluar) cuenta como pendiente —
+// mismo criterio que getColaDia/getEstadoPromesasPago (`estadoPromesa ??
+// 'pendiente'`); sin el isNull, un caso con una promesa NULL futura burlaba el
+// guard y se podía insertar una segunda activa (Codex PR #1232).
+async function promesaActivaDelCaso(casoCobroId: string) {
+	const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
+	const [row] = await db
+		.select({ id: contactosCobros.id })
+		.from(contactosCobros)
+		.where(
+			and(
+				eq(contactosCobros.casoCobroId, casoCobroId),
+				eq(contactosCobros.estadoContacto, "promesa_pago"),
+				or(
+					eq(contactosCobros.estadoPromesa, "pendiente"),
+					isNull(contactosCobros.estadoPromesa),
+				),
+				gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
+			),
+		)
+		.limit(1);
+	return row ?? null;
+}
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
@@ -1448,31 +1494,70 @@ export const cobrosRouter = {
 	createContactoCobros: cobrosProcedure
 		.input(createContactoCobrosSchema)
 		.handler(async ({ input, context }) => {
-			const estadoPromesa =
-				input.estadoContacto === "promesa_pago" ? "pendiente" : undefined;
+			// promesaContactoId no es columna: se separa del payload de escritura.
+			const { promesaContactoId, ...datos } = input;
+			const esPromesa = datos.estadoContacto === "promesa_pago";
+			const estadoPromesa = esPromesa ? ("pendiente" as const) : undefined;
 
-			const nuevoContacto = await db
-				.insert(contactosCobros)
-				.values({
-					...input,
-					estadoPromesa,
-					realizadoPor: context.userId,
-				})
-				.returning();
+			const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
+			let filas: (typeof contactosCobros.$inferSelect)[];
+			if (promesaContactoId) {
+				// CB-029: editar la promesa activa EN SITIO (una sola por caso). Se
+				// re-abre a 'pendiente' — el job/getEstadoPromesasPago la re-evalúa.
+				// El WHERE exige que la fila SIGA activa (pendiente/NULL y fecha no
+				// pasada): un promesaContactoId viejo (la promesa ya se cerró o venció
+				// entre que se abrió el modal y se guardó) NO debe reabrir/sobrescribir
+				// una promesa histórica cerrada (Codex PR #1232).
+				filas = await db
+					.update(contactosCobros)
+					.set({ ...datos, estadoPromesa })
+					.where(
+						and(
+							eq(contactosCobros.id, promesaContactoId),
+							eq(contactosCobros.casoCobroId, datos.casoCobroId),
+							eq(contactosCobros.estadoContacto, "promesa_pago"),
+							or(
+								eq(contactosCobros.estadoPromesa, "pendiente"),
+								isNull(contactosCobros.estadoPromesa),
+							),
+							gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
+						),
+					)
+					.returning();
+				if (filas.length === 0) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"La promesa ya no está activa (fue cerrada o venció); registra una nueva.",
+					});
+				}
+			} else {
+				// CB-029: una sola promesa activa por caso — si ya hay una, no se crea
+				// otra (el modal debió abrir en edición y pasar promesaContactoId).
+				if (esPromesa && (await promesaActivaDelCaso(datos.casoCobroId))) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Ya existe una promesa activa para este caso; editala en vez de crear otra.",
+					});
+				}
+				filas = await db
+					.insert(contactosCobros)
+					.values({ ...datos, estadoPromesa, realizadoPor: context.userId })
+					.returning();
+			}
 
 			// Actualizar próximo contacto en el caso si se especifica
-			if (input.fechaProximoContacto) {
+			if (datos.fechaProximoContacto) {
 				await db
 					.update(casosCobros)
 					.set({
-						proximoContacto: input.fechaProximoContacto,
-						metodoContactoProximo: input.metodoContacto,
+						proximoContacto: datos.fechaProximoContacto,
+						metodoContactoProximo: datos.metodoContacto,
 						updatedAt: new Date(),
 					})
-					.where(eq(casosCobros.id, input.casoCobroId));
+					.where(eq(casosCobros.id, datos.casoCobroId));
 			}
 
-			return nuevoContacto[0];
+			return filas[0];
 		}),
 
 	// Obtener historial de contactos de un caso
@@ -1502,6 +1587,7 @@ export const cobrosRouter = {
 					compromisosPago: contactosCobros.compromisosPago,
 					requiereSeguimiento: contactosCobros.requiereSeguimiento,
 					fechaProximoContacto: contactosCobros.fechaProximoContacto,
+					fechaAlerta: contactosCobros.fechaAlerta,
 					proximoPaso: contactosCobros.proximoPaso,
 					cuotaInicio: contactosCobros.cuotaInicio,
 					cuotaFin: contactosCobros.cuotaFin,
@@ -1518,6 +1604,35 @@ export const cobrosRouter = {
 				.limit(input.limit);
 
 			return contactos;
+		}),
+
+	// CB-029 (dashboard): resumen simple de promesas de pago del EQUIPO (casos
+	// activos). 3 contadores globales que el dashboard pinta como tiles
+	// clickeables hacia la Cola del Día. Sin scope por asesor (MVP simple).
+	getResumenPromesas: cobrosProcedure
+		.input(z.object({}).optional())
+		.handler(async () => {
+			const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
+			const finHoyGt = new Date(inicioHoyGt.getTime() + 24 * 60 * 60 * 1000);
+			const [row] = await db
+				.select({
+					activas: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'pendiente' and ${contactosCobros.fechaProximoContacto} >= ${inicioHoyGt})`,
+					vencenHoy: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'pendiente' and ${contactosCobros.fechaProximoContacto} >= ${inicioHoyGt} and ${contactosCobros.fechaProximoContacto} < ${finHoyGt})`,
+					incumplidas: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'incumplida')`,
+				})
+				.from(contactosCobros)
+				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
+				.where(
+					and(
+						eq(contactosCobros.estadoContacto, "promesa_pago"),
+						eq(casosCobros.activo, true),
+					),
+				);
+			return {
+				activas: Number(row?.activas ?? 0),
+				vencenHoy: Number(row?.vencenHoy ?? 0),
+				incumplidas: Number(row?.incumplidas ?? 0),
+			};
 		}),
 
 	// LEGACY (tabla CRM `convenios_pago`, no cartera-back): nunca se llama desde
@@ -2522,6 +2637,7 @@ export const cobrosRouter = {
 									casoCobroId: contactosCobros.casoCobroId,
 									estadoPromesa: contactosCobros.estadoPromesa,
 									fechaProximoContacto: contactosCobros.fechaProximoContacto,
+									fechaAlerta: contactosCobros.fechaAlerta,
 								})
 								.from(contactosCobros)
 								.where(
@@ -2558,6 +2674,7 @@ export const cobrosRouter = {
 					Array<{
 						estadoPromesa: "pendiente" | "incumplida";
 						fechaPrometida: Date;
+						fechaAlerta?: Date | null;
 					}>
 				>();
 				for (const p of promesas) {
@@ -2571,6 +2688,7 @@ export const cobrosRouter = {
 					lista.push({
 						estadoPromesa,
 						fechaPrometida: p.fechaProximoContacto as Date,
+						fechaAlerta: p.fechaAlerta,
 					});
 					promesasPorCaso.set(p.casoCobroId, lista);
 				}
@@ -2664,6 +2782,7 @@ export const cobrosRouter = {
 							slaHoy: clasificacion.slaHoy,
 							promesaHoy: clasificacion.promesaHoy,
 							incumplida: clasificacion.incumplida,
+							promesaProxima: clasificacion.promesaProxima,
 							sinContacto: clasificacion.sinContacto,
 							diasSinContacto,
 						}),

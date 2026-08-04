@@ -155,6 +155,7 @@ describe("clasificarCreditoColaDia — solapes", () => {
 			slaHoy: true,
 			promesaHoy: true,
 			incumplida: true,
+			promesaProxima: false,
 			sinContacto: true,
 		});
 	});
@@ -167,6 +168,7 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 				slaHoy: false,
 				promesaHoy: false,
 				incumplida: false,
+				promesaProxima: false,
 				sinContacto: false,
 			}),
 		).toBe(false);
@@ -178,6 +180,7 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 				slaHoy: true,
 				promesaHoy: false,
 				incumplida: false,
+				promesaProxima: false,
 				sinContacto: false,
 			}),
 		).toBe(true);
@@ -189,6 +192,7 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 				slaHoy: false,
 				promesaHoy: false,
 				incumplida: false,
+				promesaProxima: false,
 				sinContacto: true,
 			}),
 		).toBe(true);
@@ -199,6 +203,7 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 			slaHoy: true,
 			promesaHoy: false,
 			incumplida: false,
+			promesaProxima: false,
 			sinContacto: false,
 		};
 		expect(calificaParaFiltro(c, "sla_hoy")).toBe(true);
@@ -212,6 +217,7 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 			slaHoy: true,
 			promesaHoy: true,
 			incumplida: true,
+			promesaProxima: false,
 			sinContacto: false,
 		};
 		expect(calificaParaFiltro(c, "sin_contacto")).toBe(false);
@@ -225,6 +231,7 @@ describe("ordenColaDia", () => {
 				slaHoy: true,
 				promesaHoy: true,
 				incumplida: true,
+				promesaProxima: false,
 				sinContacto: true,
 			}),
 		).toBe(0);
@@ -233,6 +240,7 @@ describe("ordenColaDia", () => {
 				slaHoy: false,
 				promesaHoy: true,
 				incumplida: true,
+				promesaProxima: false,
 				sinContacto: true,
 			}),
 		).toBe(1);
@@ -241,16 +249,72 @@ describe("ordenColaDia", () => {
 				slaHoy: false,
 				promesaHoy: false,
 				incumplida: true,
+				promesaProxima: false,
 				sinContacto: true,
 			}),
 		).toBe(2);
+		// CB-029: promesa proxima va debajo de las urgentes (3), arriba de sin contacto (4).
 		expect(
 			ordenColaDia({
 				slaHoy: false,
 				promesaHoy: false,
 				incumplida: false,
+				promesaProxima: true,
 				sinContacto: true,
 			}),
 		).toBe(3);
+		expect(
+			ordenColaDia({
+				slaHoy: false,
+				promesaHoy: false,
+				incumplida: false,
+				promesaProxima: false,
+				sinContacto: true,
+			}),
+		).toBe(4);
+	});
+});
+
+describe("clasificarCreditoColaDia - promesa proxima (CB-029)", () => {
+	test("promesa futura con alerta ya caida -> promesaProxima, no promesaHoy", () => {
+		const MANANA = new Date("2026-08-05T06:00:00.000Z");
+		const HOY_ALERTA = new Date("2026-08-04T06:00:00.000Z");
+		const c = clasificarCreditoColaDia(
+			{
+				fechaLimiteSla: null,
+				contactadoHoy: false,
+				promesas: [
+					{
+						estadoPromesa: "pendiente",
+						fechaPrometida: MANANA,
+						fechaAlerta: HOY_ALERTA,
+					},
+				],
+				diasSinContacto: null,
+			},
+			HOY_ALERTA,
+		);
+		expect(c.promesaProxima).toBe(true);
+		expect(c.promesaHoy).toBe(false);
+		expect(c.incumplida).toBe(false);
+	});
+
+	test("promesa futura cuya alerta AUN no cae -> no entra a la cola", () => {
+		const EN_TRES_DIAS = new Date("2026-08-07T06:00:00.000Z");
+		const HOY = new Date("2026-08-04T06:00:00.000Z");
+		const c = clasificarCreditoColaDia(
+			{
+				fechaLimiteSla: null,
+				contactadoHoy: false,
+				promesas: [
+					{ estadoPromesa: "pendiente", fechaPrometida: EN_TRES_DIAS },
+				],
+				diasSinContacto: null,
+			},
+			HOY,
+		);
+		// fecha_alerta null -> default D-1 = 2026-08-06, aun futura respecto a hoy.
+		expect(c.promesaProxima).toBe(false);
+		expect(c.promesaHoy).toBe(false);
 	});
 });

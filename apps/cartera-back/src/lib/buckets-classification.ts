@@ -1,5 +1,21 @@
 import { sql } from "drizzle-orm";
+import { toZonedTime } from "date-fns-tz";
 import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
+
+// CB-030 — "hoy" en zona Guatemala, como string YYYY-MM-DD. Única fuente de
+// verdad para comparar contra `fecha_promesa` (columna date) en TODO lugar
+// donde se decide si una promesa sigue vigente — isOverdueInstallmentForMora
+// (latefee.ts, el freeze real) y getPromesaActivaPorCredito
+// (syncPromesasPago.ts, solo lectura para carteraFront). Antes cada uno
+// calculaba "hoy" por su cuenta (uno en zona GT, otro en UTC) — desalineados
+// cerca de medianoche GT (=06:00 UTC), la promesa podía verse vigente en un
+// lado y vencida en el otro durante esa ventana.
+export function hoyGtISO(): string {
+  const zona = "America/Guatemala";
+  const hoy = toZonedTime(new Date(), zona);
+  hoy.setHours(0, 0, 0, 0);
+  return hoy.toISOString().slice(0, 10);
+}
 
 // Fila del catálogo de buckets relevante para la derivación.
 export type BucketCatalogo = {

@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { client, db } from "../database";
-import { asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
+import { asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, promesas_pago_espejo, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -24,14 +24,51 @@ type MoraEventoOrigen =
 
 export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
 
+// CB-030 — promesa vigente para el freeze por cuota. Espejo local de una fila
+// de contactos_cobros (crm-server, otra DB) — ver promesas_pago_espejo en
+// schema.ts y el comentario ahí para el porqué de esta duplicación.
+export type PromesaVigente = {
+  cuota_inicio: number | null;
+  cuota_fin: number | null;
+  fecha_promesa: Date | string;
+};
+
+// CB-030 — ¿esta cuota está cubierta por alguna promesa vigente en la lista?
+// Vigente = fecha_promesa NO ha pasado (>= hoy, mismo criterio de zona que el
+// resto de esta función). Rango inclusivo en ambos extremos. Promesas sin
+// rango (cuota_inicio/cuota_fin null) NO cubren nada — el CRM exige ambos
+// bounds o ninguno, así que "ninguno" es una promesa de solo-mora, sin cuotas
+// que congelar aquí (ver §incluyeMora en procesarMoras).
+function cuotaCubiertaPorPromesa(
+  numeroCuota: number | undefined,
+  promesas: PromesaVigente[] | undefined,
+  fechaHoyZonificada: Date,
+): boolean {
+  if (!promesas || promesas.length === 0 || numeroCuota == null) return false;
+  const zona = "America/Guatemala";
+  return promesas.some((p) => {
+    if (p.cuota_inicio == null || p.cuota_fin == null) return false;
+    if (numeroCuota < p.cuota_inicio || numeroCuota > p.cuota_fin) return false;
+    const fechaPromesa = toZonedTime(p.fecha_promesa, zona);
+    fechaPromesa.setHours(0, 0, 0, 0);
+    return fechaPromesa >= fechaHoyZonificada;
+  });
+}
+
 export function isOverdueInstallmentForMora(
   cuota: {
+    numero_cuota?: number | null;
     fecha_vencimiento: Date | string;
     pagado: boolean | null;
     hasPaidPayment?: boolean | null;
     statusCredit?: string | null;
   },
   hoy: Date,
+  // CB-030 — Map<credito_id, promesas vigentes de ESE crédito>. Opcional:
+  // sin este parámetro el comportamiento es IDÉNTICO al de antes (callers/
+  // tests existentes no lo pasan y no deben cambiar de resultado).
+  promesasPorCredito?: Map<number, PromesaVigente[]>,
+  creditoId?: number,
 ) {
   const zona = "America/Guatemala";
   const fechaVenc = toZonedTime(cuota.fecha_vencimiento, zona);
@@ -44,7 +81,15 @@ export function isOverdueInstallmentForMora(
   const isUnpaid = cuota.pagado === false && cuota.hasPaidPayment !== true;
   const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
 
-  return isOverdue && isUnpaid && isEligible;
+  const promesasDelCredito =
+    creditoId != null ? promesasPorCredito?.get(creditoId) : undefined;
+  const congeladaPorPromesa = cuotaCubiertaPorPromesa(
+    cuota.numero_cuota ?? undefined,
+    promesasDelCredito,
+    fechaHoy,
+  );
+
+  return isOverdue && isUnpaid && isEligible && !congeladaPorPromesa;
 }
 
 // ============================================================
@@ -285,19 +330,45 @@ export async function createMora({
     // 🔥 Conteo REAL de cuotas vencidas (derivado de cuotas_credito), NO el cuotas_atrasadas
     // del request. Confiar en el valor enviado permitía inflarlo para esquivar el guard de
     // cordura: p.ej. Q27,953.44 pasaba con cuotas_atrasadas: 7 porque el umbral se volvía
-    // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras (isOverdueInstallmentForMora).
-    const ovRes = await db.execute<any>(sql`
-      SELECT COUNT(*)::int AS n
-      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
-      WHERE cu.credito_id = ${credito_id}
-        AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
-        AND cu.pagado = false
-        AND NOT EXISTS (
-          SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
-          WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0)`);
-    const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
+    // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras — reusa
+    // isOverdueInstallmentForMora en vez de reimplementar el filtro en SQL crudo, para que
+    // este path manual también excluya cuotas congeladas por una promesa de pago vigente
+    // (CB-030): antes esta query no tenía el filtro de promesas_pago_espejo que sí aplica
+    // el cron, así que un crédito con cuotas congeladas contaba distinto acá que en procesarMoras.
+    const hoyMora = new Date();
+    const [cuotasDelCredito, promesasDelCredito] = await Promise.all([
+      db
+        .select({
+          numero_cuota: cuotas_credito.numero_cuota,
+          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+          pagado: cuotas_credito.pagado,
+          hasPaidPayment: sql<boolean>`EXISTS (
+            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
+            WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+              AND pc."paymentFalse" = false AND pc.pagado = true
+              AND pc.validation_status IN ('validated', 'no_required')
+              AND COALESCE(pc.monto_aplicado, 0) > 0)`,
+        })
+        .from(cuotas_credito)
+        .where(eq(cuotas_credito.credito_id, credito_id)),
+      db
+        .select({
+          cuota_inicio: promesas_pago_espejo.cuota_inicio,
+          cuota_fin: promesas_pago_espejo.cuota_fin,
+          fecha_promesa: promesas_pago_espejo.fecha_promesa,
+        })
+        .from(promesas_pago_espejo)
+        .where(and(eq(promesas_pago_espejo.credito_id, credito_id), eq(promesas_pago_espejo.activa, true))),
+    ]);
+    const promesasPorCredito = new Map<number, PromesaVigente[]>([[credito_id, promesasDelCredito]]);
+    const cuotasReales = cuotasDelCredito.filter((c) =>
+      isOverdueInstallmentForMora(
+        { ...c, statusCredit: credito.statusCredit },
+        hoyMora,
+        promesasPorCredito,
+        credito_id,
+      ),
+    ).length;
 
     // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
     // (el caller no puede inflar el conteo para disparar el umbral del guard).
@@ -744,11 +815,37 @@ export async function procesarMoras() {
     console.log("║ [JOB] 🚀 INICIANDO PROCESO DE MORAS (UPSERT)");
     console.log("╚════════════════════════════════════════════════════════════\n");
 
+    // CB-030 — promesas de pago vigentes (espejo local, ver schema.ts), Map
+    // por credito_id para el freeze por cuota en isOverdueInstallmentForMora.
+    // Solo `activa = true`: una vez cumplida/cancelada, la fila deja de
+    // filtrar aquí sin necesidad de borrarla (rastro de auditoría).
+    const promesasActivas = await db
+      .select({
+        credito_id: promesas_pago_espejo.credito_id,
+        cuota_inicio: promesas_pago_espejo.cuota_inicio,
+        cuota_fin: promesas_pago_espejo.cuota_fin,
+        fecha_promesa: promesas_pago_espejo.fecha_promesa,
+      })
+      .from(promesas_pago_espejo)
+      .where(eq(promesas_pago_espejo.activa, true));
+
+    const promesasPorCredito = new Map<number, PromesaVigente[]>();
+    for (const p of promesasActivas) {
+      const lista = promesasPorCredito.get(p.credito_id) ?? [];
+      lista.push({
+        cuota_inicio: p.cuota_inicio,
+        cuota_fin: p.cuota_fin,
+        fecha_promesa: p.fecha_promesa,
+      });
+      promesasPorCredito.set(p.credito_id, lista);
+    }
+
     // 1. Get all installments WITH PROPER JOIN
     const cuotas = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         credito_id: cuotas_credito.credito_id,
+        numero_cuota: cuotas_credito.numero_cuota, // CB-030: rango de la promesa
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
         statusCredit: creditos.statusCredit,
@@ -776,8 +873,11 @@ export async function procesarMoras() {
 
     console.log(`[DEBUG] Total installments fetched: ${cuotas.length}`);
 
-    // 2. Filter overdue installments (excluyendo estados que no aplican)
-    const cuotasVencidas = cuotas.filter((c) => isOverdueInstallmentForMora(c, hoy));
+    // 2. Filter overdue installments (excluyendo estados que no aplican y
+    //    cuotas congeladas por una promesa de pago vigente — CB-030).
+    const cuotasVencidas = cuotas.filter((c) =>
+      isOverdueInstallmentForMora(c, hoy, promesasPorCredito, c.credito_id),
+    );
 
     console.log(`[DEBUG] Overdue installments found: ${cuotasVencidas.length}`);
 

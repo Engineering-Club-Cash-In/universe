@@ -379,6 +379,140 @@ describe("isOverdueInstallmentForMora", () => {
   });
 });
 
+// CB-030 — freeze por cuota cuando hay promesa de pago vigente
+describe("isOverdueInstallmentForMora — freeze por promesa (CB-030)", () => {
+  const hoy = new Date("2026-05-26T06:00:00.000Z");
+  const cuotaBase = {
+    fecha_vencimiento: new Date("2026-05-15T06:00:00.000Z"), // vencida
+    pagado: false,
+    hasPaidPayment: false,
+    statusCredit: "MOROSO",
+  };
+
+  it("sin Map de promesas (parámetro omitido) → comportamiento idéntico al actual", () => {
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 5 },
+      hoy,
+    );
+    expect(result).toBe(true);
+  });
+
+  it("promesa vigente cubre esta cuota → NO cuenta como vencida (congelada)", () => {
+    const promesas = new Map([
+      [1, [{ cuota_inicio: 4, cuota_fin: 6, fecha_promesa: "2026-05-30" }]],
+    ]);
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
+      hoy,
+      promesas,
+      1,
+    );
+    expect(result).toBe(false);
+  });
+
+  it("promesa vigente cubre OTRA cuota → esta SÍ cuenta como vencida", () => {
+    const promesas = new Map([
+      [1, [{ cuota_inicio: 4, cuota_fin: 6, fecha_promesa: "2026-05-30" }]],
+    ]);
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 8, credito_id: 1 },
+      hoy,
+      promesas,
+      1,
+    );
+    expect(result).toBe(true);
+  });
+
+  it("promesa VENCIDA (fecha_promesa < hoy) sin pago → deja de congelar, cuenta como vencida", () => {
+    const promesas = new Map([
+      [1, [{ cuota_inicio: 4, cuota_fin: 6, fecha_promesa: "2026-05-20" }]],
+    ]);
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
+      hoy,
+      promesas,
+      1,
+    );
+    expect(result).toBe(true);
+  });
+
+  it("cuota exactamente en cuota_inicio → congelada (bound inclusivo)", () => {
+    const promesas = new Map([
+      [1, [{ cuota_inicio: 5, cuota_fin: 6, fecha_promesa: "2026-05-30" }]],
+    ]);
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
+      hoy,
+      promesas,
+      1,
+    );
+    expect(result).toBe(false);
+  });
+
+  it("cuota exactamente en cuota_fin → congelada (bound inclusivo)", () => {
+    const promesas = new Map([
+      [1, [{ cuota_inicio: 4, cuota_fin: 5, fecha_promesa: "2026-05-30" }]],
+    ]);
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
+      hoy,
+      promesas,
+      1,
+    );
+    expect(result).toBe(false);
+  });
+
+  it("promesa sin rango (cuota_inicio/cuota_fin null) → NO congela ninguna cuota", () => {
+    const promesas = new Map([
+      [1, [{ cuota_inicio: null, cuota_fin: null, fecha_promesa: "2026-05-30" }]],
+    ]);
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
+      hoy,
+      promesas,
+      1,
+    );
+    expect(result).toBe(true);
+  });
+
+  it("Map de promesas vacío para este crédito → comportamiento normal", () => {
+    const promesas = new Map<number, any[]>();
+    const result = isOverdueInstallmentForMora(
+      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
+      hoy,
+      promesas,
+      1,
+    );
+    expect(result).toBe(true);
+  });
+
+  it('"salto directo": 2 cuotas venciendo durante la ventana de promesa, luego la promesa vence sin pago → ambas cuentan de una vez', () => {
+    // Simula la corrida DESPUÉS de que la promesa (fecha_promesa=2026-05-20)
+    // ya venció sin pago: el Map de promesas vigentes viene VACÍO para este
+    // crédito (la promesa dejó de ser vigente, ya no se pasa/ya no aplica).
+    // cuotasVencidas debe reflejar TODAS las cuotas realmente vencidas —
+    // nunca hubo acumulación incremental que "recuperar": el conteo siempre
+    // se calcula desde fechas reales.
+    const cuota5 = {
+      ...cuotaBase,
+      numero_cuota: 5,
+      fecha_vencimiento: new Date("2026-05-16T06:00:00.000Z"),
+      credito_id: 1,
+    };
+    const cuota6 = {
+      ...cuotaBase,
+      numero_cuota: 6,
+      fecha_vencimiento: new Date("2026-05-18T06:00:00.000Z"),
+      credito_id: 1,
+    };
+    const promesasVencidasSinEfecto = new Map<number, any[]>(); // ya no vigente
+    const cuotas = [cuota5, cuota6].filter((c) =>
+      isOverdueInstallmentForMora(c, hoy, promesasVencidasSinEfecto, 1),
+    );
+    expect(cuotas.length).toBe(2); // salto directo: ambas cuentan, no incremental
+  });
+});
+
 // FASE 3 (COBROS-02) — reparto de asesor al entrar a un bucket
 describe("elegirAsesorParaBucket", () => {
   it("pool vacío → null (el crédito conserva su asesor)", () => {

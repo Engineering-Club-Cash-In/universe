@@ -19,6 +19,11 @@ import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
 import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
+import {
+  getPromesaActivaPorCredito,
+  syncPromesasPago,
+  type PromesaSync,
+} from "../controllers/syncPromesasPago";
 import { StatusCredit } from "../database/db/schema";
 
 // Estados DENTRO del funnel operativo: ACTIVO/MOROSO clasifican por cuotas de la
@@ -789,4 +794,86 @@ export const bucketsRouter = new Elysia()
         error: String(err),
       };
     }
-  });
+  })
+
+  // CB-030 — sync de promesas de pago vigentes (espejo local, contactos_cobros
+  // vive en la DB de crm-server). Un solo endpoint sirve dos disparadores:
+  // push por evento (array de 1) + reconciliación diaria (array completo,
+  // idempotente por contacto_cobros_id) — ver syncPromesasPago.ts.
+  .put(
+    "/promesas-pago/sync",
+    async ({ body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const result = await syncPromesasPago(body.promesas as PromesaSync[]);
+        if (!result.success) {
+          set.status = 400;
+          return result;
+        }
+        return result;
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo sincronizar promesas de pago",
+          error: String(err),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        promesas: t.Array(
+          t.Object({
+            contacto_cobros_id: t.String({ minLength: 1 }),
+            numero_credito_sifco: t.String({ minLength: 1 }),
+            cuota_inicio: t.Nullable(t.Number()),
+            cuota_fin: t.Nullable(t.Number()),
+            incluye_mora: t.Boolean(),
+            fecha_promesa: t.String(),
+            activa: t.Boolean(),
+          }),
+          { minItems: 1 },
+        ),
+      }),
+      detail: {
+        summary: "Sincronizar promesas de pago vigentes desde crm-server",
+        description:
+          "Upsert idempotente por contacto_cobros_id. Resuelve numero_credito_sifco → credito_id. Usado por el push por evento y por el job de reconciliación diario del CRM.",
+        tags: ["Buckets", "Promesas de Pago"],
+      },
+    },
+  )
+
+  // CB-030 — lectura para carteraFront: ¿este crédito tiene una promesa
+  // vigente? Solo lectura, cualquier usuario autenticado (authMiddleware del
+  // .use() de arriba ya cubre esto) — no requiere requireBucketsRole, es la
+  // misma pantalla de detalle de crédito que ya ve un ASESOR.
+  .get(
+    "/promesas-pago/activa/:credito_id",
+    async ({ params, set }: any) => {
+      const creditoId = Number(params.credito_id);
+      if (!Number.isInteger(creditoId) || creditoId <= 0) {
+        set.status = 400;
+        return { success: false, message: "[ERROR] credito_id inválido" };
+      }
+      try {
+        const promesa = await getPromesaActivaPorCredito(creditoId);
+        return { success: true, data: promesa };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo consultar la promesa de pago",
+          error: String(err),
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Promesa de pago vigente de un crédito (o null)",
+        description:
+          "Solo lectura, para mostrar el aviso 'Promesa Pago: fecha' en el detalle del crédito (carteraFront). Vigente = activa y fecha_promesa >= hoy.",
+        tags: ["Buckets", "Promesas de Pago"],
+      },
+    },
+  );

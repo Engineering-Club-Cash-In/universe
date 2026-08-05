@@ -30,6 +30,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       nombre: "",
       dpi: undefined,
       emite_factura: false,
+      descuenta_impuestos: false,
       reinversion: false,
       banco: null,
       tipo_cuenta: "",
@@ -60,6 +61,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         nombre: "",
         dpi: undefined,
         emite_factura: false,
+        descuenta_impuestos: false,
         reinversion: false,
         banco: null,
         tipo_cuenta: "",
@@ -300,6 +302,14 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                   className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                 />
                 Emite Factura
+              </label>
+              <label className="flex items-center gap-2 text-blue-900 text-sm">
+                <input
+                  type="checkbox"
+                  {...register("descuenta_impuestos")}
+                  className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                Descuenta impuestos
               </label>
             </div>
           </div>

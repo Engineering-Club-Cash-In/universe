@@ -15,6 +15,7 @@ export interface InvestorPayload {
   inversionista_id?: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: number | null;
   dpi:number | null;
@@ -30,6 +31,7 @@ export interface InvestorResponse {
   inversionista_id: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
@@ -936,6 +938,7 @@ export interface InversionistaConCreditos {
   inversionista: string;
   nombre_inversionista: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   creditos: CreditoInversionistaData[];
   subtotal: SubtotalInversionista;
     reinversion: boolean;           // 🔹 nuevo

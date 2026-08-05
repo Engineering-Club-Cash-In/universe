@@ -35,6 +35,7 @@ import {
   puedeOmitirGuardTodasCubiertas,
   capitalSuprimidoPorConvenio,
   debeRechazarAbonoCapitalNoAplicado,
+  debeInsertarFilaParcialCuota,
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
   getRequestedInstallmentFloor,
@@ -1562,6 +1563,9 @@ export const insertPayment = async ({ body, set }: any) => {
         // Insertar o actualizar pago
         type PagoCredito = typeof pagos_credito.$inferSelect;
         let pagoInsertado: PagoCredito | undefined;
+        // Cuota que no cobró nada: no se escribe fila ni boleta y tampoco se
+        // resincronizan sus `*_restante` (ver `debeInsertarFilaParcialCuota`).
+        let filaParcialOmitida = false;
 
         if (existingPago) {
           if (
@@ -1744,6 +1748,25 @@ export const insertPayment = async ({ body, set }: any) => {
                   }))
                 );
               }
+            } else if (
+              !debeInsertarFilaParcialCuota({
+                totalPagado,
+                mora: moraParaPago,
+                otros: otrosParaPago,
+              })
+            ) {
+              // ── Cuota que no absorbió NADA (crédito 8717) ─────────────────
+              // Todos los abonos quedaron en 0 tras el clamp por saldo neto y
+              // no hay mora ni otros que cobrar aquí. Insertar la fila dejaría
+              // un `pending` con `monto_aplicado = 0` (invalidable para
+              // siempre por /aplicar-pago) más la boleta duplicada. Se omite
+              // la fila, la boleta, el conteo de parciales y la sincronización
+              // de `*_restante`; el disponible queda intacto para la siguiente
+              // cuota del cascadeo.
+              filaParcialOmitida = true;
+              console.log(
+                `⏭️ Cuota ${cuota.cuotas_credito.numero_cuota} sin nada que cobrar (aplicado 0, sin mora ni otros): no se inserta fila`
+              );
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
@@ -1873,23 +1896,28 @@ export const insertPayment = async ({ body, set }: any) => {
           // se distribuyen con la fila vigente (la última, que ya trae el saldo
           // correcto) y los rubros planos se netean contra objetivos+Σmonto_
           // aplicado, no contra estos saldos.
-          await db
-            .update(pagos_credito)
-            .set({
-              capital_restante: nuevo_capital_restante.toString(),
-              interes_restante: nuevo_interes_restante.toString(),
-              iva_12_restante: nuevo_iva_restante.toString(),
-              seguro_restante: nuevo_seguro_restante.toString(),
-              gps_restante: nuevo_gps_restante.toString(),
-              membresias: nuevo_membresias_restante.toString(),
-            })
-            .where(
-              and(
-                eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
-                eq(pagos_credito.credito_id, credito.credito_id),
-                eq(pagos_credito.paymentFalse, false)
-              )
-            );
+          //
+          // Se omite si la cuota no absorbió nada: un pago que no tocó la
+          // cuota tampoco debe reescribirle los saldos de sus filas.
+          if (!filaParcialOmitida) {
+            await db
+              .update(pagos_credito)
+              .set({
+                capital_restante: nuevo_capital_restante.toString(),
+                interes_restante: nuevo_interes_restante.toString(),
+                iva_12_restante: nuevo_iva_restante.toString(),
+                seguro_restante: nuevo_seguro_restante.toString(),
+                gps_restante: nuevo_gps_restante.toString(),
+                membresias: nuevo_membresias_restante.toString(),
+              })
+              .where(
+                and(
+                  eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+                  eq(pagos_credito.credito_id, credito.credito_id),
+                  eq(pagos_credito.paymentFalse, false)
+                )
+              );
+          }
 
           if (disponible_restante.lte(0)) {
             break;

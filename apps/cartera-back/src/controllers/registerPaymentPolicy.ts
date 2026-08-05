@@ -922,3 +922,33 @@ export const capitalSuprimidoPorConvenio = (params: {
   !debeRechazarAbonoCapitalNoAplicado(params)
     ? new Big(params.abonoCapital ?? 0)
     : new Big(0);
+
+/**
+ * ¿Esta cuota merece una fila de pago parcial?
+ *
+ * El loop de cuotas de `insertPayment` cascadea mientras quede
+ * `disponible_restante`, y hasta ahora insertaba una fila `pending` (más su
+ * boleta) por cada cuota visitada AUNQUE la cuota no absorbiera nada. En el
+ * crédito 8717 (INCOBRABLE migrado del CRM: toda la deuda concentrada en la
+ * última cuota y las cuotas 2-62 con recibos `no_required` de capital 0 y
+ * rubros que el saldo neto clampea a 0) una boleta de Q2,330 dejó 60 filas con
+ * `monto_aplicado = 0` y la misma boleta colgada 61 veces. Esas filas son
+ * basura permanente: `/aplicar-pago` rechaza validar un pago con monto
+ * aplicado 0, así que nunca se pueden cerrar ni facturar.
+ *
+ * Regla: una cuota que no cobró nada (sin abonos, sin mora, sin otros) no
+ * escribe fila ni boleta; el loop simplemente sigue a la siguiente cuota con
+ * el disponible intacto.
+ */
+export const debeInsertarFilaParcialCuota = ({
+  totalPagado,
+  mora = 0,
+  otros = 0,
+}: {
+  totalPagado: BigInput;
+  mora?: BigInput | null;
+  otros?: BigInput | null;
+}): boolean =>
+  new Big(totalPagado ?? 0).gt(0) ||
+  new Big(mora ?? 0).gt(0) ||
+  new Big(otros ?? 0).gt(0);

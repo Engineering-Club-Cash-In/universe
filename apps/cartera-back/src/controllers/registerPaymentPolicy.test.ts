@@ -789,3 +789,76 @@ describe("crearEstampadorPagoConvenio", () => {
     expect(estampar()).toBe("0");
   });
 });
+
+describe("debeInsertarFilaParcialCuota", () => {
+  it("no inserta fila cuando la cuota no absorbió nada (caso crédito 8717)", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+      })
+    ).toBe(false);
+  });
+
+  it("inserta fila cuando la cuota absorbió abonos", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 150.5,
+        mora: 0,
+        otros: 0,
+      })
+    ).toBe(true);
+  });
+
+  it("inserta fila cuando solo hay mora que cobrar", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 30,
+        otros: 0,
+      })
+    ).toBe(true);
+  });
+
+  it("inserta fila cuando solo hay otros que cobrar", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 25,
+      })
+    ).toBe(true);
+  });
+
+  it("trata los strings decimales de la DB como números (0.00 => false)", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: "0.00",
+        mora: "0.00",
+        otros: "0.00",
+      })
+    ).toBe(false);
+
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: "0.01",
+        mora: "0.00",
+        otros: "0.00",
+      })
+    ).toBe(true);
+  });
+
+  it("tolera mora/otros ausentes o nulos", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({ totalPagado: 0 })
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: null,
+        otros: null,
+      })
+    ).toBe(false);
+  });
+});

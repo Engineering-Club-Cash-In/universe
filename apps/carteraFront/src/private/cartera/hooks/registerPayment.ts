@@ -25,6 +25,7 @@ import { getApiErrorMessage } from "@/lib/apiError";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
 import { getDisplayedPartialContribution } from "../services/installmentContribution";
+import { getConvenioAplicado } from "../services/convenioContribution";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive({ message: "Debe seleccionar un crédito" }),
   usuario_id: z.number().int().positive({ message: "Usuario requerido" }),
@@ -446,15 +447,23 @@ const montoDisponibleTotal = montoBoleta ;
 console.log("Monto Disponible Total (boleta + saldo):", montoDisponibleTotal);
 
 // 🔥 Restar lo que se va a otros conceptos
-const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum - cuotaConvenioNum;
-const montoBoletaSinMora = montoDisponibleTotal - otrosNum - cuotaConvenioNum;
+// El convenio acepta abonos parciales: solo se descuenta lo que la boleta alcance a cubrir
+const convenioAplicado = getConvenioAplicado(
+  montoDisponibleTotal,
+  otrosNum,
+  moraNum,
+  cuotaConvenioNum
+);
+const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum - convenioAplicado;
+const montoBoletaSinMora = montoDisponibleTotal - otrosNum - convenioAplicado;
 
+console.log("Convenio Aplicado:", convenioAplicado);
 console.log("Monto Boleta Real (después de descuentos):", montoBoletaReal);
 console.log("Monto Boleta Sin Mora:", montoBoletaSinMora);
 
 // 🔥 Validación
 if (montoBoletaSinMora < 0) {
-  toast.error("El saldo a favor más la boleta debe cubrir la suma de otros y convenio");
+  toast.error("El saldo a favor más la boleta debe cubrir la suma de otros");
   return;
 }
 

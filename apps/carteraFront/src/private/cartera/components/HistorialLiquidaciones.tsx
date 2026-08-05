@@ -203,6 +203,15 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
               Reinversión
             </Badge>
           )}
+          {item.permite_distribucion && (
+            <Badge
+              variant="outline"
+              className="text-[11px] border-orange-300 text-orange-700 bg-orange-50"
+              title="Inversionista interno: excluido del archivo de transferencias ACH"
+            >
+              Interno
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -353,13 +362,14 @@ export function HistorialLiquidaciones() {
   const { mutate: calcularPagosEspejo } = useCalcularPagosEspejo();
 
   const { data, isLoading, isError, refetch } = useQuery<LiquidacionResumen[]>({
-    queryKey: ["historial-liquidaciones", mes, anio],
+    queryKey: ["historial-liquidaciones", mes, anio, "con-internos"],
     queryFn: () =>
       getResumenGlobalLiquidaciones({
         mes,
         anio,
         estado: "all",
         incluirSinMovimiento: true,
+        incluirInternos: true,
       }),
     staleTime: 1000 * 60 * 2,
     refetchOnWindowFocus: false,
@@ -398,6 +408,7 @@ export function HistorialLiquidaciones() {
         anio,
         estado: "all",
         incluirSinMovimiento: true,
+        incluirInternos: true,
       });
       if (res?.url) {
         window.open(res.url, "_blank", "noopener,noreferrer");

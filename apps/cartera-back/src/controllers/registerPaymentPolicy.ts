@@ -97,17 +97,29 @@ export const shouldApplyStaleZeroRestanteAdjustment = ({
   new Big(missingAgainstInstallment).gt(0) &&
   new Big(availableRemaining).gte(missingAgainstInstallment);
 
+/**
+ * Cuota a la que se engancha un pago especial (sólo mora / sólo otros).
+ *
+ * `fallbackCuotaId` cubre el caso sin pendientes utilizables: un INCOBRABLE con
+ * todas sus cuotas abiertas ya cubiertas queda con la lista vacía y, sin este
+ * fallback, devolvía 0 — que `insertarPago` interpreta como "sin filtro" y
+ * termina heredando el `cuota_id` del pago más viejo del crédito. Mejor apuntar
+ * explícitamente a la cuota cubierta.
+ */
 export const getSpecialPaymentCuotaId = ({
   requestedInstallment,
   pendingInstallments,
+  fallbackCuotaId,
 }: {
   requestedInstallment: number;
   pendingInstallments: { numeroCuota: number; cuotaId: number }[];
+  fallbackCuotaId?: number | null;
 }) =>
   pendingInstallments.find(
     (installment) => installment.numeroCuota === requestedInstallment
   )?.cuotaId ??
   pendingInstallments[0]?.cuotaId ??
+  fallbackCuotaId ??
   0;
 
 export const getSpecialPaymentInstallmentFields = () => ({
@@ -317,18 +329,27 @@ export const calcularCoberturaCuota = ({
   };
 };
 
-export const getCoveredOpenInstallment = ({
+type CuotaAbiertaConPagos = {
+  cuotaId: number;
+  numeroCuota: number;
+  pagos: PagoCoberturaCuota[];
+};
+
+/**
+ * Cuotas ABIERTAS cuyos pagos vivos ya cubren el monto contractual, mergeadas
+ * por `numero_cuota` (hay créditos con filas duplicadas de la misma cuota:
+ * mismo numero_cuota, cuota_id distinto).
+ */
+const getCoveredOpenInstallments = ({
   montoCuota,
   cuotas,
+  incluirPendientes = false,
 }: {
   montoCuota: BigInput;
-  cuotas: {
-    cuotaId: number;
-    numeroCuota: number;
-    pagos: PagoCoberturaCuota[];
-  }[];
+  cuotas: CuotaAbiertaConPagos[];
+  incluirPendientes?: boolean;
 }) => {
-  const cuotasLogicas = new Map<number, (typeof cuotas)[number]>();
+  const cuotasLogicas = new Map<number, CuotaAbiertaConPagos>();
   for (const cuota of cuotas) {
     const existente = cuotasLogicas.get(cuota.numeroCuota);
     cuotasLogicas.set(
@@ -339,12 +360,24 @@ export const getCoveredOpenInstallment = ({
     );
   }
 
-  const inconsistente = [...cuotasLogicas.values()].find((cuota) =>
-    calcularCoberturaCuota({
-      montoCuota,
-      pagos: cuota.pagos,
-    }).cuotaCompleta
+  return [...cuotasLogicas.values()].filter(
+    (cuota) =>
+      calcularCoberturaCuota({
+        montoCuota,
+        pagos: cuota.pagos,
+        incluirPendientes,
+      }).cuotaCompleta
   );
+};
+
+export const getCoveredOpenInstallment = ({
+  montoCuota,
+  cuotas,
+}: {
+  montoCuota: BigInput;
+  cuotas: CuotaAbiertaConPagos[];
+}) => {
+  const [inconsistente] = getCoveredOpenInstallments({ montoCuota, cuotas });
 
   return inconsistente
     ? {
@@ -353,6 +386,177 @@ export const getCoveredOpenInstallment = ({
       }
     : null;
 };
+
+/**
+ * ¿El pago va COMPLETO a abono directo a capital, sin efectivo para cuotas?
+ *
+ * Espeja la aritmética de `calcularMontoEfectivo` (boleta − otros − abono
+ * directo; el saldo a favor NO entra, el cálculo real lo ignora). Si el efectivo
+ * queda en 0 el loop de cuotas ni siquiera corre, así que un pago solo-capital
+ * no depende de que existan cuotas abiertas con saldo: es la vía válida para
+ * abonar a un INCOBRABLE que ya tiene todas sus cuotas cubiertas.
+ *
+ * Exige efectivo EXACTAMENTE 0, no <= 0: un efectivo negativo significa que se
+ * pidió más capital del que trae la boleta (la sección 7 registra el monto
+ * PEDIDO, no el recibido — una boleta de Q1,000 registraría Q5,000 de capital),
+ * así que un request sobre-asignado no es solo-capital y el guard lo rechaza.
+ */
+export const esPagoSoloCapital = ({
+  montoBoleta,
+  otros,
+  abonoDirectoCapital,
+}: {
+  montoBoleta: BigInput;
+  otros?: BigInput | null;
+  abonoDirectoCapital?: BigInput | null;
+}): boolean => {
+  const capital = new Big(abonoDirectoCapital ?? 0);
+  if (capital.lte(0)) return false;
+
+  const montoEfectivo = new Big(montoBoleta)
+    .minus(new Big(otros ?? 0))
+    .minus(capital);
+
+  return montoEfectivo.eq(0);
+};
+
+/**
+ * ¿El pago es SOLO el rubro `otros` (monto_boleta == otros), sin nada más?
+ *
+ * Exige capital pedido en 0: un request con `boleta == otros` que además trae
+ * `abono_directo_capital` deja el efectivo en −capital (sobre-asignación — la
+ * sección 7 registraría el monto PEDIDO encima de la fila de otros, y una
+ * boleta de Q1,000 asignaría Q6,000). Ese request no es "sólo otros" y no debe
+ * omitir el guard de todas-cubiertas. El `gt(0)` existe porque el schema admite
+ * monto_boleta 0 y un {boleta: 0, otros: 0} tampoco clasifica.
+ *
+ * OJO: esto es la CLASIFICACIÓN del request (para el bypass del guard). La rama
+ * runtime que inserta la fila especial sigue siendo `monto_boleta == otros` a
+ * secas — para el predicado anti-pérdida lo que importa es qué se ESCRIBIÓ, no
+ * cómo clasifica (ver `debeRechazarAbonoCapitalNoAplicado`).
+ */
+export const esPagoSoloOtros = ({
+  montoBoleta,
+  otros,
+  abonoDirectoCapital,
+}: {
+  montoBoleta: BigInput;
+  otros?: BigInput | null;
+  abonoDirectoCapital?: BigInput | null;
+}): boolean => {
+  const boleta = new Big(montoBoleta);
+  return (
+    boleta.gt(0) &&
+    boleta.eq(new Big(otros ?? 0)) &&
+    new Big(abonoDirectoCapital ?? 0).eq(0)
+  );
+};
+
+/**
+ * ¿Este pago puede saltarse el guard de "todas las cuotas abiertas cubiertas"?
+ *
+ * Sólo lo omiten las vías que NO necesitan una cuota con saldo:
+ *  - Solo-capital, pero **únicamente** si el crédito permite abonos a capital.
+ *    La sección 7 exige `(estaAlDia || permite_abono_capital) && abono > 0`; en
+ *    un INCOBRABLE `estaAlDia` es siempre false (no tiene cuota pagada vigente)
+ *    y todos los insolutos traen `permite_abono_capital = false` por default de
+ *    la columna, así que sin permiso el abono no se aplica y dejarlo pasar sólo
+ *    cambiaría un 409 por una boleta perdida. El disyunto `estaAlDia` se ignora
+ *    a propósito: no es computable en `obtenerInfoCompletaCredito`.
+ *  - Sólo otros (`monto_boleta == otros` y SIN capital pedido — ver
+ *    `esPagoSoloOtros`), que se registra con su propio insert especial y nunca
+ *    toca el loop de cuotas.
+ *
+ * El pago de sólo mora queda FUERA a propósito: hoy es inalcanzable porque el
+ * cron de moras excluye a los INCOBRABLES (ninguno tiene mora activa), así que
+ * prefiero el 409 ruidoso a abrir una vía sin probar si eso llegara a cambiar.
+ */
+export const puedeOmitirGuardTodasCubiertas = ({
+  esSoloCapital,
+  permiteAbonoCapital,
+  pagoSoloOtros,
+}: {
+  esSoloCapital: boolean;
+  permiteAbonoCapital?: boolean | null;
+  pagoSoloOtros: boolean;
+}): boolean =>
+  (esSoloCapital && permiteAbonoCapital === true) || pagoSoloOtros;
+
+/**
+ * ¿Hay que rechazar el pago porque traía abono a capital, no se aplicó y no se
+ * escribió NADA?
+ *
+ * Es el camino en que insertPayment respondía `success: true` con cero filas en
+ * `pagos_credito` (la sección 7 no corrió por falta de permiso y el loop de
+ * cuotas tampoco, porque el monto efectivo era 0): la boleta se perdía en
+ * silencio. Sólo es seguro rechazar si nada se insertó antes — de ahí que se
+ * exija cero cuotas aplicadas, cero mora aplicada y que la rama especial de
+ * `otros` no haya insertado ya su fila.
+ *
+ * `otrosEspecialAplicado` es la condición RUNTIME de esa rama (`monto_boleta ==
+ * otros`, sin mirar el capital) — NO la clasificación `esPagoSoloOtros`: acá
+ * importa qué se escribió, y la rama inserta aunque el request traiga capital
+ * colado. Usar la clasificación aquí respondería 409 sobre estado ya escrito.
+ *
+ * `convenioAplicado`: en EN_CONVENIO el convenio puede consumir todo el
+ * disponible no-capital — para entonces `processConvenioPayment` YA actualizó
+ * `convenios_pago` y la fila solo-convenio YA se insertó. Responder 409 ahí
+ * mentiría sobre estado persistido y un reintento aplicaría el convenio DOS
+ * veces.
+ */
+export const debeRechazarAbonoCapitalNoAplicado = ({
+  abonoCapital,
+  cuotasCompletas,
+  cuotasParciales,
+  moraAplicada,
+  otrosEspecialAplicado,
+  convenioAplicado = 0,
+}: {
+  abonoCapital: BigInput;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  otrosEspecialAplicado: boolean;
+  convenioAplicado?: BigInput;
+}): boolean =>
+  new Big(abonoCapital ?? 0).gt(0) &&
+  cuotasCompletas === 0 &&
+  cuotasParciales === 0 &&
+  new Big(moraAplicada ?? 0).lte(0) &&
+  new Big(convenioAplicado ?? 0).lte(0) &&
+  !otrosEspecialAplicado;
+
+/**
+ * Números de cuota abiertos que ya están cubiertos por pagos vivos.
+ *
+ * Sólo para INCOBRABLES: ahí la cuota NO se cierra al cubrir el monto
+ * contractual, sino cuando el capital del crédito llega a 0 (ver
+ * `shouldIncobrableInstallmentBePaid`, regla del PR #887), así que una cuota
+ * "cubierta pero abierta" es el estado normal de un insoluto a medio pagar, no
+ * una inconsistencia. El caller filtra esas cuotas de las pendientes para que
+ * el pago nuevo caiga en la siguiente cuota CON saldo: si lo dejáramos entrar,
+ * su saldo neto daría 0 en todos los rubros y se insertaría una fila pending
+ * con `monto_aplicado = 0` (nunca validable) que además duplica la boleta.
+ *
+ * Cuenta los pending vivos (`incluirPendientes`) porque el loop de insertPayment
+ * también los cuenta como hermanos al calcular el saldo de la cuota: el criterio
+ * del skip tiene que ser el mismo o la fila en cero vuelve por esa vía. El gate
+ * normal (`getCoveredOpenInstallment`) sigue mirando sólo `validated`.
+ */
+export const getCoveredInstallmentNumbers = ({
+  montoCuota,
+  cuotas,
+}: {
+  montoCuota: BigInput;
+  cuotas: CuotaAbiertaConPagos[];
+}): Set<number> =>
+  new Set(
+    getCoveredOpenInstallments({
+      montoCuota,
+      cuotas,
+      incluirPendientes: true,
+    }).map((cuota) => cuota.numeroCuota)
+  );
 
 export type ResumenAbonosCuota = {
   cuotaCerrada: boolean;
@@ -578,3 +782,143 @@ export const recomputeCreditAfterCapital = ({
 
   return { capital, cuotaInteres, iva, deudaTotal };
 };
+
+/**
+ * ¿El pago debe pasar por processConvenioPayment? Solo créditos EN_CONVENIO y
+ * solo si después de otros/abono-capital/mora todavía queda plata (orden
+ * canónico del split, espejo del desglose del front: otros → mora → convenio).
+ */
+export const debeProcesarConvenio = ({
+  statusCredit,
+  disponible,
+}: {
+  statusCredit?: string | null;
+  disponible: BigInput;
+}) => statusCredit === "EN_CONVENIO" && new Big(disponible).gt(0);
+
+/**
+ * Resta del disponible lo que se acreditó al convenio. El convenio es deuda
+ * APARTE (las cuotas viejas congeladas en su pivot): sin esta resta, la misma
+ * boleta acreditaba el convenio Y además pagaba cuotas corrientes (doble
+ * aplicación). `requiereRegistroSoloConvenio` marca el caso en que el convenio
+ * consumió todo: el loop de cuotas ya no corre y el caller debe insertar la
+ * fila del pago aquí para no perder boleta/mora/otros/convenio del historial.
+ */
+export const aplicarConvenioAlDisponible = ({
+  disponible,
+  montoConvenio,
+}: {
+  disponible: BigInput;
+  montoConvenio: BigInput;
+}): { disponibleRestante: Big; requiereRegistroSoloConvenio: boolean } => {
+  const restante = new Big(disponible).minus(montoConvenio);
+  return {
+    disponibleRestante: restante.gt(0) ? restante : new Big(0),
+    requiereRegistroSoloConvenio:
+      restante.lte(0) && new Big(montoConvenio).gt(0),
+  };
+};
+
+/**
+ * Cuánto aplicar al convenio en un pago. Topa al MENOR entre la cuota mensual
+ * y el monto_pendiente real: tras un abono parcial previo el pendiente puede
+ * ser menor que la cuota mensual, y sin este tope el ledger del convenio se
+ * iba a negativo — y como lo aplicado ahora SE RESTA del disponible, ese
+ * exceso fantasma se evaporaría del dinero del cliente sin pagar nada.
+ * `pagoCompleto` = el pago cubre el tope (>0): marca cuota del convenio y
+ * contadores; un tope en 0 (convenio ya saldado) nunca cuenta como completo.
+ */
+export const calcularAplicacionConvenio = ({
+  montoPago,
+  cuotaMensual,
+  montoPendiente,
+}: {
+  montoPago: BigInput;
+  cuotaMensual: BigInput;
+  montoPendiente: BigInput;
+}): { montoAplicar: Big; pagoCompleto: boolean } => {
+  const cuota = new Big(cuotaMensual);
+  const pendiente = new Big(montoPendiente);
+  const pago = new Big(montoPago);
+  let tope = cuota.lt(pendiente) ? cuota : pendiente;
+  if (tope.lt(0)) tope = new Big(0);
+  if (pago.gte(tope)) {
+    return { montoAplicar: tope, pagoCompleto: tope.gt(0) };
+  }
+  return { montoAplicar: pago.gt(0) ? pago : new Big(0), pagoCompleto: false };
+};
+
+/**
+ * El convenio se cobra UNA sola vez por boleta (processConvenioPayment), pero la
+ * boleta puede insertar varias filas en pagos_credito (cierre de una cuota +
+ * parcial de la siguiente + abono a capital). Si todas cargaran el monto, cada
+ * reverso restaría su pago_convenio de convenios_pago: la primera reversa deja
+ * el convenio en cero y la segunda revienta con "No se puede revertir más de lo
+ * que se ha pagado" (caso crédito 659 / convenio 98). Este estampador entrega
+ * el monto a la PRIMERA fila que lo pide y "0" a todas las demás.
+ */
+export const crearEstampadorPagoConvenio = (
+  montoConvenio: BigInput | null | undefined
+) => {
+  const monto = new Big(montoConvenio ?? 0);
+  let estampado = false;
+  return (): string => {
+    if (estampado || monto.lte(0)) return "0";
+    estampado = true;
+    return monto.toString();
+  };
+};
+
+/**
+ * Cuántas cuotas del convenio quedan completadas según el monto ACUMULADO
+ * (`monto_pagado` YA incluyendo el abono actual), no según el pago individual.
+ * Con parciales habilitados, dos abonos de Q600 contra una cuota de Q1,000
+ * deben completar la cuota al llegar el segundo — decidirlo por pago
+ * individual (`pago >= cuota_mensual`) deja `pagos_realizados` y
+ * `convenio_cuotas.fecha_pago` atrás del dinero y los recordatorios siguen
+ * cobrando una cuota ya fondeada. `montoPendiente <= 0` completa todas las
+ * cuotas de una vez: la última cuota real puede ser menor a la mensual por
+ * redondeo de `total / meses` y el floor solo nunca la alcanzaría.
+ */
+export const calcularCuotasConvenioCompletadas = ({
+  montoPagado,
+  cuotaMensual,
+  montoPendiente,
+  numeroMeses,
+}: {
+  montoPagado: BigInput;
+  cuotaMensual: BigInput;
+  montoPendiente: BigInput;
+  numeroMeses?: number | null;
+}): number => {
+  const meses = Math.max(0, Math.trunc(numeroMeses ?? 0));
+  const cuota = new Big(cuotaMensual);
+  if (new Big(montoPendiente).lte(0)) return meses;
+  if (cuota.lte(0)) return 0;
+  const completadas = Number(
+    new Big(montoPagado).div(cuota).round(0, Big.roundDown).toString()
+  );
+  return Math.min(meses, completadas);
+};
+
+/**
+ * Capital pedido que quedó SIN destino cuando el 409 se suprimió únicamente
+ * porque el convenio escribió estado: la sección 7 no corrió (sin permiso ni
+ * estaAlDia), el capital ya venía descontado de `montoEfectivo` y el saldo a
+ * favor solo acredita `disponible_restante` — sin esta devolución ese monto se
+ * evaporaría en silencio (P1 de Codex en #1246). Scoped a propósito: si mora/
+ * otros/cuotas ya suprimían el rechazo ANTES de existir el convenio, se
+ * conserva ese comportamiento pre-existente (ticket aparte).
+ */
+export const capitalSuprimidoPorConvenio = (params: {
+  abonoCapital: BigInput;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  otrosEspecialAplicado: boolean;
+  convenioAplicado: BigInput;
+}): Big =>
+  debeRechazarAbonoCapitalNoAplicado({ ...params, convenioAplicado: 0 }) &&
+  !debeRechazarAbonoCapitalNoAplicado(params)
+    ? new Big(params.abonoCapital ?? 0)
+    : new Big(0);

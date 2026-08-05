@@ -14,6 +14,10 @@ import {
   moras_credito,
 } from "../database/db";
 import Big from "big.js";
+import {
+  calcularAplicacionConvenio,
+  calcularCuotasConvenioCompletadas,
+} from "./registerPaymentPolicy";
 import { createMora } from "./latefee";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
@@ -739,19 +743,16 @@ export async function processConvenioPayment(
     const montoPagadoActualBig = new Big(convenio.monto_pagado);
     const montoPendienteActualBig = new Big(convenio.monto_pendiente);
 
-    // 4. Determinar el monto a aplicar
-    let montoAplicarBig: Big;
-    let pagoCompleto = false;
-
-    // Si el monto es >= a la cuota mensual, usar solo la cuota mensual
-    if (montoPagoBig.gte(cuotaMensualBig)) {
-      montoAplicarBig = cuotaMensualBig;
-      pagoCompleto = true;
-    } else {
-      // Si es menor, usar el monto completo
-      montoAplicarBig = montoPagoBig;
-      pagoCompleto = false;
-    }
+    // 4. Determinar el monto a aplicar — topado al MENOR entre la cuota
+    // mensual y el monto_pendiente REAL: tras un abono parcial previo el
+    // pendiente puede ser menor que la cuota mensual; sin el tope el ledger
+    // se iba a negativo y, como lo aplicado se resta del disponible en
+    // insertPayment, ese exceso se evaporaría del dinero del cliente.
+    const { montoAplicar: montoAplicarBig } = calcularAplicacionConvenio({
+      montoPago: montoPagoBig,
+      cuotaMensual: cuotaMensualBig,
+      montoPendiente: montoPendienteActualBig,
+    });
 
     // 5. Calcular nuevo monto pagado
     const nuevoMontoPagadoBig = montoPagadoActualBig.plus(montoAplicarBig);
@@ -759,14 +760,26 @@ export async function processConvenioPayment(
     // 6. Calcular nuevo monto pendiente
     const nuevoMontoPendienteBig = montoPendienteActualBig.minus(montoAplicarBig);
 
-    // 7. Actualizar pagos realizados y pendientes solo si se completó la cuota
-    let nuevosPagosRealizados = convenio.pagos_realizados;
-    let nuevosPagosPendientes = convenio.pagos_pendientes;
-
-    if (pagoCompleto) {
-      nuevosPagosRealizados = convenio.pagos_realizados + 1;
-      nuevosPagosPendientes = convenio.pagos_pendientes - 1;
-    }
+    // 7. Cuotas completadas por monto ACUMULADO, no por pago individual: con
+    // parciales habilitados, dos abonos de Q600 contra una cuota de Q1,000
+    // deben completarla al llegar el segundo. El delta contra el contador
+    // persistido también repone marcados que quedaron atrás por parciales
+    // previos a este fix.
+    const cuotasCompletadasAcumuladas = calcularCuotasConvenioCompletadas({
+      montoPagado: nuevoMontoPagadoBig,
+      cuotaMensual: cuotaMensualBig,
+      montoPendiente: nuevoMontoPendienteBig,
+      numeroMeses: convenio.numero_meses,
+    });
+    const nuevasCuotasCompletadas = Math.min(
+      Math.max(0, cuotasCompletadasAcumuladas - convenio.pagos_realizados),
+      Math.max(0, convenio.pagos_pendientes)
+    );
+    const pagoCompleto = nuevasCuotasCompletadas > 0;
+    const nuevosPagosRealizados =
+      convenio.pagos_realizados + nuevasCuotasCompletadas;
+    const nuevosPagosPendientes =
+      convenio.pagos_pendientes - nuevasCuotasCompletadas;
 
     // 8. Verificar si se completó el convenio
     const convenioCompletado = nuevoMontoPendienteBig.lte(0) || nuevosPagosPendientes <= 0;
@@ -786,56 +799,67 @@ export async function processConvenioPayment(
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
 
-    // 10. 🔥 SI SE COMPLETÓ LA CUOTA DEL CONVENIO, MARCAR LA CUOTA COMO PAGADA
-   if (pagoCompleto) {
-  console.log("✅ Pago completo detectado, marcando cuota del convenio como pagada");
-  
-  // Buscar la primera cuota pendiente del convenio (fecha_pago = NULL)
-  const [cuotaPendiente] = await db
-    .select()
-    .from(convenio_cuotas)
-    .where(
-      and(
-        eq(convenio_cuotas.convenio_id, convenio.convenio_id),
-        isNull(convenio_cuotas.fecha_pago) // Las que NO tienen fecha_pago
-      )
-    )
-    .orderBy(convenio_cuotas.numero_cuota)
-    .limit(1);
-  
-  if (cuotaPendiente) {
-    console.log(`📅 Marcando cuota #${cuotaPendiente.numero_cuota} como pagada`);
-    
-    // 🔥 Obtener fecha y hora de Guatemala
-    const guatemalaTimeString = new Date().toLocaleString("en-US", {
-      timeZone: "America/Guatemala",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-    
-    const [datePart, timePart] = guatemalaTimeString.split(", ");
-    const [month, day, year] = datePart.split("/");
-    const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
-    
-    await db
-      .update(convenio_cuotas)
-      .set({
-        fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala
-      })
-      .where(eq(convenio_cuotas.cuota_convenio_id, cuotaPendiente.cuota_convenio_id));
-    
-    console.log(`✅ Cuota #${cuotaPendiente.numero_cuota} marcada como pagada exitosamente`);
-  } else {
-    console.log("⚠️ No se encontró cuota pendiente para marcar como pagada");
-  }
-} else {
-  console.log("⚠️ Pago parcial - no se marca cuota del convenio como pagada");
-}
+    // 10. 🔥 MARCAR LAS CUOTAS DEL CONVENIO COMPLETADAS POR ACUMULADO
+    if (nuevasCuotasCompletadas > 0) {
+      console.log(
+        `✅ Marcando ${nuevasCuotasCompletadas} cuota(s) del convenio como pagada(s) (acumulado)`
+      );
+
+      // Las N cuotas pendientes más viejas del convenio (fecha_pago = NULL)
+      const cuotasPendientesConvenio = await db
+        .select()
+        .from(convenio_cuotas)
+        .where(
+          and(
+            eq(convenio_cuotas.convenio_id, convenio.convenio_id),
+            isNull(convenio_cuotas.fecha_pago)
+          )
+        )
+        .orderBy(convenio_cuotas.numero_cuota)
+        .limit(nuevasCuotasCompletadas);
+
+      if (cuotasPendientesConvenio.length > 0) {
+        // 🔥 Obtener fecha y hora de Guatemala
+        const guatemalaTimeString = new Date().toLocaleString("en-US", {
+          timeZone: "America/Guatemala",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        });
+
+        const [datePart, timePart] = guatemalaTimeString.split(", ");
+        const [month, day, year] = datePart.split("/");
+        const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+
+        await db
+          .update(convenio_cuotas)
+          .set({
+            fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala
+          })
+          .where(
+            inArray(
+              convenio_cuotas.cuota_convenio_id,
+              cuotasPendientesConvenio.map((c) => c.cuota_convenio_id)
+            )
+          );
+
+        console.log(
+          `✅ Cuotas marcadas: ${cuotasPendientesConvenio
+            .map((c) => `#${c.numero_cuota}`)
+            .join(", ")}`
+        );
+      } else {
+        console.log("⚠️ No se encontraron cuotas pendientes para marcar");
+      }
+    } else {
+      console.log(
+        "⚠️ Pago parcial - el acumulado aún no completa una cuota del convenio"
+      );
+    }
 
    
 

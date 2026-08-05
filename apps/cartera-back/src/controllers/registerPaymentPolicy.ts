@@ -497,6 +497,12 @@ export const puedeOmitirGuardTodasCubiertas = ({
  * otros`, sin mirar el capital) — NO la clasificación `esPagoSoloOtros`: acá
  * importa qué se escribió, y la rama inserta aunque el request traiga capital
  * colado. Usar la clasificación aquí respondería 409 sobre estado ya escrito.
+ *
+ * `convenioAplicado`: en EN_CONVENIO el convenio puede consumir todo el
+ * disponible no-capital — para entonces `processConvenioPayment` YA actualizó
+ * `convenios_pago` y la fila solo-convenio YA se insertó. Responder 409 ahí
+ * mentiría sobre estado persistido y un reintento aplicaría el convenio DOS
+ * veces.
  */
 export const debeRechazarAbonoCapitalNoAplicado = ({
   abonoCapital,
@@ -504,17 +510,20 @@ export const debeRechazarAbonoCapitalNoAplicado = ({
   cuotasParciales,
   moraAplicada,
   otrosEspecialAplicado,
+  convenioAplicado = 0,
 }: {
   abonoCapital: BigInput;
   cuotasCompletas: number;
   cuotasParciales: number;
   moraAplicada: BigInput;
   otrosEspecialAplicado: boolean;
+  convenioAplicado?: BigInput;
 }): boolean =>
   new Big(abonoCapital ?? 0).gt(0) &&
   cuotasCompletas === 0 &&
   cuotasParciales === 0 &&
   new Big(moraAplicada ?? 0).lte(0) &&
+  new Big(convenioAplicado ?? 0).lte(0) &&
   !otrosEspecialAplicado;
 
 /**
@@ -859,3 +868,57 @@ export const crearEstampadorPagoConvenio = (
     return monto.toString();
   };
 };
+
+/**
+ * Cuántas cuotas del convenio quedan completadas según el monto ACUMULADO
+ * (`monto_pagado` YA incluyendo el abono actual), no según el pago individual.
+ * Con parciales habilitados, dos abonos de Q600 contra una cuota de Q1,000
+ * deben completar la cuota al llegar el segundo — decidirlo por pago
+ * individual (`pago >= cuota_mensual`) deja `pagos_realizados` y
+ * `convenio_cuotas.fecha_pago` atrás del dinero y los recordatorios siguen
+ * cobrando una cuota ya fondeada. `montoPendiente <= 0` completa todas las
+ * cuotas de una vez: la última cuota real puede ser menor a la mensual por
+ * redondeo de `total / meses` y el floor solo nunca la alcanzaría.
+ */
+export const calcularCuotasConvenioCompletadas = ({
+  montoPagado,
+  cuotaMensual,
+  montoPendiente,
+  numeroMeses,
+}: {
+  montoPagado: BigInput;
+  cuotaMensual: BigInput;
+  montoPendiente: BigInput;
+  numeroMeses?: number | null;
+}): number => {
+  const meses = Math.max(0, Math.trunc(numeroMeses ?? 0));
+  const cuota = new Big(cuotaMensual);
+  if (new Big(montoPendiente).lte(0)) return meses;
+  if (cuota.lte(0)) return 0;
+  const completadas = Number(
+    new Big(montoPagado).div(cuota).round(0, Big.roundDown).toString()
+  );
+  return Math.min(meses, completadas);
+};
+
+/**
+ * Capital pedido que quedó SIN destino cuando el 409 se suprimió únicamente
+ * porque el convenio escribió estado: la sección 7 no corrió (sin permiso ni
+ * estaAlDia), el capital ya venía descontado de `montoEfectivo` y el saldo a
+ * favor solo acredita `disponible_restante` — sin esta devolución ese monto se
+ * evaporaría en silencio (P1 de Codex en #1246). Scoped a propósito: si mora/
+ * otros/cuotas ya suprimían el rechazo ANTES de existir el convenio, se
+ * conserva ese comportamiento pre-existente (ticket aparte).
+ */
+export const capitalSuprimidoPorConvenio = (params: {
+  abonoCapital: BigInput;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  otrosEspecialAplicado: boolean;
+  convenioAplicado: BigInput;
+}): Big =>
+  debeRechazarAbonoCapitalNoAplicado({ ...params, convenioAplicado: 0 }) &&
+  !debeRechazarAbonoCapitalNoAplicado(params)
+    ? new Big(params.abonoCapital ?? 0)
+    : new Big(0);

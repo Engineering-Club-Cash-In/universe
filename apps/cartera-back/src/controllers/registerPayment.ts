@@ -35,6 +35,7 @@ import {
   puedeOmitirGuardTodasCubiertas,
   capitalSuprimidoSinAplicar,
   debeRechazarAbonoCapitalNoAplicado,
+  debeRechazarPagoSinAplicacion,
   debeInsertarFilaParcialCuota,
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
@@ -2191,6 +2192,34 @@ export const insertPayment = async ({ body, set }: any) => {
           success: false,
           message:
             "El pago es un abono directo a capital pero el crédito no lo permite (permite_abono_capital) y no está al día. Habilite el permiso o registre el pago como pago normal.",
+        };
+      }
+
+      // El cascadeo visitó cuotas y ninguna absorbió nada, y tampoco se
+      // escribió fila por mora/otros/convenio: acreditar saldo a favor acá
+      // respondería `success` sin NINGUNA fila ni boleta persistida, y el
+      // reintento de la misma boleta acreditaría saldo doble sin rastro.
+      // Preempta a propósito la pata "cuotas saltadas" de
+      // `capitalSuprimidoSinAplicar`: un mixto capital+efectivo con todas las
+      // cuotas saltadas cae en este 409 antes de llegar a la devolución. El
+      // helper se conserva porque sigue cubriendo la pata convenio (#1246) y
+      // porque es la red si estas condiciones se estrechan.
+      if (
+        debeRechazarPagoSinAplicacion({
+          cuotasSaltadas: cuotas_saltadas,
+          cuotasCompletas: cuotas_completas,
+          // Parciales REALES: acá interesa si se escribió fila, no la
+          // compensación de paridad que lleva `guardCapitalParams`.
+          cuotasParciales: cuotas_parciales,
+          moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
+          otrosEspecialAplicado: montoBoleta.eq(otrosBig),
+          convenioAplicado: montoConvenio,
+        })
+      ) {
+        set.status = 409;
+        return {
+          success: false,
+          message: `No se pudo registrar el pago: ninguna cuota abierta del crédito tiene saldo por cobrar (las ${cuotas_saltadas} cuota(s) recorridas no absorbieron nada). El crédito requiere revisión; si corresponde, registre el pago como abono directo a capital.`,
         };
       }
 

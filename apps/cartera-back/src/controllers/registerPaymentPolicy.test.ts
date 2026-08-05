@@ -940,6 +940,11 @@ describe("capitalSuprimidoSinAplicar (devolución por cuotas saltadas)", () => {
     convenioAplicado: 0,
   };
 
+  // NOTA de precedencia: en el controller este escenario ya no se alcanza —
+  // `debeRechazarPagoSinAplicacion` responde 409 antes de llegar a la
+  // devolución. El test sigue siendo válido como contrato PURO del helper (no
+  // depende del orden del controller) y fija la red por si esas condiciones
+  // se estrechan; la pata convenio de #1246 sí sigue viva en producción.
   it("devuelve el capital cuando el 409 se suprimió SOLO por cuotas saltadas", () => {
     expect(
       registerPaymentPolicy
@@ -998,5 +1003,76 @@ describe("capitalSuprimidoSinAplicar (devolución por cuotas saltadas)", () => {
     expect(
       registerPaymentPolicy.capitalSuprimidoSinAplicar(conConvenio).toString()
     ).toBe("500");
+  });
+});
+
+describe("debeRechazarPagoSinAplicacion", () => {
+  // Cascadeo que recorrió cuotas sin que ninguna absorbiera nada y sin ninguna
+  // otra vía que haya escrito fila.
+  const base = {
+    cuotasSaltadas: 3,
+    cuotasCompletas: 0,
+    cuotasParciales: 0,
+    moraAplicada: 0,
+    otrosEspecialAplicado: false,
+    convenioAplicado: 0,
+  };
+
+  it("rechaza cuando el pago no dejó NINGUNA fila (solo cuotas saltadas)", () => {
+    expect(registerPaymentPolicy.debeRechazarPagoSinAplicacion(base)).toBe(true);
+  });
+
+  it("no rechaza si el loop nunca corrió (crédito sin cuotas pendientes)", () => {
+    // Flujo histórico de saldo a favor: no se toca.
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        cuotasSaltadas: 0,
+      })
+    ).toBe(false);
+  });
+
+  it("no rechaza si la mora ya insertó su fila", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        moraAplicada: 75,
+      })
+    ).toBe(false);
+  });
+
+  it("no rechaza si la rama especial de otros insertó su fila", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        otrosEspecialAplicado: true,
+      })
+    ).toBe(false);
+  });
+
+  it("no rechaza si el convenio se aplicó (su fila existe)", () => {
+    // Con convenio pendiente el skip no ocurre: la primera cuota inserta fila.
+    // Y en el caso `registroSoloConvenio` la fila se escribe antes del loop.
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        convenioAplicado: 981.86,
+      })
+    ).toBe(false);
+  });
+
+  it("no rechaza si alguna cuota sí se procesó", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        cuotasParciales: 1,
+      })
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        cuotasCompletas: 1,
+      })
+    ).toBe(false);
   });
 });

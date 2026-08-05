@@ -931,6 +931,52 @@ export const capitalSuprimidoPorConvenio = (params: {
 }): Big => capitalSuprimidoSinAplicar({ ...params, cuotasSaltadas: 0 });
 
 /**
+ * ¿El cascadeo visitó cuotas, ninguna absorbió nada y NO se escribió ninguna
+ * otra fila? Entonces el pago no dejó rastro alguno en `pagos_credito`.
+ *
+ * Antes del skip de cuotas sin saldo, esas cuotas dejaban filas basura que —
+ * accidentalmente — servían de rastro: un reintento de la misma boleta se
+ * detectaba como duplicado. Sin ellas, el `else` final acreditaría
+ * `disponible_restante` a `saldo_a_favor` y respondería `success` sin fila ni
+ * boleta persistida, así que reenviar la misma boleta/autorización acreditaría
+ * saldo DOBLE sin evidencia (P2 de Codex en #1248).
+ *
+ * Se RECHAZA con 409 en lugar de insertar una fila especial de saldo a favor:
+ * una fila con `monto_aplicado = 0` es permanentemente invalidable
+ * (`shouldRejectZeroAppliedNormalValidation`), o sea exactamente el artefacto
+ * que este PR elimina. Un crédito donde ninguna cuota abierta puede absorber
+ * es un crédito degenerado que necesita reparación, y el 409 ruidoso-seguro es
+ * la filosofía ya adoptada por el gate de integridad de #1229.
+ *
+ * `cuotasSaltadas > 0` es la condición clave: si el loop nunca corrió (crédito
+ * sin cuotas pendientes) NO se rechaza, se conserva el flujo histórico de
+ * saldo a favor. Y cualquier otra vía que YA escribió su fila (mora, la rama
+ * especial de otros, o el convenio — que con el fix del sello fuerza fila en
+ * la primera cuota, dejando `cuotasParciales > 0`) desactiva el rechazo.
+ */
+export const debeRechazarPagoSinAplicacion = ({
+  cuotasSaltadas,
+  cuotasCompletas,
+  cuotasParciales,
+  moraAplicada,
+  otrosEspecialAplicado,
+  convenioAplicado,
+}: {
+  cuotasSaltadas: number;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  otrosEspecialAplicado: boolean;
+  convenioAplicado: BigInput;
+}): boolean =>
+  cuotasSaltadas > 0 &&
+  cuotasCompletas === 0 &&
+  cuotasParciales === 0 &&
+  new Big(moraAplicada ?? 0).lte(0) &&
+  !otrosEspecialAplicado &&
+  new Big(convenioAplicado ?? 0).lte(0);
+
+/**
  * Generalización de lo anterior: capital pedido que se evaporaría porque el
  * 409 anti-pérdida quedó suprimido por algo que NO aplicó ese capital. Hoy hay
  * dos supresores de esa clase:

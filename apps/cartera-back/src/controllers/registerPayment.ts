@@ -1766,6 +1766,10 @@ export const insertPayment = async ({ body, set }: any) => {
                 totalPagado,
                 mora: moraParaPago,
                 otros: otrosParaPago,
+                // Peek NO consumidor: si el convenio sigue sin estampar, esta
+                // cuota debe insertar fila para cargarlo. Una vez estampado
+                // devuelve "0" y las siguientes cuotas sí pueden saltarse.
+                pagoConvenio: estamparPagoConvenio.pendiente(),
               })
             ) {
               // ── Cuota que no absorbió NADA (crédito 8717) ─────────────────

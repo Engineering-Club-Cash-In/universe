@@ -849,6 +849,47 @@ describe("debeInsertarFilaParcialCuota", () => {
     ).toBe(true);
   });
 
+  it("inserta fila cuando queda convenio pendiente de estampar", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: 981.86,
+      })
+    ).toBe(true);
+
+    // String decimal (formato del estampador / de la DB).
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: "981.86",
+      })
+    ).toBe(true);
+  });
+
+  it("se salta la cuota cuando el convenio ya fue estampado o no existe", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: "0",
+      })
+    ).toBe(false);
+
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: null,
+      })
+    ).toBe(false);
+  });
+
   it("tolera mora/otros ausentes o nulos", () => {
     expect(
       registerPaymentPolicy.debeInsertarFilaParcialCuota({ totalPagado: 0 })
@@ -860,5 +901,28 @@ describe("debeInsertarFilaParcialCuota", () => {
         otros: null,
       })
     ).toBe(false);
+  });
+});
+
+describe("crearEstampadorPagoConvenio - peek pendiente()", () => {
+  it("reporta el monto sin consumir el sello", () => {
+    const estampar = registerPaymentPolicy.crearEstampadorPagoConvenio(981.86);
+
+    // Consultar dos veces no quema el sello.
+    expect(estampar.pendiente()).toBe("981.86");
+    expect(estampar.pendiente()).toBe("981.86");
+
+    expect(estampar()).toBe("981.86");
+
+    // Ya estampado: el peek pasa a 0 y las cuotas siguientes pueden saltarse.
+    expect(estampar.pendiente()).toBe("0");
+    expect(estampar()).toBe("0");
+  });
+
+  it("reporta 0 cuando la boleta no aplicó al convenio", () => {
+    expect(registerPaymentPolicy.crearEstampadorPagoConvenio(0).pendiente()).toBe("0");
+    expect(
+      registerPaymentPolicy.crearEstampadorPagoConvenio(null).pendiente()
+    ).toBe("0");
   });
 });

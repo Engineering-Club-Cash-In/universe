@@ -862,11 +862,22 @@ export const crearEstampadorPagoConvenio = (
 ) => {
   const monto = new Big(montoConvenio ?? 0);
   let estampado = false;
-  return (): string => {
-    if (estampado || monto.lte(0)) return "0";
-    estampado = true;
-    return monto.toString();
-  };
+  return Object.assign(
+    (): string => {
+      if (estampado || monto.lte(0)) return "0";
+      estampado = true;
+      return monto.toString();
+    },
+    {
+      /**
+       * Peek NO consumidor: cuánto estamparía la próxima llamada. Lo usa el
+       * loop de cuotas para decidir si una cuota sin saldo puede saltarse
+       * (`debeInsertarFilaParcialCuota`) sin quemar el sello en la consulta.
+       */
+      pendiente: (): string =>
+        estampado || monto.lte(0) ? "0" : monto.toString(),
+    }
+  );
 };
 
 /**
@@ -936,19 +947,31 @@ export const capitalSuprimidoPorConvenio = (params: {
  * basura permanente: `/aplicar-pago` rechaza validar un pago con monto
  * aplicado 0, así que nunca se pueden cerrar ni facturar.
  *
- * Regla: una cuota que no cobró nada (sin abonos, sin mora, sin otros) no
- * escribe fila ni boleta; el loop simplemente sigue a la siguiente cuota con
- * el disponible intacto.
+ * Regla: una cuota que no cobró nada (sin abonos, sin mora, sin otros, sin
+ * convenio pendiente de estampar) no escribe fila ni boleta; el loop
+ * simplemente sigue a la siguiente cuota con el disponible intacto.
+ *
+ * `pagoConvenio` es lo que el estampador escribiría en ESTA fila (su peek
+ * `pendiente()`, no una llamada consumidora). En EN_CONVENIO,
+ * `processConvenioPayment` ya mutó `convenios_pago` ANTES del loop y el sello
+ * vive en una sola fila de `pagos_credito`: si todas las cuotas se saltaran,
+ * el convenio quedaría cobrado sin fila que lo registre y se romperían la
+ * reversa y la detección de boleta duplicada (P2 de Codex en #1248). Una fila
+ * con `monto_aplicado = 0` pero `pagoConvenio > 0` es legítima y validable
+ * (`shouldRejectZeroAppliedNormalValidation` exime pagoConvenio > 0).
  */
 export const debeInsertarFilaParcialCuota = ({
   totalPagado,
   mora = 0,
   otros = 0,
+  pagoConvenio = 0,
 }: {
   totalPagado: BigInput;
   mora?: BigInput | null;
   otros?: BigInput | null;
+  pagoConvenio?: BigInput | null;
 }): boolean =>
   new Big(totalPagado ?? 0).gt(0) ||
   new Big(mora ?? 0).gt(0) ||
-  new Big(otros ?? 0).gt(0);
+  new Big(otros ?? 0).gt(0) ||
+  new Big(pagoConvenio ?? 0).gt(0);

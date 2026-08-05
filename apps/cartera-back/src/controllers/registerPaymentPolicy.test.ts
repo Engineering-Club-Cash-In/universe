@@ -926,3 +926,77 @@ describe("crearEstampadorPagoConvenio - peek pendiente()", () => {
     ).toBe("0");
   });
 });
+
+describe("capitalSuprimidoSinAplicar (devolución por cuotas saltadas)", () => {
+  // Escenario base: capital pedido sin permiso, la sección 7 no corrió y no
+  // hubo mora ni fila especial de otros. Lo único que puede suprimir el 409
+  // es el convenio o las cuotas saltadas.
+  const base = {
+    abonoCapital: 500,
+    cuotasCompletas: 0,
+    cuotasParciales: 0,
+    moraAplicada: 0,
+    otrosEspecialAplicado: false,
+    convenioAplicado: 0,
+  };
+
+  it("devuelve el capital cuando el 409 se suprimió SOLO por cuotas saltadas", () => {
+    expect(
+      registerPaymentPolicy
+        .capitalSuprimidoSinAplicar({
+          ...base,
+          cuotasParciales: 3, // 0 reales + 3 saltadas
+          cuotasSaltadas: 3,
+        })
+        .toString()
+    ).toBe("500");
+  });
+
+  it("no devuelve nada cuando hubo parciales REALES (comportamiento pre-existente)", () => {
+    expect(
+      registerPaymentPolicy
+        .capitalSuprimidoSinAplicar({
+          ...base,
+          cuotasParciales: 2, // ambas reales
+          cuotasSaltadas: 0,
+        })
+        .toString()
+    ).toBe("0");
+  });
+
+  it("no devuelve nada cuando el 409 SÍ procede (no se procesó nada)", () => {
+    expect(
+      registerPaymentPolicy
+        .capitalSuprimidoSinAplicar({ ...base, cuotasSaltadas: 0 })
+        .toString()
+    ).toBe("0");
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado(base)
+    ).toBe(true);
+  });
+
+  it("devuelve el capital UNA sola vez cuando convenio y saltadas suprimen a la vez", () => {
+    expect(
+      registerPaymentPolicy
+        .capitalSuprimidoSinAplicar({
+          ...base,
+          cuotasParciales: 2,
+          cuotasSaltadas: 2,
+          convenioAplicado: 230,
+        })
+        .toString()
+    ).toBe("500");
+  });
+
+  it("sin `cuotasSaltadas` se comporta igual que capitalSuprimidoPorConvenio", () => {
+    const conConvenio = { ...base, convenioAplicado: 230 };
+    expect(
+      registerPaymentPolicy.capitalSuprimidoSinAplicar(conConvenio).toString()
+    ).toBe(
+      registerPaymentPolicy.capitalSuprimidoPorConvenio(conConvenio).toString()
+    );
+    expect(
+      registerPaymentPolicy.capitalSuprimidoSinAplicar(conConvenio).toString()
+    ).toBe("500");
+  });
+});

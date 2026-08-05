@@ -928,9 +928,37 @@ export const capitalSuprimidoPorConvenio = (params: {
   moraAplicada: BigInput;
   otrosEspecialAplicado: boolean;
   convenioAplicado: BigInput;
+}): Big => capitalSuprimidoSinAplicar({ ...params, cuotasSaltadas: 0 });
+
+/**
+ * Generalización de lo anterior: capital pedido que se evaporaría porque el
+ * 409 anti-pérdida quedó suprimido por algo que NO aplicó ese capital. Hoy hay
+ * dos supresores de esa clase:
+ *
+ *  - el convenio (`convenioAplicado`, caso #1246), y
+ *  - las cuotas saltadas (`cuotasSaltadas`), que se suman a `cuotasParciales`
+ *    por paridad con develop — allá las filas basura de las cuotas sin saldo
+ *    contaban como parciales y suprimían el 409.
+ *
+ * Se compara contra el escenario CRUDO (sin convenio y con las parciales
+ * REALES): si ahí se rechazaría y con los supresores no, el capital vuelve a
+ * saldo a favor. Al ser UN solo cómputo, si ambas supresiones coinciden el
+ * capital se devuelve UNA vez, no dos.
+ */
+export const capitalSuprimidoSinAplicar = (params: {
+  abonoCapital: BigInput;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  otrosEspecialAplicado: boolean;
+  convenioAplicado: BigInput;
+  cuotasSaltadas?: number;
 }): Big =>
-  debeRechazarAbonoCapitalNoAplicado({ ...params, convenioAplicado: 0 }) &&
-  !debeRechazarAbonoCapitalNoAplicado(params)
+  debeRechazarAbonoCapitalNoAplicado({
+    ...params,
+    convenioAplicado: 0,
+    cuotasParciales: params.cuotasParciales - (params.cuotasSaltadas ?? 0),
+  }) && !debeRechazarAbonoCapitalNoAplicado(params)
     ? new Big(params.abonoCapital ?? 0)
     : new Big(0);
 

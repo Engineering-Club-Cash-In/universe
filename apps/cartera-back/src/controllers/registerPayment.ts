@@ -33,7 +33,7 @@ import {
   esPagoSoloCapital,
   esPagoSoloOtros,
   puedeOmitirGuardTodasCubiertas,
-  capitalSuprimidoPorConvenio,
+  capitalSuprimidoSinAplicar,
   debeRechazarAbonoCapitalNoAplicado,
   debeInsertarFilaParcialCuota,
   CREDIT_PENDING_CANCELLATION_ERROR,
@@ -2171,6 +2171,10 @@ export const insertPayment = async ({ body, set }: any) => {
         // siquiera saltándola; si el loop recorrió cuotas y no absorbieron
         // nada, el disponible quedó en saldo a favor como antes.
         cuotasParciales: cuotas_parciales + cuotas_saltadas,
+        // Se pasa aparte para poder reconstruir el escenario CRUDO (parciales
+        // reales) y devolver a saldo a favor el capital que esta compensación
+        // deja sin destino — ver `capitalSuprimidoSinAplicar`.
+        cuotasSaltadas: cuotas_saltadas,
         moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
         // Condición RUNTIME de la rama especial de otros (no la clasificación
         // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
@@ -2190,10 +2194,12 @@ export const insertPayment = async ({ body, set }: any) => {
         };
       }
 
-      // Capital que la sección 7 no aplicó y cuyo 409 se suprimió SOLO por el
-      // convenio: ya venía descontado de montoEfectivo, así que sin esto se
-      // evaporaría en silencio — se devuelve a saldo a favor.
-      const capitalDevuelto = capitalSuprimidoPorConvenio(guardCapitalParams);
+      // Capital que la sección 7 no aplicó y cuyo 409 se suprimió por algo que
+      // NO aplicó ese capital (el convenio, #1246, o las cuotas saltadas de
+      // este PR): ya venía descontado de montoEfectivo, así que sin esto se
+      // evaporaría en silencio — se devuelve a saldo a favor UNA sola vez,
+      // apliquen una o ambas supresiones.
+      const capitalDevuelto = capitalSuprimidoSinAplicar(guardCapitalParams);
       if (capitalDevuelto.gt(0)) {
         console.log(
           `↩️ Abono a capital no aplicable (sin permiso) devuelto a saldo a favor: Q${capitalDevuelto.toString()}`

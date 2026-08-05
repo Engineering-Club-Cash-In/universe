@@ -1,0 +1,8 @@
+# Salidas de estos scripts: traen datos de clientes, montos y cadenas de conexión
+# en los mensajes de error. Nunca se versionan.
+plan_ajuste_autocash*.json
+plan_ajuste_autocash*.csv
+reporte_ajuste_autocash*.json
+db_creditos.csv
+*.xlsx
+__pycache__/

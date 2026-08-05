@@ -983,6 +983,12 @@ export const insertPayment = async ({ body, set }: any) => {
 
     let cuotas_completas = 0;
     let cuotas_parciales = 0;
+    // Cuotas visitadas por el cascadeo que no absorbieron nada y por eso NO
+    // escriben fila (ver `debeInsertarFilaParcialCuota`). Antes de ese cambio
+    // cada una dejaba una fila parcial basura que SÍ contaba en
+    // `cuotas_parciales`; este contador preserva esa semántica donde el
+    // conteo tenía efectos observables (ajuste stale y guard anti-pérdida).
+    let cuotas_saltadas = 0;
     let disponible_para_cuotasPosteriores = new Big(0);
     for (const cuota of cuotasPendientes) {
       console.log("\n===============================");
@@ -1411,8 +1417,15 @@ export const insertPayment = async ({ body, set }: any) => {
           .plus(abono_seguro)
           .plus(abono_gps)
           .plus(abono_membresias);
+        // Incluye `cuotas_saltadas`: en develop una cuota saltada dejaba fila
+        // parcial y por tanto consumía el "primera cuota procesada". Se
+        // preserva esa semántica para que `shouldApplyStaleZeroRestanteAdjustment`
+        // (que MUEVE plata: totalPagado += faltante, disponible -= faltante) no
+        // dispare en cascadeos donde antes no disparaba.
         const esPrimeraCuotaProcesada =
-          cuotas_completas === 0 && cuotas_parciales === 0;
+          cuotas_completas === 0 &&
+          cuotas_parciales === 0 &&
+          cuotas_saltadas === 0;
         const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
         const faltanteContraCuota = montoCuota.minus(totalPagado);
 
@@ -1764,6 +1777,7 @@ export const insertPayment = async ({ body, set }: any) => {
               // de `*_restante`; el disponible queda intacto para la siguiente
               // cuota del cascadeo.
               filaParcialOmitida = true;
+              cuotas_saltadas++;
               console.log(
                 `⏭️ Cuota ${cuota.cuotas_credito.numero_cuota} sin nada que cobrar (aplicado 0, sin mora ni otros): no se inserta fila`
               );
@@ -2147,7 +2161,12 @@ export const insertPayment = async ({ body, set }: any) => {
       const guardCapitalParams = {
         abonoCapital,
         cuotasCompletas: cuotas_completas,
-        cuotasParciales: cuotas_parciales,
+        // + `cuotas_saltadas`: en develop las filas basura de las cuotas sin
+        // saldo contaban como parciales y suprimían este 409. El anti-pérdida
+        // sólo debe disparar cuando de verdad no se procesó NINGUNA cuota, ni
+        // siquiera saltándola; si el loop recorrió cuotas y no absorbieron
+        // nada, el disponible quedó en saldo a favor como antes.
+        cuotasParciales: cuotas_parciales + cuotas_saltadas,
         moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
         // Condición RUNTIME de la rama especial de otros (no la clasificación
         // pagoSoloOtros): esa rama inserta su fila aunque el request traiga

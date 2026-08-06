@@ -327,9 +327,10 @@ export function TableInvestors() {
   }, [searchParams]);
 
   // Catálogo de inversionistas (para el filtro)
-  const { investors = [], loading: loadingCatalogs } = useCatalogs() as {
+  const { investors = [], loading: loadingCatalogs, refetch: refetchCatalogs } = useCatalogs() as {
     investors: Investor[];
     loading: boolean;
+    refetch: () => void;
   };
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "update">("create");
@@ -745,6 +746,7 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
     setSelectedInvestorData(undefined);
     refetch();
     refetchTotales(); // Refresca la tabla y totales después de crear/editar
+    refetchCatalogs(); // El catálogo alimenta la edición vía headerInv; sin esto re-editar pisa los flags con datos viejos
   };
   return (
   <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">

@@ -697,6 +697,7 @@ export interface Investor {
   inversionista_id: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos?: boolean;
   reinversion: boolean;          // 🔹 nuevo campo
   banco: string | null;          // 🔹 nuevo campo
   tipo_cuenta: string | null;    // 🔹 nuevo campo

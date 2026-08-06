@@ -41,10 +41,13 @@ import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./paym
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   CREDIT_DETAIL_STATUSES,
+  RESET_CREDIT_ERRORS,
   canResetCreditByStatus,
   isAmbiguousOriginalPrincipalPayment,
   isCreditClosingPayment,
+  isIncobrableContinuationReady,
   isOriginalPrincipalPayment,
+  normalizarMontoQ,
   withActiveCancellation,
 } from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
@@ -1580,8 +1583,10 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
         return { ok: false, message: "Crédito no encontrado" };
       }
 
-      // b) Capital = monto_incobrable, plazo = 1, cuota = capital completo
-      const capitalIncobrable = new Big(monto_cancelacion!);
+      // b) Capital = monto_incobrable, plazo = 1, cuota = capital completo.
+      //    Normalizado a centavos: el front lo calcula con float y las columnas
+      //    sin escala (pagos_credito.cuota) preservarían el polvo tal cual.
+      const capitalIncobrable = new Big(normalizarMontoQ(monto_cancelacion!));
 
       // c) Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
       //    paymentFalse=true). Además se ponen los *_restante en 0 para que las queries de
@@ -1838,6 +1843,14 @@ export async function resetCredit({
   numeroAutorizacion?: string;
 }) {
   try {
+    // El monto llega del front con aritmética float (p.ej. 106488.77 - 90000 =
+    // 16488.770000000004) y las columnas de dinero son numeric(18,2): se
+    // normaliza a centavos UNA vez y todo el flujo usa esta versión.
+    const montoIncobrableNormalizado =
+      montoIncobrable !== undefined && Number.isFinite(montoIncobrable)
+        ? Number(normalizarMontoQ(montoIncobrable))
+        : undefined;
+
     const { statusCredit } = await db.transaction(async (tx) => {
       const [lockedCredit] = await tx
         .select()
@@ -1846,7 +1859,7 @@ export async function resetCredit({
         .limit(1)
         .for("update");
       if (!lockedCredit) {
-        throw new Error("Crédito no encontrado.");
+        throw new Error(RESET_CREDIT_ERRORS.CREDITO_NO_ENCONTRADO);
       }
       const credito = lockedCredit;
 
@@ -1885,27 +1898,14 @@ export async function resetCredit({
         )
         .limit(1);
 
-      let incobrableContinuationReady = false;
-      if (credito.statusCredit === "INCOBRABLE") {
-        try {
-          if (
-            montoIncobrable !== undefined &&
-            Number.isFinite(montoIncobrable) &&
-            badDebt &&
-            !existingClosingPayment
-          ) {
-            const montoIncobrableBig = new Big(montoIncobrable);
-            const creditoCapitalBig = new Big(credito.capital ?? 0);
-            const badDebtCapitalBig = new Big(badDebt.monto_incobrable ?? 0);
-            incobrableContinuationReady =
-              montoIncobrableBig.gt(0) &&
-              montoIncobrableBig.eq(creditoCapitalBig) &&
-              montoIncobrableBig.eq(badDebtCapitalBig);
-          }
-        } catch {
-          incobrableContinuationReady = false;
-        }
-      }
+      const incobrableContinuationReady =
+        credito.statusCredit === "INCOBRABLE" &&
+        isIncobrableContinuationReady({
+          montoIncobrable: montoIncobrableNormalizado,
+          capitalCredito: credito.capital,
+          montoIncobrableRegistrado: badDebt?.monto_incobrable ?? null,
+          tienePagoCierre: Boolean(existingClosingPayment),
+        });
 
       if (
         !canResetCreditByStatus(
@@ -1913,18 +1913,16 @@ export async function resetCredit({
           incobrableContinuationReady,
         )
       ) {
-        throw new Error(
-          "El crédito no está pendiente de cancelación ni listo para continuar como incobrable.",
-        );
+        throw new Error(RESET_CREDIT_ERRORS.ESTADO_INVALIDO);
       }
       if (existingClosingPayment) {
-        throw new Error("El crédito ya tiene un pago de cierre system_reset.");
+        throw new Error(RESET_CREDIT_ERRORS.CIERRE_PREVIO);
       }
 
       // 3. Determinar el estado del crédito
       const statusCredit =
-        typeof montoIncobrable !== "undefined" &&
-        montoIncobrable > 0 &&
+        typeof montoIncobrableNormalizado !== "undefined" &&
+        montoIncobrableNormalizado > 0 &&
         montoBoleta !== undefined
           ? "INCOBRABLE"
           : "CANCELADO";
@@ -1951,7 +1949,7 @@ export async function resetCredit({
       const capitalOriginal = new Big(credito.capital ?? "0");
       const abonoCapital =
         statusCredit === "INCOBRABLE"
-          ? capitalOriginal.minus(new Big(montoIncobrable!))
+          ? capitalOriginal.minus(new Big(montoIncobrableNormalizado!))
           : capitalOriginal;
       const abonoInteres = new Big(credito.cuota_interes ?? "0").times(n);
       const abonoIva = new Big(credito.iva_12 ?? "0").times(n);
@@ -2175,7 +2173,7 @@ export async function resetCredit({
       });
 
       if (statusCredit === "INCOBRABLE") {
-        const capitalIncobrable = new Big(montoIncobrable!);
+        const capitalIncobrable = new Big(montoIncobrableNormalizado!);
 
         // 16a. Actualizar crédito: capital = incobrable, lo demás en 0 (preservamos porcentaje_interes)
         await setCapitalSource(tx, "CASTIGO", null, null);
@@ -2290,7 +2288,7 @@ export async function resetCredit({
     return {
       ok: true,
       message: statusCredit === "INCOBRABLE"
-        ? `Crédito reiniciado como incobrable. Deuda pendiente: ${montoIncobrable}`
+        ? `Crédito reiniciado como incobrable. Deuda pendiente: ${montoIncobrableNormalizado}`
         : "Crédito reiniciado y pago creado exitosamente.",
     };
   } catch (error) {

@@ -862,11 +862,22 @@ export const crearEstampadorPagoConvenio = (
 ) => {
   const monto = new Big(montoConvenio ?? 0);
   let estampado = false;
-  return (): string => {
-    if (estampado || monto.lte(0)) return "0";
-    estampado = true;
-    return monto.toString();
-  };
+  return Object.assign(
+    (): string => {
+      if (estampado || monto.lte(0)) return "0";
+      estampado = true;
+      return monto.toString();
+    },
+    {
+      /**
+       * Peek NO consumidor: cuánto estamparía la próxima llamada. Lo usa el
+       * loop de cuotas para decidir si una cuota sin saldo puede saltarse
+       * (`debeInsertarFilaParcialCuota`) sin quemar el sello en la consulta.
+       */
+      pendiente: (): string =>
+        estampado || monto.lte(0) ? "0" : monto.toString(),
+    }
+  );
 };
 
 /**
@@ -917,8 +928,124 @@ export const capitalSuprimidoPorConvenio = (params: {
   moraAplicada: BigInput;
   otrosEspecialAplicado: boolean;
   convenioAplicado: BigInput;
+}): Big => capitalSuprimidoSinAplicar({ ...params, cuotasSaltadas: 0 });
+
+/**
+ * ¿El cascadeo visitó cuotas, ninguna absorbió nada y NO se escribió ninguna
+ * otra fila? Entonces el pago no dejó rastro alguno en `pagos_credito`.
+ *
+ * Antes del skip de cuotas sin saldo, esas cuotas dejaban filas basura que —
+ * accidentalmente — servían de rastro: un reintento de la misma boleta se
+ * detectaba como duplicado. Sin ellas, el `else` final acreditaría
+ * `disponible_restante` a `saldo_a_favor` y respondería `success` sin fila ni
+ * boleta persistida, así que reenviar la misma boleta/autorización acreditaría
+ * saldo DOBLE sin evidencia (P2 de Codex en #1248).
+ *
+ * Se RECHAZA con 409 en lugar de insertar una fila especial de saldo a favor:
+ * una fila con `monto_aplicado = 0` es permanentemente invalidable
+ * (`shouldRejectZeroAppliedNormalValidation`), o sea exactamente el artefacto
+ * que este PR elimina. Un crédito donde ninguna cuota abierta puede absorber
+ * es un crédito degenerado que necesita reparación, y el 409 ruidoso-seguro es
+ * la filosofía ya adoptada por el gate de integridad de #1229.
+ *
+ * `cuotasSaltadas > 0` es la condición clave: si el loop nunca corrió (crédito
+ * sin cuotas pendientes) NO se rechaza, se conserva el flujo histórico de
+ * saldo a favor. Y cualquier otra vía que YA escribió su fila (mora, la rama
+ * especial de otros, o el convenio — que con el fix del sello fuerza fila en
+ * la primera cuota, dejando `cuotasParciales > 0`) desactiva el rechazo.
+ */
+export const debeRechazarPagoSinAplicacion = ({
+  cuotasSaltadas,
+  cuotasCompletas,
+  cuotasParciales,
+  moraAplicada,
+  otrosEspecialAplicado,
+  convenioAplicado,
+}: {
+  cuotasSaltadas: number;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  otrosEspecialAplicado: boolean;
+  convenioAplicado: BigInput;
+}): boolean =>
+  cuotasSaltadas > 0 &&
+  cuotasCompletas === 0 &&
+  cuotasParciales === 0 &&
+  new Big(moraAplicada ?? 0).lte(0) &&
+  !otrosEspecialAplicado &&
+  new Big(convenioAplicado ?? 0).lte(0);
+
+/**
+ * Generalización de lo anterior: capital pedido que se evaporaría porque el
+ * 409 anti-pérdida quedó suprimido por algo que NO aplicó ese capital. Hoy hay
+ * dos supresores de esa clase:
+ *
+ *  - el convenio (`convenioAplicado`, caso #1246), y
+ *  - las cuotas saltadas (`cuotasSaltadas`), que se suman a `cuotasParciales`
+ *    por paridad con develop — allá las filas basura de las cuotas sin saldo
+ *    contaban como parciales y suprimían el 409.
+ *
+ * Se compara contra el escenario CRUDO (sin convenio y con las parciales
+ * REALES): si ahí se rechazaría y con los supresores no, el capital vuelve a
+ * saldo a favor. Al ser UN solo cómputo, si ambas supresiones coinciden el
+ * capital se devuelve UNA vez, no dos.
+ */
+export const capitalSuprimidoSinAplicar = (params: {
+  abonoCapital: BigInput;
+  cuotasCompletas: number;
+  cuotasParciales: number;
+  moraAplicada: BigInput;
+  otrosEspecialAplicado: boolean;
+  convenioAplicado: BigInput;
+  cuotasSaltadas?: number;
 }): Big =>
-  debeRechazarAbonoCapitalNoAplicado({ ...params, convenioAplicado: 0 }) &&
-  !debeRechazarAbonoCapitalNoAplicado(params)
+  debeRechazarAbonoCapitalNoAplicado({
+    ...params,
+    convenioAplicado: 0,
+    cuotasParciales: params.cuotasParciales - (params.cuotasSaltadas ?? 0),
+  }) && !debeRechazarAbonoCapitalNoAplicado(params)
     ? new Big(params.abonoCapital ?? 0)
     : new Big(0);
+
+/**
+ * ¿Esta cuota merece una fila de pago parcial?
+ *
+ * El loop de cuotas de `insertPayment` cascadea mientras quede
+ * `disponible_restante`, y hasta ahora insertaba una fila `pending` (más su
+ * boleta) por cada cuota visitada AUNQUE la cuota no absorbiera nada. En el
+ * crédito 8717 (INCOBRABLE migrado del CRM: toda la deuda concentrada en la
+ * última cuota y las cuotas 2-62 con recibos `no_required` de capital 0 y
+ * rubros que el saldo neto clampea a 0) una boleta de Q2,330 dejó 60 filas con
+ * `monto_aplicado = 0` y la misma boleta colgada 61 veces. Esas filas son
+ * basura permanente: `/aplicar-pago` rechaza validar un pago con monto
+ * aplicado 0, así que nunca se pueden cerrar ni facturar.
+ *
+ * Regla: una cuota que no cobró nada (sin abonos, sin mora, sin otros, sin
+ * convenio pendiente de estampar) no escribe fila ni boleta; el loop
+ * simplemente sigue a la siguiente cuota con el disponible intacto.
+ *
+ * `pagoConvenio` es lo que el estampador escribiría en ESTA fila (su peek
+ * `pendiente()`, no una llamada consumidora). En EN_CONVENIO,
+ * `processConvenioPayment` ya mutó `convenios_pago` ANTES del loop y el sello
+ * vive en una sola fila de `pagos_credito`: si todas las cuotas se saltaran,
+ * el convenio quedaría cobrado sin fila que lo registre y se romperían la
+ * reversa y la detección de boleta duplicada (P2 de Codex en #1248). Una fila
+ * con `monto_aplicado = 0` pero `pagoConvenio > 0` es legítima y validable
+ * (`shouldRejectZeroAppliedNormalValidation` exime pagoConvenio > 0).
+ */
+export const debeInsertarFilaParcialCuota = ({
+  totalPagado,
+  mora = 0,
+  otros = 0,
+  pagoConvenio = 0,
+}: {
+  totalPagado: BigInput;
+  mora?: BigInput | null;
+  otros?: BigInput | null;
+  pagoConvenio?: BigInput | null;
+}): boolean =>
+  new Big(totalPagado ?? 0).gt(0) ||
+  new Big(mora ?? 0).gt(0) ||
+  new Big(otros ?? 0).gt(0) ||
+  new Big(pagoConvenio ?? 0).gt(0);

@@ -1760,7 +1760,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-green-700">📈 IVA</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-green-50 rounded px-1 text-sm font-bold text-green-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.currencySymbol} {inv.emite_factura
+                                        {inv.currencySymbol} {inv.descuenta_impuestos
+                                          ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
+                                          : inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
                                           : "0.00"}
                                       </div>
@@ -1776,7 +1778,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-yellow-700">📉 ISR</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-yellow-50 rounded px-1 text-sm font-bold text-yellow-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.currencySymbol} {!inv.emite_factura
+                                        {inv.currencySymbol} {inv.descuenta_impuestos || !inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.07).toFixed(2)
                                           : "0.00"}
                                       </div>

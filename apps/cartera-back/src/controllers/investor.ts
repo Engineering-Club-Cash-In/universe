@@ -1529,7 +1529,9 @@ export async function resumeInvestor(
             : null;
             console.log("Fecha para mes:", fechaParaMes, "→ Mes:", mes);
        // 🆕 CORRECCIÓN: Cálculo según emite_factura
-              if (inv.emite_factura) {
+              if (descImp) {
+                abonoGeneralInteres = descImp.neto;
+              } else if (inv.emite_factura) {
                 abonoGeneralInteres = abono_interes.plus(abono_iva);
               } else {
                 abonoGeneralInteres = abono_interes.minus(isr);
@@ -1631,7 +1633,10 @@ export async function resumeInvestor(
                 id: (pago as any).id,
                 mes, // 🔥 AHORA USA LA FECHA DE LA CUOTA
                 abono_capital: formatValue(abono_capital.toString()),
-                abono_interes: formatValue((descImp ? descImp.neto.round(2) : abono_interes).toString()),
+                // abono_interes queda SIEMPRE en bruto: el front lo devuelve tal cual a
+                // /recalcularPagosEspejo y netearlo aquí corrompería el espejo (×0.81
+                // por guardado). El neto por pago viaja en abonoGeneralInteres.
+                abono_interes: formatValue(abono_interes.toString()),
                 abono_iva: formatValue((descImp ? descImp.iva.round(2) : abono_iva).toString()),
                 isr: descImp
                   ? formatValue(descImp.isr.round(2).toString())
@@ -1946,6 +1951,7 @@ export async function getInvestorTotalsGlobales(
         total_abono_interes: 0,
         total_abono_iva: 0,
         total_isr: 0,
+        total_neto_impuestos: inv.descuenta_impuestos === true ? 0 : null,
         total_cuota: 0,
         total_monto_aportado: 0,
         totalAbonoGeneralInteres: 0,
@@ -1981,6 +1987,7 @@ export async function getInvestorTotalsGlobales(
         total_abono_interes: 0,
         total_abono_iva: 0,
         total_isr: 0,
+        total_neto_impuestos: inv.descuenta_impuestos === true ? 0 : null,
         total_cuota: 0,
         total_monto_aportado: 0,
         totalAbonoGeneralInteres: 0,
@@ -8607,7 +8614,9 @@ export async function getLiquidaciones({
           porcentaje_tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5).times(new Big(pago.porcentaje_participacion ?? 80)).div(100)),
           tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5)),
           abono_capital: formatValue(abono_capital.toString()),
-          abono_interes: formatValue((descImp ? descImp.neto.round(2) : abono_interes).toString()),
+          // Interés por pago en bruto (igual que resumeInvestor); el neto se ve en
+          // la cuota (capital + interés − IVA − ISR) y en los totales.
+          abono_interes: formatValue(abono_interes.toString()),
           abono_iva: formatValue((descImp ? descImp.iva.round(2) : abono_iva).toString()),
           isr: formatValue((descImp ? descImp.isr.round(2) : isr).toString()),
           cuota: formatValue(cuota.toString()),

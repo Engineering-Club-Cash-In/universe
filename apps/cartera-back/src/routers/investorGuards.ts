@@ -1,19 +1,15 @@
-import { db } from "../database/index";
-import { inversionistas } from "../database/db/schema";
-import { eq } from "drizzle-orm";
-
 // ── Guard a nivel de CAMPO para `descuenta_impuestos` ───────────────────────
 // `descuenta_impuestos` cambia cuánto se le paga al inversionista (interés
-// neteado 12% IVA + 7% ISR), así que solo ADMIN puede CAMBIARLO. El resto del
-// endpoint sigue abierto a cualquier usuario autenticado.
+// neteado 12% IVA + 7% ISR), así que solo ADMIN puede escribirlo.
 //
-// OJO: el modal de carteraFront siempre incluye `descuenta_impuestos` en el
-// payload (default false del form), aunque el usuario no toque el checkbox.
-// Por eso NO alcanza con detectar la presencia del campo: hay que comparar
-// contra el valor guardado y bloquear solo cuando el valor REALMENTE cambia
-// (o cuando se crea un inversionista con el flag en true).
+// Enfoque: para NO-ADMIN se ELIMINA el campo del body antes de llegar al
+// controller. Así el valor guardado se preserva SIN importar por qué camino
+// resuelva `insertInvestor` (por inversionista_id, o el upsert legacy que
+// resuelve un inversionista existente por DPI/email/nombre aunque no venga id).
+// Es más seguro que detectar "cambio", porque el modal siempre manda el campo
+// con su default y no podemos replicar la resolución del upsert en el guard.
 
-type InvBody = { inversionista_id?: number | string; descuenta_impuestos?: unknown };
+type InvBody = { descuenta_impuestos?: unknown };
 
 const elementos = (body: unknown): InvBody[] => {
   if (Array.isArray(body)) return body as InvBody[];
@@ -22,50 +18,33 @@ const elementos = (body: unknown): InvBody[] => {
 };
 
 /**
- * ¿El body intenta CAMBIAR `descuenta_impuestos` respecto de lo guardado?
- * - update (con inversionista_id): true si el nuevo valor != el actual en BD.
- * - create (sin id): true solo si se pide activarlo (true); false = default.
- * Un valor no booleano se ignora (lo filtra el controller aguas abajo).
+ * Elimina `descuenta_impuestos` de cada elemento del body (en sitio).
+ * Devuelve true si quitó el campo de al menos un elemento.
  */
-export const intentaCambiarDescuentaImpuestos = async (body: unknown): Promise<boolean> => {
+export const stripDescuentaImpuestos = (body: unknown): boolean => {
+  let stripped = false;
   for (const el of elementos(body)) {
-    if (typeof el?.descuenta_impuestos !== "boolean") continue;
-    const nuevo = el.descuenta_impuestos as boolean;
-
-    const id = el.inversionista_id != null ? Number(el.inversionista_id) : null;
-    if (id == null || Number.isNaN(id)) {
-      // create: solo activar requiere ADMIN; false es el default y no cambia nada.
-      if (nuevo === true) return true;
-      continue;
+    if (el && typeof el === "object" && "descuenta_impuestos" in el) {
+      delete (el as any).descuenta_impuestos;
+      stripped = true;
     }
-
-    const [actual] = await db
-      .select({ descuenta_impuestos: inversionistas.descuenta_impuestos })
-      .from(inversionistas)
-      .where(eq(inversionistas.inversionista_id, id))
-      .limit(1);
-
-    // Si no existe todavía, se tratará como create aguas abajo: activar = cambio.
-    if (!actual) {
-      if (nuevo === true) return true;
-      continue;
-    }
-    if (actual.descuenta_impuestos !== nuevo) return true;
   }
-  return false;
+  return stripped;
 };
 
-export const guardDescuentaImpuestos = async ({
+/**
+ * ADMIN: pasa intacto. No-ADMIN: el campo se ignora (se elimina del body); el
+ * resto de la request sigue normal. Nunca devuelve 403 — no rompe el guardado
+ * de otros campos, solo impide escribir el flag protegido.
+ */
+export const guardDescuentaImpuestos = ({
   body,
   user,
-  set,
 }: {
   body: unknown;
   user?: { role?: string };
-  set: { status?: number };
-}): Promise<{ message: string } | null> => {
-  if (user?.role === "ADMIN") return null; // ADMIN puede todo, sin tocar la BD
-  if (!(await intentaCambiarDescuentaImpuestos(body))) return null;
-  set.status = 403;
-  return { message: "Solo ADMIN puede modificar descuenta_impuestos" };
+  set?: { status?: number };
+}): void => {
+  if (user?.role === "ADMIN") return;
+  stripDescuentaImpuestos(body);
 };

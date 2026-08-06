@@ -116,6 +116,18 @@ export async function computarTotalesFiltrados(opts: {
     .where(eq(inversionistas.inversionista_id, inversionista_id))
     .limit(1);
 
+  // Ajustar una liquidación NO cambia cómo se pagó: se usa el SNAPSHOT de esa
+  // liquidación, no el flag actual del inversionista. Así una liquidación vieja
+  // en bruto no se re-netea si el inversionista activó descuenta_impuestos después.
+  const [liqSnap] = await db
+    .select({ descuenta_impuestos: liquidaciones.descuenta_impuestos })
+    .from(liquidaciones)
+    .where(eq(liquidaciones.liquidacion_id, liquidacion_id))
+    .limit(1);
+  if (inv) {
+    inv.descuenta_impuestos = liqSnap?.descuenta_impuestos === true;
+  }
+
   if (!inv) {
     throw new Error(`Inversionista ${inversionista_id} no encontrado.`);
   }

@@ -2208,6 +2208,32 @@ export const insertPayment = async ({ body, set }: any) => {
         );
       }
 
+      // El convenio ya acreditó convenios_pago pero NINGUNA fila de esta
+      // boleta consumió el estampado: pasa cuando el crédito EN_CONVENIO no
+      // tiene cuotas abiertas (el guard de integridad pide cuotasPendientes
+      // > 0, así que no lo intercepta). Sin esta fila la boleta no existe en
+      // pagos_credito — invisible para la detección de duplicados y sin
+      // reversa posible del convenio. El disponible sigue yendo a saldo a
+      // favor: el registro del convenio no consume la boleta.
+      if (new Big(estamparPagoConvenio.pendiente()).gt(0)) {
+        await insertarPago({
+          numero_credito_sifco: credito.numero_credito_sifco,
+          numero_cuota: cuotaApagar,
+          cuotaId: cuotaIdPagoEspecial,
+          otros: otrosBig.toNumber(),
+          mora: resultadoMora.montoAplicadoMora,
+          boleta: montoBoleta.toNumber(),
+          urlBoletas: urlCompletas ?? [],
+          pagado: pagoEspecialCuota.pagado,
+          banco_id: banco_id ?? 0,
+          numeroAutorizacion: numeroAutorizacion ?? "",
+          registerBy: registerBy ?? "",
+          fecha_boleta,
+          monto_aplicado: pagoEspecialCuota.montoAplicado,
+          pagoConvenio: Number(estamparPagoConvenio()),
+        });
+      }
+
       const newSaldoAFavor = saldoAFavor
         .plus(disponible_restante)
         .plus(capitalDevuelto);

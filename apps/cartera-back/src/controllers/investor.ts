@@ -544,7 +544,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           updateData.email = inv.email.trim().toLowerCase();
         if (inv.emite_factura !== undefined)
           updateData.emite_factura = inv.emite_factura;
-        if (inv.descuenta_impuestos !== undefined)
+        if (typeof inv.descuenta_impuestos === "boolean")
           updateData.descuenta_impuestos = inv.descuenta_impuestos;
         if (inv.tipo_reinversion?.trim())
           updateData.tipo_reinversion = inv.tipo_reinversion.trim();
@@ -1872,7 +1872,6 @@ export async function getInvestorTotalsGlobales(
       inversionista_id: inversionistas.inversionista_id,
       inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
-      descuenta_impuestos: inversionistas.descuenta_impuestos,
       reinversion: inversionistas.tipo_reinversion,
       monto_reinversion: inversionistas.monto_reinversion,
       moneda: inversionistas.moneda,
@@ -5178,7 +5177,7 @@ export const updateInvestor = async ({ body, set }: any) => {
       if (typeof nombre !== "undefined") updateData.nombre = nombre;
       if (typeof emite_factura !== "undefined")
         updateData.emite_factura = emite_factura;
-      if (typeof descuenta_impuestos !== "undefined")
+      if (typeof descuenta_impuestos === "boolean")
         updateData.descuenta_impuestos = descuenta_impuestos;
       if (typeof tipo_reinversion !== "undefined")
         updateData.tipo_reinversion = tipo_reinversion;

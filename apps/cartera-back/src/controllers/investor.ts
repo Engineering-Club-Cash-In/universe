@@ -7398,9 +7398,20 @@ function mapResumenRow(
     numero_cuenta: inv.numero_cuenta,
     cuentas_extra,
     total_abono_capital: convert(inv.total_abono_capital),
-    total_abono_interes: convert(
-      descImp ? descImp.neto.round(2).toString() : inv.total_abono_interes
-    ),
+    // "Interés" queda en BRUTO para que la fila se lea sola (100 − 12 − 7 = 81);
+    // el neto vive en total_neto_impuestos y total_abono_general_interes
+    // (feedback de review PR #1255). En fuente "liquidaciones" el interés
+    // persistido YA es neto: se reconstruye el bruto con iva+isr guardados.
+    total_abono_interes:
+      inv.descuenta_impuestos === true && fuente === "liquidaciones"
+        ? convert(
+            new Big(inv.total_abono_interes ?? 0)
+              .plus(inv.total_abono_iva ?? 0)
+              .plus(inv.total_isr ?? 0)
+              .round(2)
+              .toString()
+          )
+        : convert(inv.total_abono_interes),
     total_abono_iva: convert(
       descImp ? descImp.iva.round(2).toString() : inv.total_abono_iva
     ),
@@ -7413,7 +7424,13 @@ function mapResumenRow(
             descImp ? descImp.neto.round(2).toString() : inv.total_abono_interes
           )
         : null,
-    total_abono_general_interes: convert(inv.total_abono_general_interes),
+    // En "liquidaciones" el SQL arma general = interes + iva − isr, pero con el
+    // flag el interés persistido YA es neto → el neto real es el persistido
+    // (Codex PR #1255: mostraba Q86 en vez de los Q81 pagados).
+    total_abono_general_interes:
+      inv.descuenta_impuestos === true && fuente === "liquidaciones"
+        ? convert(inv.total_abono_interes)
+        : convert(inv.total_abono_general_interes),
     total_a_recibir_sin_reinversion: convert(inv.total_a_recibir_sin_reinversion),
     total_reinversion: convert(inv.total_reinversion),
     total_reinversion_capital: convert(inv.total_reinversion_capital),
@@ -8250,7 +8267,9 @@ async function generateAchTransferenciasWorkbook(
   });
 
   rows.forEach((inv) => {
-    const valor = Number(inv.total_cuota) || 0;
+    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.19 sin ROUND
+    // y total_cuota puede venir con 4 decimales; este Excel va al banco.
+    const valor = Number((Number(inv.total_cuota) || 0).toFixed(2));
     if (valor === 0) return;
 
     const concepto = `Liquidación ${nombreMes} ${anio}, Club CashIn S.A`;
@@ -8356,7 +8375,9 @@ async function generateTransferenciasWorkbook(
   });
 
   rows.forEach((inv) => {
-    const valor = Number(inv.total_cuota) || 0;
+    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.19 sin ROUND
+    // y total_cuota puede venir con 4 decimales; este Excel va al banco.
+    const valor = Number((Number(inv.total_cuota) || 0).toFixed(2));
     if (valor === 0) return;
 
     const { agencia, correlativo, digito, valido } = parseCuentaMonetaria(inv.numero_cuenta);

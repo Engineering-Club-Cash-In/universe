@@ -26,6 +26,7 @@ export function MiniCardCredito({
   convenioActivoInfo,
   cuotaMensualAPagar,
   abonosParciales,
+  promesaActiva,
 }: {
   credito: any;
   usuario: any;
@@ -36,6 +37,7 @@ export function MiniCardCredito({
     | "pending"
     | "validated"
     | "capital"
+    | "capital_validated"
     | "reset";
   cuotasAtrasadasInfo?: {
     cuotas: {
@@ -45,6 +47,7 @@ export function MiniCardCredito({
         | "pending"
         | "validated"
         | "capital"
+        | "capital_validated"
         | "reset";
     }[];
   };
@@ -58,6 +61,7 @@ export function MiniCardCredito({
         | "pending"
         | "validated"
         | "capital"
+        | "capital_validated"
         | "reset";
     }[];
   };
@@ -99,6 +103,12 @@ export function MiniCardCredito({
     abono_gps: number;
     abono_membresias: number;
     total: number;
+  } | null;
+  promesaActiva?: {
+    fecha_promesa: string;
+    cuota_inicio: number | null;
+    cuota_fin: number | null;
+    incluye_mora: boolean;
   } | null;
 }) {
   if (!credito || !usuario) return null;
@@ -322,6 +332,39 @@ export function MiniCardCredito({
       {/* Card principal del crédito */}
       <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-2xl shadow-2xl px-6 py-6 w-full max-w-[900px] relative">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
+          {/* Promesa de pago vigente (CB-030, solo lectura) */}
+          {promesaActiva && (
+            <div className="col-span-full flex items-center justify-center gap-3 flex-wrap bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-3 text-center">
+              <span className="flex items-center gap-1.5 font-bold text-blue-700 text-sm">
+                <Calendar className="w-4 h-4" />
+                Promesa de Pago
+              </span>
+              <span className="text-blue-900 font-semibold text-sm">
+                {new Date(
+                  promesaActiva.fecha_promesa + "T12:00:00"
+                ).toLocaleDateString("es-ES", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
+              {(promesaActiva.cuota_inicio || promesaActiva.cuota_fin) && (
+                <span className="text-blue-900 text-sm">
+                  {promesaActiva.cuota_inicio &&
+                  promesaActiva.cuota_fin &&
+                  promesaActiva.cuota_inicio !== promesaActiva.cuota_fin
+                    ? `Cuotas #${promesaActiva.cuota_inicio} – #${promesaActiva.cuota_fin}`
+                    : `Cuota #${promesaActiva.cuota_inicio ?? promesaActiva.cuota_fin}`}
+                </span>
+              )}
+              {promesaActiva.incluye_mora && (
+                <span className="px-2 py-0.5 bg-blue-500 text-white text-[10px] font-extrabold rounded-full shadow-sm">
+                  + MORA
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Número de crédito */}
           <div className="flex flex-col bg-white rounded-lg p-4 shadow-sm border border-blue-100">
             <span className="font-bold text-blue-700 text-sm mb-1">

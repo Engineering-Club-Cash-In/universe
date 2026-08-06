@@ -21,6 +21,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { useBancos } from "../hooks/bancos";
+import { usePromesaActivaPorCredito } from "../hooks/paymentagreement";
 import { useState, useCallback } from "react";
 import {
   Dialog,
@@ -91,6 +92,9 @@ export function PagoForm() {
   } = usePagoForm();
 
   const { bancos, loading: loadingBancos } = useBancos();
+  const { data: promesaActiva } = usePromesaActivaPorCredito(
+    dataCredito?.credito?.credito_id
+  );
   const displayedPartialContribution =
     getDisplayedPartialContribution(abonosCuota);
 
@@ -579,6 +583,7 @@ export function PagoForm() {
                 mora={mora || 0}
                 convenioActivoInfo={convenioActivoInfo}
                 cuotaMensualAPagar={dataCredito.cuotaMensualAPagar}
+                promesaActiva={promesaActiva}
                 abonosParciales={(() => {
                   if (!abonosCuota || displayedPartialContribution === 0) {
                     return null;

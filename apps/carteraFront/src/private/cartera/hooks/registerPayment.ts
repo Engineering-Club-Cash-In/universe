@@ -486,8 +486,13 @@ const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
 // 🔥 Calcular abonos ya realizados en la cuota SELECCIONADA (desde endpoint)
 const abonosRealizados = getDisplayedPartialContribution(abonosCuota);
 
-// 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar
-const cuotaComparar = Math.max(0,cuota - abonosRealizados );
+// 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar. La porción
+// proyectada de convenio se suma al umbral: cardInfo muestra "Total a Pagar"
+// = cuota + convenio, así que ese monto es esperado y no debe abrir el modal
+// de excedente (el modal re-asignaría a capital/otros dinero que el back ya
+// registra como convenio). Mismo umbral efectivo que cuando el front restaba
+// el convenio del disponible.
+const cuotaComparar = Math.max(0, cuota - abonosRealizados) + convenioAplicado;
 
 console.log("=== VALIDACIÓN DE EXCEDENTES ===");
 console.log("Monto boleta real (redondeado):", montoRedondeado);

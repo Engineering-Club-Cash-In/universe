@@ -1923,6 +1923,23 @@ export async function getInvestorTotalsGlobales(
   }
 
   const inv = listaInversionistas[0];
+
+  // Si se consulta una liquidación YA hecha (regenerar reporte / sustituir totales),
+  // el neteo lo gobierna el SNAPSHOT de esa liquidación, no el flag actual del
+  // inversionista: una liquidación vieja en bruto no se recalcula como neta si el
+  // inversionista activó descuenta_impuestos después. Sin liquidacionId (totales
+  // vivos / pre-liquidación) se conserva el flag actual.
+  if (liquidacionId != null) {
+    const [liqSnap] = await db
+      .select({ descuenta_impuestos: liquidaciones.descuenta_impuestos })
+      .from(liquidaciones)
+      .where(eq(liquidaciones.liquidacion_id, liquidacionId))
+      .limit(1);
+    if (liqSnap) {
+      (inv as any).descuenta_impuestos = liqSnap.descuenta_impuestos === true;
+    }
+  }
+
   const inversionistaIds = [inv.inversionista_id];
 
   // 2. Créditos asociados al inversionista (según tipo)

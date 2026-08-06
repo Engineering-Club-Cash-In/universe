@@ -2121,6 +2121,23 @@ export const insertPayment = async ({ body, set }: any) => {
         "⏳ Pendiente de validación para distribuir entre inversionistas\n"
       );
 
+      // Sobrante no-capital de la boleta (p. ej. EN_CONVENIO sin cuotas
+      // abiertas que consuman el disponible): esta rama retorna sin pasar por
+      // el bloque de saldo a favor del else final, así que sin esto el
+      // efectivo restante se evaporaba sin acreditarse. Mismo espejo contable
+      // que el else: saldo viejo + sobrante (el capital acá SÍ se aplicó, no
+      // hay capitalDevuelto).
+      if (disponible_restante.gt(0)) {
+        const saldoConSobrante = saldoAFavor.plus(disponible_restante);
+        await db
+          .update(usuarios)
+          .set({ saldo_a_favor: saldoConSobrante.toString() })
+          .where(eq(usuarios.usuario_id, credito.usuario_id));
+        console.log(
+          `↩️ Sobrante no aplicado a cuotas acreditado a saldo a favor: Q${disponible_restante.toString()} (saldo: Q${saldoConSobrante.toString()})`
+        );
+      }
+
       // 4️⃣ Retornar resultado
       return {
         success: true,

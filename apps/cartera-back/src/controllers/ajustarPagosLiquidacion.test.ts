@@ -27,8 +27,12 @@ const PAGO = { credito_id: 1, abono_capital: "500", abono_interes: "100", abono_
 const CREDITO = { credito_id: 1, monto_aportado: "1000", tipo_reinversion: null };
 
 const correr = async (emite_factura: boolean, descuenta_impuestos: boolean) => {
+  // Orden de selects en computarTotalesFiltrados: inv → snapshot liquidación →
+  // créditos espejo → pagos. El SNAPSHOT (no el flag del inversionista) gobierna
+  // el neteo, así que el flag del inv va en false y el comportamiento lo fija el snapshot.
   selectQueue = [
-    [{ emite_factura, descuenta_impuestos, reinversion: "sin_reinversion", monto_reinversion: null, moneda: "quetzales" }],
+    [{ emite_factura, descuenta_impuestos: false, reinversion: "sin_reinversion", monto_reinversion: null, moneda: "quetzales" }],
+    [{ descuenta_impuestos }],
     [CREDITO],
     [PAGO],
   ];

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import Big from "big.js";
 import {
-  aplicarConvenioAlDisponible,
   applyCapitalPaymentAndBuildResponse,
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
@@ -871,7 +870,7 @@ describe("calcularSaldoNetoCuota", () => {
   });
 });
 
-describe("convenio: split del disponible (orden otros → mora → convenio)", () => {
+describe("convenio: registro del catch-up (orden otros → mora → convenio)", () => {
   it("solo procesa convenio en créditos EN_CONVENIO con disponible", () => {
     expect(
       debeProcesarConvenio({ statusCredit: "EN_CONVENIO", disponible: 230 })
@@ -887,32 +886,6 @@ describe("convenio: split del disponible (orden otros → mora → convenio)", (
     ).toBe(false);
   });
 
-  it("resta del disponible lo aplicado al convenio (parcial consume todo)", () => {
-    const split = aplicarConvenioAlDisponible({
-      disponible: 230,
-      montoConvenio: 230,
-    });
-    expect(split.disponibleRestante.toString()).toBe("0");
-    expect(split.requiereRegistroSoloConvenio).toBe(true);
-  });
-
-  it("deja el sobrante para cuotas cuando la boleta supera la cuota del convenio", () => {
-    const split = aplicarConvenioAlDisponible({
-      disponible: 1200,
-      montoConvenio: 981.86,
-    });
-    expect(split.disponibleRestante.toString()).toBe("218.14");
-    expect(split.requiereRegistroSoloConvenio).toBe(false);
-  });
-
-  it("sin monto de convenio no exige registro solo-convenio ni toca el disponible", () => {
-    const split = aplicarConvenioAlDisponible({
-      disponible: 500,
-      montoConvenio: 0,
-    });
-    expect(split.disponibleRestante.toString()).toBe("500");
-    expect(split.requiereRegistroSoloConvenio).toBe(false);
-  });
 });
 
 describe("calcularAplicacionConvenio (tope al pendiente real)", () => {

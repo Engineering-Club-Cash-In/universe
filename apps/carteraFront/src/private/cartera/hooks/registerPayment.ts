@@ -449,15 +449,19 @@ const montoDisponibleTotal = montoBoleta ;
 console.log("Monto Disponible Total (boleta + saldo):", montoDisponibleTotal);
 
 // 🔥 Restar lo que se va a otros conceptos
-// El convenio acepta abonos parciales: solo se descuenta lo que la boleta alcance a cubrir
+// El convenio se REGISTRA pero NO consume la boleta (espejo del back): lo que
+// se acredita al convenio es el rastro del catch-up, no un cobro aparte, así
+// que la proyección de lo que irá a cuotas usa el disponible completo tras
+// otros/mora. `convenioAplicado` proyecta la porción que el back registrará
+// (solo informativo aquí; el back la calcula por su cuenta).
 const convenioAplicado = getConvenioAplicado(
   montoDisponibleTotal,
   otrosNum,
   moraNum,
   cuotaConvenioNum
 );
-const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum - convenioAplicado;
-const montoBoletaSinMora = montoDisponibleTotal - otrosNum - convenioAplicado;
+const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum;
+const montoBoletaSinMora = montoDisponibleTotal - otrosNum;
 
 console.log("Convenio Aplicado:", convenioAplicado);
 console.log("Monto Boleta Real (después de descuentos):", montoBoletaReal);

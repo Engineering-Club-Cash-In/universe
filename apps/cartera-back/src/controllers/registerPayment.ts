@@ -40,7 +40,6 @@ import {
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
   getRequestedInstallmentFloor,
-  aplicarConvenioAlDisponible,
   debeProcesarConvenio,
   getSpecialPaymentInstallmentFields,
   getSpecialPaymentCuotaId,
@@ -916,11 +915,14 @@ export const insertPayment = async ({ body, set }: any) => {
       };
     }
 
-    // 🔥 CONVENIO — después de la mora (orden canónico otros → mora →
-    // convenio) y RESTANDO lo acreditado del disponible. El convenio es deuda
-    // APARTE (las cuotas viejas congeladas en su pivot): sin la resta, la
-    // misma boleta acreditaba el convenio Y además pagaba cuotas corrientes.
-    let registroSoloConvenio = false;
+    // 🔥 CONVENIO — se REGISTRA después de la mora (orden canónico otros →
+    // mora → convenio), topado al menor entre la cuota mensual del convenio y
+    // el pendiente real, pero NO se resta del disponible: acreditar
+    // convenios_pago es el RASTRO de cuánto de esta boleta cuenta como
+    // catch-up del convenio, no un cobro aparte que compita con las cuotas.
+    // La boleta completa (tras otros/mora) sigue pagando cuotas corrientes —
+    // regla de negocio del dueño del dominio (06-ago-2026), que revierte la
+    // resta introducida en b6d79b8d.
     if (
       debeProcesarConvenio({
         statusCredit: creditoInfo.credito.statusCredit,
@@ -943,44 +945,15 @@ export const insertPayment = async ({ body, set }: any) => {
         },
       });
       montoConvenio = new Big(pagoConvenio.monto_aplicado);
-      const splitConvenio = aplicarConvenioAlDisponible({
-        disponible: disponible_restante,
-        montoConvenio,
-      });
-      disponible_restante = splitConvenio.disponibleRestante;
-      disponible = disponible_restante;
-      console.log(
-        `Convenio: aplicado $${montoConvenio.toString()}, disponible restante $${disponible_restante.toString()}`
-      );
-      registroSoloConvenio = splitConvenio.requiereRegistroSoloConvenio;
+      console.log(`Convenio: registrado $${montoConvenio.toString()}`);
     }
 
     // Solo UNA fila de esta boleta puede cargar el pago_convenio (ver doc del
     // estampador en registerPaymentPolicy). Se crea DESPUÉS del bloque de
-    // convenio para capturar el monto ya topado al pendiente real.
+    // convenio para capturar el monto ya topado al pendiente real; el loop de
+    // cuotas lo estampa en su primera fila (siempre corre, porque el convenio
+    // ya no consume disponible).
     const estamparPagoConvenio = crearEstampadorPagoConvenio(montoConvenio);
-
-    if (registroSoloConvenio) {
-      // El convenio consumió todo el disponible: el loop de cuotas ya no
-      // corre, así que la fila del pago (boleta/mora/otros/convenio) se
-      // registra aquí — igual que las filas de solo-mora — para no perderla.
-      await insertarPago({
-        numero_credito_sifco: credito.numero_credito_sifco,
-        numero_cuota: cuotaApagar,
-        cuotaId: cuotaIdPagoEspecial,
-        otros: otrosBig.toNumber(),
-        mora: resultadoMora.montoAplicadoMora,
-        boleta: montoBoleta.toNumber(),
-        urlBoletas: urlCompletas ?? [],
-        pagado: pagoEspecialCuota.pagado,
-        banco_id: banco_id ?? 0,
-        numeroAutorizacion: numeroAutorizacion ?? "",
-        registerBy: registerBy ?? "",
-        fecha_boleta,
-        monto_aplicado: pagoEspecialCuota.montoAplicado,
-        pagoConvenio: Number(estamparPagoConvenio()),
-      });
-    }
 
     let cuotas_completas = 0;
     let cuotas_parciales = 0;
@@ -2181,9 +2154,9 @@ export const insertPayment = async ({ body, set }: any) => {
         // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
         // capital colado, y acá lo que importa es qué se escribió.
         otrosEspecialAplicado: montoBoleta.eq(otrosBig),
-        // Si el convenio consumió el disponible, convenios_pago y la fila
-        // solo-convenio YA están escritos: un 409 aquí invitaría a reintentar
-        // y aplicar el convenio dos veces.
+        // Si el convenio ya se registró, `convenios_pago` YA está escrito
+        // (processConvenioPayment corre antes del loop): un 409 aquí invitaría
+        // a reintentar la boleta y acreditaría el convenio dos veces.
         convenioAplicado: montoConvenio,
       };
       if (debeRechazarAbonoCapitalNoAplicado(guardCapitalParams)) {

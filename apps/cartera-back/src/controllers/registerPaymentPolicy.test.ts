@@ -1051,8 +1051,8 @@ describe("debeRechazarPagoSinAplicacion", () => {
   });
 
   it("no rechaza si el convenio se aplicó (su fila existe)", () => {
-    // Con convenio pendiente el skip no ocurre: la primera cuota inserta fila.
-    // Y en el caso `registroSoloConvenio` la fila se escribe antes del loop.
+    // Con convenio pendiente el skip no ocurre: la primera cuota inserta fila
+    // (el convenio no consume disponible, así que el loop siempre corre).
     expect(
       registerPaymentPolicy.debeRechazarPagoSinAplicacion({
         ...base,

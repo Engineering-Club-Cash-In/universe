@@ -698,8 +698,8 @@ export async function buildInversionistaWorkbook(
   function toN(v: any) { return Number(v || 0); }
 
   // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
-  // Los pagos y el subtotal YA llegan neteados desde el controlador
-  // (abono_interes = interés × 0.81, abono_iva = 12% bruto, isr = 7% bruto).
+  // Del controlador: abono_interes llega BRUTO, abonoGeneralInteres = neto (×0.81),
+  // abono_iva = 12% bruto, isr = 7% bruto; el subtotal ya viene neteado.
   const aplicaDescImp = inv.descuenta_impuestos === true;
 
   // ── fila 1-2: logo + título
@@ -1135,10 +1135,10 @@ export async function buildInversionistaWorkbook(
         const iva = new Big(pago.abono_iva || 0);
         const isr = new Big(pago.isr || 0);
 
-        // Con descuenta_impuestos `int` YA es el interés neto (int_bruto − iva − isr):
-        // no se le vuelve a sumar el IVA ni a restar el ISR.
+        // Con descuenta_impuestos `int` es el interés BRUTO (el controller lo mantiene
+        // así); el neto = bruto − IVA − ISR, usando el iva/isr que ya trae el pago.
         const abonoGeneralInteres = aplicaDescImp
-          ? int
+          ? int.minus(iva).minus(isr)
           : inv.emite_factura
           ? int.plus(iva)
           : int.minus(isr);

@@ -70,4 +70,25 @@ describe("recalcularPagosCredito — exclusión de pagos de reset", () => {
     expect(q.params).toContain("capital");
     expect(q.params).toContain("capital_validated");
   });
+
+  // Variante legacy del cierre (ver isCreditClosingPayment y crédito 23 /
+  // pago 121102): la fila estructural quedó validated + registerBy='system_reset'.
+  it("excluye el cierre legacy validated+system_reset al recalcular desde una cuota", async () => {
+    await recalcularPagosCredito({
+      numero_credito_sifco: "01010214120190",
+      numero_cuota: 1,
+    });
+
+    const q = renderSql(capturedWheres[0]);
+    expect(q.params).toContain("system_reset");
+    expect(q.params).toContain("validated");
+  });
+
+  it("excluye el cierre legacy validated+system_reset también sin numero_cuota", async () => {
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    const q = renderSql(capturedWheres[0]);
+    expect(q.params).toContain("system_reset");
+    expect(q.params).toContain("validated");
+  });
 });

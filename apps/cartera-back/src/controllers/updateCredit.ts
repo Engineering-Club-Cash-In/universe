@@ -1,6 +1,7 @@
 import Big from "big.js";
 import {
   eq,
+  ne,
   and,
   or,
   inArray,
@@ -2002,18 +2003,27 @@ export const recalcularPagosCredito = async ({
   // les toca puro cero. Caso real: abono registrado sin aplicar, un "Recalcular
   // Pagos" intermedio le dejó abono_capital en 0 y al aplicarse restó Q0 del
   // crédito. También cubre abonos ya aplicados que quedaron con pagado=false.
-  // Las filas de RESET de incobrable (validationStatus 'reset') tampoco: son el
-  // registro de la liquidación del insoluto (monto_aplicado va en "otros", no
-  // es reparto de cuota) y redistribuirlas las convierte en pago normal. Caso
-  // real: crédito 794, la cuota del reset quedó como última cuota pagada y un
-  // recálculo desde una cuota anterior le habría borrado el split.
-  const filaNoEsAbonoCapitalNiReset = or(
-    isNull(pagos_credito.validationStatus),
-    notInArray(pagos_credito.validationStatus, [
-      "capital",
-      "capital_validated",
-      "reset",
-    ]),
+  // Las filas de CIERRE de incobrable tampoco: son el registro de la
+  // liquidación del insoluto (monto_aplicado va en "otros", no es reparto de
+  // cuota) y redistribuirlas las convierte en pago normal. Se excluyen las dos
+  // variantes de isCreditClosingPayment: validationStatus 'reset' (caso real:
+  // crédito 794, la cuota del reset quedó como última cuota pagada) y el cierre
+  // legacy 'validated' + registerBy 'system_reset' (caso real: crédito 23 /
+  // pago 121102).
+  const filaNoEsAbonoCapitalNiCierre = and(
+    or(
+      isNull(pagos_credito.validationStatus),
+      notInArray(pagos_credito.validationStatus, [
+        "capital",
+        "capital_validated",
+        "reset",
+      ]),
+    ),
+    or(
+      isNull(pagos_credito.validationStatus),
+      ne(pagos_credito.validationStatus, "validated"),
+      ne(pagos_credito.registerBy, "system_reset"),
+    ),
   );
 
   const whereConditions =
@@ -2021,11 +2031,11 @@ export const recalcularPagosCredito = async ({
       ? and(
           eq(pagos_credito.credito_id, credito.credito_id),
           gte(cuotas_credito.numero_cuota, numero_cuota),
-          filaNoEsAbonoCapitalNiReset,
+          filaNoEsAbonoCapitalNiCierre,
         )
       : and(
           eq(pagos_credito.credito_id, credito.credito_id),
-          filaNoEsAbonoCapitalNiReset,
+          filaNoEsAbonoCapitalNiCierre,
           or(
             eq(pagos_credito.pagado, false),
             // Pagos registrados sin validar: solo con monto_aplicado > 0.

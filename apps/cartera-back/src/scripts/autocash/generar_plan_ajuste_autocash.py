@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-FASE 1 — Genera el PLAN de ajuste de los créditos de Autocash contra el Excel de cartera.
+⚠️  NO USAR — SUPERSEDIDO. Se conserva solo como referencia.
+
+Genera el plan de la propuesta ORIGINAL de cuadre (capital Y cuota alineados al Excel en
+los 72 créditos vivos). Contabilidad revisó el comparativo y autorizó otra cosa: un
+subconjunto, solo capital, y con reglas por color. El flujo vivo es:
+
+    preview_ajuste_conta.py  →  plan_ajuste_conta.json  →  aplicarAjusteConta.ts
+
+Ver README.md.
+
+────────────────────────────────────────────────────────────────────────────────
+
+Genera el PLAN de ajuste de los créditos de Autocash contra el Excel de cartera.
 
 Este script NO escribe nada en la base de datos: solo hace SELECT y produce un JSON
 (el "plan") que después consume `aplicarPlanAjusteAutocash.ts`.

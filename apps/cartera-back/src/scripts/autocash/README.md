@@ -1,161 +1,201 @@
-# Cuadre de la cartera de Autocash contra el Excel
+# Cuadre de la cartera de Autocash
 
 Herramientas para comparar los créditos de **Autocash S.A.** entre la base de cartera y el
-Excel *Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx*, y para ajustar la base a lo que dice el
-Excel.
+Excel *Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx*, y para aplicar los ajustes que
+contabilidad autorizó.
 
-> **Nada de esto se corre solo.** El generador de plan es de solo lectura; el aplicador arranca
-> en modo seco y necesita `--apply` explícito. Contra producción además exige `--permitir-prod`.
+> Nada corre solo. El generador de plan es de solo lectura y el aplicador arranca en modo
+> seco: necesita `--apply` explícito, y contra producción además `--permitir-prod`.
 
 ---
 
-## Cómo lee el Excel
+## Flujo vivo
 
-Cada hoja del libro es un mes. Un crédito puede ocupar **varias filas**, una por inversionista:
+```
+1) comparativo_autocash.py        →  Excel comparativo (DB vs Excel de cartera)
+2) corregir_companions.py         →  arregla los créditos partidos en SIFCO correlativos
+3) agregar_resumen.py             →  hoja de resumen al inicio
+        ↓  contabilidad revisa y marca el archivo
+4) preview_ajuste_conta.py        →  Excel para gerencia + plan_ajuste_conta.json
+5) aplicarAjusteConta.ts          →  aplica el plan y recalcula pagos
+```
+
+### Scripts supersedidos (no usar)
+
+`generar_plan_ajuste_autocash.py` y `aplicarPlanAjusteAutocash.ts` implementan la propuesta
+**original**: alinear capital *y cuota* al Excel en los 72 créditos vivos, igualando siempre
+el espejo al padre. Contabilidad no autorizó eso. Se conservan por el contexto y porque la
+lógica de lectura del Excel sirve de referencia, pero **correrlos aplicaría cambios que nadie
+autorizó**.
+
+---
+
+## Cómo se lee el Excel de cartera
+
+Cada hoja es un mes. Un crédito ocupa **varias filas**, una por inversionista:
 
 - Lo normal es el sufijo `_2`, `_3` sobre el mismo SIFCO (`01010214117220`, `01010214117220_2`).
 - A veces el Excel usa **SIFCO correlativos distintos** para el mismo crédito
   (`01010214105290` + `01010214105300` + `01010214105310`). Se detectan agrupando por
-  *(cliente, # de cuota)* dentro de la hoja: si en el grupo hay **exactamente un** SIFCO que
-  existe en la base, los demás son rebanadas suyas. Si hay dos o más en la base son créditos
-  distintos del mismo cliente y no se juntan.
+  *(cliente, # de cuota)*: si en el grupo hay **exactamente un** SIFCO que existe en la base,
+  los demás son rebanadas suyas. Con dos o más en la base son créditos distintos del mismo
+  cliente y no se juntan.
 
-La foto de un crédito se toma de la **última hoja mensual donde aparece con `Pagado` en
-{`Si`, `Atrasado`}**, sumando todas sus filas. Columnas que se usan: `Capital restante` y `Cuota`.
-
-Dos límites del libro, ya contemplados:
+La foto se toma de la **última hoja mensual donde el crédito aparece con `Pagado` en
+{`Si`, `Atrasado`}**, sumando todas sus filas. Columnas: `Capital restante` y `Cuota`.
 
 | Columna  | Existe desde |
 |----------|--------------|
 | `Pagado` | Agosto 2023  |
 | `Cuota`  | Julio 2024   |
 
-Cuando el Excel **liquida** un crédito pone `Capital restante = 0` y mete el **finiquito** en la
-columna `Cuota`. Por eso esos créditos se excluyen del ajuste automático.
+Cuando el Excel **liquida** un crédito pone `Capital restante = 0` y mete el **finiquito** en
+la columna `Cuota`. Por eso esos créditos no se ajustan automáticamente.
 
 ---
 
-## Fase 1 — ajustar los créditos que ya tienen Autocash
+## Las reglas que autorizó contabilidad
 
-### Reglas
+Conta marcó el comparativo con una columna `capital correcto` y un código de color que dice
+**a qué registro** se le pone ese valor:
 
-1. Solo se ajustan créditos en **ACTIVO**, **MOROSO** o **EN_CONVENIO**.
-2. `creditos.capital` y `creditos.cuota` se alinean al Excel.
-3. Del reparto por inversionista **solo se mueve la fila de Autocash**
-   (`monto_aportado` y `cuota_inversionista`): absorbe la diferencia para que la suma cuadre
-   con el crédito. Ningún otro inversionista se toca.
-   La fila **espejo** de Autocash se empareja con los mismos valores que el padre, en la misma
-   transacción. Si no existe fila espejo **no se crea**: se reporta para revisarla a mano.
-4. Si otro inversionista está fuera de cuadre contra el Excel, va al log `revisar_manual`
-   para ajustarlo a mano.
-5. Se excluyen los créditos que el Excel da por liquidados (`Capital restante = 0`).
-6. Después del ajuste se llama a `recalcularPagosCredito({ numero_credito_sifco })`
-   ([`updateCredit.ts`](../../controllers/updateCredit.ts)). Sin `numero_cuota` recalcula
-   **solo las cuotas no pagadas** y los pagos registrados pendientes de validar; las cuotas ya
-   pagadas y los abonos a capital no se tocan.
+| Color | Acción |
+|---|---|
+| 🟨 Amarillo | solo el **espejo** |
+| 🟩 Verde | solo el **padre** |
+| 🟦 Celeste | **padre y espejo** |
+| 🟧 Naranja | **padre y espejo** (no estaba en la leyenda; confirmado aparte) |
+| 🟥 Rojo `CANCELADO` | **espejo a 0**, el padre no se toca |
 
-### Paso 1 — generar el plan (solo lectura)
+Más:
+
+- Si la fila trae un **segundo monto**, ese manda sobre `capital correcto`.
+- Solo se mueve el `monto_aportado` de **Autocash**, que absorbe la diferencia para que
+  `SUM(padre) == creditos.capital`. Excepción autorizada: Crhistian Herrera, donde conta dio
+  los montos de Autocash y de Cube por separado y se aplican los dos.
+- **La cuota no se toca**: conta solo autorizó capital.
+
+### Los dos invariantes
+
+1. `SUM(creditos_inversionistas.monto_aportado) == creditos.capital` — **siempre debe cumplirse**.
+2. El espejo **no** tiene por qué igualar al capital: es un libro aparte (capital real del
+   inversionista para liquidación, movido por compras de cartera y actualizaciones manuales).
+
+Para **Autocash** sí se alinea el espejo al padre, porque este inversionista **nunca ha sido
+liquidado** (0 filas en `cartera.liquidaciones`), así que no pisa ningún pago histórico. Esa
+premisa hay que **re-verificarla** antes de correr esto de nuevo.
+
+---
+
+## Uso
+
+### Paso 1 — plan y preview (solo lectura)
 
 ```bash
 cd apps/cartera-back
-export SUPABASE_DB_URL='postgresql://...'          # ambiente de PRUEBA
-python3 src/scripts/autocash/generar_plan_ajuste_autocash.py \
-  --excel "$HOME/Descargas/Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx" \
-  --salida plan_ajuste_autocash.json
+export SUPABASE_DB_URL='postgresql://...'
+python3 src/scripts/autocash/preview_ajuste_conta.py --plan plan_ajuste_conta.json
 ```
 
-Produce `plan_ajuste_autocash.json` con:
+Genera:
 
-| Sección | Qué trae |
+| Archivo | Para qué |
 |---|---|
-| `aplicar` | Créditos a ajustar, con valores actuales, objetivo y delta de cada campo |
-| `excluidos` | Los que quedan fuera y **por qué** (liquidados, status, sin foto, etc.) |
-| `revisar_manual` | Inversionistas distintos de Autocash fuera de cuadre — para ajustar a mano |
-| `fase2_candidatos` | Relevamiento de la Fase 2 (ver abajo) |
+| `Resumen_Ajuste_Autocash_gerencia.xlsx` | El que va al correo de autorización |
+| `Preview_Ajuste_Autocash_conta.xlsx` | Desglose fila por fila |
+| `plan_ajuste_conta.json` | Lo que consume el aplicador |
 
-Y un `plan_ajuste_autocash_revisar_manual.csv` con la misma lista en formato de hoja.
+El plan trae dos lotes:
 
-**Revisá el plan antes de seguir.** Es el punto de control.
+- **`conta`** — lo autorizado por contabilidad.
+- **`saneamiento`** — créditos que conta no revisó y que están internamente incoherentes.
+  Acá **no se cambia el capital del crédito**: se mueve a Autocash para que la suma cuadre y
+  se alinea su espejo. No necesita autorización porque no cambia ningún capital.
 
 ### Paso 2 — aplicar
 
 ```bash
-# Modo seco: imprime todo y escribe el reporte, sin tocar la base
-bun run src/scripts/autocash/aplicarPlanAjusteAutocash.ts --plan=plan_ajuste_autocash.json
+# Seco (default)
+bun run src/scripts/autocash/aplicarAjusteConta.ts --plan=plan_ajuste_conta.json
 
-# Un solo crédito, para la primera prueba
-bun run src/scripts/autocash/aplicarPlanAjusteAutocash.ts --plan=... --solo=01010214117220 --apply
-
-# Los primeros 5
-bun run src/scripts/autocash/aplicarPlanAjusteAutocash.ts --plan=... --limite=5 --apply
-
-# Todo
-bun run src/scripts/autocash/aplicarPlanAjusteAutocash.ts --plan=... --apply
+# De verdad
+bun run src/scripts/autocash/aplicarAjusteConta.ts --plan=... --apply --incluir-opcionales
 ```
 
 | Flag | Efecto |
 |---|---|
-| *(ninguno)* | Modo seco. Nada se escribe. |
-| `--apply` | Escribe de verdad. |
+| *(ninguno)* | Modo seco. |
+| `--apply` | Escribe. |
+| `--incluir-opcionales` | Mete los items marcados `opcional` en el plan. |
+| `--lote=conta` / `--lote=saneamiento` | Solo ese lote. |
 | `--solo=A,B` | Solo esos SIFCO. |
-| `--limite=N` | Solo los primeros N del plan. |
-| `--sin-recalculo` | Ajusta pero no llama a `recalcularPagosCredito`. |
-| `--sin-espejo` | Ajusta el padre pero deja el espejo como está (solo para pruebas). |
-| `--permitir-prod` | Necesario para escribir si la conexión apunta a `supabase.com`. |
-| `--reporte=ruta` | Dónde dejar el reporte (default `reporte_ajuste_autocash.json`). |
+| `--sin-recalculo` | No llama a `recalcularPagosCredito`. |
+| `--permitir-prod` | Necesario para escribir contra `supabase.com`. |
 
 ### Qué hace por crédito
 
-1. Relee el estado vivo y verifica que **siga coincidiendo con el plan**. Si alguien movió el
-   crédito entre medio, lo salta y lo reporta: hay que regenerar el plan.
-2. En **una transacción**: `UPDATE creditos` (capital + cuota), `UPDATE creditos_inversionistas`
-   y `UPDATE creditos_inversionistas_espejo`, las dos últimas solo de la fila de Autocash y con
-   los mismos valores, para que padre y espejo queden iguales. El update del crédito va dentro
-   de `withCapitalContext`, así el trigger `trg_historial_capital_credito` deja el rastro con
-   fuente `AJUSTE_EXCEL_AUTOCASH` y el motivo (hoja del Excel y filas usadas).
-3. Recalcula los pagos no pagados del crédito.
-4. Al final **verifica** que cada espejo haya quedado igual al padre. Lo que salga en
-   `espejos_desalineados` es un problema a revisar, no un resultado esperado.
-
-### Lo que el script NO hace a propósito
-
-- **No crea filas espejo** que no existan: eso implicaría inventar porcentajes y modalidad de
-  facturación. Se reportan en `creditos_sin_fila_espejo` para verlas a mano.
-- No toca ningún inversionista que no sea Autocash, ni en el padre ni en el espejo.
-- No toca `cuota_interes`, `porcentaje_participacion_inversionista` ni
-  `porcentaje_cash_in`. (Ojo: `porcentaje_participacion_inversionista` no es el % de capital,
-  es el reparto del interés con Cash-In; por eso no se recalcula al mover `monto_aportado`.)
-- No toca créditos CANCELADO, INCOBRABLE, PENDIENTE_CANCELACION ni CAIDO.
+1. Relee el estado vivo y verifica que **siga coincidiendo con el plan**. Si algo cambió, lo
+   salta y avisa: hay que regenerar el plan.
+2. En **una transacción**: `creditos.capital` (si cambia), `creditos_inversionistas` y
+   `creditos_inversionistas_espejo` de Autocash, más los `otros_movidos` que el plan traiga
+   explícitos. El update del crédito va dentro de `withCapitalContext`, así el trigger
+   `trg_historial_capital_credito` deja el rastro con fuente `AJUSTE_EXCEL_AUTOCASH`.
+3. **Solo si cambió `creditos.capital`**, llama a `recalcularPagosCredito({ numero_credito_sifco })`
+   ([updateCredit.ts](../../controllers/updateCredit.ts)). Sin `numero_cuota` toca únicamente
+   las cuotas no pagadas y los pagos pendientes de validar. Si solo se movió el espejo, no hay
+   nada que recalcular.
 
 ---
 
-## Fase 2 — créditos que el Excel tiene con Autocash y la base no
+## Verificación de la prueba en local (2026-08-06)
 
-**Todavía no implementada**, a propósito. El generador ya los deja relevados en
-`fase2_candidatos` (mismos estados ajustables) con: qué inversionistas tiene cada uno en la
-base, cuáles en el Excel, y cuánto capital y cuota le corresponden a Autocash según el Excel.
+Copia fresca de prod, 19 créditos (14 del lote de conta + 5 de saneamiento):
 
-En la corrida contra producción del 5-ago-2026 eran **10 créditos**, y en casi todos la base
-tiene `Cube Investments S.A.` donde el Excel dice `Autocash S.A.` — o sea el traslado se hizo
-en el sistema y el Excel no se actualizó, o al revés.
+- 19 aplicados, 0 omitidos, 0 errores.
+- De los 72 créditos vivos: **71 con padre cuadrado**, 67 con espejo alineado. Los 6 restantes
+  son por diseño (2 cancelados con espejo en 0, 2 que conta marcó solo-espejo, 1 fuera del
+  lote, y 1 donde Autocash absorbe el desfase del espejo de otro inversionista).
+- Recálculo de pagos en los 10 que cambiaron capital: **259 filas pagadas, 0 modificadas**;
+  417 filas no pagadas reproyectadas; **0 cambios de estado pagado↔no pagado**.
+- 0 filas de pago con montos negativos.
 
-Esto **no es un ajuste de montos**: es dar de alta o reemplazar una participación. Los
-controllers que ya existen para eso son
-[`addInvestorToCredit.ts`](../../controllers/addInvestorToCredit.ts) y
-[`replaceInvestorCredit.ts`](../../controllers/replaceInvestorCredit.ts). Antes de automatizar
-nada hay que definir con negocio si manda el Excel o manda el sistema.
+### Cómo comparar antes/después de los pagos
+
+`pagos_credito` no tiene auditoría. Para un antes/después real, cargar la tabla desde el dump:
+
+```bash
+pg_restore --data-only -t pagos_credito cartera_prod.dump -f - \
+  | sed 's/cartera\.pagos_credito/cartera.pagos_credito_antes/g' > pagos_antes.sql
+psql "$URL" -c "CREATE TABLE cartera.pagos_credito_antes (LIKE cartera.pagos_credito);"
+psql "$URL" < pagos_antes.sql
+```
 
 ---
 
-## Herramientas del comparativo (las que originaron esto)
+## Pendientes conocidos
 
-| Script | Qué hace |
-|---|---|
-| `comparativo_autocash.py` | Genera el Excel comparativo de 2 hojas (créditos comparativos / los que ya no están en el sistema) |
-| `corregir_companions.py` | Aplica la corrección de SIFCO correlativos sobre un comparativo ya generado |
-| `agregar_resumen.py` | Agrega la hoja *Resumen* al inicio del comparativo |
+- **Brenda Aguilar** (`01010202115520`): con 3% mensual y Q644.74 de cargos fijos, al subirle
+  el capital pasa a amortizar Q40.30/mes. Ya no amortizaba antes del ajuste, pero ahora es
+  peor: con la cuota actual no termina de pagarse. Necesita recálculo de cuota o de plazo.
+- **Espejo de terceros descuadrado** en Edmon Robinson, Peralta Soma y Francisco Luna. No es
+  de Autocash, hay que resolverlo con esos inversionistas.
+- **`replaceInvestorCredit` deja padre ≠ espejo**: de 331 filas de espejo creadas por la API,
+  144 tienen el padre distinto. Caso confirmado: Francisco Luna, donde el reemplazo de Central
+  de Carga por Richard Kachler dejó al padre con el monto viejo.
+- **Cuota vs Excel** en Anabella Figueroa (+Q21.87) y José Carlos Motta (−Q3,816.28).
+  Internamente cuadran (crédito == suma de inversionistas, en padre y espejo); solo difieren
+  contra el Excel. Sin autorizar.
+- **Rocael Batres** y **Pedro Bersai**: conta no los marcó. Rocael quedó como `opcional`.
+- **Fase 2**: créditos que el Excel tiene con Autocash y el sistema no (~10, casi todos hoy
+  con Cube Investments). No es ajuste de montos sino alta o reemplazo de participación; ver
+  [addInvestorToCredit.ts](../../controllers/addInvestorToCredit.ts) y
+  [replaceInvestorCredit.ts](../../controllers/replaceInvestorCredit.ts).
 
-Los tres esperan un `db_creditos.csv` al lado. Se regenera así (solo lectura):
+---
+
+## Regenerar `db_creditos.csv`
+
+Los scripts del comparativo (pasos 1-3) esperan ese CSV al lado:
 
 ```bash
 psql "$SUPABASE_DB_URL" -c "COPY (
@@ -178,5 +218,5 @@ ORDER BY c.numero_credito_sifco
 ) TO STDOUT WITH CSV HEADER" > db_creditos.csv
 ```
 
-> El `89` es el `inversionista_id` de Autocash **en producción**. En otro ambiente hay que
-> resolverlo por nombre. El generador de plan y el aplicador ya lo hacen solos.
+> El `89` es el `inversionista_id` de Autocash **en producción**. `preview_ajuste_conta.py` y
+> `aplicarAjusteConta.ts` lo resuelven por nombre, así que funcionan en cualquier ambiente.

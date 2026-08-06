@@ -142,3 +142,6 @@ logs-dte/
 # Scripts temporales ad-hoc (QA/regen) en la raíz de cartera-back
 /_*.ts
 /_*.mjs
+# Planes y reportes del cuadre de cartera Autocash (traen nombres de clientes y montos)
+/plan_ajuste_*.json
+/reporte_ajuste_*.json

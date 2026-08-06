@@ -1,5 +1,20 @@
 /**
- * FASE 2 — Aplica el plan generado por `generar_plan_ajuste_autocash.py`.
+ * ⚠️  NO USAR — SUPERSEDIDO. Se conserva solo como referencia.
+ *
+ * Este aplicador implementa la propuesta ORIGINAL de cuadre: alinear capital Y CUOTA
+ * contra el Excel en los 72 créditos vivos de Autocash, igualando siempre el espejo al
+ * padre. Contabilidad NO autorizó eso: revisó el comparativo y autorizó un subconjunto
+ * con reglas distintas (acción por color, solo capital, espejo a 0 en los que se van a
+ * cancelar, y una excepción puntual para Cube).
+ *
+ * El flujo vivo es:
+ *     preview_ajuste_conta.py  →  plan_ajuste_conta.json  →  aplicarAjusteConta.ts
+ *
+ * Correr este script aplicaría cambios que nadie autorizó. Ver README.md.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Aplica el plan generado por `generar_plan_ajuste_autocash.py`.
  *
  * Qué hace por cada crédito del plan:
  *   1. Re-lee el estado vivo de la base y verifica que siga coincidiendo con el plan

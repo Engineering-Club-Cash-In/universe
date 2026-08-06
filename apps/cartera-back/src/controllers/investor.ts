@@ -7142,7 +7142,7 @@ async function consultarResumenGlobalPorEstadoPago(
           ${pe.abono_capital}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN 0
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7156,7 +7156,7 @@ async function consultarResumenGlobalPorEstadoPago(
               ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.19) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
             WHEN 'reinversion_interes' THEN (
-              ${pe.abono_capital} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.19) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+              ${pe.abono_capital} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN 0 WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
             WHEN 'reinversion_excedente' THEN 0
             WHEN 'reinversion_variable' THEN 0
@@ -8618,12 +8618,23 @@ export async function getLiquidaciones({
       const currencySymbol = liq.moneda === "dolares" ? "$" : "Q.";
 
       // 💰 Calcular ISR y cuota por pago
+      // Solo re-netear si ESTA liquidación se persistió neteada (total_interes ≈ 0.81×Σbruto
+      // del espejo). Liquidaciones viejas de un inversionista que activó el flag después se
+      // muestran con su fórmula original — no se recalcula histórico con el flag actual.
+      const sumInteresBruto = pagos.reduce(
+        (acc, p) => acc.plus(new Big(p.abono_interes ?? 0)),
+        new Big(0)
+      );
+      const liqNeteada =
+        liq.descuenta_impuestos === true &&
+        (sumInteresBruto.lte(0) ||
+          new Big(liq.total_interes ?? 0).lt(sumInteresBruto.times("0.95")));
       const pagosConISR = pagos.map((pago) => {
         const abono_capital = new Big(pago.abono_capital ?? 0);
         const abono_interes = new Big(pago.abono_interes ?? 0);
         const abono_iva = new Big(pago.abono_iva ?? 0);
-        // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
-        const descImp = liq.descuenta_impuestos === true ? descuentoImpuestos(abono_interes) : null;
+        // Carril descuenta_impuestos: solo si esta liquidación nació neteada.
+        const descImp = liqNeteada ? descuentoImpuestos(abono_interes) : null;
         const isr = descImp ? descImp.isr : liq.emite_factura ? new Big(0) : abono_interes.times(0.07);
 
         const cuota = abono_capital
@@ -8665,8 +8676,8 @@ export async function getLiquidaciones({
           total_isr: formatValue(liq.total_isr),
           // Liquidaciones nuevas de inversionistas con el flag ya persisten el
           // interés neteado; se expone como atributo sin recalcular lo guardado.
-          total_neto_impuestos:
-            liq.descuenta_impuestos === true ? formatValue(liq.total_interes) : null,
+          // Las viejas (persistidas en bruto) no lo llevan.
+          total_neto_impuestos: liqNeteada ? formatValue(liq.total_interes) : null,
           total_cuota: formatValue(liq.total_cuota),
         },
         reinversion: {

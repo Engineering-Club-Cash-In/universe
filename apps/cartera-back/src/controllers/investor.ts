@@ -1365,9 +1365,26 @@ export async function resumeInvestor(
     page * perPage
   );
 
+  // Si se consulta una liquidación YA hecha (regenerar reporte / ajuste con
+  // generar_reporte), el neteo de las filas por pago y por crédito lo gobierna el
+  // SNAPSHOT de esa liquidación, no el flag actual del inversionista. Igual que en
+  // getInvestorTotalsGlobales; sin liquidacionId se conserva el flag actual.
+  let descuentaImpuestosSnapshot: boolean | null = null;
+  if (liquidacionId != null) {
+    const [liqSnap] = await db
+      .select({ descuenta_impuestos: liquidaciones.descuenta_impuestos })
+      .from(liquidaciones)
+      .where(eq(liquidaciones.liquidacion_id, liquidacionId))
+      .limit(1);
+    if (liqSnap) descuentaImpuestosSnapshot = liqSnap.descuenta_impuestos === true;
+  }
+
   // 5️⃣ Armar estructura final
   const inversionistasResumen = await Promise.all(
     listaInversionistas.map(async (inv) => {
+      if (descuentaImpuestosSnapshot !== null) {
+        (inv as any).descuenta_impuestos = descuentaImpuestosSnapshot;
+      }
       // Créditos del inversionista dentro de la página actual
       const creditosDeInv = creditosParticipa.filter(
         (c) =>

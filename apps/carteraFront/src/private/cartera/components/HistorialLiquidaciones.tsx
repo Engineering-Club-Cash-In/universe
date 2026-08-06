@@ -233,6 +233,12 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
           <p className="text-[10px] text-orange-600 font-medium uppercase tracking-wide truncate">ISR</p>
           <p className="text-[12px] font-bold text-orange-900 truncate">{formatCurrency(item.total_isr, s)}</p>
         </div>
+        {item.total_neto_impuestos != null && (
+          <div className="bg-rose-50 rounded-lg px-2 py-1.5 min-w-0" title="Interés neto de impuestos">
+            <p className="text-[10px] text-rose-600 font-medium uppercase tracking-wide truncate">Neto de impuestos</p>
+            <p className="text-[12px] font-bold text-rose-900 truncate">{formatCurrency(item.total_neto_impuestos, s)}</p>
+          </div>
+        )}
         <div className="bg-cyan-50 rounded-lg px-2 py-1.5 min-w-0" title="Reinversión Capital">
           <p className="text-[10px] text-cyan-700 font-medium uppercase tracking-wide truncate">Reinv. Cap.</p>
           <p className="text-[12px] font-bold text-cyan-900 truncate">{formatCurrency(reinvCap, s)}</p>

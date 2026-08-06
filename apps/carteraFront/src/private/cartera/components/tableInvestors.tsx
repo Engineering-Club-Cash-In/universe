@@ -432,6 +432,7 @@ export function TableInvestors() {
           total_reinversion_interes:   mirrorSummaryData.subtotal.total_reinversion_interes,
           total_reinversion:           mirrorSummaryData.subtotal.total_reinversion,
           total_abono_general_interes: mirrorSummaryData.subtotal.total_abono_general_interes,
+          total_neto_impuestos:        mirrorSummaryData.subtotal.total_neto_impuestos ?? null,
         }
       : {
           total_abono_capital:         totalesData?.totales.total_abono_capital         ?? 0,
@@ -445,6 +446,7 @@ export function TableInvestors() {
           total_reinversion_interes:   totalesData?.totales.total_reinversion_interes   ?? 0,
           total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
           total_abono_general_interes: totalesData?.totales.total_abono_general_interes ?? 0,
+          total_neto_impuestos:        totalesData?.totales.total_neto_impuestos        ?? null,
         };
 
     return {
@@ -1310,6 +1312,17 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </div>
               </div>
 
+              {subtotales.total_neto_impuestos != null && (
+                <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-violet-100"}`}>
+                  <div className="text-xs mb-1 font-semibold text-blue-900">
+                    Neto de impuestos
+                  </div>
+                  <div className={`font-bold text-lg ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
+                    {inv.currencySymbol} {Number(subtotales.total_neto_impuestos).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              )}
+
               <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-green-100"}`}>
                 <div className="text-xs mb-1 font-semibold text-blue-900">
                   Cuota Sin Reinversión
@@ -1747,7 +1760,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-green-700">📈 IVA</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-green-50 rounded px-1 text-sm font-bold text-green-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.currencySymbol} {inv.emite_factura
+                                        {inv.currencySymbol} {inv.descuenta_impuestos
+                                          ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
+                                          : inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
                                           : "0.00"}
                                       </div>
@@ -1763,7 +1778,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-yellow-700">📉 ISR</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-yellow-50 rounded px-1 text-sm font-bold text-yellow-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.currencySymbol} {!inv.emite_factura
+                                        {inv.currencySymbol} {inv.descuenta_impuestos || !inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.07).toFixed(2)
                                           : "0.00"}
                                       </div>

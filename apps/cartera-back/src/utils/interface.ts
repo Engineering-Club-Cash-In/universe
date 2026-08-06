@@ -51,6 +51,8 @@ export interface Subtotal {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
+  /** Interés neto de impuestos (×0.81) si descuenta_impuestos; null si no. */
+  total_neto_impuestos?: number | null;
   total_cuota: number;
   total_cuota_sin_reinversion: number;
   total_cuota_con_reinversion: number;
@@ -70,6 +72,7 @@ export interface InversionistaReporte {
   inversionista_id: number;
   inversionista: string;
   emite_factura: boolean;
+  descuenta_impuestos?: boolean | null;
   nombre_inversionista: string;
   email: string | null;
   reinversion: string;

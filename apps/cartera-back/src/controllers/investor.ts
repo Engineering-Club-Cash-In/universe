@@ -3939,6 +3939,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             total_iva: totales.total_abono_iva.toString(),
             total_isr: totales.total_isr.toString(),
             total_cuota: (totales.total_cuota_con_reinversion ?? 0).toString(),
+            // Snapshot: si total_interes viene neteado, la liquidación se marca
+            // para que los reportes no la recalculen con el flag futuro.
+            descuenta_impuestos: totales.total_neto_impuestos != null,
             reinversion_capital: reinvCapital.toString(),
             reinversion_interes: reinvInteres.toString(),
             reinversion_total: reinvTotal.toString(),
@@ -6724,6 +6727,8 @@ interface InversionistaResumenRow {
   total_abono_iva: number;
   total_isr: number;
   total_abono_general_interes: number;
+  // Solo lo emite la fuente "liquidaciones" (SQL condicionado por snapshot).
+  total_neto_impuestos?: number | null;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_reinversion_capital: number;
@@ -7304,10 +7309,29 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     tipo_cuenta: inversionistas.tipo_cuenta,
     numero_cuenta: inversionistas.numero_cuenta,
     total_abono_capital: sql<number>`COALESCE(SUM(${liquidaciones.total_capital}), 0)`,
-    total_abono_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes}), 0)`,
+    // Interés en BRUTO por consistencia con la fuente "pagos": en las liquidaciones
+    // neteadas (snapshot=true) total_interes ya es neto, se reconstruye el bruto
+    // sumándole IVA+ISR; las viejas ya están en bruto.
+    total_abono_interes: sql<number>`COALESCE(SUM(
+      CASE WHEN ${liquidaciones.descuenta_impuestos}
+        THEN ${liquidaciones.total_interes} + ${liquidaciones.total_iva} + ${liquidaciones.total_isr}
+        ELSE ${liquidaciones.total_interes}
+      END
+    ), 0)`,
     total_abono_iva: sql<number>`COALESCE(SUM(${liquidaciones.total_iva}), 0)`,
     total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
-    total_abono_general_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes} + ${liquidaciones.total_iva} - ${liquidaciones.total_isr}), 0)`,
+    // Neto real: en las neteadas el total_interes persistido YA es el neto (×0.81);
+    // en las viejas (bruto) es interes + iva − isr. Condicionado POR liquidación.
+    total_abono_general_interes: sql<number>`COALESCE(SUM(
+      CASE WHEN ${liquidaciones.descuenta_impuestos}
+        THEN ${liquidaciones.total_interes}
+        ELSE ${liquidaciones.total_interes} + ${liquidaciones.total_iva} - ${liquidaciones.total_isr}
+      END
+    ), 0)`,
+    // Solo suma el neto de las liquidaciones neteadas; NULL si no hay ninguna.
+    total_neto_impuestos: sql<number | null>`NULLIF(SUM(
+      CASE WHEN ${liquidaciones.descuenta_impuestos} THEN ${liquidaciones.total_interes} ELSE 0 END
+    ), 0)`,
     total_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
     total_reinversion_capital: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_capital}), 0)`,
     total_reinversion_interes: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_interes}), 0)`,
@@ -7399,38 +7423,30 @@ function mapResumenRow(
     cuentas_extra,
     total_abono_capital: convert(inv.total_abono_capital),
     // "Interés" queda en BRUTO para que la fila se lea sola (100 − 12 − 7 = 81);
-    // el neto vive en total_neto_impuestos y total_abono_general_interes
-    // (feedback de review PR #1255). En fuente "liquidaciones" el interés
-    // persistido YA es neto: se reconstruye el bruto con iva+isr guardados.
-    total_abono_interes:
-      inv.descuenta_impuestos === true && fuente === "liquidaciones"
-        ? convert(
-            new Big(inv.total_abono_interes ?? 0)
-              .plus(inv.total_abono_iva ?? 0)
-              .plus(inv.total_isr ?? 0)
-              .round(2)
-              .toString()
-          )
-        : convert(inv.total_abono_interes),
+    // el neto vive en total_neto_impuestos y total_abono_general_interes.
+    // Fuente "pagos": el SUM viene bruto, se usa tal cual. Fuente "liquidaciones":
+    // el SQL ya reconstruyó el bruto por liquidación (snapshot) → pasa directo.
+    total_abono_interes: convert(inv.total_abono_interes),
     total_abono_iva: convert(
       descImp ? descImp.iva.round(2).toString() : inv.total_abono_iva
     ),
     total_isr: convert(
       descImp ? descImp.isr.round(2).toString() : inv.total_isr
     ),
+    // Fuente "pagos": neto = descImp sobre el interés bruto (o null sin flag).
+    // Fuente "liquidaciones": ya viene condicionado POR liquidación desde el SQL
+    // (NULLIF → null si ninguna liquidación fue neteada; no recalcula histórico).
     total_neto_impuestos:
-      inv.descuenta_impuestos === true
-        ? convert(
-            descImp ? descImp.neto.round(2).toString() : inv.total_abono_interes
-          )
+      fuente === "liquidaciones"
+        ? inv.total_neto_impuestos != null
+          ? convert(inv.total_neto_impuestos)
+          : null
+        : descImp
+        ? convert(descImp.neto.round(2).toString())
         : null,
-    // En "liquidaciones" el SQL arma general = interes + iva − isr, pero con el
-    // flag el interés persistido YA es neto → el neto real es el persistido
-    // (Codex PR #1255: mostraba Q86 en vez de los Q81 pagados).
-    total_abono_general_interes:
-      inv.descuenta_impuestos === true && fuente === "liquidaciones"
-        ? convert(inv.total_abono_interes)
-        : convert(inv.total_abono_general_interes),
+    // "pagos": SUM crudo (bruto) → neto en JS vía descImp cuando aplica.
+    // "liquidaciones": el SQL ya lo condicionó por liquidación → pasa directo.
+    total_abono_general_interes: convert(inv.total_abono_general_interes),
     total_a_recibir_sin_reinversion: convert(inv.total_a_recibir_sin_reinversion),
     total_reinversion: convert(inv.total_reinversion),
     total_reinversion_capital: convert(inv.total_reinversion_capital),
@@ -8501,7 +8517,9 @@ export async function getLiquidaciones({
       // Datos del inversionista
       nombre_inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
-      descuenta_impuestos: inversionistas.descuenta_impuestos,
+      // Snapshot POR LIQUIDACIÓN (no el flag actual del inversionista): fija cómo
+      // se pagó esta liquidación, para no recalcular el histórico con el flag nuevo.
+      descuenta_impuestos: liquidaciones.descuenta_impuestos,
       dpi: inversionistas.dpi,
       email: inversionistas.email,
       moneda: inversionistas.moneda,
@@ -8618,17 +8636,9 @@ export async function getLiquidaciones({
       const currencySymbol = liq.moneda === "dolares" ? "$" : "Q.";
 
       // 💰 Calcular ISR y cuota por pago
-      // Solo re-netear si ESTA liquidación se persistió neteada (total_interes ≈ 0.81×Σbruto
-      // del espejo). Liquidaciones viejas de un inversionista que activó el flag después se
-      // muestran con su fórmula original — no se recalcula histórico con el flag actual.
-      const sumInteresBruto = pagos.reduce(
-        (acc, p) => acc.plus(new Big(p.abono_interes ?? 0)),
-        new Big(0)
-      );
-      const liqNeteada =
-        liq.descuenta_impuestos === true &&
-        (sumInteresBruto.lte(0) ||
-          new Big(liq.total_interes ?? 0).lt(sumInteresBruto.times("0.95")));
+      // Snapshot por liquidación: solo re-netea si ESTA liquidación se pagó
+      // neteada. Las viejas (flag activado después) conservan su fórmula original.
+      const liqNeteada = liq.descuenta_impuestos === true;
       const pagosConISR = pagos.map((pago) => {
         const abono_capital = new Big(pago.abono_capital ?? 0);
         const abono_interes = new Big(pago.abono_interes ?? 0);

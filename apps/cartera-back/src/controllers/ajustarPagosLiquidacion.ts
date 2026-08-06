@@ -803,6 +803,9 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
 
   const huboCambiosTotales = Object.keys(setObj).length > 0;
   if (huboCambiosTotales && !isDryRun) {
+    // Snapshot: el ajuste recalculó total_interes con el flag actual, así que
+    // la liquidación queda marcada según cómo quedó realmente persistida.
+    setObj.descuenta_impuestos = totalesFiltrados.descuenta_impuestos === true;
     await db
       .update(liquidaciones)
       .set(setObj as any)

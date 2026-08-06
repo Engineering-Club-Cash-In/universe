@@ -1626,6 +1626,11 @@
       total_isr: numeric("total_isr", { precision: 18, scale: 2 }).notNull().default("0"),
       total_cuota: numeric("total_cuota", { precision: 18, scale: 2 }).notNull().default("0"),
 
+      // Snapshot de cómo se pagó ESTA liquidación: si el inversionista tenía
+      // descuenta_impuestos al liquidar, total_interes se persistió NETO (×0.81).
+      // Las liquidaciones viejas quedan en false = fórmula bruta original.
+      descuenta_impuestos: boolean("descuenta_impuestos").notNull().default(false),
+
       // Reinversión
       reinversion_capital: numeric("reinversion_capital", { precision: 18, scale: 2 }).notNull().default("0"),
       reinversion_interes: numeric("reinversion_interes", { precision: 18, scale: 2 }).notNull().default("0"),

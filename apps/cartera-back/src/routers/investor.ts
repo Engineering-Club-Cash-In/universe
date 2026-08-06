@@ -288,14 +288,14 @@ async function armarYGuardarXlsxBulkAjuste(
 
 export const inversionistasRouter = new Elysia()
   .use(authMiddleware)
-  .post("/investor", (ctx: any) => {
-    const denegado = guardDescuentaImpuestos(ctx);
+  .post("/investor", async (ctx: any) => {
+    const denegado = await guardDescuentaImpuestos(ctx);
     if (denegado) return denegado;
     return insertInvestor(ctx);
   })
   .get("/investor", getInvestors)
-  .post("/investor/update", (ctx: any) => {
-    const denegado = guardDescuentaImpuestos(ctx);
+  .post("/investor/update", async (ctx: any) => {
+    const denegado = await guardDescuentaImpuestos(ctx);
     if (denegado) return denegado;
     return updateInvestor(ctx);
   })

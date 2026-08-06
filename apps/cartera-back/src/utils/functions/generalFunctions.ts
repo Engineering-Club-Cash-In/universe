@@ -67,7 +67,11 @@ export async function generarPDFBuffer(
   inversionista: InversionistaReporte,
   logoUrl: string = ""
 ): Promise<Buffer> {
-  const html = generarHTMLReporte(inversionista, logoUrl);
+  const html = generarHTMLReporte(
+    inversionista,
+    logoUrl,
+    inversionista.descuenta_impuestos
+  );
   const browser = await launchBrowser();
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
@@ -93,7 +97,11 @@ export async function generarYSubirPDFInversionista(
   filename: string,
   logoUrl: string = ""
 ): Promise<{ url: string; pdfBuffer: Buffer }> {
-  const html = generarHTMLReporte(inversionista, logoUrl);
+  const html = generarHTMLReporte(
+    inversionista,
+    logoUrl,
+    inversionista.descuenta_impuestos
+  );
 
   const browser = await launchBrowser();
 
@@ -689,6 +697,11 @@ export async function buildInversionistaWorkbook(
 
   function toN(v: any) { return Number(v || 0); }
 
+  // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
+  // Los pagos y el subtotal YA llegan neteados desde el controlador
+  // (abono_interes = interés × 0.81, abono_iva = 12% bruto, isr = 7% bruto).
+  const aplicaDescImp = inv.descuenta_impuestos === true;
+
   // ── fila 1-2: logo + título
   ws.getRow(1).height = 45;
   ws.getRow(2).height = 35;
@@ -719,6 +732,24 @@ export async function buildInversionistaWorkbook(
     ["Gran total a recibir", toN(sub.total_cuota_con_reinversion)],
   ];
   const resumenCols = [1, 4 + offset, 8 + offset, 12 + offset];
+
+  // Filas 5-6 extra "Neto de impuestos": SOLO para inversionistas con el flag.
+  // Cuando aplica, las tablas de datos arrancan en la fila 7 (ver `let row`).
+  if (aplicaDescImp) {
+    const netoLabel = ws.getCell(5, 1);
+    netoLabel.value = "Neto de impuestos";
+    netoLabel.font = { bold: true, color: { argb: CINV.slate }, size: 9 };
+    netoLabel.alignment = { horizontal: "center" };
+    ws.mergeCells(5, 1, 5, 3);
+
+    const netoVal = ws.getCell(6, 1);
+    netoVal.value = toN(sub.total_neto_impuestos);
+    netoVal.numFmt = numFmt;
+    netoVal.font = { bold: true, size: 12, color: { argb: CINV.navy } };
+    netoVal.alignment = { horizontal: "center" };
+    ws.mergeCells(6, 1, 6, 3);
+  }
+
   for (let i = 0; i < resumen.length; i++) {
     const col = resumenCols[i];
     const labelCell = ws.getCell(3, col);
@@ -771,11 +802,12 @@ export async function buildInversionistaWorkbook(
     sin_reinversion:       "El inversionista recibe capital + interés; no se reinvierte nada.",
   };
 
-  let row = 5;
+  // Con descuenta_impuestos las filas 5-6 llevan el bloque "Neto de impuestos".
+  let row = aplicaDescImp ? 7 : 5;
   const groupTotalRows: number[] = [];
 
   let headerRowSet = false;
-  let firstHeaderRow = 6;
+  let firstHeaderRow = aplicaDescImp ? 8 : 6;
 
   for (const grupo of grupos) {
     let credGrupo = inv.creditos;
@@ -1103,7 +1135,11 @@ export async function buildInversionistaWorkbook(
         const iva = new Big(pago.abono_iva || 0);
         const isr = new Big(pago.isr || 0);
 
-        const abonoGeneralInteres = inv.emite_factura
+        // Con descuenta_impuestos `int` YA es el interés neto (int_bruto − iva − isr):
+        // no se le vuelve a sumar el IVA ni a restar el ISR.
+        const abonoGeneralInteres = aplicaDescImp
+          ? int
+          : inv.emite_factura
           ? int.plus(iva)
           : int.minus(isr);
 

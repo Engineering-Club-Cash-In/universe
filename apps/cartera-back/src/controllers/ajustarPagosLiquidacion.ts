@@ -35,6 +35,7 @@ import {
   pagos_credito_inversionistas_espejo,
 } from "../database/db/schema";
 import { formatToUSD } from "../utils/functions/currencyConverter";
+import { descuentoImpuestos } from "../utils/functions/taxes";
 import { generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
 import { resumeInvestor } from "./investor";
 
@@ -74,7 +75,7 @@ export type AjustarPagosLiquidacionInput = {
 //
 // Devuelve valores RAW en Quetzales (sin conversión a USD).
 // ============================================
-async function computarTotalesFiltrados(opts: {
+export async function computarTotalesFiltrados(opts: {
   inversionista_id: number;
   liquidacion_id: number;
   creditos_excluidos: Set<number>;
@@ -94,6 +95,7 @@ async function computarTotalesFiltrados(opts: {
   pagos_count: number;
   moneda: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
 }> {
   const {
     inversionista_id,
@@ -105,6 +107,7 @@ async function computarTotalesFiltrados(opts: {
   const [inv] = await db
     .select({
       emite_factura: inversionistas.emite_factura,
+      descuenta_impuestos: inversionistas.descuenta_impuestos,
       reinversion: inversionistas.tipo_reinversion,
       monto_reinversion: inversionistas.monto_reinversion,
       moneda: inversionistas.moneda,
@@ -178,8 +181,13 @@ async function computarTotalesFiltrados(opts: {
       const abono_interes = new Big(pago.abono_interes);
       const abono_iva = new Big(pago.abono_iva_12).round(2);
       const isr = abono_interes.times(0.07);
+      // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
+      const descImp =
+        inv.descuenta_impuestos === true ? descuentoImpuestos(abono_interes) : null;
 
-      const abonoGeneralInteres = inv.emite_factura
+      const abonoGeneralInteres = descImp
+        ? descImp.neto
+        : inv.emite_factura
         ? abono_interes.plus(abono_iva)
         : abono_interes.minus(isr);
 
@@ -189,7 +197,7 @@ async function computarTotalesFiltrados(opts: {
       }
 
       const interesTotal = abono_interes.plus(
-        inv.emite_factura ? abono_iva : isr.neg(),
+        descImp ? descImp.ajuste : inv.emite_factura ? abono_iva : isr.neg(),
       );
 
       let reinvCapital = new Big(0);
@@ -229,7 +237,10 @@ async function computarTotalesFiltrados(opts: {
       totales.total_abono_capital = totales.total_abono_capital.plus(abono_capital);
       totales.total_abono_interes = totales.total_abono_interes.plus(abono_interes);
       totales.total_abono_iva = totales.total_abono_iva.plus(abono_iva);
-      if (!inv.emite_factura) {
+      if (descImp) {
+        // Con el flag el ISR SIEMPRE se acumula (7% del bruto), emita o no factura.
+        totales.total_isr = totales.total_isr.plus(descImp.isr);
+      } else if (!inv.emite_factura) {
         totales.total_isr = totales.total_isr.plus(isr);
       }
       totales.total_cuota = totales.total_cuota.plus(cuota_inversor);
@@ -281,6 +292,7 @@ async function computarTotalesFiltrados(opts: {
     ...totales,
     moneda: inv.moneda ?? "quetzales",
     emite_factura: inv.emite_factura,
+    descuenta_impuestos: inv.descuenta_impuestos === true,
   };
 }
 
@@ -703,15 +715,25 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
 
   // total_iva en `liquidaciones` se guarda según emite_factura, igual que
   // hace getInvestorTotalsGlobales al rendear el header del Excel.
-  const totalIvaFinal = totalesFiltrados.emite_factura
+  // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
+  const totalIvaFinal = totalesFiltrados.descuenta_impuestos
+    ? totalesFiltrados.total_abono_interes.round(2).times(0.12)
+    : totalesFiltrados.emite_factura
     ? totalesFiltrados.total_abono_iva
     : totalesFiltrados.total_abono_interes.round(2).times(0.12);
+
+  // Con el flag, `liquidaciones.total_interes` se persiste NETO (misma
+  // convención que liquidateByInvestorId, que guarda los totales ya neteados
+  // de getInvestorTotalsGlobales).
+  const totalInteresFinal = totalesFiltrados.descuenta_impuestos
+    ? descuentoImpuestos(totalesFiltrados.total_abono_interes).neto
+    : totalesFiltrados.total_abono_interes;
 
   // Mapeo: campo de liquidaciones → valor recalculado.
   const nuevosValores: Record<string, Big | number> = {
     total_pagos_liquidados: totalesFiltrados.pagos_count,
     total_capital: totalesFiltrados.total_abono_capital.round(2),
-    total_interes: totalesFiltrados.total_abono_interes.round(2),
+    total_interes: totalInteresFinal.round(2),
     total_iva: totalIvaFinal.round(2),
     total_isr: totalesFiltrados.total_isr.round(2),
     total_cuota: totalesFiltrados.total_cuota.round(2),
@@ -854,15 +876,25 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
           ? formatToUSD(val.toString(), inversionista_id)
           : Number(val.round(2).toString());
 
-      const totalAbonoIvaShown = totalesFiltrados.emite_factura
+      // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
+      const totalAbonoIvaShown = totalesFiltrados.descuenta_impuestos
+        ? totalesFiltrados.total_abono_interes.round(2).times(0.12)
+        : totalesFiltrados.emite_factura
         ? totalesFiltrados.total_abono_iva
         : totalesFiltrados.total_abono_interes.round(2).times(0.12);
 
+      const totalAbonoInteresShown = totalesFiltrados.descuenta_impuestos
+        ? descuentoImpuestos(totalesFiltrados.total_abono_interes).neto
+        : totalesFiltrados.total_abono_interes;
+
       inversionista.subtotal = {
         total_abono_capital: fmt(totalesFiltrados.total_abono_capital),
-        total_abono_interes: fmt(totalesFiltrados.total_abono_interes),
+        total_abono_interes: fmt(totalAbonoInteresShown),
         total_abono_iva: fmt(totalAbonoIvaShown),
         total_isr: fmt(totalesFiltrados.total_isr),
+        total_neto_impuestos: totalesFiltrados.descuenta_impuestos
+          ? fmt(descuentoImpuestos(totalesFiltrados.total_abono_interes).neto)
+          : null,
         total_cuota_sin_reinversion: fmt(totalesFiltrados.total_cuota_sin_reinversion),
         total_cuota_con_reinversion: fmt(totalesFiltrados.total_cuota),
         total_cuota: fmt(totalesFiltrados.total_cuota),
@@ -911,6 +943,21 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
     creditos_ajustados_reporte,
     compras_canceladas,
     totales_update,
+    // Totales recalculados tal como quedan (o quedarían) persistidos.
+    totales: {
+      total_capital: totalesFiltrados.total_abono_capital.round(2).toString(),
+      total_interes: totalInteresFinal.round(2).toString(),
+      total_iva: totalIvaFinal.round(2).toString(),
+      total_isr: totalesFiltrados.total_isr.round(2).toString(),
+      total_cuota: totalesFiltrados.total_cuota.round(2).toString(),
+      total_neto_impuestos: totalesFiltrados.descuenta_impuestos
+        ? Number(
+            descuentoImpuestos(totalesFiltrados.total_abono_interes)
+              .neto.round(2)
+              .toString(),
+          )
+        : null,
+    },
     totales_cambios_count: Object.values(totales_update).filter((t) => t.cambio)
       .length,
     status: 200 as const,

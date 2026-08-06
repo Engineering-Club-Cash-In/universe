@@ -432,6 +432,7 @@ export function TableInvestors() {
           total_reinversion_interes:   mirrorSummaryData.subtotal.total_reinversion_interes,
           total_reinversion:           mirrorSummaryData.subtotal.total_reinversion,
           total_abono_general_interes: mirrorSummaryData.subtotal.total_abono_general_interes,
+          total_neto_impuestos:        mirrorSummaryData.subtotal.total_neto_impuestos ?? null,
         }
       : {
           total_abono_capital:         totalesData?.totales.total_abono_capital         ?? 0,
@@ -445,6 +446,7 @@ export function TableInvestors() {
           total_reinversion_interes:   totalesData?.totales.total_reinversion_interes   ?? 0,
           total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
           total_abono_general_interes: totalesData?.totales.total_abono_general_interes ?? 0,
+          total_neto_impuestos:        totalesData?.totales.total_neto_impuestos        ?? null,
         };
 
     return {
@@ -1309,6 +1311,17 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   </div>
                 </div>
               </div>
+
+              {subtotales.total_neto_impuestos != null && (
+                <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-violet-100"}`}>
+                  <div className="text-xs mb-1 font-semibold text-blue-900">
+                    Neto de impuestos
+                  </div>
+                  <div className={`font-bold text-lg ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
+                    {inv.currencySymbol} {Number(subtotales.total_neto_impuestos).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              )}
 
               <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-green-100"}`}>
                 <div className="text-xs mb-1 font-semibold text-blue-900">

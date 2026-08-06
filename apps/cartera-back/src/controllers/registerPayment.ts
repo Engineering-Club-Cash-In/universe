@@ -1575,7 +1575,12 @@ export const insertPayment = async ({ body, set }: any) => {
               );
               [pagoInsertado] = await db
                 .update(pagos_credito)
-                .set(pagoData)
+                // Esta fila ES la boleta (pisa el placeholder): sin estampar
+                // acá, el estampado seguía pendiente tras el loop y la fila
+                // fallback del convenio insertaba una SEGUNDA fila con el
+                // mismo monto; además el reverso no tenía pago_convenio de
+                // dónde leer en los cierres por UPDATE.
+                .set({ ...pagoData, pagoConvenio: estamparPagoConvenio() })
                 .from(cuotas_credito)
                 .where(
                   and(

@@ -888,6 +888,7 @@
     dpi: bigint("dpi", { mode: "number" }).unique(),
     email: varchar("email", { length: 255 }),
     emite_factura: boolean("emite_factura").notNull(),
+    descuenta_impuestos: boolean("descuenta_impuestos").notNull().default(false),
     tipo_reinversion: tipoReinversionEnum("tipo_reinversion")
       .notNull()
       .default("sin_reinversion"),

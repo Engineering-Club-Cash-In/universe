@@ -789,3 +789,290 @@ describe("crearEstampadorPagoConvenio", () => {
     expect(estampar()).toBe("0");
   });
 });
+
+describe("debeInsertarFilaParcialCuota", () => {
+  it("no inserta fila cuando la cuota no absorbió nada (caso crédito 8717)", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+      })
+    ).toBe(false);
+  });
+
+  it("inserta fila cuando la cuota absorbió abonos", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 150.5,
+        mora: 0,
+        otros: 0,
+      })
+    ).toBe(true);
+  });
+
+  it("inserta fila cuando solo hay mora que cobrar", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 30,
+        otros: 0,
+      })
+    ).toBe(true);
+  });
+
+  it("inserta fila cuando solo hay otros que cobrar", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 25,
+      })
+    ).toBe(true);
+  });
+
+  it("trata los strings decimales de la DB como números (0.00 => false)", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: "0.00",
+        mora: "0.00",
+        otros: "0.00",
+      })
+    ).toBe(false);
+
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: "0.01",
+        mora: "0.00",
+        otros: "0.00",
+      })
+    ).toBe(true);
+  });
+
+  it("inserta fila cuando queda convenio pendiente de estampar", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: 981.86,
+      })
+    ).toBe(true);
+
+    // String decimal (formato del estampador / de la DB).
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: "981.86",
+      })
+    ).toBe(true);
+  });
+
+  it("se salta la cuota cuando el convenio ya fue estampado o no existe", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: "0",
+      })
+    ).toBe(false);
+
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: null,
+      })
+    ).toBe(false);
+  });
+
+  it("tolera mora/otros ausentes o nulos", () => {
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({ totalPagado: 0 })
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: null,
+        otros: null,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("crearEstampadorPagoConvenio - peek pendiente()", () => {
+  it("reporta el monto sin consumir el sello", () => {
+    const estampar = registerPaymentPolicy.crearEstampadorPagoConvenio(981.86);
+
+    // Consultar dos veces no quema el sello.
+    expect(estampar.pendiente()).toBe("981.86");
+    expect(estampar.pendiente()).toBe("981.86");
+
+    expect(estampar()).toBe("981.86");
+
+    // Ya estampado: el peek pasa a 0 y las cuotas siguientes pueden saltarse.
+    expect(estampar.pendiente()).toBe("0");
+    expect(estampar()).toBe("0");
+  });
+
+  it("reporta 0 cuando la boleta no aplicó al convenio", () => {
+    expect(registerPaymentPolicy.crearEstampadorPagoConvenio(0).pendiente()).toBe("0");
+    expect(
+      registerPaymentPolicy.crearEstampadorPagoConvenio(null).pendiente()
+    ).toBe("0");
+  });
+});
+
+describe("capitalSuprimidoSinAplicar (devolución por cuotas saltadas)", () => {
+  // Escenario base: capital pedido sin permiso, la sección 7 no corrió y no
+  // hubo mora ni fila especial de otros. Lo único que puede suprimir el 409
+  // es el convenio o las cuotas saltadas.
+  const base = {
+    abonoCapital: 500,
+    cuotasCompletas: 0,
+    cuotasParciales: 0,
+    moraAplicada: 0,
+    otrosEspecialAplicado: false,
+    convenioAplicado: 0,
+  };
+
+  // NOTA de precedencia: en el controller este escenario ya no se alcanza —
+  // `debeRechazarPagoSinAplicacion` responde 409 antes de llegar a la
+  // devolución. El test sigue siendo válido como contrato PURO del helper (no
+  // depende del orden del controller) y fija la red por si esas condiciones
+  // se estrechan; la pata convenio de #1246 sí sigue viva en producción.
+  it("devuelve el capital cuando el 409 se suprimió SOLO por cuotas saltadas", () => {
+    expect(
+      registerPaymentPolicy
+        .capitalSuprimidoSinAplicar({
+          ...base,
+          cuotasParciales: 3, // 0 reales + 3 saltadas
+          cuotasSaltadas: 3,
+        })
+        .toString()
+    ).toBe("500");
+  });
+
+  it("no devuelve nada cuando hubo parciales REALES (comportamiento pre-existente)", () => {
+    expect(
+      registerPaymentPolicy
+        .capitalSuprimidoSinAplicar({
+          ...base,
+          cuotasParciales: 2, // ambas reales
+          cuotasSaltadas: 0,
+        })
+        .toString()
+    ).toBe("0");
+  });
+
+  it("no devuelve nada cuando el 409 SÍ procede (no se procesó nada)", () => {
+    expect(
+      registerPaymentPolicy
+        .capitalSuprimidoSinAplicar({ ...base, cuotasSaltadas: 0 })
+        .toString()
+    ).toBe("0");
+    expect(
+      registerPaymentPolicy.debeRechazarAbonoCapitalNoAplicado(base)
+    ).toBe(true);
+  });
+
+  it("devuelve el capital UNA sola vez cuando convenio y saltadas suprimen a la vez", () => {
+    expect(
+      registerPaymentPolicy
+        .capitalSuprimidoSinAplicar({
+          ...base,
+          cuotasParciales: 2,
+          cuotasSaltadas: 2,
+          convenioAplicado: 230,
+        })
+        .toString()
+    ).toBe("500");
+  });
+
+  it("sin `cuotasSaltadas` se comporta igual que capitalSuprimidoPorConvenio", () => {
+    const conConvenio = { ...base, convenioAplicado: 230 };
+    expect(
+      registerPaymentPolicy.capitalSuprimidoSinAplicar(conConvenio).toString()
+    ).toBe(
+      registerPaymentPolicy.capitalSuprimidoPorConvenio(conConvenio).toString()
+    );
+    expect(
+      registerPaymentPolicy.capitalSuprimidoSinAplicar(conConvenio).toString()
+    ).toBe("500");
+  });
+});
+
+describe("debeRechazarPagoSinAplicacion", () => {
+  // Cascadeo que recorrió cuotas sin que ninguna absorbiera nada y sin ninguna
+  // otra vía que haya escrito fila.
+  const base = {
+    cuotasSaltadas: 3,
+    cuotasCompletas: 0,
+    cuotasParciales: 0,
+    moraAplicada: 0,
+    otrosEspecialAplicado: false,
+    convenioAplicado: 0,
+  };
+
+  it("rechaza cuando el pago no dejó NINGUNA fila (solo cuotas saltadas)", () => {
+    expect(registerPaymentPolicy.debeRechazarPagoSinAplicacion(base)).toBe(true);
+  });
+
+  it("no rechaza si el loop nunca corrió (crédito sin cuotas pendientes)", () => {
+    // Flujo histórico de saldo a favor: no se toca.
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        cuotasSaltadas: 0,
+      })
+    ).toBe(false);
+  });
+
+  it("no rechaza si la mora ya insertó su fila", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        moraAplicada: 75,
+      })
+    ).toBe(false);
+  });
+
+  it("no rechaza si la rama especial de otros insertó su fila", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        otrosEspecialAplicado: true,
+      })
+    ).toBe(false);
+  });
+
+  it("no rechaza si el convenio se aplicó (su fila existe)", () => {
+    // Con convenio pendiente el skip no ocurre: la primera cuota inserta fila.
+    // Y en el caso `registroSoloConvenio` la fila se escribe antes del loop.
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        convenioAplicado: 981.86,
+      })
+    ).toBe(false);
+  });
+
+  it("no rechaza si alguna cuota sí se procesó", () => {
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        cuotasParciales: 1,
+      })
+    ).toBe(false);
+    expect(
+      registerPaymentPolicy.debeRechazarPagoSinAplicacion({
+        ...base,
+        cuotasCompletas: 1,
+      })
+    ).toBe(false);
+  });
+});

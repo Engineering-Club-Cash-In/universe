@@ -544,6 +544,8 @@ export const insertInvestor = async ({ body, set }: any) => {
           updateData.email = inv.email.trim().toLowerCase();
         if (inv.emite_factura !== undefined)
           updateData.emite_factura = inv.emite_factura;
+        if (typeof inv.descuenta_impuestos === "boolean")
+          updateData.descuenta_impuestos = inv.descuenta_impuestos;
         if (inv.tipo_reinversion?.trim())
           updateData.tipo_reinversion = inv.tipo_reinversion.trim();
         if (inv._banco_id) updateData.banco_id = inv._banco_id;
@@ -580,6 +582,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           dpi: inv.dpi || null,
           email: inv.email?.trim().toLowerCase() || null,
           emite_factura: inv.emite_factura ?? false,
+          descuenta_impuestos: inv.descuenta_impuestos ?? false,
           tipo_reinversion: inv.tipo_reinversion?.trim() || "sin_reinversion",
           banco_id: inv._banco_id || null,
           tipo_cuenta: inv.tipo_cuenta?.trim() || null,
@@ -1271,6 +1274,7 @@ export async function resumeInvestor(
       inversionista_id: inversionistas.inversionista_id,
       inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
+      descuenta_impuestos: inversionistas.descuenta_impuestos,
       reinversion: inversionistas.tipo_reinversion,
       monto_reinversion: inversionistas.monto_reinversion,
       saldo_reinversion: inversionistas.saldo_reinversion,
@@ -1772,6 +1776,7 @@ export async function resumeInvestor(
         inversionista_id: inv.inversionista_id,
         nombre_inversionista: inv.inversionista,
         emite_factura: inv.emite_factura,
+        descuenta_impuestos: inv.descuenta_impuestos,
         banco_id: inv.banco_id,
         banco: inv.banco_nombre,
         tipo_cuenta: inv.tipo_cuenta,
@@ -5118,6 +5123,7 @@ export const findOrCreateInvestor = async (
     .values({
       nombre: nombreNormalizado,
       emite_factura,
+      descuenta_impuestos: false,
       banco_id: null,
       tipo_cuenta: null,
       numero_cuenta: null,
@@ -5155,6 +5161,7 @@ export const updateInvestor = async ({ body, set }: any) => {
         inversionista_id,
         nombre,
         emite_factura,
+        descuenta_impuestos,
         tipo_reinversion, // ⭐ Agregado
         monto_reinversion,
         permite_distribucion,
@@ -5170,6 +5177,8 @@ export const updateInvestor = async ({ body, set }: any) => {
       if (typeof nombre !== "undefined") updateData.nombre = nombre;
       if (typeof emite_factura !== "undefined")
         updateData.emite_factura = emite_factura;
+      if (typeof descuenta_impuestos === "boolean")
+        updateData.descuenta_impuestos = descuenta_impuestos;
       if (typeof tipo_reinversion !== "undefined")
         updateData.tipo_reinversion = tipo_reinversion;
       if (typeof monto_reinversion !== "undefined")

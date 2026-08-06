@@ -33,8 +33,10 @@ import {
   esPagoSoloCapital,
   esPagoSoloOtros,
   puedeOmitirGuardTodasCubiertas,
-  capitalSuprimidoPorConvenio,
+  capitalSuprimidoSinAplicar,
   debeRechazarAbonoCapitalNoAplicado,
+  debeRechazarPagoSinAplicacion,
+  debeInsertarFilaParcialCuota,
   CREDIT_PENDING_CANCELLATION_ERROR,
   getCreditPaymentBlock,
   getRequestedInstallmentFloor,
@@ -982,6 +984,12 @@ export const insertPayment = async ({ body, set }: any) => {
 
     let cuotas_completas = 0;
     let cuotas_parciales = 0;
+    // Cuotas visitadas por el cascadeo que no absorbieron nada y por eso NO
+    // escriben fila (ver `debeInsertarFilaParcialCuota`). Antes de ese cambio
+    // cada una dejaba una fila parcial basura que SÍ contaba en
+    // `cuotas_parciales`; este contador preserva esa semántica donde el
+    // conteo tenía efectos observables (ajuste stale y guard anti-pérdida).
+    let cuotas_saltadas = 0;
     let disponible_para_cuotasPosteriores = new Big(0);
     for (const cuota of cuotasPendientes) {
       console.log("\n===============================");
@@ -1410,8 +1418,15 @@ export const insertPayment = async ({ body, set }: any) => {
           .plus(abono_seguro)
           .plus(abono_gps)
           .plus(abono_membresias);
+        // Incluye `cuotas_saltadas`: en develop una cuota saltada dejaba fila
+        // parcial y por tanto consumía el "primera cuota procesada". Se
+        // preserva esa semántica para que `shouldApplyStaleZeroRestanteAdjustment`
+        // (que MUEVE plata: totalPagado += faltante, disponible -= faltante) no
+        // dispare en cascadeos donde antes no disparaba.
         const esPrimeraCuotaProcesada =
-          cuotas_completas === 0 && cuotas_parciales === 0;
+          cuotas_completas === 0 &&
+          cuotas_parciales === 0 &&
+          cuotas_saltadas === 0;
         const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
         const faltanteContraCuota = montoCuota.minus(totalPagado);
 
@@ -1562,6 +1577,9 @@ export const insertPayment = async ({ body, set }: any) => {
         // Insertar o actualizar pago
         type PagoCredito = typeof pagos_credito.$inferSelect;
         let pagoInsertado: PagoCredito | undefined;
+        // Cuota que no cobró nada: no se escribe fila ni boleta y tampoco se
+        // resincronizan sus `*_restante` (ver `debeInsertarFilaParcialCuota`).
+        let filaParcialOmitida = false;
 
         if (existingPago) {
           if (
@@ -1744,6 +1762,30 @@ export const insertPayment = async ({ body, set }: any) => {
                   }))
                 );
               }
+            } else if (
+              !debeInsertarFilaParcialCuota({
+                totalPagado,
+                mora: moraParaPago,
+                otros: otrosParaPago,
+                // Peek NO consumidor: si el convenio sigue sin estampar, esta
+                // cuota debe insertar fila para cargarlo. Una vez estampado
+                // devuelve "0" y las siguientes cuotas sí pueden saltarse.
+                pagoConvenio: estamparPagoConvenio.pendiente(),
+              })
+            ) {
+              // ── Cuota que no absorbió NADA (crédito 8717) ─────────────────
+              // Todos los abonos quedaron en 0 tras el clamp por saldo neto y
+              // no hay mora ni otros que cobrar aquí. Insertar la fila dejaría
+              // un `pending` con `monto_aplicado = 0` (invalidable para
+              // siempre por /aplicar-pago) más la boleta duplicada. Se omite
+              // la fila, la boleta, el conteo de parciales y la sincronización
+              // de `*_restante`; el disponible queda intacto para la siguiente
+              // cuota del cascadeo.
+              filaParcialOmitida = true;
+              cuotas_saltadas++;
+              console.log(
+                `⏭️ Cuota ${cuota.cuotas_credito.numero_cuota} sin nada que cobrar (aplicado 0, sin mora ni otros): no se inserta fila`
+              );
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
@@ -1873,23 +1915,28 @@ export const insertPayment = async ({ body, set }: any) => {
           // se distribuyen con la fila vigente (la última, que ya trae el saldo
           // correcto) y los rubros planos se netean contra objetivos+Σmonto_
           // aplicado, no contra estos saldos.
-          await db
-            .update(pagos_credito)
-            .set({
-              capital_restante: nuevo_capital_restante.toString(),
-              interes_restante: nuevo_interes_restante.toString(),
-              iva_12_restante: nuevo_iva_restante.toString(),
-              seguro_restante: nuevo_seguro_restante.toString(),
-              gps_restante: nuevo_gps_restante.toString(),
-              membresias: nuevo_membresias_restante.toString(),
-            })
-            .where(
-              and(
-                eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
-                eq(pagos_credito.credito_id, credito.credito_id),
-                eq(pagos_credito.paymentFalse, false)
-              )
-            );
+          //
+          // Se omite si la cuota no absorbió nada: un pago que no tocó la
+          // cuota tampoco debe reescribirle los saldos de sus filas.
+          if (!filaParcialOmitida) {
+            await db
+              .update(pagos_credito)
+              .set({
+                capital_restante: nuevo_capital_restante.toString(),
+                interes_restante: nuevo_interes_restante.toString(),
+                iva_12_restante: nuevo_iva_restante.toString(),
+                seguro_restante: nuevo_seguro_restante.toString(),
+                gps_restante: nuevo_gps_restante.toString(),
+                membresias: nuevo_membresias_restante.toString(),
+              })
+              .where(
+                and(
+                  eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+                  eq(pagos_credito.credito_id, credito.credito_id),
+                  eq(pagos_credito.paymentFalse, false)
+                )
+              );
+          }
 
           if (disponible_restante.lte(0)) {
             break;
@@ -2119,7 +2166,16 @@ export const insertPayment = async ({ body, set }: any) => {
       const guardCapitalParams = {
         abonoCapital,
         cuotasCompletas: cuotas_completas,
-        cuotasParciales: cuotas_parciales,
+        // + `cuotas_saltadas`: en develop las filas basura de las cuotas sin
+        // saldo contaban como parciales y suprimían este 409. El anti-pérdida
+        // sólo debe disparar cuando de verdad no se procesó NINGUNA cuota, ni
+        // siquiera saltándola; si el loop recorrió cuotas y no absorbieron
+        // nada, el disponible quedó en saldo a favor como antes.
+        cuotasParciales: cuotas_parciales + cuotas_saltadas,
+        // Se pasa aparte para poder reconstruir el escenario CRUDO (parciales
+        // reales) y devolver a saldo a favor el capital que esta compensación
+        // deja sin destino — ver `capitalSuprimidoSinAplicar`.
+        cuotasSaltadas: cuotas_saltadas,
         moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
         // Condición RUNTIME de la rama especial de otros (no la clasificación
         // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
@@ -2139,10 +2195,40 @@ export const insertPayment = async ({ body, set }: any) => {
         };
       }
 
-      // Capital que la sección 7 no aplicó y cuyo 409 se suprimió SOLO por el
-      // convenio: ya venía descontado de montoEfectivo, así que sin esto se
-      // evaporaría en silencio — se devuelve a saldo a favor.
-      const capitalDevuelto = capitalSuprimidoPorConvenio(guardCapitalParams);
+      // El cascadeo visitó cuotas y ninguna absorbió nada, y tampoco se
+      // escribió fila por mora/otros/convenio: acreditar saldo a favor acá
+      // respondería `success` sin NINGUNA fila ni boleta persistida, y el
+      // reintento de la misma boleta acreditaría saldo doble sin rastro.
+      // Preempta a propósito la pata "cuotas saltadas" de
+      // `capitalSuprimidoSinAplicar`: un mixto capital+efectivo con todas las
+      // cuotas saltadas cae en este 409 antes de llegar a la devolución. El
+      // helper se conserva porque sigue cubriendo la pata convenio (#1246) y
+      // porque es la red si estas condiciones se estrechan.
+      if (
+        debeRechazarPagoSinAplicacion({
+          cuotasSaltadas: cuotas_saltadas,
+          cuotasCompletas: cuotas_completas,
+          // Parciales REALES: acá interesa si se escribió fila, no la
+          // compensación de paridad que lleva `guardCapitalParams`.
+          cuotasParciales: cuotas_parciales,
+          moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
+          otrosEspecialAplicado: montoBoleta.eq(otrosBig),
+          convenioAplicado: montoConvenio,
+        })
+      ) {
+        set.status = 409;
+        return {
+          success: false,
+          message: `No se pudo registrar el pago: ninguna cuota abierta del crédito tiene saldo por cobrar (las ${cuotas_saltadas} cuota(s) recorridas no absorbieron nada). El crédito requiere revisión; si corresponde, registre el pago como abono directo a capital.`,
+        };
+      }
+
+      // Capital que la sección 7 no aplicó y cuyo 409 se suprimió por algo que
+      // NO aplicó ese capital (el convenio, #1246, o las cuotas saltadas de
+      // este PR): ya venía descontado de montoEfectivo, así que sin esto se
+      // evaporaría en silencio — se devuelve a saldo a favor UNA sola vez,
+      // apliquen una o ambas supresiones.
+      const capitalDevuelto = capitalSuprimidoSinAplicar(guardCapitalParams);
       if (capitalDevuelto.gt(0)) {
         console.log(
           `↩️ Abono a capital no aplicable (sin permiso) devuelto a saldo a favor: Q${capitalDevuelto.toString()}`

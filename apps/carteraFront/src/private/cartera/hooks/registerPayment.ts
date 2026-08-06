@@ -410,7 +410,9 @@ const handleFormSubmit = (e: React.FormEvent) => {
     }
 
     if (monto_boleta < monto_cancelacion) {
-      const resta = monto_cancelacion - monto_boleta;
+      // Redondeado a centavos: la resta en float deja polvo (16488.770000000004)
+      // que el back compara contra montos numeric(18,2) de la DB.
+      const resta = Number((monto_cancelacion - monto_boleta).toFixed(2));
       setMontoBaseBadDebt(resta);
       setOpenBadDebt(true);
       return;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, not, inArray, sql } from "drizzle-orm";
+import { eq, and, not, inArray, isNotNull, desc, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -12,6 +12,7 @@ import {
   boletas,
   pagos_credito_inversionistas,
   convenios_pago,
+  convenio_cuotas,
   facturas_electronicas,
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
@@ -28,6 +29,7 @@ import {
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
 import {
+  calcularCuotasConvenioCompletadas,
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
 } from "./registerPaymentPolicy";
@@ -874,14 +876,20 @@ export async function reverseConvenioPayment(
     );
     console.log("📊 Monto pendiente nuevo:", nuevoMontoPendienteBig.toString());
 
-    // 5. Recalcular cuántas cuotas completas se han pagado
+    // 5. Recalcular cuántas cuotas completas se han pagado — con el MISMO
+    // helper de acumulado que usa processConvenioPayment al marcar, para que
+    // forward y reverse compartan una sola fórmula (incluye el tope a
+    // numero_meses: el floor solo podía dejar pagos_pendientes negativo con
+    // un convenio sobre-pagado).
     if (cuotaMensualBig.eq(0)) {
       throw new Error("La cuota mensual del convenio es 0, no se puede recalcular");
     }
-    const cuotasCompletasPagadas = nuevoMontoPagadoBig
-      .div(cuotaMensualBig)
-      .round(0, Big.roundDown);
-    const nuevosPagosRealizados = parseInt(cuotasCompletasPagadas.toString());
+    const nuevosPagosRealizados = calcularCuotasConvenioCompletadas({
+      montoPagado: nuevoMontoPagadoBig,
+      cuotaMensual: cuotaMensualBig,
+      montoPendiente: nuevoMontoPendienteBig,
+      numeroMeses: convenio.numero_meses,
+    });
     const nuevosPagosPendientes = convenio.numero_meses - nuevosPagosRealizados;
 
     console.log(
@@ -913,6 +921,45 @@ export async function reverseConvenioPayment(
       })
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
+
+    // 7.5 Desmarcar las cuotas del convenio que el dinero reversado ya no
+    // cubre: el marcado por acumulado (processConvenioPayment) escribe
+    // fecha_pago al cruzar cada cuota; sin este espejo la cuota seguía
+    // figurando pagada (los readers de cobranza leen fecha_pago) y se dejaba
+    // de cobrar dinero que acababa de reversarse. Se desmarcan las más NUEVAS
+    // hasta que marcadas == pagos_realizados recalculado.
+    const cuotasMarcadas = await db
+      .select({
+        cuota_convenio_id: convenio_cuotas.cuota_convenio_id,
+        numero_cuota: convenio_cuotas.numero_cuota,
+      })
+      .from(convenio_cuotas)
+      .where(
+        and(
+          eq(convenio_cuotas.convenio_id, convenio.convenio_id),
+          isNotNull(convenio_cuotas.fecha_pago)
+        )
+      )
+      .orderBy(desc(convenio_cuotas.numero_cuota));
+
+    const sobremarcadas = cuotasMarcadas.length - nuevosPagosRealizados;
+    if (sobremarcadas > 0) {
+      const aDesmarcar = cuotasMarcadas.slice(0, sobremarcadas);
+      await db
+        .update(convenio_cuotas)
+        .set({ fecha_pago: null })
+        .where(
+          inArray(
+            convenio_cuotas.cuota_convenio_id,
+            aDesmarcar.map((c) => c.cuota_convenio_id)
+          )
+        );
+      console.log(
+        `↩️ Cuotas del convenio desmarcadas por reversa: ${aDesmarcar
+          .map((c) => `#${c.numero_cuota}`)
+          .join(", ")}`
+      );
+    }
 
     console.log("🔄 ========== FIN REVERSIÓN DE PAGO ==========\n");
 

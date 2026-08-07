@@ -522,6 +522,12 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		console.log(
 			`[DEBUG] Lead ${leadId} already has open opportunity from Whatsapp: ${existingOpportunity.id}`,
 		);
+		if (existingOpportunity.assignedTo !== assignedUserId) {
+			await db
+				.update(opportunities)
+				.set({ assignedTo: assignedUserId, updatedAt: new Date() })
+				.where(eq(opportunities.id, existingOpportunity.id));
+		}
 		opportunityId = existingOpportunity.id;
 	} else {
 		const [firstStage] = await db

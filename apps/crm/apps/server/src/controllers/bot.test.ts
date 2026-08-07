@@ -4,15 +4,29 @@ type DatabaseRow = Record<string, unknown>;
 
 let queuedSelectResults: DatabaseRow[][] = [];
 let insertedRows: DatabaseRow[] = [];
+let updatedRows: DatabaseRow[] = [];
+let currentOwnerEligible = false;
+let fallbackSalesUser: { id: string } | null = null;
+let openOpportunity: {
+	id: string;
+	assignedTo: string;
+} | null = null;
 
 const nextSelectResult = () => queuedSelectResults.shift() ?? [];
+
+const selectResult = () => {
+	const result = nextSelectResult();
+
+	return Object.assign(Promise.resolve(result), {
+		limit: (..._limitArgs: unknown[]) => Promise.resolve(result),
+	});
+};
 
 mock.module("../db", () => ({
 	db: {
 		select: (..._args: unknown[]) => ({
 			from: (..._fromArgs: unknown[]) => ({
-				where: (..._whereArgs: unknown[]) =>
-					Promise.resolve(nextSelectResult()),
+				where: (..._whereArgs: unknown[]) => selectResult(),
 				orderBy: (..._orderByArgs: unknown[]) => ({
 					limit: (..._limitArgs: unknown[]) =>
 						Promise.resolve(nextSelectResult()),
@@ -29,8 +43,11 @@ mock.module("../db", () => ({
 			},
 		}),
 		update: (..._updateArgs: unknown[]) => ({
-			set: (..._setArgs: unknown[]) => ({
-				where: (..._whereArgs: unknown[]) => Promise.resolve([]),
+			set: (values: DatabaseRow) => ({
+				where: (..._whereArgs: unknown[]) => {
+					updatedRows.push(values);
+					return Promise.resolve([]);
+				},
 			}),
 		}),
 	},
@@ -69,7 +86,8 @@ mock.module("@/functions/getRenapInfo", () => ({
 
 mock.module("@/lib/lead-assignment", () => ({
 	findSalesUserWithLeastAutoAssignedLeads: async () => null,
-	resolveExistingLeadAssigneeFromDatabase: async () => null,
+	resolveExistingLeadAssigneeFromDatabase: async (currentOwnerId: string) =>
+		currentOwnerEligible ? currentOwnerId : fallbackSalesUser?.id,
 	resolveNewAutoLeadAssignment: async (
 		findSalesUser: () => Promise<{ id: string } | null>,
 		unavailableMessage: string,
@@ -93,7 +111,7 @@ mock.module("@/lib/lead-assignment", () => ({
 }));
 
 mock.module("@/lib/lead-opportunity", () => ({
-	getOpenOpportunityBySource: async () => null,
+	getOpenOpportunityBySource: async () => openOpportunity,
 }));
 
 mock.module("@/lib/storage", () => ({
@@ -119,6 +137,10 @@ describe("WhatsApp RENAP lead assignment", () => {
 	beforeEach(() => {
 		queuedSelectResults = [[], []];
 		insertedRows = [];
+		updatedRows = [];
+		currentOwnerEligible = false;
+		fallbackSalesUser = null;
+		openOpportunity = null;
 	});
 
 	test("fails closed before creating lead or opportunity when no eligible advisor exists", async () => {
@@ -133,6 +155,47 @@ describe("WhatsApp RENAP lead assignment", () => {
 				(row) => row.source === "Whatsapp" && row.status === "new",
 			),
 		).toEqual([]);
+		expect(
+			insertedRows.filter(
+				(row) => row.source === "Whatsapp" && "leadId" in row,
+			),
+		).toEqual([]);
+	});
+
+	test("reassigns a reused opportunity with its reactivated lead", async () => {
+		currentOwnerEligible = false;
+		fallbackSalesUser = { id: "new-owner" };
+		openOpportunity = {
+			id: "existing-opportunity",
+			assignedTo: "old-owner",
+		};
+		queuedSelectResults = [
+			[],
+			[
+				{
+					id: "existing-lead",
+					assignedTo: "old-owner",
+					assignmentType: "manual",
+					createdBy: "creator",
+					age: 36,
+				},
+			],
+			[{ id: "existing-magic-url" }],
+		];
+
+		const result = await getRenapInfoController("1234567890101", "55555555");
+
+		expect(result.success).toBe(true);
+		expect(updatedRows).toContainEqual(
+			expect.objectContaining({
+				assignedTo: "new-owner",
+				assignmentType: "auto",
+			}),
+		);
+		expect(updatedRows).toContainEqual({
+			assignedTo: "new-owner",
+			updatedAt: expect.any(Date),
+		});
 		expect(
 			insertedRows.filter(
 				(row) => row.source === "Whatsapp" && "leadId" in row,

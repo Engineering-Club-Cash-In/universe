@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	canReceiveAutoAssignedLead,
 	getSalesUserWithLeastAutoAssignedLeads,
+	getStartOfTodayGT,
 	resolveExistingLeadAssignee,
 	resolveNewAutoLeadAssignment,
 } from "./lead-assignment";
@@ -104,6 +105,13 @@ describe("lead assignment helpers", () => {
 		);
 
 		expect(selected?.id).toBe("second");
+	});
+
+	test.each([
+		["2026-08-07T05:59:59.999Z", "2026-08-06T06:00:00.000Z"],
+		["2026-08-07T06:00:00.000Z", "2026-08-07T06:00:00.000Z"],
+	])("gets the Guatemala start of day for %s", (now, expected) => {
+		expect(getStartOfTodayGT(new Date(now))).toEqual(new Date(expected));
 	});
 
 	test("returns no assignee when no eligible fallback exists", () => {

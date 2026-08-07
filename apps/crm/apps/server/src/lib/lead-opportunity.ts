@@ -11,6 +11,7 @@ export async function getOpenOpportunityBySource(
 	const [existing] = await db
 		.select({
 			id: opportunities.id,
+			assignedTo: opportunities.assignedTo,
 			source: opportunities.source,
 			campaign: opportunities.campaign,
 			creditType: opportunities.creditType,

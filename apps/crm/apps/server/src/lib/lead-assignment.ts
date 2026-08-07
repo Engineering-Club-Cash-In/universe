@@ -2,6 +2,7 @@ import { and, count, eq, gte, lt } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { leads } from "../db/schema/crm";
+import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
 import { ROLES } from "./roles";
 
 export type LeadAssignableUser = {
@@ -59,6 +60,10 @@ export function getSalesUserWithLeastAutoAssignedLeads(
 	return selectedUser;
 }
 
+export function getStartOfTodayGT(now: Date): Date {
+	return gtDateStrToDate(toDateStrGT(now));
+}
+
 export function resolveExistingLeadAssignee(
 	currentOwner: LeadAssignableUser | null | undefined,
 	fallbackSalesUser: LeadAssignableUser | null,
@@ -107,11 +112,7 @@ export async function findSalesUserWithLeastAutoAssignedLeads() {
 				eq(user.banned, false),
 			),
 		);
-	const startOfToday = new Date(
-		new Date().toLocaleDateString("en-US", {
-			timeZone: "America/Guatemala",
-		}),
-	);
+	const startOfToday = getStartOfTodayGT(new Date());
 	const [leadCounts, reactivatedLeadCounts] = await Promise.all([
 		db
 			.select({ assignedTo: leads.assignedTo, count: count(leads.id) })

@@ -48,17 +48,9 @@ function redondearMonto(valor: number): number {
 }
 
 /**
- * Días del mes en que cae la primera cuota del crédito, calculado con la misma
- * lógica de "mes actual + 1" que usa generatePaymentDates en cartera-back
- * (apps/cartera-back/src/controllers/createCredit.ts), para que el denominador
- * del prorrateo coincida con el mes real donde va a caer esa primera cuota.
- *
- * A propósito NO usa hora Guatemala: generatePaymentDates elige el mes con
- * getFullYear()/getMonth() en hora local del server (no GT), así que replicar
- * esa misma fuente es lo que mantiene sincronizados numerador y denominador —
- * usar GT aquí desincroniza el mes cerca de medianoche GT si el server corre
- * en UTC (ej. 31 a las 7pm GT ya es día 1 de UTC: cartera-back agenda la
- * primera cuota un mes adelante de lo que este cálculo asumiría con GT).
+ * Días del mes de la primera cuota, mismo cálculo que generatePaymentDates en
+ * cartera-back (createCredit.ts) — a propósito hora local del server, no GT,
+ * para no desincronizarse del mes que cartera-back realmente agenda.
  */
 function getDiasDelMesPrimeraCuota(fechaReferencia: Date): number {
 	const anio = fechaReferencia.getFullYear();

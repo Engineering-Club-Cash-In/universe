@@ -2158,9 +2158,7 @@ export const crmRouter = {
 				input.diaPagoMensual !== undefined &&
 				input.elegidoDesdeRecomendacionIA !==
 					(currentOpportunity[0].diaPagoOriginalSistema != null);
-			// Si leadId cambia, el análisis (y por lo tanto suggestedDays) es del
-			// lead anterior — hay que revalidar aunque el día/flag entrantes
-			// coincidan con lo ya guardado (los forms siempre reenvían ambos).
+			// Si leadId cambia, revalidar aunque día/flag no cambien (analisis del lead anterior ya no aplica).
 			const leadIdCambio =
 				input.leadId !== undefined &&
 				input.leadId !== currentOpportunity[0].leadId;
@@ -2205,12 +2203,13 @@ export const crmRouter = {
 					}
 				}
 
-				// Por el flag del front, revalidado contra suggestedDays — el valor
-				// numérico solo no distingue intención cuando la IA recomienda
-				// justo 15 o 30 (mismo criterio que assignInvestorAndAdvance).
+				// No 15/30 ya probó su origen IA al pasar la validación de arriba.
 				const esDiaIA =
-					elegidoDesdeRecomendacionIA &&
-					(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ?? false);
+					input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30
+						? true
+						: elegidoDesdeRecomendacionIA &&
+							(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
+								false);
 				diaPagoOriginalSistemaUpdate = esDiaIA
 					? getDiaPagoOriginalSistema()
 					: null;
@@ -6617,14 +6616,13 @@ export const crmRouter = {
 				});
 			}
 
-			// Solo días recomendados por IA generan el ajuste al cierre (no 15/30
-			// manual) — es el día contra el que se compara diaPagoOriginalSistema
-			// para calcular el ingreso adicional. Se determina por el flag del
-			// front, revalidado contra suggestedDays: el valor numérico solo no
-			// distingue intención cuando la IA recomienda justo 15 o 30.
+			// No 15/30 ya probó su origen IA al pasar la validación de arriba.
 			const esDiaIA =
-				input.elegidoDesdeRecomendacionIA &&
-				(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ?? false);
+				input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30
+					? true
+					: input.elegidoDesdeRecomendacionIA &&
+						(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
+							false);
 
 			// Update opportunity and record history in a transaction for atomicity
 			await db.transaction(async (tx) => {

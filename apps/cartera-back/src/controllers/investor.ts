@@ -3572,11 +3572,40 @@ export async function getInvestorMirrorSummary(
       abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
       abono_interes: pagos_credito_inversionistas_espejo.abono_interes,
       abono_iva_12:  pagos_credito_inversionistas_espejo.abono_iva_12,
+      liquidacion_id: pagos_credito_inversionistas_espejo.liquidacion_id,
+      estado_liquidacion: pagos_credito_inversionistas_espejo.estado_liquidacion,
     })
     .from(pagos_credito_inversionistas_espejo)
     .where(and(...pagosConditions));
 
   console.log(`[getInvestorMirrorSummary] Pagos espejo: ${pagosEspejo.length}`);
+
+  // Snapshot POR liquidación: al incluir liquidados, cada pago ya liquidado se
+  // netea según cómo se pagó ESA liquidación (no el flag actual del inversionista).
+  // Los NO_LIQUIDADO usan el flag vivo. Así una liquidación vieja en bruto no se
+  // recalcula como neta si el inversionista activó el flag después.
+  const snapMapMirror = new Map<number, boolean>();
+  const liqIdsMirror = [
+    ...new Set(
+      pagosEspejo
+        .filter((p) => p.estado_liquidacion === "LIQUIDADO" && p.liquidacion_id != null)
+        .map((p) => p.liquidacion_id as number)
+    ),
+  ];
+  if (liqIdsMirror.length) {
+    const snaps = await db
+      .select({
+        liquidacion_id: liquidaciones.liquidacion_id,
+        descuenta_impuestos: liquidaciones.descuenta_impuestos,
+      })
+      .from(liquidaciones)
+      .where(inArray(liquidaciones.liquidacion_id, liqIdsMirror));
+    for (const s of snaps) snapMapMirror.set(s.liquidacion_id, s.descuenta_impuestos === true);
+  }
+  const flagPagoMirror = (pago: { estado_liquidacion?: string | null; liquidacion_id?: number | null }) =>
+    pago.estado_liquidacion === "LIQUIDADO" && pago.liquidacion_id != null
+      ? snapMapMirror.get(pago.liquidacion_id) ?? false
+      : inv.descuenta_impuestos === true;
 
   // Agrupar pagos por credito_id
   const pagosPorCredito = new Map<number, typeof pagosEspejo>();
@@ -3601,6 +3630,14 @@ export async function getInvestorMirrorSummary(
     total_reinversion_interes: new Big(0),
     total_reinversion:         new Big(0),
     total_cuota_sin_reinversion: new Big(0),
+    // Separar el interés bruto de los pagos NETEADOS (snapshot/flag) del resto,
+    // para aplicar en el return el MISMO orden de redondeo que getInvestorTotalsGlobales
+    // (así el espejo no difiere por centavos de la liquidación persistida).
+    gross_interes_neteado: new Big(0),
+    total_abono_interes_no_neteado: new Big(0),
+    total_abono_iva_no_neteado: new Big(0),
+    total_isr_no_neteado: new Big(0),
+    huboNeteo: false,
     // Pools para combinada (ver getInvestorTotalsGlobales): cuota completa de los
     // créditos que dentro de una combinada son excedente/variable.
     total_cuota_excedente_combinada: new Big(0),
@@ -3620,8 +3657,8 @@ export async function getInvestorMirrorSummary(
       const abono_interes = new Big(pago.abono_interes ?? 0);
       const abono_iva     = new Big(pago.abono_iva_12  ?? 0);
 
-      // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
-      const descImp = inv.descuenta_impuestos === true ? descuentoImpuestos(abono_interes) : null;
+      // Carril descuenta_impuestos por pago: liquidado → snapshot; vivo → flag actual.
+      const descImp = flagPagoMirror(pago) ? descuentoImpuestos(abono_interes) : null;
 
       // ISR: 7% sobre interés si NO emite factura (con descuenta_impuestos siempre aplica)
       const isr = descImp
@@ -3629,6 +3666,17 @@ export async function getInvestorMirrorSummary(
         : inv.emite_factura
         ? new Big(0)
         : abono_interes.times(0.07).round(2);
+
+      // Para los TOTALES mostrados: separar el interés bruto neteado del no-neteado.
+      // El return aplica el MISMO orden de redondeo que getInvestorTotalsGlobales.
+      if (descImp) {
+        sg.gross_interes_neteado = sg.gross_interes_neteado.plus(abono_interes);
+        sg.huboNeteo = true;
+      } else {
+        sg.total_abono_interes_no_neteado = sg.total_abono_interes_no_neteado.plus(abono_interes);
+        sg.total_abono_iva_no_neteado = sg.total_abono_iva_no_neteado.plus(abono_iva);
+        sg.total_isr_no_neteado = sg.total_isr_no_neteado.plus(isr);
+      }
 
       const abonoGeneralInteres = descImp
         ? descImp.neto
@@ -3769,22 +3817,24 @@ export async function getInvestorMirrorSummary(
     currencySymbol:   inv.moneda === "dolares" ? "$" : "Q.",
     subtotal: {
       total_abono_capital:      formatValue(sg.total_abono_capital.round(2).toString()),
+      // Mismo orden de redondeo que getInvestorTotalsGlobales para no diferir por
+      // centavos con la liquidación persistida: interés neto = 0.81×bruto (sin
+      // redondear el bruto antes), IVA = round(bruto,2)×0.12, ISR = 0.07×bruto.
       total_abono_interes:      formatValue(
-        (inv.descuenta_impuestos === true
-          ? descuentoImpuestos(sg.total_abono_interes).neto
-          : sg.total_abono_interes
-        ).round(2).toString()
+        descuentoImpuestos(sg.gross_interes_neteado).neto
+          .plus(sg.total_abono_interes_no_neteado).round(2).toString()
       ),
       total_abono_iva:          formatValue(
-        (inv.descuenta_impuestos === true
-          ? sg.total_abono_interes.round(2).times(0.12)
-          : sg.total_abono_iva
-        ).round(2).toString()
+        sg.gross_interes_neteado.round(2).times("0.12")
+          .plus(sg.total_abono_iva_no_neteado).round(2).toString()
       ),
-      total_isr:                formatValue(sg.total_isr.round(2).toString()),
+      total_isr:                formatValue(
+        descuentoImpuestos(sg.gross_interes_neteado).isr
+          .plus(sg.total_isr_no_neteado).round(2).toString()
+      ),
       total_neto_impuestos:
-        inv.descuenta_impuestos === true
-          ? formatValue(descuentoImpuestos(sg.total_abono_interes).neto.round(2).toString())
+        sg.huboNeteo
+          ? formatValue(descuentoImpuestos(sg.gross_interes_neteado).neto.round(2).toString())
           : null,
       total_cuota_sin_reinversion: formatValue(sg.total_cuota_sin_reinversion.round(2).toString()),
       total_cuota_con_reinversion: formatValue(sg.total_cuota.round(2).toString()),

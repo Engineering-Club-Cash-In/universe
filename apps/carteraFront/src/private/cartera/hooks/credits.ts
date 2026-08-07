@@ -71,7 +71,9 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
         page,
         perPage,
         numero_credito_sifco: creditoSifco.trim() !== "" ? creditoSifco : undefined,
-        estado,
+        // TEMP: al buscar por número SIFCO no se manda estado, para que
+        // aparezcan también los CANCELADOs (revertir a `estado,`)
+        estado: creditoSifco.trim() !== "" ? undefined : estado,
         excel: false,
         asesor_id: asesorId,
         nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,
@@ -101,7 +103,8 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
       page,
       perPage,
       numero_credito_sifco: creditoSifco.trim() !== "" ? creditoSifco : undefined,
-      estado,
+      // TEMP: mismo criterio que la búsqueda normal (revertir a `estado,`)
+      estado: creditoSifco.trim() !== "" ? undefined : estado,
       excel: true,
       asesor_id: asesorId,
       nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,

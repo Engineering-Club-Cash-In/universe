@@ -2220,6 +2220,8 @@ export interface LiquidacionResumen {
   boleta_pendiente: string | null;
   boleta_liquidacion: BoletaLiquidacion | null;
   reporte_liquidacion_url: string | null;
+  /** Mismo reporte expresado en quetzales. Solo lo tienen los inversionistas en dólares. */
+  reporte_liquidacion_url_gtq?: string | null;
   estado_liquidacion_resumen:
     | "pending"
     | "uploaded"

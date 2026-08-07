@@ -1,6 +1,7 @@
 // app.ts (o donde declares tus rutas Elysia)
 import { z } from "zod";
-import { formatToUSD } from "../utils/functions/currencyConverter";
+import { formatToUSD, getTipoCambioUSD } from "../utils/functions/currencyConverter";
+import { convertirReporteAUSD } from "../utils/functions/reporteMoneda";
 import { USD_EXCHANGE_RATE } from "../utils/functions/const";
 import { descuentoImpuestos } from "../utils/functions/taxes";
 import {
@@ -1240,7 +1241,8 @@ export async function resumeInvestor(
   tipo: TipoConsulta = "originales",
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  rawValues = false
 ) {
   console.log(
     "resumeInvestor for",
@@ -1416,8 +1418,14 @@ export async function resumeInvestor(
         total_cuota_variable_combinada: new Big(0),
       };
 
+      // `rawValues` devuelve los montos tal como están en la base (quetzales),
+      // sin convertir a la moneda del inversionista. Lo usa la liquidación para
+      // pedir el reporte UNA sola vez y derivar la versión en dólares en memoria
+      // (ver convertirReporteAUSD), en lugar de repetir toda la consulta.
       const formatValue = (val: string | number | null | undefined) =>
-        inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val || 0);
+        !rawValues && inv.moneda === "dolares"
+          ? formatToUSD(val, inv.inversionista_id)
+          : Number(val || 0);
 
       // Procesar créditos del inversionista
       const creditosData = await Promise.all(
@@ -1830,9 +1838,14 @@ export async function resumeInvestor(
         saldo_reinversion: inv.saldo_reinversion,
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
         dpi: inv.dpi,
-        moneda: inv.moneda,
+        // Con `rawValues` los montos quedaron en quetzales, así que la moneda
+        // declarada tiene que acompañarlos: si no, el Excel rotularía con "$"
+        // cifras que están en Q. La moneda real del inversionista viaja aparte
+        // en `moneda_inversionista`.
+        moneda: rawValues ? "quetzales" : inv.moneda,
+        moneda_inversionista: inv.moneda,
         email: inv.email,
-        currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
+        currencySymbol: !rawValues && inv.moneda === "dolares" ? "$" : "Q.",
         creditos: creditosData,
         subtotal: {
           total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
@@ -2356,7 +2369,13 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
   if (liquidacion) {
     await db
       .update(liquidaciones)
-      .set({ reporte_liquidacion_url: url })
+      .set({
+        reporte_liquidacion_url: url,
+        // El reporte principal se regeneró por fuera de la liquidación, así que
+        // la copia en quetzales ya no le corresponde. Se limpia para no dejar
+        // dos reportes que no cuadran entre sí.
+        reporte_liquidacion_url_gtq: null,
+      })
       .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
     return {
@@ -4273,6 +4292,10 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       // paso falla (por ejemplo, error de correo), no afecta los datos financieros
       // ya guardados — la liquidación sigue siendo válida.
       try {
+        // Se pide el resumen en quetzales (`rawValues`), tal como está en la base.
+        // Para un inversionista en dólares la versión en USD se deriva de este
+        // mismo objeto en memoria (convertirReporteAUSD), sin repetir la consulta:
+        // la liquidación no hace ni un query más que antes.
         const resumen = await resumeInvestor(
           inv_id,
           1,
@@ -4284,13 +4307,16 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           undefined,
           "espejos",
           true,
-          liquidacion.liquidacion_id
+          liquidacion.liquidacion_id,
+          undefined,
+          true // rawValues: montos en quetzales
         );
 
-        const inversionista = resumen.inversionistas?.[0];
+        const inversionistaQ = resumen.inversionistas?.[0];
 
-        if (inversionista) {
-          // Recalcular totales específicamente para esta liquidación (ya persistida)
+        if (inversionistaQ) {
+          // Recalcular totales específicamente para esta liquidación (ya persistida).
+          // También en crudo, para que el subtotal quede en la misma moneda que el resto.
           const postTotales = await getInvestorTotalsGlobales(
             inv_id,
             undefined,
@@ -4298,27 +4324,53 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             false,
             undefined,
             true, // soloLiquidados
-            liquidacion.liquidacion_id
+            liquidacion.liquidacion_id,
+            undefined,
+            true // rawValues: montos en quetzales
           );
-          inversionista.subtotal = postTotales.totales as any;
+          inversionistaQ.subtotal = postTotales.totales as any;
 
-          console.log(`  📄 Generando Excel...`);
+          // El reporte principal (el que se guarda como `reporte_liquidacion_url`
+          // y viaja por correo) siempre va en la moneda del inversionista.
+          const esDolares = (inversionistaQ as any).moneda_inversionista === "dolares";
+          const inversionista: any = esDolares
+            ? convertirReporteAUSD(inversionistaQ as any)
+            : inversionistaQ;
+
+          console.log(`  📄 Generando Excel${esDolares ? " (USD + GTQ)" : ""}...`);
           const logoUrl = process.env.LOGO_URL || "";
-          const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.xlsx`;
-          const excelResult = await generarYSubirExcelInversionista(
-            inversionista as any,
-            filename,
-            logoUrl
-          );
+          const stamp = Date.now();
+          const filename = `liquidacion_${liquidacion.liquidacion_id}_${stamp}.xlsx`;
+
+          // Para inversionistas en dólares se emite además el mismo reporte en
+          // quetzales, que es la moneda en la que esta tabla guarda sus totales.
+          // Los dos Excel se arman y suben en paralelo.
+          const filenameGtq = esDolares
+            ? `liquidacion_${liquidacion.liquidacion_id}_${stamp}_GTQ.xlsx`
+            : null;
+
+          const [excelResult, excelResultGtq] = await Promise.all([
+            generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+            filenameGtq
+              ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl)
+              : Promise.resolve(null),
+          ]);
+
           const url = excelResult.url;
+          const urlGtq = excelResultGtq?.url ?? null;
           const excelBuffer = Buffer.from(excelResult.excelBuffer);
 
           console.log(`  ✅ Excel generado: ${filename}`);
+          if (urlGtq) console.log(`  ✅ Excel en quetzales generado: ${filenameGtq}`);
 
-          // Actualizar liquidación con URL del reporte
+          // Actualizar liquidación con URL(s) del reporte
           await db
             .update(liquidaciones)
-            .set({ reporte_liquidacion_url: url })
+            .set({
+              reporte_liquidacion_url: url,
+              reporte_liquidacion_url_gtq: urlGtq,
+              tipo_cambio_reporte: esDolares ? String(getTipoCambioUSD(inv_id)) : null,
+            })
             .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
           // Enviar correo (best-effort)
@@ -6779,6 +6831,8 @@ interface InversionistaResumen {
   boleta_pendiente: BoletaPendiente | null;
   boleta_liquidacion: BoletaPendiente | null;
   reporte_liquidacion_url: string | null;
+  /** Mismo reporte en quetzales. Solo los inversionistas en dólares lo tienen. */
+  reporte_liquidacion_url_gtq: string | null;
   mes_liquidacion?: number | null;
   anio_liquidacion?: number | null;
 }
@@ -6820,6 +6874,7 @@ interface InversionistaResumenRow {
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
   reporte_liquidacion_url?: string | null;
+  reporte_liquidacion_url_gtq?: string | null;
   mes_liquidacion?: number | null;
   anio_liquidacion?: number | null;
   boleta_id?: number | null;
@@ -7423,6 +7478,8 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
     total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
     reporte_liquidacion_url: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url})`,
+    // Mismo reporte en quetzales (solo inversionistas en dólares lo tienen).
+    reporte_liquidacion_url_gtq: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url_gtq})`,
     boleta_id: liquidaciones.boleta_id,
   };
 
@@ -7540,6 +7597,7 @@ function mapResumenRow(
     boleta_pendiente,
     boleta_liquidacion,
     reporte_liquidacion_url: inv.reporte_liquidacion_url ?? null,
+    reporte_liquidacion_url_gtq: inv.reporte_liquidacion_url_gtq ?? null,
     ...(inv.mes_liquidacion != null ? { mes_liquidacion: inv.mes_liquidacion } : {}),
     ...(inv.anio_liquidacion != null ? { anio_liquidacion: inv.anio_liquidacion } : {}),
   };
@@ -8121,6 +8179,7 @@ export async function resumenGlobalLiquidaciones(
         total_a_recibir_con_reinversion: 0,
         total_cuota: 0,
         reporte_liquidacion_url: null,
+        reporte_liquidacion_url_gtq: null,
       };
 
       result.push({
@@ -8597,6 +8656,10 @@ export async function getLiquidaciones({
       reinversion_interes: liquidaciones.reinversion_interes,
       reinversion_total: liquidaciones.reinversion_total,
       reporte_liquidacion: liquidaciones.reporte_liquidacion_url,
+      // Mismo reporte en quetzales. Solo viene lleno para inversionistas en
+      // dólares; en los de quetzales es null porque el principal ya está en Q.
+      reporte_liquidacion_gtq: liquidaciones.reporte_liquidacion_url_gtq,
+      tipo_cambio_reporte: liquidaciones.tipo_cambio_reporte,
       fecha_liquidacion: liquidaciones.fecha_liquidacion,
       // Datos del inversionista
       nombre_inversionista: inversionistas.nombre,

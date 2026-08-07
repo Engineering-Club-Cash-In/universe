@@ -935,7 +935,13 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
       if (!isDryRun) {
         await db
           .update(liquidaciones)
-          .set({ reporte_liquidacion_url: url })
+          .set({
+            reporte_liquidacion_url: url,
+            // La copia en quetzales que dejó la liquidación quedó vieja: este
+            // Excel se armó con otros créditos. Se limpia en vez de dejarla
+            // apuntando a cifras que ya no cuadran con el reporte principal.
+            reporte_liquidacion_url_gtq: null,
+          })
           .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
       }
     } catch (err) {

@@ -318,7 +318,19 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
           >
             <FileText className="w-3.5 h-3.5" />
-            Reporte
+            {/* Solo se rotula la moneda cuando hay dos reportes que distinguir. */}
+            {item.reporte_liquidacion_url_gtq ? "Reporte $" : "Reporte"}
+          </a>
+        )}
+        {item.reporte_liquidacion_url_gtq && (
+          <a
+            href={item.reporte_liquidacion_url_gtq}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            Reporte Q
           </a>
         )}
       </div>

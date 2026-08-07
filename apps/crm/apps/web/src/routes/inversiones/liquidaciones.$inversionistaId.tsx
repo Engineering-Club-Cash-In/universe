@@ -614,6 +614,16 @@ function LiquidacionCard({ item }: { item: any }) {
 						{formatCurrency(item.total_isr, sym)}
 					</p>
 				</div>
+				{item.total_neto_impuestos != null && (
+					<div className="rounded-lg bg-rose-50 px-2.5 py-1.5 dark:bg-rose-950/50">
+						<p className="font-medium text-[10px] text-rose-600 uppercase tracking-wide dark:text-rose-400">
+							Neto de impuestos
+						</p>
+						<p className="font-bold text-[13px] text-rose-900 dark:text-rose-100">
+							{formatCurrency(item.total_neto_impuestos, sym)}
+						</p>
+					</div>
+				)}
 				<div className="rounded-lg bg-teal-50 px-2.5 py-1.5 dark:bg-teal-950/50">
 					<p className="font-medium text-[10px] text-teal-600 uppercase tracking-wide dark:text-teal-400">
 						Reinversión

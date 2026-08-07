@@ -20,6 +20,10 @@
  *  - Caso parcial (≥2 pagos/cuota): se reparte cada monto_aplicado en cascada
  *    (interés → IVA → seguro → GPS → membresías → capital) sembrando los totales
  *    del Excel, igual que repararTotalRestante.
+ *  - Guard anti-borrado: si la fila del Excel viene SIN un solo abono (conta
+ *    todavía no anotó el pago) y en la DB la cuota ya tiene pagos aplicados,
+ *    la cuota NO se toca y se reporta en `protegidas`. Ver
+ *    actualizarPagosExcelPolicy.debeProtegerCuota.
  *
  * Atomicidad: se valida TODO primero. Si algún crédito/cuota no matchea en el
  * Excel (o hay error), NO se escribe nada y se devuelve el detalle. Si todo
@@ -31,6 +35,7 @@ import Big from "big.js";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { authMiddleware } from "./midleware";
+import { debeProtegerCuota, pagoTieneAplicacion } from "./actualizarPagosExcelPolicy";
 import {
   descargarCarteraDeR2,
   leerPagosCarteraPorVencimiento,
@@ -235,7 +240,13 @@ export const actualizarPagosExcelRouter = new Elysia()
       type CuotaInfo = {
         numero_cuota: number;
         fecha_vencimiento: string | null;
-        pagos: Array<{ pago_id: number; monto_aplicado: any; fecha_pago: any }>;
+        pagos: Array<{
+          pago_id: number;
+          monto_aplicado: any;
+          fecha_pago: any;
+          // Se calcula acá (con la fila completa) para el guard anti-borrado.
+          tiene_aplicacion: boolean;
+        }>;
       };
       const datosCredito = new Map<
         string,
@@ -298,6 +309,7 @@ export const actualizarPagosExcelRouter = new Elysia()
             pago_id: r.pagos_credito.pago_id,
             monto_aplicado: r.pagos_credito.monto_aplicado,
             fecha_pago: r.pagos_credito.fecha_pago,
+            tiene_aplicacion: pagoTieneAplicacion(r.pagos_credito),
           });
         }
 
@@ -331,6 +343,7 @@ export const actualizarPagosExcelRouter = new Elysia()
       const updatesGlobal: Update[] = [];
       const problemas: any[] = [];
       const omitidas: any[] = []; // cuotas sin match cuando omitir_sin_match=true
+      const protegidas: any[] = []; // cuotas ya aplicadas que el Excel aún no trae
 
       for (const sifcoRaw of lista) {
         const sifco = String(sifcoRaw);
@@ -377,6 +390,25 @@ export const actualizarPagosExcelRouter = new Elysia()
               motivo: esCrono ? "sin_pago_excel_en_ese_orden" : "sin_match_en_excel",
             };
             (omitir_sin_match ? omitidas : problemas).push(item);
+            return;
+          }
+
+          // 🛡️ Guard anti-borrado: el Excel matcheó pero viene sin un solo
+          // abono (conta aún no anotó el pago) y la cuota ya tiene plata
+          // aplicada en la DB. Escribir esos ceros borraría el pago real, así
+          // que la cuota se salta y se reporta. No aborta el resto: las demás
+          // cuotas del crédito sí se reparan.
+          if (debeProtegerCuota(excel, cuota.pagos)) {
+            const item = {
+              numero_credito_sifco: sifco,
+              numero_cuota: cuota.numero_cuota,
+              fecha_vencimiento: cuota.fecha_vencimiento,
+              mes_excel: excel.mes,
+              pago_ids: cuota.pagos.filter((p) => p.tiene_aplicacion).map((p) => p.pago_id),
+              motivo: "excel_sin_pago_registrado",
+            };
+            protegidas.push(item);
+            cambiosCredito.push({ ...item, protegida: true, pagos: 0 });
             return;
           }
 
@@ -435,6 +467,8 @@ export const actualizarPagosExcelRouter = new Elysia()
           excel: { key: descarga.key, etag: descarga.etag, from_cache: descarga.fromCache },
           problemas_count: problemas.length,
           problemas,
+          protegidas_count: protegidas.length,
+          protegidas,
           resultados,
         };
       }
@@ -450,6 +484,8 @@ export const actualizarPagosExcelRouter = new Elysia()
           pagos_a_actualizar: updatesGlobal.length,
           omitidas_count: omitidas.length,
           omitidas,
+          protegidas_count: protegidas.length,
+          protegidas,
           resultados,
         };
       }
@@ -480,6 +516,8 @@ export const actualizarPagosExcelRouter = new Elysia()
         pagos_actualizados: updatesGlobal.length,
         omitidas_count: omitidas.length,
         omitidas,
+        protegidas_count: protegidas.length,
+        protegidas,
         resultados,
       };
     },
@@ -496,7 +534,7 @@ export const actualizarPagosExcelRouter = new Elysia()
       detail: {
         summary: "Actualizar pagos pagados de créditos desde el Excel de cartera (R2)",
         description:
-          "Baja el .xlsx de cartera desde R2 (caché por ETag), y para cada crédito actualiza sus cuotas PAGADAS con los abonos/restantes del Excel. Match por fecha_vencimiento ↔ columna 'Pago'. Soporta pagos parciales (cascada). dry_run=true (default) solo previsualiza. Si alguna cuota no matchea en el Excel, aborta sin escribir. Escribe todo en una sola transacción.",
+          "Baja el .xlsx de cartera desde R2 (caché por ETag), y para cada crédito actualiza sus cuotas PAGADAS con los abonos/restantes del Excel. Match por fecha_vencimiento ↔ columna 'Pago'. Soporta pagos parciales (cascada). dry_run=true (default) solo previsualiza. Si alguna cuota no matchea en el Excel, aborta sin escribir. Si el Excel aún no trae el pago de una cuota que en la DB ya está aplicada, esa cuota se protege (no se escribe) y sale en 'protegidas'. Escribe todo en una sola transacción.",
         tags: ["Créditos", "Cartera"],
       },
     },

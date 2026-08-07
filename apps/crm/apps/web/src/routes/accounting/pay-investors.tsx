@@ -109,6 +109,10 @@ interface ResumenInversionista {
 	total_abono_interes: string;
 	total_abono_iva: string;
 	total_isr: string;
+	/** true si al inversionista se le descuentan impuestos del interés. */
+	descuenta_impuestos?: boolean;
+	/** Interés neto de impuestos (interés × 0.81). Null cuando no descuenta impuestos. */
+	total_neto_impuestos?: number | string | null;
 	total_cuota?: string;
 	total_a_recibir_sin_reinversion: string;
 	total_reinversion: string;
@@ -766,6 +770,12 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 					<DetailItem label="IVA" value={formatCurrency(inv.total_abono_iva, inv.currencySymbol)} />
 					{Number.parseFloat(inv.total_isr) > 0 && (
 						<DetailItem label="ISR" value={formatCurrency(inv.total_isr, inv.currencySymbol)} />
+					)}
+					{inv.total_neto_impuestos != null && (
+						<DetailItem
+							label="Neto impuestos"
+							value={formatCurrency(inv.total_neto_impuestos, inv.currencySymbol)}
+						/>
 					)}
 					{inv.emite_factura && (
 						<span className="text-[10px] text-muted-foreground/40">

@@ -376,6 +376,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // sigue sin pagarse (mismo criterio de registerPayment.ts, consultado
     // directo para no depender de fecha_vencimiento ni de validaciones
     // pendientes de otras listas).
+    // Ordenado por cuota_id desc: hay créditos con cuotas_credito duplicadas
+    // (mismo numero_cuota, cuota_id distinto, artefacto de un flujo viejo —
+    // mismo criterio que obtenerInfoCompletaCredito en registerPayment.ts).
     const [cuota1Row] = await db
       .select({ pagado: cuotas_credito.pagado })
       .from(cuotas_credito)
@@ -385,6 +388,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           eq(cuotas_credito.numero_cuota, 1)
         )
       )
+      .orderBy(desc(cuotas_credito.cuota_id))
       .limit(1);
     const cuota1Pendiente = cuota1Row?.pagado === false;
     const cuotaMensualAPagar =

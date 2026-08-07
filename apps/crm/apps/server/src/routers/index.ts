@@ -449,6 +449,9 @@ export const proyeccionRouter = {
 	getInvestorsCartera: investorDocumentsRouter.getInvestorsCartera,
 	getSimulacionInversionista:
 		investorDocumentsRouter.getSimulacionInversionista,
+	// Contabilidad: reporte de pagos no liquidados. Va aquí y no en
+	// reportsAppRouter porque ahí el tipo del cliente queda truncado.
+	getReporteNoLiquidados: accountingRouter.getReporteNoLiquidados,
 };
 
 // Merged AppRouter type to avoid serialization limit

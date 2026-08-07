@@ -1503,6 +1503,25 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	async getReporteNoLiquidados(
+		inversionistaId: number,
+	): Promise<{ success: boolean; url: string; filename: string }> {
+		const queryParams = new URLSearchParams();
+		queryParams.set("id", String(inversionistaId));
+
+		// Sin cache: el reporte debe reflejar el estado actual de los pagos.
+		const response = await this.request<{
+			success: boolean;
+			url: string;
+			filename: string;
+		}>(
+			`/investor/reporte-no-liquidados?${queryParams.toString()}`,
+			{ method: "GET" },
+			false,
+		);
+		return response;
+	}
+
 	async uploadFile(
 		file: File | Blob,
 		filename: string,

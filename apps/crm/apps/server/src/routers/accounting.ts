@@ -43,6 +43,33 @@ export const accountingRouter = {
 			}
 		}),
 
+	getReporteNoLiquidados: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+			}),
+		)
+		// El .output() explícito evita que el tipo del cliente se infiera como {}
+		// cuando TS trunca el tipo del appRouter (mismo motivo que en
+		// getResumenGlobalInversionistas).
+		.output(
+			z.object({
+				success: z.boolean(),
+				url: z.string(),
+				filename: z.string(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			try {
+				return await carteraBackClient.getReporteNoLiquidados(
+					input.inversionistaId,
+				);
+			} catch (error) {
+				console.error("[ORPC] getReporteNoLiquidados error:", error);
+				throw error;
+			}
+		}),
+
 	createBoleta: crmProcedure
 		.input(
 			z.object({

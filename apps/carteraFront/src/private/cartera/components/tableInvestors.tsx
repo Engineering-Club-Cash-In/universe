@@ -1239,7 +1239,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                         ) : (
                             <FileSpreadsheet className="w-4 h-4" />
                         )}
-                        No Liquidados
+                        Preview Liquidación
                     </button>
 
                     <button

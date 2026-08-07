@@ -227,6 +227,10 @@ export function CreditDetailView({
 		SelectedInversionista[]
 	>([]);
 	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<PaymentDay>(15);
+	// true solo si se eligió la opción "recomendado" del select, aunque el día
+	// coincida con 15/30 — el server la revalida contra el análisis.
+	const [elegidoDesdeRecomendacionIA, setElegidoDesdeRecomendacionIA] =
+		useState(false);
 
 	// Inicializar valores desde opportunity
 	useEffect(() => {
@@ -244,6 +248,9 @@ export function CreditDetailView({
 		setEditNit(opportunity.nit || "");
 		setEditCategoria((opportunity.categoria as CreditCategory) || "");
 		setEditDiaPagoMensual((opportunity.diaPagoMensual as PaymentDay) || 15);
+		// Refleja el estado guardado (diaPagoOriginalSistema != null = fue IA),
+		// para que un guardado que no toca el día no cambie su intención.
+		setElegidoDesdeRecomendacionIA(opportunity.diaPagoOriginalSistema != null);
 
 		// Parsear inversionistas existentes
 		if (opportunity.inversionistas) {
@@ -293,6 +300,14 @@ export function CreditDetailView({
 	// Datos de inspección y análisis de crédito
 	const vehicleInspection = vehicleInspectionQuery.data;
 	const creditAnalysis = consolidatedCreditQuery.data?.consolidated;
+
+	// Ingreso adicional por día de pago IA (si el crédito ya existe en cartera-back y aplicó el ajuste)
+	const ajusteFechaIdealQuery = useQuery({
+		queryKey: ["getAjusteFechaIdealPago", opportunityId],
+		queryFn: () => client.getAjusteFechaIdealPago({ opportunityId }),
+		enabled: !!opportunityId,
+	});
+	const ajusteFechaIdeal = ajusteFechaIdealQuery.data?.ajuste;
 
 	// Query para obtener el vendor del vehículo (solo para Autocompras)
 	const vendorQuery = useQuery({
@@ -493,6 +508,7 @@ export function CreditDetailView({
 				nit: editNit,
 				inversionistas: JSON.stringify(editInversionistas),
 				diaPagoMensual: editDiaPagoMensual,
+				elegidoDesdeRecomendacionIA,
 				// Campos de la cotización
 				numeroCuotas: numeroCuotasValue,
 				tasaInteres: tasaMensualValue,
@@ -1047,10 +1063,22 @@ export function CreditDetailView({
 										</Label>
 										{isEditing ? (
 											<Select
-												value={String(editDiaPagoMensual)}
-												onValueChange={(value) =>
-													setEditDiaPagoMensual(Number(value) as PaymentDay)
+												value={
+													elegidoDesdeRecomendacionIA
+														? `ia-${editDiaPagoMensual}`
+														: String(editDiaPagoMensual)
 												}
+												onValueChange={(value) => {
+													if (value.startsWith("ia-")) {
+														setEditDiaPagoMensual(
+															Number(value.slice(3)) as PaymentDay,
+														);
+														setElegidoDesdeRecomendacionIA(true);
+													} else {
+														setEditDiaPagoMensual(Number(value) as PaymentDay);
+														setElegidoDesdeRecomendacionIA(false);
+													}
+												}}
 											>
 												<SelectTrigger className="mt-1">
 													<SelectValue placeholder="Seleccionar día" />
@@ -1058,17 +1086,15 @@ export function CreditDetailView({
 												<SelectContent>
 													<SelectItem value="15">Día 15</SelectItem>
 													<SelectItem value="30">Día 30</SelectItem>
+													{/* No se excluyen 15/30: si la IA los recomienda, deben
+													verse como opción aparte aunque el número se repita. */}
 													{consolidatedCreditQuery.data?.lead?.suggestedPaymentDays
 														?.filter(
-															(d: { dia: number; porcentaje: number }) =>
-																d.dia !== 15 && d.dia !== 30,
-														)
-														.filter(
 															(d, i, arr) =>
 																arr.findIndex((x) => x.dia === d.dia) === i,
 														)
 														.map((d: { dia: number; porcentaje: number }) => (
-															<SelectItem key={d.dia} value={String(d.dia)}>
+															<SelectItem key={`ia-${d.dia}`} value={`ia-${d.dia}`}>
 																Día {d.dia} ({d.porcentaje}% recomendado)
 															</SelectItem>
 														))}
@@ -1083,6 +1109,59 @@ export function CreditDetailView({
 									</div>
 								</div>
 							</div>
+							{/* Sección: Ingreso Adicional por Fecha Ideal de Pago (solo si aplicó al crear el crédito) */}
+							{ajusteFechaIdeal && (
+								<div className="space-y-3">
+									<h3 className="flex items-center gap-2 font-semibold text-sm">
+										<Calculator className="h-4 w-4" />
+										Ingreso Adicional por Fecha Ideal de Pago
+									</h3>
+									<div className="space-y-2 rounded-lg border bg-muted/30 p-4">
+										<p className="text-muted-foreground text-xs">
+											Se eligió el día {ajusteFechaIdeal.dia_pago_mensual_elegido}{" "}
+											en vez del día {ajusteFechaIdeal.dia_pago_original_sistema}{" "}
+											que el sistema hubiera asignado por default (
+											{ajusteFechaIdeal.dias_diferencia}{" "}
+											{ajusteFechaIdeal.dias_diferencia === 1 ? "día" : "días"} de
+											diferencia, sobre {ajusteFechaIdeal.dias_del_mes} días del mes).
+										</p>
+										<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Interés
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(Number(ajusteFechaIdeal.monto_interes))}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Membresía
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(Number(ajusteFechaIdeal.monto_membresia))}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Servicios
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(Number(ajusteFechaIdeal.monto_servicios))}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Total
+												</Label>
+												<p className="font-semibold">
+													{formatCurrency(Number(ajusteFechaIdeal.monto_total))}
+												</p>
+											</div>
+										</div>
+									</div>
+								</div>
+							)}
 
 							{/* Sección: Datos del Vehículo */}
 							<div className="space-y-3">

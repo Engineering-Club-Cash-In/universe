@@ -1,3 +1,5 @@
+import { roundMoney } from "./quotation-calculator";
+
 export type InsuranceProvider = "universales" | "gyt";
 
 export interface InsuranceSelectionInput {
@@ -37,10 +39,6 @@ export interface NormalizedInsuranceBreakdown {
 
 const GYT_MIN_INSURED_AMOUNT = 1000000;
 const VEHICLE_GYT_TYPES = new Set(["particular", "nuevo"]);
-
-export function roundMoney(value: number): number {
-	return Math.round(value * 100) / 100;
-}
 
 function toMoneyString(value: number): string {
 	return roundMoney(value).toFixed(2);

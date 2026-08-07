@@ -19,7 +19,21 @@ export const CONTRATO_LEASING = 400;
 /** Costo fijo del GPS (se resta de la membresía cruda para obtener la neta) */
 export const GPS_COST = 148.2;
 
-interface QuotationInput {
+/** Redondea al centavo más cercano. */
+export function roundMoney(value: number): number {
+	return Math.round(value * 100) / 100;
+}
+
+/**
+ * Redondea hacia arriba al quetzal entero (sin centavos) — así se calculan hoy el
+ * royalty y el interés de autocompra en el Excel de referencia. No confundir con
+ * redondeo a centavos: `ceilMoney(10.01)` da `11`, no `10.01`.
+ */
+export function ceilMoney(value: number): number {
+	return Math.ceil(value);
+}
+
+export interface QuotationInput {
 	creditType: "autocompra" | "sobre_vehiculo";
 	vehicleValue: number;
 	downPayment: number;
@@ -57,20 +71,26 @@ export function calculateMonthlyPayment(
 	// La tasa incluye IVA (12%)
 	const r = (monthlyRate / 100) * IVA_FACTOR;
 
+	// TODO(negocio): comportamiento heredado, no re-verificado en este trabajo — a
+	// tasa 0% la cuota NO suma seguro/GPS (a diferencia de la rama con tasa > 0), y
+	// generateAmortizationTable() más abajo divide por cero con esta misma tasa
+	// (factor - 1 === 0), produciendo NaN en la tabla. En la práctica no debería
+	// ocurrir porque interestRate es positive() en el schema del servidor, pero el
+	// formulario del cotizador sí permite escribir 0% en pantalla.
 	if (r === 0) return principal / termMonths;
 
 	const factor = (1 + r) ** termMonths;
 	const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
 
 	// Agregar seguro y GPS a la cuota mensual
-	return Math.round((baseMonthlyPayment + insuranceCost + gpsCost) * 100) / 100;
+	return roundMoney(baseMonthlyPayment + insuranceCost + gpsCost);
 }
 
 /**
  * Calcula todos los valores de una cotización según el tipo de crédito.
  *
  * - Sobre vehículo: los cálculos se hacen sobre el monto solicitado directamente.
- *   Los gastos se descuentan del desembolso al cliente.
+ *   Los gastos se descuentan del desembolso al cliente, no se suman al financiamiento.
  * - Autocompra: los cálculos se hacen sobre B22 (base intermedia que incluye
  *   monto a financiar + traspaso + garantía + leasing + admin + GPS + seguro).
  *   Los gastos se suman al monto a financiar.
@@ -93,12 +113,11 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 
 	if (isSobreVehiculo) {
 		// Royalty = % del monto solicitado
-		calculatedRoyalty = Math.ceil(amountToFinance * (royaltyPercentage / 100));
+		calculatedRoyalty = ceilMoney(amountToFinance * (royaltyPercentage / 100));
 
 		// Intereses = monto solicitado × tasa × IVA
 		const interestRate = input.interestRate / 100;
-		calculatedInterest =
-			Math.round(amountToFinance * interestRate * IVA_FACTOR * 100) / 100;
+		calculatedInterest = roundMoney(amountToFinance * interestRate * IVA_FACTOR);
 
 		// Gastos administrativos fijos
 		adminCost = FIXED_ADMIN_COST;
@@ -107,9 +126,7 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 		totalFinanced = amountToFinance;
 	} else {
 		// Constantes según tipo de crédito (interno vs normal)
-		const garantia = input.isInterno
-			? GARANTIA_MOBILIARIA_INTERNO
-			: GARANTIA_MOBILIARIA;
+		const garantia = input.isInterno ? GARANTIA_MOBILIARIA_INTERNO : GARANTIA_MOBILIARIA;
 		const leasing = input.isInterno ? 0 : CONTRATO_LEASING;
 		const adminFijo = input.isInterno ? 0 : FIXED_ADMIN_COST;
 		const gps = input.isInterno ? 0 : input.gpsCost;
@@ -117,19 +134,13 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 
 		// B22 = Monto a financiar + Traspaso + Garantía + Leasing + Admin fijo + GPS + Seguro
 		const b22 =
-			amountToFinance +
-			input.transferCost +
-			garantia +
-			leasing +
-			adminFijo +
-			gps +
-			seguro;
+			amountToFinance + input.transferCost + garantia + leasing + adminFijo + gps + seguro;
 
 		// Royalty = % de B22 redondeado hacia arriba
-		calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
+		calculatedRoyalty = ceilMoney(b22 * (royaltyPercentage / 100));
 
 		// Interés = ROUNDUP(B22 * tasa autocompra) — sin RCDP
-		calculatedInterest = Math.ceil(b22 * AUTOCOMPRA_INTEREST_RATE);
+		calculatedInterest = ceilMoney(b22 * AUTOCOMPRA_INTEREST_RATE);
 
 		// Gastos Admin = Garantía + Royalty + Leasing + Admin fijo + Intereses + RCDP + GPS + Seguro
 		const extraCost = calculatedInterest + input.rcdpCost + gps + seguro;
@@ -140,8 +151,7 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 		totalFinanced = amountToFinance + financedCosts;
 	}
 
-	const effectiveGpsCost =
-		!isSobreVehiculo && input.isInterno ? 0 : input.gpsCost;
+	const effectiveGpsCost = !isSobreVehiculo && input.isInterno ? 0 : input.gpsCost;
 
 	const monthlyPayment = calculateMonthlyPayment(
 		totalFinanced,
@@ -156,8 +166,68 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 		calculatedRoyalty,
 		calculatedInterest,
 		rcdpCost: input.rcdpCost,
-		adminCost: Math.round(adminCost * 100) / 100,
+		adminCost: roundMoney(adminCost),
 		totalFinanced,
 		monthlyPayment,
 	};
+}
+
+export interface AmortizationRow {
+	period: number;
+	initialBalance: number;
+	interestPlusVAT: number;
+	principal: number;
+	finalBalance: number;
+}
+
+/** Genera la tabla de amortización (cuota nivelada, IVA incluido en el interés). */
+export function generateAmortizationTable(
+	totalFinanced: number,
+	monthlyRate: number,
+	termMonths: number,
+): AmortizationRow[] {
+	const table: AmortizationRow[] = [];
+	let balance = totalFinanced;
+	const r = monthlyRate / 100;
+	const rWithVAT = r * IVA_FACTOR;
+
+	// Calcular la cuota base (sin seguro ni GPS)
+	// TODO(negocio): comportamiento heredado — a tasa 0% (rWithVAT === 0), `factor - 1`
+	// da 0 y esta división produce NaN en toda la tabla. Sin guard, igual que antes de
+	// este trabajo. Ver TODO en calculateMonthlyPayment().
+	const factor = (1 + rWithVAT) ** termMonths;
+	const baseMonthlyPayment = (totalFinanced * (rWithVAT * factor)) / (factor - 1);
+
+	// Período 0 (inicial)
+	const initialInterest = balance * r;
+	const initialInterestWithVAT = initialInterest * IVA_FACTOR;
+
+	table.push({
+		period: 0,
+		initialBalance: roundMoney(balance),
+		interestPlusVAT: roundMoney(initialInterestWithVAT),
+		principal: 0,
+		finalBalance: roundMoney(balance),
+	});
+
+	// Períodos 1 a termMonths
+	for (let i = 1; i <= termMonths; i++) {
+		const interest = balance * r;
+		const interestWithVAT = interest * IVA_FACTOR;
+		const principalPayment = baseMonthlyPayment - interestWithVAT;
+		const newBalance = balance - principalPayment;
+		const clampedBalance = newBalance > 0 ? newBalance : 0;
+
+		table.push({
+			period: i,
+			initialBalance: roundMoney(balance),
+			interestPlusVAT: roundMoney(interestWithVAT),
+			principal: roundMoney(principalPayment),
+			finalBalance: roundMoney(clampedBalance),
+		});
+
+		balance = newBalance;
+	}
+
+	return table;
 }

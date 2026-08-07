@@ -9,7 +9,7 @@
 import {
 	calculateMonthlyPayment,
 	IVA_FACTOR,
-} from "@/utils/quoter-calculations";
+} from "server/src/lib/quotation-calculator";
 
 export type LeverKey = "colocacion" | "mora" | "efectividad" | "metodo";
 

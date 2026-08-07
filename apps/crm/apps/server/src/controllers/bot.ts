@@ -12,10 +12,13 @@ import {
 } from "@/db/schema";
 import type { documentTypeEnum } from "@/db/schema/documents";
 import { getRenapData } from "@/functions/getRenapInfo";
-import { resolveExistingLeadAssigneeFromDatabase } from "@/lib/lead-assignment";
+import {
+	findSalesUserWithLeastAutoAssignedLeads,
+	resolveExistingLeadAssigneeFromDatabase,
+	resolveNewAutoLeadAssignment,
+} from "@/lib/lead-assignment";
 import { getOpenOpportunityBySource } from "@/lib/lead-opportunity";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
-import { salesUser } from "@/utils/constants";
 import { db } from "../db";
 import { validarDpi } from "../utils/cui-validation";
 import { otpController } from "./otp";
@@ -410,6 +413,15 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 
 	if (existingLead.length === 0) {
 		console.log("[DEBUG] DPI not found in leads. Inserting new lead.");
+		const newLeadAssignment = await resolveNewAutoLeadAssignment(
+			findSalesUserWithLeastAutoAssignedLeads,
+			"No sales user available to assign the WhatsApp lead",
+		);
+
+		if (!newLeadAssignment.success) {
+			return newLeadAssignment;
+		}
+
 		const newLead = await db
 			.insert(leads)
 			.values({
@@ -417,18 +429,19 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				lastName: renapData.firstLastName,
 				dpi: renapData.dpi,
 				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
-				assignedTo: salesUser,
+				assignedTo: newLeadAssignment.assignedTo,
 				age: age ?? undefined,
 				source: "Whatsapp",
 				email: "",
 				phone: phone,
-				createdBy: salesUser,
+				createdBy: newLeadAssignment.createdBy,
 				status: "new",
+				assignmentType: "auto",
 			})
 			.returning({ id: leads.id });
 		leadId = newLead[0].id;
-		assignedUserId = salesUser;
-		createdByUserId = salesUser;
+		assignedUserId = newLeadAssignment.assignedTo;
+		createdByUserId = newLeadAssignment.createdBy;
 	} else {
 		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
 		const assignedTo = await resolveExistingLeadAssigneeFromDatabase(

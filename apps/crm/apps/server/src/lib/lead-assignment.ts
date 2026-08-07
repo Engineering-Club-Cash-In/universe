@@ -11,6 +11,20 @@ export type LeadAssignableUser = {
 	banned: boolean | null | undefined;
 };
 
+export type NewAutoLeadAssignment =
+	| {
+			success: true;
+			assignedTo: string;
+			createdBy: string;
+			assignmentType: "auto";
+	  }
+	| {
+			success: false;
+			message: string;
+	  };
+
+export type FindAssignableSalesUser = () => Promise<{ id: string } | null>;
+
 export function canReceiveAutoAssignedLead(
 	user: LeadAssignableUser | null | undefined,
 ): boolean {
@@ -54,6 +68,27 @@ export function resolveExistingLeadAssignee(
 	}
 
 	return fallbackSalesUser?.id ?? null;
+}
+
+export async function resolveNewAutoLeadAssignment(
+	findSalesUser: FindAssignableSalesUser = findSalesUserWithLeastAutoAssignedLeads,
+	unavailableMessage = "No sales user available to assign the lead",
+): Promise<NewAutoLeadAssignment> {
+	const salesUser = await findSalesUser();
+
+	if (!salesUser) {
+		return {
+			success: false,
+			message: unavailableMessage,
+		};
+	}
+
+	return {
+		success: true,
+		assignedTo: salesUser.id,
+		createdBy: salesUser.id,
+		assignmentType: "auto",
+	};
 }
 
 export async function findSalesUserWithLeastAutoAssignedLeads() {

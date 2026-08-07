@@ -3,6 +3,7 @@ import {
 	canReceiveAutoAssignedLead,
 	getSalesUserWithLeastAutoAssignedLeads,
 	resolveExistingLeadAssignee,
+	resolveNewAutoLeadAssignment,
 } from "./lead-assignment";
 
 describe("lead assignment helpers", () => {
@@ -114,11 +115,61 @@ describe("lead assignment helpers", () => {
 		).toBeNull();
 	});
 
-	test("keeps the WhatsApp controller out of the public-lead import cycle", async () => {
+	test("prepares new automatic leads with the selected eligible advisor", async () => {
+		const assignment = await resolveNewAutoLeadAssignment(async () => ({
+			id: "eligible-sales-user",
+		}));
+
+		expect(assignment).toEqual({
+			success: true,
+			assignedTo: "eligible-sales-user",
+			createdBy: "eligible-sales-user",
+			assignmentType: "auto",
+		});
+	});
+
+	test("fails closed for new automatic leads when no eligible advisor exists", async () => {
+		const assignment = await resolveNewAutoLeadAssignment(
+			async () => null,
+			"No sales user available to assign the WhatsApp lead",
+		);
+
+		expect(assignment).toEqual({
+			success: false,
+			message: "No sales user available to assign the WhatsApp lead",
+		});
+	});
+
+	test("keeps existing lead reactivation fail-closed when no eligible fallback exists", () => {
+		expect(
+			resolveExistingLeadAssignee(
+				{ id: "disabled", role: "sales", assignLeads: false, banned: false },
+				null,
+			),
+		).toBeNull();
+	});
+
+	test("keeps the WhatsApp controller out of the public-lead import cycle and fixed advisor assignment", async () => {
 		const botSource = await Bun.file(
 			new URL("../controllers/bot.ts", import.meta.url),
 		).text();
 
 		expect(botSource).not.toContain('from "./public-lead"');
+		expect(botSource).not.toContain('from "@/utils/constants"');
+		expect(botSource).not.toContain("assignedTo: salesUser");
+		expect(botSource).not.toContain("createdBy: salesUser");
+		expect(botSource).toContain('assignmentType: "auto"');
+		expect(botSource).toContain(
+			"assignedUserId = newLeadAssignment.assignedTo",
+		);
+		expect(botSource).toContain("assignedTo: assignedUserId");
+
+		const failClosedIndex = botSource.indexOf(
+			"if (!newLeadAssignment.success)",
+		);
+		const leadInsertIndex = botSource.indexOf(".insert(leads)");
+		expect(failClosedIndex).toBeGreaterThan(-1);
+		expect(leadInsertIndex).toBeGreaterThan(-1);
+		expect(failClosedIndex).toBeLessThan(leadInsertIndex);
 	});
 });

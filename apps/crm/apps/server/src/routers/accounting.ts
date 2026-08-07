@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { crmCobrosOrInvestmentsProcedure, crmProcedure } from "../lib/orpc";
+import {
+	accountingProcedure,
+	crmCobrosOrInvestmentsProcedure,
+	crmProcedure,
+} from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 export const accountingRouter = {
@@ -43,7 +47,9 @@ export const accountingRouter = {
 			}
 		}),
 
-	getReporteNoLiquidados: crmCobrosOrInvestmentsProcedure
+	// Solo contabilidad/admin: el reporte expone el desglose de pagos de un
+	// inversionista arbitrario, igual que la pantalla que lo consume.
+	getReporteNoLiquidados: accountingProcedure
 		.input(
 			z.object({
 				inversionistaId: z.number().int().positive(),

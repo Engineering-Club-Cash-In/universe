@@ -19,8 +19,11 @@ import {
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
+  compras_credito_inversionista,
   cuotas_credito,
+  inversionistas as inversionistasTable,
   pagos_credito,
+  pagos_credito_inversionistas_espejo,
   usuarios,
   historial_devolucion_credito,
 } from "../database/db";
@@ -438,6 +441,12 @@ const creditUpdateSchema = z.object({
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
         cuota_inversionista: z.number().min(0).optional(),
+        // Inversionista agregado DESDE la edición del crédito (no estaba antes).
+        // Obliga a declarar la operación para registrarla en
+        // compras_credito_inversionista — sin ese registro la liquidación
+        // descuadra (calcular pagos espejo data las compras por ahí).
+        es_nuevo: z.boolean().optional(),
+        tipo_operacion: z.enum(["compra_cartera", "reinversion"]).optional(),
       }),
     )
     .min(0)
@@ -451,6 +460,10 @@ const creditUpdateSchema = z.object({
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
         cuota_inversionista: z.number().min(0).optional(),
+        // El front sincroniza el espejo desde el padre para nuevos; estos
+        // campos viajan también aquí pero la lógica solo lee los del padre.
+        es_nuevo: z.boolean().optional(),
+        tipo_operacion: z.enum(["compra_cartera", "reinversion"]).optional(),
       }),
     )
     .min(0)
@@ -517,6 +530,236 @@ const validateInvestorsPercentages = (
     }
   }
   return { success: true };
+};
+
+// ========================================
+// INVERSIONISTAS NUEVOS DESDE LA EDICIÓN
+// ========================================
+// La edición hace nuke & rebuild de creditos_inversionistas(_espejo), así que
+// históricamente se podía "colar" un inversionista nuevo sin registrar la
+// operación en compras_credito_inversionista — y sin ese registro el calcular
+// pagos espejo no sabe datar la compra y la liquidación descuadra (por eso el
+// botón estuvo deshabilitado en el front).
+//
+// Reglas:
+//   1. Todo inversionista del payload que NO esté hoy en el crédito debe venir
+//      declarado con es_nuevo + tipo_operacion. Si no, 400 (era el bug).
+//   2. Un es_nuevo NO puede haber participado nunca en el crédito: ni estar
+//      activo (padre/espejo), ni tener compras previas, ni pagos espejo
+//      históricos. Cubre borrar-y-volver-a-agregar en la misma edición (sigue
+//      en DB al validar) y también re-entradas en ediciones posteriores
+//      (compras/pagos espejo conservan el historial). Tiene que ser de cero.
+export type InversionistaNuevoValidado = {
+  inversionista_id: number;
+  monto_aportado: number;
+  tipo_operacion: "compra_cartera" | "reinversion";
+  fecha_inicio_participacion?: string;
+};
+
+export const validarInversionistasNuevos = async (
+  credito_id: number,
+  inversionistas: NonNullable<CreditUpdateData["inversionistas"]>,
+  inversionistas_espejo: CreditUpdateData["inversionistas_espejo"],
+  set: SetContext,
+): Promise<
+  | { success: true; nuevos: InversionistaNuevoValidado[] }
+  | { success: false; error: { message: string; [key: string]: unknown } }
+> => {
+  const fail = (message: string, extra?: Record<string, unknown>) => {
+    set.status = 400;
+    return { success: false as const, error: { message, ...extra } };
+  };
+
+  // Sin duplicados dentro del propio payload (agregarlo dos veces = colarlo).
+  const idsPayload = inversionistas.map((i) => i.inversionista_id);
+  const duplicado = idsPayload.find((id, ix) => idsPayload.indexOf(id) !== ix);
+  if (duplicado !== undefined) {
+    return fail(
+      `El inversionista con ID ${duplicado} aparece más de una vez en la lista.`,
+      { inversionista_id: duplicado },
+    );
+  }
+
+  const [padreActual, espejoActual] = await Promise.all([
+    db
+      .select({ inversionista_id: creditos_inversionistas.inversionista_id })
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.credito_id, credito_id)),
+    db
+      .select({ inversionista_id: creditos_inversionistas_espejo.inversionista_id })
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.credito_id, credito_id)),
+  ]);
+  const idsPadreActual = new Set(padreActual.map((r) => r.inversionista_id));
+  const idsEspejoActual = new Set(espejoActual.map((r) => r.inversionista_id));
+
+  const declaradosNuevos = inversionistas.filter((i) => i.es_nuevo === true);
+
+  // Regla 1: nadie entra al crédito sin declararse nuevo. Aplica al padre y al
+  // espejo (el espejo nuevo viene sincronizado desde el padre por el front).
+  for (const inv of inversionistas) {
+    if (!inv.es_nuevo && !idsPadreActual.has(inv.inversionista_id)) {
+      return fail(
+        `El inversionista con ID ${inv.inversionista_id} no participa en este crédito. ` +
+          `Para agregarlo, usá "Agregar Inversionista" e indicá si es compra de cartera o reinversión.`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+  const idsDeclarados = new Set(declaradosNuevos.map((i) => i.inversionista_id));
+  for (const inv of inversionistas_espejo ?? []) {
+    // Un espejo cuyo ID ya está en el PADRE actual no es un colado: es el
+    // backfill legítimo del modal para créditos importados (processFromExcelFull
+    // omite el espejo a propósito y la edición lo reconstruye desde el padre).
+    // Solo se rechaza al que no está en NINGUNA de las dos tablas ni viene
+    // declarado como nuevo.
+    if (
+      !idsEspejoActual.has(inv.inversionista_id) &&
+      !idsPadreActual.has(inv.inversionista_id) &&
+      !idsDeclarados.has(inv.inversionista_id)
+    ) {
+      return fail(
+        `El inversionista con ID ${inv.inversionista_id} no participa en este crédito ` +
+          `(ni en el padre ni en el espejo) y no viene declarado como nuevo.`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+
+  if (declaradosNuevos.length === 0) return { success: true, nuevos: [] };
+
+  // Datos mínimos del nuevo.
+  for (const inv of declaradosNuevos) {
+    if (!inv.tipo_operacion) {
+      return fail(
+        `El inversionista nuevo con ID ${inv.inversionista_id} no indica tipo de operación (compra de cartera o reinversión).`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+    if (!(Number(inv.monto_aportado) > 0)) {
+      return fail(
+        `El inversionista nuevo con ID ${inv.inversionista_id} debe tener un monto aportado mayor a 0.`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+
+  // Regla 2: cero historial en el crédito.
+  const idsNuevos = [...idsDeclarados];
+  const [comprasPrevias, pagosPrevios] = await Promise.all([
+    db
+      .select({ inversionista_id: compras_credito_inversionista.inversionista_id })
+      .from(compras_credito_inversionista)
+      .where(
+        and(
+          eq(compras_credito_inversionista.credito_id, credito_id),
+          inArray(compras_credito_inversionista.inversionista_id, idsNuevos),
+        ),
+      ),
+    db
+      .select({ inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(
+        and(
+          eq(pagos_credito_inversionistas_espejo.credito_id, credito_id),
+          inArray(pagos_credito_inversionistas_espejo.inversionista_id, idsNuevos),
+        ),
+      ),
+  ]);
+  const idsConHistorial = new Set([
+    ...comprasPrevias.map((r) => r.inversionista_id),
+    ...pagosPrevios.map((r) => r.inversionista_id),
+  ]);
+
+  for (const inv of declaradosNuevos) {
+    if (
+      idsPadreActual.has(inv.inversionista_id) ||
+      idsEspejoActual.has(inv.inversionista_id) ||
+      idsConHistorial.has(inv.inversionista_id)
+    ) {
+      return fail(
+        `El inversionista con ID ${inv.inversionista_id} ya participa o participó en este crédito; ` +
+          `no puede agregarse como nuevo (aunque se borre y se vuelva a agregar).`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+
+  return {
+    success: true,
+    nuevos: declaradosNuevos.map((inv) => ({
+      inversionista_id: inv.inversionista_id,
+      monto_aportado: Number(inv.monto_aportado),
+      tipo_operacion: inv.tipo_operacion!,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
+    })),
+  };
+};
+
+// Registra en compras_credito_inversionista la entrada de cada inversionista
+// nuevo, replicando el estado FINAL que deja el flujo normal (addInvestorToCredit
+// + completeEspejo) al aceptar la operación — aquí no hay paso de aceptación,
+// así que el registro nace ya completado:
+//   - status "completado" (el espejo del nuevo también nace "completado", que es
+//     el default de la tabla, así que no queda nada pendiente ni se activa
+//     bandera_reinversion).
+//   - compra_cartera: fecha_completada anclada a la fecha de inicio de
+//     participación a mediodía UTC — igual que completeEspejo — para que caiga
+//     en el mismo mes que lee el calcular pagos espejo (calcularAjusteCompras /
+//     obtenerSumaComprasMesAnterior). pendiente_facturar=true para que cofidi
+//     prorratee el interés del primer pago bajo la nueva distribución.
+//   - reinversion: fecha_completada = ahora y sin factura (pendiente_facturar
+//     false), igual que completeEspejo.
+export const registrarComprasInversionistasNuevos = async (
+  credito_id: number,
+  nuevos: InversionistaNuevoValidado[],
+) => {
+  if (nuevos.length === 0) return;
+
+  // tipo_reinversion informativo del registro: la modalidad global del
+  // inversionista (mismo fallback que usa addInvestorToCredit cuando no viene).
+  const filasInv = await db
+    .select({
+      inversionista_id: inversionistasTable.inversionista_id,
+      tipo_reinversion: inversionistasTable.tipo_reinversion,
+    })
+    .from(inversionistasTable)
+    .where(
+      inArray(
+        inversionistasTable.inversionista_id,
+        nuevos.map((n) => n.inversionista_id),
+      ),
+    );
+  const tipoReinvPorId = new Map(filasInv.map((r) => [r.inversionista_id, r.tipo_reinversion]));
+
+  const ahora = new Date();
+  await db.insert(compras_credito_inversionista).values(
+    nuevos.map((n) => {
+      const esCompra = n.tipo_operacion === "compra_cartera";
+      // Anclar a mediodía UTC para que la conversión a hora GT (UTC-6) no
+      // cruce la frontera de día (mismo truco que completeEspejo).
+      const ymd = n.fecha_inicio_participacion
+        ? new Date(n.fecha_inicio_participacion).toISOString().split("T")[0]
+        : null;
+      const fechaCompletada = esCompra && ymd ? new Date(`${ymd}T12:00:00Z`) : ahora;
+      return {
+        credito_id,
+        inversionista_id: n.inversionista_id,
+        monto_aportado: n.monto_aportado.toString(),
+        tipo_operacion: n.tipo_operacion,
+        tipo_reinversion: tipoReinvPorId.get(n.inversionista_id) ?? null,
+        status: "completado" as const,
+        fecha_completada: fechaCompletada,
+        pendiente_facturar: esCompra,
+        updated_at: ahora,
+      };
+    }),
+  );
+
+  console.log(
+    `🧾 [COMPRAS] Registradas ${nuevos.length} operación(es) en compras_credito_inversionista para crédito ${credito_id}:`,
+    nuevos.map((n) => `inv ${n.inversionista_id} ${n.tipo_operacion} Q${n.monto_aportado}`).join(", "),
+  );
 };
 
 /**
@@ -1084,6 +1327,28 @@ export const updateCredit = async ({ body, set, request }: any) => {
       }
     }
 
+    // 3.2. Inversionistas nuevos: nadie entra al crédito sin declararse
+    // (es_nuevo + tipo_operacion) y sin haber sido validado contra el
+    // historial. Corre ANTES de cualquier mutación: si falla, no se tocó nada.
+    // Se valida también cuando solo viene el espejo, para que nadie se cuele
+    // por esa lista.
+    let inversionistasNuevos: InversionistaNuevoValidado[] = [];
+    if (
+      (inversionistas && inversionistas.length > 0) ||
+      (inversionistas_espejo && inversionistas_espejo.length > 0)
+    ) {
+      const nuevosValidation = await validarInversionistasNuevos(
+        credito_id,
+        inversionistas ?? [],
+        inversionistas_espejo,
+        set,
+      );
+      if (!nuevosValidation.success) {
+        return nuevosValidation.error;
+      }
+      inversionistasNuevos = nuevosValidation.nuevos;
+    }
+
     // 3.5 Actualizar datos del usuario si se enviaron
     const userFields: Record<string, string> = {};
     if (nombre !== undefined) userFields.nombre = nombre;
@@ -1408,7 +1673,11 @@ export const updateCredit = async ({ body, set, request }: any) => {
       console.log(`🪞 [ESPEJO] ⚠️ Bloque saltado: inversionistas_espejo está vacío o undefined`);
     }
 
-
+    // 10.5. Registrar en compras_credito_inversionista la entrada de cada
+    // inversionista nuevo (ya validado en 3.2). Va DESPUÉS del rebuild de
+    // padre/espejo: si el rebuild falla, no queda registro huérfano de una
+    // participación que nunca se materializó.
+    await registrarComprasInversionistasNuevos(credito_id, inversionistasNuevos);
 
     set.status = 200;
     return updatedCredit;

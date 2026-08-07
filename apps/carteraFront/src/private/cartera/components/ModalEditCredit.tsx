@@ -125,6 +125,19 @@ export function ModalEditCredit({
     return dateString ? new Date(dateString).toISOString().split('T')[0] : "2025-12-01";
   };
 
+  // IDs que ya participan en el crédito al abrir el modal (padre + espejo).
+  // Un inversionista "nuevo" NO puede ser uno de estos — ni aunque se borre y
+  // se vuelva a agregar en la misma edición: la operación no quedaría
+  // registrada en compras y la liquidación descuadra. El backend valida lo
+  // mismo (incluyendo historial); esto es la primera línea en UI.
+  const originalInvestorIds = useMemo(() => {
+    const ids = new Set<number>();
+    investorsInitial?.forEach((i) => ids.add(Number(i.inversionista_id)));
+    investorsMirrorInitial?.forEach((i) => ids.add(Number(i.inversionista_id)));
+    ids.delete(0);
+    return ids;
+  }, [investorsInitial, investorsMirrorInitial]);
+
   // Preparamos los valores iniciales
   const parseInvestors = (list?: InvestorItem[]) =>
     list?.map((inv) => ({
@@ -212,6 +225,35 @@ export function ModalEditCredit({
         return;
       }
 
+      // Validar inversionistas nuevos antes de armar el payload
+      const nuevos = values.investors.filter((inv: InvestorItem) => inv.es_nuevo === true);
+      for (const nuevo of nuevos) {
+        const id = Number(nuevo.inversionista_id);
+        const nombre =
+          investorsOptions.find((o) => o.inversionista_id === id)?.nombre ?? `ID ${id}`;
+        if (!(id > 0)) {
+          toast.error("Hay un inversionista nuevo sin seleccionar. Elegí uno o quitá la fila.");
+          return;
+        }
+        if (originalInvestorIds.has(id)) {
+          toast.error(
+            `${nombre} ya participa en este crédito; no puede agregarse como nuevo (aunque se haya borrado de la lista).`
+          );
+          return;
+        }
+        if (!(Number(nuevo.monto_aportado) > 0)) {
+          toast.error(`El inversionista nuevo ${nombre} debe tener un monto mayor a 0.`);
+          return;
+        }
+      }
+      const idsInvestors = values.investors
+        .map((inv: InvestorItem) => Number(inv.inversionista_id))
+        .filter((id: number) => id > 0);
+      if (new Set(idsInvestors).size !== idsInvestors.length) {
+        toast.error("Hay inversionistas repetidos en la lista.");
+        return;
+      }
+
       // Filtrar espejo vacíos antes de enviar
       const espejoFinal = values.investorsMirror.filter(
         (inv) => Number(inv.monto_aportado) > 0 || Number(inv.inversionista_id) > 0
@@ -264,7 +306,8 @@ export function ModalEditCredit({
             ? values.motivo_ajuste_capital?.trim() || undefined
             : undefined,
 
-        // Lista Principal
+        // Lista Principal. Los nuevos viajan con es_nuevo + tipo_operacion para
+        // que el backend registre la operación en compras_credito_inversionista.
         inversionistas: values.investors.map((i: InvestorItem) => ({
           inversionista_id: Number(i.inversionista_id),
           monto_aportado: Number(i.monto_aportado),
@@ -272,6 +315,7 @@ export function ModalEditCredit({
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
           cuota_inversionista: Number(i.cuota_inversionista || 0),
+          ...(i.es_nuevo ? { es_nuevo: true, tipo_operacion: i.tipo_operacion } : {}),
         })),
 
         // Lista Espejo
@@ -282,6 +326,7 @@ export function ModalEditCredit({
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
           cuota_inversionista: Number(i.cuota_inversionista || 0),
+          ...(i.es_nuevo ? { es_nuevo: true, tipo_operacion: i.tipo_operacion } : {}),
         })),
       };
       updateCredit(payload, {
@@ -793,6 +838,7 @@ export function ModalEditCredit({
                   });
                 }
               }}
+              blockedInvestorIds={originalInvestorIds}
             />
           </form>
         </div>

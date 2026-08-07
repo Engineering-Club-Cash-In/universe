@@ -44,6 +44,7 @@ import {
 	appRouter,
 	disbursementRouter,
 	manualVehicleRouter,
+	proyeccionRouter,
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
@@ -175,6 +176,7 @@ const handler = new RPCHandler(
 		manualVehicleRouter,
 		investmentsRouter,
 		disbursementRouter,
+		proyeccionRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

@@ -10,6 +10,7 @@ import {
 	Download,
 	Eye,
 	FileCheck,
+	FileSpreadsheet,
 	FileText,
 	Loader2,
 	Search,
@@ -709,6 +710,34 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 		},
 	});
 
+	const reporteNoLiquidadosMutation = useMutation({
+		...orpc.getReporteNoLiquidados.mutationOptions(),
+		onSuccess: (data) => {
+			if (!data?.success || !data?.url) {
+				toast.error("No se pudo generar el reporte");
+				return;
+			}
+			// La URL llega async, fuera del gesto del usuario: window.open y
+			// <a target="_blank"> se bloquean como popup. Un <a> sin target sí
+			// dispara. R2 responde el MIME de xlsx y sin Content-Disposition, así
+			// que el navegador no lo puede renderizar y lo descarga sin salir de
+			// la página. El atributo download lo ignora por ser cross-origin.
+			const link = document.createElement("a");
+			link.href = data.url;
+			link.download = data.filename || "reporte_no_liquidados.xlsx";
+			link.rel = "noopener";
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			toast.success("Reporte generado correctamente");
+		},
+		onError: (err) => {
+			toast.error(
+				err instanceof Error ? err.message : "Error al generar el reporte",
+			);
+		},
+	});
+
 	return (
 		<>
 			<Card className="group gap-0 overflow-hidden py-0 transition-all hover:shadow-md">
@@ -790,7 +819,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				</div>
 
 				{/* Acción */}
-				<div className="px-4 pt-1 pb-4">
+				<div className="flex flex-col gap-2 px-4 pt-1 pb-4">
 					{estadoResumen === "liquidated" ? (
 						tieneBoletaLiquidacion || reporteLiquidacionUrl ? (
 							<div className="flex gap-2">
@@ -880,6 +909,29 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 								Liquidar sin boleta
 							</Button>
 						</div>
+					)}
+
+					{/* Solo tiene sentido mientras no se haya liquidado: una vez
+					    liquidado el reporte de no liquidados sale vacío. */}
+					{estadoResumen !== "liquidated" && (
+						<Button
+							variant="outline"
+							size="sm"
+							className="h-8 w-full gap-1.5 border-emerald-600/40 text-emerald-700 text-xs hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+							disabled={reporteNoLiquidadosMutation.isPending}
+							onClick={() =>
+								reporteNoLiquidadosMutation.mutate({
+									inversionistaId: inv.inversionista_id,
+								})
+							}
+						>
+							{reporteNoLiquidadosMutation.isPending ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<FileSpreadsheet className="h-3.5 w-3.5" />
+							)}
+							Preview Liquidación
+						</Button>
 					)}
 				</div>
 			</Card>

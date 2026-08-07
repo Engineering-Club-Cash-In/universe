@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { crmCobrosOrInvestmentsProcedure, crmProcedure } from "../lib/orpc";
+import {
+	accountingProcedure,
+	crmCobrosOrInvestmentsProcedure,
+	crmProcedure,
+} from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 export const accountingRouter = {
@@ -39,6 +43,35 @@ export const accountingRouter = {
 				return filtered;
 			} catch (error) {
 				console.error("[ORPC] getResumenGlobalInversionistas error:", error);
+				throw error;
+			}
+		}),
+
+	// Solo contabilidad/admin: el reporte expone el desglose de pagos de un
+	// inversionista arbitrario, igual que la pantalla que lo consume.
+	getReporteNoLiquidados: accountingProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+			}),
+		)
+		// El .output() explícito evita que el tipo del cliente se infiera como {}
+		// cuando TS trunca el tipo del appRouter (mismo motivo que en
+		// getResumenGlobalInversionistas).
+		.output(
+			z.object({
+				success: z.boolean(),
+				url: z.string(),
+				filename: z.string(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			try {
+				return await carteraBackClient.getReporteNoLiquidados(
+					input.inversionistaId,
+				);
+			} catch (error) {
+				console.error("[ORPC] getReporteNoLiquidados error:", error);
 				throw error;
 			}
 		}),

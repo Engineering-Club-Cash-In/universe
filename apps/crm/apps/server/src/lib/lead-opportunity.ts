@@ -6,7 +6,7 @@ type LeadSource = (typeof leadSourceEnum.enumValues)[number];
 
 export async function getOpenOpportunityBySource(
 	leadId: string,
-	_source: LeadSource,
+	source: LeadSource,
 ) {
 	const [existing] = await db
 		.select({
@@ -20,6 +20,7 @@ export async function getOpenOpportunityBySource(
 		.where(
 			and(
 				eq(opportunities.leadId, leadId),
+				eq(opportunities.source, source),
 				or(
 					eq(opportunities.status, "open"),
 					eq(opportunities.status, "on_hold"),

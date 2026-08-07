@@ -41,6 +41,7 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
+import { leadIntakeAnswers } from "../db/schema/lead-intake";
 import {
 	analysisChecklists,
 	disbursementChecklists,
@@ -756,6 +757,48 @@ export const crmRouter = {
 				limit,
 				offset,
 			};
+		}),
+
+	// Respuestas de formularios de captación (ej. Meta Instant Forms) guardadas en llave-valor
+	getLeadIntakeAnswers: crmProcedure
+		.input(z.object({ leadId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const [lead] = await db
+				.select({ assignedTo: leads.assignedTo })
+				.from(leads)
+				.where(eq(leads.id, input.leadId))
+				.limit(1);
+
+			if (!lead) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Lead no encontrado",
+				});
+			}
+
+			// Mismo criterio de visibilidad que getLeads: solo estos roles ven cualquier lead,
+			// el resto (sales, cobros, accounting, etc.) solo el suyo asignado.
+			const canSeeAllLeads =
+				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor" ||
+				context.userRole === "juridico" ||
+				context.userRole === "analyst";
+
+			if (!canSeeAllLeads && lead.assignedTo !== context.userId) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ver este lead",
+				});
+			}
+
+			const answers = await db
+				.select({
+					campaignFormKey: leadIntakeAnswers.campaignFormKey,
+					fieldKey: leadIntakeAnswers.fieldKey,
+					fieldValue: leadIntakeAnswers.fieldValue,
+				})
+				.from(leadIntakeAnswers)
+				.where(eq(leadIntakeAnswers.leadId, input.leadId));
+
+			return { data: answers };
 		}),
 
 	getLeadById: crmProcedure

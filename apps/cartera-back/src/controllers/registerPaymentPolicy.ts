@@ -498,11 +498,10 @@ export const puedeOmitirGuardTodasCubiertas = ({
  * importa qué se escribió, y la rama inserta aunque el request traiga capital
  * colado. Usar la clasificación aquí respondería 409 sobre estado ya escrito.
  *
- * `convenioAplicado`: en EN_CONVENIO el convenio puede consumir todo el
- * disponible no-capital — para entonces `processConvenioPayment` YA actualizó
- * `convenios_pago` y la fila solo-convenio YA se insertó. Responder 409 ahí
- * mentiría sobre estado persistido y un reintento aplicaría el convenio DOS
- * veces.
+ * `convenioAplicado`: en EN_CONVENIO el registro del convenio corre ANTES del
+ * loop de cuotas, así que `processConvenioPayment` YA actualizó
+ * `convenios_pago`. Responder 409 ahí mentiría sobre estado persistido y el
+ * reintento de la boleta acreditaría el convenio DOS veces.
  */
 export const debeRechazarAbonoCapitalNoAplicado = ({
   abonoCapital,
@@ -797,34 +796,13 @@ export const debeProcesarConvenio = ({
 }) => statusCredit === "EN_CONVENIO" && new Big(disponible).gt(0);
 
 /**
- * Resta del disponible lo que se acreditó al convenio. El convenio es deuda
- * APARTE (las cuotas viejas congeladas en su pivot): sin esta resta, la misma
- * boleta acreditaba el convenio Y además pagaba cuotas corrientes (doble
- * aplicación). `requiereRegistroSoloConvenio` marca el caso en que el convenio
- * consumió todo: el loop de cuotas ya no corre y el caller debe insertar la
- * fila del pago aquí para no perder boleta/mora/otros/convenio del historial.
- */
-export const aplicarConvenioAlDisponible = ({
-  disponible,
-  montoConvenio,
-}: {
-  disponible: BigInput;
-  montoConvenio: BigInput;
-}): { disponibleRestante: Big; requiereRegistroSoloConvenio: boolean } => {
-  const restante = new Big(disponible).minus(montoConvenio);
-  return {
-    disponibleRestante: restante.gt(0) ? restante : new Big(0),
-    requiereRegistroSoloConvenio:
-      restante.lte(0) && new Big(montoConvenio).gt(0),
-  };
-};
-
-/**
  * Cuánto aplicar al convenio en un pago. Topa al MENOR entre la cuota mensual
  * y el monto_pendiente real: tras un abono parcial previo el pendiente puede
  * ser menor que la cuota mensual, y sin este tope el ledger del convenio se
- * iba a negativo — y como lo aplicado ahora SE RESTA del disponible, ese
- * exceso fantasma se evaporaría del dinero del cliente sin pagar nada.
+ * acreditaría por encima de lo que realmente se debe (monto_pendiente en
+ * negativo, cuotas del convenio marcadas de más y reversos que revientan).
+ * El monto NO se resta del disponible del pago — es registro del catch-up,
+ * la boleta sigue pagando las cuotas corrientes completa.
  * `pagoCompleto` = el pago cubre el tope (>0): marca cuota del convenio y
  * contadores; un tope en 0 (convenio ya saldado) nunca cuenta como completo.
  */

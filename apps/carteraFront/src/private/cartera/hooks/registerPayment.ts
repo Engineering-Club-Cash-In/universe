@@ -449,15 +449,19 @@ const montoDisponibleTotal = montoBoleta ;
 console.log("Monto Disponible Total (boleta + saldo):", montoDisponibleTotal);
 
 // 🔥 Restar lo que se va a otros conceptos
-// El convenio acepta abonos parciales: solo se descuenta lo que la boleta alcance a cubrir
+// El convenio se REGISTRA pero NO consume la boleta (espejo del back): lo que
+// se acredita al convenio es el rastro del catch-up, no un cobro aparte, así
+// que la proyección de lo que irá a cuotas usa el disponible completo tras
+// otros/mora. `convenioAplicado` proyecta la porción que el back registrará
+// (solo informativo aquí; el back la calcula por su cuenta).
 const convenioAplicado = getConvenioAplicado(
   montoDisponibleTotal,
   otrosNum,
   moraNum,
   cuotaConvenioNum
 );
-const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum - convenioAplicado;
-const montoBoletaSinMora = montoDisponibleTotal - otrosNum - convenioAplicado;
+const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum;
+const montoBoletaSinMora = montoDisponibleTotal - otrosNum;
 
 console.log("Convenio Aplicado:", convenioAplicado);
 console.log("Monto Boleta Real (después de descuentos):", montoBoletaReal);
@@ -482,8 +486,13 @@ const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
 // 🔥 Calcular abonos ya realizados en la cuota SELECCIONADA (desde endpoint)
 const abonosRealizados = getDisplayedPartialContribution(abonosCuota);
 
-// 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar
-const cuotaComparar = Math.max(0,cuota - abonosRealizados );
+// 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar. La porción
+// proyectada de convenio se suma al umbral: cardInfo muestra "Total a Pagar"
+// = cuota + convenio, así que ese monto es esperado y no debe abrir el modal
+// de excedente (el modal re-asignaría a capital/otros dinero que el back ya
+// registra como convenio). Mismo umbral efectivo que cuando el front restaba
+// el convenio del disponible.
+const cuotaComparar = Math.max(0, cuota - abonosRealizados) + convenioAplicado;
 
 console.log("=== VALIDACIÓN DE EXCEDENTES ===");
 console.log("Monto boleta real (redondeado):", montoRedondeado);

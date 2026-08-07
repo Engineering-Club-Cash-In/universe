@@ -746,8 +746,7 @@ export async function processConvenioPayment(
     // 4. Determinar el monto a aplicar — topado al MENOR entre la cuota
     // mensual y el monto_pendiente REAL: tras un abono parcial previo el
     // pendiente puede ser menor que la cuota mensual; sin el tope el ledger
-    // se iba a negativo y, como lo aplicado se resta del disponible en
-    // insertPayment, ese exceso se evaporaría del dinero del cliente.
+    // acreditaría más que el pendiente real y se iba a negativo.
     const { montoAplicar: montoAplicarBig } = calcularAplicacionConvenio({
       montoPago: montoPagoBig,
       cuotaMensual: cuotaMensualBig,

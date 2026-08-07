@@ -3630,12 +3630,13 @@ export async function getInvestorMirrorSummary(
     total_reinversion_interes: new Big(0),
     total_reinversion:         new Big(0),
     total_cuota_sin_reinversion: new Big(0),
-    // Acumuladores POR PAGO del carril descuenta (interés neto / IVA mostrado /
-    // neto de impuestos), para no re-netear el agregado con un solo flag cuando
-    // se mezclan pagos liquidados (snapshot) y vivos.
-    total_abono_interes_neto: new Big(0),
-    total_abono_iva_final: new Big(0),
-    total_neto_impuestos: new Big(0),
+    // Separar el interés bruto de los pagos NETEADOS (snapshot/flag) del resto,
+    // para aplicar en el return el MISMO orden de redondeo que getInvestorTotalsGlobales
+    // (así el espejo no difiere por centavos de la liquidación persistida).
+    gross_interes_neteado: new Big(0),
+    total_abono_interes_no_neteado: new Big(0),
+    total_abono_iva_no_neteado: new Big(0),
+    total_isr_no_neteado: new Big(0),
     huboNeteo: false,
     // Pools para combinada (ver getInvestorTotalsGlobales): cuota completa de los
     // créditos que dentro de una combinada son excedente/variable.
@@ -3659,20 +3660,23 @@ export async function getInvestorMirrorSummary(
       // Carril descuenta_impuestos por pago: liquidado → snapshot; vivo → flag actual.
       const descImp = flagPagoMirror(pago) ? descuentoImpuestos(abono_interes) : null;
 
-      // Acumular el neto por pago (no re-netear el agregado con un solo flag).
-      sg.total_abono_interes_neto = sg.total_abono_interes_neto.plus(descImp ? descImp.neto : abono_interes);
-      sg.total_abono_iva_final = sg.total_abono_iva_final.plus(descImp ? descImp.iva : abono_iva);
-      if (descImp) {
-        sg.total_neto_impuestos = sg.total_neto_impuestos.plus(descImp.neto);
-        sg.huboNeteo = true;
-      }
-
       // ISR: 7% sobre interés si NO emite factura (con descuenta_impuestos siempre aplica)
       const isr = descImp
         ? descImp.isr.round(2)
         : inv.emite_factura
         ? new Big(0)
         : abono_interes.times(0.07).round(2);
+
+      // Para los TOTALES mostrados: separar el interés bruto neteado del no-neteado.
+      // El return aplica el MISMO orden de redondeo que getInvestorTotalsGlobales.
+      if (descImp) {
+        sg.gross_interes_neteado = sg.gross_interes_neteado.plus(abono_interes);
+        sg.huboNeteo = true;
+      } else {
+        sg.total_abono_interes_no_neteado = sg.total_abono_interes_no_neteado.plus(abono_interes);
+        sg.total_abono_iva_no_neteado = sg.total_abono_iva_no_neteado.plus(abono_iva);
+        sg.total_isr_no_neteado = sg.total_isr_no_neteado.plus(isr);
+      }
 
       const abonoGeneralInteres = descImp
         ? descImp.neto
@@ -3813,13 +3817,25 @@ export async function getInvestorMirrorSummary(
     currencySymbol:   inv.moneda === "dolares" ? "$" : "Q.",
     subtotal: {
       total_abono_capital:      formatValue(sg.total_abono_capital.round(2).toString()),
-      // Neto/IVA/neto-de-impuestos acumulados POR PAGO (snapshot por liquidación),
-      // no re-neteados sobre el agregado con un solo flag.
-      total_abono_interes:      formatValue(sg.total_abono_interes_neto.round(2).toString()),
-      total_abono_iva:          formatValue(sg.total_abono_iva_final.round(2).toString()),
-      total_isr:                formatValue(sg.total_isr.round(2).toString()),
+      // Mismo orden de redondeo que getInvestorTotalsGlobales para no diferir por
+      // centavos con la liquidación persistida: interés neto = 0.81×bruto (sin
+      // redondear el bruto antes), IVA = round(bruto,2)×0.12, ISR = 0.07×bruto.
+      total_abono_interes:      formatValue(
+        descuentoImpuestos(sg.gross_interes_neteado).neto
+          .plus(sg.total_abono_interes_no_neteado).round(2).toString()
+      ),
+      total_abono_iva:          formatValue(
+        sg.gross_interes_neteado.round(2).times("0.12")
+          .plus(sg.total_abono_iva_no_neteado).round(2).toString()
+      ),
+      total_isr:                formatValue(
+        descuentoImpuestos(sg.gross_interes_neteado).isr
+          .plus(sg.total_isr_no_neteado).round(2).toString()
+      ),
       total_neto_impuestos:
-        sg.huboNeteo ? formatValue(sg.total_neto_impuestos.round(2).toString()) : null,
+        sg.huboNeteo
+          ? formatValue(descuentoImpuestos(sg.gross_interes_neteado).neto.round(2).toString())
+          : null,
       total_cuota_sin_reinversion: formatValue(sg.total_cuota_sin_reinversion.round(2).toString()),
       total_cuota_con_reinversion: formatValue(sg.total_cuota.round(2).toString()),
       total_monto_aportado:     formatValue(sg.total_monto_aportado.round(2).toString()),

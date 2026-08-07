@@ -1913,9 +1913,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         {(() => {
           const s = isDraft ? subtotales : (inv.subtotal || subtotales);
           const isEmite = inv.emite_factura;
-          const displayIvaIsr = isEmite ? Number(s.total_abono_iva) : -Number(s.total_isr);
-          const displayCuotaSin = Number(s.total_abono_capital) + Number(s.total_abono_interes) + displayIvaIsr;
-          const displayCuotaCon = displayCuotaSin - Number(s.total_reinversion);
+          const isDescuenta = (inv as any).descuenta_impuestos === true;
+          // Usar la cuota que YA calcula el backend en vez de re-derivarla: con
+          // descuenta_impuestos el interés viene neto y volver a sumar IVA/restar
+          // ISR encima lo doble-ajustaba (mostraba plata equivocada).
+          const displayCuotaSin = Number(s.total_cuota_sin_reinversion ?? 0);
+          const displayCuotaCon = Number(
+            s.total_cuota_con_reinversion ?? (displayCuotaSin - Number(s.total_reinversion ?? 0))
+          );
+          // "Interés ajustado" = el neto que ya calcula el backend (int+IVA, int−ISR,
+          // o int×0.81 con descuenta_impuestos).
+          const interesAjustadoLabel = isDescuenta ? "- IVA - ISR" : isEmite ? "+ IVA" : "- ISR";
+          const interesAjustadoValor = Number(s.total_abono_general_interes ?? 0);
 
           return (
             <>
@@ -1933,9 +1942,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               </div>
               {/* 🆕 Mobile: Interés Ajustado */}
               <div>
-                <span className="font-bold text-indigo-900">Interés {isEmite ? "+ IVA" : "- ISR"}: </span>
+                <span className="font-bold text-indigo-900">Interés {interesAjustadoLabel}: </span>
                 <span className="text-indigo-700 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_interes) + displayIvaIsr).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {interesAjustadoValor.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>

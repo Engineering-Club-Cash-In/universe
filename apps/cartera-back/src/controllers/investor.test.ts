@@ -10,6 +10,7 @@ const existingInvestor = {
 let selectResponses: unknown[][] = [];
 let updateWasCalled = false;
 let insertWasCalled = false;
+let lastUpdateData: Record<string, unknown> | undefined;
 
 mock.module("../database/index", () => ({
   db: {
@@ -23,14 +24,17 @@ mock.module("../database/index", () => ({
     update: () => {
       updateWasCalled = true;
       return {
-        set: () => ({
+        set: (data: Record<string, unknown>) => {
+          lastUpdateData = data;
+          return {
           where: () => ({
             returning: () =>
               Promise.resolve([
                 { ...existingInvestor, nombre: "LPT Lopez Sanchez, S.A." },
               ]),
           }),
-        }),
+          };
+        },
       };
     },
     insert: () => {
@@ -63,6 +67,7 @@ describe("insertInvestor", () => {
     selectResponses = [];
     updateWasCalled = false;
     insertWasCalled = false;
+    lastUpdateData = undefined;
   });
 
   it("rechaza operation CREATE con email ya usado por otro inversionista", async () => {
@@ -126,5 +131,58 @@ describe("insertInvestor", () => {
     ]);
     expect(updateWasCalled).toBeTrue();
     expect(insertWasCalled).toBeFalse();
+  });
+
+  it("preserva descuenta_impuestos cuando el body no lo trae", async () => {
+    selectResponses = [[existingInvestor]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        nombre: "Isabella Sanchez",
+        email: "isabella@example.com",
+      },
+      set,
+    });
+
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData).toBeDefined();
+    expect("descuenta_impuestos" in lastUpdateData!).toBeFalse();
+  });
+
+  it("aplica descuenta_impuestos=false explícito en el upsert", async () => {
+    selectResponses = [[existingInvestor]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        nombre: "Isabella Sanchez",
+        descuenta_impuestos: false,
+      },
+      set,
+    });
+
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.descuenta_impuestos).toBeFalse();
+  });
+
+  it("ignora descuenta_impuestos no booleano (null/string) en el upsert", async () => {
+    selectResponses = [[existingInvestor]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        nombre: "Isabella Sanchez",
+        descuenta_impuestos: null,
+      },
+      set,
+    });
+
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData).toBeDefined();
+    expect("descuenta_impuestos" in lastUpdateData!).toBeFalse();
   });
 });

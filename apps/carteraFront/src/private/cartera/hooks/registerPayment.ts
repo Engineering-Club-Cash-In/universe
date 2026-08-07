@@ -25,6 +25,7 @@ import { getApiErrorMessage } from "@/lib/apiError";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
 import { getDisplayedPartialContribution } from "../services/installmentContribution";
+import { getConvenioAplicado } from "../services/convenioContribution";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive({ message: "Debe seleccionar un crédito" }),
   usuario_id: z.number().int().positive({ message: "Usuario requerido" }),
@@ -409,7 +410,9 @@ const handleFormSubmit = (e: React.FormEvent) => {
     }
 
     if (monto_boleta < monto_cancelacion) {
-      const resta = monto_cancelacion - monto_boleta;
+      // Redondeado a centavos: la resta en float deja polvo (16488.770000000004)
+      // que el back compara contra montos numeric(18,2) de la DB.
+      const resta = Number((monto_cancelacion - monto_boleta).toFixed(2));
       setMontoBaseBadDebt(resta);
       setOpenBadDebt(true);
       return;
@@ -446,15 +449,27 @@ const montoDisponibleTotal = montoBoleta ;
 console.log("Monto Disponible Total (boleta + saldo):", montoDisponibleTotal);
 
 // 🔥 Restar lo que se va a otros conceptos
-const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum - cuotaConvenioNum;
-const montoBoletaSinMora = montoDisponibleTotal - otrosNum - cuotaConvenioNum;
+// El convenio se REGISTRA pero NO consume la boleta (espejo del back): lo que
+// se acredita al convenio es el rastro del catch-up, no un cobro aparte, así
+// que la proyección de lo que irá a cuotas usa el disponible completo tras
+// otros/mora. `convenioAplicado` proyecta la porción que el back registrará
+// (solo informativo aquí; el back la calcula por su cuenta).
+const convenioAplicado = getConvenioAplicado(
+  montoDisponibleTotal,
+  otrosNum,
+  moraNum,
+  cuotaConvenioNum
+);
+const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum;
+const montoBoletaSinMora = montoDisponibleTotal - otrosNum;
 
+console.log("Convenio Aplicado:", convenioAplicado);
 console.log("Monto Boleta Real (después de descuentos):", montoBoletaReal);
 console.log("Monto Boleta Sin Mora:", montoBoletaSinMora);
 
 // 🔥 Validación
 if (montoBoletaSinMora < 0) {
-  toast.error("El saldo a favor más la boleta debe cubrir la suma de otros y convenio");
+  toast.error("El saldo a favor más la boleta debe cubrir la suma de otros");
   return;
 }
 
@@ -471,8 +486,13 @@ const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
 // 🔥 Calcular abonos ya realizados en la cuota SELECCIONADA (desde endpoint)
 const abonosRealizados = getDisplayedPartialContribution(abonosCuota);
 
-// 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar
-const cuotaComparar = Math.max(0,cuota - abonosRealizados );
+// 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar. La porción
+// proyectada de convenio se suma al umbral: cardInfo muestra "Total a Pagar"
+// = cuota + convenio, así que ese monto es esperado y no debe abrir el modal
+// de excedente (el modal re-asignaría a capital/otros dinero que el back ya
+// registra como convenio). Mismo umbral efectivo que cuando el front restaba
+// el convenio del disponible.
+const cuotaComparar = Math.max(0, cuota - abonosRealizados) + convenioAplicado;
 
 console.log("=== VALIDACIÓN DE EXCEDENTES ===");
 console.log("Monto boleta real (redondeado):", montoRedondeado);

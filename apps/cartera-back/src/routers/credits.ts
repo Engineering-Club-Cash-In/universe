@@ -15,7 +15,10 @@ import {
 import { getCuotasPorDiaYAsesor, upsertEfectividadAsesores, getEfectividadAsesores } from "../controllers/paymentsByAdvisor";
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
-import { isValidResetCreditInput } from "../controllers/creditDetailPolicy";
+import {
+  isValidResetCreditInput,
+  mapResetCreditError,
+} from "../controllers/creditDetailPolicy";
 import { launchBrowser } from "../utils/functions/browser";
 import { promises as fs } from "fs";
 import {
@@ -729,8 +732,9 @@ export const creditRouter = new Elysia()
       set.status = 200;
       return result;
     } catch (error) {
-      set.status = 500;
-      return { message: "Error reiniciando el crédito", error: String(error) };
+      const mapped = mapResetCreditError(error);
+      set.status = mapped.status;
+      return { message: mapped.message, error: String(error) };
     }
   })
   .get("/credit/cancelation-report", async ({ query, set }) => {

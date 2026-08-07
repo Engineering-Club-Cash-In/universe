@@ -42,6 +42,20 @@ type ParticipacionTotals = {
 	cuotasInvalidas: number;
 };
 
+type MontoACobrarViewRow = {
+	capital: number;
+	interesIva: number;
+	servicios: number;
+	membresias: number;
+	interesInversionista: number;
+	capitalInv: number;
+	capitalCube: number;
+	interesIvaInv: number;
+	interesIvaCube: number;
+	totalMora: number;
+	total: number;
+};
+
 const emptyRow = (bucket: string): MontoACobrarParticipacionRow => ({
 	bucket,
 	cuotas_count: 0,
@@ -101,6 +115,52 @@ export function fillMissingMontoACobrarPeriods(
 	return dates.map((date) => rows.get(toKey(date)) ?? emptyRow(toKey(date)));
 }
 
+export function getMontoACobrarViewRow(
+	row: MontoACobrarParticipacionRow,
+	acumulado: boolean,
+): MontoACobrarViewRow {
+	const numeric = (value: string) => Number.parseFloat(value) || 0;
+	const value = (current: string, accumulated: string) =>
+		numeric(acumulado ? accumulated : current);
+	const capital = value(row.total_cuota, row.acum_total_cuota);
+	const interesIva =
+		value(row.total_interes, row.acum_total_interes) +
+		value(row.total_iva, row.acum_total_iva);
+	const servicios =
+		value(row.total_seguro, row.acum_total_seguro) +
+		value(row.total_gps, row.acum_total_gps);
+	const membresias = value(row.total_membresias, row.acum_total_membresias);
+
+	return {
+		capital,
+		interesIva,
+		servicios,
+		membresias,
+		interesInversionista: value(
+			row.total_interes_inversionista,
+			row.acum_total_interes_inversionista,
+		),
+		capitalInv: value(
+			row.capital_inv_participacion_actual,
+			row.acum_capital_inv_participacion_actual,
+		),
+		capitalCube: value(
+			row.capital_cube_participacion_actual,
+			row.acum_capital_cube_participacion_actual,
+		),
+		interesIvaInv: value(
+			row.interes_iva_inv_participacion_actual,
+			row.acum_interes_iva_inv_participacion_actual,
+		),
+		interesIvaCube: value(
+			row.interes_iva_cube_participacion_actual,
+			row.acum_interes_iva_cube_participacion_actual,
+		),
+		totalMora: numeric(row.total_mora),
+		total: capital + interesIva + servicios + membresias,
+	};
+}
+
 export function getMontoACobrarParticipacionTotals(
 	rows: Array<
 		Pick<
@@ -122,14 +182,14 @@ export function getMontoACobrarParticipacionTotals(
 	const creditosInvalidosRango = rows.find(
 		(row) => row.creditos_participacion_invalida_rango !== undefined,
 	)?.creditos_participacion_invalida_rango;
-	const creditosInvalidosLegacy = acumulado && last
-		? last.creditos_participacion_invalida
-		: rows.reduce(
-				(total, row) => total + row.creditos_participacion_invalida,
-				0,
-			);
-	const creditosInvalidos =
-		creditosInvalidosRango ?? creditosInvalidosLegacy;
+	const creditosInvalidosLegacy =
+		acumulado && last
+			? last.creditos_participacion_invalida
+			: rows.reduce(
+					(total, row) => total + row.creditos_participacion_invalida,
+					0,
+				);
+	const creditosInvalidos = creditosInvalidosRango ?? creditosInvalidosLegacy;
 	const cuotasInvalidas = rows.reduce(
 		(total, row) => total + row.cuotas_participacion_invalida,
 		0,

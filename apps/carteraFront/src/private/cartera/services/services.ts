@@ -15,6 +15,7 @@ export interface InvestorPayload {
   inversionista_id?: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: number | null;
   dpi:number | null;
@@ -30,6 +31,7 @@ export interface InvestorResponse {
   inversionista_id: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
@@ -695,6 +697,7 @@ export interface Investor {
   inversionista_id: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos?: boolean;
   reinversion: boolean;          // 🔹 nuevo campo
   banco: string | null;          // 🔹 nuevo campo
   tipo_cuenta: string | null;    // 🔹 nuevo campo
@@ -928,6 +931,8 @@ export interface SubtotalInversionista {
   total_reinversion_interes: number;
   total_reinversion: number;
   total_abono_general_interes: number;
+  /** Interés neto de impuestos (interés × 0.81). Solo viene con valor cuando el inversionista tiene `descuenta_impuestos`; en caso contrario es null. */
+  total_neto_impuestos?: number | string | null;
 }
 
 // Un inversionista con sus créditos y sus subtotales
@@ -936,6 +941,7 @@ export interface InversionistaConCreditos {
   inversionista: string;
   nombre_inversionista: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   creditos: CreditoInversionistaData[];
   subtotal: SubtotalInversionista;
     reinversion: boolean;           // 🔹 nuevo
@@ -1101,6 +1107,8 @@ export interface InvestorMirrorSummaryResponse {
     total_reinversion_capital: number;
     total_reinversion_interes: number;
     total_reinversion: number;
+    /** Interés neto de impuestos (interés × 0.81). Null cuando el inversionista no descuenta impuestos. */
+    total_neto_impuestos?: number | string | null;
   };
 }
 
@@ -2190,6 +2198,8 @@ export interface LiquidacionResumen {
   emite_factura: boolean;
   reinversion: string;
   status?: "activo" | "inactivo" | "pendiente_devolucion";
+  /** true = inversionista interno/propio (no externo). */
+  permite_distribucion?: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -2197,6 +2207,10 @@ export interface LiquidacionResumen {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
+  /** true si al inversionista se le descuentan impuestos del interés. */
+  descuenta_impuestos?: boolean;
+  /** Interés neto de impuestos (interés × 0.81). Null cuando el inversionista no descuenta impuestos. */
+  total_neto_impuestos?: number | string | null;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_reinversion_capital?: number;
@@ -2218,6 +2232,7 @@ export async function getResumenGlobalLiquidaciones(params: {
   anio: number;
   estado?: string;
   incluirSinMovimiento?: boolean;
+  incluirInternos?: boolean;
 }): Promise<LiquidacionResumen[]> {
   const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
     params: {
@@ -2225,6 +2240,7 @@ export async function getResumenGlobalLiquidaciones(params: {
       anio: params.anio,
       estado: params.estado ?? "liquidated",
       ...(params.incluirSinMovimiento ? { incluirSinMovimiento: "true" } : {}),
+      ...(params.incluirInternos ? { incluirInternos: "true" } : {}),
     },
   });
   return data;
@@ -2241,6 +2257,7 @@ export async function descargarResumenLiquidacionesExcel(params: {
   anio: number;
   estado?: string;
   incluirSinMovimiento?: boolean;
+  incluirInternos?: boolean;
 }): Promise<ResumenLiquidacionesExcelResponse> {
   const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
     params: {
@@ -2249,6 +2266,7 @@ export async function descargarResumenLiquidacionesExcel(params: {
       estado: params.estado ?? "liquidated",
       excel: "true",
       ...(params.incluirSinMovimiento ? { incluirSinMovimiento: "true" } : {}),
+      ...(params.incluirInternos ? { incluirInternos: "true" } : {}),
     },
   });
   return data;

@@ -5,8 +5,12 @@ import {
 	canViewCreditDetailByStatus,
 	isAmbiguousOriginalPrincipalPayment,
 	isCreditClosingPayment,
+	isIncobrableContinuationReady,
 	isOriginalPrincipalPayment,
 	isValidResetCreditInput,
+	mapResetCreditError,
+	normalizarMontoQ,
+	RESET_CREDIT_ERRORS,
 	withActiveCancellation,
 } from "./creditDetailPolicy";
 
@@ -275,8 +279,9 @@ describe("reset credit bad-debt continuation wiring", () => {
 		expect(resetCredit).toContain(
 			'eq(pagos_credito.registerBy, "system_reset")',
 		);
-		expect(resetCredit).toContain("montoIncobrableBig.eq(creditoCapitalBig)");
-		expect(resetCredit).toContain("montoIncobrableBig.eq(badDebtCapitalBig)");
+		expect(resetCredit).toMatch(
+			/isIncobrableContinuationReady\(\{\s*montoIncobrable: montoIncobrableNormalizado,\s*capitalCredito: credito\.capital,\s*montoIncobrableRegistrado: badDebt\?\.monto_incobrable \?\? null,\s*tienePagoCierre: Boolean\(existingClosingPayment\),?\s*\}\)/,
+		);
 		expect(resetCredit).toMatch(
 			/canResetCreditByStatus\(\s*credito\.statusCredit,\s*incobrableContinuationReady,?\s*\)/,
 		);
@@ -366,6 +371,216 @@ describe("reset credit input validation", () => {
 		expect(
 			isValidResetCreditInput({ ...validInput, numeroAutorizacion: 123 }),
 		).toBeFalse();
+	});
+});
+
+describe("normalizarMontoQ", () => {
+	it("limpia el polvo de punto flotante a 2 decimales", () => {
+		// Caso real crédito 365: 106488.77 - 90000 da 16488.770000000004 en JS.
+		expect(normalizarMontoQ(106488.77 - 90000)).toBe("16488.77");
+		expect(normalizarMontoQ(16488.770000000004)).toBe("16488.77");
+		expect(normalizarMontoQ(16488.769999999997)).toBe("16488.77");
+	});
+
+	it("redondea half-up al centavo como numeric de Postgres", () => {
+		expect(normalizarMontoQ("10.005")).toBe("10.01");
+		expect(normalizarMontoQ("10.004")).toBe("10.00");
+	});
+
+	it("formatea siempre con 2 decimales", () => {
+		expect(normalizarMontoQ(90000)).toBe("90000.00");
+		expect(normalizarMontoQ("16488.77")).toBe("16488.77");
+		expect(normalizarMontoQ("0.5")).toBe("0.50");
+		expect(normalizarMontoQ(0)).toBe("0.00");
+	});
+
+	it("lanza con entradas no numéricas", () => {
+		expect(() => normalizarMontoQ("basura")).toThrow();
+		expect(() => normalizarMontoQ("")).toThrow();
+	});
+});
+
+describe("isIncobrableContinuationReady", () => {
+	const base = {
+		montoIncobrable: 16488.77,
+		capitalCredito: "16488.77" as string | number | null,
+		montoIncobrableRegistrado: "16488.77" as string | number | null,
+		tienePagoCierre: false,
+	};
+
+	it("acepta el monto con polvo de float del front (bug crédito 365)", () => {
+		expect(
+			isIncobrableContinuationReady({
+				...base,
+				montoIncobrable: 106488.77 - 90000,
+			}),
+		).toBeTrue();
+	});
+
+	it("acepta el match exacto al centavo", () => {
+		expect(isIncobrableContinuationReady(base)).toBeTrue();
+	});
+
+	it("rechaza diferencias reales de un centavo o más", () => {
+		expect(
+			isIncobrableContinuationReady({ ...base, montoIncobrable: 16488.78 }),
+		).toBeFalse();
+		expect(
+			isIncobrableContinuationReady({ ...base, montoIncobrable: 16488.76 }),
+		).toBeFalse();
+		expect(
+			isIncobrableContinuationReady({ ...base, montoIncobrable: 16490 }),
+		).toBeFalse();
+	});
+
+	it("rechaza sin monto o con monto no finito", () => {
+		expect(
+			isIncobrableContinuationReady({ ...base, montoIncobrable: undefined }),
+		).toBeFalse();
+		expect(
+			isIncobrableContinuationReady({
+				...base,
+				montoIncobrable: Number.NaN,
+			}),
+		).toBeFalse();
+		expect(
+			isIncobrableContinuationReady({
+				...base,
+				montoIncobrable: Number.POSITIVE_INFINITY,
+			}),
+		).toBeFalse();
+	});
+
+	it("rechaza monto incobrable en 0 aunque todo coincida", () => {
+		expect(
+			isIncobrableContinuationReady({
+				...base,
+				montoIncobrable: 0,
+				capitalCredito: "0",
+				montoIncobrableRegistrado: "0",
+			}),
+		).toBeFalse();
+	});
+
+	it("rechaza sin registro de deuda incobrable", () => {
+		expect(
+			isIncobrableContinuationReady({
+				...base,
+				montoIncobrableRegistrado: null,
+			}),
+		).toBeFalse();
+	});
+
+	it("rechaza cuando ya existe pago de cierre", () => {
+		expect(
+			isIncobrableContinuationReady({ ...base, tienePagoCierre: true }),
+		).toBeFalse();
+	});
+
+	it("rechaza capital nulo o basura sin lanzar", () => {
+		expect(
+			isIncobrableContinuationReady({ ...base, capitalCredito: null }),
+		).toBeFalse();
+		expect(
+			isIncobrableContinuationReady({ ...base, capitalCredito: "basura" }),
+		).toBeFalse();
+		expect(
+			isIncobrableContinuationReady({
+				...base,
+				montoIncobrableRegistrado: "basura",
+			}),
+		).toBeFalse();
+	});
+});
+
+describe("mapResetCreditError", () => {
+	it("propaga estado inválido como 409 con el mensaje real", () => {
+		expect(
+			mapResetCreditError(new Error(RESET_CREDIT_ERRORS.ESTADO_INVALIDO)),
+		).toEqual({ status: 409, message: RESET_CREDIT_ERRORS.ESTADO_INVALIDO });
+	});
+
+	it("propaga cierre previo como 409 con el mensaje real", () => {
+		expect(
+			mapResetCreditError(new Error(RESET_CREDIT_ERRORS.CIERRE_PREVIO)),
+		).toEqual({ status: 409, message: RESET_CREDIT_ERRORS.CIERRE_PREVIO });
+	});
+
+	it("propaga crédito no encontrado como 404", () => {
+		expect(
+			mapResetCreditError(
+				new Error(RESET_CREDIT_ERRORS.CREDITO_NO_ENCONTRADO),
+			),
+		).toEqual({
+			status: 404,
+			message: RESET_CREDIT_ERRORS.CREDITO_NO_ENCONTRADO,
+		});
+	});
+
+	it("mapea errores desconocidos al 500 genérico sin filtrar internos", () => {
+		expect(mapResetCreditError(new Error("column does not exist"))).toEqual({
+			status: 500,
+			message: "Error reiniciando el crédito",
+		});
+	});
+
+	it("tolera valores lanzados que no son Error", () => {
+		expect(mapResetCreditError("boom")).toEqual({
+			status: 500,
+			message: "Error reiniciando el crédito",
+		});
+		expect(mapResetCreditError(undefined)).toEqual({
+			status: 500,
+			message: "Error reiniciando el crédito",
+		});
+	});
+});
+
+describe("reset credit monto normalization wiring", () => {
+	it("resetCredit normaliza el monto incobrable y decide con el helper", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "credits.ts"),
+		).text();
+		const resetCredit = source.match(
+			/export async function resetCredit[\s\S]*?(?=\nexport )/,
+		)?.[0];
+		if (!resetCredit) throw new Error("No se encontró resetCredit");
+
+		expect(resetCredit).toContain("normalizarMontoQ(");
+		expect(resetCredit).toContain("isIncobrableContinuationReady(");
+		expect(resetCredit).toContain("RESET_CREDIT_ERRORS.CREDITO_NO_ENCONTRADO");
+		expect(resetCredit).toContain("RESET_CREDIT_ERRORS.ESTADO_INVALIDO");
+		expect(resetCredit).toContain("RESET_CREDIT_ERRORS.CIERRE_PREVIO");
+		// El monto crudo del front (con polvo de float) no debe entrar a Big ni
+		// escribirse: solo su versión normalizada.
+		expect(resetCredit).not.toContain("new Big(montoIncobrable)");
+		expect(resetCredit).not.toContain("new Big(montoIncobrable!)");
+	});
+
+	it("actualizarEstadoCredito castiga con el monto normalizado", async () => {
+		const source = await Bun.file(
+			resolve(import.meta.dir, "credits.ts"),
+		).text();
+		const fn = source.match(
+			/export async function actualizarEstadoCredito[\s\S]*?(?=\nexport )/,
+		)?.[0];
+		if (!fn) throw new Error("No se encontró actualizarEstadoCredito");
+
+		expect(fn).toContain("normalizarMontoQ(monto_cancelacion");
+		expect(fn).not.toContain("new Big(monto_cancelacion!)");
+	});
+
+	it("el router de resetCredit responde con el error mapeado", async () => {
+		const routerSource = await Bun.file(
+			resolve(import.meta.dir, "../routers/credits.ts"),
+		).text();
+		const handler = routerSource.match(
+			/\.post\("\/resetCredit"[\s\S]*?\n  \}\)/,
+		)?.[0];
+		if (!handler) throw new Error("No se encontró el handler de /resetCredit");
+
+		expect(handler).toContain("mapResetCreditError(");
+		expect(handler).not.toContain('set.status = 500');
 	});
 });
 

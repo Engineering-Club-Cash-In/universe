@@ -203,6 +203,15 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
               Reinversión
             </Badge>
           )}
+          {item.permite_distribucion && (
+            <Badge
+              variant="outline"
+              className="text-[11px] border-orange-300 text-orange-700 bg-orange-50"
+              title="Inversionista interno: excluido del archivo de transferencias ACH"
+            >
+              Interno
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -224,6 +233,12 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
           <p className="text-[10px] text-orange-600 font-medium uppercase tracking-wide truncate">ISR</p>
           <p className="text-[12px] font-bold text-orange-900 truncate">{formatCurrency(item.total_isr, s)}</p>
         </div>
+        {item.total_neto_impuestos != null && (
+          <div className="bg-rose-50 rounded-lg px-2 py-1.5 min-w-0" title="Interés neto de impuestos">
+            <p className="text-[10px] text-rose-600 font-medium uppercase tracking-wide truncate">Neto de impuestos</p>
+            <p className="text-[12px] font-bold text-rose-900 truncate">{formatCurrency(item.total_neto_impuestos, s)}</p>
+          </div>
+        )}
         <div className="bg-cyan-50 rounded-lg px-2 py-1.5 min-w-0" title="Reinversión Capital">
           <p className="text-[10px] text-cyan-700 font-medium uppercase tracking-wide truncate">Reinv. Cap.</p>
           <p className="text-[12px] font-bold text-cyan-900 truncate">{formatCurrency(reinvCap, s)}</p>
@@ -353,13 +368,14 @@ export function HistorialLiquidaciones() {
   const { mutate: calcularPagosEspejo } = useCalcularPagosEspejo();
 
   const { data, isLoading, isError, refetch } = useQuery<LiquidacionResumen[]>({
-    queryKey: ["historial-liquidaciones", mes, anio],
+    queryKey: ["historial-liquidaciones", mes, anio, "con-internos"],
     queryFn: () =>
       getResumenGlobalLiquidaciones({
         mes,
         anio,
         estado: "all",
         incluirSinMovimiento: true,
+        incluirInternos: true,
       }),
     staleTime: 1000 * 60 * 2,
     refetchOnWindowFocus: false,
@@ -398,6 +414,7 @@ export function HistorialLiquidaciones() {
         anio,
         estado: "all",
         incluirSinMovimiento: true,
+        incluirInternos: true,
       });
       if (res?.url) {
         window.open(res.url, "_blank", "noopener,noreferrer");

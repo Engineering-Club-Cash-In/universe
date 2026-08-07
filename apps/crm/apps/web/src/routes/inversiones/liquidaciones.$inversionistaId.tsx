@@ -614,6 +614,16 @@ function LiquidacionCard({ item }: { item: any }) {
 						{formatCurrency(item.total_isr, sym)}
 					</p>
 				</div>
+				{item.total_neto_impuestos != null && (
+					<div className="rounded-lg bg-rose-50 px-2.5 py-1.5 dark:bg-rose-950/50">
+						<p className="font-medium text-[10px] text-rose-600 uppercase tracking-wide dark:text-rose-400">
+							Neto de impuestos
+						</p>
+						<p className="font-bold text-[13px] text-rose-900 dark:text-rose-100">
+							{formatCurrency(item.total_neto_impuestos, sym)}
+						</p>
+					</div>
+				)}
 				<div className="rounded-lg bg-teal-50 px-2.5 py-1.5 dark:bg-teal-950/50">
 					<p className="font-medium text-[10px] text-teal-600 uppercase tracking-wide dark:text-teal-400">
 						Reinversión
@@ -751,7 +761,7 @@ function InvestorLiquidacionesPage() {
 		: undefined;
 	const compraCarteraPctCashInCalc =
 		compraCarteraPctInvCalc !== undefined ? 100 - compraCarteraPctInvCalc : undefined;
-	// Con monto ingresado pero sin bracket válido (ej. < Q25,000) y SIN
+	// Con monto ingresado pero sin bracket válido (ej. < Q1,000) y SIN
 	// anulación manual activa, el backend responde sin filas: bloqueamos el
 	// confirmar. Con override activo no aplica (el operador ya eligió una
 	// fila válida, sin importar el monto).
@@ -1751,7 +1761,7 @@ function InvestorLiquidacionesPage() {
 						{compraCarteraBracketFaltante ? (
 							<p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
 								El monto ingresado no cae en ningún rango del catálogo
-								(mínimo Q25,000). Ajusta el monto.
+								(mínimo Q1,000). Ajusta el monto.
 							</p>
 						) : (
 							<>

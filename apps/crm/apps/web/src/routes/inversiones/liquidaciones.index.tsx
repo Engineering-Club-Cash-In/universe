@@ -71,6 +71,21 @@ function LiquidacionesInversionistas() {
 	const [formMontoCompra, setFormMontoCompra] = useState("");
 	const [formModalidadFacturacion, setFormModalidadFacturacion] =
 		useState<ModalidadFacturacion>("p2p_directa");
+	// Campo que cartera rechazó por duplicado (dpi | email | nombre): lo manda
+	// el backend en err.data.campo para marcar el input exacto.
+	const [campoDuplicado, setCampoDuplicado] = useState<{
+		campo: string;
+		mensaje: string;
+	} | null>(null);
+	const duplicadoEn = (campo: string) => campoDuplicado?.campo === campo;
+	// Al editar el dato que chocó, la marca deja de aplicar.
+	const limpiarDuplicado = (campo: string) => {
+		if (duplicadoEn(campo)) setCampoDuplicado(null);
+	};
+	const MensajeDuplicado = ({ campo }: { campo: string }) =>
+		duplicadoEn(campo) ? (
+			<p className="text-destructive text-xs">{campoDuplicado?.mensaje}</p>
+		) : null;
 
 	// Resuelve por monto las 3 filas del bracket (SQL, fuente única de
 	// verdad) y de ahí tomamos la de la modalidad elegida. Solo se necesita si
@@ -157,6 +172,7 @@ function LiquidacionesInversionistas() {
 		setFormMontoCompra("");
 		setFormModalidadFacturacion("p2p_directa");
 		setCompraSpreadOverrideId(null);
+		setCampoDuplicado(null);
 	};
 
 	const crearMutation = useMutation({
@@ -174,7 +190,27 @@ function LiquidacionesInversionistas() {
 			});
 		},
 		onError: (err: any) => {
-			toast.error(err?.message ?? "Error al crear inversionista");
+			// El backend ya traduce los rechazos de cartera (DPI/email/nombre
+			// duplicado, validaciones) a mensajes legibles; solo caemos al texto
+			// genérico cuando el error no trae ninguno.
+			const mensaje: string | undefined = err?.message;
+			const esGenerico =
+				!mensaje || mensaje.toLowerCase() === "internal server error";
+			const texto = esGenerico
+				? "No se pudo crear el inversionista. Verifica los datos e intenta de nuevo."
+				: (mensaje as string);
+
+			// Duplicado: además del toast, marcamos el input culpable y lo
+			// enfocamos para que corrijan ahí mismo.
+			const campo: string | undefined = err?.data?.campo;
+			if (campo) {
+				setCampoDuplicado({ campo, mensaje: texto });
+				document.getElementById(`inv-${campo}`)?.focus();
+			} else {
+				setCampoDuplicado(null);
+			}
+
+			toast.error(texto, { duration: 8000 });
 		},
 	});
 
@@ -408,9 +444,17 @@ function LiquidacionesInversionistas() {
 							<Input
 								id="inv-nombre"
 								value={formNombre}
-								onChange={(e) => setFormNombre(e.target.value)}
+								onChange={(e) => {
+									setFormNombre(e.target.value);
+									limpiarDuplicado("nombre");
+								}}
 								placeholder="Nombre completo"
+								aria-invalid={duplicadoEn("nombre")}
+								className={
+									duplicadoEn("nombre") ? "border-destructive" : undefined
+								}
 							/>
+							<MensajeDuplicado campo="nombre" />
 						</div>
 
 						{/* DPI + Email */}
@@ -420,9 +464,17 @@ function LiquidacionesInversionistas() {
 								<Input
 									id="inv-dpi"
 									value={formDpi}
-									onChange={(e) => setFormDpi(e.target.value)}
+									onChange={(e) => {
+										setFormDpi(e.target.value);
+										limpiarDuplicado("dpi");
+									}}
 									placeholder="Número de DPI"
+									aria-invalid={duplicadoEn("dpi")}
+									className={
+										duplicadoEn("dpi") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeDuplicado campo="dpi" />
 							</div>
 							<div className="space-y-1.5">
 								<Label htmlFor="inv-email">Email</Label>
@@ -430,9 +482,17 @@ function LiquidacionesInversionistas() {
 									id="inv-email"
 									type="email"
 									value={formEmail}
-									onChange={(e) => setFormEmail(e.target.value)}
+									onChange={(e) => {
+										setFormEmail(e.target.value);
+										limpiarDuplicado("email");
+									}}
 									placeholder="correo@ejemplo.com"
+									aria-invalid={duplicadoEn("email")}
+									className={
+										duplicadoEn("email") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeDuplicado campo="email" />
 							</div>
 						</div>
 
@@ -607,7 +667,7 @@ function LiquidacionesInversionistas() {
 									{compraBracketFaltante ? (
 										<p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
 											El monto ingresado no cae en ningún rango del catálogo
-											(mínimo Q25,000). Ajusta el monto.
+											(mínimo Q1,000). Ajusta el monto.
 										</p>
 									) : (
 										<>

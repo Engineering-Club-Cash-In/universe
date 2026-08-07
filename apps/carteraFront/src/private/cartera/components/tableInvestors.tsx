@@ -327,9 +327,10 @@ export function TableInvestors() {
   }, [searchParams]);
 
   // Catálogo de inversionistas (para el filtro)
-  const { investors = [], loading: loadingCatalogs } = useCatalogs() as {
+  const { investors = [], loading: loadingCatalogs, refetch: refetchCatalogs } = useCatalogs() as {
     investors: Investor[];
     loading: boolean;
+    refetch: () => void;
   };
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "update">("create");
@@ -431,6 +432,7 @@ export function TableInvestors() {
           total_reinversion_interes:   mirrorSummaryData.subtotal.total_reinversion_interes,
           total_reinversion:           mirrorSummaryData.subtotal.total_reinversion,
           total_abono_general_interes: mirrorSummaryData.subtotal.total_abono_general_interes,
+          total_neto_impuestos:        mirrorSummaryData.subtotal.total_neto_impuestos ?? null,
         }
       : {
           total_abono_capital:         totalesData?.totales.total_abono_capital         ?? 0,
@@ -444,6 +446,7 @@ export function TableInvestors() {
           total_reinversion_interes:   totalesData?.totales.total_reinversion_interes   ?? 0,
           total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
           total_abono_general_interes: totalesData?.totales.total_abono_general_interes ?? 0,
+          total_neto_impuestos:        totalesData?.totales.total_neto_impuestos        ?? null,
         };
 
     return {
@@ -550,6 +553,7 @@ export function TableInvestors() {
       inversionista_id: inv.inversionista_id,
       nombre: inv.nombre_inversionista,
       emite_factura: inv.emite_factura,
+      descuenta_impuestos: inv.descuenta_impuestos ?? false,
       reinversion: inv.reinversion ?? false,
       banco: inv.banco_id ?? null,
       tipo_cuenta: inv.tipo_cuenta ?? "",
@@ -686,7 +690,7 @@ export function TableInvestors() {
     compraCarteraPctInvCalc !== undefined
       ? 100 - compraCarteraPctInvCalc
       : undefined;
-  // Con monto ingresado pero sin bracket válido (ej. < Q25,000) y SIN
+  // Con monto ingresado pero sin bracket válido (ej. < Q1,000) y SIN
   // anulación manual activa, el backend responde sin filas: bloqueamos el
   // confirmar. Con override activo no aplica (el operador ya eligió una
   // fila válida, sin importar el monto).
@@ -711,6 +715,7 @@ export function TableInvestors() {
       inversionista_id: cat.inversionista_id,
       nombre_inversionista: cat.nombre,
       emite_factura: cat.emite_factura,
+      descuenta_impuestos: cat.descuenta_impuestos ?? false,
       reinversion: cat.reinversion,
       banco_id: cat.banco,
       tipo_cuenta: cat.tipo_cuenta,
@@ -743,6 +748,7 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
     setSelectedInvestorData(undefined);
     refetch();
     refetchTotales(); // Refresca la tabla y totales después de crear/editar
+    refetchCatalogs(); // El catálogo alimenta la edición vía headerInv; sin esto re-editar pisa los flags con datos viejos
   };
   return (
   <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
@@ -1306,6 +1312,17 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </div>
               </div>
 
+              {subtotales.total_neto_impuestos != null && (
+                <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-violet-100"}`}>
+                  <div className="text-xs mb-1 font-semibold text-blue-900">
+                    Neto de impuestos
+                  </div>
+                  <div className={`font-bold text-lg ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
+                    {inv.currencySymbol} {Number(subtotales.total_neto_impuestos).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              )}
+
               <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-green-100"}`}>
                 <div className="text-xs mb-1 font-semibold text-blue-900">
                   Cuota Sin Reinversión
@@ -1743,7 +1760,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-green-700">📈 IVA</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-green-50 rounded px-1 text-sm font-bold text-green-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.currencySymbol} {inv.emite_factura
+                                        {inv.currencySymbol} {inv.descuenta_impuestos
+                                          ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
+                                          : inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
                                           : "0.00"}
                                       </div>
@@ -1759,7 +1778,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-yellow-700">📉 ISR</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-yellow-50 rounded px-1 text-sm font-bold text-yellow-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.currencySymbol} {!inv.emite_factura
+                                        {inv.currencySymbol} {inv.descuenta_impuestos || !inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.07).toFixed(2)
                                           : "0.00"}
                                       </div>
@@ -1894,9 +1913,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         {(() => {
           const s = isDraft ? subtotales : (inv.subtotal || subtotales);
           const isEmite = inv.emite_factura;
-          const displayIvaIsr = isEmite ? Number(s.total_abono_iva) : -Number(s.total_isr);
-          const displayCuotaSin = Number(s.total_abono_capital) + Number(s.total_abono_interes) + displayIvaIsr;
-          const displayCuotaCon = displayCuotaSin - Number(s.total_reinversion);
+          const isDescuenta = (inv as any).descuenta_impuestos === true;
+          // Usar la cuota que YA calcula el backend en vez de re-derivarla: con
+          // descuenta_impuestos el interés viene neto y volver a sumar IVA/restar
+          // ISR encima lo doble-ajustaba (mostraba plata equivocada).
+          const displayCuotaSin = Number(s.total_cuota_sin_reinversion ?? 0);
+          const displayCuotaCon = Number(
+            s.total_cuota_con_reinversion ?? (displayCuotaSin - Number(s.total_reinversion ?? 0))
+          );
+          // "Interés ajustado" = el neto que ya calcula el backend (int+IVA, int−ISR,
+          // o int×0.81 con descuenta_impuestos).
+          const interesAjustadoLabel = isDescuenta ? "- IVA - ISR" : isEmite ? "+ IVA" : "- ISR";
+          const interesAjustadoValor = Number(s.total_abono_general_interes ?? 0);
 
           return (
             <>
@@ -1914,9 +1942,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               </div>
               {/* 🆕 Mobile: Interés Ajustado */}
               <div>
-                <span className="font-bold text-indigo-900">Interés {isEmite ? "+ IVA" : "- ISR"}: </span>
+                <span className="font-bold text-indigo-900">Interés {interesAjustadoLabel}: </span>
                 <span className="text-indigo-700 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_interes) + displayIvaIsr).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {interesAjustadoValor.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>
@@ -2875,7 +2903,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               compraCarteraBracketFaltante ? (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                   El monto ingresado no cae en ningún rango del catálogo
-                  (mínimo Q25,000). Ajusta el monto.
+                  (mínimo Q1,000). Ajusta el monto.
                 </p>
               ) : (
                 <>

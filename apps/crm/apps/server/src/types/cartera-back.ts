@@ -779,6 +779,10 @@ export interface ResumenGlobalInversionista {
 	total_abono_interes: string;
 	total_abono_iva: string;
 	total_isr: string;
+	/** true si al inversionista se le descuentan impuestos del interés. */
+	descuenta_impuestos?: boolean;
+	/** Interés neto de impuestos (interés × 0.81). Null cuando no descuenta impuestos. */
+	total_neto_impuestos?: number | string | null;
 	total_cuota?: string;
 	total_a_recibir_sin_reinversion: string;
 	total_reinversion: string;

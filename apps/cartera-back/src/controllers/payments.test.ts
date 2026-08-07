@@ -180,6 +180,14 @@ mock.module("../utils/comprasAjuste", () => ({
     montoRestarValidacion: mockMontoRestarValidacion,
     montoRestarCalculo: mockMontoRestarCalculo
   })),
+  // Variante sin BD que usa el Excel del inversionista. `mock.module` es global al run de
+  // bun test, así que este doble también lo ven los otros archivos de test: si falta, el
+  // Excel se queda sin ajuste de compras sin que nadie lo note.
+  calcularAjusteComprasDesdeFilas: mock(() => ({
+    montoRestarValidacion: mockMontoRestarValidacion,
+    montoRestarCalculo: mockMontoRestarCalculo
+  })),
+  columnasCompraAjuste: {},
   obtenerSumaComprasMesAnterior: mock(() => Promise.resolve(new Big(0))),
   obtenerSumaComprasPendientes: mock(() => Promise.resolve(mockSumaComprasPendientes)),
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),

@@ -53,14 +53,16 @@ function redondearMonto(valor: number): number {
  * (apps/cartera-back/src/controllers/createCredit.ts), para que el denominador
  * del prorrateo coincida con el mes real donde va a caer esa primera cuota.
  *
- * Usa hora Guatemala (toDateStrGT), igual que getDiaPagoOriginalSistema, para
- * que numerador y denominador no se desincronicen cerca de medianoche GT si
- * el server corre en UTC (ej. día 31 a las 7pm GT ya es día 1 en UTC).
+ * A propósito NO usa hora Guatemala: generatePaymentDates elige el mes con
+ * getFullYear()/getMonth() en hora local del server (no GT), así que replicar
+ * esa misma fuente es lo que mantiene sincronizados numerador y denominador —
+ * usar GT aquí desincroniza el mes cerca de medianoche GT si el server corre
+ * en UTC (ej. 31 a las 7pm GT ya es día 1 de UTC: cartera-back agenda la
+ * primera cuota un mes adelante de lo que este cálculo asumiría con GT).
  */
 function getDiasDelMesPrimeraCuota(fechaReferencia: Date): number {
-	const [anioStr, mesStr] = toDateStrGT(fechaReferencia).split("-");
-	const anio = Number(anioStr);
-	const mesBase = Number(mesStr); // ya es "mes siguiente" en índice 0-based de Date
+	const anio = fechaReferencia.getFullYear();
+	const mesBase = fechaReferencia.getMonth() + 1; // "mes siguiente", 0-based
 	return new Date(anio, mesBase + 1, 0).getDate();
 }
 

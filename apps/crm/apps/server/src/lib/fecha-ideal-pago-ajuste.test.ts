@@ -105,11 +105,14 @@ describe("calcularAjusteFechaIdeal", () => {
 		expect(resultado).toBeNull();
 	});
 
-	test("usa hora Guatemala para el mes de la primera cuota, no la hora local del server", () => {
-		// 2026-02-01T01:00:00Z = 31 de enero, 7pm hora Guatemala (UTC-6) — sigue
-		// siendo enero en GT aunque ya sea 1 de febrero en UTC. Antes del fix,
-		// getFullYear()/getMonth() en un server UTC leían "febrero" acá y el
-		// denominador salía calculado con el mes equivocado.
+	test("usa la misma hora del server que generatePaymentDates en cartera-back, no hora Guatemala", () => {
+		// 2026-02-01T01:00:00Z = 31 de enero, 7pm hora Guatemala (UTC-6), pero ya
+		// es 1 de febrero en hora del server (UTC). generatePaymentDates en
+		// cartera-back elige el mes de la primera cuota con getMonth() en hora
+		// del server (no GT) — este cálculo debe leer lo mismo que esa función
+		// para que el denominador no quede desincronizado del mes real que
+		// cartera-back agenda. Usar GT aquí (como antes del fix) haría creer
+		// que la primera cuota cae en febrero cuando en realidad cae en marzo.
 		const fechaReferencia = new Date("2026-02-01T01:00:00Z");
 
 		const resultado = calcularAjusteFechaIdeal({
@@ -123,8 +126,8 @@ describe("calcularAjusteFechaIdeal", () => {
 			fechaReferencia,
 		});
 
-		// Enero (GT) → primera cuota en febrero de 2026 (no bisiesto) = 28 días
-		expect(resultado?.diasDelMes).toBe(28);
+		// Febrero (hora server) → primera cuota en marzo de 2026 = 31 días
+		expect(resultado?.diasDelMes).toBe(31);
 	});
 
 	test("clampa el día elegido al último día del mes si el mes tiene menos días (día 31 en abril de 30 días)", () => {

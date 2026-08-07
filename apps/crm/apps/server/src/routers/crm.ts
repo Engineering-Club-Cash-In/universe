@@ -2158,11 +2158,18 @@ export const crmRouter = {
 				input.diaPagoMensual !== undefined &&
 				input.elegidoDesdeRecomendacionIA !==
 					(currentOpportunity[0].diaPagoOriginalSistema != null);
+			// Si leadId cambia, el análisis (y por lo tanto suggestedDays) es del
+			// lead anterior — hay que revalidar aunque el día/flag entrantes
+			// coincidan con lo ya guardado (los forms siempre reenvían ambos).
+			const leadIdCambio =
+				input.leadId !== undefined &&
+				input.leadId !== currentOpportunity[0].leadId;
 			let diaPagoOriginalSistemaUpdate: number | null | undefined;
 			if (
 				input.diaPagoMensual !== undefined &&
 				(input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
-					cambioDeIntencion)
+					cambioDeIntencion ||
+					leadIdCambio)
 			) {
 				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
 				// Se consulta sin importar si el día es 15/30: esDiaIA (más abajo)

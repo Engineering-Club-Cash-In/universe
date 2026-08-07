@@ -608,10 +608,19 @@ export const validarInversionistasNuevos = async (
   }
   const idsDeclarados = new Set(declaradosNuevos.map((i) => i.inversionista_id));
   for (const inv of inversionistas_espejo ?? []) {
-    if (!idsEspejoActual.has(inv.inversionista_id) && !idsDeclarados.has(inv.inversionista_id)) {
+    // Un espejo cuyo ID ya está en el PADRE actual no es un colado: es el
+    // backfill legítimo del modal para créditos importados (processFromExcelFull
+    // omite el espejo a propósito y la edición lo reconstruye desde el padre).
+    // Solo se rechaza al que no está en NINGUNA de las dos tablas ni viene
+    // declarado como nuevo.
+    if (
+      !idsEspejoActual.has(inv.inversionista_id) &&
+      !idsPadreActual.has(inv.inversionista_id) &&
+      !idsDeclarados.has(inv.inversionista_id)
+    ) {
       return fail(
-        `El inversionista con ID ${inv.inversionista_id} no participa en el espejo de este crédito ` +
-          `y no viene declarado como nuevo.`,
+        `El inversionista con ID ${inv.inversionista_id} no participa en este crédito ` +
+          `(ni en el padre ni en el espejo) y no viene declarado como nuevo.`,
         { inversionista_id: inv.inversionista_id },
       );
     }

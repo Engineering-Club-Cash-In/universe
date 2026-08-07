@@ -109,7 +109,7 @@ describe("validarInversionistasNuevos — regla 1: nadie entra sin declararse", 
     if (!res.success) expect(res.error.message).toContain("no participa en este crédito");
   });
 
-  it("rechaza un espejo que no está en el espejo actual ni viene declarado en el padre", async () => {
+  it("rechaza un espejo que no está en ninguna tabla ni viene declarado en el padre", async () => {
     setRows({ padre: [1], espejo: [1] });
     const set = makeSet();
     const res = await validarInversionistasNuevos(
@@ -120,6 +120,23 @@ describe("validarInversionistasNuevos — regla 1: nadie entra sin declararse", 
     );
     expect(res.success).toBe(false);
     if (!res.success) expect(res.error.message).toContain("espejo");
+  });
+
+  it("acepta el backfill del espejo desde el padre (créditos importados sin espejo)", async () => {
+    // processFromExcelFull deja inversionistas SOLO en el padre; el modal
+    // sintetiza el espejo desde el padre para reconstruirlo al guardar. Ese
+    // espejo "nuevo en tabla" NO es un colado: su ID ya participa en el
+    // crédito vía padre. (Hallazgo P1 de Codex en el PR #1268.)
+    setRows({ padre: [1, 2], espejo: [1] }); // el 2 no tiene espejo aún
+    const set = makeSet();
+    const res = await validarInversionistasNuevos(
+      CREDITO_ID,
+      [invPayload(1), invPayload(2)],
+      [invPayload(1), invPayload(2)], // backfill del 2 sintetizado por el modal
+      set,
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.nuevos).toEqual([]);
   });
 
   it("rechaza inversionistas duplicados en el payload", async () => {

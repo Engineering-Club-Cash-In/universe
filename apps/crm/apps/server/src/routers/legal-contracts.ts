@@ -24,6 +24,8 @@ import {
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
+import { sendCoverageDocument } from "../services/send-coverage-document";
+import { sendWelcomeMessage } from "../services/send-welcome-message";
 import { sendContractLinksToLead } from "./messaging";
 import { createNotification } from "./notifications";
 
@@ -1007,6 +1009,35 @@ export const legalContractsRouter = {
 				relatedEntityId: input.opportunityId,
 				redirectPage: "analysis_90_details",
 			});
+
+			// ── WhatsApp automáticos al cliente (bienvenida + documento de seguro) ─
+			// DEPENDEN de que el crédito se haya creado en cartera: solo disparamos
+			// si `closeResult.creditoId` existe (id que cartera devuelve al crearlo).
+			// Si la creación en cartera falla, closeOpportunity devuelve
+			// success=false y el handler ya lanzó error más arriba, así que ni
+			// llegamos acá; este guard lo deja explícito y a prueba de que se mueva
+			// el bloque a futuro.
+			// Disparos fire-and-forget: nunca bloquean ni rompen el cierre si
+			// WhatsApp falla (eso sí es independiente). Ambos servicios son
+			// autocontenidos y desacoplados: para moverlos a otro punto del flujo
+			// (p. ej. al 100% / desembolso) basta con reubicar este bloque completo.
+			if (closeResult.creditoId) {
+				void sendWelcomeMessage({
+					opportunityId: input.opportunityId,
+					userId: context.userId,
+					numeroSifco: closeResult.numeroSifco,
+				}).catch((e) => console.error("[Bienvenida] fallo no bloqueante:", e));
+
+				// Mensaje con el PDF de cobertura/instrucciones del seguro. Sin
+				// `toTestPhone` → va al teléfono real del lead (respeta el test-mode
+				// global si estuviera activo).
+				void sendCoverageDocument({
+					opportunityId: input.opportunityId,
+					userId: context.userId,
+				}).catch((e) =>
+					console.error("[MensajeAdjunto] fallo no bloqueante:", e),
+				);
+			}
 
 			return {
 				success: true,

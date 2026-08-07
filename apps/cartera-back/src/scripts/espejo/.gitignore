@@ -1,0 +1,5 @@
+# Salidas de estos scripts: traen nombres de clientes, montos y participaciones
+# de inversionistas. Se regeneran con el COPY del README. Nunca se versionan.
+db_*.csv
+*.xlsx
+__pycache__/

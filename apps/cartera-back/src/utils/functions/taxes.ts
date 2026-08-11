@@ -14,9 +14,10 @@ export function aplicaDescuentaImpuestos(inv: {
 
 /**
  * Desglose del descuento sobre el interés bruto:
- * neto = interés − IVA(12%) − ISR(7%) = interés × 0.81.
- * `ajuste` es el término aditivo (−IVA − ISR) para componer cuotas
- * (capital + interés + ajuste) sin alterar las fórmulas existentes.
+ * neto = interés − ISR(7%) = interés × 0.93.
+ * El descuento resta SOLO ISR (el IVA se sigue calculando/mostrando como dato,
+ * pero NO se resta del pago). `ajuste` es el término aditivo (−ISR) para componer
+ * cuotas (capital + interés + ajuste) sin alterar las fórmulas existentes.
  */
 export function descuentoImpuestos(interes: Big): {
   iva: Big;
@@ -26,6 +27,6 @@ export function descuentoImpuestos(interes: Big): {
 } {
   const iva = interes.times(TASA_IVA_DESCUENTO);
   const isr = interes.times(TASA_ISR_DESCUENTO);
-  const ajuste = iva.plus(isr).neg();
+  const ajuste = isr.neg();
   return { iva, isr, ajuste, neto: interes.plus(ajuste) };
 }

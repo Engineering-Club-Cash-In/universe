@@ -1627,7 +1627,7 @@
       total_cuota: numeric("total_cuota", { precision: 18, scale: 2 }).notNull().default("0"),
 
       // Snapshot de cómo se pagó ESTA liquidación: si el inversionista tenía
-      // descuenta_impuestos al liquidar, total_interes se persistió NETO (×0.81).
+      // descuenta_impuestos al liquidar, total_interes se persistió NETO (×0.93, solo ISR).
       // Las liquidaciones viejas quedan en false = fórmula bruta original.
       descuenta_impuestos: boolean("descuenta_impuestos").notNull().default(false),
 

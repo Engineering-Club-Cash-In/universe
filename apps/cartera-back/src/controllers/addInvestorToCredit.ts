@@ -1581,14 +1581,30 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       // créditos que sí se procesaron. Sin esto, los inserts parciales ya
       // estarían commiteados y un retry con el mismo monto_aportado los
       // duplicaría (over-reinvestment).
-      const omitidosPorContencion = errores.filter((e) => e.retryable).length;
-      if (omitidosPorContencion > 0 && montoRestante.gt(0)) {
+      //
+      // Mismo chequeo de capacidad que el bloque de modalidad de arriba:
+      // sin él, CUALQUIER lock perdido (aunque su capacidad fuera mínima y
+      // no tuviera nada que ver con el faltante real) disparaba rollback
+      // total. Si lo omitido por contención no alcanza para cubrir
+      // montoRestante, el faltante es real (no explicado por contención) y
+      // no hay que revertir por eso — el resultado parcial ya colocado es
+      // válido tal cual.
+      const omitidos = errores.filter((e) => e.retryable);
+      const capacidadOmitidaContencion = omitidos.reduce(
+        (acc, e) => acc.plus(new Big(e.capacidad_omitida ?? 0)),
+        new Big(0),
+      );
+      if (
+        omitidos.length > 0 &&
+        montoRestante.gt(0) &&
+        capacidadOmitidaContencion.gte(montoRestante)
+      ) {
         // Este throw vive DENTRO de la tx: hace rollback de TODO lo ya
         // insertado en este loop, no solo del remanente. Un retry tiene que
         // mandar monto_aportado completo otra vez — no hay nada parcial
         // commiteado que "completar".
         throw new CreditoNoDisponibleError(
-          `No se pudo colocar el monto completo por contención de locks: ${omitidosPorContencion} crédito(s) omitidos por contención. Se revirtió toda la operación (nada quedó colocado); reintenta con el monto completo Q${new Big(monto_aportado).toFixed(2)}.`,
+          `No se pudo colocar el monto completo por contención de locks: ${omitidos.length} crédito(s) omitidos por contención tenían capital suficiente (Q${capacidadOmitidaContencion.toFixed(2)}) para los Q${montoRestante.toFixed(2)} que faltaron. Se revirtió toda la operación (nada quedó colocado); reintenta con el monto completo Q${new Big(monto_aportado).toFixed(2)}.`,
         );
       }
     }),

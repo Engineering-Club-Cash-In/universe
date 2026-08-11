@@ -23,7 +23,6 @@ import {
   cuotas_credito,
   inversionistas as inversionistasTable,
   pagos_credito,
-  pagos_credito_inversionistas_espejo,
   usuarios,
   historial_devolucion_credito,
 } from "../database/db";
@@ -544,11 +543,16 @@ const validateInvestorsPercentages = (
 // Reglas:
 //   1. Todo inversionista del payload que NO esté hoy en el crédito debe venir
 //      declarado con es_nuevo + tipo_operacion. Si no, 400 (era el bug).
-//   2. Un es_nuevo NO puede haber participado nunca en el crédito: ni estar
-//      activo (padre/espejo), ni tener compras previas, ni pagos espejo
-//      históricos. Cubre borrar-y-volver-a-agregar en la misma edición (sigue
-//      en DB al validar) y también re-entradas en ediciones posteriores
-//      (compras/pagos espejo conservan el historial). Tiene que ser de cero.
+//   2. Un es_nuevo no puede estar HOY en el crédito (padre o espejo). Eso es
+//      justo lo que ataja el borrar-y-volver-a-agregar en la misma edición: la
+//      validación corre antes del nuke & rebuild, así que el borrado sigue en
+//      la DB y cae acá. En cambio el historial (compras viejas, pagos espejo
+//      de participaciones ya cerradas) NO bloquea: que un inversionista salga
+//      del crédito y más adelante vuelva a entrar es rotación normal de pool y
+//      necesita su propio registro de compra.
+//   3. Como máximo UNA compra_cartera puede quedar pendiente de facturar por
+//      crédito: cofidi prorratea el interés del pago con una sola fecha de
+//      corte (operacionesPendientesFacturar[0]) y las demás se le pierden.
 export type InversionistaNuevoValidado = {
   inversionista_id: number;
   monto_aportado: number;
@@ -644,43 +648,61 @@ export const validarInversionistasNuevos = async (
     }
   }
 
-  // Regla 2: cero historial en el crédito.
-  const idsNuevos = [...idsDeclarados];
-  const [comprasPrevias, pagosPrevios] = await Promise.all([
-    db
+  // Regla 2: el "nuevo" no puede estar hoy en el crédito. El que se borró de la
+  // lista en esta misma edición todavía está en la DB (la validación corre
+  // antes del rebuild), así que cae acá. El que participó y ya salió, no: puede
+  // volver a entrar.
+  for (const inv of declaradosNuevos) {
+    if (
+      idsPadreActual.has(inv.inversionista_id) ||
+      idsEspejoActual.has(inv.inversionista_id)
+    ) {
+      return fail(
+        `El inversionista con ID ${inv.inversionista_id} ya participa en este crédito; ` +
+          `no puede agregarse como nuevo (aunque se borre de la lista y se vuelva a agregar).`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+
+  // Regla 3: una sola compra_cartera pendiente de facturar por crédito.
+  // El flujo nuevo de intereses de cofidi (routers/cofidi.ts) prorratea el
+  // interés del pago con UNA fecha de corte — toma operacionesPendientesFacturar[0]
+  // y las demás quedan sin prorratear (se facturan bajo la distribución vieja y
+  // el pendiente se arrastra al siguiente pago). Así que ni dos compras en la
+  // misma edición ni una compra encima de otra que todavía no cerró ciclo.
+  // Las reinversiones no cuentan: nacen con pendiente_facturar=false.
+  const nuevasCompras = declaradosNuevos.filter(
+    (inv) => inv.tipo_operacion === "compra_cartera",
+  );
+  if (nuevasCompras.length > 1) {
+    return fail(
+      `Solo se puede agregar una compra de cartera a la vez en este crédito ` +
+        `(llegaron ${nuevasCompras.length}). Agregá una, esperá a que se facture el ` +
+        `siguiente pago y luego agregá la otra. Las reinversiones sí pueden ir juntas.`,
+      { inversionistas_ids: nuevasCompras.map((i) => i.inversionista_id) },
+    );
+  }
+  if (nuevasCompras.length === 1) {
+    const [pendiente] = await db
       .select({ inversionista_id: compras_credito_inversionista.inversionista_id })
       .from(compras_credito_inversionista)
       .where(
         and(
           eq(compras_credito_inversionista.credito_id, credito_id),
-          inArray(compras_credito_inversionista.inversionista_id, idsNuevos),
+          eq(compras_credito_inversionista.pendiente_facturar, true),
         ),
-      ),
-    db
-      .select({ inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id })
-      .from(pagos_credito_inversionistas_espejo)
-      .where(
-        and(
-          eq(pagos_credito_inversionistas_espejo.credito_id, credito_id),
-          inArray(pagos_credito_inversionistas_espejo.inversionista_id, idsNuevos),
-        ),
-      ),
-  ]);
-  const idsConHistorial = new Set([
-    ...comprasPrevias.map((r) => r.inversionista_id),
-    ...pagosPrevios.map((r) => r.inversionista_id),
-  ]);
-
-  for (const inv of declaradosNuevos) {
-    if (
-      idsPadreActual.has(inv.inversionista_id) ||
-      idsEspejoActual.has(inv.inversionista_id) ||
-      idsConHistorial.has(inv.inversionista_id)
-    ) {
+      )
+      .limit(1);
+    if (pendiente) {
       return fail(
-        `El inversionista con ID ${inv.inversionista_id} ya participa o participó en este crédito; ` +
-          `no puede agregarse como nuevo (aunque se borre y se vuelva a agregar).`,
-        { inversionista_id: inv.inversionista_id },
+        `Este crédito ya tiene una compra pendiente de facturar (inversionista ` +
+          `${pendiente.inversionista_id}). Hay que esperar a que el siguiente pago la ` +
+          `facture antes de agregar otra compra de cartera.`,
+        {
+          inversionista_id: nuevasCompras[0].inversionista_id,
+          compra_pendiente_inversionista_id: pendiente.inversionista_id,
+        },
       );
     }
   }
@@ -710,15 +732,21 @@ export const validarInversionistasNuevos = async (
 //     prorratee el interés del primer pago bajo la nueva distribución.
 //   - reinversion: fecha_completada = ahora y sin factura (pendiente_facturar
 //     false), igual que completeEspejo.
+//
+// Corre con el MISMO dbInstance (transacción) que el rebuild de padre/espejo:
+// participación y registro de compra entran o no entran juntos. Si esto falla,
+// el rollback deshace el rebuild y el reintento con el mismo payload vuelve a
+// pasar la validación (el nuevo no quedó a medias dentro del crédito).
 export const registrarComprasInversionistasNuevos = async (
   credito_id: number,
   nuevos: InversionistaNuevoValidado[],
+  dbInstance: typeof db = db,
 ) => {
   if (nuevos.length === 0) return;
 
   // tipo_reinversion informativo del registro: la modalidad global del
   // inversionista (mismo fallback que usa addInvestorToCredit cuando no viene).
-  const filasInv = await db
+  const filasInv = await dbInstance
     .select({
       inversionista_id: inversionistasTable.inversionista_id,
       tipo_reinversion: inversionistasTable.tipo_reinversion,
@@ -733,7 +761,7 @@ export const registrarComprasInversionistasNuevos = async (
   const tipoReinvPorId = new Map(filasInv.map((r) => [r.inversionista_id, r.tipo_reinversion]));
 
   const ahora = new Date();
-  await db.insert(compras_credito_inversionista).values(
+  await dbInstance.insert(compras_credito_inversionista).values(
     nuevos.map((n) => {
       const esCompra = n.tipo_operacion === "compra_cartera";
       // Anclar a mediodía UTC para que la conversión a hora GT (UTC-6) no
@@ -1609,75 +1637,94 @@ export const updateCredit = async ({ body, set, request }: any) => {
       }
     }
 
-    // 9. Actualizar inversionistas (Principal)
-    let parentCuotas: Map<number, string> = new Map();
-    if (inversionistas && inversionistas.length > 0) {
-      parentCuotas = await updateInvestors(
-        credito_id,
-        inversionistas,
-        updateFields,
-        current,
-        numero_credito_sifco ?? current.numero_credito_sifco,
-        Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-        Number(updateFields.membresias_pago ?? current.membresias_pago),
-        Number(updateFields.gps ?? current.gps),
-        creditos_inversionistas // Explicit target
-      );
-    }
-
-    // 10. Actualizar inversionistas (Espejo)
+    // 9-10.5. Rebuild de inversionistas (padre + espejo) y registro de las
+    // compras de los nuevos, TODO en una sola transacción: si el registro de
+    // compras falla después del rebuild, el rollback deshace también el rebuild.
+    // Sin eso quedaba el inversionista nuevo dentro del crédito sin su fila en
+    // compras_credito_inversionista (liquidación descuadrada) y el reintento con
+    // el mismo payload rebotaba en la validación, porque el "nuevo" ya figuraba
+    // como participante.
     console.log(`🪞 [ESPEJO] inversionistas_espejo recibidos: ${JSON.stringify(inversionistas_espejo?.length ?? 'undefined')}`);
-    if (inversionistas_espejo && inversionistas_espejo.length > 0) {
-      // 🔒 Sincronización forzada solo de cuota_inversionista desde el padre.
-      // El monto_aportado del espejo se respeta tal como viene del frontend
-      // porque representa el saldo vivo del inversionista (capital - abonos)
-      // y puede divergir del padre cuando ya hubo abonos a capital.
-      const principalCuotas = new Map(
-        (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
-      );
-
-      const espejoSincronizado = inversionistas_espejo.map((inv) => ({
-        ...inv,
-        cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
-      }));
-
-      console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
-      try {
-        const espejoUserId = extractUserId(request);
-        const runEspejoUpdate = async (dbInstance: typeof db) =>
-          updateInvestors(
-            credito_id,
-            espejoSincronizado,
-            updateFields,
-            current,
-            numero_credito_sifco ?? current.numero_credito_sifco,
-            Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-            Number(updateFields.membresias_pago ?? current.membresias_pago),
-            Number(updateFields.gps ?? current.gps),
-            creditos_inversionistas_espejo,
-            parentCuotas,
-            dbInstance,
-          );
-
-        if (espejoUserId) {
-          await withAuditContext(espejoUserId, runEspejoUpdate);
-        } else {
-          await runEspejoUpdate(db);
-        }
-        console.log(`🪞 [ESPEJO] ✅ updateInvestors completado para espejo`);
-      } catch (espejoError) {
-        console.error(`🪞 [ESPEJO] ❌ Error en updateInvestors espejo:`, espejoError);
-        throw espejoError;
+    const runInvestorRebuild = async (tx: typeof db) => {
+      // 9. Actualizar inversionistas (Principal)
+      let parentCuotasTx: Map<number, string> = new Map();
+      if (inversionistas && inversionistas.length > 0) {
+        parentCuotasTx = await updateInvestors(
+          credito_id,
+          inversionistas,
+          updateFields,
+          current,
+          numero_credito_sifco ?? current.numero_credito_sifco,
+          Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+          Number(updateFields.membresias_pago ?? current.membresias_pago),
+          Number(updateFields.gps ?? current.gps),
+          creditos_inversionistas, // Explicit target
+          undefined,
+          tx,
+        );
       }
-    } else {
-      console.log(`🪞 [ESPEJO] ⚠️ Bloque saltado: inversionistas_espejo está vacío o undefined`);
-    }
 
-    // 10.5. Registrar en compras_credito_inversionista la entrada de cada
-    // inversionista nuevo (ya validado en 3.2). Va DESPUÉS del rebuild de
-    // padre/espejo: si el rebuild falla, no queda registro huérfano de una
-    // participación que nunca se materializó.
-    await registrarComprasInversionistasNuevos(credito_id, inversionistasNuevos);
+      // 10. Actualizar inversionistas (Espejo)
+      if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+        // 🔒 Sincronización forzada solo de cuota_inversionista desde el padre.
+        // El monto_aportado del espejo se respeta tal como viene del frontend
+        // porque representa el saldo vivo del inversionista (capital - abonos)
+        // y puede divergir del padre cuando ya hubo abonos a capital.
+        const principalCuotas = new Map(
+          (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
+        );
+
+        const espejoSincronizado = inversionistas_espejo.map((inv) => ({
+          ...inv,
+          cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
+        }));
+
+        console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
+        await updateInvestors(
+          credito_id,
+          espejoSincronizado,
+          updateFields,
+          current,
+          numero_credito_sifco ?? current.numero_credito_sifco,
+          Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+          Number(updateFields.membresias_pago ?? current.membresias_pago),
+          Number(updateFields.gps ?? current.gps),
+          creditos_inversionistas_espejo,
+          parentCuotasTx,
+          tx,
+        );
+        console.log(`🪞 [ESPEJO] ✅ updateInvestors completado para espejo`);
+      } else {
+        console.log(`🪞 [ESPEJO] ⚠️ Bloque saltado: inversionistas_espejo está vacío o undefined`);
+      }
+
+      // 10.5. Registrar en compras_credito_inversionista la entrada de cada
+      // inversionista nuevo (ya validado en 3.2). Va DESPUÉS del rebuild para
+      // que el registro refleje la participación que acaba de materializarse,
+      // pero dentro de la misma tx: o entran los dos o no entra ninguno.
+      await registrarComprasInversionistasNuevos(credito_id, inversionistasNuevos, tx);
+    };
+
+    if (
+      (inversionistas && inversionistas.length > 0) ||
+      (inversionistas_espejo && inversionistas_espejo.length > 0) ||
+      inversionistasNuevos.length > 0
+    ) {
+      try {
+        // withAuditContext ya abre su propia transacción (setea
+        // app.current_user_id para los triggers de auditoría); sin usuario, una
+        // transacción pelada.
+        const espejoUserId = extractUserId(request);
+        if (espejoUserId) {
+          await withAuditContext(espejoUserId, runInvestorRebuild);
+        } else {
+          await db.transaction(async (tx) => runInvestorRebuild(tx as unknown as typeof db));
+        }
+      } catch (investorError) {
+        console.error(`🪞 [ESPEJO] ❌ Error actualizando inversionistas:`, investorError);
+        throw investorError;
+      }
+    }
 
     set.status = 200;
     return updatedCredit;

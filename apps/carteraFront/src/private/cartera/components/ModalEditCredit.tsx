@@ -125,11 +125,12 @@ export function ModalEditCredit({
     return dateString ? new Date(dateString).toISOString().split('T')[0] : "2025-12-01";
   };
 
-  // IDs que ya participan en el crédito al abrir el modal (padre + espejo).
-  // Un inversionista "nuevo" NO puede ser uno de estos — ni aunque se borre y
-  // se vuelva a agregar en la misma edición: la operación no quedaría
-  // registrada en compras y la liquidación descuadra. El backend valida lo
-  // mismo (incluyendo historial); esto es la primera línea en UI.
+  // IDs que participan HOY en el crédito (padre + espejo, al abrir el modal).
+  // Un inversionista "nuevo" no puede ser uno de estos ni aunque se borre de la
+  // lista y se vuelva a agregar en la misma edición: sería la misma
+  // participación disfrazada de compra nueva. En cambio el que ya salió del
+  // crédito sí puede volver a entrar (rotación normal de pool). El backend
+  // valida exactamente lo mismo; esto es la primera línea en UI.
   const originalInvestorIds = useMemo(() => {
     const ids = new Set<number>();
     investorsInitial?.forEach((i) => ids.add(Number(i.inversionista_id)));
@@ -246,6 +247,21 @@ export function ModalEditCredit({
           return;
         }
       }
+      // Una sola compra de cartera por edición: la facturación prorratea el
+      // interés del pago con UNA fecha de corte, así que una segunda compra
+      // pendiente se quedaría sin prorratear. Las reinversiones no facturan y
+      // pueden ir varias juntas. El backend rechaza lo mismo (y además si el
+      // crédito ya arrastra una compra pendiente de facturar).
+      const nuevasCompras = nuevos.filter(
+        (inv: InvestorItem) => inv.tipo_operacion === "compra_cartera"
+      );
+      if (nuevasCompras.length > 1) {
+        toast.error(
+          "Solo se puede agregar una compra de cartera a la vez. Agregá una, esperá a que se facture el siguiente pago y luego la otra."
+        );
+        return;
+      }
+
       const idsInvestors = values.investors
         .map((inv: InvestorItem) => Number(inv.inversionista_id))
         .filter((id: number) => id > 0);

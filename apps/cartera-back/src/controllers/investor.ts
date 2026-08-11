@@ -3269,7 +3269,7 @@ export async function ejecutarReinversionAutomatica(
     `  📊 Moda porcentaje inversión: ${modaInversion}%, cash in: ${modaCashIn}%`,
   );
 
-  const reinversionResult = await addInvestorToCredit({
+  const reinversionResult = (await addInvestorToCredit({
     body: {
       inversionista_id: inv_id,
       monto_aportado: montoReinvertido,
@@ -3278,11 +3278,31 @@ export async function ejecutarReinversionAutomatica(
       tipo_operacion: "reinversion",
     },
     set: { status: 200 },
-  });
+  })) as any;
 
-  console.log(`  ✅ Reinversión automática completada inv ${inv_id}.`);
+  // `success: false` es un rollback total (ver addInvestorToCredit: el throw
+  // de contención vive DENTRO de la tx). `success: true` con
+  // `monto_sin_asignar > 0` es éxito parcial: algunos créditos se saltaron
+  // por contención y quedó remanente sin colocar. Ambos casos deben loguearse
+  // fuerte — antes de este chequeo se logueaba "✅ completada" siempre,
+  // incluso cuando la reinversión completa se había perdido.
+  const huboFalla = reinversionResult?.success === false;
+  const huboRemanente =
+    reinversionResult?.success === true &&
+    Number(reinversionResult?.monto_sin_asignar ?? 0) > 0;
+
+  if (huboFalla || huboRemanente) {
+    console.error(
+      `  ❌ Reinversión automática inv ${inv_id} por Q${montoReinvertido.toFixed(2)} NO se completó del todo:`,
+      reinversionResult,
+    );
+  } else {
+    console.log(`  ✅ Reinversión automática completada inv ${inv_id}.`);
+  }
+
   return {
     skipped: false,
+    ok: !huboFalla && !huboRemanente,
     moda_inversion: modaInversion,
     moda_cash_in: modaCashIn,
     monto: montoReinvertido,
@@ -4447,6 +4467,17 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               if (reinversionResult && (reinversionResult as any).success === false) {
                 console.error(`  ❌ Reinversión [${r.etiqueta}] sin candidatos compatibles. Aborto las siguientes:`, reinversionResult);
                 break;
+              }
+
+              // Éxito parcial: `success: true` pero quedó remanente sin
+              // colocar por contención (ver ejecutarReinversionAutomatica).
+              // No se aborta el resto de llamadasReinversion —son montos
+              // independientes (capital/interés/etc)— pero no puede quedar
+              // en silencio como si se hubiera colocado todo.
+              const remanente = Number((reinversionResult as any)?.monto_sin_asignar ?? 0);
+              if (remanente > 0) {
+                console.error(`  ⚠️ Reinversión [${r.etiqueta}] quedó con Q${remanente.toFixed(2)} sin colocar por contención:`, reinversionResult);
+                continue;
               }
 
               console.log(`  ✅ Reinversión [${r.etiqueta}] completada por Q${r.monto.toFixed(2)}:`, reinversionResult);

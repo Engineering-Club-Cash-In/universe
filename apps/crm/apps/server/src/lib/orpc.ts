@@ -203,6 +203,33 @@ const requireCobros = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireAccounting = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessAccounting(userRole)) {
+		throw new ORPCError("FORBIDDEN", { message: "Accounting role required" });
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 const requireCobrosSupervisor = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -620,6 +647,7 @@ export const crmOrCobrosProcedure = publicProcedure.use(requireCrmOrCobros);
 export const crmCobrosOrInvestmentsProcedure = publicProcedure.use(
 	requireCrmCobrosOrInvestments,
 );
+export const accountingProcedure = publicProcedure.use(requireAccounting);
 export const cobrosProcedure = publicProcedure.use(requireCobros);
 export const cobrosSupervisorProcedure = publicProcedure.use(
 	requireCobrosSupervisor,

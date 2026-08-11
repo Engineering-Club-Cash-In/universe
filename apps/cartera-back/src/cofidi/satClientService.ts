@@ -36,7 +36,11 @@ function esDocumentoNoEncontrado(mensaje: string | undefined): boolean {
   const normalizado = normalizarMensajeCofidi(mensaje);
   return (
     /(documento|dte|uuid).*no (se )?(encontro|encontrado|existe)/.test(normalizado) ||
-    /no (se )?(encontro|existe).*(documento|dte|uuid)/.test(normalizado)
+    /no (se )?(encontro|existe).*(documento|dte|uuid)/.test(normalizado) ||
+    // "El documento no ha sido emitido": el certificador devolvió UUID al
+    // certificar pero nunca emitió el DTE a SAT. Es un "no existe" definitivo,
+    // no un error transitorio de consulta.
+    /(documento|dte|uuid).*no ha sido emitid/.test(normalizado)
   );
 }
 

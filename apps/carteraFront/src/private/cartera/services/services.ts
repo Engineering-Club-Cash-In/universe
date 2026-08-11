@@ -724,6 +724,13 @@ export interface InversionistaPayload {
   porcentaje_inversion: number;
   fecha_inicio_participacion?: string;
   cuota_inversionista?: number;
+  /**
+   * Inversionista agregado desde la edición del crédito (no estaba antes).
+   * El backend exige declararlo así para registrar la operación en
+   * compras_credito_inversionista; sin ese registro la liquidación descuadra.
+   */
+  es_nuevo?: boolean;
+  tipo_operacion?: "compra_cartera" | "reinversion";
 }
 
 export interface UpdateCreditBody {

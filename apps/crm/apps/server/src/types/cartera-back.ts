@@ -754,6 +754,7 @@ export interface ResumenGlobalInversionista {
 	boleta_pendiente: BoletaPagoInversionista | null;
 	boleta_liquidacion?: BoletaPagoInversionista | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
+	reporte_liquidacion_url?: string | null;
 }
 
 // ============================================================================

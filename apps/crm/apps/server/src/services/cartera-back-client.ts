@@ -114,6 +114,12 @@ export interface ResumenGlobalInversionistasFilters {
 	estado?: "pending" | "uploaded" | "liquidated" | "all";
 	mes?: number;
 	anio?: number;
+	/**
+	 * Incluye a los inversionistas internos/propios (permite_distribucion = true:
+	 * Cube, Autocash, Blokfund, …). En cartera-back el flag es opt-in y por defecto
+	 * el endpoint solo devuelve externos.
+	 */
+	incluirInternos?: boolean;
 }
 
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
@@ -130,6 +136,15 @@ const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	accessTokenProvider: getCarteraAccessToken,
 	fetchTransport: globalThis.fetch,
 };
+
+/**
+ * Generar el reporte de pagos no liquidados recorre todos los créditos del
+ * inversionista, arma el Excel y lo sube a R2. Con inversionistas grandes eso
+ * supera los 30s del timeout por defecto.
+ */
+const REPORTE_NO_LIQUIDADOS_TIMEOUT_MS = Number.parseInt(
+	process.env.CARTERA_BACK_REPORTE_TIMEOUT || "300000",
+);
 
 // ============================================================================
 // ERROR TIPADO CON STATUS HTTP
@@ -694,6 +709,7 @@ export class CarteraBackClient {
 		endpoint: string,
 		options: RequestInit = {},
 		useCache = false,
+		timeoutMs?: number,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
@@ -720,7 +736,7 @@ export class CarteraBackClient {
 					Authorization: `Bearer ${token}`,
 					...options.headers,
 				},
-				signal: AbortSignal.timeout(this.config.timeout),
+				signal: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
 			};
 		};
 
@@ -1440,6 +1456,9 @@ export class CarteraBackClient {
 		if (filters.anio !== undefined) {
 			queryParams.set("anio", String(filters.anio));
 		}
+		if (filters.incluirInternos) {
+			queryParams.set("incluirInternos", "true");
+		}
 
 		// Sin cache: el estado de liquidación debe verse fresco siempre. Con cache
 		// en memoria + varias instancias, el invalidate del POST liquidar no llega
@@ -1466,6 +1485,9 @@ export class CarteraBackClient {
 		}
 		if (filters.anio !== undefined) {
 			queryParams.set("anio", String(filters.anio));
+		}
+		if (filters.incluirInternos) {
+			queryParams.set("incluirInternos", "true");
 		}
 		queryParams.set("excel", "true");
 
@@ -1499,6 +1521,29 @@ export class CarteraBackClient {
 			`/resumen-transferencias?${queryParams.toString()}`,
 			{ method: "GET" },
 			false,
+		);
+		return response;
+	}
+
+	async getReporteNoLiquidados(
+		inversionistaId: number,
+	): Promise<{ success: boolean; url: string; filename: string }> {
+		const queryParams = new URLSearchParams();
+		queryParams.set("id", String(inversionistaId));
+
+		// Sin cache: el reporte debe reflejar el estado actual de los pagos.
+		// Timeout propio de 5 min: armar el Excel recorre todos los créditos y
+		// pagos del inversionista y lo sube a R2, así que los 30s por defecto se
+		// quedan cortos con inversionistas grandes.
+		const response = await this.request<{
+			success: boolean;
+			url: string;
+			filename: string;
+		}>(
+			`/investor/reporte-no-liquidados?${queryParams.toString()}`,
+			{ method: "GET" },
+			false,
+			REPORTE_NO_LIQUIDADOS_TIMEOUT_MS,
 		);
 		return response;
 	}

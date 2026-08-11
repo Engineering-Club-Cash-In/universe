@@ -1357,6 +1357,10 @@ export async function resumeInvestor(
     return { inversionistas: [], page, perPage, totalItems: 0, totalPages: 0 };
   }
 
+  // `creditosInfo` ya trae en bloque las mismas columnas que antes se releían con una
+  // consulta por crédito dentro del map de abajo; se indexa para resolverlas en memoria.
+  const creditoInfoPorId = new Map(creditosInfo.map((c) => [c.credito_id, c]));
+
   // 🚀 Paginación sobre créditos
   const totalItems = creditosIds.length;
   const totalPages = Math.ceil(totalItems / perPage);
@@ -1422,23 +1426,9 @@ export async function resumeInvestor(
       // Procesar créditos del inversionista
       const creditosData = await Promise.all(
         creditosDeInv.map(async (c) => {
-          // 📌 Obtener info del crédito
-          const [credito] = await db
-            .select({
-              numero_credito_sifco: creditos.numero_credito_sifco,
-              nombre_usuario: usuarios.nombre,
-              nit_usuario: usuarios.nit,
-              capital: creditos.capital,
-              fecha_creacion: creditos.fecha_creacion,
-              porcentaje_interes: creditos.porcentaje_interes,
-              plazo: creditos.plazo,
-              cuota_interes: creditos.cuota_interes,
-              iva12: creditos.iva_12,
-            })
-            .from(creditos)
-            .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-            .where(eq(creditos.credito_id, c.credito_id))
-            .limit(1);
+          // 📌 Info del crédito: sale del bloque `creditosInfo` ya consultado arriba
+          // (mismas columnas, mismo filtro) en vez de una consulta por crédito.
+          const credito = creditoInfoPorId.get(c.credito_id);
 
           // 📌 Pagos (liquidados o no según el parámetro)
           // 🔥 NUEVO: Consultar según tipo (originales, espejos o ambas)
@@ -1544,7 +1534,6 @@ export async function resumeInvestor(
           const mes = fechaParaMes
             ? dayjs(fechaParaMes).format('MMMM') // 🔥 Esto da el mes correcto
             : null;
-            console.log("Fecha para mes:", fechaParaMes, "→ Mes:", mes);
        // 🆕 CORRECCIÓN: Cálculo según emite_factura
               if (descImp) {
                 abonoGeneralInteres = descImp.neto;
@@ -1737,7 +1726,7 @@ export async function resumeInvestor(
             porcentaje_inversionista: c.porcentaje_inversionista,
             cuota_inversionista: formatValue(c.cuota_inversionista),
             credito_inversionista_espejo_id: (c as any).credito_inversionista_espejo_id ?? null,
-            plazo: credito.plazo,
+            plazo: credito?.plazo,
             pagos: pagos_detalle,
             total_abono_capital: formatValue(total_abono_capital.toString()),
             total_abono_interes: formatValue(

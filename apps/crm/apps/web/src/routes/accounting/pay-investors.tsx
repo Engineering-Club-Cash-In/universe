@@ -10,6 +10,8 @@ import {
 	Download,
 	Eye,
 	FileCheck,
+	FileSpreadsheet,
+	FileText,
 	Loader2,
 	Search,
 	Send,
@@ -119,6 +121,7 @@ interface ResumenInversionista {
 	boleta_pendiente?: BoletaPendiente | null;
 	boleta_liquidacion?: BoletaPendiente | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
+	reporte_liquidacion_url?: string | null;
 }
 
 type EstadoBoletaFilter = "all" | "pending" | "liquidated";
@@ -668,6 +671,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 		useState(false);
 	const tieneBoleta = inv.boleta_pendiente != null;
 	const tieneBoletaLiquidacion = inv.boleta_liquidacion != null;
+	const reporteLiquidacionUrl = inv.reporte_liquidacion_url ?? null;
 	const estadoResumen =
 		inv.estado_liquidacion_resumen ?? (tieneBoleta ? "uploaded" : "pending");
 	const montoPrincipal = inv.total_cuota ?? inv.total_a_recibir_con_reinversion;
@@ -703,6 +707,34 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 		},
 		onError: (err) => {
 			toast.error(err instanceof Error ? err.message : "Error al liquidar");
+		},
+	});
+
+	const reporteNoLiquidadosMutation = useMutation({
+		...orpc.getReporteNoLiquidados.mutationOptions(),
+		onSuccess: (data) => {
+			if (!data?.success || !data?.url) {
+				toast.error("No se pudo generar el reporte");
+				return;
+			}
+			// La URL llega async, fuera del gesto del usuario: window.open y
+			// <a target="_blank"> se bloquean como popup. Un <a> sin target sí
+			// dispara. R2 responde el MIME de xlsx y sin Content-Disposition, así
+			// que el navegador no lo puede renderizar y lo descarga sin salir de
+			// la página. El atributo download lo ignora por ser cross-origin.
+			const link = document.createElement("a");
+			link.href = data.url;
+			link.download = data.filename || "reporte_no_liquidados.xlsx";
+			link.rel = "noopener";
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			toast.success("Reporte generado correctamente");
+		},
+		onError: (err) => {
+			toast.error(
+				err instanceof Error ? err.message : "Error al generar el reporte",
+			);
 		},
 	});
 
@@ -787,20 +819,35 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				</div>
 
 				{/* Acción */}
-				<div className="px-4 pt-1 pb-4">
+				<div className="flex flex-col gap-2 px-4 pt-1 pb-4">
 					{estadoResumen === "liquidated" ? (
-						tieneBoletaLiquidacion ? (
-							<Button
-								variant="ghost"
-								size="sm"
-								className="h-8 w-full gap-1.5 text-xs"
-								onClick={() =>
-									window.open(inv.boleta_liquidacion!.boleta_url, "_blank")
-								}
-							>
-								<Eye className="h-3.5 w-3.5" />
-								Ver boleta
-							</Button>
+						tieneBoletaLiquidacion || reporteLiquidacionUrl ? (
+							<div className="flex gap-2">
+								{tieneBoletaLiquidacion && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-8 flex-1 gap-1.5 text-xs"
+										onClick={() =>
+											window.open(inv.boleta_liquidacion!.boleta_url, "_blank")
+										}
+									>
+										<Eye className="h-3.5 w-3.5" />
+										Ver boleta
+									</Button>
+								)}
+								{reporteLiquidacionUrl && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-8 flex-1 gap-1.5 text-xs"
+										onClick={() => window.open(reporteLiquidacionUrl, "_blank")}
+									>
+										<FileText className="h-3.5 w-3.5" />
+										Reporte
+									</Button>
+								)}
+							</div>
 						) : (
 							<div className="flex h-8 w-full items-center justify-center rounded-md bg-muted font-medium text-muted-foreground text-xs">
 								Completada
@@ -862,6 +909,29 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 								Liquidar sin boleta
 							</Button>
 						</div>
+					)}
+
+					{/* Solo tiene sentido mientras no se haya liquidado: una vez
+					    liquidado el reporte de no liquidados sale vacío. */}
+					{estadoResumen !== "liquidated" && (
+						<Button
+							variant="outline"
+							size="sm"
+							className="h-8 w-full gap-1.5 border-emerald-600/40 text-emerald-700 text-xs hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+							disabled={reporteNoLiquidadosMutation.isPending}
+							onClick={() =>
+								reporteNoLiquidadosMutation.mutate({
+									inversionistaId: inv.inversionista_id,
+								})
+							}
+						>
+							{reporteNoLiquidadosMutation.isPending ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<FileSpreadsheet className="h-3.5 w-3.5" />
+							)}
+							Preview Liquidación
+						</Button>
 					)}
 				</div>
 			</Card>
@@ -940,6 +1010,10 @@ function PagarInversionistas() {
 		() => ({
 			estado: estadoBoletaFilter,
 			...(requiresPeriodo ? { mes: mesFiltro, anio: anioFiltro } : {}),
+			// Los inversionistas internos/propios (Cube, Autocash, …) también se pagan
+			// desde esta pantalla. En cartera-back el flag es opt-in: sin él, el
+			// endpoint solo devuelve externos y estos no aparecerían en la lista.
+			incluirInternos: true,
 		}),
 		[anioFiltro, estadoBoletaFilter, mesFiltro, requiresPeriodo],
 	);

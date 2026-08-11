@@ -44,6 +44,7 @@ import {
 	appRouter,
 	disbursementRouter,
 	manualVehicleRouter,
+	proyeccionRouter,
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
@@ -175,6 +176,7 @@ const handler = new RPCHandler(
 		manualVehicleRouter,
 		investmentsRouter,
 		disbursementRouter,
+		proyeccionRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {
@@ -833,6 +835,9 @@ app.get("/api/accounting/resumen-global-excel", async (c) => {
 			mes: mes ? Number(mes) : undefined,
 			anio: anio ? Number(anio) : undefined,
 			inversionistaId: inversionistaId || undefined,
+			// Mismo criterio que la tabla de Pagar Inversionistas: el Excel debe
+			// traer también a los internos/propios (Cube, Autocash, …).
+			incluirInternos: true,
 		});
 		return c.json(result);
 	} catch (err: any) {

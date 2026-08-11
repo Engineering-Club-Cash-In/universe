@@ -3308,11 +3308,16 @@ if (facturasExistentes.length > 0) {
         console.log(`🏢 Emisor: ${emisorKey} (${emisorConfig.config.emisor.nombreEmisor})`);
 
         // ============================================
-        // 0️⃣ IDEMPOTENCIA (antes de tocar SAT)
+        // 0️⃣ IDEMPOTENCIA — parte 1: ¿ya se emitió esta factura?
         // --------------------------------------------
         // Si el caller manda idempotency_key, la MISMA clave nunca emite dos
         // facturas: se devuelve la que ya se emitió. Sin clave, el
         // comportamiento es el de siempre (cada POST factura).
+        //
+        // Acá solo se CONSULTA (para no gastar el viaje a SAT si ya existe). La
+        // RESERVA se toma más abajo, después de las validaciones y justo antes
+        // de certificar: si se reservara acá, un 400 por NIT inválido dejaría la
+        // clave tomada y el usuario no podría corregir hasta 10 min después.
         // ============================================
         const respuestaReutilizada = (f: FacturaIdempotente) => ({
           success: true as const,
@@ -3353,25 +3358,6 @@ if (facturasExistentes.length > 0) {
             );
             await liberarIdempotencyKey(idempotencyKey, true);
           }
-
-          if ((await reservarIdempotencyKey(idempotencyKey)) === "en_proceso") {
-            // Otra request tiene la clave tomada. Puede haber terminado entre
-            // el SELECT y el INSERT, así que se vuelve a mirar antes de rendirse.
-            const reciente = await buscarFacturaPorIdempotencyKey(idempotencyKey);
-            if (reciente && reciente.status !== "ANULADA") {
-              return respuestaReutilizada(reciente);
-            }
-            console.warn(
-              `⏳ idempotency_key "${idempotencyKey}" en proceso en otra request: NO se factura`
-            );
-            set.status = 409;
-            return {
-              success: false,
-              error: "Ya hay una facturación en curso con esta idempotency_key",
-              en_proceso: true,
-            };
-          }
-          reservaTomada = true;
         }
 
         // ============================================
@@ -3490,6 +3476,35 @@ if (facturasExistentes.length > 0) {
             ],
           },
         ];
+
+        // ============================================
+        // 0️⃣ IDEMPOTENCIA — parte 2: reservar la clave
+        // --------------------------------------------
+        // Justo antes de tocar SAT y después de TODAS las validaciones: los 400
+        // de arriba (NIT inválido, items malos) salen por `return` y no pasan
+        // por el catch, así que reservar antes dejaría la clave tomada 10 min
+        // aunque no se hubiera emitido nada.
+        // ============================================
+        if (idempotencyKey) {
+          if ((await reservarIdempotencyKey(idempotencyKey)) === "en_proceso") {
+            // Otra request tiene la clave tomada. Puede haber terminado entre
+            // el SELECT y el INSERT, así que se vuelve a mirar antes de rendirse.
+            const reciente = await buscarFacturaPorIdempotencyKey(idempotencyKey);
+            if (reciente && reciente.status !== "ANULADA") {
+              return respuestaReutilizada(reciente);
+            }
+            console.warn(
+              `⏳ idempotency_key "${idempotencyKey}" en proceso en otra request: NO se factura`
+            );
+            set.status = 409;
+            return {
+              success: false,
+              error: "Ya hay una facturación en curso con esta idempotency_key",
+              en_proceso: true,
+            };
+          }
+          reservaTomada = true;
+        }
 
         // ============================================
         // 5️⃣ CERTIFICAR FACTURA (con emisor seleccionado)

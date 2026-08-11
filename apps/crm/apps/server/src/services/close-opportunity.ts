@@ -433,6 +433,40 @@ async function closeInvoiceSyncOperation(
 }
 
 /**
+ * ¿Este gasto administrativo ya se registró antes con éxito?
+ *
+ * `POST /api/gastos-administrativos` inserta sin condiciones, así que en un
+ * re-cierre de la misma oportunidad (donde la factura NO se vuelve a emitir por
+ * la idempotency_key) el gasto sí se duplicaría y el reporte diario contaría
+ * doble. El log del CRM ya guarda una fila por gasto con un entityId estable,
+ * así que sirve de candado sin tocar cartera.
+ */
+async function gastoYaRegistrado(gastoEntityId: string): Promise<boolean> {
+	try {
+		const [row] = await db
+			.select({ id: carteraBackSyncLog.id })
+			.from(carteraBackSyncLog)
+			.where(
+				and(
+					eq(carteraBackSyncLog.operation, "register_gasto_administrativo"),
+					eq(carteraBackSyncLog.entityId, gastoEntityId),
+					eq(carteraBackSyncLog.status, "success"),
+				),
+			)
+			.limit(1);
+		return !!row;
+	} catch (error) {
+		// Si no se puede consultar, se conserva el comportamiento de siempre
+		// (registrar) en vez de arriesgarse a perder el gasto.
+		console.error(
+			"[CloseOpportunity] No se pudo verificar si el gasto ya existía:",
+			error,
+		);
+		return false;
+	}
+}
+
+/**
  * Un abort/timeout deja la operación EN DUDA: cartera pudo haberla ejecutado
  * igual (certificar en SAT no se cancela porque el cliente cuelgue). Se marca
  * distinto para que se pueda auditar antes de re-facturar a mano.
@@ -813,52 +847,76 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 						};
 						const gastoEntityId = `${opportunityId}-${invoice.name}-gasto`;
 
-						// 📝 Log persistente en cartera_back_sync_log (por cualquier
-						// cosa): deja traza en BD de cada gasto, no solo en consola.
-						// Se abre ANTES de la llamada, igual que la factura, para que un
-						// intento que no vuelve quede como "pending".
-						const gastoLogId = await logInvoiceSyncOperation({
-							operation: "register_gasto_administrativo",
-							entityType: "gasto",
-							entityId: gastoEntityId,
-							status: "pending",
-							requestPayload: JSON.stringify(gastoBody),
-							startedAt: new Date(gastoStart),
-							userId,
-							source: "crm",
-						});
-
-						try {
-							const gastoResp =
-								await carteraBackClient.crearGastoAdministrativo(gastoBody);
-							gastosRegistrados++;
-
-							await closeInvoiceSyncOperation(gastoLogId, {
-								status: "success",
-								responsePayload: JSON.stringify(gastoResp),
+						// 🔒 Candado del gasto. La factura ya no se duplica (idempotency_key),
+						// pero /api/gastos-administrativos inserta sin condiciones: sin esto,
+						// un re-cierre volvería a sumar el gasto al reporte del día.
+						if (await gastoYaRegistrado(gastoEntityId)) {
+							await logInvoiceSyncOperation({
+								operation: "register_gasto_administrativo",
+								entityType: "gasto",
+								entityId: gastoEntityId,
+								status: "skipped",
+								requestPayload: JSON.stringify(gastoBody),
+								responsePayload: JSON.stringify({
+									motivo: "ya existía un registro exitoso para este gasto",
+								}),
 								startedAt: new Date(gastoStart),
+								completedAt: new Date(),
+								durationMs: Date.now() - gastoStart,
+								userId,
+								source: "crm",
 							});
-
 							console.log(
-								`[CloseOpportunity] ✓ Gasto administrativo registrado: "${invoice.name}" = ${montoFacturado}`,
+								`[CloseOpportunity] ↺ Gasto administrativo "${invoice.name}" ya estaba registrado, no se repite`,
 							);
-						} catch (gastoError) {
-							const gastoMsg =
-								gastoError instanceof Error
-									? gastoError.message
-									: String(gastoError);
-
-							await closeInvoiceSyncOperation(gastoLogId, {
-								status: "error",
-								errorMessage: esTimeout(gastoError)
-									? `TIMEOUT (el gasto pudo haberse registrado igual, verificar antes de repetirlo): ${gastoMsg}`
-									: gastoMsg,
+						} else {
+							// 📝 Log persistente en cartera_back_sync_log (por cualquier
+							// cosa): deja traza en BD de cada gasto, no solo en consola.
+							// Se abre ANTES de la llamada, igual que la factura, para que un
+							// intento que no vuelve quede como "pending".
+							const gastoLogId = await logInvoiceSyncOperation({
+								operation: "register_gasto_administrativo",
+								entityType: "gasto",
+								entityId: gastoEntityId,
+								status: "pending",
+								requestPayload: JSON.stringify(gastoBody),
 								startedAt: new Date(gastoStart),
+								userId,
+								source: "crm",
 							});
 
-							console.error(
-								`[CloseOpportunity] ✗ No se pudo registrar el gasto administrativo "${invoice.name}": ${gastoMsg}`,
-							);
+							try {
+								const gastoResp =
+									await carteraBackClient.crearGastoAdministrativo(gastoBody);
+								gastosRegistrados++;
+
+								await closeInvoiceSyncOperation(gastoLogId, {
+									status: "success",
+									responsePayload: JSON.stringify(gastoResp),
+									startedAt: new Date(gastoStart),
+								});
+
+								console.log(
+									`[CloseOpportunity] ✓ Gasto administrativo registrado: "${invoice.name}" = ${montoFacturado}`,
+								);
+							} catch (gastoError) {
+								const gastoMsg =
+									gastoError instanceof Error
+										? gastoError.message
+										: String(gastoError);
+
+								await closeInvoiceSyncOperation(gastoLogId, {
+									status: "error",
+									errorMessage: esTimeout(gastoError)
+										? `TIMEOUT (el gasto pudo haberse registrado igual, verificar antes de repetirlo): ${gastoMsg}`
+										: gastoMsg,
+									startedAt: new Date(gastoStart),
+								});
+
+								console.error(
+									`[CloseOpportunity] ✗ No se pudo registrar el gasto administrativo "${invoice.name}": ${gastoMsg}`,
+								);
+							}
 						}
 					}
 				} catch (error) {

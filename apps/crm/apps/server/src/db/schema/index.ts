@@ -21,6 +21,7 @@ export * from "./notifications";
 export * from "./otp";
 export * from "./quotations";
 export * from "./renap";
+export * from "./sat-vehiculos";
 export * from "./vehicles";
 export * from "./views";
 export * from "./whatsapp-logs";

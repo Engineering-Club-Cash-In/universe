@@ -96,6 +96,23 @@ export interface ModalidadFacturacionSpreadRow {
 // CONFIGURATION
 // ============================================================================
 
+export interface VehiculoSatPropio {
+	placa: string;
+	tipo: string;
+	marca: string;
+	modelo: string;
+	color: string;
+	estado: string;
+}
+
+export interface SatVehiculosPropiosResponse {
+	nit: string;
+	estado: "OK" | "ERROR" | "CODIGO_REQUERIDO" | "BLOQUEADO";
+	vehiculos: VehiculoSatPropio[];
+	mensajeError?: string;
+	evidencia?: string;
+}
+
 interface CarteraBackClientConfig {
 	baseUrl: string;
 	timeout: number;
@@ -1167,6 +1184,24 @@ export class CarteraBackClient {
 			body: JSON.stringify(input),
 		});
 		return response.data || { success: false, message: "No response" };
+	}
+
+	// ========================================================================
+	// SAT - VEHÍCULOS PROPIOS
+	// ========================================================================
+
+	/**
+	 * Dispara el scraping de Agencia Virtual en cartera-back y devuelve el
+	 * listado crudo. Cartera no persiste nada: el cruce y el guardado son de
+	 * este lado, que es donde vive `vehicles`.
+	 *
+	 * Devuelve el cuerpo aunque el estado no sea OK: cartera responde 502 con
+	 * el detalle del fallo, y ese detalle es justamente lo que hay que guardar.
+	 */
+	async obtenerVehiculosPropiosSat(): Promise<SatVehiculosPropiosResponse> {
+		return this.request<SatVehiculosPropiosResponse>("/sat-vehiculos/propios", {
+			method: "GET",
+		});
 	}
 
 	// ========================================================================

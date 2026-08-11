@@ -973,6 +973,23 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           ]),
         );
 
+        // ── Mapa de status actual por inversionista en el espejo ──
+        // Al hacer nuke&rebuild, los OTROS inversionistas deben conservar su
+        // status: pueden tener su PROPIA sesión pendiente en este crédito
+        // (p.ej. dos reinversiones de la misma liquidación que caen al mismo
+        // crédito, una tras otra). Si no, caerían a "completado" y su sesión
+        // desaparecería de Sesiones Pendientes dejando la compra huérfana.
+        const statusActualPorInv = new Map<
+          number,
+          typeof creditos_inversionistas_espejo.$inferSelect.status
+        >(
+          (espejoActual ?? []).map((e: any) => [
+            e.inversionista_id as number,
+            (e.status ??
+              "completado") as typeof creditos_inversionistas_espejo.$inferSelect.status,
+          ]),
+        );
+
         // ── Extraer datos del crédito que necesitamos para recalcular ──
         // Estos vienen del GET, no hacemos queries adicionales
         const creditoData = {
@@ -1259,11 +1276,14 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
 
         const dataEspejoConStatus = dataEspejoRaw.map((inv) => ({
           ...inv,
-          // Solo el inversionista nuevo recibe el status pendiente
-          // Los demás se mantienen como "completado"
-          status: (inv.inversionista_id === inversionista_id
+          // Solo el inversionista nuevo recibe el status pendiente de esta
+          // operación. Los demás preservan su status previo (pueden tener su
+          // propia sesión pendiente en este crédito); sin fila previa quedan
+          // en "completado".
+          status:
+            inv.inversionista_id === inversionista_id
               ? statusEspejo
-              : "completado") as "pendiente_reinversion" | "pendiente_compra_cartera" | "completado",
+              : statusActualPorInv.get(inv.inversionista_id) ?? "completado",
           // tipo_reinversion (prioridad: lo que viene > viejo del espejo > null):
           //   - target: si viene Y en el request lo usa; si no, preserva el
           //     valor previo del espejo. Aplica tanto en compra_cartera como

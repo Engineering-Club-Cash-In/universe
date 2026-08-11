@@ -1414,22 +1414,24 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         );
       }
 
-      // ── Todo-o-nada: si NINGÚN destino se pudo asignar, no limpiar el
+      // ── Todo-o-nada: si CUALQUIER destino fue rechazado, no limpiar el
       //    origen ──
-      // Sin este corte, el PASO 5 de abajo corre igual aunque todos los
-      // destinos hayan sido rechazados (crédito no encontrado, CUBE
-      // insuficiente, sesión pendiente ajena, etc.): saca al inversionista
-      // del crédito origen, le devuelve el monto a CUBE, y responde 200 con
-      // 0 destinos asignados y N errores. El inversionista queda fuera de
-      // TODO crédito sin que se le haya reasignado a ningún lado — el
-      // equivalente a un "cancelar sesión" que nadie pidió. Mismo criterio
-      // todo-o-nada que ya usa addInvestorToCredit en modo manual: si nada
-      // se pudo colocar, se aborta antes de tocar el origen, y el operador
-      // ve el error en vez de descubrir después que el inversionista ya no
-      // está en el crédito.
-      if (reasignaciones.length > 0 && resultadosAsignacion.length === 0) {
+      // Sin este corte, el PASO 5 de abajo resta SIEMPRE `montoEnOrigen`
+      // completo (calculado ANTES del loop, sobre el total de reasignaciones
+      // pedidas) sin importar cuántos destinos realmente se asignaron. Con
+      // 0 de N destinos exitosos, eso deja al inversionista fuera de TODO
+      // crédito con respuesta 200 — el caso extremo. Pero con solo 1 destino
+      // rechazado de varios (crédito no encontrado, CUBE insuficiente,
+      // sesión pendiente ajena, etc.) el bug es el mismo, más difícil de
+      // notar: el PASO 5 resta igual el monto completo, incluida la porción
+      // del destino que falló, y esa porción se pierde hacia CUBE en
+      // silencio con respuesta 200 y "N-1 destinos, 1 error". Por eso el
+      // corte es sobre `errores.length`, no sobre si hubo al menos un
+      // éxito — un solo rechazo ya vuelve inconsistente el monto que el
+      // PASO 5 asume que salió completo del origen.
+      if (errores.length > 0) {
         throw new ReasignacionNoDisponibleError(
-          `Ningún crédito destino pudo recibir la reasignación (${errores.length} rechazado(s)); no se movió al inversionista del crédito origen.`,
+          `${errores.length} de ${reasignaciones.length} crédito(s) destino fueron rechazados; no se movió al inversionista del crédito origen para no perder la porción del destino rechazado.`,
         );
       }
 

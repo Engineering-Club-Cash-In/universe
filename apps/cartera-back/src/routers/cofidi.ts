@@ -3348,6 +3348,18 @@ if (facturasExistentes.length > 0) {
             console.log(
               `♻️ idempotency_key "${idempotencyKey}" ya tiene factura ${yaEmitida.serie}-${yaEmitida.numero}: se devuelve esa`
             );
+            // Si la request original guardó la factura pero murió antes de
+            // escribir el desglose, ese ingreso nunca llegaría al reporte: sin
+            // esto, cada reintento devolvería la factura y el hueco quedaría
+            // para siempre. `soloSiFalta` evita pisar un desglose que ya está
+            // bien (los montos de ESTA request podrían no ser los de la
+            // factura que se emitió en su momento).
+            await guardarDesgloseGenerico({
+              facturaId: yaEmitida.factura_id,
+              itemsInput,
+              nitNormalizado: (nit || "").trim().replace(/-/g, "").toUpperCase(),
+              soloSiFalta: true,
+            });
             return respuestaReutilizada(yaEmitida);
           }
 
@@ -3546,78 +3558,12 @@ if (facturasExistentes.length > 0) {
         }
 
         // 🧾 Desglose de la factura GENÉRICA para el reporte diario (best-effort,
-        //    NO afecta la facturación). Solo para items que traen `rubro_desglose`.
-        //    La categoría (columna de producto del reporte) se resuelve por el NIT
-        //    del receptor → usuario con créditos → usuarios.categoria.
-        try {
-          const RUBROS_VALIDOS = new Set([
-            "CAPITAL", "INTERES", "MEMBRESIA", "SEGURO", "GPS",
-            "MORA", "OTROS", "INTERES_INVERSIONISTAS", "ROYALTY",
-          ]);
-          const itemsConRubro = (itemsInput as any[]).filter(
-            (it) =>
-              it.rubro_desglose &&
-              RUBROS_VALIDOS.has(String(it.rubro_desglose).toUpperCase())
-          );
-          if (itemsConRubro.length > 0 && resultado.factura_id) {
-            // Categoría del receptor: usuario (con créditos) por NIT; el del crédito más reciente.
-            const catRes = await db.execute(sql`
-              SELECT u.categoria
-              FROM cartera.usuarios u
-              WHERE upper(regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g'))
-                  = upper(regexp_replace(${nitNormalizado}, '[^0-9A-Za-z]', '', 'g'))
-                AND EXISTS (SELECT 1 FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id)
-              ORDER BY (SELECT MAX(c.fecha_creacion) FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id) DESC NULLS LAST
-              LIMIT 1
-            `);
-            const categoria = (catRes as any).rows?.[0]?.categoria ?? null;
-
-            // Agrupar por rubro (varios items pueden compartir rubro). monto = total con IVA.
-            const porRubro: Record<string, Big> = {};
-            for (const it of itemsConRubro) {
-              const k = String(it.rubro_desglose).toUpperCase();
-              porRubro[k] = (porRubro[k] ?? new Big(0)).plus(new Big(it.monto || 0));
-            }
-
-            await db.transaction(async (tx) => {
-              // Reemplazar para que re-facturar no duplique.
-              await tx.execute(
-                sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${resultado.factura_id} AND pago_id IS NULL`
-              );
-              for (const [rubro, montoBig] of Object.entries(porRubro)) {
-                if (montoBig.lte(0)) continue;
-                const iva = new Big(
-                  calcularIvaExacto(parseFloat(montoBig.toFixed(2))).montoImpuesto
-                );
-                await tx.execute(sql`
-                  INSERT INTO cartera.facturacion_desglose
-                    (pago_id, factura_id, rubro, monto_total, monto_iva, fecha_aplicado_gt, categoria)
-                  VALUES (
-                    NULL,
-                    ${resultado.factura_id},
-                    ${rubro}::cartera.rubro_facturacion,
-                    ${montoBig.toFixed(2)},
-                    ${iva.toFixed(2)},
-                    -- fecha_emision YA se guarda en hora Guatemala (certificarFacturaHelper
-                    -- le resta 6h antes de persistir), así que se usa directo SIN volver a
-                    -- convertir de UTC→GT (eso shifteaba las genéricas de 00:00–05:59 al día anterior).
-                    (SELECT fecha_emision::date
-                       FROM cartera.facturas_electronicas WHERE factura_id = ${resultado.factura_id}),
-                    ${categoria}
-                  )
-                `);
-              }
-            });
-            console.log(
-              `🧾 Desglose genérico guardado: ${Object.keys(porRubro).length} rubro(s) para factura ${resultado.factura_id} (categoria=${categoria ?? "—"})`
-            );
-          }
-        } catch (desgloseError: any) {
-          console.error(
-            `⚠️ No se pudo guardar el desglose genérico (NO afecta la facturación):`,
-            desgloseError?.message
-          );
-        }
+        //    NO afecta la facturación). Ver guardarDesgloseGenerico().
+        await guardarDesgloseGenerico({
+          facturaId: resultado.factura_id,
+          itemsInput,
+          nitNormalizado,
+        });
 
         return {
           success: true,
@@ -3643,12 +3589,27 @@ if (facturasExistentes.length > 0) {
       } catch (error) {
         console.error("❌ Error facturando genérico:", error);
 
-        // La reserva solo se suelta si NO llegó a factura: así un reintento
-        // legítimo puede volver a intentar, sin abrir la puerta a duplicar una
-        // factura que sí se emitió.
-        if (idempotencyKey && reservaTomada) {
+        // La reserva solo se suelta si el error ocurrió ANTES de certificar en
+        // SAT: ahí no pasó nada y un reintento legítimo debe poder seguir.
+        //
+        // Si el DTE ya se había certificado y reventó después (parseo del XML,
+        // insert en BD), la factura EXISTE en SAT pero puede no estar en la BD:
+        // soltar la clave dejaría que el siguiente reintento certifique una
+        // duplicada. Se deja la reserva puesta (queda EN DUDA) y se avisa fuerte
+        // para revisión manual; a los 10 min la reserva se considera abandonada,
+        // así que esto no bloquea para siempre.
+        const yaCertificado =
+          (error as { certificadoEnSat?: boolean })?.certificadoEnSat === true;
+
+        if (idempotencyKey && reservaTomada && !yaCertificado) {
           await liberarIdempotencyKey(idempotencyKey).catch((e) =>
             console.error("⚠️ No se pudo liberar la idempotency_key:", e)
+          );
+        } else if (idempotencyKey && reservaTomada && yaCertificado) {
+          console.error(
+            `🚨 idempotency_key "${idempotencyKey}": el DTE se certificó en SAT pero la request falló después. ` +
+              `La reserva NO se suelta para no duplicar. Revisar en SAT si la factura quedó emitida ` +
+              `antes de volver a facturar (script backfill-facturas-faltantes).`
           );
         }
 
@@ -4025,6 +3986,120 @@ if (facturasExistentes.length > 0) {
 // ============================================
 // 🔥 FUNCIÓN HELPER PARA CERTIFICAR FACTURA
 // ============================================
+/**
+ * Guarda el desglose por rubro de una factura GENÉRICA, que es lo que el
+ * reporte diario suma (`facturacion_snapshot_diario` se regenera desde
+ * `facturacion_desglose`, no desde las facturas).
+ *
+ * Best-effort: si falla NO rompe la facturación, solo se loguea.
+ *
+ * @param soloSiFalta Para el camino de factura REUTILIZADA (idempotency_key):
+ *   si el desglose ya está, no se toca — los montos de esta request podrían no
+ *   ser los de la factura que ya se emitió. Solo repara el hueco que deja una
+ *   request que guardó la factura y murió antes de escribir el desglose.
+ */
+async function guardarDesgloseGenerico({
+  facturaId,
+  itemsInput,
+  nitNormalizado,
+  soloSiFalta = false,
+}: {
+  facturaId?: number | null;
+  itemsInput: any[];
+  nitNormalizado: string;
+  soloSiFalta?: boolean;
+}): Promise<void> {
+  try {
+    const RUBROS_VALIDOS = new Set([
+      "CAPITAL", "INTERES", "MEMBRESIA", "SEGURO", "GPS",
+      "MORA", "OTROS", "INTERES_INVERSIONISTAS", "ROYALTY",
+    ]);
+    const itemsConRubro = itemsInput.filter(
+      (it) =>
+        it.rubro_desglose &&
+        RUBROS_VALIDOS.has(String(it.rubro_desglose).toUpperCase())
+    );
+    if (itemsConRubro.length === 0 || !facturaId) return;
+
+    if (soloSiFalta) {
+      const yaHay = await db.execute(sql`
+        SELECT 1 FROM cartera.facturacion_desglose
+        WHERE factura_id = ${facturaId} AND pago_id IS NULL
+        LIMIT 1
+      `);
+      if (((yaHay as any).rows ?? []).length > 0) return;
+      console.log(
+        `🧾 La factura ${facturaId} no tenía desglose (request anterior murió a mitad): se rellena`
+      );
+    }
+
+    const Big = (await import("big.js")).default;
+
+    // Misma fórmula que usa /facturar-generico para armar los items: IVA
+    // desglosado desde el total, ajustando la base si sobra/falta un centavo.
+    const ivaDesdeTotal = (totalConIva: number): string => {
+      const total = new Big(totalConIva);
+      const montoGravable = total.div("1.12").round(2, Big.roundHalfUp);
+      return montoGravable.times("0.12").round(2, Big.roundHalfUp).toFixed(2);
+    };
+
+    // Categoría del receptor: usuario (con créditos) por NIT; el del crédito más reciente.
+    const catRes = await db.execute(sql`
+      SELECT u.categoria
+      FROM cartera.usuarios u
+      WHERE upper(regexp_replace(COALESCE(u.nit, ''), '[^0-9A-Za-z]', '', 'g'))
+          = upper(regexp_replace(${nitNormalizado}, '[^0-9A-Za-z]', '', 'g'))
+        AND EXISTS (SELECT 1 FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id)
+      ORDER BY (SELECT MAX(c.fecha_creacion) FROM cartera.creditos c WHERE c.usuario_id = u.usuario_id) DESC NULLS LAST
+      LIMIT 1
+    `);
+    const categoria = (catRes as any).rows?.[0]?.categoria ?? null;
+
+    // Agrupar por rubro (varios items pueden compartir rubro). monto = total con IVA.
+    const porRubro: Record<string, InstanceType<typeof Big>> = {};
+    for (const it of itemsConRubro) {
+      const k = String(it.rubro_desglose).toUpperCase();
+      porRubro[k] = (porRubro[k] ?? new Big(0)).plus(new Big(it.monto || 0));
+    }
+
+    await db.transaction(async (tx) => {
+      // Reemplazar para que re-facturar no duplique.
+      await tx.execute(
+        sql`DELETE FROM cartera.facturacion_desglose WHERE factura_id = ${facturaId} AND pago_id IS NULL`
+      );
+      for (const [rubro, montoBig] of Object.entries(porRubro)) {
+        if (montoBig.lte(0)) continue;
+        const iva = new Big(ivaDesdeTotal(parseFloat(montoBig.toFixed(2))));
+        await tx.execute(sql`
+          INSERT INTO cartera.facturacion_desglose
+            (pago_id, factura_id, rubro, monto_total, monto_iva, fecha_aplicado_gt, categoria)
+          VALUES (
+            NULL,
+            ${facturaId},
+            ${rubro}::cartera.rubro_facturacion,
+            ${montoBig.toFixed(2)},
+            ${iva.toFixed(2)},
+            -- fecha_emision YA se guarda en hora Guatemala (certificarFacturaHelper
+            -- le resta 6h antes de persistir), así que se usa directo SIN volver a
+            -- convertir de UTC→GT (eso shifteaba las genéricas de 00:00–05:59 al día anterior).
+            (SELECT fecha_emision::date
+               FROM cartera.facturas_electronicas WHERE factura_id = ${facturaId}),
+            ${categoria}
+          )
+        `);
+      }
+    });
+    console.log(
+      `🧾 Desglose genérico guardado: ${Object.keys(porRubro).length} rubro(s) para factura ${facturaId} (categoria=${categoria ?? "—"})`
+    );
+  } catch (desgloseError: any) {
+    console.error(
+      `⚠️ No se pudo guardar el desglose genérico (NO afecta la facturación):`,
+      desgloseError?.message
+    );
+  }
+}
+
 async function certificarFacturaHelper({
   pago_id,
   receptor,
@@ -4061,6 +4136,10 @@ async function certificarFacturaHelper({
    */
   idempotencyKey?: string | null;
 }) {
+  // ¿SAT ya certificó? Viaja en el error para que el caller sepa si la
+  // operación quedó EN DUDA (ver el catch de más abajo).
+  let certificadoEnSat = false;
+
   try {
     console.log(`\n📄 ========== CERTIFICANDO FACTURA ==========`);
 
@@ -4177,6 +4256,10 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         requestCompleto,
         idInterno
       );
+      // A partir de acá el DTE EXISTE en SAT. Si algo revienta después (parseo
+      // del XML, insert en BD), el caller no puede tratarlo como "no pasó nada":
+      // reintentar certificaría un duplicado. Se marca el error para que decida.
+      certificadoEnSat = true;
       console.log(
         `   ✅ Certificado en SAT: ${resultado.serie}-${resultado.numero}`
       );
@@ -4444,6 +4527,10 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     };
   } catch (error) {
     console.error(`❌ Error certificando factura:`, error);
+    // Si ya se había certificado, el caller NO puede reintentar a ciegas.
+    if (certificadoEnSat && error && typeof error === "object") {
+      (error as { certificadoEnSat?: boolean }).certificadoEnSat = true;
+    }
     throw error;
   }
 }

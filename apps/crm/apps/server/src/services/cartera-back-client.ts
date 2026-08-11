@@ -114,6 +114,12 @@ export interface ResumenGlobalInversionistasFilters {
 	estado?: "pending" | "uploaded" | "liquidated" | "all";
 	mes?: number;
 	anio?: number;
+	/**
+	 * Incluye a los inversionistas internos/propios (permite_distribucion = true:
+	 * Cube, Autocash, Blokfund, …). En cartera-back el flag es opt-in y por defecto
+	 * el endpoint solo devuelve externos.
+	 */
+	incluirInternos?: boolean;
 }
 
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
@@ -1450,6 +1456,9 @@ export class CarteraBackClient {
 		if (filters.anio !== undefined) {
 			queryParams.set("anio", String(filters.anio));
 		}
+		if (filters.incluirInternos) {
+			queryParams.set("incluirInternos", "true");
+		}
 
 		// Sin cache: el estado de liquidación debe verse fresco siempre. Con cache
 		// en memoria + varias instancias, el invalidate del POST liquidar no llega
@@ -1476,6 +1485,9 @@ export class CarteraBackClient {
 		}
 		if (filters.anio !== undefined) {
 			queryParams.set("anio", String(filters.anio));
+		}
+		if (filters.incluirInternos) {
+			queryParams.set("incluirInternos", "true");
 		}
 		queryParams.set("excel", "true");
 

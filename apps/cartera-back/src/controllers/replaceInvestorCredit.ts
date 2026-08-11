@@ -1099,7 +1099,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           invDestinoEspejoActuales.map((i) => [i.inversionista_id, i]),
         );
 
-        // ── Rechazar destino con otra sesión pendiente ──
+        // ── Rechazar destino con otra sesión pendiente AJENA ──
         // compraCarteraAceptada.ts acepta TODAS las filas
         // "pendiente_compra_cartera" de un crédito de un solo golpe (filtra
         // por credito_id, no por inversionista_id — el endpoint no recibe
@@ -1110,8 +1110,17 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         // Más simple y seguro rechazar acá que intentar que el rebuild lo
         // resuelva: el operador reintenta después de que se resuelva el
         // pendiente existente.
+        //
+        // Se excluye la fila del PROPIO inversionista_id: si este destino es
+        // también el crédito origen (reasignación dentro del mismo crédito,
+        // ver PASO 5 más abajo — "pueden haber cambiado si el origen también
+        // era un destino"), acá todavía está su fila vieja sin limpiar. Esa
+        // fila es suya, no de un tercero — no es el conflicto que este guard
+        // busca prevenir.
         const pendienteExistente = operacionEnCursoEnEspejo(
-          invDestinoEspejoActuales,
+          invDestinoEspejoActuales.filter(
+            (i) => i.inversionista_id !== inversionista_id,
+          ),
         );
         if (pendienteExistente) {
           errores.push({

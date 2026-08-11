@@ -1024,18 +1024,15 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             // contención o por falta real de capital (ver PASO 3k).
             capacidad_omitida: capacidadCubeSnapshot(candidato),
           });
-          // Abortar automático al PRIMER lock miss (no seguir probando el
-          // resto de candidatos): con contención de por medio, el bloque de
-          // abajo (omitidosPorContencion > 0 && montoRestante > 0) va a
-          // hacer rollback total de todas formas — seguir el loop no coloca
-          // nada extra, solo retiene los locks de los créditos SIGUIENTES
-          // mientras esta tx sigue abierta. Con dos reinversiones compitiendo
-          // por los mismos top-2 créditos (A gana el 1º, B gana el 2º), eso
-          // amplía la ventana en la que cada una bloquea a la otra en el
-          // crédito que sí tiene libre — livelock bajo contención pesada.
-          // Cortar acá suelta rápido y deja que la otra corrida avance.
-          break;
+          continue;
         }
+
+        // (revertido: abortar acá en el primer lock miss estaba mal — hay
+        // candidatos más abajo en la lista sin contención que solos pueden
+        // cubrir montoRestante. El chequeo final ya distingue bien: solo
+        // revierte si AMBAS cosas pasan — quedó contención Y quedó saldo sin
+        // colocar. Cortar antes de agotar la lista revertía compras que en
+        // realidad sí se podían completar sin esperar nada.)
 
         // ── Relectura de PADRE y ESPEJO DENTRO de la transacción ──
         // Lo que trae `credito_completo` viene de getCreditCandidates, que lee

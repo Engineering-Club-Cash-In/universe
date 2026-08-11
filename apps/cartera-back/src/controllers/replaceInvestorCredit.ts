@@ -1404,6 +1404,25 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         );
       }
 
+      // ── Todo-o-nada: si NINGÚN destino se pudo asignar, no limpiar el
+      //    origen ──
+      // Sin este corte, el PASO 5 de abajo corre igual aunque todos los
+      // destinos hayan sido rechazados (crédito no encontrado, CUBE
+      // insuficiente, sesión pendiente ajena, etc.): saca al inversionista
+      // del crédito origen, le devuelve el monto a CUBE, y responde 200 con
+      // 0 destinos asignados y N errores. El inversionista queda fuera de
+      // TODO crédito sin que se le haya reasignado a ningún lado — el
+      // equivalente a un "cancelar sesión" que nadie pidió. Mismo criterio
+      // todo-o-nada que ya usa addInvestorToCredit en modo manual: si nada
+      // se pudo colocar, se aborta antes de tocar el origen, y el operador
+      // ve el error en vez de descubrir después que el inversionista ya no
+      // está en el crédito.
+      if (reasignaciones.length > 0 && resultadosAsignacion.length === 0) {
+        throw new Error(
+          `Ningún crédito destino pudo recibir la reasignación (${errores.length} rechazado(s)); no se movió al inversionista del crédito origen.`,
+        );
+      }
+
       // ================================================================
       // PASO 5: LIMPIAR EL CRÉDITO ORIGEN
       // Ahora que las reasignaciones están hechas, sacamos al inversionista

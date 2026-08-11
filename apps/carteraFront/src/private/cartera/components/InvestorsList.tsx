@@ -43,10 +43,10 @@ interface InvestorsListProps {
   recalculatedQuotasMirror?: Record<number, number>;
   onClearRecalculatedQuota?: (inversionistaId: number, isMirror: boolean) => void;
   /**
-   * IDs que NO pueden elegirse al agregar un inversionista nuevo: los que ya
-   * participan o participaron en el crédito (incluye los borrados en esta
-   * misma edición — un inversionista nuevo tiene que serlo desde cero, si no
-   * la operación no queda registrada y la liquidación descuadra).
+   * IDs que NO pueden elegirse al agregar un inversionista nuevo: los que
+   * participan HOY en el crédito (incluye los borrados en esta misma edición,
+   * porque re-agregarlos sería la misma participación disfrazada de compra
+   * nueva). Los que ya salieron del crédito sí pueden volver a entrar.
    */
   blockedInvestorIds?: Set<number>;
 }
@@ -316,9 +316,9 @@ export function InvestorsList({
         const isNew = inv.es_nuevo === true;
         const tipoInversion = inv.tipo_operacion;
 
-        // Para filas nuevas: no ofrecer inversionistas que ya participan o
-        // participaron en el crédito (blockedInvestorIds) ni los ya elegidos
-        // en otra fila del formulario. Tiene que ser un inversionista de cero.
+        // Para filas nuevas: no ofrecer a quienes participan HOY en el crédito
+        // (blockedInvestorIds) ni a los ya elegidos en otra fila del
+        // formulario. Los que salieron del crédito sí aparecen: pueden volver.
         const idsEnOtrasFilas = new Set(
           listToRender
             .filter((_, i) => i !== index)

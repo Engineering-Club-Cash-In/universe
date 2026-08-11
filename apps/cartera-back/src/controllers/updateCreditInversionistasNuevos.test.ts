@@ -8,9 +8,12 @@ const inserted: { table: unknown; values: any[] }[] = [];
 
 const dbMock = {
   select: () => ({
-    from: (table: unknown) => ({
-      where: () => Promise.resolve(rowsPorTabla.get(table) ?? []),
-    }),
+    from: (table: unknown) => {
+      const rows = () => Promise.resolve(rowsPorTabla.get(table) ?? []);
+      return {
+        where: () => Object.assign(rows(), { limit: rows }),
+      };
+    },
   }),
   insert: (table: unknown) => ({
     values: (vals: any) => {
@@ -29,7 +32,6 @@ const {
   creditos_inversionistas_espejo,
   compras_credito_inversionista,
   inversionistas,
-  pagos_credito_inversionistas_espejo,
 } = await import("../database/db");
 
 const { validarInversionistasNuevos, registrarComprasInversionistasNuevos } =
@@ -57,8 +59,8 @@ const invPayload = (
 const setRows = (opts?: {
   padre?: number[];
   espejo?: number[];
-  compras?: number[];
-  pagos?: number[];
+  /** Compras del crédito que siguen con pendiente_facturar = true. */
+  comprasPendientes?: number[];
   tiposReinv?: Record<number, string>;
 }) => {
   rowsPorTabla = new Map();
@@ -72,11 +74,7 @@ const setRows = (opts?: {
   );
   rowsPorTabla.set(
     compras_credito_inversionista,
-    (opts?.compras ?? []).map((id) => ({ inversionista_id: id })),
-  );
-  rowsPorTabla.set(
-    pagos_credito_inversionistas_espejo,
-    (opts?.pagos ?? []).map((id) => ({ inversionista_id: id })),
+    (opts?.comprasPendientes ?? []).map((id) => ({ inversionista_id: id })),
   );
   rowsPorTabla.set(
     inversionistas,
@@ -153,7 +151,7 @@ describe("validarInversionistasNuevos — regla 1: nadie entra sin declararse", 
   });
 });
 
-describe("validarInversionistasNuevos — regla 2: el nuevo tiene que ser de cero", () => {
+describe("validarInversionistasNuevos — regla 2: el nuevo no puede estar HOY en el crédito", () => {
   it("rechaza un es_nuevo que sigue en el padre (borrar y volver a agregar en la misma edición)", async () => {
     // El operador lo borró de la lista y lo re-agregó como nuevo, pero la DB
     // aún lo tiene: la validación corre ANTES del nuke & rebuild.
@@ -166,11 +164,11 @@ describe("validarInversionistasNuevos — regla 2: el nuevo tiene que ser de cer
       set,
     );
     expect(res.success).toBe(false);
-    if (!res.success) expect(res.error.message).toContain("ya participa o participó");
+    if (!res.success) expect(res.error.message).toContain("ya participa en este crédito");
   });
 
-  it("rechaza un es_nuevo con compras previas en el crédito (re-entrada en otra edición)", async () => {
-    setRows({ padre: [1], compras: [7] });
+  it("rechaza un es_nuevo que solo está en el espejo", async () => {
+    setRows({ padre: [1], espejo: [1, 7] });
     const set = makeSet();
     const res = await validarInversionistasNuevos(
       CREDITO_ID,
@@ -179,20 +177,78 @@ describe("validarInversionistasNuevos — regla 2: el nuevo tiene que ser de cer
       set,
     );
     expect(res.success).toBe(false);
-    if (!res.success) expect(res.error.message).toContain("ya participa o participó");
+    if (!res.success) expect(res.error.message).toContain("ya participa en este crédito");
   });
 
-  it("rechaza un es_nuevo con pagos espejo históricos en el crédito", async () => {
-    setRows({ padre: [1], pagos: [7] });
+  it("ACEPTA un es_nuevo que participó y ya salió del crédito (rotación de pool)", async () => {
+    // Caso real: Cube salió del crédito cuando otro inversionista reinvirtió
+    // sobre él y meses después vuelve a entrar. Tiene compras y pagos espejo
+    // viejos, pero no está en padre ni en espejo → puede volver.
+    setRows({ padre: [1], espejo: [1] });
     const set = makeSet();
     const res = await validarInversionistasNuevos(
       CREDITO_ID,
-      [invPayload(1), invPayload(7, { es_nuevo: true, tipo_operacion: "reinversion" })],
+      [invPayload(1), invPayload(86, { es_nuevo: true, tipo_operacion: "compra_cartera" })],
+      [],
+      set,
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.nuevos.map((n) => n.inversionista_id)).toEqual([86]);
+  });
+});
+
+describe("validarInversionistasNuevos — regla 3: una sola compra pendiente por crédito", () => {
+  it("rechaza dos compra_cartera en la misma edición (cofidi prorratea una sola fecha de corte)", async () => {
+    setRows({ padre: [1], espejo: [1] });
+    const set = makeSet();
+    const res = await validarInversionistasNuevos(
+      CREDITO_ID,
+      [
+        invPayload(1),
+        invPayload(7, { es_nuevo: true, tipo_operacion: "compra_cartera" }),
+        invPayload(8, { es_nuevo: true, tipo_operacion: "compra_cartera" }),
+      ],
       [],
       set,
     );
     expect(res.success).toBe(false);
-    if (!res.success) expect(res.error.message).toContain("ya participa o participó");
+    if (!res.success) {
+      expect(res.error.message).toContain("una compra de cartera a la vez");
+      expect(res.error.inversionistas_ids).toEqual([7, 8]);
+    }
+  });
+
+  it("rechaza una compra_cartera si el crédito ya tiene otra pendiente de facturar", async () => {
+    setRows({ padre: [1], espejo: [1], comprasPendientes: [5] });
+    const set = makeSet();
+    const res = await validarInversionistasNuevos(
+      CREDITO_ID,
+      [invPayload(1), invPayload(7, { es_nuevo: true, tipo_operacion: "compra_cartera" })],
+      [],
+      set,
+    );
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error.message).toContain("compra pendiente de facturar");
+      expect(res.error.compra_pendiente_inversionista_id).toBe(5);
+    }
+  });
+
+  it("acepta varias reinversiones juntas (nacen sin pendiente_facturar)", async () => {
+    setRows({ padre: [1], espejo: [1], comprasPendientes: [5] });
+    const set = makeSet();
+    const res = await validarInversionistasNuevos(
+      CREDITO_ID,
+      [
+        invPayload(1),
+        invPayload(7, { es_nuevo: true, tipo_operacion: "reinversion" }),
+        invPayload(8, { es_nuevo: true, tipo_operacion: "reinversion" }),
+      ],
+      [],
+      set,
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.nuevos.map((n) => n.inversionista_id)).toEqual([7, 8]);
   });
 });
 

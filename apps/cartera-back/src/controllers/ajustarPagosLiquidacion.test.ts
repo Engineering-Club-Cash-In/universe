@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { lockPoolMock } from "../utils/testMocks";
 
 // Cola de resultados: computarTotalesFiltrados hace 3 selects en orden:
 // inversionista → créditos espejo → pagos espejo.
@@ -18,6 +19,9 @@ function chain() {
 
 mock.module("../database/index", () => ({
   db: { select: () => chain() },
+  // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
+  // aunque estos tests no lo usen. Ver testMocks.ts.
+  lockPool: lockPoolMock,
 }));
 
 const { computarTotalesFiltrados } = await import("./ajustarPagosLiquidacion");
@@ -64,19 +68,19 @@ describe("computarTotalesFiltrados — 4 combinaciones emite_factura × descuent
     expect(t.total_cuota.toString()).toBe("612");
   });
 
-  it("emite=false, descuenta=true → neto 81 (100 − 12 − 7), ISR 7, cuota 581", async () => {
+  it("emite=false, descuenta=true → solo ISR: neto 93 (100 − 7), ISR 7, cuota 593", async () => {
     const t = await correr(false, true);
-    expect(t.total_abono_general_interes.toString()).toBe("81");
+    expect(t.total_abono_general_interes.toString()).toBe("93");
     expect(t.total_isr.toString()).toBe("7");
-    expect(t.total_cuota.toString()).toBe("581");
+    expect(t.total_cuota.toString()).toBe("593");
     expect(t.descuenta_impuestos).toBeTrue();
   });
 
-  it("emite=true, descuenta=true → el descuento MANDA: neto 81, ISR 7, cuota 581", async () => {
+  it("emite=true, descuenta=true → el descuento MANDA (solo ISR): neto 93, ISR 7, cuota 593", async () => {
     const t = await correr(true, true);
-    expect(t.total_abono_general_interes.toString()).toBe("81");
+    expect(t.total_abono_general_interes.toString()).toBe("93");
     expect(t.total_isr.toString()).toBe("7");
-    expect(t.total_cuota.toString()).toBe("581");
+    expect(t.total_cuota.toString()).toBe("593");
   });
 
   it("regresión: con descuenta=false los totales son idénticos a la fórmula histórica", async () => {

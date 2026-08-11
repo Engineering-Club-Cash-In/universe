@@ -15,6 +15,7 @@ import { sendSessionCancelledNotification } from "@cci/email";
 import { COMPRA_CARTERA_RECIPIENTS } from "../utils/functions/compraCarteraRecipients";
 import {
   construirStatusActualPorInv,
+  operacionEnCursoEnEspejo,
   resolverStatusEspejoRebuild,
 } from "../utils/espejoGuards";
 
@@ -1097,6 +1098,28 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         const espejoPorInvDestino = new Map(
           invDestinoEspejoActuales.map((i) => [i.inversionista_id, i]),
         );
+
+        // ── Rechazar destino con otra sesión pendiente ──
+        // compraCarteraAceptada.ts acepta TODAS las filas
+        // "pendiente_compra_cartera" de un crédito de un solo golpe (filtra
+        // por credito_id, no por inversionista_id — el endpoint no recibe
+        // inversionista_id). Si dejamos que este reasignado entre en
+        // pendiente junto a otro inversionista que YA tenía su propia sesión
+        // pendiente en este destino, aceptar la compra del reasignado
+        // aceptaría de paso la del otro, sin que nadie la haya confirmado.
+        // Más simple y seguro rechazar acá que intentar que el rebuild lo
+        // resuelva: el operador reintenta después de que se resuelva el
+        // pendiente existente.
+        const pendienteExistente = operacionEnCursoEnEspejo(
+          invDestinoEspejoActuales,
+        );
+        if (pendienteExistente) {
+          errores.push({
+            credito_destino_id,
+            razon: `El crédito destino ya tiene una sesión pendiente (inversionista ${pendienteExistente.inversionista_id}, status ${pendienteExistente.status}); no se puede reasignar hasta que se acepte o cancele esa operación`,
+          });
+          continue;
+        }
 
         // ── Buscar CUBE en el destino (padre) ──
         const cubeDestino = invDestinoActuales.find(

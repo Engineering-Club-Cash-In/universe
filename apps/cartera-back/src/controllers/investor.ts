@@ -1651,7 +1651,7 @@ export async function resumeInvestor(
                 mes, // 🔥 AHORA USA LA FECHA DE LA CUOTA
                 abono_capital: formatValue(abono_capital.toString()),
                 // abono_interes queda SIEMPRE en bruto: el front lo devuelve tal cual a
-                // /recalcularPagosEspejo y netearlo aquí corrompería el espejo (×0.81
+                // /recalcularPagosEspejo y netearlo aquí corrompería el espejo (×0.93
                 // por guardado). El neto por pago viaja en abonoGeneralInteres.
                 abono_interes: formatValue(abono_interes.toString()),
                 abono_iva: formatValue((descImp ? descImp.iva.round(2) : abono_iva).toString()),
@@ -3736,7 +3736,7 @@ export async function getInvestorMirrorSummary(
       const pagoNetoEspejo = abono_capital.plus(interesTotal);
       sg.total_cuota_sin_reinversion = sg.total_cuota_sin_reinversion.plus(pagoNetoEspejo);
       // 🔑 Reinversión Neta (Fuente de Verdad)
-      // Con descuenta_impuestos la reinversión ya viene neteada (0.81): no repetir descuento.
+      // Con descuenta_impuestos la reinversión ya viene neteada (solo ISR): no repetir descuento.
       const isrReinvMirror = descImp || inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
       const netReinvMirror = reinvCapital.plus(reinvInteres).minus(isrReinvMirror);
       const netReinvIntMirror = reinvInteres.minus(isrReinvMirror);
@@ -3818,7 +3818,7 @@ export async function getInvestorMirrorSummary(
     subtotal: {
       total_abono_capital:      formatValue(sg.total_abono_capital.round(2).toString()),
       // Mismo orden de redondeo que getInvestorTotalsGlobales para no diferir por
-      // centavos con la liquidación persistida: interés neto = 0.81×bruto (sin
+      // centavos con la liquidación persistida: interés neto = 0.93×bruto (solo ISR, sin
       // redondear el bruto antes), IVA = round(bruto,2)×0.12, ISR = 0.07×bruto.
       total_abono_interes:      formatValue(
         descuentoImpuestos(sg.gross_interes_neteado).neto
@@ -6767,7 +6767,7 @@ interface InversionistaResumen {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
-  /** Interés neto de impuestos (×0.81) si descuenta_impuestos; null si no. */
+  /** Interés neto de impuestos (×0.93, solo ISR) si descuenta_impuestos; null si no. */
   total_neto_impuestos: number | null;
   total_abono_general_interes: number;
   total_a_recibir_sin_reinversion: number;
@@ -7017,7 +7017,7 @@ async function consultarResumenGlobalPorEstadoPago(
     + ${pe.abono_interes}
     + CASE
         WHEN ${inversionistas.descuenta_impuestos}
-          THEN -(${pe.abono_interes} * 0.19)
+          THEN -(${pe.abono_interes} * 0.07)
         WHEN ${inversionistas.emite_factura}
           THEN ${pe.abono_iva_12}
         ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7070,7 +7070,7 @@ async function consultarResumenGlobalPorEstadoPago(
         ${pe.abono_interes}
         + CASE
             WHEN ${inversionistas.descuenta_impuestos}
-              THEN -(${pe.abono_interes} * 0.19)
+              THEN -(${pe.abono_interes} * 0.07)
             WHEN ${inversionistas.emite_factura}
               THEN ${pe.abono_iva_12}
             ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7081,7 +7081,7 @@ async function consultarResumenGlobalPorEstadoPago(
         + ${pe.abono_interes}
         + CASE
             WHEN ${inversionistas.descuenta_impuestos}
-              THEN -(${pe.abono_interes} * 0.19)
+              THEN -(${pe.abono_interes} * 0.07)
             WHEN ${inversionistas.emite_factura}
               THEN ${pe.abono_iva_12}
             ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7092,19 +7092,19 @@ async function consultarResumenGlobalPorEstadoPago(
         WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
         WHEN 'reinversion_interes' THEN COALESCE(SUM(
           ${pe.abono_interes}
-          - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+          - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
         ), 0)
         WHEN 'reinversion_total' THEN COALESCE(SUM(
           ${pe.abono_capital} + ${pe.abono_interes}
-          - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+          - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
         ), 0)
         WHEN 'reinversion_combinada' THEN COALESCE(SUM(
           CASE ${ce.tipo_reinversion}
             WHEN 'reinversion_capital' THEN ${pe.abono_capital}
             WHEN 'reinversion_interes' THEN ${pe.abono_interes}
-              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
-              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             ELSE 0
           END
         ), 0)
@@ -7116,7 +7116,7 @@ async function consultarResumenGlobalPorEstadoPago(
             + ${pe.abono_interes}
             + CASE
                 WHEN ${inversionistas.descuenta_impuestos}
-                  THEN -(${pe.abono_interes} * 0.19)
+                  THEN -(${pe.abono_interes} * 0.07)
                 WHEN ${inversionistas.emite_factura}
                   THEN ${pe.abono_iva_12}
                 ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7129,7 +7129,7 @@ async function consultarResumenGlobalPorEstadoPago(
             + ${pe.abono_interes}
             + CASE
                 WHEN ${inversionistas.descuenta_impuestos}
-                  THEN -(${pe.abono_interes} * 0.19)
+                  THEN -(${pe.abono_interes} * 0.07)
                 WHEN ${inversionistas.emite_factura}
                   THEN ${pe.abono_iva_12}
                 ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7146,7 +7146,7 @@ async function consultarResumenGlobalPorEstadoPago(
           + ${pe.abono_interes}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN -(${pe.abono_interes} * 0.07)
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7157,19 +7157,19 @@ async function consultarResumenGlobalPorEstadoPago(
             WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
             WHEN 'reinversion_interes' THEN COALESCE(SUM(
               ${pe.abono_interes}
-              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             ), 0)
             WHEN 'reinversion_total' THEN COALESCE(SUM(
               ${pe.abono_capital} + ${pe.abono_interes}
-              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             ), 0)
             WHEN 'reinversion_combinada' THEN COALESCE(SUM(
               CASE ${ce.tipo_reinversion}
                 WHEN 'reinversion_capital' THEN ${pe.abono_capital}
                 WHEN 'reinversion_interes' THEN ${pe.abono_interes}
-                  - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+                  - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
                 WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
-                  - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+                  - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
                 ELSE 0
               END
             ), 0)
@@ -7181,7 +7181,7 @@ async function consultarResumenGlobalPorEstadoPago(
                 + ${pe.abono_interes}
                 + CASE
                     WHEN ${inversionistas.descuenta_impuestos}
-                      THEN -(${pe.abono_interes} * 0.19)
+                      THEN -(${pe.abono_interes} * 0.07)
                     WHEN ${inversionistas.emite_factura}
                       THEN ${pe.abono_iva_12}
                     ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7194,7 +7194,7 @@ async function consultarResumenGlobalPorEstadoPago(
                 + ${pe.abono_interes}
                 + CASE
                     WHEN ${inversionistas.descuenta_impuestos}
-                      THEN -(${pe.abono_interes} * 0.19)
+                      THEN -(${pe.abono_interes} * 0.07)
                     WHEN ${inversionistas.emite_factura}
                       THEN ${pe.abono_iva_12}
                     ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7211,7 +7211,7 @@ async function consultarResumenGlobalPorEstadoPago(
           + ${pe.abono_interes}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN -(${pe.abono_interes} * 0.07)
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7221,7 +7221,7 @@ async function consultarResumenGlobalPorEstadoPago(
           ${pe.abono_interes}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN -(${pe.abono_interes} * 0.07)
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7242,7 +7242,7 @@ async function consultarResumenGlobalPorEstadoPago(
           CASE ${ce.tipo_reinversion}
             WHEN 'reinversion_total' THEN 0
             WHEN 'reinversion_capital' THEN (
-              ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.19) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+              ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.07) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
             WHEN 'reinversion_interes' THEN (
               ${pe.abono_capital} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN 0 WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
@@ -7250,7 +7250,7 @@ async function consultarResumenGlobalPorEstadoPago(
             WHEN 'reinversion_excedente' THEN 0
             WHEN 'reinversion_variable' THEN 0
             ELSE (
-               ${pe.abono_capital} + ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.19) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+               ${pe.abono_capital} + ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.07) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
           END
         ), 0)
@@ -7261,7 +7261,7 @@ async function consultarResumenGlobalPorEstadoPago(
             + ${pe.abono_interes}
             + CASE
                 WHEN ${inversionistas.descuenta_impuestos}
-                  THEN -(${pe.abono_interes} * 0.19)
+                  THEN -(${pe.abono_interes} * 0.07)
                 WHEN ${inversionistas.emite_factura}
                   THEN ${pe.abono_iva_12}
                 ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7274,7 +7274,7 @@ async function consultarResumenGlobalPorEstadoPago(
                 + ${pe.abono_interes}
                 + CASE
                     WHEN ${inversionistas.descuenta_impuestos}
-                      THEN -(${pe.abono_interes} * 0.19)
+                      THEN -(${pe.abono_interes} * 0.07)
                     WHEN ${inversionistas.emite_factura}
                       THEN ${pe.abono_iva_12}
                     ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7289,7 +7289,7 @@ async function consultarResumenGlobalPorEstadoPago(
               + ${pe.abono_interes}
               + CASE
                   WHEN ${inversionistas.descuenta_impuestos}
-                    THEN -(${pe.abono_interes} * 0.19)
+                    THEN -(${pe.abono_interes} * 0.07)
                   WHEN ${inversionistas.emite_factura}
                     THEN ${pe.abono_iva_12}
                   ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7301,7 +7301,7 @@ async function consultarResumenGlobalPorEstadoPago(
           + ${pe.abono_interes}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN -(${pe.abono_interes} * 0.07)
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7395,16 +7395,16 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     total_abono_capital: sql<number>`COALESCE(SUM(${liquidaciones.total_capital}), 0)`,
     // Interés en BRUTO por consistencia con la fuente "pagos": en las liquidaciones
     // neteadas (snapshot=true) total_interes ya es neto, se reconstruye el bruto
-    // sumándole IVA+ISR; las viejas ya están en bruto.
+    // sumándole el ISR (solo ISR se resta); las viejas ya están en bruto.
     total_abono_interes: sql<number>`COALESCE(SUM(
       CASE WHEN ${liquidaciones.descuenta_impuestos}
-        THEN ${liquidaciones.total_interes} + ${liquidaciones.total_iva} + ${liquidaciones.total_isr}
+        THEN ${liquidaciones.total_interes} + ${liquidaciones.total_isr}
         ELSE ${liquidaciones.total_interes}
       END
     ), 0)`,
     total_abono_iva: sql<number>`COALESCE(SUM(${liquidaciones.total_iva}), 0)`,
     total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
-    // Neto real: en las neteadas el total_interes persistido YA es el neto (×0.81);
+    // Neto real: en las neteadas el total_interes persistido YA es el neto (×0.93, solo ISR);
     // en las viejas (bruto) es interes + iva − isr. Condicionado POR liquidación.
     total_abono_general_interes: sql<number>`COALESCE(SUM(
       CASE WHEN ${liquidaciones.descuenta_impuestos}
@@ -8367,7 +8367,7 @@ async function generateAchTransferenciasWorkbook(
   });
 
   rows.forEach((inv) => {
-    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.19 sin ROUND
+    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.07 (solo ISR) sin ROUND
     // y total_cuota puede venir con 4 decimales; este Excel va al banco.
     const valor = Number((Number(inv.total_cuota) || 0).toFixed(2));
     if (valor === 0) return;
@@ -8475,7 +8475,7 @@ async function generateTransferenciasWorkbook(
   });
 
   rows.forEach((inv) => {
-    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.19 sin ROUND
+    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.07 (solo ISR) sin ROUND
     // y total_cuota puede venir con 4 decimales; este Excel va al banco.
     const valor = Number((Number(inv.total_cuota) || 0).toFixed(2));
     if (valor === 0) return;
@@ -9959,7 +9959,7 @@ export async function simularInversionista(
           const iva = cuota._raw_iva;
           const isr = cuota._raw_isr;
           const interesNeto = inv.descuenta_impuestos === true
-            ? intBruto.minus(iva).minus(isr)
+            ? intBruto.minus(isr)
             : inv.emite_factura ? intBruto.plus(iva) : intBruto.minus(isr);
           const prev = totalBrutoPorMes.get(key) ?? new Big(0);
           totalBrutoPorMes.set(key, prev.plus(cap).plus(interesNeto));
@@ -9992,7 +9992,7 @@ export async function simularInversionista(
         const iva = cuota._raw_iva;
         const isr = cuota._raw_isr;
         const interesNeto = inv.descuenta_impuestos === true
-          ? intBruto.minus(iva).minus(isr)
+          ? intBruto.minus(isr)
           : inv.emite_factura
           ? intBruto.plus(iva)
           : intBruto.minus(isr);

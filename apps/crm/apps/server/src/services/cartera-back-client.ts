@@ -96,6 +96,8 @@ export interface ModalidadFacturacionSpreadRow {
 // CONFIGURATION
 // ============================================================================
 
+export const SAT_TIMEOUT_MS = 180_000;
+
 export interface VehiculoSatPropio {
 	placa: string;
 	tipo: string;
@@ -711,6 +713,8 @@ export class CarteraBackClient {
 		endpoint: string,
 		options: RequestInit = {},
 		useCache = false,
+		// Timeout por llamada para endpoints más lentos que el resto.
+		timeoutMs?: number,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
@@ -737,7 +741,7 @@ export class CarteraBackClient {
 					Authorization: `Bearer ${token}`,
 					...options.headers,
 				},
-				signal: AbortSignal.timeout(this.config.timeout),
+				signal: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
 			};
 		};
 
@@ -1199,9 +1203,15 @@ export class CarteraBackClient {
 	 * el detalle del fallo, y ese detalle es justamente lo que hay que guardar.
 	 */
 	async obtenerVehiculosPropiosSat(): Promise<SatVehiculosPropiosResponse> {
-		return this.request<SatVehiculosPropiosResponse>("/sat-vehiculos/propios", {
-			method: "GET",
-		});
+		// 3 min: el scraper tolera hasta 120s de navegación porque SAT se queda
+		// en "Procesando Información". Con los 30s por defecto el CRM abortaría
+		// una sesión lenta que del otro lado sigue corriendo.
+		return this.request<SatVehiculosPropiosResponse>(
+			"/sat-vehiculos/propios",
+			{ method: "GET" },
+			false,
+			SAT_TIMEOUT_MS,
+		);
 	}
 
 	// ========================================================================

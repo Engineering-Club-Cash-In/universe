@@ -1697,11 +1697,18 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     //     este flag la respuesta es 200 "exitosa" y el monto que no se colocó
     //     queda invisible: el operador no tiene cómo saber que reintentando
     //     sí entraría.
+    //     Puede haber contención Y llegar acá con 200: el bloque de arriba
+    //     solo revierte si la capacidad omitida ALCANZA para cubrir
+    //     montoRestante. Si no alcanza, el resultado parcial es válido, pero
+    //     igual hubo crédito(s) saltado(s) por contención — el flag tiene
+    //     que reflejar eso para que el operador sepa que reintentar podría
+    //     colocar algo más, no solo cuando el resultado fue "todo o nada".
     // ================================================================
+    const huboOmitidosPorContencion = errores.some((e) => e.retryable);
     set.status = 200;
     return {
       success: true,
-      reintentable: false,
+      reintentable: huboOmitidosPorContencion,
       message: `Procesados: ${resultados.length} créditos, ${errores.length} errores`,
       monto_total: monto_aportado,
       monto_distribuido: new Big(monto_aportado).minus(montoRestante).toString(),

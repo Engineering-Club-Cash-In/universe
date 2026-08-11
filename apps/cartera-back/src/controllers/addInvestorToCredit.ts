@@ -1703,8 +1703,16 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     //     igual hubo crédito(s) saltado(s) por contención — el flag tiene
     //     que reflejar eso para que el operador sepa que reintentar podría
     //     colocar algo más, no solo cuando el resultado fue "todo o nada".
+    //     Pero solo si QUEDA algo sin colocar: un crédito puede quedar en
+    //     `errores` con retryable=true (se saltó por contención) y aun así
+    //     el resto de candidatos alcanzó para completar todo el
+    //     monto_aportado (montoRestante <= 0). Ahí no hay nada que
+    //     reintentar — poner reintentable=true igual invitaría a un reintento
+    //     innecesario que, si el caller lo usa para disparar otro
+    //     addInvestorToCredit con el mismo monto, duplicaría lo ya colocado.
     // ================================================================
-    const huboOmitidosPorContencion = errores.some((e) => e.retryable);
+    const huboOmitidosPorContencion =
+      errores.some((e) => e.retryable) && montoRestante.gt(0);
     set.status = 200;
     return {
       success: true,

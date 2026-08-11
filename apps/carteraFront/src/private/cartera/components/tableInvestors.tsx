@@ -1922,8 +1922,8 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             s.total_cuota_con_reinversion ?? (displayCuotaSin - Number(s.total_reinversion ?? 0))
           );
           // "Interés ajustado" = el neto que ya calcula el backend (int+IVA, int−ISR,
-          // o int×0.81 con descuenta_impuestos).
-          const interesAjustadoLabel = isDescuenta ? "- IVA - ISR" : isEmite ? "+ IVA" : "- ISR";
+          // o int×0.93 (solo ISR) con descuenta_impuestos).
+          const interesAjustadoLabel = isDescuenta ? "- ISR" : isEmite ? "+ IVA" : "- ISR";
           const interesAjustadoValor = Number(s.total_abono_general_interes ?? 0);
 
           return (

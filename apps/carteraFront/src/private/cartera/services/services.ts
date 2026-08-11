@@ -938,7 +938,7 @@ export interface SubtotalInversionista {
   total_reinversion_interes: number;
   total_reinversion: number;
   total_abono_general_interes: number;
-  /** Interés neto de impuestos (interés × 0.81). Solo viene con valor cuando el inversionista tiene `descuenta_impuestos`; en caso contrario es null. */
+  /** Interés neto de impuestos (interés × 0.93, solo ISR). Solo viene con valor cuando el inversionista tiene `descuenta_impuestos`; en caso contrario es null. */
   total_neto_impuestos?: number | string | null;
 }
 
@@ -1114,7 +1114,7 @@ export interface InvestorMirrorSummaryResponse {
     total_reinversion_capital: number;
     total_reinversion_interes: number;
     total_reinversion: number;
-    /** Interés neto de impuestos (interés × 0.81). Null cuando el inversionista no descuenta impuestos. */
+    /** Interés neto de impuestos (interés × 0.93, solo ISR). Null cuando el inversionista no descuenta impuestos. */
     total_neto_impuestos?: number | string | null;
   };
 }
@@ -2216,7 +2216,7 @@ export interface LiquidacionResumen {
   total_isr: number;
   /** true si al inversionista se le descuentan impuestos del interés. */
   descuenta_impuestos?: boolean;
-  /** Interés neto de impuestos (interés × 0.81). Null cuando el inversionista no descuenta impuestos. */
+  /** Interés neto de impuestos (interés × 0.93, solo ISR). Null cuando el inversionista no descuenta impuestos. */
   total_neto_impuestos?: number | string | null;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;

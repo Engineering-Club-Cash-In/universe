@@ -7506,7 +7506,7 @@ function mapResumenRow(
     numero_cuenta: inv.numero_cuenta,
     cuentas_extra,
     total_abono_capital: convert(inv.total_abono_capital),
-    // "Interés" queda en BRUTO para que la fila se lea sola (100 − 12 − 7 = 81);
+    // "Interés" queda en BRUTO para que la fila se lea sola (100 − 7 ISR = 93);
     // el neto vive en total_neto_impuestos y total_abono_general_interes.
     // Fuente "pagos": el SUM viene bruto, se usa tal cual. Fuente "liquidaciones":
     // el SQL ya reconstruyó el bruto por liquidación (snapshot) → pasa directo.
@@ -8741,7 +8741,7 @@ export async function getLiquidaciones({
           tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5)),
           abono_capital: formatValue(abono_capital.toString()),
           // Interés por pago en bruto (igual que resumeInvestor); el neto se ve en
-          // la cuota (capital + interés − IVA − ISR) y en los totales.
+          // la cuota (capital + interés − ISR) y en los totales.
           abono_interes: formatValue(abono_interes.toString()),
           abono_iva: formatValue((descImp ? descImp.iva.round(2) : abono_iva).toString()),
           isr: formatValue((descImp ? descImp.isr.round(2) : isr).toString()),

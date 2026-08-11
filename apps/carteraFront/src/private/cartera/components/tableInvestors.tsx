@@ -1923,7 +1923,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           );
           // "Interés ajustado" = el neto que ya calcula el backend (int+IVA, int−ISR,
           // o int×0.93 (solo ISR) con descuenta_impuestos).
-          const interesAjustadoLabel = isDescuenta ? "- IVA - ISR" : isEmite ? "+ IVA" : "- ISR";
+          const interesAjustadoLabel = isDescuenta ? "- ISR" : isEmite ? "+ IVA" : "- ISR";
           const interesAjustadoValor = Number(s.total_abono_general_interes ?? 0);
 
           return (

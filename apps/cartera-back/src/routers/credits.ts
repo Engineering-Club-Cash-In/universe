@@ -15,6 +15,7 @@ import {
 import { getCuotasPorDiaYAsesor, upsertEfectividadAsesores, getEfectividadAsesores } from "../controllers/paymentsByAdvisor";
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
+import { reverseCancelation } from "../controllers/reverseCancelation";
 import { isValidResetCreditInput } from "../controllers/creditDetailPolicy";
 import { launchBrowser } from "../utils/functions/browser";
 import { promises as fs } from "fs";
@@ -668,6 +669,64 @@ export const creditRouter = new Elysia()
       set.status = 500;
       return {
         message: "[ERROR] Error actualizando estado del crédito",
+        error: String(error),
+      };
+    }
+  })
+  /**
+   * Reversa de una cancelación hecha por resetCredit, basada en el snapshot
+   * (drizzle/0025). Por default corre en dry-run: evalúa gates y devuelve el
+   * plan sin escribir nada; con dryRun=false ejecuta la restauración.
+   * Solo ADMIN/CONTA.
+   */
+  .post("/reverseCancelation", async ({ body, set, user }) => {
+    if (!user || !["ADMIN", "CONTA"].includes((user as any).role)) {
+      set.status = 403;
+      return { ok: false, message: "No autorizado (requiere ADMIN o CONTA)." };
+    }
+
+    const parse = z
+      .object({
+        creditId: z.coerce.number().int().positive(),
+        dryRun: z.boolean().optional().default(true),
+        motivo: z.string().trim().min(5, "motivo muy corto").optional(),
+      })
+      // El motivo viaja al XML de anulación ante SAT: obligatorio al ejecutar.
+      .refine((d) => d.dryRun || (d.motivo && d.motivo.length >= 5), {
+        message:
+          "Para ejecutar la reversa (dryRun=false) el 'motivo' es requerido (mínimo 5 caracteres).",
+        path: ["motivo"],
+      })
+      .safeParse(body);
+
+    if (!parse.success) {
+      set.status = 400;
+      return {
+        ok: false,
+        message: "[ERROR] Parámetros inválidos",
+        issues: parse.error.flatten(),
+      };
+    }
+
+    try {
+      const result = await reverseCancelation({
+        creditId: parse.data.creditId,
+        dryRun: parse.data.dryRun,
+        motivo: parse.data.motivo,
+        executedBy: (user as any)?.email ?? undefined,
+        executedById: Number.isInteger(Number((user as any)?.id))
+          ? Number((user as any).id)
+          : undefined,
+      });
+      // Un dry-run bloqueado es una consulta exitosa (el cliente necesita leer
+      // los gates); 409 solo cuando una ejecución real no procede.
+      if (!result.ok && !parse.data.dryRun) set.status = 409;
+      return result;
+    } catch (error) {
+      set.status = 500;
+      return {
+        ok: false,
+        message: "Error reversando la cancelación",
         error: String(error),
       };
     }

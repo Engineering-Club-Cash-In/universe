@@ -40,6 +40,11 @@ import {
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
+  capturarSnapshotResetCredit,
+  registrarArtefactosSnapshot,
+} from "./creditResetSnapshot";
+import { pagos_credito_inversionistas } from "../database/db/schema";
+import {
   CREDIT_DETAIL_STATUSES,
   canResetCreditByStatus,
   isAmbiguousOriginalPrincipalPayment,
@@ -1947,6 +1952,9 @@ export async function resetCredit({
         new Big(0),
       );
 
+      // 5.5 Snapshot de reversa: capturar ANTES de la primera escritura (drizzle/0025)
+      const snapshotId = await capturarSnapshotResetCredit(tx, credito);
+
       // 6. Calcular abonos reales
       const capitalOriginal = new Big(credito.capital ?? "0");
       const abonoCapital =
@@ -2043,6 +2051,10 @@ export async function resetCredit({
         })
         .returning();
 
+      if (!nuevoPago?.pago_id) {
+        throw new Error("No se pudo crear el pago de cierre.");
+      }
+
       // 11. Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
       //     paymentFalse=true). Además se ponen los *_restante en 0: algunas queries de
       //     cuotas pendientes/atrasadas (getCreditoByNumero, reportes) NO filtran paymentFalse,
@@ -2105,13 +2117,16 @@ export async function resetCredit({
       //     anulados (paymentFalse=true) en el paso 11, así que no aportan saldo en las vistas activas.
 
       // 12.5 Distribuir abono a capital en tabla espejo (CANCELACION)
-      await distribuirAbonoCapitalEspejo(
+      const abonosEspejo = await distribuirAbonoCapitalEspejo(
         credito.credito_id,
         abonoCapital.toString(),
         "CANCELACION",
         undefined,
         tx,
       );
+      // Estas filas nacen con pago_id NULL; sin sus IDs la reversa no podría encontrarlas.
+      const abonosCapitalIds =
+        abonosEspejo.data?.distribucion.map((d) => d.abono_id) ?? [];
 
       // 13. Distribuir pago entre inversionistas (ANTES de reiniciar, necesita monto_aportado).
       //     Si la suma de aportes es 0 (p.ej. crédito ya reseteado antes) la distribución lanza
@@ -2142,6 +2157,13 @@ export async function resetCredit({
         }
       }
 
+      const pciCierre = nuevoPago?.pago_id
+        ? await tx
+            .select({ id: pagos_credito_inversionistas.id })
+            .from(pagos_credito_inversionistas)
+            .where(eq(pagos_credito_inversionistas.pago_id, nuevoPago.pago_id))
+        : [];
+
       // 14. Reiniciar creditos_inversionistas (no espejo)
       await tx
         .update(creditos_inversionistas)
@@ -2155,24 +2177,35 @@ export async function resetCredit({
         .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
 
       // 15. Insertar boletas si existen
+      let boletaIds: number[] = [];
       if (
         urlCompletas &&
         urlCompletas.length > 0 &&
         nuevoPago &&
         nuevoPago?.pago_id
       ) {
-        await tx.insert(boletas).values(
-          urlCompletas.map((url) => ({
-            pago_id: nuevoPago?.pago_id,
-            url_boleta: url,
-          })),
-        );
+        const boletasInsertadas = await tx
+          .insert(boletas)
+          .values(
+            urlCompletas.map((url) => ({
+              pago_id: nuevoPago?.pago_id,
+              url_boleta: url,
+            })),
+          )
+          .returning({ id: boletas.id });
+        boletaIds = boletasInsertadas.map((b) => b.id);
       }
 
       // 16. Al final: zerear el crédito y ponerle el status
       const fechaHoyGT = new Date().toLocaleDateString("sv-SE", {
         timeZone: "America/Guatemala",
       });
+
+      const cuotaCierreIds: number[] = cuotaCierre?.cuota_id
+        ? [cuotaCierre.cuota_id]
+        : [];
+      let badDebtId: number | null = null;
+      let pagoPlaceholderId: number | null = null;
 
       if (statusCredit === "INCOBRABLE") {
         const capitalIncobrable = new Big(montoIncobrable!);
@@ -2219,47 +2252,57 @@ export async function resetCredit({
           })
           .returning();
 
+        cuotaCierreIds.push(cuotaPendiente.cuota_id);
+
         // 16c. Crear pago placeholder (no pagado) con capital_restante = incobrable
-        await tx.insert(pagos_credito).values({
-          credito_id: credito.credito_id,
-          cuota_id: cuotaPendiente.cuota_id,
-          cuota: capitalIncobrable.toString(),
-          cuota_interes: "0",
-          abono_capital: "0",
-          abono_interes: "0",
-          abono_iva_12: "0",
-          abono_interes_ci: "0",
-          abono_iva_ci: "0",
-          abono_seguro: "0",
-          abono_gps: "0",
-          pago_del_mes: "0",
-          monto_boleta: "0",
-          capital_restante: capitalIncobrable.toString(),
-          interes_restante: "0",
-          iva_12_restante: "0",
-          seguro_restante: "0",
-          gps_restante: "0",
-          total_restante: capitalIncobrable.toString(),
-          membresias: "0",
-          membresias_pago: "0",
-          membresias_mes: "0",
-          mora: "0",
-          monto_boleta_cuota: "0",
-          seguro_total: "0",
-          pagado: false,
-          registerBy: "SISTEMA-INCOBRABLE",
-          pagoConvenio: "0",
-          monto_aplicado: "0",
-          observaciones: `Pago base - Crédito marcado como incobrable (reset)`,
-        });
+        const [pagoPlaceholder] = await tx
+          .insert(pagos_credito)
+          .values({
+            credito_id: credito.credito_id,
+            cuota_id: cuotaPendiente.cuota_id,
+            cuota: capitalIncobrable.toString(),
+            cuota_interes: "0",
+            abono_capital: "0",
+            abono_interes: "0",
+            abono_iva_12: "0",
+            abono_interes_ci: "0",
+            abono_iva_ci: "0",
+            abono_seguro: "0",
+            abono_gps: "0",
+            pago_del_mes: "0",
+            monto_boleta: "0",
+            capital_restante: capitalIncobrable.toString(),
+            interes_restante: "0",
+            iva_12_restante: "0",
+            seguro_restante: "0",
+            gps_restante: "0",
+            total_restante: capitalIncobrable.toString(),
+            membresias: "0",
+            membresias_pago: "0",
+            membresias_mes: "0",
+            mora: "0",
+            monto_boleta_cuota: "0",
+            seguro_total: "0",
+            pagado: false,
+            registerBy: "SISTEMA-INCOBRABLE",
+            pagoConvenio: "0",
+            monto_aplicado: "0",
+            observaciones: `Pago base - Crédito marcado como incobrable (reset)`,
+          })
+          .returning({ pago_id: pagos_credito.pago_id });
+        pagoPlaceholderId = pagoPlaceholder.pago_id;
 
         // 16d. Registrar en bad_debts
-        await tx.insert(bad_debts).values({
-          credit_id: creditId,
-          motivo: cancelacion?.motivo ?? "Incobrable",
-          observaciones: cancelacion?.observaciones ?? "",
-          monto_incobrable: capitalIncobrable.toString(),
-        });
+        const [badDebtRow] = await tx
+          .insert(bad_debts)
+          .values({
+            credit_id: creditId,
+            motivo: cancelacion?.motivo ?? "Incobrable",
+            observaciones: cancelacion?.observaciones ?? "",
+            monto_incobrable: capitalIncobrable.toString(),
+          })
+          .returning({ id: bad_debts.id });
+        badDebtId = badDebtRow.id;
       } else {
         // CANCELADO: zerear todo (preservamos porcentaje_interes)
         await setCapitalSource(tx, "CANCELACION", null, null);
@@ -2282,6 +2325,16 @@ export async function resetCredit({
           })
           .where(eq(creditos.credito_id, creditId));
       }
+
+      await registrarArtefactosSnapshot(tx, snapshotId, {
+        pago_cierre_id: nuevoPago.pago_id,
+        cuota_cierre_ids: cuotaCierreIds,
+        abonos_capital_ids: abonosCapitalIds,
+        pagos_credito_inversionistas_ids: pciCierre.map((p) => p.id),
+        boleta_ids: boletaIds,
+        bad_debt_id: badDebtId,
+        pago_incobrable_placeholder_id: pagoPlaceholderId,
+      });
 
       return { nuevoPago, statusCredit };
     });

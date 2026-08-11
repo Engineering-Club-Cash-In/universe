@@ -3424,6 +3424,56 @@ export const toggleCancelacionActivoService = async (
   return data;
 };
 
+// Reversa de cancelación (snapshot): dry-run evalúa gates sin escribir; con
+// dryRun=false ejecuta la restauración. Solo ADMIN/CONTA.
+export interface ReverseCancelationPayload {
+  creditId: number;
+  dryRun: boolean;
+  motivo?: string;
+}
+
+export interface ReverseGate {
+  gate: string;
+  ok: boolean;
+  detalle: string;
+}
+
+export interface ReverseCancelationPlan {
+  restaurar_credito: boolean;
+  status_destino: string;
+  inversionistas_a_restaurar: number;
+  pagos_a_desanular: number;
+  pagos_a_borrar: number[];
+  cuotas_a_borrar: number[];
+  abonos_capital_a_borrar: number;
+  pci_a_borrar: number;
+  espejo_a_borrar: number;
+  boletas_a_borrar: number;
+  bad_debt_a_borrar: number | null;
+  facturas_a_anular: number;
+  facturacion_desglose_borrado_por_cascade: number;
+  facturas_quedan_sin_pago: boolean;
+  mora_a_restaurar: boolean;
+}
+
+export interface ReverseCancelationResponse {
+  ok: boolean;
+  dryRun: boolean;
+  gates: ReverseGate[];
+  plan?: ReverseCancelationPlan;
+  message: string;
+}
+
+export const reverseCancelationService = async (
+  payload: ReverseCancelationPayload
+): Promise<ReverseCancelationResponse> => {
+  const { data } = await api.post<ReverseCancelationResponse>(
+    '/reverseCancelation',
+    payload
+  );
+  return data;
+};
+
 // Recalcular cuota
 export interface RecalculateQuotaPayload {
   numero_credito_sifco: string;

@@ -420,12 +420,12 @@ describe("reset credit atomic closing payment wiring", () => {
 		expect(transaction).toContain(
 			'eq(pagos_credito.registerBy, "system_reset")',
 		);
-		expect(transaction).toContain("tx.insert(pagos_credito)");
+		expect(transaction).toMatch(/tx\s*\.insert\(pagos_credito\)/);
 		expect(transaction).toMatch(/tx\s*\.update\(pagos_credito\)/);
 		expect(transaction).toMatch(/tx\s*\.insert\(cuotas_credito\)/);
 		expect(transaction).toMatch(/tx\s*\.update\(creditos_inversionistas\)/);
-		expect(transaction).toContain("tx.insert(boletas)");
-		expect(transaction).toContain("tx.insert(bad_debts)");
+		expect(transaction).toMatch(/tx\s*\.insert\(boletas\)/);
+		expect(transaction).toMatch(/tx\s*\.insert\(bad_debts\)/);
 		expect(transaction).toContain("setCapitalSource(tx");
 		expect(transaction).toContain("distribuirAbonoCapitalEspejo(");
 		expect(transaction).toMatch(
@@ -439,7 +439,7 @@ describe("reset credit atomic closing payment wiring", () => {
 		expect(transaction).toContain('statusCredit === "INCOBRABLE"');
 		expect(
 			transaction.lastIndexOf("return { nuevoPago, statusCredit }"),
-		).toBeGreaterThan(transaction.lastIndexOf("tx.insert(bad_debts)"));
+		).toBeGreaterThan(transaction.lastIndexOf(".insert(bad_debts)"));
 		expect(
 			transaction.lastIndexOf("return { nuevoPago, statusCredit }"),
 		).toBeGreaterThan(transaction.lastIndexOf(".update(creditos)"));
@@ -447,7 +447,7 @@ describe("reset credit atomic closing payment wiring", () => {
 			transaction.indexOf(".from(pagos_credito)"),
 		);
 		expect(transaction.indexOf(".from(pagos_credito)")).toBeLessThan(
-			transaction.indexOf("tx.insert(pagos_credito)"),
+			transaction.indexOf(".insert(pagos_credito)"),
 		);
 	});
 });

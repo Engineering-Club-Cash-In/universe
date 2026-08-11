@@ -15,6 +15,7 @@
     unique,
     bigint,
     index,
+    jsonb,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
   export enum CategoriaUsuario {
@@ -701,6 +702,44 @@
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
     fecha_registro: timestamp("fecha_registro").defaultNow(),
   });
+
+  // Snapshot de reversa de resetCredit: payload = estado previo, artefactos_creados = IDs creados por el cierre (ver drizzle/0025).
+  export const credit_reset_snapshots = customSchema.table(
+    "credit_reset_snapshots",
+    {
+      id: serial("id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      pago_cierre_id: integer("pago_cierre_id").references(
+        () => pagos_credito.pago_id,
+        { onDelete: "set null" }
+      ),
+      version: integer("version").notNull().default(1),
+      payload: jsonb("payload").notNull(),
+      artefactos_creados: jsonb("artefactos_creados"),
+      estado: text("estado", {
+        enum: ["VIVO", "RESTAURADO", "SUPERSEDED"],
+      })
+        .notNull()
+        .default("VIVO"),
+      restaurado_at: timestamp("restaurado_at", { withTimezone: true }),
+      restaurado_por: text("restaurado_por"),
+      created_by: text("created_by"),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+    },
+    (t) => ({
+      ixCredito: index("ix_credit_reset_snapshots_credito").on(
+        t.credito_id,
+        t.created_at.desc()
+      ),
+      uxCreditoVivo: uniqueIndex("ux_credit_reset_snapshots_credito_vivo")
+        .on(t.credito_id)
+        .where(sql`${t.estado} = 'VIVO'`),
+    })
+  );
   export const estadoLiquidacionEnum = pgEnum("estado_liquidacion", [
     "NO_LIQUIDADO",
     "POR_LIQUIDAR",

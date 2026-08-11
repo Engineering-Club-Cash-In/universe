@@ -13,6 +13,9 @@ import {
   toggleCancelacionActivoService,
   type ToggleCancelacionActivoPayload,
   type ToggleCancelacionActivoResponse,
+  reverseCancelationService,
+  type ReverseCancelationPayload,
+  type ReverseCancelationResponse,
 } from "../services/services";
 
 // Hook específico para cancelar crédito (puedes dejarlo si lo usas en un lugar aparte)
@@ -61,5 +64,12 @@ export function openReportInNewTab(url: string): void {
 export function useToggleCancelacionActivo() {
   return useMutation<ToggleCancelacionActivoResponse, Error, ToggleCancelacionActivoPayload>({
     mutationFn: toggleCancelacionActivoService,
+  });
+}
+
+// Reversa de cancelación: mismo hook para dry-run y ejecución (cambia dryRun)
+export function useReverseCancelation() {
+  return useMutation<ReverseCancelationResponse, Error, ReverseCancelationPayload>({
+    mutationFn: reverseCancelationService,
   });
 }

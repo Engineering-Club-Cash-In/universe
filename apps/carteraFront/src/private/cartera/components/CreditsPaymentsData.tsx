@@ -36,6 +36,7 @@ import type { Investor, Aseguradora } from "../services/services";
 import { getAseguradoras } from "../services/services";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModalCancelCredit } from "./modalCreditCancel";
+import { ModalReverseCancelation } from "./ModalReverseCancelation";
 import { openReportInNewTab, useActivateCredit, useToggleCancelacionActivo } from "../hooks/cancelCredit";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "@/Provider/authProvider";
@@ -139,6 +140,12 @@ export function ListaCreditosPagos() {
   const canEdit = (_s: CreditStatus) => true;
   const canCancel = (s: CreditStatus) => ["ACTIVO", "MOROSO"].includes(s);
   const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
+  // Reversa de cancelación: solo créditos ya cerrados por resetCredit. El
+  // controller decide con el snapshot si hay algo que revertir; acá solo
+  // filtramos por status para no mostrar el botón en créditos que nunca
+  // pasaron por un cierre.
+  const canReverse = (s: CreditStatus) =>
+    s === "CANCELADO" || s === "INCOBRABLE";
   const canViewPayments = (_s: CreditStatus) => true;
   const canCreateConvenio = (s: CreditStatus) =>
     ["ACTIVO", "MOROSO"].includes(s);
@@ -274,6 +281,11 @@ export function ListaCreditosPagos() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedCreditId, setSelectedCreditId] = useState<number | null>(null);
   const [caidoModalOpen, setCaidoModalOpen] = useState(false);
+  const [reverseModalOpen, setReverseModalOpen] = useState(false);
+  const [selectedCreditReverse, setSelectedCreditReverse] = useState<{
+    credito_id: number;
+    numero_credito_sifco: string;
+  } | null>(null);
   const [investorPopoverOpen, setInvestorPopoverOpen] = useState(false);
   const [selectedCreditCaido, setSelectedCreditCaido] = useState<number | null>(null);
   const activateCreditMutation = useActivateCredit();
@@ -749,6 +761,9 @@ export function ListaCreditosPagos() {
               canCreateConvenio={canCreateConvenio}
               canCancel={canCancel}
               canActivate={canActivate}
+              canReverse={canReverse}
+              setSelectedCreditReverse={setSelectedCreditReverse}
+              setReverseModalOpen={setReverseModalOpen}
               toggleCancelacionMutation={toggleCancelacionMutation}
               refetch={refetch}
               setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
@@ -779,6 +794,9 @@ export function ListaCreditosPagos() {
               canEdit={canEdit}
               canCancel={canCancel}
               canActivate={canActivate}
+              canReverse={canReverse}
+              setSelectedCreditReverse={setSelectedCreditReverse}
+              setReverseModalOpen={setReverseModalOpen}
               canViewPayments={canViewPayments}
               canCreateConvenio={canCreateConvenio}
               refetch={refetch}
@@ -840,6 +858,22 @@ export function ListaCreditosPagos() {
         onClose={handleCloseModal}
         creditId={selectedCreditId ?? 0}
         onSuccess={() => {
+          queryClient.invalidateQueries({
+            queryKey: ["creditos-paginados", mes, anio, page, perPage],
+          });
+        }}
+      />
+
+      <ModalReverseCancelation
+        open={reverseModalOpen}
+        onClose={() => {
+          setReverseModalOpen(false);
+          setSelectedCreditReverse(null);
+        }}
+        creditId={selectedCreditReverse?.credito_id ?? 0}
+        numeroSifco={selectedCreditReverse?.numero_credito_sifco}
+        onSuccess={() => {
+          refetch();
           queryClient.invalidateQueries({
             queryKey: ["creditos-paginados", mes, anio, page, perPage],
           });
@@ -1266,6 +1300,9 @@ function MobileView({
   canCreateConvenio,
   canCancel,
   canActivate,
+  canReverse,
+  setSelectedCreditReverse,
+  setReverseModalOpen,
   toggleCancelacionMutation,
   refetch,
   setSelectedCreditFechaInicio,
@@ -1414,6 +1451,21 @@ function MobileView({
               >
                 <FileCheck className="w-4 h-4 mr-1" />
                 {toggleCancelacionMutation.isPending ? "Activando..." : "Activar Cancelación"}
+              </Button>
+            )}
+            {canReverse(item.creditos.statusCredit) && user?.role === "ADMIN" && (
+              <Button
+                variant="outline"
+                className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                onClick={() => {
+                  setSelectedCreditReverse({
+                    credito_id: item.creditos.credito_id,
+                    numero_credito_sifco: item.creditos.numero_credito_sifco,
+                  });
+                  setReverseModalOpen(true);
+                }}
+              >
+                <RefreshCw className="w-4 h-4 mr-1" /> Reversar Cancelación
               </Button>
             )}
             {user?.role === "ADMIN" && (
@@ -1569,6 +1621,9 @@ function DesktopView({
   canEdit,
   canCancel,
   canActivate,
+  canReverse,
+  setSelectedCreditReverse,
+  setReverseModalOpen,
   canViewPayments,
   canCreateConvenio,
   refetch,
@@ -1879,6 +1934,26 @@ function DesktopView({
                                 Reactivar Crédito
                               </Button>
                             </>
+                          )}
+
+                        {canReverse(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-amber-700 border-amber-300 hover:bg-amber-50"
+                              onClick={() => {
+                                setSelectedCreditReverse({
+                                  credito_id: item.creditos.credito_id,
+                                  numero_credito_sifco:
+                                    item.creditos.numero_credito_sifco,
+                                });
+                                setReverseModalOpen(true);
+                              }}
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              Reversar Cancelación
+                            </Button>
                           )}
 
                         {(canEdit(item.creditos.statusCredit) ||

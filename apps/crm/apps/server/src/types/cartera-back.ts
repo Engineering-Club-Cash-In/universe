@@ -683,13 +683,33 @@ export interface FacturarGenericoInput {
 	nit: string;
 	items: FacturaItem[];
 	created_by: number;
+	emisor?: string;
+	credito_nuevo?: boolean;
+	/**
+	 * Clave estable por factura lógica (ej. `${opportunityId}-Copia de Llave`).
+	 * Cartera-back no emite dos facturas con la misma clave: si la repetimos,
+	 * devuelve la ya emitida con `reutilizada: true`. Es lo que evita duplicar
+	 * en SAT cuando una llamada se corta después de haber certificado.
+	 */
+	idempotency_key?: string;
 }
 
 /** Respuesta de facturación genérica */
 export interface FacturarGenericoResponse {
 	success: boolean;
 	message?: string;
+	mensaje?: string;
 	factura_id?: number;
+	/** true cuando cartera devolvió una factura ya emitida (idempotency_key). */
+	reutilizada?: boolean;
+	data?: {
+		factura_id?: number;
+		serie?: string;
+		numero?: string;
+		uuid?: string;
+		monto_total?: number;
+		pdf_url?: string;
+	};
 }
 
 // ============================================================================

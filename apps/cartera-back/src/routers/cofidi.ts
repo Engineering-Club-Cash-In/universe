@@ -5,7 +5,14 @@ import jwt from "jsonwebtoken";
 import { authMiddleware } from "./midleware";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
-import { generarHTMLFacturaPro } from "../cofidi/functions";
+import { generarPDFFacturaEnBackground } from "../utils/functions/facturaPdf";
+import {
+  buscarFacturaPorIdempotencyKey,
+  confirmarIdempotencyKey,
+  liberarIdempotencyKey,
+  reservarIdempotencyKey,
+  type FacturaIdempotente,
+} from "../utils/functions/facturaIdempotencia";
 import {
   cuentaParaRubroInv,
   decidirRubroInteresInversionistas,
@@ -3268,6 +3275,10 @@ if (facturasExistentes.length > 0) {
   .post(
     "/facturar-generico",
     async ({ body, set, request }) => {
+      // Fuera del try: el catch necesita soltar la reserva de idempotencia.
+      const idempotencyKey = body.idempotency_key?.trim() || null;
+      let reservaTomada = false;
+
       try {
         const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo, fecha_vencimiento} = body;
 
@@ -3295,6 +3306,73 @@ if (facturasExistentes.length > 0) {
 
         console.log(`📝 NIT: ${nit} | Items: ${itemsInput.length} | Usuario: ${created_by || "N/A"}`);
         console.log(`🏢 Emisor: ${emisorKey} (${emisorConfig.config.emisor.nombreEmisor})`);
+
+        // ============================================
+        // 0️⃣ IDEMPOTENCIA (antes de tocar SAT)
+        // --------------------------------------------
+        // Si el caller manda idempotency_key, la MISMA clave nunca emite dos
+        // facturas: se devuelve la que ya se emitió. Sin clave, el
+        // comportamiento es el de siempre (cada POST factura).
+        // ============================================
+        const respuestaReutilizada = (f: FacturaIdempotente) => ({
+          success: true as const,
+          reutilizada: true as const,
+          data: {
+            factura_id: f.factura_id,
+            serie: f.serie,
+            numero: f.numero,
+            uuid: f.uuid,
+            monto_total: Number(f.monto_total),
+            monto_iva: Number(f.monto_iva),
+            pdf_url: f.pdf_url,
+            receptor: { nombre: f.receptor_nombre, nit: f.receptor_nit },
+            items_facturados: itemsInput.length,
+            emisor: {
+              key: emisorKey,
+              nombre: emisorConfig.config.emisor.nombreEmisor,
+              nit: emisorConfig.config.emisor.nit,
+            },
+          },
+          mensaje: `Factura ${f.serie}-${f.numero} ya había sido emitida con esta idempotency_key; no se emitió una nueva`,
+        });
+
+        if (idempotencyKey) {
+          const yaEmitida = await buscarFacturaPorIdempotencyKey(idempotencyKey);
+
+          if (yaEmitida && yaEmitida.status !== "ANULADA") {
+            console.log(
+              `♻️ idempotency_key "${idempotencyKey}" ya tiene factura ${yaEmitida.serie}-${yaEmitida.numero}: se devuelve esa`
+            );
+            return respuestaReutilizada(yaEmitida);
+          }
+
+          if (yaEmitida) {
+            // La anterior se anuló: se permite reemitir con la misma clave.
+            console.log(
+              `🔁 idempotency_key "${idempotencyKey}" apuntaba a la factura ANULADA ${yaEmitida.serie}-${yaEmitida.numero}: se reemite`
+            );
+            await liberarIdempotencyKey(idempotencyKey, true);
+          }
+
+          if ((await reservarIdempotencyKey(idempotencyKey)) === "en_proceso") {
+            // Otra request tiene la clave tomada. Puede haber terminado entre
+            // el SELECT y el INSERT, así que se vuelve a mirar antes de rendirse.
+            const reciente = await buscarFacturaPorIdempotencyKey(idempotencyKey);
+            if (reciente && reciente.status !== "ANULADA") {
+              return respuestaReutilizada(reciente);
+            }
+            console.warn(
+              `⏳ idempotency_key "${idempotencyKey}" en proceso en otra request: NO se factura`
+            );
+            set.status = 409;
+            return {
+              success: false,
+              error: "Ya hay una facturación en curso con esta idempotency_key",
+              en_proceso: true,
+            };
+          }
+          reservaTomada = true;
+        }
 
         // ============================================
         // 1️⃣ VALIDAR NIT Y CONSULTAR EN COFIDI
@@ -3431,6 +3509,19 @@ if (facturasExistentes.length > 0) {
         console.log(`✅ Serie: ${resultado.serie}-${resultado.numero}`);
         console.log(`✅ UUID: ${resultado.uuid}`);
 
+        // Anclar la clave a la factura recién emitida: desde acá, cualquier
+        // repetición del POST devuelve ESTA factura en vez de emitir otra.
+        if (idempotencyKey) {
+          if (resultado.factura_id) {
+            await confirmarIdempotencyKey(idempotencyKey, resultado.factura_id);
+          } else {
+            // SIMULAR_FACTURAS=true (modo demo): no hay factura real que anclar,
+            // se suelta la clave para no dejar la reserva colgada.
+            await liberarIdempotencyKey(idempotencyKey);
+          }
+          reservaTomada = false;
+        }
+
         // 🧾 Desglose de la factura GENÉRICA para el reporte diario (best-effort,
         //    NO afecta la facturación). Solo para items que traen `rubro_desglose`.
         //    La categoría (columna de producto del reporte) se resuelve por el NIT
@@ -3528,6 +3619,16 @@ if (facturasExistentes.length > 0) {
 
       } catch (error) {
         console.error("❌ Error facturando genérico:", error);
+
+        // La reserva solo se suelta si NO llegó a factura: así un reintento
+        // legítimo puede volver a intentar, sin abrir la puerta a duplicar una
+        // factura que sí se emitió.
+        if (idempotencyKey && reservaTomada) {
+          await liberarIdempotencyKey(idempotencyKey).catch((e) =>
+            console.error("⚠️ No se pudo liberar la idempotency_key:", e)
+          );
+        }
+
         set.status = 500;
         return {
           success: false,
@@ -3562,6 +3663,10 @@ if (facturasExistentes.length > 0) {
         // Opcional: fecha de vencimiento del abono cambiario (yyyy-mm-dd).
         // Si no viene, se usa la fecha de hoy (comportamiento original).
         fecha_vencimiento: t.Optional(t.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" })),
+        // Opcional: clave estable por factura lógica (ej. "<oportunidad>-Copia de Llave").
+        // Si viene, el MISMO POST repetido NO emite una segunda factura: devuelve
+        // la ya emitida con `reutilizada: true`. Ver facturaIdempotencia.ts.
+        idempotency_key: t.Optional(t.String({ maxLength: 160 })),
       }),
     }
   )
@@ -4160,60 +4265,59 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       process.env.LOGO_URL ||
       "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
-    const html = generarHTMLFacturaPro(
-      {
-        tipo: datosGenerales["@_Tipo"],
-        serie: certificacion["dte:NumeroAutorizacion"]["@_Serie"],
-        numero: certificacion["dte:NumeroAutorizacion"]["@_Numero"],
-        uuid: certificacion["dte:NumeroAutorizacion"]["#text"],
-        fechaEmision: datosGenerales["@_FechaHoraEmision"],
-        fechaCertificacion: certificacion["dte:FechaHoraCertificacion"],
+    // Los datos del PDF se arman acá (el XML ya está parseado) pero el HTML y
+    // el render se hacen FUERA del request, después de guardar en BD (paso 7).
+    const datosFactura = {
+      tipo: datosGenerales["@_Tipo"],
+      serie: certificacion["dte:NumeroAutorizacion"]["@_Serie"],
+      numero: certificacion["dte:NumeroAutorizacion"]["@_Numero"],
+      uuid: certificacion["dte:NumeroAutorizacion"]["#text"],
+      fechaEmision: datosGenerales["@_FechaHoraEmision"],
+      fechaCertificacion: certificacion["dte:FechaHoraCertificacion"],
 
-        emisor: {
-          nit: emisor["@_NITEmisor"],
-          nombre: emisor["@_NombreEmisor"],
-          nombreComercial: emisor["@_NombreComercial"],
-          direccion: emisor["dte:DireccionEmisor"],
-        },
-
-        receptor: {
-          nit: receptorXML["@_IDReceptor"],
-          nombre: receptorXML["@_NombreReceptor"],
-          direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
-        },
-
-        items: itemsXML.map((item: any) => ({
-          numeroLinea: item["@_NumeroLinea"],
-          cantidad: item["dte:Cantidad"],
-          unidad: item["dte:UnidadMedida"],
-          descripcion: item["dte:Descripcion"],
-          precioUnitario: parseFloat(item["dte:PrecioUnitario"]),
-          total: parseFloat(item["dte:Total"]),
-        })),
-
-        totales: {
-          iva: parseFloat(
-            totales["dte:TotalImpuestos"]["dte:TotalImpuesto"][
-              "@_TotalMontoImpuesto"
-            ]
-          ),
-          granTotal: parseFloat(totales["dte:GranTotal"]),
-        },
-
-        // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
-        abonos: pago_id ? abonos.map((abono: any) => ({
-          numero: abono["cfc:NumeroAbono"],
-          fechaVencimiento: abono["cfc:FechaVencimiento"],
-          monto: parseFloat(abono["cfc:MontoAbono"]),
-        })) : [],
-
-        certificador: {
-          nit: certificacion["dte:NITCertificador"],
-          nombre: certificacion["dte:NombreCertificador"],
-        },
+      emisor: {
+        nit: emisor["@_NITEmisor"],
+        nombre: emisor["@_NombreEmisor"],
+        nombreComercial: emisor["@_NombreComercial"],
+        direccion: emisor["dte:DireccionEmisor"],
       },
-      logoUrl
-    );
+
+      receptor: {
+        nit: receptorXML["@_IDReceptor"],
+        nombre: receptorXML["@_NombreReceptor"],
+        direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
+      },
+
+      items: itemsXML.map((item: any) => ({
+        numeroLinea: item["@_NumeroLinea"],
+        cantidad: item["dte:Cantidad"],
+        unidad: item["dte:UnidadMedida"],
+        descripcion: item["dte:Descripcion"],
+        precioUnitario: parseFloat(item["dte:PrecioUnitario"]),
+        total: parseFloat(item["dte:Total"]),
+      })),
+
+      totales: {
+        iva: parseFloat(
+          totales["dte:TotalImpuestos"]["dte:TotalImpuesto"][
+            "@_TotalMontoImpuesto"
+          ]
+        ),
+        granTotal: parseFloat(totales["dte:GranTotal"]),
+      },
+
+      // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
+      abonos: pago_id ? abonos.map((abono: any) => ({
+        numero: abono["cfc:NumeroAbono"],
+        fechaVencimiento: abono["cfc:FechaVencimiento"],
+        monto: parseFloat(abono["cfc:MontoAbono"]),
+      })) : [],
+
+      certificador: {
+        nit: certificacion["dte:NITCertificador"],
+        nombre: certificacion["dte:NombreCertificador"],
+      },
+    };
 
     // ============================================
     // 6️⃣ GUARDAR EN BASE DE DATOS *PRIMERO* (antes del PDF, que es frágil)
@@ -4265,63 +4369,22 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     console.log('📅 Fecha certificación guardada (Guatemala):', facturaGuardada.fecha_certificacion);
 
     // ============================================
-    // 7️⃣ GENERAR PDF + SUBIR A R2 (best-effort, NO fatal)
+    // 7️⃣ GENERAR PDF + SUBIR A R2 (EN BACKGROUND, best-effort, NO fatal)
     // ------------------------------------------------------------
-    // Si esto falla, la factura YA quedó guardada arriba: NO relanzamos, solo
-    // logueamos para monitoreo/reintento. El PDF se puede regenerar luego con
-    // el mismo filename determinístico -> misma URL (script de backfill).
+    // NO se espera: la factura YA está certificada en SAT y guardada arriba, y
+    // el pdf_url es determinístico. Tener a Puppeteer + R2 dentro del request
+    // fue lo que colgó un handler 34s el 2026-08-07: el CRM abortó a los 30s,
+    // reintentó el POST y SAT certificó la MISMA factura dos veces.
+    // Si el PDF falla NO se pierde el registro: se regenera después con el
+    // mismo filename -> misma URL (script backfill-facturas-faltantes).
     // ============================================
-    try {
-      console.log(`   🎨 Generando PDF...`);
-      const { launchBrowser } = await import("../utils/functions/browser");
-      const browser = await launchBrowser();
-      try {
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle0" });
-
-        const pdfBuffer = await page.pdf({
-          format: "A4",
-          printBackground: true,
-          margin: {
-            top: "20px",
-            bottom: "20px",
-            left: "20px",
-            right: "20px",
-          },
-        });
-        console.log(`   ✅ PDF generado`);
-
-        const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-        const s3 = new S3Client({
-          endpoint: process.env.BUCKET_REPORTS_URL,
-          region: "auto",
-          credentials: {
-            accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-          },
-        });
-
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: process.env.BUCKET_REPORTS,
-            Key: filename,
-            Body: pdfBuffer,
-            ContentType: "application/pdf",
-          })
-        );
-        console.log(`   ✅ PDF subido a R2: ${filename}`);
-      } finally {
-        await browser.close();
-      }
-    } catch (pdfError) {
-      // La factura YA está guardada en la BD (paso 6). No se pierde el registro.
-      console.error(
-        `⚠️ [certificarFactura] Factura ${resultado.serie}-${resultado.numero} ` +
-          `(${resultado.uuid}) GUARDADA en BD (id ${facturaGuardada.factura_id}) ` +
-          `pero FALLÓ el PDF/R2. Se puede regenerar el PDF luego:`,
-        pdfError
-      );
-    }
+    console.log(`   🎨 PDF encolado en background...`);
+    generarPDFFacturaEnBackground({
+      datos: datosFactura,
+      logoUrl,
+      filename,
+      referencia: `${resultado.serie}-${resultado.numero} (${resultado.uuid}) id ${facturaGuardada.factura_id}`,
+    });
 
     // ============================================
     // 9️⃣ RETORNAR RESULTADO

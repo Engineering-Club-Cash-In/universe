@@ -1183,6 +1183,15 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           ? (montoManualPorCredito.get(credito_id) ?? new Big(0))
           : montoRestante;
 
+        // En modo manual la instrucción es Todo-o-Nada. Si en la relectura bajo tx
+        // CUBE ya no tiene el saldo que se solicitó para este crédito, lanzamos
+        // error para hacer rollback de toda la operación en vez de colocar menos.
+        if (esManual && montoObjetivo.gt(montoCubePadre)) {
+          throw new CreditoNoDisponibleError(
+            `El crédito ${numero_credito_sifco} ya no tiene el saldo CUBE solicitado en modo manual (solicitado: Q${montoObjetivo.toFixed(2)}, disponible en CUBE: Q${montoCubePadre.toFixed(2)}). Asignación manual cancelada.`,
+          );
+        }
+
         const montoParaEsteCredito = montoObjetivo.gt(montoCubePadre)
           ? montoCubePadre
           : montoObjetivo;
@@ -1647,15 +1656,32 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     //     queda invisible: el operador no tiene cómo saber que reintentando
     //     sí entraría.
     // ================================================================
-    set.status = 200;
     const omitidosPorContencion = errores.filter((e) => e.retryable).length;
+
+    // P1 fix: Si hubo créditos omitidos por contención Y quedó saldo sin colocar (montoRestante > 0),
+    // la operación no fue exitosa. Retornamos 409 y success: false para que los llamadores
+    // automáticos (como la liquidación masiva) y el frontend no asuman que la reinversión
+    // concluyó exitosamente y puedan reintentar.
+    if (omitidosPorContencion > 0 && montoRestante.gt(0)) {
+      set.status = 409;
+      return {
+        success: false,
+        reintentable: true,
+        retryable: true,
+        message: `No se pudo colocar el monto completo por contención de locks: procesados ${resultados.length} créditos, ${omitidosPorContencion} omitidos por contención. Quedan Q${montoRestante.toFixed(2)} sin asignar; reintenta para colocar el remanente.`,
+        monto_total: monto_aportado,
+        monto_distribuido: new Big(monto_aportado).minus(montoRestante).toString(),
+        monto_sin_asignar: montoRestante.toString(),
+        resultados,
+        errores,
+      };
+    }
+
+    set.status = 200;
     return {
       success: true,
-      reintentable: omitidosPorContencion > 0,
-      message:
-        omitidosPorContencion > 0
-          ? `Procesados: ${resultados.length} créditos, ${errores.length} errores (${omitidosPorContencion} por contención: reintenta para colocar Q${montoRestante.toFixed(2)})`
-          : `Procesados: ${resultados.length} créditos, ${errores.length} errores`,
+      reintentable: false,
+      message: `Procesados: ${resultados.length} créditos, ${errores.length} errores`,
       monto_total: monto_aportado,
       monto_distribuido: new Big(monto_aportado).minus(montoRestante).toString(),
       monto_sin_asignar: montoRestante.toString(),

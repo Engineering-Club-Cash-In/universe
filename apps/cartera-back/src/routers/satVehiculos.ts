@@ -6,17 +6,8 @@ export const satVehiculosRouter = new Elysia({ prefix: "/sat-vehiculos" })
   .use(authMiddleware)
   .get(
   "/propios",
-  async ({ set }) => {
-    const resultado = await obtenerVehiculosPropios();
-
-    // 502 cuando el fallo viene de SAT: deja que el CRM distinga un problema
-    // externo de un error propio, aunque el cuerpo llegue igual en ambos casos.
-    if (resultado.estado !== "OK") {
-      set.status = 502;
-    }
-
-    return resultado;
-  },
+  // Siempre 200: con 5xx el cliente reintenta y descarta el cuerpo.
+  async () => obtenerVehiculosPropios(),
   {
     detail: {
       summary: "Consultar Vehículos Propios en Agencia Virtual de SAT",

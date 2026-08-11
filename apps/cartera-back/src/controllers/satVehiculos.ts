@@ -70,7 +70,9 @@ export async function iniciarSesion(page: Page, credenciales: CredencialesSat) {
         return !!el && el.offsetParent !== null;
       },
       { timeout: TIMEOUT_NAV, polling: 500 },
-      SEL.codigoVerificacion.replace(/\\/g, ""),
+      // El selector va con la barra invertida: sin ella el `:` del id JSF se
+      // lee como pseudo-clase y querySelector lanza SyntaxError.
+      SEL.codigoVerificacion,
     )
     .catch(() => null);
 

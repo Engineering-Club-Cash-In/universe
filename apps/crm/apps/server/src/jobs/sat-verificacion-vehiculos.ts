@@ -35,6 +35,28 @@ export interface ResumenVerificacion {
 	omitida?: string;
 }
 
+type EstadoCorrida = "ok" | "error" | "codigo_requerido" | "bloqueado";
+
+/**
+ * Traduce el estado que reporta cartera-back al enum de la corrida. Explícito
+ * en vez de `toLowerCase()` con cast: si cartera agrega un estado nuevo, cae en
+ * `error` en lugar de romper el insert con un valor que el enum no acepta.
+ */
+export function estadoCorridaDesdeSat(
+	estado: SatVehiculosPropiosResponse["estado"],
+): EstadoCorrida {
+	switch (estado) {
+		case "OK":
+			return "ok";
+		case "CODIGO_REQUERIDO":
+			return "codigo_requerido";
+		case "BLOQUEADO":
+			return "bloqueado";
+		default:
+			return "error";
+	}
+}
+
 /** SAT devuelve la placa con guion; en el CRM el formato puede variar. */
 function normalizarPlaca(placa: string): string {
 	return placa.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -200,7 +222,7 @@ export async function verificarVehiculosEnSat(
 				.update(satVerificacionCorridas)
 				.set({
 					nit: respuesta.nit ?? "",
-					estado: respuesta.estado.toLowerCase() as "error",
+					estado: estadoCorridaDesdeSat(respuesta.estado),
 					mensajeError: respuesta.mensajeError,
 					evidencia: respuesta.evidencia?.slice(0, MAX_EVIDENCIA),
 					finalizadaAt: new Date(),

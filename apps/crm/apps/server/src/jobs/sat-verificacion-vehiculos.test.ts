@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { VehiculoSatPropio } from "../services/cartera-back-client";
-import { construirResultados } from "./sat-verificacion-vehiculos";
+import {
+	construirResultados,
+	estadoCorridaDesdeSat,
+} from "./sat-verificacion-vehiculos";
 
 function vehiculoSat(
 	placa: string,
@@ -112,6 +115,21 @@ describe("cruce de vehículos contra SAT", () => {
 		expect(porPlaca.get("P-333CCC")).toBe("no_aparece_en_sat");
 		expect(porPlaca.get("P-999ZZZ")).toBe("no_registrado_interno");
 		expect(filas).toHaveLength(4);
+	});
+
+	test("preserva la clasificación del fallo que reporta cartera-back", () => {
+		// Estos estados llegan en el cuerpo de una respuesta 200: si cartera
+		// respondiera 5xx, el cliente reintentaría y descartaría el cuerpo.
+		expect(estadoCorridaDesdeSat("OK")).toBe("ok");
+		expect(estadoCorridaDesdeSat("CODIGO_REQUERIDO")).toBe("codigo_requerido");
+		expect(estadoCorridaDesdeSat("BLOQUEADO")).toBe("bloqueado");
+		expect(estadoCorridaDesdeSat("ERROR")).toBe("error");
+	});
+
+	test("un estado desconocido cae en error y no rompe el enum", () => {
+		expect(
+			estadoCorridaDesdeSat("ALGO_NUEVO" as Parameters<typeof estadoCorridaDesdeSat>[0]),
+		).toBe("error");
 	});
 
 	test("no reporta alertas cuando todo está en orden", () => {

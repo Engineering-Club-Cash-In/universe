@@ -296,15 +296,21 @@ export async function obtenerUltimaVerificacion() {
 
 	if (!corrida) return null;
 
-	const alertas = await db
+	const filas = await db
 		.select()
 		.from(satVerificacionResultados)
 		.where(
 			and(
 				eq(satVerificacionResultados.corridaId, corrida.id),
-				sql`${satVerificacionResultados.resultado} IN ('no_aparece_en_sat', 'inactivo')`,
+				sql`${satVerificacionResultados.resultado} <> 'activo_ok'`,
 			),
 		);
 
-	return { corrida, alertas };
+	// Separados a propósito: `no_registrado_interno` es un hallazgo de
+	// reconciliación, no una alarma, y no cuenta en `totalAlertas`.
+	return {
+		corrida,
+		alertas: filas.filter((f) => f.resultado !== "no_registrado_interno"),
+		descubiertos: filas.filter((f) => f.resultado === "no_registrado_interno"),
+	};
 }

@@ -31,6 +31,8 @@ export interface VehiculoSat {
 
 export class SatLoginError extends Error {}
 export class SatRequiereCodigoError extends SatLoginError {}
+/** La página cambió y un paso obligatorio del flujo no se pudo ejecutar. */
+export class SatScrapeError extends Error {}
 
 async function esperar(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
@@ -262,7 +264,15 @@ export async function obtenerVehiculosPropios(): Promise<ResultadoScrapeSat> {
       try {
         await iniciarSesion(page, credenciales);
         const listado = await irAVehiculosPropios(page);
-        await verTodosLosVehiculos(listado);
+
+        // Sin este clic la tabla puede venir vacía, y una lista vacía marca
+        // todos los vehículos como salidos del nombre de Cash In.
+        if (!(await verTodosLosVehiculos(listado))) {
+          throw new SatScrapeError(
+            "No se encontró el enlace 'Ver todos mis vehiculos'; la página cambió.",
+          );
+        }
+
         return await leerTablaVehiculos(listado);
       } catch (error) {
         const evidencia = await page.content().catch(() => "");

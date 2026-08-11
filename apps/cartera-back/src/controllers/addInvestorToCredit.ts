@@ -1002,9 +1002,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         const { credito: creditoRaw } = credito_completo;
 
         // ── Lock del crédito, sin esperar ──
-        // Si otro proceso ya lo está operando, este crédito se salta y el
-        // monto se coloca en el siguiente candidato. No se espera a propósito:
-        // un waiter retendría su conexión (ver paymentAdvisoryLock.ts).
+        // No se espera a propósito: un waiter retendría su conexión (ver
+        // paymentAdvisoryLock.ts).
         if (!(await locks.tryLock(credito_id))) {
           const razon = "Otro proceso está operando este crédito";
           // Manual es todo-o-nada: saltar acá dejaría la instrucción aplicada
@@ -1025,7 +1024,17 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             // contención o por falta real de capital (ver PASO 3k).
             capacidad_omitida: capacidadCubeSnapshot(candidato),
           });
-          continue;
+          // Abortar automático al PRIMER lock miss (no seguir probando el
+          // resto de candidatos): con contención de por medio, el bloque de
+          // abajo (omitidosPorContencion > 0 && montoRestante > 0) va a
+          // hacer rollback total de todas formas — seguir el loop no coloca
+          // nada extra, solo retiene los locks de los créditos SIGUIENTES
+          // mientras esta tx sigue abierta. Con dos reinversiones compitiendo
+          // por los mismos top-2 créditos (A gana el 1º, B gana el 2º), eso
+          // amplía la ventana en la que cada una bloquea a la otra en el
+          // crédito que sí tiene libre — livelock bajo contención pesada.
+          // Cortar acá suelta rápido y deja que la otra corrida avance.
+          break;
         }
 
         // ── Relectura de PADRE y ESPEJO DENTRO de la transacción ──
@@ -1192,6 +1201,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           );
         }
 
+        // En manual esta rama de clamp es inalcanzable: el throw de arriba ya
+        // interceptó `montoObjetivo.gt(montoCubePadre)`. Queda como clamp real
+        // solo para automático, que sí puede colocar menos de lo pedido.
         const montoParaEsteCredito = montoObjetivo.gt(montoCubePadre)
           ? montoCubePadre
           : montoObjetivo;
@@ -1574,8 +1586,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       // duplicaría (over-reinvestment).
       const omitidosPorContencion = errores.filter((e) => e.retryable).length;
       if (omitidosPorContencion > 0 && montoRestante.gt(0)) {
+        // Este throw vive DENTRO de la tx: hace rollback de TODO lo ya
+        // insertado en este loop, no solo del remanente. Un retry tiene que
+        // mandar monto_aportado completo otra vez — no hay nada parcial
+        // commiteado que "completar".
         throw new CreditoNoDisponibleError(
-          `No se pudo colocar el monto completo por contención de locks: procesados ${resultados.length} créditos, ${omitidosPorContencion} omitidos por contención. Quedan Q${montoRestante.toFixed(2)} sin asignar; reintenta para colocar el remanente.`,
+          `No se pudo colocar el monto completo por contención de locks: ${omitidosPorContencion} crédito(s) omitidos por contención. Se revirtió toda la operación (nada quedó colocado); reintenta con el monto completo Q${new Big(monto_aportado).toFixed(2)}.`,
         );
       }
     }),

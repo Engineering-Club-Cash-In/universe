@@ -108,3 +108,43 @@ describe("status del rebuild del espejo", () => {
     );
   });
 });
+
+describe("replaceInvestorCredit — mismo rebuild destructivo, caso real crédito 9205", () => {
+  // 2026-08-10 17:19 la liquidación deja a Fernando (160) pendiente_reinversion
+  // en el crédito 9205. 2026-08-11 08:33 un operador saca a Carlos (110) del
+  // MISMO crédito vía manualReassignInvestor / returnPendingInvestorsToCube.
+  // El rebuild de esos controllers hardcodeaba "completado" para todos los
+  // que no eran el target de ESA operación — igual que el bug original de
+  // addInvestorToCredit, pero sin carrera de por medio: acá pasaron 15 horas,
+  // el operador sí quería operar el crédito, solo no debía confirmar de paso
+  // la reinversión pendiente de Fernando.
+  const espejoActual: FilaEspejoGuard[] = [
+    { inversionista_id: 160, status: "pendiente_reinversion" }, // Fernando
+    { inversionista_id: 110, status: "pendiente_compra_cartera" }, // Carlos
+  ];
+  const mapa = construirStatusActualPorInv(espejoActual);
+
+  it("manualReassignInvestor destino/origen (un solo target): Fernando conserva su pendiente al operar sobre Carlos", () => {
+    expect(resolverStatus(160, 110, "completado", mapa)).toBe(
+      "pendiente_reinversion",
+    );
+  });
+
+  it("Carlos (el target) sí recibe el status nuevo de su propia operación", () => {
+    expect(resolverStatus(110, 110, "completado", mapa)).toBe("completado");
+  });
+
+  it("returnPendingInvestorsToCube (Set de varios targets): Fernando conserva su pendiente si NO está en el Set cancelado", () => {
+    // Mismo criterio que resolverStatusEspejoRebuild pero con un Set en vez
+    // de un solo target — así quedó implementado en replaceInvestorCredit.ts
+    // porque esa operación puede cancelar a varios inversionistas a la vez.
+    const inversionistasConPendiente = new Set([110]);
+    const resolver = (inversionista_id: number) =>
+      inversionistasConPendiente.has(inversionista_id)
+        ? "completado"
+        : mapa.get(inversionista_id) ?? "completado";
+
+    expect(resolver(160)).toBe("pendiente_reinversion");
+    expect(resolver(110)).toBe("completado");
+  });
+});

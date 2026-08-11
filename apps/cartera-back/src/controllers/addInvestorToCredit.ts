@@ -1565,6 +1565,19 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           `Solo hay Q${distribuido.toFixed(2)} disponibles de los Q${new Big(monto_aportado).toFixed(2)} solicitados. Una compra de cartera con modalidad de facturación debe colocarse completa; ajusta el monto e intenta de nuevo.`,
         );
       }
+
+      // ── Contención parcial en modo automático (sin modalidad) ──
+      // Si algún crédito se saltó por contención de locks Y quedó saldo sin
+      // colocar, lanzamos DENTRO de la tx para que haga rollback de los
+      // créditos que sí se procesaron. Sin esto, los inserts parciales ya
+      // estarían commiteados y un retry con el mismo monto_aportado los
+      // duplicaría (over-reinvestment).
+      const omitidosPorContencion = errores.filter((e) => e.retryable).length;
+      if (omitidosPorContencion > 0 && montoRestante.gt(0)) {
+        throw new CreditoNoDisponibleError(
+          `No se pudo colocar el monto completo por contención de locks: procesados ${resultados.length} créditos, ${omitidosPorContencion} omitidos por contención. Quedan Q${montoRestante.toFixed(2)} sin asignar; reintenta para colocar el remanente.`,
+        );
+      }
     }),
     );
 
@@ -1656,27 +1669,6 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     //     queda invisible: el operador no tiene cómo saber que reintentando
     //     sí entraría.
     // ================================================================
-    const omitidosPorContencion = errores.filter((e) => e.retryable).length;
-
-    // P1 fix: Si hubo créditos omitidos por contención Y quedó saldo sin colocar (montoRestante > 0),
-    // la operación no fue exitosa. Retornamos 409 y success: false para que los llamadores
-    // automáticos (como la liquidación masiva) y el frontend no asuman que la reinversión
-    // concluyó exitosamente y puedan reintentar.
-    if (omitidosPorContencion > 0 && montoRestante.gt(0)) {
-      set.status = 409;
-      return {
-        success: false,
-        reintentable: true,
-        retryable: true,
-        message: `No se pudo colocar el monto completo por contención de locks: procesados ${resultados.length} créditos, ${omitidosPorContencion} omitidos por contención. Quedan Q${montoRestante.toFixed(2)} sin asignar; reintenta para colocar el remanente.`,
-        monto_total: monto_aportado,
-        monto_distribuido: new Big(monto_aportado).minus(montoRestante).toString(),
-        monto_sin_asignar: montoRestante.toString(),
-        resultados,
-        errores,
-      };
-    }
-
     set.status = 200;
     return {
       success: true,

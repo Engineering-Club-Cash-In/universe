@@ -433,42 +433,70 @@ async function closeInvoiceSyncOperation(
 }
 
 /**
- * ¿Este gasto administrativo ya se registró antes con éxito?
+ * ¿Qué pasó con este gasto administrativo en un intento anterior?
  *
  * `POST /api/gastos-administrativos` inserta sin condiciones, así que en un
  * re-cierre de la misma oportunidad (donde la factura NO se vuelve a emitir por
  * la idempotency_key) el gasto sí se duplicaría y el reporte diario contaría
- * doble. El log del CRM ya guarda una fila por gasto con un entityId estable,
- * así que sirve de candado sin tocar cartera.
+ * doble. El log del CRM guarda una fila por gasto con un entityId estable, así
+ * que sirve de candado sin tocar cartera.
+ *
+ * Tres desenlaces posibles:
+ * - "registrado": hubo un `success` → no hay que repetirlo.
+ * - "en_duda": el intento anterior quedó en `pending` o murió por timeout. El
+ *   gasto PUDO haberse insertado igual (que el cliente cuelgue no cancela lo
+ *   que cartera ya ejecutó), así que hay que confirmarlo contra cartera antes
+ *   de repetir el POST.
+ * - "ninguno": no hay rastro → se registra normal.
  */
-async function gastoYaRegistrado(
+type EstadoGastoPrevio = {
+	estado: "registrado" | "en_duda" | "ninguno";
+	fecha: string | null;
+};
+
+async function estadoGastoPrevio(
 	gastoEntityId: string,
-): Promise<{ registrado: boolean; fecha: string | null }> {
+): Promise<EstadoGastoPrevio> {
 	try {
-		const [row] = await db
-			.select({ requestPayload: carteraBackSyncLog.requestPayload })
+		const filas = await db
+			.select({
+				status: carteraBackSyncLog.status,
+				errorMessage: carteraBackSyncLog.errorMessage,
+				requestPayload: carteraBackSyncLog.requestPayload,
+			})
 			.from(carteraBackSyncLog)
 			.where(
 				and(
 					eq(carteraBackSyncLog.operation, "register_gasto_administrativo"),
 					eq(carteraBackSyncLog.entityId, gastoEntityId),
-					eq(carteraBackSyncLog.status, "success"),
 				),
 			)
-			.limit(1);
+			.orderBy(desc(carteraBackSyncLog.startedAt));
 
-		if (!row) return { registrado: false, fecha: null };
+		if (filas.length === 0) return { estado: "ninguno", fecha: null };
+
+		const exito = filas.find((f) => f.status === "success");
+		// Un intento abierto que nunca cerró, o uno que murió por timeout: en
+		// ambos casos el gasto pudo haber quedado insertado del otro lado.
+		const enDuda = filas.find(
+			(f) =>
+				f.status === "pending" ||
+				(f.status === "error" && f.errorMessage?.startsWith("TIMEOUT")),
+		);
+		const referencia = exito ?? enDuda;
+		if (!referencia) return { estado: "ninguno", fecha: null };
 
 		// La fecha del gasto original importa: en un re-cierre de otro día, el
 		// snapshot que hay que refrescar es el de ESE día, no el de hoy.
 		let fecha: string | null = null;
 		try {
-			const payload = JSON.parse(row.requestPayload ?? "{}");
+			const payload = JSON.parse(referencia.requestPayload ?? "{}");
 			if (typeof payload?.fecha === "string") fecha = payload.fecha;
 		} catch {
 			// Payload viejo o ilegible: se refresca solo el día de hoy.
 		}
-		return { registrado: true, fecha };
+
+		return { estado: exito ? "registrado" : "en_duda", fecha };
 	} catch (error) {
 		// Si no se puede consultar, se conserva el comportamiento de siempre
 		// (registrar) en vez de arriesgarse a perder el gasto.
@@ -476,7 +504,32 @@ async function gastoYaRegistrado(
 			"[CloseOpportunity] No se pudo verificar si el gasto ya existía:",
 			error,
 		);
-		return { registrado: false, fecha: null };
+		return { estado: "ninguno", fecha: null };
+	}
+}
+
+/**
+ * Resuelve un intento "en duda" preguntándole a cartera: ¿existe ya un gasto
+ * con este concepto en esa fecha? El concepto lo arma siempre la misma fórmula
+ * (`<factura> (oportunidad <id>)`), así que identifica al gasto sin ambigüedad.
+ *
+ * Ante un fallo de la consulta devuelve `true` (asumir que existe): duplicar un
+ * gasto descuadra el reporte del día y hay que ir a borrarlo a mano, mientras
+ * que no registrarlo queda visible en el log como intento en duda.
+ */
+async function gastoExisteEnCartera(
+	fecha: string,
+	concepto: string,
+): Promise<boolean> {
+	try {
+		const resp = await carteraBackClient.listarGastosAdministrativos(fecha);
+		return (resp.data ?? []).some((g) => g.concepto === concepto);
+	} catch (error) {
+		console.error(
+			`[CloseOpportunity] No se pudo consultar los gastos del ${fecha}, se asume que el gasto ya existe:`,
+			error,
+		);
+		return true;
 	}
 }
 
@@ -873,10 +926,18 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 						// 🔒 Candado del gasto. La factura ya no se duplica (idempotency_key),
 						// pero /api/gastos-administrativos inserta sin condiciones: sin esto,
 						// un re-cierre volvería a sumar el gasto al reporte del día.
-						const gastoPrevio = await gastoYaRegistrado(gastoEntityId);
-						if (gastoPrevio.registrado) {
+						const gastoPrevio = await estadoGastoPrevio(gastoEntityId);
+						const fechaPrevia = gastoPrevio.fecha ?? fechaGuatemala;
+						// Un intento anterior que quedó en duda (timeout / pending) no se
+						// puede dar por perdido: se le pregunta a cartera si el gasto quedó.
+						const yaRegistrado =
+							gastoPrevio.estado === "registrado" ||
+							(gastoPrevio.estado === "en_duda" &&
+								(await gastoExisteEnCartera(fechaPrevia, gastoBody.concepto)));
+
+						if (yaRegistrado) {
 							gastosOmitidos++;
-							fechasARefrescar.add(gastoPrevio.fecha ?? fechaGuatemala);
+							fechasARefrescar.add(fechaPrevia);
 							await logInvoiceSyncOperation({
 								operation: "register_gasto_administrativo",
 								entityType: "gasto",
@@ -884,7 +945,11 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 								status: "skipped",
 								requestPayload: JSON.stringify(gastoBody),
 								responsePayload: JSON.stringify({
-									motivo: "ya existía un registro exitoso para este gasto",
+									motivo:
+										gastoPrevio.estado === "registrado"
+											? "ya existía un registro exitoso para este gasto"
+											: "el intento anterior quedó en duda y cartera confirmó que el gasto ya existe",
+									fecha_verificada: fechaPrevia,
 								}),
 								startedAt: new Date(gastoStart),
 								completedAt: new Date(),

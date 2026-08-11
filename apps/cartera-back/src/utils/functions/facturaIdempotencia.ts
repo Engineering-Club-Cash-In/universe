@@ -36,16 +36,24 @@ export interface FacturaIdempotente {
   status: string;
 }
 
-/** Factura ya emitida para esa clave (cualquier status), o null si no hay. */
+/**
+ * Factura ya emitida para esa clave (cualquier status), o null si no hay.
+ *
+ * Se busca por la columna de la FACTURA, no por la tabla de reservas: la
+ * columna se escribe en el mismo INSERT que la certificación, así que sigue
+ * siendo confiable aunque `confirmarIdempotencyKey` (un UPDATE aparte) haya
+ * fallado. Si mirásemos solo las reservas, un UPDATE caído dejaría la factura
+ * sin candado y la siguiente request emitiría una duplicada.
+ */
 export async function buscarFacturaPorIdempotencyKey(
   key: string
 ): Promise<FacturaIdempotente | null> {
   const res = await db.execute(sql`
     SELECT f.factura_id, f.serie, f.numero, f.uuid, f.monto_total, f.monto_iva,
            f.pdf_url, f.receptor_nit, f.receptor_nombre, f.status::text AS status
-    FROM cartera.facturas_idempotencia i
-    JOIN cartera.facturas_electronicas f ON f.factura_id = i.factura_id
-    WHERE i.idempotency_key = ${key}
+    FROM cartera.facturas_electronicas f
+    WHERE f.idempotency_key = ${key}
+    ORDER BY (f.status <> 'ANULADA') DESC, f.factura_id DESC
     LIMIT 1
   `);
   return ((res as any).rows?.[0] as FacturaIdempotente) ?? null;

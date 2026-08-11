@@ -3518,14 +3518,22 @@ if (facturasExistentes.length > 0) {
           customConfig: emisorKey !== "CUBE" ? emisorConfig.config : undefined,
           customSatConfig: emisorKey !== "CUBE" ? emisorConfig.satConfig : undefined,
           usarFechaActual: credito_nuevo,
+          // Queda guardada EN la fila de la factura, en el mismo INSERT.
+          idempotencyKey,
         });
+
+        // A partir de acá la factura EXISTE en SAT y en la BD con su clave. Pase
+        // lo que pase después, la reserva no se suelta: soltarla dejaría la
+        // puerta abierta a que un reintento certifique una duplicada.
+        if (resultado.factura_id) reservaTomada = false;
 
         console.log("🎉 ========== FACTURA GENÉRICA GENERADA ==========");
         console.log(`✅ Serie: ${resultado.serie}-${resultado.numero}`);
         console.log(`✅ UUID: ${resultado.uuid}`);
 
-        // Anclar la clave a la factura recién emitida: desde acá, cualquier
-        // repetición del POST devuelve ESTA factura en vez de emitir otra.
+        // Enlazar la reserva con la factura. Es bookkeeping: el candado real es
+        // facturas_electronicas.idempotency_key (se escribió con el INSERT), así
+        // que si este UPDATE falla NO se emite nada duplicado.
         if (idempotencyKey) {
           if (resultado.factura_id) {
             await confirmarIdempotencyKey(idempotencyKey, resultado.factura_id);
@@ -3533,8 +3541,8 @@ if (facturasExistentes.length > 0) {
             // SIMULAR_FACTURAS=true (modo demo): no hay factura real que anclar,
             // se suelta la clave para no dejar la reserva colgada.
             await liberarIdempotencyKey(idempotencyKey);
+            reservaTomada = false;
           }
-          reservaTomada = false;
         }
 
         // 🧾 Desglose de la factura GENÉRICA para el reporte diario (best-effort,
@@ -4027,6 +4035,7 @@ async function certificarFacturaHelper({
   customSatConfig,
   usarFechaActual = false,
   nitsFallback = [],
+  idempotencyKey = null,
 }: {
   pago_id?: number | null;
   receptor: any;
@@ -4044,6 +4053,13 @@ async function certificarFacturaHelper({
   };
   usarFechaActual?: boolean;
   nitsFallback?: string[];
+  /**
+   * Clave de idempotencia del caller. Se guarda EN LA MISMA fila de la factura
+   * (mismo INSERT que la certificación) para que el candado no dependa de un
+   * UPDATE posterior que puede fallar: si se cae, la clave igual quedó pegada a
+   * la factura y la siguiente request la encuentra en vez de emitir otra.
+   */
+  idempotencyKey?: string | null;
 }) {
   try {
     console.log(`\n📄 ========== CERTIFICANDO FACTURA ==========`);
@@ -4377,6 +4393,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
         status: "ACTIVA",
         created_by: created_by || null,
+        idempotency_key: idempotencyKey,
       })
       .returning();
 

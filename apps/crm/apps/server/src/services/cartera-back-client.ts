@@ -1461,6 +1461,29 @@ export class CarteraBackClient {
 	}
 
 	/**
+	 * Lista los gastos administrativos de un rango de fechas.
+	 *
+	 * Se usa para resolver un intento ANTERIOR que quedó en duda (timeout): el
+	 * POST no es idempotente, así que antes de repetirlo hay que preguntarle a
+	 * cartera si el gasto quedó registrado o no.
+	 *
+	 * @param fechaInicio - "YYYY-MM-DD" (hora Guatemala)
+	 * @param fechaFin - "YYYY-MM-DD"; por defecto, el mismo día
+	 */
+	async listarGastosAdministrativos(
+		fechaInicio: string,
+		fechaFin: string = fechaInicio,
+	): Promise<{
+		success: boolean;
+		data?: { id: number; fecha: string; concepto: string; monto: string }[];
+	}> {
+		const params = new URLSearchParams({ fechaInicio, fechaFin });
+		return this.request(`/api/gastos-administrativos?${params}`, {
+			method: "GET",
+		});
+	}
+
+	/**
 	 * Refresca (aplica los registros manuales de) el snapshot diario de
 	 * facturación para una fecha. Es necesario DESPUÉS de insertar gastos
 	 * administrativos: el reporte diario lee de facturacion_snapshot_diario,

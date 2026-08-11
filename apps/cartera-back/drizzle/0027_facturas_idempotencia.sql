@@ -17,6 +17,24 @@
 -- Aditiva: sin `idempotency_key` el endpoint se comporta igual que siempre.
 -- NOTA: aplicar a mano en dev y prod (Cartera aplica el SQL a mano, no drizzle-kit).
 
+-- 1) La clave vive TAMBIÉN en la factura, escrita en el mismo INSERT que la
+--    certificación. Es la fuente de verdad de "esta factura lógica ya se
+--    emitió": si el UPDATE de confirmación de abajo fallara (timeout, deadlock),
+--    la clave igual quedó pegada a la factura y la siguiente request la
+--    encuentra en vez de emitir otra.
+--    SIN unique a propósito: si alguna vez se colara un duplicado, preferimos
+--    tenerlo en la BD (visible y anulable) antes que un INSERT rechazado que
+--    deje la factura "en SAT pero no en la BD".
+ALTER TABLE cartera.facturas_electronicas
+  ADD COLUMN IF NOT EXISTS idempotency_key varchar(160);
+
+CREATE INDEX IF NOT EXISTS idx_facturas_electronicas_idempotency_key
+  ON cartera.facturas_electronicas (idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+-- 2) Tabla de reservas: resuelve la carrera entre dos requests concurrentes que
+--    todavía no insertaron nada (el candado de arriba solo existe una vez que
+--    la factura está en la BD).
 CREATE TABLE IF NOT EXISTS cartera.facturas_idempotencia (
   idempotency_key varchar(160) PRIMARY KEY,
   factura_id      integer REFERENCES cartera.facturas_electronicas(factura_id),

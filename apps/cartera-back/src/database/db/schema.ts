@@ -1202,6 +1202,14 @@
     // Metadata
     created_at: timestamp("created_at").defaultNow().notNull(),
     created_by: integer("created_by").references(() => platform_users.id),
+
+    // Clave de idempotencia del caller (ej. "<opportunityId>-Copia de Llave").
+    // Se escribe en el MISMO insert que la factura: es la fuente de verdad de
+    // "esta factura lógica ya se emitió", para que el candado no dependa de un
+    // UPDATE posterior. NO lleva unique: si alguna vez se colara un duplicado,
+    // preferimos tenerlo registrado (y anulable) antes que dejarlo en SAT sin
+    // fila en la BD. Ver utils/functions/facturaIdempotencia.ts.
+    idempotency_key: varchar("idempotency_key", { length: 160 }),
   });
 
   // ============================================

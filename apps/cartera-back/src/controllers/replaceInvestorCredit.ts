@@ -21,6 +21,16 @@ import {
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
+// Conflicto de negocio (créditos rechazados por guards), no un error
+// interno: se responde 409, no 500, para que el operador vea un mensaje
+// accionable en vez de "error inesperado del servidor".
+class ReasignacionNoDisponibleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReasignacionNoDisponibleError";
+  }
+}
+
 // ========================================
 // ID fijo de CUBE INVESTMENTS S.A.
 // CUBE es el inversionista principal/"la casa" al que se le
@@ -1418,7 +1428,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       // ve el error en vez de descubrir después que el inversionista ya no
       // está en el crédito.
       if (reasignaciones.length > 0 && resultadosAsignacion.length === 0) {
-        throw new Error(
+        throw new ReasignacionNoDisponibleError(
           `Ningún crédito destino pudo recibir la reasignación (${errores.length} rechazado(s)); no se movió al inversionista del crédito origen.`,
         );
       }
@@ -1789,6 +1799,13 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       errores,
     };
   } catch (error) {
+    if (error instanceof ReasignacionNoDisponibleError) {
+      set.status = 409;
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
     console.error("[manualReassignInvestor] Error:", error);
     set.status = 500;
     return {

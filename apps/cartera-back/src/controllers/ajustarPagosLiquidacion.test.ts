@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { lockPoolMock } from "../utils/testMocks";
 
 // Cola de resultados: computarTotalesFiltrados hace 3 selects en orden:
 // inversionista → créditos espejo → pagos espejo.
@@ -18,6 +19,9 @@ function chain() {
 
 mock.module("../database/index", () => ({
   db: { select: () => chain() },
+  // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
+  // aunque estos tests no lo usen. Ver testMocks.ts.
+  lockPool: lockPoolMock,
 }));
 
 const { computarTotalesFiltrados } = await import("./ajustarPagosLiquidacion");

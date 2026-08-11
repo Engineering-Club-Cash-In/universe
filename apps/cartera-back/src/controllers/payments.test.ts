@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import Big from "big.js";
+import { lockPoolMock } from "../utils/testMocks";
 
 // Let's create simple test flags/mocks we can dynamically adjust per test case
 let mockCreditosInversionistaEspejo: any[] = [];
@@ -153,7 +154,12 @@ mock.module("../database/index", () => {
       }
   };
 
-  return { db: mockDbInstance };
+  // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
+  // aunque estos tests no lo usen. Ver testMocks.ts.
+  return {
+    db: mockDbInstance,
+    lockPool: lockPoolMock,
+  };
 });
 
 // Mock @cci/email

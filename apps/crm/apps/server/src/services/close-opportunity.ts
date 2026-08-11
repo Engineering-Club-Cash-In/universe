@@ -441,10 +441,12 @@ async function closeInvoiceSyncOperation(
  * doble. El log del CRM ya guarda una fila por gasto con un entityId estable,
  * así que sirve de candado sin tocar cartera.
  */
-async function gastoYaRegistrado(gastoEntityId: string): Promise<boolean> {
+async function gastoYaRegistrado(
+	gastoEntityId: string,
+): Promise<{ registrado: boolean; fecha: string | null }> {
 	try {
 		const [row] = await db
-			.select({ id: carteraBackSyncLog.id })
+			.select({ requestPayload: carteraBackSyncLog.requestPayload })
 			.from(carteraBackSyncLog)
 			.where(
 				and(
@@ -454,7 +456,19 @@ async function gastoYaRegistrado(gastoEntityId: string): Promise<boolean> {
 				),
 			)
 			.limit(1);
-		return !!row;
+
+		if (!row) return { registrado: false, fecha: null };
+
+		// La fecha del gasto original importa: en un re-cierre de otro día, el
+		// snapshot que hay que refrescar es el de ESE día, no el de hoy.
+		let fecha: string | null = null;
+		try {
+			const payload = JSON.parse(row.requestPayload ?? "{}");
+			if (typeof payload?.fecha === "string") fecha = payload.fecha;
+		} catch {
+			// Payload viejo o ilegible: se refresca solo el día de hoy.
+		}
+		return { registrado: true, fecha };
 	} catch (error) {
 		// Si no se puede consultar, se conserva el comportamiento de siempre
 		// (registrar) en vez de arriesgarse a perder el gasto.
@@ -462,7 +476,7 @@ async function gastoYaRegistrado(gastoEntityId: string): Promise<boolean> {
 			"[CloseOpportunity] No se pudo verificar si el gasto ya existía:",
 			error,
 		);
-		return false;
+		return { registrado: false, fecha: null };
 	}
 }
 
@@ -772,6 +786,15 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 			// Cuántos gastos administrativos se registraron (para refrescar el
 			// snapshot del día una sola vez al final, si hubo al menos uno).
 			let gastosRegistrados = 0;
+			// Días cuyo snapshot hay que refrescar al final. Normalmente es solo
+			// hoy, pero un gasto OMITIDO (ya existía) también entra con SU fecha:
+			// si en el cierre anterior el gasto se insertó y el refresco
+			// (best-effort) falló o el proceso murió antes, este es el único paso
+			// que lo lleva al reporte, y el día a arreglar es el de ese gasto, no
+			// el de hoy. `aplicarManualesDia` regenera el día completo, así que
+			// correrlo de más es inocuo.
+			const fechasARefrescar = new Set<string>();
+			let gastosOmitidos = 0;
 
 			for (const invoice of invoices) {
 				const startTime = Date.now();
@@ -850,7 +873,10 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 						// 🔒 Candado del gasto. La factura ya no se duplica (idempotency_key),
 						// pero /api/gastos-administrativos inserta sin condiciones: sin esto,
 						// un re-cierre volvería a sumar el gasto al reporte del día.
-						if (await gastoYaRegistrado(gastoEntityId)) {
+						const gastoPrevio = await gastoYaRegistrado(gastoEntityId);
+						if (gastoPrevio.registrado) {
+							gastosOmitidos++;
+							fechasARefrescar.add(gastoPrevio.fecha ?? fechaGuatemala);
 							await logInvoiceSyncOperation({
 								operation: "register_gasto_administrativo",
 								entityType: "gasto",
@@ -889,6 +915,7 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 								const gastoResp =
 									await carteraBackClient.crearGastoAdministrativo(gastoBody);
 								gastosRegistrados++;
+								fechasARefrescar.add(gastoBody.fecha);
 
 								await closeInvoiceSyncOperation(gastoLogId, {
 									status: "success",
@@ -952,11 +979,20 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 			// tras insertar los gastos hay que aplicar los manuales del día para que
 			// queden en las columnas administrativos/otros_cobros (mismo paso que
 			// hace la UI manual). Best-effort: si falla, se loguea y sigue.
-			if (gastosRegistrados > 0) {
+			//
+			// Los omitidos cuentan igual: el gasto existe en cartera pero el refresco
+			// del cierre anterior pudo no haber corrido, y este es el único paso que
+			// lo lleva al snapshot.
+			if (fechasARefrescar.size > 0) {
+				console.log(
+					`[CloseOpportunity] Refrescando snapshot de ${fechasARefrescar.size} día(s) (${gastosRegistrados} gasto(s) nuevo(s), ${gastosOmitidos} ya existente(s))`,
+				);
+			}
+			for (const fecha of fechasARefrescar) {
 				try {
-					await carteraBackClient.aplicarManualesDia(fechaGuatemala);
+					await carteraBackClient.aplicarManualesDia(fecha);
 					console.log(
-						`[CloseOpportunity] ✓ Snapshot del día ${fechaGuatemala} refrescado (${gastosRegistrados} gasto(s))`,
+						`[CloseOpportunity] ✓ Snapshot del día ${fecha} refrescado`,
 					);
 				} catch (snapshotError) {
 					const snapshotMsg =
@@ -964,7 +1000,7 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 							? snapshotError.message
 							: String(snapshotError);
 					console.error(
-						`[CloseOpportunity] ✗ No se pudo refrescar el snapshot del día ${fechaGuatemala}: ${snapshotMsg}`,
+						`[CloseOpportunity] ✗ No se pudo refrescar el snapshot del día ${fecha}: ${snapshotMsg}`,
 					);
 				}
 			}

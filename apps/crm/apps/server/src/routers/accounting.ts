@@ -18,6 +18,9 @@ export const accountingRouter = {
 						.default("pending"),
 					mes: z.number().int().min(1).max(12).optional(),
 					anio: z.number().int().min(2000).max(2100).optional(),
+					// Incluye a los inversionistas internos/propios (Cube, Autocash, …).
+					// Opt-in: sin el flag, cartera-back solo devuelve externos.
+					incluirInternos: z.boolean().optional(),
 				})
 				.refine(
 					(value) =>

@@ -1010,6 +1010,10 @@ function PagarInversionistas() {
 		() => ({
 			estado: estadoBoletaFilter,
 			...(requiresPeriodo ? { mes: mesFiltro, anio: anioFiltro } : {}),
+			// Los inversionistas internos/propios (Cube, Autocash, …) también se pagan
+			// desde esta pantalla. En cartera-back el flag es opt-in: sin él, el
+			// endpoint solo devuelve externos y estos no aparecerían en la lista.
+			incluirInternos: true,
 		}),
 		[anioFiltro, estadoBoletaFilter, mesFiltro, requiresPeriodo],
 	);

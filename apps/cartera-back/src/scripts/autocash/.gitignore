@@ -6,3 +6,7 @@ reporte_ajuste_autocash*.json
 db_creditos.csv
 *.xlsx
 __pycache__/
+
+# Cualquier volcado de la DB o salida con datos de clientes. Se generan fuera
+# del repo (~/Descargas/datos-cuadre-autocash/); esto es la red de seguridad.
+*.csv

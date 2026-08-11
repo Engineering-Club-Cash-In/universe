@@ -3,3 +3,4 @@
 db_*.csv
 *.xlsx
 __pycache__/
+*.csv

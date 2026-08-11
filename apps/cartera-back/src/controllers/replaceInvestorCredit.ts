@@ -431,17 +431,25 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
               creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
             fecha_inicio_participacion:
               creditos_inversionistas_espejo.fecha_inicio_participacion,
-            // Se leen para preservar modalidad, status y tipo_reinversion en
-            // el nuke & rebuild de abajo. Si no: la modalidad se borraría a
-            // null y el status caería a "completado", matando la sesión
-            // pendiente de cualquier OTRO inversionista del mismo crédito
-            // que no es parte de esta limpieza.
+            // Se leen para preservar modalidad, status, tipo_reinversion y
+            // metadata de aceptación en el nuke & rebuild de abajo. Si no: la
+            // modalidad se borraría a null, el status caería a "completado"
+            // y aceptada_at/aceptada_por/compra_cartera_extendida_at se
+            // perderían — matando la sesión pendiente de cualquier OTRO
+            // inversionista del mismo crédito que no es parte de esta
+            // limpieza, y con aceptada_at en null expirarCompraCartera.ts ya
+            // no lo encuentra (filtra por isNotNull(aceptada_at)), así que
+            // una compra pendiente_revision quedaría colgada para siempre.
             modalidad_facturacion:
               creditos_inversionistas_espejo.modalidad_facturacion,
             modalidad_facturacion_spread_id:
               creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
             status: creditos_inversionistas_espejo.status,
             tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+            aceptada_at: creditos_inversionistas_espejo.aceptada_at,
+            aceptada_por: creditos_inversionistas_espejo.aceptada_por,
+            compra_cartera_extendida_at:
+              creditos_inversionistas_espejo.compra_cartera_extendida_at,
           })
           .from(creditos_inversionistas_espejo)
           .where(eq(creditos_inversionistas_espejo.credito_id, creditoId));
@@ -638,6 +646,15 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
             modalidad_facturacion: previo?.modalidad_facturacion ?? null,
             modalidad_facturacion_spread_id:
               previo?.modalidad_facturacion_spread_id ?? null,
+            // El cancelado no tiene nada que expirar; los demás preservan su
+            // metadata de aceptación (si no, expirarCompraCartera.ts deja de
+            // encontrarlos con aceptada_at en null y su pendiente_revision
+            // queda colgada para siempre).
+            aceptada_at: fueCancelado ? null : previo?.aceptada_at ?? null,
+            aceptada_por: fueCancelado ? null : previo?.aceptada_por ?? null,
+            compra_cartera_extendida_at: fueCancelado
+              ? null
+              : previo?.compra_cartera_extendida_at ?? null,
             updated_at: new Date(),
           };
         });
@@ -1053,17 +1070,24 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
               creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
             fecha_inicio_participacion:
               creditos_inversionistas_espejo.fecha_inicio_participacion,
-            // Se leen para preservar modalidad, status y tipo_reinversion de
-            // los OTROS inversionistas en el nuke & rebuild del espejo. Si
-            // no: la modalidad se borraría a null y el status caería a
-            // "completado", matando sesiones pendientes ajenas a esta
-            // reasignación.
+            // Se leen para preservar modalidad, status, tipo_reinversion y
+            // metadata de aceptación de los OTROS inversionistas en el nuke
+            // & rebuild del espejo. Si no: la modalidad se borraría a null,
+            // el status caería a "completado" y aceptada_at/aceptada_por/
+            // compra_cartera_extendida_at se perderían — matando sesiones
+            // pendientes ajenas a esta reasignación, y dejando cualquier
+            // pendiente_revision fuera del alcance de expirarCompraCartera.ts
+            // (filtra por isNotNull(aceptada_at)), colgada para siempre.
             modalidad_facturacion:
               creditos_inversionistas_espejo.modalidad_facturacion,
             modalidad_facturacion_spread_id:
               creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
             status: creditos_inversionistas_espejo.status,
             tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+            aceptada_at: creditos_inversionistas_espejo.aceptada_at,
+            aceptada_por: creditos_inversionistas_espejo.aceptada_por,
+            compra_cartera_extendida_at:
+              creditos_inversionistas_espejo.compra_cartera_extendida_at,
           })
           .from(creditos_inversionistas_espejo)
           .where(
@@ -1280,6 +1304,16 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             modalidad_facturacion_spread_id: esReasignado
               ? modalidadFacturacionSpreadIdOrigen
               : previo?.modalidad_facturacion_spread_id ?? null,
+            // El reasignado arranca un ciclo nuevo en este destino (todavía
+            // no aceptado): sin metadata de aceptación. Los demás preservan
+            // la suya (si no, expirarCompraCartera.ts deja de encontrarlos
+            // con aceptada_at en null y su pendiente_revision queda colgada
+            // para siempre).
+            aceptada_at: esReasignado ? null : previo?.aceptada_at ?? null,
+            aceptada_por: esReasignado ? null : previo?.aceptada_por ?? null,
+            compra_cartera_extendida_at: esReasignado
+              ? null
+              : previo?.compra_cartera_extendida_at ?? null,
             updated_at: new Date(),
           };
         });
@@ -1382,16 +1416,25 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
           fecha_inicio_participacion:
             creditos_inversionistas_espejo.fecha_inicio_participacion,
-          // Se leen para preservar modalidad, status y tipo_reinversion en el
-          // nuke & rebuild del origen. Si no: la modalidad se borraría a null
-          // y el status caería a "completado", matando la sesión pendiente de
-          // cualquier OTRO inversionista del origen ajeno a esta reasignación.
+          // Se leen para preservar modalidad, status, tipo_reinversion y
+          // metadata de aceptación en el nuke & rebuild del origen. Si no: la
+          // modalidad se borraría a null, el status caería a "completado" y
+          // aceptada_at/aceptada_por/compra_cartera_extendida_at se
+          // perderían — matando la sesión pendiente de cualquier OTRO
+          // inversionista del origen ajeno a esta reasignación, y dejando
+          // cualquier pendiente_revision fuera del alcance de
+          // expirarCompraCartera.ts (filtra por isNotNull(aceptada_at)),
+          // colgada para siempre.
           modalidad_facturacion:
             creditos_inversionistas_espejo.modalidad_facturacion,
           modalidad_facturacion_spread_id:
             creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
           status: creditos_inversionistas_espejo.status,
           tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+          aceptada_at: creditos_inversionistas_espejo.aceptada_at,
+          aceptada_por: creditos_inversionistas_espejo.aceptada_por,
+          compra_cartera_extendida_at:
+            creditos_inversionistas_espejo.compra_cartera_extendida_at,
         })
         .from(creditos_inversionistas_espejo)
         .where(
@@ -1583,6 +1626,23 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           modalidad_facturacion: previo?.modalidad_facturacion ?? null,
           modalidad_facturacion_spread_id:
             previo?.modalidad_facturacion_spread_id ?? null,
+          // El removido ya no tiene nada pendiente en el origen (su ciclo
+          // se movió al destino): sin metadata de aceptación. Los demás
+          // preservan la suya (si no, expirarCompraCartera.ts deja de
+          // encontrarlos con aceptada_at en null y su pendiente_revision
+          // queda colgada para siempre).
+          aceptada_at:
+            inv.inversionista_id === inversionista_id
+              ? null
+              : previo?.aceptada_at ?? null,
+          aceptada_por:
+            inv.inversionista_id === inversionista_id
+              ? null
+              : previo?.aceptada_por ?? null,
+          compra_cartera_extendida_at:
+            inv.inversionista_id === inversionista_id
+              ? null
+              : previo?.compra_cartera_extendida_at ?? null,
           updated_at: new Date(),
         };
       });

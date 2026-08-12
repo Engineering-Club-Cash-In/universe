@@ -19,6 +19,7 @@ import {
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
+import { eqDpi } from "../lib/dpi-lookup";
 import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
 import type { FacturaItem } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
@@ -968,7 +969,7 @@ async function createCredit(
 		const [renapInfoData] = await db
 			.select()
 			.from(renapInfo)
-			.where(eq(renapInfo.dpi, lead.dpi ?? ""))
+			.where(eqDpi(renapInfo.dpi, lead.dpi ?? ""))
 			.limit(1);
 
 		console.log(

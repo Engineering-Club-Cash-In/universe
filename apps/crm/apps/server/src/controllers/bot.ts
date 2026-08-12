@@ -1,6 +1,6 @@
 // controllers/renapController.ts
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
 import {
 	leads,
 	type leadSourceEnum,
@@ -13,9 +13,9 @@ import {
 } from "@/db/schema";
 import type { documentTypeEnum } from "@/db/schema/documents";
 import { getRenapData } from "@/functions/getRenapInfo";
+import { eqDpi } from "@/lib/dpi-lookup";
 import {
 	findSalesUserWithLeastAutoAssignedLeads,
-	resolveExistingLeadAssigneeFromDatabase,
 	resolveNewAutoLeadAssignment,
 } from "@/lib/lead-assignment";
 import { getOpenOpportunityBySource } from "@/lib/lead-opportunity";
@@ -38,15 +38,28 @@ const BOT_DOCUMENT_TYPE_MAP: Record<string, DocumentType> = {
 };
 
 /**
- * Generic function to add or replace documents to open opportunities by DPI
+ * Estados en los que una oportunidad cuenta como proceso en curso.
  *
- * @param dpi - The lead's DPI to find open opportunities
+ * Va en una sola constante a propósito: el lead se elige por tener un proceso
+ * activo, y si los documentos se buscaran con un criterio más angosto habría
+ * leads elegidos a los que nunca se les podría adjuntar nada.
+ */
+const ACTIVE_OPPORTUNITY_STATUSES = ["open", "on_hold"] as const;
+
+/**
+ * Generic function to add or replace documents to active opportunities of a lead.
+ *
+ * Recibe el lead ya resuelto y no lo vuelve a buscar por DPI: mientras queden
+ * duplicados sin depurar, repetir la búsqueda podía caer en otra fila y dejar
+ * los documentos colgados del proceso equivocado.
+ *
+ * @param leadId - The lead whose active opportunities receive the documents
  * @param documents - Array of documents to add { type: DocumentType, url: string, filename?: string }
  * @param uploadedBy - User ID who uploads the documents
  * @returns Results of the operation
  */
-export async function addDocumentsToOpenOpportunities(
-	dpi: string,
+export async function addDocumentsToActiveOpportunities(
+	leadId: string,
 	documents: Array<{
 		type: DocumentType;
 		url: string;
@@ -60,49 +73,34 @@ export async function addDocumentsToOpenOpportunities(
 	documentsAdded?: number;
 }> {
 	try {
-		console.log(`[DEBUG] addDocumentsToOpenOpportunities for DPI: ${dpi}`);
+		console.log(`[DEBUG] addDocumentsToActiveOpportunities for lead: ${leadId}`);
 
-		// 1. Find lead by DPI
-		const lead = await db
-			.select()
-			.from(leads)
-			.where(eq(leads.dpi, dpi))
-			.limit(1)
-			.then((results) => results[0] || null);
-
-		if (!lead) {
-			return {
-				success: false,
-				message: `Lead not found with DPI: ${dpi}`,
-			};
-		}
-
-		// 2. Find open opportunities for this lead
-		const openOpportunities = await db
+		// 1. Find active opportunities for this lead
+		const activeOpportunities = await db
 			.select()
 			.from(opportunities)
 			.where(
 				and(
-					eq(opportunities.leadId, lead.id),
-					eq(opportunities.status, "open"),
+					eq(opportunities.leadId, leadId),
+					inArray(opportunities.status, ACTIVE_OPPORTUNITY_STATUSES),
 				),
 			);
 
-		if (openOpportunities.length === 0) {
+		if (activeOpportunities.length === 0) {
 			return {
 				success: false,
-				message: `No open opportunities found for lead with DPI: ${dpi}`,
+				message: `No active opportunities found for lead: ${leadId}`,
 			};
 		}
 
 		console.log(
-			`[DEBUG] Found ${openOpportunities.length} open opportunities for lead ${lead.id}`,
+			`[DEBUG] Found ${activeOpportunities.length} active opportunities for lead ${leadId}`,
 		);
 
 		let totalDocumentsAdded = 0;
 
-		// 3. For each open opportunity, add/replace documents
-		for (const opportunity of openOpportunities) {
+		// 2. For each active opportunity, add/replace documents
+		for (const opportunity of activeOpportunities) {
 			for (const doc of documents) {
 				if (!doc.url) continue;
 
@@ -179,11 +177,11 @@ export async function addDocumentsToOpenOpportunities(
 		return {
 			success: true,
 			message: "Documents added/updated successfully",
-			opportunitiesUpdated: openOpportunities.length,
+			opportunitiesUpdated: activeOpportunities.length,
 			documentsAdded: totalDocumentsAdded,
 		};
 	} catch (error: any) {
-		console.error("[ERROR] addDocumentsToOpenOpportunities failed:", error);
+		console.error("[ERROR] addDocumentsToActiveOpportunities failed:", error);
 		return {
 			success: false,
 			message: error?.message || "Failed to add documents to opportunities",
@@ -192,10 +190,13 @@ export async function addDocumentsToOpenOpportunities(
 }
 
 /**
- * Helper function to check if open opportunities have specific document types
+ * Helper function to check if active opportunities have specific document types.
+ *
+ * Igual que `addDocumentsToActiveOpportunities`, recibe el lead ya resuelto para
+ * no volver a buscarlo por DPI y arriesgarse a leer otro duplicado.
  */
-export async function checkDocumentsInOpenOpportunities(
-	dpi: string,
+export async function checkDocumentsInActiveOpportunities(
+	leadId: string,
 	documentTypes: DocumentType[],
 ): Promise<{
 	success: boolean;
@@ -203,46 +204,30 @@ export async function checkDocumentsInOpenOpportunities(
 	message?: string;
 }> {
 	try {
-		// Find lead by DPI
-		const lead = await db
-			.select()
-			.from(leads)
-			.where(eq(leads.dpi, dpi))
-			.limit(1)
-			.then((results) => results[0] || null);
-
-		if (!lead) {
-			return {
-				success: false,
-				hasDocuments: {} as Record<DocumentType, boolean>,
-				message: `Lead not found with DPI: ${dpi}`,
-			};
-		}
-
-		// Find open opportunities
-		const openOpportunities = await db
+		// Find active opportunities
+		const activeOpportunities = await db
 			.select()
 			.from(opportunities)
 			.where(
 				and(
-					eq(opportunities.leadId, lead.id),
-					eq(opportunities.status, "open"),
+					eq(opportunities.leadId, leadId),
+					inArray(opportunities.status, ACTIVE_OPPORTUNITY_STATUSES),
 				),
 			);
 
-		if (openOpportunities.length === 0) {
+		if (activeOpportunities.length === 0) {
 			return {
 				success: false,
 				hasDocuments: {} as Record<DocumentType, boolean>,
-				message: `No open opportunities found for lead with DPI: ${dpi}`,
+				message: `No active opportunities found for lead: ${leadId}`,
 			};
 		}
 
-		// Get all documents for the first open opportunity (most recent)
+		// Get all documents for the first active opportunity (most recent)
 		const docs = await db
 			.select()
 			.from(opportunityDocuments)
-			.where(eq(opportunityDocuments.opportunityId, openOpportunities[0].id));
+			.where(eq(opportunityDocuments.opportunityId, activeOpportunities[0].id));
 
 		const existingTypes = new Set(docs.map((d) => d.documentType));
 		const hasDocuments = {} as Record<DocumentType, boolean>;
@@ -256,7 +241,7 @@ export async function checkDocumentsInOpenOpportunities(
 			hasDocuments,
 		};
 	} catch (error: any) {
-		console.error("[ERROR] checkDocumentsInOpenOpportunities failed:", error);
+		console.error("[ERROR] checkDocumentsInActiveOpportunities failed:", error);
 		return {
 			success: false,
 			hasDocuments: {} as Record<DocumentType, boolean>,
@@ -306,20 +291,101 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
 }
 
 /**
+ * Busca el lead que corresponde a un DPI y el proceso que tenga en curso.
+ *
+ * Se traen TODOS los leads del DPI, no uno solo: mientras queden duplicados sin
+ * depurar, la oportunidad activa puede estar colgada de cualquiera de ellos, y
+ * quedarse con el más antiguo haría pasar por inactivo a un cliente que otro
+ * asesor ya está atendiendo. Se devuelve el lead que sostiene ese proceso y, si
+ * no hay ninguno, el más antiguo, que es el que arrastra el historial.
+ *
+ * No se filtra por estado: un cliente ya migrado o convertido sigue siendo la
+ * misma persona, y tratarlo como inexistente lo parte en dos leads repartidos
+ * entre dos asesores.
+ */
+async function findLeadWithActiveOpportunity(match: SQL): Promise<{
+	// El tipo va explícito para que ambos campos queden independientes: si se
+	// infiere, TypeScript los trata como unión correlacionada y descartar la
+	// oportunidad activa termina descartando también el lead.
+	lead: typeof leads.$inferSelect | null;
+	activeOpportunity: {
+		id: string;
+		leadId: string | null;
+		assignedTo: string;
+	} | null;
+}> {
+	const matchingLeads = await db
+		.select()
+		.from(leads)
+		.where(match)
+		.orderBy(asc(leads.createdAt));
+
+	if (matchingLeads.length === 0) {
+		return { lead: null, activeOpportunity: null };
+	}
+
+	const [activeOpportunity] = await db
+		.select({
+			id: opportunities.id,
+			leadId: opportunities.leadId,
+			assignedTo: opportunities.assignedTo,
+		})
+		.from(opportunities)
+		.where(
+			and(
+				inArray(
+					opportunities.leadId,
+					matchingLeads.map((lead) => lead.id),
+				),
+				inArray(opportunities.status, ACTIVE_OPPORTUNITY_STATUSES),
+			),
+		)
+		.orderBy(desc(opportunities.createdAt))
+		.limit(1);
+
+	const lead =
+		matchingLeads.find((item) => item.id === activeOpportunity?.leadId) ??
+		matchingLeads[0];
+
+	return { lead, activeOpportunity: activeOpportunity ?? null };
+}
+
+/** Resuelve el lead a partir del DPI, normalizando el formato. */
+function findLeadWithActiveOpportunityByDpi(dpi: string) {
+	return findLeadWithActiveOpportunity(eqDpi(leads.dpi, dpi));
+}
+
+/**
+ * Resuelve el lead a partir del teléfono con el que escribe el cliente.
+ * Comparte la selección con la búsqueda por DPI para que los pasos del bot no
+ * terminen mirando leads distintos según con qué dato entren.
+ */
+function findLeadWithActiveOpportunityByPhone(phone: string) {
+	return findLeadWithActiveOpportunity(eq(leads.phone, phone));
+}
+
+/**
  * @param dpi - The DPI (unique identifier for the person).
  * @returns An object with the RENAP data and the operation status.
  */
-export const getRenapInfoController = async (dpi: string, phone: string) => {
-	console.log(`[DEBUG] Starting RENAP process for DPI: ${dpi}`);
+export const getRenapInfoController = async (
+	dpiRecibido: string,
+	phone: string,
+) => {
+	console.log(`[DEBUG] Starting RENAP process for DPI: ${dpiRecibido}`);
 
 	// Validar DPI
-	const resultadoDpi = validarDpi(dpi);
+	const resultadoDpi = validarDpi(dpiRecibido);
 	if (!resultadoDpi.valid) {
 		return {
 			success: false,
 			message: resultadoDpi.error,
 		};
 	}
+
+	// A partir de aquí se trabaja siempre con el DPI normalizado: si entra con
+	// espacios, guardarlo tal cual crea un registro que ya no empata con el resto.
+	const dpi = resultadoDpi.dpiLimpio;
 
 	// 1. Fetch data from RENAP API
 	const renapResponse = await getRenapData(dpi);
@@ -343,12 +409,12 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	const existingRenap = await db
 		.select()
 		.from(renapInfo)
-		.where(eq(renapInfo.dpi, dpi));
+		.where(eqDpi(renapInfo.dpi, dpi));
 
 	if (existingRenap.length === 0) {
 		console.log("[DEBUG] DPI not found in renap_info. Inserting new record.");
 		await db.insert(renapInfo).values({
-			dpi: renapData.dpi,
+			dpi,
 			firstName: renapData.firstName,
 			secondName: renapData.secondName,
 			thirdName: renapData.thirdName,
@@ -394,16 +460,14 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				cedulaRegister: renapData.cedula_register,
 				dpiExpiracyDate: normalizeDate(renapData.dpi_expiracy_date),
 			})
-			.where(eq(renapInfo.dpi, dpi));
+			.where(eqDpi(renapInfo.dpi, dpi));
 	}
 
 	// ========================
 	// 3. Insert or Update leads
 	// ========================
-	const existingLead = await db
-		.select()
-		.from(leads)
-		.where(and(eq(leads.dpi, dpi), eq(leads.status, "new")));
+	const { lead: existingLead, activeOpportunity } =
+		await findLeadWithActiveOpportunityByDpi(dpi);
 
 	const age = calculateAge(renapData.birthDate);
 	console.log(`[DEBUG] Calculated age for DPI ${dpi}: ${age}`);
@@ -416,7 +480,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	// que se lee aquí es el mismo con el que se creó el lead.
 	let leadSource: (typeof leadSourceEnum.enumValues)[number];
 
-	if (existingLead.length === 0) {
+	if (!existingLead) {
 		console.log("[DEBUG] DPI not found in leads. Inserting new lead.");
 		const newLeadAssignment = await resolveNewAutoLeadAssignment(
 			findSalesUserWithLeastAutoAssignedLeads,
@@ -432,7 +496,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 			.values({
 				firstName: renapData.firstName,
 				lastName: renapData.firstLastName,
-				dpi: renapData.dpi,
+				dpi,
 				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
 				assignedTo: newLeadAssignment.assignedTo,
 				age: age ?? undefined,
@@ -449,39 +513,61 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		createdByUserId = newLeadAssignment.createdBy;
 		leadSource = "Whatsapp";
 	} else {
-		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
-		const assignedTo = await resolveExistingLeadAssigneeFromDatabase(
-			existingLead[0].assignedTo,
-		);
+		// El lead ya existía. Si hay un proceso activo se respeta al asesor que lo
+		// está trabajando; si solo le quedan créditos ganados o migrados es un
+		// cliente que regresa y vuelve a entrar a la ruleta.
+		leadId = existingLead.id;
+		createdByUserId = existingLead.createdBy;
+		leadSource = existingLead.source;
 
-		if (!assignedTo) {
-			return {
-				success: false,
-				message: "No sales user available to assign the reactivated lead",
-			};
+		if (activeOpportunity) {
+			console.log(
+				`[DEBUG] Lead ${leadId} ya tiene proceso activo; se respeta su asesor.`,
+			);
+			assignedUserId = activeOpportunity.assignedTo;
+
+			// Solo se refrescan los datos de RENAP. El estado del lead y su asesor
+			// pertenecen a un proceso en curso y no se tocan.
+			await db
+				.update(leads)
+				.set({
+					firstName: renapData.firstName,
+					lastName: renapData.firstLastName,
+					maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
+					age: age ?? existingLead.age,
+					updatedAt: new Date(),
+				})
+				.where(eq(leads.id, existingLead.id));
+		} else {
+			console.log(
+				`[DEBUG] Lead ${leadId} sin proceso activo; se reasigna por ruleta.`,
+			);
+			const reassignment = await resolveNewAutoLeadAssignment(
+				findSalesUserWithLeastAutoAssignedLeads,
+				"No sales user available to assign the reactivated lead",
+			);
+
+			if (!reassignment.success) {
+				return reassignment;
+			}
+
+			assignedUserId = reassignment.assignedTo;
+
+			await db
+				.update(leads)
+				.set({
+					firstName: renapData.firstName,
+					lastName: renapData.firstLastName,
+					maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
+					assignedTo: reassignment.assignedTo,
+					assignmentType: "auto",
+					status: "new",
+					age: age ?? existingLead.age,
+					updatedAt: new Date(),
+					livenessValidated: false,
+				})
+				.where(eq(leads.id, existingLead.id));
 		}
-
-		await db
-			.update(leads)
-			.set({
-				firstName: renapData.firstName,
-				lastName: renapData.firstLastName,
-				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
-				assignedTo,
-				assignmentType:
-					assignedTo === existingLead[0].assignedTo
-						? existingLead[0].assignmentType
-						: "auto",
-				status: "new",
-				age: age ?? existingLead[0].age,
-				updatedAt: new Date(),
-				livenessValidated: false,
-			})
-			.where(eq(leads.dpi, dpi));
-		leadId = existingLead[0].id;
-		assignedUserId = assignedTo;
-		createdByUserId = existingLead[0].createdBy;
-		leadSource = existingLead[0].source;
 	}
 
 	// ========================
@@ -661,19 +747,18 @@ export const updateLeadAndCreateOpportunity = async (
 		return { success: false, message: "DPI is required" };
 	}
 
-	// 1. Buscar lead por DPI con status NEW
-	const existingLead = await db
-		.select()
-		.from(leads)
-		.where(and(eq(leads.dpi, dpi), eq(leads.status, "new")))
-		.limit(1)
-		.then((results) => results[0] || null);
+	// 1. Buscar el lead por DPI, con el mismo criterio que el paso de RENAP.
+	// Antes se exigía `status = 'new'`, que funcionaba solo porque ese paso
+	// siempre reseteaba el estado. Desde que respeta el proceso en curso, el
+	// lead puede seguir en `contacted`, `qualified` o `migrate`, y filtrar por
+	// `new` dejaba sin guardar los ingresos y documentos recién enviados.
+	const { lead: existingLead } = await findLeadWithActiveOpportunityByDpi(dpi);
 
 	if (!existingLead) {
-		console.error(`[ERROR] Lead not found with DPI: ${dpi} and status=new`);
+		console.error(`[ERROR] Lead not found with DPI: ${dpi}`);
 		return {
 			success: false,
-			message: "Lead not found with the provided DPI and status 'new'",
+			message: "Lead not found with the provided DPI",
 		};
 	}
 
@@ -762,7 +847,21 @@ export const updateLeadAndCreateOpportunity = async (
 		if (documentsToAdd.length > 0) {
 			// Usar el usuario asignado al lead como uploader
 			const uploadedBy = existingLead.assignedTo;
-			await addDocumentsToOpenOpportunities(dpi, documentsToAdd, uploadedBy);
+			// Se pasa el lead ya resuelto arriba, no el DPI: volver a buscarlo podía
+			// caer en otro duplicado y colgar los documentos del proceso equivocado.
+			const documentsResult = await addDocumentsToActiveOpportunities(
+				existingLead.id,
+				documentsToAdd,
+				uploadedBy,
+			);
+
+			// El cliente ya subió los archivos; si no quedaron pegados a ninguna
+			// oportunidad hay que verlo en el log y no perderlo en silencio.
+			if (!documentsResult.success) {
+				console.error(
+					`[ERROR] No se adjuntaron los documentos del lead ${existingLead.id}: ${documentsResult.message}`,
+				);
+			}
 		}
 	}
 
@@ -816,26 +915,24 @@ export const getLeadProgress = async (phone: string) => {
 	try {
 		console.log(`[DEBUG] Starting getLeadProgress for phone: ${phone}`);
 
-		// 1. Find the lead by phone with status "new"
-		const lead = await db
-			.select()
-			.from(leads)
-			.where(and(eq(leads.phone, phone), eq(leads.status, "new")))
-			.limit(1)
-			.then((res) => res[0] || null);
+		// 1. Find the lead by phone.
+		// Sin filtrar por estado: el paso de RENAP ya no lo resetea cuando hay un
+		// proceso en curso, así que exigir `new` dejaba al bot sin poder calcular
+		// los pasos pendientes de los clientes activos.
+		const { lead } = await findLeadWithActiveOpportunityByPhone(phone);
 
 		if (!lead) {
-			console.error("[ERROR] Lead not found or not in status 'new'");
+			console.error("[ERROR] Lead not found");
 			return {
 				success: false,
-				message: "Lead not found with DPI or not in status 'new'",
+				message: "Lead not found with the provided phone",
 			};
 		}
 
-		console.log(`[DEBUG] Found lead ${lead.id} with status "new"`);
+		console.log(`[DEBUG] Found lead ${lead.id} with status "${lead.status}"`);
 
 		// 2. Get documents from open opportunities
-		const documentCheck = await checkDocumentsInOpenOpportunities(lead.dpi!, [
+		const documentCheck = await checkDocumentsInActiveOpportunities(lead.id, [
 			"recibo_luz",
 			"estados_cuenta_1",
 		]);
@@ -886,12 +983,14 @@ export const validateMagicUrlController = async (dpi: string) => {
 		return { success: false, message: "DPI is required" };
 	}
 
-	// Buscar magic URL asociado al lead con ese DPI
+	// Buscar magic URL asociado al lead con ese DPI.
+	// La comparación va normalizada: los links ya enviados llevan el DPI con el
+	// formato que tenía el lead al generarlos, y el backfill del 0028 se lo quita.
 	const [magicUrl] = await db
 		.select()
 		.from(magicUrls)
 		.innerJoin(leads, eq(magicUrls.leadId, leads.id))
-		.where(eq(leads.dpi, dpi))
+		.where(eqDpi(leads.dpi, dpi))
 		.orderBy(desc(leads.createdAt)) // Ordenar por el más reciente primero
 		.limit(1);
 	if (!magicUrl) {
@@ -929,7 +1028,7 @@ export async function hasPassedLiveness(
 	const result = await db
 		.select({ livenessValidated: leads.livenessValidated })
 		.from(leads)
-		.where(and(eq(leads.dpi, dpi), eq(leads.livenessValidated, true)))
+		.where(and(eqDpi(leads.dpi, dpi), eq(leads.livenessValidated, true)))
 		.limit(1);
 
 	if (result.length === 0) {
@@ -992,7 +1091,7 @@ export const getOnlyRenapInfoController = async (dpi: string) => {
 		const existingRenap = await db
 			.select()
 			.from(renapInfo)
-			.where(eq(renapInfo.dpi, dpi));
+			.where(eqDpi(renapInfo.dpi, dpi));
 
 		if (existingRenap.length === 0) {
 			// 🆕 Insert a new record if DPI not found
@@ -1045,7 +1144,7 @@ export const getOnlyRenapInfoController = async (dpi: string) => {
 					cedulaRegister: renapData.cedula_register,
 					dpiExpiracyDate: normalizeDate(renapData.dpi_expiracy_date),
 				})
-				.where(eq(renapInfo.dpi, dpi));
+				.where(eqDpi(renapInfo.dpi, dpi));
 		}
 
 		// ========================================================

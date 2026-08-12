@@ -117,8 +117,45 @@ async function generarYSubirPDF({
   );
 }
 
+// ============================================================================
+// LÍMITE DE CONCURRENCIA
+// ----------------------------------------------------------------------------
+// Antes de sacar el PDF del request, el trabajo pesado quedaba serializado sin
+// querer: el CRM factura en un bucle secuencial y cada llamada esperaba a que
+// el PDF terminara. Al pasar a fire-and-forget eso se pierde — un cierre puede
+// disparar hasta 8 facturas casi a la vez, y varios cierres en paralelo lo
+// multiplican. Sin freno serían N Chromium simultáneos en el contenedor.
+//
+// Este semáforo mantiene el trabajo acotado: los PDFs siguen saliendo del
+// camino crítico (que es el punto), pero de a pocos.
+// ============================================================================
+
+const MAX_PDFS_EN_PARALELO = Number.parseInt(
+  process.env.PDF_FACTURA_CONCURRENCIA || "2",
+  10
+);
+
+let enCurso = 0;
+const enEspera: Array<() => void> = [];
+
+function adquirirTurno(): Promise<void> {
+  if (enCurso < MAX_PDFS_EN_PARALELO) {
+    enCurso++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => enEspera.push(resolve));
+}
+
+function liberarTurno(): void {
+  // El turno se cede directo al siguiente en la cola (sin bajar el contador),
+  // para que nunca se cuelen más de MAX_PDFS_EN_PARALELO.
+  const siguiente = enEspera.shift();
+  if (siguiente) siguiente();
+  else enCurso--;
+}
+
 /**
- * Dispara la generación del PDF SIN bloquear al caller (fire-and-forget).
+ * Encola la generación del PDF SIN bloquear al caller (fire-and-forget).
  *
  * La factura ya está certificada en SAT y guardada en BD antes de llamar acá:
  * si el PDF falla NO se pierde el registro y se puede regenerar después con el
@@ -133,19 +170,30 @@ export function generarPDFFacturaEnBackground(params: {
   referencia: string;
 }): void {
   const { referencia, ...resto } = params;
-  const inicio = Date.now();
+  const encolado = Date.now();
 
-  void generarYSubirPDF(resto)
-    .then(() => {
+  if (enCurso >= MAX_PDFS_EN_PARALELO) {
+    console.log(
+      `   ⏳ PDF de ${referencia} en cola (${enCurso} generándose, ${enEspera.length + 1} esperando)`
+    );
+  }
+
+  void (async () => {
+    await adquirirTurno();
+    const inicio = Date.now();
+    try {
+      await generarYSubirPDF(resto);
       console.log(
-        `   ✅ PDF subido a R2: ${resto.filename} (${Date.now() - inicio}ms) [${referencia}]`
+        `   ✅ PDF subido a R2: ${resto.filename} (${Date.now() - inicio}ms de render, ${Date.now() - encolado}ms desde que se encoló) [${referencia}]`
       );
-    })
-    .catch((pdfError) => {
+    } catch (pdfError) {
       console.error(
         `⚠️ [facturaPdf] Factura ${referencia} GUARDADA en BD pero FALLÓ el PDF/R2. ` +
           `Se puede regenerar luego (mismo filename → misma URL):`,
         pdfError
       );
-    });
+    } finally {
+      liberarTurno();
+    }
+  })();
 }

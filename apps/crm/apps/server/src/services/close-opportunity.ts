@@ -738,6 +738,13 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 			// Cuántos gastos administrativos se registraron (para refrescar el
 			// snapshot del día una sola vez al final, si hubo al menos uno).
 			let gastosRegistrados = 0;
+			// Gastos cuyo POST murió por timeout: cartera pudo haberlos insertado
+			// igual (que el cliente cuelgue no cancela lo que el servidor ya
+			// ejecutó). Cuentan para refrescar el snapshot, porque si el gasto sí
+			// entró y no se refresca, queda fuera del reporte del día hasta que
+			// alguien lo note. `aplicarManualesDia` regenera el día completo, así
+			// que correrlo de más es inocuo.
+			let gastosEnDuda = 0;
 
 			for (const invoice of invoices) {
 				const startTime = Date.now();
@@ -840,6 +847,8 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 									? gastoError.message
 									: String(gastoError);
 
+							if (esTimeout(gastoError)) gastosEnDuda++;
+
 							await closeInvoiceSyncOperation(gastoLogId, {
 								status: "error",
 								errorMessage: esTimeout(gastoError)
@@ -885,11 +894,11 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 			// tras insertar los gastos hay que aplicar los manuales del día para que
 			// queden en las columnas administrativos/otros_cobros (mismo paso que
 			// hace la UI manual). Best-effort: si falla, se loguea y sigue.
-			if (gastosRegistrados > 0) {
+			if (gastosRegistrados > 0 || gastosEnDuda > 0) {
 				try {
 					await carteraBackClient.aplicarManualesDia(fechaGuatemala);
 					console.log(
-						`[CloseOpportunity] ✓ Snapshot del día ${fechaGuatemala} refrescado (${gastosRegistrados} gasto(s))`,
+						`[CloseOpportunity] ✓ Snapshot del día ${fechaGuatemala} refrescado (${gastosRegistrados} gasto(s) registrado(s), ${gastosEnDuda} en duda por timeout)`,
 					);
 				} catch (snapshotError) {
 					const snapshotMsg =

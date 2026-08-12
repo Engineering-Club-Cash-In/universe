@@ -46,7 +46,7 @@ export const bankStatementAnalysisSchema = z.object({
 		})
 		.nullable()
 		.catch(null),
-	estados_cuenta_detectados: z.number().int().min(1).max(9).nullable().catch(null),
+	estados_cuenta_detectados: z.number().int().min(1).nullable().catch(null),
 });
 
 export type BankStatementAnalysis = z.infer<typeof bankStatementAnalysisSchema>;

@@ -16,8 +16,10 @@ import {
 	bankStatementAnalysisSchema,
 } from "../lib/bank-analysis-schema";
 import {
+	BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES,
 	canAutoAttachBankStatementDocuments,
 	getBankStatementOpportunityDocumentType,
+	resolveBankStatementDocumentSlots,
 } from "../lib/bank-statement-documents";
 import { updateChecklistForClientDocument } from "../lib/checklist";
 import {
@@ -402,12 +404,17 @@ export const bankAnalysisRouter = {
 					const savedKeys: string[] = [];
 
 					try {
-						for (const [index, file] of downloadedFiles.entries()) {
-							const documentType = getBankStatementOpportunityDocumentType(index);
-							if (!documentType) {
-								continue;
-							}
-
+						// Máximo un archivo por slot del checklist (3).
+						const filesToUpload = downloadedFiles.slice(
+							0,
+							BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length,
+						);
+						const uploadedFiles: {
+							key: string;
+							uniqueFilename: string;
+							file: (typeof filesToUpload)[number];
+						}[] = [];
+						for (const file of filesToUpload) {
 							const uniqueFilename = generateUniqueFilename(file.name);
 							const { key } = await uploadFileToR2(
 								new Blob([new Uint8Array(file.buffer)], { type: file.mimeType }),
@@ -415,20 +422,35 @@ export const bankAnalysisRouter = {
 								opportunityForDocuments.id,
 							);
 							savedKeys.push(key);
+							uploadedFiles.push({ key, uniqueFilename, file });
+						}
+
+						const documentSlots = resolveBankStatementDocumentSlots({
+							uploadedFileCount: uploadedFiles.length,
+							statementsDetected:
+								analysis.estados_cuenta_detectados ?? uploadedFiles.length,
+						});
+
+						for (let slot = 0; slot < documentSlots.length; slot++) {
+							const documentType = getBankStatementOpportunityDocumentType(slot);
+							const upload = uploadedFiles[documentSlots[slot]];
+							if (!documentType || !upload) {
+								continue;
+							}
 
 							const [newDocument] = await db
 								.insert(opportunityDocuments)
 								.values({
 									opportunityId: opportunityForDocuments.id,
-									filename: uniqueFilename,
-									originalName: file.name,
-									mimeType: file.mimeType,
-									size: file.size,
+									filename: upload.uniqueFilename,
+									originalName: upload.file.name,
+									mimeType: upload.file.mimeType,
+									size: upload.file.size,
 									documentType,
 									description:
 										"Guardado automáticamente desde análisis de capacidad de pago",
 									uploadedBy: context.userId,
-									filePath: key,
+									filePath: upload.key,
 								})
 								.returning({ id: opportunityDocuments.id });
 

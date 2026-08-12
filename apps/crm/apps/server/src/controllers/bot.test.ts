@@ -5,7 +5,6 @@ type DatabaseRow = Record<string, unknown>;
 let queuedSelectResults: DatabaseRow[][] = [];
 let insertedRows: DatabaseRow[] = [];
 let updatedRows: DatabaseRow[] = [];
-let currentOwnerEligible = false;
 let fallbackSalesUser: { id: string } | null = null;
 let openOpportunity: {
 	id: string;
@@ -19,6 +18,9 @@ const selectResult = () => {
 
 	return Object.assign(Promise.resolve(result), {
 		limit: (..._limitArgs: unknown[]) => Promise.resolve(result),
+		orderBy: (..._orderByArgs: unknown[]) => ({
+			limit: (..._limitArgs: unknown[]) => Promise.resolve(result),
+		}),
 	});
 };
 
@@ -85,9 +87,7 @@ mock.module("@/functions/getRenapInfo", () => ({
 }));
 
 mock.module("@/lib/lead-assignment", () => ({
-	findSalesUserWithLeastAutoAssignedLeads: async () => null,
-	resolveExistingLeadAssigneeFromDatabase: async (currentOwnerId: string) =>
-		currentOwnerEligible ? currentOwnerId : fallbackSalesUser?.id,
+	findSalesUserWithLeastAutoAssignedLeads: async () => fallbackSalesUser,
 	resolveNewAutoLeadAssignment: async (
 		findSalesUser: () => Promise<{ id: string } | null>,
 		unavailableMessage: string,
@@ -124,7 +124,13 @@ mock.module("@/lib/storage", () => ({
 }));
 
 mock.module("../utils/cui-validation", () => ({
-	validarDpi: () => ({ valid: true }),
+	cuiValido: () => true,
+	normalizarDpi: (dpi: string) => dpi.replace(/\s/g, ""),
+	normalizarYValidarDpi: (dpi: string) => dpi.replace(/\s/g, ""),
+	validarDpi: (dpi: string) => ({
+		valid: true,
+		dpiLimpio: dpi.replace(/\s/g, ""),
+	}),
 }));
 
 mock.module("./otp", () => ({
@@ -138,7 +144,6 @@ describe("WhatsApp RENAP lead assignment", () => {
 		queuedSelectResults = [[], []];
 		insertedRows = [];
 		updatedRows = [];
-		currentOwnerEligible = false;
 		fallbackSalesUser = null;
 		openOpportunity = null;
 	});
@@ -162,13 +167,43 @@ describe("WhatsApp RENAP lead assignment", () => {
 		).toEqual([]);
 	});
 
-	test("reassigns a reused opportunity with its reactivated lead", async () => {
-		currentOwnerEligible = false;
+	test("reuses the existing lead instead of creating a duplicate when the DPI was stored with spaces", async () => {
 		fallbackSalesUser = { id: "new-owner" };
-		openOpportunity = {
-			id: "existing-opportunity",
-			assignedTo: "old-owner",
-		};
+		queuedSelectResults = [
+			[],
+			// El lead migrado quedó guardado como "3460 66638 0101"; la búsqueda
+			// normaliza ambos lados, por eso lo encuentra.
+			[
+				{
+					id: "existing-lead",
+					dpi: "1234 56789 0101",
+					assignedTo: "old-owner",
+					assignmentType: "manual",
+					createdBy: "creator",
+					status: "migrate",
+					age: 36,
+				},
+			],
+			[],
+			[{ id: "existing-magic-url" }],
+			[{ id: "stage-1", order: 1 }],
+		];
+
+		const result = await getRenapInfoController("1234 56789 0101", "55555555");
+
+		expect(result.success).toBe(true);
+		// No se dio de alta otro lead: los inserts de lead llevan source pero no leadId.
+		expect(
+			insertedRows.filter((row) => row.source === "Whatsapp" && !row.leadId),
+		).toEqual([]);
+		// La oportunidad se le colgó al lead que ya existía.
+		expect(insertedRows).toContainEqual(
+			expect.objectContaining({ leadId: "existing-lead" }),
+		);
+	});
+
+	test("keeps the current advisor when the lead already has an active opportunity", async () => {
+		fallbackSalesUser = { id: "ruleta-owner" };
 		queuedSelectResults = [
 			[],
 			[
@@ -177,10 +212,54 @@ describe("WhatsApp RENAP lead assignment", () => {
 					assignedTo: "old-owner",
 					assignmentType: "manual",
 					createdBy: "creator",
+					status: "qualified",
 					age: 36,
 				},
 			],
+			// Oportunidad activa: el lead ya lo está trabajando "old-owner".
+			[{ id: "active-opportunity", assignedTo: "old-owner" }],
 			[{ id: "existing-magic-url" }],
+			[{ id: "stage-1", order: 1 }],
+		];
+
+		const result = await getRenapInfoController("1234567890101", "55555555");
+
+		expect(result.success).toBe(true);
+		// Ni el estado ni el asesor del lead se tocan: hay un proceso en curso.
+		expect(updatedRows).not.toContainEqual(
+			expect.objectContaining({ status: "new" }),
+		);
+		expect(updatedRows).not.toContainEqual(
+			expect.objectContaining({ assignedTo: "ruleta-owner" }),
+		);
+		// Y la oportunidad de WhatsApp queda con el asesor que ya lo atendía.
+		expect(insertedRows).toContainEqual(
+			expect.objectContaining({
+				source: "Whatsapp",
+				leadId: "existing-lead",
+				assignedTo: "old-owner",
+			}),
+		);
+	});
+
+	test("sends the lead back to the round robin when it has no active opportunity", async () => {
+		fallbackSalesUser = { id: "new-owner" };
+		queuedSelectResults = [
+			[],
+			[
+				{
+					id: "existing-lead",
+					assignedTo: "old-owner",
+					assignmentType: "manual",
+					createdBy: "creator",
+					status: "migrate",
+					age: 36,
+				},
+			],
+			// Sin oportunidades open/on_hold: solo tiene créditos ganados o migrados.
+			[],
+			[{ id: "existing-magic-url" }],
+			[{ id: "stage-1", order: 1 }],
 		];
 
 		const result = await getRenapInfoController("1234567890101", "55555555");
@@ -190,16 +269,11 @@ describe("WhatsApp RENAP lead assignment", () => {
 			expect.objectContaining({
 				assignedTo: "new-owner",
 				assignmentType: "auto",
+				status: "new",
 			}),
 		);
-		expect(updatedRows).toContainEqual({
-			assignedTo: "new-owner",
-			updatedAt: expect.any(Date),
-		});
 		expect(
-			insertedRows.filter(
-				(row) => row.source === "Whatsapp" && "leadId" in row,
-			),
+			insertedRows.filter((row) => row.source === "Whatsapp" && !row.leadId),
 		).toEqual([]);
 	});
 });

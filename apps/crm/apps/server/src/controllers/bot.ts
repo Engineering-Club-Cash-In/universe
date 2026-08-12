@@ -1,6 +1,6 @@
 // controllers/renapController.ts
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
 	leads,
 	magicUrls,
@@ -12,9 +12,9 @@ import {
 } from "@/db/schema";
 import type { documentTypeEnum } from "@/db/schema/documents";
 import { getRenapData } from "@/functions/getRenapInfo";
+import { eqDpi } from "@/lib/dpi-lookup";
 import {
 	findSalesUserWithLeastAutoAssignedLeads,
-	resolveExistingLeadAssigneeFromDatabase,
 	resolveNewAutoLeadAssignment,
 } from "@/lib/lead-assignment";
 import { getOpenOpportunityBySource } from "@/lib/lead-opportunity";
@@ -65,7 +65,7 @@ export async function addDocumentsToOpenOpportunities(
 		const lead = await db
 			.select()
 			.from(leads)
-			.where(eq(leads.dpi, dpi))
+			.where(eqDpi(leads.dpi, dpi))
 			.limit(1)
 			.then((results) => results[0] || null);
 
@@ -206,7 +206,7 @@ export async function checkDocumentsInOpenOpportunities(
 		const lead = await db
 			.select()
 			.from(leads)
-			.where(eq(leads.dpi, dpi))
+			.where(eqDpi(leads.dpi, dpi))
 			.limit(1)
 			.then((results) => results[0] || null);
 
@@ -308,17 +308,24 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
  * @param dpi - The DPI (unique identifier for the person).
  * @returns An object with the RENAP data and the operation status.
  */
-export const getRenapInfoController = async (dpi: string, phone: string) => {
-	console.log(`[DEBUG] Starting RENAP process for DPI: ${dpi}`);
+export const getRenapInfoController = async (
+	dpiRecibido: string,
+	phone: string,
+) => {
+	console.log(`[DEBUG] Starting RENAP process for DPI: ${dpiRecibido}`);
 
 	// Validar DPI
-	const resultadoDpi = validarDpi(dpi);
+	const resultadoDpi = validarDpi(dpiRecibido);
 	if (!resultadoDpi.valid) {
 		return {
 			success: false,
 			message: resultadoDpi.error,
 		};
 	}
+
+	// A partir de aquí se trabaja siempre con el DPI normalizado: si entra con
+	// espacios, guardarlo tal cual crea un registro que ya no empata con el resto.
+	const dpi = resultadoDpi.dpiLimpio;
 
 	// 1. Fetch data from RENAP API
 	const renapResponse = await getRenapData(dpi);
@@ -342,12 +349,12 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	const existingRenap = await db
 		.select()
 		.from(renapInfo)
-		.where(eq(renapInfo.dpi, dpi));
+		.where(eqDpi(renapInfo.dpi, dpi));
 
 	if (existingRenap.length === 0) {
 		console.log("[DEBUG] DPI not found in renap_info. Inserting new record.");
 		await db.insert(renapInfo).values({
-			dpi: renapData.dpi,
+			dpi,
 			firstName: renapData.firstName,
 			secondName: renapData.secondName,
 			thirdName: renapData.thirdName,
@@ -393,16 +400,22 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				cedulaRegister: renapData.cedula_register,
 				dpiExpiracyDate: normalizeDate(renapData.dpi_expiracy_date),
 			})
-			.where(eq(renapInfo.dpi, dpi));
+			.where(eqDpi(renapInfo.dpi, dpi));
 	}
 
 	// ========================
 	// 3. Insert or Update leads
 	// ========================
-	const existingLead = await db
+	// La búsqueda es solo por DPI, sin filtrar por estado: un cliente ya migrado
+	// o convertido sigue siendo la misma persona, y darlo de alta otra vez lo
+	// parte en dos leads repartidos entre dos asesores. Se toma el más antiguo,
+	// que es el que arrastra el historial.
+	const [existingLead] = await db
 		.select()
 		.from(leads)
-		.where(and(eq(leads.dpi, dpi), eq(leads.status, "new")));
+		.where(eqDpi(leads.dpi, dpi))
+		.orderBy(asc(leads.createdAt))
+		.limit(1);
 
 	const age = calculateAge(renapData.birthDate);
 	console.log(`[DEBUG] Calculated age for DPI ${dpi}: ${age}`);
@@ -411,7 +424,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	let assignedUserId: string;
 	let createdByUserId: string;
 
-	if (existingLead.length === 0) {
+	if (!existingLead) {
 		console.log("[DEBUG] DPI not found in leads. Inserting new lead.");
 		const newLeadAssignment = await resolveNewAutoLeadAssignment(
 			findSalesUserWithLeastAutoAssignedLeads,
@@ -427,7 +440,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 			.values({
 				firstName: renapData.firstName,
 				lastName: renapData.firstLastName,
-				dpi: renapData.dpi,
+				dpi,
 				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
 				assignedTo: newLeadAssignment.assignedTo,
 				age: age ?? undefined,
@@ -443,38 +456,74 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		assignedUserId = newLeadAssignment.assignedTo;
 		createdByUserId = newLeadAssignment.createdBy;
 	} else {
-		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
-		const assignedTo = await resolveExistingLeadAssigneeFromDatabase(
-			existingLead[0].assignedTo,
-		);
-
-		if (!assignedTo) {
-			return {
-				success: false,
-				message: "No sales user available to assign the reactivated lead",
-			};
-		}
-
-		await db
-			.update(leads)
-			.set({
-				firstName: renapData.firstName,
-				lastName: renapData.firstLastName,
-				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
-				assignedTo,
-				assignmentType:
-					assignedTo === existingLead[0].assignedTo
-						? existingLead[0].assignmentType
-						: "auto",
-				status: "new",
-				age: age ?? existingLead[0].age,
-				updatedAt: new Date(),
-				livenessValidated: false,
+		// El lead ya existía. Si tiene un proceso activo se respeta al asesor que
+		// lo está trabajando; si solo le quedan créditos ganados o migrados es un
+		// cliente que regresa y vuelve a entrar a la ruleta.
+		const [activeOpportunity] = await db
+			.select({
+				id: opportunities.id,
+				assignedTo: opportunities.assignedTo,
 			})
-			.where(eq(leads.dpi, dpi));
-		leadId = existingLead[0].id;
-		assignedUserId = assignedTo;
-		createdByUserId = existingLead[0].createdBy;
+			.from(opportunities)
+			.where(
+				and(
+					eq(opportunities.leadId, existingLead.id),
+					inArray(opportunities.status, ["open", "on_hold"]),
+				),
+			)
+			.limit(1);
+
+		leadId = existingLead.id;
+		createdByUserId = existingLead.createdBy;
+
+		if (activeOpportunity) {
+			console.log(
+				`[DEBUG] Lead ${leadId} ya tiene proceso activo; se respeta su asesor.`,
+			);
+			assignedUserId = activeOpportunity.assignedTo;
+
+			// Solo se refrescan los datos de RENAP. El estado del lead y su asesor
+			// pertenecen a un proceso en curso y no se tocan.
+			await db
+				.update(leads)
+				.set({
+					firstName: renapData.firstName,
+					lastName: renapData.firstLastName,
+					maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
+					age: age ?? existingLead.age,
+					updatedAt: new Date(),
+				})
+				.where(eq(leads.id, existingLead.id));
+		} else {
+			console.log(
+				`[DEBUG] Lead ${leadId} sin proceso activo; se reasigna por ruleta.`,
+			);
+			const reassignment = await resolveNewAutoLeadAssignment(
+				findSalesUserWithLeastAutoAssignedLeads,
+				"No sales user available to assign the reactivated lead",
+			);
+
+			if (!reassignment.success) {
+				return reassignment;
+			}
+
+			assignedUserId = reassignment.assignedTo;
+
+			await db
+				.update(leads)
+				.set({
+					firstName: renapData.firstName,
+					lastName: renapData.firstLastName,
+					maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
+					assignedTo: reassignment.assignedTo,
+					assignmentType: "auto",
+					status: "new",
+					age: age ?? existingLead.age,
+					updatedAt: new Date(),
+					livenessValidated: false,
+				})
+				.where(eq(leads.id, existingLead.id));
+		}
 	}
 
 	// ========================
@@ -657,7 +706,7 @@ export const updateLeadAndCreateOpportunity = async (
 	const existingLead = await db
 		.select()
 		.from(leads)
-		.where(and(eq(leads.dpi, dpi), eq(leads.status, "new")))
+		.where(and(eqDpi(leads.dpi, dpi), eq(leads.status, "new")))
 		.limit(1)
 		.then((results) => results[0] || null);
 
@@ -921,7 +970,7 @@ export async function hasPassedLiveness(
 	const result = await db
 		.select({ livenessValidated: leads.livenessValidated })
 		.from(leads)
-		.where(and(eq(leads.dpi, dpi), eq(leads.livenessValidated, true)))
+		.where(and(eqDpi(leads.dpi, dpi), eq(leads.livenessValidated, true)))
 		.limit(1);
 
 	if (result.length === 0) {
@@ -984,7 +1033,7 @@ export const getOnlyRenapInfoController = async (dpi: string) => {
 		const existingRenap = await db
 			.select()
 			.from(renapInfo)
-			.where(eq(renapInfo.dpi, dpi));
+			.where(eqDpi(renapInfo.dpi, dpi));
 
 		if (existingRenap.length === 0) {
 			// 🆕 Insert a new record if DPI not found
@@ -1037,7 +1086,7 @@ export const getOnlyRenapInfoController = async (dpi: string) => {
 					cedulaRegister: renapData.cedula_register,
 					dpiExpiracyDate: normalizeDate(renapData.dpi_expiracy_date),
 				})
-				.where(eq(renapInfo.dpi, dpi));
+				.where(eqDpi(renapInfo.dpi, dpi));
 		}
 
 		// ========================================================

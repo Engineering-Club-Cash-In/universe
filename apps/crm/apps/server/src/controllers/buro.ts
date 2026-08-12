@@ -8,6 +8,7 @@ import {
 	type EstudioPersonaJSON,
 	infornetPersonaCache,
 } from "@/db/schema/buro";
+import { eqDpi } from "@/lib/dpi-lookup";
 
 // 🔥 Instanciar el cliente con las credenciales del .env
 const infornetClient = new InfornetClient({
@@ -38,7 +39,7 @@ export class InfornetController {
 			const personaRenap = await db
 				.select()
 				.from(renapInfo)
-				.where(eq(renapInfo.dpi, dpi))
+				.where(eqDpi(renapInfo.dpi, dpi))
 				.limit(1);
 
 			if (personaRenap.length === 0) {

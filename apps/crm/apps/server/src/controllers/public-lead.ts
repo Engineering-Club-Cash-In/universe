@@ -8,6 +8,7 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
+import { eqDpi } from "../lib/dpi-lookup";
 import {
 	findSalesUserWithLeastAutoAssignedLeads,
 	resolveExistingLeadAssigneeFromDatabase,
@@ -164,7 +165,7 @@ export async function createPublicLead(c: Context) {
 
 		// Buscar lead existente: por email+DPI si hay DPI, solo por email si no
 		const whereClause = hasDpi
-			? or(eq(leads.email, body.email), eq(leads.dpi, body.dpi))
+			? or(eq(leads.email, body.email), eqDpi(leads.dpi, body.dpi))
 			: eq(leads.email, body.email);
 
 		const [existingLead] = await db

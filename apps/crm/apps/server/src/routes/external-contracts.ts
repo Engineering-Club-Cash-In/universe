@@ -4,6 +4,7 @@ import { db } from "../db";
 import { leads } from "../db/schema/crm";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { auth } from "../lib/auth";
+import { eqDpi } from "../lib/dpi-lookup";
 
 const app = new Hono();
 
@@ -67,7 +68,7 @@ app.post("/", async (c) => {
 		const foundLeads = await db
 			.select()
 			.from(leads)
-			.where(eq(leads.dpi, dpi))
+			.where(eqDpi(leads.dpi, dpi))
 			.orderBy(desc(leads.createdAt))
 			.limit(1);
 

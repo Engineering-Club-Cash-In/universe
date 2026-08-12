@@ -66,6 +66,7 @@ import {
 	getCreditAnalysisOwnerCondition,
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
+import { eqDpi } from "../lib/dpi-lookup";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
@@ -667,8 +668,12 @@ export const crmRouter = {
 				}
 			}
 
-			// Excluir leads migrados (solo se muestran en la sección de clientes migrados)
-			conditions.push(not(eq(leads.status, "migrate")));
+			// Excluir leads migrados del listado (solo se muestran en la sección de
+			// clientes migrados). Cuando se pide un lead puntual por id no aplica:
+			// el detalle se abre desde un link directo y debe poder mostrarlo.
+			if (!id) {
+				conditions.push(not(eq(leads.status, "migrate")));
+			}
 
 			// Date range filter on createdAt
 			if (input?.dateFrom) {
@@ -928,7 +933,7 @@ export const crmRouter = {
 					})
 					.from(leads)
 					.innerJoin(user, eq(leads.assignedTo, user.id))
-					.where(eq(leads.dpi, normalizedDpi))
+					.where(eqDpi(leads.dpi, normalizedDpi))
 					.limit(1);
 
 				if (existingLead) {

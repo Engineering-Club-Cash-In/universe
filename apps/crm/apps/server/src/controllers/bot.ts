@@ -38,15 +38,19 @@ const BOT_DOCUMENT_TYPE_MAP: Record<string, DocumentType> = {
 };
 
 /**
- * Generic function to add or replace documents to open opportunities by DPI
+ * Generic function to add or replace documents to open opportunities of a lead.
  *
- * @param dpi - The lead's DPI to find open opportunities
+ * Recibe el lead ya resuelto y no lo vuelve a buscar por DPI: mientras queden
+ * duplicados sin depurar, repetir la búsqueda podía caer en otra fila y dejar
+ * los documentos colgados del proceso equivocado.
+ *
+ * @param leadId - The lead whose open opportunities receive the documents
  * @param documents - Array of documents to add { type: DocumentType, url: string, filename?: string }
  * @param uploadedBy - User ID who uploads the documents
  * @returns Results of the operation
  */
 export async function addDocumentsToOpenOpportunities(
-	dpi: string,
+	leadId: string,
 	documents: Array<{
 		type: DocumentType;
 		url: string;
@@ -60,43 +64,25 @@ export async function addDocumentsToOpenOpportunities(
 	documentsAdded?: number;
 }> {
 	try {
-		console.log(`[DEBUG] addDocumentsToOpenOpportunities for DPI: ${dpi}`);
+		console.log(`[DEBUG] addDocumentsToOpenOpportunities for lead: ${leadId}`);
 
-		// 1. Find lead by DPI
-		const lead = await db
-			.select()
-			.from(leads)
-			.where(eqDpi(leads.dpi, dpi))
-			.limit(1)
-			.then((results) => results[0] || null);
-
-		if (!lead) {
-			return {
-				success: false,
-				message: `Lead not found with DPI: ${dpi}`,
-			};
-		}
-
-		// 2. Find open opportunities for this lead
+		// 1. Find open opportunities for this lead
 		const openOpportunities = await db
 			.select()
 			.from(opportunities)
 			.where(
-				and(
-					eq(opportunities.leadId, lead.id),
-					eq(opportunities.status, "open"),
-				),
+				and(eq(opportunities.leadId, leadId), eq(opportunities.status, "open")),
 			);
 
 		if (openOpportunities.length === 0) {
 			return {
 				success: false,
-				message: `No open opportunities found for lead with DPI: ${dpi}`,
+				message: `No open opportunities found for lead: ${leadId}`,
 			};
 		}
 
 		console.log(
-			`[DEBUG] Found ${openOpportunities.length} open opportunities for lead ${lead.id}`,
+			`[DEBUG] Found ${openOpportunities.length} open opportunities for lead ${leadId}`,
 		);
 
 		let totalDocumentsAdded = 0;
@@ -192,10 +178,13 @@ export async function addDocumentsToOpenOpportunities(
 }
 
 /**
- * Helper function to check if open opportunities have specific document types
+ * Helper function to check if open opportunities have specific document types.
+ *
+ * Igual que `addDocumentsToOpenOpportunities`, recibe el lead ya resuelto para
+ * no volver a buscarlo por DPI y arriesgarse a leer otro duplicado.
  */
 export async function checkDocumentsInOpenOpportunities(
-	dpi: string,
+	leadId: string,
 	documentTypes: DocumentType[],
 ): Promise<{
 	success: boolean;
@@ -203,38 +192,19 @@ export async function checkDocumentsInOpenOpportunities(
 	message?: string;
 }> {
 	try {
-		// Find lead by DPI
-		const lead = await db
-			.select()
-			.from(leads)
-			.where(eqDpi(leads.dpi, dpi))
-			.limit(1)
-			.then((results) => results[0] || null);
-
-		if (!lead) {
-			return {
-				success: false,
-				hasDocuments: {} as Record<DocumentType, boolean>,
-				message: `Lead not found with DPI: ${dpi}`,
-			};
-		}
-
 		// Find open opportunities
 		const openOpportunities = await db
 			.select()
 			.from(opportunities)
 			.where(
-				and(
-					eq(opportunities.leadId, lead.id),
-					eq(opportunities.status, "open"),
-				),
+				and(eq(opportunities.leadId, leadId), eq(opportunities.status, "open")),
 			);
 
 		if (openOpportunities.length === 0) {
 			return {
 				success: false,
 				hasDocuments: {} as Record<DocumentType, boolean>,
-				message: `No open opportunities found for lead with DPI: ${dpi}`,
+				message: `No open opportunities found for lead: ${leadId}`,
 			};
 		}
 
@@ -848,7 +818,21 @@ export const updateLeadAndCreateOpportunity = async (
 		if (documentsToAdd.length > 0) {
 			// Usar el usuario asignado al lead como uploader
 			const uploadedBy = existingLead.assignedTo;
-			await addDocumentsToOpenOpportunities(dpi, documentsToAdd, uploadedBy);
+			// Se pasa el lead ya resuelto arriba, no el DPI: volver a buscarlo podía
+			// caer en otro duplicado y colgar los documentos del proceso equivocado.
+			const documentsResult = await addDocumentsToOpenOpportunities(
+				existingLead.id,
+				documentsToAdd,
+				uploadedBy,
+			);
+
+			// El cliente ya subió los archivos; si no quedaron pegados a ninguna
+			// oportunidad hay que verlo en el log y no perderlo en silencio.
+			if (!documentsResult.success) {
+				console.error(
+					`[ERROR] No se adjuntaron los documentos del lead ${existingLead.id}: ${documentsResult.message}`,
+				);
+			}
 		}
 	}
 
@@ -921,7 +905,7 @@ export const getLeadProgress = async (phone: string) => {
 		console.log(`[DEBUG] Found lead ${lead.id} with status "new"`);
 
 		// 2. Get documents from open opportunities
-		const documentCheck = await checkDocumentsInOpenOpportunities(lead.dpi!, [
+		const documentCheck = await checkDocumentsInOpenOpportunities(lead.id, [
 			"recibo_luz",
 			"estados_cuenta_1",
 		]);

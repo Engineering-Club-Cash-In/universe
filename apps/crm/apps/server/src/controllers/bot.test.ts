@@ -401,4 +401,60 @@ describe("WhatsApp follow-up step", () => {
 			expect.objectContaining({ monthlyIncome: "5000" }),
 		);
 	});
+
+	// Los documentos se adjuntan sobre el lead que ya se eligió. Si el helper
+	// vuelve a resolver el DPI por su cuenta puede caer en otro duplicado y
+	// dejarlos colgados del proceso equivocado.
+	test("attaches the documents to the already selected lead without looking the DPI up again", async () => {
+		capturedWhere = [];
+		queuedSelectResults = [
+			// Dos leads con el mismo DPI; el proceso activo está en el más nuevo.
+			[
+				{
+					id: "lead-viejo",
+					dpi: "1234567890101",
+					assignedTo: "otro-asesor",
+					createdBy: "creator",
+					status: "migrate",
+				},
+				{
+					id: "lead-activo",
+					dpi: "1234567890101",
+					assignedTo: "asesor-actual",
+					createdBy: "creator",
+					status: "qualified",
+				},
+			],
+			[
+				{
+					id: "active-opportunity",
+					leadId: "lead-activo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			// Oportunidades abiertas del lead elegido.
+			[{ id: "opp-del-lead-activo" }],
+			// Sin documento previo de ese tipo.
+			[],
+			[{ id: "existing-magic-url" }],
+		];
+
+		await updateLeadAndCreateOpportunity("1234567890101", {
+			electricityBill: "https://archivos/recibo.pdf",
+		});
+
+		// Una sola resolución por DPI en todo el flujo.
+		const busquedasPorDpi = capturedWhere.filter((condition) =>
+			dialect.sqlToQuery(condition).sql.includes('"leads"."dpi"'),
+		);
+		expect(busquedasPorDpi).toHaveLength(1);
+
+		// Y el documento quedó en la oportunidad del lead con proceso activo.
+		expect(insertedRows).toContainEqual(
+			expect.objectContaining({
+				opportunityId: "opp-del-lead-activo",
+				documentType: "recibo_luz",
+			}),
+		);
+	});
 });

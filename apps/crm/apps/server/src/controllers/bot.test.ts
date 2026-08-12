@@ -1,11 +1,24 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 type DatabaseRow = Record<string, unknown>;
+
+const dialect = new PgDialect();
+// El mock no filtra por el `where`, solo devuelve lo encolado, así que las
+// condiciones se guardan para poder afirmar sobre el SQL que se construyó.
+let capturedWhere: SQL[] = [];
+
+const captureWhere = (args: unknown[]) => {
+	const [condition] = args;
+	if (condition) {
+		capturedWhere.push(condition as SQL);
+	}
+};
 
 let queuedSelectResults: DatabaseRow[][] = [];
 let insertedRows: DatabaseRow[] = [];
 let updatedRows: DatabaseRow[] = [];
-let currentOwnerEligible = false;
 let fallbackSalesUser: { id: string } | null = null;
 let openOpportunity: {
 	id: string;
@@ -19,19 +32,35 @@ const selectResult = () => {
 
 	return Object.assign(Promise.resolve(result), {
 		limit: (..._limitArgs: unknown[]) => Promise.resolve(result),
+		// `orderBy` es awaitable por sí solo: hay consultas que ordenan sin acotar.
+		orderBy: (..._orderByArgs: unknown[]) =>
+			Object.assign(Promise.resolve(result), {
+				limit: (..._limitArgs: unknown[]) => Promise.resolve(result),
+			}),
 	});
+};
+
+const selectBuilder = () => {
+	const builder: Record<string, unknown> = {
+		where: (...whereArgs: unknown[]) => {
+			captureWhere(whereArgs);
+			return selectResult();
+		},
+		orderBy: (..._orderByArgs: unknown[]) => ({
+			limit: (..._limitArgs: unknown[]) => Promise.resolve(nextSelectResult()),
+		}),
+		// Los joins solo encadenan; el mock no los resuelve.
+		innerJoin: (..._joinArgs: unknown[]) => builder,
+		leftJoin: (..._joinArgs: unknown[]) => builder,
+	};
+
+	return builder;
 };
 
 mock.module("../db", () => ({
 	db: {
 		select: (..._args: unknown[]) => ({
-			from: (..._fromArgs: unknown[]) => ({
-				where: (..._whereArgs: unknown[]) => selectResult(),
-				orderBy: (..._orderByArgs: unknown[]) => ({
-					limit: (..._limitArgs: unknown[]) =>
-						Promise.resolve(nextSelectResult()),
-				}),
-			}),
+			from: (..._fromArgs: unknown[]) => selectBuilder(),
 		}),
 		insert: (..._insertArgs: unknown[]) => ({
 			values: (values: DatabaseRow) => {
@@ -85,9 +114,7 @@ mock.module("@/functions/getRenapInfo", () => ({
 }));
 
 mock.module("@/lib/lead-assignment", () => ({
-	findSalesUserWithLeastAutoAssignedLeads: async () => null,
-	resolveExistingLeadAssigneeFromDatabase: async (currentOwnerId: string) =>
-		currentOwnerEligible ? currentOwnerId : fallbackSalesUser?.id,
+	findSalesUserWithLeastAutoAssignedLeads: async () => fallbackSalesUser,
 	resolveNewAutoLeadAssignment: async (
 		findSalesUser: () => Promise<{ id: string } | null>,
 		unavailableMessage: string,
@@ -124,21 +151,33 @@ mock.module("@/lib/storage", () => ({
 }));
 
 mock.module("../utils/cui-validation", () => ({
-	validarDpi: () => ({ valid: true }),
+	cuiValido: () => true,
+	normalizarDpi: (dpi: string) => dpi.replace(/\s/g, ""),
+	normalizarYValidarDpi: (dpi: string) => dpi.replace(/\s/g, ""),
+	validarDpi: (dpi: string) => ({
+		valid: true,
+		dpiLimpio: dpi.replace(/\s/g, ""),
+	}),
 }));
 
 mock.module("./otp", () => ({
 	otpController: {},
 }));
 
-const { getRenapInfoController } = await import("./bot");
+const {
+	getLeadProgress,
+	getRenapInfoController,
+	updateLeadAndCreateOpportunity,
+	validateMagicUrlController,
+} = await import(
+	"./bot"
+);
 
 describe("WhatsApp RENAP lead assignment", () => {
 	beforeEach(() => {
 		queuedSelectResults = [[], []];
 		insertedRows = [];
 		updatedRows = [];
-		currentOwnerEligible = false;
 		fallbackSalesUser = null;
 		openOpportunity = null;
 	});
@@ -162,13 +201,43 @@ describe("WhatsApp RENAP lead assignment", () => {
 		).toEqual([]);
 	});
 
-	test("reassigns a reused opportunity with its reactivated lead", async () => {
-		currentOwnerEligible = false;
+	test("reuses the existing lead instead of creating a duplicate when the DPI was stored with spaces", async () => {
 		fallbackSalesUser = { id: "new-owner" };
-		openOpportunity = {
-			id: "existing-opportunity",
-			assignedTo: "old-owner",
-		};
+		queuedSelectResults = [
+			[],
+			// El lead migrado quedó guardado como "3460 66638 0101"; la búsqueda
+			// normaliza ambos lados, por eso lo encuentra.
+			[
+				{
+					id: "existing-lead",
+					dpi: "1234 56789 0101",
+					assignedTo: "old-owner",
+					assignmentType: "manual",
+					createdBy: "creator",
+					status: "migrate",
+					age: 36,
+				},
+			],
+			[],
+			[{ id: "existing-magic-url" }],
+			[{ id: "stage-1", order: 1 }],
+		];
+
+		const result = await getRenapInfoController("1234 56789 0101", "55555555");
+
+		expect(result.success).toBe(true);
+		// No se dio de alta otro lead: los inserts de lead llevan source pero no leadId.
+		expect(
+			insertedRows.filter((row) => row.source === "Whatsapp" && !row.leadId),
+		).toEqual([]);
+		// La oportunidad se le colgó al lead que ya existía.
+		expect(insertedRows).toContainEqual(
+			expect.objectContaining({ leadId: "existing-lead" }),
+		);
+	});
+
+	test("keeps the current advisor when the lead already has an active opportunity", async () => {
+		fallbackSalesUser = { id: "ruleta-owner" };
 		queuedSelectResults = [
 			[],
 			[
@@ -177,10 +246,109 @@ describe("WhatsApp RENAP lead assignment", () => {
 					assignedTo: "old-owner",
 					assignmentType: "manual",
 					createdBy: "creator",
+					status: "qualified",
 					age: 36,
 				},
 			],
+			// Oportunidad activa: el lead ya lo está trabajando "old-owner".
+			[{ id: "active-opportunity", assignedTo: "old-owner" }],
 			[{ id: "existing-magic-url" }],
+			[{ id: "stage-1", order: 1 }],
+		];
+
+		const result = await getRenapInfoController("1234567890101", "55555555");
+
+		expect(result.success).toBe(true);
+		// Ni el estado ni el asesor del lead se tocan: hay un proceso en curso.
+		expect(updatedRows).not.toContainEqual(
+			expect.objectContaining({ status: "new" }),
+		);
+		expect(updatedRows).not.toContainEqual(
+			expect.objectContaining({ assignedTo: "ruleta-owner" }),
+		);
+		// Y la oportunidad de WhatsApp queda con el asesor que ya lo atendía.
+		expect(insertedRows).toContainEqual(
+			expect.objectContaining({
+				source: "Whatsapp",
+				leadId: "existing-lead",
+				assignedTo: "old-owner",
+			}),
+		);
+	});
+
+	test("reuses the duplicate that holds the active process, not the oldest one", async () => {
+		fallbackSalesUser = { id: "ruleta-owner" };
+		queuedSelectResults = [
+			[],
+			// Dos leads con el mismo DPI (duplicado sin depurar): el proceso en
+			// curso está en el más nuevo, no en el más antiguo.
+			[
+				{
+					id: "lead-viejo",
+					assignedTo: "old-owner",
+					assignmentType: "auto",
+					createdBy: "creator",
+					status: "migrate",
+					age: 36,
+				},
+				{
+					id: "lead-nuevo",
+					assignedTo: "asesor-actual",
+					assignmentType: "auto",
+					createdBy: "creator-nuevo",
+					status: "new",
+					age: 36,
+				},
+			],
+			[
+				{
+					id: "active-opportunity",
+					leadId: "lead-nuevo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			[{ id: "existing-magic-url" }],
+			[{ id: "stage-1", order: 1 }],
+		];
+
+		const result = await getRenapInfoController("1234567890101", "55555555");
+
+		expect(result.success).toBe(true);
+		// La oportunidad nueva va al lead que sostiene el proceso, con su asesor.
+		expect(insertedRows).toContainEqual(
+			expect.objectContaining({
+				source: "Whatsapp",
+				leadId: "lead-nuevo",
+				assignedTo: "asesor-actual",
+			}),
+		);
+		// Y no se reasignó por ruleta ni se reactivó el lead viejo.
+		expect(updatedRows).not.toContainEqual(
+			expect.objectContaining({ assignedTo: "ruleta-owner" }),
+		);
+		expect(updatedRows).not.toContainEqual(
+			expect.objectContaining({ status: "new" }),
+		);
+	});
+
+	test("sends the lead back to the round robin when it has no active opportunity", async () => {
+		fallbackSalesUser = { id: "new-owner" };
+		queuedSelectResults = [
+			[],
+			[
+				{
+					id: "existing-lead",
+					assignedTo: "old-owner",
+					assignmentType: "manual",
+					createdBy: "creator",
+					status: "migrate",
+					age: 36,
+				},
+			],
+			// Sin oportunidades open/on_hold: solo tiene créditos ganados o migrados.
+			[],
+			[{ id: "existing-magic-url" }],
+			[{ id: "stage-1", order: 1 }],
 		];
 
 		const result = await getRenapInfoController("1234567890101", "55555555");
@@ -190,16 +358,235 @@ describe("WhatsApp RENAP lead assignment", () => {
 			expect.objectContaining({
 				assignedTo: "new-owner",
 				assignmentType: "auto",
+				status: "new",
 			}),
 		);
-		expect(updatedRows).toContainEqual({
-			assignedTo: "new-owner",
-			updatedAt: expect.any(Date),
-		});
 		expect(
-			insertedRows.filter(
-				(row) => row.source === "Whatsapp" && "leadId" in row,
-			),
+			insertedRows.filter((row) => row.source === "Whatsapp" && !row.leadId),
 		).toEqual([]);
+	});
+});
+
+describe("WhatsApp follow-up step", () => {
+	beforeEach(() => {
+		queuedSelectResults = [[], []];
+		insertedRows = [];
+		updatedRows = [];
+		fallbackSalesUser = null;
+		openOpportunity = null;
+	});
+
+	// El paso de RENAP dejó de resetear el estado del lead cuando hay un proceso
+	// en curso, así que este handler ya no puede exigir `status = 'new'`: si lo
+	// hiciera, los ingresos y documentos del cliente se perderían en silencio.
+	test("saves the data for an active lead that is no longer in the new status", async () => {
+		capturedWhere = [];
+		queuedSelectResults = [
+			[
+				{
+					id: "lead-activo",
+					dpi: "1234567890101",
+					assignedTo: "asesor-actual",
+					createdBy: "creator",
+					status: "qualified",
+				},
+			],
+			[
+				{
+					id: "active-opportunity",
+					leadId: "lead-activo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			[{ id: "existing-magic-url" }],
+		];
+
+		const result = await updateLeadAndCreateOpportunity("1234567890101", {
+			monthlyIncome: "5000",
+		});
+
+		// La búsqueda del lead no debe acotarse por estado.
+		expect(dialect.sqlToQuery(capturedWhere[0]).sql).not.toContain(
+			'"leads"."status"',
+		);
+		expect(result.success).not.toBe(false);
+		expect(updatedRows).toContainEqual(
+			expect.objectContaining({ monthlyIncome: "5000" }),
+		);
+	});
+
+	// Los documentos se adjuntan sobre el lead que ya se eligió. Si el helper
+	// vuelve a resolver el DPI por su cuenta puede caer en otro duplicado y
+	// dejarlos colgados del proceso equivocado.
+	test("attaches the documents to the already selected lead without looking the DPI up again", async () => {
+		capturedWhere = [];
+		queuedSelectResults = [
+			// Dos leads con el mismo DPI; el proceso activo está en el más nuevo.
+			[
+				{
+					id: "lead-viejo",
+					dpi: "1234567890101",
+					assignedTo: "otro-asesor",
+					createdBy: "creator",
+					status: "migrate",
+				},
+				{
+					id: "lead-activo",
+					dpi: "1234567890101",
+					assignedTo: "asesor-actual",
+					createdBy: "creator",
+					status: "qualified",
+				},
+			],
+			[
+				{
+					id: "active-opportunity",
+					leadId: "lead-activo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			// Oportunidades abiertas del lead elegido.
+			[{ id: "opp-del-lead-activo" }],
+			// Sin documento previo de ese tipo.
+			[],
+			[{ id: "existing-magic-url" }],
+		];
+
+		await updateLeadAndCreateOpportunity("1234567890101", {
+			electricityBill: "https://archivos/recibo.pdf",
+		});
+
+		// Una sola resolución por DPI en todo el flujo.
+		const busquedasPorDpi = capturedWhere.filter((condition) =>
+			dialect.sqlToQuery(condition).sql.includes('"leads"."dpi"'),
+		);
+		expect(busquedasPorDpi).toHaveLength(1);
+
+		// Y el documento quedó en la oportunidad del lead con proceso activo.
+		expect(insertedRows).toContainEqual(
+			expect.objectContaining({
+				opportunityId: "opp-del-lead-activo",
+				documentType: "recibo_luz",
+			}),
+		);
+	});
+
+	// El lead se elige por tener un proceso activo, y `on_hold` cuenta como tal.
+	// Si los documentos se buscaran solo entre las `open`, habría leads elegidos
+	// a los que nunca se les podría adjuntar nada.
+	test("uses the same active-status predicate to pick the lead and to place the documents", async () => {
+		capturedWhere = [];
+		queuedSelectResults = [
+			[
+				{
+					id: "lead-activo",
+					dpi: "1234567890101",
+					assignedTo: "asesor-actual",
+					createdBy: "creator",
+					status: "qualified",
+				},
+			],
+			[
+				{
+					id: "on-hold-opportunity",
+					leadId: "lead-activo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			[{ id: "opp-en-espera" }],
+			[],
+			[{ id: "existing-magic-url" }],
+		];
+
+		await updateLeadAndCreateOpportunity("1234567890101", {
+			electricityBill: "https://archivos/recibo.pdf",
+		});
+
+		const filtrosPorEstado = capturedWhere
+			.map((condition) => dialect.sqlToQuery(condition))
+			.filter((query) => query.sql.includes('"opportunities"."status"'));
+
+		// Uno al elegir el lead y otro al buscar dónde dejar los documentos.
+		expect(filtrosPorEstado.length).toBeGreaterThanOrEqual(2);
+		for (const query of filtrosPorEstado) {
+			expect(query.params).toContain("open");
+			expect(query.params).toContain("on_hold");
+		}
+	});
+});
+
+describe("WhatsApp progress step", () => {
+	beforeEach(() => {
+		queuedSelectResults = [[], []];
+		insertedRows = [];
+		updatedRows = [];
+		capturedWhere = [];
+	});
+
+	// Mismo motivo que el paso de seguimiento: el flujo dejó de resetear el
+	// estado del lead, así que exigir `new` dejaba al bot sin poder calcular los
+	// pasos pendientes de los clientes que ya están siendo atendidos.
+	test("computes the pending steps for an active lead that is no longer new", async () => {
+		queuedSelectResults = [
+			[
+				{
+					id: "lead-activo",
+					phone: "55555555",
+					dpi: "1234567890101",
+					status: "qualified",
+					assignedTo: "asesor-actual",
+					createdBy: "creator",
+				},
+			],
+			[
+				{
+					id: "active-opportunity",
+					leadId: "lead-activo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			[{ id: "opp-activa" }],
+			[],
+		];
+
+		const result = await getLeadProgress("55555555");
+
+		expect(result.success).not.toBe(false);
+		expect(dialect.sqlToQuery(capturedWhere[0]).sql).not.toContain(
+			'"leads"."status"',
+		);
+	});
+});
+
+describe("WhatsApp magic URL", () => {
+	beforeEach(() => {
+		queuedSelectResults = [[], []];
+		capturedWhere = [];
+	});
+
+	// Los links ya enviados llevan el DPI con el formato que el lead tenía al
+	// generarlos; el backfill de la migración 0028 se lo quita de la fila, así
+	// que la comparación tiene que normalizar ambos lados o el link deja de valer.
+	test("validates a magic link issued with a formatted DPI", async () => {
+		queuedSelectResults = [
+			[
+				{
+					magic_urls: {
+						id: "magic-url",
+						url: "https://portal/1234 56789 0101",
+						used: false,
+						expiresAt: new Date(Date.now() + 60_000),
+					},
+					leads: { id: "lead-activo", dpi: "1234567890101" },
+				},
+			],
+		];
+
+		const result = await validateMagicUrlController("1234 56789 0101");
+
+		expect(result.success).toBe(true);
+		expect(dialect.sqlToQuery(capturedWhere[0]).sql).toContain(
+			"regexp_replace",
+		);
 	});
 });

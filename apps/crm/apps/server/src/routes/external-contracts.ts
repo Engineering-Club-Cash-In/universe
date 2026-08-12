@@ -1,9 +1,11 @@
 import { desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
-import { leads } from "../db/schema/crm";
+import { leads, opportunities } from "../db/schema/crm";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { auth } from "../lib/auth";
+import { eqDpi } from "../lib/dpi-lookup";
+import { normalizarDpi } from "../utils/cui-validation";
 
 const app = new Hono();
 
@@ -63,15 +65,45 @@ app.post("/", async (c) => {
 			);
 		}
 
-		// 5. Buscar lead por DPI (usar el más reciente si hay duplicados)
-		const foundLeads = await db
-			.select()
-			.from(leads)
-			.where(eq(leads.dpi, dpi))
-			.orderBy(desc(leads.createdAt))
-			.limit(1);
+		// 5. Resolver el lead.
+		// Si el callback trae la oportunidad, ella manda: el contrato se guarda
+		// contra ese `opportunityId`, así que el lead tiene que ser su dueño. Con
+		// duplicados por DPI todavía en la base, buscar por DPI podía devolver
+		// otra fila y dejar el contrato colgado de un lead que no posee esa
+		// oportunidad, invisible para las consultas por lead y para el portal.
+		let lead: typeof leads.$inferSelect | undefined;
 
-		if (foundLeads.length === 0) {
+		if (opportunityId) {
+			const [owner] = await db
+				.select({ lead: leads })
+				.from(opportunities)
+				.innerJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(eq(opportunities.id, opportunityId))
+				.limit(1);
+
+			lead = owner?.lead;
+
+			if (lead && normalizarDpi(lead.dpi ?? "") !== normalizarDpi(dpi)) {
+				console.warn(
+					`[WARN] external-contracts: la oportunidad ${opportunityId} pertenece al lead ${lead.id}, cuyo DPI no coincide con el recibido (${dpi}). Se respeta el dueño de la oportunidad.`,
+				);
+			}
+		}
+
+		// Sin oportunidad en el callback (o inexistente), se cae al DPI y se usa
+		// el lead más reciente, como antes.
+		if (!lead) {
+			const [foundByDpi] = await db
+				.select()
+				.from(leads)
+				.where(eqDpi(leads.dpi, dpi))
+				.orderBy(desc(leads.createdAt))
+				.limit(1);
+
+			lead = foundByDpi;
+		}
+
+		if (!lead) {
 			return c.json(
 				{
 					success: false,
@@ -80,8 +112,6 @@ app.post("/", async (c) => {
 				404,
 			);
 		}
-
-		const lead = foundLeads[0];
 
 		// 6. Extraer signing links del array
 		const [clientLink, representativeLink, ...additionalLinks] =

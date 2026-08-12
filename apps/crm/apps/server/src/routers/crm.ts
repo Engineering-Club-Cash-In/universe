@@ -1,6 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import {
 	and,
+	asc,
 	count,
 	desc,
 	eq,
@@ -66,6 +67,7 @@ import {
 	getCreditAnalysisOwnerCondition,
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
+import { eqDpi } from "../lib/dpi-lookup";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
@@ -667,8 +669,12 @@ export const crmRouter = {
 				}
 			}
 
-			// Excluir leads migrados (solo se muestran en la sección de clientes migrados)
-			conditions.push(not(eq(leads.status, "migrate")));
+			// Excluir leads migrados del listado (solo se muestran en la sección de
+			// clientes migrados). Cuando se pide un lead puntual por id no aplica:
+			// el detalle se abre desde un link directo y debe poder mostrarlo.
+			if (!id) {
+				conditions.push(not(eq(leads.status, "migrate")));
+			}
 
 			// Date range filter on createdAt
 			if (input?.dateFrom) {
@@ -920,7 +926,11 @@ export const crmRouter = {
 
 			// Validar DPI duplicado
 			if (normalizedDpi) {
-				const [existingLead] = await db
+				// Se traen todos los leads del DPI, no uno solo: mientras queden
+				// duplicados sin depurar, el proceso activo puede estar colgado de
+				// cualquiera de ellos, y revisar uno arbitrario haría reasignar un
+				// cliente que otro asesor ya está atendiendo.
+				const matchingLeads = await db
 					.select({
 						id: leads.id,
 						assignedTo: leads.assignedTo,
@@ -928,27 +938,45 @@ export const crmRouter = {
 					})
 					.from(leads)
 					.innerJoin(user, eq(leads.assignedTo, user.id))
-					.where(eq(leads.dpi, normalizedDpi))
-					.limit(1);
+					.where(eqDpi(leads.dpi, normalizedDpi))
+					.orderBy(asc(leads.createdAt));
 
-				if (existingLead) {
-					// Verificar si tiene oportunidades activas (open o on_hold)
+				if (matchingLeads.length > 0) {
+					// Verificar si alguno tiene oportunidades activas (open u on_hold)
 					const [activeOpportunity] = await db
-						.select({ id: opportunities.id })
+						.select({
+							id: opportunities.id,
+							leadId: opportunities.leadId,
+						})
 						.from(opportunities)
 						.where(
 							and(
-								eq(opportunities.leadId, existingLead.id),
+								inArray(
+									opportunities.leadId,
+									matchingLeads.map((lead) => lead.id),
+								),
 								inArray(opportunities.status, ["open", "on_hold"]),
 							),
 						)
+						.orderBy(desc(opportunities.createdAt))
 						.limit(1);
 
 					if (activeOpportunity) {
+						// El conflicto se reporta con el dueño del proceso en curso, que
+						// no necesariamente es el del lead más antiguo.
+						const leadEnProceso =
+							matchingLeads.find(
+								(lead) => lead.id === activeOpportunity.leadId,
+							) ?? matchingLeads[0];
+
 						throw new ORPCError("CONFLICT", {
-							message: `Ya existe un lead con este DPI y tiene un proceso activo, asignado al asesor: ${existingLead.assignedToName}`,
+							message: `Ya existe un lead con este DPI y tiene un proceso activo, asignado al asesor: ${leadEnProceso.assignedToName}`,
 						});
 					}
+
+					// Sin procesos activos: se reusa el más antiguo, que arrastra el
+					// historial.
+					const existingLead = matchingLeads[0];
 
 					// Lead existe pero sin procesos activos → reasignar al nuevo asesor
 					const reassignedLead = await db.transaction(async (tx) => {

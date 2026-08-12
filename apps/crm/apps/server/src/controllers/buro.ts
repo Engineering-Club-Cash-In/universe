@@ -8,6 +8,8 @@ import {
 	type EstudioPersonaJSON,
 	infornetPersonaCache,
 } from "@/db/schema/buro";
+import { eqDpi } from "@/lib/dpi-lookup";
+import { normalizarDpi } from "@/utils/cui-validation";
 
 // 🔥 Instanciar el cliente con las credenciales del .env
 const infornetClient = new InfornetClient({
@@ -22,12 +24,18 @@ export class InfornetController {
 	 * 2. Busca en caché de infornet
 	 * 3. Si no existe o expiró, consulta a la API de Infornet
 	 */
-	async obtenerEstudioPorDPI(dpi: string): Promise<{
+	async obtenerEstudioPorDPI(dpiRecibido: string): Promise<{
 		success: boolean;
 		data?: EstudioPersonaJSON;
 		fromCache?: boolean;
 		error?: string;
 	}> {
+		// Se normaliza una sola vez y se usa en todo el flujo. El caché guarda los
+		// DPI sin formato y su upsert apunta solo a `dpi`, así que entrar con
+		// espacios erraba el caché y el insert chocaba contra el unique de
+		// `codigo_persona`, reportando el buró como fallido pese a tener estudio.
+		const dpi = normalizarDpi(dpiRecibido);
+
 		try {
 			console.log(
 				`\n🔍 ========== BUSCANDO ESTUDIO PARA DPI: ${dpi} ==========`,
@@ -38,7 +46,7 @@ export class InfornetController {
 			const personaRenap = await db
 				.select()
 				.from(renapInfo)
-				.where(eq(renapInfo.dpi, dpi))
+				.where(eqDpi(renapInfo.dpi, dpi))
 				.limit(1);
 
 			if (personaRenap.length === 0) {

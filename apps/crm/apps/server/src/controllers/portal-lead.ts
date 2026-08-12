@@ -6,9 +6,10 @@ import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
+import { eqDpi } from "../lib/dpi-lookup";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
+import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
-import { validarDpi } from "../utils/cui-validation";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
@@ -30,7 +31,7 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 		conditions.push(eq(leads.email, email));
 	}
 	if (dpi && dpi.trim() !== "") {
-		conditions.push(eq(leads.dpi, dpi));
+		conditions.push(eqDpi(leads.dpi, dpi));
 	}
 
 	// Buscar el lead
@@ -164,7 +165,10 @@ export async function getLeadByEmail(c: Context) {
 export async function updateLeadByEmail(c: Context) {
 	try {
 		const body = await c.req.json();
-		const { email, dpi, address, phone } = body;
+		const { email, dpi: dpiRaw, address, phone } = body;
+		// Se guarda siempre normalizado; si no, el mismo DPI escrito con espacios
+		// queda como un registro distinto y deja de detectarse como duplicado.
+		let dpi: string | undefined = dpiRaw;
 
 		// Buscar el lead usando la función auxiliar (email o dpi como identificadores)
 		const result = await findLeadByEmailOrDpi(email);
@@ -191,6 +195,7 @@ export async function updateLeadByEmail(c: Context) {
 					400,
 				);
 			}
+			dpi = resultadoDpi.dpiLimpio;
 		}
 
 		// Check if new DPI or phone already exists in another lead
@@ -199,7 +204,7 @@ export async function updateLeadByEmail(c: Context) {
 			const orConditions = [];
 
 			if (dpi !== undefined) {
-				orConditions.push(eq(leads.dpi, dpi));
+				orConditions.push(eqDpi(leads.dpi, dpi));
 			}
 
 			if (phone !== undefined) {
@@ -213,7 +218,11 @@ export async function updateLeadByEmail(c: Context) {
 				.limit(1);
 
 			if (conflict) {
-				if (dpi !== undefined && conflict.dpi === dpi) {
+				if (
+					dpi !== undefined &&
+					conflict.dpi &&
+					normalizarDpi(conflict.dpi) === dpi
+				) {
 					return c.json(
 						{
 							success: false,
@@ -641,7 +650,7 @@ export async function createPortalRegisterLead(c: Context) {
 		const [existingLead] = await db
 			.select()
 			.from(leads)
-			.where(or(eq(leads.email, email), eq(leads.dpi, dpi)))
+			.where(or(eq(leads.email, email), eqDpi(leads.dpi, dpi)))
 			.limit(1);
 
 		if (existingLead) {
@@ -649,7 +658,11 @@ export async function createPortalRegisterLead(c: Context) {
 			const isEmptyEmail =
 				!existingLead.email || existingLead.email.trim() === "";
 
-			if (existingLead.dpi === dpi && isEmptyEmail) {
+			if (
+				existingLead.dpi &&
+				normalizarDpi(existingLead.dpi) === dpi &&
+				isEmptyEmail
+			) {
 				const [updatedLead] = await db
 					.update(leads)
 					.set({ email, updatedAt: new Date() })

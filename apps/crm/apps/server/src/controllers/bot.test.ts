@@ -457,4 +457,47 @@ describe("WhatsApp follow-up step", () => {
 			}),
 		);
 	});
+
+	// El lead se elige por tener un proceso activo, y `on_hold` cuenta como tal.
+	// Si los documentos se buscaran solo entre las `open`, habría leads elegidos
+	// a los que nunca se les podría adjuntar nada.
+	test("uses the same active-status predicate to pick the lead and to place the documents", async () => {
+		capturedWhere = [];
+		queuedSelectResults = [
+			[
+				{
+					id: "lead-activo",
+					dpi: "1234567890101",
+					assignedTo: "asesor-actual",
+					createdBy: "creator",
+					status: "qualified",
+				},
+			],
+			[
+				{
+					id: "on-hold-opportunity",
+					leadId: "lead-activo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			[{ id: "opp-en-espera" }],
+			[],
+			[{ id: "existing-magic-url" }],
+		];
+
+		await updateLeadAndCreateOpportunity("1234567890101", {
+			electricityBill: "https://archivos/recibo.pdf",
+		});
+
+		const filtrosPorEstado = capturedWhere
+			.map((condition) => dialect.sqlToQuery(condition))
+			.filter((query) => query.sql.includes('"opportunities"."status"'));
+
+		// Uno al elegir el lead y otro al buscar dónde dejar los documentos.
+		expect(filtrosPorEstado.length).toBeGreaterThanOrEqual(2);
+		for (const query of filtrosPorEstado) {
+			expect(query.params).toContain("open");
+			expect(query.params).toContain("on_hold");
+		}
+	});
 });

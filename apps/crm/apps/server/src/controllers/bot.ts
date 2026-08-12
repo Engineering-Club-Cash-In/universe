@@ -38,18 +38,27 @@ const BOT_DOCUMENT_TYPE_MAP: Record<string, DocumentType> = {
 };
 
 /**
- * Generic function to add or replace documents to open opportunities of a lead.
+ * Estados en los que una oportunidad cuenta como proceso en curso.
+ *
+ * Va en una sola constante a propósito: el lead se elige por tener un proceso
+ * activo, y si los documentos se buscaran con un criterio más angosto habría
+ * leads elegidos a los que nunca se les podría adjuntar nada.
+ */
+const ACTIVE_OPPORTUNITY_STATUSES = ["open", "on_hold"] as const;
+
+/**
+ * Generic function to add or replace documents to active opportunities of a lead.
  *
  * Recibe el lead ya resuelto y no lo vuelve a buscar por DPI: mientras queden
  * duplicados sin depurar, repetir la búsqueda podía caer en otra fila y dejar
  * los documentos colgados del proceso equivocado.
  *
- * @param leadId - The lead whose open opportunities receive the documents
+ * @param leadId - The lead whose active opportunities receive the documents
  * @param documents - Array of documents to add { type: DocumentType, url: string, filename?: string }
  * @param uploadedBy - User ID who uploads the documents
  * @returns Results of the operation
  */
-export async function addDocumentsToOpenOpportunities(
+export async function addDocumentsToActiveOpportunities(
 	leadId: string,
 	documents: Array<{
 		type: DocumentType;
@@ -64,31 +73,34 @@ export async function addDocumentsToOpenOpportunities(
 	documentsAdded?: number;
 }> {
 	try {
-		console.log(`[DEBUG] addDocumentsToOpenOpportunities for lead: ${leadId}`);
+		console.log(`[DEBUG] addDocumentsToActiveOpportunities for lead: ${leadId}`);
 
-		// 1. Find open opportunities for this lead
-		const openOpportunities = await db
+		// 1. Find active opportunities for this lead
+		const activeOpportunities = await db
 			.select()
 			.from(opportunities)
 			.where(
-				and(eq(opportunities.leadId, leadId), eq(opportunities.status, "open")),
+				and(
+					eq(opportunities.leadId, leadId),
+					inArray(opportunities.status, ACTIVE_OPPORTUNITY_STATUSES),
+				),
 			);
 
-		if (openOpportunities.length === 0) {
+		if (activeOpportunities.length === 0) {
 			return {
 				success: false,
-				message: `No open opportunities found for lead: ${leadId}`,
+				message: `No active opportunities found for lead: ${leadId}`,
 			};
 		}
 
 		console.log(
-			`[DEBUG] Found ${openOpportunities.length} open opportunities for lead ${leadId}`,
+			`[DEBUG] Found ${activeOpportunities.length} active opportunities for lead ${leadId}`,
 		);
 
 		let totalDocumentsAdded = 0;
 
-		// 3. For each open opportunity, add/replace documents
-		for (const opportunity of openOpportunities) {
+		// 2. For each active opportunity, add/replace documents
+		for (const opportunity of activeOpportunities) {
 			for (const doc of documents) {
 				if (!doc.url) continue;
 
@@ -165,11 +177,11 @@ export async function addDocumentsToOpenOpportunities(
 		return {
 			success: true,
 			message: "Documents added/updated successfully",
-			opportunitiesUpdated: openOpportunities.length,
+			opportunitiesUpdated: activeOpportunities.length,
 			documentsAdded: totalDocumentsAdded,
 		};
 	} catch (error: any) {
-		console.error("[ERROR] addDocumentsToOpenOpportunities failed:", error);
+		console.error("[ERROR] addDocumentsToActiveOpportunities failed:", error);
 		return {
 			success: false,
 			message: error?.message || "Failed to add documents to opportunities",
@@ -178,12 +190,12 @@ export async function addDocumentsToOpenOpportunities(
 }
 
 /**
- * Helper function to check if open opportunities have specific document types.
+ * Helper function to check if active opportunities have specific document types.
  *
- * Igual que `addDocumentsToOpenOpportunities`, recibe el lead ya resuelto para
+ * Igual que `addDocumentsToActiveOpportunities`, recibe el lead ya resuelto para
  * no volver a buscarlo por DPI y arriesgarse a leer otro duplicado.
  */
-export async function checkDocumentsInOpenOpportunities(
+export async function checkDocumentsInActiveOpportunities(
 	leadId: string,
 	documentTypes: DocumentType[],
 ): Promise<{
@@ -192,27 +204,30 @@ export async function checkDocumentsInOpenOpportunities(
 	message?: string;
 }> {
 	try {
-		// Find open opportunities
-		const openOpportunities = await db
+		// Find active opportunities
+		const activeOpportunities = await db
 			.select()
 			.from(opportunities)
 			.where(
-				and(eq(opportunities.leadId, leadId), eq(opportunities.status, "open")),
+				and(
+					eq(opportunities.leadId, leadId),
+					inArray(opportunities.status, ACTIVE_OPPORTUNITY_STATUSES),
+				),
 			);
 
-		if (openOpportunities.length === 0) {
+		if (activeOpportunities.length === 0) {
 			return {
 				success: false,
 				hasDocuments: {} as Record<DocumentType, boolean>,
-				message: `No open opportunities found for lead: ${leadId}`,
+				message: `No active opportunities found for lead: ${leadId}`,
 			};
 		}
 
-		// Get all documents for the first open opportunity (most recent)
+		// Get all documents for the first active opportunity (most recent)
 		const docs = await db
 			.select()
 			.from(opportunityDocuments)
-			.where(eq(opportunityDocuments.opportunityId, openOpportunities[0].id));
+			.where(eq(opportunityDocuments.opportunityId, activeOpportunities[0].id));
 
 		const existingTypes = new Set(docs.map((d) => d.documentType));
 		const hasDocuments = {} as Record<DocumentType, boolean>;
@@ -226,7 +241,7 @@ export async function checkDocumentsInOpenOpportunities(
 			hasDocuments,
 		};
 	} catch (error: any) {
-		console.error("[ERROR] checkDocumentsInOpenOpportunities failed:", error);
+		console.error("[ERROR] checkDocumentsInActiveOpportunities failed:", error);
 		return {
 			success: false,
 			hasDocuments: {} as Record<DocumentType, boolean>,
@@ -322,7 +337,7 @@ async function findLeadWithActiveOpportunityByDpi(dpi: string): Promise<{
 					opportunities.leadId,
 					matchingLeads.map((lead) => lead.id),
 				),
-				inArray(opportunities.status, ["open", "on_hold"]),
+				inArray(opportunities.status, ACTIVE_OPPORTUNITY_STATUSES),
 			),
 		)
 		.orderBy(desc(opportunities.createdAt))
@@ -820,7 +835,7 @@ export const updateLeadAndCreateOpportunity = async (
 			const uploadedBy = existingLead.assignedTo;
 			// Se pasa el lead ya resuelto arriba, no el DPI: volver a buscarlo podía
 			// caer en otro duplicado y colgar los documentos del proceso equivocado.
-			const documentsResult = await addDocumentsToOpenOpportunities(
+			const documentsResult = await addDocumentsToActiveOpportunities(
 				existingLead.id,
 				documentsToAdd,
 				uploadedBy,
@@ -905,7 +920,7 @@ export const getLeadProgress = async (phone: string) => {
 		console.log(`[DEBUG] Found lead ${lead.id} with status "new"`);
 
 		// 2. Get documents from open opportunities
-		const documentCheck = await checkDocumentsInOpenOpportunities(lead.id, [
+		const documentCheck = await checkDocumentsInActiveOpportunities(lead.id, [
 			"recibo_luz",
 			"estados_cuenta_1",
 		]);

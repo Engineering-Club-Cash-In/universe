@@ -1,12 +1,21 @@
-import { and, desc, eq, or } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { db } from "../db";
-import { type leadSourceEnum, opportunities } from "../db/schema/crm";
+import { opportunities } from "../db/schema/crm";
+import {
+	buildOpenOpportunityBySourceCondition,
+	type LeadSource,
+} from "./lead-opportunity-source";
 
-type LeadSource = (typeof leadSourceEnum.enumValues)[number];
-
+/**
+ * Busca la oportunidad activa del lead que pertenezca al canal `source`.
+ *
+ * `leadSource` es el canal que el lead tenía ANTES de cualquier actualización
+ * hecha en el mismo request; ver `buildOpenOpportunityBySourceCondition`.
+ */
 export async function getOpenOpportunityBySource(
 	leadId: string,
 	source: LeadSource,
+	leadSource: LeadSource,
 ) {
 	const [existing] = await db
 		.select({
@@ -17,16 +26,7 @@ export async function getOpenOpportunityBySource(
 			creditType: opportunities.creditType,
 		})
 		.from(opportunities)
-		.where(
-			and(
-				eq(opportunities.leadId, leadId),
-				eq(opportunities.source, source),
-				or(
-					eq(opportunities.status, "open"),
-					eq(opportunities.status, "on_hold"),
-				),
-			),
-		)
+		.where(buildOpenOpportunityBySourceCondition(leadId, source, leadSource))
 		.orderBy(desc(opportunities.createdAt))
 		.limit(1);
 

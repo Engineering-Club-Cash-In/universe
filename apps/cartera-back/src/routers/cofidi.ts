@@ -10,6 +10,7 @@ import {
   buscarFacturaPorIdempotencyKey,
   confirmarIdempotencyKey,
   liberarIdempotencyKey,
+  marcarIdempotencyKeyEnDuda,
   reservarIdempotencyKey,
   type FacturaIdempotente,
 } from "../utils/functions/facturaIdempotencia";
@@ -3498,7 +3499,25 @@ if (facturasExistentes.length > 0) {
         // aunque no se hubiera emitido nada.
         // ============================================
         if (idempotencyKey) {
-          if ((await reservarIdempotencyKey(idempotencyKey)) === "en_proceso") {
+          const reserva = await reservarIdempotencyKey(idempotencyKey);
+
+          if (reserva === "en_duda") {
+            // Un intento anterior certificó en SAT y no llegó a guardar la
+            // factura. Reintentar emitiría una segunda: esto se destraba a mano.
+            console.error(
+              `🚨 idempotency_key "${idempotencyKey}" EN DUDA: un intento anterior certificó en SAT sin guardar la factura. NO se factura hasta conciliar.`
+            );
+            set.status = 409;
+            return {
+              success: false,
+              error:
+                "Esta facturación quedó en duda: un intento anterior certificó en SAT pero no se guardó la factura. " +
+                "Hay que conciliarla a mano antes de volver a facturar (revisar en SAT y reconstruir la factura, o borrar la reserva si no se emitió).",
+              en_duda: true,
+            };
+          }
+
+          if (reserva === "en_proceso") {
             // Otra request tiene la clave tomada. Puede haber terminado entre
             // el SELECT y el INSERT, así que se vuelve a mirar antes de rendirse.
             const reciente = await buscarFacturaPorIdempotencyKey(idempotencyKey);
@@ -3606,10 +3625,20 @@ if (facturasExistentes.length > 0) {
             console.error("⚠️ No se pudo liberar la idempotency_key:", e)
           );
         } else if (idempotencyKey && reservaTomada && yaCertificado) {
+          // La reserva se queda Y se marca EN DUDA, para que tampoco se retome
+          // por antigüedad: no hay factura en la BD que el lookup encuentre, así
+          // que un reintento certificaría una segunda en SAT.
+          await marcarIdempotencyKeyEnDuda(
+            idempotencyKey,
+            `DTE certificado en SAT pero la request falló después: ${(error as Error)?.message ?? error}`
+          ).catch((e) =>
+            console.error("⚠️ No se pudo marcar la idempotency_key en duda:", e)
+          );
           console.error(
             `🚨 idempotency_key "${idempotencyKey}": el DTE se certificó en SAT pero la request falló después. ` +
-              `La reserva NO se suelta para no duplicar. Revisar en SAT si la factura quedó emitida ` +
-              `antes de volver a facturar (script backfill-facturas-faltantes).`
+              `La clave queda TRABADA hasta conciliación manual. Revisar en SAT si la factura quedó emitida: ` +
+              `si sí, reconstruirla con el script backfill-facturas-faltantes dejándole esta idempotency_key; ` +
+              `si no, borrar la fila de cartera.facturas_idempotencia.`
           );
         }
 

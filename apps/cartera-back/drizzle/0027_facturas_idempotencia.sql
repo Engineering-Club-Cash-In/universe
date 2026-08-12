@@ -41,6 +41,25 @@ CREATE TABLE IF NOT EXISTS cartera.facturas_idempotencia (
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
+-- 3) Reservas EN DUDA: el DTE se certificó en SAT pero la request murió antes de
+--    guardar la factura (parseo del XML, caída de la BD). No hay fila en
+--    facturas_electronicas, así que el candado de arriba no la puede encontrar.
+--    Estas reservas NO se pueden retomar por antigüedad: hacerlo dejaría que un
+--    reintento emitiera una segunda factura en SAT. Quedan trabadas hasta
+--    conciliación manual.
+--
+--    Para destrabar una:
+--      * si SAT SÍ la emitió -> reconstruir la factura con el script
+--        backfill-facturas-faltantes y dejarle su idempotency_key (con eso el
+--        lookup la encuentra y ya no hace falta tocar esta tabla);
+--      * si SAT NO la emitió -> borrar la fila:
+--        DELETE FROM cartera.facturas_idempotencia WHERE idempotency_key = '...';
+ALTER TABLE cartera.facturas_idempotencia
+  ADD COLUMN IF NOT EXISTS en_duda_sat boolean NOT NULL DEFAULT false;
+
+ALTER TABLE cartera.facturas_idempotencia
+  ADD COLUMN IF NOT EXISTS detalle text;
+
 -- Para ubicar la clave desde la factura (auditoría/soporte).
 CREATE INDEX IF NOT EXISTS idx_facturas_idempotencia_factura
   ON cartera.facturas_idempotencia (factura_id);

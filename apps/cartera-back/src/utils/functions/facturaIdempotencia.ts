@@ -63,20 +63,55 @@ export async function buscarFacturaPorIdempotencyKey(
  * Toma la clave para esta request.
  * - "reservada": se puede certificar.
  * - "en_proceso": otra request la está usando ahora mismo; NO certificar.
+ * - "en_duda": un intento anterior YA certificó en SAT pero no llegó a guardar
+ *   la factura. NO se puede reintentar solo: necesita conciliación manual (ver
+ *   `marcarIdempotencyKeyEnDuda`).
  */
 export async function reservarIdempotencyKey(
   key: string
-): Promise<"reservada" | "en_proceso"> {
+): Promise<"reservada" | "en_proceso" | "en_duda"> {
   const res = await db.execute(sql`
     INSERT INTO cartera.facturas_idempotencia AS fi (idempotency_key)
     VALUES (${key})
     ON CONFLICT (idempotency_key) DO UPDATE
       SET created_at = now()
       WHERE fi.factura_id IS NULL
+        -- Una reserva EN DUDA nunca se retoma por antigüedad: del otro lado
+        -- puede haber una factura viva en SAT que no está en la BD, así que
+        -- reintentar emitiría una segunda.
+        AND fi.en_duda_sat = false
         AND fi.created_at < now() - ${RESERVA_ABANDONADA}::interval
     RETURNING fi.idempotency_key
   `);
-  return (res as any).rows?.length ? "reservada" : "en_proceso";
+  if ((res as any).rows?.length) return "reservada";
+
+  const estado = await db.execute(sql`
+    SELECT en_duda_sat FROM cartera.facturas_idempotencia
+    WHERE idempotency_key = ${key}
+    LIMIT 1
+  `);
+  return (estado as any).rows?.[0]?.en_duda_sat ? "en_duda" : "en_proceso";
+}
+
+/**
+ * Marca la reserva como EN DUDA: SAT certificó el DTE pero la request se cayó
+ * antes de guardar la factura, así que no hay fila en `facturas_electronicas`
+ * que el lookup pueda encontrar.
+ *
+ * Desde acá la clave queda trabada (ni siquiera se libera por antigüedad) hasta
+ * que alguien concilie: reconstruir la factura con su idempotency_key, o borrar
+ * la fila si SAT no llegó a emitir. Es a propósito: es preferible frenar la
+ * facturación de ese concepto a emitir una segunda en SAT.
+ */
+export async function marcarIdempotencyKeyEnDuda(
+  key: string,
+  detalle: string
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE cartera.facturas_idempotencia
+    SET en_duda_sat = true, detalle = ${detalle}
+    WHERE idempotency_key = ${key} AND factura_id IS NULL
+  `);
 }
 
 /** Ancla la clave a la factura que se acaba de emitir. */

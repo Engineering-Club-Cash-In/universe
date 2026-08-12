@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { authMiddleware } from "./midleware";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
-import { generarHTMLFacturaPro } from "../cofidi/functions";
+import { generarPDFFacturaEnBackground } from "../utils/functions/facturaPdf";
 import {
   cuentaParaRubroInv,
   decidirRubroInteresInversionistas,
@@ -4160,60 +4160,59 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       process.env.LOGO_URL ||
       "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
-    const html = generarHTMLFacturaPro(
-      {
-        tipo: datosGenerales["@_Tipo"],
-        serie: certificacion["dte:NumeroAutorizacion"]["@_Serie"],
-        numero: certificacion["dte:NumeroAutorizacion"]["@_Numero"],
-        uuid: certificacion["dte:NumeroAutorizacion"]["#text"],
-        fechaEmision: datosGenerales["@_FechaHoraEmision"],
-        fechaCertificacion: certificacion["dte:FechaHoraCertificacion"],
+    // Los datos del PDF se arman acá (el XML ya está parseado) pero el HTML y
+    // el render se hacen FUERA del request, después de guardar en BD (paso 7).
+    const datosFactura = {
+      tipo: datosGenerales["@_Tipo"],
+      serie: certificacion["dte:NumeroAutorizacion"]["@_Serie"],
+      numero: certificacion["dte:NumeroAutorizacion"]["@_Numero"],
+      uuid: certificacion["dte:NumeroAutorizacion"]["#text"],
+      fechaEmision: datosGenerales["@_FechaHoraEmision"],
+      fechaCertificacion: certificacion["dte:FechaHoraCertificacion"],
 
-        emisor: {
-          nit: emisor["@_NITEmisor"],
-          nombre: emisor["@_NombreEmisor"],
-          nombreComercial: emisor["@_NombreComercial"],
-          direccion: emisor["dte:DireccionEmisor"],
-        },
-
-        receptor: {
-          nit: receptorXML["@_IDReceptor"],
-          nombre: receptorXML["@_NombreReceptor"],
-          direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
-        },
-
-        items: itemsXML.map((item: any) => ({
-          numeroLinea: item["@_NumeroLinea"],
-          cantidad: item["dte:Cantidad"],
-          unidad: item["dte:UnidadMedida"],
-          descripcion: item["dte:Descripcion"],
-          precioUnitario: parseFloat(item["dte:PrecioUnitario"]),
-          total: parseFloat(item["dte:Total"]),
-        })),
-
-        totales: {
-          iva: parseFloat(
-            totales["dte:TotalImpuestos"]["dte:TotalImpuesto"][
-              "@_TotalMontoImpuesto"
-            ]
-          ),
-          granTotal: parseFloat(totales["dte:GranTotal"]),
-        },
-
-        // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
-        abonos: pago_id ? abonos.map((abono: any) => ({
-          numero: abono["cfc:NumeroAbono"],
-          fechaVencimiento: abono["cfc:FechaVencimiento"],
-          monto: parseFloat(abono["cfc:MontoAbono"]),
-        })) : [],
-
-        certificador: {
-          nit: certificacion["dte:NITCertificador"],
-          nombre: certificacion["dte:NombreCertificador"],
-        },
+      emisor: {
+        nit: emisor["@_NITEmisor"],
+        nombre: emisor["@_NombreEmisor"],
+        nombreComercial: emisor["@_NombreComercial"],
+        direccion: emisor["dte:DireccionEmisor"],
       },
-      logoUrl
-    );
+
+      receptor: {
+        nit: receptorXML["@_IDReceptor"],
+        nombre: receptorXML["@_NombreReceptor"],
+        direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
+      },
+
+      items: itemsXML.map((item: any) => ({
+        numeroLinea: item["@_NumeroLinea"],
+        cantidad: item["dte:Cantidad"],
+        unidad: item["dte:UnidadMedida"],
+        descripcion: item["dte:Descripcion"],
+        precioUnitario: parseFloat(item["dte:PrecioUnitario"]),
+        total: parseFloat(item["dte:Total"]),
+      })),
+
+      totales: {
+        iva: parseFloat(
+          totales["dte:TotalImpuestos"]["dte:TotalImpuesto"][
+            "@_TotalMontoImpuesto"
+          ]
+        ),
+        granTotal: parseFloat(totales["dte:GranTotal"]),
+      },
+
+      // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
+      abonos: pago_id ? abonos.map((abono: any) => ({
+        numero: abono["cfc:NumeroAbono"],
+        fechaVencimiento: abono["cfc:FechaVencimiento"],
+        monto: parseFloat(abono["cfc:MontoAbono"]),
+      })) : [],
+
+      certificador: {
+        nit: certificacion["dte:NITCertificador"],
+        nombre: certificacion["dte:NombreCertificador"],
+      },
+    };
 
     // ============================================
     // 6️⃣ GUARDAR EN BASE DE DATOS *PRIMERO* (antes del PDF, que es frágil)
@@ -4265,63 +4264,22 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     console.log('📅 Fecha certificación guardada (Guatemala):', facturaGuardada.fecha_certificacion);
 
     // ============================================
-    // 7️⃣ GENERAR PDF + SUBIR A R2 (best-effort, NO fatal)
+    // 7️⃣ GENERAR PDF + SUBIR A R2 (EN BACKGROUND, best-effort, NO fatal)
     // ------------------------------------------------------------
-    // Si esto falla, la factura YA quedó guardada arriba: NO relanzamos, solo
-    // logueamos para monitoreo/reintento. El PDF se puede regenerar luego con
-    // el mismo filename determinístico -> misma URL (script de backfill).
+    // NO se espera: la factura YA está certificada en SAT y guardada arriba, y
+    // el pdf_url es determinístico. Tener a Puppeteer + R2 dentro del request
+    // fue lo que colgó un handler 34s el 2026-08-07: el CRM abortó a los 30s,
+    // reintentó el POST y SAT certificó la MISMA factura dos veces.
+    // Si el PDF falla NO se pierde el registro: se regenera después con el
+    // mismo filename -> misma URL (script backfill-facturas-faltantes).
     // ============================================
-    try {
-      console.log(`   🎨 Generando PDF...`);
-      const { launchBrowser } = await import("../utils/functions/browser");
-      const browser = await launchBrowser();
-      try {
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle0" });
-
-        const pdfBuffer = await page.pdf({
-          format: "A4",
-          printBackground: true,
-          margin: {
-            top: "20px",
-            bottom: "20px",
-            left: "20px",
-            right: "20px",
-          },
-        });
-        console.log(`   ✅ PDF generado`);
-
-        const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-        const s3 = new S3Client({
-          endpoint: process.env.BUCKET_REPORTS_URL,
-          region: "auto",
-          credentials: {
-            accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-          },
-        });
-
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: process.env.BUCKET_REPORTS,
-            Key: filename,
-            Body: pdfBuffer,
-            ContentType: "application/pdf",
-          })
-        );
-        console.log(`   ✅ PDF subido a R2: ${filename}`);
-      } finally {
-        await browser.close();
-      }
-    } catch (pdfError) {
-      // La factura YA está guardada en la BD (paso 6). No se pierde el registro.
-      console.error(
-        `⚠️ [certificarFactura] Factura ${resultado.serie}-${resultado.numero} ` +
-          `(${resultado.uuid}) GUARDADA en BD (id ${facturaGuardada.factura_id}) ` +
-          `pero FALLÓ el PDF/R2. Se puede regenerar el PDF luego:`,
-        pdfError
-      );
-    }
+    console.log(`   🎨 PDF encolado en background...`);
+    generarPDFFacturaEnBackground({
+      datos: datosFactura,
+      logoUrl,
+      filename,
+      referencia: `${resultado.serie}-${resultado.numero} (${resultado.uuid}) id ${facturaGuardada.factura_id}`,
+    });
 
     // ============================================
     // 9️⃣ RETORNAR RESULTADO

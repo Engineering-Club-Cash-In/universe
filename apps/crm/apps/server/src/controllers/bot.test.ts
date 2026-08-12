@@ -40,19 +40,27 @@ const selectResult = () => {
 	});
 };
 
+const selectBuilder = () => {
+	const builder: Record<string, unknown> = {
+		where: (...whereArgs: unknown[]) => {
+			captureWhere(whereArgs);
+			return selectResult();
+		},
+		orderBy: (..._orderByArgs: unknown[]) => ({
+			limit: (..._limitArgs: unknown[]) => Promise.resolve(nextSelectResult()),
+		}),
+		// Los joins solo encadenan; el mock no los resuelve.
+		innerJoin: (..._joinArgs: unknown[]) => builder,
+		leftJoin: (..._joinArgs: unknown[]) => builder,
+	};
+
+	return builder;
+};
+
 mock.module("../db", () => ({
 	db: {
 		select: (..._args: unknown[]) => ({
-			from: (..._fromArgs: unknown[]) => ({
-				where: (...whereArgs: unknown[]) => {
-					captureWhere(whereArgs);
-					return selectResult();
-				},
-				orderBy: (..._orderByArgs: unknown[]) => ({
-					limit: (..._limitArgs: unknown[]) =>
-						Promise.resolve(nextSelectResult()),
-				}),
-			}),
+			from: (..._fromArgs: unknown[]) => selectBuilder(),
 		}),
 		insert: (..._insertArgs: unknown[]) => ({
 			values: (values: DatabaseRow) => {
@@ -156,7 +164,12 @@ mock.module("./otp", () => ({
 	otpController: {},
 }));
 
-const { getRenapInfoController, updateLeadAndCreateOpportunity } = await import(
+const {
+	getLeadProgress,
+	getRenapInfoController,
+	updateLeadAndCreateOpportunity,
+	validateMagicUrlController,
+} = await import(
 	"./bot"
 );
 
@@ -499,5 +512,81 @@ describe("WhatsApp follow-up step", () => {
 			expect(query.params).toContain("open");
 			expect(query.params).toContain("on_hold");
 		}
+	});
+});
+
+describe("WhatsApp progress step", () => {
+	beforeEach(() => {
+		queuedSelectResults = [[], []];
+		insertedRows = [];
+		updatedRows = [];
+		capturedWhere = [];
+	});
+
+	// Mismo motivo que el paso de seguimiento: el flujo dejó de resetear el
+	// estado del lead, así que exigir `new` dejaba al bot sin poder calcular los
+	// pasos pendientes de los clientes que ya están siendo atendidos.
+	test("computes the pending steps for an active lead that is no longer new", async () => {
+		queuedSelectResults = [
+			[
+				{
+					id: "lead-activo",
+					phone: "55555555",
+					dpi: "1234567890101",
+					status: "qualified",
+					assignedTo: "asesor-actual",
+					createdBy: "creator",
+				},
+			],
+			[
+				{
+					id: "active-opportunity",
+					leadId: "lead-activo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			[{ id: "opp-activa" }],
+			[],
+		];
+
+		const result = await getLeadProgress("55555555");
+
+		expect(result.success).not.toBe(false);
+		expect(dialect.sqlToQuery(capturedWhere[0]).sql).not.toContain(
+			'"leads"."status"',
+		);
+	});
+});
+
+describe("WhatsApp magic URL", () => {
+	beforeEach(() => {
+		queuedSelectResults = [[], []];
+		capturedWhere = [];
+	});
+
+	// Los links ya enviados llevan el DPI con el formato que el lead tenía al
+	// generarlos; el backfill de la migración 0028 se lo quita de la fila, así
+	// que la comparación tiene que normalizar ambos lados o el link deja de valer.
+	test("validates a magic link issued with a formatted DPI", async () => {
+		queuedSelectResults = [
+			[
+				{
+					magic_urls: {
+						id: "magic-url",
+						url: "https://portal/1234 56789 0101",
+						used: false,
+						expiresAt: new Date(Date.now() + 60_000),
+					},
+					leads: { id: "lead-activo", dpi: "1234567890101" },
+				},
+			],
+		];
+
+		const result = await validateMagicUrlController("1234 56789 0101");
+
+		expect(result.success).toBe(true);
+		expect(dialect.sqlToQuery(capturedWhere[0]).sql).toContain(
+			"regexp_replace",
+		);
 	});
 });

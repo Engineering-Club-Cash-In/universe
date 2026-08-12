@@ -1,6 +1,6 @@
 // controllers/renapController.ts
 
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
 import {
 	leads,
 	type leadSourceEnum,
@@ -303,7 +303,7 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
  * misma persona, y tratarlo como inexistente lo parte en dos leads repartidos
  * entre dos asesores.
  */
-async function findLeadWithActiveOpportunityByDpi(dpi: string): Promise<{
+async function findLeadWithActiveOpportunity(match: SQL): Promise<{
 	// El tipo va explícito para que ambos campos queden independientes: si se
 	// infiere, TypeScript los trata como unión correlacionada y descartar la
 	// oportunidad activa termina descartando también el lead.
@@ -317,7 +317,7 @@ async function findLeadWithActiveOpportunityByDpi(dpi: string): Promise<{
 	const matchingLeads = await db
 		.select()
 		.from(leads)
-		.where(eqDpi(leads.dpi, dpi))
+		.where(match)
 		.orderBy(asc(leads.createdAt));
 
 	if (matchingLeads.length === 0) {
@@ -348,6 +348,20 @@ async function findLeadWithActiveOpportunityByDpi(dpi: string): Promise<{
 		matchingLeads[0];
 
 	return { lead, activeOpportunity: activeOpportunity ?? null };
+}
+
+/** Resuelve el lead a partir del DPI, normalizando el formato. */
+function findLeadWithActiveOpportunityByDpi(dpi: string) {
+	return findLeadWithActiveOpportunity(eqDpi(leads.dpi, dpi));
+}
+
+/**
+ * Resuelve el lead a partir del teléfono con el que escribe el cliente.
+ * Comparte la selección con la búsqueda por DPI para que los pasos del bot no
+ * terminen mirando leads distintos según con qué dato entren.
+ */
+function findLeadWithActiveOpportunityByPhone(phone: string) {
+	return findLeadWithActiveOpportunity(eq(leads.phone, phone));
 }
 
 /**
@@ -901,23 +915,21 @@ export const getLeadProgress = async (phone: string) => {
 	try {
 		console.log(`[DEBUG] Starting getLeadProgress for phone: ${phone}`);
 
-		// 1. Find the lead by phone with status "new"
-		const lead = await db
-			.select()
-			.from(leads)
-			.where(and(eq(leads.phone, phone), eq(leads.status, "new")))
-			.limit(1)
-			.then((res) => res[0] || null);
+		// 1. Find the lead by phone.
+		// Sin filtrar por estado: el paso de RENAP ya no lo resetea cuando hay un
+		// proceso en curso, así que exigir `new` dejaba al bot sin poder calcular
+		// los pasos pendientes de los clientes activos.
+		const { lead } = await findLeadWithActiveOpportunityByPhone(phone);
 
 		if (!lead) {
-			console.error("[ERROR] Lead not found or not in status 'new'");
+			console.error("[ERROR] Lead not found");
 			return {
 				success: false,
-				message: "Lead not found with DPI or not in status 'new'",
+				message: "Lead not found with the provided phone",
 			};
 		}
 
-		console.log(`[DEBUG] Found lead ${lead.id} with status "new"`);
+		console.log(`[DEBUG] Found lead ${lead.id} with status "${lead.status}"`);
 
 		// 2. Get documents from open opportunities
 		const documentCheck = await checkDocumentsInActiveOpportunities(lead.id, [
@@ -971,12 +983,14 @@ export const validateMagicUrlController = async (dpi: string) => {
 		return { success: false, message: "DPI is required" };
 	}
 
-	// Buscar magic URL asociado al lead con ese DPI
+	// Buscar magic URL asociado al lead con ese DPI.
+	// La comparación va normalizada: los links ya enviados llevan el DPI con el
+	// formato que tenía el lead al generarlos, y el backfill del 0028 se lo quita.
 	const [magicUrl] = await db
 		.select()
 		.from(magicUrls)
 		.innerJoin(leads, eq(magicUrls.leadId, leads.id))
-		.where(eq(leads.dpi, dpi))
+		.where(eqDpi(leads.dpi, dpi))
 		.orderBy(desc(leads.createdAt)) // Ordenar por el más reciente primero
 		.limit(1);
 	if (!magicUrl) {

@@ -18,9 +18,11 @@ const selectResult = () => {
 
 	return Object.assign(Promise.resolve(result), {
 		limit: (..._limitArgs: unknown[]) => Promise.resolve(result),
-		orderBy: (..._orderByArgs: unknown[]) => ({
-			limit: (..._limitArgs: unknown[]) => Promise.resolve(result),
-		}),
+		// `orderBy` es awaitable por sí solo: hay consultas que ordenan sin acotar.
+		orderBy: (..._orderByArgs: unknown[]) =>
+			Object.assign(Promise.resolve(result), {
+				limit: (..._limitArgs: unknown[]) => Promise.resolve(result),
+			}),
 	});
 };
 
@@ -239,6 +241,61 @@ describe("WhatsApp RENAP lead assignment", () => {
 				leadId: "existing-lead",
 				assignedTo: "old-owner",
 			}),
+		);
+	});
+
+	test("reuses the duplicate that holds the active process, not the oldest one", async () => {
+		fallbackSalesUser = { id: "ruleta-owner" };
+		queuedSelectResults = [
+			[],
+			// Dos leads con el mismo DPI (duplicado sin depurar): el proceso en
+			// curso está en el más nuevo, no en el más antiguo.
+			[
+				{
+					id: "lead-viejo",
+					assignedTo: "old-owner",
+					assignmentType: "auto",
+					createdBy: "creator",
+					status: "migrate",
+					age: 36,
+				},
+				{
+					id: "lead-nuevo",
+					assignedTo: "asesor-actual",
+					assignmentType: "auto",
+					createdBy: "creator-nuevo",
+					status: "new",
+					age: 36,
+				},
+			],
+			[
+				{
+					id: "active-opportunity",
+					leadId: "lead-nuevo",
+					assignedTo: "asesor-actual",
+				},
+			],
+			[{ id: "existing-magic-url" }],
+			[{ id: "stage-1", order: 1 }],
+		];
+
+		const result = await getRenapInfoController("1234567890101", "55555555");
+
+		expect(result.success).toBe(true);
+		// La oportunidad nueva va al lead que sostiene el proceso, con su asesor.
+		expect(insertedRows).toContainEqual(
+			expect.objectContaining({
+				source: "Whatsapp",
+				leadId: "lead-nuevo",
+				assignedTo: "asesor-actual",
+			}),
+		);
+		// Y no se reasignó por ruleta ni se reactivó el lead viejo.
+		expect(updatedRows).not.toContainEqual(
+			expect.objectContaining({ assignedTo: "ruleta-owner" }),
+		);
+		expect(updatedRows).not.toContainEqual(
+			expect.objectContaining({ status: "new" }),
 		);
 	});
 

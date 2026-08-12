@@ -408,14 +408,45 @@ export const getRenapInfoController = async (
 	// ========================
 	// La búsqueda es solo por DPI, sin filtrar por estado: un cliente ya migrado
 	// o convertido sigue siendo la misma persona, y darlo de alta otra vez lo
-	// parte en dos leads repartidos entre dos asesores. Se toma el más antiguo,
-	// que es el que arrastra el historial.
-	const [existingLead] = await db
+	// parte en dos leads repartidos entre dos asesores.
+	//
+	// Se traen TODOS los leads del DPI, no uno solo: mientras queden duplicados
+	// sin depurar, el proceso en curso puede estar colgado de cualquiera de
+	// ellos, y quedarse con el más antiguo haría pasar por inactivo a un cliente
+	// que otro asesor ya está atendiendo.
+	const matchingLeads = await db
 		.select()
 		.from(leads)
 		.where(eqDpi(leads.dpi, dpi))
-		.orderBy(asc(leads.createdAt))
-		.limit(1);
+		.orderBy(asc(leads.createdAt));
+
+	// Proceso activo en cualquiera de esos leads; si hay varios, el más reciente.
+	const [activeOpportunity] = matchingLeads.length
+		? await db
+				.select({
+					id: opportunities.id,
+					leadId: opportunities.leadId,
+					assignedTo: opportunities.assignedTo,
+				})
+				.from(opportunities)
+				.where(
+					and(
+						inArray(
+							opportunities.leadId,
+							matchingLeads.map((lead) => lead.id),
+						),
+						inArray(opportunities.status, ["open", "on_hold"]),
+					),
+				)
+				.orderBy(desc(opportunities.createdAt))
+				.limit(1)
+		: [];
+
+	// Se reusa el lead que sostiene el proceso activo; si no hay ninguno, el más
+	// antiguo, que es el que arrastra el historial.
+	const existingLead =
+		matchingLeads.find((lead) => lead.id === activeOpportunity?.leadId) ??
+		matchingLeads[0];
 
 	const age = calculateAge(renapData.birthDate);
 	console.log(`[DEBUG] Calculated age for DPI ${dpi}: ${age}`);
@@ -456,23 +487,9 @@ export const getRenapInfoController = async (
 		assignedUserId = newLeadAssignment.assignedTo;
 		createdByUserId = newLeadAssignment.createdBy;
 	} else {
-		// El lead ya existía. Si tiene un proceso activo se respeta al asesor que
-		// lo está trabajando; si solo le quedan créditos ganados o migrados es un
+		// El lead ya existía. Si hay un proceso activo se respeta al asesor que lo
+		// está trabajando; si solo le quedan créditos ganados o migrados es un
 		// cliente que regresa y vuelve a entrar a la ruleta.
-		const [activeOpportunity] = await db
-			.select({
-				id: opportunities.id,
-				assignedTo: opportunities.assignedTo,
-			})
-			.from(opportunities)
-			.where(
-				and(
-					eq(opportunities.leadId, existingLead.id),
-					inArray(opportunities.status, ["open", "on_hold"]),
-				),
-			)
-			.limit(1);
-
 		leadId = existingLead.id;
 		createdByUserId = existingLead.createdBy;
 

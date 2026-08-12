@@ -45,6 +45,7 @@ import { requierePeriodoLiquidacion } from "../utils/investorLiquidationSummary"
 import ExcelJS from "exceljs";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
+import { guardDescuentaImpuestos } from "./investorGuards";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
 
 
@@ -287,9 +288,15 @@ async function armarYGuardarXlsxBulkAjuste(
 
 export const inversionistasRouter = new Elysia()
   .use(authMiddleware)
-  .post("/investor", insertInvestor)
+  .post("/investor", (ctx: any) => {
+    guardDescuentaImpuestos(ctx); // no-ADMIN: quita descuenta_impuestos del body
+    return insertInvestor(ctx);
+  })
   .get("/investor", getInvestors)
-  .post("/investor/update", updateInvestor)
+  .post("/investor/update", (ctx: any) => {
+    guardDescuentaImpuestos(ctx); // no-ADMIN: quita descuenta_impuestos del body
+    return updateInvestor(ctx);
+  })
   .post(
     "/investor/status",
     updateInvestorStatus,
@@ -1472,7 +1479,7 @@ export const inversionistasRouter = new Elysia()
   .get(
     "/resumen-global-liquidaciones",
     async ({ query, set }) => {
-      const { inversionistaId, mes, anio, estado = "pending", excel, incluirSinMovimiento } = query;
+      const { inversionistaId, mes, anio, estado = "pending", excel, incluirSinMovimiento, incluirInternos } = query;
       const estadoFiltro = estado as "pending" | "uploaded" | "liquidated" | "all";
 
       // Si hay inversionistaId, permitir liquidated/all sin mes/anio (trae todo el historial)
@@ -1490,7 +1497,8 @@ export const inversionistasRouter = new Elysia()
         anio ? Number(anio) : undefined,
         estadoFiltro,
         excel === "true",
-        incluirSinMovimiento === "true"
+        incluirSinMovimiento === "true",
+        incluirInternos === "true"
       );
     },
     {
@@ -1508,6 +1516,7 @@ export const inversionistasRouter = new Elysia()
         ),
         excel: t.Optional(t.String()),
         incluirSinMovimiento: t.Optional(t.String()),
+        incluirInternos: t.Optional(t.String()),
       }),
       detail: {
         summary: "Obtiene el resumen global de liquidaciones por inversionista",

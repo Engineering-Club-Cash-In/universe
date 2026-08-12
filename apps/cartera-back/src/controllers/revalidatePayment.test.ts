@@ -28,10 +28,20 @@ const tx = {
   })),
 };
 
+const lockQuery = mock(() => Promise.resolve());
+const lockRelease = mock(() => {});
+
 mock.module("../database", () => ({
   db: {
     transaction: mock(
       (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
+    ),
+  },
+  // Pool de advisory locks: el wrapper withPaymentAdvisoryLock pide una
+  // conexión, lockea/deslockea y la libera.
+  lockPool: {
+    connect: mock(() =>
+      Promise.resolve({ query: lockQuery, release: lockRelease }),
     ),
   },
 }));
@@ -81,6 +91,8 @@ describe("revalidatePayment", () => {
     selectResults = [[pagoCompletoPendiente], [credito], []];
     tx.execute.mockClear();
     insertInvestors.mockClear();
+    lockQuery.mockClear();
+    lockRelease.mockClear();
   });
 
   it("restaura la cuota cerrada al revalidar el pago completo reversado", async () => {
@@ -94,7 +106,16 @@ describe("revalidatePayment", () => {
     expect(set.status).toBe(200);
     expect(updates.some((values) => values.pagado === true)).toBeTrue();
     expect(insertInvestors).toHaveBeenCalledWith(30, 10, undefined, tx);
-    expect(tx.execute).toHaveBeenCalledTimes(1);
+    // El lock por crédito ahora se toma/libera en el pool dedicado, no con
+    // pg_advisory_xact_lock dentro de la transacción.
+    expect(lockQuery).toHaveBeenCalledWith("SELECT pg_advisory_lock($1, $2)", [
+      8765, 10,
+    ]);
+    expect(lockQuery).toHaveBeenCalledWith(
+      "SELECT pg_advisory_unlock($1, $2)",
+      [8765, 10],
+    );
+    expect(lockRelease).toHaveBeenCalledTimes(1);
   });
 
   it("valida un pago parcial sin cerrar la cuota", async () => {

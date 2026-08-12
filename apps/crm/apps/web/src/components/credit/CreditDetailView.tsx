@@ -74,7 +74,7 @@ type CreditCategory =
 	| "Hipotecario"
 	| "Vehículo";
 
-type PaymentDay = 15 | 30;
+type PaymentDay = number;
 
 // Tipo para inversionista seleccionado
 interface SelectedInversionista {
@@ -1056,11 +1056,22 @@ export function CreditDetailView({
 													<SelectValue placeholder="Seleccionar día" />
 												</SelectTrigger>
 												<SelectContent>
-													{[1, 5, 10, 15, 20, 25, 30].map((day) => (
-														<SelectItem key={day} value={String(day)}>
-															Día {day}
-														</SelectItem>
-													))}
+													<SelectItem value="15">Día 15</SelectItem>
+													<SelectItem value="30">Día 30</SelectItem>
+													{consolidatedCreditQuery.data?.lead?.suggestedPaymentDays
+														?.filter(
+															(d: { dia: number; porcentaje: number }) =>
+																d.dia !== 15 && d.dia !== 30,
+														)
+														.filter(
+															(d, i, arr) =>
+																arr.findIndex((x) => x.dia === d.dia) === i,
+														)
+														.map((d: { dia: number; porcentaje: number }) => (
+															<SelectItem key={d.dia} value={String(d.dia)}>
+																Día {d.dia} ({d.porcentaje}% recomendado)
+															</SelectItem>
+														))}
 												</SelectContent>
 											</Select>
 										) : (
@@ -2577,7 +2588,8 @@ export function CreditDetailView({
 							<div className="mx-6 mb-2 flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2">
 								<Car className="h-4 w-4 shrink-0 text-muted-foreground" />
 								<span className="text-muted-foreground text-sm">
-									{vehicleString}
+									{vehicleString} ·{" "}
+									{vehiculo.licensePlate?.trim() || "(sin placas)"}
 								</span>
 								{(vehiculo as any).isOwned && (
 									<Badge

@@ -20,7 +20,6 @@ import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
-import { updateInstallments } from "./updateCredit";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
@@ -30,6 +29,7 @@ import {
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
 import {
+  calcularCuotasConvenioCompletadas,
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
 } from "./registerPaymentPolicy";
@@ -716,28 +716,15 @@ export const reversePayment = async ({ body, set }: any) => {
         reversionEspejo,
       };
     });
-try {
-  // En un INCOBRABLE NO se refrescan las cuotas: updateInstallments recalcula
-  // interes_restante/iva_12_restante de cada fila con `porcentaje_interes`
-  // (preservado en el castigo) y revivirían interés/IVA sobre un calendario
-  // que debe ser capital-only, corrompiendo el castigo tras la reversa.
-  if (result.creditData.creditos.statusCredit === "INCOBRABLE") {
-    console.log(
-      "⏭️ INCOBRABLE: se omite updateInstallments (cuota capital-only, no se recalcula interés)"
-    );
-  } else {
-    await updateInstallments({
-      numero_credito_sifco: result.creditData.creditos.numero_credito_sifco,
-      nueva_cuota: Number(result.creditData.creditos.cuota),
-      all: true,
-    });
-
-    console.log("✅ UPDATE ALL STATEMENT ejecutado correctamente");
-  }
-} catch (updateError: any) {
-  console.error("⚠️ Error en UPDATE ALL STATEMENT:", updateError.message);
-  // NO hacer throw aquí porque la transacción ya se completó
-}
+// La reversión NO recalcula ninguna otra fila del crédito. La transacción de
+// arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).
+// Aquí vivía un updateInstallments({all: true}) (agregado en 0183a387, ene-2026)
+// que reescribía las cuotas YA PAGADAS del crédito: restantes teóricos,
+// cuota actual y membresias_pago/membresias_mes en 0 — corrompiendo la
+// historia liquidada en cada reversión (los INCOBRABLES ya lo omitían por un
+// clavo análogo, PR #890). La proyección teórica de las cuotas pendientes se
+// refresca por el flujo normal (siguiente pago aplicado o el botón manual
+// "Recalcular Pagos"), igual que antes de enero 2026.
     // ========================================================================
     // ✅ TRANSACCIÓN COMPLETADA - RETORNAR RESULTADO EXITOSO
     // ========================================================================
@@ -889,14 +876,20 @@ export async function reverseConvenioPayment(
     );
     console.log("📊 Monto pendiente nuevo:", nuevoMontoPendienteBig.toString());
 
-    // 5. Recalcular cuántas cuotas completas se han pagado
+    // 5. Recalcular cuántas cuotas completas se han pagado — con el MISMO
+    // helper de acumulado que usa processConvenioPayment al marcar, para que
+    // forward y reverse compartan una sola fórmula (incluye el tope a
+    // numero_meses: el floor solo podía dejar pagos_pendientes negativo con
+    // un convenio sobre-pagado).
     if (cuotaMensualBig.eq(0)) {
       throw new Error("La cuota mensual del convenio es 0, no se puede recalcular");
     }
-    const cuotasCompletasPagadas = nuevoMontoPagadoBig
-      .div(cuotaMensualBig)
-      .round(0, Big.roundDown);
-    const nuevosPagosRealizados = parseInt(cuotasCompletasPagadas.toString());
+    const nuevosPagosRealizados = calcularCuotasConvenioCompletadas({
+      montoPagado: nuevoMontoPagadoBig,
+      cuotaMensual: cuotaMensualBig,
+      montoPendiente: nuevoMontoPendienteBig,
+      numeroMeses: convenio.numero_meses,
+    });
     const nuevosPagosPendientes = convenio.numero_meses - nuevosPagosRealizados;
 
     console.log(
@@ -929,36 +922,43 @@ export async function reverseConvenioPayment(
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
 
-    // COBROS-02: reabrir en `convenio_cuotas` las cuotas que el reverso "despagó".
-    // convenio_cuotas es donde vive el pago DEL CONVENIO, y tanto el endpoint de
-    // recordatorios como el job de buckets tratan SOLO `fecha_pago IS NULL` como
-    // impaga. Si el reverso reduce las cuotas completas pagadas (aunque el convenio
-    // siga activo — reversa de una cuota NO final), hay que reabrir las últimas N
-    // pagadas o quedarían invisibles (ni cuentan atraso ni recuerdan).
-    const cuotasAReabrir = convenio.pagos_realizados - nuevosPagosRealizados;
-    if (cuotasAReabrir > 0) {
-      const pagadas = await db
-        .select({ id: convenio_cuotas.cuota_convenio_id })
-        .from(convenio_cuotas)
-        .where(
-          and(
-            eq(convenio_cuotas.convenio_id, convenio.convenio_id),
-            isNotNull(convenio_cuotas.fecha_pago),
-          ),
+    // 7.5 Desmarcar las cuotas del convenio que el dinero reversado ya no
+    // cubre: el marcado por acumulado (processConvenioPayment) escribe
+    // fecha_pago al cruzar cada cuota; sin este espejo la cuota seguía
+    // figurando pagada (los readers de cobranza leen fecha_pago) y se dejaba
+    // de cobrar dinero que acababa de reversarse. Se desmarcan las más NUEVAS
+    // hasta que marcadas == pagos_realizados recalculado.
+    const cuotasMarcadas = await db
+      .select({
+        cuota_convenio_id: convenio_cuotas.cuota_convenio_id,
+        numero_cuota: convenio_cuotas.numero_cuota,
+      })
+      .from(convenio_cuotas)
+      .where(
+        and(
+          eq(convenio_cuotas.convenio_id, convenio.convenio_id),
+          isNotNull(convenio_cuotas.fecha_pago)
         )
-        .orderBy(desc(convenio_cuotas.fecha_pago), desc(convenio_cuotas.numero_cuota))
-        .limit(cuotasAReabrir);
-      if (pagadas.length > 0) {
-        await db
-          .update(convenio_cuotas)
-          .set({ fecha_pago: null })
-          .where(
-            inArray(
-              convenio_cuotas.cuota_convenio_id,
-              pagadas.map((p) => p.id),
-            ),
-          );
-      }
+      )
+      .orderBy(desc(convenio_cuotas.numero_cuota));
+
+    const sobremarcadas = cuotasMarcadas.length - nuevosPagosRealizados;
+    if (sobremarcadas > 0) {
+      const aDesmarcar = cuotasMarcadas.slice(0, sobremarcadas);
+      await db
+        .update(convenio_cuotas)
+        .set({ fecha_pago: null })
+        .where(
+          inArray(
+            convenio_cuotas.cuota_convenio_id,
+            aDesmarcar.map((c) => c.cuota_convenio_id)
+          )
+        );
+      console.log(
+        `↩️ Cuotas del convenio desmarcadas por reversa: ${aDesmarcar
+          .map((c) => `#${c.numero_cuota}`)
+          .join(", ")}`
+      );
     }
 
     // Si además la reversa "des-completa" el convenio (estaba completado y vuelve a

@@ -8,8 +8,16 @@ import { ContractType } from '../types/contract';
 export interface SignaturePatternConfig {
   /** Patrón de texto a buscar en el PDF para ubicar la línea de firma */
   pattern: string;
-  /** Número de firmantes esperados para este contrato */
+  /** Número de firmantes esperados para este contrato (= cantidad de emails) */
   signerCount: number;
+  /**
+   * Cantidad de widgets de firma a colocar en el PDF. Por defecto es igual a
+   * `signerCount`. Se separa para el caso en que el MISMO firmante debe firmar
+   * en varios lugares (ej. un documento con 2 anexos, cada uno con su bloque de
+   * firma del inversionista): signerCount=1 (un solo email) pero
+   * signatureFieldCount=2 (dos widgets, ambos asignados a ese firmante).
+   */
+  signatureFieldCount?: number;
   /** Descripción de quién firma (opcional, para debugging) */
   signers?: string[];
   /** Offset en Y para ajustar posición vertical (opcional, en unidades Documenso) */
@@ -174,6 +182,23 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.DESIGNACION_BENEFICIARIO]: {
     pattern: 'Firma: __________________________',
     signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  // Contrato de Participación y Administración de Cartera (inversionista individual)
+  [ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA]: {
+    pattern: 'EL INVERSIONISTA___________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  // Anexos 1 y 2 - el bloque de firma no usa línea de guiones, ancla en la etiqueta.
+  // Aparece 2 veces (una por anexo), ambas del MISMO firmante: 1 solo email
+  // (signerCount) pero 2 widgets de firma (signatureFieldCount).
+  [ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO]: {
+    pattern: 'Firma del Inversionista',
+    signerCount: 1,
+    signatureFieldCount: 2,
     signers: ['Inversionista']
   },
 

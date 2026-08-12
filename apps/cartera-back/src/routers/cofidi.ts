@@ -6,7 +6,11 @@ import jwt from "jsonwebtoken";
 import { authMiddleware } from "./midleware";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
-import { generarHTMLFacturaPro } from "../cofidi/functions";
+import { generarPDFFacturaEnBackground } from "../utils/functions/facturaPdf";
+import {
+  cuentaParaRubroInv,
+  decidirRubroInteresInversionistas,
+} from "../cofidi/rubroInteresInversionistas";
 import { db } from "../database";
 import {
   compras_credito_inversionista,
@@ -67,6 +71,14 @@ for (const [, value] of Object.entries(EMISORES_CONFIG)) {
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
+
+// 🗓️ Días de gracia para anular una factura del período anterior.
+// Contabilidad confirmó que SAT permite anular durante los primeros días del mes
+// siguiente. Antes cortábamos el día 1 a las 00:00, así que una factura emitida a
+// fin de mes se quedaba sin ventana real para corregirse.
+// Ojo: esto solo ABRE la puerta — la última palabra la tiene COFIDI/SAT, que
+// responde con PERIODO_IVA_CERRADO si el plazo real ya venció.
+export const DIAS_GRACIA_ANULACION = 5;
 
 function generarIdInternoRandom(): string {
   return Math.floor(10000000 + Math.random() * 90000000).toString();
@@ -943,6 +955,15 @@ if (facturasExistentes.length > 0) {
       // participación), NO escribimos los rubros INTERES / INTERES_INVERSIONISTAS,
       // para no atribuir todo el interés a inversionistas con interesCubeConIva=0.
       let interesFlujoOk = false;
+      // 🧾 Lo que en ESTA corrida se facturó a inversionistas no-CUBE que NO se
+      //    autofacturan (mismas reglas que la query de pci). Sirve de fallback
+      //    para el rubro INTERES_INVERSIONISTAS en pagos PARCIALES: ahí pci
+      //    todavía está en 0 (se llena al completarse la cuota) pero los DTEs
+      //    de los inversionistas SÍ salieron, y el snapshot los perdía.
+      //    El IVA se acumula por-inversionista (el mismo que fue al DTE) para
+      //    que el renglón cuadre exacto con lo emitido.
+      let invNoEmiteFacturadoConIva = new Big(0);
+      let invNoEmiteIva = new Big(0);
 
       if (!hayInteresEnPago) {
         console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses (ambos flujos)");
@@ -1388,6 +1409,16 @@ if (facturasExistentes.length > 0) {
                 nitsFallback: nitsDisponibles.slice(1),
               });
 
+              // 🧾 Mismo acumulado que en el flujo estándar: SOLO lo ya
+              //    certificado en SAT. Acá los redirigidos a CUBE ya quedaron
+              //    fuera de parteInvPorId (se descartan dentro de
+              //    calcularReparto), así que basta el criterio
+              //    no-CUBE/no-autofactura.
+              if (cuentaParaRubroInv(inv, false)) {
+                invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calc.total);
+                invNoEmiteIva = invNoEmiteIva.plus(calc.montoImpuesto);
+              }
+
               facturasGeneradas.push({
                 tipo: "INTERESES",
                 inversionista: inv.nombre,
@@ -1733,6 +1764,18 @@ if (facturasExistentes.length > 0) {
               nitsFallback: nitsDisponibles.slice(1),
             });
 
+            // 🧾 Acumular lo facturado a inversionistas que NO se autofacturan:
+            //    es el respaldo del rubro INTERES_INVERSIONISTAS cuando pci aún
+            //    está en 0 (pago parcial). Se suma con el MISMO IVA del DTE.
+            //    Va DESPUÉS de certificar: si el DTE falla en SAT pero otra
+            //    factura del pago sí sale, el desglose igual se escribe, y el
+            //    DTE faltante se remedia con /facturar-generico, que agrega su
+            //    PROPIA fila → contarlo acá lo duplicaría en el snapshot.
+            if (cuentaParaRubroInv(inv, redirigirACube)) {
+              invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calc.total);
+              invNoEmiteIva = invNoEmiteIva.plus(calc.montoImpuesto);
+            }
+
             facturasGeneradas.push({
               tipo: "INTERESES",
               inversionista: inv.nombre,
@@ -1967,15 +2010,19 @@ if (facturasExistentes.length > 0) {
         // INTERES_INVERSIONISTAS → dejamos ambos rubros sin escribir.
         if (interesFlujoOk) {
           pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
-          // INTERES_INVERSIONISTAS: monto + IVA directo de pci (no recalcular el
-          // IVA) para que coincida con el reparto real. Solo si hay monto.
-          if (invFacturadoTotal.gt(0)) {
-            rubrosDesglose.push({
-              rubro: "INTERES_INVERSIONISTAS",
-              monto_total: invFacturadoTotal.toFixed(2),
-              monto_iva: invFacturadoIva.toFixed(2),
-            });
-          }
+        }
+        // INTERES_INVERSIONISTAS: pci manda cuando ya tiene reparto (no se
+        // recalcula el IVA); si pci está en 0 porque el pago es PARCIAL, se usa
+        // lo realmente facturado en esta corrida para no perder DTEs emitidos.
+        const rubroInv = decidirRubroInteresInversionistas({
+          interesFlujoOk,
+          pciTotal: invFacturadoTotal,
+          pciIva: invFacturadoIva,
+          corridaTotal: invNoEmiteFacturadoConIva,
+          corridaIva: invNoEmiteIva,
+        });
+        if (rubroInv) {
+          rubrosDesglose.push({ rubro: "INTERES_INVERSIONISTAS", ...rubroInv });
         }
         pushRubro("MEMBRESIA", pagoData.membresias_pago, true);
         pushRubro("SEGURO", pagoData.abono_seguro, true);
@@ -2256,24 +2303,47 @@ if (facturasExistentes.length > 0) {
     }
 
     // 🔥 VALIDACIÓN: Verificar período válido para anular
-    const fechaCertificacion = facturaCompleta.factura_fecha_certificacion 
-      ? new Date(facturaCompleta.factura_fecha_certificacion)
-      : new Date(facturaCompleta.factura_fecha_emision);
-    
-    const hoy = new Date();
-    const mesFactura = fechaCertificacion.getMonth();
-    const anioFactura = fechaCertificacion.getFullYear();
-    const mesActual = hoy.getMonth();
-    const anioActual = hoy.getFullYear();
+    // 📅 El período de IVA lo define la fecha de EMISIÓN del DTE (FechaHoraEmision),
+    // no la de certificación. Al facturar en los primeros días del mes,
+    // certificarFacturaHelper backdatea fecha_emision al último día del mes anterior
+    // mientras la certificación queda en el mes en curso: una factura del período de
+    // julio, certificada el 3 de agosto, se habría tratado como de agosto y en
+    // septiembre habría entrado a la gracia con dos períodos de antigüedad.
+    const fechaPeriodo = facturaCompleta.factura_fecha_emision
+      ? new Date(facturaCompleta.factura_fecha_emision)
+      : new Date(facturaCompleta.factura_fecha_certificacion);
 
-    // SAT Guatemala permite anular hasta el 10 del mes siguiente (aproximado)
-    // Para ser seguros, solo permitimos anular facturas del mes actual
+
+    // 🌎 Todo el cálculo va en hora de Guatemala (UTC-6 fijo, sin horario de verano).
+    // El contenedor corre en UTC, así que con getDate()/getMonth() locales el corte
+    // del día 5 se adelantaría 6 horas: el 5 a las 18:00 GT ya es día 6 en UTC y se
+    // perdería la última tarde de la ventana de gracia.
+    // Mismo patrón que certificarFacturaHelper: restar 6h y leer con getUTC*.
+    const hoy = new Date();
+    hoy.setUTCHours(hoy.getUTCHours() - 6);
+
+    // ⚠️ fecha_emision/fecha_certificacion se persisten YA en hora Guatemala
+    // (certificarFacturaHelper les resta 6h antes de guardar), así que se leen con
+    // getUTC* para no volver a desplazarlas con la zona horaria del proceso.
+    const mesFactura = fechaPeriodo.getUTCMonth();
+    const anioFactura = fechaPeriodo.getUTCFullYear();
+    const mesActual = hoy.getUTCMonth();
+    const anioActual = hoy.getUTCFullYear();
+
     const esMismoPeriodo = (anioFactura === anioActual && mesFactura === mesActual);
 
-    if (!esMismoPeriodo) {
-      const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+    // 🗓️ Días de gracia: una factura del período INMEDIATAMENTE anterior todavía
+    // se puede intentar anular durante los primeros DIAS_GRACIA_ANULACION días del
+    // mes actual. El salto de año (diciembre → enero) se maneja explícitamente.
+    const mesAnterior = mesActual === 0 ? 11 : mesActual - 1;
+    const anioDelMesAnterior = mesActual === 0 ? anioActual - 1 : anioActual;
+    const esPeriodoAnterior = (anioFactura === anioDelMesAnterior && mesFactura === mesAnterior);
+    const enDiasDeGracia = esPeriodoAnterior && hoy.getUTCDate() <= DIAS_GRACIA_ANULACION;
+
+    if (!esMismoPeriodo && !enDiasDeGracia) {
+      const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-      
+
       set.status = 422;
       return {
         success: false,
@@ -2282,11 +2352,17 @@ if (facturasExistentes.length > 0) {
         detalle: {
           factura_del_periodo: `${nombresMeses[mesFactura]} ${anioFactura}`,
           periodo_actual: `${nombresMeses[mesActual]} ${anioActual}`,
-          fecha_factura: fechaCertificacion.toISOString().split('T')[0],
-          restriccion_sat: 'Solo se pueden anular facturas del período actual de IVA'
+          fecha_factura: fechaPeriodo.toISOString().split('T')[0],
+          dias_gracia: DIAS_GRACIA_ANULACION,
+          restriccion_sat: `Se pueden anular facturas del período actual, y las del período anterior solo durante los primeros ${DIAS_GRACIA_ANULACION} días del mes`
         },
         sugerencia: 'Para corregir facturas de períodos cerrados, debe emitir una Nota de Crédito en lugar de anular'
       };
+    }
+
+    if (enDiasDeGracia) {
+      console.log(`⏳ Anulación dentro de los ${DIAS_GRACIA_ANULACION} días de gracia (factura del período anterior, hoy es ${hoy.getUTCDate()} en Guatemala)`);
+      console.log('⚠️ SAT tiene la última palabra: si responde OK, igual hay que verificar en el portal');
     }
 
     console.log('✅ Factura encontrada y validada');
@@ -2303,24 +2379,35 @@ if (facturasExistentes.length > 0) {
     // ============================================
     
     // 🔥 FORMATO SIN MILISEGUNDOS (como SAT lo espera)
+    // Se lee con getUTC* a propósito: las fechas que recibe ya vienen expresadas en
+    // hora de Guatemala (igual que fechaHoraEmision al certificar), así que con los
+    // getters locales se desplazarían según la zona horaria del proceso — que en el
+    // contenedor es UTC.
     const formatearFechaSAT = (fecha: Date): string => {
-      const year = fecha.getFullYear();
-  const month = String(fecha.getMonth() + 1).padStart(2, '0');
-  const day = String(fecha.getDate()).padStart(2, '0');
-  const hours = String(fecha.getHours()).padStart(2, '0');
-  const minutes = String(fecha.getMinutes()).padStart(2, '0');
-  const seconds = String(fecha.getSeconds()).padStart(2, '0');
-  
-  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+      const year = fecha.getUTCFullYear();
+      const month = String(fecha.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(fecha.getUTCDate()).padStart(2, '0');
+      const hours = String(fecha.getUTCHours()).padStart(2, '0');
+      const minutes = String(fecha.getUTCMinutes()).padStart(2, '0');
+      const seconds = String(fecha.getUTCSeconds()).padStart(2, '0');
+
+      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
     };
 
-    const fechaEmisionRaw = facturaCompleta.factura_fecha_certificacion || facturaCompleta.factura_fecha_emision;
-    const fechaEmisionDate = new Date(fechaEmisionRaw);
-    const fechaEmisionDocumento = formatearFechaSAT(fechaEmisionDate);
-    const fechaHoraAnulacion = formatearFechaSAT(new Date());
+    // 📄 FechaEmisionDocumentoAnular tiene que coincidir con la FechaHoraEmision del
+    // DTE original, y `fecha_emision` se persiste justamente desde ese campo. Se reusa
+    // `fechaPeriodo` (la misma fecha con la que se decidió el período) para que la
+    // validación y el XML no puedan discrepar. Tomando la certificación, las facturas
+    // backdateadas mandaban a SAT una fecha que no es la del DTE.
+    const fechaEmisionDocumento = formatearFechaSAT(fechaPeriodo);
+    // ⏰ Se reusa el mismo `hoy` ya desplazado a hora de Guatemala con el que se
+    // decidió la ventana de gracia. Si acá se usara `new Date()` en el contenedor
+    // (UTC), una anulación de la noche del 5 viajaría a SAT como día 6 y quedaría
+    // rechazada justo en las horas que la gracia acaba de habilitar.
+    const fechaHoraAnulacion = formatearFechaSAT(hoy);
 
     console.log('🔍 ========== FECHAS PREPARADAS ==========');
-    console.log('📅 Fecha emisión original (BD):', fechaEmisionRaw);
+    console.log('📅 Fecha emisión original (BD):', facturaCompleta.factura_fecha_emision);
     console.log('📅 Fecha emisión formateada (XML):', fechaEmisionDocumento);
     console.log('📅 Fecha/hora anulación (XML):', fechaHoraAnulacion);
     console.log('📋 Tipo documento:', facturaCompleta.factura_tipo_documento);
@@ -2406,9 +2493,13 @@ if (facturasExistentes.length > 0) {
       }
       
       // 🔥 Error de documento no encontrado
-      else if (descripcionError.includes('no existe') || 
+      // "no ha sido emitido" = factura fantasma (el certificador devolvió UUID
+      // pero nunca la emitió a SAT). La corrección del estado en BD es MANUAL
+      // por decisión del equipo: este endpoint solo reporta el error claro.
+      else if (descripcionError.includes('no existe') ||
                descripcionError.includes('not found') ||
-               descripcionError.includes('No se encontró')) {
+               descripcionError.includes('No se encontró') ||
+               descripcionError.includes('no ha sido emitido')) {
         mensajeUsuario = 'La factura no fue encontrada en el sistema SAT';
         codigoError = 'FACTURA_NO_EXISTE_SAT';
         sugerencia = 'Verifique que la factura haya sido certificada correctamente';
@@ -2500,6 +2591,13 @@ if (facturasExistentes.length > 0) {
       return {
         success: true,
         mensaje: `Factura ${facturaCompleta.factura_serie}-${facturaCompleta.factura_numero} anulada exitosamente`,
+        // ⏳ Si se usaron los días de gracia, el front lo dice en el toast: un OK de
+        // COFIDI sobre el período anterior no garantiza que SAT lo haya aceptado,
+        // así que quien anula tiene que verificarlo en el portal.
+        anulado_en_dias_gracia: enDiasDeGracia,
+        ...(enDiasDeGracia && {
+          advertencia: `Se anuló usando los ${DIAS_GRACIA_ANULACION} días de gracia del período anterior. Confirmá en el portal de SAT que quedó anulada.`
+        }),
         data: {
           // Datos de COFIDI/SAT
           confirmacion_sat: {
@@ -3172,7 +3270,7 @@ if (facturasExistentes.length > 0) {
     "/facturar-generico",
     async ({ body, set, request }) => {
       try {
-        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo} = body;
+        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo, fecha_vencimiento} = body;
 
         // Si no viene created_by en el body, extraerlo del token
         let created_by = bodyCreatedBy;
@@ -3299,7 +3397,7 @@ if (facturasExistentes.length > 0) {
         console.log(`💰 Total factura: Q${totalFactura.toFixed(2)}`);
 
         // ============================================
-        // 4️⃣ CONSTRUIR COMPLEMENTOS (1 ABONO, FECHA HOY)
+        // 4️⃣ CONSTRUIR COMPLEMENTOS (1 ABONO, FECHA HOY O fecha_vencimiento)
         // ============================================
         const fechaHoy = new Date().toISOString().split("T")[0];
 
@@ -3309,7 +3407,7 @@ if (facturasExistentes.length > 0) {
             abonos: [
               {
                 numeroAbono: 1,
-                fechaVencimiento: fechaHoy,
+                fechaVencimiento: fecha_vencimiento ?? fechaHoy,
                 montoAbono: parseFloat(totalFactura.toFixed(2)),
               },
             ],
@@ -3462,6 +3560,9 @@ if (facturasExistentes.length > 0) {
           t.Literal("AUTOCASH"),
         ]),
         credito_nuevo: t.Optional(t.Boolean({ default: false })),
+        // Opcional: fecha de vencimiento del abono cambiario (yyyy-mm-dd).
+        // Si no viene, se usa la fecha de hoy (comportamiento original).
+        fecha_vencimiento: t.Optional(t.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" })),
       }),
     }
   )
@@ -4060,60 +4161,59 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       process.env.LOGO_URL ||
       "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
-    const html = generarHTMLFacturaPro(
-      {
-        tipo: datosGenerales["@_Tipo"],
-        serie: certificacion["dte:NumeroAutorizacion"]["@_Serie"],
-        numero: certificacion["dte:NumeroAutorizacion"]["@_Numero"],
-        uuid: certificacion["dte:NumeroAutorizacion"]["#text"],
-        fechaEmision: datosGenerales["@_FechaHoraEmision"],
-        fechaCertificacion: certificacion["dte:FechaHoraCertificacion"],
+    // Los datos del PDF se arman acá (el XML ya está parseado) pero el HTML y
+    // el render se hacen FUERA del request, después de guardar en BD (paso 7).
+    const datosFactura = {
+      tipo: datosGenerales["@_Tipo"],
+      serie: certificacion["dte:NumeroAutorizacion"]["@_Serie"],
+      numero: certificacion["dte:NumeroAutorizacion"]["@_Numero"],
+      uuid: certificacion["dte:NumeroAutorizacion"]["#text"],
+      fechaEmision: datosGenerales["@_FechaHoraEmision"],
+      fechaCertificacion: certificacion["dte:FechaHoraCertificacion"],
 
-        emisor: {
-          nit: emisor["@_NITEmisor"],
-          nombre: emisor["@_NombreEmisor"],
-          nombreComercial: emisor["@_NombreComercial"],
-          direccion: emisor["dte:DireccionEmisor"],
-        },
-
-        receptor: {
-          nit: receptorXML["@_IDReceptor"],
-          nombre: receptorXML["@_NombreReceptor"],
-          direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
-        },
-
-        items: itemsXML.map((item: any) => ({
-          numeroLinea: item["@_NumeroLinea"],
-          cantidad: item["dte:Cantidad"],
-          unidad: item["dte:UnidadMedida"],
-          descripcion: item["dte:Descripcion"],
-          precioUnitario: parseFloat(item["dte:PrecioUnitario"]),
-          total: parseFloat(item["dte:Total"]),
-        })),
-
-        totales: {
-          iva: parseFloat(
-            totales["dte:TotalImpuestos"]["dte:TotalImpuesto"][
-              "@_TotalMontoImpuesto"
-            ]
-          ),
-          granTotal: parseFloat(totales["dte:GranTotal"]),
-        },
-
-        // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
-        abonos: pago_id ? abonos.map((abono: any) => ({
-          numero: abono["cfc:NumeroAbono"],
-          fechaVencimiento: abono["cfc:FechaVencimiento"],
-          monto: parseFloat(abono["cfc:MontoAbono"]),
-        })) : [],
-
-        certificador: {
-          nit: certificacion["dte:NITCertificador"],
-          nombre: certificacion["dte:NombreCertificador"],
-        },
+      emisor: {
+        nit: emisor["@_NITEmisor"],
+        nombre: emisor["@_NombreEmisor"],
+        nombreComercial: emisor["@_NombreComercial"],
+        direccion: emisor["dte:DireccionEmisor"],
       },
-      logoUrl
-    );
+
+      receptor: {
+        nit: receptorXML["@_IDReceptor"],
+        nombre: receptorXML["@_NombreReceptor"],
+        direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
+      },
+
+      items: itemsXML.map((item: any) => ({
+        numeroLinea: item["@_NumeroLinea"],
+        cantidad: item["dte:Cantidad"],
+        unidad: item["dte:UnidadMedida"],
+        descripcion: item["dte:Descripcion"],
+        precioUnitario: parseFloat(item["dte:PrecioUnitario"]),
+        total: parseFloat(item["dte:Total"]),
+      })),
+
+      totales: {
+        iva: parseFloat(
+          totales["dte:TotalImpuestos"]["dte:TotalImpuesto"][
+            "@_TotalMontoImpuesto"
+          ]
+        ),
+        granTotal: parseFloat(totales["dte:GranTotal"]),
+      },
+
+      // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
+      abonos: pago_id ? abonos.map((abono: any) => ({
+        numero: abono["cfc:NumeroAbono"],
+        fechaVencimiento: abono["cfc:FechaVencimiento"],
+        monto: parseFloat(abono["cfc:MontoAbono"]),
+      })) : [],
+
+      certificador: {
+        nit: certificacion["dte:NITCertificador"],
+        nombre: certificacion["dte:NombreCertificador"],
+      },
+    };
 
     // ============================================
     // 6️⃣ GUARDAR EN BASE DE DATOS *PRIMERO* (antes del PDF, que es frágil)
@@ -4165,63 +4265,22 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     console.log('📅 Fecha certificación guardada (Guatemala):', facturaGuardada.fecha_certificacion);
 
     // ============================================
-    // 7️⃣ GENERAR PDF + SUBIR A R2 (best-effort, NO fatal)
+    // 7️⃣ GENERAR PDF + SUBIR A R2 (EN BACKGROUND, best-effort, NO fatal)
     // ------------------------------------------------------------
-    // Si esto falla, la factura YA quedó guardada arriba: NO relanzamos, solo
-    // logueamos para monitoreo/reintento. El PDF se puede regenerar luego con
-    // el mismo filename determinístico -> misma URL (script de backfill).
+    // NO se espera: la factura YA está certificada en SAT y guardada arriba, y
+    // el pdf_url es determinístico. Tener a Puppeteer + R2 dentro del request
+    // fue lo que colgó un handler 34s el 2026-08-07: el CRM abortó a los 30s,
+    // reintentó el POST y SAT certificó la MISMA factura dos veces.
+    // Si el PDF falla NO se pierde el registro: se regenera después con el
+    // mismo filename -> misma URL (script backfill-facturas-faltantes).
     // ============================================
-    try {
-      console.log(`   🎨 Generando PDF...`);
-      const { launchBrowser } = await import("../utils/functions/browser");
-      const browser = await launchBrowser();
-      try {
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle0" });
-
-        const pdfBuffer = await page.pdf({
-          format: "A4",
-          printBackground: true,
-          margin: {
-            top: "20px",
-            bottom: "20px",
-            left: "20px",
-            right: "20px",
-          },
-        });
-        console.log(`   ✅ PDF generado`);
-
-        const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-        const s3 = new S3Client({
-          endpoint: process.env.BUCKET_REPORTS_URL,
-          region: "auto",
-          credentials: {
-            accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-          },
-        });
-
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: process.env.BUCKET_REPORTS,
-            Key: filename,
-            Body: pdfBuffer,
-            ContentType: "application/pdf",
-          })
-        );
-        console.log(`   ✅ PDF subido a R2: ${filename}`);
-      } finally {
-        await browser.close();
-      }
-    } catch (pdfError) {
-      // La factura YA está guardada en la BD (paso 6). No se pierde el registro.
-      console.error(
-        `⚠️ [certificarFactura] Factura ${resultado.serie}-${resultado.numero} ` +
-          `(${resultado.uuid}) GUARDADA en BD (id ${facturaGuardada.factura_id}) ` +
-          `pero FALLÓ el PDF/R2. Se puede regenerar el PDF luego:`,
-        pdfError
-      );
-    }
+    console.log(`   🎨 PDF encolado en background...`);
+    generarPDFFacturaEnBackground({
+      datos: datosFactura,
+      logoUrl,
+      filename,
+      referencia: `${resultado.serie}-${resultado.numero} (${resultado.uuid}) id ${facturaGuardada.factura_id}`,
+    });
 
     // ============================================
     // 9️⃣ RETORNAR RESULTADO

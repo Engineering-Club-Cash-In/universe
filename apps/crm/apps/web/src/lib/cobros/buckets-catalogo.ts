@@ -108,11 +108,18 @@ export const DEFAULT_BUCKETS: readonly BucketUI[] = [
 		orden: 7,
 	},
 	{
+		key: "pendiente_cancelacion",
+		label: "Pendiente Cancelación",
+		colorClass: "bg-purple-100 text-purple-800",
+		colorHex: "#a855f7",
+		orden: 8,
+	},
+	{
 		key: "completado",
 		label: "Completado",
 		colorClass: "bg-blue-100 text-blue-800",
 		colorHex: "#3b82f6",
-		orden: 8,
+		orden: 9,
 	},
 ];
 

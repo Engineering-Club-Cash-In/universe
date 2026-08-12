@@ -145,6 +145,7 @@ interface CasoDetalle {
 	etiquetas?: string[] | null;
 	montoFinanciado?: string | number | null;
 	cuotaMensual?: string | number | null;
+	cuotaMensualHistorica?: string | number | null;
 	numeroCuotas?: number | null;
 	fechaInicio?: string | null;
 	diaPagoMensual?: number | null;
@@ -1574,13 +1575,12 @@ function RouteComponent() {
 											</div>
 											<p className="font-bold text-blue-600 text-lg uppercase tracking-tight">
 												Q
-												{Number(caso.cuotaMensual || 0).toLocaleString(
-													"es-GT",
-													{
-														minimumFractionDigits: 2,
-														maximumFractionDigits: 2,
-													},
-												)}
+												{Number(
+													caso.cuotaMensualHistorica ?? caso.cuotaMensual,
+												).toLocaleString("es-GT", {
+													minimumFractionDigits: 2,
+													maximumFractionDigits: 2,
+												})}
 											</p>
 										</div>
 										<div className="space-y-2">
@@ -3024,14 +3024,15 @@ function RouteComponent() {
 											Capital Activo
 										</p>
 										<p className="font-medium">
-											Q
-											{Number(caso.montoFinanciado || 0).toLocaleString(
-												"es-GT",
-												{
-													minimumFractionDigits: 2,
-													maximumFractionDigits: 2,
-												},
-											)}
+											{caso.montoFinanciado == null
+												? "No disponible"
+												: `Q${Number(caso.montoFinanciado).toLocaleString(
+														"es-GT",
+														{
+															minimumFractionDigits: 2,
+															maximumFractionDigits: 2,
+														},
+													)}`}
 										</p>
 									</div>
 									<div>
@@ -3040,7 +3041,9 @@ function RouteComponent() {
 										</p>
 										<p className="font-medium">
 											Q
-											{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+											{Number(
+												caso.cuotaMensualHistorica ?? caso.cuotaMensual,
+											).toLocaleString("es-GT", {
 												minimumFractionDigits: 2,
 												maximumFractionDigits: 2,
 											})}

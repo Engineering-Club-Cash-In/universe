@@ -135,7 +135,14 @@ export async function getAllPagosWithCreditAndInversionistas(
         eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
       )
       .where(eq(creditos.numero_credito_sifco, credito_sifco))
-      .orderBy(cuotas_credito.numero_cuota);
+      // Dentro de cada cuota: primero el recibo placeholder (sin fecha_aplicado ni
+      // fecha_pago), luego los pagos en orden cronológico — los registrados sin
+      // aplicar entran por su fecha de pago para no flotar arriba del historial.
+      .orderBy(
+        cuotas_credito.numero_cuota,
+        sql`COALESCE(${pagos_credito.fecha_aplicado}, ${pagos_credito.fecha_pago}) ASC NULLS FIRST`,
+        pagos_credito.pago_id
+      );
 
     const pagoIds = pagos.map((p) => p.pago_id);
 
@@ -1718,7 +1725,10 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   };
 }
 
-export async function getPagosDelMesActual(credito_id: number) {
+export async function getPagosDelMesActual(
+  credito_id: number,
+  executor: Pick<typeof db, "select"> = db
+) {
   const hoy = new Date(
     new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
   );
@@ -1726,7 +1736,7 @@ export async function getPagosDelMesActual(credito_id: number) {
   const anio = hoy.getFullYear();
 
   // Trae todos los pagos válidos de este mes y año
-  const pagos = await db
+  const pagos = await executor
     .select({ monto_boleta: pagos_credito.monto_boleta })
     .from(pagos_credito)
     .where(

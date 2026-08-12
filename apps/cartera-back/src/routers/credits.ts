@@ -15,6 +15,10 @@ import {
 import { getCuotasPorDiaYAsesor, upsertEfectividadAsesores, getEfectividadAsesores } from "../controllers/paymentsByAdvisor";
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
+import {
+  isValidResetCreditInput,
+  mapResetCreditError,
+} from "../controllers/creditDetailPolicy";
 import { launchBrowser } from "../utils/functions/browser";
 import { promises as fs } from "fs";
 import {
@@ -740,50 +744,29 @@ export const creditRouter = new Elysia()
     }
   })
   .post("/resetCredit", async ({ body, set }) => {
-    // Valida los parámetros
-    const { creditId, montoIncobrable, montoBoleta, url_boletas, cuota, banco_id, numeroAutorizacion } =
-      body as {
-        creditId?: number;
-        montoIncobrable?: number;
-        montoBoleta?: number | string;
-        url_boletas?: string[];
-        cuota?: number;
-        banco_id?: number;
-        numeroAutorizacion?: string;
-      };
-
-    // Validaciones mínimas
-    if (
-      !creditId ||
-      isNaN(Number(creditId)) ||
-      montoBoleta === undefined ||
-      isNaN(Number(montoBoleta)) ||
-      !Array.isArray(url_boletas) ||
-      cuota === undefined ||
-      isNaN(Number(cuota)) ||
-      !banco_id ||
-      isNaN(Number(banco_id))
-    ) {
+    const input = body as Record<string, unknown>;
+    if (!isValidResetCreditInput(input)) {
       set.status = 400;
       return { message: "Faltan o son inválidos los parámetros requeridos." };
     }
+    const { creditId, montoIncobrable, montoBoleta, url_boletas, cuota, banco_id, numeroAutorizacion } = input;
 
     try {
       const result = await resetCredit({
-        creditId: Number(creditId),
-        montoIncobrable:
-          montoIncobrable !== undefined ? Number(montoIncobrable) : undefined,
-        montoBoleta: montoBoleta,
-        url_boletas: url_boletas,
-        cuota: Number(cuota),
-        banco_id: Number(banco_id),
+        creditId,
+        montoIncobrable,
+        montoBoleta,
+        url_boletas,
+        cuota,
+        banco_id,
         numeroAutorizacion,
       });
       set.status = 200;
       return result;
     } catch (error) {
-      set.status = 500;
-      return { message: "Error reiniciando el crédito", error: String(error) };
+      const mapped = mapResetCreditError(error);
+      set.status = mapped.status;
+      return { message: mapped.message, error: String(error) };
     }
   })
   .get("/credit/cancelation-report", async ({ query, set }) => {

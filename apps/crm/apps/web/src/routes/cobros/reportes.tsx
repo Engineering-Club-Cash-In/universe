@@ -41,6 +41,12 @@ import {
 } from "@/lib/cobros/buckets-catalogo";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
+import {
+	buildMoraDisplayRows,
+	getMoraSnapshotDate,
+	type MoraBucket,
+	type MoraDisplayAsesor,
+} from "./-mora-display";
 
 export const Route = createFileRoute("/cobros/reportes")({
 	component: RouteComponent,
@@ -70,6 +76,12 @@ const ETAPAS_MORA_KEYS = [
 	"mora_120",
 	"mora_120_plus",
 ] as const;
+
+type MoraSnapshotAsesor = {
+	asesorId: number;
+	nombre: string;
+	totalEnMora: { cantidad: number; sumaMora: string };
+} & Partial<Record<(typeof ETAPAS)[number]["key"], MoraBucket>>;
 
 function todayGTISO() {
 	return new Date().toLocaleDateString("sv-SE", {
@@ -117,13 +129,8 @@ function TabMora({
 		setMesAnio(next);
 	};
 
-	// Fecha snapshot = día 6 del mes elegido, clamp a hoy (nunca futura).
 	const hoy = todayGTISO();
-	const fechaSnapshot = useMemo(() => {
-		if (modo === "hoy") return undefined;
-		const dia6 = `${mesAnio}-06`;
-		return dia6 > hoy ? hoy : dia6;
-	}, [modo, mesAnio, hoy]);
+	const fechaSnapshot = getMoraSnapshotDate(modo, mesAnio, hoy);
 
 	const { data: asesoresData } = useQuery({
 		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
@@ -148,8 +155,8 @@ function TabMora({
 	});
 
 	// Totales con / sin Gerencia (cliente, sobre porAsesor).
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const porAsesor: any[] = (data as any)?.porAsesor ?? [];
+	const porAsesor = ((data as { porAsesor?: MoraSnapshotAsesor[] } | undefined)
+		?.porAsesor ?? []) as MoraSnapshotAsesor[];
 	const totalConGerencia = porAsesor.reduce(
 		(s, a) => s + Number(a.totalEnMora?.sumaMora ?? 0),
 		0,
@@ -172,11 +179,11 @@ function TabMora({
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const alcance = (data as any)?.alcance as "live" | "historico" | undefined;
 
-	// Cobrado (mora cobrada en el período del mes). Solo aplica en modo "mes".
+	// Recuperación de mora para el mismo ciclo [día 6, día 6 siguiente).
 	const anioNum = Number(mesAnio.slice(0, 4));
 	const mesNum = Number(mesAnio.slice(5, 7));
-	const { data: cobradoData, refetch: refetchCobrado } = useQuery({
-		...orpc.getMoraCobradaPorAsesor.queryOptions({
+	const { data: recuperacion, refetch: refetchRecuperacion } = useQuery({
+		...orpc.getMoraRecuperacionPorAsesor.queryOptions({
 			input: {
 				mes: mesNum,
 				anio: anioNum,
@@ -186,32 +193,17 @@ function TabMora({
 		}),
 		enabled: !!session && modo === "mes",
 	});
-	const cobradoMap = useMemo(() => {
-		const m = new Map<number, { cobrado: number; nombre: string }>();
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		for (const a of ((cobradoData as any)?.porAsesor ?? []) as any[]) {
-			m.set(a.asesorId, { cobrado: Number(a.cobrado), nombre: a.nombre });
-		}
-		return m;
-	}, [cobradoData]);
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const totalCobrado = Number((cobradoData as any)?.totalCobrado ?? 0);
 	const verCobrado = modo === "mes";
+	const esperadoSnapshot = Number(
+		verCobrado
+			? (recuperacion?.totales.esperado ?? totalConGerencia)
+			: totalConGerencia,
+	);
 
-	// Filas del desglose = unión de asesores con mora esperada y/o cobrada. El
-	// total cobrado incluye pagos sobre créditos ya saldados / fuera del snapshot
-	// de mora activa, así que sin la unión las filas no sumarían el total.
-	const filasAsesor = useMemo(() => {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const map = new Map<number, any>();
-		for (const a of porAsesor) map.set(a.asesorId, a);
-		if (verCobrado) {
-			for (const [id, c] of cobradoMap) {
-				if (!map.has(id)) map.set(id, { asesorId: id, nombre: c.nombre });
-			}
-		}
-		return [...map.values()];
-	}, [porAsesor, cobradoMap, verCobrado]);
+	const filasAsesor = useMemo<MoraDisplayAsesor[]>(
+		() => buildMoraDisplayRows(porAsesor, recuperacion?.porAsesor, verCobrado),
+		[porAsesor, recuperacion, verCobrado],
+	);
 
 	const ultimaAct = dataUpdatedAt ? fmtTime(new Date(dataUpdatedAt)) : null;
 
@@ -233,7 +225,7 @@ function TabMora({
 						size="sm"
 						onClick={() => {
 							refetch();
-							if (verCobrado) refetchCobrado();
+							if (verCobrado) refetchRecuperacion();
 						}}
 						disabled={isFetching}
 					>
@@ -325,6 +317,13 @@ function TabMora({
 				</div>
 			)}
 
+			{verCobrado && recuperacion?.metadata.alcance === "historico" && (
+				<div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-blue-800 text-sm">
+					La mora corresponde al corte histórico; el asesor mostrado es su
+					asignación actual.
+				</div>
+			)}
+
 			{isLoading ? (
 				<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 					{ETAPAS.map((e) => (
@@ -375,7 +374,7 @@ function TabMora({
 				</div>
 			)}
 
-			{(porAsesor.length > 0 || (verCobrado && totalCobrado > 0)) && (
+			{(porAsesor.length > 0 || (verCobrado && recuperacion)) && (
 				<div
 					className={`grid grid-cols-1 gap-4 md:grid-cols-2 ${verCobrado ? "lg:grid-cols-3" : ""}`}
 				>
@@ -383,10 +382,12 @@ function TabMora({
 						<Card className="border-red-200 bg-red-50">
 							<CardContent className="pt-4">
 								<p className="font-semibold text-red-700 text-sm">
-									Total en Mora (con Gerencia)
+									{verCobrado
+										? "Mora esperada del snapshot"
+										: "Total en Mora (con Gerencia)"}
 								</p>
 								<p className="font-bold text-3xl text-red-800">
-									{fmtQ(totalConGerencia)}
+									{fmtQ(esperadoSnapshot)}
 								</p>
 								<p className="text-muted-foreground text-xs">
 									{credConGerencia} créditos
@@ -409,19 +410,18 @@ function TabMora({
 							</CardContent>
 						</Card>
 					)}
-					{verCobrado && (
+					{verCobrado && recuperacion && (
 						<Card className="border-green-200 bg-green-50">
 							<CardContent className="pt-4">
 								<p className="font-semibold text-green-700 text-sm">
-									Mora Cobrada (en el mes)
+									Cobrado en créditos del snapshot
 								</p>
 								<p className="font-bold text-3xl text-green-800">
-									{fmtQ(totalCobrado)}
+									{fmtQ(recuperacion.totales.cobradoEnSnapshot)}
 								</p>
 								<p className="text-muted-foreground text-xs">
-									{totalConGerencia > 0
-										? `${((totalCobrado / totalConGerencia) * 100).toFixed(1)}% de lo esperado`
-										: "—"}
+									Pendiente: {fmtQ(recuperacion.totales.pendiente)} · Excedente:{" "}
+									{fmtQ(recuperacion.totales.excedenteEnSnapshot)}
 								</p>
 							</CardContent>
 						</Card>
@@ -458,10 +458,13 @@ function TabMora({
 									{verCobrado && (
 										<>
 											<th className="px-4 py-3 text-right font-semibold">
-												Cobrado
+												Cobrado snapshot
 											</th>
 											<th className="px-4 py-3 text-right font-semibold">
-												% Cobrado
+												Fuera snapshot
+											</th>
+											<th className="px-4 py-3 text-right font-semibold">
+												Excedente
 											</th>
 											<th className="px-4 py-3 text-right font-semibold">
 												Pendiente
@@ -471,8 +474,7 @@ function TabMora({
 								</tr>
 							</thead>
 							<tbody>
-								{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-								{filasAsesor.map((asesor: any) => (
+								{filasAsesor.map((asesor) => (
 									<tr
 										key={asesor.asesorId}
 										className="border-t hover:bg-muted/30"
@@ -482,7 +484,7 @@ function TabMora({
 											const bucket = asesor[etapa.key];
 											return (
 												<td key={etapa.key} className="px-4 py-3 text-right">
-													{bucket?.cantidad > 0 ? (
+													{bucket && bucket.cantidad > 0 ? (
 														<div>
 															<div className="font-medium">
 																{fmtQ(bucket.sumaMora)}
@@ -499,7 +501,11 @@ function TabMora({
 										})}
 										<td className="px-4 py-3 text-right">
 											<div className="font-semibold text-red-700">
-												{fmtQ(asesor.totalEnMora?.sumaMora ?? "0")}
+												{fmtQ(
+													verCobrado
+														? (asesor.esperado ?? "0")
+														: (asesor.totalEnMora?.sumaMora ?? "0"),
+												)}
 											</div>
 											<div className="text-muted-foreground text-xs">
 												{asesor.totalEnMora?.cantidad ?? 0} créd.
@@ -526,14 +532,12 @@ function TabMora({
 										</td>
 										{verCobrado &&
 											(() => {
-												const esperado = Number.parseFloat(
-													asesor.totalEnMora?.sumaMora ?? "0",
+												const cobrado = Number(asesor.cobradoEnSnapshot ?? 0);
+												const fuera = Number(asesor.cobradoFueraSnapshot ?? 0);
+												const excedente = Number(
+													asesor.excedenteEnSnapshot ?? 0,
 												);
-												const cobrado =
-													cobradoMap.get(asesor.asesorId)?.cobrado ?? 0;
-												const pct =
-													esperado > 0 ? (cobrado / esperado) * 100 : 0;
-												const pendiente = Math.max(0, esperado - cobrado);
+												const pendiente = Number(asesor.pendiente ?? 0);
 												return (
 													<>
 														<td className="px-4 py-3 text-right font-medium text-green-700">
@@ -544,7 +548,10 @@ function TabMora({
 															)}
 														</td>
 														<td className="px-4 py-3 text-right text-muted-foreground">
-															{esperado > 0 ? `${pct.toFixed(1)}%` : "—"}
+															{fuera > 0 ? fmtQ(fuera) : "—"}
+														</td>
+														<td className="px-4 py-3 text-right text-amber-700">
+															{excedente > 0 ? fmtQ(excedente) : "—"}
 														</td>
 														<td className="px-4 py-3 text-right">
 															{fmtQ(pendiente)}
@@ -576,7 +583,10 @@ function TabMora({
 											{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
 											<div>
 												{fmtQ(
-													(data as any).totales.totalEnMora?.sumaMora ?? "0",
+													verCobrado
+														? (recuperacion?.totales.esperado ?? "0")
+														: ((data as any).totales.totalEnMora?.sumaMora ??
+																"0"),
 												)}
 											</div>
 											{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
@@ -586,24 +596,20 @@ function TabMora({
 										</td>
 										{verCobrado &&
 											(() => {
-												// eslint-disable-next-line @typescript-eslint/no-explicit-any
-												const esperadoTot = Number.parseFloat(
-													(data as any).totales.totalEnMora?.sumaMora ?? "0",
-												);
-												const pctTot =
-													esperadoTot > 0
-														? (totalCobrado / esperadoTot) * 100
-														: 0;
+												const totales = recuperacion?.totales;
 												return (
 													<>
 														<td className="px-4 py-3 text-right text-green-700">
-															{fmtQ(totalCobrado)}
+															{fmtQ(totales?.cobradoEnSnapshot ?? "0")}
 														</td>
 														<td className="px-4 py-3 text-right font-normal text-muted-foreground">
-															{esperadoTot > 0 ? `${pctTot.toFixed(1)}%` : "—"}
+															{fmtQ(totales?.cobradoFueraSnapshot ?? "0")}
+														</td>
+														<td className="px-4 py-3 text-right font-normal text-amber-700">
+															{fmtQ(totales?.excedenteEnSnapshot ?? "0")}
 														</td>
 														<td className="px-4 py-3 text-right">
-															{fmtQ(Math.max(0, esperadoTot - totalCobrado))}
+															{fmtQ(totales?.pendiente ?? "0")}
 														</td>
 													</>
 												);

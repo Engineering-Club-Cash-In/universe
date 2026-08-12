@@ -29,6 +29,8 @@ export enum ContractType {
   CESION_CREDITOS = 'cesion_creditos',
   CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL = 'contrato_servicios_cash_in_inversor_general',
   DESIGNACION_BENEFICIARIO = 'designacion_beneficiario',
+  CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA = 'contrato_participacion_administracion_cartera',
+  ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO = 'anexos_confirmacion_participacion_beneficiario',
 
   // ===== INVERSIONES SOCIEDAD =====
   ACUERDO_INVERSION_CASH_IN_SOCIEDAD = 'acuerdo_inversion_cash_in_sociedad',

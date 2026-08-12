@@ -152,7 +152,7 @@ export interface CreateCreditoParams {
 	departamento?: string | null;
 	codigo_postal?: string | null;
 	pais?: string | null;
-	dia_pago_mensual?: 15 | 30;
+	dia_pago_mensual?: number;
 	// Campos para el correo de notificación
 	vehiculo_marca?: string;
 	vehiculo_linea?: string;

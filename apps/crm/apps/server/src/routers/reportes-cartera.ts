@@ -16,7 +16,7 @@ import {
 	gtDateStrToDate,
 } from "../lib/guatemala-month-window";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
-import { adminProcedure } from "../lib/orpc";
+import { adminProcedure, cobranzaReportProcedure } from "../lib/orpc";
 import {
 	carteraBackClient,
 	type FacturacionMesResponse,
@@ -27,6 +27,14 @@ import {
 	type ReinversionLiquidacionesResponse,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
+
+export function fetchReinvestmentLiquidaciones(
+	input: { mes: number; anio: number },
+	client: Pick<typeof carteraBackClient, "getReinversionLiquidaciones"> =
+		carteraBackClient,
+) {
+	return client.getReinversionLiquidaciones(input);
+}
 
 export const reportesCarteraRouter = {
 	// ========================================================================
@@ -453,7 +461,7 @@ export const reportesCarteraRouter = {
 	// REPORTE: MONTO A COBRARSE POR PERÍODO (lógica cartera web, con acumulado)
 	// ========================================================================
 
-	getMontoACobrarPeriodo: adminProcedure
+	getMontoACobrarPeriodo: cobranzaReportProcedure
 		.input(
 			z.object({
 				periodo: z
@@ -487,7 +495,7 @@ export const reportesCarteraRouter = {
 	// REPORTE: FACTURADO DEL MES VS ESPERADO
 	// ========================================================================
 
-	getFacturacionMes: adminProcedure
+	getFacturacionMes: cobranzaReportProcedure
 		.input(
 			z.object({
 				mes: z.number().min(1).max(12),
@@ -545,7 +553,7 @@ export const reportesCarteraRouter = {
 				});
 			}
 
-			return carteraBackClient.getReinversionLiquidaciones({
+			return fetchReinvestmentLiquidaciones({
 				mes: input.mes,
 				anio: input.anio,
 			});

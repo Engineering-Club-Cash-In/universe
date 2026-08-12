@@ -40,6 +40,17 @@ import {
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
+import {
+  CREDIT_DETAIL_STATUSES,
+  RESET_CREDIT_ERRORS,
+  canResetCreditByStatus,
+  isAmbiguousOriginalPrincipalPayment,
+  isCreditClosingPayment,
+  isIncobrableContinuationReady,
+  isOriginalPrincipalPayment,
+  normalizarMontoQ,
+  withActiveCancellation,
+} from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import {
   bucketDeCredito,
@@ -83,13 +94,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .where(
         and(
           eq(creditos.numero_credito_sifco, numero_credito_sifco),
-          inArray(creditos.statusCredit, [
-            "ACTIVO",
-            "PENDIENTE_CANCELACION",
-            "MOROSO",
-            "EN_CONVENIO",
-            "INCOBRABLE"
-          ])
+          inArray(creditos.statusCredit, [...CREDIT_DETAIL_STATUSES])
         )
       )
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
@@ -103,35 +108,62 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     const currentCredit = creditoData[0];
     const creditoId = currentCredit.creditos.credito_id;
 
+    const contractSummary =
+      currentCredit.creditos.statusCredit === "CANCELADO"
+        ? await (async () => {
+            const payments = await db
+              .select({
+                abono_capital: pagos_credito.abono_capital,
+                cuota: pagos_credito.cuota,
+                validationStatus: pagos_credito.validationStatus,
+                registerBy: pagos_credito.registerBy,
+                pagado: pagos_credito.pagado,
+                paymentFalse: pagos_credito.paymentFalse,
+              })
+              .from(pagos_credito)
+              .where(eq(pagos_credito.credito_id, creditoId));
+            const eligiblePayments = payments.filter(isOriginalPrincipalPayment);
+            const closingPayments = eligiblePayments.filter(isCreditClosingPayment);
+            const hasAmbiguousPrincipalPayments = payments.some(
+              isAmbiguousOriginalPrincipalPayment,
+            );
+
+            return {
+              originalPrincipal: (() => {
+                const principal = eligiblePayments.reduce(
+                  (total, payment) => total.plus(payment.abono_capital ?? 0),
+                  new Big(0),
+                );
+                return closingPayments.length > 0 &&
+                  !hasAmbiguousPrincipalPayments &&
+                  principal.gt(0)
+                  ? principal.toFixed(2)
+                  : null;
+              })(),
+              installment:
+                closingPayments.find((payment) => payment.cuota != null)?.cuota ??
+                null,
+            };
+          })()
+        : undefined;
+
     // 2. Si el crédito está cancelado o pendiente de cancelación, verificar si hay cancelación activa
-    if (
+    const cancelacionActiva =
       currentCredit.creditos.statusCredit === "CANCELADO" ||
       currentCredit.creditos.statusCredit === "PENDIENTE_CANCELACION"
-    ) {
-      // Buscar la info de cancelación (solo si está activa)
-      const cancelacion = await db
-        .select()
-        .from(credit_cancelations)
-        .where(
-          and(
-            eq(credit_cancelations.credit_id, creditoId),
-            eq(credit_cancelations.activo, true)
-          )
-        )
-        .limit(1);
-
-      // Solo retornar flujo CANCELADO si hay una cancelación activa
-      if (cancelacion.length > 0) {
-        return {
-          credito: currentCredit.creditos,
-          usuario: currentCredit.usuarios,
-          asesor: currentCredit.asesores,
-          cancelacion: cancelacion[0],
-          flujo: "CANCELADO",
-        };
-      }
-      // Si no hay cancelación activa, continuar con el flujo normal
-    }
+        ? (
+            await db
+              .select()
+              .from(credit_cancelations)
+              .where(
+                and(
+                  eq(credit_cancelations.credit_id, creditoId),
+                  eq(credit_cancelations.activo, true)
+                )
+              )
+              .limit(1)
+          )[0]
+        : undefined;
 
     // 2. Consultar todas las cuotas pagadas (pagado = true)
     const cuotasPagadas = await db
@@ -146,6 +178,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
         // 🔥 Campos de pagos_credito - ABONOS
         pago_id: pagos_credito.pago_id,
+        cuota: pagos_credito.cuota,
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,
         abono_interes: pagos_credito.abono_interes,
@@ -183,7 +216,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       )
       .orderBy(cuotas_credito.numero_cuota);
-
     // 4. Calcular la cuota que toca este mes (según meses transcurridos desde fecha_creacion)
     const fechaInicio = new Date(currentCredit.creditos.fecha_creacion);
     const hoy = new Date();
@@ -203,6 +235,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         createdAt: cuotas_credito.createdAt,
         validationStatus: pagos_credito.validationStatus,
         pago_id: pagos_credito.pago_id,
+        cuota: pagos_credito.cuota,
 
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,
@@ -255,6 +288,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         createdAt: cuotas_credito.createdAt,
         // 🔥 Campos de pagos_credito - ABONOS
         pago_id: pagos_credito.pago_id,
+        cuota: pagos_credito.cuota,
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,
         abono_interes: pagos_credito.abono_interes,
@@ -298,6 +332,16 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       )
       .orderBy(cuotas_credito.numero_cuota);
 
+    const moraActual = await db
+      .select()
+      .from(moras_credito)
+      .where(
+        and(
+          eq(moras_credito.credito_id, creditoId),
+          eq(moras_credito.activa, true)
+        )
+      );
+
     // 6. Consultar si la cuota actual ya fue pagada
     const cuotaActualDataResult = await db
       .select({
@@ -310,6 +354,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         validationStatus: pagos_credito.validationStatus,
         // 🔥 Campos de pagos_credito - ABONOS
         pago_id: pagos_credito.pago_id,
+        cuota: pagos_credito.cuota,
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,
         abono_interes: pagos_credito.abono_interes,
@@ -351,22 +396,24 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
     // 🔥 VALIDACIÓN: Si no hay cuota actual, retornar datos sin cuota activa
     if (!cuotaActualDataResult || cuotaActualDataResult.length === 0) {
-      return {
+      return withActiveCancellation({
         flujo: "ACTIVO",
         credito: currentCredit.creditos,
         usuario: currentCredit.usuarios,
+        asesor: currentCredit.asesores,
         cuotaActual: null,
         cuotaActualPagada: false,
         cuotaActualStatus: null,
         cuotasPendientes,
         cuotasAtrasadas,
         cuotasPagadas,
-        moraActual: 0,
-        mora: null,
+        moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+        mora: moraActual.length > 0 ? moraActual[0] : null,
         convenioActivo: null,
         cuotasEnConvenio: [],
         pagosConvenio: [],
-      };
+        ...(contractSummary ? { contractSummary } : {}),
+      }, cancelacionActiva, currentCredit.creditos.statusCredit);
     }
 
     const cuotaActualData = cuotaActualDataResult[0];
@@ -378,16 +425,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // La cuota actual del mes con toda su info
     const cuotaActual = cuotaActualData;
     const cuotaActualStatus = cuotaActualData.validationStatus;
-
-    const moraActual = await db
-      .select()
-      .from(moras_credito)
-      .where(
-        and(
-          eq(moras_credito.credito_id, creditoId),
-          eq(moras_credito.activa, true)
-        )
-      );
 
     const convenioActivo = await db
       .select()
@@ -486,7 +523,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       }
     }
 
-    return {
+    return withActiveCancellation({
       flujo: "ACTIVO",
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
@@ -516,7 +553,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           : null,
       cuotasEnConvenio,
       pagosConvenio,
-    };
+      ...(contractSummary ? { contractSummary } : {}),
+    }, cancelacionActiva, currentCredit.creditos.statusCredit);
   } catch (error) {
     console.error("[getCreditoByNumero] Error:", error);
     return { message: "Error consultando crédito", error: String(error) };
@@ -1792,8 +1830,10 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
         return { ok: false, message: "Crédito no encontrado" };
       }
 
-      // b) Capital = monto_incobrable, plazo = 1, cuota = capital completo
-      const capitalIncobrable = new Big(monto_cancelacion!);
+      // b) Capital = monto_incobrable, plazo = 1, cuota = capital completo.
+      //    Normalizado a centavos: el front lo calcula con float y las columnas
+      //    sin escala (pagos_credito.cuota) preservarían el polvo tal cual.
+      const capitalIncobrable = new Big(normalizarMontoQ(monto_cancelacion!));
 
       // c) Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
       //    paymentFalse=true). Además se ponen los *_restante en 0 para que las queries de
@@ -1801,7 +1841,11 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       const pagosNoPagados = await tx
         .update(pagos_credito)
         .set({
-          paymentFalse: true,
+          paymentFalse: sql<boolean>`CASE
+            WHEN ${pagos_credito.paymentFalse} IS TRUE THEN TRUE
+            WHEN ${pagos_credito.validationStatus} IN ('validated', 'capital_validated') THEN FALSE
+            ELSE TRUE
+          END`,
           capital_restante: "0",
           interes_restante: "0",
           iva_12_restante: "0",
@@ -2046,274 +2090,341 @@ export async function resetCredit({
   numeroAutorizacion?: string;
 }) {
   try {
-    // 1. Jalar mora activa (si existe, se incluye en el pago de cierre)
-    const [moraActiva] = await db
-      .select({ monto_mora: moras_credito.monto_mora })
-      .from(moras_credito)
-      .where(
-        and(
-          eq(moras_credito.credito_id, creditId),
-          eq(moras_credito.activa, true)
+    // El monto llega del front con aritmética float (p.ej. 106488.77 - 90000 =
+    // 16488.770000000004) y las columnas de dinero son numeric(18,2): se
+    // normaliza a centavos UNA vez y todo el flujo usa esta versión.
+    const montoIncobrableNormalizado =
+      montoIncobrable !== undefined && Number.isFinite(montoIncobrable)
+        ? Number(normalizarMontoQ(montoIncobrable))
+        : undefined;
+
+    const { statusCredit } = await db.transaction(async (tx) => {
+      const [lockedCredit] = await tx
+        .select()
+        .from(creditos)
+        .where(eq(creditos.credito_id, creditId))
+        .limit(1)
+        .for("update");
+      if (!lockedCredit) {
+        throw new Error(RESET_CREDIT_ERRORS.CREDITO_NO_ENCONTRADO);
+      }
+      const credito = lockedCredit;
+
+      // 1. Jalar mora activa (si existe, se incluye en el pago de cierre)
+      const [moraActiva] = await tx
+        .select({ monto_mora: moras_credito.monto_mora })
+        .from(moras_credito)
+        .where(
+          and(
+            eq(moras_credito.credito_id, creditId),
+            eq(moras_credito.activa, true),
+          ),
         )
-      )
-      .limit(1);
-
-    const moraBig = new Big(moraActiva?.monto_mora as unknown as string ?? "0");
-
-    // 2. Consultar crédito ANTES de resetearlo (necesitamos los valores originales)
-    const [credito] = await db
-      .select()
-      .from(creditos)
-      .where(eq(creditos.credito_id, creditId));
-    if (!credito) {
-      throw new Error("Crédito no encontrado.");
-    }
-
-    // 3. Determinar el estado del crédito
-    const statusCredit =
-      typeof montoIncobrable !== "undefined" &&
-      montoIncobrable > 0 &&
-      montoBoleta !== undefined
-        ? "INCOBRABLE"
-        : "CANCELADO";
-
-    // 4. Jalar la cancelación para obtener cuotas_atrasadas, garantía, traspaso, otros
-    const [cancelacion] = await db
-      .select()
-      .from(credit_cancelations)
-      .where(eq(credit_cancelations.credit_id, creditId))
-      .limit(1);
-
-    const n = cancelacion?.cuotas_atrasadas ?? 0;
-
-    // 5. Jalar extras (montos_adicionales)
-    const extrasRows = await db
-      .select({ monto: montos_adicionales.monto })
-      .from(montos_adicionales)
-      .where(eq(montos_adicionales.credit_id, creditId));
-
-    const totalExtras = extrasRows.reduce(
-      (acc, row) => acc.plus(row.monto as unknown as string),
-      new Big(0)
-    );
-
-    // 6. Calcular abonos reales
-    const capitalOriginal = new Big(credito.capital ?? "0");
-    const abonoCapital = statusCredit === "INCOBRABLE"
-      ? capitalOriginal.minus(new Big(montoIncobrable!))
-      : capitalOriginal;
-    const abonoInteres = new Big(credito.cuota_interes ?? "0").times(n);
-    const abonoIva = new Big(credito.iva_12 ?? "0").times(n);
-    const abonoSeguro = new Big(credito.seguro_10_cuotas ?? "0").times(n);
-    const abonoGps = new Big(credito.gps ?? "0").times(n);
-    const abonoMembresias = new Big(credito.membresias ?? "0").times(n);
-
-    const otrosCancelacion = new Big(cancelacion?.garantia_mobiliaria ?? "0")
-      .plus(cancelacion?.traspaso ?? "0")
-      .plus(cancelacion?.otros ?? "0")
-      .plus(totalExtras);
-
-    const totalMontoPago = abonoCapital
-      .plus(abonoInteres)
-      .plus(abonoIva)
-      .plus(abonoSeguro)
-      .plus(abonoGps)
-      .plus(abonoMembresias)
-      .plus(otrosCancelacion)
-      .plus(moraBig);
-
-    // 7. Construir URLs de boletas
-    const r2BaseUrl = import.meta.env.URL_PUBLIC_R2 ?? "";
-    const urlCompletas = construirUrlBoletas(url_boletas, r2BaseUrl);
-
-    // 8. Obtener pagos del mes + monto de boleta
-    const pago_del_mes = await getPagosDelMesActual(credito.credito_id);
-    const pago_del_mesBig = new Big(pago_del_mes ?? 0).add(montoBoleta ?? 0);
-
-    // 9. Buscar cuota_id correspondiente
-    const [cuotaEncontrada] = await db
-      .select({ cuota_id: cuotas_credito.cuota_id })
-      .from(cuotas_credito)
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credito.credito_id),
-          eq(cuotas_credito.numero_cuota, cuota)
-        )
-      )
-      .limit(1);
-
-    const cuotaId = cuotaEncontrada?.cuota_id;
-
-    // 10. Insertar pago de cierre con abonos reales
-    const [nuevoPago] = await db
-      .insert(pagos_credito)
-      .values({
-        credito_id: credito.credito_id,
-        cuota_id: cuotaId,
-        cuota: credito.cuota?.toString() ?? "0",
-        cuota_interes: credito.cuota_interes?.toString() ?? "0",
-        abono_capital: abonoCapital.toString(),
-        abono_interes: abonoInteres.toString(),
-        abono_iva_12: abonoIva.toString(),
-        abono_interes_ci: "0",
-        abono_iva_ci: "0",
-        abono_seguro: abonoSeguro.toString(),
-        abono_gps: abonoGps.toString(),
-        pago_del_mes: pago_del_mesBig.toString(),
-        monto_boleta: montoBoleta.toString(),
-        capital_restante: "0",
-        interes_restante: "0",
-        iva_12_restante: "0",
-        seguro_restante: "0",
-        gps_restante: "0",
-        total_restante: "0",
-        llamada: "",
-        renuevo_o_nuevo: "renuevo",
-        membresias: "0",
-        membresias_pago: abonoMembresias.toString(),
-        membresias_mes: abonoMembresias.toString(),
-        otros: otrosCancelacion.toString(),
-        mora: moraBig.toString(),
-        monto_boleta_cuota: montoBoleta.toString(),
-        seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
-        pagado: true,
-        facturacion: "si",
-        mes_pagado: "",
-        seguro_facturado: abonoSeguro.toString(),
-        gps_facturado: abonoGps.toString(),
-        reserva: "0",
-        observaciones: "",
-        validationStatus: "reset" as const,
-        banco_id: banco_id,
-        numeroAutorizacion: numeroAutorizacion ?? "",
-        registerBy: "system_reset",
-        pagoConvenio: "0",
-        monto_aplicado: totalMontoPago.toString(),
-      })
-      .returning();
-
-    // 11. Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
-    //     paymentFalse=true). Además se ponen los *_restante en 0: algunas queries de
-    //     cuotas pendientes/atrasadas (getCreditoByNumero, reportes) NO filtran paymentFalse,
-    //     así que sin esto mostrarían "deuda fantasma" con los restantes viejos.
-    await db
-      .update(pagos_credito)
-      .set({
-        paymentFalse: true,
-        capital_restante: "0",
-        interes_restante: "0",
-        iva_12_restante: "0",
-        seguro_restante: "0",
-        gps_restante: "0",
-        total_restante: "0",
-        mora: "0",
-      })
-      .where(
-        and(
-          eq(pagos_credito.credito_id, credito.credito_id),
-          eq(pagos_credito.pagado, false)
-        )
+        .limit(1);
+      const moraBig = new Big(
+        (moraActiva?.monto_mora as unknown as string) ?? "0",
       );
 
-    // 12.1 Crear cuota correlativa (MAX(numero_cuota) + 1) para enlazar el pago de cierre
-    const [maxCuotaRow] = await db
-      .select({ max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)` })
-      .from(cuotas_credito)
-      .where(eq(cuotas_credito.credito_id, credito.credito_id));
-    const nextNumeroCuotaCierre = Number(maxCuotaRow?.max ?? 0) + 1;
+      const [badDebt] =
+        credito.statusCredit === "INCOBRABLE"
+          ? await tx
+              .select({ monto_incobrable: bad_debts.monto_incobrable })
+              .from(bad_debts)
+              .where(eq(bad_debts.credit_id, creditId))
+              .limit(1)
+          : [undefined];
 
-    const [cuotaCierre] = await db
-      .insert(cuotas_credito)
-      .values({
-        credito_id: credito.credito_id,
-        numero_cuota: nextNumeroCuotaCierre,
-        fecha_vencimiento: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" }),
-        liquidado_inversionistas: false,
-        pagado: true,
-      })
-      .returning();
+      const [existingClosingPayment] = await tx
+        .select({ pago_id: pagos_credito.pago_id })
+        .from(pagos_credito)
+        .where(
+          and(
+            eq(pagos_credito.credito_id, creditId),
+            eq(pagos_credito.registerBy, "system_reset"),
+          ),
+        )
+        .limit(1);
 
-    // 12.2 Enlazar el pago de cierre a la cuota recién creada (cuota correlativa "pagada"),
-    // para que el cierre quede asociado a una cuota limpia y no a una cuota vigente del plan.
-    if (nuevoPago?.pago_id && cuotaCierre?.cuota_id) {
-      await db
+      const incobrableContinuationReady =
+        credito.statusCredit === "INCOBRABLE" &&
+        isIncobrableContinuationReady({
+          montoIncobrable: montoIncobrableNormalizado,
+          capitalCredito: credito.capital,
+          montoIncobrableRegistrado: badDebt?.monto_incobrable ?? null,
+          tienePagoCierre: Boolean(existingClosingPayment),
+        });
+
+      if (
+        !canResetCreditByStatus(
+          credito.statusCredit,
+          incobrableContinuationReady,
+        )
+      ) {
+        throw new Error(RESET_CREDIT_ERRORS.ESTADO_INVALIDO);
+      }
+      if (existingClosingPayment) {
+        throw new Error(RESET_CREDIT_ERRORS.CIERRE_PREVIO);
+      }
+
+      // 3. Determinar el estado del crédito
+      const statusCredit =
+        typeof montoIncobrableNormalizado !== "undefined" &&
+        montoIncobrableNormalizado > 0 &&
+        montoBoleta !== undefined
+          ? "INCOBRABLE"
+          : "CANCELADO";
+
+      // 4. Jalar la cancelación para obtener cuotas_atrasadas, garantía, traspaso, otros
+      const [cancelacion] = await tx
+        .select()
+        .from(credit_cancelations)
+        .where(eq(credit_cancelations.credit_id, creditId))
+        .limit(1);
+      const n = cancelacion?.cuotas_atrasadas ?? 0;
+
+      // 5. Jalar extras (montos_adicionales)
+      const extrasRows = await tx
+        .select({ monto: montos_adicionales.monto })
+        .from(montos_adicionales)
+        .where(eq(montos_adicionales.credit_id, creditId));
+      const totalExtras = extrasRows.reduce(
+        (acc, row) => acc.plus(row.monto as unknown as string),
+        new Big(0),
+      );
+
+      // 6. Calcular abonos reales
+      const capitalOriginal = new Big(credito.capital ?? "0");
+      const abonoCapital =
+        statusCredit === "INCOBRABLE"
+          ? capitalOriginal.minus(new Big(montoIncobrableNormalizado!))
+          : capitalOriginal;
+      const abonoInteres = new Big(credito.cuota_interes ?? "0").times(n);
+      const abonoIva = new Big(credito.iva_12 ?? "0").times(n);
+      const abonoSeguro = new Big(credito.seguro_10_cuotas ?? "0").times(n);
+      const abonoGps = new Big(credito.gps ?? "0").times(n);
+      const abonoMembresias = new Big(credito.membresias ?? "0").times(n);
+      const otrosCancelacion = new Big(
+        cancelacion?.garantia_mobiliaria ?? "0",
+      )
+        .plus(cancelacion?.traspaso ?? "0")
+        .plus(cancelacion?.otros ?? "0")
+        .plus(totalExtras);
+      const totalMontoPago = abonoCapital
+        .plus(abonoInteres)
+        .plus(abonoIva)
+        .plus(abonoSeguro)
+        .plus(abonoGps)
+        .plus(abonoMembresias)
+        .plus(otrosCancelacion)
+        .plus(moraBig);
+
+      // 7. Construir URLs de boletas
+      const r2BaseUrl = import.meta.env.URL_PUBLIC_R2 ?? "";
+      const urlCompletas = construirUrlBoletas(url_boletas, r2BaseUrl);
+
+      // 8. Obtener pagos del mes + monto de boleta
+      const pago_del_mes = await getPagosDelMesActual(credito.credito_id, tx);
+      const pago_del_mesBig = new Big(pago_del_mes ?? 0).add(montoBoleta ?? 0);
+
+      // 9. Buscar cuota_id correspondiente
+      const [cuotaEncontrada] = await tx
+        .select({ cuota_id: cuotas_credito.cuota_id })
+        .from(cuotas_credito)
+        .where(
+          and(
+            eq(cuotas_credito.credito_id, credito.credito_id),
+            eq(cuotas_credito.numero_cuota, cuota),
+          ),
+        )
+        .limit(1);
+      const cuotaId = cuotaEncontrada?.cuota_id;
+
+      // 10. Insertar pago de cierre con abonos reales
+
+      const [nuevoPago] = await tx
+        .insert(pagos_credito)
+        .values({
+          credito_id: credito.credito_id,
+          cuota_id: cuotaId,
+          cuota: credito.cuota?.toString() ?? "0",
+          cuota_interes: credito.cuota_interes?.toString() ?? "0",
+          abono_capital: abonoCapital.toString(),
+          abono_interes: abonoInteres.toString(),
+          abono_iva_12: abonoIva.toString(),
+          abono_interes_ci: "0",
+          abono_iva_ci: "0",
+          abono_seguro: abonoSeguro.toString(),
+          abono_gps: abonoGps.toString(),
+          pago_del_mes: pago_del_mesBig.toString(),
+          monto_boleta: montoBoleta.toString(),
+          capital_restante: "0",
+          interes_restante: "0",
+          iva_12_restante: "0",
+          seguro_restante: "0",
+          gps_restante: "0",
+          total_restante: "0",
+          llamada: "",
+          renuevo_o_nuevo: "renuevo",
+          membresias: "0",
+          membresias_pago: abonoMembresias.toString(),
+          membresias_mes: abonoMembresias.toString(),
+          otros: otrosCancelacion.toString(),
+          mora: moraBig.toString(),
+          monto_boleta_cuota: montoBoleta.toString(),
+          seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
+          pagado: true,
+          facturacion: "si",
+          mes_pagado: "",
+          seguro_facturado: abonoSeguro.toString(),
+          gps_facturado: abonoGps.toString(),
+          reserva: "0",
+          observaciones: "",
+          validationStatus: "reset" as const,
+          banco_id: banco_id,
+          numeroAutorizacion: numeroAutorizacion ?? "",
+          registerBy: "system_reset",
+          pagoConvenio: "0",
+          monto_aplicado: totalMontoPago.toString(),
+        })
+        .returning();
+
+      // 11. Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
+      //     paymentFalse=true). Además se ponen los *_restante en 0: algunas queries de
+      //     cuotas pendientes/atrasadas (getCreditoByNumero, reportes) NO filtran paymentFalse,
+      //     así que sin esto mostrarían "deuda fantasma" con los restantes viejos.
+      await tx
         .update(pagos_credito)
-        .set({ cuota_id: cuotaCierre.cuota_id })
-        .where(eq(pagos_credito.pago_id, nuevoPago.pago_id));
-    }
-
-    // 12. Las cuotas no pagadas NO se borran: se conservan como histórico. Sus pagos quedaron
-    //     anulados (paymentFalse=true) en el paso 11, así que no aportan saldo en las vistas activas.
-
-    // 12.5 Distribuir abono a capital en tabla espejo (CANCELACION)
-    try {
-      await distribuirAbonoCapitalEspejo(credito.credito_id, abonoCapital.toString(), "CANCELACION");
-      console.log("✅ Abono capital (reset) distribuido en tabla abonos_capital (espejo)");
-    } catch (err) {
-      console.error("⚠️ Error al distribuir abono en espejo (reset):", err);
-    }
-
-    // 13. Distribuir pago entre inversionistas (ANTES de reiniciar, necesita monto_aportado).
-    //     Si la suma de aportes es 0 (p.ej. crédito ya reseteado antes) la distribución lanza
-    //     excepción; la atrapamos para no abortar el cierre del crédito.
-    if (nuevoPago?.pago_id) {
-      try {
-        await insertPagosCreditoInversionistasV2(
-          nuevoPago.pago_id,
-          credito.credito_id
+        .set({
+          paymentFalse: sql<boolean>`CASE
+          WHEN ${pagos_credito.paymentFalse} IS TRUE THEN TRUE
+          WHEN ${pagos_credito.validationStatus} IN ('validated', 'capital_validated') THEN FALSE
+          ELSE TRUE
+        END`,
+          capital_restante: "0",
+          interes_restante: "0",
+          iva_12_restante: "0",
+          seguro_restante: "0",
+          gps_restante: "0",
+          total_restante: "0",
+          mora: "0",
+        })
+        .where(
+          and(
+            eq(pagos_credito.credito_id, credito.credito_id),
+            eq(pagos_credito.pagado, false),
+          ),
         );
-      } catch (err) {
-        // Solo silenciamos el caso conocido y benigno: crédito SIN aportes (suma = 0),
-        // típico de un crédito ya reseteado antes. Cualquier otro fallo (inversionistas o
-        // pagos faltantes, error de DB, distribución a medias) SÍ se re-lanza: dejar el
-        // cierre sin liquidación de inversionistas e irreintentable sería peor.
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("suma de montos aportados es 0")) {
-          console.warn(
-            `⚠️ Distribución a inversionistas omitida (crédito ${credito.credito_id} sin aportes).`
+
+      // 12.1 Crear cuota correlativa (MAX(numero_cuota) + 1) para enlazar el pago de cierre
+      const [maxCuotaRow] = await tx
+        .select({
+          max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)`,
+        })
+        .from(cuotas_credito)
+        .where(eq(cuotas_credito.credito_id, credito.credito_id));
+      const nextNumeroCuotaCierre = Number(maxCuotaRow?.max ?? 0) + 1;
+
+      const [cuotaCierre] = await tx
+        .insert(cuotas_credito)
+        .values({
+          credito_id: credito.credito_id,
+          numero_cuota: nextNumeroCuotaCierre,
+          fecha_vencimiento: new Date().toLocaleDateString("sv-SE", {
+            timeZone: "America/Guatemala",
+          }),
+          liquidado_inversionistas: false,
+          pagado: true,
+        })
+        .returning();
+
+      // 12.2 Enlazar el pago de cierre a la cuota recién creada (cuota correlativa "pagada"),
+      // para que el cierre quede asociado a una cuota limpia y no a una cuota vigente del plan.
+      if (nuevoPago?.pago_id && cuotaCierre?.cuota_id) {
+        await tx
+          .update(pagos_credito)
+          .set({ cuota_id: cuotaCierre.cuota_id })
+          .where(eq(pagos_credito.pago_id, nuevoPago.pago_id));
+      }
+
+      // 12. Las cuotas no pagadas NO se borran: se conservan como histórico. Sus pagos quedaron
+      //     anulados (paymentFalse=true) en el paso 11, así que no aportan saldo en las vistas activas.
+
+      // 12.5 Distribuir abono a capital en tabla espejo (CANCELACION)
+      await distribuirAbonoCapitalEspejo(
+        credito.credito_id,
+        abonoCapital.toString(),
+        "CANCELACION",
+        undefined,
+        tx,
+      );
+
+      // 13. Distribuir pago entre inversionistas (ANTES de reiniciar, necesita monto_aportado).
+      //     Si la suma de aportes es 0 (p.ej. crédito ya reseteado antes) la distribución lanza
+      //     excepción; la atrapamos para no abortar el cierre del crédito.
+      if (nuevoPago?.pago_id) {
+        try {
+          await insertPagosCreditoInversionistasV2(
+            nuevoPago.pago_id,
+            credito.credito_id,
+            undefined,
+            tx,
           );
-        } else {
-          throw err;
+        } catch (err) {
+          // Solo silenciamos el caso conocido y benigno: crédito SIN aportes (suma = 0),
+          // típico de un crédito ya reseteado antes. Cualquier otro fallo (inversionistas o
+          // pagos faltantes, error de DB, distribución a medias) SÍ se re-lanza: dejar el
+          // cierre sin liquidación de inversionistas e irreintentable sería peor.
+          const msg = err instanceof Error ? err.message : String(err);
+          if (
+            msg === "La suma de montos aportados es 0, no se puede distribuir"
+          ) {
+            console.warn(
+              `⚠️ Distribución a inversionistas omitida (crédito ${credito.credito_id} sin aportes).`,
+            );
+          } else {
+            throw err;
+          }
         }
       }
-    }
 
-    // 14. Reiniciar creditos_inversionistas (no espejo)
-    await db
-      .update(creditos_inversionistas)
-      .set({
-        monto_aportado: "0",
-        monto_inversionista: "0",
-        monto_cash_in: "0",
-        iva_inversionista: "0",
-        iva_cash_in: "0",
-      })
-      .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
+      // 14. Reiniciar creditos_inversionistas (no espejo)
+      await tx
+        .update(creditos_inversionistas)
+        .set({
+          monto_aportado: "0",
+          monto_inversionista: "0",
+          monto_cash_in: "0",
+          iva_inversionista: "0",
+          iva_cash_in: "0",
+        })
+        .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
 
-    // 15. Insertar boletas si existen
-    if (
-      urlCompletas &&
-      urlCompletas.length > 0 &&
-      nuevoPago &&
-      nuevoPago?.pago_id
-    ) {
-      await db.insert(boletas).values(
-        urlCompletas.map((url) => ({
-          pago_id: nuevoPago?.pago_id,
-          url_boleta: url,
-        }))
-      );
-    }
+      // 15. Insertar boletas si existen
+      if (
+        urlCompletas &&
+        urlCompletas.length > 0 &&
+        nuevoPago &&
+        nuevoPago?.pago_id
+      ) {
+        await tx.insert(boletas).values(
+          urlCompletas.map((url) => ({
+            pago_id: nuevoPago?.pago_id,
+            url_boleta: url,
+          })),
+        );
+      }
 
-    // 16. Al final: zerear el crédito y ponerle el status
-    const fechaHoyGT = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
+      // 16. Al final: zerear el crédito y ponerle el status
+      const fechaHoyGT = new Date().toLocaleDateString("sv-SE", {
+        timeZone: "America/Guatemala",
+      });
 
-    if (statusCredit === "INCOBRABLE") {
-      const capitalIncobrable = new Big(montoIncobrable!);
+      if (statusCredit === "INCOBRABLE") {
+        const capitalIncobrable = new Big(montoIncobrableNormalizado!);
 
-      // 16a. Actualizar crédito: capital = incobrable, lo demás en 0 (preservamos porcentaje_interes)
-      await withCapitalContext(null, "CASTIGO", null, (tx) =>
-        tx
+        // 16a. Actualizar crédito: capital = incobrable, lo demás en 0 (preservamos porcentaje_interes)
+        await setCapitalSource(tx, "CASTIGO", null, null);
+        await tx
           .update(creditos)
           .set({
             capital: capitalIncobrable.toString(),
@@ -2331,72 +2442,73 @@ export async function resetCredit({
             plazo: 1,
             statusCredit: "INCOBRABLE",
           })
-          .where(eq(creditos.credito_id, creditId))
-      );
+          .where(eq(creditos.credito_id, creditId));
 
-      // 16b. Crear cuota pendiente para el monto incobrable (correlativa)
-      const [maxCuotaRowInc] = await db
-        .select({ max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)` })
-        .from(cuotas_credito)
-        .where(eq(cuotas_credito.credito_id, credito.credito_id));
-      const nextNumeroCuotaPendiente = Number(maxCuotaRowInc?.max ?? 0) + 1;
+        // 16b. Crear cuota pendiente para el monto incobrable (correlativa)
+        const [maxCuotaRowInc] = await tx
+          .select({
+            max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)`,
+          })
+          .from(cuotas_credito)
+          .where(eq(cuotas_credito.credito_id, credito.credito_id));
+        const nextNumeroCuotaPendiente = Number(maxCuotaRowInc?.max ?? 0) + 1;
 
-      const [cuotaPendiente] = await db
-        .insert(cuotas_credito)
-        .values({
+        const [cuotaPendiente] = await tx
+          .insert(cuotas_credito)
+          .values({
+            credito_id: credito.credito_id,
+            numero_cuota: nextNumeroCuotaPendiente,
+            fecha_vencimiento: fechaHoyGT,
+            pagado: false,
+            liquidado_inversionistas: false,
+          })
+          .returning();
+
+        // 16c. Crear pago placeholder (no pagado) con capital_restante = incobrable
+        await tx.insert(pagos_credito).values({
           credito_id: credito.credito_id,
-          numero_cuota: nextNumeroCuotaPendiente,
-          fecha_vencimiento: fechaHoyGT,
+          cuota_id: cuotaPendiente.cuota_id,
+          cuota: capitalIncobrable.toString(),
+          cuota_interes: "0",
+          abono_capital: "0",
+          abono_interes: "0",
+          abono_iva_12: "0",
+          abono_interes_ci: "0",
+          abono_iva_ci: "0",
+          abono_seguro: "0",
+          abono_gps: "0",
+          pago_del_mes: "0",
+          monto_boleta: "0",
+          capital_restante: capitalIncobrable.toString(),
+          interes_restante: "0",
+          iva_12_restante: "0",
+          seguro_restante: "0",
+          gps_restante: "0",
+          total_restante: capitalIncobrable.toString(),
+          membresias: "0",
+          membresias_pago: "0",
+          membresias_mes: "0",
+          mora: "0",
+          monto_boleta_cuota: "0",
+          seguro_total: "0",
           pagado: false,
-          liquidado_inversionistas: false,
-        })
-        .returning();
+          registerBy: "SISTEMA-INCOBRABLE",
+          pagoConvenio: "0",
+          monto_aplicado: "0",
+          observaciones: `Pago base - Crédito marcado como incobrable (reset)`,
+        });
 
-      // 16c. Crear pago placeholder (no pagado) con capital_restante = incobrable
-      await db.insert(pagos_credito).values({
-        credito_id: credito.credito_id,
-        cuota_id: cuotaPendiente.cuota_id,
-        cuota: capitalIncobrable.toString(),
-        cuota_interes: "0",
-        abono_capital: "0",
-        abono_interes: "0",
-        abono_iva_12: "0",
-        abono_interes_ci: "0",
-        abono_iva_ci: "0",
-        abono_seguro: "0",
-        abono_gps: "0",
-        pago_del_mes: "0",
-        monto_boleta: "0",
-        capital_restante: capitalIncobrable.toString(),
-        interes_restante: "0",
-        iva_12_restante: "0",
-        seguro_restante: "0",
-        gps_restante: "0",
-        total_restante: capitalIncobrable.toString(),
-        membresias: "0",
-        membresias_pago: "0",
-        membresias_mes: "0",
-        mora: "0",
-        monto_boleta_cuota: "0",
-        seguro_total: "0",
-        pagado: false,
-        registerBy: "SISTEMA-INCOBRABLE",
-        pagoConvenio: "0",
-        monto_aplicado: "0",
-        observaciones: `Pago base - Crédito marcado como incobrable (reset)`,
-      });
-
-      // 16d. Registrar en bad_debts
-      await db.insert(bad_debts).values({
-        credit_id: creditId,
-        motivo: cancelacion?.motivo ?? "Incobrable",
-        observaciones: cancelacion?.observaciones ?? "",
-        monto_incobrable: capitalIncobrable.toString(),
-      });
-    } else {
-      // CANCELADO: zerear todo (preservamos porcentaje_interes)
-      await withCapitalContext(null, "CANCELACION", null, (tx) =>
-        tx
+        // 16d. Registrar en bad_debts
+        await tx.insert(bad_debts).values({
+          credit_id: creditId,
+          motivo: cancelacion?.motivo ?? "Incobrable",
+          observaciones: cancelacion?.observaciones ?? "",
+          monto_incobrable: capitalIncobrable.toString(),
+        });
+      } else {
+        // CANCELADO: zerear todo (preservamos porcentaje_interes)
+        await setCapitalSource(tx, "CANCELACION", null, null);
+        await tx
           .update(creditos)
           .set({
             capital: "0",
@@ -2413,15 +2525,17 @@ export async function resetCredit({
             otros: "0",
             statusCredit: "CANCELADO",
           })
-          .where(eq(creditos.credito_id, creditId))
-      );
-    }
+          .where(eq(creditos.credito_id, creditId));
+      }
+
+      return { nuevoPago, statusCredit };
+    });
 
     // 17. Retorno OK
     return {
       ok: true,
       message: statusCredit === "INCOBRABLE"
-        ? `Crédito reiniciado como incobrable. Deuda pendiente: ${montoIncobrable}`
+        ? `Crédito reiniciado como incobrable. Deuda pendiente: ${montoIncobrableNormalizado}`
         : "Crédito reiniciado y pago creado exitosamente.",
     };
   } catch (error) {

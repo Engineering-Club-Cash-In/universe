@@ -1,8 +1,12 @@
 import { describe, expect, it, mock } from "bun:test";
+import { lockPoolMock } from "../utils/testMocks";
 
 mock.module("../database", () => ({
   db: {},
   client: {},
+  // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
+  // aunque estos tests no lo usen. Ver testMocks.ts.
+  lockPool: lockPoolMock,
 }));
 
 mock.module("./credits", () => ({

@@ -67,11 +67,21 @@ export function cuiValido(cui: string | null | undefined): boolean {
 }
 
 /**
+ * Quita el formato de un DPI (espacios) sin validarlo.
+ * Es la forma canónica de un DPI: así se guarda y así se compara. Los DPI
+ * viejos quedaron guardados con espacios ("3460 66638 0101"), por lo que
+ * cualquier búsqueda debe normalizar ambos lados. Ver `eqDpi`.
+ */
+export function normalizarDpi(dpi: string): string {
+	return dpi.replace(/\s/g, "");
+}
+
+/**
  * Normaliza un DPI: elimina espacios y valida.
  * Retorna el DPI limpio si es válido, o lanza el mensaje de error.
  */
 export function normalizarYValidarDpi(dpi: string): string {
-	const dpiLimpio = dpi.replace(/\s/g, "");
+	const dpiLimpio = normalizarDpi(dpi);
 
 	if (dpiLimpio.length !== 13) {
 		return "DPI inválido, debe tener 13 dígitos";
@@ -89,7 +99,7 @@ export function normalizarYValidarDpi(dpi: string): string {
  * Útil para distinguir entre éxito y error.
  */
 export function validarDpi(dpi: string): { valid: true; dpiLimpio: string } | { valid: false; error: string } {
-	const dpiLimpio = dpi.replace(/\s/g, "");
+	const dpiLimpio = normalizarDpi(dpi);
 
 	if (dpiLimpio.length !== 13) {
 		return { valid: false, error: "DPI inválido, debe tener 13 dígitos" };

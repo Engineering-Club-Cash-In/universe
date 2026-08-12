@@ -31,11 +31,17 @@ import {
   inversionistasService,
   notificarContabilidadBoletas,
   formatMensajeFallido,
+  MODALIDAD_FACTURACION_LABELS,
   type Investor,
   type InvestorPayload,
+  type ModalidadFacturacion,
 } from "../services/services";
 import { useLiquidateByInvestor } from "../hooks/liquidateAllInvestor";
 import { useDownloadReporteNoLiquidados } from "../hooks/downloadReporteNoLiquidados";
+import {
+  useResolverModalidadFacturacionSpread,
+  useModalidadFacturacionSpreadByModalidad,
+} from "../hooks/useModalidadFacturacion";
 import { InvestorModal } from "./modalInvestor";
 import { useFalsePayments } from "../hooks/falsePayments";
 import {
@@ -321,9 +327,10 @@ export function TableInvestors() {
   }, [searchParams]);
 
   // Catálogo de inversionistas (para el filtro)
-  const { investors = [], loading: loadingCatalogs } = useCatalogs() as {
+  const { investors = [], loading: loadingCatalogs, refetch: refetchCatalogs } = useCatalogs() as {
     investors: Investor[];
     loading: boolean;
+    refetch: () => void;
   };
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "update">("create");
@@ -425,6 +432,7 @@ export function TableInvestors() {
           total_reinversion_interes:   mirrorSummaryData.subtotal.total_reinversion_interes,
           total_reinversion:           mirrorSummaryData.subtotal.total_reinversion,
           total_abono_general_interes: mirrorSummaryData.subtotal.total_abono_general_interes,
+          total_neto_impuestos:        mirrorSummaryData.subtotal.total_neto_impuestos ?? null,
         }
       : {
           total_abono_capital:         totalesData?.totales.total_abono_capital         ?? 0,
@@ -438,6 +446,7 @@ export function TableInvestors() {
           total_reinversion_interes:   totalesData?.totales.total_reinversion_interes   ?? 0,
           total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
           total_abono_general_interes: totalesData?.totales.total_abono_general_interes ?? 0,
+          total_neto_impuestos:        totalesData?.totales.total_neto_impuestos        ?? null,
         };
 
     return {
@@ -544,6 +553,7 @@ export function TableInvestors() {
       inversionista_id: inv.inversionista_id,
       nombre: inv.nombre_inversionista,
       emite_factura: inv.emite_factura,
+      descuenta_impuestos: inv.descuenta_impuestos ?? false,
       reinversion: inv.reinversion ?? false,
       banco: inv.banco_id ?? null,
       tipo_cuenta: inv.tipo_cuenta ?? "",
@@ -621,6 +631,77 @@ export function TableInvestors() {
     compraCarteraManualList.length > 0 &&
     compraCarteraManualList.every((c) => Number(c.monto) > 0);
 
+  // ─── Modalidad de Facturación ─────────────────────────────────────────
+  // Solo aplica a compra_cartera (el backend rechaza el campo en
+  // reinversión). Mismo patrón que el CRM: pre-elección automática por
+  // monto (vía /resolver), anulable manualmente entre los 8 brackets de la
+  // modalidad (vía /por-modalidad) — disponible tanto en modo automático
+  // como en "Asignación manual", a pedido del negocio.
+  const esCompraConModalidad = compraCarteraTipoOperacion === "compra_cartera";
+  const [compraCarteraModalidad, setCompraCarteraModalidad] =
+    useState<ModalidadFacturacion>("p2p_directa");
+  const [compraCarteraSpreadOverrideId, setCompraCarteraSpreadOverrideId] =
+    useState<number | null>(null);
+
+  const compraCarteraMontoEfectivo = compraCarteraManual
+    ? montoTotalManual
+    : Number(compraCarteraMonto) || 0;
+
+  // Debounce del monto que alimenta la resolución: evita una ráfaga de
+  // requests por cada dígito tecleado y el parpadeo del warning.
+  const [compraCarteraMontoDebounced, setCompraCarteraMontoDebounced] =
+    useState(compraCarteraMontoEfectivo);
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setCompraCarteraMontoDebounced(compraCarteraMontoEfectivo),
+      350,
+    );
+    return () => clearTimeout(timer);
+  }, [compraCarteraMontoEfectivo]);
+
+  // Se resetea la anulación manual al cambiar monto o modalidad, para no
+  // arrastrar una elección que ya no aplica al contexto nuevo.
+  useEffect(() => {
+    setCompraCarteraSpreadOverrideId(null);
+  }, [compraCarteraModalidad, compraCarteraMontoDebounced]);
+
+  const modalidadResolverQuery = useResolverModalidadFacturacionSpread(
+    compraCarteraMontoDebounced,
+    compraCarteraOpen && esCompraConModalidad,
+  );
+  const modalidadPorModalidadQuery = useModalidadFacturacionSpreadByModalidad(
+    compraCarteraModalidad,
+    compraCarteraOpen && esCompraConModalidad,
+  );
+  const compraCarteraOverrideRow = compraCarteraSpreadOverrideId
+    ? modalidadPorModalidadQuery.data?.find(
+        (r) => r.id === compraCarteraSpreadOverrideId,
+      )
+    : undefined;
+  const compraCarteraSpreadRow =
+    compraCarteraOverrideRow ??
+    modalidadResolverQuery.data?.find(
+      (r) => r.modalidad === compraCarteraModalidad,
+    );
+  const compraCarteraPctInvCalc = compraCarteraSpreadRow
+    ? Number(compraCarteraSpreadRow.spread)
+    : undefined;
+  const compraCarteraPctCashInCalc =
+    compraCarteraPctInvCalc !== undefined
+      ? 100 - compraCarteraPctInvCalc
+      : undefined;
+  // Con monto ingresado pero sin bracket válido (ej. < Q1,000) y SIN
+  // anulación manual activa, el backend responde sin filas: bloqueamos el
+  // confirmar. Con override activo no aplica (el operador ya eligió una
+  // fila válida, sin importar el monto).
+  const compraCarteraBracketFaltante =
+    esCompraConModalidad &&
+    !compraCarteraSpreadOverrideId &&
+    !modalidadResolverQuery.isLoading &&
+    !modalidadResolverQuery.isError &&
+    compraCarteraMontoDebounced > 0 &&
+    !compraCarteraSpreadRow;
+
   // Inversionista objetivo para los botones del header: el de la lista filtrada (currentInv)
   // o, si no tiene créditos y no aparece en la lista, el del catálogo (para igual permitir editar/comprar)
   const headerInv = useMemo(() => {
@@ -634,6 +715,7 @@ export function TableInvestors() {
       inversionista_id: cat.inversionista_id,
       nombre_inversionista: cat.nombre,
       emite_factura: cat.emite_factura,
+      descuenta_impuestos: cat.descuenta_impuestos ?? false,
       reinversion: cat.reinversion,
       banco_id: cat.banco,
       tipo_cuenta: cat.tipo_cuenta,
@@ -666,6 +748,7 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
     setSelectedInvestorData(undefined);
     refetch();
     refetchTotales(); // Refresca la tabla y totales después de crear/editar
+    refetchCatalogs(); // El catálogo alimenta la edición vía headerInv; sin esto re-editar pisa los flags con datos viejos
   };
   return (
   <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
@@ -1156,7 +1239,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                         ) : (
                             <FileSpreadsheet className="w-4 h-4" />
                         )}
-                        No Liquidados
+                        Preview Liquidación
                     </button>
 
                     <button
@@ -1228,6 +1311,17 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   </div>
                 </div>
               </div>
+
+              {subtotales.total_neto_impuestos != null && (
+                <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-violet-100"}`}>
+                  <div className="text-xs mb-1 font-semibold text-blue-900">
+                    Neto de impuestos
+                  </div>
+                  <div className={`font-bold text-lg ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
+                    {inv.currencySymbol} {Number(subtotales.total_neto_impuestos).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              )}
 
               <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-green-100"}`}>
                 <div className="text-xs mb-1 font-semibold text-blue-900">
@@ -1666,7 +1760,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-green-700">📈 IVA</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-green-50 rounded px-1 text-sm font-bold text-green-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.currencySymbol} {inv.emite_factura
+                                        {inv.currencySymbol} {inv.descuenta_impuestos
+                                          ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
+                                          : inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
                                           : "0.00"}
                                       </div>
@@ -1682,7 +1778,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-yellow-700">📉 ISR</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-yellow-50 rounded px-1 text-sm font-bold text-yellow-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.currencySymbol} {!inv.emite_factura
+                                        {inv.currencySymbol} {inv.descuenta_impuestos || !inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.07).toFixed(2)
                                           : "0.00"}
                                       </div>
@@ -1817,9 +1913,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         {(() => {
           const s = isDraft ? subtotales : (inv.subtotal || subtotales);
           const isEmite = inv.emite_factura;
-          const displayIvaIsr = isEmite ? Number(s.total_abono_iva) : -Number(s.total_isr);
-          const displayCuotaSin = Number(s.total_abono_capital) + Number(s.total_abono_interes) + displayIvaIsr;
-          const displayCuotaCon = displayCuotaSin - Number(s.total_reinversion);
+          const isDescuenta = (inv as any).descuenta_impuestos === true;
+          // Usar la cuota que YA calcula el backend en vez de re-derivarla: con
+          // descuenta_impuestos el interés viene neto y volver a sumar IVA/restar
+          // ISR encima lo doble-ajustaba (mostraba plata equivocada).
+          const displayCuotaSin = Number(s.total_cuota_sin_reinversion ?? 0);
+          const displayCuotaCon = Number(
+            s.total_cuota_con_reinversion ?? (displayCuotaSin - Number(s.total_reinversion ?? 0))
+          );
+          // "Interés ajustado" = el neto que ya calcula el backend (int+IVA, int−ISR,
+          // o int×0.93 (solo ISR) con descuenta_impuestos).
+          const interesAjustadoLabel = isDescuenta ? "- ISR" : isEmite ? "+ IVA" : "- ISR";
+          const interesAjustadoValor = Number(s.total_abono_general_interes ?? 0);
 
           return (
             <>
@@ -1837,9 +1942,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               </div>
               {/* 🆕 Mobile: Interés Ajustado */}
               <div>
-                <span className="font-bold text-indigo-900">Interés {isEmite ? "+ IVA" : "- ISR"}: </span>
+                <span className="font-bold text-indigo-900">Interés {interesAjustadoLabel}: </span>
                 <span className="text-indigo-700 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_interes) + displayIvaIsr).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {interesAjustadoValor.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>
@@ -2574,6 +2679,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           if (!open) {
             setCompraCarteraOpen(false);
             setCompraCarteraInvId(null);
+            setCompraCarteraSpreadOverrideId(null);
           }
         }}
       >
@@ -2647,6 +2753,40 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </SelectContent>
               </Select>
             </div>
+            {esCompraConModalidad && (
+              <div>
+                <label
+                  htmlFor="compra-modalidad-fact"
+                  className="text-sm font-medium text-gray-700"
+                >
+                  Modalidad de Facturación
+                </label>
+                <Select
+                  value={compraCarteraModalidad}
+                  onValueChange={(v) =>
+                    setCompraCarteraModalidad(v as ModalidadFacturacion)
+                  }
+                >
+                  <SelectTrigger
+                    id="compra-modalidad-fact"
+                    className="mt-1 w-full !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="!bg-white !border-gray-200 !text-gray-900 z-[70]">
+                    <SelectItem value="p2p_directa">
+                      {MODALIDAD_FACTURACION_LABELS.p2p_directa}
+                    </SelectItem>
+                    <SelectItem value="factura_cube">
+                      {MODALIDAD_FACTURACION_LABELS.factura_cube}
+                    </SelectItem>
+                    <SelectItem value="factura_cube_pequeno">
+                      {MODALIDAD_FACTURACION_LABELS.factura_cube_pequeno}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             {/* Toggle: Asignación manual */}
             <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
               <div className="pr-3">
@@ -2754,52 +2894,130 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 />
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="compra-pct-inv" className="text-sm font-medium text-gray-700">
-                  % Inversionista
-                </label>
-                <Input
-                  id="compra-pct-inv"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="1"
-                  value={compraCarteraPctInv}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setCompraCarteraPctInv(val);
-                    const num = Number(val);
-                    if (!isNaN(num) && num >= 0 && num <= 100) {
-                      setCompraCarteraPctCashIn(String(100 - num));
-                    }
-                  }}
-                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
-                />
+            {esCompraConModalidad ? (
+              // % Inversionista: pre-elegido por el sistema según monto +
+              // modalidad, pero editable — el combobox solo permite elegir
+              // entre los spreads válidos de la modalidad actual (los 8
+              // brackets), sin importar si corresponde al monto. % Cash In
+              // y Tasa se derivan del spread elegido.
+              compraCarteraBracketFaltante ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  El monto ingresado no cae en ningún rango del catálogo
+                  (mínimo Q1,000). Ajusta el monto.
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label
+                        htmlFor="compra-pct-inv"
+                        className="text-sm font-medium text-gray-700"
+                      >
+                        % Inversionista
+                      </label>
+                      <Select
+                        value={compraCarteraSpreadRow?.id?.toString() ?? ""}
+                        onValueChange={(v) =>
+                          setCompraCarteraSpreadOverrideId(Number(v))
+                        }
+                      >
+                        <SelectTrigger
+                          id="compra-pct-inv"
+                          className="mt-1 w-full !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                        >
+                          {/* Texto explícito: Radix solo registra el texto de
+                              un SelectItem cuando el dropdown se abre al menos
+                              una vez, así que un valor pre-seleccionado por
+                              monto (sin que el usuario haya abierto el combo)
+                              se vería en blanco si dependemos del lookup automático. */}
+                          <SelectValue placeholder="—">
+                            {compraCarteraSpreadRow
+                              ? `${Number(compraCarteraSpreadRow.spread).toFixed(4)}%`
+                              : undefined}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent className="!bg-white !border-gray-200 !text-gray-900 z-[70]">
+                          {modalidadPorModalidadQuery.data?.map((row) => (
+                            <SelectItem key={row.id} value={row.id.toString()}>
+                              {Number(row.spread).toFixed(4)}%
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">
+                        % Cash In
+                      </label>
+                      <div className="mt-1 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800">
+                        {compraCarteraPctCashInCalc !== undefined
+                          ? `${compraCarteraPctCashInCalc.toFixed(4)}%`
+                          : "—"}
+                      </div>
+                    </div>
+                  </div>
+                  {compraCarteraSpreadRow && (
+                    <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                      <span className="text-xs font-medium text-emerald-700">
+                        Tasa del inversionista
+                      </span>
+                      <span className="text-sm font-bold text-emerald-800">
+                        {Number(compraCarteraSpreadRow.tasa).toFixed(4)}%
+                      </span>
+                    </div>
+                  )}
+                </>
+              )
+            ) : (
+              // Reinversión: la modalidad de facturación no aplica (el
+              // backend la rechaza), el % se sigue ingresando a mano.
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="compra-pct-inv" className="text-sm font-medium text-gray-700">
+                    % Inversionista
+                  </label>
+                  <Input
+                    id="compra-pct-inv"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="1"
+                    value={compraCarteraPctInv}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCompraCarteraPctInv(val);
+                      const num = Number(val);
+                      if (!isNaN(num) && num >= 0 && num <= 100) {
+                        setCompraCarteraPctCashIn(String(100 - num));
+                      }
+                    }}
+                    className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-gray-700">
+                    % Cash In
+                  </label>
+                  <Input
+                    id="compra-pct-cashin"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="1"
+                    value={compraCarteraPctCashIn}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCompraCarteraPctCashIn(val);
+                      const num = Number(val);
+                      if (!isNaN(num) && num >= 0 && num <= 100) {
+                        setCompraCarteraPctInv(String(100 - num));
+                      }
+                    }}
+                    className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                  />
+                </div>
               </div>
-              <div>
-                <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-gray-700">
-                  % Cash In
-                </label>
-                <Input
-                  id="compra-pct-cashin"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="1"
-                  value={compraCarteraPctCashIn}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setCompraCarteraPctCashIn(val);
-                    const num = Number(val);
-                    if (!isNaN(num) && num >= 0 && num <= 100) {
-                      setCompraCarteraPctInv(String(100 - num));
-                    }
-                  }}
-                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
-                />
-              </div>
-            </div>
+            )}
           </div>
           <DialogFooter>
             <button
@@ -2807,6 +3025,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               onClick={() => {
                 setCompraCarteraOpen(false);
                 setCompraCarteraInvId(null);
+                setCompraCarteraSpreadOverrideId(null);
               }}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
@@ -2818,7 +3037,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 agregarInvCredito.isPending ||
                 (compraCarteraManual
                   ? !manualValido
-                  : !compraCarteraMonto || Number(compraCarteraMonto) <= 0)
+                  : !compraCarteraMonto || Number(compraCarteraMonto) <= 0) ||
+                (esCompraConModalidad &&
+                  (!compraCarteraSpreadRow ||
+                    // El debounce todavía no alcanzó al monto tecleado: el
+                    // spread mostrado podría no corresponder al monto actual.
+                    compraCarteraMontoEfectivo !== compraCarteraMontoDebounced ||
+                    modalidadResolverQuery.isFetching))
               }
               onClick={() => {
                 if (!compraCarteraInvId) return;
@@ -2829,14 +3054,28 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   ? montoTotalManual
                   : Number(compraCarteraMonto);
                 if (compraCarteraManual ? !manualValido : montoTotal <= 0) return;
+                if (esCompraConModalidad && !compraCarteraSpreadRow) return;
                 agregarInvCredito.mutate(
                   {
                     inversionista_id: compraCarteraInvId,
                     monto_aportado: montoTotal,
                     tipo_operacion: compraCarteraTipoOperacion,
                     tipo_reinversion: compraCarteraTipoReinversion,
-                    porcentaje_inversion: Number(compraCarteraPctInv),
-                    porcentaje_cash_in: Number(compraCarteraPctCashIn),
+                    modalidad_facturacion: esCompraConModalidad
+                      ? compraCarteraModalidad
+                      : undefined,
+                    // Solo se manda con anulación manual explícita: sin
+                    // esto, el backend re-resuelve y valida por monto.
+                    modalidad_facturacion_spread_id: esCompraConModalidad
+                      ? compraCarteraOverrideRow?.id
+                      : undefined,
+                    // La modalidad ya define el % en compra_cartera (el
+                    // backend lo recalcula e ignora estos dos si vinieran);
+                    // en reinversión siguen siendo los que ingresa el operador.
+                    ...(!esCompraConModalidad && {
+                      porcentaje_inversion: Number(compraCarteraPctInv),
+                      porcentaje_cash_in: Number(compraCarteraPctCashIn),
+                    }),
                     ...(compraCarteraManual && {
                       manual: compraCarteraManualList.map((c) => ({
                         credito_id: c.credito_id,
@@ -2853,6 +3092,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       );
                       setCompraCarteraOpen(false);
                       setCompraCarteraInvId(null);
+                      setCompraCarteraSpreadOverrideId(null);
                       refetch();
                       refetchTotales();
                     },

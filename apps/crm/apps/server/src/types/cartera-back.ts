@@ -113,7 +113,7 @@ export interface CreateCreditoInput {
 	no_poliza?: string;
 	aseguradora?: string;
 	como_se_entero?: string;
-	dia_pago_mensual?: 15 | 30;
+	dia_pago_mensual?: number;
 	membresias_pago?: number;
 	categoria?: string;
 	nit?: string;
@@ -575,6 +575,10 @@ export interface CarteraConvenioListado {
 
 export interface CreditoDirectoResponse {
 	credito: CarteraCredito;
+	contractSummary?: {
+		originalPrincipal?: string | null;
+		installment?: string | null;
+	};
 	usuario: CarteraUsuario;
 	asesor: CarteraAsesorCredito | null;
 	cuotasPagadas: CarteraCuotaCredito[];
@@ -622,6 +626,8 @@ export interface CarteraCuotaCredito {
 	pago?: CarteraPagoCredito;
 	// Campos adicionales de pago (opcionales)
 	pago_id?: number;
+	cuota?: string | null;
+	validationStatus?: ValidationStatusEnum | null;
 	monto_boleta?: string; // decimal
 	abono_capital?: string; // decimal
 	abono_interes?: string; // decimal
@@ -1327,6 +1333,10 @@ export interface ResumenGlobalInversionista {
 	total_abono_interes: string;
 	total_abono_iva: string;
 	total_isr: string;
+	/** true si al inversionista se le descuentan impuestos del interés. */
+	descuenta_impuestos?: boolean;
+	/** Interés neto de impuestos (interés × 0.93, solo ISR). Null cuando no descuenta impuestos. */
+	total_neto_impuestos?: number | string | null;
 	total_cuota?: string;
 	total_a_recibir_sin_reinversion: string;
 	total_reinversion: string;
@@ -1334,6 +1344,7 @@ export interface ResumenGlobalInversionista {
 	boleta_pendiente: BoletaPagoInversionista | null;
 	boleta_liquidacion?: BoletaPagoInversionista | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
+	reporte_liquidacion_url?: string | null;
 }
 
 // ============================================================================

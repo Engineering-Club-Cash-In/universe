@@ -12,7 +12,7 @@ import {
 	Shield,
 	Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { InvestorStatusBadge } from "@/components/investments/InvestorStatusBadge";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,10 @@ import {
 } from "@/components/ui/select";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
+import {
+	MODALIDAD_FACTURACION_LABELS,
+	type ModalidadFacturacion,
+} from "@/lib/modalidad-facturacion";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/inversiones/liquidaciones/")({
@@ -65,11 +69,91 @@ function LiquidacionesInversionistas() {
 	// Compra de cartera opcional
 	const [hacerCompra, setHacerCompra] = useState(false);
 	const [formMontoCompra, setFormMontoCompra] = useState("");
-	const [formPctInversion, setFormPctInversion] = useState("70");
-	const [formPctCashIn, setFormPctCashIn] = useState("30");
-	const [formFechaCompra, setFormFechaCompra] = useState(
-		new Date().toISOString().split("T")[0],
-	);
+	const [formModalidadFacturacion, setFormModalidadFacturacion] =
+		useState<ModalidadFacturacion>("p2p_directa");
+	// Campo que cartera rechazó por duplicado (dpi | email | nombre): lo manda
+	// el backend en err.data.campo para marcar el input exacto.
+	const [campoDuplicado, setCampoDuplicado] = useState<{
+		campo: string;
+		mensaje: string;
+	} | null>(null);
+	const duplicadoEn = (campo: string) => campoDuplicado?.campo === campo;
+	// Al editar el dato que chocó, la marca deja de aplicar.
+	const limpiarDuplicado = (campo: string) => {
+		if (duplicadoEn(campo)) setCampoDuplicado(null);
+	};
+	const MensajeDuplicado = ({ campo }: { campo: string }) =>
+		duplicadoEn(campo) ? (
+			<p className="text-destructive text-xs">{campoDuplicado?.mensaje}</p>
+		) : null;
+
+	// Resuelve por monto las 3 filas del bracket (SQL, fuente única de
+	// verdad) y de ahí tomamos la de la modalidad elegida. Solo se necesita si
+	// el modal de crear está abierto, el toggle de compra activo y hay monto.
+	// Se debounza el monto que alimenta la query para no disparar un request
+	// por cada dígito tecleado (y el parpadeo del warning que eso causaba).
+	const formMontoCompraNum = Number(formMontoCompra) || 0;
+	const [formMontoCompraDebounced, setFormMontoCompraDebounced] =
+		useState(formMontoCompraNum);
+	useEffect(() => {
+		const timer = setTimeout(
+			() => setFormMontoCompraDebounced(formMontoCompraNum),
+			350,
+		);
+		return () => clearTimeout(timer);
+	}, [formMontoCompraNum]);
+	const modalidadResolverQuery = useQuery({
+		...orpc.resolverModalidadFacturacionSpread.queryOptions({
+			input: { monto: formMontoCompraDebounced },
+		}),
+		enabled: crearOpen && hacerCompra && formMontoCompraDebounced > 0,
+		staleTime: 5 * 60 * 1000,
+	});
+
+	// Anulación manual del % Inversionista: el operador puede elegir
+	// cualquiera de los 8 brackets de la modalidad (no solo el que
+	// corresponde al monto). null = usar la pre-elección automática del
+	// sistema. Se resetea al cambiar de modalidad o de monto para no
+	// arrastrar una elección que ya no aplica al contexto nuevo.
+	const [compraSpreadOverrideId, setCompraSpreadOverrideId] = useState<
+		number | null
+	>(null);
+	useEffect(() => {
+		setCompraSpreadOverrideId(null);
+	}, [formModalidadFacturacion, formMontoCompraDebounced]);
+
+	const modalidadPorModalidadQuery = useQuery({
+		...orpc.listModalidadFacturacionSpreadByModalidad.queryOptions({
+			input: { modalidad: formModalidadFacturacion },
+		}),
+		enabled: crearOpen && hacerCompra,
+		staleTime: 5 * 60 * 1000,
+	});
+	const compraOverrideRow = compraSpreadOverrideId
+		? modalidadPorModalidadQuery.data?.find(
+				(r) => r.id === compraSpreadOverrideId,
+			)
+		: undefined;
+	const compraSpreadRow =
+		compraOverrideRow ??
+		modalidadResolverQuery.data?.find(
+			(r) => r.modalidad === formModalidadFacturacion,
+		);
+	const compraPctInvCalc = compraSpreadRow
+		? Number(compraSpreadRow.spread)
+		: undefined;
+	const compraPctCashInCalc =
+		compraPctInvCalc !== undefined ? 100 - compraPctInvCalc : undefined;
+	// Solo lo damos por "faltante" una vez que el query ya resolvió bien (si
+	// no, es carga o error, no bracket inválido) y sin anulación manual
+	// activa (con override, el operador ya eligió una fila válida).
+	const compraBracketFaltante =
+		hacerCompra &&
+		!compraSpreadOverrideId &&
+		!modalidadResolverQuery.isLoading &&
+		!modalidadResolverQuery.isError &&
+		formMontoCompraDebounced > 0 &&
+		!compraSpreadRow;
 
 	const queryClient = useQueryClient();
 
@@ -86,9 +170,9 @@ function LiquidacionesInversionistas() {
 		setFormMontoReinversion("");
 		setHacerCompra(false);
 		setFormMontoCompra("");
-		setFormPctInversion("70");
-		setFormPctCashIn("30");
-		setFormFechaCompra(new Date().toISOString().split("T")[0]);
+		setFormModalidadFacturacion("p2p_directa");
+		setCompraSpreadOverrideId(null);
+		setCampoDuplicado(null);
 	};
 
 	const crearMutation = useMutation({
@@ -106,7 +190,27 @@ function LiquidacionesInversionistas() {
 			});
 		},
 		onError: (err: any) => {
-			toast.error(err?.message ?? "Error al crear inversionista");
+			// El backend ya traduce los rechazos de cartera (DPI/email/nombre
+			// duplicado, validaciones) a mensajes legibles; solo caemos al texto
+			// genérico cuando el error no trae ninguno.
+			const mensaje: string | undefined = err?.message;
+			const esGenerico =
+				!mensaje || mensaje.toLowerCase() === "internal server error";
+			const texto = esGenerico
+				? "No se pudo crear el inversionista. Verifica los datos e intenta de nuevo."
+				: (mensaje as string);
+
+			// Duplicado: además del toast, marcamos el input culpable y lo
+			// enfocamos para que corrijan ahí mismo.
+			const campo: string | undefined = err?.data?.campo;
+			if (campo) {
+				setCampoDuplicado({ campo, mensaje: texto });
+				document.getElementById(`inv-${campo}`)?.focus();
+			} else {
+				setCampoDuplicado(null);
+			}
+
+			toast.error(texto, { duration: 8000 });
 		},
 	});
 
@@ -340,9 +444,17 @@ function LiquidacionesInversionistas() {
 							<Input
 								id="inv-nombre"
 								value={formNombre}
-								onChange={(e) => setFormNombre(e.target.value)}
+								onChange={(e) => {
+									setFormNombre(e.target.value);
+									limpiarDuplicado("nombre");
+								}}
 								placeholder="Nombre completo"
+								aria-invalid={duplicadoEn("nombre")}
+								className={
+									duplicadoEn("nombre") ? "border-destructive" : undefined
+								}
 							/>
+							<MensajeDuplicado campo="nombre" />
 						</div>
 
 						{/* DPI + Email */}
@@ -352,9 +464,17 @@ function LiquidacionesInversionistas() {
 								<Input
 									id="inv-dpi"
 									value={formDpi}
-									onChange={(e) => setFormDpi(e.target.value)}
+									onChange={(e) => {
+										setFormDpi(e.target.value);
+										limpiarDuplicado("dpi");
+									}}
 									placeholder="Número de DPI"
+									aria-invalid={duplicadoEn("dpi")}
+									className={
+										duplicadoEn("dpi") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeDuplicado campo="dpi" />
 							</div>
 							<div className="space-y-1.5">
 								<Label htmlFor="inv-email">Email</Label>
@@ -362,9 +482,17 @@ function LiquidacionesInversionistas() {
 									id="inv-email"
 									type="email"
 									value={formEmail}
-									onChange={(e) => setFormEmail(e.target.value)}
+									onChange={(e) => {
+										setFormEmail(e.target.value);
+										limpiarDuplicado("email");
+									}}
 									placeholder="correo@ejemplo.com"
+									aria-invalid={duplicadoEn("email")}
+									className={
+										duplicadoEn("email") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeDuplicado campo="email" />
 							</div>
 						</div>
 
@@ -500,65 +628,104 @@ function LiquidacionesInversionistas() {
 
 							{hacerCompra && (
 								<div className="space-y-3">
-									<div className="grid grid-cols-2 gap-3">
-										<div className="space-y-1.5">
-											<Label htmlFor="inv-monto-compra">Monto aportado *</Label>
-											<CurrencyInput
-												id="inv-monto-compra"
-												value={formMontoCompra}
-												onChange={setFormMontoCompra}
-											/>
-										</div>
-										<div className="space-y-1.5">
-											<Label htmlFor="inv-fecha-compra">
-												Fecha participación
-											</Label>
-											<Input
-												id="inv-fecha-compra"
-												type="date"
-												value={formFechaCompra}
-												onChange={(e) => setFormFechaCompra(e.target.value)}
-											/>
-										</div>
+									<div className="space-y-1.5">
+										<Label htmlFor="inv-monto-compra">Monto aportado *</Label>
+										<CurrencyInput
+											id="inv-monto-compra"
+											value={formMontoCompra}
+											onChange={setFormMontoCompra}
+										/>
 									</div>
-									<div className="grid grid-cols-2 gap-3">
-										<div className="space-y-1.5">
-											<Label htmlFor="inv-pct-inv">% Inversiónista</Label>
-											<Input
-												id="inv-pct-inv"
-												type="number"
-												min="0"
-												max="100"
-												value={formPctInversion}
-												onChange={(e) => {
-													const val = e.target.value;
-													setFormPctInversion(val);
-													const num = Number(val);
-													if (!Number.isNaN(num)) {
-														setFormPctCashIn(String(100 - num));
-													}
-												}}
-											/>
-										</div>
-										<div className="space-y-1.5">
-											<Label htmlFor="inv-pct-cci">% CCI</Label>
-											<Input
-												id="inv-pct-cci"
-												type="number"
-												min="0"
-												max="100"
-												value={formPctCashIn}
-												onChange={(e) => {
-													const val = e.target.value;
-													setFormPctCashIn(val);
-													const num = Number(val);
-													if (!Number.isNaN(num)) {
-														setFormPctInversion(String(100 - num));
-													}
-												}}
-											/>
-										</div>
+									<div className="space-y-1.5">
+										<Label htmlFor="inv-modalidad-fact">
+											Modalidad de Facturación
+										</Label>
+										<Select
+											value={formModalidadFacturacion}
+											onValueChange={(v) =>
+												setFormModalidadFacturacion(v as ModalidadFacturacion)
+											}
+										>
+											<SelectTrigger id="inv-modalidad-fact">
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="p2p_directa">
+													{MODALIDAD_FACTURACION_LABELS.p2p_directa}
+												</SelectItem>
+												<SelectItem value="factura_cube">
+													{MODALIDAD_FACTURACION_LABELS.factura_cube}
+												</SelectItem>
+												<SelectItem value="factura_cube_pequeno">
+													{MODALIDAD_FACTURACION_LABELS.factura_cube_pequeno}
+												</SelectItem>
+											</SelectContent>
+										</Select>
 									</div>
+									{/* % Inversionista: pre-elegido por el sistema, pero editable
+									    entre los spreads válidos de la modalidad actual. */}
+									{compraBracketFaltante ? (
+										<p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+											El monto ingresado no cae en ningún rango del catálogo
+											(mínimo Q1,000). Ajusta el monto.
+										</p>
+									) : (
+										<>
+											<div className="grid grid-cols-2 gap-3">
+												<div className="space-y-1.5">
+													<Label htmlFor="inv-pct-inv">% Inversiónista</Label>
+													<Select
+														value={compraSpreadRow?.id?.toString() ?? ""}
+														onValueChange={(v) =>
+															setCompraSpreadOverrideId(Number(v))
+														}
+													>
+														<SelectTrigger id="inv-pct-inv">
+															{/* Texto explícito: Radix solo registra el texto
+															    de un SelectItem cuando el dropdown se abre al
+															    menos una vez, así que un valor pre-seleccionado
+															    por monto (sin que el usuario haya abierto el
+															    combo) se vería en blanco si dependemos del
+															    lookup automático. */}
+															<SelectValue placeholder="—">
+																{compraSpreadRow
+																	? `${Number(compraSpreadRow.spread).toFixed(4)}%`
+																	: undefined}
+															</SelectValue>
+														</SelectTrigger>
+														<SelectContent>
+															{modalidadPorModalidadQuery.data?.map((row) => (
+																<SelectItem
+																	key={row.id}
+																	value={row.id.toString()}
+																>
+																	{Number(row.spread).toFixed(4)}%
+																</SelectItem>
+															))}
+														</SelectContent>
+													</Select>
+												</div>
+												<div className="space-y-1.5">
+													<Label>% CCI</Label>
+													<div className="rounded-md border bg-muted px-3 py-2 text-sm font-semibold tabular-nums">
+														{compraPctCashInCalc !== undefined
+															? `${compraPctCashInCalc.toFixed(4)}%`
+															: "—"}
+													</div>
+												</div>
+											</div>
+											{compraSpreadRow && (
+												<div className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+													<span className="text-xs font-medium text-emerald-700">
+														Tasa del inversionista
+													</span>
+													<span className="text-sm font-bold text-emerald-800 tabular-nums">
+														{Number(compraSpreadRow.tasa).toFixed(4)}%
+													</span>
+												</div>
+											)}
+										</>
+									)}
 								</div>
 							)}
 						</div>
@@ -579,9 +746,16 @@ function LiquidacionesInversionistas() {
 								crearMutation.isPending ||
 								!formNombre.trim() ||
 								(hacerCompra &&
-									(!formMontoCompra || Number(formMontoCompra) <= 0))
+									(!formMontoCompra ||
+										Number(formMontoCompra) <= 0 ||
+										// Con compra activa exigimos un bracket válido.
+										!compraSpreadRow ||
+										// El debounce todavía no alcanzó al monto tecleado.
+										formMontoCompraNum !== formMontoCompraDebounced ||
+										modalidadResolverQuery.isFetching))
 							}
 							onClick={() => {
+								if (hacerCompra && !compraSpreadRow) return;
 								crearMutation.mutate({
 									nombre: formNombre.trim(),
 									dpi: formDpi.trim() || undefined,
@@ -599,14 +773,13 @@ function LiquidacionesInversionistas() {
 									montoCompraCartera: hacerCompra
 										? Number(formMontoCompra)
 										: undefined,
-									porcentajeInversion: hacerCompra
-										? Number(formPctInversion)
+									modalidadFacturacion: hacerCompra
+										? formModalidadFacturacion
 										: undefined,
-									porcentajeCashIn: hacerCompra
-										? Number(formPctCashIn)
-										: undefined,
-									fechaInicioParticipacion: hacerCompra
-										? formFechaCompra || undefined
+									// Solo se manda con anulación manual explícita: sin
+									// esto, el backend re-resuelve y valida por monto.
+									modalidadFacturacionSpreadId: hacerCompra
+										? compraOverrideRow?.id
 										: undefined,
 								});
 							}}

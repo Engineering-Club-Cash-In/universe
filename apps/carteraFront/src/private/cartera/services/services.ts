@@ -15,6 +15,7 @@ export interface InvestorPayload {
   inversionista_id?: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: number | null;
   dpi:number | null;
@@ -30,6 +31,7 @@ export interface InvestorResponse {
   inversionista_id: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
@@ -704,6 +706,7 @@ export interface Investor {
   inversionista_id: number;
   nombre: string;
   emite_factura: boolean;
+  descuenta_impuestos?: boolean;
   reinversion: boolean;          // 🔹 nuevo campo
   banco: string | null;          // 🔹 nuevo campo
   tipo_cuenta: string | null;    // 🔹 nuevo campo
@@ -730,6 +733,13 @@ export interface InversionistaPayload {
   porcentaje_inversion: number;
   fecha_inicio_participacion?: string;
   cuota_inversionista?: number;
+  /**
+   * Inversionista agregado desde la edición del crédito (no estaba antes).
+   * El backend exige declararlo así para registrar la operación en
+   * compras_credito_inversionista; sin ese registro la liquidación descuadra.
+   */
+  es_nuevo?: boolean;
+  tipo_operacion?: "compra_cartera" | "reinversion";
 }
 
 export interface UpdateCreditBody {
@@ -937,6 +947,8 @@ export interface SubtotalInversionista {
   total_reinversion_interes: number;
   total_reinversion: number;
   total_abono_general_interes: number;
+  /** Interés neto de impuestos (interés × 0.93, solo ISR). Solo viene con valor cuando el inversionista tiene `descuenta_impuestos`; en caso contrario es null. */
+  total_neto_impuestos?: number | string | null;
 }
 
 // Un inversionista con sus créditos y sus subtotales
@@ -945,6 +957,7 @@ export interface InversionistaConCreditos {
   inversionista: string;
   nombre_inversionista: string;
   emite_factura: boolean;
+  descuenta_impuestos: boolean;
   creditos: CreditoInversionistaData[];
   subtotal: SubtotalInversionista;
     reinversion: boolean;           // 🔹 nuevo
@@ -1110,6 +1123,8 @@ export interface InvestorMirrorSummaryResponse {
     total_reinversion_capital: number;
     total_reinversion_interes: number;
     total_reinversion: number;
+    /** Interés neto de impuestos (interés × 0.93, solo ISR). Null cuando el inversionista no descuenta impuestos. */
+    total_neto_impuestos?: number | string | null;
   };
 }
 
@@ -2001,6 +2016,32 @@ export interface AplicarPagoResponse {
   success: boolean;
   applied?: boolean;
   message: string;
+  /**
+   * Estado del recálculo automático de recibos tras aplicar un abono a capital:
+   * - "error": falló — correr "Recalcular Pagos" manualmente.
+   * - "revisar_vencidas": el crédito tiene cuotas VENCIDAS sin aplicar — no se
+   *   recalculó nada para no repreciar el interés de meses ya debidos; revisar
+   *   con el equipo cómo tratarlas antes de recalcular.
+   * - "revisar_parciales": hay cuota con pago parcial YA APLICADO al crédito —
+   *   NI el recálculo automático NI el botón "Recalcular Pagos" son seguros ahí
+   *   (ambos redistribuirían el parcial); revisar el reparto con el equipo.
+   *   (Un pago solo registrado sin validar — parcial o completo — NO cae aquí:
+   *   ese sí se recalcula para que conta lo valide con el reparto nuevo.)
+   * - "revisar_sobrante": el abono se aplicó y se recalculó bien, pero hay un
+   *   pago PENDIENTE de validar cuyo monto supera lo que pide su recibo nuevo
+   *   (ej. pagó la cuota completa y el abono dejó el último recibo más chico)
+   *   — NO validar ese pago pendiente hasta decidir con el equipo si el
+   *   sobrante va como saldo a favor o devolución. Solo es un aviso: el botón
+   *   de validar sigue funcionando igual.
+   * - "omitido_solo_interes": crédito solo-interés, no aplica el recálculo.
+   */
+  recalculo_pendientes?:
+    | "ok"
+    | "error"
+    | "omitido_solo_interes"
+    | "revisar_vencidas"
+    | "revisar_parciales"
+    | "revisar_sobrante";
   data?: {
     credito_id: number;
     capital_anterior: string;
@@ -2173,6 +2214,8 @@ export interface LiquidacionResumen {
   emite_factura: boolean;
   reinversion: string;
   status?: "activo" | "inactivo" | "pendiente_devolucion";
+  /** true = inversionista interno/propio (no externo). */
+  permite_distribucion?: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -2180,6 +2223,10 @@ export interface LiquidacionResumen {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
+  /** true si al inversionista se le descuentan impuestos del interés. */
+  descuenta_impuestos?: boolean;
+  /** Interés neto de impuestos (interés × 0.93, solo ISR). Null cuando el inversionista no descuenta impuestos. */
+  total_neto_impuestos?: number | string | null;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_reinversion_capital?: number;
@@ -2201,6 +2248,7 @@ export async function getResumenGlobalLiquidaciones(params: {
   anio: number;
   estado?: string;
   incluirSinMovimiento?: boolean;
+  incluirInternos?: boolean;
 }): Promise<LiquidacionResumen[]> {
   const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
     params: {
@@ -2208,6 +2256,7 @@ export async function getResumenGlobalLiquidaciones(params: {
       anio: params.anio,
       estado: params.estado ?? "liquidated",
       ...(params.incluirSinMovimiento ? { incluirSinMovimiento: "true" } : {}),
+      ...(params.incluirInternos ? { incluirInternos: "true" } : {}),
     },
   });
   return data;
@@ -2224,6 +2273,7 @@ export async function descargarResumenLiquidacionesExcel(params: {
   anio: number;
   estado?: string;
   incluirSinMovimiento?: boolean;
+  incluirInternos?: boolean;
 }): Promise<ResumenLiquidacionesExcelResponse> {
   const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
     params: {
@@ -2232,6 +2282,7 @@ export async function descargarResumenLiquidacionesExcel(params: {
       estado: params.estado ?? "liquidated",
       excel: "true",
       ...(params.incluirSinMovimiento ? { incluirSinMovimiento: "true" } : {}),
+      ...(params.incluirInternos ? { incluirInternos: "true" } : {}),
     },
   });
   return data;
@@ -3916,6 +3967,7 @@ export interface CreditoEspejoPendiente {
   tiempo_restante_ms: number | null;
   status: "pendiente_reinversion" | "pendiente_compra_cartera" | "pendiente_revision" | string;
   tipo_reinversion: string | null;
+  modalidad_facturacion: ModalidadFacturacion | null;
   numero_credito_sifco: string;
   nombre_usuario: string;
   monto_aportado_nuevo: string | null;
@@ -4004,10 +4056,76 @@ export interface AgregarInversionistaCreditoPayload {
   fecha_inicio_participacion?: string;
   porcentaje_cash_in?: number;
   porcentaje_inversion?: number;
+  // Solo aplica cuando tipo_operacion === "compra_cartera". Si viene, el
+  // % Inversionista / % Cash In se calcula del catálogo (por monto_aportado,
+  // salvo que venga modalidad_facturacion_spread_id) y SE IGNORAN
+  // porcentaje_cash_in / porcentaje_inversion si vinieran.
+  modalidad_facturacion?: ModalidadFacturacion;
+  // Anulación manual: id exacto del bracket elegido (de los 8 de la
+  // modalidad), sin importar si corresponde al monto_aportado.
+  modalidad_facturacion_spread_id?: number;
   // MODO MANUAL: créditos específicos con su monto. Si viene, el backend
   // ignora el buscador de candidatos y opera solo sobre estos. La suma de los
   // montos debe igualar monto_aportado.
   manual?: { credito_id: number; monto: number }[];
+}
+
+// ============================================================================
+// MODALIDAD DE FACTURACIÓN
+// ============================================================================
+
+export type ModalidadFacturacion =
+  | "p2p_directa"
+  | "factura_cube"
+  | "factura_cube_pequeno";
+
+export const MODALIDAD_FACTURACION_LABELS: Record<ModalidadFacturacion, string> = {
+  p2p_directa: "Facturación P2P Directa",
+  factura_cube: "1 Factura a Cube",
+  factura_cube_pequeno: "1 Factura a Cube · Pequeño Contribuyente",
+};
+
+export interface ModalidadFacturacionSpreadRow {
+  id: number;
+  monto_desde: string;
+  monto_hasta: string | null; // null = sin límite superior
+  modalidad: ModalidadFacturacion;
+  spread: string; // % Inversionista de esa modalidad
+  tasa: string; // tasa final que ve el cliente
+}
+
+/**
+ * Resuelve, para un monto dado, las 3 filas del catálogo (una por
+ * modalidad) del bracket correspondiente — fuente única de verdad en SQL.
+ * Devuelve [] si el monto no cae en ningún bracket (backend responde 404).
+ */
+export async function resolverModalidadFacturacionSpreadService(
+  monto: number,
+): Promise<ModalidadFacturacionSpreadRow[]> {
+  try {
+    const res = await api.get<{ data: ModalidadFacturacionSpreadRow[] }>(
+      "/modalidad-facturacion/spread/resolver",
+      { params: { monto } },
+    );
+    return res.data.data ?? [];
+  } catch (err: any) {
+    if (err?.response?.status === 404) return [];
+    throw err;
+  }
+}
+
+/**
+ * Devuelve las 8 filas (una por bracket) de una modalidad, sin filtrar por
+ * monto. Fuente de opciones para la anulación manual del spread.
+ */
+export async function listModalidadFacturacionSpreadByModalidadService(
+  modalidad: ModalidadFacturacion,
+): Promise<ModalidadFacturacionSpreadRow[]> {
+  const res = await api.get<{ data: ModalidadFacturacionSpreadRow[] }>(
+    "/modalidad-facturacion/spread/por-modalidad",
+    { params: { modalidad } },
+  );
+  return res.data.data ?? [];
 }
 
 export interface AgregarInversionistaCreditoResponse {

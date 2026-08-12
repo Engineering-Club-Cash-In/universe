@@ -25,6 +25,7 @@ import {
 	type LeadSourceChannelType,
 } from "../lib/lead-sources";
 import {
+	adminProcedure,
 	closedCreditsReportProcedure,
 	efectividadPorEtapaReportProcedure,
 	metaColocacionReportProcedure,
@@ -248,7 +249,7 @@ function parseGuatemalaDateRange(startDate: string, endDate: string) {
  * Dashboard Ejecutivo
  * KPIs principales del negocio
  */
-export const getDashboardExecutivo = protectedProcedure
+export const getDashboardExecutivo = adminProcedure
 	.input(dateRangeSchema)
 	.handler(async () => {
 		// KPI 1: Cartera total activa

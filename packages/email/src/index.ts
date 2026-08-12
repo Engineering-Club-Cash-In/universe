@@ -245,6 +245,11 @@ export interface SendInvestorAddedToCreditsNotificationParams {
       | "reinversion_excedente"
       | "reinversion_variable"
       | null;
+    modalidad_facturacion?:
+      | "p2p_directa"
+      | "factura_cube"
+      | "factura_cube_pequeno"
+      | null;
   }>;
   currencySymbol?: string;
   usuarioNombre?: string;
@@ -285,6 +290,13 @@ export const sendInvestorAddedToCreditsNotification = async ({
       reinversion_variable: "Reinversión Variable",
     };
 
+    // Modalidad de facturación por operación (régimen fiscal elegido en la compra).
+    const modalidadFacturacionLabel: Record<string, string> = {
+      p2p_directa: "Facturación P2P Directa",
+      factura_cube: "1 Factura a Cube",
+      factura_cube_pequeno: "1 Factura a Cube · Pequeño Contribuyente",
+    };
+
     const filas = creditos
       .map(
         (c) => `
@@ -293,6 +305,11 @@ export const sendInvestorAddedToCreditsNotification = async ({
             <td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">${currencySymbol}${c.monto_asignado}</td>
             <td style="padding:8px;border:1px solid #e5e7eb;text-align:center;">${
               c.tipo_reinversion ? modalidadLabel[c.tipo_reinversion] ?? c.tipo_reinversion : "Tradicional"
+            }</td>
+            <td style="padding:8px;border:1px solid #e5e7eb;text-align:center;">${
+              c.modalidad_facturacion
+                ? modalidadFacturacionLabel[c.modalidad_facturacion] ?? c.modalidad_facturacion
+                : "—"
             }</td>
             <td style="padding:8px;border:1px solid #e5e7eb;text-align:center;">
               <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:600;">POR VALIDAR</span>
@@ -325,6 +342,7 @@ export const sendInvestorAddedToCreditsNotification = async ({
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:left;">Crédito</th>
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:right;">Monto asignado</th>
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:center;">Modalidad</th>
+              <th style="padding:8px;border:1px solid #e5e7eb;text-align:center;">Facturación</th>
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:center;">Estado</th>
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:center;">CUBE eliminado</th>
             </tr>
@@ -382,6 +400,11 @@ export interface SendCompraCarteraAcceptedNotificationParams {
       | "reinversion_variable"
       | "reinversion_excedente"
       | "reinversion_combinada"
+      | null;
+    modalidad_facturacion?:
+      | "p2p_directa"
+      | "factura_cube"
+      | "factura_cube_pequeno"
       | null;
     rows: Array<{
       inversionista_nombre: string;
@@ -446,6 +469,13 @@ export const sendCompraCarteraAcceptedNotification = async ({
       reinversion_combinada: "Reinversión Combinada",
     };
 
+    // Modalidad de facturación por operación (régimen fiscal de la compra).
+    const modalidadFacturacionLabelCreditos: Record<string, string> = {
+      p2p_directa: "Facturación P2P Directa",
+      factura_cube: "1 Factura a Cube",
+      factura_cube_pequeno: "1 Factura a Cube · Pequeño Contribuyente",
+    };
+
     // Una tabla por crédito: encabezado con cliente/SIFCO/capital/modalidad y filas de inversionistas.
     const poolsPorCredito = pool
       .map((grupo) => {
@@ -463,17 +493,23 @@ export const sendCompraCarteraAcceptedNotification = async ({
           ? modalidadLabelCreditos[grupo.tipo_reinversion] ?? grupo.tipo_reinversion
           : "Tradicional";
 
+        const facturacion = grupo.modalidad_facturacion
+          ? modalidadFacturacionLabelCreditos[grupo.modalidad_facturacion] ??
+            grupo.modalidad_facturacion
+          : "—";
+
         return `
           <p style="margin:12px 0 4px 0;font-size:13px;color:#374151;">
             <strong>${grupo.cliente_nombre}</strong>
             <span style="color:#6b7280;"> — ${grupo.numero_credito_sifco}</span>
             <span style="color:#6b7280;"> — Modalidad: ${modalidad}</span>
+            <span style="color:#6b7280;"> — Facturación: ${facturacion}</span>
           </p>
           <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:0;margin-bottom:12px;">
             <thead>
               <tr>
                 <th colspan="2" style="padding:8px 12px;border:1px solid #f59e0b;background:#fef3c7;color:#78350f;text-align:left;font-weight:600;">
-                  Modalidad: ${modalidad}
+                  Modalidad: ${modalidad} · Facturación: ${facturacion}
                 </th>
               </tr>
             </thead>

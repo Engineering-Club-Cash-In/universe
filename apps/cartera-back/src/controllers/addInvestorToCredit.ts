@@ -19,6 +19,18 @@ import {
   type CreditCandidate,
 } from "./assignCapital";
 import { sendInvestorAddedToCreditsNotification } from "@cci/email";
+import {
+  resolveModalidadFacturacionSpread,
+  getModalidadFacturacionSpreadById,
+  type ModalidadFacturacionSpreadRow,
+} from "./modalidadFacturacion";
+import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
+import {
+  construirStatusActualPorInv,
+  operacionEnCursoEnEspejo,
+  resolverStatusEspejoRebuild,
+  type FilaEspejoGuard,
+} from "../utils/espejoGuards";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -47,6 +59,41 @@ const COMPRA_CARTERA_PENDIENTE_RECIPIENTS = {
 // ========================================
 const CUBE_INVESTMENT_ID = 86;
 
+// Error de negocio: una compra CON modalidad no se pudo colocar completa. Se
+// distingue del resto para hacer rollback y devolver 409 (no 500) con un
+// mensaje claro, en vez de dejar una compra parcial mal tarifada.
+// Error de negocio: en modo MANUAL un crédito de la instrucción no se pudo
+// operar porque otro proceso lo tiene tomado (lock) o porque su espejo tiene
+// una operación en curso. Manual es todo-o-nada —lo valida antes de la tx en
+// :792 devolviendo 409—, así que saltar el crédito aplicaría la instrucción a
+// medias. Se lanza dentro de la tx para hacer rollback y devolver 409.
+class CreditoNoDisponibleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CreditoNoDisponibleError";
+  }
+}
+
+/**
+ * Capital de CUBE en el crédito según el snapshot pre-transacción, o sea el
+ * tope que ese crédito podía absorber. Solo se usa para reportar cuánto se
+ * dejó de colocar al saltar un crédito por contención: es una estimación (el
+ * snapshot puede estar viejo), nunca la base de un cálculo de dinero.
+ */
+function capacidadCubeSnapshot(candidato: CreditCandidate): string {
+  const cube = (candidato.credito_completo?.inversionistas_detalle ?? []).find(
+    (inv: any) => inv.inversionista_id === CUBE_INVESTMENT_ID,
+  );
+  return cube ? new Big(cube.monto_aportado ?? 0).toString() : "0";
+}
+
+class ModalidadMontoInsuficienteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ModalidadMontoInsuficienteError";
+  }
+}
+
 // ========================================
 // SCHEMA DE VALIDACIÓN
 // ========================================
@@ -64,6 +111,18 @@ const addInvestorToCreditSchema = z.object({
   monto_aportado: z.number().positive(),
   porcentaje_cash_in: z.number().min(0).max(100).optional(),
   porcentaje_inversion: z.number().min(0).max(100).optional(),
+  // Solo aplica cuando tipo_operacion === "compra_cartera". Si viene, el
+  // % Inversionista / % Cash In se calcula del catálogo (por monto_aportado,
+  // salvo que venga modalidad_facturacion_spread_id — ver abajo) y SE
+  // IGNORAN porcentaje_cash_in / porcentaje_inversion si vinieran.
+  modalidad_facturacion: z
+    .enum(["p2p_directa", "factura_cube", "factura_cube_pequeno"])
+    .optional(),
+  // Anulación manual del bracket: si viene, se usa ESA fila exacta del
+  // catálogo (cualquiera de los 8 brackets de la modalidad, sin importar si
+  // corresponde al monto_aportado — decisión de negocio) en vez de resolver
+  // por monto. Debe pertenecer a la modalidad enviada en modalidad_facturacion.
+  modalidad_facturacion_spread_id: z.number().int().positive().optional(),
   tipo_operacion: z.enum(["reinversion", "compra_cartera"]),
   tipo_reinversion: z
     .enum([
@@ -331,6 +390,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       monto_aportado,
       porcentaje_cash_in,
       porcentaje_inversion,
+      modalidad_facturacion,
+      modalidad_facturacion_spread_id,
       tipo_operacion,
       tipo_reinversion,
       // NOTA: fecha_inicio_participacion se sigue aceptando en el body pero
@@ -356,6 +417,111 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           ],
         },
       };
+    }
+
+    // ================================================================
+    // MODALIDAD DE FACTURACIÓN
+    // OPCIONAL a nivel backend (retrocompatible: el front todavía no la
+    // manda). Si VIENE, define el % Inversionista / % Cash In desde el bracket
+    // del catálogo y esos valores MANDAN sobre cualquier porcentaje del
+    // request. Si NO viene, el flujo de porcentajes sigue como antes. Solo
+    // aplica a compra_cartera; en reinversión se rechaza si viene.
+    //
+    // Por default el bracket se resuelve por monto_aportado. Si además viene
+    // modalidad_facturacion_spread_id, es una anulación manual: el operador
+    // puede elegir cualquiera de los 8 brackets de la modalidad (no tiene
+    // que ser el que corresponde al monto), siempre que el monto sea válido
+    // para el catálogo (el piso de Q1,000 es duro, sin excepción — se
+    // valida abajo con resolveModalidadFacturacionSpread).
+    // ================================================================
+    if (tipo_operacion !== "compra_cartera" && modalidad_facturacion) {
+      set.status = 400;
+      return {
+        message: "Validation failed",
+        errors: {
+          modalidad_facturacion: [
+            "modalidad_facturacion solo aplica cuando tipo_operacion es 'compra_cartera'",
+          ],
+        },
+      };
+    }
+
+    if (modalidad_facturacion_spread_id && !modalidad_facturacion) {
+      set.status = 400;
+      return {
+        message: "Validation failed",
+        errors: {
+          modalidad_facturacion_spread_id: [
+            "modalidad_facturacion_spread_id requiere que venga modalidad_facturacion",
+          ],
+        },
+      };
+    }
+
+    let modalidadFacturacionSpreadRow: ModalidadFacturacionSpreadRow | null = null;
+    if (modalidad_facturacion) {
+      if (modalidad_facturacion_spread_id) {
+        modalidadFacturacionSpreadRow = await getModalidadFacturacionSpreadById(
+          modalidad_facturacion_spread_id,
+        );
+        if (!modalidadFacturacionSpreadRow) {
+          set.status = 400;
+          return {
+            message: "Validation failed",
+            errors: {
+              modalidad_facturacion_spread_id: [
+                `No existe un bracket de modalidad de facturación con id ${modalidad_facturacion_spread_id}`,
+              ],
+            },
+          };
+        }
+        if (modalidadFacturacionSpreadRow.modalidad !== modalidad_facturacion) {
+          set.status = 400;
+          return {
+            message: "Validation failed",
+            errors: {
+              modalidad_facturacion_spread_id: [
+                `El bracket ${modalidad_facturacion_spread_id} pertenece a la modalidad '${modalidadFacturacionSpreadRow.modalidad}', no a '${modalidad_facturacion}'`,
+              ],
+            },
+          };
+        }
+        // El pricing usa la fila elegida (modalidadFacturacionSpreadRow) sin
+        // importar su bracket — pero el monto igual debe ser válido para el
+        // catálogo (piso de Q1,000 duro, sin excepción). Este resolve solo
+        // se usa para ese chequeo; el resultado se descarta.
+        const bracketDelMonto = await resolveModalidadFacturacionSpread(
+          monto_aportado,
+          modalidad_facturacion,
+        );
+        if (!bracketDelMonto) {
+          set.status = 400;
+          return {
+            message: "Validation failed",
+            errors: {
+              monto_aportado: [
+                `No existe un bracket de modalidad de facturación para el monto Q${monto_aportado}`,
+              ],
+            },
+          };
+        }
+      } else {
+        modalidadFacturacionSpreadRow = await resolveModalidadFacturacionSpread(
+          monto_aportado,
+          modalidad_facturacion,
+        );
+        if (!modalidadFacturacionSpreadRow) {
+          set.status = 400;
+          return {
+            message: "Validation failed",
+            errors: {
+              monto_aportado: [
+                `No existe un bracket de modalidad de facturación para el monto Q${monto_aportado}`,
+              ],
+            },
+          };
+        }
+      }
     }
 
     // ================================================================
@@ -412,17 +578,89 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         };
       }
 
-      candidatos = armados;
+      // Modo manual + modalidad: si el inversionista ya participa en un
+      // crédito de la lista con otro %, se rechaza (409) en vez de repreciarlo.
+      if (modalidadFacturacionSpreadRow) {
+        const spreadSolicitado = Number(modalidadFacturacionSpreadRow.spread);
+        const conflictos: {
+          credito_id: number;
+          numero_credito_sifco: string;
+          porcentaje_actual: number;
+        }[] = [];
+        for (const candidato of armados) {
+          // El espejo manda si existe; si está vacío/desactualizado para
+          // este crédito, el padre (inversionistas_detalle) es la fuente
+          // real que el camino de escritura también lee y reprecia.
+          const filaExistente =
+            candidato.credito_completo?.espejo?.find(
+              (e: any) => e.inversionista_id === inversionista_id,
+            ) ??
+            candidato.credito_completo?.inversionistas_detalle?.find(
+              (i: any) => i.inversionista_id === inversionista_id,
+            );
+          if (
+            filaExistente &&
+            Number(filaExistente.porcentaje_participacion_inversionista) !==
+              spreadSolicitado
+          ) {
+            conflictos.push({
+              credito_id: candidato.credito_id,
+              numero_credito_sifco: candidato.numero_credito_sifco,
+              porcentaje_actual: Number(
+                filaExistente.porcentaje_participacion_inversionista,
+              ),
+            });
+          }
+        }
+        if (conflictos.length > 0) {
+          set.status = 409;
+          return {
+            success: false,
+            message:
+              "El inversionista ya participa en uno o más créditos de la lista con un % distinto al que aplicaría la modalidad elegida. Quítalos de la lista o hazlo en una operación aparte.",
+            conflictos,
+          };
+        }
+      }
+
+      // Orden ascendente por credito_id SOLO en manual: evita el livelock
+      // ENTRE DOS LLAMADAS A addInvestorToCredit cruzadas ([A,B] vs [B,A])
+      // que se roban los locks entre sí, fallan las dos con 409 retryable y
+      // al reintentar vuelven a cruzarse. Tomando siempre en el mismo orden,
+      // una gana y la otra falla limpio al primer crédito.
+      //
+      // ⚠️ Esto NO cierra el livelock contra replaceInvestorCredit: ese
+      // controller hace el mismo nuke&rebuild del espejo (ver
+      // creditoEspejoLock.ts) SIN tomar este lock, así que no respeta ningún
+      // orden global. El orden de acá solo garantiza algo cuando ambos lados
+      // de la carrera son llamadas a addInvestorToCredit.
+      //
+      // En manual el orden no es prioridad de negocio: cada crédito trae su
+      // propio monto y el loop no corta por montoRestante — a diferencia del
+      // modo automático, donde el orden ES el ranking por score de
+      // getCreditCandidates y no se puede tocar.
+      candidatos = [...armados].sort((a, b) => a.credito_id - b.credito_id);
     } else {
+      // Porcentaje para el filtro de "% incompatible" de getCreditCandidates, que
+      // descarta un crédito solo si el inversionista ya participa ahí con un %
+      // DISTINTO. Con modalidad le pasamos el spread del catálogo (no el del
+      // request) para que descarte los que se repreciarían a otro spread; los de
+      // mismo % o no participados pasan. Como el spread trae decimales y los %
+      // previos suelen ser enteros, en la práctica descarta las posiciones
+      // previas (puede subir el "monto sin asignar"). Es intencional.
+      const porcentajeParaCandidatos = modalidadFacturacionSpreadRow
+        ? Number(modalidadFacturacionSpreadRow.spread)
+        : porcentaje_inversion;
+
       console.log("================================================================");
       console.log("[addInvestorToCredit] Llamando a getCreditCandidates con:");
       console.log(` - monto: ${monto_aportado}`);
       console.log(` - limit (minimo): ${minimo ?? "Sin límite"}`);
       console.log(` - inversionista_id: ${inversionista_id}`);
-      console.log(` - porcentaje_inversion: ${porcentaje_inversion}`);
+      console.log(` - porcentaje (filtro): ${porcentajeParaCandidatos}`);
       console.log("================================================================");
 
-      candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentaje_inversion);
+      candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id, porcentajeParaCandidatos);
 
       console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
       candidatos.forEach((c, i) => {
@@ -551,9 +789,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         // Un crédito pasa solo si TODAS sus filas de espejo están en
         // "completado" (o no tiene filas de espejo). Si alguna está en
         // pendiente_*, ya hay un proceso en curso y reasignarlo lo pisaría.
-        const espejoPendiente = (
-          candidato.credito_completo?.espejo ?? []
-        ).find((e: any) => e.status && e.status !== "completado");
+        const espejoPendiente = operacionEnCursoEnEspejo(
+          candidato.credito_completo?.espejo as FilaEspejoGuard[] | undefined,
+        );
 
         if (espejoPendiente) {
           violaciones.push({
@@ -660,8 +898,25 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     // PASO 3: ITERAR CRÉDITOS Y DISTRIBUIR MONTO
     // Todo dentro de una transacción para que si algo falla,
     // se haga rollback de TODOS los cambios.
+    //
+    // La transacción va envuelta en `withCreditoEspejoLocks`: cada crédito que
+    // se toca se lockea (sin esperar) y los locks se sueltan recién cuando la
+    // transacción cerró. Sin esto, dos liquidaciones en paralelo eligen el
+    // mismo crédito —`getCreditCandidates` lee sin lock y fuera de la tx— y el
+    // nuke&rebuild del segundo pisa la operación en vuelo del primero.
     // ================================================================
-    await db.transaction(async (tx) => {
+    await withCreditoEspejoLocks(async (locks) =>
+      db.transaction(async (tx) => {
+        // `resultados`/`errores`/`montoRestante` se declaran ANTES de la tx
+        // porque la respuesta final y el correo los leen después de que
+        // cierra. drizzle no reintenta transacciones hoy, pero si algún día
+        // se agrega retry (más probable ahora que hay locks/contención de por
+        // medio), este callback correría más de una vez — y sin resetear acá
+        // adentro, `resultados` acumularía duplicados de la corrida
+        // abandonada y `montoRestante` quedaría descontado dos veces.
+        resultados.length = 0;
+        errores.length = 0;
+        montoRestante = new Big(monto_aportado);
       // ================================================================
       // PASO 3.0 (solo compra_cartera): RESOLUCIÓN DE MODALIDAD
       // Antes de tocar los créditos, decidimos qué hacer con la modalidad
@@ -744,11 +999,99 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           continue;
         }
 
-        const {
-          credito: creditoRaw,
-          inversionistas_detalle,
-          espejo: espejoActual,
-        } = credito_completo;
+        const { credito: creditoRaw } = credito_completo;
+
+        // ── Lock del crédito, sin esperar ──
+        // No se espera a propósito: un waiter retendría su conexión (ver
+        // paymentAdvisoryLock.ts).
+        if (!(await locks.tryLock(credito_id))) {
+          const razon = "Otro proceso está operando este crédito";
+          // Manual es todo-o-nada: saltar acá dejaría la instrucción aplicada
+          // a medias (unos créditos commiteados y otros no) con respuesta 200.
+          if (esManual) {
+            throw new CreditoNoDisponibleError(
+              `${razon} (${numero_credito_sifco}). Reintenta en unos segundos.`,
+            );
+          }
+          errores.push({
+            credito_id,
+            numero_credito_sifco,
+            razon: `${razon}; se omite`,
+            // Contención transitoria, no un dato malo: se puede reintentar.
+            retryable: true,
+            // Capital que este crédito podía absorber según el snapshot. Sirve
+            // para decidir si el monto que quedó sin colocar se explica por la
+            // contención o por falta real de capital (ver PASO 3k).
+            capacidad_omitida: capacidadCubeSnapshot(candidato),
+          });
+          continue;
+        }
+
+        // (revertido: abortar acá en el primer lock miss estaba mal — hay
+        // candidatos más abajo en la lista sin contención que solos pueden
+        // cubrir montoRestante. El chequeo final ya distingue bien: solo
+        // revierte si AMBAS cosas pasan — quedó contención Y quedó saldo sin
+        // colocar. Cortar antes de agotar la lista revertía compras que en
+        // realidad sí se podían completar sin esperar nada.)
+
+        // ── Relectura de PADRE y ESPEJO DENTRO de la transacción ──
+        // Lo que trae `credito_completo` viene de getCreditCandidates, que lee
+        // ANTES de abrir la tx. Con liquidaciones en paralelo ese snapshot
+        // llega viejo y las dos tablas se reconstruyen con nuke&rebuild, así
+        // que copiarlo tal cual destruye lo que otro proceso ya commiteó:
+        //
+        //   - espejo: le pisa el status a la operación en vuelo de un tercero
+        //     o, si el tercero ni aparece en el snapshot, lo BORRA del crédito.
+        //   - padre: además del mismo borrado, de acá sale `montoCubePadre`,
+        //     el tope de capital de CUBE. Con el tope viejo se asignaría más
+        //     de lo que a CUBE le queda realmente → sobre-asignación.
+        //
+        // El lock cierra la carrera hacia adelante, pero no arregla un snapshot
+        // que YA llegó viejo: hay que releer las dos bajo `tx`.
+        const [inversionistasDetalleActual, espejoActual] = await Promise.all([
+          tx
+            .select()
+            .from(creditos_inversionistas)
+            .where(eq(creditos_inversionistas.credito_id, credito_id)),
+          tx
+            .select()
+            .from(creditos_inversionistas_espejo)
+            .where(eq(creditos_inversionistas_espejo.credito_id, credito_id)),
+        ]);
+
+        // ── Guard: espejo sin operación en curso ──
+        // Mismo criterio que getCreditCandidates (:318-330) y que el guard del
+        // modo manual, pero acá sí es atómico: corre bajo el lock y sobre datos
+        // frescos, así que entre el chequeo y la escritura no cabe nadie.
+        const espejoEnCurso = operacionEnCursoEnEspejo(espejoActual);
+        if (espejoEnCurso) {
+          // Distinto al lock de arriba: esto NO es contención transitoria.
+          // "pendiente_reinversion"/"pendiente_compra_cartera" esperan que un
+          // HUMANO acepte por /completar-espejo — puede tardar días, no
+          // segundos. Decirle al operador "reintenta" acá lo manda a un loop
+          // que nunca se resuelve solo. `retryable: false` para no invitar al
+          // reintento automático; el mensaje señala qué hacer en su lugar.
+          const razon = `El espejo tiene una operación en curso (status ${espejoEnCurso.status}) esperando aceptación`;
+          // Mismo criterio todo-o-nada que el guard pre-transacción de :792,
+          // que ya rechaza este caso con 409 sobre el snapshot.
+          if (esManual) {
+            throw new CreditoNoDisponibleError(
+              `${razon} en ${numero_credito_sifco}; no se puede reasignar manualmente hasta que se acepte o cancele esa operación.`,
+            );
+          }
+          errores.push({
+            credito_id,
+            numero_credito_sifco,
+            razon: `${razon}; se omite`,
+            retryable: false,
+          });
+          continue;
+        }
+
+        // ── Mapa de status actual por inversionista ──
+        // Se usa en el rebuild (PASO 3h) para PRESERVAR el status de los
+        // demás en vez de asumir "completado".
+        const statusActualPorInv = construirStatusActualPorInv(espejoActual);
 
         // ── Mapa de tipo_reinversion actual por inversionista en el espejo ──
         // Lo usamos para preservar los valores existentes de los OTROS
@@ -761,6 +1104,25 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           (espejoActual ?? []).map((e: any) => [
             e.inversionista_id as number,
             e.tipo_reinversion ?? null,
+          ]),
+        );
+
+        // ── Mapa de modalidad_facturacion actual por inversionista en el
+        //    espejo. Igual que arriba: al hacer nuke&rebuild, los inversionistas
+        //    que NO son el nuevo deben conservar lo que ya tenían. ──
+        const modalidadFacturacionActualPorInv = new Map<
+          number,
+          {
+            modalidad_facturacion: typeof creditos_inversionistas_espejo.$inferSelect.modalidad_facturacion;
+            modalidad_facturacion_spread_id: number | null;
+          }
+        >(
+          (espejoActual ?? []).map((e: any) => [
+            e.inversionista_id as number,
+            {
+              modalidad_facturacion: e.modalidad_facturacion ?? null,
+              modalidad_facturacion_spread_id: e.modalidad_facturacion_spread_id ?? null,
+            },
           ]),
         );
 
@@ -779,7 +1141,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         // monto_cash_in, iva_*) se calculan independientemente por tabla.
         // cuota_inversionista y los porcentajes se calculan desde el ESPEJO
         // y se replican al padre.
-        const inversionistasPadre = inversionistas_detalle.map((inv: any) => ({
+        const inversionistasPadre = inversionistasDetalleActual.map((inv: any) => ({
           inversionista_id: inv.inversionista_id,
           monto_aportado: inv.monto_aportado,
           porcentaje_cash_in: inv.porcentaje_cash_in,
@@ -827,6 +1189,18 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           ? (montoManualPorCredito.get(credito_id) ?? new Big(0))
           : montoRestante;
 
+        // En modo manual la instrucción es Todo-o-Nada. Si en la relectura bajo tx
+        // CUBE ya no tiene el saldo que se solicitó para este crédito, lanzamos
+        // error para hacer rollback de toda la operación en vez de colocar menos.
+        if (esManual && montoObjetivo.gt(montoCubePadre)) {
+          throw new CreditoNoDisponibleError(
+            `El crédito ${numero_credito_sifco} ya no tiene el saldo CUBE solicitado en modo manual (solicitado: Q${montoObjetivo.toFixed(2)}, disponible en CUBE: Q${montoCubePadre.toFixed(2)}). Asignación manual cancelada.`,
+          );
+        }
+
+        // En manual esta rama de clamp es inalcanzable: el throw de arriba ya
+        // interceptó `montoObjetivo.gt(montoCubePadre)`. Queda como clamp real
+        // solo para automático, que sí puede colocar menos de lo pedido.
         const montoParaEsteCredito = montoObjetivo.gt(montoCubePadre)
           ? montoCubePadre
           : montoObjetivo;
@@ -834,6 +1208,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         // ================================================================
         // PASO 3c: DETERMINAR PORCENTAJES DEL NUEVO INVERSIONISTA
         // Prioridad:
+        //   0. Si vino modalidad_facturacion → el spread del bracket manda
+        //      (ignora porcentaje_cash_in/porcentaje_inversion del request)
         //   1. Si se pasaron en el request → usar esos
         //   2. Si el inversionista YA EXISTE en ESTE crédito → jalar de ahí
         //   3. Si existe en CUALQUIER OTRO crédito → jalar de ahí
@@ -842,7 +1218,10 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         let porcCashIn: Big;
         let porcInversion: Big;
 
-        if (porcentaje_cash_in !== undefined) {
+        if (modalidadFacturacionSpreadRow) {
+          porcInversion = new Big(modalidadFacturacionSpreadRow.spread);
+          porcCashIn = new Big(100).minus(porcInversion);
+        } else if (porcentaje_cash_in !== undefined) {
           // Porcentajes explícitos del request
           porcCashIn = new Big(porcentaje_cash_in);
           porcInversion = new Big(porcentaje_inversion ?? 80);
@@ -1045,11 +1424,20 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
 
         const dataEspejoConStatus = dataEspejoRaw.map((inv) => ({
           ...inv,
-          // Solo el inversionista nuevo recibe el status pendiente
-          // Los demás se mantienen como "completado"
-          status: (inv.inversionista_id === inversionista_id
-              ? statusEspejo
-              : "completado") as "pendiente_reinversion" | "pendiente_compra_cartera" | "completado",
+          // Solo el inversionista nuevo recibe el status pendiente. Los demás
+          // CONSERVAN el suyo (mismo patrón que tipo_reinversion y
+          // modalidad_facturacion acá abajo): hardcodear "completado" daba por
+          // confirmada la operación en vuelo de un tercero sin que nadie la
+          // confirmara, y su fila en compras_credito_inversionista quedaba
+          // pendiente para siempre — invisible en la pantalla de pendientes,
+          // que filtra por el status del espejo.
+          // La regla vive en espejoGuards para que el test la ejerza de verdad.
+          status: resolverStatusEspejoRebuild(
+            inv.inversionista_id,
+            inversionista_id,
+            statusEspejo,
+            statusActualPorInv,
+          ),
           // tipo_reinversion (prioridad: lo que viene > viejo del espejo > null):
           //   - target: si viene Y en el request lo usa; si no, preserva el
           //     valor previo del espejo. Aplica tanto en compra_cartera como
@@ -1061,6 +1449,24 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
                 tipoReinvActualPorInv.get(inv.inversionista_id) ??
                 null
               : tipoReinvActualPorInv.get(inv.inversionista_id) ?? null,
+          // Igual patrón que tipo_reinversion: solo el inversionista nuevo
+          // recibe la modalidad de esta operación; el resto conserva la suya.
+          modalidad_facturacion:
+            inv.inversionista_id === inversionista_id
+              ? modalidad_facturacion ??
+                modalidadFacturacionActualPorInv.get(inv.inversionista_id)
+                  ?.modalidad_facturacion ??
+                null
+              : modalidadFacturacionActualPorInv.get(inv.inversionista_id)
+                  ?.modalidad_facturacion ?? null,
+          modalidad_facturacion_spread_id:
+            inv.inversionista_id === inversionista_id
+              ? modalidadFacturacionSpreadRow?.id ??
+                modalidadFacturacionActualPorInv.get(inv.inversionista_id)
+                  ?.modalidad_facturacion_spread_id ??
+                null
+              : modalidadFacturacionActualPorInv.get(inv.inversionista_id)
+                  ?.modalidad_facturacion_spread_id ?? null,
           updated_at: new Date(),
         }));
 
@@ -1097,6 +1503,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             tipo_reinversion ??
             tipoReinvActualPorInv.get(inversionista_id) ??
             null,
+          modalidad_facturacion: modalidad_facturacion ?? null,
+          modalidad_facturacion_spread_id: modalidadFacturacionSpreadRow?.id ?? null,
           status: statusEspejo,
         });
 
@@ -1137,7 +1545,70 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           `✅ Crédito ${numero_credito_sifco} - asignado Q${montoParaEsteCredito} - quedan Q${montoRestante}`,
         );
       }
-    });
+
+      // Compra CON modalidad = todo o nada. El spread/bracket se resolvió con el
+      // monto_aportado pedido; si no se colocó todo, el precio no correspondería
+      // a lo realmente colocado. Hacemos rollback (throw dentro de la tx) para
+      // que el operador ajuste el monto a lo que sí hay disponible en CUBE.
+      if (modalidad_facturacion && montoRestante.gt(0)) {
+        // Antes de culpar al tope de CUBE: si algún crédito se saltó por
+        // contención (lock tomado / espejo en curso), el capital SÍ estaba —
+        // solo no se pudo tocar ahora. Decirle al operador que baje el monto
+        // sería mentirle y le haría reducir la compra sin necesidad.
+        //
+        // Pero solo si la capacidad omitida ALCANZA para lo que faltó: si se
+        // saltó un crédito chico y el faltante es grande, el monto igual no
+        // entra y mandarlo a reintentar sin bajar el monto lo deja en un loop.
+        const omitidos = errores.filter((e) => e.retryable);
+        const capacidadOmitida = omitidos.reduce(
+          (acc, e) => acc.plus(new Big(e.capacidad_omitida ?? 0)),
+          new Big(0),
+        );
+        if (omitidos.length > 0 && capacidadOmitida.gte(montoRestante)) {
+          throw new CreditoNoDisponibleError(
+            `No se pudo colocar el monto completo: ${omitidos.length} crédito(s) están siendo operados por otro proceso y tenían capital suficiente (Q${capacidadOmitida.toFixed(2)}) para los Q${montoRestante.toFixed(2)} que faltaron. Reintenta en unos segundos sin cambiar el monto.`,
+          );
+        }
+        const distribuido = new Big(monto_aportado).minus(montoRestante);
+        throw new ModalidadMontoInsuficienteError(
+          `Solo hay Q${distribuido.toFixed(2)} disponibles de los Q${new Big(monto_aportado).toFixed(2)} solicitados. Una compra de cartera con modalidad de facturación debe colocarse completa; ajusta el monto e intenta de nuevo.`,
+        );
+      }
+
+      // ── Contención parcial en modo automático (sin modalidad) ──
+      // Si algún crédito se saltó por contención de locks Y quedó saldo sin
+      // colocar, lanzamos DENTRO de la tx para que haga rollback de los
+      // créditos que sí se procesaron. Sin esto, los inserts parciales ya
+      // estarían commiteados y un retry con el mismo monto_aportado los
+      // duplicaría (over-reinvestment).
+      //
+      // Mismo chequeo de capacidad que el bloque de modalidad de arriba:
+      // sin él, CUALQUIER lock perdido (aunque su capacidad fuera mínima y
+      // no tuviera nada que ver con el faltante real) disparaba rollback
+      // total. Si lo omitido por contención no alcanza para cubrir
+      // montoRestante, el faltante es real (no explicado por contención) y
+      // no hay que revertir por eso — el resultado parcial ya colocado es
+      // válido tal cual.
+      const omitidos = errores.filter((e) => e.retryable);
+      const capacidadOmitidaContencion = omitidos.reduce(
+        (acc, e) => acc.plus(new Big(e.capacidad_omitida ?? 0)),
+        new Big(0),
+      );
+      if (
+        omitidos.length > 0 &&
+        montoRestante.gt(0) &&
+        capacidadOmitidaContencion.gte(montoRestante)
+      ) {
+        // Este throw vive DENTRO de la tx: hace rollback de TODO lo ya
+        // insertado en este loop, no solo del remanente. Un retry tiene que
+        // mandar monto_aportado completo otra vez — no hay nada parcial
+        // commiteado que "completar".
+        throw new CreditoNoDisponibleError(
+          `No se pudo colocar el monto completo por contención de locks: ${omitidos.length} crédito(s) omitidos por contención tenían capital suficiente (Q${capacidadOmitidaContencion.toFixed(2)}) para los Q${montoRestante.toFixed(2)} que faltaron. Se revirtió toda la operación (nada quedó colocado); reintenta con el monto completo Q${new Big(monto_aportado).toFixed(2)}.`,
+        );
+      }
+    }),
+    );
 
     // ================================================================
     // PASO 4: NOTIFICAR A LOS ADMINS POR CORREO
@@ -1201,6 +1672,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
               tipo_reinversion && tipo_reinversion !== "sin_reinversion"
                 ? tipo_reinversion
                 : null,
+            // Modalidad de facturación de esta compra (misma para todos los
+            // créditos de la operación); null si no se eligió → el email muestra "—".
+            modalidad_facturacion: modalidad_facturacion ?? null,
           })),
           usuarioNombre,
           usuarioEmail,
@@ -1218,10 +1692,31 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     //   - monto_sin_asignar: lo que sobró (si no hubo suficientes créditos)
     //   - resultados: detalle por crédito procesado
     //   - errores: créditos que fallaron y por qué
+    //   - reintentable: al menos un crédito se saltó por contención
+    //     transitoria (lock / espejo en curso), no por falta de capital. Sin
+    //     este flag la respuesta es 200 "exitosa" y el monto que no se colocó
+    //     queda invisible: el operador no tiene cómo saber que reintentando
+    //     sí entraría.
+    //     Puede haber contención Y llegar acá con 200: el bloque de arriba
+    //     solo revierte si la capacidad omitida ALCANZA para cubrir
+    //     montoRestante. Si no alcanza, el resultado parcial es válido, pero
+    //     igual hubo crédito(s) saltado(s) por contención — el flag tiene
+    //     que reflejar eso para que el operador sepa que reintentar podría
+    //     colocar algo más, no solo cuando el resultado fue "todo o nada".
+    //     Pero solo si QUEDA algo sin colocar: un crédito puede quedar en
+    //     `errores` con retryable=true (se saltó por contención) y aun así
+    //     el resto de candidatos alcanzó para completar todo el
+    //     monto_aportado (montoRestante <= 0). Ahí no hay nada que
+    //     reintentar — poner reintentable=true igual invitaría a un reintento
+    //     innecesario que, si el caller lo usa para disparar otro
+    //     addInvestorToCredit con el mismo monto, duplicaría lo ya colocado.
     // ================================================================
+    const huboOmitidosPorContencion =
+      errores.some((e) => e.retryable) && montoRestante.gt(0);
     set.status = 200;
     return {
       success: true,
+      reintentable: huboOmitidosPorContencion,
       message: `Procesados: ${resultados.length} créditos, ${errores.length} errores`,
       monto_total: monto_aportado,
       monto_distribuido: new Big(monto_aportado).minus(montoRestante).toString(),
@@ -1230,6 +1725,26 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       errores,
     };
   } catch (error) {
+    // Compra con modalidad que no se pudo colocar completa: es un caso de
+    // negocio esperado (409), no un error interno. La transacción ya hizo rollback.
+    if (error instanceof ModalidadMontoInsuficienteError) {
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
+    // Manual sobre un crédito tomado por otro proceso / con operación en curso:
+    // también es de negocio (409) y la tx ya hizo rollback. `retryable` deja que
+    // el front ofrezca reintentar en vez de mostrar un fallo genérico.
+    if (error instanceof CreditoNoDisponibleError) {
+      set.status = 409;
+      // `reintentable` es el mismo nombre que en la respuesta 200, para que el
+      // front lea un solo campo sin importar el código de estado.
+      return {
+        success: false,
+        message: error.message,
+        reintentable: true,
+        retryable: true,
+      };
+    }
     console.error("[addInvestorToCredit] Error:", error);
     set.status = 500;
     return {

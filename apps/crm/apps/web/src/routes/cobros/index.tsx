@@ -662,6 +662,7 @@ function RouteComponent() {
 		"mora_120",
 		"mora_120_plus",
 		"incobrable",
+		"pendiente_cancelacion",
 		"completado",
 	]);
 

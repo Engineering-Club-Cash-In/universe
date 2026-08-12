@@ -152,19 +152,19 @@ async function assertCanUploadToResource(params: {
 				});
 			}
 
-			const [lead] = await db
+			const [opportunity] = await db
 				.select({
-					id: leads.id,
-					assignedTo: leads.assignedTo,
+					id: opportunities.id,
+					assignedTo: opportunities.assignedTo,
 				})
-				.from(leads)
-				.where(eq(leads.id, resourceId))
+				.from(opportunities)
+				.where(eq(opportunities.id, resourceId))
 				.limit(1);
 
-			if (lead) {
-				if (userRole === "sales" && lead.assignedTo !== userId) {
+			if (opportunity) {
+				if (userRole === "sales" && opportunity.assignedTo !== userId) {
 					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para analizar este lead",
+						message: "No tienes permiso para analizar esta oportunidad",
 					});
 				}
 				return;
@@ -178,7 +178,7 @@ async function assertCanUploadToResource(params: {
 
 			if (!coDebtor) {
 				throw new ORPCError("NOT_FOUND", {
-					message: "Lead o co-deudor no encontrado",
+					message: "Oportunidad o co-deudor no encontrado",
 				});
 			}
 			return;

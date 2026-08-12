@@ -3,6 +3,7 @@
  * Type-safe HTTP client with retry logic, circuit breaker, and caching
  */
 
+import { z } from "zod";
 import type {
 	AperturaDiaResponse,
 	AsesorHistorialResponse,
@@ -95,6 +96,24 @@ export interface SimulacionInversionistaResult {
 }
 
 // ============================================================================
+// TIPOS MODALIDAD DE FACTURACIÓN
+// ============================================================================
+
+export type ModalidadFacturacion =
+	| "p2p_directa"
+	| "factura_cube"
+	| "factura_cube_pequeno";
+
+export interface ModalidadFacturacionSpreadRow {
+	id: number;
+	monto_desde: string;
+	monto_hasta: string | null; // null = sin límite superior
+	modalidad: ModalidadFacturacion;
+	spread: string; // % Inversionista de esa modalidad
+	tasa: string; // tasa final que ve el cliente
+}
+
+// ============================================================================
 // CONFIGURATION
 // ============================================================================
 
@@ -107,6 +126,8 @@ interface CarteraBackClientConfig {
 	circuitBreakerTimeout: number;
 	enableCache: boolean;
 	cacheTtl: number;
+	accessTokenProvider: () => Promise<string>;
+	fetchTransport: typeof globalThis.fetch;
 }
 
 export interface ResumenGlobalInversionistasFilters {
@@ -114,6 +135,12 @@ export interface ResumenGlobalInversionistasFilters {
 	estado?: "pending" | "uploaded" | "liquidated" | "all";
 	mes?: number;
 	anio?: number;
+	/**
+	 * Incluye a los inversionistas internos/propios (permite_distribucion = true:
+	 * Cube, Autocash, Blokfund, …). En cartera-back el flag es opt-in y por defecto
+	 * el endpoint solo devuelve externos.
+	 */
+	incluirInternos?: boolean;
 }
 
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
@@ -127,7 +154,46 @@ const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	circuitBreakerTimeout: 60000,
 	enableCache: process.env.CARTERA_BACK_ENABLE_CACHE === "true",
 	cacheTtl: Number.parseInt(process.env.CARTERA_BACK_CACHE_TTL || "300000"), // 5 minutes
+	accessTokenProvider: getCarteraAccessToken,
+	fetchTransport: globalThis.fetch,
 };
+
+/**
+ * Generar el reporte de pagos no liquidados recorre todos los créditos del
+ * inversionista, arma el Excel y lo sube a R2. Con inversionistas grandes eso
+ * supera los 30s del timeout por defecto.
+ */
+const REPORTE_NO_LIQUIDADOS_TIMEOUT_MS = Number.parseInt(
+	process.env.CARTERA_BACK_REPORTE_TIMEOUT || "300000",
+);
+
+// ============================================================================
+// ERROR TIPADO CON STATUS HTTP
+// ============================================================================
+// A diferencia de los demás throws de `request()` (que solo se distinguen
+// por texto en `.message`), este preserva el status code real para que los
+// callers puedan chequear `err.status === 404` en vez de parsear el mensaje.
+// `handleError()` lo respeta explícitamente (no lo reescribe) para que el
+// status sobreviva hasta el caller final.
+export class CarteraBackHttpError extends Error {
+	constructor(
+		message: string,
+		public readonly status: number,
+		// Body crudo que devolvió cartera-back. `message` suele traer el texto
+		// para el usuario ("Ya existe un inversionista con ese DPI") y `error`
+		// el código de máquina ("duplicate_dpi"); el `.message` de esta clase
+		// antepone el código, así que los callers que quieran mostrarle algo
+		// legible al usuario deben leer `payload.message`.
+		public readonly payload: {
+			error?: string;
+			message?: string;
+			errores?: string[];
+		} = {},
+	) {
+		super(message);
+		this.name = "CarteraBackHttpError";
+	}
+}
 
 // ============================================================================
 // CIRCUIT BREAKER
@@ -157,6 +223,9 @@ class CircuitBreaker {
 			this.onSuccess();
 			return result;
 		} catch (error) {
+			if (error instanceof CarteraBackHttpError && error.status < 500) {
+				throw error;
+			}
 			this.onFailure();
 			throw error;
 		}
@@ -310,6 +379,18 @@ export type MontoACobrarPeriodoRow = {
 	acum_total_membresias: string;
 	total_interes_inversionista: string;
 	acum_total_interes_inversionista: string;
+	capital_inv_participacion_actual: string;
+	capital_cube_participacion_actual: string;
+	interes_iva_inv_participacion_actual: string;
+	interes_iva_cube_participacion_actual: string;
+	acum_capital_inv_participacion_actual: string;
+	acum_capital_cube_participacion_actual: string;
+	acum_interes_iva_inv_participacion_actual: string;
+	acum_interes_iva_cube_participacion_actual: string;
+	creditos_participacion_invalida: number;
+	creditos_participacion_invalida_rango?: number;
+	cuotas_participacion_invalida: number;
+	participacion_actual: boolean;
 };
 
 export type FlujoCuotasRubro = {
@@ -343,11 +424,11 @@ export type FlujoCuotasInversionesResponse = {
 };
 
 export type ReinversionLiquidacionesResponse = {
+	/** Versión runtime del contrato de conciliación por modalidad. */
+	contrato_version: 2;
 	/**
-	 * Por modalidad (`tipo_reinversion`), campos crudos de la liquidación:
-	 * - `reinversion_total` → sección "Cuotas → Reinversión".
-	 * - `total_capital` / `total_interes` / `total_iva` / `total_isr` / `total_cuota`
-	 *   → sección "Cuotas → A Recibir".
+	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
+	 * `reinversion_total` el capital que permanece colocado.
 	 */
 	porTipo: Record<
 		string,
@@ -360,16 +441,14 @@ export type ReinversionLiquidacionesResponse = {
 			total_iva: string;
 			total_isr: string;
 			total_cuota: string;
+			/** IVA real facturado; excluye el IVA referencial sin factura. */
+			iva_facturado: string;
+			total_distribuido: string;
+			cantidad_liquidaciones: number;
 		}
 	>;
-	/**
-	 * Interés neto agrupado por si el inversionista emite factura:
-	 * - `conFactura`: neto = interés + IVA.
-	 * - `sinFactura`: neto = interés − ISR.
-	 */
 	interesNeto: {
-		conFactura: { interes: string; iva: string; neto: string };
-		sinFactura: { interes: string; isr: string; neto: string };
+		noVerificado: { interes: string };
 		cube: { interes: string; iva: string; neto: string };
 	};
 	/** Pagos extras recibidos del mes (vía liquidación → pago espejo → abono). */
@@ -383,12 +462,154 @@ export type ReinversionLiquidacionesResponse = {
 		reinversion_interes: string;
 		reinversion: string;
 		a_recibir: string;
-		monto_aportado: string;
+		capital_activo: string;
 	}[];
 	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
 	comprasMes: { tipo: string; cantidad: number; monto: string }[];
+	detalleInteresNeto: (
+		| {
+				inversionista_id: number;
+				inversionista: string;
+				referencia: string;
+				interes: string;
+				iva: string;
+				isr: string;
+				tratamiento_fiscal: "no_verificado";
+		  }
+		| {
+				inversionista_id: number;
+				inversionista: string;
+				referencia: string;
+				tratamiento_fiscal: "cube";
+				interes: string;
+				iva: string;
+				isr: string;
+				neto: string;
+		  }
+	)[];
+	detallePagosExtras: {
+		fecha: string;
+		credito: string;
+		tipo: "abono_capital" | "cancelacion";
+		monto: string;
+	}[];
+	detalleComprasMes: {
+		fecha: string;
+		inversionista: string;
+		modalidad: string;
+		monto: string;
+	}[];
+	detalle_estado: {
+		disponible: boolean;
+		error: string | null;
+	};
 	cantidad_liquidaciones: number;
 };
+
+const reinversionModes = [
+	"sin_reinversion",
+	"reinversion_capital",
+	"reinversion_interes",
+	"reinversion_total",
+	"reinversion_variable",
+	"reinversion_excedente",
+	"reinversion_combinada",
+] as const;
+const moneySchema = z.string().regex(/^\d+(?:\.\d+)?$/);
+const countSchema = z.number().int().nonnegative();
+const idSchema = z.number().int().nonnegative();
+const modeSummarySchema = z.object({
+	reinversion_capital: moneySchema,
+	reinversion_interes: moneySchema,
+	reinversion_total: moneySchema,
+	total_capital: moneySchema,
+	total_interes: moneySchema,
+	total_iva: moneySchema,
+	total_isr: moneySchema,
+	total_cuota: moneySchema,
+	iva_facturado: moneySchema,
+	total_distribuido: moneySchema,
+	cantidad_liquidaciones: countSchema,
+});
+const reinversionLiquidacionesSchema = z.object({
+	contrato_version: z.literal(2),
+	porTipo: z.record(z.enum(reinversionModes), modeSummarySchema),
+	interesNeto: z.object({
+		noVerificado: z.object({ interes: moneySchema }),
+		cube: z.object({
+			interes: moneySchema,
+			iva: moneySchema,
+			neto: moneySchema,
+		}),
+	}),
+	pagosExtras: z.object({
+		abonos_capital: moneySchema,
+		cancelaciones: moneySchema,
+	}),
+	porInversionista: z.array(
+		z.object({
+			inversionista_id: idSchema,
+			nombre: z.string().trim().min(1),
+			tipo_reinversion: z.enum(reinversionModes),
+			reinversion_capital: moneySchema,
+			reinversion_interes: moneySchema,
+			reinversion: moneySchema,
+			a_recibir: moneySchema,
+			capital_activo: moneySchema,
+		}),
+	),
+	comprasMes: z.array(
+		z.object({
+			tipo: z.enum(reinversionModes),
+			cantidad: countSchema,
+			monto: moneySchema,
+		}),
+	),
+	detalleInteresNeto: z.array(
+		z.discriminatedUnion("tratamiento_fiscal", [
+			z.object({
+				inversionista_id: idSchema,
+				inversionista: z.string().trim().min(1),
+				referencia: z.string().trim().min(1),
+				tratamiento_fiscal: z.literal("no_verificado"),
+				interes: moneySchema,
+				iva: moneySchema,
+				isr: moneySchema,
+			}),
+			z.object({
+				inversionista_id: idSchema,
+				inversionista: z.string().trim().min(1),
+				referencia: z.string().trim().min(1),
+				tratamiento_fiscal: z.literal("cube"),
+				interes: moneySchema,
+				iva: moneySchema,
+				isr: moneySchema,
+				neto: moneySchema,
+			}),
+		]),
+	),
+	detallePagosExtras: z.array(
+		z.object({
+			fecha: z.string().trim().min(1),
+			credito: z.string().trim().min(1),
+			tipo: z.enum(["abono_capital", "cancelacion"]),
+			monto: moneySchema,
+		}),
+	),
+	detalleComprasMes: z.array(
+		z.object({
+			fecha: z.string().trim().min(1),
+			inversionista: z.string().trim().min(1),
+			modalidad: z.enum(reinversionModes),
+			monto: moneySchema,
+		}),
+	),
+	detalle_estado: z.discriminatedUnion("disponible", [
+		z.object({ disponible: z.literal(true), error: z.null() }),
+		z.object({ disponible: z.literal(false), error: z.string().trim().min(1) }),
+	]),
+	cantidad_liquidaciones: countSchema,
+});
 
 export type FlujoPorInversionistaRow = {
 	inversionista_id: number;
@@ -462,6 +683,27 @@ export type MoraCobradaPorAsesorResponse = {
 	totalCobrado: string;
 };
 
+export type MoraRecuperacionPorAsesorResponse = {
+	periodo: { inicio: string; fin: string };
+	metadata: {
+		alcance: "live" | "historico";
+		atribucionAsesor: "actual";
+	};
+	totales: MoraRecoveryMetric;
+	porAsesor: (MoraRecoveryMetric & {
+		asesorId: number | null;
+		nombre: string;
+	})[];
+};
+
+export type MoraRecoveryMetric = {
+	esperado: string;
+	cobradoEnSnapshot: string;
+	cobradoFueraSnapshot: string;
+	excedenteEnSnapshot: string;
+	pendiente: string;
+};
+
 // ============================================================================
 // HTTP CLIENT
 // ============================================================================
@@ -484,10 +726,18 @@ export class CarteraBackClient {
 	// PRIVATE METHODS
 	// ========================================================================
 
+	/**
+	 * @param retryOnFailure fuerza la política de reintentos de esta llamada.
+	 *   Por defecto SOLO se reintentan GET/HEAD: reintentar un POST que ya se
+	 *   ejecutó del otro lado duplica el efecto (ver el bloque de reintentos
+	 *   más abajo). Pasar `true` únicamente en POST de solo lectura.
+	 */
 	private async request<T>(
 		endpoint: string,
 		options: RequestInit = {},
 		useCache = false,
+		timeoutMs?: number,
+		retryOnFailure?: boolean,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
@@ -506,7 +756,7 @@ export class CarteraBackClient {
 		): Promise<RequestInit> => {
 			const token = forceRefresh
 				? await invalidateAndReauth()
-				: await getCarteraAccessToken();
+				: await this.config.accessTokenProvider();
 			return {
 				...options,
 				headers: {
@@ -514,9 +764,16 @@ export class CarteraBackClient {
 					Authorization: `Bearer ${token}`,
 					...options.headers,
 				},
-				signal: AbortSignal.timeout(this.config.timeout),
+				signal: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
 			};
 		};
+
+		// Solo son seguras de reintentar las llamadas sin efecto de lado. Un
+		// método mutante puede haberse ejecutado igual aunque el cliente no vea
+		// la respuesta (timeout, corte de red), así que el reintento duplica.
+		const metodo = (options.method || "GET").toUpperCase();
+		const esLectura = metodo === "GET" || metodo === "HEAD";
+		const permiteReintento = retryOnFailure ?? esLectura;
 
 		let lastError: Error | null = null;
 		let didReauth = false;
@@ -525,7 +782,7 @@ export class CarteraBackClient {
 			try {
 				const response = await this.circuitBreaker.execute(async () => {
 					const requestOptions = await buildRequestOptions();
-					const res = await fetch(url, requestOptions);
+					const res = await this.config.fetchTransport(url, requestOptions);
 
 					if (!res.ok) {
 						const errorText = await res.text();
@@ -541,7 +798,10 @@ export class CarteraBackClient {
 							if (!didReauth) {
 								didReauth = true;
 								const retryOptions = await buildRequestOptions(true);
-								const retryRes = await fetch(url, retryOptions);
+								const retryRes = await this.config.fetchTransport(
+									url,
+									retryOptions,
+								);
 								if (retryRes.ok) return retryRes;
 								const retryText = await retryRes.text();
 								let retryData: { error?: string; message?: string } = {};
@@ -550,23 +810,31 @@ export class CarteraBackClient {
 								} catch {
 									retryData = { error: retryText };
 								}
-								throw new Error(
+								throw new CarteraBackHttpError(
 									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+									retryRes.status,
+									retryData,
 								);
 							}
-							throw new Error(
+							throw new CarteraBackHttpError(
 								`Authentication failed: ${errorData.error || errorData.message}`,
+								res.status,
+								errorData,
 							);
 						}
 
 						if (res.status === 400) {
-							throw new Error(
+							throw new CarteraBackHttpError(
 								`Validation failed: ${errorData.error || errorData.message}`,
+								res.status,
+								errorData,
 							);
 						}
 
-						throw new Error(
+						throw new CarteraBackHttpError(
 							`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
+							res.status,
+							errorData,
 						);
 					}
 
@@ -584,12 +852,33 @@ export class CarteraBackClient {
 			} catch (error) {
 				lastError = error as Error;
 
-				// Don't retry on authentication or validation errors
+				// Don't retry on authentication/validation errors, nor on 4xx
+				// (esos son respuestas definitivas del servidor, no fallas
+				// transitorias — ej. un 404 de "monto sin bracket" no cambia
+				// de resultado al reintentar).
 				if (
 					lastError.message.includes("Authentication failed") ||
 					lastError.message.includes("Validation failed") ||
-					lastError.message.includes("Circuit breaker is OPEN")
+					lastError.message.includes("Circuit breaker is OPEN") ||
+					(lastError instanceof CarteraBackHttpError &&
+						lastError.status >= 400 &&
+						lastError.status < 500)
 				) {
+					break;
+				}
+
+				// 🚫 Nada de reintentar operaciones que MUTAN (POST/PUT/PATCH/DELETE).
+				// El 2026-08-07 este bucle reintentó un POST a /facturar-generico que
+				// había abortado por timeout a los 30s: cartera ya había certificado
+				// la factura en SAT y el reintento certificó una segunda idéntica
+				// (Q150 al NIT 43254667). El timeout del cliente NO cancela lo que el
+				// servidor ya está ejecutando; lo mismo aplicaría a /newPayment,
+				// /newCredit, /boletas, etc. Ante un fallo transitorio preferimos que
+				// el error suba y se decida arriba antes que duplicar plata o facturas.
+				if (!permiteReintento) {
+					console.warn(
+						`[CarteraBack] ${metodo} ${endpoint} falló y NO se reintenta (operación no idempotente): ${lastError.message}`,
+					);
 					break;
 				}
 
@@ -609,6 +898,13 @@ export class CarteraBackClient {
 	}
 
 	private handleError(error: Error): CarteraBackError {
+		// Preservar tal cual: los callers que necesitan el status HTTP real
+		// (ej. distinguir un 404 de "sin bracket" de un error genérico)
+		// dependen de que esta instancia no se reescriba.
+		if (error instanceof CarteraBackHttpError) {
+			return error as unknown as CarteraBackError;
+		}
+
 		if (error.message.includes("Authentication failed")) {
 			return new Error(error.message) as CarteraBackAuthError;
 		}
@@ -790,6 +1086,11 @@ export class CarteraBackClient {
 						excel: false,
 					}),
 				},
+				false,
+				undefined,
+				// POST solo por el tamaño del body (>50 SIFCOs): es una consulta,
+				// no muta nada → se puede reintentar.
+				true,
 			);
 		} else {
 			const queryParams = new URLSearchParams({
@@ -960,10 +1261,14 @@ export class CarteraBackClient {
 		data?: { nit: string; nombre: string | null };
 		mensaje: string;
 	}> {
-		return this.request("/api/dte/consultarNit", {
-			method: "POST",
-			body: JSON.stringify({ nit }),
-		});
+		// POST de solo consulta (pega a SAT y no crea nada): se puede reintentar.
+		return this.request(
+			"/api/dte/consultarNit",
+			{ method: "POST", body: JSON.stringify({ nit }) },
+			false,
+			undefined,
+			true,
+		);
 	}
 
 	// ========================================================================
@@ -1683,10 +1988,15 @@ export class CarteraBackClient {
 	 * @param fecha - "YYYY-MM-DD" (hora Guatemala)
 	 */
 	async aplicarManualesDia(fecha: string): Promise<unknown> {
-		return this.request("/api/facturacion-snapshot/aplicar-manuales-dia", {
-			method: "POST",
-			body: JSON.stringify({ fecha }),
-		});
+		// Regenera el snapshot del día completo (no suma): correrlo dos veces
+		// deja el mismo resultado → es idempotente y se puede reintentar.
+		return this.request(
+			"/api/facturacion-snapshot/aplicar-manuales-dia",
+			{ method: "POST", body: JSON.stringify({ fecha }) },
+			false,
+			undefined,
+			true,
+		);
 	}
 
 	// ========================================================================
@@ -1707,6 +2017,9 @@ export class CarteraBackClient {
 		}
 		if (filters.anio !== undefined) {
 			queryParams.set("anio", String(filters.anio));
+		}
+		if (filters.incluirInternos) {
+			queryParams.set("incluirInternos", "true");
 		}
 
 		// Sin cache: el estado de liquidación debe verse fresco siempre. Con cache
@@ -1734,6 +2047,9 @@ export class CarteraBackClient {
 		}
 		if (filters.anio !== undefined) {
 			queryParams.set("anio", String(filters.anio));
+		}
+		if (filters.incluirInternos) {
+			queryParams.set("incluirInternos", "true");
 		}
 		queryParams.set("excel", "true");
 
@@ -1767,6 +2083,29 @@ export class CarteraBackClient {
 			`/resumen-transferencias?${queryParams.toString()}`,
 			{ method: "GET" },
 			false,
+		);
+		return response;
+	}
+
+	async getReporteNoLiquidados(
+		inversionistaId: number,
+	): Promise<{ success: boolean; url: string; filename: string }> {
+		const queryParams = new URLSearchParams();
+		queryParams.set("id", String(inversionistaId));
+
+		// Sin cache: el reporte debe reflejar el estado actual de los pagos.
+		// Timeout propio de 5 min: armar el Excel recorre todos los créditos y
+		// pagos del inversionista y lo sube a R2, así que los 30s por defecto se
+		// quedan cortos con inversionistas grandes.
+		const response = await this.request<{
+			success: boolean;
+			url: string;
+			filename: string;
+		}>(
+			`/investor/reporte-no-liquidados?${queryParams.toString()}`,
+			{ method: "GET" },
+			false,
+			REPORTE_NO_LIQUIDADOS_TIMEOUT_MS,
 		);
 		return response;
 	}
@@ -1988,6 +2327,13 @@ export class CarteraBackClient {
 			| "sin_reinversion"
 			| "reinversion_capital"
 			| "reinversion_total";
+		// Obligatoria en compra_cartera: define el % Inversionista / % Cash In
+		// desde el catálogo de spreads (por monto_aportado, salvo que venga
+		// modalidad_facturacion_spread_id).
+		modalidad_facturacion?: ModalidadFacturacion;
+		// Anulación manual: id exacto del bracket elegido (de los 8 de la
+		// modalidad), sin importar si corresponde al monto_aportado.
+		modalidad_facturacion_spread_id?: number;
 		porcentaje_inversion?: number;
 		porcentaje_cash_in?: number;
 		fecha_inicio_participacion?: string;
@@ -2000,6 +2346,50 @@ export class CarteraBackClient {
 			body: JSON.stringify(input),
 		});
 		return response;
+	}
+
+	/**
+	 * Resuelve, para un monto dado, las 3 filas del catálogo (una por
+	 * modalidad) del bracket correspondiente — fuente única de verdad en SQL,
+	 * el front ya no reimplementa esta comparación en JS. Devuelve `[]` si el
+	 * monto no cae en ningún bracket (backend responde 404 en ese caso).
+	 */
+	async resolverModalidadFacturacionSpread(
+		monto: number,
+	): Promise<ModalidadFacturacionSpreadRow[]> {
+		try {
+			const response = await this.request<{
+				data: ModalidadFacturacionSpreadRow[];
+			}>(
+				`/modalidad-facturacion/spread/resolver?monto=${encodeURIComponent(monto)}`,
+				{ method: "GET" },
+				true,
+			);
+			return response.data ?? [];
+		} catch (err) {
+			if (err instanceof CarteraBackHttpError && err.status === 404) {
+				return [];
+			}
+			throw err;
+		}
+	}
+
+	/**
+	 * Devuelve las 8 filas (una por bracket) de una modalidad, sin filtrar
+	 * por monto. Lo usa el front para poblar el combobox de anulación manual
+	 * del spread (el operador puede elegir cualquiera de los 8).
+	 */
+	async listModalidadFacturacionSpreadByModalidad(
+		modalidad: ModalidadFacturacion,
+	): Promise<ModalidadFacturacionSpreadRow[]> {
+		const response = await this.request<{
+			data: ModalidadFacturacionSpreadRow[];
+		}>(
+			`/modalidad-facturacion/spread/por-modalidad?modalidad=${encodeURIComponent(modalidad)}`,
+			{ method: "GET" },
+			true,
+		);
+		return response.data ?? [];
 	}
 
 	// ========================================================================
@@ -2133,11 +2523,14 @@ export class CarteraBackClient {
 		// Sin cache: el reporte debe reflejar liquidaciones recién creadas/ajustadas.
 		// Con cache activo, tras crear liquidaciones el mes podía seguir devolviendo
 		// los totales previos hasta expirar el TTL.
-		return this.request<ReinversionLiquidacionesResponse>(
+		const data = await this.request<unknown>(
 			`/reportes/reinversion-liquidaciones?${qp}`,
 			{ method: "GET" },
 			false,
 		);
+		const parsed = reinversionLiquidacionesSchema.safeParse(data);
+		if (!parsed.success) throw new Error("Contrato de reinversión inválido");
+		return parsed.data;
 	}
 
 	async getFlujoCuotasPorInversionista(params: {
@@ -2195,6 +2588,27 @@ export class CarteraBackClient {
 		// "Actualizar" podría devolver un hit stale tras registrar/ajustar un pago.
 		return this.request<MoraCobradaPorAsesorResponse>(
 			`/reportes/mora-cobrada-por-asesor?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+	}
+
+	async getMoraRecuperacionPorAsesor(params: {
+		mes: number;
+		anio: number;
+		asesores?: number[];
+		emailCobrador?: string;
+	}): Promise<MoraRecuperacionPorAsesorResponse> {
+		const queryParams = new URLSearchParams({
+			mes: String(params.mes),
+			anio: String(params.anio),
+		});
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		if (params.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
+		return this.request<MoraRecuperacionPorAsesorResponse>(
+			`/reportes/mora-recuperacion-por-asesor?${queryParams}`,
 			{ method: "GET" },
 			false,
 		);

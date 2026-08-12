@@ -301,6 +301,25 @@ export class ContractGeneratorService {
       requiredFields: []
     });
 
+    // Contrato de Participación y Administración de Cartera (mismo doc para hombre y mujer)
+    this.registerTemplate({
+      type: ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA,
+      templateFilename: 'inversiones/contrato_participacion_administracion_cartera/contrato_participacion_administracion_cartera.docx',
+      templateFilenameFemale: 'inversiones/contrato_participacion_administracion_cartera/contrato_participacion_administracion_cartera.docx',
+      description: 'Contrato de Participación y Administración de Cartera - Inversionista Individual',
+      requiredFields: []
+    });
+
+    // Anexos 1 y 2 - Confirmación de Participación y Designación de Beneficiario
+    // (mismo doc para hombre y mujer; incluye lista repetible de beneficiarios)
+    this.registerTemplate({
+      type: ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO,
+      templateFilename: 'inversiones/anexos_confirmacion_participacion_beneficiario/anexos_confirmacion_participacion_beneficiario.docx',
+      templateFilenameFemale: 'inversiones/anexos_confirmacion_participacion_beneficiario/anexos_confirmacion_participacion_beneficiario.docx',
+      description: 'Anexos 1 y 2 - Confirmación de Participación y Designación de Beneficiario',
+      requiredFields: []
+    });
+
     // ===== INVERSIONES SOCIEDAD =====
     this.registerTemplate({
       type: ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,

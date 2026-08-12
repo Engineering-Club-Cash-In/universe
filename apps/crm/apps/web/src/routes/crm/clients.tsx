@@ -359,6 +359,12 @@ function RouteComponent() {
 				status: opp.status,
 				expectedCloseDate: opp.expectedCloseDate ?? null,
 				createdAt: opp.createdAt,
+				nit: opp.nit,
+				categoria: opp.categoria,
+				diaPagoMensual: opp.diaPagoMensual,
+				royalti: opp.royalti,
+				porcentajeRoyalti: opp.porcentajeRoyalti,
+				inversionistas: opp.inversionistas,
 				lead: opp.lead?.id
 					? {
 							id: opp.lead.id,
@@ -928,14 +934,22 @@ function RouteComponent() {
 					}
 				}}
 			>
-				<DialogContent className="max-h-[85vh] min-w-[900px] max-w-6xl overflow-y-auto">
+				{/* Ancho responsivo: `min-w-[900px]` le ganaba al `max-w-[calc(100%-2rem)]`
+				    del DialogContent (en CSS min-width pisa a max-width), así que en
+				    pantallas menores a ~930px la modal se salía y aparecía scroll en X.
+				    Con sm:max-w-5xl se pisa el sm:max-w-lg del componente base y la
+				    modal crece hasta 1024px sin pasarse nunca del viewport. */}
+				<DialogContent className="max-h-[85vh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-5xl">
 					<DialogHeader>
 						<DialogTitle>Detalles del Cliente</DialogTitle>
 					</DialogHeader>
 					{selectedClient && (
-						<div className="space-y-6">
+						/* min-w-0: el DialogContent es `grid` y sus hijos arrancan con
+						   min-width:auto, así que sin esto el bloque se estiraba hasta su
+						   ancho min-content y el scroll en X aparecía en la modal misma. */
+						<div className="min-w-0 space-y-6">
 							{/* Header con nombre, badges y resumen */}
-							<div className="flex items-center gap-4 rounded-lg border bg-linear-to-r from-primary/5 to-transparent p-4">
+							<div className="flex flex-wrap items-center gap-4 rounded-lg border bg-linear-to-r from-primary/5 to-transparent p-4">
 								<div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary/10 font-bold text-lg text-primary">
 									{selectedClient.firstName?.[0]}
 									{selectedClient.lastName?.[0]}
@@ -967,28 +981,35 @@ function RouteComponent() {
 											</Badge>
 										)}
 									</div>
-									<div className="mt-1 flex items-center gap-4 text-muted-foreground text-sm">
+									{/* Los valores largos (correo, SIFCO tipo CRM-<uuid>) no se
+									    parten solos: sin flex-wrap + break-all fijaban un ancho
+									    mínimo que empujaba el bloque de totales fuera de la modal. */}
+									<div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground text-sm">
 										{selectedClient.email && (
-											<span className="flex items-center gap-1">
-												<Mail className="h-3.5 w-3.5" />
-												{selectedClient.email}
+											<span className="flex min-w-0 items-center gap-1">
+												<Mail className="h-3.5 w-3.5 shrink-0" />
+												<span className="break-all">
+													{selectedClient.email}
+												</span>
 											</span>
 										)}
 										{selectedClient.phone && (
 											<span className="flex items-center gap-1">
-												<Phone className="h-3.5 w-3.5" />
+												<Phone className="h-3.5 w-3.5 shrink-0" />
 												{selectedClient.phone}
 											</span>
 										)}
 										{selectedClient.carteraCredit?.numeroSifco && (
-											<span className="flex items-center gap-1">
-												<CreditCard className="h-3.5 w-3.5" />
-												SIFCO: {selectedClient.carteraCredit.numeroSifco}
+											<span className="flex min-w-0 items-center gap-1">
+												<CreditCard className="h-3.5 w-3.5 shrink-0" />
+												<span className="break-all">
+													SIFCO: {selectedClient.carteraCredit.numeroSifco}
+												</span>
 											</span>
 										)}
 										{selectedClient.dpi && (
 											<span className="flex items-center gap-1">
-												<User className="h-3.5 w-3.5" />
+												<User className="h-3.5 w-3.5 shrink-0" />
 												DPI: {selectedClient.dpi}
 											</span>
 										)}
@@ -1084,7 +1105,7 @@ function RouteComponent() {
 														</Badge>
 													)}
 												</div>
-												<div className="mt-0.5 flex items-center gap-3 text-muted-foreground text-xs">
+												<div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-xs">
 													<span className="font-medium text-foreground">
 														{formatCurrency(opp.value)}
 													</span>
@@ -1094,7 +1115,7 @@ function RouteComponent() {
 															: "Sobre Vehículo"}
 													</span>
 													{opp.numeroSifco && (
-														<span className="text-blue-600">
+														<span className="break-all text-blue-600">
 															#{opp.numeroSifco}
 														</span>
 													)}

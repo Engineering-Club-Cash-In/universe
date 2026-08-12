@@ -8,6 +8,7 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
+import { eqDpi } from "../lib/dpi-lookup";
 import {
 	findSalesUserWithLeastAutoAssignedLeads,
 	resolveExistingLeadAssigneeFromDatabase,
@@ -164,7 +165,7 @@ export async function createPublicLead(c: Context) {
 
 		// Buscar lead existente: por email+DPI si hay DPI, solo por email si no
 		const whereClause = hasDpi
-			? or(eq(leads.email, body.email), eq(leads.dpi, body.dpi))
+			? or(eq(leads.email, body.email), eqDpi(leads.dpi, body.dpi))
 			: eq(leads.email, body.email);
 
 		const [existingLead] = await db
@@ -198,10 +199,14 @@ export async function createPublicLead(c: Context) {
 					.returning();
 			}
 
-			// Verificar si ya tiene una oportunidad abierta con el mismo source
+			// Verificar si ya tiene una oportunidad abierta con el mismo source.
+			// Se pasa el source que el lead traía de antes (`existingLead` es la fila
+			// leída antes del update de arriba): las oportunidades legacy sin source
+			// son del canal original del lead, no del que se acaba de pedir.
 			const existingOpportunity = await getOpenOpportunityBySource(
 				existingLead.id,
 				source,
+				existingLead.source,
 			);
 			if (existingOpportunity) {
 				const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(

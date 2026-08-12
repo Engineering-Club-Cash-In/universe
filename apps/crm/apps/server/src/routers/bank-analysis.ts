@@ -16,8 +16,10 @@ import {
 	bankStatementAnalysisSchema,
 } from "../lib/bank-analysis-schema";
 import {
+	BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES,
 	canAutoAttachBankStatementDocuments,
 	getBankStatementOpportunityDocumentType,
+	resolveBankStatementDocumentSlots,
 } from "../lib/bank-statement-documents";
 import { updateChecklistForClientDocument } from "../lib/checklist";
 import {
@@ -402,9 +404,22 @@ export const bankAnalysisRouter = {
 					const savedKeys: string[] = [];
 
 					try {
-						for (const [index, file] of downloadedFiles.entries()) {
-							const documentType = getBankStatementOpportunityDocumentType(index);
-							if (!documentType) {
+						// Máximo un archivo por slot del checklist (3).
+						const filesToUpload = downloadedFiles.slice(
+							0,
+							BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length,
+						);
+
+						const documentSlots = resolveBankStatementDocumentSlots({
+							uploadedFileCount: filesToUpload.length,
+							statementsDetected:
+								analysis.estados_cuenta_detectados ?? filesToUpload.length,
+						});
+
+						for (let slot = 0; slot < documentSlots.length; slot++) {
+							const documentType = getBankStatementOpportunityDocumentType(slot);
+							const file = filesToUpload[documentSlots[slot]];
+							if (!documentType || !file) {
 								continue;
 							}
 

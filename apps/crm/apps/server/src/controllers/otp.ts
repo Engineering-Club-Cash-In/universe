@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { leads } from "@/db/schema";
 import { otps } from "@/db/schema/otp";
+import { eqDpi } from "@/lib/dpi-lookup";
 
 /**
  * Controller de OTP - Toda la lógica de negocio aquí
@@ -17,7 +18,7 @@ export class OTPController {
 			const [lead] = await db
 				.select()
 				.from(leads)
-				.where(eq(leads.dpi, dpi))
+				.where(eqDpi(leads.dpi, dpi))
 				.limit(1);
 
 			if (!lead) {

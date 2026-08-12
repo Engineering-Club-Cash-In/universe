@@ -198,10 +198,14 @@ export async function createPublicLead(c: Context) {
 					.returning();
 			}
 
-			// Verificar si ya tiene una oportunidad abierta con el mismo source
+			// Verificar si ya tiene una oportunidad abierta con el mismo source.
+			// Se pasa el source que el lead traía de antes (`existingLead` es la fila
+			// leída antes del update de arriba): las oportunidades legacy sin source
+			// son del canal original del lead, no del que se acaba de pedir.
 			const existingOpportunity = await getOpenOpportunityBySource(
 				existingLead.id,
 				source,
+				existingLead.source,
 			);
 			if (existingOpportunity) {
 				const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(

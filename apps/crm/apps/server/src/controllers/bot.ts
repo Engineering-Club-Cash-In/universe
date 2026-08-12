@@ -3,6 +3,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import {
 	leads,
+	type leadSourceEnum,
 	magicUrls,
 	opportunities,
 	opportunityDocuments,
@@ -410,6 +411,10 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	let leadId: string;
 	let assignedUserId: string;
 	let createdByUserId: string;
+	// Canal del lead, para decidir si una oportunidad legacy (sin source) le
+	// corresponde a WhatsApp. Este flujo no toca leads.source, así que el valor
+	// que se lee aquí es el mismo con el que se creó el lead.
+	let leadSource: (typeof leadSourceEnum.enumValues)[number];
 
 	if (existingLead.length === 0) {
 		console.log("[DEBUG] DPI not found in leads. Inserting new lead.");
@@ -442,6 +447,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		leadId = newLead[0].id;
 		assignedUserId = newLeadAssignment.assignedTo;
 		createdByUserId = newLeadAssignment.createdBy;
+		leadSource = "Whatsapp";
 	} else {
 		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
 		const assignedTo = await resolveExistingLeadAssigneeFromDatabase(
@@ -475,6 +481,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		leadId = existingLead[0].id;
 		assignedUserId = assignedTo;
 		createdByUserId = existingLead[0].createdBy;
+		leadSource = existingLead[0].source;
 	}
 
 	// ========================
@@ -514,6 +521,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	const existingOpportunity = await getOpenOpportunityBySource(
 		leadId,
 		"Whatsapp",
+		leadSource,
 	);
 
 	let opportunityId: string;

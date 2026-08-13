@@ -1,12 +1,33 @@
 # Árbol de decisiones del bot — referencia funcional
 
 **Estado:** Aprobado como propuesta de flujo (documento de gerencia v1.0, agosto 2026)
-**Fuente:** [`fuente/flujo-bot-whatsapp.pdf`](./fuente/flujo-bot-whatsapp.pdf)
 **Ticket:** [CC2-48 · CB-115](https://clubcashin.atlassian.net/browse/CC2-48)
 
 Este archivo transcribe el árbol completo tal como lo aprobó gerencia. Es la referencia
 funcional del feature: **el detalle técnico de cada paso vive en su propio documento**.
 Cambiar algo de acá implica validarlo con Cobros, no es una decisión de IT.
+
+## Fuentes
+
+| Documento | Qué es |
+| --- | --- |
+| [`fuente/flujo-bot-whatsapp.pdf`](./fuente/flujo-bot-whatsapp.pdf) | **Presentación a gerencia** (v1.0). El árbol resumido con diagramas. Es lo que se transcribe abajo. |
+| [`fuente/FlujoBotCobros.pdf`](./fuente/FlujoBotCobros.pdf) | **Documento detallado de trabajo** ("moFlujazo Bot"). Mensajes concretos, campos y submenús. Más granular y en algunos puntos **contradice** a la presentación. |
+| Reunión 2026-08-13 | Acuerdos en vivo con Cobros. Es lo más reciente y manda sobre los dos anteriores. |
+
+### Diferencias entre las fuentes
+
+Donde no coinciden, hay que resolverlo explícitamente. Estado actual:
+
+| Tema | Presentación a gerencia | Documento detallado | Reunión 2026-08-13 |
+| --- | --- | --- | --- |
+| Cuándo se pide OTP | Solo si el número **no** coincide con el CRM | **Siempre** hay OTP; lo que cambia es a dónde se envía | — (sin tocar) |
+| Codeudores | No se mencionan | Un **codeudor** también puede identificarse | — |
+| Canal del OTP | No lo dice | **SMS o correo** | — |
+| Mora en el link de pago | Rubro **elegible** | **Obligatoria**, no se puede excluir | Obligatoria ✔ |
+| Convenio y promesa | Dos gestiones del menú del crédito | **No** están en el menú: pasan por agente | 🔴 Bloqueadas ([D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados)) |
+| Info del crédito | Nodo terminal | Termina volviendo al menú | Sale a **Realizar un pago** o regresar |
+| Aseguradora | No aparece | No aparece | **Se agrega** a info del crédito |
 
 ---
 
@@ -28,6 +49,19 @@ flowchart TD
     SEG --> SEL[Selección de crédito<br/>Lista de créditos activos]
     SEL --> MC[Menú del crédito]
 ```
+
+> **Precisiones del documento detallado** (contradicen en parte lo de arriba, ver
+> [D-03](./DECISIONES.md#d-03--segundo-factor-cuando-el-número-no-coincide)):
+> - El texto de entrada es: *"Ingresa tu NIT, tu DPI o placa para poder obtener información
+>   acerca de tu crédito. Al enviar estás aceptando nuestros términos y condiciones."*
+> - **Siempre hay OTP.** Si escribe desde el número registrado en el CRM **o desde el de
+>   alguno de sus codeudores**, el OTP va a ese número; **si no es ninguno de esos, el OTP
+>   se manda al número principal** del titular.
+> - El OTP se envía **por SMS o correo**.
+> - Tras identificarse: *"Hola [nombre], hemos encontrado que posees estos crédito(s) con
+>   nosotros"* + menú con la lista de créditos.
+> - En ese mismo punto aparece **"Contactar con un agente"**, marcado como *(validar)* en el
+>   documento original.
 
 > Detalle técnico y contratos: [`01-identificacion-y-acceso.md`](./01-identificacion-y-acceso.md)
 
@@ -52,6 +86,12 @@ flowchart TD
 
 Siempre existe la opción de **regresar al menú anterior**.
 
+> **Cambios acordados en reunión (2026-08-13)** — ver [`02-menu-del-credito.md`](./02-menu-del-credito.md):
+> - **Info del crédito** devuelve además la **aseguradora**.
+> - **Info del crédito deja de ser un nodo terminal**: al final ofrece *Realizar un pago* o
+>   *Regresar al menú anterior*.
+> - **Convenio** y **promesa de pago** quedan bloqueados ([D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados)).
+
 ---
 
 ## 03 · Métodos de pago → Paso 3
@@ -74,6 +114,10 @@ flowchart TD
     P3 --> CF
 ```
 
+> Detalle: [`03-metodos-de-pago.md`](./03-metodos-de-pago.md). Cambios ya acordados: la mora
+> es obligatoria (no es rubro elegible) y el bot solo muestra **cuántas cuotas**; el monto y
+> el link los arma el CRM.
+
 ---
 
 ## 04 · Validación de boleta → Paso 4
@@ -95,9 +139,23 @@ flowchart TD
     PI --> NO[Notificación<br/>SMS o WhatsApp con recibo]
 ```
 
+> Detalle: [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md). El documento
+> detallado agrega que antes de confirmar se le muestra **cómo se va a aplicar el pago**
+> (si cubre la cuota o paga otra) y que al confirmar puede **hacer otra gestión con el mismo
+> crédito** o terminar el proceso.
+
 ---
 
 ## 05 · Convenio y promesa de pago → Paso 5
+
+> 🔴 **BLOQUEADO (2026-08-13).** Este flujo **no se construye por ahora**: queda pendiente
+> de aprobación de gerencia. No se define, no se estima y no se implementa hasta que haya
+> luz verde. El texto de abajo se conserva como referencia de lo que se había propuesto.
+> Ver [D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados).
+>
+> Impacto en otros pasos: el **menú del crédito** (Paso 2) muestra seis gestiones, dos de
+> ellas son estas. Hay que definir qué hace el bot con esas dos opciones mientras tanto —
+> ocultarlas o mandarlas directo a un agente.
 
 Ambas gestiones inician con un **mensaje aclaratorio** de qué son y qué incluyen (cuotas
 atrasadas, mora y cualquier situación legal), seguido de un resumen del crédito. En el
@@ -122,6 +180,8 @@ flowchart TD
 
 En ambos casos el cliente puede regresar al menú anterior.
 
+> Detalle (congelado): [`05-convenio-y-promesa.md`](./05-convenio-y-promesa.md).
+
 ---
 
 ## 06 · Reglas transversales
@@ -132,6 +192,19 @@ En ambos casos el cliente puede regresar al menú anterior.
 | **Notificaciones de resultado** | Todo pago genera notificación por SMS o WhatsApp: si se acredita, incluye recibo y cómo quedó capital, mora y cuota; **si se rechaza, se informa igualmente** al cliente. |
 | **Escalamiento a agente** | Cancelación de crédito, abonos a capital, convenios especiales o **falta de respuesta tras un link de pago** se transbordan a un agente humano. |
 | **Seguridad de acceso** | Si el número del cliente no coincide con el registrado en el CRM, se exige **validación por OTP**, con **validación de vida como paso opcional adicional**. |
+
+---
+
+## 07 · A futuro (fuera del alcance actual)
+
+El documento detallado cierra con una sección **"A FUTURO"**: permitir que el cliente
+**actualice sus datos** desde el bot —cambiar correo, cambiar teléfono— y una tercera opción
+que quedó **cortada en el documento original** ("cambiar…"). Hay que preguntar cuál era.
+
+No entra en ningún paso actual. Ojo: dejar que un cliente cambie su teléfono desde el bot
+choca de frente con usar ese mismo teléfono como factor de autenticación
+([Paso 1](./01-identificacion-y-acceso.md)); cuando se retome, se diseña con Cobros y
+Seguridad, no como un formulario más.
 
 ---
 

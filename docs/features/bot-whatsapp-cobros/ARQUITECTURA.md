@@ -158,7 +158,8 @@ Reglas:
 | DPI | CRM · `leads.dpi` | Usar el helper `eqDpi` (`lib/dpi-lookup.ts`): hay DPI guardados con y sin formato. |
 | NIT | CRM · `leads.nit` | Búsqueda directa. Ojo: puede venir con guion. |
 | Placa | CRM · `vehicles.license_plate` | `vehicles` → `opportunities.vehicle_id` → `opportunities.numero_sifco`. |
-| Teléfonos del cliente | CRM · `leads.phone`, `casos_cobros.telefono_principal`, `casos_cobros.telefono_alternativo` | `referencias_lead.telefono` y el teléfono del segundo firmante son de **otras personas**: no cuentan como teléfonos del titular. |
+| Teléfonos del cliente | CRM · `leads.phone`, `casos_cobros.telefono_principal`, `casos_cobros.telefono_alternativo` | `referencias_lead.telefono` es de **otra persona**: no cuenta como teléfono del titular. |
+| Teléfonos de codeudores | CRM · `co_debtors` | El documento detallado los acepta como número válido del crédito. Pendiente de confirmar ([D-11](./DECISIONES.md#d-11--quien-escribe-no-es-el-titular)). |
 | Créditos del cliente | Puente `opportunities.numero_sifco` → cartera `creditos.numero_credito_sifco` | El CRM resuelve los números SIFCO y cartera devuelve el detalle. |
 | Capital, cuotas, mora, próxima fecha | cartera-back | `GET /credito?numero_credito_sifco=…`, `GET /getAllCredits` vía `carteraBackClient`. |
 | Vehículo (marca, modelo, año, placa) | CRM · `vehicles` | Ya se expone algo así en `/api/portal/lead/sifco`. |

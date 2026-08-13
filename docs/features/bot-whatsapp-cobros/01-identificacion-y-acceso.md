@@ -52,6 +52,22 @@ posterior puede exponer un dato sin que este haya terminado bien.
    - **Sin créditos activos** → mensaje y salida hacia agente.
 7. El cliente elige un crédito → **fin del Paso 1**, entra el menú del crédito (Paso 2).
 
+### Precisiones del documento detallado (`FlujoBotCobros.pdf`)
+
+Aparecieron después de escribir los contratos de la §3 y **cambian reglas del paso**. Están
+sin resolver: ver [D-03](./DECISIONES.md#d-03--segundo-factor-cuando-el-número-no-coincide),
+[D-11](./DECISIONES.md#d-11--quien-escribe-no-es-el-titular) y
+[D-13](./DECISIONES.md#d-13--canal-del-otp).
+
+| Punto | Qué dice el documento detallado | Impacto |
+| --- | --- | --- |
+| **OTP siempre** | Hay validación de OTP tanto si el número coincide como si no. Lo que cambia es **a dónde se envía**: si coincide (o es de un codeudor) va a ese número; si no es ninguno, va **al número principal** del titular. | Contradice el árbol de gerencia ("OTP si número ≠ CRM") y lo asumido en la §3. Más fricción, más seguridad. **Decisión pendiente.** |
+| **Codeudores** | El número de un **codeudor** cuenta como número válido del crédito. | El CRM tiene codeudores (`co_debtors`); habría que incluir sus teléfonos en la comparación y registrar **quién** de los dos está gestionando. |
+| **Canal del OTP** | **SMS o correo.** | La propuesta de IT era WhatsApp con caída a SMS. Correo agrega un canal más y hay clientes sin correo confiable. |
+| **Contactar con un agente** | Aparece como opción ya en el menú de selección de crédito, marcada *(validar)* en el original. | Definir si existe salida a agente **antes** de elegir crédito. |
+| **Texto de entrada** | *"Ingresa tu NIT, tu DPI o placa… Al enviar estás aceptando nuestros términos y condiciones."* | La aceptación de T&C es **implícita al enviar el dato**, no un botón aparte ([D-12](./DECISIONES.md#d-12--términos-y-condiciones)). |
+| **Saludo** | *"Hola [nombre], hemos encontrado que posees estos crédito(s) con nosotros."* | Confirma que se usa el nombre antes de terminar de verificar. |
+
 ```mermaid
 sequenceDiagram
     participant C as Cliente

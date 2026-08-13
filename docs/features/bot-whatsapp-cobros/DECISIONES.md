@@ -22,6 +22,7 @@ día; si no está escrito, no está decidido.
 | [D-12](#d-12--términos-y-condiciones) | Términos y condiciones | 🔴 |
 | [D-13](#d-13--canal-del-otp) | Canal del OTP | 🟡 |
 | [D-14](#d-14--retención-de-pii-y-logs) | Retención de PII y logs | 🟡 |
+| [D-15](#d-15--convenio-y-promesa-de-pago-bloqueados) | Convenio y promesa de pago: bloqueados | 🔴 |
 
 ---
 
@@ -72,18 +73,28 @@ parámetro de la llamada.
 
 **Estado:** 🔴 Abierta · **bloquea la implementación**
 
-**Contexto.** El PDF dice: "OTP si número ≠ CRM", con "validación de vida como paso
-opcional adicional". Falta cerrar qué se implementa ahora.
+**Contexto.** Las dos fuentes se contradicen:
+
+- **Presentación a gerencia:** "OTP si número ≠ CRM", con "validación de vida como paso
+  opcional adicional". Es decir, quien escribe desde su número registrado **no** pasa OTP.
+- **Documento detallado (`FlujoBotCobros.pdf`):** hay OTP **siempre**. Si escribe desde el
+  número del CRM **o desde el de un codeudor**, el OTP va a ese número; si no es ninguno de
+  esos, el OTP se manda **al número principal** del titular.
 
 **Opciones.**
-- A) Solo OTP a un teléfono registrado (lo mínimo del árbol).
-- B) OTP + validación de vida siempre (existe `livenessController` en el CRM).
-- C) OTP y, además, validación de vida solo para gestiones sensibles.
-- D) OTP + una pregunta de control (ej. últimos 4 del DPI, marca del vehículo).
+- A) OTP **solo** cuando el número no coincide (menos fricción; lo asumido en los contratos
+  del Paso 1 §3).
+- B) OTP **siempre**, cambiando el destino según coincida o no (lo del documento detallado).
+- C) OTP siempre, pero con "recordar" el dispositivo por N días para no repetirlo en cada
+  consulta.
+- D) Cualquiera de las anteriores + validación de vida (existe `livenessController` en el
+  CRM) solo para gestiones sensibles.
 
-**A discutir:** la validación de vida en WhatsApp implica sacar al cliente a un link
-externo; hay que medir cuánta gente se cae del flujo antes de imponerla. Decide Cobros
-junto con IT.
+**A considerar.** B es más seguro y es lo que dice el documento de trabajo más reciente,
+pero le agrega un paso a **todos** los clientes, incluidos los que solo quieren ver su saldo:
+es la diferencia entre consultar en 2 mensajes o en 5. C es el punto medio y depende de
+[D-06](#d-06--ttl-de-la-sesión-y-caducidad-de-la-verificación). Decide Cobros con IT.
+**Si se elige B o C, cambian los contratos del Paso 1.**
 
 ---
 
@@ -208,10 +219,16 @@ Sin ambiente de pruebas, el primer despliegue se prueba contra clientes reales.
 **Contexto.** Casos reales: la esposa que administra el crédito, un hijo, el contador de la
 empresa. El OTP no distingue: si tiene el teléfono del titular, entra.
 
+El documento detallado responde una parte: **los codeudores sí cuentan** como números
+válidos del crédito. El CRM ya tiene `co_debtors` con sus teléfonos.
+
 **Preguntas.**
-1. ¿Se acepta que un tercero con acceso al teléfono registrado consulte? (hoy, de facto, sí)
-2. ¿Se permite registrar **autorizados** por crédito, con su propio teléfono?
-3. ¿Hay gestiones que **siempre** requieren al titular, aun con OTP válido?
+1. ¿Se confirma que un **codeudor** puede identificarse y operar el crédito? ¿Con las mismas
+   gestiones que el titular, o solo consultar?
+2. ¿Queda registrado **quién** de los dos hizo cada gestión? (debería: es evidencia)
+3. ¿Se acepta que un tercero con acceso al teléfono registrado consulte? (hoy, de facto, sí)
+4. ¿Se permite registrar **autorizados** por crédito, con su propio teléfono?
+5. ¿Hay gestiones que **siempre** requieren al titular, aun con OTP válido?
 
 Involucra a Legal por el tema de datos personales.
 
@@ -231,13 +248,21 @@ Involucra a Legal por el tema de datos personales.
 
 ## D-13 · Canal del OTP
 
-**Estado:** 🟡 Propuesta
+**Estado:** 🔴 Abierta (era 🟡; el documento detallado dice otra cosa)
 
-**Opciones.** WhatsApp (mismo hilo), SMS (existe `packages/sms`), o ambos según el caso.
+**Contexto.** El documento detallado especifica **SMS o correo**. La propuesta de IT era
+WhatsApp con caída a SMS.
 
-**Recomendación de IT:** WhatsApp al teléfono elegido. Si ese teléfono no tiene WhatsApp,
-caer a SMS. Un código que llega al **mismo chat** donde escribe alguien que no es el
-titular no valida nada: el envío debe ir al teléfono **registrado**, no al del chat.
+**Opciones.** WhatsApp (mismo hilo), SMS (existe `packages/sms`), correo (existe
+`packages/email`), o una combinación.
+
+**Recomendación de IT:** WhatsApp al teléfono elegido, con caída a SMS. Correo como tercera
+opción solo si el cliente no tiene teléfono utilizable: muchos clientes tienen correos
+viejos o inventados en el registro, y un OTP que nunca llega termina en un agente.
+
+**Regla que no se negocia, elijan lo que elijan:** el código se envía al contacto
+**registrado**, nunca al número del chat cuando ese número no está registrado. Si no, el
+factor no valida nada.
 
 ---
 
@@ -252,3 +277,27 @@ titular no valida nada: el envío debe ir al teléfono **registrado**, no al del
   90 días), conservando el evento auditado sin PII.
 - Los adjuntos que suba el cliente en pasos futuros (boletas) tienen su propia política:
   se define en el Paso 4.
+
+---
+
+## D-15 · Convenio y promesa de pago: bloqueados
+
+**Estado:** 🔴 Bloqueado · 2026-08-13 (acordado en reunión)
+
+**Decisión.** El flujo de **convenio de pago** y **promesa de pago** por el bot
+(sección 05 del árbol / Paso 5) **no se construye por ahora**. Queda a la espera de
+**aprobación de gerencia**.
+
+**Qué implica.**
+
+- No se define, no se estima ni se implementa el Paso 5 hasta que haya aprobación.
+- El resto del feature sigue: identificación (Paso 1), menú del crédito, consultas y pagos
+  no dependen de esto.
+- **Pendiente de definir:** qué hace el bot mientras tanto con esas dos opciones del menú
+  del crédito, que en el árbol aparecen como dos de las seis gestiones. Opciones: ocultarlas
+  del menú, o dejarlas visibles y transbordar directo a un agente humano. Se decide al
+  definir el Paso 2.
+
+**Al desbloquearse:** actualizar este registro con la fecha y quién aprobó, pasar el Paso 5
+a "En definición" en el README y revisar si el flujo aprobado sigue siendo el del PDF v1.0
+o cambió.

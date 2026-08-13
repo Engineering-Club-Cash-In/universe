@@ -3,7 +3,11 @@
 **Estado global:** 🟡 En definición · **Nada de esto está implementado todavía**
 **Última actualización:** 2026-08-13
 **Proyecto Jira:** [CC2 — CRM Cobros 2](https://clubcashin.atlassian.net/browse/CC2)
-**Fuente funcional:** [`fuente/flujo-bot-whatsapp.pdf`](./fuente/flujo-bot-whatsapp.pdf) (v1.0, agosto 2026)
+**Fuentes funcionales:** [`fuente/flujo-bot-whatsapp.pdf`](./fuente/flujo-bot-whatsapp.pdf)
+(presentación a gerencia, v1.0) · [`fuente/FlujoBotCobros.pdf`](./fuente/FlujoBotCobros.pdf)
+(documento detallado de trabajo) · reunión 2026-08-13.
+Donde se contradicen, ver la tabla de diferencias en
+[`00-arbol-de-decisiones.md`](./00-arbol-de-decisiones.md#diferencias-entre-las-fuentes).
 
 ---
 
@@ -31,20 +35,25 @@ decidido.
 | --- | --- |
 | [`00-arbol-de-decisiones.md`](./00-arbol-de-decisiones.md) | El flujo completo del PDF transcrito, con diagramas. Es la referencia funcional; **no se cambia sin acuerdo con Cobros**. |
 | [`ARQUITECTURA.md`](./ARQUITECTURA.md) | Cómo se integran SimpleTech ↔ CRM ↔ cartera-back. Auth, versionado, formato de respuestas, sesiones, errores, observabilidad. Aplica a todos los pasos. |
-| [`01-identificacion-y-acceso.md`](./01-identificacion-y-acceso.md) | **Paso 1** (el que se está definiendo hoy): identificación, validación de identidad y selección de crédito. |
+| [`01-identificacion-y-acceso.md`](./01-identificacion-y-acceso.md) | **Paso 1**: identificación, validación de identidad y selección de crédito. |
+| [`02-menu-del-credito.md`](./02-menu-del-credito.md) | **Paso 2**: info del crédito y las gestiones disponibles. |
+| [`03-metodos-de-pago.md`](./03-metodos-de-pago.md) | **Paso 3**: link de Pagalo, Nexa y el menú de pago. |
+| [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md) | **Paso 4**: subir comprobante, lectura de la boleta e ingreso manual. |
+| [`05-convenio-y-promesa.md`](./05-convenio-y-promesa.md) | **Paso 5**: congelado. Solo referencia hasta que gerencia apruebe. |
 | [`DECISIONES.md`](./DECISIONES.md) | Registro de decisiones: abiertas, cerradas y por qué. |
-| `fuente/` | El PDF original de gerencia. |
+| `fuente/` | Los PDF originales (gerencia + documento detallado). |
 
 ## Pasos del feature
 
 | # | Paso | Alcance | Estado | Doc |
 | --- | --- | --- | --- | --- |
 | 1 | Identificación y acceso | Menú general → identificación (NIT/DPI/placa) → validación de identidad → lista de créditos | 🟡 **En definición** | [`01-…`](./01-identificacion-y-acceso.md) |
-| 2 | Menú del crédito | Info del crédito, y el ruteo a las 6 gestiones | ⚪ Pendiente | — |
-| 3 | Métodos de pago | Link de Pagalo, subir boleta, transferencia Nexa | ⚪ Pendiente | — |
-| 4 | Validación de boleta | OCR, confirmación, pendiente de conciliación, notificación | ⚪ Pendiente | — |
-| 5 | Convenio y promesa de pago | Selección de rubros, plazo, documento | ⚪ Pendiente | — |
-| 6 | Reglas transversales | Excedentes, notificaciones, escalamiento a agente | ⚪ Pendiente | — |
+| 2 | Menú del crédito | Info del crédito, y el ruteo a las 6 gestiones | 🟡 **En definición** (notas de reunión 2026-08-13) | [`02-…`](./02-menu-del-credito.md) |
+| 3 | Realizar un pago | Link de Pagalo, Nexa, menú dinámico de pago | 🟡 **En definición** | [`03-…`](./03-metodos-de-pago.md) |
+| 4 | Validación de boleta | Lectura de boleta, ingreso manual, pendiente de conciliación | 🟡 **En definición** | [`04-…`](./04-validacion-de-boleta.md) |
+| 5 | Convenio y promesa de pago | Selección de rubros, plazo, documento | 🔴 **Bloqueado** — requiere aprobación de gerencia (2026-08-13) | [`05-…`](./05-convenio-y-promesa.md) · [D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados) |
+| 6 | Reglas transversales | Excedentes, notificaciones, escalamiento a agente | 🟡 Documentadas, sin implementar | [`00-…`](./00-arbol-de-decisiones.md#06--reglas-transversales) |
+| — | A futuro | Que el cliente actualice correo y teléfono desde el bot | ⚪ Fuera de alcance | [`00-…`](./00-arbol-de-decisiones.md#07--a-futuro-fuera-del-alcance-actual) |
 
 > El orden de construcción no tiene por qué ser el orden del árbol, pero el Paso 1 es
 > prerrequisito de todos: sin identidad verificada no se puede exponer ningún dato.

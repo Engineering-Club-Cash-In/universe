@@ -252,6 +252,53 @@ describe("validarInversionistasNuevos — regla 3: una sola compra pendiente por
   });
 });
 
+describe("validarInversionistasNuevos — regla 4: crédito excluido de compras", () => {
+  it("rechaza una compra_cartera si el crédito está excluido de compras", async () => {
+    setRows({ padre: [1], espejo: [1] });
+    const set = makeSet();
+    const res = await validarInversionistasNuevos(
+      CREDITO_ID,
+      [invPayload(1), invPayload(7, { es_nuevo: true, tipo_operacion: "compra_cartera" })],
+      [],
+      set,
+      true,
+    );
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error.message).toContain("excluido de las compras");
+      expect(res.error.inversionistas_ids).toEqual([7]);
+    }
+  });
+
+  it("permite reinversiones aunque el crédito esté excluido de compras", async () => {
+    setRows({ padre: [1], espejo: [1] });
+    const set = makeSet();
+    const res = await validarInversionistasNuevos(
+      CREDITO_ID,
+      [invPayload(1), invPayload(7, { es_nuevo: true, tipo_operacion: "reinversion" })],
+      [],
+      set,
+      true,
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.nuevos.map((n) => n.inversionista_id)).toEqual([7]);
+  });
+
+  it("permite la compra_cartera si el crédito no está excluido", async () => {
+    setRows({ padre: [1], espejo: [1] });
+    const set = makeSet();
+    const res = await validarInversionistasNuevos(
+      CREDITO_ID,
+      [invPayload(1), invPayload(7, { es_nuevo: true, tipo_operacion: "compra_cartera" })],
+      [],
+      set,
+      false,
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.nuevos.map((n) => n.inversionista_id)).toEqual([7]);
+  });
+});
+
 describe("validarInversionistasNuevos — datos mínimos del nuevo", () => {
   it("rechaza un es_nuevo sin tipo_operacion", async () => {
     setRows({ padre: [1] });

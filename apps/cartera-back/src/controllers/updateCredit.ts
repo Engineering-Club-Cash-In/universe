@@ -554,6 +554,11 @@ const validateInvestorsPercentages = (
 //   3. Como máximo UNA compra_cartera puede quedar pendiente de facturar por
 //      crédito: cofidi prorratea el interés del pago con una sola fecha de
 //      corte (operacionesPendientesFacturar[0]) y las demás se le pierden.
+//   4. Si el crédito está excluido de compras, no se le puede agregar una
+//      compra_cartera desde acá. Sin esta regla el modal de edición sería una
+//      puerta trasera al filtro de getCreditCandidates y al guard manual de
+//      addInvestorToCredit. Solo aplica a compra_cartera: el flag no bloquea
+//      reinversiones (el capital ya estaba adentro).
 export type InversionistaNuevoValidado = {
   inversionista_id: number;
   monto_aportado: number;
@@ -566,6 +571,10 @@ export const validarInversionistasNuevos = async (
   inversionistas: NonNullable<CreditUpdateData["inversionistas"]>,
   inversionistas_espejo: CreditUpdateData["inversionistas_espejo"],
   set: SetContext,
+  // Valor EFECTIVO de excluir_compras tras aplicar este request: en una misma
+  // edición se puede prender el flag y agregar una compra, así que no alcanza
+  // con mirar el estado actual del crédito.
+  excluirComprasEfectivo: boolean = false,
 ): Promise<
   | { success: true; nuevos: InversionistaNuevoValidado[] }
   | { success: false; error: { message: string; [key: string]: unknown } }
@@ -676,6 +685,18 @@ export const validarInversionistasNuevos = async (
   const nuevasCompras = declaradosNuevos.filter(
     (inv) => inv.tipo_operacion === "compra_cartera",
   );
+
+  // Regla 4: crédito excluido de compras. Se evalúa antes que la Regla 3 porque
+  // no necesita ir a la DB. No toca las reinversiones a propósito.
+  if (excluirComprasEfectivo && nuevasCompras.length > 0) {
+    return fail(
+      `Este crédito está excluido de las compras a inversionistas; no se le pueden ` +
+        `agregar compras de cartera. Desmarcá "Excluir de compras a inversionistas" ` +
+        `si querés asignarlo.`,
+      { inversionistas_ids: nuevasCompras.map((i) => i.inversionista_id) },
+    );
+  }
+
   if (nuevasCompras.length > 1) {
     return fail(
       `Solo se puede agregar una compra de cartera a la vez en este crédito ` +
@@ -1372,6 +1393,8 @@ export const updateCredit = async ({ body, set, request }: any) => {
         inversionistas ?? [],
         inversionistas_espejo,
         set,
+        // El request manda si trae el flag; si no, vale el estado actual.
+        excluir_compras ?? current.excluir_compras,
       );
       if (!nuevosValidation.success) {
         return nuevosValidation.error;

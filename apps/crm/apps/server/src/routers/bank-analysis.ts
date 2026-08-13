@@ -13,6 +13,7 @@ import {
 } from "../db/schema/crm";
 import {
 	BANK_ANALYSIS_PROMPT,
+	type BankStatementAnalysis,
 	bankStatementAnalysisSchema,
 } from "../lib/bank-analysis-schema";
 import {
@@ -42,6 +43,62 @@ import {
 const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
 const AI_TIMEOUT_MS = 120_000; // 2 minutos timeout para la IA
+
+// Mismo nombre de variable que usa cartera-back para no tener dos tasas distintas.
+const RAW_USD_EXCHANGE_RATE = Number(process.env.USD_EXCHANGE_RATE);
+const USD_EXCHANGE_RATE =
+	Number.isFinite(RAW_USD_EXCHANGE_RATE) && RAW_USD_EXCHANGE_RATE > 0
+		? RAW_USD_EXCHANGE_RATE
+		: 7.78;
+
+const toQuetzales = (amount: number) =>
+	Math.round(amount * USD_EXCHANGE_RATE * 100) / 100;
+
+/**
+ * La IA reporta los montos en la moneda original del estado de cuenta (no convierte,
+ * porque no conoce el tipo de cambio). Todo lo que sigue en el sistema asume quetzales,
+ * así que los análisis en dólares se convierten aquí antes de calcular capacidad y persistir.
+ */
+function convertAnalysisToQuetzales(
+	analysis: BankStatementAnalysis,
+): BankStatementAnalysis {
+	const { promedio_mensual } = analysis;
+
+	return {
+		...analysis,
+		resumen_mensual: analysis.resumen_mensual.map((mes) => ({
+			...mes,
+			saldo_inicial: toQuetzales(mes.saldo_inicial),
+			total_debitos: toQuetzales(mes.total_debitos),
+			total_creditos: toQuetzales(mes.total_creditos),
+			saldo_final: toQuetzales(mes.saldo_final),
+			ingresos: {
+				fijos: toQuetzales(mes.ingresos.fijos),
+				variables: toQuetzales(mes.ingresos.variables),
+			},
+			gastos: {
+				fijos: toQuetzales(mes.gastos.fijos),
+				variables: toQuetzales(mes.gastos.variables),
+			},
+		})),
+		promedio_mensual: {
+			promedio_ingresos_fijos: toQuetzales(
+				promedio_mensual.promedio_ingresos_fijos,
+			),
+			promedio_ingresos_variables: toQuetzales(
+				promedio_mensual.promedio_ingresos_variables,
+			),
+			promedio_gastos_fijos: toQuetzales(promedio_mensual.promedio_gastos_fijos),
+			promedio_gastos_variables: toQuetzales(
+				promedio_mensual.promedio_gastos_variables,
+			),
+			disponibilidad_economica: toQuetzales(
+				promedio_mensual.disponibilidad_economica,
+			),
+		},
+		moneda: "GTQ",
+	};
+}
 
 export const bankAnalysisRouter = {
 	analyzeBankStatements: crmProcedure
@@ -359,7 +416,20 @@ export const bankAnalysisRouter = {
 					});
 				}
 
-				// 5.5. ordenar por porcentaje descendente antes de persistir, ya que la UI
+				// 5.5. Normalizar a quetzales: los montos vienen en la moneda original del
+				// estado de cuenta y todo lo que sigue (capacidad, columnas, UI) asume Q.
+				if (analysis.moneda === "MIXTA") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Los estados de cuenta subidos están en monedas distintas (quetzales y dólares). Analice por separado los de cada moneda.",
+					});
+				}
+
+				if (analysis.moneda === "USD") {
+					analysis = convertAnalysisToQuetzales(analysis);
+				}
+
+				// 5.6. ordenar por porcentaje descendente antes de persistir, ya que la UI
 				// asume que el índice 0 es siempre la mejor recomendación.
 				if (analysis.analisis_fecha_pago) {
 					analysis.analisis_fecha_pago.dias_pago_sugeridos = [

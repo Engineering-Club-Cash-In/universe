@@ -172,6 +172,45 @@ export const reversePayment = async ({ body, set }: any) => {
       const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
 
       // ======================================================================
+      // 4️⃣.6️⃣ LEER LAS FACTURAS ACTIVAS DEL PAGO (ANTES DE TOCARLO)
+      // ======================================================================
+      // 🔴 LA LECTURA VA ACÁ, NO EN EL PASO 1️⃣2️⃣.5️⃣ DONDE SE ANULAN: más abajo la
+      // rama de pago parcial hace `DELETE FROM pagos_credito`, y las FK que
+      // `facturas_electronicas.pago_id` tiene contra esa tabla desvinculan la
+      // factura (ON DELETE SET NULL) o directamente borran la fila
+      // (ON DELETE CASCADE). Para cuando corría el bloque de anulación, el
+      // SELECT por `pago_id` ya devolvía 0 filas: no se llamaba a COFIDI, no
+      // fallaba nada y la reversa respondía 200 "exitosa" con la factura
+      // VIGENTE en SAT (crédito 102, pago 153742, 13-ago-2026: 3 facturas
+      // certificadas que quedaron vigentes y sin registro en la BD).
+      //
+      // Leyendo acá capturamos factura_id y uuid mientras el vínculo existe.
+      // La anulación en COFIDI sigue ocurriendo abajo, en su paso, y actualiza
+      // por `factura_id`, que sigue siendo válido aunque `pago_id` quede NULL.
+      const facturasDelPago = await tx
+        .select({
+          factura_id: facturas_electronicas.factura_id,
+          uuid: facturas_electronicas.uuid,
+          status: facturas_electronicas.status,
+          receptor_nit: facturas_electronicas.receptor_nit,
+          fecha_certificacion: facturas_electronicas.fecha_certificacion,
+          fecha_emision: facturas_electronicas.fecha_emision,
+          serie: facturas_electronicas.serie,
+          numero: facturas_electronicas.numero,
+        })
+        .from(facturas_electronicas)
+        .where(
+          and(
+            eq(facturas_electronicas.pago_id, pago_id),
+            eq(facturas_electronicas.status, "ACTIVA"), // Solo anular las activas
+          ),
+        );
+
+      console.log(
+        `📊 Se encontraron ${facturasDelPago.length} factura(s) activa(s)`,
+      );
+
+      // ======================================================================
       // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (solo si cuota está pagada)
       // ======================================================================
       let nuevoCapital = new Big(creditData.creditos.capital ?? 0);
@@ -462,30 +501,8 @@ export const reversePayment = async ({ body, set }: any) => {
       // ======================================================================
       console.log("\n🧾 ========== ANULANDO FACTURAS ELECTRÓNICAS ==========");
 
-      // Buscar facturas activas de este pago
-      const facturasDelPago = await tx
-        .select({
-          factura_id: facturas_electronicas.factura_id,
-          uuid: facturas_electronicas.uuid,
-          status: facturas_electronicas.status,
-          receptor_nit: facturas_electronicas.receptor_nit,
-          fecha_certificacion: facturas_electronicas.fecha_certificacion,
-          fecha_emision: facturas_electronicas.fecha_emision,
-          serie: facturas_electronicas.serie,
-          numero: facturas_electronicas.numero,
-        })
-        .from(facturas_electronicas)
-        .where(
-          and(
-            eq(facturas_electronicas.pago_id, pago_id),
-            eq(facturas_electronicas.status, "ACTIVA"), // Solo anular las activas
-          ),
-        );
-
-      console.log(
-        `📊 Se encontraron ${facturasDelPago.length} factura(s) activa(s)`,
-      );
-
+      // `facturasDelPago` se leyó en el paso 4️⃣.6️⃣, antes de que el DELETE del
+      // pago rompiera el vínculo por FK. Acá solo se anulan.
       const facturasAnuladas = [];
       const facturasConError = [];
 

@@ -1,180 +1,145 @@
 # Paso 1 · Identificación y acceso
 
-**Estado:** 🟡 Propuesta en definición · **No implementado**
+**Estado:** 🟢 **Definido (2026-08-13)** — listo para implementar · aún **no implementado**
 **Tickets:** [CC2-39 · CB-103](https://clubcashin.atlassian.net/browse/CC2-39) (principal),
 [CC2-48 · CB-115](https://clubcashin.atlassian.net/browse/CC2-48) (árbol)
-**Apps involucradas:** `apps/crm` (principal), `apps/cartera-back` (lectura de créditos)
+**Apps involucradas:** `apps/crm` únicamente — **este paso no consulta cartera-back**
 **Prerrequisitos de lectura:** [`ARQUITECTURA.md`](./ARQUITECTURA.md)
 
 ---
 
 ## 1. Alcance
 
-Desde que el cliente elige "ya tengo un crédito" hasta que queda con **un crédito
-seleccionado y su identidad verificada**. Es el cimiento de todo el bot: ningún paso
-posterior puede exponer un dato sin que este haya terminado bien.
+Desde que el cliente elige "ya tengo un crédito" hasta que ve la lista de sus créditos para
+elegir uno.
 
-**Entra en este paso**
+**Son dos servicios, los dos en el CRM:**
 
-- Identificación del cliente por **NIT, DPI o placa**.
-- Aceptación de términos y condiciones.
-- Verificación de que quien escribe es el titular (comparación contra los teléfonos del
-  CRM y, si no coincide, segundo factor).
-- Listado de los créditos del cliente y selección de uno.
-- Reglas antifraude: intentos máximos, bloqueos, enmascarado de datos.
+| # | Servicio | Qué hace |
+| --- | --- | --- |
+| 1 | **Buscar cliente y enviar OTP** | Recibe `search` (NIT, DPI o placa) + teléfono. Deduce qué es, busca al cliente, dice si el teléfono es de él, **siempre manda OTP por SMS** y devuelve el nombre. |
+| 2 | **Listar créditos** | Con el OTP validado, devuelve las oportunidades ganadas del cliente con la info del vehículo. |
 
-**No entra en este paso**
+**Decisión importante:** en este paso **todo se resuelve dentro del CRM**. No se consulta
+cartera-back. La consulta a cartera empieza cuando el cliente **selecciona** un crédito
+(Paso 2). Por eso el listado del servicio 2 **no** trae saldos, mora ni estado del crédito:
+solo lo necesario para elegir.
 
-- El contenido del menú del crédito y el detalle de saldos (Paso 2).
-- Cualquier forma de pago, boleta, convenio o promesa (Pasos 3–5).
-- El ruteo entre bot de ventas y bot de cobros dentro de SimpleTech: eso se configura del
-  lado del bot (CB-115), acá solo se asume que el cliente ya cayó en la rama de cobros.
+**No entra en este paso:** el menú del crédito y los saldos (Paso 2), pagos, boletas,
+convenios y promesas (Pasos 3–5), y el ruteo ventas/cobros dentro de SimpleTech.
 
 ---
 
-## 2. Recorrido funcional
-
-1. El cliente entra al bot de cobros y acepta términos y condiciones.
-2. El bot pide un identificador y le ofrece tres formas: **NIT, DPI o placa**.
-3. El bot llama al CRM con el identificador **y el número desde el que escribe**.
-4. El CRM busca al cliente:
-   - **No lo encuentra** → respuesta genérica, el cliente puede reintentar (con tope) o
-     pasar a un agente.
-   - **Lo encuentra** → crea una sesión y compara el número del chat contra los teléfonos
-     registrados del cliente.
-5. Segundo factor:
-   - **El número coincide** → la sesión queda `verificada` de una vez.
-   - **No coincide** → la sesión queda `requiere_otp`; el bot ofrece los teléfonos
-     registrados **enmascarados**, el cliente elige uno y recibe el código ahí.
-6. Con la sesión verificada, el bot pide la lista de créditos:
-   - Búsqueda por **placa** → normalmente un solo crédito, se puede autoseleccionar.
-   - Búsqueda por **NIT o DPI** → puede haber varios; se muestran para elegir.
-   - **Sin créditos activos** → mensaje y salida hacia agente.
-7. El cliente elige un crédito → **fin del Paso 1**, entra el menú del crédito (Paso 2).
-
-### Precisiones del documento detallado (`FlujoBotCobros.pdf`)
-
-Aparecieron después de escribir los contratos de la §3 y **cambian reglas del paso**. Están
-sin resolver: ver [D-03](./DECISIONES.md#d-03--segundo-factor-cuando-el-número-no-coincide),
-[D-11](./DECISIONES.md#d-11--quien-escribe-no-es-el-titular) y
-[D-13](./DECISIONES.md#d-13--canal-del-otp).
-
-| Punto | Qué dice el documento detallado | Impacto |
-| --- | --- | --- |
-| **OTP siempre** | Hay validación de OTP tanto si el número coincide como si no. Lo que cambia es **a dónde se envía**: si coincide (o es de un codeudor) va a ese número; si no es ninguno, va **al número principal** del titular. | Contradice el árbol de gerencia ("OTP si número ≠ CRM") y lo asumido en la §3. Más fricción, más seguridad. **Decisión pendiente.** |
-| **Codeudores** | El número de un **codeudor** cuenta como número válido del crédito. | El CRM tiene codeudores (`co_debtors`); habría que incluir sus teléfonos en la comparación y registrar **quién** de los dos está gestionando. |
-| **Canal del OTP** | **SMS o correo.** | La propuesta de IT era WhatsApp con caída a SMS. Correo agrega un canal más y hay clientes sin correo confiable. |
-| **Contactar con un agente** | Aparece como opción ya en el menú de selección de crédito, marcada *(validar)* en el original. | Definir si existe salida a agente **antes** de elegir crédito. |
-| **Texto de entrada** | *"Ingresa tu NIT, tu DPI o placa… Al enviar estás aceptando nuestros términos y condiciones."* | La aceptación de T&C es **implícita al enviar el dato**, no un botón aparte ([D-12](./DECISIONES.md#d-12--términos-y-condiciones)). |
-| **Saludo** | *"Hola [nombre], hemos encontrado que posees estos crédito(s) con nosotros."* | Confirma que se usa el nombre antes de terminar de verificar. |
+## 2. Recorrido
 
 ```mermaid
 sequenceDiagram
     participant C as Cliente
     participant B as SimpleTech (bot)
     participant CRM as CRM
-    participant CB as cartera-back
 
     C->>B: "Ya tengo un crédito" + acepta T&C
-    B->>C: ¿NIT, DPI o placa?
-    C->>B: DPI 1234567890101
-    B->>CRM: POST /identificar {identificador, telefonoChat}
-    CRM->>CRM: busca lead + arma teléfonos + crea sesión
-    alt el número del chat coincide
-        CRM-->>B: {sesionId, estado: "verificada"}
-    else no coincide
-        CRM-->>B: {sesionId, estado: "requiere_otp", telefonos enmascarados}
-        C->>B: elige "****1234"
-        B->>CRM: POST /otp/enviar {sesionId, telefonoId}
-        CRM-->>C: código de 4 dígitos
-        C->>B: 4821
-        B->>CRM: POST /otp/validar {sesionId, codigo}
-        CRM-->>B: {estado: "verificada"}
-    end
-    B->>CRM: POST /creditos {sesionId}
-    CRM->>CB: consulta créditos por números SIFCO
-    CB-->>CRM: estado, mora, próxima fecha
-    CRM-->>B: lista de créditos para elegir
+    B->>C: Ingresa tu NIT, DPI o placa
+    C->>B: 1234567890101
+    B->>CRM: SERVICIO 1 {search, telefono}
+    CRM->>CRM: deduce el tipo · busca en leads y codeudores
+    CRM->>CRM: elige el teléfono destino · genera y envía OTP por SMS
+    CRM-->>B: {celEnCrm, otp, nombre completo}
+    CRM-->>C: SMS con el código
+    C->>B: 5463
+    B->>B: valida el código
+    B->>CRM: SERVICIO 2 {search, telefono, otp}
+    CRM-->>B: créditos: numeroSifco + placa + modelo
     B->>C: menú de selección de crédito
 ```
 
+### Reglas del servicio 1
+
+1. **`search` viene sin tipo.** El CRM deduce si es DPI, NIT o placa antes de buscar.
+2. **El DPI puede ser del titular o de un codeudor.** Se busca en `leads.dpi` **y** en
+   `co_debtors.dpi`.
+3. **A dónde va el OTP:**
+   - Si el DPI resultó ser de un **codeudor** → al teléfono que tenemos **del codeudor**
+     (`co_debtors.phone`).
+   - Si es del **titular** → a su **teléfono principal**. Ojo: hay leads con **varios
+     teléfonos en el mismo campo**, separados por `,` o `/`; el principal es el primero.
+4. **El OTP se envía siempre**, coincida o no el teléfono desde el que escribe. Lo que
+   cambia es el destino, no si se manda.
+5. **El OTP va por SMS.** Ya existe: `otpController` (`controllers/otp.ts`) usando
+   `@repo/sms` (BroadcasterMobile), código de 4 dígitos, 5 minutos de vigencia.
+6. `celEnCrm` dice si el número desde el que escribe es uno de los que tenemos registrados
+   del cliente. Es información para el bot y para auditoría, **no** cambia si se manda OTP.
+
 ---
 
-## 3. Contratos propuestos
+## 3. Contratos
 
 Base: `POST /api/bot/v1/cobros/...` · `Authorization: Bearer <BOT_COBROS_TOKEN>` ·
 formato de respuesta y códigos de error en [`ARQUITECTURA.md`](./ARQUITECTURA.md).
 
-> ⚠️ Contratos **en revisión**. No se implementan hasta cerrarlos con SimpleTech y
-> resolver las decisiones bloqueantes de la §8.
-
-### 3.1 `POST /identificar`
-
-Busca al cliente y abre la sesión.
+### 3.1 Servicio 1 · Buscar cliente y enviar OTP
 
 ```jsonc
 // request
 {
-  "canal": "whatsapp",
-  "telefonoChat": "50255551234",     // número desde el que escribe, formato 502XXXXXXXX
-  "tipoIdentificador": "dpi",        // "dpi" | "nit" | "placa"
-  "identificador": "1234567890101",
-  "aceptaTerminos": true             // se registra con fecha y versión de los T&C
+  "search": "1234567890101",   // NIT, DPI o placa — sin decir cuál
+  "telefono": "50255551234"    // número desde el que escribe el cliente
 }
 ```
 
 ```jsonc
-// respuesta · cliente encontrado y número coincide
+// respuesta · cliente encontrado
 {
   "success": true,
   "data": {
-    "sesionId": "bcs_7f3a…",
-    "estado": "verificada",
-    "cliente": { "nombreCorto": "Daniel R." },   // nunca el nombre completo ni el DPI
-    "expiraEnSegundos": 900
+    "encontrado": true,
+    "celEnCrm": true,                       // ¿el número del chat es uno de los suyos?
+    "otp": "5463",                          // siempre se genera y se envía por SMS
+    "cliente": {
+      "nombreCompleto": "Daniel Rodríguez López",
+      "tipo": "titular"                     // "titular" | "codeudor"
+    },
+    "tipoBusqueda": "dpi",                  // lo que dedujo el CRM: "dpi" | "nit" | "placa"
+    "otpEnviadoA": "****1234"               // enmascarado, para que el bot lo diga en el chat
   }
 }
 ```
 
 ```jsonc
-// respuesta · cliente encontrado, número NO coincide
+// respuesta · no encontrado
 {
   "success": true,
-  "data": {
-    "sesionId": "bcs_7f3a…",
-    "estado": "requiere_otp",
-    "cliente": { "nombreCorto": "Daniel R." },
-    "telefonos": [
-      { "id": "tel_1", "mascara": "****1234" },
-      { "id": "tel_2", "mascara": "****9087" }
-    ],
-    "expiraEnSegundos": 900
-  }
+  "data": { "encontrado": false }
 }
 ```
 
-```jsonc
-// respuesta · no encontrado (200, no 404 — ver D-05)
-{
-  "success": true,
-  "data": { "estado": "no_encontrado", "intentosRestantes": 2 }
-}
-```
+**Detección del tipo de `search`** — orden de evaluación propuesto:
 
-Notas:
+Regla acordada: **la placa tiene letras, el NIT no.**
 
-- **La comparación del teléfono la hace el CRM**, no SimpleTech: así los números completos
-  del cliente nunca salen de nuestros servidores. Ver [D-02](./DECISIONES.md).
-- `telefonos[].id` es un identificador **de la sesión**, no de la base: no sirve fuera de
-  ella y no permite reconstruir el número.
-- El campo `cliente` se devuelve incluso antes de verificar porque el bot necesita
-  saludar; por eso es solo nombre + inicial, nunca dato sensible.
+| Orden | Tipo | Cómo se reconoce | Dónde se busca |
+| --- | --- | --- | --- |
+| 1 | **DPI** | **13 dígitos** numéricos. Ya existe `validarDpi` (`utils/cui-validation.ts`) para validar el CUI. | `leads.dpi` con el helper `eqDpi` (hay DPI guardados con y sin formato) **y** `co_debtors.dpi` |
+| 2 | **Placa** | Contiene **letras** (ej. `P123ABC`), con o sin guion | `vehicles.license_plate` → `opportunities.vehicle_id` |
+| 3 | **NIT** | **Solo dígitos** y no son 13 | `leads.nit` |
 
-### 3.2 `POST /otp/enviar`
+Antes de clasificar se normaliza: se quitan guiones, espacios y se pasa a mayúsculas.
+
+> ⚠️ **Única excepción a revisar:** el NIT guatemalteco puede llevar **`K` como dígito
+> verificador** (`1234567-K`). Con la regla de arriba, ese NIT se clasificaría como placa.
+> Si hay NIT así en la base, la regla necesita una salvedad: una sola `K` al final ⇒ NIT.
+
+---
+
+### 3.2 Servicio 2 · Listar créditos
 
 ```jsonc
 // request
-{ "sesionId": "bcs_7f3a…", "telefonoId": "tel_1" }
+{
+  "search": "1234567890101",
+  "telefono": "50255551234",
+  "otp": "5463"                 // el código que ingresó el cliente
+}
 ```
 
 ```jsonc
@@ -182,211 +147,158 @@ Notas:
 {
   "success": true,
   "data": {
-    "estado": "requiere_otp",
-    "enviadoA": "****1234",
-    "expiraEnSegundos": 300,
-    "reenvioDisponibleEnSegundos": 60,
-    "reenviosRestantes": 2
-  }
-}
-```
-
-### 3.3 `POST /otp/validar`
-
-```jsonc
-// request
-{ "sesionId": "bcs_7f3a…", "codigo": "4821" }
-```
-
-```jsonc
-// respuesta OK
-{ "success": true, "data": { "estado": "verificada", "expiraEnSegundos": 900 } }
-```
-
-```jsonc
-// respuesta código incorrecto
-{
-  "success": false,
-  "error": { "codigo": "OTP_INVALIDO", "mensaje": "El código no es correcto." },
-  "data": { "intentosRestantes": 2 }
-}
-```
-
-> **Importante:** no reutilizar `/info/validate-otp` tal cual. Ese endpoint, al validar
-> bien el código, **dispara una consulta a Infornet** (buró) porque fue hecho para el
-> flujo de ventas. En cobros eso sería un costo por cada cliente que entra al bot, sin
-> ninguna utilidad. Se reusa `otpController` (generación, TTL, intentos), **sin** el
-> efecto secundario. Ver [D-07](./DECISIONES.md).
-
-### 3.4 `POST /creditos`
-
-```jsonc
-// request
-{ "sesionId": "bcs_7f3a…" }
-```
-
-```jsonc
-// respuesta
-{
-  "success": true,
-  "data": {
+    "cliente": { "nombreCompleto": "Daniel Rodríguez López", "tipo": "titular" },
     "creditos": [
       {
-        "creditoId": "crd_a1",                  // referencia opaca, válida en la sesión
         "numeroSifco": "01010214117590",
-        "alias": "Toyota Yaris 2019 · P123ABC", // lo que se muestra en el menú
-        "placa": "P123ABC",
-        "estado": "activo",
-        "tieneMora": true
+        "etiqueta": "Toyota Yaris 2019 · P123ABC",   // lo que el bot muestra en el menú
+        "vehiculo": {
+          "placa": "P123ABC",
+          "marca": "Toyota",
+          "modelo": "Yaris",
+          "anio": 2019
+        }
+      },
+      {
+        "numeroSifco": "01010214118821",
+        "etiqueta": "Daniel Rodríguez López",        // sin vehículo: se usa el nombre
+        "vehiculo": null
       }
-    ],
-    "seleccionAutomatica": false   // true cuando se identificó por placa y hay 1 crédito
+    ]
   }
 }
 ```
 
-Notas:
+**De dónde salen los créditos:** de las oportunidades del cliente en el CRM con
+`status IN ('won', 'migrate')`.
 
-- Devuelve **lo mínimo para elegir**. Capital, cuotas, mora y fechas son del Paso 2, ya con
-  el crédito seleccionado: menos datos en tránsito y menos consultas a cartera por cliente
-  que solo está navegando.
-- `creditoId` opaco: el bot no maneja números SIFCO en su estado conversacional.
-- Requiere sesión `verificada`; si no, `SESION_NO_VERIFICADA`.
+- Si es **titular** → `opportunities.lead_id = lead.id`
+- Si es **codeudor** → las oportunidades donde aparece como codeudor
+  (`co_debtors.opportunity_id`)
+- Vehículo: `opportunities.vehicle_id` → `vehicles` (placa, marca, modelo, año)
+- Número de crédito: `opportunities.numero_sifco`
 
----
+> **Por qué también `migrate`:** los créditos cargados por la migración masiva quedaron con
+> `status = 'migrate'`, no con `won`. Filtrar solo por `won` dejaría fuera a los clientes
+> viejos, que son el grueso de la cartera en cobros.
 
-## 4. Modelo de datos propuesto (CRM)
+**Sin info del vehículo.** Puede pasar y no es un error: en esos casos el crédito se lista
+igual, usando el **nombre completo del cliente** como etiqueta. El campo `etiqueta` lo arma
+el CRM para que el bot no tenga que decidir nada.
 
-Dos tablas nuevas. Migración a cargo del usuario, como siempre en este repo.
-
-### `bot_cobros_sesiones`
-
-| Campo | Tipo | Notas |
-| --- | --- | --- |
-| `id` | uuid PK | |
-| `token` | text unique | El `sesionId` opaco que ve el bot. |
-| `canal` | enum | `whatsapp` (deja lugar a otros canales). |
-| `telefono_chat` | text | Número desde el que escribe. Ata la sesión a ese número. |
-| `lead_id` | uuid FK → `leads.id` | Nullable hasta que se identifica. |
-| `tipo_identificador` | enum | `dpi` \| `nit` \| `placa`. |
-| `identificador_hash` | text | Hash, no el dato en claro. |
-| `estado` | enum | `iniciada` \| `requiere_otp` \| `verificada` \| `bloqueada` \| `expirada`. |
-| `intentos_otp` | integer | |
-| `reenvios_otp` | integer | |
-| `verificada_at` | timestamp | |
-| `expira_at` | timestamp | |
-| `terminos_aceptados_at` | timestamp | Con versión de los T&C. |
-| `created_at` / `updated_at` | timestamp | |
-
-### `bot_cobros_eventos`
-
-Auditoría y, más adelante, la fuente de la pantalla de CB-110
-([CC2-46](https://clubcashin.atlassian.net/browse/CC2-46)): "ver en el CRM todas las
-interacciones del bot".
-
-| Campo | Tipo | Notas |
-| --- | --- | --- |
-| `id` | uuid PK | |
-| `sesion_id` | uuid FK | |
-| `lead_id` | uuid FK | Nullable. |
-| `tipo` | enum | `identificacion_ok`, `identificacion_fallida`, `otp_enviado`, `otp_ok`, `otp_fallido`, `bloqueo`, `creditos_listados`, `credito_seleccionado`, `escalado_agente`. |
-| `payload` | jsonb | Sin PII en claro. |
-| `created_at` | timestamp | |
-
-> Se diseñan pensando en que los pasos siguientes (pagos, boletas, convenios) escriben en
-> la **misma** tabla de eventos. No crear una tabla de log por paso.
+**Validación del OTP.** SimpleTech puede validar el código de su lado, pero **el servicio 2
+debe recibirlo y validarlo igual** contra la tabla `otps`: es una consulta que ya existe,
+marca el código como usado y evita que baste el token de la API para listar los créditos de
+cualquier persona. Ver [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta).
 
 ---
 
-## 5. Seguridad y antifraude
+## 4. Datos y piezas que ya existen
 
-CB-103 pide explícitamente "reglas antifraude, intentos máximos y mensajes de error".
-Propuesta inicial — los números se afinan con Cobros:
-
-| Control | Propuesta |
+| Necesidad | Qué hay hoy |
 | --- | --- |
-| Intentos de identificación | 5 por `telefonoChat` por hora; 3 por identificador por hora. |
-| Enumeración de clientes | Respuesta genérica ante no encontrado. Nunca "ese DPI no existe" vs "ese DPI existe pero…". |
-| OTP | 4 dígitos (reusa lo existente), TTL 5 min, 3 intentos, reenvío con cooldown de 60 s, máx. 3 reenvíos. |
-| Bloqueo | Al agotar intentos: sesión `bloqueada` 30 min y oferta de agente humano. |
-| Sesión | TTL 15 min; atada al `telefonoChat`; token opaco; se invalida al cambiar de número. |
-| Datos expuestos sin verificar | Solo nombre corto y máscaras de teléfono. Ni DPI, ni saldos, ni cantidad de créditos. |
-| Datos expuestos ya verificado | Solo lo del contrato. Nada de DPI completo o dirección en el chat. |
-| Logs | DPI/NIT hasheados, teléfonos enmascarados. |
-| Validación de vida | Opcional según el PDF. Existe `livenessController` en el CRM; se evalúa como refuerzo para casos de alto riesgo, no para el flujo normal ([D-03](./DECISIONES.md)). |
+| Generar y enviar OTP por SMS | `otpController.sendOTP` — 4 dígitos, 5 min, `@repo/sms`, tag `otp-verification` |
+| Validar OTP | `otpController.validateOTP` — **no reusar el endpoint** `/info/validate-otp`: dispara una consulta a Infornet (buró) que en cobros es costo puro. Ver [D-07](./DECISIONES.md#d-07--otp-de-cobros-reuso-o-endpoints-nuevos) |
+| Buscar por DPI tolerando formatos | `eqDpi` (`lib/dpi-lookup.ts`) |
+| Validar DPI | `validarDpi` (`utils/cui-validation.ts`) |
+| Autenticar al bot | Patrón de `validatePortalToken` (`controllers/portal-lead.ts`), con secreto propio |
+| Codeudores | Tabla `co_debtors` (`opportunity_id`, `full_name`, `dpi`, `phone`) |
 
-**Límite honesto de este diseño:** el OTP prueba que *alguien con acceso al teléfono
-registrado* aprobó la consulta, no que quien escribe sea el titular. Un familiar con el
-teléfono del titular pasa igual. Para gestiones sensibles (convenios, cancelación), el
-árbol ya manda a un agente humano, y ahí sigue la validación de siempre.
+### Ajuste necesario en la tabla `otps`
+
+Hoy `otps` tiene `lead_id` **NOT NULL** y `dpi` NOT NULL: está pensada solo para leads.
+Para el OTP de un **codeudor** hay dos caminos:
+
+- **A)** Agregar `co_debtor_id` nullable y relajar `lead_id`.
+- **B)** Guardar el `lead_id` de la oportunidad y el `dpi` del codeudor.
+
+A es más limpio y deja auditoría real de a quién se le mandó el código. Requiere migración
+—que corre el usuario, como siempre en este repo—.
+
+### Sin tabla de sesiones (por ahora)
+
+La propuesta original tenía una tabla `bot_cobros_sesiones` con token opaco. **Se descarta
+para esta primera versión:** los dos servicios son sin estado y el bot reenvía `search` +
+`telefono` en cada llamada. Ver
+[D-04](./DECISIONES.md#d-04--dónde-vive-el-estado-de-identidad). Si más adelante hacen falta
+sesiones (pagos, boletas), se agrega ahí.
 
 ---
 
-## 6. Casos borde a resolver
+## 5. Seguridad
 
-| Caso | Comportamiento esperado |
+| Control | Definición |
 | --- | --- |
-| DPI existe en **más de un lead** (duplicados históricos) | Definir criterio determinista (lead con crédito activo más reciente) y **alertar** al equipo. Hay precedente: se corrigieron duplicados por formato de DPI. |
-| Cliente con **varios créditos** | Se listan todos los activos; el bot muestra menú de selección. |
-| Cliente con **cero créditos activos** | Mensaje claro + oferta de agente. No decirle "no existís". |
-| Búsqueda por **placa de otro cliente** | El teléfono del chat no coincide → OTP al titular. Si no lo pasa, no ve nada. |
-| Placa con formato distinto (`P123ABC` / `P-123ABC` / minúsculas) | Normalizar antes de buscar ([D-09](./DECISIONES.md)). |
-| NIT con guion o con `CF` | Normalizar; `CF` no identifica a nadie: se rechaza. |
-| Oportunidad **sin `numero_sifco`** (migraciones viejas) | No se puede listar como crédito; se escala a agente. |
-| **Crédito renumerado** en SIFCO | El número que conoce cartera puede no ser el histórico. Se lista el vigente. |
-| Cliente **sin teléfono** en el CRM | No hay a dónde mandar OTP → agente humano, y queda registrado para que Cobros complete el dato. |
-| Cliente al día, **sin caso de cobros** | Sus teléfonos salen solo de `leads.phone`. Es lo normal en B0, no un error. |
-| cartera-back caído | `SERVICIO_NO_DISPONIBLE` + agente. Nunca error técnico al cliente. |
-| El cliente escribe desde un número nuevo y **quiere actualizarlo** | Fuera de alcance del Paso 1: no se actualizan teléfonos desde el bot. Se registra el evento para que Cobros lo revise. |
+| Autenticación | Bearer con secreto propio del bot. Los dos servicios exponen datos de clientes: **ninguno puede quedar público**, a diferencia de los `/info/*` del bot de ventas. |
+| OTP | Siempre se envía. 4 dígitos, 5 min, un solo uso, al contacto **registrado** (nunca al número del chat si ese número no está registrado). |
+| Intentos | Tope de búsquedas por teléfono y por `search` en una ventana de tiempo, y tope de intentos de OTP. Números a afinar con Cobros. |
+| Enumeración | Ante `search` no encontrado, respuesta genérica: nunca "ese DPI no existe" vs. "existe pero…". |
+| Logs | El **OTP no se registra en logs** (hoy `otpController` lo imprime en consola: hay que quitarlo para este flujo). DPI y NIT hasheados, teléfonos enmascarados. |
+| Nombre completo | Se devuelve antes de validar el OTP porque el bot saluda con él. Es una fuga menor pero real: quien acierte un DPI obtiene un nombre. Aceptado. |
+
+---
+
+## 6. Casos borde
+
+| Caso | Comportamiento |
+| --- | --- |
+| **Lead con varios teléfonos** en un campo (`,` o `/`) | Se toma el **primero** como principal. Definir si se normaliza el dato en la base o solo al leerlo. |
+| Teléfono con o sin `502`, con guiones o espacios | Normalizar antes de comparar y antes de mandar el SMS. |
+| DPI que existe **como lead y como codeudor** (personas que son ambas cosas) | Definir prioridad. Propuesta: titular gana; si no tiene oportunidades propias, se usa la de codeudor. |
+| DPI de codeudor en **varias** oportunidades | Se listan todas esas oportunidades. |
+| Codeudor **sin teléfono** (`co_debtors.phone` es nullable) | No hay a dónde mandar el OTP → salida a agente y se registra para que Cobros complete el dato. |
+| Cliente **sin teléfono** en el CRM | Igual: agente. |
+| Oportunidad ganada **sin `numero_sifco`** | **No ocurre**: una oportunidad ganada o migrada siempre tiene número SIFCO. Si aparece una, es un dato roto: se omite del listado y se registra para revisar. |
+| Oportunidad **sin info del vehículo** | Sí ocurre. Se lista igual con el **nombre completo del cliente** como etiqueta. |
+| DPI duplicado en varios leads | Criterio determinista (el que tenga oportunidades ganadas) y alerta al equipo. Hay precedente de duplicados por formato de DPI. |
+| Búsqueda por placa de un vehículo con más de una oportunidad | Se listan las que apliquen. |
+| Cliente sin ninguna oportunidad ganada | `creditos: []` → mensaje claro y salida a agente. |
+| El SMS no se entrega | Definir reintento y cuántos, y salida a agente. |
 
 ---
 
 ## 7. Criterios de aceptación
 
-1. Con NIT, DPI o placa válidos y escribiendo **desde un número registrado**, el cliente
-   llega a la lista de sus créditos activos sin pasar por OTP.
-2. Escribiendo **desde un número no registrado**, no ve ningún dato del crédito hasta
-   validar un OTP enviado a un teléfono registrado, mostrado siempre enmascarado.
-3. Con un identificador que no corresponde a ningún cliente, recibe un mensaje genérico y
-   tiene intentos limitados; el sistema no revela si el dato existe.
-4. Agotados los intentos, la sesión se bloquea por el tiempo definido y se le ofrece un
-   agente.
-5. Identificado por placa y con un solo crédito, el flujo puede saltarse el menú de
-   selección.
-6. Sin créditos activos, recibe un mensaje claro y salida a agente.
-7. Todo intento —exitoso o fallido— queda auditado, sin PII en claro.
-8. Ninguna respuesta del CRM incluye número de teléfono completo, DPI completo ni saldos
-   antes de la verificación.
+1. Con un `search` válido, el servicio 1 deduce solo si es DPI, NIT o placa y encuentra al
+   cliente.
+2. Un DPI de **codeudor** encuentra al cliente y el OTP se manda al teléfono **del
+   codeudor**.
+3. Un DPI de **titular** manda el OTP a su teléfono **principal**, aun cuando el campo tenga
+   varios números separados por `,` o `/`.
+4. El OTP se envía **siempre**, coincida o no el teléfono del chat, y llega **por SMS**.
+5. `celEnCrm` refleja correctamente si el número del chat está registrado.
+6. La respuesta trae el **nombre completo** del cliente.
+7. Con un `search` que no existe, la respuesta es genérica y no revela nada.
+8. El servicio 2 devuelve las oportunidades **ganadas y migradas** con `numero_sifco`, placa
+   y modelo, **sin consultar cartera-back**.
+9. Un crédito sin info de vehículo se lista igual, con el nombre completo del cliente.
+10. El servicio 2 rechaza la petición si el OTP no es válido o ya se usó.
 
 ---
 
-## 8. Decisiones pendientes que bloquean la implementación
+## 8. Decisiones que siguen abiertas
 
-| # | Pregunta | Quién decide |
+| # | Pregunta |
+| --- | --- |
+| [D-10](./DECISIONES.md#d-10--ambiente-de-pruebas-para-simpletech) | Ambiente de pruebas para SimpleTech |
+| [D-12](./DECISIONES.md#d-12--términos-y-condiciones) | Texto y versionado de los T&C (se aceptan al enviar el `search`) |
+| — | Si existen NIT con `K` como dígito verificador en la base (romperían la regla de detección) |
+| — | Si se listan créditos ya liquidados (no se puede saber sin consultar cartera) |
+
+Ninguna bloquea la implementación de los dos servicios.
+
+---
+
+## 9. Tareas
+
+| # | Tarea | Dependencias |
 | --- | --- | --- |
-| [D-02](./DECISIONES.md) | ¿La comparación del teléfono la hace el CRM o SimpleTech? | IT (con SimpleTech) |
-| [D-03](./DECISIONES.md) | Segundo factor definitivo: ¿solo OTP? ¿validación de vida en qué casos? | Cobros + IT |
-| [D-07](./DECISIONES.md) | OTP de cobros: ¿reuso sin Infornet o endpoints nuevos? | IT |
-| [D-08](./DECISIONES.md) | ¿Qué estados de cartera cuentan como "crédito activo" listable? | Cobros + Cartera |
-| [D-11](./DECISIONES.md) | ¿Qué hacemos cuando quien escribe no es el titular? | Cobros + Legal |
-| [D-12](./DECISIONES.md) | T&C: texto, versionado y dónde se registra la aceptación | Legal |
-
----
-
-## 9. Tareas propuestas
-
-Para desglosar [CC2-39](https://clubcashin.atlassian.net/browse/CC2-39) (estimado en 13
-días, es la historia más grande del sprint). Estimaciones a validar.
-
-| # | Tarea | App | Dependencias |
-| --- | --- | --- | --- |
-| 1 | Cerrar contrato de API con SimpleTech (§3) y publicar colección Postman | — | D-02 |
-| 2 | Esquema `bot_cobros_sesiones` + `bot_cobros_eventos` y migración | CRM | D-06 |
-| 3 | Middleware de autenticación del bot (`BOT_COBROS_TOKEN`) + rate limiting | CRM | — |
-| 4 | Búsqueda unificada por DPI / NIT / placa con normalización | CRM | D-09 |
-| 5 | Endpoint `identificar` + comparación de teléfonos + creación de sesión | CRM | 2, 3, 4 |
-| 6 | OTP de cobros (reuso de `otpController` sin Infornet) + intentos y bloqueos | CRM | D-07 |
-| 7 | Endpoint `creditos` (resolución SIFCO + consulta a cartera) | CRM + cartera | D-08 |
-| 8 | Auditoría de eventos y enmascarado de PII | CRM | 2 |
-| 9 | Ambiente de pruebas para SimpleTech + datos de prueba | Infra | D-10 |
-| 10 | Pruebas de los casos borde de la §6 | CRM | 5, 6, 7 |
+| 1 | Middleware de autenticación del bot (`BOT_COBROS_TOKEN`) + rate limiting | — |
+| 2 | Detector de tipo de `search` (DPI / NIT / placa) con normalización | D-09 |
+| 3 | Búsqueda unificada: `leads` + `co_debtors` + `vehicles` → cliente y tipo | 2 |
+| 4 | Resolución del teléfono destino (principal del lead, o del codeudor) y comparación con el del chat | 3 |
+| 5 | Migración de `otps` para soportar codeudor | — |
+| 6 | Servicio 1: buscar + enviar OTP por SMS (reuso de `otpController`, sin Infornet) | 3, 4, 5 |
+| 7 | Servicio 2: validar OTP + listar oportunidades ganadas con vehículo | 6, D-17 |
+| 8 | Colección Postman y entrega del contrato a SimpleTech | 6, 7 |
+| 9 | Pruebas de los casos borde de la §6 | 6, 7 |

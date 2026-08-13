@@ -47,7 +47,7 @@ decidido.
 
 | # | Paso | Alcance | Estado | Doc |
 | --- | --- | --- | --- | --- |
-| 1 | Identificación y acceso | Menú general → identificación (NIT/DPI/placa) → validación de identidad → lista de créditos | 🟡 **En definición** | [`01-…`](./01-identificacion-y-acceso.md) |
+| 1 | Identificación y acceso | 2 servicios en el CRM: buscar cliente + OTP por SMS, y listar créditos | 🟢 **Definido — listo para implementar** | [`01-…`](./01-identificacion-y-acceso.md) |
 | 2 | Menú del crédito | Info del crédito, y el ruteo a las 6 gestiones | 🟡 **En definición** (notas de reunión 2026-08-13) | [`02-…`](./02-menu-del-credito.md) |
 | 3 | Realizar un pago | Link de Pagalo, Nexa, menú dinámico de pago | 🟡 **En definición** | [`03-…`](./03-metodos-de-pago.md) |
 | 4 | Validación de boleta | Lectura de boleta, ingreso manual, pendiente de conciliación | 🟡 **En definición** | [`04-…`](./04-validacion-de-boleta.md) |

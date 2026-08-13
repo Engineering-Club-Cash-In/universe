@@ -40,6 +40,11 @@ Motivos:
 cartera-back** y el CRM lo consume vía `carteraBackClient`. El CRM no consulta la base de
 cartera por su cuenta.
 
+**Dónde empieza cartera.** El [Paso 1](./01-identificacion-y-acceso.md) se resuelve
+**enteramente dentro del CRM**: identificación, OTP y listado de créditos salen de `leads`,
+`co_debtors`, `opportunities` y `vehicles`. La primera llamada a cartera-back ocurre cuando
+el cliente **selecciona** un crédito y hay que mostrarle saldos ([Paso 2](./02-menu-del-credito.md)).
+
 ---
 
 ## 2. Superficie de API para el bot
@@ -120,8 +125,16 @@ como 404, para que el bot no trate un dato equivocado del cliente como una falla
 
 ## 3. Sesión del bot
 
-El estado de la conversación vive en SimpleTech. El estado de **identidad** vive en el CRM,
-en una sesión con token opaco.
+> ⚠️ **No aplica a la primera versión.** El 2026-08-13 se decidió que los servicios del
+> [Paso 1](./01-identificacion-y-acceso.md) son **sin estado**: el bot reenvía `search` +
+> `telefono` en cada llamada y el control de acceso es la validación del OTP
+> ([D-04](./DECISIONES.md#d-04--dónde-vive-el-estado-de-identidad),
+> [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta)). Lo de abajo queda como diseño
+> de referencia para cuando aparezcan flujos de varios pasos (pagos, boletas), donde sí hará
+> falta.
+
+El estado de la conversación vive en SimpleTech. El estado de **identidad** viviría en el
+CRM, en una sesión con token opaco.
 
 ```mermaid
 stateDiagram-v2

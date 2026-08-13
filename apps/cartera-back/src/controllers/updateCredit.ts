@@ -481,6 +481,7 @@ const creditUpdateSchema = z.object({
   formato_credito: z.string().max(50).optional(),
   permite_abono_capital: z.boolean().optional(),
   no_amortiza_capital: z.boolean().optional(),
+  excluir_compras: z.boolean().optional(),
   estado_devolucion: z.enum(['NO_APLICA', 'PENDIENTE_AUTORIZACION', 'VERIFICADO', 'RECHAZADO', 'COMPLETADO']).optional(),
   motivo_devolucion: z.string().optional(),
   bandera_reinversion: z.boolean().optional(),
@@ -553,6 +554,13 @@ const validateInvestorsPercentages = (
 //   3. Como máximo UNA compra_cartera puede quedar pendiente de facturar por
 //      crédito: cofidi prorratea el interés del pago con una sola fecha de
 //      corte (operacionesPendientesFacturar[0]) y las demás se le pierden.
+//   4. Si el crédito está excluido de compras, no entra NINGÚN inversionista
+//      nuevo desde acá — ni compra_cartera ni reinversion. Sin esta regla el
+//      modal de edición sería una puerta trasera al filtro de
+//      getCreditCandidates y al guard manual de addInvestorToCredit. Incluye
+//      las reinversiones porque un es_nuevo con tipo_operacion "reinversion"
+//      puede ser alguien que hoy NO está en el crédito (rotación de pool: salió
+//      y vuelve), o sea capital nuevo entrando igual que una compra.
 export type InversionistaNuevoValidado = {
   inversionista_id: number;
   monto_aportado: number;
@@ -565,6 +573,10 @@ export const validarInversionistasNuevos = async (
   inversionistas: NonNullable<CreditUpdateData["inversionistas"]>,
   inversionistas_espejo: CreditUpdateData["inversionistas_espejo"],
   set: SetContext,
+  // Valor EFECTIVO de excluir_compras tras aplicar este request: en una misma
+  // edición se puede prender el flag y agregar una compra, así que no alcanza
+  // con mirar el estado actual del crédito.
+  excluirComprasEfectivo: boolean = false,
 ): Promise<
   | { success: true; nuevos: InversionistaNuevoValidado[] }
   | { success: false; error: { message: string; [key: string]: unknown } }
@@ -675,6 +687,22 @@ export const validarInversionistasNuevos = async (
   const nuevasCompras = declaradosNuevos.filter(
     (inv) => inv.tipo_operacion === "compra_cartera",
   );
+
+  // Regla 4: crédito excluido de compras. Se evalúa antes que la Regla 3 porque
+  // no necesita ir a la DB. Aplica a TODO inversionista nuevo, no solo a
+  // compra_cartera: en este endpoint un es_nuevo con tipo_operacion
+  // "reinversion" puede ser alguien que no está hoy en el crédito (la Regla 2
+  // solo prohíbe a quien ya participa), o sea capital nuevo entrando. Mismo
+  // criterio que getCreditCandidates, que saca el crédito del buscador entero.
+  if (excluirComprasEfectivo && declaradosNuevos.length > 0) {
+    return fail(
+      `Este crédito está excluido de las compras a inversionistas; no se le puede ` +
+        `agregar capital de inversionistas nuevos. Desmarcá "Excluir de compras a ` +
+        `inversionistas" si querés asignarlo.`,
+      { inversionistas_ids: declaradosNuevos.map((i) => i.inversionista_id) },
+    );
+  }
+
   if (nuevasCompras.length > 1) {
     return fail(
       `Solo se puede agregar una compra de cartera a la vez en este crédito ` +
@@ -1302,6 +1330,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       formato_credito,
       permite_abono_capital,
       no_amortiza_capital,
+      excluir_compras,
       estado_devolucion,
       motivo_devolucion,
       bandera_reinversion,
@@ -1370,6 +1399,8 @@ export const updateCredit = async ({ body, set, request }: any) => {
         inversionistas ?? [],
         inversionistas_espejo,
         set,
+        // El request manda si trae el flag; si no, vale el estado actual.
+        excluir_compras ?? current.excluir_compras,
       );
       if (!nuevosValidation.success) {
         return nuevosValidation.error;
@@ -1419,6 +1450,9 @@ export const updateCredit = async ({ body, set, request }: any) => {
     }
     if (no_amortiza_capital !== undefined) {
       updateFields.no_amortiza_capital = no_amortiza_capital;
+    }
+    if (excluir_compras !== undefined) {
+      updateFields.excluir_compras = excluir_compras;
     }
     if (estado_devolucion !== undefined) {
       if (estado_devolucion !== current.estado_devolucion) {

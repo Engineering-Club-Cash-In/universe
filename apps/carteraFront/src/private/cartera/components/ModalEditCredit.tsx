@@ -311,6 +311,8 @@ export function ModalEditCredit({
         permite_abono_capital: !!values.permite_abono_capital,
         // Crédito solo-interés (no amortiza capital en la cuota)
         no_amortiza_capital: !!values.no_amortiza_capital,
+        // Excluye el crédito de la asignación de capital a inversionistas
+        excluir_compras: !!values.excluir_compras,
         estado_devolucion: values.estado_devolucion,
         motivo_devolucion:
           values.estado_devolucion === "PENDIENTE_AUTORIZACION"
@@ -730,6 +732,41 @@ export function ModalEditCredit({
                   <span
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                       formik.values.no_amortiza_capital
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Excluir de compras a inversionistas
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Si está activo, este crédito no se tomará en cuenta para las compras de inversionistas.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!formik.values.excluir_compras}
+                  onClick={() =>
+                    formik.setFieldValue(
+                      "excluir_compras",
+                      !formik.values.excluir_compras
+                    )
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.excluir_compras
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.excluir_compras
                         ? "translate-x-5"
                         : "translate-x-0"
                     }`}

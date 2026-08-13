@@ -419,9 +419,20 @@ export const bankAnalysisRouter = {
 				// 5.5. Normalizar a quetzales: los montos vienen en la moneda original del
 				// estado de cuenta y todo lo que sigue (capacidad, columnas, UI) asume Q.
 				if (analysis.moneda === "MIXTA") {
+					// El intento se contó antes de llamar a la IA, pero esto no es un análisis
+					// fallido sino documentos mal armados: se devuelve para no dejar al usuario
+					// bloqueado esperando un reset de admin por algo que puede corregir solo.
+					await db
+						.update(creditAnalysis)
+						.set({
+							attemptCount: sql`GREATEST(${creditAnalysis.attemptCount} - 1, 0)`,
+							updatedAt: new Date(),
+						})
+						.where(whereCondition);
+
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"Los estados de cuenta subidos están en monedas distintas (quetzales y dólares). Analice por separado los de cada moneda.",
+							"Los estados de cuenta subidos están en monedas distintas (quetzales y dólares). Analice por separado los de cada moneda. Este intento no se descontó.",
 					});
 				}
 

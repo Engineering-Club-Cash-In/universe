@@ -30,10 +30,14 @@ const INSERT = process.argv.includes("--insert");
 const PDF = process.argv.includes("--pdf");
 
 // UUIDs reportados por conta (en SAT, faltan en la BD).
-const UUIDS: string[] = [
-  "5086B80E-15C8-4C50-B8BB-D207F448F8FC",
-  "C86DAB89-6341-4D13-B916-C3A7990265A2",
-];
+// Se pueden pasar por CLI (posicionales) para no tocar el archivo en cada caso.
+const UUIDS_CLI = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const UUIDS: string[] = UUIDS_CLI.length
+  ? UUIDS_CLI
+  : [
+      "5086B80E-15C8-4C50-B8BB-D207F448F8FC",
+      "C86DAB89-6341-4D13-B916-C3A7990265A2",
+    ];
 
 // Overrides de pago_id verificados a mano (cuando hay >1 candidato por venc).
 // El script exige que el override esté entre los candidatos antes de usarlo.

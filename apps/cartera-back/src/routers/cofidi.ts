@@ -3895,6 +3895,58 @@ if (facturasExistentes.length > 0) {
 ;
 
 // ============================================
+// 🔥 RECUPERAR UNA FACTURA YA CERTIFICADA EN SAT
+// ============================================
+// COFIDI puede certificar y aun así dejarnos sin respuesta utilizable: timeout
+// de 60s del fetch, SOAP mal formado, o Identifier sin ResponseData1. En esos
+// casos la factura EXISTE en SAT pero nunca llega al INSERT y queda huérfana
+// (pasó el 2026-08-06 con el pago 54783; la halló conta días después).
+// Como el idInterno lo generamos nosotros ANTES de certificar, podemos
+// preguntarle a COFIDI si el documento ya existe y seguir el flujo normal.
+// Nunca lanza: si no la encuentra devuelve null y el llamador decide.
+async function recuperarFacturaCertificada(
+  satClient: SATClientService,
+  idInterno: string
+): Promise<{
+  xmlCertificado: string;
+  serie: string;
+  numero: string;
+  uuid: string;
+} | null> {
+  try {
+    const lookup = await satClient.consultarPorIdInterno(idInterno);
+    if (!lookup.encontrado || !lookup.xmlCertificado) return null;
+
+    const xmlCertificado = satClient.decodificarXMLCertificado(
+      lookup.xmlCertificado
+    );
+
+    const { XMLParser } = await import("fast-xml-parser");
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "@_",
+    });
+    const numAut =
+      parser.parse(xmlCertificado)["dte:GTDocumento"]["dte:SAT"]["dte:DTE"][
+        "dte:Certificacion"
+      ]["dte:NumeroAutorizacion"];
+
+    return {
+      xmlCertificado,
+      serie: String(numAut["@_Serie"]),
+      numero: String(numAut["@_Numero"]),
+      uuid: String(numAut["#text"]),
+    };
+  } catch (error) {
+    console.error(
+      `   ⚠️ No se pudo recuperar la factura por idInterno ${idInterno}:`,
+      error
+    );
+    return null;
+  }
+}
+
+// ============================================
 // 🔥 FUNCIÓN HELPER PARA CERTIFICAR FACTURA
 // ============================================
 async function certificarFacturaHelper({
@@ -4098,8 +4150,33 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         );
       }
 
-      // Error genérico
-      throw new Error(`Error en certificación SAT: ${errorMessage}`);
+      // 🔥 Antes de darla por perdida: los errores de arriba son de validación
+      // (COFIDI rechazó y NO emitió), pero este camino genérico incluye timeout
+      // y respuestas ilegibles, donde el DTE sí pudo quedar certificado en SAT.
+      const recuperada = await recuperarFacturaCertificada(satClient, idInterno);
+      if (recuperada) {
+        console.log(
+          `   ♻️ Recuperada de COFIDI tras el fallo: ${recuperada.serie}-${recuperada.numero} (${recuperada.uuid})`
+        );
+        resultado = recuperada;
+      } else {
+        // Error genérico
+        throw new Error(`Error en certificación SAT: ${errorMessage}`);
+      }
+    }
+
+    // 🔥 COFIDI devolvió Identifier (serie/número/UUID válidos) pero sin el XML:
+    // el parseo de abajo reventaría y perderíamos una factura ya emitida.
+    if (!resultado.xmlCertificado) {
+      const recuperada = await recuperarFacturaCertificada(satClient, idInterno);
+      if (!recuperada) {
+        throw new Error(
+          `COFIDI certificó ${resultado.serie}-${resultado.numero} (UUID ${resultado.uuid}) pero no devolvió el XML ` +
+            `y no se pudo recuperar con idInterno ${idInterno}. La factura EXISTE en SAT: recuperarla con el script de backfill.`
+        );
+      }
+      console.log(`   ♻️ XML recuperado de COFIDI para ${resultado.serie}-${resultado.numero}`);
+      resultado = { ...resultado, xmlCertificado: recuperada.xmlCertificado };
     }
 
     // ============================================

@@ -219,6 +219,7 @@ export function ListaCreditosPagos() {
       formato_credito: credit.formato_credito ?? "",
       permite_abono_capital: !!credit.permite_abono_capital,
       no_amortiza_capital: !!credit.no_amortiza_capital,
+      excluir_compras: !!credit.excluir_compras,
       estado_devolucion: credit.estado_devolucion ?? "NO_APLICA",
       nombre: usuario?.nombre ?? (usuario?.nombres ? `${usuario.nombres} ${usuario.apellidos ?? ""}`.trim() : ""),
       nit: usuario?.nit ?? "",

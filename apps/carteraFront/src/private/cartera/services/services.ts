@@ -185,6 +185,8 @@ export interface Credito {
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -456,6 +458,8 @@ export interface Credito {
   mora: string;
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -769,6 +773,8 @@ export interface UpdateCreditBody {
   // Abono capital
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
   motivo_devolucion?: string;
 

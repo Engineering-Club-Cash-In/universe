@@ -141,6 +141,9 @@ dist
 
 # Monorepo docs folders
 **/docs/
+# Excepción: la documentación transversal del monorepo (features que tocan
+# varias apps) sí se versiona. Ver docs/README.md.
+!/docs/
 
 
 # Claude Code local settings

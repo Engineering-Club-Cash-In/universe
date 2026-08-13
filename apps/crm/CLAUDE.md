@@ -96,6 +96,14 @@ apps/
 - **Imports**: Organized imports enabled via Biome
 - **Path Aliases**: Use `@/` for `src/` in web app
 
+## Documentación de features
+
+- **Decisiones internas del CRM**: `apps/crm/docs/RFC-00X-*.md`
+- **Features que cruzan varias apps del monorepo**: `docs/features/<feature>/` en la raíz
+  del repo. Antes de tocar código de uno de esos features, leer su documento.
+  - [`docs/features/bot-whatsapp-cobros/`](../../docs/features/bot-whatsapp-cobros/README.md)
+    — Bot de WhatsApp de cobros (CRM ↔ cartera-back ↔ SimpleTech). En definición.
+
 ## Utilities
 - Always use zsh as the default shell
 - All texts must be in spanish when facing client side

@@ -20,6 +20,7 @@ import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
+import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
@@ -737,7 +738,7 @@ export const reversePayment = async ({ body, set }: any) => {
           if (resultadoCofidi.success && resultadoCofidi.anulado) {
             // 2️⃣ ACTUALIZAR EN BD (SOLO SI SE ANULÓ EN COFIDI)
             try {
-              await db
+              const filasActualizadas = await db
                 .update(facturas_electronicas)
                 .set({
                   status: "ANULADA",
@@ -762,7 +763,21 @@ export const reversePayment = async ({ body, set }: any) => {
                 })
                 .where(
                   eq(facturas_electronicas.factura_id, factura.factura_id),
+                )
+                .returning({ factura_id: facturas_electronicas.factura_id });
+
+              // Un UPDATE que no matchea ninguna fila NO tira error en
+              // Postgres: sin este chequeo la factura entraba a
+              // `facturasAnuladas` y la respuesta decía "anulada
+              // correctamente" aunque en la BD no hubiera quedado registro.
+              // Pasa si el DELETE del pago disparó el CASCADE de `fk_pago` (la
+              // FK duplicada que sigue viva en la BD y no está en schema.ts) y
+              // se llevó la fila: en SAT quedó ANULADA y acá nadie se entera.
+              if (filasActualizadas.length === 0) {
+                throw new Error(
+                  `El UPDATE no afectó ninguna fila (factura_id ${factura.factura_id} ya no existe en la BD)`,
                 );
+              }
 
               console.log(
                 `   ✅ Factura ${factura.serie}-${factura.numero} anulada correctamente`,
@@ -785,7 +800,7 @@ export const reversePayment = async ({ body, set }: any) => {
                 factura_id: factura.factura_id,
                 uuid: factura.uuid,
                 error: "BD_UPDATE_ERROR",
-                mensaje: "Anulada en COFIDI pero error al actualizar BD",
+                mensaje: `Anulada en COFIDI pero error al actualizar BD: ${dbError.message}`,
               });
             }
           } else {
@@ -1117,13 +1132,29 @@ export async function anularFacturaEnCofidi(
     console.log("🚫 Anulando factura en COFIDI:", uuid);
 
     // 1️⃣ CONSTRUIR XML DE ANULACIÓN
-    const fechaEmisionDocumento = factura.fecha_certificacion
-      ? new Date(factura.fecha_certificacion).toISOString()
-      : factura.fecha_emision
-        ? new Date(factura.fecha_emision).toISOString()
-        : new Date().toISOString();
+    //
+    // 📄 `FechaEmisionDocumentoAnular` tiene que coincidir con la
+    // `FechaHoraEmision` del DTE original — que es lo que se persiste en
+    // `fecha_emision`. Acá se venía priorizando `fecha_certificacion`: en las
+    // facturas backdateadas (emisión a fin de mes, certificación días después)
+    // eso mandaba a SAT una fecha que no es la del DTE y la anulación moría con
+    // `TrCode: [1083] La fecha de emisión del documento a anular no coincide
+    // con la registrada en la SAT`. Son 4430 de 22518 facturas con día de
+    // emisión distinto al de certificación, y de las 12 reversas que llegaron a
+    // intentar anular, las 12 fallaron. Mismo criterio que la anulación manual
+    // de `routers/cofidi.ts`.
+    const fechaBaseAnulacion = factura.fecha_emision
+      ? new Date(factura.fecha_emision)
+      : factura.fecha_certificacion
+        ? new Date(factura.fecha_certificacion)
+        : ahoraEnGuatemala();
 
-    const fechaHoraAnulacion = new Date().toISOString();
+    // ⏰ Formato SAT (sin milisegundos ni sufijo Z): `.toISOString()` produce
+    // `2026-08-13T11:13:59.000Z` y SAT rechaza el documento. Y `new Date()` a
+    // secas para la hora de anulación viaja en UTC, así que una anulación de la
+    // noche llegaría a SAT con el día siguiente.
+    const fechaEmisionDocumento = formatearFechaSAT(fechaBaseAnulacion);
+    const fechaHoraAnulacion = formatearFechaSAT(ahoraEnGuatemala());
 
     const xmlAnulacion = `<?xml version="1.0" encoding="UTF-8"?>
 <dte:GTAnulacionDocumento xmlns:dte="http://www.sat.gob.gt/dte/fel/0.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="0.1" xsi:schemaLocation="http://www.sat.gob.gt/dte/fel/0.1.0 GT_AnulacionDocumento-0.1.0.xsd">

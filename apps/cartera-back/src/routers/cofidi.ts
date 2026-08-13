@@ -28,6 +28,7 @@ import { eq, desc, and, sql, gte, lte, inArray } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
+import { formatearFechaSAT } from "../utils/functions/fechaSAT";
 import type { DTERequest } from "../cofidi/types";
 import {
   SAT_CONFIG,
@@ -2377,21 +2378,9 @@ if (facturasExistentes.length > 0) {
     // 3️⃣ PREPARAR FECHAS PARA XML
     // ============================================
     
-    // 🔥 FORMATO SIN MILISEGUNDOS (como SAT lo espera)
-    // Se lee con getUTC* a propósito: las fechas que recibe ya vienen expresadas en
-    // hora de Guatemala (igual que fechaHoraEmision al certificar), así que con los
-    // getters locales se desplazarían según la zona horaria del proceso — que en el
-    // contenedor es UTC.
-    const formatearFechaSAT = (fecha: Date): string => {
-      const year = fecha.getUTCFullYear();
-      const month = String(fecha.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(fecha.getUTCDate()).padStart(2, '0');
-      const hours = String(fecha.getUTCHours()).padStart(2, '0');
-      const minutes = String(fecha.getUTCMinutes()).padStart(2, '0');
-      const seconds = String(fecha.getUTCSeconds()).padStart(2, '0');
-
-      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
-    };
+    // 🔥 FORMATO SIN MILISEGUNDOS (como SAT lo espera) — ver utils/functions/fechaSAT.
+    // Vivía acá adentro, así que la reversa de pago no podía reusarla y tenía su
+    // propia versión con `.toISOString()`, que SAT rechaza.
 
     // 📄 FechaEmisionDocumentoAnular tiene que coincidir con la FechaHoraEmision del
     // DTE original, y `fecha_emision` se persiste justamente desde ese campo. Se reusa

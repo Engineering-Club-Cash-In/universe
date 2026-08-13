@@ -175,7 +175,14 @@ export async function getCreditCandidates(
   const [{ totalActivos }] = await db.select({ totalActivos: sql<number>`COUNT(*)::int` })
     .from(creditos).where(eq(creditos.statusCredit, "ACTIVO"));
     
-  const [{ totalCandidatosBase }] = await db.select({ totalCandidatosBase: sql<number>`COUNT(*)::int` })
+  // Un solo escaneo para las dos mitades del embudo: los que sobreviven a los
+  // filtros previos y los que solo se caen por excluir_compras. Sin el segundo
+  // contador, "no hay candidatos" y "todos están excluidos" se ven igual en el log.
+  const [{ elegiblesPreInteres, totalExcluidosCompras }] = await db
+    .select({
+      elegiblesPreInteres: sql<number>`COUNT(*) FILTER (WHERE ${creditos.excluir_compras} = false)::int`,
+      totalExcluidosCompras: sql<number>`COUNT(*) FILTER (WHERE ${creditos.excluir_compras} = true)::int`,
+    })
     .from(creditos)
     .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
     .where(and(
@@ -188,6 +195,10 @@ export async function getCreditCandidates(
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
+  // Ojo: este conteo NO aplica el filtro de interés > 0, por eso puede ser mayor
+  // que el de baseCredits que se loguea más abajo.
+  console.log(`   - Elegibles antes del filtro de interés: ${elegiblesPreInteres}`);
+  console.log(`   - Descartados por excluir_compras: ${totalExcluidosCompras}`);
 
   // ──────────────────────────────────────────────────────────
   // 1. Créditos Activos de Vehículo
@@ -220,11 +231,16 @@ export async function getCreditCandidates(
         // Solo créditos sin proceso de devolución a Cube.
         // PENDIENTE_AUTORIZACION / VERIFICADO / RECHAZADO están en flujo de
         // devolución a Cube; no deben ofrecerse a inversionistas.
-        eq(creditos.estado_devolucion, "NO_APLICA")
+        eq(creditos.estado_devolucion, "NO_APLICA"),
+        // Créditos marcados manualmente como excluidos de compras: no se
+        // ofrecen a inversionistas. El modo manual de addInvestorToCredit
+        // replica este guard devolviendo el motivo al operador.
+        eq(creditos.excluir_compras, false)
       )
     );
 
-  console.log(`   Candidatos base (Activos + Vehículo + Sin pending): ${baseCredits.length}`);
+  // Los pagos pending se descartan más abajo (paso 2), no en esta query.
+  console.log(`   Candidatos base (Activos + Vehículo + Interés > 0): ${baseCredits.length}`);
 
   if (baseCredits.length === 0) return [];
 

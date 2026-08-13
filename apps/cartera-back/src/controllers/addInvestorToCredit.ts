@@ -767,6 +767,21 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         const montoSolicitado =
           montoManualPorCredito.get(candidato.credito_id) ?? new Big(0);
 
+        // ── Guard 0.a: crédito excluido de compras ──
+        // getCreditCandidates filtra excluir_compras = false. En manual
+        // saltamos ese filtro, así que lo replicamos acá para que el operador
+        // vea explícitamente por qué no se le puede asignar capital.
+        if (candidato.credito_completo?.credito?.excluir_compras === true) {
+          violaciones.push({
+            credito_id: candidato.credito_id,
+            numero_credito_sifco: candidato.numero_credito_sifco,
+            razon:
+              "El crédito está excluido de las compras a inversionistas; no puede recibir capital. Desmarca 'Excluir de compras a inversionistas' en el crédito si quieres asignarlo.",
+            monto_solicitado: montoSolicitado.toString(),
+          });
+          continue;
+        }
+
         // ── Guard 0: crédito sin proceso de devolución a Cube ──
         // getCreditCandidates filtra por estado_devolucion = NO_APLICA. En
         // manual saltamos ese filtro, así que lo replicamos: un crédito en

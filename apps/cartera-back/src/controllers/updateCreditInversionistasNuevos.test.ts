@@ -270,7 +270,7 @@ describe("validarInversionistasNuevos — regla 4: crédito excluido de compras"
     }
   });
 
-  it("permite reinversiones aunque el crédito esté excluido de compras", async () => {
+  it("rechaza también una reinversión: un es_nuevo puede ser capital entrando de cero", async () => {
     setRows({ padre: [1], espejo: [1] });
     const set = makeSet();
     const res = await validarInversionistasNuevos(
@@ -280,8 +280,25 @@ describe("validarInversionistasNuevos — regla 4: crédito excluido de compras"
       set,
       true,
     );
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error.message).toContain("excluido de las compras");
+      expect(res.error.inversionistas_ids).toEqual([7]);
+    }
+  });
+
+  it("no estorba cuando la edición no trae inversionistas nuevos", async () => {
+    setRows({ padre: [1, 7], espejo: [1, 7] });
+    const set = makeSet();
+    const res = await validarInversionistasNuevos(
+      CREDITO_ID,
+      [invPayload(1), invPayload(7)],
+      [],
+      set,
+      true,
+    );
     expect(res.success).toBe(true);
-    if (res.success) expect(res.nuevos.map((n) => n.inversionista_id)).toEqual([7]);
+    if (res.success) expect(res.nuevos).toEqual([]);
   });
 
   it("permite la compra_cartera si el crédito no está excluido", async () => {

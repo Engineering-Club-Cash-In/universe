@@ -41,6 +41,8 @@ decidido.
 | [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md) | **Paso 4**: subir comprobante, lectura de la boleta e ingreso manual. |
 | [`05-convenio-y-promesa.md`](./05-convenio-y-promesa.md) | **Paso 5**: congelado. Solo referencia hasta que gerencia apruebe. |
 | [`pruebas-equipo-it.md`](./pruebas-equipo-it.md) | Datos ficticios y mensajes para que el equipo de IT pruebe el bot en dev. |
+| [`despliegue-dev.md`](./despliegue-dev.md) | Cómo se despliega la API que consume SimpleTech: ECR, Coolify y el pipeline. |
+| [`api-para-simpletech.html`](./api-para-simpletech.html) | Fuente del **PDF que se le entrega a SimpleTech**. Se regenera con el comando de abajo. |
 | [`DECISIONES.md`](./DECISIONES.md) | Registro de decisiones: abiertas, cerradas y por qué. |
 | `fuente/` | Los PDF originales (gerencia + documento detallado). |
 
@@ -97,3 +99,16 @@ decidido.
    se registra la desviación en `DECISIONES.md` y se valida con Cobros/Gerencia.
 5. **Los contratos son la interfaz con un tercero.** Un cambio en un endpoint ya
    publicado a SimpleTech es un cambio de versión, no un ajuste silencioso.
+
+## Regenerar el PDF de SimpleTech
+
+`api-para-simpletech.html` es la fuente. Para volver a exportarlo después de un cambio:
+
+```bash
+~/.cache/puppeteer/chrome/*/chrome-linux64/chrome \
+  --headless --disable-gpu --no-pdf-header-footer \
+  --print-to-pdf=Bot-Cobros-API-SimpleTech.pdf \
+  "file://$PWD/docs/features/bot-whatsapp-cobros/api-para-simpletech.html"
+```
+
+La API key **no va en el documento**: se entrega por separado.

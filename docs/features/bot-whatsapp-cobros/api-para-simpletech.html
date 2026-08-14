@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Bot de Cobros · API del CRM</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 14mm; }
+
+  :root {
+    --tinta:      #14202e;
+    --tinta-2:    #46586c;
+    --tinta-3:    #7c8a9b;
+    --linea:      #dfe5ec;
+    --acento:     #0f5c8c;
+    --acento-sv:  #eef5fa;
+    --ok:         #0d7a4f;
+    --ok-sv:      #eaf6f0;
+    --alerta:     #9a5b00;
+    --alerta-sv:  #fdf4e5;
+    --error:      #a52222;
+    --error-sv:   #fbeeee;
+    --codigo-bg:  #f5f7f9;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 9.6pt;
+    line-height: 1.5;
+    color: var(--tinta);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  h1, h2, h3 { line-height: 1.2; margin: 0; font-weight: 650; }
+
+  /* ── Portada ───────────────────────────────────────────── */
+  .portada {
+    border-bottom: 3px solid var(--acento);
+    padding-bottom: 14px;
+    margin-bottom: 20px;
+  }
+  .portada .kicker {
+    font-size: 8pt;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--acento);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .portada h1 { font-size: 21pt; letter-spacing: -.015em; }
+  .portada .bajada {
+    color: var(--tinta-2);
+    margin-top: 6px;
+    font-size: 10.5pt;
+    max-width: 58em;
+  }
+  .meta {
+    display: flex;
+    gap: 26px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .meta div { font-size: 8.4pt; }
+  .meta dt {
+    color: var(--tinta-3);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-size: 7.4pt;
+    font-weight: 600;
+  }
+  .meta dd { margin: 2px 0 0; font-weight: 600; }
+
+  /* ── Estructura ────────────────────────────────────────── */
+  section { margin-bottom: 20px; }
+  h2 {
+    font-size: 12.5pt;
+    margin-bottom: 9px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--linea);
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+  }
+  h2 .num {
+    color: var(--acento);
+    font-variant-numeric: tabular-nums;
+    font-size: 10pt;
+  }
+  h3 { font-size: 10.2pt; margin: 14px 0 6px; }
+  p { margin: 0 0 8px; }
+  ul { margin: 0 0 8px; padding-left: 17px; }
+  li { margin-bottom: 3px; }
+
+  code, .mono {
+    font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 8.6pt;
+  }
+  p code, li code, td code {
+    background: var(--codigo-bg);
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: var(--acento);
+  }
+  pre {
+    background: var(--codigo-bg);
+    border: 1px solid var(--linea);
+    border-left: 3px solid var(--acento);
+    border-radius: 4px;
+    padding: 9px 11px;
+    margin: 0 0 10px;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 8.2pt;
+    line-height: 1.45;
+  }
+  pre .c { color: var(--tinta-3); }
+  pre .k { color: var(--acento); }
+  pre .s { color: var(--ok); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 10px;
+    font-size: 8.8pt;
+  }
+  th {
+    text-align: left;
+    background: var(--acento-sv);
+    color: var(--tinta);
+    font-weight: 650;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--linea);
+    font-size: 8.2pt;
+  }
+  td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--linea);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  .endpoint {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    background: var(--tinta);
+    color: #fff;
+    padding: 7px 11px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    font-family: "JetBrains Mono", Menlo, monospace;
+    font-size: 9pt;
+  }
+  .endpoint .verbo {
+    background: var(--ok);
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 7.6pt;
+    font-weight: 700;
+    letter-spacing: .04em;
+  }
+
+  .nota, .aviso {
+    border-radius: 4px;
+    padding: 8px 11px;
+    margin: 0 0 10px;
+    font-size: 8.8pt;
+  }
+  .nota  { background: var(--acento-sv); border-left: 3px solid var(--acento); }
+  .aviso { background: var(--alerta-sv); border-left: 3px solid var(--alerta); }
+  .nota strong, .aviso strong { display: block; margin-bottom: 2px; }
+
+  .flujo {
+    display: flex;
+    align-items: stretch;
+    gap: 7px;
+    margin: 12px 0 14px;
+  }
+  .paso {
+    flex: 1;
+    border: 1px solid var(--linea);
+    border-top: 3px solid var(--acento);
+    border-radius: 5px;
+    padding: 9px 10px;
+    background: #fff;
+  }
+  .paso .n {
+    color: var(--acento);
+    font-weight: 700;
+    font-size: 7.6pt;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .paso .t { font-weight: 650; margin: 3px 0; font-size: 9.2pt; }
+  .paso .d { color: var(--tinta-2); font-size: 8.2pt; line-height: 1.4; }
+  .flecha {
+    align-self: center;
+    color: var(--acento);
+    font-size: 13pt;
+    font-weight: 700;
+  }
+
+  .datos {
+    border: 1.5px solid var(--ok);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .datos .cab {
+    background: var(--ok-sv);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--ok);
+  }
+  .datos .cab .t { font-weight: 700; font-size: 10pt; color: var(--ok); }
+  .datos .cab .s { font-size: 8.4pt; color: var(--tinta-2); margin-top: 1px; }
+  .datos .cuerpo { padding: 10px 12px; }
+  .campos { display: flex; gap: 26px; flex-wrap: wrap; margin-bottom: 8px; }
+  .campo .et {
+    font-size: 7.4pt;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--tinta-3);
+    font-weight: 600;
+  }
+  .campo .vl {
+    font-family: "JetBrains Mono", Menlo, monospace;
+    font-size: 11pt;
+    font-weight: 600;
+    margin-top: 1px;
+  }
+
+  .cod-error { font-family: "JetBrains Mono", Menlo, monospace; font-weight: 600; font-size: 8.4pt; }
+  .http { display: inline-block; font-size: 7.6pt; font-weight: 700; padding: 0 5px; border-radius: 3px; }
+  .h2xx { background: var(--ok-sv); color: var(--ok); }
+  .h4xx { background: var(--error-sv); color: var(--error); }
+  .h5xx { background: var(--alerta-sv); color: var(--alerta); }
+
+  .pie {
+    margin-top: 22px;
+    padding-top: 9px;
+    border-top: 1px solid var(--linea);
+    color: var(--tinta-3);
+    font-size: 8pt;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .salto { break-before: page; }
+  .datos, .flujo, pre { break-inside: avoid; }
+  table { break-inside: auto; }
+  tr { break-inside: avoid; }
+  h2, h3 { break-after: avoid; }
+</style>
+</head>
+<body>
+
+<div class="portada">
+  <div class="kicker">Club Cash In · Documentación de integración</div>
+  <h1>Bot de WhatsApp de Cobros — API del CRM</h1>
+  <p class="bajada">
+    Dos servicios para identificar a un cliente con crédito y mostrarle sus créditos dentro
+    del chat. Este documento tiene todo lo necesario para armar el flujo del bot: contratos,
+    códigos de error, reglas del código de verificación y datos de prueba.
+  </p>
+  <div class="meta">
+    <div><dt>Ambiente</dt><dd>Desarrollo</dd></div>
+    <div><dt>Versión</dt><dd>1.0 · agosto 2026</dd></div>
+    <div><dt>Base URL</dt><dd class="mono">https://tgmt4r4n8pjjqpi7rjqf5lfb.devteamatcci.site</dd></div>
+  </div>
+</div>
+
+<section>
+  <h2><span class="num">01</span> Cómo es el flujo</h2>
+  <p>
+    Son <strong>dos llamadas</strong>. En la primera el cliente se identifica y le llega un
+    código por SMS; en la segunda ese código se valida y, si está bien, se devuelven sus
+    créditos. La validación y la respuesta van juntas: si el código no sirve, no se devuelve
+    nada.
+  </p>
+
+  <div class="flujo">
+    <div class="paso">
+      <div class="n">Paso 1</div>
+      <div class="t">El cliente se identifica</div>
+      <div class="d">Escribe su NIT, DPI o placa. El bot llama a <code>buscar-cliente</code>
+      con ese dato y con el número desde el que escribe.</div>
+    </div>
+    <div class="flecha">›</div>
+    <div class="paso">
+      <div class="n">Paso 2</div>
+      <div class="t">Le llega un SMS</div>
+      <div class="d">El CRM manda un código de 4 dígitos al celular <strong>registrado</strong>
+      del cliente y responde con una <code>referencia</code>, que el bot guarda.</div>
+    </div>
+    <div class="flecha">›</div>
+    <div class="paso">
+      <div class="n">Paso 3</div>
+      <div class="t">Escribe el código</div>
+      <div class="d">El bot manda <code>referencia</code> + código a <code>creditos</code>.
+      Si es correcto, recibe la lista de créditos para armar el menú.</div>
+    </div>
+  </div>
+
+  <div class="nota">
+    <strong>El código siempre va al celular registrado en el CRM</strong>
+    No al número desde el que escribe. Si alguien intenta entrar con el DPI de otra persona,
+    el código le llega al dueño del crédito, no a quien está escribiendo.
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">02</span> Autenticación</h2>
+  <p>Las dos llamadas van con la misma llave, en el header:</p>
+  <pre>Authorization: Bearer &lt;API_KEY&gt;
+Content-Type: application/json</pre>
+  <div class="aviso">
+    <strong>La llave se entrega por separado</strong>
+    No viaja en este documento. Identifica a SimpleTech como integrador, así que no debe
+    quedar en el navegador del cliente ni en repositorios públicos. Sin ella o con una
+    incorrecta, las dos rutas responden <span class="http h4xx">401</span>
+    <span class="cod-error">NO_AUTORIZADO</span>.
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">03</span> Servicio 1 · Buscar cliente y enviar el código</h2>
+  <div class="endpoint"><span class="verbo">POST</span> /api/bot/cobros/buscar-cliente</div>
+
+  <h3>Petición</h3>
+  <pre>{
+  <span class="k">"search"</span>: <span class="s">"9900000360101"</span>,   <span class="c">// NIT, DPI o placa — sin indicar cuál es</span>
+  <span class="k">"telefono"</span>: <span class="s">"50257099747"</span>   <span class="c">// número desde el que escribe el cliente</span>
+}</pre>
+
+  <table>
+    <tr><th style="width:22%">Campo</th><th style="width:13%">Tipo</th><th>Descripción</th></tr>
+    <tr><td><code>search</code></td><td>texto</td><td>NIT, DPI o placa. El CRM deduce solo cuál es; no hay que decírselo.</td></tr>
+    <tr><td><code>telefono</code></td><td>texto</td><td>El número del chat. Solo se usa para informar si ya lo teníamos registrado.</td></tr>
+  </table>
+
+  <h3>Respuesta — cliente encontrado</h3>
+  <pre>{
+  <span class="k">"success"</span>: true,
+  <span class="k">"data"</span>: {
+    <span class="k">"encontrado"</span>: true,
+    <span class="k">"celEnCrm"</span>: false,                  <span class="c">// ¿el número del chat es uno de los suyos?</span>
+    <span class="k">"otpEnviado"</span>: true,
+    <span class="k">"referencia"</span>: <span class="s">"c2287206-8f3a-4e21-..."</span>,  <span class="c">// GUARDAR: se usa en el paso 3</span>
+    <span class="k">"otpEnviadoA"</span>: <span class="s">"****9747"</span>,           <span class="c">// para decirlo en el chat</span>
+    <span class="k">"otpExpiraEnSegundos"</span>: 300,
+    <span class="k">"cliente"</span>: { <span class="k">"nombreCompleto"</span>: <span class="s">"Lucía Gómez Prueba"</span> },
+    <span class="k">"tipoBusqueda"</span>: <span class="s">"dpi"</span>              <span class="c">// "dpi" | "nit" | "placa"</span>
+  }
+}</pre>
+
+  <div class="nota">
+    <strong>Guardar la <code>referencia</code></strong>
+    Es lo único que hace falta conservar entre una llamada y la otra. No hay que volver a
+    mandar el <code>search</code>: esa referencia ya sabe de quién es el código.
+  </div>
+
+  <h3>Respuesta — no se encontró</h3>
+  <pre>{ <span class="k">"success"</span>: true, <span class="k">"data"</span>: { <span class="k">"encontrado"</span>: false } }</pre>
+  <p>
+    Llega como <span class="http h2xx">200</span>, no como error: que el cliente escriba mal
+    su DPI no es una falla técnica. Conviene pedirle que lo intente de nuevo.
+  </p>
+
+  <h3>Errores posibles</h3>
+  <table>
+    <tr><th style="width:27%">Código</th><th style="width:9%">HTTP</th><th>Cuándo pasa y qué decirle al cliente</th></tr>
+    <tr><td class="cod-error">BUSQUEDA_INVALIDA</td><td><span class="http h4xx">400</span></td><td>Lo que escribió no parece un NIT, DPI ni placa (por ejemplo, saludó). Pedirle el dato.</td></tr>
+    <tr><td class="cod-error">PLACA_AMBIGUA</td><td><span class="http h4xx">400</span></td><td>La placa parcial calzó con más de un vehículo. Pedirle la placa completa con la letra inicial.</td></tr>
+    <tr><td class="cod-error">SIN_TELEFONO_REGISTRADO</td><td><span class="http h4xx">400</span></td><td>El cliente existe pero no tiene celular registrado. Derivar a un agente.</td></tr>
+    <tr><td class="cod-error">DEMASIADOS_ENVIOS</td><td><span class="http h4xx">429</span></td><td>Pidió códigos muy seguido. Viene <code>data.reintentarEnSegundos</code> con cuánto falta.</td></tr>
+    <tr><td class="cod-error">OTP_NO_ENVIADO</td><td><span class="http h5xx">500</span></td><td>Falló el envío del SMS. Que reintente en unos minutos.</td></tr>
+    <tr><td class="cod-error">NO_AUTORIZADO</td><td><span class="http h4xx">401</span></td><td>Falta la API key o está mal.</td></tr>
+  </table>
+</section>
+
+<section class="salto">
+  <h2><span class="num">04</span> Servicio 2 · Validar el código y traer los créditos</h2>
+  <div class="endpoint"><span class="verbo">POST</span> /api/bot/cobros/creditos</div>
+
+  <p>Hace las dos cosas en una sola llamada: valida el código y, si está bien, devuelve los créditos.</p>
+
+  <h3>Petición</h3>
+  <pre>{
+  <span class="k">"referencia"</span>: <span class="s">"c2287206-8f3a-4e21-..."</span>,  <span class="c">// la del servicio 1</span>
+  <span class="k">"otp"</span>: <span class="s">"5463"</span>                          <span class="c">// lo que escribió el cliente</span>
+}</pre>
+
+  <h3>Respuesta — código correcto</h3>
+  <pre>{
+  <span class="k">"success"</span>: true,
+  <span class="k">"data"</span>: {
+    <span class="k">"creditos"</span>: [
+      {
+        <span class="k">"numeroSifco"</span>: <span class="s">"BOT-TEST-002"</span>,
+        <span class="k">"etiqueta"</span>: <span class="s">"Mazda CX-5 2020 · P-902BOT"</span>,   <span class="c">// listo para el menú</span>
+        <span class="k">"vehiculo"</span>: {
+          <span class="k">"placa"</span>: <span class="s">"P-902BOT"</span>,
+          <span class="k">"marca"</span>: <span class="s">"Mazda"</span>,
+          <span class="k">"modelo"</span>: <span class="s">"CX-5"</span>,
+          <span class="k">"anio"</span>: 2020
+        }
+      }
+    ]
+  }
+}</pre>
+
+  <table>
+    <tr><th style="width:22%">Campo</th><th>Descripción</th></tr>
+    <tr><td><code>numeroSifco</code></td><td>Identificador del crédito. Es el que habrá que mandar en los siguientes pasos del bot (consultar saldo, pagar).</td></tr>
+    <tr><td><code>etiqueta</code></td><td>Texto ya armado para mostrar en el menú. Si el crédito no tiene vehículo, trae el nombre del cliente.</td></tr>
+    <tr><td><code>vehiculo</code></td><td>Puede venir en <code>null</code>: hay créditos sin vehículo cargado. En ese caso usar <code>etiqueta</code>.</td></tr>
+  </table>
+
+  <div class="nota">
+    <strong>Un cliente puede tener varios créditos</strong>
+    El arreglo puede traer más de uno —incluidos aquellos en los que es codeudor—. Si trae
+    más de uno, hay que mostrar el menú para que elija.
+  </div>
+
+  <h3>Errores posibles</h3>
+  <table>
+    <tr><th style="width:27%">Código</th><th style="width:9%">HTTP</th><th>Cuándo pasa y qué decirle al cliente</th></tr>
+    <tr><td class="cod-error">OTP_INVALIDO</td><td><span class="http h4xx">401</span></td><td>Código equivocado. Viene <code>data.intentosRestantes</code>; conviene decírselo.</td></tr>
+    <tr><td class="cod-error">OTP_VENCIDO</td><td><span class="http h4xx">401</span></td><td>Pasaron más de 5 minutos. Ofrecerle mandar uno nuevo.</td></tr>
+    <tr><td class="cod-error">OTP_YA_USADO</td><td><span class="http h4xx">401</span></td><td>Ese código ya se usó. Cada código sirve una sola vez.</td></tr>
+    <tr><td class="cod-error">DEMASIADOS_INTENTOS</td><td><span class="http h4xx">429</span></td><td>Falló 3 veces. Hay que volver al servicio 1 por un código nuevo.</td></tr>
+    <tr><td class="cod-error">REFERENCIA_INVALIDA</td><td><span class="http h4xx">401</span></td><td>La referencia no existe. Empezar el flujo de nuevo.</td></tr>
+  </table>
+
+  <div class="aviso">
+    <strong>Rutear por <code>codigo</code>, no por el texto</strong>
+    Los mensajes están en español y pueden ajustarse en cualquier momento; los códigos no
+    cambian. Toda la lógica del bot debería mirar <code>error.codigo</code>.
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">05</span> Reglas del código de verificación</h2>
+  <table>
+    <tr><th style="width:32%">Regla</th><th>Detalle</th></tr>
+    <tr><td>Siempre se envía</td><td>Coincida o no el número desde el que escribe. Lo que cambia es a dónde se manda, no si se manda.</td></tr>
+    <tr><td>Formato</td><td>4 dígitos, por SMS.</td></tr>
+    <tr><td>Vigencia</td><td>5 minutos.</td></tr>
+    <tr><td>Intentos</td><td>3. Al tercero fallido ya responde <span class="cod-error">DEMASIADOS_INTENTOS</span>, no al cuarto.</td></tr>
+    <tr><td>Un solo uso</td><td>Validado una vez, no vuelve a servir.</td></tr>
+    <tr><td>Reenvíos</td><td>60 segundos entre uno y otro, máximo 5 por hora por cliente.</td></tr>
+    <tr><td>Un código nuevo invalida el anterior</td><td>Si el cliente pide otro, el viejo deja de funcionar aunque no hayan pasado los 5 minutos.</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2><span class="num">06</span> Qué acepta el campo <code>search</code></h2>
+  <p>No hay que limpiar el dato antes de mandarlo: el CRM normaliza guiones, espacios y mayúsculas.</p>
+  <table>
+    <tr><th style="width:16%">Tipo</th><th style="width:30%">Cómo se reconoce</th><th>Ejemplos que funcionan</th></tr>
+    <tr><td><strong>DPI</strong></td><td>13 dígitos</td><td><code>9900000360101</code> · <code>9900 00036 0101</code></td></tr>
+    <tr><td><strong>Placa</strong></td><td>Tiene letras</td><td><code>P-902BOT</code> · <code>P902BOT</code> · <code>p 902 bot</code> · <code>902BOT</code></td></tr>
+    <tr><td><strong>NIT</strong></td><td>Solo dígitos, y no son 13</td><td><code>90000022</code> · <code>9000002-2</code></td></tr>
+  </table>
+  <p>
+    La respuesta trae <code>tipoBusqueda</code> con lo que dedujo, por si el bot quiere
+    confirmarlo en el chat.
+  </p>
+</section>
+
+<section>
+  <h2><span class="num">07</span> Datos de prueba</h2>
+  <p>
+    En el ambiente de desarrollo hay clientes ficticios. El siguiente está amarrado a
+    <strong>tu celular</strong>: el código del SMS te va a llegar a vos, así que podés recorrer
+    el flujo completo de punta a punta.
+  </p>
+
+  <div class="datos">
+    <div class="cab">
+      <div class="t">Lucía Gómez Prueba</div>
+      <div class="s">Cliente de prueba · el SMS llega al 5709 9747</div>
+    </div>
+    <div class="cuerpo">
+      <div class="campos">
+        <div class="campo"><div class="et">DPI</div><div class="vl">9900000360101</div></div>
+        <div class="campo"><div class="et">NIT</div><div class="vl">90000022</div></div>
+        <div class="campo"><div class="et">Placa</div><div class="vl">P-902BOT</div></div>
+      </div>
+      <p style="margin:0">
+        Con cualquiera de los tres se llega al mismo cliente. Al validar el código deberías
+        recibir un crédito: <strong>Mazda CX-5 2020 · P-902BOT</strong>.
+      </p>
+    </div>
+  </div>
+
+  <h3>Otros casos para probar los errores</h3>
+  <table>
+    <tr><th style="width:34%">Qué mandar</th><th>Qué debería responder</th></tr>
+    <tr><td><code>"search": "1234567890101"</code></td><td><code>encontrado: false</code> — un DPI válido que no existe</td></tr>
+    <tr><td><code>"search": "hola"</code></td><td><span class="cod-error">BUSQUEDA_INVALIDA</span></td></tr>
+    <tr><td><code>"search": "9900000950101"</code></td><td><span class="cod-error">SIN_TELEFONO_REGISTRADO</span> — cliente sin celular</td></tr>
+    <tr><td>Un código equivocado</td><td><span class="cod-error">OTP_INVALIDO</span> con <code>intentosRestantes</code></td></tr>
+    <tr><td>El mismo código dos veces</td><td><span class="cod-error">OTP_YA_USADO</span></td></tr>
+    <tr><td>Pedir dos códigos seguidos</td><td><span class="cod-error">DEMASIADOS_ENVIOS</span> con <code>reintentarEnSegundos</code></td></tr>
+  </table>
+
+  <div class="nota">
+    <strong>Hay un cliente de prueba por cada persona del equipo</strong>
+    Cada uno cubre un caso distinto: varios créditos, codeudor, cliente sin DPI, teléfono fijo
+    de primero. Si necesitás probar alguno en particular, pedilo y te pasamos sus datos.
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">08</span> Ejemplos con curl</h2>
+
+  <h3>Paso 1 — identificarse</h3>
+  <pre>curl -X POST https://tgmt4r4n8pjjqpi7rjqf5lfb.devteamatcci.site/api/bot/cobros/buscar-cliente \
+  -H <span class="s">"Authorization: Bearer $API_KEY"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"search":"9900000360101","telefono":"50257099747"}'</span></pre>
+
+  <h3>Paso 2 — validar el código y traer los créditos</h3>
+  <pre>curl -X POST https://tgmt4r4n8pjjqpi7rjqf5lfb.devteamatcci.site/api/bot/cobros/creditos \
+  -H <span class="s">"Authorization: Bearer $API_KEY"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"referencia":"LA-QUE-DEVOLVIO-EL-PASO-1","otp":"5463"}'</span></pre>
+</section>
+
+<section>
+  <h2><span class="num">09</span> Lo que sigue</h2>
+  <p>
+    Estos dos servicios cubren hasta que el cliente elige un crédito. Lo que viene después
+    —consultar el detalle del crédito, generar link de pago, subir boleta— se irá entregando
+    en la misma forma: un endpoint por gestión, con estos mismos códigos de error.
+  </p>
+  <p>
+    Cualquier duda sobre el contrato, o si algo responde distinto a lo que dice este
+    documento, avisanos y lo revisamos.
+  </p>
+</section>
+
+<div class="pie">
+  <span>Club Cash In · Bot de WhatsApp de Cobros · API del CRM</span>
+  <span>Versión 1.0 · Documento interno para SimpleTech</span>
+</div>
+
+</body>
+</html>

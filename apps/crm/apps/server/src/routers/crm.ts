@@ -73,6 +73,7 @@ import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
+import { canSyncNitToOpportunities } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import { getStageVehicleRequirementError } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
@@ -1137,12 +1138,26 @@ export const crmRouter = {
 				});
 			}
 
-			// Sync NIT to associated opportunities
+			// Sync NIT to associated opportunities.
+			// Solo cuando no hay nada divergente que pisar: el NIT que viaja a
+			// cartera es el de la oportunidad y se corrige por aparte en el detalle
+			// de crédito (40%) y al asignar inversión (50%). Ver `lead-nit-sync`.
 			if (updateData.nit !== undefined) {
-				await db
-					.update(opportunities)
-					.set({ nit: updateData.nit || null, updatedAt: new Date() })
+				const leadOpportunities = await db
+					.select({ nit: opportunities.nit })
+					.from(opportunities)
 					.where(eq(opportunities.leadId, id));
+
+				if (canSyncNitToOpportunities(leadOpportunities.map((o) => o.nit))) {
+					await db
+						.update(opportunities)
+						.set({ nit: updateData.nit || null, updatedAt: new Date() })
+						.where(eq(opportunities.leadId, id));
+				} else if (leadOpportunities.length > 0) {
+					console.log(
+						`[updateLead] NIT del lead ${id} actualizado sin propagar: sus ${leadOpportunities.length} oportunidades tienen NITs distintos entre sí`,
+					);
+				}
 			}
 
 			if (

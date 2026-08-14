@@ -444,17 +444,27 @@ function HistorialAgendasPage() {
 	 * siendo scope-safe: el supervisor solo puede filtrar por ids reales que el
 	 * multi-select le ofreció alguna vez.
 	 */
-	const usuarioIdsUI = esSupervisor ? usuarioIds : null;
+	// Mientras la sesión todavía resuelve, `userRole` es `undefined` y
+	// `esSupervisor` da `false` aunque el usuario real SEA supervisor — un hard
+	// reload no distingue "es asesor" de "todavía no sabemos el rol". Sin esta
+	// rama, `usuarioIdsUI` caía a `null` en ese instante y el efecto de abajo
+	// persistía ese `null`, borrando la selección real del supervisor ANTES de
+	// que la sesión terminara de cargar — history repite el bug que ya se había
+	// corregido para este mismo caso, reintroducido al separar `usuarioIdsUI`
+	// de `usuarioIdsParaBackend`.
+	const usuarioIdsUI = sesionCargando || esSupervisor ? usuarioIds : null;
 
 	// Persiste a sessionStorage el único caso en que `usuarioIdsUI` difiere de
-	// `usuarioIds`: cuando el usuario actual NO es supervisor. Sin esto, un
-	// asesor que alguna vez tuvo una selección persistida (rol degradado, sesión
-	// compartida) la sigue arrastrando en sessionStorage aunque el filtro nunca
-	// se le aplique en memoria — y volvería a aplicarse solo si el rol cambia de
-	// vuelta a supervisor sin que el usuario haya vuelto a elegir nada. Se
-	// compara por contenido, no por referencia, para no reescribir sessionStorage
-	// (y no re-disparar este efecto) en cada render.
+	// `usuarioIds`: cuando el usuario actual NO es supervisor (y la sesión ya
+	// resolvió). Sin esto, un asesor que alguna vez tuvo una selección
+	// persistida (rol degradado, sesión compartida) la sigue arrastrando en
+	// sessionStorage aunque el filtro nunca se le aplique en memoria — y
+	// volvería a aplicarse solo si el rol cambia de vuelta a supervisor sin que
+	// el usuario haya vuelto a elegir nada. Se compara por contenido, no por
+	// referencia, para no reescribir sessionStorage (y no re-disparar este
+	// efecto) en cada render.
 	useEffect(() => {
+		if (sesionCargando) return;
 		if (usuarioIdsUI === usuarioIds) return;
 		if (
 			usuarioIdsUI &&
@@ -465,7 +475,7 @@ function HistorialAgendasPage() {
 			return;
 		}
 		setUsuarioIds(usuarioIdsUI);
-	}, [usuarioIdsUI, usuarioIds, setUsuarioIds]);
+	}, [usuarioIdsUI, usuarioIds, setUsuarioIds, sesionCargando]);
 
 	/**
 	 * Valor que se manda al backend: `[]` SÍ se colapsa a `undefined` acá (a

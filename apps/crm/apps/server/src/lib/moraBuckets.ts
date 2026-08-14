@@ -333,17 +333,23 @@ export function estadoMoraPorCuotas(cuotas: number): string {
  * CB-128: estados de `statusCredit` que dejan al crédito FUERA del funnel de
  * cobros y por lo tanto sin bucket.
  *
- * Espejo del criterio de `bucketDeCredito()` en cartera-back, que devuelve
- * `null` para estos estados: un crédito en convenio ya se está pagando bajo
- * otro acuerdo y uno cancelado no se cobra, así que sus cuotas atrasadas no
- * representan una etapa de aging. Solo `ACTIVO` y `MOROSO` tienen bucket.
+ * Espejo EXACTO de `STATUS_BUCKET_FUERA` en
+ * apps/cartera-back/src/lib/buckets-classification.ts — mismos 4 estados, no
+ * más, no menos. NO incluye INCOBRABLE: ese status SÍ tiene bucket (fuerza B5,
+ * ver `numeroBucketPorCuotas`), la lista aquí es solo "sin aging por cuotas".
+ * Un crédito en convenio ya se está pagando bajo otro acuerdo, uno cancelado
+ * no se cobra y uno caído salió de cartera activa, así que sus cuotas
+ * atrasadas no representan una etapa de aging.
  */
 const STATUS_FUERA_DEL_FUNNEL: ReadonlySet<string> = new Set([
 	"EN_CONVENIO",
 	"CANCELADO",
 	"PENDIENTE_CANCELACION",
-	"INCOBRABLE",
+	"CAIDO",
 ]);
+
+/** CB-128: bucket que fuerza INCOBRABLE, espejo de `estados_incluidos: ["INCOBRABLE"]` en el catálogo B5 de cartera-back. */
+const BUCKET_INCOBRABLE = 5;
 
 /**
  * CB-128: ¿este `statusCredit` tiene bucket de cobros?
@@ -389,6 +395,9 @@ export function numeroBucketPorCuotas(
 	statusCredit: string | null | undefined,
 ): number | null {
 	if (!estaEnFunnelCobros(statusCredit)) return null;
+	// INCOBRABLE fuerza B5 sin importar cuotas atrasadas (puede tener 0), igual
+	// que `estados_incluidos: ["INCOBRABLE"]` en el catálogo de cartera-back.
+	if (statusCredit === "INCOBRABLE") return BUCKET_INCOBRABLE;
 	maybeRefreshInBackground();
 	for (const b of activeBuckets()) {
 		const dentro =

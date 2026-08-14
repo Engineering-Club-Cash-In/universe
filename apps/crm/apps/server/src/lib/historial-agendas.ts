@@ -34,6 +34,7 @@ import {
 } from "drizzle-orm";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import {
+	PREFIJO_CONVENIO_AUTO,
 	PREFIJO_PREMORA_AUTO,
 	PREFIJO_WSP_MASIVO,
 } from "./gestion-temprana-b1";
@@ -78,7 +79,7 @@ export const LIMITE_USUARIOS_CATALOGO = 500;
 export const BUCKET_SIN_ASIGNAR = -1;
 
 /** Origen de la gestión: la registró una persona o la generó el sistema. */
-export type OrigenGestion = "manual" | "premora" | "wsp_masivo";
+export type OrigenGestion = "manual" | "premora" | "convenio" | "wsp_masivo";
 
 export interface RangoNormalizado {
 	/** Medianoche GT del primer día incluido. */
@@ -149,12 +150,20 @@ function sumarDias(fecha: Date, dias: number): Date {
  * cierre diario. Se centraliza acá para que los tres no diverjan.
  */
 export function esGestionAutomatica(): SQL {
-	return sql`(${contactosCobros.comentarios} LIKE ${`${PREFIJO_PREMORA_AUTO}%`} OR ${contactosCobros.comentarios} LIKE ${`${PREFIJO_WSP_MASIVO}%`})`;
+	return sql`COALESCE(${contactosCobros.comentarios} LIKE ${`${PREFIJO_PREMORA_AUTO}%`} OR ${contactosCobros.comentarios} LIKE ${`${PREFIJO_WSP_MASIVO}%`}, false)`;
 }
 
-/** Clasifica el origen de una gestión a partir de su comentario. */
+/**
+ * Clasifica el origen de una gestión a partir de su comentario.
+ *
+ * PREFIJO_CONVENIO_AUTO se prueba ANTES que PREFIJO_PREMORA_AUTO porque el
+ * primero lo contiene ("Recordatorio automático Convenio..." empieza con
+ * "Recordatorio automático"): en el orden inverso todo convenio se reporta
+ * como premora.
+ */
 export function origenDeComentario(comentarios: string | null): OrigenGestion {
 	if (!comentarios) return "manual";
+	if (comentarios.startsWith(PREFIJO_CONVENIO_AUTO)) return "convenio";
 	if (comentarios.startsWith(PREFIJO_PREMORA_AUTO)) return "premora";
 	if (comentarios.startsWith(PREFIJO_WSP_MASIVO)) return "wsp_masivo";
 	return "manual";
@@ -163,6 +172,7 @@ export function origenDeComentario(comentarios: string | null): OrigenGestion {
 /** SQL que expone el origen como columna del SELECT. */
 export function columnaOrigen(): SQL<OrigenGestion> {
 	return sql<OrigenGestion>`CASE
+		WHEN ${contactosCobros.comentarios} LIKE ${`${PREFIJO_CONVENIO_AUTO}%`} THEN 'convenio'
 		WHEN ${contactosCobros.comentarios} LIKE ${`${PREFIJO_PREMORA_AUTO}%`} THEN 'premora'
 		WHEN ${contactosCobros.comentarios} LIKE ${`${PREFIJO_WSP_MASIVO}%`} THEN 'wsp_masivo'
 		ELSE 'manual'

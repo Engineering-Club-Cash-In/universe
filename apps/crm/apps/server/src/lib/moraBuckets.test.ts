@@ -488,7 +488,15 @@ describe("numeroBucketPorCuotas", () => {
 		expect(numeroBucketPorCuotas(3, "EN_CONVENIO")).toBeNull();
 		expect(numeroBucketPorCuotas(3, "CANCELADO")).toBeNull();
 		expect(numeroBucketPorCuotas(3, "PENDIENTE_CANCELACION")).toBeNull();
-		expect(numeroBucketPorCuotas(3, "INCOBRABLE")).toBeNull();
+		expect(numeroBucketPorCuotas(3, "CAIDO")).toBeNull();
+	});
+
+	test("INCOBRABLE fuerza B5 sin importar cuotas atrasadas", () => {
+		// Espejo de `estados_incluidos: ["INCOBRABLE"]` en el catálogo B5 de
+		// cartera-back: INCOBRABLE SÍ tiene bucket (a diferencia de EN_CONVENIO /
+		// CANCELADO / PENDIENTE_CANCELACION / CAIDO), fijo en B5.
+		expect(numeroBucketPorCuotas(0, "INCOBRABLE")).toBe(5);
+		expect(numeroBucketPorCuotas(3, "INCOBRABLE")).toBe(5);
 	});
 
 	test("sin estado conocido no inventa bucket", () => {
@@ -508,7 +516,7 @@ describe("numeroBucketPorCuotas", () => {
 });
 
 describe("estaEnFunnelCobros", () => {
-	test("solo ACTIVO y MOROSO tienen bucket", () => {
+	test("ACTIVO y MOROSO están en el funnel", () => {
 		expect(estaEnFunnelCobros("ACTIVO")).toBe(true);
 		expect(estaEnFunnelCobros("MOROSO")).toBe(true);
 	});
@@ -517,7 +525,11 @@ describe("estaEnFunnelCobros", () => {
 		expect(estaEnFunnelCobros("EN_CONVENIO")).toBe(false);
 		expect(estaEnFunnelCobros("CANCELADO")).toBe(false);
 		expect(estaEnFunnelCobros("PENDIENTE_CANCELACION")).toBe(false);
-		expect(estaEnFunnelCobros("INCOBRABLE")).toBe(false);
+		expect(estaEnFunnelCobros("CAIDO")).toBe(false);
+	});
+
+	test("INCOBRABLE sí está en el funnel (fuerza B5, no queda sin bucket)", () => {
+		expect(estaEnFunnelCobros("INCOBRABLE")).toBe(true);
 	});
 
 	test("estado ausente cuenta como fuera del funnel", () => {

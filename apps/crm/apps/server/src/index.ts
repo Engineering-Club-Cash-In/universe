@@ -1375,223 +1375,248 @@ app.post("/api/premora/elegibilidad/run", async (c) => {
 	return c.json({ success: true, resumen });
 });
 
-// Job periódico de notificaciones de cobros (cada hora)
-setInterval(
-	async () => {
-		try {
-			await checkSeguimientosVencidos();
-		} catch (error) {
-			console.error("Error en job de notificaciones cobros:", error);
-		}
-	},
-	60 * 60 * 1000,
-);
+// ═══════════════════════════════════════════════════════════════════════════
+// TAREAS PROGRAMADAS
+//
+// Con `DISABLE_SCHEDULED_JOBS=true` el proceso levanta SOLO la API, sin ningún
+// job. Sirve para las instancias que exponen la API a un integrador (hoy el bot
+// de WhatsApp de cobros) sin duplicar el trabajo de la instancia principal.
+//
+// No es un detalle menor: varios de estos jobs LE ESCRIBEN A CLIENTES
+// (`sendPremoraReminders` a los 15 s del arranque, `sendConvenioReminders` a
+// los 20 s). Una segunda instancia apuntando a una copia de producción les
+// mandaría recordatorios de verdad.
+//
+// Ver docs/features/bot-whatsapp-cobros/despliegue-dev.md
+// ═══════════════════════════════════════════════════════════════════════════
+const TAREAS_PROGRAMADAS_ACTIVAS =
+	process.env.DISABLE_SCHEDULED_JOBS !== "true";
 
-// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista)
-setTimeout(() => {
-	checkSeguimientosVencidos().catch(console.error);
-	procesarSeguimientosRecurrentes().catch(console.error);
-	checkPromesasPago().catch(console.error);
-}, 10_000);
-
-// Recordatorios Premora (CC2-11): diario a las 8:00 GT (= 14:00 UTC, GT no
-// tiene DST). También corre al boot (abajo): la tabla recordatorios_premora
-// hace idempotente el envío, así que un deploy tardío recupera el batch del
-// día sin duplicar mensajes.
-function scheduleAtPremoraGT() {
-	const now = new Date();
-	const next = new Date();
-	next.setUTCHours(14, 0, 0, 0);
-	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-	setTimeout(async () => {
-		await sendPremoraReminders().catch(console.error);
-		scheduleAtPremoraGT();
-	}, next.getTime() - now.getTime());
+if (!TAREAS_PROGRAMADAS_ACTIVAS) {
+	console.log(
+		"[Jobs] DISABLE_SCHEDULED_JOBS=true — esta instancia levanta solo la API, sin tareas programadas",
+	);
 }
-scheduleAtPremoraGT();
 
-// COBROS-02: recordatorios de CONVENIO, diario a las 8:05 GT (= 14:05 UTC), 5
-// min DESPUÉS del funnel premora — así corren después de la subida de bucket de
-// medianoche (job de cartera) y no compiten con premora. Idempotente
-// (recordatorios_convenio), el run de boot recupera sin duplicar.
-function scheduleAtConvenioGT() {
-	const now = new Date();
-	const next = new Date();
-	next.setUTCHours(14, 5, 0, 0); // 08:05 GT
-	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-	setTimeout(async () => {
-		await sendConvenioReminders().catch(console.error);
-		scheduleAtConvenioGT();
-	}, next.getTime() - now.getTime());
-}
-scheduleAtConvenioGT();
+if (TAREAS_PROGRAMADAS_ACTIVAS) {
+	// Job periódico de notificaciones de cobros (cada hora)
+	setInterval(
+		async () => {
+			try {
+				await checkSeguimientosVencidos();
+			} catch (error) {
+				console.error("Error en job de notificaciones cobros:", error);
+			}
+		},
+		60 * 60 * 1000,
+	);
 
-// Recuperación al boot (deploy tardío): idempotente por los claims.
-setTimeout(() => {
-	sendConvenioReminders().catch(console.error);
-}, 20_000);
+	// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista)
+	setTimeout(() => {
+		checkSeguimientosVencidos().catch(console.error);
+		procesarSeguimientosRecurrentes().catch(console.error);
+		checkPromesasPago().catch(console.error);
+	}, 10_000);
 
-// CB-010: elegibilidad de la reducción de recordatorios, diario a las 7:00 GT
-// (= 13:00 UTC) — UNA HORA ANTES del funnel premora, para que la foto de "paga
-// bien" y el auto-revoke queden frescos antes de que se decidan los envíos del
-// día. Idempotente (upsert de la foto + revoca solo configs ya inactivas por
-// segunda vez no reactiva nada), así que el run de boot recupera sin efectos.
-function scheduleAtElegibilidadGT() {
-	const now = new Date();
-	const next = new Date();
-	next.setUTCHours(13, 0, 0, 0); // 07:00 GT
-	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	// Recordatorios Premora (CC2-11): diario a las 8:00 GT (= 14:00 UTC, GT no
+	// tiene DST). También corre al boot (abajo): la tabla recordatorios_premora
+	// hace idempotente el envío, así que un deploy tardío recupera el batch del
+	// día sin duplicar mensajes.
+	function scheduleAtPremoraGT() {
+		const now = new Date();
+		const next = new Date();
+		next.setUTCHours(14, 0, 0, 0);
+		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+		setTimeout(async () => {
+			await sendPremoraReminders().catch(console.error);
+			scheduleAtPremoraGT();
+		}, next.getTime() - now.getTime());
+	}
+	scheduleAtPremoraGT();
+
+	// COBROS-02: recordatorios de CONVENIO, diario a las 8:05 GT (= 14:05 UTC), 5
+	// min DESPUÉS del funnel premora — así corren después de la subida de bucket de
+	// medianoche (job de cartera) y no compiten con premora. Idempotente
+	// (recordatorios_convenio), el run de boot recupera sin duplicar.
+	function scheduleAtConvenioGT() {
+		const now = new Date();
+		const next = new Date();
+		next.setUTCHours(14, 5, 0, 0); // 08:05 GT
+		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+		setTimeout(async () => {
+			await sendConvenioReminders().catch(console.error);
+			scheduleAtConvenioGT();
+		}, next.getTime() - now.getTime());
+	}
+	scheduleAtConvenioGT();
+
+	// Recuperación al boot (deploy tardío): idempotente por los claims.
+	setTimeout(() => {
+		sendConvenioReminders().catch(console.error);
+	}, 20_000);
+
+	// CB-010: elegibilidad de la reducción de recordatorios, diario a las 7:00 GT
+	// (= 13:00 UTC) — UNA HORA ANTES del funnel premora, para que la foto de "paga
+	// bien" y el auto-revoke queden frescos antes de que se decidan los envíos del
+	// día. Idempotente (upsert de la foto + revoca solo configs ya inactivas por
+	// segunda vez no reactiva nada), así que el run de boot recupera sin efectos.
+	function scheduleAtElegibilidadGT() {
+		const now = new Date();
+		const next = new Date();
+		next.setUTCHours(13, 0, 0, 0); // 07:00 GT
+		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+		setTimeout(async () => {
+			await refreshPremoraElegibilidad().catch(console.error);
+			scheduleAtElegibilidadGT();
+		}, next.getTime() - now.getTime());
+	}
+	scheduleAtElegibilidadGT();
+
+	// Recuperación al boot (deploy tardío): la elegibilidad se refresca ANTES del
+	// envío premora y este ESPERA a que termine (review Codex P2). En el path
+	// diario no se solapan (07:00 vs 08:00), pero en el boot ambos se disparan
+	// juntos; si premora corriera primero leería reducciones stale y saltaría
+	// D-5/D-3/D-1 de un crédito que ya debía auto-revocarse (el WhatsApp perdido no
+	// se recupera después). Premora es idempotente (claims), así que re-correr al
+	// boot no duplica mensajes.
 	setTimeout(async () => {
 		await refreshPremoraElegibilidad().catch(console.error);
-		scheduleAtElegibilidadGT();
-	}, next.getTime() - now.getTime());
-}
-scheduleAtElegibilidadGT();
+		await sendPremoraReminders().catch(console.error);
+	}, 15_000);
 
-// Recuperación al boot (deploy tardío): la elegibilidad se refresca ANTES del
-// envío premora y este ESPERA a que termine (review Codex P2). En el path
-// diario no se solapan (07:00 vs 08:00), pero en el boot ambos se disparan
-// juntos; si premora corriera primero leería reducciones stale y saltaría
-// D-5/D-3/D-1 de un crédito que ya debía auto-revocarse (el WhatsApp perdido no
-// se recupera después). Premora es idempotente (claims), así que re-correr al
-// boot no duplica mensajes.
-setTimeout(async () => {
-	await refreshPremoraElegibilidad().catch(console.error);
-	await sendPremoraReminders().catch(console.error);
-}, 15_000);
-
-// COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d),
-// diario a las 8:00 GT — DESPUÉS de que la subida de bucket de medianoche ya
-// corrió en cartera, para leer las subidas de anoche. Reemplaza las viejas
-// notificaciones masivas de "sin contacto". Idempotente por su propio dedup, así
-// que el run de boot (abajo) recupera sin duplicar.
-function scheduleAtCobrosAlertasGT() {
-	const now = new Date();
-	const next = new Date();
-	next.setUTCHours(14, 0, 0, 0); // 08:00 GT
-	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-	setTimeout(async () => {
-		await checkCobrosAlertas().catch(console.error);
-		scheduleAtCobrosAlertasGT();
-	}, next.getTime() - now.getTime());
-}
-scheduleAtCobrosAlertasGT();
-// Recuperación al boot SOLO si ya pasaron las 08:00 GT (un deploy tardío recupera
-// el batch del día; el dedup evita duplicar). Antes de las 08:00 GT NO se corre:
-// dispararía las alertas "de las 8am" en medianoche — se deja que el timeout
-// programado las lance a la hora (Codex P2).
-setTimeout(() => {
-	const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
-	if (horaGT >= 8) {
-		checkCobrosAlertas().catch(console.error);
-	} else {
-		console.log(
-			"[CobrosAlertas] Boot antes de las 08:00 GT; se omite la recuperación (el timeout programado la lanzará a la hora)",
-		);
+	// COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d),
+	// diario a las 8:00 GT — DESPUÉS de que la subida de bucket de medianoche ya
+	// corrió en cartera, para leer las subidas de anoche. Reemplaza las viejas
+	// notificaciones masivas de "sin contacto". Idempotente por su propio dedup, así
+	// que el run de boot (abajo) recupera sin duplicar.
+	function scheduleAtCobrosAlertasGT() {
+		const now = new Date();
+		const next = new Date();
+		next.setUTCHours(14, 0, 0, 0); // 08:00 GT
+		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+		setTimeout(async () => {
+			await checkCobrosAlertas().catch(console.error);
+			scheduleAtCobrosAlertasGT();
+		}, next.getTime() - now.getTime());
 	}
-}, 20_000);
+	scheduleAtCobrosAlertasGT();
+	// Recuperación al boot SOLO si ya pasaron las 08:00 GT (un deploy tardío recupera
+	// el batch del día; el dedup evita duplicar). Antes de las 08:00 GT NO se corre:
+	// dispararía las alertas "de las 8am" en medianoche — se deja que el timeout
+	// programado las lance a la hora (Codex P2).
+	setTimeout(() => {
+		const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
+		if (horaGT >= 8) {
+			checkCobrosAlertas().catch(console.error);
+		} else {
+			console.log(
+				"[CobrosAlertas] Boot antes de las 08:00 GT; se omite la recuperación (el timeout programado la lanzará a la hora)",
+			);
+		}
+	}, 20_000);
 
-// Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
-// CB-020: también cierra el día evaluando TODAS las promesas de pago activas
-// (pendiente/incumplida) sin depender de que alguien abra el caso — ver
-// check-promesas-pago.ts.
-function scheduleAtMidnightGT() {
-	const now = new Date();
-	const next = new Date();
-	next.setUTCHours(6, 0, 0, 0);
-	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-	setTimeout(async () => {
-		await procesarSeguimientosRecurrentes().catch(console.error);
-		await checkPromesasPago().catch(console.error);
-		scheduleAtMidnightGT();
-	}, next.getTime() - now.getTime());
-}
-scheduleAtMidnightGT();
-
-// CB-030: reconciliación diaria de promesas de pago hacia cartera-back
-// (promesas_pago_espejo), a las 23:30 GT — 29 minutos ANTES de que
-// procesarMoras corra en cartera-back a las 23:59 GT (ver el comentario de
-// schedule.ts en ese repo, citado también en check-cobros-alertas.ts). El
-// push por evento (lib/push-promesa-cartera-back.ts) ya mantiene el espejo
-// fresco en el caso normal; esto es la red de seguridad que corrige drift
-// silencioso ANTES del cálculo que importa. Margen de ~30 min: suficiente
-// para absorber latencia sin arriesgar correr después de las 23:59 GT.
-function scheduleAtSyncPromesasGT() {
-	const now = new Date();
-	const next = new Date();
-	next.setUTCHours(5, 30, 0, 0); // 23:30 GT (GT = UTC-6, sin DST)
-	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-	setTimeout(async () => {
-		await sincronizarPromesasCarteraBack().catch(console.error);
-		scheduleAtSyncPromesasGT();
-	}, next.getTime() - now.getTime());
-}
-scheduleAtSyncPromesasGT();
-
-// Catch-up de arranque: si el proceso bootea DENTRO de la ventana 23:30–23:59
-// GT (deploy nocturno, reinicio, crash-loop), el schedule de arriba ya empujó
-// el timer a mañana y la reconciliación de ESTA noche nunca correría — pero
-// procesarMoras sí va a correr a las 23:59 con lo que haya en el espejo. Es
-// justo el peor momento para saltarla: un deploy en esa franja es lo que hace
-// más probable que se hayan perdido pushes por evento (Codex PR #1237).
-// Fuera de la ventana no se hace nada: correr el job en cualquier arranque lo
-// convertiría en un efecto secundario del deploy, y el batch declarado como
-// "set completo" no es algo que convenga disparar de más.
-{
-	const ahora = new Date();
-	const minutosUtc = ahora.getUTCHours() * 60 + ahora.getUTCMinutes();
-	const INICIO_VENTANA = 5 * 60 + 30; // 23:30 GT
-	const FIN_VENTANA = 5 * 60 + 59; // 23:59 GT (cuando arranca procesarMoras)
-	if (minutosUtc >= INICIO_VENTANA && minutosUtc < FIN_VENTANA) {
-		console.log(
-			"[SyncPromesasCarteraBack] Arranque dentro de la ventana 23:30–23:59 GT: ejecutando reconciliación de catch-up antes de procesarMoras.",
-		);
-		sincronizarPromesasCarteraBack().catch(console.error);
+	// Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
+	// CB-020: también cierra el día evaluando TODAS las promesas de pago activas
+	// (pendiente/incumplida) sin depender de que alguien abra el caso — ver
+	// check-promesas-pago.ts.
+	function scheduleAtMidnightGT() {
+		const now = new Date();
+		const next = new Date();
+		next.setUTCHours(6, 0, 0, 0);
+		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+		setTimeout(async () => {
+			await procesarSeguimientosRecurrentes().catch(console.error);
+			await checkPromesasPago().catch(console.error);
+			scheduleAtMidnightGT();
+		}, next.getTime() - now.getTime());
 	}
-}
+	scheduleAtMidnightGT();
 
-// CB-024: cierre diario de asesores — snapshot de gestión (contactos
-// efectivos manuales, promesas, movimientos de bucket) a las 00:15 GT
-// (= 06:15 UTC) todos los días, del día que ACABA DE TERMINAR (ayer GT).
-//
-// NO a las 22:00 GT: los movimientos de bucket los genera `procesarMoras` en
-// cartera-back a las 23:59 GT (schedule.ts:37 de ese repo) — correr antes
-// significa preguntar por el día de hoy ANTES de que esas filas existan, y
-// como el job nunca vuelve a visitar un día ya cerrado, esos movimientos se
-// pierden para siempre, todos los días (hallado por Codex en PR #1183).
-//
-// Re-correr el mismo día es seguro: los contactos van con ON CONFLICT DO
-// NOTHING y los movimientos se reemplazan completos (DELETE + INSERT), así
-// que un deploy tardío recupera el snapshot del día sin duplicar.
-function ayerGT(): string {
-	return toDateStrGT(new Date(Date.now() - 24 * 60 * 60 * 1000));
-}
-function scheduleAtCierreDiarioGT() {
-	const now = new Date();
-	const next = new Date();
-	next.setUTCHours(6, 15, 0, 0); // 00:15 GT
-	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-	setTimeout(async () => {
-		await generarCierreDiario(ayerGT()).catch(console.error);
-		scheduleAtCierreDiarioGT();
-	}, next.getTime() - now.getTime());
-}
-scheduleAtCierreDiarioGT();
-// Recuperación al boot SOLO si ya pasaron las 00:15 GT (deploy tardío recupera
-// el snapshot de ayer; re-correr no duplica, ver arriba). Antes de las 00:15
-// GT NO se corre: se deja que el timeout programado lo lance a la hora.
-setTimeout(() => {
-	const bootNow = new Date();
-	const horaGT = (bootNow.getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
-	const minutoGT = bootNow.getUTCMinutes();
-	if (horaGT > 0 || (horaGT === 0 && minutoGT >= 15)) {
-		generarCierreDiario(ayerGT()).catch(console.error);
-	} else {
-		console.log(
-			"[CierreDiarioAsesor] Boot antes de las 00:15 GT; se omite la recuperación (el timeout programado lo lanzará a la hora)",
-		);
+	// CB-030: reconciliación diaria de promesas de pago hacia cartera-back
+	// (promesas_pago_espejo), a las 23:30 GT — 29 minutos ANTES de que
+	// procesarMoras corra en cartera-back a las 23:59 GT (ver el comentario de
+	// schedule.ts en ese repo, citado también en check-cobros-alertas.ts). El
+	// push por evento (lib/push-promesa-cartera-back.ts) ya mantiene el espejo
+	// fresco en el caso normal; esto es la red de seguridad que corrige drift
+	// silencioso ANTES del cálculo que importa. Margen de ~30 min: suficiente
+	// para absorber latencia sin arriesgar correr después de las 23:59 GT.
+	function scheduleAtSyncPromesasGT() {
+		const now = new Date();
+		const next = new Date();
+		next.setUTCHours(5, 30, 0, 0); // 23:30 GT (GT = UTC-6, sin DST)
+		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+		setTimeout(async () => {
+			await sincronizarPromesasCarteraBack().catch(console.error);
+			scheduleAtSyncPromesasGT();
+		}, next.getTime() - now.getTime());
 	}
-}, 25_000);
+	scheduleAtSyncPromesasGT();
+
+	// Catch-up de arranque: si el proceso bootea DENTRO de la ventana 23:30–23:59
+	// GT (deploy nocturno, reinicio, crash-loop), el schedule de arriba ya empujó
+	// el timer a mañana y la reconciliación de ESTA noche nunca correría — pero
+	// procesarMoras sí va a correr a las 23:59 con lo que haya en el espejo. Es
+	// justo el peor momento para saltarla: un deploy en esa franja es lo que hace
+	// más probable que se hayan perdido pushes por evento (Codex PR #1237).
+	// Fuera de la ventana no se hace nada: correr el job en cualquier arranque lo
+	// convertiría en un efecto secundario del deploy, y el batch declarado como
+	// "set completo" no es algo que convenga disparar de más.
+	{
+		const ahora = new Date();
+		const minutosUtc = ahora.getUTCHours() * 60 + ahora.getUTCMinutes();
+		const INICIO_VENTANA = 5 * 60 + 30; // 23:30 GT
+		const FIN_VENTANA = 5 * 60 + 59; // 23:59 GT (cuando arranca procesarMoras)
+		if (minutosUtc >= INICIO_VENTANA && minutosUtc < FIN_VENTANA) {
+			console.log(
+				"[SyncPromesasCarteraBack] Arranque dentro de la ventana 23:30–23:59 GT: ejecutando reconciliación de catch-up antes de procesarMoras.",
+			);
+			sincronizarPromesasCarteraBack().catch(console.error);
+		}
+	}
+
+	// CB-024: cierre diario de asesores — snapshot de gestión (contactos
+	// efectivos manuales, promesas, movimientos de bucket) a las 00:15 GT
+	// (= 06:15 UTC) todos los días, del día que ACABA DE TERMINAR (ayer GT).
+	//
+	// NO a las 22:00 GT: los movimientos de bucket los genera `procesarMoras` en
+	// cartera-back a las 23:59 GT (schedule.ts:37 de ese repo) — correr antes
+	// significa preguntar por el día de hoy ANTES de que esas filas existan, y
+	// como el job nunca vuelve a visitar un día ya cerrado, esos movimientos se
+	// pierden para siempre, todos los días (hallado por Codex en PR #1183).
+	//
+	// Re-correr el mismo día es seguro: los contactos van con ON CONFLICT DO
+	// NOTHING y los movimientos se reemplazan completos (DELETE + INSERT), así
+	// que un deploy tardío recupera el snapshot del día sin duplicar.
+	function ayerGT(): string {
+		return toDateStrGT(new Date(Date.now() - 24 * 60 * 60 * 1000));
+	}
+	function scheduleAtCierreDiarioGT() {
+		const now = new Date();
+		const next = new Date();
+		next.setUTCHours(6, 15, 0, 0); // 00:15 GT
+		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+		setTimeout(async () => {
+			await generarCierreDiario(ayerGT()).catch(console.error);
+			scheduleAtCierreDiarioGT();
+		}, next.getTime() - now.getTime());
+	}
+	scheduleAtCierreDiarioGT();
+	// Recuperación al boot SOLO si ya pasaron las 00:15 GT (deploy tardío recupera
+	// el snapshot de ayer; re-correr no duplica, ver arriba). Antes de las 00:15
+	// GT NO se corre: se deja que el timeout programado lo lance a la hora.
+	setTimeout(() => {
+		const bootNow = new Date();
+		const horaGT = (bootNow.getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
+		const minutoGT = bootNow.getUTCMinutes();
+		if (horaGT > 0 || (horaGT === 0 && minutoGT >= 15)) {
+			generarCierreDiario(ayerGT()).catch(console.error);
+		} else {
+			console.log(
+				"[CierreDiarioAsesor] Boot antes de las 00:15 GT; se omite la recuperación (el timeout programado lo lanzará a la hora)",
+			);
+		}
+	}, 25_000);
+}
 
 export default {
 	port: process.env.PORT || 3000,

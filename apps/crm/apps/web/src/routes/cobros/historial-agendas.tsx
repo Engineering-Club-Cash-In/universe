@@ -369,6 +369,13 @@ function HistorialAgendasPage() {
 		const catalogoDeshabilitado = !esSupervisor;
 		if (catalogoDeshabilitado) return undefined;
 		if (usuariosQuery.isPending && !usuariosQuery.isFetched) return usuarioIds;
+		// Reintentos agotados: `usuarios` queda `[]` con `isPending: false`, que
+		// sin este guard se lee igual que "el catálogo cargó y ningún id
+		// seleccionado existe" — un fallo de red pasaba por una respuesta
+		// autoritativa. El saneo borraba `usuarioIds`, y el listado y el export
+		// seguían corriendo SIN el filtro, mostrando/exportando todo el equipo en
+		// silencio para un supervisor que pidió ver solo ciertos usuarios.
+		if (usuariosQuery.isError) return usuarioIds;
 		const idsCatalogo = new Set(usuarios.map((u) => u.id));
 		const filtrados = usuarioIds.filter((id) => idsCatalogo.has(id));
 		return filtrados.length ? filtrados : undefined;
@@ -377,6 +384,7 @@ function HistorialAgendasPage() {
 		usuarios,
 		usuariosQuery.isPending,
 		usuariosQuery.isFetched,
+		usuariosQuery.isError,
 		esSupervisor,
 		sesionCargando,
 	]);
@@ -519,6 +527,22 @@ function HistorialAgendasPage() {
 			if (!seguir) return;
 		}
 
+		// Snapshot del límite superior ANTES de empezar a paginar. El listado
+		// ordena por fecha_contacto DESC con OFFSET (no cursor): una gestión nueva
+		// insertada entre dos páginas del mismo export corre el offset de todo lo
+		// que sigue —duplica la que era última fila de una página, y una fila que
+		// estaba al final se sale de rango sin aparecer— porque va PRIMERA (orden
+		// descendente). Si `filtros.hasta` no vino fijo (rango abierto hasta hoy,
+		// el caso normal de la pantalla), fijarlo acá congela la ventana: una
+		// gestión registrada MIENTRAS el export corre queda fuera, en vez de
+		// desplazar páginas que ya se leyeron. No cubre una inserción dentro de un
+		// rango que el usuario ya acotó a mano —eso requeriría cursor sobre
+		// (fecha_contacto, id) en el propio endpoint— pero sí el caso real: un
+		// supervisor exportando mientras el equipo sigue registrando gestiones.
+		const filtrosExport = filtros.hasta
+			? filtros
+			: { ...filtros, hasta: aFechaISO(new Date()) };
+
 		setExportando(true);
 		try {
 			const filas: FilaHistorialData[] = [];
@@ -527,7 +551,7 @@ function HistorialAgendasPage() {
 
 			while (hayMas && filas.length < LIMITE_EXPORT) {
 				const respuesta = (await clientAny.getHistorialAgendas({
-					...filtros,
+					...filtrosExport,
 					page: paginaActual,
 					pageSize: PAGE_SIZE_EXPORT,
 					// Hasta 100 páginas sobre el mismo filtro: sin esto cada una

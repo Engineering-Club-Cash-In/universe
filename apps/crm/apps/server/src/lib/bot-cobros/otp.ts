@@ -175,8 +175,14 @@ export async function enviarOtp(
 		referencia = fila.id;
 
 		const smsClient = new SMSClient({
-			token: process.env.SMS_TOKEN ?? "",
-			apiKey: Number.parseInt(process.env.SMS_API_KEY ?? "0", 10),
+			credentials: {
+				token: process.env.SMS_TOKEN ?? "",
+				apiKey: Number.parseInt(process.env.SMS_API_KEY ?? "0", 10),
+			},
+			// El default del cliente son 30 s y la API del proveedor a veces tarda
+			// más: el envío moría en 31.9 s. Mismo criterio que el envío de SMS de
+			// cobros (routers/cobros.ts), donde ya se habían topado con esto.
+			timeout: 60000,
 		});
 
 		// La base de dev es una copia de producción con teléfonos reales. Con

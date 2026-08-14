@@ -336,7 +336,7 @@ sesiones (pagos, boletas), se agrega ahí.
 | Cliente **sin teléfono** en el CRM | Igual: agente. |
 | Oportunidad ganada **sin `numero_sifco`** | **No ocurre**: una oportunidad ganada o migrada siempre tiene número SIFCO. Si aparece una, es un dato roto: se omite del listado y se registra para revisar. |
 | Oportunidad **sin info del vehículo** | Sí ocurre. Se lista igual con el **nombre completo del cliente** como etiqueta. |
-| DPI duplicado en varios leads | Criterio determinista (el que tenga oportunidades ganadas) y alerta al equipo. Hay precedente de duplicados por formato de DPI. |
+| DPI (o NIT) duplicado en varios leads | Se toma el del **crédito más reciente**, con el id como desempate, para que la respuesta no cambie entre consultas. El duplicado se registra en el log con los ids —no con el identificador— para que alguien lo unifique. |
 | Búsqueda por placa de un vehículo con más de una oportunidad | Se listan las que apliquen. |
 | Cliente sin ninguna oportunidad ganada | `creditos: []` → mensaje claro y salida a agente. |
 | El SMS no se entrega | Definir reintento y cuántos, y salida a agente. |
@@ -445,6 +445,7 @@ listado de créditos no lo tocan y siguen funcionando igual.
 | Servicio 2 con referencia inventada | 401 `REFERENCIA_INVALIDA` |
 | Servicio 2 con código correcto | Devuelve los créditos con su etiqueta armada |
 | Reusar el mismo código | 401 `OTP_YA_USADO` |
+| La misma búsqueda 5 veces seguidas | Siempre el mismo cliente (elección determinista) |
 | Tercer código equivocado | 429 `DEMASIADOS_INTENTOS` (no al cuarto) |
 | 10 validaciones **en paralelo** con código malo | Solo 2 cuentan como intento; el contador queda en 3, no en 1 |
 | Falla el listado después de validar | El código **no** queda usado y el reintento funciona |

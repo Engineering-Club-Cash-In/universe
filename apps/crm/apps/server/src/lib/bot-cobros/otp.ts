@@ -21,8 +21,9 @@
  * Se reusan la tabla `otps` y el cliente de `@repo/sms`, que es lo que importa.
  */
 
+import { randomInt } from "node:crypto";
 import { SMSClient } from "@repo/sms";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../../db";
 import { otps } from "../../db/schema/otp";
 import { normalizarDpi } from "../../utils/cui-validation";
@@ -83,8 +84,16 @@ export type ResultadoValidacion =
 	| { valido: false; codigo: "DEMASIADOS_INTENTOS" }
 	| { valido: false; codigo: "REFERENCIA_INVALIDA" };
 
+/**
+ * Código de 4 dígitos con generador criptográfico.
+ *
+ * `Math.random()` es predecible: quien junte varios códigos enviados a un
+ * teléfono propio puede reconstruir el estado del generador y adivinar los
+ * siguientes, saltándose el tope de 3 intentos. Este código autoriza el acceso
+ * a datos de crédito, así que no puede salir de ahí.
+ */
 function generarCodigo(): string {
-	return Math.floor(1000 + Math.random() * 9000).toString();
+	return randomInt(1000, 10000).toString();
 }
 
 /**

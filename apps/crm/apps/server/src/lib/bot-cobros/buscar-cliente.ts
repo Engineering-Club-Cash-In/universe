@@ -14,7 +14,7 @@
  * manda un SMS —ni se le revela el nombre— a un lead de ventas.
  */
 
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { coDebtors, leads, opportunities } from "../../db/schema/crm";
 import { vehicles } from "../../db/schema/vehicles";
@@ -107,14 +107,42 @@ async function traerTitularConCredito(
 }
 
 /**
+ * Avisa que un identificador apunta a más de un registro.
+ *
+ * Elegir uno "el que sea" haría que el código se mande a un teléfono viejo y
+ * que el nombre cambie entre consultas, así que la elección es determinista y
+ * el duplicado queda registrado para que alguien lo limpie. Se registran los
+ * ids, no el identificador: es lo que hace falta para corregirlo y no mete PII
+ * en los logs (D-14).
+ */
+function alertarDuplicado(tipo: string, ids: string[]) {
+	console.warn(
+		"[BotCobros] IDENTIFICADOR DUPLICADO",
+		JSON.stringify({
+			tipo,
+			usado: ids[0],
+			otros: ids.slice(1),
+			nota: "Se eligió el del crédito más reciente. Revisar y unificar.",
+		}),
+	);
+}
+
+/**
  * DPI: primero el titular, y si no aparece, los codeudores.
  *
  * Hay personas que son titular de un crédito y codeudor de otro; en ese caso
  * gana el titular, que es el dueño de la relación principal.
+ *
+ * Cuando varios registros comparten el mismo DPI —pasa, hay precedente de
+ * duplicados por formato— se toma el del **crédito más reciente**, con el id
+ * como desempate para que la respuesta no cambie entre consultas.
  */
 async function buscarPorDpi(dpi: string): Promise<ClienteBot | null> {
-	const [titular] = await db
-		.selectDistinct({ id: leads.id })
+	const titulares = await db
+		.select({
+			id: leads.id,
+			ultimo: sql<Date>`max(${opportunities.createdAt})`,
+		})
 		.from(leads)
 		.innerJoin(opportunities, eq(opportunities.leadId, leads.id))
 		.where(
@@ -123,13 +151,21 @@ async function buscarPorDpi(dpi: string): Promise<ClienteBot | null> {
 				inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
 			),
 		)
-		.limit(1);
+		.groupBy(leads.id)
+		.orderBy(sql`max(${opportunities.createdAt}) DESC`, asc(leads.id))
+		.limit(2);
 
-	if (titular) {
-		return traerTitularConCredito(titular.id);
+	if (titulares.length > 0) {
+		if (titulares.length > 1) {
+			alertarDuplicado(
+				"dpi_en_varios_leads",
+				titulares.map((t) => t.id),
+			);
+		}
+		return traerTitularConCredito(titulares[0].id);
 	}
 
-	const [codeudor] = await db
+	const codeudores = await db
 		.select({
 			id: coDebtors.id,
 			fullName: coDebtors.fullName,
@@ -145,9 +181,21 @@ async function buscarPorDpi(dpi: string): Promise<ClienteBot | null> {
 				inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
 			),
 		)
-		.limit(1);
+		.orderBy(desc(opportunities.createdAt), asc(coDebtors.id))
+		.limit(2);
 
+	const codeudor = codeudores[0];
 	if (!codeudor?.leadId) return null;
+
+	// Ser codeudor de varios créditos es normal; solo se avisa si además cambia
+	// el teléfono, porque ahí sí importa a cuál se le manda el código.
+	const telefonos = new Set(codeudores.map((c) => c.phone ?? ""));
+	if (telefonos.size > 1) {
+		alertarDuplicado(
+			"codeudor_con_telefonos_distintos",
+			codeudores.map((c) => c.id),
+		);
+	}
 
 	return {
 		tipo: "codeudor",
@@ -164,8 +212,8 @@ async function buscarPorDpi(dpi: string): Promise<ClienteBot | null> {
  * clientes viejos solo en la oportunidad (332 de 1,760 no lo tienen en el lead).
  */
 async function buscarPorNit(nit: string): Promise<ClienteBot | null> {
-	const [porLead] = await db
-		.selectDistinct({ id: leads.id })
+	const porLead = await db
+		.select({ id: leads.id })
 		.from(leads)
 		.innerJoin(opportunities, eq(opportunities.leadId, leads.id))
 		.where(
@@ -174,14 +222,22 @@ async function buscarPorNit(nit: string): Promise<ClienteBot | null> {
 				inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
 			),
 		)
-		.limit(1);
+		.groupBy(leads.id)
+		.orderBy(sql`max(${opportunities.createdAt}) DESC`, asc(leads.id))
+		.limit(2);
 
-	if (porLead) {
-		return traerTitularConCredito(porLead.id);
+	if (porLead.length > 0) {
+		if (porLead.length > 1) {
+			alertarDuplicado(
+				"nit_en_varios_leads",
+				porLead.map((l) => l.id),
+			);
+		}
+		return traerTitularConCredito(porLead[0].id);
 	}
 
-	const [porOportunidad] = await db
-		.selectDistinct({ leadId: opportunities.leadId })
+	const porOportunidad = await db
+		.select({ leadId: opportunities.leadId })
 		.from(opportunities)
 		.where(
 			and(
@@ -189,11 +245,24 @@ async function buscarPorNit(nit: string): Promise<ClienteBot | null> {
 				inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
 			),
 		)
-		.limit(1);
+		.groupBy(opportunities.leadId)
+		.orderBy(
+			sql`max(${opportunities.createdAt}) DESC`,
+			asc(opportunities.leadId),
+		)
+		.limit(2);
 
-	if (!porOportunidad?.leadId) return null;
+	const leadId = porOportunidad[0]?.leadId;
+	if (!leadId) return null;
 
-	return traerTitularConCredito(porOportunidad.leadId);
+	if (porOportunidad.length > 1) {
+		alertarDuplicado(
+			"nit_en_varios_clientes",
+			porOportunidad.map((o) => o.leadId ?? "(sin lead)"),
+		);
+	}
+
+	return traerTitularConCredito(leadId);
 }
 
 /**

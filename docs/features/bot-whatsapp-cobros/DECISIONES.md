@@ -370,15 +370,18 @@ vuelve a buscar** — la fila del OTP ya guarda a qué lead o codeudor pertenece
    ya responde `DEMASIADOS_INTENTOS`, no al cuarto: el bot rutea por `codigo` y con
    `OTP_INVALIDO` le pediría al cliente un intento que ya no puede funcionar.
 3. **El código no se escribe en logs** ni se devuelve en ninguna respuesta.
-4. Si el SMS falla, la fila del OTP **se borra**: si no, quedaría vivo un código que nadie
+4. Se genera con un **generador criptográfico** (`crypto.randomInt`), no con
+   `Math.random()`: este último es predecible y quien junte varios códigos enviados a un
+   teléfono propio podría adivinar los siguientes.
+5. Si el SMS falla, la fila del OTP **se borra**: si no, quedaría vivo un código que nadie
    recibió.
-5. **Validar y listar van en una sola transacción, con la fila del OTP bloqueada
+6. **Validar y listar van en una sola transacción, con la fila del OTP bloqueada
    (`FOR UPDATE`)**, por dos razones:
    - Sin el lock, dos peticiones simultáneas leen el mismo contador de intentos y lo pisan;
      se podría probar el espacio completo de códigos en paralelo saltándose el tope de 3.
    - Si el listado de créditos falla, se revierte también el "código usado", así el cliente
      puede reintentar sin pedir otro SMS.
-6. Todo va autenticado con la API key del bot ([D-18](#d-18--autenticación-del-bot-api-key)).
+7. Todo va autenticado con la API key del bot ([D-18](#d-18--autenticación-del-bot-api-key)).
 
 ---
 

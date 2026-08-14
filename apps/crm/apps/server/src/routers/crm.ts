@@ -51,6 +51,7 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
+import { licenseQrVerifications } from "../db/schema/license-verification";
 import { quotations } from "../db/schema/quotations";
 import {
 	carryForwardAnalysisChecklistVerificationState,
@@ -1946,6 +1947,24 @@ export const crmRouter = {
 					.update(clients)
 					.set({ opportunityId: null })
 					.where(eq(clients.opportunityId, input.opportunityId));
+
+				// FK NO ACTION: sin este delete, el de abajo revienta si hay verificaciones asociadas.
+				const opportunityCoDebtors = await tx
+					.select({ id: coDebtors.id })
+					.from(coDebtors)
+					.where(eq(coDebtors.opportunityId, input.opportunityId));
+
+				await tx.delete(licenseQrVerifications).where(
+					or(
+						eq(licenseQrVerifications.opportunityId, input.opportunityId),
+						opportunityCoDebtors.length > 0
+							? inArray(
+									licenseQrVerifications.coDebtorId,
+									opportunityCoDebtors.map((c) => c.id),
+								)
+							: undefined,
+					),
+				);
 
 				await tx
 					.delete(opportunities)
@@ -6860,6 +6879,11 @@ export const crmRouter = {
 			await db
 				.delete(creditAnalysis)
 				.where(eq(creditAnalysis.coDebtorId, input.id));
+
+			// Mismo motivo: FK NO ACTION, sin esto el borrado de abajo revienta.
+			await db
+				.delete(licenseQrVerifications)
+				.where(eq(licenseQrVerifications.coDebtorId, input.id));
 
 			const [deletedCoDebtor] = await db
 				.delete(coDebtors)

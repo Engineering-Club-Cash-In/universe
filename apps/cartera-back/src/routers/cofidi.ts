@@ -12,6 +12,7 @@ import {
 } from "../cofidi/rubroInteresInversionistas";
 import { db } from "../database";
 import {
+  audit_logs,
   compras_credito_inversionista,
   credit_cancelations,
   creditos,
@@ -3894,6 +3895,228 @@ if (facturasExistentes.length > 0) {
 
 ;
 
+// Deja rastro consultable de que una factura entró por el camino degradado.
+// Sin esto, una recuperación es indistinguible de una certificación normal y
+// una racha de timeouts de COFIDI no deja señal en ningún lado — el mismo hueco
+// de visibilidad que dejó al pago 54783 sin descubrir por días.
+// No es fatal: si el log falla, la factura igual se guarda.
+async function registrarRecuperacion(datos: {
+  pago_id?: number | null;
+  idInterno: string;
+  serie: string;
+  numero: string;
+  uuid: string;
+  motivo: string;
+}) {
+  try {
+    await db.insert(audit_logs).values({
+      user_email: "SISTEMA",
+      method: "POST",
+      path: "/api/dte/factura-recuperada",
+      status_code: 200,
+      body: JSON.stringify({
+        pago_id: datos.pago_id ?? null,
+        idInterno: datos.idInterno,
+      }),
+      response: JSON.stringify({
+        serie: datos.serie,
+        numero: datos.numero,
+        uuid: datos.uuid,
+        motivo: datos.motivo,
+      }),
+    });
+  } catch (error) {
+    console.error(`   ⚠️ No se pudo registrar la recuperación en audit_logs:`, error);
+  }
+}
+
+// ============================================
+// 🔥 RECUPERAR UNA FACTURA YA CERTIFICADA EN SAT
+// ============================================
+// COFIDI puede certificar y aun así dejarnos sin respuesta utilizable: timeout
+// de 60s del fetch, SOAP mal formado, o Identifier sin ResponseData1. En esos
+// casos la factura EXISTE en SAT pero nunca llega al INSERT y queda huérfana
+// (pasó el 2026-08-06 con el pago 54783; la halló conta días después).
+// Como el idInterno lo generamos nosotros ANTES de certificar, podemos
+// preguntarle a COFIDI si el documento ya existe y seguir el flujo normal.
+//
+// Son DOS llamadas, no una: LOOKUP_ISSUED_INTERNAL_ID NO devuelve el DTE sino
+// un índice <DocsFoundBy> con metadatos (uuid, taxId, total). El XML certificado
+// hay que pedirlo aparte con GET_DOCUMENT por UUID.
+//
+// Nunca lanza: si no la encuentra, o si lo que encuentra no cuadra con lo que
+// se intentó certificar, devuelve null y el llamador sigue con su error.
+async function recuperarFacturaCertificada(
+  satClient: SATClientService,
+  idInterno: string,
+  esperado: {
+    emisorNit: string;
+    receptorNit: string;
+    granTotal: number;
+    fechaHoraEmision: string;
+  }
+): Promise<{
+  xmlCertificado: string;
+  serie: string;
+  numero: string;
+  uuid: string;
+} | null> {
+  // Esto corre DESPUÉS de que un intento de certificación ya gastó hasta 60s
+  // dentro del request HTTP. Con el timeout por defecto, el peor caso se iría a
+  // 180s entre las tres llamadas; 10s alcanza de sobra para una consulta y acota
+  // lo que paga un error que ni siquiera salió de la máquina (validación local,
+  // DNS, ECONNREFUSED), que cae en el mismo catch genérico.
+  const TIMEOUT_CONSULTA_MS = 10000;
+
+  // COFIDI puede seguir procesando el DTE cuando nuestro fetch ya abortó: el
+  // documento aparece en su índice unos segundos después. Un único lookup
+  // inmediato lo daría por inexistente y volveríamos a perder la factura, que es
+  // justo el caso que este helper existe para cubrir (verificarFacturasSat ya
+  // trabaja con un grace por la misma razón).
+  // Solo se reinsiste cuando COFIDI RESPONDE que no está. Si la consulta lanza
+  // (red caída, timeout), insistir no aporta nada y solo alarga el request.
+  const ESPERAS_MS = [0, 5000, 7000];
+
+  try {
+    // ---- 1) ¿Existe un documento emitido con este idInterno? ----
+    let lookup: Awaited<
+      ReturnType<SATClientService["consultarPorIdInterno"]>
+    > | null = null;
+
+    for (const espera of ESPERAS_MS) {
+      if (espera > 0) {
+        console.log(`   ⏳ Documento aún no visible; reintento en ${espera / 1000}s...`);
+        await new Promise((resolve) => setTimeout(resolve, espera));
+      }
+      const intento = await satClient.consultarPorIdInterno(
+        idInterno,
+        TIMEOUT_CONSULTA_MS
+      );
+      if (intento.encontrado && intento.xmlCertificado) {
+        lookup = intento;
+        break;
+      }
+    }
+
+    if (!lookup?.xmlCertificado) return null;
+
+    const { XMLParser } = await import("fast-xml-parser");
+    // parseTagValue:false: batch es hexadecimal y serial un entero largo; el
+    // parser los convertiría a Infinity o a notación científica.
+    const indice = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "@_",
+      parseTagValue: false,
+    }).parse(satClient.decodificarXMLCertificado(lookup.xmlCertificado));
+
+    const docs = indice?.["DocsFoundBy"]?.["doc"];
+    const encontrados = docs ? (Array.isArray(docs) ? docs : [docs]) : [];
+    if (encontrados.length !== 1) {
+      console.error(
+        `   ⚠️ idInterno ${idInterno}: ${encontrados.length} documentos en COFIDI. Ambiguo, no se recupera.`
+      );
+      return null;
+    }
+
+    // El idInterno son 8 dígitos de Math.random() que no persistimos, así que
+    // puede chocar con un documento histórico del mismo emisor. Sin estos
+    // chequeos, una certificación que falló de verdad podría traer la factura
+    // de otro cliente y guardarla amarrada a ESTE pago.
+    const doc = encontrados[0];
+    const uuidLookup = String(doc?.["uuid"] ?? "");
+    const totalLookup = parseFloat(String(doc?.["total"] ?? "NaN"));
+
+    // Emisor + receptor + total NO alcanzan: en este negocio el mismo cliente
+    // paga el mismo monto todos los meses, así que un documento histórico los
+    // cumpliría los tres. La fecha de emisión sí lo distingue — el índice
+    // devuelve la misma FechaHoraEmision que mandamos en el XML, y este helper
+    // corre en la misma invocación que la certificación que acaba de fallar.
+    const emitido = Date.parse(String(doc?.["issued"] ?? ""));
+    const emitidoAhora =
+      Number.isFinite(emitido) &&
+      Math.abs(emitido - Date.parse(esperado.fechaHoraEmision)) <= 5 * 60 * 1000;
+
+    if (
+      !uuidLookup ||
+      String(doc?.["taxId"] ?? "") !== esperado.emisorNit ||
+      !Number.isFinite(totalLookup) ||
+      Math.abs(totalLookup - esperado.granTotal) > 0.01 ||
+      !emitidoAhora
+    ) {
+      console.error(
+        `   ⚠️ idInterno ${idInterno} no corresponde a esta factura ` +
+          `(emisor ${doc?.["taxId"]} vs ${esperado.emisorNit}, total ${doc?.["total"]} vs ${esperado.granTotal}, ` +
+          `emitido ${doc?.["issued"]} vs ${esperado.fechaHoraEmision}). No se recupera.`
+      );
+      return null;
+    }
+
+    // ---- 2) Ahora sí, el XML certificado ----
+    const documento = await satClient.obtenerPorUUID(
+      uuidLookup,
+      TIMEOUT_CONSULTA_MS
+    );
+    if (!documento.encontrado || !documento.xmlCertificado) {
+      console.error(
+        `   ⚠️ ${uuidLookup} salió en el índice pero GET_DOCUMENT no lo devolvió: ${documento.mensaje}`
+      );
+      return null;
+    }
+    const xmlCertificado = satClient.decodificarXMLCertificado(
+      documento.xmlCertificado
+    );
+
+    const dte = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "@_",
+    }).parse(xmlCertificado)?.["dte:GTDocumento"]?.["dte:SAT"]?.["dte:DTE"];
+    const numAut = dte?.["dte:Certificacion"]?.["dte:NumeroAutorizacion"];
+    const serie = numAut?.["@_Serie"];
+    const numero = numAut?.["@_Numero"];
+    const uuidXml = numAut?.["#text"];
+
+    // Un NumeroAutorizacion sin atributos parsea como string plano y no lanza:
+    // sin este guard, String(undefined) metería el literal "undefined" en la BD.
+    if (serie === undefined || numero === undefined || uuidXml === undefined) {
+      console.error(
+        `   ⚠️ El XML de ${uuidLookup} no trae un NumeroAutorizacion utilizable. No se recupera.`
+      );
+      return null;
+    }
+    if (String(uuidXml).toUpperCase() !== uuidLookup.toUpperCase()) {
+      console.error(
+        `   ⚠️ El XML devuelto es de ${uuidXml}, no de ${uuidLookup}. No se recupera.`
+      );
+      return null;
+    }
+
+    // Último cerrojo contra colisión: el documento tiene que ser del cliente al
+    // que le estábamos facturando.
+    const receptorXml = String(
+      dte?.["dte:DatosEmision"]?.["dte:Receptor"]?.["@_IDReceptor"] ?? ""
+    );
+    if (receptorXml !== esperado.receptorNit) {
+      console.error(
+        `   ⚠️ El documento ${uuidLookup} es del receptor ${receptorXml}, no de ${esperado.receptorNit}. No se recupera.`
+      );
+      return null;
+    }
+
+    return {
+      xmlCertificado,
+      serie: String(serie),
+      numero: String(numero),
+      uuid: String(uuidXml),
+    };
+  } catch (error) {
+    console.error(
+      `   ⚠️ No se pudo recuperar la factura por idInterno ${idInterno}:`,
+      error
+    );
+    return null;
+  }
+}
+
 // ============================================
 // 🔥 FUNCIÓN HELPER PARA CERTIFICAR FACTURA
 // ============================================
@@ -4035,6 +4258,19 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
     const dteService = new DTEService(satClient);
 
+    // Lo que la recuperación tiene que ver del otro lado para aceptar un
+    // documento como "esta misma factura". El granTotal se calcula igual que
+    // DTEService.calcularTotales (suma de los totales de ítem).
+    const esperadoRecuperacion = {
+      emisorNit: String(emisorConfig.emisor.nit),
+      receptorNit: String(receptor.idReceptor),
+      granTotal: items.reduce(
+        (suma: number, item: any) => suma + Number(item.total ?? 0),
+        0
+      ),
+      fechaHoraEmision,
+    };
+
     let resultado;
     try {
       resultado = await dteService.generarYCertificarDTE(
@@ -4098,8 +4334,64 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         );
       }
 
-      // Error genérico
-      throw new Error(`Error en certificación SAT: ${errorMessage}`);
+      // 🔥 Antes de darla por perdida: los errores de arriba son de validación
+      // (COFIDI rechazó y NO emitió), pero este camino genérico incluye timeout
+      // y respuestas ilegibles, donde el DTE sí pudo quedar certificado en SAT.
+      const recuperada = await recuperarFacturaCertificada(
+        satClient,
+        idInterno,
+        esperadoRecuperacion
+      );
+      if (recuperada) {
+        console.log(
+          `   ♻️ Recuperada de COFIDI tras el fallo: ${recuperada.serie}-${recuperada.numero} (${recuperada.uuid})`
+        );
+        await registrarRecuperacion({
+          pago_id,
+          idInterno,
+          serie: recuperada.serie,
+          numero: recuperada.numero,
+          uuid: recuperada.uuid,
+          motivo: errorMessage,
+        });
+        resultado = recuperada;
+      } else {
+        // Error genérico
+        throw new Error(`Error en certificación SAT: ${errorMessage}`);
+      }
+    }
+
+    // 🔥 COFIDI devolvió Identifier (serie/número/UUID válidos) pero sin el XML:
+    // el parseo de abajo reventaría y perderíamos una factura ya emitida.
+    if (!resultado.xmlCertificado) {
+      const recuperada = await recuperarFacturaCertificada(
+        satClient,
+        idInterno,
+        esperadoRecuperacion
+      );
+      // El Identifier y el XML vienen de dos consultas independientes: si no son
+      // del mismo DTE, la fila y el PDF quedarían con datos cruzados.
+      if (
+        !recuperada ||
+        recuperada.uuid.toUpperCase() !== String(resultado.uuid).toUpperCase()
+      ) {
+        throw new Error(
+          `COFIDI certificó ${resultado.serie}-${resultado.numero} (UUID ${resultado.uuid}) pero no devolvió el XML ` +
+            `y no se pudo recuperar con idInterno ${idInterno}${
+              recuperada ? ` (la consulta devolvió otro DTE: ${recuperada.uuid})` : ""
+            }. La factura EXISTE en SAT: recuperarla con el script de backfill.`
+        );
+      }
+      console.log(`   ♻️ XML recuperado de COFIDI para ${resultado.serie}-${resultado.numero}`);
+      await registrarRecuperacion({
+        pago_id,
+        idInterno,
+        serie: String(resultado.serie),
+        numero: String(resultado.numero),
+        uuid: String(resultado.uuid),
+        motivo: "Identifier sin ResponseData1 (XML vacío)",
+      });
+      resultado = { ...resultado, xmlCertificado: recuperada.xmlCertificado };
     }
 
     // ============================================

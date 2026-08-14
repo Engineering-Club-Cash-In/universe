@@ -3,7 +3,7 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
@@ -68,24 +68,45 @@ export const contractGenerationRouter = {
 			z.object({
 				dpi: z.string().length(13),
 				documentNames: z.array(z.string()).min(1),
+				opportunityId: z.string().uuid().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
 			try {
 				// Género del CRM como fallback: RENAP a veces no tiene al cliente
 				// aunque el DPI sea correcto, y sin género no se puede elegir plantilla.
-				// eqDpi y no eq: los DPI viejos quedaron guardados con espacios
-				// ("1648 57656 0101") y el front manda el DPI ya normalizado.
-				const [lead] = await db
-					.select({ gender: leads.gender })
-					.from(leads)
-					.where(eqDpi(leads.dpi, input.dpi))
-					.limit(1);
+				// Se resuelve por la oportunidad y no por el DPI porque hay DPI
+				// duplicados entre leads (154 grupos según la migración 0028) y un
+				// lead viejo puede traer el género vacío o distinto al del dueño de
+				// esta oportunidad, que es el que firma.
+				const [leadDeLaOportunidad] = input.opportunityId
+					? await db
+							.select({ gender: leads.gender })
+							.from(opportunities)
+							.innerJoin(leads, eq(opportunities.leadId, leads.id))
+							.where(eq(opportunities.id, input.opportunityId))
+							.limit(1)
+					: [];
 
+				// Solo si ese lead no tiene género se busca por DPI: los duplicados
+				// son la misma persona, así que sirve cualquiera que sí lo tenga.
+				// eqDpi y no eq porque los DPI viejos quedaron guardados con
+				// espacios ("1648 57656 0101") y el front manda el DPI normalizado.
+				const [leadPorDpi] = leadDeLaOportunidad?.gender
+					? []
+					: await db
+							.select({ gender: leads.gender })
+							.from(leads)
+							.where(
+								and(eqDpi(leads.dpi, input.dpi), isNotNull(leads.gender)),
+							)
+							.limit(1);
+
+				const gender = leadDeLaOportunidad?.gender ?? leadPorDpi?.gender;
 				const generoFallback =
-					lead?.gender === "female"
+					gender === "female"
 						? ("mujer" as const)
-						: lead?.gender === "male"
+						: gender === "male"
 							? ("hombre" as const)
 							: undefined;
 

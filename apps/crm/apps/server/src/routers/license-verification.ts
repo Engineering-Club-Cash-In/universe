@@ -217,7 +217,10 @@ export const licenseVerificationRouter = {
 			if (input?.leadId) conditions.push(eq(licenseQrVerifications.leadId, input.leadId));
 			if (input?.opportunityId) {
 				conditions.push(
-					eq(licenseQrVerifications.opportunityId, input.opportunityId),
+					or(
+						eq(licenseQrVerifications.opportunityId, input.opportunityId),
+						eq(coDebtorOpportunities.id, input.opportunityId),
+					)!,
 				);
 			}
 			if (input?.coDebtorId) {

@@ -31,6 +31,14 @@ export interface MoraBucket {
 	orden: number;
 	/** Días de SLA para contactar al cliente desde que entra al bucket. */
 	diasSla: number | null;
+	/**
+	 * `statusCredit` que FUERZAN este bucket sin importar cuotas atrasadas
+	 * (p.ej. INCOBRABLE → B5). Espejo de `estados_incluidos` en `cartera.buckets`
+	 * — CB-128: se preserva del catálogo dinámico en vez de hardcodear qué
+	 * status fuerza qué bucket, para que un admin reconfigurando esto en
+	 * cartera-back no desalinee al CRM. `[]` = ningún status fuerza este bucket.
+	 */
+	estadosIncluidos: readonly string[];
 }
 
 export const MORA_BUCKETS: readonly MoraBucket[] = [
@@ -44,6 +52,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 0,
 		diasSla: null,
+		estadosIncluidos: [],
 	},
 	{
 		key: "1",
@@ -55,6 +64,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 1,
 		diasSla: 3,
+		estadosIncluidos: [],
 	},
 	{
 		key: "2",
@@ -66,6 +76,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 2,
 		diasSla: 3,
+		estadosIncluidos: [],
 	},
 	{
 		key: "3",
@@ -77,6 +88,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 3,
 		diasSla: 2,
+		estadosIncluidos: [],
 	},
 	{
 		key: "4",
@@ -88,6 +100,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 4,
 		diasSla: 2,
+		estadosIncluidos: [],
 	},
 	{
 		key: "5",
@@ -99,6 +112,9 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 5,
 		diasSla: 1,
+		// Espejo del catálogo real: INCOBRABLE fuerza B5 vía `estados_incluidos`
+		// en `cartera.buckets`. Ver `apps/cartera-back/src/controllers/credits.ts`.
+		estadosIncluidos: ["INCOBRABLE"],
 	},
 ] as const;
 
@@ -182,9 +198,7 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 		const mapped = Array.from(porNumero.values())
 			.sort((a, b) => a.orden - b.orden)
 			.map((b) => {
-				const fallback = MORA_BUCKETS.find(
-					(f) => f.key === String(b.numero),
-				);
+				const fallback = MORA_BUCKETS.find((f) => f.key === String(b.numero));
 				const fallbackEstado = fallback?.estadoMora as string;
 				const estadoMora =
 					b.estado_mora && ESTADOS_AGING_VALIDOS.has(b.estado_mora)
@@ -200,6 +214,7 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 					color: b.color,
 					orden: b.orden,
 					diasSla: b.dias_sla ?? fallback?.diasSla ?? null,
+					estadosIncluidos: b.estados_incluidos ?? [],
 				};
 			});
 		// Guard: catálogo vacío, o sin cubrir cada bucket conocido (siembra
@@ -256,6 +271,77 @@ function maybeRefreshInBackground(): Promise<void> | undefined {
 	return refreshInFlight ?? undefined;
 }
 
+/**
+ * CB-128: espera a que el catálogo dinámico esté cargado antes de seguir.
+ *
+ * Los helpers de este módulo son síncronos y refrescan en background, así que
+ * la PRIMERA llamada tras un deploy (o tras expirar el TTL) responde con el
+ * fallback estático MORA_BUCKETS. Para un filtro de UI eso da igual — la
+ * siguiente carga ya trae el catálogo real. Pero `bucket_snapshot` CONGELA el
+ * valor en la fila: un rango calculado con el catálogo equivocado queda como
+ * dato histórico falso permanente, justo en la columna que existe para
+ * preservar la verdad del momento.
+ *
+ * Llamar UNA vez al inicio de un flujo que va a grabar snapshots en lote (el
+ * envío masivo de WhatsApp graba cientos de filas de golpe), nunca por fila: el
+ * refresh está deduplicado, pero esperarlo por fila serializaría el lote.
+ *
+ * ── Por qué el guard es sobre el cache y NO sobre el TTL ──────────────────
+ *
+ * `refreshMoraBucketsCache` marca `cachedAt` incluso cuando FALLA (fetch caído
+ * o catálogo incompleto), dejando `dynamicBucketsCache` en null. Ese backoff es
+ * correcto para los helpers síncronos —evita machacar cartera-back fila por
+ * fila mientras esté caído—, pero delegar en `maybeRefreshInBackground` lo
+ * heredaba acá: un fallo hace 4 minutos hacía que esta función volviera al
+ * instante sin esperar NADA, y el lote entero se grababa desde el fallback
+ * estático aunque cartera-back ya estuviera sano. El costo no es una lectura
+ * degradada que se corrige sola: son cientos de `bucket_snapshot` congelados
+ * con el valor equivocado, para siempre.
+ *
+ * Por eso, si el catálogo nunca se pobló, este camino IGNORA el backoff y
+ * fuerza el refresh. Es seguro justamente porque este flujo es raro y en lote
+ * (un envío masivo, no una fila): el reintento que acá se fuerza no puede
+ * multiplicarse por N filas como sí pasaría en los helpers síncronos. Se reusa
+ * `refreshInFlight` para no duplicar un refresh que ya venga en camino.
+ *
+ * No lanza: si cartera-back no responde, `refreshMoraBucketsCache` conserva el
+ * fallback y el flujo sigue — es lo mismo que pasaba antes, solo que ahora se
+ * intentó primero.
+ *
+ * ── Por qué esperar con un timeout corto y no el del cliente ──────────────
+ *
+ * El cliente de cartera-back reintenta 3 veces con backoff exponencial sobre
+ * un timeout de 30s cada una: ~127s en el peor caso. Sin cota acá, ese peor
+ * caso se paga ANTES de que el envío masivo llame a un solo proveedor de
+ * WhatsApp, y probablemente hace expirar el request completo (Codex, PR
+ * #1299). El refresh en sí no se cancela (el cliente maneja su propio
+ * timeout/reintentos); esta espera simplemente deja de bloquear cuando gana
+ * el timer, igual que `capturarBucketSnapshot` más abajo en `routers/cobros.ts`.
+ */
+const TIMEOUT_ESPERAR_CATALOGO_MS = 5000;
+
+export async function esperarCatalogoBuckets(): Promise<void> {
+	const refresh =
+		dynamicBucketsCache === null
+			? (refreshInFlight ??= refreshMoraBucketsCache().finally(() => {
+					refreshInFlight = null;
+				}))
+			: maybeRefreshInBackground();
+	if (!refresh) return;
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			refresh,
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, TIMEOUT_ESPERAR_CATALOGO_MS);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
 /** Rango { min, max } de cuotas atrasadas para una etapa. `undefined` si no aplica filtro por cuotas. */
 export function rangoCuotasPorEstadoMora(
 	estadoMora: string,
@@ -281,6 +367,99 @@ export function estadoMoraPorCuotas(cuotas: number): string {
 		if (dentro) return b.estadoMora;
 	}
 	return "al_dia";
+}
+
+/**
+ * CB-128: estados de `statusCredit` que dejan al crédito FUERA del funnel de
+ * cobros y por lo tanto sin bucket.
+ *
+ * Espejo EXACTO de `STATUS_BUCKET_FUERA` en
+ * apps/cartera-back/src/lib/buckets-classification.ts — mismos 4 estados, no
+ * más, no menos. NO incluye INCOBRABLE: ese status SÍ tiene bucket (fuerza B5,
+ * ver `numeroBucketPorCuotas`), la lista aquí es solo "sin aging por cuotas".
+ * Un crédito en convenio ya se está pagando bajo otro acuerdo, uno cancelado
+ * no se cobra y uno caído salió de cartera activa, así que sus cuotas
+ * atrasadas no representan una etapa de aging.
+ */
+const STATUS_FUERA_DEL_FUNNEL: ReadonlySet<string> = new Set([
+	"EN_CONVENIO",
+	"CANCELADO",
+	"PENDIENTE_CANCELACION",
+	"CAIDO",
+]);
+
+/**
+ * CB-128: ¿este `statusCredit` tiene bucket de cobros?
+ *
+ * Se exporta para que los callers que ya tienen el estado en memoria puedan
+ * decidir sin ir a la red. `null`/`undefined` cuentan como fuera del funnel:
+ * si no sabemos el estado, no inventamos un bucket.
+ */
+export function estaEnFunnelCobros(
+	statusCredit: string | null | undefined,
+): boolean {
+	if (!statusCredit) return false;
+	return !STATUS_FUERA_DEL_FUNNEL.has(statusCredit);
+}
+
+/**
+ * CB-128: número de bucket (0-5) a partir de las cuotas atrasadas y el estado
+ * del crédito.
+ *
+ * Hermano de `estadoMoraPorCuotas` pero devolviendo el número, que es lo que
+ * guarda `contactos_cobros.bucket_snapshot`. Misma regla que
+ * `bucketDeCredito()` de cartera-back (B0=0 cuotas, B1=1, … B5=≥5), evaluada
+ * localmente: sirve para los flujos que YA tienen `cuotas_atrasadas` en memoria
+ * y no necesitan una llamada de red para saber el bucket.
+ *
+ * `statusCredit` es OBLIGATORIO justamente para no repetir el bug que tenía la
+ * primera versión de esta función: sin él, un crédito EN_CONVENIO con 3 cuotas
+ * atrasadas se grababa como B3 e inflaba la segmentación por bucket del
+ * historial con créditos que ya salieron del funnel. Devuelve `null` para esos
+ * estados, igual que cartera-back.
+ *
+ * Orden idéntico a `bucketDeCredito()` de cartera-back: (1) fuera del funnel →
+ * null; (2) status que FUERZA un bucket vía `estadosIncluidos` del catálogo
+ * (p.ej. INCOBRABLE → B5, hoy); (3) rango de cuotas atrasadas. El paso (2) lee
+ * el catálogo en vez de hardcodear el número — si un admin reasigna qué status
+ * fuerza qué bucket en `cartera.buckets`, este helper lo sigue sin cambio de
+ * código (Codex, PR #1299).
+ *
+ * ⚠️ Es SÍNCRONA: refresca en background y responde con lo que haya en cache,
+ * que puede ser el fallback estático MORA_BUCKETS. Cuando el resultado va a
+ * grabarse en `bucket_snapshot` —donde queda congelado— el caller DEBE haber
+ * hecho `await esperarCatalogoBuckets()` antes del lote; esta función no lo
+ * puede garantizar por sí sola. Hoy los rangos de cuotas coinciden entre el
+ * catálogo dinámico y el estático, así que la diferencia no se nota, pero eso
+ * es una coincidencia del dato actual y no un invariante: un admin puede
+ * reconfigurar los rangos en cartera.buckets cuando quiera.
+ */
+export function numeroBucketPorCuotas(
+	cuotas: number,
+	statusCredit: string | null | undefined,
+): number | null {
+	if (!estaEnFunnelCobros(statusCredit)) return null;
+	maybeRefreshInBackground();
+	// (2) Status que fuerza un bucket vía el catálogo (p.ej. INCOBRABLE → B5).
+	if (statusCredit) {
+		const porStatus = activeBuckets().find((b) =>
+			b.estadosIncluidos.includes(statusCredit),
+		);
+		if (porStatus) {
+			const numero = Number(porStatus.key);
+			return Number.isFinite(numero) ? numero : null;
+		}
+	}
+	// (3) Por rango de cuotas atrasadas.
+	for (const b of activeBuckets()) {
+		const dentro =
+			b.max === null ? cuotas >= b.min : cuotas >= b.min && cuotas <= b.max;
+		if (dentro) {
+			const numero = Number(b.key);
+			return Number.isFinite(numero) ? numero : null;
+		}
+	}
+	return null;
 }
 
 export type BucketParaUI = {

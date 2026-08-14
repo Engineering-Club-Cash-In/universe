@@ -182,6 +182,20 @@ export interface CreditoDetailResponse {
 	mora: CarteraMoraCredito | null;
 	deuda_total_con_mora: string;
 	proxima_cuota?: CarteraCuotaCredito | null;
+	/**
+	 * Bucket del MOTOR (última fila de `buckets_historial`, fallback a
+	 * derivación viva solo si el motor nunca vio el crédito). `null` si el
+	 * crédito está fuera del funnel. Faltaba en este tipo aunque
+	 * `/getAllCredits` (apps/cartera-back/src/controllers/credits.ts) ya lo
+	 * devuelve — CB-128 recalculaba el bucket localmente desde cuotas atrasadas
+	 * en vez de usar este campo (Codex, PR #1300).
+	 */
+	bucket?: {
+		numero: number;
+		prefijo: string;
+		nombre: string;
+		color: string | null;
+	} | null;
 }
 
 /** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */

@@ -69,6 +69,14 @@ export const BUCKET_GESTION_TEMPRANA = 1;
  */
 export const PREFIJO_PREMORA_AUTO = "Recordatorio automático";
 export const PREFIJO_WSP_MASIVO = "Envío masivo de WhatsApp";
+/**
+ * Prefijo de los recordatorios de convenio (send-convenio-reminders.ts), MÁS
+ * ESPECÍFICO que PREFIJO_PREMORA_AUTO ("Recordatorio automático Convenio..."
+ * empieza con "Recordatorio automático"). Quien clasifique origen debe probar
+ * este prefijo ANTES que PREFIJO_PREMORA_AUTO o todo convenio se reporta como
+ * premora.
+ */
+export const PREFIJO_CONVENIO_AUTO = "Recordatorio automático Convenio";
 
 /** `estadoContacto` que significan "el cliente CONTESTÓ" (ver decisión 3 arriba). */
 export const ESTADOS_CONTESTO = [

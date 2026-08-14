@@ -2,10 +2,13 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	__resetMoraBucketsCacheForTests,
+	esperarCatalogoBuckets,
 	estadoMoraPorCuotas,
+	estaEnFunnelCobros,
 	getBucketsParaUI,
 	getBucketsParaUIAsync,
 	labelPorEstadoMora,
+	numeroBucketPorCuotas,
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
 } from "./moraBuckets";
@@ -381,6 +384,158 @@ describe("getBucketsParaUIAsync", () => {
 			orden: 0,
 			diasSla: null,
 		});
+	});
+
+	// ── esperarCatalogoBuckets (CB-128) ──────────────────────────────────────
+	//
+	// Viven en ESTE describe y no en uno propio a propósito: cada describe llama
+	// `spyOn` sobre el mismo método sin restaurarlo, y a partir de cierta cantidad
+	// de capas Bun falla con "spyOn(target, prop) does not support accessor
+	// properties yet" — un describe más hacía fallar tests que pasan aislados.
+	// Comparten el spy que ya creó el beforeEach de arriba.
+	//
+	// Es la función que el envío masivo llama UNA vez antes de grabar cientos de
+	// `bucket_snapshot`. Un valor calculado con el catálogo equivocado no se
+	// corrige después: queda congelado en la fila.
+
+	/** Catálogo completo con un color por bucket, para distinguirlo del estático. */
+	function catalogoConColores() {
+		return buildCatalogoCompleto().map((b) => ({
+			...b,
+			color: `#${b.numero}${b.numero}${b.numero}`,
+		}));
+	}
+
+	test("esperarCatalogoBuckets — cold-start: espera el refresh y deja el catálogo dinámico cargado", async () => {
+		getBucketsCatalogoSpy.mockResolvedValue(catalogoConColores());
+
+		await esperarCatalogoBuckets();
+
+		// Síncrono después de la espera: así lo consume el loop del envío masivo,
+		// fila por fila y sin volver a esperar.
+		expect(getBucketsParaUI()[0].color).toBe("#000");
+	});
+
+	test("esperarCatalogoBuckets — tras un refresh fallido, el siguiente REINTENTA en vez de no-opear por el TTL", async () => {
+		// La regresión que motivó el guard sobre `dynamicBucketsCache`:
+		// `refreshMoraBucketsCache` marca `cachedAt` incluso cuando falla, así que
+		// delegar en `maybeRefreshInBackground` hacía que durante los 5 min de
+		// backoff esta función volviera al instante SIN esperar nada — y el lote
+		// entero se grababa con el fallback estático aunque cartera-back ya
+		// estuviera sano.
+		getBucketsCatalogoSpy.mockRejectedValue(new Error("cartera-back down"));
+		await esperarCatalogoBuckets();
+		expect(getBucketsParaUI()[0].color).toBeNull(); // fallback estático
+
+		// cartera-back se recupera, MUY dentro de la ventana de TTL.
+		getBucketsCatalogoSpy.mockResolvedValue(catalogoConColores());
+
+		await esperarCatalogoBuckets();
+
+		expect(getBucketsParaUI()[0].color).toBe("#000");
+	});
+
+	test("esperarCatalogoBuckets — no lanza si cartera-back está caído: el flujo sigue con el fallback", async () => {
+		getBucketsCatalogoSpy.mockRejectedValue(new Error("cartera-back down"));
+
+		// El envío masivo no se puede caer porque el catálogo no cargue: graba
+		// bucket_snapshot best-effort, igual que el resto de la captura.
+		await esperarCatalogoBuckets();
+
+		expect(getBucketsParaUI()[0].estadoMora).toBe("al_dia");
+	});
+});
+
+describe("numeroBucketPorCuotas", () => {
+	// CB-128: alimenta `bucket_snapshot` en el envío masivo de WhatsApp, que ya
+	// tiene `cuotas_atrasadas` y `statusCredit` en memoria y así evita una
+	// llamada de red por destinatario. Sin catálogo dinámico cargado cae al
+	// fallback estático (MORA_BUCKETS), que es el caso que se prueba acá.
+	//
+	// Aislamiento obligatorio, no defensivo: el módulo es un singleton con cache
+	// global que los describes anteriores pueblan con catálogos de prueba (rangos
+	// alterados, buckets duplicados), y además dejan su `spyOn` sin restaurar. El
+	// reset vacía el cache y el refresh —que se traga cualquier error y conserva
+	// el fallback estático— lo repuebla con MORA_BUCKETS, que es justo el
+	// catálogo contra el que asertan estos tests.
+	beforeEach(async () => {
+		__resetMoraBucketsCacheForTests();
+		await refreshMoraBucketsCache().catch(() => {});
+	});
+
+	test("mapea las cuotas atrasadas al número de bucket", () => {
+		expect(numeroBucketPorCuotas(0, "ACTIVO")).toBe(0);
+		expect(numeroBucketPorCuotas(1, "ACTIVO")).toBe(1);
+		expect(numeroBucketPorCuotas(2, "ACTIVO")).toBe(2);
+		expect(numeroBucketPorCuotas(3, "ACTIVO")).toBe(3);
+		expect(numeroBucketPorCuotas(4, "ACTIVO")).toBe(4);
+	});
+
+	test("B5 es abierto: 5 o más cuotas caen todas ahí", () => {
+		expect(numeroBucketPorCuotas(5, "ACTIVO")).toBe(5);
+		expect(numeroBucketPorCuotas(9, "ACTIVO")).toBe(5);
+		expect(numeroBucketPorCuotas(50, "ACTIVO")).toBe(5);
+	});
+
+	test("MOROSO también está en el funnel", () => {
+		expect(numeroBucketPorCuotas(3, "MOROSO")).toBe(3);
+	});
+
+	test("créditos fuera del funnel no tienen bucket, aunque tengan cuotas atrasadas", () => {
+		// El bug que motivó agregar `statusCredit`: un EN_CONVENIO con 3 cuotas
+		// atrasadas se grababa como B3 e inflaba la segmentación del historial
+		// con créditos que ya salieron del funnel de cobros.
+		expect(numeroBucketPorCuotas(3, "EN_CONVENIO")).toBeNull();
+		expect(numeroBucketPorCuotas(3, "CANCELADO")).toBeNull();
+		expect(numeroBucketPorCuotas(3, "PENDIENTE_CANCELACION")).toBeNull();
+		expect(numeroBucketPorCuotas(3, "CAIDO")).toBeNull();
+	});
+
+	test("INCOBRABLE fuerza B5 sin importar cuotas atrasadas", () => {
+		// Espejo de `estados_incluidos: ["INCOBRABLE"]` en el catálogo B5 de
+		// cartera-back: INCOBRABLE SÍ tiene bucket (a diferencia de EN_CONVENIO /
+		// CANCELADO / PENDIENTE_CANCELACION / CAIDO), fijo en B5.
+		expect(numeroBucketPorCuotas(0, "INCOBRABLE")).toBe(5);
+		expect(numeroBucketPorCuotas(3, "INCOBRABLE")).toBe(5);
+	});
+
+	test("sin estado conocido no inventa bucket", () => {
+		expect(numeroBucketPorCuotas(3, null)).toBeNull();
+		expect(numeroBucketPorCuotas(3, undefined)).toBeNull();
+		expect(numeroBucketPorCuotas(0, "")).toBeNull();
+	});
+
+	test("coincide con estadoMoraPorCuotas — las dos leen el mismo catálogo", () => {
+		// Si divergen, el historial mostraría un bucket distinto al que dice el
+		// resto del módulo para el mismo crédito.
+		expect(numeroBucketPorCuotas(0, "ACTIVO")).toBe(0);
+		expect(estadoMoraPorCuotas(0)).toBe("al_dia");
+		expect(numeroBucketPorCuotas(2, "ACTIVO")).toBe(2);
+		expect(estadoMoraPorCuotas(2)).toBe("mora_60");
+	});
+});
+
+describe("estaEnFunnelCobros", () => {
+	test("ACTIVO y MOROSO están en el funnel", () => {
+		expect(estaEnFunnelCobros("ACTIVO")).toBe(true);
+		expect(estaEnFunnelCobros("MOROSO")).toBe(true);
+	});
+
+	test("los estados terminales o bajo otro acuerdo quedan fuera", () => {
+		expect(estaEnFunnelCobros("EN_CONVENIO")).toBe(false);
+		expect(estaEnFunnelCobros("CANCELADO")).toBe(false);
+		expect(estaEnFunnelCobros("PENDIENTE_CANCELACION")).toBe(false);
+		expect(estaEnFunnelCobros("CAIDO")).toBe(false);
+	});
+
+	test("INCOBRABLE sí está en el funnel (fuerza B5, no queda sin bucket)", () => {
+		expect(estaEnFunnelCobros("INCOBRABLE")).toBe(true);
+	});
+
+	test("estado ausente cuenta como fuera del funnel", () => {
+		expect(estaEnFunnelCobros(null)).toBe(false);
+		expect(estaEnFunnelCobros(undefined)).toBe(false);
+		expect(estaEnFunnelCobros("")).toBe(false);
 	});
 });
 

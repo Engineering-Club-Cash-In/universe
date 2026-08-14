@@ -3949,7 +3949,12 @@ async function registrarRecuperacion(datos: {
 async function recuperarFacturaCertificada(
   satClient: SATClientService,
   idInterno: string,
-  esperado: { emisorNit: string; receptorNit: string; granTotal: number }
+  esperado: {
+    emisorNit: string;
+    receptorNit: string;
+    granTotal: number;
+    fechaHoraEmision: string;
+  }
 ): Promise<{
   xmlCertificado: string;
   serie: string;
@@ -4020,15 +4025,28 @@ async function recuperarFacturaCertificada(
     const doc = encontrados[0];
     const uuidLookup = String(doc?.["uuid"] ?? "");
     const totalLookup = parseFloat(String(doc?.["total"] ?? "NaN"));
+
+    // Emisor + receptor + total NO alcanzan: en este negocio el mismo cliente
+    // paga el mismo monto todos los meses, así que un documento histórico los
+    // cumpliría los tres. La fecha de emisión sí lo distingue — el índice
+    // devuelve la misma FechaHoraEmision que mandamos en el XML, y este helper
+    // corre en la misma invocación que la certificación que acaba de fallar.
+    const emitido = Date.parse(String(doc?.["issued"] ?? ""));
+    const emitidoAhora =
+      Number.isFinite(emitido) &&
+      Math.abs(emitido - Date.parse(esperado.fechaHoraEmision)) <= 5 * 60 * 1000;
+
     if (
       !uuidLookup ||
       String(doc?.["taxId"] ?? "") !== esperado.emisorNit ||
       !Number.isFinite(totalLookup) ||
-      Math.abs(totalLookup - esperado.granTotal) > 0.01
+      Math.abs(totalLookup - esperado.granTotal) > 0.01 ||
+      !emitidoAhora
     ) {
       console.error(
         `   ⚠️ idInterno ${idInterno} no corresponde a esta factura ` +
-          `(emisor ${doc?.["taxId"]} vs ${esperado.emisorNit}, total ${doc?.["total"]} vs ${esperado.granTotal}). No se recupera.`
+          `(emisor ${doc?.["taxId"]} vs ${esperado.emisorNit}, total ${doc?.["total"]} vs ${esperado.granTotal}, ` +
+          `emitido ${doc?.["issued"]} vs ${esperado.fechaHoraEmision}). No se recupera.`
       );
       return null;
     }
@@ -4250,6 +4268,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         (suma: number, item: any) => suma + Number(item.total ?? 0),
         0
       ),
+      fechaHoraEmision,
     };
 
     let resultado;

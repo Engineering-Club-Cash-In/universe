@@ -31,6 +31,14 @@ export interface MoraBucket {
 	orden: number;
 	/** Días de SLA para contactar al cliente desde que entra al bucket. */
 	diasSla: number | null;
+	/**
+	 * `statusCredit` que FUERZAN este bucket sin importar cuotas atrasadas
+	 * (p.ej. INCOBRABLE → B5). Espejo de `estados_incluidos` en `cartera.buckets`
+	 * — CB-128: se preserva del catálogo dinámico en vez de hardcodear qué
+	 * status fuerza qué bucket, para que un admin reconfigurando esto en
+	 * cartera-back no desalinee al CRM. `[]` = ningún status fuerza este bucket.
+	 */
+	estadosIncluidos: readonly string[];
 }
 
 export const MORA_BUCKETS: readonly MoraBucket[] = [
@@ -44,6 +52,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 0,
 		diasSla: null,
+		estadosIncluidos: [],
 	},
 	{
 		key: "1",
@@ -55,6 +64,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 1,
 		diasSla: 3,
+		estadosIncluidos: [],
 	},
 	{
 		key: "2",
@@ -66,6 +76,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 2,
 		diasSla: 3,
+		estadosIncluidos: [],
 	},
 	{
 		key: "3",
@@ -77,6 +88,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 3,
 		diasSla: 2,
+		estadosIncluidos: [],
 	},
 	{
 		key: "4",
@@ -88,6 +100,7 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 4,
 		diasSla: 2,
+		estadosIncluidos: [],
 	},
 	{
 		key: "5",
@@ -99,6 +112,9 @@ export const MORA_BUCKETS: readonly MoraBucket[] = [
 		color: null,
 		orden: 5,
 		diasSla: 1,
+		// Espejo del catálogo real: INCOBRABLE fuerza B5 vía `estados_incluidos`
+		// en `cartera.buckets`. Ver `apps/cartera-back/src/controllers/credits.ts`.
+		estadosIncluidos: ["INCOBRABLE"],
 	},
 ] as const;
 
@@ -198,6 +214,7 @@ export async function refreshMoraBucketsCache(): Promise<void> {
 					color: b.color,
 					orden: b.orden,
 					diasSla: b.dias_sla ?? fallback?.diasSla ?? null,
+					estadosIncluidos: b.estados_incluidos ?? [],
 				};
 			});
 		// Guard: catálogo vacío, o sin cubrir cada bucket conocido (siembra
@@ -348,9 +365,6 @@ const STATUS_FUERA_DEL_FUNNEL: ReadonlySet<string> = new Set([
 	"CAIDO",
 ]);
 
-/** CB-128: bucket que fuerza INCOBRABLE, espejo de `estados_incluidos: ["INCOBRABLE"]` en el catálogo B5 de cartera-back. */
-const BUCKET_INCOBRABLE = 5;
-
 /**
  * CB-128: ¿este `statusCredit` tiene bucket de cobros?
  *
@@ -381,6 +395,13 @@ export function estaEnFunnelCobros(
  * historial con créditos que ya salieron del funnel. Devuelve `null` para esos
  * estados, igual que cartera-back.
  *
+ * Orden idéntico a `bucketDeCredito()` de cartera-back: (1) fuera del funnel →
+ * null; (2) status que FUERZA un bucket vía `estadosIncluidos` del catálogo
+ * (p.ej. INCOBRABLE → B5, hoy); (3) rango de cuotas atrasadas. El paso (2) lee
+ * el catálogo en vez de hardcodear el número — si un admin reasigna qué status
+ * fuerza qué bucket en `cartera.buckets`, este helper lo sigue sin cambio de
+ * código (Codex, PR #1299).
+ *
  * ⚠️ Es SÍNCRONA: refresca en background y responde con lo que haya en cache,
  * que puede ser el fallback estático MORA_BUCKETS. Cuando el resultado va a
  * grabarse en `bucket_snapshot` —donde queda congelado— el caller DEBE haber
@@ -395,10 +416,18 @@ export function numeroBucketPorCuotas(
 	statusCredit: string | null | undefined,
 ): number | null {
 	if (!estaEnFunnelCobros(statusCredit)) return null;
-	// INCOBRABLE fuerza B5 sin importar cuotas atrasadas (puede tener 0), igual
-	// que `estados_incluidos: ["INCOBRABLE"]` en el catálogo de cartera-back.
-	if (statusCredit === "INCOBRABLE") return BUCKET_INCOBRABLE;
 	maybeRefreshInBackground();
+	// (2) Status que fuerza un bucket vía el catálogo (p.ej. INCOBRABLE → B5).
+	if (statusCredit) {
+		const porStatus = activeBuckets().find((b) =>
+			b.estadosIncluidos.includes(statusCredit),
+		);
+		if (porStatus) {
+			const numero = Number(porStatus.key);
+			return Number.isFinite(numero) ? numero : null;
+		}
+	}
+	// (3) Por rango de cuotas atrasadas.
 	for (const b of activeBuckets()) {
 		const dentro =
 			b.max === null ? cuotas >= b.min : cuotas >= b.min && cuotas <= b.max;

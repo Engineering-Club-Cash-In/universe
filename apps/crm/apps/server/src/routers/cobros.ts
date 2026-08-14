@@ -611,6 +611,11 @@ const TIMEOUT_BUCKET_SNAPSHOT_MS = 3000;
 async function capturarBucketSnapshot(
 	casoCobroId: string,
 ): Promise<number | null> {
+	// Mismo guard que getBucketActualCredito: sin esto, con la integración
+	// apagada, cada gestión manual dispara una llamada real (localhost/auth
+	// fallando) que solo se resuelve al vencer la carrera de 3s — un guardado
+	// local termina esperando por una integración que se sabe apagada.
+	if (!isCarteraBackEnabled()) return null;
 	try {
 		const [caso] = await db
 			.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })

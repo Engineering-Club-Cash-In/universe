@@ -20,6 +20,7 @@ import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
+import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
@@ -170,6 +171,45 @@ export const reversePayment = async ({ body, set }: any) => {
       // revertir pero la mora, el convenio y el saldo del inversionista ya
       // habrían cambiado. Se aborta antes de tocar nada.
       const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
+
+      // ======================================================================
+      // 4️⃣.6️⃣ LEER LAS FACTURAS ACTIVAS DEL PAGO (ANTES DE TOCARLO)
+      // ======================================================================
+      // 🔴 LA LECTURA VA ACÁ, NO EN EL PASO 1️⃣2️⃣.5️⃣ DONDE SE ANULAN: más abajo la
+      // rama de pago parcial hace `DELETE FROM pagos_credito`, y el FK de
+      // `facturas_electronicas.pago_id` es `onDelete: "set null"` (schema.ts):
+      // al borrarse el pago la factura NO se borra, pero pierde el vínculo.
+      // Para cuando corría el bloque de anulación, el SELECT por `pago_id` ya
+      // devolvía 0 filas: no se llamaba a COFIDI, no fallaba nada y la reversa
+      // respondía 200 "exitosa" con la factura VIGENTE en SAT (crédito 102,
+      // pago 153742, 13-ago-2026: 3 facturas certificadas que quedaron
+      // vigentes y sin anular).
+      //
+      // Leyendo acá capturamos factura_id y uuid mientras el vínculo existe.
+      // La anulación en COFIDI sigue ocurriendo abajo, en su paso, y actualiza
+      // por `factura_id`, que sigue siendo válido aunque `pago_id` quede NULL.
+      const facturasDelPago = await tx
+        .select({
+          factura_id: facturas_electronicas.factura_id,
+          uuid: facturas_electronicas.uuid,
+          status: facturas_electronicas.status,
+          receptor_nit: facturas_electronicas.receptor_nit,
+          fecha_certificacion: facturas_electronicas.fecha_certificacion,
+          fecha_emision: facturas_electronicas.fecha_emision,
+          serie: facturas_electronicas.serie,
+          numero: facturas_electronicas.numero,
+        })
+        .from(facturas_electronicas)
+        .where(
+          and(
+            eq(facturas_electronicas.pago_id, pago_id),
+            eq(facturas_electronicas.status, "ACTIVA"), // Solo anular las activas
+          ),
+        );
+
+      console.log(
+        `📊 Se encontraron ${facturasDelPago.length} factura(s) activa(s)`,
+      );
 
       // ======================================================================
       // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (solo si cuota está pagada)
@@ -458,111 +498,27 @@ export const reversePayment = async ({ body, set }: any) => {
       // ======================================================================
 
       // ======================================================================
-      // 1️⃣2️⃣.5️⃣ 🆕 ANULAR FACTURAS ELECTRÓNICAS ASOCIADAS AL PAGO
+      // 1️⃣2️⃣.5️⃣ LAS FACTURAS SE ANULAN DESPUÉS DEL COMMIT, NO ACÁ
       // ======================================================================
-      console.log("\n🧾 ========== ANULANDO FACTURAS ELECTRÓNICAS ==========");
-
-      // Buscar facturas activas de este pago
-      const facturasDelPago = await tx
-        .select({
-          factura_id: facturas_electronicas.factura_id,
-          uuid: facturas_electronicas.uuid,
-          status: facturas_electronicas.status,
-          receptor_nit: facturas_electronicas.receptor_nit,
-          fecha_certificacion: facturas_electronicas.fecha_certificacion,
-          fecha_emision: facturas_electronicas.fecha_emision,
-          serie: facturas_electronicas.serie,
-          numero: facturas_electronicas.numero,
-        })
-        .from(facturas_electronicas)
-        .where(
-          and(
-            eq(facturas_electronicas.pago_id, pago_id),
-            eq(facturas_electronicas.status, "ACTIVA"), // Solo anular las activas
-          ),
-        );
-
-      console.log(
-        `📊 Se encontraron ${facturasDelPago.length} factura(s) activa(s)`,
-      );
-
-      const facturasAnuladas = [];
-      const facturasConError = [];
-
-      if (facturasDelPago.length > 0) {
-        for (const factura of facturasDelPago) {
-          console.log(
-            `\n🧾 Procesando factura ${factura.serie}-${factura.numero} (${factura.uuid})`,
-          );
-
-          // 1️⃣ ANULAR EN COFIDI
-          const resultadoCofidi = await anularFacturaEnCofidi({
-            uuid: factura.uuid,
-            motivo: `Reversión automática del pago ID: ${pago_id}`,
-            factura: {
-              receptor_nit: factura.receptor_nit,
-              fecha_certificacion: factura.fecha_certificacion,
-              fecha_emision: factura.fecha_emision,
-            },
-          });
-
-          if (resultadoCofidi.success && resultadoCofidi.anulado) {
-            // 2️⃣ ACTUALIZAR EN BD (SOLO SI SE ANULÓ EN COFIDI)
-            try {
-              await tx
-                .update(facturas_electronicas)
-                .set({
-                  status: "ANULADA",
-                  fecha_anulacion: new Date(),
-                  motivo_anulacion: `Reversión automática del pago ID: ${pago_id}`,
-                  anulada_por: creditData.creditos.usuario_id || null,
-                })
-                .where(
-                  eq(facturas_electronicas.factura_id, factura.factura_id),
-                );
-
-              console.log(
-                `   ✅ Factura ${factura.serie}-${factura.numero} anulada correctamente`,
-              );
-
-              facturasAnuladas.push({
-                factura_id: factura.factura_id,
-                uuid: factura.uuid,
-                serie: factura.serie,
-                numero: factura.numero,
-              });
-            } catch (dbError: any) {
-              console.error(
-                `   ⚠️ Error al actualizar BD (factura YA anulada en COFIDI):`,
-                dbError.message,
-              );
-
-              facturasConError.push({
-                factura_id: factura.factura_id,
-                uuid: factura.uuid,
-                error: "BD_UPDATE_ERROR",
-                mensaje: "Anulada en COFIDI pero error al actualizar BD",
-              });
-            }
-          } else {
-            console.error(
-              `   ❌ Error al anular en COFIDI:`,
-              resultadoCofidi.mensaje,
-            );
-
-            facturasConError.push({
-              factura_id: factura.factura_id,
-              uuid: factura.uuid,
-              error: resultadoCofidi.error,
-              mensaje: resultadoCofidi.mensaje,
-            });
-          }
-        }
-
-        console.log(`\n📊 Resumen anulación facturas:`);
-        console.log(`   ✅ Anuladas: ${facturasAnuladas.length}`);
-        console.log(`   ❌ Con error: ${facturasConError.length}`);
-      }
+      // Acá vivía el loop que llamaba a COFIDI (HTTP a SAT) DENTRO de esta
+      // transacción. Dos problemas:
+      //
+      //   1. Cada llamada tiene `AbortSignal.timeout(60000)` (satClientService):
+      //      con 3 facturas la transacción podía retener su conexión y sus locks
+      //      sobre pagos_credito/creditos hasta 180s. El pool de trabajo usa el
+      //      default de `pg` (10 conexiones), así que un COFIDI lento podía
+      //      agotarlo y colgar al backend entero, no solo a las reversas.
+      //
+      //   2. Peor: si COFIDI anulaba OK y la transacción abortaba después (pasos
+      //      13/14/15 o timeout), el DTE quedaba ANULADO en SAT con la BD
+      //      restaurada — pago vivo, factura ACTIVA. Y desanular no existe: es
+      //      irreversible del lado fiscal.
+      //
+      // La anulación se movió a después del commit (best-effort). Se invierte
+      // el riesgo a la variante recuperable: si falla el UPDATE post-commit, la
+      // factura queda ACTIVA en BD pero ANULADA en SAT, que la conciliación de
+      // DTEs sí puede detectar y corregir. La respuesta ya tolera parciales vía
+      // `facturasConError`.
 
       // ======================================================================
       // 1️⃣3️⃣ ELIMINAR PAGOS DE INVERSIONISTAS ASOCIADOS
@@ -710,9 +666,8 @@ export const reversePayment = async ({ body, set }: any) => {
         nuevoInteresRestante,
         nuevoIvaRestante,
         nuevoSaldoAFavor,
-        facturasAnuladas,
-        facturasConError,
-        totalFacturas: facturasDelPago.length,
+        // Las facturas todavía NO se anularon: se hace después del commit.
+        facturasDelPago,
         reversionEspejo,
       };
     });
@@ -725,6 +680,164 @@ export const reversePayment = async ({ body, set }: any) => {
 // clavo análogo, PR #890). La proyección teórica de las cuotas pendientes se
 // refresca por el flujo normal (siguiente pago aplicado o el botón manual
 // "Recalcular Pagos"), igual que antes de enero 2026.
+    // ========================================================================
+    // 🧾 ANULAR FACTURAS ELECTRÓNICAS — DESPUÉS DEL COMMIT (best-effort)
+    // ========================================================================
+    // Va acá, FUERA de la transacción, a propósito: la anulación es HTTP a
+    // SAT/COFIDI con timeout de 60s por factura. Adentro retenía la conexión y
+    // los locks del pago/crédito hasta 60s × N facturas sobre un pool de 10, y
+    // sobre todo dejaba abierta la ventana irreversible: COFIDI anula OK →
+    // algo falla más abajo → rollback → DTE ANULADO en SAT con el pago vivo en
+    // la BD. Desanular no existe.
+    //
+    // Acá el peor caso es el recuperable: la reversa ya está firme y, si el
+    // UPDATE falla, la factura queda ACTIVA en la BD pero ANULADA en SAT, que
+    // la conciliación de DTEs detecta comparando ambos lados.
+    //
+    // Los datos vienen del SELECT del paso 4️⃣.6️⃣, tomado antes de que el DELETE
+    // del pago rompiera el vínculo por FK. Se anula por `factura_id`, que sigue
+    // siendo válido aunque `pago_id` haya quedado NULL.
+    const facturasAnuladas: {
+      factura_id: number;
+      uuid: string;
+      serie: string;
+      numero: string;
+    }[] = [];
+    const facturasConError: {
+      factura_id: number;
+      uuid: string;
+      error?: string;
+      mensaje?: string;
+    }[] = [];
+
+    if (result.facturasDelPago.length > 0) {
+      console.log("\n🧾 ========== ANULANDO FACTURAS ELECTRÓNICAS ==========");
+
+      for (const factura of result.facturasDelPago) {
+        // Cada factura va en su propio try: de acá en adelante la reversa YA
+        // está commiteada, así que ningún fallo de esta etapa puede escalar al
+        // catch de abajo y convertir un 200 en 500 — el pago quedaría revertido
+        // con el cliente creyendo lo contrario. Se reporta en
+        // `facturasConError` y se sigue con la próxima.
+        try {
+          console.log(
+            `\n🧾 Procesando factura ${factura.serie}-${factura.numero} (${factura.uuid})`,
+          );
+
+          // 1️⃣ ANULAR EN COFIDI
+          const resultadoCofidi = await anularFacturaEnCofidi({
+            uuid: factura.uuid,
+            motivo: `Reversión automática del pago ID: ${pago_id}`,
+            factura: {
+              receptor_nit: factura.receptor_nit,
+              fecha_certificacion: factura.fecha_certificacion,
+              fecha_emision: factura.fecha_emision,
+            },
+          });
+
+          if (resultadoCofidi.success && resultadoCofidi.anulado) {
+            // 2️⃣ ACTUALIZAR EN BD (SOLO SI SE ANULÓ EN COFIDI)
+            try {
+              const filasActualizadas = await db
+                .update(facturas_electronicas)
+                .set({
+                  status: "ANULADA",
+                  fecha_anulacion: new Date(),
+                  motivo_anulacion: `Reversión automática del pago ID: ${pago_id}`,
+                  // `anulada_por` tiene FK contra `platform_users.id`, NO contra
+                  // `usuarios.usuario_id`: son namespaces distintos. Acá se
+                  // escribía `creditData.creditos.usuario_id` (el id del DEUDOR),
+                  // que en producción no existe en platform_users en 1719 de
+                  // 1746 casos -> el UPDATE viola el FK, cae en el catch de
+                  // abajo y la factura queda ACTIVA en la BD aunque SAT ya la
+                  // anuló. En los 27 ids que sí colisionan es peor: pasa en
+                  // silencio y le atribuye la anulación a un usuario de
+                  // plataforma que no fue.
+                  //
+                  // El endpoint solo recibe { credito_id, pago_id }: no hay
+                  // usuario de sesión en scope. Se deja null, igual que
+                  // revertPaymentToPending. Si se quiere trazar quién reversó,
+                  // hay que plomar el userId real desde el router (como hace la
+                  // anulación manual de cofidi.ts).
+                  anulada_por: null,
+                })
+                .where(
+                  eq(facturas_electronicas.factura_id, factura.factura_id),
+                )
+                .returning({ factura_id: facturas_electronicas.factura_id });
+
+              // Un UPDATE que no matchea ninguna fila NO tira error en
+              // Postgres: sin este chequeo la factura entraba a
+              // `facturasAnuladas` y la respuesta decía "anulada
+              // correctamente" aunque en la BD no hubiera quedado registro.
+              // Pasa si el DELETE del pago disparó el CASCADE de `fk_pago` (la
+              // FK duplicada que sigue viva en la BD y no está en schema.ts) y
+              // se llevó la fila: en SAT quedó ANULADA y acá nadie se entera.
+              if (filasActualizadas.length === 0) {
+                throw new Error(
+                  `El UPDATE no afectó ninguna fila (factura_id ${factura.factura_id} ya no existe en la BD)`,
+                );
+              }
+
+              console.log(
+                `   ✅ Factura ${factura.serie}-${factura.numero} anulada correctamente`,
+              );
+
+              facturasAnuladas.push({
+                factura_id: factura.factura_id,
+                uuid: factura.uuid,
+                serie: factura.serie,
+                numero: factura.numero,
+              });
+            } catch (dbError: any) {
+              // 🔴 Anulada en SAT pero la BD quedó ACTIVA: va a conciliación.
+              console.error(
+                `   ⚠️ Error al actualizar BD (factura YA anulada en COFIDI):`,
+                dbError.message,
+              );
+
+              facturasConError.push({
+                factura_id: factura.factura_id,
+                uuid: factura.uuid,
+                error: "BD_UPDATE_ERROR",
+                mensaje: `Anulada en COFIDI pero error al actualizar BD: ${dbError.message}`,
+              });
+            }
+          } else {
+            console.error(
+              `   ❌ Error al anular en COFIDI:`,
+              resultadoCofidi.mensaje,
+            );
+
+            facturasConError.push({
+              factura_id: factura.factura_id,
+              uuid: factura.uuid,
+              error: resultadoCofidi.error,
+              mensaje: resultadoCofidi.mensaje,
+            });
+          }
+        } catch (facturaError: any) {
+          // Red de seguridad: la reversa ya está firme, esta factura queda para
+          // conciliación manual y el resto del lote sigue procesándose.
+          console.error(
+            `   ❌ Fallo inesperado anulando ${factura.serie}-${factura.numero}:`,
+            facturaError?.message ?? facturaError,
+          );
+
+          facturasConError.push({
+            factura_id: factura.factura_id,
+            uuid: factura.uuid,
+            error: "UNEXPECTED_ERROR",
+            mensaje: facturaError?.message ?? String(facturaError),
+          });
+        }
+      }
+
+      console.log(`\n📊 Resumen anulación facturas:`);
+      console.log(`   ✅ Anuladas: ${facturasAnuladas.length}`);
+      console.log(`   ❌ Con error: ${facturasConError.length}`);
+    }
+
     // ========================================================================
     // ✅ TRANSACCIÓN COMPLETADA - RETORNAR RESULTADO EXITOSO
     // ========================================================================
@@ -759,14 +872,14 @@ export const reversePayment = async ({ body, set }: any) => {
         abonoCapitalEspejo: result.reversionEspejo?.data ?? undefined,
         // 🆕 Info de facturas anuladas
         facturas:
-          result.totalFacturas > 0
+          result.facturasDelPago.length > 0
             ? {
-                total: result.totalFacturas,
-                anuladas: result.facturasAnuladas.length,
-                con_error: result.facturasConError.length,
+                total: result.facturasDelPago.length,
+                anuladas: facturasAnuladas.length,
+                con_error: facturasConError.length,
                 detalles: {
-                  anuladas: result.facturasAnuladas,
-                  errores: result.facturasConError,
+                  anuladas: facturasAnuladas,
+                  errores: facturasConError,
                 },
               }
             : undefined,
@@ -1019,13 +1132,29 @@ export async function anularFacturaEnCofidi(
     console.log("🚫 Anulando factura en COFIDI:", uuid);
 
     // 1️⃣ CONSTRUIR XML DE ANULACIÓN
-    const fechaEmisionDocumento = factura.fecha_certificacion
-      ? new Date(factura.fecha_certificacion).toISOString()
-      : factura.fecha_emision
-        ? new Date(factura.fecha_emision).toISOString()
-        : new Date().toISOString();
+    //
+    // 📄 `FechaEmisionDocumentoAnular` tiene que coincidir con la
+    // `FechaHoraEmision` del DTE original — que es lo que se persiste en
+    // `fecha_emision`. Acá se venía priorizando `fecha_certificacion`: en las
+    // facturas backdateadas (emisión a fin de mes, certificación días después)
+    // eso mandaba a SAT una fecha que no es la del DTE y la anulación moría con
+    // `TrCode: [1083] La fecha de emisión del documento a anular no coincide
+    // con la registrada en la SAT`. Son 4430 de 22518 facturas con día de
+    // emisión distinto al de certificación, y de las 12 reversas que llegaron a
+    // intentar anular, las 12 fallaron. Mismo criterio que la anulación manual
+    // de `routers/cofidi.ts`.
+    const fechaBaseAnulacion = factura.fecha_emision
+      ? new Date(factura.fecha_emision)
+      : factura.fecha_certificacion
+        ? new Date(factura.fecha_certificacion)
+        : ahoraEnGuatemala();
 
-    const fechaHoraAnulacion = new Date().toISOString();
+    // ⏰ Formato SAT (sin milisegundos ni sufijo Z): `.toISOString()` produce
+    // `2026-08-13T11:13:59.000Z` y SAT rechaza el documento. Y `new Date()` a
+    // secas para la hora de anulación viaja en UTC, así que una anulación de la
+    // noche llegaría a SAT con el día siguiente.
+    const fechaEmisionDocumento = formatearFechaSAT(fechaBaseAnulacion);
+    const fechaHoraAnulacion = formatearFechaSAT(ahoraEnGuatemala());
 
     const xmlAnulacion = `<?xml version="1.0" encoding="UTF-8"?>
 <dte:GTAnulacionDocumento xmlns:dte="http://www.sat.gob.gt/dte/fel/0.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="0.1" xsi:schemaLocation="http://www.sat.gob.gt/dte/fel/0.1.0 GT_AnulacionDocumento-0.1.0.xsd">

@@ -28,6 +28,7 @@ import { Route as CrmWhatsappRouteImport } from './routes/crm/whatsapp'
 import { Route as CrmVendorsRouteImport } from './routes/crm/vendors'
 import { Route as CrmQuoterRouteImport } from './routes/crm/quoter'
 import { Route as CrmOpportunitiesRouteImport } from './routes/crm/opportunities'
+import { Route as CrmLicenciasRouteImport } from './routes/crm/licencias'
 import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
 import { Route as CrmClientsRouteImport } from './routes/crm/clients'
@@ -145,6 +146,11 @@ const CrmQuoterRoute = CrmQuoterRouteImport.update({
 const CrmOpportunitiesRoute = CrmOpportunitiesRouteImport.update({
   id: '/crm/opportunities',
   path: '/crm/opportunities',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CrmLicenciasRoute = CrmLicenciasRouteImport.update({
+  id: '/crm/licencias',
+  path: '/crm/licencias',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CrmLeadsRoute = CrmLeadsRouteImport.update({
@@ -280,6 +286,7 @@ export interface FileRoutesByFullPath {
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
+  '/crm/licencias': typeof CrmLicenciasRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
@@ -323,6 +330,7 @@ export interface FileRoutesByTo {
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
+  '/crm/licencias': typeof CrmLicenciasRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
@@ -367,6 +375,7 @@ export interface FileRoutesById {
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
+  '/crm/licencias': typeof CrmLicenciasRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
@@ -412,6 +421,7 @@ export interface FileRouteTypes {
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
+    | '/crm/licencias'
     | '/crm/opportunities'
     | '/crm/quoter'
     | '/crm/vendors'
@@ -455,6 +465,7 @@ export interface FileRouteTypes {
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
+    | '/crm/licencias'
     | '/crm/opportunities'
     | '/crm/quoter'
     | '/crm/vendors'
@@ -498,6 +509,7 @@ export interface FileRouteTypes {
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
+    | '/crm/licencias'
     | '/crm/opportunities'
     | '/crm/quoter'
     | '/crm/vendors'
@@ -542,6 +554,7 @@ export interface RootRouteChildren {
   CrmClientsRoute: typeof CrmClientsRoute
   CrmCompaniesRoute: typeof CrmCompaniesRoute
   CrmLeadsRoute: typeof CrmLeadsRoute
+  CrmLicenciasRoute: typeof CrmLicenciasRoute
   CrmOpportunitiesRoute: typeof CrmOpportunitiesRoute
   CrmQuoterRoute: typeof CrmQuoterRoute
   CrmVendorsRoute: typeof CrmVendorsRoute
@@ -704,6 +717,13 @@ declare module '@tanstack/react-router' {
       path: '/crm/opportunities'
       fullPath: '/crm/opportunities'
       preLoaderRoute: typeof CrmOpportunitiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/crm/licencias': {
+      id: '/crm/licencias'
+      path: '/crm/licencias'
+      fullPath: '/crm/licencias'
+      preLoaderRoute: typeof CrmLicenciasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/leads': {
@@ -878,6 +898,7 @@ const rootRouteChildren: RootRouteChildren = {
   CrmClientsRoute: CrmClientsRoute,
   CrmCompaniesRoute: CrmCompaniesRoute,
   CrmLeadsRoute: CrmLeadsRoute,
+  CrmLicenciasRoute: CrmLicenciasRoute,
   CrmOpportunitiesRoute: CrmOpportunitiesRoute,
   CrmQuoterRoute: CrmQuoterRoute,
   CrmVendorsRoute: CrmVendorsRoute,

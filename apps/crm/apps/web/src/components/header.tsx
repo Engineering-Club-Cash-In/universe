@@ -16,6 +16,7 @@ import {
 	LayoutDashboard,
 	Menu,
 	MessageSquare,
+	QrCode,
 	Scale,
 	Settings,
 	Target,
@@ -140,6 +141,12 @@ export default function Header() {
 										<Link to="/crm/vendors" className="cursor-pointer">
 											<UserCircle className="mr-2 h-4 w-4" />
 											Vendedores
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/crm/licencias" className="cursor-pointer">
+											<QrCode className="mr-2 h-4 w-4" />
+											Licencias
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />
@@ -548,6 +555,10 @@ function MobileNav({
 										<Link to="/crm/vendors" className={MOBILE_LINK_CLASS}>
 											<UserCircle />
 											Vendedores
+										</Link>
+										<Link to="/crm/licencias" className={MOBILE_LINK_CLASS}>
+											<QrCode />
+											Licencias
 										</Link>
 										<Link to="/crm/quoter" className={MOBILE_LINK_CLASS}>
 											<Calculator />

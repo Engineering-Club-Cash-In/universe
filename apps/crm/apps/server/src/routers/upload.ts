@@ -223,6 +223,57 @@ async function assertCanUploadToResource(params: {
 			}
 			return;
 		}
+
+		case "license_verification": {
+			// El recurso se organiza por oportunidad (leads) o por co-deudor,
+			// igual que "bank_statement" — una licencia se verifica por cada
+			// expediente de crédito, no una vez por persona.
+			if (!PERMISSIONS.canAccessClients(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "CRM access role required",
+				});
+			}
+
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					assignedTo: opportunities.assignedTo,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, resourceId))
+				.limit(1);
+
+			if (opportunity) {
+				if (userRole === "sales" && opportunity.assignedTo !== userId) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para verificar esta oportunidad",
+					});
+				}
+				return;
+			}
+
+			const [coDebtor] = await db
+				.select({
+					id: coDebtors.id,
+					opportunityAssignedTo: opportunities.assignedTo,
+				})
+				.from(coDebtors)
+				.leftJoin(opportunities, eq(coDebtors.opportunityId, opportunities.id))
+				.where(eq(coDebtors.id, resourceId))
+				.limit(1);
+
+			if (!coDebtor) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad o co-deudor no encontrado",
+				});
+			}
+			if (userRole === "sales" && coDebtor.opportunityAssignedTo !== userId) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para verificar este co-deudor",
+				});
+			}
+			return;
+		}
 	}
 }
 
@@ -275,6 +326,19 @@ export const uploadRouter = {
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Los estados de cuenta deben subirse en formato PDF.",
+				});
+			}
+
+			if (
+				input.resourceType === "license_verification" &&
+				!["image/jpeg", "image/png"].includes(resolvedMime.mimeType)
+			) {
+				// No cualquier "image/*": el decodificador de QR/barcode
+				// (zxing-wasm, vía stb_image) no soporta WebP ni AVIF aunque
+				// ALLOWED_DOCUMENT_TYPES sí los acepte para otros documentos.
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El reverso de la licencia debe subirse en formato JPEG o PNG.",
 				});
 			}
 

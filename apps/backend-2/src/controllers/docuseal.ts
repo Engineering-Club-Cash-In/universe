@@ -97,24 +97,62 @@ async function fetchRenapInfo(dpi: string) {
 }
 
 /**
+ * 🚻 Normaliza el género que manda el CRM (fallback cuando RENAP no responde)
+ */
+function normalizeGenero(value?: string | null): "hombre" | "mujer" | null {
+  if (!value) return null;
+  const v = value.trim().toLowerCase();
+  if (["hombre", "masculino", "male", "m"].includes(v)) return "hombre";
+  if (["mujer", "femenino", "female", "f"].includes(v)) return "mujer";
+  return null;
+}
+
+/**
  * 🎯 Controller: Fetch RENAP info + documents + fields from DB by gender
+ *
+ * RENAP solo se usa para (a) saber el género y así elegir la plantilla y
+ * (b) pre-llenar campos que el CRM no tenga. Si RENAP no tiene la persona
+ * (pasa con DPIs válidos), seguimos con el género que manda el CRM y
+ * devolvemos `renapData: null` — el wizard ya prioriza los datos del CRM.
  */
 export async function getDocumentsByDpiController(
   dpi: string,
-  documentNames: string[]
+  documentNames: string[],
+  generoFallback?: string
 ) {
   try {
-    // 1️⃣ Fetch RENAP info
-    const renapResponse = await fetchRenapInfo(dpi);
-    const renapData = renapResponse.data;
+    // 1️⃣ Fetch RENAP info (best-effort: no debe bloquear la generación)
+    let renapData: any = null;
+    let renapError: string | null = null;
 
-    if (!renapData?.gender) {
-      return { success: false, message: "Missing gender info", renapData };
+    try {
+      const renapResponse = await fetchRenapInfo(dpi);
+      renapData = renapResponse.data;
+    } catch (error: any) {
+      renapError = error?.message ?? "Error consultando RENAP";
+      console.warn(
+        `[getDocumentsByDpiController] RENAP no disponible para el DPI ${dpi}: ${renapError}`
+      );
     }
 
-    // 2️⃣ Determine gender for filtering
-    const gender = renapData.gender.toLowerCase();
-    const genero = gender.startsWith("m") ? "hombre" : "mujer";
+    // 2️⃣ Determine gender for filtering (RENAP manda; si no, el del CRM)
+    const generoRenap = renapData?.gender
+      ? renapData.gender.toLowerCase().startsWith("m")
+        ? "hombre"
+        : "mujer"
+      : null;
+    const genero = generoRenap ?? normalizeGenero(generoFallback);
+
+    if (!genero) {
+      return {
+        success: false,
+        message: renapError
+          ? "No se pudo validar el DPI en RENAP y el cliente no tiene género registrado en el CRM. Verifique el DPI o complete el género del cliente."
+          : "Missing gender info",
+        renapData,
+        renapError,
+      };
+    }
 
     const documentosEncontrados = [];
     const camposMap = new Map<number, any>();
@@ -232,6 +270,9 @@ export async function getDocumentsByDpiController(
       documents: documentosEncontrados,
       campos: camposArray,
       notFound,
+      // 🚩 Para que el CRM avise que los datos salieron solo de la oportunidad
+      renapUnavailable: !renapData,
+      renapError,
     };
   } catch (error: any) {
     console.error("[ERROR] getDocumentsByDpiController:", error);

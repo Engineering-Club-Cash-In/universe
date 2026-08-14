@@ -210,6 +210,13 @@ function aFechaISO(fecha: Date): string {
 	return `${y}-${m}-${d}`;
 }
 
+/** Suma días a un Date en horario LOCAL (no UTC), preservando hora/minuto. */
+function sumarDiasLocal(fecha: Date, dias: number): Date {
+	const copia = new Date(fecha);
+	copia.setDate(copia.getDate() + dias);
+	return copia;
+}
+
 function HistorialAgendasPage() {
 	const { data: session, isPending: sesionCargando } = authClient.useSession();
 	const userRole = session?.user?.role;
@@ -527,25 +534,34 @@ function HistorialAgendasPage() {
 			if (!seguir) return;
 		}
 
-		// Snapshot del límite superior ANTES de empezar a paginar. El listado
-		// ordena por fecha_contacto DESC con OFFSET (no cursor): una gestión nueva
-		// insertada entre dos páginas del mismo export corre el offset de todo lo
-		// que sigue —duplica la que era última fila de una página, y una fila que
-		// estaba al final se sale de rango sin aparecer— porque va PRIMERA (orden
-		// descendente). Si `filtros.hasta` no vino fijo (rango abierto hasta hoy,
-		// el caso normal de la pantalla), fijarlo acá congela la ventana: una
-		// gestión registrada MIENTRAS el export corre queda fuera, en vez de
-		// desplazar páginas que ya se leyeron. No cubre una inserción dentro de un
-		// rango que el usuario ya acotó a mano —eso requeriría cursor sobre
-		// (fecha_contacto, id) en el propio endpoint— pero sí el caso real: un
-		// supervisor exportando mientras el equipo sigue registrando gestiones.
-		const filtrosExport = filtros.hasta
-			? filtros
-			: { ...filtros, hasta: aFechaISO(new Date()) };
+		// Instante real de inicio del export, no un día calendario: `hasta` que
+		// manda el server (z.string().date()) solo tiene granularidad de DÍA, así
+		// que fijar `hasta = hoy` (como se hacía antes) seguía dejando abierta toda
+		// la ventana restante del día — una gestión registrada 10 minutos después
+		// de iniciar el export, mismo día, entraba igual. El corte real pasa acá,
+		// en memoria, comparando contra el timestamp exacto.
+		const instanteInicio = new Date();
+
+		// El listado ordena por fecha_contacto DESC con OFFSET (no cursor): una
+		// gestión nueva insertada entre dos páginas del mismo export va PRIMERA y
+		// corre el offset de todo lo que sigue —duplica la que era última fila de
+		// una página, y una fila que estaba al final puede salirse de rango sin
+		// aparecer—. `hasta` se fija amplio (mañana) para no perder nada por el
+		// borde day-granular; el corte real es el filtro por `instanteInicio` de
+		// abajo, y el dedup por `id` cubre el caso de duplicado que el offset
+		// shift puede producir. Lo que este mecanismo NO puede arreglar es una
+		// fila que el corrimiento empuja fuera de las páginas ya visitadas sin
+		// duplicarse en ninguna —eso requeriría cursor sobre (fecha_contacto, id)
+		// en el propio endpoint, cambio de mayor alcance que el de este archivo.
+		const filtrosExport = {
+			...filtros,
+			hasta: filtros.hasta ?? aFechaISO(sumarDiasLocal(instanteInicio, 1)),
+		};
 
 		setExportando(true);
 		try {
 			const filas: FilaHistorialData[] = [];
+			const idsVistos = new Set<string>();
 			let paginaActual = 1;
 			let hayMas = true;
 
@@ -561,7 +577,16 @@ function HistorialAgendasPage() {
 					// "Editado" del archivo.
 					incluirConteo: false,
 				})) as RespuestaHistorial;
-				filas.push(...respuesta.items);
+				for (const fila of respuesta.items) {
+					// Filas registradas DESPUÉS de iniciar el export: se descartan acá,
+					// no en el filtro del server (que solo distingue días). Y el dedup
+					// por id: el corrimiento de offset por una inserción intermedia
+					// puede repetir la misma fila en dos páginas consecutivas.
+					if (new Date(fila.fechaContacto) > instanteInicio) continue;
+					if (idsVistos.has(fila.id)) continue;
+					idsVistos.add(fila.id);
+					filas.push(fila);
+				}
 				// El corte es SOLO "la página vino llena", no `totalPaginas`: ese sale
 				// del COUNT acotado a 10,001, así que con más de 10k filas el loop
 				// habría parado ahí mientras el diálogo prometía 20,000. El tope real
@@ -698,26 +723,31 @@ function HistorialAgendasPage() {
 					titulo="Actividades"
 					valor={resumenData?.total}
 					cargando={resumen.isPending}
+					error={resumen.isError}
 				/>
 				<TarjetaKpi
 					titulo="Contactos efectivos"
 					valor={resumenData?.efectivos}
 					cargando={resumen.isPending}
+					error={resumen.isError}
 				/>
 				<TarjetaKpi
 					titulo="Promesas"
 					valor={resumenData?.promesas}
 					cargando={resumen.isPending}
+					error={resumen.isError}
 				/>
 				<TarjetaKpi
 					titulo="Sin contacto"
 					valor={resumenData?.sinContacto}
 					cargando={resumen.isPending}
+					error={resumen.isError}
 				/>
 				<TarjetaKpi
 					titulo="Con próxima acción"
 					valor={resumenData?.conProximaAccion}
 					cargando={resumen.isPending}
+					error={resumen.isError}
 				/>
 				{/* AC-6: cuántos registros editó una persona después de crearlos.
 				    Cuenta solo ediciones manuales (audit con origen='manual'), no los
@@ -726,6 +756,7 @@ function HistorialAgendasPage() {
 					titulo="Editadas"
 					valor={resumenData?.editadas}
 					cargando={resumen.isPending}
+					error={resumen.isError}
 				/>
 			</div>
 
@@ -1104,10 +1135,17 @@ function TarjetaKpi({
 	titulo,
 	valor,
 	cargando,
+	error,
 }: {
 	titulo: string;
 	valor: number | undefined;
 	cargando: boolean;
+	// Reintentos agotados de getHistorialAgendasResumen: `resumen.data` queda
+	// `undefined` con `isPending: false`, igual que "cargó y dio 0" — sin este
+	// estado separado, un fallo de red se mostraba como "Actividades: 0" pese a
+	// que la tabla de abajo sí tiene filas. Fabrica una métrica del reporte
+	// durante una falla parcial en vez de señalarla.
+	error: boolean;
 }) {
 	return (
 		<Card>
@@ -1117,6 +1155,13 @@ function TarjetaKpi({
 				</p>
 				{cargando ? (
 					<div className="mt-1 h-7 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+				) : error ? (
+					<p
+						className="font-bold text-2xl text-gray-400"
+						title="No se pudo cargar este dato"
+					>
+						—
+					</p>
 				) : (
 					<p className="font-bold text-2xl text-gray-900 dark:text-gray-100">
 						{(valor ?? 0).toLocaleString("es-GT")}

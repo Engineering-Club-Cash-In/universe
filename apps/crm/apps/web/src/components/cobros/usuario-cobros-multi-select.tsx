@@ -59,22 +59,39 @@ export function UsuarioCobrosMultiSelect({
 	onChange: (ids: string[] | null) => void;
 }) {
 	const allIds = usuarios.map((u) => u.id);
+	const allIdsSet = new Set(allIds);
 	const vigentes = value;
 	const selected = vigentes === null ? allIds : vigentes;
+	/**
+	 * ¿`ids` cubre exactamente el catálogo visible (mismo CONJUNTO, no solo
+	 * mismo largo)?
+	 *
+	 * `vigentes` puede traer ids que no están en `usuarios` (ver la nota larga
+	 * del prop `value` — el catálogo se restringe por otros filtros activos, la
+	 * selección no). Con una selección oculta como [Alice] y catálogo actual
+	 * [Bob, Carol], comparar solo por longitud (`next.length ===
+	 * allIds.length`) daba un falso positivo apenas la selección visible
+	 * llegaba a 2 ids, aunque el conjunto real fuera distinto — en `toggle` eso
+	 * convertía la selección en `null` ("todos") y ampliaba el filtro real al
+	 * equipo completo en silencio, incluyendo a Carol, que nunca se eligió.
+	 */
+	function esElCatalogoCompleto(ids: readonly string[]): boolean {
+		return ids.length === allIds.length && ids.every((x) => allIdsSet.has(x));
+	}
 	// 0 marcados equivale a "todos": el backend trata el array vacío como sin
 	// filtro, así que deseleccionar el último no deja la vista en blanco ni
 	// bloquea al usuario. Mismo criterio que BucketMultiSelect.
 	const isAll =
 		vigentes === null ||
 		selected.length === 0 ||
-		selected.length === allIds.length;
+		esElCatalogoCompleto(selected);
 
 	function toggle(id: string) {
 		const base = vigentes === null ? allIds : vigentes;
 		const next = base.includes(id)
 			? base.filter((x) => x !== id)
 			: [...base, id];
-		onChange(next.length === allIds.length ? null : next);
+		onChange(esElCatalogoCompleto(next) ? null : next);
 	}
 
 	const label = isAll

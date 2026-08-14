@@ -6,8 +6,10 @@ import {
 	ChevronRight,
 	Link2,
 	Loader2,
+	TriangleAlert,
 	User,
 	Users,
+	UserX,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -21,6 +23,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -593,6 +596,8 @@ export function DynamicContractWizard({
 
 	// Data from API
 	const [renapData, setRenapData] = useState<RenapData | null>(null);
+	// RENAP no encontró el DPI: los campos se llenaron solo con datos del CRM
+	const [renapUnavailable, setRenapUnavailable] = useState(false);
 	const [documents, setDocuments] = useState<Document[]>([]);
 	const [fields, setFields] = useState<Field[]>([]);
 	const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -1233,7 +1238,9 @@ export function DynamicContractWizard({
 
 				// RENAP no siempre tiene a la persona aunque el DPI sea correcto:
 				// se sigue con los datos de la oportunidad, pero hay que revisarlos.
-				if (response.renapUnavailable) {
+				const sinRenap = response.renapUnavailable ?? !response.renapData;
+				setRenapUnavailable(sinRenap);
+				if (sinRenap) {
 					toast.warning(
 						"RENAP no devolvió datos de este DPI. Los campos se llenaron con la información del CRM: revíselos antes de generar.",
 						{ duration: 8000 },
@@ -1777,6 +1784,49 @@ export function DynamicContractWizard({
 														{renapData.gender === "F"
 															? "Femenino"
 															: "Masculino"}
+													</p>
+												</div>
+											</div>
+										</CardContent>
+									</Card>
+								)}
+
+								{/* RENAP no tiene el DPI: se muestran los datos del CRM */}
+								{!renapData && renapUnavailable && (
+									<Card className="border-amber-300 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/30">
+										<CardHeader>
+											<CardTitle className="flex flex-wrap items-center gap-2 text-amber-900 dark:text-amber-200">
+												<TriangleAlert className="h-5 w-5 shrink-0" />
+												Información del Firmante (datos del CRM)
+												<Badge
+													variant="outline"
+													className="border-amber-400 bg-amber-100 text-amber-900 dark:border-amber-700 dark:bg-amber-900/50 dark:text-amber-100"
+												>
+													Revisar
+												</Badge>
+											</CardTitle>
+										</CardHeader>
+										<CardContent>
+											<div className="flex items-start space-x-4">
+												<div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border-2 border-amber-400 border-dashed bg-amber-100/60 dark:border-amber-800 dark:bg-amber-900/30">
+													<UserX className="h-7 w-7 text-amber-600 dark:text-amber-400" />
+												</div>
+												<div className="space-y-1">
+													<h3 className="font-semibold">
+														{crmData.cliente.nombreCompleto?.toUpperCase() ||
+															"Sin nombre en el CRM"}
+													</h3>
+													<p className="text-muted-foreground">
+														DPI: {crmData.cliente.dpi || "—"}
+													</p>
+													<p className="text-amber-800 text-sm dark:text-amber-200">
+														<strong>
+															No se encontró este DPI en RENAP, así que no hay
+															foto ni datos oficiales que mostrar.
+														</strong>{" "}
+														Los campos se llenaron con la información de la
+														oportunidad: revíselos antes de generar los
+														contratos.
 													</p>
 												</div>
 											</div>

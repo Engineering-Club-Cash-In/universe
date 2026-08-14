@@ -13,6 +13,7 @@ import {
 } from "../db/schema/legal-contracts";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import { eqDpi } from "../lib/dpi-lookup";
 import { juridicoProcedure } from "../lib/orpc";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
@@ -73,10 +74,12 @@ export const contractGenerationRouter = {
 			try {
 				// Género del CRM como fallback: RENAP a veces no tiene al cliente
 				// aunque el DPI sea correcto, y sin género no se puede elegir plantilla.
+				// eqDpi y no eq: los DPI viejos quedaron guardados con espacios
+				// ("1648 57656 0101") y el front manda el DPI ya normalizado.
 				const [lead] = await db
 					.select({ gender: leads.gender })
 					.from(leads)
-					.where(eq(leads.dpi, input.dpi))
+					.where(eqDpi(leads.dpi, input.dpi))
 					.limit(1);
 
 				const generoFallback =

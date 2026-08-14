@@ -307,16 +307,39 @@ function maybeRefreshInBackground(): Promise<void> | undefined {
  * No lanza: si cartera-back no responde, `refreshMoraBucketsCache` conserva el
  * fallback y el flujo sigue — es lo mismo que pasaba antes, solo que ahora se
  * intentó primero.
+ *
+ * ── Por qué esperar con un timeout corto y no el del cliente ──────────────
+ *
+ * El cliente de cartera-back reintenta 3 veces con backoff exponencial sobre
+ * un timeout de 30s cada una: ~127s en el peor caso. Sin cota acá, ese peor
+ * caso se paga ANTES de que el envío masivo llame a un solo proveedor de
+ * WhatsApp, y probablemente hace expirar el request completo (Codex, PR
+ * #1299). El refresh en sí no se cancela (el cliente maneja su propio
+ * timeout/reintentos); esta espera simplemente deja de bloquear cuando gana
+ * el timer, igual que `capturarBucketSnapshot` más abajo en `routers/cobros.ts`.
  */
+const TIMEOUT_ESPERAR_CATALOGO_MS = 5000;
+
 export async function esperarCatalogoBuckets(): Promise<void> {
-	if (dynamicBucketsCache === null) {
-		refreshInFlight ??= refreshMoraBucketsCache().finally(() => {
-			refreshInFlight = null;
-		});
-		await refreshInFlight;
-		return;
+	const refresh =
+		dynamicBucketsCache === null
+			? (refreshInFlight ??= refreshMoraBucketsCache().finally(() => {
+					refreshInFlight = null;
+				}))
+			: maybeRefreshInBackground();
+	if (!refresh) return;
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			refresh,
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, TIMEOUT_ESPERAR_CATALOGO_MS);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
 	}
-	await maybeRefreshInBackground();
 }
 
 /** Rango { min, max } de cuotas atrasadas para una etapa. `undefined` si no aplica filtro por cuotas. */

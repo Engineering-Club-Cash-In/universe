@@ -84,14 +84,13 @@ const METODOS_CONTACTO = [
 ] as const;
 
 const filtrosSchema = z.object({
-	desde: z
-		.string()
-		.regex(/^\d{4}-\d{2}-\d{2}$/)
-		.optional(),
-	hasta: z
-		.string()
-		.regex(/^\d{4}-\d{2}-\d{2}$/)
-		.optional(),
+	// z.date() (no z.string().regex) valida que sea un día calendario REAL: un
+	// regex de forma acepta "2026-02-31" o "2026-13-01", y gtDateStrToDate los
+	// normaliza en silencio (Date hace rollover) o produce un Date inválido que
+	// llega crudo al WHERE — el caller ve un rango distinto al que pidió, sin
+	// error (Codex, PR #1299).
+	desde: z.string().date().optional(),
+	hasta: z.string().date().optional(),
 	usuarioIds: z.array(z.string()).optional(),
 	// Validado contra el catálogo real de roles (USER_ROLE_VALUES) y no como
 	// string suelto: así el tipo que sale de zod ya calza con la columna enum y

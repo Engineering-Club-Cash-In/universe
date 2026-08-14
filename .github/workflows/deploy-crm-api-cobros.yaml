@@ -53,9 +53,13 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Instalar dependencias
-        working-directory: apps/crm
-        run: bun install --frozen-lockfile
+      # Las dependencias del server NO se hoistean a apps/crm/node_modules: hay
+      # que instalarlas dentro de su propio directorio, igual que hace el
+      # Dockerfile. Instalar en apps/crm deja a `tsc` sin drizzle-orm.
+      # El server no tiene lockfile propio, así que va sin --frozen-lockfile.
+      - name: Instalar dependencias del server
+        working-directory: apps/crm/apps/server
+        run: bun install
 
       - name: Revisar tipos
         working-directory: apps/crm/apps/server

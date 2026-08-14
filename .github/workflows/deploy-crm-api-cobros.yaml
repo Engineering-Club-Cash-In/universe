@@ -29,6 +29,18 @@ env:
 permissions:
   contents: read
 
+# La concurrencia va a nivel de workflow, no del job que despliega: si estuviera
+# solo en `desplegar`, un push viejo que todavía está verificando no se cancela,
+# y al terminar —después de que el nuevo ya desplegó— publicaría su imagen
+# encima, dejando `latest` apuntando a un commit anterior.
+#
+# (En deploy-cartera-dev.yaml la concurrencia sí va por job, porque ese workflow
+# construye dos apps distintas y un push que solo toca el front no debe cancelar
+# un deploy del back en curso. Acá hay una sola app.)
+concurrency:
+  group: deploy-crm-api-cobros
+  cancel-in-progress: true
+
 jobs:
   # 1) Barrera barata antes de publicar: la API la consume un tercero, así que
   # no conviene subir una imagen que ni compila.
@@ -58,11 +70,6 @@ jobs:
     name: Construir y desplegar
     needs: verificar
     runs-on: ubuntu-latest
-    # Si llega otro push mientras este corre, se cancela y se despliega el
-    # último: no tiene sentido publicar una imagen que ya quedó vieja.
-    concurrency:
-      group: deploy-crm-api-cobros
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 

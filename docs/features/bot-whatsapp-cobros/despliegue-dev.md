@@ -122,6 +122,11 @@ sobre lo que hace `apps/crm/apps/server/deployServer.sh` a mano.
 El tag con el SHA permite volver atrás sin reconstruir: en Coolify se cambia la imagen a
 `…/cci/crm-api-cobros:<sha>` y se redespliega.
 
+La concurrencia va **a nivel de workflow**: un push nuevo cancela el run anterior completo,
+incluida la verificación. Si estuviera solo en el job que despliega, un push viejo que
+todavía está verificando no se cancelaría y, al terminar —después de que el nuevo ya
+desplegó—, publicaría su imagen encima y dejaría `latest` apuntando a un commit anterior.
+
 La verificación de tipos y pruebas va **antes** de publicar a propósito: esta API la consume
 un tercero y una imagen rota se nota del lado de ellos.
 

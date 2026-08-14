@@ -37,6 +37,7 @@ import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasig
 import { Route as CobrosPromesasRouteImport } from './routes/cobros/promesas'
 import { Route as CobrosMiDiaRouteImport } from './routes/cobros/mi-dia'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
+import { Route as CobrosHistorialAgendasRouteImport } from './routes/cobros/historial-agendas'
 import { Route as CobrosConveniosRouteImport } from './routes/cobros/convenios'
 import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
 import { Route as CobrosCierreRouteImport } from './routes/cobros/cierre'
@@ -203,6 +204,11 @@ const CobrosMetasRoute = CobrosMetasRouteImport.update({
   path: '/cobros/metas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosHistorialAgendasRoute = CobrosHistorialAgendasRouteImport.update({
+  id: '/cobros/historial-agendas',
+  path: '/cobros/historial-agendas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosConveniosRoute = CobrosConveniosRouteImport.update({
   id: '/cobros/convenios',
   path: '/cobros/convenios',
@@ -348,6 +354,7 @@ export interface FileRoutesByFullPath {
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
+  '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
@@ -402,6 +409,7 @@ export interface FileRoutesByTo {
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
+  '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
@@ -457,6 +465,7 @@ export interface FileRoutesById {
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
+  '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
@@ -513,6 +522,7 @@ export interface FileRouteTypes {
     | '/cobros/cierre'
     | '/cobros/cola'
     | '/cobros/convenios'
+    | '/cobros/historial-agendas'
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/promesas'
@@ -567,6 +577,7 @@ export interface FileRouteTypes {
     | '/cobros/cierre'
     | '/cobros/cola'
     | '/cobros/convenios'
+    | '/cobros/historial-agendas'
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/promesas'
@@ -621,6 +632,7 @@ export interface FileRouteTypes {
     | '/cobros/cierre'
     | '/cobros/cola'
     | '/cobros/convenios'
+    | '/cobros/historial-agendas'
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/promesas'
@@ -676,6 +688,7 @@ export interface RootRouteChildren {
   CobrosCierreRoute: typeof CobrosCierreRoute
   CobrosColaRoute: typeof CobrosColaRoute
   CobrosConveniosRoute: typeof CobrosConveniosRoute
+  CobrosHistorialAgendasRoute: typeof CobrosHistorialAgendasRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosMiDiaRoute: typeof CobrosMiDiaRoute
   CobrosPromesasRoute: typeof CobrosPromesasRoute
@@ -912,6 +925,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosMetasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/historial-agendas': {
+      id: '/cobros/historial-agendas'
+      path: '/cobros/historial-agendas'
+      fullPath: '/cobros/historial-agendas'
+      preLoaderRoute: typeof CobrosHistorialAgendasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/convenios': {
       id: '/cobros/convenios'
       path: '/cobros/convenios'
@@ -1100,6 +1120,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosCierreRoute: CobrosCierreRoute,
   CobrosColaRoute: CobrosColaRoute,
   CobrosConveniosRoute: CobrosConveniosRoute,
+  CobrosHistorialAgendasRoute: CobrosHistorialAgendasRoute,
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosMiDiaRoute: CobrosMiDiaRoute,
   CobrosPromesasRoute: CobrosPromesasRoute,

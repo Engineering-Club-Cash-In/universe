@@ -23,6 +23,7 @@ import {
 	MessageSquare,
 	Moon,
 	Scale,
+	ScrollText,
 	Settings,
 	Sunrise,
 	Target,
@@ -284,6 +285,18 @@ export default function Header() {
 										<Link to="/cobros/convenios" className="cursor-pointer">
 											<Handshake className="mr-2 h-4 w-4" />
 											Convenios
+										</Link>
+									</DropdownMenuItem>
+									{/* CB-128: va bajo canAccessCobros y NO canAssignCobros — el
+									    asesor también consulta su propio historial (el backend le
+									    fuerza el scope por realizado_por). */}
+									<DropdownMenuItem asChild>
+										<Link
+											to="/cobros/historial-agendas"
+											className="cursor-pointer"
+										>
+											<ScrollText className="mr-2 h-4 w-4" />
+											Historial de agendas
 										</Link>
 									</DropdownMenuItem>
 									{PERMISSIONS.canAssignCobros(userRole) && (
@@ -696,6 +709,13 @@ function MobileNav({
 										<Link to="/cobros/convenios" className={MOBILE_LINK_CLASS}>
 											<Handshake />
 											Convenios
+										</Link>
+										<Link
+											to="/cobros/historial-agendas"
+											className={MOBILE_LINK_CLASS}
+										>
+											<ScrollText />
+											Historial de agendas
 										</Link>
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<Link to="/cobros/apertura" className={MOBILE_LINK_CLASS}>

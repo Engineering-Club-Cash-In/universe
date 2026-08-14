@@ -354,6 +354,13 @@ function HistorialAgendasPage() {
 	// legítima.
 	const usuarioIdsVigentes = useMemo(() => {
 		if (!usuarioIds?.length) return undefined;
+		// Mientras la sesión todavía resuelve, `userRole` es `undefined` y
+		// `esSupervisor` da `false` aunque el usuario real SEA supervisor — un
+		// hard reload no distingue "es asesor" de "todavía no sabemos el rol". Sin
+		// esta rama, `catalogoDeshabilitado` de abajo trataba ambos casos igual y
+		// el useEffect de sincronización borraba la selección persistida de un
+		// supervisor antes de que la sesión terminara de cargar.
+		if (sesionCargando) return usuarioIds;
 		// `isPending` NO alcanza como "todavía cargando": en TanStack v5 una query
 		// con `enabled: false` se queda en pending para siempre, así que para un
 		// asesor (que no consulta el catálogo) el saneo nunca correría y un id
@@ -371,6 +378,7 @@ function HistorialAgendasPage() {
 		usuariosQuery.isPending,
 		usuariosQuery.isFetched,
 		esSupervisor,
+		sesionCargando,
 	]);
 
 	// Persiste el saneo de vuelta a sessionStorage. Sin esto, `usuarioIds` crudo
@@ -906,90 +914,112 @@ function HistorialAgendasPage() {
 				</div>
 			)}
 
-			{!listado.isError && !listado.isPending && items.length === 0 && (
-				<p className="py-20 text-center text-gray-400 text-sm">
-					No hay gestiones registradas con estos filtros.
-				</p>
-			)}
+			{/* Página vacía CON page > 1: no es "sin resultados con estos filtros",
+			    es haber pedido una página que no existe (el caso aproximado permite
+			    probar una página más allá del último COUNT exacto, ver
+			    hayMasPaginas). El mensaje de "sin gestiones" sería engañoso —el
+			    filtro sí tiene resultados, están en páginas anteriores— y esconder
+			    la paginación entera dejaría sin botón "Anterior" para volver. */}
+			{!listado.isError &&
+				!listado.isPending &&
+				items.length === 0 &&
+				page === 1 && (
+					<p className="py-20 text-center text-gray-400 text-sm">
+						No hay gestiones registradas con estos filtros.
+					</p>
+				)}
 
-			{items.length > 0 && (
-				<>
-					<div className="overflow-x-auto rounded-lg border dark:border-gray-700">
-						<table className="w-full text-sm">
-							<thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
-								<tr className="text-left text-gray-600 text-xs uppercase dark:text-gray-300">
-									<th className="px-3 py-2 font-medium">Fecha</th>
-									<th className="px-3 py-2 font-medium">Usuario</th>
-									<th className="px-3 py-2 font-medium">Bucket</th>
-									<th className="px-3 py-2 font-medium">Cuenta</th>
-									<th className="px-3 py-2 font-medium">Tipo</th>
-									<th className="px-3 py-2 font-medium">Resultado</th>
-									<th className="px-3 py-2 font-medium">Próxima acción</th>
-									<th className="px-3 py-2 font-medium">Promesa</th>
-									<th className="px-3 py-2 font-medium" />
-								</tr>
-							</thead>
-							<tbody>
-								{items.map((fila) => (
-									<FilaHistorial
-										key={fila.id}
-										fila={fila}
-										catalogo={catalogo}
-										esSupervisor={esSupervisor}
-									/>
-								))}
-							</tbody>
-						</table>
-					</div>
+			{!listado.isError &&
+				!listado.isPending &&
+				items.length === 0 &&
+				page > 1 && (
+					<p className="py-10 text-center text-gray-400 text-sm">
+						Esta página no tiene resultados. Volvé a la página anterior.
+					</p>
+				)}
 
-					<div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
-						<span className="text-gray-500">
-							{datos?.totalEsAproximado
-								? `Más de ${(datos?.total ?? 0).toLocaleString("es-GT")} registros`
-								: `${(datos?.total ?? 0).toLocaleString("es-GT")} registros`}
-						</span>
-						<div className="flex items-center gap-2">
-							<Select
-								value={String(pageSize)}
-								onValueChange={(v) => {
-									setPageSize(Number(v));
-									setPage(1);
-								}}
-							>
-								<SelectTrigger className="h-8 w-28">
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									{[25, 50, 100, 200].map((n) => (
-										<SelectItem key={n} value={String(n)}>
-											{n} / página
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={page <= 1}
-								onClick={() => setPage((p) => Math.max(1, p - 1))}
-							>
-								Anterior
-							</Button>
+			{!listado.isError &&
+				!listado.isPending &&
+				(items.length > 0 || page > 1) && (
+					<>
+						{items.length > 0 && (
+							<div className="overflow-x-auto rounded-lg border dark:border-gray-700">
+								<table className="w-full text-sm">
+									<thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
+										<tr className="text-left text-gray-600 text-xs uppercase dark:text-gray-300">
+											<th className="px-3 py-2 font-medium">Fecha</th>
+											<th className="px-3 py-2 font-medium">Usuario</th>
+											<th className="px-3 py-2 font-medium">Bucket</th>
+											<th className="px-3 py-2 font-medium">Cuenta</th>
+											<th className="px-3 py-2 font-medium">Tipo</th>
+											<th className="px-3 py-2 font-medium">Resultado</th>
+											<th className="px-3 py-2 font-medium">Próxima acción</th>
+											<th className="px-3 py-2 font-medium">Promesa</th>
+											<th className="px-3 py-2 font-medium" />
+										</tr>
+									</thead>
+									<tbody>
+										{items.map((fila) => (
+											<FilaHistorial
+												key={fila.id}
+												fila={fila}
+												catalogo={catalogo}
+												esSupervisor={esSupervisor}
+											/>
+										))}
+									</tbody>
+								</table>
+							</div>
+						)}
+
+						<div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
 							<span className="text-gray-500">
-								Página {page} de {totalPaginas}
+								{datos?.totalEsAproximado
+									? `Más de ${(datos?.total ?? 0).toLocaleString("es-GT")} registros`
+									: `${(datos?.total ?? 0).toLocaleString("es-GT")} registros`}
 							</span>
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={!hayMasPaginas}
-								onClick={() => setPage((p) => p + 1)}
-							>
-								Siguiente
-							</Button>
+							<div className="flex items-center gap-2">
+								<Select
+									value={String(pageSize)}
+									onValueChange={(v) => {
+										setPageSize(Number(v));
+										setPage(1);
+									}}
+								>
+									<SelectTrigger className="h-8 w-28">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{[25, 50, 100, 200].map((n) => (
+											<SelectItem key={n} value={String(n)}>
+												{n} / página
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={page <= 1}
+									onClick={() => setPage((p) => Math.max(1, p - 1))}
+								>
+									Anterior
+								</Button>
+								<span className="text-gray-500">
+									Página {page} de {totalPaginas}
+								</span>
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={!hayMasPaginas}
+									onClick={() => setPage((p) => p + 1)}
+								>
+									Siguiente
+								</Button>
+							</div>
 						</div>
-					</div>
-				</>
-			)}
+					</>
+				)}
 		</div>
 	);
 }

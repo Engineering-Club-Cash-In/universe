@@ -217,6 +217,22 @@ function sumarDiasLocal(fecha: Date, dias: number): Date {
 	return copia;
 }
 
+/**
+ * YYYY-MM-DD de un instante, en el día calendario de GUATEMALA (no el del
+ * navegador). Espejo client-side de `toDateStrGT` del server
+ * (`lib/guatemala-month-window.ts`): mismo mecanismo (`Intl.DateTimeFormat`
+ * `en-CA` da directo el formato ISO), duplicado porque este archivo no importa
+ * del server (ver la nota de TS7056 más abajo). Necesario para convertir
+ * `rangoAplicado.hasta` (instante UTC, exclusivo) al día calendario GT que
+ * espera `z.string().date()` en el input — usar el día LOCAL del navegador acá
+ * correría el día para cualquier usuario fuera de UTC-6.
+ */
+function aFechaISO_GT(instante: Date): string {
+	return new Intl.DateTimeFormat("en-CA", {
+		timeZone: "America/Guatemala",
+	}).format(instante);
+}
+
 function HistorialAgendasPage() {
 	const { data: session, isPending: sesionCargando } = authClient.useSession();
 	const userRole = session?.user?.role;
@@ -553,10 +569,42 @@ function HistorialAgendasPage() {
 		// fila que el corrimiento empuja fuera de las páginas ya visitadas sin
 		// duplicarse en ninguna —eso requeriría cursor sobre (fecha_contacto, id)
 		// en el propio endpoint, cambio de mayor alcance que el de este archivo.
-		const filtrosExport = {
-			...filtros,
-			hasta: filtros.hasta ?? aFechaISO(sumarDiasLocal(instanteInicio, 1)),
-		};
+		//
+		// Cuando NI `desde` NI `hasta` vienen del usuario (modo default), fijar
+		// solo `hasta` acá dejaba `desde` sin mandar — el server lo re-derivaba
+		// como `hasta_nuevo - 30 días` (normalizarRango, rama de "una sola cota
+		// dada"), que es UN DÍA MÁS TARDE que el `desde` real que ya calculó y
+		// mostró la pantalla (`hoy - 30`, rama "ninguna cota dada"). El export
+		// quedaba un día corrido respecto a la tabla y sus KPIs, silenciosamente.
+		// La corrección: cuando el usuario no fijó fechas, se usa el rango que el
+		// SERVER ya devolvió y la pantalla ya muestra (`datos.rangoAplicado`) para
+		// fijar AMBOS extremos, no solo `hasta` — el export refleja exactamente lo
+		// que está en pantalla en vez de recalcular una ventana distinta.
+		const sinFiltroDeFechas = !filtros.desde && !filtros.hasta;
+		const filtrosExport =
+			sinFiltroDeFechas && datos?.rangoAplicado
+				? {
+						...filtros,
+						desde: aFechaISO_GT(new Date(datos.rangoAplicado.desde)),
+						// `rangoAplicado.hasta` es EXCLUSIVO (medianoche del día
+						// siguiente al último día mostrado), pero el `hasta` que espera
+						// el input es INCLUSIVO (día calendario). Restar 24h antes de
+						// convertir da el último día real que la tabla muestra — sin
+						// esto, el server volvía a sumarle 1 día (trata cualquier
+						// `hasta` que recibe como inclusivo), agregando un día de más al
+						// export que la pantalla no tiene.
+						hasta: aFechaISO_GT(
+							new Date(
+								new Date(datos.rangoAplicado.hasta).getTime() -
+									24 * 60 * 60 * 1000,
+							),
+						),
+					}
+				: {
+						...filtros,
+						hasta:
+							filtros.hasta ?? aFechaISO(sumarDiasLocal(instanteInicio, 1)),
+					};
 
 		setExportando(true);
 		try {

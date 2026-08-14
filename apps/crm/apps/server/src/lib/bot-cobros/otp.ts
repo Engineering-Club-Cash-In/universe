@@ -47,6 +47,49 @@ const ORIGEN = "cobros";
 const COOLDOWN_SEGUNDOS = 60;
 /** Envíos máximos a la misma persona por hora. */
 const MAX_ENVIOS_POR_HORA = 5;
+/**
+ * Prefijo de los ids sembrados por `db/seeds/bot-cobros-pruebas.sql`.
+ *
+ * Los clientes ficticios del equipo de IT son `b071…` (leads) y `b074…`
+ * (codeudores). Sirve para que el endpoint de pruebas solo pueda revelar el
+ * código de esos registros y nunca el de un cliente real de la copia de prod.
+ */
+const PREFIJO_DATOS_DE_PRUEBA = "b07";
+
+/**
+ * Modo simulado: se genera y guarda el código, pero NO se manda el SMS.
+ *
+ * El proveedor solo acepta peticiones desde IPs en su whitelist y la de esta
+ * instancia no está, así que el envío muere en timeout y el flujo nunca pasa
+ * del servicio 1. Con `BOT_COBROS_OTP_SIMULADO=true` el código queda en la base
+ * y se consulta con `obtenerCodigoDePrueba`, así se prueba el flujo completo
+ * como si el SMS hubiera llegado.
+ *
+ * **Solo para la instancia de dev.** En producción va apagada: prendida, el
+ * cliente nunca recibiría su código.
+ */
+export function esModoSimulado(): boolean {
+	const valor = process.env.BOT_COBROS_OTP_SIMULADO;
+	return valor === "true" || valor === "1";
+}
+
+/**
+ * ¿La fila del OTP pertenece a un cliente sembrado para pruebas?
+ *
+ * Se exige que TODOS los ids presentes sean de prueba, no que alguno lo sea:
+ * una fila mixta (codeudor ficticio de un lead real, o al revés) no debe
+ * exponer nada.
+ */
+export function esDeDatosDePrueba(
+	ids: Array<string | null>,
+): boolean {
+	const presentes = ids.filter((id): id is string => Boolean(id));
+
+	return (
+		presentes.length > 0 &&
+		presentes.every((id) => id.startsWith(PREFIJO_DATOS_DE_PRUEBA))
+	);
+}
 
 /**
  * `db` o la transacción de un `db.transaction(...)`.
@@ -79,6 +122,8 @@ export type ResultadoEnvio =
 			referencia: string;
 			enviadoA: string;
 			expiraEnSegundos: number;
+			/** true = no salió SMS; el código se consulta (ver `esModoSimulado`). */
+			simulado: boolean;
 	  }
 	| { enviado: false; codigo: "ERROR_ENVIO" }
 	| {
@@ -113,6 +158,13 @@ export type ResultadoValidacion =
  */
 function generarCodigo(): string {
 	return randomInt(1000, 10000).toString();
+}
+
+/** La referencia es el uuid de la fila; si viene otra cosa, la consulta explota. */
+function esReferenciaValida(referencia: string): boolean {
+	return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+		referencia,
+	);
 }
 
 /**
@@ -174,43 +226,55 @@ export async function enviarOtp(
 
 		referencia = fila.id;
 
-		const smsClient = new SMSClient({
-			credentials: {
-				token: process.env.SMS_TOKEN ?? "",
-				apiKey: Number.parseInt(process.env.SMS_API_KEY ?? "0", 10),
-			},
-			// El default del cliente son 30 s y la API del proveedor a veces tarda
-			// más: el envío moría en 31.9 s. Mismo criterio que el envío de SMS de
-			// cobros (routers/cobros.ts), donde ya se habían topado con esto.
-			timeout: 60000,
-		});
+		const simulado = esModoSimulado();
 
-		// La base de dev es una copia de producción con teléfonos reales. Con
-		// TEST_MESSAGE=true el SMS se redirige a un número interno para poder
-		// probar sin escribirle a un cliente.
-		const destino = isTestModeEnabled()
-			? getTestPhone()
-			: destinatario.telefono8;
-
-		if (isTestModeEnabled()) {
+		if (simulado) {
+			// El código ya quedó guardado; se consulta con `obtenerCodigoDePrueba`.
+			// No se escribe en el log: ahí sí quedaría a la vista de cualquiera con
+			// acceso a los logs del contenedor (D-16).
 			console.log(
-				`[BotCobros] TEST_MESSAGE activo: OTP redirigido a ${enmascararTelefono(destino)} (real: ${enmascararTelefono(destinatario.telefono8)})`,
+				`[BotCobros] BOT_COBROS_OTP_SIMULADO activo: no se envía SMS a ${enmascararTelefono(destinatario.telefono8)} (referencia ${fila.id})`,
 			);
-		}
+		} else {
+			const smsClient = new SMSClient({
+				credentials: {
+					token: process.env.SMS_TOKEN ?? "",
+					apiKey: Number.parseInt(process.env.SMS_API_KEY ?? "0", 10),
+				},
+				// El default del cliente son 30 s y la API del proveedor a veces tarda
+				// más: el envío moría en 31.9 s. Mismo criterio que el envío de SMS de
+				// cobros (routers/cobros.ts), donde ya se habían topado con esto.
+				timeout: 60000,
+			});
 
-		await smsClient.send({
-			msisdns: [aFormatoSms(destino)],
-			message: `Cash In: tu codigo de verificacion es ${codigo}. Vence en ${VIGENCIA_MINUTOS} minutos. No lo compartas con nadie.`,
-			country: "GT",
-			tag: "otp-bot-cobros",
-			dial: 50237633199,
-		});
+			// La base de dev es una copia de producción con teléfonos reales. Con
+			// TEST_MESSAGE=true el SMS se redirige a un número interno para poder
+			// probar sin escribirle a un cliente.
+			const destino = isTestModeEnabled()
+				? getTestPhone()
+				: destinatario.telefono8;
+
+			if (isTestModeEnabled()) {
+				console.log(
+					`[BotCobros] TEST_MESSAGE activo: OTP redirigido a ${enmascararTelefono(destino)} (real: ${enmascararTelefono(destinatario.telefono8)})`,
+				);
+			}
+
+			await smsClient.send({
+				msisdns: [aFormatoSms(destino)],
+				message: `Cash In: tu codigo de verificacion es ${codigo}. Vence en ${VIGENCIA_MINUTOS} minutos. No lo compartas con nadie.`,
+				country: "GT",
+				tag: "otp-bot-cobros",
+				dial: 50237633199,
+			});
+		}
 
 		return {
 			enviado: true,
 			referencia: fila.id,
 			enviadoA: enmascararTelefono(destinatario.telefono8),
 			expiraEnSegundos: VIGENCIA_MINUTOS * 60,
+			simulado,
 		};
 	} catch (error) {
 		console.error("[BotCobros] Error enviando OTP:", error);
@@ -310,11 +374,7 @@ export async function validarOtp(
 	ejecutor: Ejecutor = db,
 ): Promise<ResultadoValidacion> {
 	// La referencia es un uuid; si viene cualquier cosa, la consulta explota.
-	if (
-		!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-			referencia,
-		)
-	) {
+	if (!esReferenciaValida(referencia)) {
 		return { valido: false, codigo: "REFERENCIA_INVALIDA" };
 	}
 
@@ -376,5 +436,75 @@ export async function validarOtp(
 			coDebtorId: otp.coDebtorId,
 			dpi: otp.dpi,
 		},
+	};
+}
+
+export type ResultadoCodigoDePrueba =
+	| {
+			disponible: true;
+			codigo: string;
+			usado: boolean;
+			intentosFallidos: number;
+			expiraEnSegundos: number;
+	  }
+	| {
+			disponible: false;
+			codigo: "PRUEBAS_NO_HABILITADAS" | "REFERENCIA_INVALIDA" | "NO_ES_CLIENTE_DE_PRUEBA";
+	  };
+
+/**
+ * Devuelve el código de un OTP para poder probar sin recibir el SMS.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ESTO EXISTE SOLO PORQUE EL SMS NO SALE (ver `esModoSimulado`). Cuando la IP
+ * de la instancia esté en la whitelist del proveedor, se apaga la env y este
+ * endpoint deja de responder solo; después se borra junto con `esModoSimulado`.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Dos candados, porque revelar un código es dar acceso a los datos de crédito
+ * de esa persona:
+ *   1. `BOT_COBROS_OTP_SIMULADO` apagada → no responde nada.
+ *   2. Aunque esté prendida, solo devuelve el código de los clientes ficticios
+ *      sembrados para pruebas. La base de dev es copia de producción: sin este
+ *      filtro, con la API key se podría pedir el DPI de un cliente real y leer
+ *      su código.
+ */
+export async function obtenerCodigoDePrueba(
+	referencia: string,
+): Promise<ResultadoCodigoDePrueba> {
+	if (!esModoSimulado()) {
+		return { disponible: false, codigo: "PRUEBAS_NO_HABILITADAS" };
+	}
+
+	if (!esReferenciaValida(referencia)) {
+		return { disponible: false, codigo: "REFERENCIA_INVALIDA" };
+	}
+
+	const [otp] = await db
+		.select()
+		.from(otps)
+		.where(and(eq(otps.id, referencia), eq(otps.origen, ORIGEN)))
+		.limit(1);
+
+	if (!otp) {
+		return { disponible: false, codigo: "REFERENCIA_INVALIDA" };
+	}
+
+	if (!esDeDatosDePrueba([otp.leadId, otp.coDebtorId])) {
+		console.warn(
+			`[BotCobros] Se pidió el código de prueba de un cliente que no es de prueba (referencia ${referencia})`,
+		);
+		return { disponible: false, codigo: "NO_ES_CLIENTE_DE_PRUEBA" };
+	}
+
+	return {
+		disponible: true,
+		codigo: otp.code,
+		usado: otp.used,
+		intentosFallidos: otp.attempts,
+		expiraEnSegundos: Math.max(
+			0,
+			Math.floor((otp.expiresAt.getTime() - Date.now()) / 1000),
+		),
 	};
 }

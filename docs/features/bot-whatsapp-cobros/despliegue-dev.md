@@ -79,7 +79,8 @@ O dejar que el pipeline (§3) construya la primera y crear la app en Coolify des
    | `BOT_COBROS_API_KEY` | una llave nueva | La que se le entrega a SimpleTech. Generar con `openssl rand -hex 32` |
    | `DISABLE_SCHEDULED_JOBS` | — | Ya no hace falta: en esta rama los jobs están apagados en el código. Ver la advertencia de abajo |
    | `TEST_MESSAGE` | `false` | Para que cada quien reciba su propio código |
-   | `SMS_TOKEN`, `SMS_API_KEY` | las de siempre | Sin esto no sale ningún OTP |
+   | `BOT_COBROS_OTP_SIMULADO` | `true` | **Necesaria hoy.** El SMS no sale: la IP de esta instancia no está en la whitelist del proveedor. Con esto el código se consulta en vez de recibirse. Ver abajo |
+   | `SMS_TOKEN`, `SMS_API_KEY` | las de siempre | Para cuando se apague la de arriba |
    | `CORS_ORIGIN` | el dominio de dev | |
 
    El resto (R2, Infornet, SimpleTech, Google, etc.) se copian del CRM API de dev: el binario
@@ -115,6 +116,26 @@ clientes dejan de recibir sus recordatorios. El `FIXME(COBROS-02)` en `index.ts`
 línea exacta.
 
 Los jobs los sigue corriendo la instancia principal del CRM, que es la que debe hacerlo.
+
+### ⏳ El OTP va en modo simulado (`BOT_COBROS_OTP_SIMULADO=true`)
+
+El proveedor de SMS solo acepta peticiones desde **IPs que estén en su whitelist**, y la de
+esta instancia no está: la petición se queda colgada hasta el timeout de 60 s y el flujo
+nunca pasa del servicio 1. No es del bot ni del binario — es un trámite pendiente con el
+proveedor. (Los timeouts que el CRM registra desde abril son lo mismo: salieron desde IPs no
+habilitadas.)
+
+> 📌 **Cuando se pida la habilitación**, hay que darle al proveedor la IP de salida de este
+> servidor de Coolify, no la del CRM de producción: son máquinas distintas.
+
+Con esta variable en `true`, el código se genera y se guarda igual (mismo vencimiento, mismos
+límites, mismos 3 intentos) pero **no se llama al proveedor**, y se consulta con
+`POST /api/bot/cobros/pruebas/otp`. Así se prueba el flujo completo como si el SMS hubiera
+llegado. Ver [D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale).
+
+> ⚠️ Esta variable es **solo para esta instancia**. En producción prendida dejaría al cliente
+> sin recibir su código. Cuando el proveedor habilite la IP se apaga —el endpoint de consulta
+> deja de responder solo— y después se borra el código que la lee.
 
 ---
 
@@ -169,12 +190,20 @@ curl -s -X POST https://crmapi-cobros.s2.devteamatcci.site/api/bot/cobros/buscar
   -d '{"search":"P-901BOT","telefono":"50257099747"}'
 # → 401 NO_AUTORIZADO
 
-# 3. Con llave, encuentra al cliente de prueba y manda el SMS
+# 3. Con llave, encuentra al cliente de prueba y genera el código
 curl -s -X POST https://crmapi-cobros.s2.devteamatcci.site/api/bot/cobros/buscar-cliente \
   -H "Authorization: Bearer $BOT_COBROS_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"search":"P-901BOT","telefono":"50257099747"}'
+# → debe responder en ~2 s con "otpSimulado": true y una "referencia"
+# Si tarda 60 s y devuelve OTP_NO_ENVIADO, falta BOT_COBROS_OTP_SIMULADO=true
+
+# 4. El código, con la referencia del paso anterior
+curl -s -X POST https://crmapi-cobros.s2.devteamatcci.site/api/bot/cobros/pruebas/otp \
+  -H "Authorization: Bearer $BOT_COBROS_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"referencia":"LA-REFERENCIA"}'
 ```
 
-En los logs de Coolify debe aparecer la línea de `DISABLE_SCHEDULED_JOBS` y **ninguna** de
-los jobs de recordatorios.
+En los logs de Coolify debe aparecer la línea de las tareas programadas desactivadas y
+**ninguna** de los jobs de recordatorios.

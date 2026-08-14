@@ -4,8 +4,35 @@
 **Datos:** `apps/crm/apps/server/src/db/seeds/bot-cobros-pruebas.sql` — **lo corre el usuario**
 
 Cada persona del equipo tiene un **cliente ficticio a su nombre amarrado a su celular**, así
-recibe su propio código por SMS y puede recorrer el flujo completo sin tocar datos de
+cada quien tiene su propio código y puede recorrer el flujo completo sin tocar datos de
 clientes reales.
+
+---
+
+## ⏳ Hoy el código NO llega por SMS
+
+El proveedor solo acepta peticiones desde **IPs que estén en su whitelist** y la del servidor
+de dev no está, así que el mensaje nunca sale. Para no quedarnos parados, la instancia corre
+con `BOT_COBROS_OTP_SIMULADO=true`: el código se genera igual pero **no se manda**, y se
+consulta por API ([D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale)).
+
+En la práctica, el paso "esperar el SMS" se cambia por esto:
+
+```bash
+# La referencia sale en la respuesta del primer paso (servicio 1)
+curl -s -X POST https://crmapi-cobros.s2.devteamatcci.site/api/bot/cobros/pruebas/otp \
+  -H "Authorization: Bearer $BOT_COBROS_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"referencia":"LA-REFERENCIA"}'
+# → { "otp": "6126", "usado": false, "intentosFallidos": 0, "expiraEnSegundos": 299 }
+```
+
+Todo lo demás se comporta igual que en producción: el código vence a los 5 minutos, sirve una
+sola vez y se bloquea a los 3 intentos fallidos. **Solo funciona con estos clientes de
+prueba**: con un cliente real responde `403`.
+
+Cuando el proveedor habilite la IP del servidor, se apaga esa variable y el SMS llega sin
+tocar nada más.
 
 ---
 
@@ -16,7 +43,8 @@ clientes reales.
 | Migraciones | `0033` (aplicada) y **`0034`** — sin la 0034, Sofía (que no tiene DPI) no puede recibir código |
 | Datos | Correr `src/db/seeds/bot-cobros-pruebas.sql` en green-tree |
 | `BOT_COBROS_API_KEY` | Configurada en el ambiente de dev y entregada a SimpleTech |
-| **`TEST_MESSAGE=false`** | ⚠️ **Importante.** Con `true`, **todos** los SMS se redirigen al primer número de la lista de pruebas y nadie recibe su propio código. Como estos clientes ficticios ya tienen los números del equipo, acá tiene que ir en `false` |
+| **`BOT_COBROS_OTP_SIMULADO=true`** | Mientras la IP del servidor no esté habilitada. Sin esto, el servicio 1 tarda 60 s y devuelve `OTP_NO_ENVIADO` |
+| `TEST_MESSAGE=false` | Para cuando vuelva el SMS: con `true`, **todos** los mensajes se redirigen al primer número de la lista y nadie recibe su propio código. Como estos clientes ficticios ya tienen los números del equipo, acá va en `false` |
 
 ---
 
@@ -42,13 +70,20 @@ cualquiera puede usar para ver el mensaje de "contacta a soporte".
 
 > Copiar y pegar. Cambiar solo el nombre del contacto del bot cuando exista.
 
+> ⏳ **Agregarle esto a todos** mientras la IP no esté habilitada, para que nadie se quede
+> esperando un SMS que no va a llegar:
+>
+> ```
+> OJO: por ahora el código NO te va a llegar por SMS (falta que el proveedor habilite la IP
+> del servidor). Pedímelo cuando llegués a ese paso y te lo paso al toque.
+> ```
+
 ### 1 · Para el del 5844 6376
 
 ```
 ¡Hola! Ya podés probar el bot de cobros en dev 🤖
 
-Tu cliente de prueba se llama Mario Andrés Pérez Prueba y está amarrado a tu celular,
-así que el código te va a llegar a vos.
+Tu cliente de prueba se llama Mario Andrés Pérez Prueba y está amarrado a tu celular.
 
 Podés identificarte con cualquiera de estos:
 • DPI:   9900000280101
@@ -198,7 +233,8 @@ propio celular.
 
 1. **Escribís tu DPI, NIT o placa** → el bot saluda con el nombre del cliente y avisa que
    mandó un código a un número terminado en `****XXXX`.
-2. **Llega un SMS** con un código de 4 dígitos, vigente 5 minutos.
+2. **Conseguís el código de 4 dígitos**, vigente 5 minutos. Hoy no llega por SMS: se pide
+   como se explica arriba. Cuando habiliten la IP, llegará solo.
 3. **Escribís el código** → el bot muestra el crédito (o el menú, si hay varios).
 
 ## Errores que vale la pena provocar
@@ -216,8 +252,8 @@ propio celular.
 ## Qué reportar
 
 - Qué escribiste, qué te respondió y a qué hora.
-- Si el SMS no llegó, decilo igual: sirve para saber si el problema es el envío o el flujo.
 - Si el nombre o el vehículo salen mal escritos.
+- Que el SMS no llegue **no hay que reportarlo**: es lo esperado hasta que habiliten la IP.
 
 ---
 

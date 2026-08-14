@@ -28,6 +28,7 @@ día; si no está escrito, no está decidido.
 | [D-18](#d-18--autenticación-del-bot-api-key) | Autenticación del bot: API key | 🟢 |
 | [D-19](#d-19--a-qué-teléfono-se-manda-el-otp) | A qué teléfono se manda el OTP | 🟢 |
 | [D-20](#d-20--el-dpi-se-busca-también-en-codeudores) | ¿El DPI se busca en codeudores? | 🟢 |
+| [D-21](#d-21--modo-simulado-mientras-el-sms-no-sale) | Modo simulado mientras el SMS no sale | 🟢 |
 
 ---
 
@@ -294,6 +295,10 @@ código de 4 dígitos, 5 minutos. Correo y WhatsApp quedan descartados por ahora
 del titular o del codeudor), nunca al número del chat cuando ese número no está registrado.
 Si no, el factor no valida nada.
 
+> **Nota 2026-08-14.** El canal no cambia, pero **en dev el SMS no sale**: el proveedor
+> solo acepta peticiones desde IPs en su whitelist y la de la instancia no está. Ver
+> [D-21](#d-21--modo-simulado-mientras-el-sms-no-sale).
+
 ---
 
 ## D-14 · Retención de PII y logs
@@ -503,3 +508,51 @@ está en dos (`leads.nit` y `opportunities.nit`) y el DPI del titular en una sol
 
 **Consecuencia:** la tabla `otps` necesita `co_debtor_id` y que `lead_id` deje de ser NOT
 NULL, porque el código se le manda al codeudor.
+
+---
+
+## D-21 · Modo simulado mientras el SMS no sale
+
+**Estado:** 🟢 **Cerrada · 2026-08-14 — temporal, solo dev**
+
+**Contexto.** Con el servicio 1 ya desplegado, ningún OTP llegaba: la llamada moría en
+timeout a los 60 s y devolvía `OTP_NO_ENVIADO`. La revisión de `cobros_send_logs` mostró que
+no era del bot — el canal SMS del CRM lleva así desde abril (1 enviado, 2 fallidos, ambos
+`Timeout: La peticion excedio 60000ms`), mientras WhatsApp acumula 4,719 enviados.
+
+**Causa (confirmada con gerencia).** El proveedor solo acepta peticiones desde **IPs que
+estén en su whitelist**, y la de esta instancia no está. Por eso la petición se queda colgada
+hasta el timeout en vez de responder un error: nunca la contesta nadie. No es un problema del
+código ni del bot — es un trámite con el proveedor.
+
+Esto explica también los timeouts de abril: los envíos del CRM que fallaron salieron desde
+una IP no habilitada. Lo que sí funciona (WhatsApp, y el SMS que Daniel vio salir en prod)
+va desde el servidor de producción, cuya IP sí está.
+
+**Decisión.** Se agrega la env **`BOT_COBROS_OTP_SIMULADO`**, solo para la instancia de dev.
+Prendida:
+
+1. El código se genera y se guarda **igual que siempre** (misma tabla, mismo vencimiento,
+   mismos límites de reenvío y de intentos). Lo único que se salta es la llamada al proveedor.
+2. El servicio 1 responde lo mismo de siempre más `otpSimulado: true`, así el bot no cambia
+   su lógica.
+3. El código se consulta con `POST /api/bot/cobros/pruebas/otp`, simulando que llegó el SMS.
+
+**Por qué no se cambió a WhatsApp** (lo que habría tocado [D-13](#d-13--canal-del-otp)):
+el canal no está roto, solo falta habilitar la IP. Cambiar de canal por un trámite pendiente
+habría sido rehacer el flujo para nada.
+
+**Dos candados**, porque revelar un código es dar acceso a los datos de crédito de esa
+persona — y la base de dev es una **copia de producción con clientes reales**:
+
+| Candado | Qué pasa si falta |
+| --- | --- |
+| `BOT_COBROS_OTP_SIMULADO` apagada | El endpoint responde **404**, como si no existiera |
+| Solo clientes ficticios (ids `b07…`) | Con un cliente real responde **403 NO_ES_CLIENTE_DE_PRUEBA** |
+
+Además va detrás de la misma API key ([D-18](#d-18--autenticación-del-bot-api-key)).
+
+**Cuándo se quita.** Cuando el proveedor habilite la IP de la instancia: se apaga la env
+—el endpoint deja de responder solo— y después se borran `esModoSimulado`,
+`obtenerCodigoDePrueba` y la ruta. En producción la env **nunca** se prende: prendida, el
+cliente no recibiría su código.

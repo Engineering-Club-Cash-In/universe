@@ -23,12 +23,16 @@ import {
 	elegirTelefonoParaOtp,
 	telefonoEstaRegistrado,
 } from "../lib/bot-cobros/identificadores";
-import { enviarOtp, validarOtp } from "../lib/bot-cobros/otp";
+import {
+	enviarOtp,
+	obtenerCodigoDePrueba,
+	validarOtp,
+} from "../lib/bot-cobros/otp";
 
 type RespuestaError = {
 	codigo: string;
 	mensaje: string;
-	estado: 400 | 401 | 404 | 429 | 500 | 503;
+	estado: 400 | 401 | 403 | 404 | 429 | 500 | 503;
 };
 
 function error(c: Context, { codigo, mensaje, estado }: RespuestaError) {
@@ -130,6 +134,9 @@ export async function buscarClienteBotCobros(c: Context) {
 				encontrado: true,
 				celEnCrm: telefonoEstaRegistrado(telefonoChat, cliente.telefonos),
 				otpEnviado: true,
+				// Solo en dev: true = no salió SMS y el código se consulta en
+				// /api/bot/cobros/pruebas/otp. En producción siempre false.
+				otpSimulado: envio.simulado,
 				// El bot guarda esta referencia y la devuelve en el servicio 2:
 				// ata el código a esta persona.
 				referencia: envio.referencia,
@@ -240,6 +247,67 @@ export async function listarCreditosBotCobros(c: Context) {
 		return c.json({ success: true, data: { creditos: creditos ?? [] } });
 	} catch (err) {
 		console.error("[BotCobros] creditos:", err);
+		return error(c, {
+			codigo: "ERROR_INTERNO",
+			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",
+			estado: 500,
+		});
+	}
+}
+
+/**
+ * Solo dev · Devuelve el código de un OTP para poder probar sin recibir el SMS.
+ *
+ * El proveedor de SMS solo acepta peticiones desde IPs en su whitelist y la de
+ * esta instancia no está, así que el envío muere en timeout. Con
+ * `BOT_COBROS_OTP_SIMULADO` prendida no se manda SMS y el código se pide acá,
+ * simulando que llegó.
+ *
+ * Responde 404 con la env apagada: en producción este endpoint no existe.
+ * Ver `obtenerCodigoDePrueba` para los candados.
+ */
+export async function otpDePruebaBotCobros(c: Context) {
+	try {
+		const body = await c.req.json<{ referencia?: unknown }>();
+		const referencia = String(body.referencia ?? "").trim();
+
+		const resultado = await obtenerCodigoDePrueba(referencia);
+
+		if (!resultado.disponible) {
+			switch (resultado.codigo) {
+				case "PRUEBAS_NO_HABILITADAS":
+					return error(c, {
+						codigo: "NO_ENCONTRADO",
+						mensaje: "Recurso no encontrado.",
+						estado: 404,
+					});
+				case "NO_ES_CLIENTE_DE_PRUEBA":
+					return error(c, {
+						codigo: "NO_ES_CLIENTE_DE_PRUEBA",
+						mensaje:
+							"Esa referencia no es de un cliente de prueba. Solo se puede consultar el código de los clientes ficticios sembrados para el equipo.",
+						estado: 403,
+					});
+				default:
+					return error(c, {
+						codigo: "REFERENCIA_INVALIDA",
+						mensaje: "No encontramos esa solicitud de código.",
+						estado: 404,
+					});
+			}
+		}
+
+		return c.json({
+			success: true,
+			data: {
+				otp: resultado.codigo,
+				usado: resultado.usado,
+				intentosFallidos: resultado.intentosFallidos,
+				expiraEnSegundos: resultado.expiraEnSegundos,
+			},
+		});
+	} catch (err) {
+		console.error("[BotCobros] pruebas/otp:", err);
 		return error(c, {
 			codigo: "ERROR_INTERNO",
 			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",

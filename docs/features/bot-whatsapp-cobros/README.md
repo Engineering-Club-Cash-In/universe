@@ -48,7 +48,7 @@ decidido.
 
 | # | Paso | Alcance | Estado | Doc |
 | --- | --- | --- | --- | --- |
-| 1 | Identificación y acceso | 2 servicios en el CRM: buscar cliente + OTP por SMS, y validar código + listar créditos | 🔵 **Los dos servicios implementados** — falta migración 0034 y probar el SMS en dev | [`01-…`](./01-identificacion-y-acceso.md) |
+| 1 | Identificación y acceso | 2 servicios en el CRM: buscar cliente + OTP por SMS, y validar código + listar créditos | 🔵 **Los dos servicios implementados y desplegados en dev.** El SMS no sale hasta que el proveedor habilite la IP del servidor; mientras tanto se prueba en modo simulado ([D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale)) | [`01-…`](./01-identificacion-y-acceso.md) |
 | 2 | Menú del crédito | Info del crédito, y el ruteo a las 6 gestiones | 🟡 **En definición** (notas de reunión 2026-08-13) | [`02-…`](./02-menu-del-credito.md) |
 | 3 | Realizar un pago | Link de Pagalo, Nexa, menú dinámico de pago | 🟡 **En definición** | [`03-…`](./03-metodos-de-pago.md) |
 | 4 | Validación de boleta | Lectura de boleta, ingreso manual, pendiente de conciliación | 🟡 **En definición** | [`04-…`](./04-validacion-de-boleta.md) |

@@ -11,6 +11,7 @@ import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
+import { historialAgendasRouter } from "./historial-agendas";
 import { insuranceRouter } from "./insurance";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
@@ -211,6 +212,14 @@ export const cobrosAppRouter = {
 	configurarReduccion: premoraReduccionRouter.configurarReduccion,
 	revocarReduccion: premoraReduccionRouter.revocarReduccion,
 	recalcularElegibilidad: premoraReduccionRouter.recalcularElegibilidad,
+
+	// CB-128: historial de agendas segmentado por bucket (asesor ve lo suyo,
+	// supervisor/gerente ve todo). En su propio archivo por el límite de TS7056
+	// de este objeto — ver la nota en routers/bucket-capacidad.ts.
+	getHistorialAgendas: historialAgendasRouter.getHistorialAgendas,
+	getHistorialAgendasResumen: historialAgendasRouter.getHistorialAgendasResumen,
+	getUsuariosConGestiones: historialAgendasRouter.getUsuariosConGestiones,
+	getAuditoriaContacto: historialAgendasRouter.getAuditoriaContacto,
 
 	// Seguimientos programados
 	createSeguimiento: seguimientosRouter.createSeguimiento,

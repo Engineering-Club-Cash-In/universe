@@ -50,6 +50,10 @@ import {
 	PREFIJO_PREMORA_AUTO,
 	PREFIJO_WSP_MASIVO,
 } from "../jobs/cierre-diario-asesores";
+import {
+	payloadEdicionManual,
+	registrarAuditContacto,
+} from "../lib/audit-contactos";
 import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
 import {
 	deriveHasCapitalData,
@@ -85,10 +89,12 @@ import {
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
 	ESTADOS_AGING_VALIDOS,
+	esperarCatalogoBuckets,
 	estadoMoraPorCuotas,
 	getBucketsParaUIAsync,
 	isDynamicCatalogLoaded,
 	MORA_BUCKETS,
+	numeroBucketPorCuotas,
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
 } from "../lib/moraBuckets";
@@ -100,6 +106,10 @@ import {
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
 import { primerTelefono } from "../lib/phone-utils";
+import {
+	aplicarCambiosEstadoPromesa,
+	auditarTransiciones,
+} from "../lib/promesa-estado-batch";
 import {
 	derivarEstadoCredito,
 	type EstadoPromesa,
@@ -558,6 +568,89 @@ async function promesaActivaDelCaso(casoCobroId: string) {
 		)
 		.limit(1);
 	return row ?? null;
+}
+
+/**
+ * CB-128 (AC-2): bucket del crédito al momento de registrar la gestión.
+ *
+ * BEST-EFFORT por diseño: si el caso no tiene número SIFCO, si cartera-back
+ * está caído o si el crédito salió del funnel (EN_CONVENIO/CANCELADO/…, que no
+ * tienen bucket), devuelve null y la gestión se guarda igual. Registrar la
+ * gestión es lo que no puede fallar — el snapshot es un dato de reportería, y
+ * bloquear al asesor por él sería invertir las prioridades.
+ *
+ * NO PASA POR CACHE: `getBucketActualCredito` va siempre a la red (el cliente
+ * de cartera-back no cachea ese endpoint). Es lo que queremos acá — el snapshot
+ * debe ser el bucket EXACTO del momento, y un valor cacheado podría ser previo
+ * a un cambio reciente y grabar un dato falso justo en la columna que existe
+ * para preservar la verdad histórica. Si algún día se le agrega cache a ese
+ * endpoint, esta llamada tiene que quedar fuera.
+ *
+ * Como cada llamada va a la red, se acota con un TIMEOUT CORTO (3s). El default
+ * del cliente son 30s con hasta 3 reintentos: en el peor caso serían ~93s
+ * colgando el guardado del asesor por un dato de reportería. Con 3s, si
+ * cartera-back no responde rápido se graba NULL y la gestión se guarda igual.
+ *
+ * ── Por qué EN SERIE antes del INSERT y no diferido ───────────────────────
+ *
+ * Esos 3s de peor caso se pagan en el camino del asesor, así que la alternativa
+ * obvia es insertar con NULL y completar el bucket con un UPDATE después de
+ * responder. Se descartó: ese UPDATE sería una CUARTA escritura sobre
+ * contactos_cobros, y el AC-6 exige que toda alteración quede auditada — habría
+ * que auditar cada creación de gestión, llenando la bitácora de ruido para
+ * ahorrar una latencia que solo aparece cuando cartera-back está degradado.
+ *
+ * El caso normal es una llamada rápida; los 3s son el techo, no el costo
+ * típico. Si algún día la latencia p95 de getBucketActualCredito se acerca al
+ * timeout, la salida correcta NO es diferir el UPDATE sino leer el bucket de
+ * `casos_cobros.estado_mora`, que ya está denormalizado localmente y no cuesta
+ * red — a costa de ser el estado del último sync y no el del instante exacto.
+ */
+const TIMEOUT_BUCKET_SNAPSHOT_MS = 3000;
+
+async function capturarBucketSnapshot(
+	casoCobroId: string,
+): Promise<number | null> {
+	try {
+		const [caso] = await db
+			.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+			.from(casosCobros)
+			.where(eq(casosCobros.id, casoCobroId))
+			.limit(1);
+
+		const sifco = caso?.numeroCreditoSifco?.trim();
+		if (!sifco) return null;
+
+		// Carrera contra el reloj: lo que gane primero. No se aborta la llamada
+		// subyacente (el cliente maneja su propio timeout), simplemente se deja de
+		// esperarla — registrar la gestión no puede depender de cartera-back.
+		//
+		// El timer se limpia en el finally: si gana cartera-back, un setTimeout
+		// vivo mantiene el event loop ocupado hasta 3s (en tests eso bloquea el
+		// drenaje) y bajo ráfagas se acumulan uno por gestión.
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let actual: Awaited<
+			ReturnType<typeof carteraBackClient.getBucketActualCredito>
+		>;
+		try {
+			actual = await Promise.race([
+				carteraBackClient.getBucketActualCredito(sifco),
+				new Promise<null>((resolve) => {
+					timer = setTimeout(() => resolve(null), TIMEOUT_BUCKET_SNAPSHOT_MS);
+				}),
+			]);
+		} finally {
+			if (timer) clearTimeout(timer);
+		}
+		// `bucket` ya viene null cuando el crédito está fuera del funnel.
+		return actual?.bucket ?? null;
+	} catch (error) {
+		console.error(
+			`[capturarBucketSnapshot] No se pudo resolver el bucket del caso ${casoCobroId}:`,
+			error,
+		);
+		return null;
+	}
 }
 
 export const cobrosRouter = {
@@ -1570,22 +1663,70 @@ export const cobrosRouter = {
 				// pasada): un promesaContactoId viejo (la promesa ya se cerró o venció
 				// entre que se abrió el modal y se guardó) NO debe reabrir/sobrescribir
 				// una promesa histórica cerrada (Codex PR #1232).
-				filas = await db
-					.update(contactosCobros)
-					.set({ ...datos, estadoPromesa })
-					.where(
-						and(
-							eq(contactosCobros.id, promesaContactoId),
-							eq(contactosCobros.casoCobroId, datos.casoCobroId),
-							eq(contactosCobros.estadoContacto, "promesa_pago"),
-							or(
-								eq(contactosCobros.estadoPromesa, "pendiente"),
-								isNull(contactosCobros.estadoPromesa),
+				//
+				// CB-128: este UPDATE es el ÚNICO punto del módulo donde una persona
+				// pisa datos históricos, y lo que pisa (fecha prometida, rango de
+				// cuotas, monto, comentarios) no se puede reconstruir de ningún lado.
+				// Por eso va en transacción con su auditoría: si el audit falla, el
+				// UPDATE se revierte. Dejar pasar el UPDATE sin rastro es exactamente
+				// lo que el AC-6 prohíbe, así que acá NO se usa la variante
+				// best-effort (a diferencia de los UPDATE de sistema, que sí).
+				//
+				// El bucket_snapshot NO se toca: congela el bucket de cuando NACIÓ la
+				// promesa. Re-capturarlo en cada edición reescribiría el pasado.
+				filas = await db.transaction(async (tx) => {
+					// FOR UPDATE: fija la fila mientras se lee el valor previo y se
+					// escribe, para que dos ediciones simultáneas no auditen el mismo
+					// "antes" y una pise a la otra sin dejar rastro.
+					// El guard de casoCobroId va también acá y no solo en el UPDATE:
+					// sin él se puede tomar el lock de CUALQUIER fila pasando un id
+					// ajeno al caso, y aunque el UPDATE después no la toque, la fila
+					// queda bloqueada hasta el fin de la transacción — suficiente para
+					// frenar al job nocturno.
+					const [previa] = await tx
+						.select()
+						.from(contactosCobros)
+						.where(
+							and(
+								eq(contactosCobros.id, promesaContactoId),
+								eq(contactosCobros.casoCobroId, datos.casoCobroId),
 							),
-							gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
-						),
-					)
-					.returning();
+						)
+						.for("update");
+
+					const actualizadas = await tx
+						.update(contactosCobros)
+						.set({ ...datos, estadoPromesa, updatedAt: new Date() })
+						.where(
+							and(
+								eq(contactosCobros.id, promesaContactoId),
+								eq(contactosCobros.casoCobroId, datos.casoCobroId),
+								eq(contactosCobros.estadoContacto, "promesa_pago"),
+								or(
+									eq(contactosCobros.estadoPromesa, "pendiente"),
+									isNull(contactosCobros.estadoPromesa),
+								),
+								gte(contactosCobros.fechaProximoContacto, inicioHoyGt),
+							),
+						)
+						.returning();
+
+					// Sin fila actualizada no hay nada que auditar: la promesa ya no
+					// estaba activa y el caller convierte esto en un CONFLICT.
+					if (actualizadas.length > 0 && previa) {
+						await registrarAuditContacto({
+							contactoId: promesaContactoId,
+							casoCobroId: previa.casoCobroId,
+							accion: "edicion_promesa",
+							origen: "manual",
+							valoresAnteriores: payloadEdicionManual(previa),
+							editadoPor: context.userId,
+							tx,
+						});
+					}
+
+					return actualizadas;
+				});
 				if (filas.length === 0) {
 					throw new ORPCError("CONFLICT", {
 						message:
@@ -1601,9 +1742,18 @@ export const cobrosRouter = {
 							"Ya existe una promesa activa para este caso; editala en vez de crear otra.",
 					});
 				}
+				// CB-128 (AC-2): bucket del crédito AL MOMENTO de la gestión. Se
+				// captura al crear y nunca se recalcula, para que el historial diga en
+				// qué etapa estaba la cuenta cuando se gestionó y no en cuál está hoy.
+				const bucketSnapshot = await capturarBucketSnapshot(datos.casoCobroId);
 				filas = await db
 					.insert(contactosCobros)
-					.values({ ...datos, estadoPromesa, realizadoPor: context.userId })
+					.values({
+						...datos,
+						estadoPromesa,
+						realizadoPor: context.userId,
+						bucketSnapshot,
+					})
 					.returning();
 			}
 
@@ -2649,6 +2799,8 @@ export const cobrosRouter = {
 					fechaProximoContacto: contactosCobros.fechaProximoContacto,
 					estadoContacto: contactosCobros.estadoContacto,
 					estadoPromesa: contactosCobros.estadoPromesa,
+					// CB-128: la auditoría necesita el caso para la FK.
+					casoCobroId: contactosCobros.casoCobroId,
 					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 				})
 				.from(contactosCobros)
@@ -2728,26 +2880,30 @@ export const cobrosRouter = {
 				);
 			}
 
-			// Persistir — best-effort, no debe tumbar la respuesta de lectura.
-			// allSettled, no all: un UPDATE que falle no debe bloquear la
-			// persistencia de las demás promesas (`resultado` ya se devuelve al
-			// front sin importar esto, pero la fila en DB sí queda atrás si se
-			// pierde por una sola falla ajena).
-			const resultadosPersistencia = await Promise.allSettled(
-				Object.entries(resultado).map(([id, estado]) =>
-					db
-						.update(contactosCobros)
-						.set({ estadoPromesa: estado })
-						.where(eq(contactosCobros.id, id)),
-				),
-			);
-			for (const r of resultadosPersistencia) {
-				if (r.status === "rejected") {
-					console.error(
-						"[getEstadoPromesasPago] Error persistiendo estadoPromesa:",
-						r.reason,
-					);
-				}
+			// Persistir — best-effort, no debe tumbar la respuesta de lectura:
+			// `resultado` ya se devuelve al front sin importar cómo salga esto.
+			//
+			// CB-128: guard de no-op (antes se escribía SIEMPRE, aunque el estado
+			// calculado fuera idéntico al guardado — ruido puro en el camino
+			// caliente, y auditarlo habría llenado la bitácora de filas
+			// 'pendiente → pendiente') + auditoría de la transición real.
+			//
+			// TODO EL LOTE VA EN UNA SOLA TRANSACCIÓN, no una por promesa. Con
+			// `promesaIds` capado a 100, una transacción por fila dentro de un
+			// allSettled tomaba hasta 100 conexiones a la vez contra un pool de 10
+			// para toda la app — un handler de LECTURA dejaba al resto del CRM
+			// esperando. El helper además ordena los locks por id, que es lo que
+			// evita el deadlock contra el job nocturno. Ver lib/promesa-estado-batch.ts.
+			try {
+				const transiciones = await aplicarCambiosEstadoPromesa(
+					Object.entries(resultado).map(([id, estado]) => ({ id, estado })),
+				);
+				await auditarTransiciones(transiciones, "sistema_lectura");
+			} catch (error) {
+				console.error(
+					"[getEstadoPromesasPago] Error persistiendo estadoPromesa:",
+					error,
+				);
 			}
 
 			// CB-030: promesa recién CUMPLIDA → push best-effort marcando
@@ -3858,7 +4014,9 @@ export const cobrosRouter = {
 				const contractSummary = resolveCreditContractSummary(
 					statusCredit,
 					creditoCompleto.cuotasPagadas,
-					creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
+					creditoCompleto.credito.capital ??
+						creditoCompleto.credito.deudatotal ??
+						"0.00",
 					resolveHistoricalInstallment(
 						creditoCompleto.credito.cuota,
 						oportunidadData?.cuotaMensual,
@@ -5189,6 +5347,19 @@ export const cobrosRouter = {
 
 			// 4. Construir recipients, aplicando reglas de descarte.
 			const testMode = isTestModeEnabled();
+
+			// CB-128: una sola espera del catálogo de buckets ANTES del loop. Los
+			// helpers de moraBuckets refrescan en background, así que la primera
+			// llamada tras un deploy usaría el fallback estático — y acá ese valor
+			// no es transitorio: queda CONGELADO en `bucket_snapshot` de cientos de
+			// filas de golpe. Una espera para todo el lote, nunca por fila.
+			//
+			// Se espera TAMBIÉN en test mode: lo único que cambia ahí es el teléfono
+			// destino, las gestiones se graban igual y con el mismo bucket_snapshot.
+			// Saltarla dejaría al modo de prueba escribiendo buckets distintos a los
+			// de producción, que es justo lo contrario de lo que sirve para probar.
+			await esperarCatalogoBuckets();
+
 			type Candidato = {
 				numeroSifco: string;
 				telefono: string; // destino efectivo (test o real)
@@ -5196,6 +5367,7 @@ export const cobrosRouter = {
 				mensaje: string;
 				casoCobroId: string | null;
 				clienteNombre: string | null; // para reportar en descartados si falla
+				bucketSnapshot: number | null; // CB-128, derivado de cuotas atrasadas
 			};
 			const candidatos: Candidato[] = [];
 			const descartados: Array<{
@@ -5312,6 +5484,23 @@ export const cobrosRouter = {
 					mensaje,
 					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
 					clienteNombre,
+					// CB-128: bucket del momento para el historial de agendas. Se
+					// DERIVA de las cuotas atrasadas que ya vienen en `credito.mora`
+					// (mismo dato que arriba alimenta la plantilla) en vez de llamar a
+					// capturarBucketSnapshot: eso sería una petición de red por
+					// destinatario dentro de un envío que puede tener cientos, y con el
+					// timeout de 3s cada una haría el envío inviable. Acá el dato ya
+					// está en memoria, así que sale gratis.
+					//
+					// `statusCredit` va junto porque este loop NO filtra por funnel: sus
+					// descartes son por cuota/teléfono/asesor, y `estadoCartera` puede
+					// venir en CANCELADO/INCOBRABLE/PENDIENTE_CANCELACION cuando el
+					// supervisor filtra por esos estados. Sin ese dato, esos créditos se
+					// grabarían con un bucket numérico inventado.
+					bucketSnapshot: numeroBucketPorCuotas(
+						credito.mora?.cuotas_atrasadas ?? 0,
+						credito.creditos.statusCredit,
+					),
 				});
 			}
 
@@ -5338,6 +5527,7 @@ export const cobrosRouter = {
 				estadoContacto: "contactado";
 				comentarios: string;
 				realizadoPor: string;
+				bucketSnapshot: number | null;
 			}> = [];
 
 			for (let i = 0; i < candidatos.length; i += CHUNK_SIZE) {
@@ -5429,6 +5619,8 @@ export const cobrosRouter = {
 							estadoContacto: "contactado",
 							comentarios: `Envío masivo de WhatsApp — Plantilla: ${plantilla.nombre}`,
 							realizadoPor: context.userId,
+							// CB-128: derivado al armar el candidato, sin llamada de red.
+							bucketSnapshot: c.bucketSnapshot,
 						});
 					}
 				}

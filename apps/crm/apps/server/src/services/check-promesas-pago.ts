@@ -20,6 +20,10 @@ import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
+	aplicarCambiosEstadoPromesa,
+	auditarTransiciones,
+} from "../lib/promesa-estado-batch";
+import {
 	derivarEstadoCredito,
 	type EstadoPromesa,
 	evaluarPromesa,
@@ -80,6 +84,9 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 				incluyeMora: contactosCobros.incluyeMora,
 				fechaProximoContacto: contactosCobros.fechaProximoContacto,
 				fechaAlerta: contactosCobros.fechaAlerta,
+				// CB-128: estado ANTES de esta corrida — es el "de" de la transición
+				// que se audita cuando el estado efectivamente cambia.
+				estadoPromesa: contactosCobros.estadoPromesa,
 			})
 			.from(contactosCobros)
 			.where(
@@ -158,8 +165,15 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 				const credito = await carteraBackClient.getCredito(sifco);
 				const estadoCredito = derivarEstadoCredito(credito);
 
-				const actualizaciones: Array<{ id: string; estado: EstadoPromesa }> =
-					[];
+				// CB-128: se arrastra el caso para la FK del audit. El estado PREVIO
+				// NO se guarda acá a propósito — se lee dentro de la transacción que
+				// escribe, porque para entonces este valor ya puede estar
+				// desactualizado (ver la nota del bloque de persistencia).
+				const actualizaciones: Array<{
+					id: string;
+					estado: EstadoPromesa;
+					casoCobroId: string;
+				}> = [];
 				// Candidatas a notificar: toda promesa incumplida de este crédito
 				// (con su fecha prometida, que ancla el dedup por episodio).
 				const candidatos: Array<{
@@ -186,7 +200,11 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 						estadoCredito,
 						hoy,
 					);
-					actualizaciones.push({ id: promesa.id, estado });
+					actualizaciones.push({
+						id: promesa.id,
+						estado,
+						casoCobroId: promesa.casoCobroId,
+					});
 					if (estado === "incumplida") {
 						candidatos.push({
 							promesaId: promesa.id,
@@ -221,36 +239,49 @@ export async function checkPromesasPago(): Promise<CheckPromesasResumen> {
 					else resumen.pendientes++;
 				}
 
-				// allSettled, no all: un UPDATE que falle no debe tumbar los demás
-				// del mismo crédito — con Promise.all, una fila mala bloqueaba la
-				// persistencia de TODAS sus hermanas (aunque ya se hubieran
-				// calculado bien), y el catch de abajo las contaba a todas como
-				// error aunque solo una fallara.
-				const resultados = await Promise.allSettled(
-					actualizaciones.map(({ id, estado }) =>
-						db
-							.update(contactosCobros)
-							.set({ estadoPromesa: estado })
-							.where(eq(contactosCobros.id, id)),
-					),
-				);
+				// CB-128: guard de no-op + auditoría de la transición, todo el lote
+				// de este crédito en UNA transacción.
+				//
+				// Cuando el estado calculado ya es el guardado no se escribe nada.
+				// Eso NO es un error ni un cambio de semántica para el resumen — el
+				// resumen cuenta EVALUACIONES (arriba, sobre `estado`), no
+				// escrituras, y una promesa que sigue igual sí se evaluó. Solo un
+				// fallo de escritura revierte el conteo, igual que antes.
+				//
+				// Antes esto era un `Promise.allSettled` con una transacción por
+				// promesa. Dos problemas: N conexiones concurrentes del pool (que es
+				// de 10 para toda la app), y locks tomados en orden arbitrario, lo
+				// que podía trabar este job contra una Ficha 360 abierta sobre las
+				// mismas filas. El helper toma los locks ordenados por id, así que el
+				// deadlock deja de ser posible. Ver lib/promesa-estado-batch.ts.
+				//
+				// El "de" que se audita se lee DENTRO de la transacción que escribe y
+				// no del SELECT del inicio del job: entre ambos momentos pudo correr
+				// getEstadoPromesasPago (cada apertura de Ficha 360 recalcula), y
+				// auditar el valor viejo registraría una transición que nunca ocurrió.
 				const idsRechazados = new Set<string>();
-				for (let i = 0; i < resultados.length; i++) {
-					const resultado = resultados[i];
-					if (resultado.status === "rejected") {
-						const { estado } = actualizaciones[i];
+				try {
+					const transiciones =
+						await aplicarCambiosEstadoPromesa(actualizaciones);
+					await auditarTransiciones(transiciones, "sistema_job");
+				} catch (error) {
+					// La transacción es todo-o-nada: si falla, NINGUNA promesa de este
+					// crédito quedó persistida. Antes el allSettled podía dejar algunas
+					// escritas y otras no, y por eso el rechazo se rastreaba por id;
+					// ahora el conjunto rechazado es, siempre, el lote completo.
+					for (const { id, estado } of actualizaciones) {
 						// Revertir el conteo de éxito hecho arriba — la evaluación fue
 						// correcta pero la escritura falló, no debe contar como logro.
 						if (estado === "cumplida") resumen.cumplidas--;
 						else if (estado === "incumplida") resumen.incumplidas--;
 						else resumen.pendientes--;
 						resumen.errores++;
-						idsRechazados.add(actualizaciones[i].id);
-						console.error(
-							`${LOG_PREFIX} Error persistiendo promesa ${actualizaciones[i].id}:`,
-							resultado.reason,
-						);
+						idsRechazados.add(id);
 					}
+					console.error(
+						`${LOG_PREFIX} Error persistiendo el lote de promesas de ${sifco}:`,
+						error,
+					);
 				}
 
 				// Solo considerar incumplidas cuyo UPDATE sí persistió.

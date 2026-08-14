@@ -496,6 +496,12 @@ export async function sendPremoraReminders(
 			// 5. Historial de contacto del CRM (requisito: que quede en el
 			//    histórico que ya existe). Solo si el crédito tiene caso —
 			//    `contactos_cobros.caso_cobro_id` es NOT NULL.
+			//    CB-128: `bucket_snapshot` queda NULL a propósito. Este job trabaja
+			//    sobre cuotas PRÓXIMAS A VENCER, no sobre mora, así que no tiene
+			//    `cuotas_atrasadas` a mano para derivar el bucket — y resolverlo
+			//    exigiría una llamada a cartera-back por recordatorio. Son
+			//    notificaciones del sistema, excluidas por defecto del historial de
+			//    agendas. Ver la nota de bucketSnapshot en db/schema/cobros.ts.
 			const caso = casoPorSifco.get(cuota.numero_credito_sifco);
 			if (caso) {
 				try {

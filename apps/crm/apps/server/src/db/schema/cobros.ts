@@ -6,6 +6,7 @@ import {
 	decimal,
 	index,
 	integer,
+	jsonb,
 	pgEnum,
 	pgTable,
 	text,
@@ -276,13 +277,137 @@ export const contactosCobros = pgTable(
 			.notNull()
 			.references(() => user.id),
 
+		// CB-128: bucket que tenía el crédito AL MOMENTO de registrar la gestión.
+		// Congelado a propósito — el AC pide segmentar el historial por el bucket
+		// de entonces, no por el de hoy (una cuenta que subió de B1 a B3 no debe
+		// re-etiquetar retroactivamente la gestión que se hizo cuando estaba en
+		// B1).
+		//
+		// Se llena en tres de los cuatro puntos que insertan en esta tabla:
+		//   - createContactoCobros (gestión manual) → capturarBucketSnapshot(),
+		//     una llamada a cartera-back con timeout corto y best-effort.
+		//   - envío masivo de WhatsApp → DERIVADO de `cuotas_atrasadas`, que ese
+		//     flujo ya tiene en memoria. Sin red: llamar a cartera-back por cada
+		//     destinatario haría inviable un envío de cientos.
+		//   - premora / convenio (send-*-reminders.ts) → queda NULL A PROPÓSITO.
+		//     Esos jobs no traen las cuotas atrasadas del crédito (trabajan sobre
+		//     cuotas próximas a vencer, no sobre mora), así que derivarlo exigiría
+		//     una llamada de red por recordatorio. Son notificaciones del sistema,
+		//     excluidas por defecto de la vista, y de volumen bajo — el costo no se
+		//     justifica. Si algún día importa, la vía es traer `cuotas_atrasadas`
+		//     en la query de esos jobs, NO llamar a cartera-back por fila.
+		//
+		// NULL = desconocido: filas anteriores a CB-128 (no hay backfill), los
+		// recordatorios automáticos de arriba, o cartera-back no respondió al
+		// crearla.
+		bucketSnapshot: integer("bucket_snapshot"),
+
 		createdAt: timestamp("created_at").notNull().defaultNow(),
+		// CB-128: última escritura sobre la fila. Dato TÉCNICO, no de negocio: lo
+		// tocan también los UPDATE de sistema que solo recalculan estado_promesa,
+		// así que NO sirve para decir "esto lo editaron". La marca de edición que
+		// ve el usuario sale de contactos_cobros_audit con origen='manual'.
+		updatedAt: timestamp("updated_at"),
 	},
 	(table) => [
 		index("idx_contactos_cobros_caso_fecha").on(
 			table.casoCobroId,
 			table.fechaContacto,
 		),
+		// CB-128 — índices de escala. El de arriba solo sirve a la Ficha 360 (un
+		// caso a la vez); el historial de agendas filtra por rango de fechas
+		// GLOBAL, sin caso_cobro_id. Proyección del negocio: 5× créditos a 5 años
+		// ⇒ ~500k-800k filas acá, donde un seq scan por carga deja de ser viable.
+		index("idx_contactos_cobros_fecha").on(table.fechaContacto.desc()),
+		// Scoping del asesor: filtro por usuario + orden por fecha van SIEMPRE
+		// juntos en esa vista, por eso compuesto y no dos índices sueltos.
+		index("idx_contactos_cobros_realizado_fecha").on(
+			table.realizadoPor,
+			table.fechaContacto.desc(),
+		),
+		// Segmentación por bucket (el corazón del AC). Parcial: las filas con
+		// snapshot NULL nunca se filtran por bucket, indexarlas es peso muerto.
+		index("idx_contactos_cobros_bucket_fecha")
+			.on(table.bucketSnapshot, table.fechaContacto.desc())
+			.where(sql`${table.bucketSnapshot} IS NOT NULL`),
+	],
+);
+
+// CB-128 — auditoría de escrituras sobre contactos_cobros (AC-6: "no se
+// eliminan ni alteran registros históricos sin auditoría").
+//
+// contactos_cobros es append-only SALVO tres UPDATE, que esta tabla cubre:
+//
+//   1. Edición manual de la promesa activa (CB-029, cobros.ts createContacto-
+//      Cobros rama promesaContactoId). Baja frecuencia, decisión humana, pisa
+//      la fila ENTERA (cuotas, monto, fecha prometida, comentarios). Es el
+//      único caso donde se PIERDE información irrecuperable: sin esto no queda
+//      rastro de que el cliente prometió el día 10 y luego se movió al 20.
+//      → origen='manual', valores_anteriores = snapshot completo de la fila.
+//
+//   2. getEstadoPromesasPago (cobros.ts) — recalcula estado_promesa en cada
+//      apertura de Ficha 360.
+//   3. check-promesas-pago.ts — mismo recálculo, job nocturno.
+//      → origen='sistema_lectura'/'sistema_job', valores_anteriores = {de, a}.
+//      Solo la transición: estado_promesa es función pura de columnas que ya
+//      persisten (cuota_inicio/cuota_fin/incluye_mora/fecha_proximo_contacto)
+//      contra el estado del crédito — es lo que hace evaluarPromesa(), o sea
+//      que es reconstruible y guardar el snapshot completo sería redundante.
+//
+// Los casos 2 y 3 SOLO se auditan porque llevan guard de no-op (ver el `or(
+// isNull, ne)` en sus WHERE): sin él escribirían en cada corrida aunque el
+// estado no cambie, y esta tabla se llenaría de filas 'pendiente → pendiente'
+// (~36,500/año con 100 promesas vivas). El guard es prerequisito, no adorno.
+//
+// LO QUE ESTA TABLA NO CAPTURA — explícito para no asumir cobertura de más:
+//   - Cambios en casos_cobros (7 UPDATE: reasignación de responsable,
+//     etiquetas, próximo contacto, sync SIFCO). Fuera del alcance de CB-128,
+//     que es historial de GESTIONES, no de cuentas. Deuda conocida:
+//     casos_cobros tiene updated_at pero ningún updated_by.
+//   - DELETE: no existe ninguno en producción (el único está en db/clear.ts,
+//     seed). Ojo que la FK es ON DELETE CASCADE, así que si algún día se
+//     borrara un contacto su auditoría se iría con él.
+//   - Lecturas: quién consultó el historial no se registra.
+//   - No reemplaza buckets_historial ni credito_asesor_historial (cartera-back),
+//     que ya cubren transiciones de bucket y reasignaciones con su propia
+//     bitácora append-only.
+//
+// `accion` y `valores_anteriores` (jsonb) son deliberadamente genéricos: un
+// UPDATE futuro sobre contactos_cobros entra sin migración. Si la tabla solo
+// supiera de promesas, el próximo UPDATE rompería el AC-6 en silencio.
+export const contactosCobrosAudit = pgTable(
+	"contactos_cobros_audit",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		contactoId: uuid("contacto_id")
+			.notNull()
+			.references(() => contactosCobros.id, { onDelete: "cascade" }),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id),
+
+		// 'edicion_promesa' | 'cambio_estado_promesa' — texto libre a propósito
+		// (ver nota de genericidad arriba).
+		accion: text("accion").notNull(),
+		// 'manual' | 'sistema_lectura' | 'sistema_job'
+		origen: text("origen").notNull(),
+		valoresAnteriores: jsonb("valores_anteriores").notNull(),
+
+		// NULL cuando origen != 'manual': los UPDATE de sistema no tienen usuario.
+		editadoPor: text("editado_por").references(() => user.id),
+		editadoEn: timestamp("editado_en").notNull().defaultNow(),
+	},
+	(table) => [
+		index("idx_contactos_audit_contacto").on(
+			table.contactoId,
+			table.editadoEn.desc(),
+		),
+		index("idx_contactos_audit_caso").on(table.casoCobroId),
+		// El listado del historial solo pregunta "¿lo editó un humano?" — parcial
+		// para que ese lookup no pague por las filas de sistema, que son mayoría.
+		index("idx_contactos_audit_manual")
+			.on(table.contactoId)
+			.where(sql`${table.origen} = 'manual'`),
 	],
 );
 

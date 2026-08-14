@@ -355,6 +355,10 @@ export async function sendConvenioReminders(
 			resumen.enviados++;
 
 			// 5. Historial de contacto (si el crédito tiene caso).
+			//    CB-128: `bucket_snapshot` queda NULL a propósito — mismo criterio
+			//    que send-premora-reminders.ts. Este job trabaja sobre cuotas del
+			//    convenio próximas a vencer y no tiene `cuotas_atrasadas` a mano
+			//    para derivar el bucket. Ver db/schema/cobros.ts.
 			const caso = casoPorSifco.get(cuota.numero_credito_sifco);
 			if (caso) {
 				try {

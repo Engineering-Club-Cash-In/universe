@@ -42,15 +42,27 @@ export const getRenapData = async (dpi: string): Promise<RenapResponse> => {
     },
   });
   const data = (await response.json()) as RenapResponse;
+
+  // 🛡️ Centinela responde 500 / success:false cuando RENAP no tiene el DPI.
+  // En ese caso `data.data` viene sin los campos de la persona y reventaba abajo
+  // con un TypeError genérico, tapando la causa real.
+  if (!data?.success || !data?.data?.dpi) {
+    throw new Error(
+      `RENAP: no se encontraron datos para el DPI ${dpi}` +
+        (data?.message ? ` (${data.message})` : "")
+    );
+  }
+
   return {
     ...data,
     error: null,
     data: {
       ...data.data,
-      picture: data.data.picture.replace(
-        "https://funtec-uploads.s3.amazonaws.com/",
-        CLOUDFRONT_URL
-      ),
+      picture:
+        data.data.picture?.replace(
+          "https://funtec-uploads.s3.amazonaws.com/",
+          CLOUDFRONT_URL
+        ) ?? "",
     },
   };
 };

@@ -305,7 +305,14 @@ function HistorialAgendasPage() {
 		() => ({
 			desde: rangoFechas?.from ? aFechaISO(rangoFechas.from) : undefined,
 			hasta: rangoFechas?.to ? aFechaISO(rangoFechas.to) : undefined,
-			roles: rol === "todos" ? undefined : [rol],
+			// El selector de rol solo se renderiza para esSupervisor (más abajo en
+			// el JSX). Sin este gate, un `rol` heredado en sessionStorage de una
+			// sesión previa con más permisos (u otro usuario en el mismo perfil de
+			// navegador) se seguiría mandando para un asesor que ni lo ve ni puede
+			// cambiarlo — el backend lo combina con su scope forzado por
+			// `realizado_por` y devuelve 0 filas sin ninguna pista visible de por
+			// qué.
+			roles: esSupervisor && rol !== "todos" ? [rol] : undefined,
 			buckets: buckets?.length ? buckets : undefined,
 			estadoContacto: estadoContacto === "todos" ? undefined : [estadoContacto],
 			metodoContacto: metodoContacto === "todos" ? undefined : [metodoContacto],
@@ -316,6 +323,7 @@ function HistorialAgendasPage() {
 		[
 			rangoFechas,
 			rol,
+			esSupervisor,
 			buckets,
 			estadoContacto,
 			metodoContacto,
@@ -365,6 +373,29 @@ function HistorialAgendasPage() {
 		esSupervisor,
 	]);
 
+	// Persiste el saneo de vuelta a sessionStorage. Sin esto, `usuarioIds` crudo
+	// seguía teniendo los ids que ya no están en el catálogo actual (solo se
+	// filtraban en memoria para ESTA consulta); si un filtro posterior volvía a
+	// ampliar el catálogo, esos ids reaparecían y se reactivaban como selección
+	// sin que el usuario los hubiera vuelto a elegir. Se compara por contenido,
+	// no por referencia, para no reescribir sessionStorage (y no re-disparar
+	// este efecto) en cada render.
+	useEffect(() => {
+		if (usuarioIdsVigentes === usuarioIds) return;
+		if (
+			usuarioIdsVigentes &&
+			usuarioIds &&
+			usuarioIdsVigentes.length === usuarioIds.length &&
+			usuarioIdsVigentes.every((id, i) => id === usuarioIds[i])
+		) {
+			return;
+		}
+		// `usuarioIds` (no saneado) sigue siendo la fuente de verdad mientras el
+		// catálogo carga: `usuarioIdsVigentes` devuelve el mismo array en ese caso
+		// (ver arriba), así que este efecto no corre hasta que ya sea seguro.
+		setUsuarioIds(usuarioIdsVigentes ?? null);
+	}, [usuarioIdsVigentes, usuarioIds, setUsuarioIds]);
+
 	const filtros = useMemo(
 		() => ({ ...filtrosBase, usuarioIds: usuarioIdsVigentes }),
 		[filtrosBase, usuarioIdsVigentes],
@@ -388,6 +419,16 @@ function HistorialAgendasPage() {
 	const resumenData = resumen.data as ResumenHistorial | undefined;
 	const items = datos?.items ?? [];
 	const totalPaginas = datos?.totalPaginas ?? 1;
+
+	// Con `totalEsAproximado` el servidor capó el COUNT en 10,000 (ver
+	// LIMITE_CONTEO), pero el listado en sí no tiene ese techo: sigue sirviendo
+	// páginas más allá. Bloquear "Siguiente" con `page >= totalPaginas` (derivado
+	// del total capado) dejaba inalcanzables todas las filas después de la
+	// 10,000. En el caso aproximado, la página actual llena es la única señal de
+	// que puede haber más.
+	const hayMasPaginas = datos?.totalEsAproximado
+		? items.length === pageSize
+		: page < totalPaginas;
 
 	/**
 	 * Chips de bucket: los que trae el resumen MÁS los que estén seleccionados
@@ -940,7 +981,7 @@ function HistorialAgendasPage() {
 							<Button
 								variant="outline"
 								size="sm"
-								disabled={page >= totalPaginas}
+								disabled={!hayMasPaginas}
 								onClick={() => setPage((p) => p + 1)}
 							>
 								Siguiente

@@ -414,7 +414,18 @@ function HistorialAgendasPage() {
 	const usuarios = (usuariosQuery.data ?? []) as UsuarioCobros[];
 
 	/**
-	 * Selección de usuario vigente para el filtro real (no el desplegable).
+	 * Selección de usuario que ve y edita el multi-select — DISTINTA del valor
+	 * que se manda al backend (ver `usuarioIdsParaBackend` más abajo).
+	 *
+	 * `[]` ("Deseleccionar todos") y `null` (nunca elegido / "Seleccionar
+	 * todos") son estados DIFERENTES para el componente, aunque el backend trate
+	 * a ambos como "sin filtro". Colapsarlos acá a uno solo (`undefined`) hacía
+	 * que el multi-select recibiera `null` después de un "Deseleccionar todos" y
+	 * pintara TODOS los usuarios como marcados (`vigentes === null` → `selected
+	 * = allIds`); el siguiente click en un usuario entonces lo SACABA del
+	 * conjunto completo en vez de dejarlo como única selección — un supervisor
+	 * que quería filtrar por una sola persona terminaba filtrando por todas
+	 * menos esa.
 	 *
 	 * NO se valida contra `usuarios` (el catálogo). Versión anterior descartaba
 	 * cualquier id que no apareciera en `usuarios`, tratándolo como "ya no
@@ -425,10 +436,7 @@ function HistorialAgendasPage() {
 	 * legítimamente, no por estar "borrada" — y el saneo antiguo lo interpretaba
 	 * igual que un id inválido, lo tiraba, y listado/KPIs/export seguían
 	 * corriendo SIN el filtro: pasaban de "cero resultados para este usuario" a
-	 * "todo el equipo", en silencio. Mismo problema estructural que ya se corrigió
-	 * para sesión-cargando y catálogo-con-error, pero esta vez con el catálogo
-	 * respondiendo bien — la causa real es usar un catálogo filtrado como fuente
-	 * de verdad de "el id existe".
+	 * "todo el equipo", en silencio.
 	 *
 	 * El único saneo real que queda: limpiar la selección para quien NO es
 	 * supervisor (el filtro no se ve ni se puede tocar). El backend maneja bien
@@ -436,14 +444,10 @@ function HistorialAgendasPage() {
 	 * siendo scope-safe: el supervisor solo puede filtrar por ids reales que el
 	 * multi-select le ofreció alguna vez.
 	 */
-	const usuarioIdsVigentes = useMemo(() => {
-		if (!usuarioIds?.length) return undefined;
-		if (!esSupervisor) return undefined;
-		return usuarioIds;
-	}, [usuarioIds, esSupervisor]);
+	const usuarioIdsUI = esSupervisor ? usuarioIds : null;
 
-	// Persiste a sessionStorage el único caso en que `usuarioIdsVigentes` difiere
-	// de `usuarioIds`: cuando el usuario actual NO es supervisor. Sin esto, un
+	// Persiste a sessionStorage el único caso en que `usuarioIdsUI` difiere de
+	// `usuarioIds`: cuando el usuario actual NO es supervisor. Sin esto, un
 	// asesor que alguna vez tuvo una selección persistida (rol degradado, sesión
 	// compartida) la sigue arrastrando en sessionStorage aunque el filtro nunca
 	// se le aplique en memoria — y volvería a aplicarse solo si el rol cambia de
@@ -451,33 +455,50 @@ function HistorialAgendasPage() {
 	// compara por contenido, no por referencia, para no reescribir sessionStorage
 	// (y no re-disparar este efecto) en cada render.
 	useEffect(() => {
-		if (usuarioIdsVigentes === usuarioIds) return;
+		if (usuarioIdsUI === usuarioIds) return;
 		if (
-			usuarioIdsVigentes &&
+			usuarioIdsUI &&
 			usuarioIds &&
-			usuarioIdsVigentes.length === usuarioIds.length &&
-			usuarioIdsVigentes.every((id, i) => id === usuarioIds[i])
+			usuarioIdsUI.length === usuarioIds.length &&
+			usuarioIdsUI.every((id, i) => id === usuarioIds[i])
 		) {
 			return;
 		}
-		setUsuarioIds(usuarioIdsVigentes ?? null);
-	}, [usuarioIdsVigentes, usuarioIds, setUsuarioIds]);
+		setUsuarioIds(usuarioIdsUI);
+	}, [usuarioIdsUI, usuarioIds, setUsuarioIds]);
+
+	/**
+	 * Valor que se manda al backend: `[]` SÍ se colapsa a `undefined` acá (a
+	 * diferencia de `usuarioIdsUI`), porque `whereHistorial` en el server trata
+	 * un array vacío como "sin filtro" — mandarlo tal cual sería redundante con
+	 * `undefined`, no incorrecto, pero mantener la distinción solo donde importa
+	 * (la UI) evita cargar esa sutileza en el resto del archivo.
+	 */
+	const usuarioIdsParaBackend = usuarioIdsUI?.length ? usuarioIdsUI : undefined;
 
 	const filtros = useMemo(
-		() => ({ ...filtrosBase, usuarioIds: usuarioIdsVigentes }),
-		[filtrosBase, usuarioIdsVigentes],
+		() => ({ ...filtrosBase, usuarioIds: usuarioIdsParaBackend }),
+		[filtrosBase, usuarioIdsParaBackend],
 	);
+
+	// `canAccessCobros`, no solo `!!session`: ambos procedures están gateados
+	// por `cobrosProcedure` en el server, así que un usuario autenticado SIN el
+	// permiso (que abre la URL directo, sin pasar por el menú que ya la
+	// esconde) disparaba las queries igual — el rechazo del backend llegaba
+	// como reintentos y toasts de error globales detrás de la pantalla de
+	// "Acceso Denegado" que de todas formas se termina mostrando más abajo.
+	const puedeConsultar = !!userRole && PERMISSIONS.canAccessCobros(userRole);
 
 	const listado = useQuery({
 		...orpcAny.getHistorialAgendas.queryOptions({
 			input: { ...filtros, page, pageSize },
 		}),
-		enabled: !!session,
+		enabled: !!session && puedeConsultar,
 	});
 
 	const resumen = useQuery({
 		...orpcAny.getHistorialAgendasResumen.queryOptions({ input: filtros }),
-		enabled: !!session,
+		enabled: !!session && puedeConsultar,
 		// No se recalcula al paginar: los agregados no dependen de la página.
 		staleTime: 60_000,
 	});
@@ -528,11 +549,11 @@ function HistorialAgendasPage() {
 
 	const filtrosActivos = [
 		rangoFechas?.from,
-		// El vigente, no el persistido: para un asesor `usuarioIdsVigentes` es
-		// siempre `undefined` aunque haya algo guardado (el filtro no se le
-		// aplica), así que contar el crudo mostraría "Limpiar (1)" sin que haya
-		// nada real que limpiar.
-		usuarioIdsVigentes?.length,
+		// El de UI, no el persistido crudo: para un asesor `usuarioIdsUI` es
+		// siempre `null` aunque haya algo guardado (el filtro no se le aplica),
+		// así que contar el crudo mostraría "Limpiar (1)" sin que haya nada real
+		// que limpiar.
+		usuarioIdsUI?.length,
 		buckets?.length,
 		rol !== "todos" || null,
 		estadoContacto !== "todos" || null,
@@ -850,22 +871,23 @@ function HistorialAgendasPage() {
 								// priori, asumiendo que el usuario elegido podía no tener
 								// gestiones en el rango nuevo — la misma suposición que ya se
 								// quitó del saneo automático (ver la nota larga en
-								// `usuarioIdsVigentes`), con el mismo problema: si SÍ sigue
-								// teniendo gestiones ahí, se le borraba la selección sin
-								// necesidad. Si de verdad no tiene, la tabla trae 0 filas —
-								// correcto y visible (el multi-select sigue mostrando a quién
-								// se filtra).
+								// `usuarioIdsUI`), con el mismo problema: si SÍ sigue teniendo
+								// gestiones ahí, se le borraba la selección sin necesidad. Si de
+								// verdad no tiene, la tabla trae 0 filas — correcto y visible
+								// (el multi-select sigue mostrando a quién se filtra).
 							}}
 						/>
 
 						{esSupervisor && (
 							<UsuarioCobrosMultiSelect
 								usuarios={usuarios}
-								// El valor YA saneado, el mismo que se manda al backend. Antes
-								// acá iba `usuarioIds` crudo y el componente hacía su propio
-								// filtrado: dos copias de la misma regla, y el desplegable
-								// podía mostrar un estado distinto al que realmente filtraba.
-								value={usuarioIdsVigentes ?? null}
+								// `usuarioIdsUI`, NO `usuarioIdsParaBackend`: el componente
+								// necesita distinguir `[]` ("Deseleccionar todos") de `null`
+								// (nunca elegido) para saber si el próximo click selecciona un
+								// usuario o lo saca de un conjunto ya completo (ver la nota
+								// larga en `usuarioIdsUI` — ese colapso es justo el bug que
+								// motivó separar los dos valores).
+								value={usuarioIdsUI}
 								onChange={(v) => {
 									setUsuarioIds(v);
 									setPage(1);

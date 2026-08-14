@@ -1109,7 +1109,21 @@ function HistorialAgendasPage() {
 									Anterior
 								</Button>
 								<span className="text-gray-500">
-									Página {page} de {totalPaginas}
+									{datos?.totalEsAproximado ? (
+										// `totalPaginas` sale del COUNT capado a 10,000
+										// (LIMITE_CONTEO), pero `hayMasPaginas` deliberadamente
+										// permite seguir navegando más allá de ese tope. Un número
+										// fijo se vuelve imposible apenas se cruza ("Página 201 de
+										// 200") y sigue subestimando cuántas hay en realidad —se
+										// muestra como cota inferior en vez de total exacto.
+										<>
+											Página {page} de {totalPaginas}+
+										</>
+									) : (
+										<>
+											Página {page} de {totalPaginas}
+										</>
+									)}
 								</span>
 								<Button
 									variant="outline"

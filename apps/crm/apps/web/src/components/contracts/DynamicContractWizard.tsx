@@ -177,9 +177,11 @@ interface DynamicContractWizardProps {
 		documentNames: string[],
 	) => Promise<{
 		success: boolean;
-		renapData: RenapData;
+		/** null cuando RENAP no tiene a la persona: se usan los datos del CRM */
+		renapData: RenapData | null;
 		documents: Document[];
 		fields: Field[];
+		renapUnavailable?: boolean;
 	}>;
 	onGenerate: (data: {
 		contracts: Array<{
@@ -1228,6 +1230,15 @@ export function DynamicContractWizard({
 				setDocuments(response.documents);
 				setFields(response.fields);
 				prefillFields(response.fields, response.renapData);
+
+				// RENAP no siempre tiene a la persona aunque el DPI sea correcto:
+				// se sigue con los datos de la oportunidad, pero hay que revisarlos.
+				if (response.renapUnavailable) {
+					toast.warning(
+						"RENAP no devolvió datos de este DPI. Los campos se llenaron con la información del CRM: revíselos antes de generar.",
+						{ duration: 8000 },
+					);
+				}
 
 				// Auto-calculate fecha de vencimiento if we have credit data
 				if (crmData.credito?.mesesPrestamo) {

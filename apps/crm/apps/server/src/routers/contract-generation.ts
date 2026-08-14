@@ -71,23 +71,46 @@ export const contractGenerationRouter = {
 		)
 		.handler(async ({ input }) => {
 			try {
+				// Género del CRM como fallback: RENAP a veces no tiene al cliente
+				// aunque el DPI sea correcto, y sin género no se puede elegir plantilla.
+				const [lead] = await db
+					.select({ gender: leads.gender })
+					.from(leads)
+					.where(eq(leads.dpi, input.dpi))
+					.limit(1);
+
+				const generoFallback =
+					lead?.gender === "female"
+						? ("mujer" as const)
+						: lead?.gender === "male"
+							? ("hombre" as const)
+							: undefined;
+
 				const response = await getDocumentsByDpi(
 					input.dpi,
 					input.documentNames,
+					generoFallback,
 				);
 				if (!response.success) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: response.message || "Error al obtener documentos",
 					});
 				}
+				if (response.renapUnavailable) {
+					console.warn(
+						`[getDocumentsByDpi] RENAP sin datos para ${input.dpi} (${response.renapError}); se usan los datos del CRM`,
+					);
+				}
 				return {
 					success: true,
 					renapData: response.renapData,
 					documents: response.documents,
 					fields: response.campos,
+					renapUnavailable: response.renapUnavailable ?? false,
 				};
 			} catch (error) {
 				console.error("[getDocumentsByDpi] Error:", error);
+				if (error instanceof ORPCError) throw error;
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
 						error instanceof Error

@@ -3963,13 +3963,37 @@ async function recuperarFacturaCertificada(
   // DNS, ECONNREFUSED), que cae en el mismo catch genérico.
   const TIMEOUT_CONSULTA_MS = 10000;
 
+  // COFIDI puede seguir procesando el DTE cuando nuestro fetch ya abortó: el
+  // documento aparece en su índice unos segundos después. Un único lookup
+  // inmediato lo daría por inexistente y volveríamos a perder la factura, que es
+  // justo el caso que este helper existe para cubrir (verificarFacturasSat ya
+  // trabaja con un grace por la misma razón).
+  // Solo se reinsiste cuando COFIDI RESPONDE que no está. Si la consulta lanza
+  // (red caída, timeout), insistir no aporta nada y solo alarga el request.
+  const ESPERAS_MS = [0, 5000, 7000];
+
   try {
     // ---- 1) ¿Existe un documento emitido con este idInterno? ----
-    const lookup = await satClient.consultarPorIdInterno(
-      idInterno,
-      TIMEOUT_CONSULTA_MS
-    );
-    if (!lookup.encontrado || !lookup.xmlCertificado) return null;
+    let lookup: Awaited<
+      ReturnType<SATClientService["consultarPorIdInterno"]>
+    > | null = null;
+
+    for (const espera of ESPERAS_MS) {
+      if (espera > 0) {
+        console.log(`   ⏳ Documento aún no visible; reintento en ${espera / 1000}s...`);
+        await new Promise((resolve) => setTimeout(resolve, espera));
+      }
+      const intento = await satClient.consultarPorIdInterno(
+        idInterno,
+        TIMEOUT_CONSULTA_MS
+      );
+      if (intento.encontrado && intento.xmlCertificado) {
+        lookup = intento;
+        break;
+      }
+    }
+
+    if (!lookup?.xmlCertificado) return null;
 
     const { XMLParser } = await import("fast-xml-parser");
     // parseTagValue:false: batch es hexadecimal y serial un entero largo; el

@@ -5489,23 +5489,27 @@ export const cobrosRouter = {
 					mensaje,
 					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
 					clienteNombre,
-					// CB-128: bucket del momento para el historial de agendas. Se
-					// DERIVA de las cuotas atrasadas que ya vienen en `credito.mora`
-					// (mismo dato que arriba alimenta la plantilla) en vez de llamar a
-					// capturarBucketSnapshot: eso sería una petición de red por
-					// destinatario dentro de un envío que puede tener cientos, y con el
-					// timeout de 3s cada una haría el envío inviable. Acá el dato ya
-					// está en memoria, así que sale gratis.
+					// CB-128: bucket del momento para el historial de agendas.
 					//
-					// `statusCredit` va junto porque este loop NO filtra por funnel: sus
-					// descartes son por cuota/teléfono/asesor, y `estadoCartera` puede
-					// venir en CANCELADO/INCOBRABLE/PENDIENTE_CANCELACION cuando el
-					// supervisor filtra por esos estados. Sin ese dato, esos créditos se
-					// grabarían con un bucket numérico inventado.
-					bucketSnapshot: numeroBucketPorCuotas(
-						credito.mora?.cuotas_atrasadas ?? 0,
-						credito.creditos.statusCredit,
-					),
+					// `credito.bucket` es el AUTORITATIVO: lo arma /getAllCredits desde
+					// buckets_historial (última fila del motor), el mismo criterio que
+					// getBucketActualCredito usa para las gestiones manuales. Recalcular
+					// desde cuotas_atrasadas en vez de leerlo podía divergir cuando el
+					// motor y la derivación viva por cuotas no coinciden — p.ej. el
+					// motor aún no vio un cambio reciente, o el crédito tiene bucket
+					// forzado por estado (INCOBRABLE) (Codex, PR #1300).
+					//
+					// Fallback a numeroBucketPorCuotas SOLO si `credito.bucket` no vino
+					// (ambiente sin la tabla buckets_historial, o crédito que el motor
+					// nunca procesó) — no se llama a capturarBucketSnapshot: eso sería
+					// una petición de red por destinatario dentro de un envío que puede
+					// tener cientos, y con el timeout de 3s haría el envío inviable.
+					bucketSnapshot:
+						credito.bucket?.numero ??
+						numeroBucketPorCuotas(
+							credito.mora?.cuotas_atrasadas ?? 0,
+							credito.creditos.statusCredit,
+						),
 				});
 			}
 

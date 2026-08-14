@@ -49,6 +49,7 @@ import {
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
+  pagoSchema,
 } from "./registerPaymentPolicy";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -61,25 +62,6 @@ const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 // ========================================
 // TIPOS E INTERFACES
 // ========================================
-
-const pagoSchema = z.object({
-  credito_id: z.number().int().positive(),
-  usuario_id: z.number().int().positive(),
-  monto_boleta: z.number().min(0),
-  fecha_pago: z.string(),
-  llamada: z.string().optional(),
-  renuevo_o_nuevo: z.string().optional(),
-  otros: z.number().min(0).optional(),
-  observaciones: z.string().optional(),
-  abono_directo_capital: z.number().min(0).optional(),
-  cuotaApagar: z.number().int(),
-  url_boletas: z.array(z.string()),
-  banco_id: z.number().int().positive().optional(),
-  numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1),
-  fecha_boleta: z.string(),
-  origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
-});
 
 type PagoData = z.infer<typeof pagoSchema>;
 
@@ -807,6 +789,7 @@ export const insertPayment = async ({ body, set }: any) => {
         registerBy: registerBy ?? "",
         fecha_boleta,
         monto_aplicado: pagoEspecialCuota.montoAplicado,
+        observaciones,
       });
     }
 
@@ -858,6 +841,7 @@ export const insertPayment = async ({ body, set }: any) => {
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
+            observaciones,
           });
         }
         console.log(
@@ -880,6 +864,7 @@ export const insertPayment = async ({ body, set }: any) => {
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
+            observaciones,
           });
         }
         return {
@@ -906,6 +891,7 @@ export const insertPayment = async ({ body, set }: any) => {
           registerBy: registerBy ?? "",
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
+          observaciones,
         });
       }
       return {
@@ -2253,6 +2239,7 @@ export const insertPayment = async ({ body, set }: any) => {
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           pagoConvenio: Number(estamparPagoConvenio()),
+          observaciones,
         });
       }
 
@@ -2369,6 +2356,7 @@ interface InsertarPagoParams {
   fecha_boleta?: string;
   monto_aplicado: number;
   pagoConvenio?: number;
+  observaciones?: string;
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -2384,7 +2372,8 @@ export async function insertarPago({
   registerBy,
   fecha_boleta,
   monto_aplicado,
-  pagoConvenio = 0
+  pagoConvenio = 0,
+  observaciones = ""
 }: InsertarPagoParams) {
   console.log(
     `Insertando pago para crédito SIFCO: ${numero_credito_sifco}, cuota: ${numero_cuota}, mora: ${mora}, otros: ${otros}`
@@ -2519,7 +2508,7 @@ export async function insertarPago({
       seguro_facturado: creditData.seguro_10_cuotas?.toString() ?? "0",
       gps_facturado: creditData.gps?.toString() ?? "0",
       reserva: "0",
-      observaciones: "",
+      observaciones: observaciones,
       validationStatus: "pending",
       fecha_boleta: fecha_boleta,
       banco_id: banco_id ?? undefined,

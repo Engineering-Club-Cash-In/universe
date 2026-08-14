@@ -23,8 +23,11 @@ día; si no está escrito, no está decidido.
 | [D-13](#d-13--canal-del-otp) | Canal del OTP | 🟢 |
 | [D-14](#d-14--retención-de-pii-y-logs) | Retención de PII y logs | 🟡 |
 | [D-15](#d-15--convenio-y-promesa-de-pago-bloqueados) | Convenio y promesa de pago: bloqueados | 🔴 |
-| [D-16](#d-16--el-otp-viaja-en-la-respuesta) | El OTP viaja en la respuesta | 🟢 (con mitigaciones) |
+| [D-16](#d-16--quién-valida-el-otp) | Quién valida el OTP | 🟢 |
 | [D-17](#d-17--qué-oportunidades-cuentan-como-crédito) | Qué oportunidades cuentan como crédito | 🟢 |
+| [D-18](#d-18--autenticación-del-bot-api-key) | Autenticación del bot: API key | 🟢 |
+| [D-19](#d-19--a-qué-teléfono-se-manda-el-otp) | A qué teléfono se manda el OTP | 🟢 |
+| [D-20](#d-20--el-dpi-se-busca-también-en-codeudores) | ¿El DPI se busca en codeudores? | 🟢 |
 
 ---
 
@@ -48,7 +51,7 @@ infraestructura para el volumen esperado: si el bot crece, se puede extraer desp
 
 ## D-02 · Quién compara el teléfono del chat
 
-**Estado:** 🟡 Propuesta
+**Estado:** 🟢 Cerrada · 2026-08-13
 
 **Contexto.** Hay que decidir si el número desde el que escribe el cliente coincide con
 alguno de los registrados. La descripción original del flujo era: el CRM devuelve la lista
@@ -119,8 +122,8 @@ los que solo quieren ver su saldo.
 sin TTL que administrar. Es lo más simple que funciona y se entrega antes.
 
 **Lo que se pierde y cómo se cubre:** sin sesión no hay un "ya verificó" persistido, así que
-el servicio 2 **debe** validar el OTP en cada llamada (ver
-[D-16](#d-16--el-otp-viaja-en-la-respuesta)) — ahí está el control de acceso. Si más adelante
+el servicio 2 **valida el OTP en la misma llamada** en la que devuelve los créditos (ver
+[D-16](#d-16--quién-valida-el-otp)) — ahí está el control de acceso. Si más adelante
 aparecen flujos con varios pasos (pagos, boletas), se agrega la sesión entonces.
 
 ---
@@ -331,28 +334,43 @@ o cambió.
 
 ---
 
-## D-16 · El OTP viaja en la respuesta
+## D-16 · Quién valida el OTP
 
-**Estado:** 🟢 Cerrada · 2026-08-13 — **con mitigaciones**
+**Estado:** 🟢 **Cerrada · 2026-08-14** (revisada dos veces el mismo día)
 
-**Decisión.** El servicio 1 devuelve el código OTP en su respuesta (`otp: "5463"`), además de
-mandarlo por SMS, para que **SimpleTech pueda validarlo de su lado** sin una llamada extra.
+**Decisión final: el servicio 2 valida el código y devuelve los créditos en la misma
+llamada.** No hay endpoint de validación aparte. Si el código no sirve, responde el error y
+no lista nada.
 
-**Lo que hay que tener claro.** El código deja de ser algo que solo tiene quien controla el
-teléfono: también lo tiene quien pueda ver la respuesta de la API o el estado del bot. Si el
-servicio 2 aceptara un simple "ya lo validé", **el token de la API bastaría para listar los
-créditos de cualquier persona** con solo saber su DPI.
+El servicio 1 **no devuelve el código**: devuelve una **referencia** opaca (el id de la fila
+del OTP) que el bot guarda y manda de vuelta junto con lo que escribió el cliente.
 
-**Mitigaciones acordadas:**
+**Cómo se llegó acá.**
 
-1. El **servicio 2 recibe el código y lo valida** contra la tabla `otps`, aunque SimpleTech
-   ya lo haya validado. Es la única barrera real de acceso, ahora que no hay sesiones
-   ([D-04](#d-04--dónde-vive-el-estado-de-identidad)).
-2. Un solo uso: al validarse se marca `used`.
-3. Vigencia corta (5 min, la que ya tiene el controller).
-4. **El OTP no se escribe en logs.** Hoy `otpController` lo imprime en consola; hay que
-   quitarlo para este flujo.
-5. Los dos servicios van autenticados con el token del bot y con rate limiting.
+1. *Primera versión:* el CRM devolvía el código y SimpleTech lo validaba de su lado.
+2. *Se descartó* porque comparando strings no hay forma de saber si un código **venció**: el
+   cliente recibiría "código incorrecto" cuando en realidad se le pasó el tiempo.
+3. *Segunda versión:* un endpoint `validar-otp` aparte, y después otro para los créditos. Eso
+   dejaba el problema de cómo saber, en la tercera llamada, que ya había validado.
+4. *Versión final:* las dos cosas en el servicio 2. La validación **es** la autorización, y no
+   hace falta ni sesión ni ventana de tiempo.
+
+**Por qué `referencia` y no `search`.** El código es de 4 dígitos y puede haber varios vivos a
+la vez. Si el servicio 2 aceptara solo el código, alguien con la API key podría probar
+`0000`…`9999` hasta caer en el de cualquier cliente, y como no habría a quién atribuirle el
+intento fallido, el tope de 3 no lo frenaría. La referencia ata el código a una persona.
+
+**De paso resuelve lo que se pidió:** el bot no tiene que reenviar el `search`, y el CRM **no
+vuelve a buscar** — la fila del OTP ya guarda a qué lead o codeudor pertenece.
+
+**Reglas.**
+
+1. Un código sirve **una sola vez** (`used`, `used_at`).
+2. Vigencia de 5 minutos; 3 intentos fallidos y hay que pedir uno nuevo.
+3. **El código no se escribe en logs** ni se devuelve en ninguna respuesta.
+4. Si el SMS falla, la fila del OTP **se borra**: si no, quedaría vivo un código que nadie
+   recibió.
+5. Todo va autenticado con la API key del bot ([D-18](#d-18--autenticación-del-bot-api-key)).
 
 ---
 
@@ -376,3 +394,92 @@ viejos, que son el grueso de la cartera en cobros.
 **Queda abierto:** si se listan créditos ya **liquidados**. En el CRM la oportunidad sigue
 ganada aunque el crédito esté pagado, y en este paso no se consulta cartera, así que no hay
 forma de distinguirlo. Se resuelve en el Paso 2 o filtrando con cartera más adelante.
+
+---
+
+## D-18 · Autenticación del bot: API key
+
+**Estado:** 🟢 Cerrada · 2026-08-14
+
+**Contexto.** El CRM expone dos superficies: ORPC (`/rpc/*`) para su propio front, y endpoints
+REST en Hono para integraciones. Los del bot de **ventas** (`/info/*`) y la creación de leads
+públicos están **sin autenticación**. Los del bot de cobros exponen datos de clientes con
+crédito: no pueden quedar abiertos.
+
+**Decisión: API key en variable de entorno**, enviada por header, verificada por un middleware
+propio de las rutas del bot.
+
+- Variable: `BOT_COBROS_API_KEY`. **En `.env`, no quemada en el código**: una llave en el
+  repositorio se filtra con el primer fork o captura de pantalla, y rotarla obliga a
+  desplegar.
+- Header: `Authorization: Bearer <key>`, igual que el resto de integraciones del CRM
+  (`validatePortalToken`).
+- **Secreto propio**, distinto de `BETTER_SECRET_PORTAL_WEB`: si se filtra uno, se rota uno
+  solo.
+- Comparación en **tiempo constante** (`timingSafeEqual`), no con `===`.
+- Si la variable no está configurada, el endpoint responde 503 y **no** se abre: falla
+  cerrado.
+- Se admite una segunda llave (`BOT_COBROS_API_KEY_PREV`) para rotar sin coordinar despliegue
+  con SimpleTech.
+- La llave **nunca** se escribe en logs.
+
+**Lo que la API key NO da.** Identifica al integrador, no al cliente final: cualquiera con la
+llave puede preguntar por cualquier DPI. Por eso el control de acceso real a los datos del
+crédito es el **OTP validado** ([D-16](#d-16--quién-valida-el-otp)), y por eso el servicio 1
+solo devuelve nombre y máscara del teléfono.
+
+**Descartado por ahora:** mTLS y firma HMAC por request (más seguros, pero SimpleTech tendría
+que implementarlos y hoy no lo justifica el volumen), y allowlist de IP (SimpleTech no
+garantiza IP fija).
+
+---
+
+## D-19 · A qué teléfono se manda el OTP
+
+**Estado:** 🟢 Cerrada · 2026-08-14 — **decidido con los datos en la mano**
+
+**Contexto.** El acuerdo era "al teléfono principal, el primero del campo cuando hay varios".
+Al revisar la base (1,760 clientes con crédito ganado o migrado) apareció que el primero no
+siempre sirve:
+
+| Hallazgo | Número |
+| --- | --- |
+| Clientes con crédito | 1,760 |
+| Con varios teléfonos en el mismo campo (`,` o `/`) | 570 (32%) |
+| Sin ningún teléfono utilizable | ~206 (12%) |
+| Con al menos un **móvil** (empieza en 3, 4 o 5) | 1,551 |
+| Con **solo fijos** (empieza en 2, 6 o 7) | 3 |
+| Teléfonos guardados con código de país (`502…`) | 65 |
+| Basura en el campo: números de 16 dígitos (parecen tarjetas), `0`, fijos de 7 dígitos | ~6 |
+
+**Decisión.** Se toma el **primer número móvil** del campo, no el primero a secas:
+
+1. Se parte el campo por `,` y `/`.
+2. De cada parte se dejan solo dígitos.
+3. Se normaliza: si trae `502` y 11 dígitos, se queda con los últimos 8.
+4. Se descarta lo que no quede en 8 dígitos (basura, fijos de 7, tarjetas).
+5. Se elige el **primero que empiece en 3, 4 o 5** (móviles en Guatemala).
+6. Si no hay ninguno, **no se manda OTP**: se responde que no hay teléfono registrado y se
+   deriva a soporte.
+
+Un SMS a un fijo no llega nunca, así que mandarlo al primero de la lista dejaría al cliente
+esperando un código que no existe. Con esta regla, solo 3 clientes de 1,760 quedan fuera por
+tener únicamente fijos.
+
+---
+
+## D-20 · ¿El DPI se busca también en codeudores?
+
+**Estado:** 🟢 **Cerrada · 2026-08-14 — sí**
+
+**Contexto.** Al indicar dónde vive cada identificador ("el NIT puede estar en el lead y en la
+oportunidad, el DPI sí solo en el lead") quedó la duda de si las búsquedas por codeudor
+seguían en pie. **Confirmado que sí.**
+
+**Decisión.** El DPI se busca en `leads.dpi` **y** en `co_debtors.dpi`. Si el match es un
+codeudor, el OTP se manda al teléfono **del codeudor** y se listan las oportunidades donde
+aparece como tal. La frase del 14/08 se refería a en qué **columnas** vive cada dato: el NIT
+está en dos (`leads.nit` y `opportunities.nit`) y el DPI del titular en una sola.
+
+**Consecuencia:** la tabla `otps` necesita `co_debtor_id` y que `lead_id` deje de ser NOT
+NULL, porque el código se le manda al codeudor.

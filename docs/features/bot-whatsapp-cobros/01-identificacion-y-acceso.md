@@ -1,6 +1,7 @@
 # Paso 1 · Identificación y acceso
 
-**Estado:** 🟢 **Definido (2026-08-13)** — listo para implementar · aún **no implementado**
+**Estado:** 🔵 **Los dos servicios implementados (2026-08-14)** — falta correr la migración
+0034 y probar el envío real del SMS en dev
 **Tickets:** [CC2-39 · CB-103](https://clubcashin.atlassian.net/browse/CC2-39) (principal),
 [CC2-48 · CB-115](https://clubcashin.atlassian.net/browse/CC2-48) (árbol)
 **Apps involucradas:** `apps/crm` únicamente — **este paso no consulta cartera-back**
@@ -18,7 +19,7 @@ elegir uno.
 | # | Servicio | Qué hace |
 | --- | --- | --- |
 | 1 | **Buscar cliente y enviar OTP** | Recibe `search` (NIT, DPI o placa) + teléfono. Deduce qué es, busca al cliente, dice si el teléfono es de él, **siempre manda OTP por SMS** y devuelve el nombre. |
-| 2 | **Listar créditos** | Con el OTP validado, devuelve las oportunidades ganadas del cliente con la info del vehículo. |
+| 2 | **Validar código y listar créditos** | Recibe la referencia y el código. Lo valida y, si es correcto, devuelve las oportunidades ganadas del cliente con la info del vehículo. Las dos cosas en una llamada. |
 
 **Decisión importante:** en este paso **todo se resuelve dentro del CRM**. No se consulta
 cartera-back. La consulta a cartera empieza cuando el cliente **selecciona** un crédito
@@ -44,11 +45,11 @@ sequenceDiagram
     B->>CRM: SERVICIO 1 {search, telefono}
     CRM->>CRM: deduce el tipo · busca en leads y codeudores
     CRM->>CRM: elige el teléfono destino · genera y envía OTP por SMS
-    CRM-->>B: {celEnCrm, otp, nombre completo}
+    CRM-->>B: {celEnCrm, referencia, nombre completo}
     CRM-->>C: SMS con el código
     C->>B: 5463
-    B->>B: valida el código
-    B->>CRM: SERVICIO 2 {search, telefono, otp}
+    B->>CRM: SERVICIO 2 {referencia, otp}
+    CRM->>CRM: valida el código y resuelve la identidad guardada
     CRM-->>B: créditos: numeroSifco + placa + modelo
     B->>C: menú de selección de crédito
 ```
@@ -56,28 +57,36 @@ sequenceDiagram
 ### Reglas del servicio 1
 
 1. **`search` viene sin tipo.** El CRM deduce si es DPI, NIT o placa antes de buscar.
-2. **El DPI puede ser del titular o de un codeudor.** Se busca en `leads.dpi` **y** en
-   `co_debtors.dpi`.
-3. **A dónde va el OTP:**
-   - Si el DPI resultó ser de un **codeudor** → al teléfono que tenemos **del codeudor**
-     (`co_debtors.phone`).
-   - Si es del **titular** → a su **teléfono principal**. Ojo: hay leads con **varios
-     teléfonos en el mismo campo**, separados por `,` o `/`; el principal es el primero.
-4. **El OTP se envía siempre**, coincida o no el teléfono desde el que escribe. Lo que
+2. **Dónde vive cada identificador:** el DPI en `leads.dpi` **y en `co_debtors.dpi`**; el NIT
+   en `leads.nit` **y en `opportunities.nit`**; la placa en `vehicles.license_plate`.
+   Si el DPI resulta ser de un **codeudor**, el OTP va al teléfono **del codeudor**
+   ([D-20](./DECISIONES.md#d-20--el-dpi-se-busca-también-en-codeudores)).
+3. **El OTP se envía siempre**, coincida o no el teléfono desde el que escribe. Lo que
    cambia es el destino, no si se manda.
-5. **El OTP va por SMS.** Ya existe: `otpController` (`controllers/otp.ts`) usando
+4. **A dónde va el OTP:** al **primer número móvil** del cliente, no al primero de la lista.
+   Ver [D-19](./DECISIONES.md#d-19--a-qué-teléfono-se-manda-el-otp) — un SMS a un teléfono
+   fijo no llega nunca.
+5. **Sin teléfono utilizable no hay flujo.** Si el cliente no tiene ningún móvil registrado
+   (~12% de la cartera), se responde con un error claro y se le dice que contacte a soporte.
+6. **El OTP va por SMS.** Ya existe: `otpController` (`controllers/otp.ts`) usando
    `@repo/sms` (BroadcasterMobile), código de 4 dígitos, 5 minutos de vigencia.
-6. `celEnCrm` dice si el número desde el que escribe es uno de los que tenemos registrados
+7. **El código no se devuelve.** Se valida en el servicio 2
+   ([D-16](./DECISIONES.md#d-16--quién-valida-el-otp)), para poder distinguir un código
+   **vencido** de uno incorrecto. En su lugar se devuelve una **referencia** opaca que el bot
+   guarda y manda de vuelta.
+8. `celEnCrm` dice si el número desde el que escribe es uno de los que tenemos registrados
    del cliente. Es información para el bot y para auditoría, **no** cambia si se manda OTP.
 
 ---
 
 ## 3. Contratos
 
-Base: `POST /api/bot/v1/cobros/...` · `Authorization: Bearer <BOT_COBROS_TOKEN>` ·
-formato de respuesta y códigos de error en [`ARQUITECTURA.md`](./ARQUITECTURA.md).
+Base: `POST /api/bot/cobros/...` · `Authorization: Bearer <BOT_COBROS_API_KEY>`
+([D-18](./DECISIONES.md#d-18--autenticación-del-bot-api-key)).
 
 ### 3.1 Servicio 1 · Buscar cliente y enviar OTP
+
+`POST /api/bot/cobros/buscar-cliente`
 
 ```jsonc
 // request
@@ -88,19 +97,18 @@ formato de respuesta y códigos de error en [`ARQUITECTURA.md`](./ARQUITECTURA.m
 ```
 
 ```jsonc
-// respuesta · cliente encontrado
+// respuesta · cliente encontrado, OTP enviado
 {
   "success": true,
   "data": {
     "encontrado": true,
     "celEnCrm": true,                       // ¿el número del chat es uno de los suyos?
-    "otp": "5463",                          // siempre se genera y se envía por SMS
-    "cliente": {
-      "nombreCompleto": "Daniel Rodríguez López",
-      "tipo": "titular"                     // "titular" | "codeudor"
-    },
-    "tipoBusqueda": "dpi",                  // lo que dedujo el CRM: "dpi" | "nit" | "placa"
-    "otpEnviadoA": "****1234"               // enmascarado, para que el bot lo diga en el chat
+    "otpEnviado": true,
+    "referencia": "c2287206-…",             // el bot la guarda para el servicio 2
+    "otpEnviadoA": "****6376",              // enmascarado, para decirlo en el chat
+    "otpExpiraEnSegundos": 300,
+    "cliente": { "nombreCompleto": "Daniel Rodríguez López" },
+    "tipoBusqueda": "dpi"                   // lo que dedujo el CRM: "dpi" | "nit" | "placa"
   }
 }
 ```
@@ -113,74 +121,126 @@ formato de respuesta y códigos de error en [`ARQUITECTURA.md`](./ARQUITECTURA.m
 }
 ```
 
-**Detección del tipo de `search`** — orden de evaluación propuesto:
+```jsonc
+// respuesta · encontrado pero sin teléfono al cual mandar el código
+{
+  "success": false,
+  "error": {
+    "codigo": "SIN_TELEFONO_REGISTRADO",
+    "mensaje": "No tenemos un número de celular registrado para enviarte el código. Por favor contacta a soporte."
+  }
+}
+```
 
-Regla acordada: **la placa tiene letras, el NIT no.**
+**Detección del tipo de `search`.** Regla acordada: **la placa tiene letras, el NIT no.**
 
 | Orden | Tipo | Cómo se reconoce | Dónde se busca |
 | --- | --- | --- | --- |
-| 1 | **DPI** | **13 dígitos** numéricos. Ya existe `validarDpi` (`utils/cui-validation.ts`) para validar el CUI. | `leads.dpi` con el helper `eqDpi` (hay DPI guardados con y sin formato) **y** `co_debtors.dpi` |
-| 2 | **Placa** | Contiene **letras** (ej. `P123ABC`), con o sin guion | `vehicles.license_plate` → `opportunities.vehicle_id` |
-| 3 | **NIT** | **Solo dígitos** y no son 13 | `leads.nit` |
+| 1 | **DPI** | **13 dígitos** numéricos. Se valida el CUI con `validarDpi` (`utils/cui-validation.ts`). | `leads.dpi` con el helper `eqDpi` (hay DPI guardados con y sin formato) **y** `co_debtors.dpi` |
+| 2 | **Placa** | Contiene **letras** (ej. `P185KKW`), con o sin guion | `vehicles.license_plate` → `opportunities.vehicle_id` |
+| 3 | **NIT** | **Solo dígitos** y no son 13 | `leads.nit` **y** `opportunities.nit` |
 
 Antes de clasificar se normaliza: se quitan guiones, espacios y se pasa a mayúsculas.
 
-> ⚠️ **Única excepción a revisar:** el NIT guatemalteco puede llevar **`K` como dígito
-> verificador** (`1234567-K`). Con la regla de arriba, ese NIT se clasificaría como placa.
-> Si hay NIT así en la base, la regla necesita una salvedad: una sola `K` al final ⇒ NIT.
+> ⚠️ **Excepción a revisar:** el NIT guatemalteco puede llevar **`K` como dígito verificador**
+> (`1234567-K`). Con la regla de arriba caería como placa. Si aparecen NIT así, se agrega la
+> salvedad: una sola `K` al final ⇒ NIT.
 
----
+**Sanitización de la placa.** La placa guatemalteca se escribe `P-185KKW`, pero el cliente
+puede mandar `P185KKW`, `p 185 kkw` o incluso `185KKW` sin la letra de tipo. Y del lado de la
+base está igual de irregular: de 1,369 vehículos con placa, 1,155 tienen guion, **98 tienen
+espacios**, 8 están en minúsculas y **19 no empiezan con letra**.
 
-### 3.2 Servicio 2 · Listar créditos
+Por eso se compara **normalizando los dos lados**: solo letras y dígitos, en mayúsculas.
+
+| Lo que escribe el cliente | Normalizado | Contra qué hace match |
+| --- | --- | --- |
+| `P-185KKW`, `p 185 kkw`, `P185KKW` | `P185KKW` | Igualdad exacta |
+| `185KKW` (sin la letra de tipo) | `185KKW` | La placa guardada **termina en** ese valor |
+| `P-185KKW` cuando la guardada es `185KKW` | `P185KKW` | Se compara sin la letra inicial |
+
+La tolerancia va en **las dos direcciones**: puede faltar la letra de tipo del lado del
+cliente o del lado de la base (hay 19 vehículos guardados así).
+
+Si la búsqueda sin letra inicial calza con **más de un** vehículo, se le pide al cliente la
+placa completa en vez de adivinar.
+
+### 3.2 Servicio 2 · Validar el código y listar los créditos
+
+`POST /api/bot/cobros/creditos`
+
+**Hace las dos cosas en una sola llamada:** valida el código y, si es correcto, devuelve los
+créditos. Si no lo es, responde el error y no lista nada.
 
 ```jsonc
 // request
 {
-  "search": "1234567890101",
-  "telefono": "50255551234",
-  "otp": "5463"                 // el código que ingresó el cliente
+  "referencia": "c2287206-…",   // la que devolvió el servicio 1
+  "otp": "5463"                 // el código que escribió el cliente
 }
 ```
 
 ```jsonc
-// respuesta
+// respuesta · código correcto
 {
   "success": true,
   "data": {
-    "cliente": { "nombreCompleto": "Daniel Rodríguez López", "tipo": "titular" },
     "creditos": [
       {
-        "numeroSifco": "01010214117590",
-        "etiqueta": "Toyota Yaris 2019 · P123ABC",   // lo que el bot muestra en el menú
+        "numeroSifco": "01010214113290",
+        "etiqueta": "MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT",  // para el menú
         "vehiculo": {
-          "placa": "P123ABC",
-          "marca": "Toyota",
-          "modelo": "Yaris",
-          "anio": 2019
+          "placa": "P-247JYT",
+          "marca": "MAZDA",
+          "modelo": "CX-5 GRAND TOURING AWD",
+          "anio": 2016
         }
-      },
-      {
-        "numeroSifco": "01010214118821",
-        "etiqueta": "Daniel Rodríguez López",        // sin vehículo: se usa el nombre
-        "vehiculo": null
       }
     ]
   }
 }
 ```
 
+```jsonc
+// respuesta · código incorrecto
+{
+  "success": false,
+  "error": { "codigo": "OTP_INVALIDO", "mensaje": "El código no es correcto." },
+  "data": { "intentosRestantes": 2 }
+}
+```
+
+Otros errores posibles: `OTP_VENCIDO`, `OTP_YA_USADO` (un código sirve una sola vez),
+`DEMASIADOS_INTENTOS` (3 fallidos) y `REFERENCIA_INVALIDA`.
+
+**Por qué va la `referencia` y no el `search`.** Con solo el código de 4 dígitos, alguien con
+la API key podría probar `0000`…`9999` hasta caer en el código vivo de cualquier cliente, y
+como no habría a quién atribuirle el intento, el tope de 3 no lo frenaría. La referencia ata
+el código a **una** persona. Y como en la fila del OTP ya quedó guardado a qué lead o
+codeudor pertenece, **no hace falta volver a buscar** por DPI, NIT o placa.
+
 **De dónde salen los créditos:** de las oportunidades del cliente en el CRM con
 `status IN ('won', 'migrate')`.
 
-- Si es **titular** → `opportunities.lead_id = lead.id`
-- Si es **codeudor** → las oportunidades donde aparece como codeudor
-  (`co_debtors.opportunity_id`)
+- Como **titular** → `opportunities.lead_id`, o cualquier lead con el mismo DPI
+- Como **codeudor** → oportunidades donde su DPI aparece en `co_debtors`
 - Vehículo: `opportunities.vehicle_id` → `vehicles` (placa, marca, modelo, año)
 - Número de crédito: `opportunities.numero_sifco`
+
+**Un cliente ve todos los créditos donde aparece**, sea como titular o como codeudor.
 
 > **Por qué también `migrate`:** los créditos cargados por la migración masiva quedaron con
 > `status = 'migrate'`, no con `won`. Filtrar solo por `won` dejaría fuera a los clientes
 > viejos, que son el grueso de la cartera en cobros.
+
+**Dos formatos de `numero_sifco`, los dos válidos:** el número de SIFCO
+(`01010214113290`) y `CRM-<uuid>` para los créditos post-migración, que nacen al cerrar la
+oportunidad en el CRM y quedan en cartera con ese mismo número
+(`services/close-opportunity.ts`). Hoy son 1,106 y 427 respectivamente.
+
+**Créditos liquidados:** se listan igual. En el CRM la oportunidad sigue ganada aunque el
+crédito esté pagado, y este paso no consulta cartera, así que no hay forma de distinguirlos
+(D-17).
 
 **Sin info del vehículo.** Puede pasar y no es un error: en esos casos el crédito se lista
 igual, usando el **nombre completo del cliente** como etiqueta. El campo `etiqueta` lo arma
@@ -206,14 +266,33 @@ cualquier persona. Ver [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta
 
 ### Ajuste necesario en la tabla `otps`
 
-Hoy `otps` tiene `lead_id` **NOT NULL** y `dpi` NOT NULL: está pensada solo para leads.
-Para el OTP de un **codeudor** hay dos caminos:
+`otps` estaba pensada solo para leads de ventas. Hicieron falta dos ajustes, los dos en
+`apps/crm/apps/server/src/db/migrations/` y **los corre el usuario**:
 
-- **A)** Agregar `co_debtor_id` nullable y relajar `lead_id`.
-- **B)** Guardar el `lead_id` de la oportunidad y el `dpi` del codeudor.
+| Migración | Qué hace | Por qué |
+| --- | --- | --- |
+| `0033_bot_cobros_otp_codeudor.sql` ✅ aplicada | Agrega `co_debtor_id` y hace `lead_id` nullable | El código también se le manda a codeudores |
+| `0034_bot_cobros_otp_sin_dpi.sql` ⏳ pendiente | Hace `dpi` nullable | **274 de 1,522 clientes con crédito (18%) no tienen DPI en el CRM.** Si se identifican por placa o NIT, con `dpi NOT NULL` no se les puede generar el código y quedan fuera del bot |
 
-A es más limpio y deja auditoría real de a quién se le mandó el código. Requiere migración
-—que corre el usuario, como siempre en este repo—.
+### Perfil de los datos reales (consultado el 2026-08-14)
+
+Medido sobre los clientes con oportunidad `won` o `migrate`, que son la población del bot:
+
+| Dato | Número |
+| --- | --- |
+| Clientes con crédito | 1,760 |
+| …con al menos un teléfono utilizable | 1,554 |
+| …**sin ningún teléfono utilizable** → van a soporte | ~206 (12%) |
+| …con varios teléfonos en el mismo campo | 570 (32%) |
+| …con al menos un móvil (3, 4 o 5) | 1,551 |
+| …con solo fijos | 3 |
+| Sin DPI en el lead | 332 (19%) |
+| Sin NIT en el lead | 332 — por eso también se busca en `opportunities.nit` |
+| Vehículos con placa | 1,369 · 1,155 con guion · 98 con espacios · 8 en minúsculas · 19 sin letra inicial |
+
+Dos conclusiones que cambiaron el diseño: **el teléfono destino tiene que ser un móvil**
+(§ [D-19](./DECISIONES.md#d-19--a-qué-teléfono-se-manda-el-otp)) y **la placa hay que
+normalizarla de los dos lados**, no solo la que escribe el cliente.
 
 ### Sin tabla de sesiones (por ahora)
 
@@ -242,8 +321,10 @@ sesiones (pagos, boletas), se agrega ahí.
 
 | Caso | Comportamiento |
 | --- | --- |
-| **Lead con varios teléfonos** en un campo (`,` o `/`) | Se toma el **primero** como principal. Definir si se normaliza el dato en la base o solo al leerlo. |
-| Teléfono con o sin `502`, con guiones o espacios | Normalizar antes de comparar y antes de mandar el SMS. |
+| **Lead con varios teléfonos** en un campo (`,` o `/`) — 570 de 1,760 clientes | Se parte por `,` y `/` y se toma el **primer móvil**, no el primero de la lista ([D-19](./DECISIONES.md#d-19--a-qué-teléfono-se-manda-el-otp)). |
+| **Primer teléfono es un fijo** (empieza en 2, 6 o 7) | Se salta: el SMS no llegaría. Solo 3 clientes de 1,760 tienen únicamente fijos. |
+| Teléfono con o sin `502`, con guiones o espacios | Se normaliza a 8 dígitos para comparar, y a `502XXXXXXXX` para mandar el SMS. |
+| **Basura en el campo teléfono** | Hay 3 registros con 16 dígitos (parecen tarjetas), uno con `0` y uno de 7 dígitos. Se descartan por longitud. |
 | DPI que existe **como lead y como codeudor** (personas que son ambas cosas) | Definir prioridad. Propuesta: titular gana; si no tiene oportunidades propias, se usa la de codeudor. |
 | DPI de codeudor en **varias** oportunidades | Se listan todas esas oportunidades. |
 | Codeudor **sin teléfono** (`co_debtors.phone` es nullable) | No hay a dónde mandar el OTP → salida a agente y se registra para que Cobros complete el dato. |
@@ -289,16 +370,78 @@ Ninguna bloquea la implementación de los dos servicios.
 
 ---
 
-## 9. Tareas
+## 9. Estado de implementación
 
-| # | Tarea | Dependencias |
+| # | Tarea | Estado |
 | --- | --- | --- |
-| 1 | Middleware de autenticación del bot (`BOT_COBROS_TOKEN`) + rate limiting | — |
-| 2 | Detector de tipo de `search` (DPI / NIT / placa) con normalización | D-09 |
-| 3 | Búsqueda unificada: `leads` + `co_debtors` + `vehicles` → cliente y tipo | 2 |
-| 4 | Resolución del teléfono destino (principal del lead, o del codeudor) y comparación con el del chat | 3 |
-| 5 | Migración de `otps` para soportar codeudor | — |
-| 6 | Servicio 1: buscar + enviar OTP por SMS (reuso de `otpController`, sin Infornet) | 3, 4, 5 |
-| 7 | Servicio 2: validar OTP + listar oportunidades ganadas con vehículo | 6, D-17 |
-| 8 | Colección Postman y entrega del contrato a SimpleTech | 6, 7 |
-| 9 | Pruebas de los casos borde de la §6 | 6, 7 |
+| 1 | Middleware de autenticación del bot (`BOT_COBROS_API_KEY`) | ✅ `lib/bot-cobros/auth.ts` |
+| 2 | Detector de tipo de `search` + normalización de placa y teléfono | ✅ `lib/bot-cobros/identificadores.ts` (26 pruebas) |
+| 3 | Búsqueda unificada: `leads` + `co_debtors` + `opportunities` + `vehicles` | ✅ `lib/bot-cobros/buscar-cliente.ts` |
+| 4 | Resolución del teléfono destino y comparación con el del chat | ✅ `elegirTelefonoParaOtp` / `telefonoEstaRegistrado` |
+| 5 | Migración `0033` (codeudor en `otps`) | ✅ aplicada en dev |
+| 6 | Migración `0034` (`dpi` nullable) | ⏳ **la corre el usuario** |
+| 7 | Servicio 1: buscar + enviar OTP por SMS | ✅ `controllers/bot-cobros.ts` |
+| 8 | Servicio 2: validar código + listar créditos | ✅ `controllers/bot-cobros.ts` |
+| 9 | Colección Postman y entrega del contrato a SimpleTech | ⚪ Pendiente |
+| 10 | Rate limiting | ⚪ Pendiente |
+
+### Dónde quedó cada cosa
+
+```
+apps/crm/apps/server/src/
+├── controllers/bot-cobros.ts              ← los dos endpoints
+├── lib/bot-cobros/
+│   ├── auth.ts                            ← API key (D-18)
+│   ├── identificadores.ts                 ← detección y normalización
+│   ├── identificadores.test.ts            ← 26 pruebas con los formatos reales
+│   ├── buscar-cliente.ts                  ← búsqueda por DPI / NIT / placa
+│   └── otp.ts                             ← MÓDULO AISLADO: envío y validación
+├── db/schema/otp.ts                       ← + co_debtor_id, lead_id nullable
+├── db/migrations/0033_bot_cobros_otp_codeudor.sql
+└── index.ts                               ← montaje de las rutas
+```
+
+### Cómo quitar el OTP si se decide cambiarlo
+
+Se pidió que fuera fácil de extraer. Todo lo del OTP vive en `lib/bot-cobros/otp.ts`; para
+sacarlo se borra ese archivo y se quitan sus dos llamadas en `controllers/bot-cobros.ts`
+(`enviarOtp` en el servicio 1, `validarOtp` en el servicio 2). La búsqueda del cliente y el
+listado de créditos no lo tocan y siguen funcionando igual.
+
+### Lo que se decidió durante la implementación
+
+- **No se reusó `otpController`** (`controllers/otp.ts`), aunque D-07 decía reusarlo: tiene
+  un **bypass hardcodeado con el código `1234`** que valida siempre, exige que exista un lead
+  con ese DPI —el bot también le manda el código a codeudores— y escribe el código en la
+  consola. Se reusan la tabla `otps` y `@repo/sms`, que es lo que importaba.
+- **Los envíos respetan `TEST_MESSAGE`.** Como la base de dev es una copia de producción con
+  teléfonos reales, con esa variable en `true` el SMS se redirige a un número interno
+  (`lib/messaging-test-mode.ts`).
+- **El DPI se guarda normalizado** en `otps`, para que validar el código no dependa del
+  formato con el que quedó guardado en el CRM.
+- **Una palabra suelta no se busca como placa.** Se exige forma de placa (5 a 9 caracteres
+  con al menos un dígito), para no salir a consultar la base con cada "hola" del cliente.
+- **Solo se encuentra a quien tiene crédito** (oportunidad `won` o `migrate`): así no se le
+  manda un SMS ni se le revela el nombre a un lead de ventas.
+
+### Pruebas hechas contra la base de dev (2026-08-14)
+
+| Caso | Resultado |
+| --- | --- |
+| DPI guardado con espacios (`2266 84938 0101`) y escrito sin ellos | Encuentra al mismo titular |
+| DPI de un codeudor | Encuentra al codeudor y resuelve su teléfono |
+| NIT que está en el lead | Encuentra al titular |
+| NIT que solo está en la oportunidad | Encuentra al titular |
+| Placa `P-247JYT`, `P247JYT`, `p 247 jyt`, `247JYT` | Las cuatro llegan al mismo cliente |
+| DPI inexistente | `encontrado: false` |
+| `"hola"` | `BUSQUEDA_INVALIDA`, sin consultar la base |
+| Sin API key / con llave incorrecta | 401 `NO_AUTORIZADO` |
+| Servicio 2 con código incorrecto | 401 `OTP_INVALIDO` + `intentosRestantes: 2` |
+| Servicio 2 con referencia inventada | 401 `REFERENCIA_INVALIDA` |
+| Servicio 2 con código correcto | Devuelve los créditos con su etiqueta armada |
+| Reusar el mismo código | 401 `OTP_YA_USADO` |
+| Cliente con dos créditos | Lista los dos |
+| Codeudor | Lista el crédito donde es codeudor |
+
+**El envío real del SMS no se pudo probar:** desde la red local no se alcanza a
+`api.broadcastermobile.com` (timeout). Queda para cuando se levante en dev.

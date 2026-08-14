@@ -40,6 +40,7 @@ decidido.
 | [`03-metodos-de-pago.md`](./03-metodos-de-pago.md) | **Paso 3**: link de Pagalo, Nexa y el menú de pago. |
 | [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md) | **Paso 4**: subir comprobante, lectura de la boleta e ingreso manual. |
 | [`05-convenio-y-promesa.md`](./05-convenio-y-promesa.md) | **Paso 5**: congelado. Solo referencia hasta que gerencia apruebe. |
+| [`pruebas-equipo-it.md`](./pruebas-equipo-it.md) | Datos ficticios y mensajes para que el equipo de IT pruebe el bot en dev. |
 | [`DECISIONES.md`](./DECISIONES.md) | Registro de decisiones: abiertas, cerradas y por qué. |
 | `fuente/` | Los PDF originales (gerencia + documento detallado). |
 
@@ -47,7 +48,7 @@ decidido.
 
 | # | Paso | Alcance | Estado | Doc |
 | --- | --- | --- | --- | --- |
-| 1 | Identificación y acceso | 2 servicios en el CRM: buscar cliente + OTP por SMS, y listar créditos | 🟢 **Definido — listo para implementar** | [`01-…`](./01-identificacion-y-acceso.md) |
+| 1 | Identificación y acceso | 2 servicios en el CRM: buscar cliente + OTP por SMS, y validar código + listar créditos | 🔵 **Los dos servicios implementados** — falta migración 0034 y probar el SMS en dev | [`01-…`](./01-identificacion-y-acceso.md) |
 | 2 | Menú del crédito | Info del crédito, y el ruteo a las 6 gestiones | 🟡 **En definición** (notas de reunión 2026-08-13) | [`02-…`](./02-menu-del-credito.md) |
 | 3 | Realizar un pago | Link de Pagalo, Nexa, menú dinámico de pago | 🟡 **En definición** | [`03-…`](./03-metodos-de-pago.md) |
 | 4 | Validación de boleta | Lectura de boleta, ingreso manual, pendiente de conciliación | 🟡 **En definición** | [`04-…`](./04-validacion-de-boleta.md) |

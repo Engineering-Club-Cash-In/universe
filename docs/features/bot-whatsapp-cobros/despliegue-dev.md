@@ -77,7 +77,7 @@ O dejar que el pipeline (§3) construya la primera y crear la app en Coolify des
    | `PORT` | `9000` | Para que coincida con el `EXPOSE` |
    | `DATABASE_URL` | la de **green-tree** | Es la base donde están los datos de prueba |
    | `BOT_COBROS_API_KEY` | una llave nueva | La que se le entrega a SimpleTech. Generar con `openssl rand -hex 32` |
-   | `DISABLE_SCHEDULED_JOBS` | `true` | **Obligatorio.** Ver la advertencia de abajo |
+   | `DISABLE_SCHEDULED_JOBS` | — | Ya no hace falta: en esta rama los jobs están apagados en el código. Ver la advertencia de abajo |
    | `TEST_MESSAGE` | `false` | Para que cada quien reciba su propio código |
    | `SMS_TOKEN`, `SMS_API_KEY` | las de siempre | Sin esto no sale ningún OTP |
    | `CORS_ORIGIN` | el dominio de dev | |
@@ -90,19 +90,29 @@ O dejar que el pipeline (§3) construya la primera y crear la app en Coolify des
 9. Copiar el **webhook de redeploy** (Coolify → la app → Webhooks) y guardarlo en GitHub como
    secret `COOLIFY_WEBHOOK_CRM_API_COBROS`. El secret `COOLIFY_TOKEN` ya existe en el repo.
 
-### ⚠️ `DISABLE_SCHEDULED_JOBS=true` no es opcional
+### 🚨 Las tareas programadas están apagadas EN EL CÓDIGO
 
 El binario del CRM levanta **tareas programadas que le escriben a los clientes**:
 `sendPremoraReminders` corre a los **15 segundos** del arranque y `sendConvenioReminders` a
 los **20 segundos**, además de los recordatorios diarios.
 
 Como esta instancia apunta a una **copia de producción** y va con `TEST_MESSAGE=false`, sin
-esa bandera **le mandaría recordatorios de pago reales a clientes reales en cada
-despliegue**. Con la bandera, el proceso levanta solo la API y lo deja ver en el log:
+protección **le mandaría recordatorios de pago reales a clientes reales en cada despliegue**.
+
+En esta rama la protección **no depende de una variable de entorno**: en `index.ts` hay un
+`const TAREAS_PROGRAMADAS_ACTIVAS = false` fijo. Depender de que la env quedara bien puesta
+en el ambiente era demasiado frágil para lo que está en juego. Al arrancar lo avisa:
 
 ```
-[Jobs] DISABLE_SCHEDULED_JOBS=true — esta instancia levanta solo la API, sin tareas programadas
+[Jobs] ⚠️  Tareas programadas DESACTIVADAS en el código (rama COBROS-02): esta instancia
+levanta solo la API. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción.
 ```
+
+**Antes de mergear esta rama a `develop` hay que revertirlo.** Si se mergea así, el CRM de
+producción se queda **sin ninguna tarea programada** —premora, convenios, alertas de cobros,
+sincronización de promesas, cierre diario— y no se nota al desplegar: se nota cuando los
+clientes dejan de recibir sus recordatorios. El `FIXME(COBROS-02)` en `index.ts` marca la
+línea exacta.
 
 Los jobs los sigue corriendo la instancia principal del CRM, que es la que debe hacerlo.
 

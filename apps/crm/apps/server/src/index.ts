@@ -1389,12 +1389,29 @@ app.post("/api/premora/elegibilidad/run", async (c) => {
 //
 // Ver docs/features/bot-whatsapp-cobros/despliegue-dev.md
 // ═══════════════════════════════════════════════════════════════════════════
-const TAREAS_PROGRAMADAS_ACTIVAS =
-	process.env.DISABLE_SCHEDULED_JOBS !== "true";
+//
+//   🚨 FIXME(COBROS-02): REVERTIR ESTA LÍNEA ANTES DE MERGEAR A DEVELOP 🚨
+//
+//   Está en `false` FIJO, no por variable de entorno: en esta rama el binario
+//   solo sirve la API para el bot de WhatsApp, y depender de que la env esté
+//   bien puesta en el ambiente era demasiado frágil para el riesgo que corre
+//   (le escribe a clientes reales).
+//
+//   Si esta rama se mergea así, el CRM de producción se queda SIN NINGUNA
+//   tarea programada: recordatorios premora, convenios, alertas de cobros,
+//   sincronización de promesas y cierre diario. Y no se nota al desplegar:
+//   se nota cuando los clientes dejan de recibir sus recordatorios.
+//
+//   Para revertir: poner de vuelta
+//   `process.env.DISABLE_SCHEDULED_JOBS !== "true"` y dejar la env en `true`
+//   solo en la instancia del bot.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+const TAREAS_PROGRAMADAS_ACTIVAS = false;
 
 if (!TAREAS_PROGRAMADAS_ACTIVAS) {
-	console.log(
-		"[Jobs] DISABLE_SCHEDULED_JOBS=true — esta instancia levanta solo la API, sin tareas programadas",
+	console.warn(
+		"[Jobs] ⚠️  Tareas programadas DESACTIVADAS en el código (rama COBROS-02): esta instancia levanta solo la API. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción.",
 	);
 }
 

@@ -101,6 +101,21 @@ export async function buscarClienteBotCobros(c: Context) {
 		});
 
 		if (!envio.enviado) {
+			if (envio.codigo === "DEMASIADOS_ENVIOS") {
+				return c.json(
+					{
+						success: false,
+						error: {
+							codigo: "DEMASIADOS_ENVIOS",
+							mensaje:
+								"Ya te enviamos un código hace poco. Espera un momento antes de pedir otro.",
+						},
+						data: { reintentarEnSegundos: envio.reintentarEnSegundos },
+					},
+					429,
+				);
+			}
+
 			return error(c, {
 				codigo: "OTP_NO_ENVIADO",
 				mensaje:

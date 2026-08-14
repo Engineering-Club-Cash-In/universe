@@ -381,7 +381,16 @@ vuelve a buscar** — la fila del OTP ya guarda a qué lead o codeudor pertenece
      se podría probar el espacio completo de códigos en paralelo saltándose el tope de 3.
    - Si el listado de créditos falla, se revierte también el "código usado", así el cliente
      puede reintentar sin pedir otro SMS.
-7. Todo va autenticado con la API key del bot ([D-18](#d-18--autenticación-del-bot-api-key)).
+7. **Solo valen los códigos emitidos por el bot de cobros** (columna `otps.origen`). La
+   tabla la comparte con el bot de ventas, cuyo `/info/send-otp` es **público** y acepta
+   cualquier DPI con un teléfono elegido por quien llama: sin esta marca, se podía pedir un
+   código para el DPI de otra persona, recibirlo en el teléfono propio y entrar acá como
+   ella.
+8. **Reenvíos limitados:** 60 segundos entre códigos y 5 por hora por persona, y cada código
+   nuevo **invalida los anteriores**. Si no, tras un bloqueo bastaba con volver a pedir
+   código para tener otros 3 intentos, y se le podía llenar el teléfono de SMS (que se
+   cobran) a un cliente real.
+9. Todo va autenticado con la API key del bot ([D-18](#d-18--autenticación-del-bot-api-key)).
 
 ---
 

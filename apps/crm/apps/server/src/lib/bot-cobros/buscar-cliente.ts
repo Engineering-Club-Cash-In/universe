@@ -212,13 +212,19 @@ async function buscarPorDpi(dpi: string): Promise<ClienteBot | null> {
  * clientes viejos solo en la oportunidad (332 de 1,760 no lo tienen en el lead).
  */
 async function buscarPorNit(nit: string): Promise<ClienteBot | null> {
-	const porLead = await db
+	// Las dos fuentes se consultan JUNTAS: si un cliente lo tiene en su ficha y
+	// otro solo en su crédito, tiene que ganar el del crédito más reciente, no
+	// el que aparezca en la primera consulta.
+	const candidatos = await db
 		.select({ id: leads.id })
 		.from(leads)
 		.innerJoin(opportunities, eq(opportunities.leadId, leads.id))
 		.where(
 			and(
-				sql`${nitNormalizado(leads.nit)} = ${nit}`,
+				or(
+					sql`${nitNormalizado(leads.nit)} = ${nit}`,
+					sql`${nitNormalizado(opportunities.nit)} = ${nit}`,
+				),
 				inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
 			),
 		)
@@ -226,43 +232,16 @@ async function buscarPorNit(nit: string): Promise<ClienteBot | null> {
 		.orderBy(sql`max(${opportunities.createdAt}) DESC`, asc(leads.id))
 		.limit(2);
 
-	if (porLead.length > 0) {
-		if (porLead.length > 1) {
-			alertarDuplicado(
-				"nit_en_varios_leads",
-				porLead.map((l) => l.id),
-			);
-		}
-		return traerTitularConCredito(porLead[0].id);
-	}
+	if (candidatos.length === 0) return null;
 
-	const porOportunidad = await db
-		.select({ leadId: opportunities.leadId })
-		.from(opportunities)
-		.where(
-			and(
-				sql`${nitNormalizado(opportunities.nit)} = ${nit}`,
-				inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
-			),
-		)
-		.groupBy(opportunities.leadId)
-		.orderBy(
-			sql`max(${opportunities.createdAt}) DESC`,
-			asc(opportunities.leadId),
-		)
-		.limit(2);
-
-	const leadId = porOportunidad[0]?.leadId;
-	if (!leadId) return null;
-
-	if (porOportunidad.length > 1) {
+	if (candidatos.length > 1) {
 		alertarDuplicado(
 			"nit_en_varios_clientes",
-			porOportunidad.map((o) => o.leadId ?? "(sin lead)"),
+			candidatos.map((c) => c.id),
 		);
 	}
 
-	return traerTitularConCredito(leadId);
+	return traerTitularConCredito(candidatos[0].id);
 }
 
 /**

@@ -23,7 +23,7 @@
 
 import { randomInt } from "node:crypto";
 import { SMSClient } from "@repo/sms";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gt, type SQL } from "drizzle-orm";
 import { db } from "../../db";
 import { otps } from "../../db/schema/otp";
 import { normalizarDpi } from "../../utils/cui-validation";
@@ -34,6 +34,19 @@ import { aFormatoSms, enmascararTelefono } from "./identificadores";
 const VIGENCIA_MINUTOS = 5;
 /** Intentos fallidos antes de obligar a pedir uno nuevo. */
 const MAX_INTENTOS = 3;
+/**
+ * Marca del flujo que emitió el código.
+ *
+ * La tabla `otps` la comparte con el bot de ventas, cuyos endpoints `/info/*`
+ * son públicos y aceptan cualquier DPI con un teléfono elegido por quien llama.
+ * Sin esta marca, un código pedido por ahí servía para entrar acá como esa
+ * persona.
+ */
+const ORIGEN = "cobros";
+/** Segundos que hay que esperar entre un envío y el siguiente. */
+const COOLDOWN_SEGUNDOS = 60;
+/** Envíos máximos a la misma persona por hora. */
+const MAX_ENVIOS_POR_HORA = 5;
 
 /**
  * `db` o la transacción de un `db.transaction(...)`.
@@ -67,7 +80,13 @@ export type ResultadoEnvio =
 			enviadoA: string;
 			expiraEnSegundos: number;
 	  }
-	| { enviado: false; motivo: string };
+	| { enviado: false; codigo: "ERROR_ENVIO" }
+	| {
+			enviado: false;
+			codigo: "DEMASIADOS_ENVIOS";
+			/** Segundos que faltan para poder pedir otro código. */
+			reintentarEnSegundos: number;
+	  };
 
 /** A quién pertenece el código validado: con esto se listan sus créditos. */
 export type IdentidadVerificada = {
@@ -105,6 +124,19 @@ function generarCodigo(): string {
 export async function enviarOtp(
 	destinatario: DestinatarioOtp,
 ): Promise<ResultadoEnvio> {
+	// Identidad a la que se le manda el código: con ella se cuentan los envíos y
+	// se invalidan los códigos anteriores.
+	const deEstaIdentidad = destinatario.coDebtorId
+		? eq(otps.coDebtorId, destinatario.coDebtorId)
+		: destinatario.leadId
+			? eq(otps.leadId, destinatario.leadId)
+			: null;
+
+	if (deEstaIdentidad) {
+		const limite = await revisarLimiteDeEnvios(deEstaIdentidad);
+		if (limite) return limite;
+	}
+
 	const codigo = generarCodigo();
 	const expiraEn = new Date();
 	expiraEn.setMinutes(expiraEn.getMinutes() + VIGENCIA_MINUTOS);
@@ -115,10 +147,23 @@ export async function enviarOtp(
 	let referencia: string | null = null;
 
 	try {
+		// Un código nuevo deja sin efecto a los anteriores: si no, cada envío
+		// regalaría 3 intentos más y bastaría con volver a pedir código para
+		// seguir adivinando después de un bloqueo.
+		if (deEstaIdentidad) {
+			await db
+				.update(otps)
+				.set({ expiresAt: new Date() })
+				.where(
+					and(deEstaIdentidad, eq(otps.origen, ORIGEN), eq(otps.used, false)),
+				);
+		}
+
 		const [fila] = await db
 			.insert(otps)
 			.values({
 				code: codigo,
+				origen: ORIGEN,
 				dpi: destinatario.dpi ? normalizarDpi(destinatario.dpi) : null,
 				leadId: destinatario.leadId,
 				coDebtorId: destinatario.coDebtorId,
@@ -173,11 +218,68 @@ export async function enviarOtp(
 				);
 		}
 
+		return { enviado: false, codigo: "ERROR_ENVIO" };
+	}
+}
+
+/**
+ * Frena los reenvíos antes de generar otro código.
+ *
+ * Sin esto, cada llamada al servicio 1 emite un código nuevo con 3 intentos
+ * frescos —así el tope de intentos no frena nada— y además le llena el teléfono
+ * de SMS (que se cobran) a un cliente real.
+ */
+async function revisarLimiteDeEnvios(
+	deEstaIdentidad: SQL,
+): Promise<ResultadoEnvio | null> {
+	const desdeUnaHora = new Date(Date.now() - 60 * 60 * 1000);
+
+	const enviados = await db
+		.select({ createdAt: otps.createdAt })
+		.from(otps)
+		.where(
+			and(
+				deEstaIdentidad,
+				eq(otps.origen, ORIGEN),
+				gt(otps.createdAt, desdeUnaHora),
+			),
+		)
+		.orderBy(desc(otps.createdAt))
+		.limit(MAX_ENVIOS_POR_HORA);
+
+	const ultimo = enviados[0];
+
+	if (ultimo) {
+		const segundosDesdeElUltimo = Math.floor(
+			(Date.now() - ultimo.createdAt.getTime()) / 1000,
+		);
+
+		if (segundosDesdeElUltimo < COOLDOWN_SEGUNDOS) {
+			return {
+				enviado: false,
+				codigo: "DEMASIADOS_ENVIOS",
+				reintentarEnSegundos: COOLDOWN_SEGUNDOS - segundosDesdeElUltimo,
+			};
+		}
+	}
+
+	if (enviados.length >= MAX_ENVIOS_POR_HORA) {
+		const masViejo = enviados[enviados.length - 1];
+		const segundosParaLiberar = Math.max(
+			1,
+			Math.ceil(
+				(masViejo.createdAt.getTime() + 60 * 60 * 1000 - Date.now()) / 1000,
+			),
+		);
+
 		return {
 			enviado: false,
-			motivo: "No se pudo enviar el código por SMS",
+			codigo: "DEMASIADOS_ENVIOS",
+			reintentarEnSegundos: segundosParaLiberar,
 		};
 	}
+
+	return null;
 }
 
 /**
@@ -213,7 +315,7 @@ export async function validarOtp(
 	const [otp] = await ejecutor
 		.select()
 		.from(otps)
-		.where(eq(otps.id, referencia))
+		.where(and(eq(otps.id, referencia), eq(otps.origen, ORIGEN)))
 		.limit(1)
 		.for("update");
 

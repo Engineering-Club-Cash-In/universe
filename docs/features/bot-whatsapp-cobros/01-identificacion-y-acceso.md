@@ -122,6 +122,21 @@ Base: `POST /api/bot/cobros/...` · `Authorization: Bearer <BOT_COBROS_API_KEY>`
 ```
 
 ```jsonc
+// respuesta · pidió otro código demasiado pronto
+{
+  "success": false,
+  "error": {
+    "codigo": "DEMASIADOS_ENVIOS",
+    "mensaje": "Ya te enviamos un código hace poco. Espera un momento antes de pedir otro."
+  },
+  "data": { "reintentarEnSegundos": 42 }
+}
+```
+
+Límites de envío: **60 segundos** entre códigos y **5 por hora** por persona. Cada código
+nuevo **invalida los anteriores**, para que pedir otro no regale 3 intentos más.
+
+```jsonc
 // respuesta · encontrado pero sin teléfono al cual mandar el código
 {
   "success": false,
@@ -278,6 +293,7 @@ cualquier persona. Ver [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta
 | --- | --- | --- |
 | `0033_bot_cobros_otp_codeudor.sql` ✅ aplicada | Agrega `co_debtor_id` y hace `lead_id` nullable | El código también se le manda a codeudores |
 | `0034_bot_cobros_otp_sin_dpi.sql` ⏳ pendiente | Hace `dpi` nullable | **274 de 1,522 clientes con crédito (18%) no tienen DPI en el CRM.** Si se identifican por placa o NIT, con `dpi NOT NULL` no se les puede generar el código y quedan fuera del bot |
+| `0035_bot_cobros_otp_origen.sql` ⏳ pendiente | Agrega `origen` ('ventas' / 'cobros') | La tabla se comparte con el bot de ventas, cuyo `/info/send-otp` es público: sin distinguir el origen se podía entrar al bot de cobros con un código pedido desde ahí |
 
 ### Perfil de los datos reales (consultado el 2026-08-14)
 

@@ -27,6 +27,17 @@ export const otps = pgTable("otps", {
 	code: text("code").notNull(),
 
 	/**
+	 * Qué flujo emitió el código: `ventas` (el bot de ventas, vía los endpoints
+	 * públicos `/info/*`) o `cobros` (el bot de cobros).
+	 *
+	 * La validación de cada flujo solo acepta los suyos. Sin esta distinción, un
+	 * código pedido por el endpoint público de ventas —que acepta cualquier DPI
+	 * y un teléfono elegido por quien llama— servía para entrar al bot de cobros
+	 * como esa persona.
+	 */
+	origen: text("origen").notNull().default("ventas"),
+
+	/**
 	 * DPI de quien pidió el código (para búsqueda rápida sin join).
 	 *
 	 * Nullable desde el bot de cobros: hay clientes con crédito que no tienen

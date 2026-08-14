@@ -1,7 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import {
 	AlertTriangle,
 	CalendarClock,
@@ -192,14 +190,62 @@ function etiquetaRol(rol: string | null): string {
 	return ROLES_FILTRABLES.find((r) => r.value === rol)?.label ?? rol ?? "—";
 }
 
+/**
+ * `Intl.DateTimeFormat` con zona horaria explícita GT, en vez de `date-fns`
+ * puro: `format()` de `date-fns` usa siempre la zona LOCAL del navegador, y las
+ * ventanas de este reporte se definen por día calendario de Guatemala en el
+ * server. Para un supervisor con el navegador fuera de UTC-6, una gestión
+ * cerca de medianoche se mostraba en un día u hora distinto al real GT —y esta
+ * fecha alimenta la tabla, el popover de auditoría y el export XLSX, así que
+ * podía contradecir el propio rango de fechas que el usuario seleccionó.
+ */
+const MESES_CORTOS_ES = [
+	"ene",
+	"feb",
+	"mar",
+	"abr",
+	"may",
+	"jun",
+	"jul",
+	"ago",
+	"sep",
+	"oct",
+	"nov",
+	"dic",
+];
+
+/** Partes de un instante en el día calendario y hora de Guatemala. */
+function partesGT(fecha: Date) {
+	const partes = new Intl.DateTimeFormat("en-CA", {
+		timeZone: "America/Guatemala",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: false,
+	}).formatToParts(fecha);
+	const get = (tipo: string) =>
+		partes.find((p) => p.type === tipo)?.value ?? "";
+	return {
+		dia: get("day"),
+		mes: MESES_CORTOS_ES[Number(get("month")) - 1] ?? "",
+		anio: get("year"),
+		hora: get("hour"),
+		minuto: get("minute"),
+	};
+}
+
 function fechaHora(valor: string | Date | null): string {
 	if (!valor) return "—";
-	return format(new Date(valor), "dd MMM yyyy HH:mm", { locale: es });
+	const { dia, mes, anio, hora, minuto } = partesGT(new Date(valor));
+	return `${dia} ${mes} ${anio} ${hora}:${minuto}`;
 }
 
 function soloFecha(valor: string | Date | null): string {
 	if (!valor) return "—";
-	return format(new Date(valor), "dd MMM yyyy", { locale: es });
+	const { dia, mes, anio } = partesGT(new Date(valor));
+	return `${dia} ${mes} ${anio}`;
 }
 
 /** YYYY-MM-DD de un Date local, sin pasar por UTC (que correría el día). */
@@ -367,58 +413,43 @@ function HistorialAgendasPage() {
 	});
 	const usuarios = (usuariosQuery.data ?? []) as UsuarioCobros[];
 
-	// La selección vive en sessionStorage y el catálogo cambia con los filtros:
-	// un id guardado puede ya no existir en el catálogo actual. Si se mandara
-	// igual, el backend devolvería 0 filas por un filtro que el usuario no ve en
-	// el desplegable y no puede desmarcar. Se descartan los que no están.
-	//
-	// Se espera a que el catálogo cargue (`isPending`) antes de sanear: si no,
-	// en el primer render `usuarios` está vacío y se borraría una selección
-	// legítima.
+	/**
+	 * Selección de usuario vigente para el filtro real (no el desplegable).
+	 *
+	 * NO se valida contra `usuarios` (el catálogo). Versión anterior descartaba
+	 * cualquier id que no apareciera en `usuarios`, tratándolo como "ya no
+	 * existe" — pero `getUsuariosConGestiones` recibe `filtrosBase`, que incluye
+	 * bucket/resultado/tipo/SIFCO: el catálogo se RESTRINGE por esos filtros. Un
+	 * supervisor que elige un usuario y luego aplica un bucket bajo el cual ese
+	 * usuario no tiene gestiones ve su selección desaparecer del catálogo —
+	 * legítimamente, no por estar "borrada" — y el saneo antiguo lo interpretaba
+	 * igual que un id inválido, lo tiraba, y listado/KPIs/export seguían
+	 * corriendo SIN el filtro: pasaban de "cero resultados para este usuario" a
+	 * "todo el equipo", en silencio. Mismo problema estructural que ya se corrigió
+	 * para sesión-cargando y catálogo-con-error, pero esta vez con el catálogo
+	 * respondiendo bien — la causa real es usar un catálogo filtrado como fuente
+	 * de verdad de "el id existe".
+	 *
+	 * El único saneo real que queda: limpiar la selección para quien NO es
+	 * supervisor (el filtro no se ve ni se puede tocar). El backend maneja bien
+	 * un id que no matchea nada — 0 filas es una respuesta correcta, y sigue
+	 * siendo scope-safe: el supervisor solo puede filtrar por ids reales que el
+	 * multi-select le ofreció alguna vez.
+	 */
 	const usuarioIdsVigentes = useMemo(() => {
 		if (!usuarioIds?.length) return undefined;
-		// Mientras la sesión todavía resuelve, `userRole` es `undefined` y
-		// `esSupervisor` da `false` aunque el usuario real SEA supervisor — un
-		// hard reload no distingue "es asesor" de "todavía no sabemos el rol". Sin
-		// esta rama, `catalogoDeshabilitado` de abajo trataba ambos casos igual y
-		// el useEffect de sincronización borraba la selección persistida de un
-		// supervisor antes de que la sesión terminara de cargar.
-		if (sesionCargando) return usuarioIds;
-		// `isPending` NO alcanza como "todavía cargando": en TanStack v5 una query
-		// con `enabled: false` se queda en pending para siempre, así que para un
-		// asesor (que no consulta el catálogo) el saneo nunca correría y un id
-		// guardado seguiría filtrando sin chip visible que lo explique. Se
-		// distingue "deshabilitada" de "cargando" con isFetching/isFetched.
-		const catalogoDeshabilitado = !esSupervisor;
-		if (catalogoDeshabilitado) return undefined;
-		if (usuariosQuery.isPending && !usuariosQuery.isFetched) return usuarioIds;
-		// Reintentos agotados: `usuarios` queda `[]` con `isPending: false`, que
-		// sin este guard se lee igual que "el catálogo cargó y ningún id
-		// seleccionado existe" — un fallo de red pasaba por una respuesta
-		// autoritativa. El saneo borraba `usuarioIds`, y el listado y el export
-		// seguían corriendo SIN el filtro, mostrando/exportando todo el equipo en
-		// silencio para un supervisor que pidió ver solo ciertos usuarios.
-		if (usuariosQuery.isError) return usuarioIds;
-		const idsCatalogo = new Set(usuarios.map((u) => u.id));
-		const filtrados = usuarioIds.filter((id) => idsCatalogo.has(id));
-		return filtrados.length ? filtrados : undefined;
-	}, [
-		usuarioIds,
-		usuarios,
-		usuariosQuery.isPending,
-		usuariosQuery.isFetched,
-		usuariosQuery.isError,
-		esSupervisor,
-		sesionCargando,
-	]);
+		if (!esSupervisor) return undefined;
+		return usuarioIds;
+	}, [usuarioIds, esSupervisor]);
 
-	// Persiste el saneo de vuelta a sessionStorage. Sin esto, `usuarioIds` crudo
-	// seguía teniendo los ids que ya no están en el catálogo actual (solo se
-	// filtraban en memoria para ESTA consulta); si un filtro posterior volvía a
-	// ampliar el catálogo, esos ids reaparecían y se reactivaban como selección
-	// sin que el usuario los hubiera vuelto a elegir. Se compara por contenido,
-	// no por referencia, para no reescribir sessionStorage (y no re-disparar
-	// este efecto) en cada render.
+	// Persiste a sessionStorage el único caso en que `usuarioIdsVigentes` difiere
+	// de `usuarioIds`: cuando el usuario actual NO es supervisor. Sin esto, un
+	// asesor que alguna vez tuvo una selección persistida (rol degradado, sesión
+	// compartida) la sigue arrastrando en sessionStorage aunque el filtro nunca
+	// se le aplique en memoria — y volvería a aplicarse solo si el rol cambia de
+	// vuelta a supervisor sin que el usuario haya vuelto a elegir nada. Se
+	// compara por contenido, no por referencia, para no reescribir sessionStorage
+	// (y no re-disparar este efecto) en cada render.
 	useEffect(() => {
 		if (usuarioIdsVigentes === usuarioIds) return;
 		if (
@@ -429,9 +460,6 @@ function HistorialAgendasPage() {
 		) {
 			return;
 		}
-		// `usuarioIds` (no saneado) sigue siendo la fuente de verdad mientras el
-		// catálogo carga: `usuarioIdsVigentes` devuelve el mismo array en ese caso
-		// (ver arriba), así que este efecto no corre hasta que ya sea seguro.
 		setUsuarioIds(usuarioIdsVigentes ?? null);
 	}, [usuarioIdsVigentes, usuarioIds, setUsuarioIds]);
 
@@ -500,9 +528,10 @@ function HistorialAgendasPage() {
 
 	const filtrosActivos = [
 		rangoFechas?.from,
-		// El vigente, no el persistido: un id que ya no está en el catálogo no
-		// filtra nada, así que contarlo mostraría "Limpiar (1)" sin que haya nada
-		// que limpiar.
+		// El vigente, no el persistido: para un asesor `usuarioIdsVigentes` es
+		// siempre `undefined` aunque haya algo guardado (el filtro no se le
+		// aplica), así que contar el crudo mostraría "Limpiar (1)" sin que haya
+		// nada real que limpiar.
 		usuarioIdsVigentes?.length,
 		buckets?.length,
 		rol !== "todos" || null,
@@ -817,11 +846,15 @@ function HistorialAgendasPage() {
 							onDateRangeChange={(r) => {
 								setRangoFechas(r);
 								setPage(1);
-								// El catálogo de usuarios depende del rango. Si quedaba alguien
-								// seleccionado que no gestionó en el rango nuevo, su chip
-								// desaparece del desplegable pero el filtro seguiría aplicando:
-								// tabla vacía sin nada visible que lo explique. Se limpia.
-								setUsuarioIds(null);
+								// NO se limpia `usuarioIds` acá. Versión anterior lo borraba a
+								// priori, asumiendo que el usuario elegido podía no tener
+								// gestiones en el rango nuevo — la misma suposición que ya se
+								// quitó del saneo automático (ver la nota larga en
+								// `usuarioIdsVigentes`), con el mismo problema: si SÍ sigue
+								// teniendo gestiones ahí, se le borraba la selección sin
+								// necesidad. Si de verdad no tiene, la tabla trae 0 filas —
+								// correcto y visible (el multi-select sigue mostrando a quién
+								// se filtra).
 							}}
 						/>
 

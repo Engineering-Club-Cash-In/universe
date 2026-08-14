@@ -44,22 +44,21 @@ export function UsuarioCobrosMultiSelect({
 	/**
 	 * Selección actual; `null` = todos (sin filtro).
 	 *
-	 * Debe venir ya saneada contra `usuarios`: el componente la usa tal cual.
+	 * NO se valida contra `usuarios` acá ni en el caller: `usuarios` es un
+	 * catálogo que se restringe por los DEMÁS filtros activos (bucket,
+	 * resultado, tipo, SIFCO), así que un id puede faltar en él legítimamente
+	 * —el usuario elegido simplemente no tiene gestiones bajo el filtro
+	 * actual— y no por haber dejado de existir. Validar contra ese catálogo
+	 * borraba selecciones válidas (ver la nota larga en `usuarioIdsVigentes`
+	 * de `historial-agendas.tsx`). Efecto visible acá: un id seleccionado que
+	 * no está en `usuarios` no aparece marcado en la lista y, si es la única
+	 * selección, el label cae a "1 usuario" genérico en vez del nombre real —
+	 * degradación cosmética, no funcional, y preferible a perder el filtro.
 	 */
 	value: string[] | null;
 	onChange: (ids: string[] | null) => void;
 }) {
 	const allIds = usuarios.map((u) => u.id);
-	// `value` llega YA saneado contra el catálogo vigente — el caller descarta
-	// los ids que dejaron de existir antes de pasarlos (el catálogo no es fijo:
-	// depende de los filtros activos, y la selección se persiste en
-	// sessionStorage, así que un id guardado puede quedar huérfano).
-	//
-	// El saneo vive del lado del caller y no acá porque es el mismo valor que se
-	// manda al backend: tenerlo en los dos lados permitía que el desplegable
-	// mostrara un estado distinto al que de verdad estaba filtrando. Además solo
-	// el caller sabe si el catálogo todavía está cargando, y filtrar contra una
-	// lista vacía borraría una selección legítima.
 	const vigentes = value;
 	const selected = vigentes === null ? allIds : vigentes;
 	// 0 marcados equivale a "todos": el backend trata el array vacío como sin

@@ -1,0 +1,100 @@
+name: Deploy CRM API (cobros)
+
+# Construye y empuja la imagen del CRM API de la rama COBROS-02 al ECR público y
+# dispara el redeploy en Coolify. Es la instancia que consume el bot de WhatsApp
+# de SimpleTech, separada del CRM API principal para no arrastrarle cambios en
+# curso.
+#
+# Hace lo mismo que apps/crm/apps/server/deployServer.sh (Dockerfile del server,
+# contexto en la raíz del monorepo), pero automático y con tag por commit.
+#
+# Ver docs/features/bot-whatsapp-cobros/despliegue-dev.md
+on:
+  push:
+    branches: ["COBROS-02"]
+    paths:
+      - "apps/crm/apps/server/**"
+      - "packages/sms/**"
+      - "packages/simpletech/**"
+      - "packages/infornet/**"
+      - "packages/email/**"
+      - ".github/workflows/deploy-crm-api-cobros.yaml"
+  workflow_dispatch: {} # permite dispararlo a mano desde la pestaña Actions
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: public.ecr.aws/a6w8m2u2
+  IMAGEN: cci/crm-api-cobros
+
+permissions:
+  contents: read
+
+# La concurrencia va a nivel de workflow, no del job que despliega: si estuviera
+# solo en `desplegar`, un push viejo que todavía está verificando no se cancela,
+# y al terminar —después de que el nuevo ya desplegó— publicaría su imagen
+# encima, dejando `latest` apuntando a un commit anterior.
+#
+# (En deploy-cartera-dev.yaml la concurrencia sí va por job, porque ese workflow
+# construye dos apps distintas y un push que solo toca el front no debe cancelar
+# un deploy del back en curso. Acá hay una sola app.)
+concurrency:
+  group: deploy-crm-api-cobros
+  cancel-in-progress: true
+
+jobs:
+  # 1) Barrera barata antes de publicar: la API la consume un tercero, así que
+  # no conviene subir una imagen que ni compila.
+  verificar:
+    name: Tipos y pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Instalar dependencias
+        working-directory: apps/crm
+        run: bun install --frozen-lockfile
+
+      - name: Revisar tipos
+        working-directory: apps/crm/apps/server
+        run: bunx tsc --noEmit
+
+      - name: Pruebas del bot de cobros
+        working-directory: apps/crm/apps/server
+        run: bun test src/lib/bot-cobros/
+
+  # 2) Imagen → cci/crm-api-cobros:latest
+  desplegar:
+    name: Construir y desplegar
+    needs: verificar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login a ECR Public (podman)
+        run: |
+          aws ecr-public get-login-password --region $AWS_REGION \
+            | podman login --username AWS --password-stdin public.ecr.aws
+
+      - name: Construir y empujar
+        run: |
+          podman build -f apps/crm/apps/server/Dockerfile . \
+            -t $ECR_REGISTRY/$IMAGEN:latest \
+            -t $ECR_REGISTRY/$IMAGEN:${{ github.sha }}
+          podman push $ECR_REGISTRY/$IMAGEN:latest
+          podman push $ECR_REGISTRY/$IMAGEN:${{ github.sha }}
+
+      - name: Redeploy en Coolify
+        run: |
+          curl --fail-with-body --request GET \
+            "${{ secrets.COOLIFY_WEBHOOK_CRM_API_COBROS }}" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"

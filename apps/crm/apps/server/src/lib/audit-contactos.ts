@@ -108,6 +108,19 @@ interface RegistrarAuditArgs {
 	editadoPor?: string | null;
 	/** Para escribir dentro de una transacción del caller. */
 	tx?: Pick<typeof db, "insert">;
+	/**
+	 * Instante REAL de la transición, si el caller ya lo tiene (p.ej. el `ahora`
+	 * que usó el propio UPDATE). Sin esto, la columna cae a `defaultNow()` — el
+	 * instante del INSERT del audit, no el del UPDATE que audita.
+	 *
+	 * Importa para los callers de SISTEMA (`promesa-estado-batch.ts`): su audit
+	 * corre DESPUÉS del commit, en serie, fuera de la transacción de escritura.
+	 * Si otra transacción concurrente audita la misma fila más rápido, su
+	 * INSERT (con `defaultNow()`) puede insertarse ANTES que este aunque su
+	 * transición haya ocurrido DESPUÉS — `getAuditoriaContacto`, que ordena por
+	 * `editadoEn`, mostraría el orden invertido (Codex, PR #1299).
+	 */
+	editadoEn?: Date;
 }
 
 /**
@@ -127,6 +140,7 @@ export async function registrarAuditContacto({
 	valoresAnteriores,
 	editadoPor,
 	tx,
+	editadoEn,
 }: RegistrarAuditArgs): Promise<void> {
 	const ejecutor = tx ?? db;
 	await ejecutor.insert(contactosCobrosAudit).values({
@@ -139,6 +153,10 @@ export async function registrarAuditContacto({
 		// confiar en el caller para que un origen de sistema nunca quede
 		// atribuido a una persona por accidente.
 		editadoPor: origen === "manual" ? (editadoPor ?? null) : null,
+		// Sin `editadoEn` explícito cae a defaultNow() del schema — correcto para
+		// la edición manual, que audita DENTRO de la misma transacción del
+		// UPDATE. Los callers de sistema SÍ deben pasarlo (ver la nota del tipo).
+		...(editadoEn ? { editadoEn } : {}),
 	});
 }
 

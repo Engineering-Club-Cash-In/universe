@@ -59,6 +59,8 @@ export interface TransicionAplicada {
 	casoCobroId: string;
 	de: EstadoPromesa | null;
 	a: EstadoPromesa;
+	/** Instante REAL del UPDATE (dentro de la transacción), no el del INSERT del audit — ver nota en `audit-contactos.ts`. */
+	ocurrioEn: Date;
 }
 
 /**
@@ -97,10 +99,16 @@ export interface FilaBloqueada {
  * no venían en el lote. El "de" sale de la fila BLOQUEADA, no de una lectura
  * previa: es lo que hace que la transición auditada sea la que realmente
  * ocurrió.
+ *
+ * `ocurrioEn` es el instante que el caller va a escribir en `updatedAt` del
+ * UPDATE — se propaga a la transición para que el audit (que corre después,
+ * fuera de esta transacción) registre el momento REAL de la escritura y no el
+ * de su propio INSERT. Ver la nota larga en `audit-contactos.ts`.
  */
 export function decidirTransiciones(
 	filas: readonly FilaBloqueada[],
 	estadoPorId: ReadonlyMap<string, EstadoPromesa>,
+	ocurrioEn: Date,
 ): TransicionAplicada[] {
 	const aplicadas: TransicionAplicada[] = [];
 	for (const fila of filas) {
@@ -112,6 +120,7 @@ export function decidirTransiciones(
 			casoCobroId: fila.casoCobroId,
 			de: fila.estadoPromesa,
 			a: nuevo,
+			ocurrioEn,
 		});
 	}
 	return aplicadas;
@@ -138,8 +147,8 @@ export async function aplicarCambiosEstadoPromesa(
 			.orderBy(contactosCobros.id)
 			.for("update");
 
-		const aplicadas = decidirTransiciones(filas, estadoPorId);
 		const ahora = new Date();
+		const aplicadas = decidirTransiciones(filas, estadoPorId, ahora);
 
 		for (const t of aplicadas) {
 			await tx
@@ -172,6 +181,7 @@ export async function auditarTransiciones(
 			accion: "cambio_estado_promesa",
 			origen,
 			valoresAnteriores: payloadCambioEstado(t.de, t.a),
+			editadoEn: t.ocurrioEn,
 		});
 	}
 }

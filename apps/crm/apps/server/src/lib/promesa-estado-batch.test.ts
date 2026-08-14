@@ -15,6 +15,8 @@ function fila(overrides: Partial<FilaBloqueada> = {}): FilaBloqueada {
 	};
 }
 
+const AHORA_FIJO = new Date("2026-01-01T00:00:00.000Z");
+
 describe("deduplicarCambios", () => {
 	test("conserva el último estado de un id repetido", () => {
 		// Dos entradas del mismo id se colapsan en una: si se aplicaran las dos,
@@ -48,7 +50,7 @@ describe("decidirTransiciones", () => {
 		const filas = [fila({ id: "p-1", estadoPromesa: "pendiente" })];
 		const mapa = deduplicarCambios([{ id: "p-1", estado: "pendiente" }]);
 
-		expect(decidirTransiciones(filas, mapa)).toEqual([]);
+		expect(decidirTransiciones(filas, mapa, AHORA_FIJO)).toEqual([]);
 	});
 
 	test("registra el cambio con el 'de' de la fila bloqueada", () => {
@@ -57,8 +59,14 @@ describe("decidirTransiciones", () => {
 		];
 		const mapa = deduplicarCambios([{ id: "p-1", estado: "cumplida" }]);
 
-		expect(decidirTransiciones(filas, mapa)).toEqual([
-			{ id: "p-1", casoCobroId: "caso-9", de: "pendiente", a: "cumplida" },
+		expect(decidirTransiciones(filas, mapa, AHORA_FIJO)).toEqual([
+			{
+				id: "p-1",
+				casoCobroId: "caso-9",
+				de: "pendiente",
+				a: "cumplida",
+				ocurrioEn: AHORA_FIJO,
+			},
 		]);
 	});
 
@@ -69,7 +77,7 @@ describe("decidirTransiciones", () => {
 		const filas = [fila({ estadoPromesa: null })];
 		const mapa = deduplicarCambios([{ id: "p-1", estado: "pendiente" }]);
 
-		const resultado = decidirTransiciones(filas, mapa);
+		const resultado = decidirTransiciones(filas, mapa, AHORA_FIJO);
 
 		expect(resultado).toHaveLength(1);
 		expect(resultado[0].de).toBeNull();
@@ -80,7 +88,7 @@ describe("decidirTransiciones", () => {
 		const filas = [fila({ id: "ajena", estadoPromesa: "pendiente" })];
 		const mapa = deduplicarCambios([{ id: "p-1", estado: "cumplida" }]);
 
-		expect(decidirTransiciones(filas, mapa)).toEqual([]);
+		expect(decidirTransiciones(filas, mapa, AHORA_FIJO)).toEqual([]);
 	});
 
 	test("procesa un lote mixto: solo salen los que cambian", () => {
@@ -95,10 +103,9 @@ describe("decidirTransiciones", () => {
 			{ id: "p-3", estado: "pendiente" },
 		]);
 
-		expect(decidirTransiciones(filas, mapa).map((t) => t.id)).toEqual([
-			"p-1",
-			"p-3",
-		]);
+		expect(
+			decidirTransiciones(filas, mapa, AHORA_FIJO).map((t) => t.id),
+		).toEqual(["p-1", "p-3"]);
 	});
 
 	test("preserva el orden en que vinieron las filas bloqueadas", () => {
@@ -116,10 +123,8 @@ describe("decidirTransiciones", () => {
 			{ id: "b", estado: "cumplida" },
 		]);
 
-		expect(decidirTransiciones(filas, mapa).map((t) => t.id)).toEqual([
-			"a",
-			"b",
-			"c",
-		]);
+		expect(
+			decidirTransiciones(filas, mapa, AHORA_FIJO).map((t) => t.id),
+		).toEqual(["a", "b", "c"]);
 	});
 });

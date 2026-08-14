@@ -14,6 +14,7 @@
  */
 
 import type { Context } from "hono";
+import { db } from "../db";
 import {
 	buscarCliente,
 	listarCreditosDeCliente,
@@ -158,7 +159,26 @@ export async function listarCreditosBotCobros(c: Context) {
 			});
 		}
 
-		const validacion = await validarOtp(referencia, codigo);
+		// Validar y listar van en la MISMA transacción, con la fila del OTP
+		// bloqueada:
+		//   · Dos peticiones simultáneas no pueden pisarse el contador de
+		//     intentos y saltarse el tope de 3.
+		//   · Si el listado falla, se revierte también el "código usado", así el
+		//     cliente puede reintentar sin pedir otro SMS.
+		const resultado = await db.transaction(async (tx) => {
+			const validacion = await validarOtp(referencia, codigo, tx);
+
+			if (!validacion.valido) {
+				// Se retorna (no se lanza) para que el intento fallido sí quede
+				// contado al hacer commit.
+				return { validacion, creditos: null };
+			}
+
+			const creditos = await listarCreditosDeCliente(validacion.identidad, tx);
+			return { validacion, creditos };
+		});
+
+		const { validacion, creditos } = resultado;
 
 		if (!validacion.valido) {
 			switch (validacion.codigo) {
@@ -202,9 +222,7 @@ export async function listarCreditosBotCobros(c: Context) {
 			}
 		}
 
-		const creditos = await listarCreditosDeCliente(validacion.identidad);
-
-		return c.json({ success: true, data: { creditos } });
+		return c.json({ success: true, data: { creditos: creditos ?? [] } });
 	} catch (err) {
 		console.error("[BotCobros] creditos:", err);
 		return error(c, {

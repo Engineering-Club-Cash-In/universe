@@ -22,6 +22,7 @@ import { normalizarDpi } from "../../utils/cui-validation";
 import { eqDpi } from "../dpi-lookup";
 import type { TipoBusqueda } from "./identificadores";
 import { detectarTipoBusqueda } from "./identificadores";
+import type { Ejecutor } from "./otp";
 
 /** Estados de oportunidad que representan un crédito real (D-17). */
 const ESTADOS_CON_CREDITO = ["won", "migrate"] as const;
@@ -273,10 +274,13 @@ export type CreditoBot = {
  * aquellos en los que es codeudor. No se consulta cartera, así que los ya
  * liquidados también salen (D-17): en el CRM la oportunidad sigue ganada.
  */
-export async function listarCreditosDeCliente(identidad: {
-	leadId: string | null;
-	dpi: string | null;
-}): Promise<CreditoBot[]> {
+export async function listarCreditosDeCliente(
+	identidad: {
+		leadId: string | null;
+		dpi: string | null;
+	},
+	ejecutor: Ejecutor = db,
+): Promise<CreditoBot[]> {
 	const condiciones = [];
 
 	if (identidad.leadId) {
@@ -301,7 +305,7 @@ export async function listarCreditosDeCliente(identidad: {
 
 	if (condiciones.length === 0) return [];
 
-	const filas = await db
+	const filas = await ejecutor
 		.selectDistinct({
 			numeroSifco: opportunities.numeroSifco,
 			placa: vehicles.licensePlate,

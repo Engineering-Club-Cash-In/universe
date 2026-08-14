@@ -211,7 +211,12 @@ créditos. Si no lo es, responde el error y no lista nada.
 ```
 
 Otros errores posibles: `OTP_VENCIDO`, `OTP_YA_USADO` (un código sirve una sola vez),
-`DEMASIADOS_INTENTOS` (3 fallidos) y `REFERENCIA_INVALIDA`.
+`DEMASIADOS_INTENTOS` (llega en el **tercer** fallo, no en el cuarto) y
+`REFERENCIA_INVALIDA`.
+
+**Validación y listado van en una sola transacción**, con la fila del OTP bloqueada
+(`FOR UPDATE`): peticiones simultáneas no pueden pisarse el contador de intentos, y si el
+listado falla el código **no queda consumido**, así el cliente reintenta sin pedir otro SMS.
 
 **Por qué va la `referencia` y no el `search`.** Con solo el código de 4 dígitos, alguien con
 la API key podría probar `0000`…`9999` hasta caer en el código vivo de cualquier cliente, y
@@ -440,6 +445,9 @@ listado de créditos no lo tocan y siguen funcionando igual.
 | Servicio 2 con referencia inventada | 401 `REFERENCIA_INVALIDA` |
 | Servicio 2 con código correcto | Devuelve los créditos con su etiqueta armada |
 | Reusar el mismo código | 401 `OTP_YA_USADO` |
+| Tercer código equivocado | 429 `DEMASIADOS_INTENTOS` (no al cuarto) |
+| 10 validaciones **en paralelo** con código malo | Solo 2 cuentan como intento; el contador queda en 3, no en 1 |
+| Falla el listado después de validar | El código **no** queda usado y el reintento funciona |
 | Cliente con dos créditos | Lista los dos |
 | Codeudor | Lista el crédito donde es codeudor |
 

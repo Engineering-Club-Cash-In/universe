@@ -34,6 +34,16 @@ const VIGENCIA_MINUTOS = 5;
 /** Intentos fallidos antes de obligar a pedir uno nuevo. */
 const MAX_INTENTOS = 3;
 
+/**
+ * `db` o la transacción de un `db.transaction(...)`.
+ *
+ * El servicio 2 valida y lista los créditos dentro de una misma transacción,
+ * para que el código no quede consumido si el listado falla.
+ */
+export type Ejecutor =
+	| typeof db
+	| Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export type DestinatarioOtp = {
 	/** Lead del titular, o null si el código va a un codeudor. */
 	leadId: string | null;
@@ -171,10 +181,16 @@ export async function enviarOtp(
  * La `referencia` es el id de la fila, que el servicio 1 le devolvió al bot.
  * Ata el código a UNA persona: sin ella, mandar solo 4 dígitos permitiría
  * probar 0000…9999 hasta caer en el código vivo de cualquier cliente.
+ *
+ * **Se debe llamar dentro de una transacción** (`ejecutor` = la `tx`): la fila
+ * se bloquea con `FOR UPDATE` para que dos peticiones simultáneas no lean el
+ * mismo contador de intentos y lo pisen — si no, se podría probar el espacio
+ * completo de códigos en paralelo saltándose el tope de 3.
  */
 export async function validarOtp(
 	referencia: string,
 	codigo: string,
+	ejecutor: Ejecutor = db,
 ): Promise<ResultadoValidacion> {
 	// La referencia es un uuid; si viene cualquier cosa, la consulta explota.
 	if (
@@ -185,11 +201,12 @@ export async function validarOtp(
 		return { valido: false, codigo: "REFERENCIA_INVALIDA" };
 	}
 
-	const [otp] = await db
+	const [otp] = await ejecutor
 		.select()
 		.from(otps)
 		.where(eq(otps.id, referencia))
-		.limit(1);
+		.limit(1)
+		.for("update");
 
 	if (!otp) {
 		return { valido: false, codigo: "REFERENCIA_INVALIDA" };
@@ -211,19 +228,26 @@ export async function validarOtp(
 
 	if (otp.code !== codigo) {
 		const intentos = otp.attempts + 1;
-		await db
+		await ejecutor
 			.update(otps)
 			.set({ attempts: intentos })
 			.where(eq(otps.id, otp.id));
 
+		// Si este intento agotó el tope, se avisa el bloqueo ahora y no en el
+		// siguiente: el bot rutea por `codigo`, y con OTP_INVALIDO le pediría al
+		// cliente otro intento que ya no puede funcionar.
+		if (intentos >= MAX_INTENTOS) {
+			return { valido: false, codigo: "DEMASIADOS_INTENTOS" };
+		}
+
 		return {
 			valido: false,
 			codigo: "OTP_INVALIDO",
-			intentosRestantes: Math.max(0, MAX_INTENTOS - intentos),
+			intentosRestantes: MAX_INTENTOS - intentos,
 		};
 	}
 
-	await db
+	await ejecutor
 		.update(otps)
 		.set({ used: true, usedAt: new Date() })
 		.where(eq(otps.id, otp.id));

@@ -5,11 +5,12 @@
  * corregir por aparte en el detalle de crédito (40%) y al asignar inversión
  * (50%).
  *
- * Por eso editar el NIT del lead solo debe propagarse a sus oportunidades
- * cuando no hay nada divergente que pisar: si las oportunidades del lead ya no
- * coinciden entre ellas, alguien corrigió una a mano para ese crédito en
- * concreto y esa corrección manda. Con una sola oportunidad no hay conflicto
- * posible, así que ahí sí se propaga.
+ * Por eso al editar el NIT del lead solo se propaga a las oportunidades que
+ * siguen con la copia intacta. La referencia para saberlo es el NIT que el lead
+ * tenía ANTES de la edición: si la oportunidad todavía coincide con él, nadie la
+ * tocó; si difiere, alguien la corrigió a mano para ese crédito y esa corrección
+ * manda. Comparar las oportunidades entre ellas no sirve —una oportunidad sola,
+ * o varias corregidas al mismo valor, también "coinciden" y se perderían igual.
  *
  * Vive en su propio módulo, sin tocar `db`, para poder verificarlo en tests.
  */
@@ -24,14 +25,20 @@ function normalizarNit(nit: string | null | undefined): string | null {
 }
 
 /**
- * @param opportunityNits NIT actual de cada oportunidad del lead
- * @returns true si el NIT del lead se puede propagar sin pisar correcciones
+ * @param opportunityNit NIT actual de la oportunidad
+ * @param previousLeadNit NIT que el lead tenía antes de esta edición
+ * @returns true si la oportunidad sigue con la copia del lead y se puede
+ * actualizar sin pisar una corrección manual
  */
-export function canSyncNitToOpportunities(
-	opportunityNits: Array<string | null | undefined>,
+export function canSyncNitToOpportunity(
+	opportunityNit: string | null | undefined,
+	previousLeadNit: string | null | undefined,
 ): boolean {
-	if (opportunityNits.length === 0) return false;
+	const actual = normalizarNit(opportunityNit);
 
-	const distintos = new Set(opportunityNits.map(normalizarNit));
-	return distintos.size === 1;
+	// Sin NIT propio no hay nada que preservar: la oportunidad se creó antes de
+	// que el lead tuviera NIT, o la copia nunca ocurrió.
+	if (actual === null) return true;
+
+	return actual === normalizarNit(previousLeadNit);
 }

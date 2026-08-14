@@ -6,7 +6,7 @@ import {
 	timestamp,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { leads } from "./crm";
+import { coDebtors, leads } from "./crm";
 
 /**
  * Tabla de códigos OTP (One-Time Password) para verificación de leads
@@ -26,13 +26,39 @@ export const otps = pgTable("otps", {
 	/** Código OTP de 6 dígitos */
 	code: text("code").notNull(),
 
-	/** DPI del lead asociado (para búsqueda rápida sin join) */
-	dpi: text("dpi").notNull(),
+	/**
+	 * Qué flujo emitió el código: `ventas` (el bot de ventas, vía los endpoints
+	 * públicos `/info/*`) o `cobros` (el bot de cobros).
+	 *
+	 * La validación de cada flujo solo acepta los suyos. Sin esta distinción, un
+	 * código pedido por el endpoint público de ventas —que acepta cualquier DPI
+	 * y un teléfono elegido por quien llama— servía para entrar al bot de cobros
+	 * como esa persona.
+	 */
+	origen: text("origen").notNull().default("ventas"),
 
-	/** Referencia al lead que solicitó el OTP */
-	leadId: uuid("lead_id")
-		.notNull()
-		.references(() => leads.id, { onDelete: "cascade" }),
+	/**
+	 * DPI de quien pidió el código (para búsqueda rápida sin join).
+	 *
+	 * Nullable desde el bot de cobros: hay clientes con crédito que no tienen
+	 * DPI cargado en el CRM y se identifican por placa o NIT.
+	 */
+	dpi: text("dpi"),
+
+	/**
+	 * Referencia al lead que solicitó el OTP.
+	 *
+	 * Nullable desde el bot de cobros: cuando el DPI buscado es el de un
+	 * codeudor, el código se le manda a él y la fila apunta a `coDebtorId` en
+	 * lugar de a un lead. Siempre hay uno de los dos (constraint
+	 * `otps_destinatario_check`).
+	 */
+	leadId: uuid("lead_id").references(() => leads.id, { onDelete: "cascade" }),
+
+	/** Referencia al codeudor, cuando el OTP se le envió a él en vez del titular */
+	coDebtorId: uuid("co_debtor_id").references(() => coDebtors.id, {
+		onDelete: "cascade",
+	}),
 
 	/** Teléfono al que se envió el SMS (puede diferir del lead.phone si cambió) */
 	phoneNumber: text("phone_number").notNull(),

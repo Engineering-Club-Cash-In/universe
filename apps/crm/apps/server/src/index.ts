@@ -11,6 +11,10 @@ import {
 	updateLeadAndCreateOpportunity,
 	validateMagicUrlController,
 } from "./controllers/bot";
+import {
+	buscarClienteBotCobros,
+	listarCreditosBotCobros,
+} from "./controllers/bot-cobros";
 import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
@@ -38,6 +42,7 @@ import {
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
+import { autenticarBotCobros } from "./lib/bot-cobros/auth";
 import { createContext } from "./lib/context";
 import { toDateStrGT } from "./lib/guatemala-month-window";
 import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
@@ -969,6 +974,21 @@ app.post("/api/notifications/pay-investors", async (c) => {
 		return c.json({ error: err.message || "Error al crear notificación" }, 500);
 	}
 });
+
+// Bot de WhatsApp de cobros (SimpleTech).
+// A diferencia de /info/* (bot de ventas), estos endpoints exponen datos de
+// clientes con crédito, así que van autenticados con la API key del integrador.
+// Ver docs/features/bot-whatsapp-cobros/
+app.post(
+	"/api/bot/cobros/buscar-cliente",
+	autenticarBotCobros,
+	buscarClienteBotCobros,
+);
+app.post(
+	"/api/bot/cobros/creditos",
+	autenticarBotCobros,
+	listarCreditosBotCobros,
+);
 
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);

@@ -285,6 +285,16 @@ function HistorialAgendasPage() {
 	const esSupervisor = userRole
 		? PERMISSIONS.canViewAllCasosCobros(userRole)
 		: false;
+	// `canAccessCobros`, no solo `!!session`: todo procedure de este archivo
+	// (listado, resumen, catálogo de buckets) está gateado por `cobrosProcedure`
+	// en el server, así que un usuario autenticado SIN el permiso (que abre la
+	// URL directo, sin pasar por el menú que ya la esconde) disparaba las
+	// queries igual — el rechazo del backend llegaba como reintentos y toasts de
+	// error globales detrás de la pantalla de "Acceso Denegado" que de todas
+	// formas se termina mostrando más abajo. Declarado acá arriba, no junto a
+	// `listado`/`resumen`, porque `catalogoQuery` también lo necesita y se
+	// declara antes.
+	const puedeConsultar = !!userRole && PERMISSIONS.canAccessCobros(userRole);
 
 	// Los filtros persisten en sessionStorage: el supervisor entra y sale de la
 	// ficha de un crédito y vuelve al mismo recorte.
@@ -347,7 +357,7 @@ function HistorialAgendasPage() {
 		return () => clearTimeout(timer);
 	}, [busquedaSifco]);
 
-	const catalogoQuery = useBucketsCatalogo();
+	const catalogoQuery = useBucketsCatalogo(puedeConsultar);
 	// `getBucketsCatalogo` cae en el mismo truncado de TS7056 que el resto (ver
 	// nota más abajo): el hook devuelve `unknown` aunque el server lo tipa bien.
 	const catalogo = catalogoQuery.data as BucketsCatalogoQueryData | undefined;
@@ -490,14 +500,6 @@ function HistorialAgendasPage() {
 		() => ({ ...filtrosBase, usuarioIds: usuarioIdsParaBackend }),
 		[filtrosBase, usuarioIdsParaBackend],
 	);
-
-	// `canAccessCobros`, no solo `!!session`: ambos procedures están gateados
-	// por `cobrosProcedure` en el server, así que un usuario autenticado SIN el
-	// permiso (que abre la URL directo, sin pasar por el menú que ya la
-	// esconde) disparaba las queries igual — el rechazo del backend llegaba
-	// como reintentos y toasts de error globales detrás de la pantalla de
-	// "Acceso Denegado" que de todas formas se termina mostrando más abajo.
-	const puedeConsultar = !!userRole && PERMISSIONS.canAccessCobros(userRole);
 
 	const listado = useQuery({
 		...orpcAny.getHistorialAgendas.queryOptions({

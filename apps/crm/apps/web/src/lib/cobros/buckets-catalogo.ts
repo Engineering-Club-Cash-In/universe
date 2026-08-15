@@ -151,9 +151,18 @@ export type BucketsCatalogoQueryData = {
 	diasSla?: number | null;
 }[];
 
-/** Catálogo dinámico de buckets de aging (B0-B5), vía ORPC. Cachea 5 min en el server. */
-export function useBucketsCatalogo() {
-	return useQuery(orpc.getBucketsCatalogo.queryOptions());
+/**
+ * Catálogo dinámico de buckets de aging (B0-B5), vía ORPC. Cachea 5 min en el
+ * server.
+ *
+ * `enabled` (default `true`) existe para callers que renderizan ANTES de
+ * confirmar el permiso de acceso a cobros — el procedure está gateado por
+ * `cobrosProcedure` en el server, así que sin este gate un usuario autenticado
+ * sin el permiso dispara la query igual y el rechazo llega como reintentos y
+ * toasts de error globales detrás de la pantalla de acceso denegado.
+ */
+export function useBucketsCatalogo(enabled = true) {
+	return useQuery({ ...orpc.getBucketsCatalogo.queryOptions(), enabled });
 }
 
 /**

@@ -1338,22 +1338,11 @@ export const updateCredit = async ({ body, set, request }: any) => {
       ...fieldsToUpdate
     } = parseResult.data;
 
-    // 2. Buscar el crédito actual
+    // 2. Buscar el crédito actual (editable sin importar el status)
     const [current] = await db
       .select()
       .from(creditos)
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          inArray(creditos.statusCredit, [
-            "ACTIVO",
-            "MOROSO",
-            "PENDIENTE_CANCELACION",
-            "EN_CONVENIO",
-            "INCOBRABLE"
-          ]),
-        ),
-      )
+      .where(eq(creditos.credito_id, credito_id))
       .limit(1);
 
     if (!current) {

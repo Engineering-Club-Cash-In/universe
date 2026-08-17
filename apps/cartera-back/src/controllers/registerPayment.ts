@@ -2617,11 +2617,18 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       };
     }
     if (pago.validationStatus === "capital") {
-      return applyCapitalPaymentAndBuildResponse(
+      const resultadoCapital = await applyCapitalPaymentAndBuildResponse(
         pago,
         pago_id,
         aplicarAbonoCapitalInversionistas
       );
+      // Un abono directo a capital puede dejar el crédito sin capital: la
+      // regla sinCapital debe apagar la mora aquí mismo (igual que haría el
+      // cron esa noche). Post-commit del abono; barato si no hay mora activa.
+      if (resultadoCapital?.success && pago.credito_id !== null) {
+        await desactivarMoraSiCreditoAlDia(pago.credito_id);
+      }
+      return resultadoCapital;
     }
     if (pago.validationStatus === "reset") {
       if (pago.credito_id === null) {

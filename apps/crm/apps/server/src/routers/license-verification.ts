@@ -267,7 +267,10 @@ export const licenseVerificationRouter = {
 					eq(coDebtors.opportunityId, coDebtorOpportunities.id),
 				)
 				.where(conditions.length > 0 ? and(...conditions) : undefined)
-				.orderBy(desc(licenseQrVerifications.createdAt))
+				.orderBy(
+					desc(licenseQrVerifications.createdAt),
+					desc(licenseQrVerifications.id),
+				)
 				.limit(input?.limit ?? 20)
 				.offset(input?.offset ?? 0);
 

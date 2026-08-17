@@ -11,12 +11,12 @@ import {
 	ChevronDown,
 	Database,
 	FileText,
+	Files,
 	Gavel,
 	Landmark,
 	LayoutDashboard,
 	Menu,
 	MessageSquare,
-	QrCode,
 	Scale,
 	Settings,
 	Target,
@@ -144,9 +144,9 @@ export default function Header() {
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>
-										<Link to="/crm/licencias" className="cursor-pointer">
-											<QrCode className="mr-2 h-4 w-4" />
-											Licencias
+										<Link to="/crm/documentacion" className="cursor-pointer">
+											<Files className="mr-2 h-4 w-4" />
+											Documentación
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />
@@ -556,9 +556,9 @@ function MobileNav({
 											<UserCircle />
 											Vendedores
 										</Link>
-										<Link to="/crm/licencias" className={MOBILE_LINK_CLASS}>
-											<QrCode />
-											Licencias
+										<Link to="/crm/documentacion" className={MOBILE_LINK_CLASS}>
+											<Files />
+											Documentación
 										</Link>
 										<Link to="/crm/quoter" className={MOBILE_LINK_CLASS}>
 											<Calculator />

@@ -1,8 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	keepPreviousData,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	AlertCircle,
 	CheckCircle2,
+	ChevronLeft,
+	ChevronRight,
 	HelpCircle,
 	Loader2,
 	QrCode,
@@ -54,9 +61,22 @@ import {
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc } from "@/utils/orpc";
 
-export const Route = createFileRoute("/crm/licencias")({
-	component: LicenciasPage,
+// Ruta directa opcional (deep link); el acceso normal es vía el tab en
+// /crm/documentacion. Mismo patrón que apps/web/.../reportes/meta-colocacion.tsx.
+export const Route = createFileRoute("/crm/documentacion/licencias")({
+	component: RouteComponent,
 });
+
+function RouteComponent() {
+	return (
+		<div className="container mx-auto p-6">
+			<LicenciasContent />
+		</div>
+	);
+}
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 25;
 
 type VerificationResult = "valida" | "invalida" | "ilegible" | "revision_manual";
 
@@ -100,16 +120,25 @@ function ResultBadge({ result }: { result: string }) {
 	);
 }
 
-function LicenciasPage() {
+export function LicenciasContent() {
 	const [isDialogOpen, setIsDialogOpen] = useState(false);
 	const [selectedVerificationId, setSelectedVerificationId] = useState<
 		string | null
 	>(null);
+	const [page, setPage] = useState(0);
+	const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
 	const queryClient = useQueryClient();
 
 	const verificationsQuery = useQuery({
-		...orpc.listLicenseVerifications.queryOptions({ input: { limit: 50 } }),
+		...orpc.listLicenseVerifications.queryOptions({
+			input: { limit: pageSize, offset: page * pageSize },
+		}),
+		// Mantiene la página anterior visible mientras carga la siguiente, en
+		// vez de mostrar "Cargando..." de nuevo en cada cambio de página.
+		placeholderData: keepPreviousData,
 	});
+	const rows = verificationsQuery.data ?? [];
+	const hasNextPage = rows.length === pageSize;
 
 	// El listado no trae rawResponse (payload completo de Tránsito) — se pide
 	// aparte solo cuando se abre el detalle de una fila.
@@ -121,11 +150,11 @@ function LicenciasPage() {
 	});
 
 	return (
-		<div className="container mx-auto space-y-6 p-6">
+		<div className="space-y-6">
 			<div className="flex items-center justify-between">
 				<div>
-					<h1 className="font-bold text-3xl">Licencias</h1>
-					<p className="text-muted-foreground">
+					<h1 className="font-bold text-2xl">Licencias</h1>
+					<p className="text-muted-foreground text-sm">
 						Verificación del QR del reverso de licencia contra el sitio
 						oficial de Tránsito.
 					</p>
@@ -143,6 +172,7 @@ function LicenciasPage() {
 					{isDialogOpen && (
 						<NewVerificationDialog
 							onDone={() => {
+								setPage(0);
 								queryClient.invalidateQueries({
 									queryKey: orpc.listLicenseVerifications.key(),
 								});
@@ -177,14 +207,25 @@ function LicenciasPage() {
 									</TableCell>
 								</TableRow>
 							)}
-							{verificationsQuery.data?.length === 0 && (
+							{verificationsQuery.isError && (
 								<TableRow>
-									<TableCell colSpan={6} className="text-center text-muted-foreground">
-										Todavía no hay verificaciones.
+									<TableCell colSpan={6} className="text-center text-destructive">
+										No se pudo cargar el historial. Intenta de nuevo.
 									</TableCell>
 								</TableRow>
 							)}
-							{verificationsQuery.data?.map((row) => (
+							{!verificationsQuery.isLoading &&
+								!verificationsQuery.isError &&
+								rows.length === 0 && (
+									<TableRow>
+										<TableCell colSpan={6} className="text-center text-muted-foreground">
+											{page === 0
+												? "Todavía no hay verificaciones."
+												: "No hay más verificaciones."}
+										</TableCell>
+									</TableRow>
+								)}
+							{rows.map((row) => (
 								<TableRow
 									key={row.id}
 									className="cursor-pointer hover:bg-muted/50"
@@ -204,6 +245,57 @@ function LicenciasPage() {
 							))}
 						</TableBody>
 					</Table>
+
+					<div className="flex items-center justify-between border-t pt-4">
+						<div className="flex items-center gap-4">
+							<p className="text-muted-foreground text-xs">
+								{!verificationsQuery.isFetching &&
+									rows.length > 0 &&
+									`Mostrando ${page * pageSize + 1}–${page * pageSize + rows.length}`}
+							</p>
+							<div className="flex items-center gap-2">
+								<span className="text-muted-foreground text-xs">Por página</span>
+								<Select
+									value={String(pageSize)}
+									onValueChange={(value) => {
+										setPageSize(Number(value));
+										setPage(0);
+									}}
+								>
+									<SelectTrigger className="h-8 w-[70px]">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{PAGE_SIZE_OPTIONS.map((size) => (
+											<SelectItem key={size} value={String(size)}>
+												{size}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+						</div>
+						<div className="flex gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={page === 0 || verificationsQuery.isFetching}
+								onClick={() => setPage((p) => p - 1)}
+							>
+								<ChevronLeft className="mr-1 h-4 w-4" />
+								Anterior
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!hasNextPage || verificationsQuery.isFetching}
+								onClick={() => setPage((p) => p + 1)}
+							>
+								Siguiente
+								<ChevronRight className="ml-1 h-4 w-4" />
+							</Button>
+						</div>
+					</div>
 				</CardContent>
 			</Card>
 
@@ -233,9 +325,6 @@ function LicenciasPage() {
 type VerificationRow = NonNullable<
 	Awaited<ReturnType<typeof client.verifyLicenseQr>>
 >;
-// El resultado recién creado no trae subjectName/opportunityTitle (el
-// diálogo ya sabe cuáles son); el de getLicenseVerificationById sí. Se
-// aceptan ambos.
 type VerificationDetails = VerificationRow & {
 	subjectName?: string;
 	opportunityTitle?: string | null;
@@ -252,8 +341,7 @@ const RAW_FIELD_LABELS: Record<string, string> = {
 
 function RawResponseDetails({ rawResponse }: { rawResponse: unknown }) {
 	if (!rawResponse || typeof rawResponse !== "object") return null;
-	// Solo los campos que no se muestran ya en otro lado del detalle
-	// (numeroLicencia, nombreCiudadano, fechaVencimiento quedan afuera).
+
 	const entries = Object.entries(rawResponse as Record<string, unknown>).filter(
 		([key]) => key in RAW_FIELD_LABELS,
 	);
@@ -325,8 +413,6 @@ function NewVerificationDialog({
 		}),
 	);
 
-	// Una licencia se verifica por cada expediente de crédito, así que hace
-	// falta elegir a cuál oportunidad del lead corresponde esta verificación.
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({ input: { leadId: leadId ?? "" } }),
 		enabled: !!leadId,

@@ -28,7 +28,6 @@ import { Route as CrmWhatsappRouteImport } from './routes/crm/whatsapp'
 import { Route as CrmVendorsRouteImport } from './routes/crm/vendors'
 import { Route as CrmQuoterRouteImport } from './routes/crm/quoter'
 import { Route as CrmOpportunitiesRouteImport } from './routes/crm/opportunities'
-import { Route as CrmLicenciasRouteImport } from './routes/crm/licencias'
 import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
 import { Route as CrmClientsRouteImport } from './routes/crm/clients'
@@ -41,6 +40,7 @@ import { Route as AdminImportRouteImport } from './routes/admin/import'
 import { Route as AccountingPayInvestorsRouteImport } from './routes/accounting/pay-investors'
 import { Route as InversionesLiquidacionesIndexRouteImport } from './routes/inversiones/liquidaciones.index'
 import { Route as CrmReportesIndexRouteImport } from './routes/crm/reportes/index'
+import { Route as CrmDocumentacionIndexRouteImport } from './routes/crm/documentacion/index'
 import { Route as CrmAnalysisIndexRouteImport } from './routes/crm/analysis/index'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
 import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juridico/generate.$opportunityId'
@@ -49,6 +49,7 @@ import { Route as CrmReportesTiempoCierreRouteImport } from './routes/crm/report
 import { Route as CrmReportesPorcentajeEfectividadRouteImport } from './routes/crm/reportes/porcentaje-efectividad'
 import { Route as CrmReportesMetaColocacionRouteImport } from './routes/crm/reportes/meta-colocacion'
 import { Route as CrmReportesEfectividadPorEtapaRouteImport } from './routes/crm/reportes/efectividad-por-etapa'
+import { Route as CrmDocumentacionLicenciasRouteImport } from './routes/crm/documentacion/licencias'
 import { Route as CrmAnalysisOpportunityIdRouteImport } from './routes/crm/analysis/$opportunityId'
 import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
 
@@ -148,11 +149,6 @@ const CrmOpportunitiesRoute = CrmOpportunitiesRouteImport.update({
   path: '/crm/opportunities',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CrmLicenciasRoute = CrmLicenciasRouteImport.update({
-  id: '/crm/licencias',
-  path: '/crm/licencias',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CrmLeadsRoute = CrmLeadsRouteImport.update({
   id: '/crm/leads',
   path: '/crm/leads',
@@ -214,6 +210,11 @@ const CrmReportesIndexRoute = CrmReportesIndexRouteImport.update({
   path: '/crm/reportes/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CrmDocumentacionIndexRoute = CrmDocumentacionIndexRouteImport.update({
+  id: '/crm/documentacion/',
+  path: '/crm/documentacion/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CrmAnalysisIndexRoute = CrmAnalysisIndexRouteImport.update({
   id: '/crm/analysis/',
   path: '/crm/analysis/',
@@ -259,6 +260,12 @@ const CrmReportesEfectividadPorEtapaRoute =
     path: '/crm/reportes/efectividad-por-etapa',
     getParentRoute: () => rootRouteImport,
   } as any)
+const CrmDocumentacionLicenciasRoute =
+  CrmDocumentacionLicenciasRouteImport.update({
+    id: '/crm/documentacion/licencias',
+    path: '/crm/documentacion/licencias',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const CrmAnalysisOpportunityIdRoute =
   CrmAnalysisOpportunityIdRouteImport.update({
     id: '/crm/analysis/$opportunityId',
@@ -286,7 +293,6 @@ export interface FileRoutesByFullPath {
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
-  '/crm/licencias': typeof CrmLicenciasRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
@@ -304,6 +310,7 @@ export interface FileRoutesByFullPath {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/documentacion/licencias': typeof CrmDocumentacionLicenciasRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
   '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
@@ -312,6 +319,7 @@ export interface FileRoutesByFullPath {
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/crm/documentacion/': typeof CrmDocumentacionIndexRoute
   '/crm/reportes/': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
@@ -330,7 +338,6 @@ export interface FileRoutesByTo {
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
-  '/crm/licencias': typeof CrmLicenciasRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
@@ -348,6 +355,7 @@ export interface FileRoutesByTo {
   '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/documentacion/licencias': typeof CrmDocumentacionLicenciasRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
   '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
@@ -356,6 +364,7 @@ export interface FileRoutesByTo {
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports': typeof AdminReportsIndexRoute
   '/crm/analysis': typeof CrmAnalysisIndexRoute
+  '/crm/documentacion': typeof CrmDocumentacionIndexRoute
   '/crm/reportes': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones': typeof InversionesLiquidacionesIndexRoute
 }
@@ -375,7 +384,6 @@ export interface FileRoutesById {
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
-  '/crm/licencias': typeof CrmLicenciasRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
@@ -393,6 +401,7 @@ export interface FileRoutesById {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/documentacion/licencias': typeof CrmDocumentacionLicenciasRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
   '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
@@ -401,6 +410,7 @@ export interface FileRoutesById {
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/crm/documentacion/': typeof CrmDocumentacionIndexRoute
   '/crm/reportes/': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
@@ -421,7 +431,6 @@ export interface FileRouteTypes {
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
-    | '/crm/licencias'
     | '/crm/opportunities'
     | '/crm/quoter'
     | '/crm/vendors'
@@ -439,6 +448,7 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/documentacion/licencias'
     | '/crm/reportes/efectividad-por-etapa'
     | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
@@ -447,6 +457,7 @@ export interface FileRouteTypes {
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/crm/documentacion/'
     | '/crm/reportes/'
     | '/inversiones/liquidaciones/'
   fileRoutesByTo: FileRoutesByTo
@@ -465,7 +476,6 @@ export interface FileRouteTypes {
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
-    | '/crm/licencias'
     | '/crm/opportunities'
     | '/crm/quoter'
     | '/crm/vendors'
@@ -483,6 +493,7 @@ export interface FileRouteTypes {
     | '/vehicles'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/documentacion/licencias'
     | '/crm/reportes/efectividad-por-etapa'
     | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
@@ -491,6 +502,7 @@ export interface FileRouteTypes {
     | '/juridico/generate/$opportunityId'
     | '/admin/reports'
     | '/crm/analysis'
+    | '/crm/documentacion'
     | '/crm/reportes'
     | '/inversiones/liquidaciones'
   id:
@@ -509,7 +521,6 @@ export interface FileRouteTypes {
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
-    | '/crm/licencias'
     | '/crm/opportunities'
     | '/crm/quoter'
     | '/crm/vendors'
@@ -527,6 +538,7 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/documentacion/licencias'
     | '/crm/reportes/efectividad-por-etapa'
     | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
@@ -535,6 +547,7 @@ export interface FileRouteTypes {
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/crm/documentacion/'
     | '/crm/reportes/'
     | '/inversiones/liquidaciones/'
   fileRoutesById: FileRoutesById
@@ -554,7 +567,6 @@ export interface RootRouteChildren {
   CrmClientsRoute: typeof CrmClientsRoute
   CrmCompaniesRoute: typeof CrmCompaniesRoute
   CrmLeadsRoute: typeof CrmLeadsRoute
-  CrmLicenciasRoute: typeof CrmLicenciasRoute
   CrmOpportunitiesRoute: typeof CrmOpportunitiesRoute
   CrmQuoterRoute: typeof CrmQuoterRoute
   CrmVendorsRoute: typeof CrmVendorsRoute
@@ -572,6 +584,7 @@ export interface RootRouteChildren {
   VehiclesIndexRoute: typeof VehiclesIndexRoute
   CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   CrmAnalysisOpportunityIdRoute: typeof CrmAnalysisOpportunityIdRoute
+  CrmDocumentacionLicenciasRoute: typeof CrmDocumentacionLicenciasRoute
   CrmReportesEfectividadPorEtapaRoute: typeof CrmReportesEfectividadPorEtapaRoute
   CrmReportesMetaColocacionRoute: typeof CrmReportesMetaColocacionRoute
   CrmReportesPorcentajeEfectividadRoute: typeof CrmReportesPorcentajeEfectividadRoute
@@ -580,6 +593,7 @@ export interface RootRouteChildren {
   JuridicoGenerateOpportunityIdRoute: typeof JuridicoGenerateOpportunityIdRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
   CrmAnalysisIndexRoute: typeof CrmAnalysisIndexRoute
+  CrmDocumentacionIndexRoute: typeof CrmDocumentacionIndexRoute
   CrmReportesIndexRoute: typeof CrmReportesIndexRoute
   InversionesLiquidacionesIndexRoute: typeof InversionesLiquidacionesIndexRoute
 }
@@ -719,13 +733,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmOpportunitiesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/crm/licencias': {
-      id: '/crm/licencias'
-      path: '/crm/licencias'
-      fullPath: '/crm/licencias'
-      preLoaderRoute: typeof CrmLicenciasRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/crm/leads': {
       id: '/crm/leads'
       path: '/crm/leads'
@@ -810,6 +817,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmReportesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/crm/documentacion/': {
+      id: '/crm/documentacion/'
+      path: '/crm/documentacion'
+      fullPath: '/crm/documentacion/'
+      preLoaderRoute: typeof CrmDocumentacionIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
@@ -866,6 +880,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmReportesEfectividadPorEtapaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/crm/documentacion/licencias': {
+      id: '/crm/documentacion/licencias'
+      path: '/crm/documentacion/licencias'
+      fullPath: '/crm/documentacion/licencias'
+      preLoaderRoute: typeof CrmDocumentacionLicenciasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/$opportunityId': {
       id: '/crm/analysis/$opportunityId'
       path: '/crm/analysis/$opportunityId'
@@ -898,7 +919,6 @@ const rootRouteChildren: RootRouteChildren = {
   CrmClientsRoute: CrmClientsRoute,
   CrmCompaniesRoute: CrmCompaniesRoute,
   CrmLeadsRoute: CrmLeadsRoute,
-  CrmLicenciasRoute: CrmLicenciasRoute,
   CrmOpportunitiesRoute: CrmOpportunitiesRoute,
   CrmQuoterRoute: CrmQuoterRoute,
   CrmVendorsRoute: CrmVendorsRoute,
@@ -916,6 +936,7 @@ const rootRouteChildren: RootRouteChildren = {
   VehiclesIndexRoute: VehiclesIndexRoute,
   CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   CrmAnalysisOpportunityIdRoute: CrmAnalysisOpportunityIdRoute,
+  CrmDocumentacionLicenciasRoute: CrmDocumentacionLicenciasRoute,
   CrmReportesEfectividadPorEtapaRoute: CrmReportesEfectividadPorEtapaRoute,
   CrmReportesMetaColocacionRoute: CrmReportesMetaColocacionRoute,
   CrmReportesPorcentajeEfectividadRoute: CrmReportesPorcentajeEfectividadRoute,
@@ -925,6 +946,7 @@ const rootRouteChildren: RootRouteChildren = {
   JuridicoGenerateOpportunityIdRoute: JuridicoGenerateOpportunityIdRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,
   CrmAnalysisIndexRoute: CrmAnalysisIndexRoute,
+  CrmDocumentacionIndexRoute: CrmDocumentacionIndexRoute,
   CrmReportesIndexRoute: CrmReportesIndexRoute,
   InversionesLiquidacionesIndexRoute: InversionesLiquidacionesIndexRoute,
 }

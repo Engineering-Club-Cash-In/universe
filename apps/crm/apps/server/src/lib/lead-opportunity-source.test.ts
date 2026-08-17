@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
 	buildOpenOpportunityBySourceCondition,
+	isOpportunityFromSource,
 	type LeadSource,
 } from "./lead-opportunity-source";
 
@@ -44,8 +45,8 @@ describe("buildOpenOpportunityBySourceCondition", () => {
 	});
 
 	// El source del lead llega por parámetro justamente para no leerlo de la DB:
-	// `createPublicLead` lo actualiza al canal recién pedido antes de llamar al
-	// helper, así que consultarlo haría pasar cualquier oportunidad legacy de
+	// hay flujos que lo actualizan al canal recién pedido dentro del mismo
+	// request, así que consultarlo haría pasar cualquier oportunidad legacy de
 	// otro canal por una del canal correcto.
 	test("never resolves the lead source from the leads table", () => {
 		expect(compile("Whatsapp", "Whatsapp").sql).not.toContain('"leads"');
@@ -56,5 +57,27 @@ describe("buildOpenOpportunityBySourceCondition", () => {
 
 		expect(query.params).toContain("open");
 		expect(query.params).toContain("on_hold");
+	});
+});
+
+// Gemela en memoria de la condición de arriba: con leads duplicados cada
+// oportunidad legacy se clasifica con el canal de su propio lead, y eso una
+// sola condición SQL no lo puede expresar.
+describe("isOpportunityFromSource", () => {
+	test("matches an opportunity tagged with the requested source", () => {
+		expect(isOpportunityFromSource("Whatsapp", "Whatsapp", "agency")).toBe(
+			true,
+		);
+	});
+
+	test("rejects an opportunity from another channel", () => {
+		expect(isOpportunityFromSource("agency", "Whatsapp", "Whatsapp")).toBe(
+			false,
+		);
+	});
+
+	test("treats legacy null-source opportunities as their lead's channel", () => {
+		expect(isOpportunityFromSource(null, "Whatsapp", "Whatsapp")).toBe(true);
+		expect(isOpportunityFromSource(null, "Whatsapp", "agency")).toBe(false);
 	});
 });

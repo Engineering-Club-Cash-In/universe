@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { getApiErrorMessage, getPendingReturnWarningMessage } from "@/lib/apiError";
+import {
+  getApiErrorMessage,
+  getBatchFailedCredits,
+  getPendingReturnWarningMessage,
+} from "@/lib/apiError";
 import {
   Check,
   CheckCircle,
@@ -215,7 +219,13 @@ export function TableInvestors() {
         if (warning) {
           toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
         } else {
-          toast.error(getApiErrorMessage(error, "Error al calcular pagos"));
+          const fallidos = getBatchFailedCredits(error);
+          const description = fallidos.length > 0
+            ? fallidos
+                .map((f) => `• ${f.numeroCreditoSifco}: ${formatMensajeFallido(f.mensaje)}`)
+                .join("\n")
+            : undefined;
+          toast.error(getApiErrorMessage(error, "Error al calcular pagos"), { description, duration: 12000 });
         }
       },
     });
@@ -262,7 +272,13 @@ export function TableInvestors() {
           setSelectedInversionista(null);
           toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
         } else {
-          toast.error(getApiErrorMessage(error, "Error al calcular pagos"));
+          const fallidos = getBatchFailedCredits(error);
+          const description = fallidos.length > 0
+            ? fallidos
+                .map((f) => `• ${f.numeroCreditoSifco}: ${formatMensajeFallido(f.mensaje)}`)
+                .join("\n")
+            : undefined;
+          toast.error(getApiErrorMessage(error, "Error al calcular pagos"), { description, duration: 12000 });
         }
       },
     });

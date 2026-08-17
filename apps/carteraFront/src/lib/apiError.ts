@@ -64,6 +64,30 @@ const MENSAJES_POR_CODIGO: Record<string, string> = {
     "Hay créditos pendientes de autorización para devolución a CUBE.",
 };
 
+export type BatchFailedCredit = {
+  creditoId: number;
+  numeroCreditoSifco: string;
+  mensaje: string;
+};
+
+export function getBatchFailedCredits(error: unknown): BatchFailedCredit[] {
+  if (!(error instanceof AxiosError)) return [];
+
+  const data = error.response?.data as {
+    fallidos?: unknown;
+  } | undefined;
+
+  if (!Array.isArray(data?.fallidos)) return [];
+
+  return data.fallidos.filter((fallido): fallido is BatchFailedCredit => {
+    if (!fallido || typeof fallido !== "object") return false;
+    const row = fallido as Partial<BatchFailedCredit>;
+    return typeof row.creditoId === "number"
+      && typeof row.numeroCreditoSifco === "string"
+      && typeof row.mensaje === "string";
+  });
+}
+
 export function getPendingReturnWarningMessage(error: unknown): string | null {
   if (!(error instanceof AxiosError)) return null;
 

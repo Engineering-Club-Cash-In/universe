@@ -158,6 +158,10 @@ function extraerDetalle(data: unknown): string | undefined {
  */
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof AxiosError) {
+    const pendingReturnWarning = getPendingReturnWarningMessage(error);
+    if (pendingReturnWarning) {
+      return `${fallback}: ${pendingReturnWarning}`;
+    }
     if (error.code === "ECONNABORTED") {
       return `${fallback}: El servidor tardó demasiado en responder, intenta de nuevo`;
     }

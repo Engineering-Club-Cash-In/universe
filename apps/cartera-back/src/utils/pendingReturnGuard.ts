@@ -63,3 +63,54 @@ export function buildPendingReturnAuthorizationWarning(
     creditos_bloqueados,
   };
 }
+
+export function buildPendingReturnAuthorizationWarningFromErrors(
+  errors: unknown,
+): PendingReturnAuthorizationWarning | null {
+  if (!Array.isArray(errors)) return null;
+
+  const candidates: PendingReturnCandidate[] = [];
+  for (const error of errors) {
+    if (
+      !error ||
+      typeof error !== "object" ||
+      (error as { code?: unknown }).code !== PENDING_RETURN_AUTHORIZATION_CODE
+    ) {
+      continue;
+    }
+
+    const blocked = (error as { creditos_bloqueados?: unknown }).creditos_bloqueados;
+    if (!Array.isArray(blocked)) continue;
+
+    for (const credit of blocked) {
+      if (!credit || typeof credit !== "object") continue;
+      const row = credit as {
+        credito_id?: unknown;
+        numero_credito_sifco?: unknown;
+        estado_devolucion?: unknown;
+      };
+      if (
+        typeof row.credito_id !== "number" ||
+        typeof row.numero_credito_sifco !== "string"
+      ) {
+        continue;
+      }
+      candidates.push({
+        creditoId: row.credito_id,
+        numeroCreditoSifco: row.numero_credito_sifco,
+        estadoDevolucion: row.estado_devolucion as string | null | undefined,
+      });
+    }
+  }
+
+  return buildPendingReturnAuthorizationWarning(candidates);
+}
+
+export function formatPendingReturnAuthorizationNote(
+  warning: PendingReturnAuthorizationWarning,
+): string {
+  const sifcos = warning.creditos_bloqueados
+    .map((credit) => credit.numero_credito_sifco)
+    .join(", ");
+  return `[BLOQUEO DEVOLUCIÓN CUBE] Créditos pendientes de autorización: ${sifcos}.`;
+}

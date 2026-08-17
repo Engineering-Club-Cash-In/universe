@@ -73,5 +73,8 @@ describe("getApiErrorMessage", () => {
     expect(getPendingReturnWarningMessage(error)).toBe(
       "Hay créditos pendientes de autorización para devolución a CUBE. Créditos: 01010214119070, CRM-123.",
     );
+    expect(getApiErrorMessage(error, "No se pudo continuar")).toBe(
+      "No se pudo continuar: Hay créditos pendientes de autorización para devolución a CUBE. Créditos: 01010214119070, CRM-123.",
+    );
   });
 });

@@ -13,6 +13,7 @@ let mockLockReleaseCalls = 0;
 let mockDbTransactionCalls = 0;
 let mockLockQueries: string[] = [];
 let mockInsertCalls = 0;
+let mockInsertError: Error | null = null;
 
 // For compras_credito_inversionista mock
 let mockComprasCreditoInversionista: any[] = [];
@@ -116,7 +117,9 @@ mock.module("../database/index", () => {
         mockInsertCalls++;
         return {
           values: () => ({
-            returning: () => Promise.resolve([{ id: 801 }])
+            returning: () => mockInsertError
+              ? Promise.reject(mockInsertError)
+              : Promise.resolve([{ id: 801 }])
           })
         };
       }),
@@ -262,6 +265,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     mockDbTransactionCalls = 0;
     mockLockQueries = [];
     mockInsertCalls = 0;
+    mockInsertError = null;
   });
 
   it("bloquea toda la generación si un crédito está pendiente de autorización para devolución", async () => {
@@ -520,6 +524,56 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
       expect.stringMatching(/ORDER BY credito_id\s+FOR NO KEY UPDATE/),
       "COMMIT",
     ]);
+  });
+
+  it("reporta success=false cuando todos los créditos del lote fallan", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+    ];
+    mockCuotasCreditoWithPagos = [
+      {
+        cuotaId: 501,
+        numeroCuota: 1,
+        fechaVencimiento: "2026-06-15",
+        pagadoCuota: false,
+        liquidadoInversionistas: false,
+        pagoId: 301,
+        fechaPago: new Date("2026-06-05"),
+        montoBoleta: "1000.00",
+        abonoCapital: "800.00",
+        abonoInteres: "200.00",
+        abonoIva: "24.00",
+        validationStatus: "validated",
+      },
+    ];
+    mockHistoricoLiquidacionesEspejo = [
+      { monto_aportado: "10000.00000000", fecha: new Date("2026-05-15") },
+    ];
+    mockInsertError = new Error("insert espejo falló");
+
+    const result = await calcularYRegistrarPagosEspejo(
+      99,
+      new Date("2026-06-10T12:00:00.000Z"),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      totalCreditosProcesados: 0,
+      totalCreditosFallidos: 1,
+      pagosGenerados: false,
+      fallidos: [expect.objectContaining({ creditoId: 101 })],
+    });
   });
 
   it("3. Self-compra (compras pendientes) → paga sobre monto ajustado", async () => {

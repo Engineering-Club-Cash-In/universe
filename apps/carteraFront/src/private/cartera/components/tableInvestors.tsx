@@ -258,6 +258,8 @@ export function TableInvestors() {
         console.error("❌ Error al calcular pagos:", error);
         const warning = getPendingReturnWarningMessage(error);
         if (warning) {
+          setCalcularModalTarget(undefined);
+          setSelectedInversionista(null);
           toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
         } else {
           toast.error(getApiErrorMessage(error, "Error al calcular pagos"));

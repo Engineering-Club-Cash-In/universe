@@ -172,7 +172,7 @@ mock.module("../database/index", () => {
   const mockLockConnection = {
     query: mock(async (queryText: string) => {
       mockLockQueries.push(queryText);
-      if (queryText.includes("FOR UPDATE")) {
+      if (/FOR (?:NO KEY )?UPDATE|FOR SHARE/.test(queryText)) {
         mockCreditLockCalls++;
         return {
           rows: mockLockedCreditRows ?? mockCreditosInversionistaEspejo.map((credito) => ({
@@ -400,7 +400,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     expect(mockDbTransactionCalls).toBe(0);
     expect(mockLockQueries).toEqual([
       "BEGIN",
-      expect.stringMatching(/ORDER BY credito_id\s+FOR UPDATE/),
+      expect.stringMatching(/ORDER BY credito_id\s+FOR NO KEY UPDATE/),
       "ROLLBACK",
     ]);
     expect(mockInsertCalls).toBe(0);
@@ -518,7 +518,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     expect(mockLockReleaseCalls).toBe(1);
     expect(mockLockQueries).toEqual([
       "BEGIN",
-      expect.stringMatching(/ORDER BY credito_id\s+FOR UPDATE/),
+      expect.stringMatching(/ORDER BY credito_id\s+FOR NO KEY UPDATE/),
       "COMMIT",
     ]);
   });

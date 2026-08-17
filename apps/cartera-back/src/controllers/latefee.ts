@@ -64,6 +64,11 @@ async function registrarHistorialMora(params: {
   usuario_id?: number | null;
   motivo?: string | null;
   dbClient?: typeof db;
+  // Dentro de una transacción el swallow es mentiroso: un insert fallido deja
+  // la tx abortada y el COMMIT se vuelve rollback silencioso, pero el caller
+  // seguiría creyendo que sus writes persistieron. Con esto el error se
+  // propaga y la tx puede reportar el fallo de verdad.
+  propagarError?: boolean;
 }) {
   try {
     await (params.dbClient ?? db).insert(moras_historial).values({
@@ -88,6 +93,7 @@ async function registrarHistorialMora(params: {
     });
   } catch (err) {
     console.error("[HISTORIAL] ⚠️  No se pudo registrar evento de mora:", err);
+    if (params.propagarError) throw err;
   }
 }
 
@@ -271,6 +277,7 @@ export async function desactivarMoraSiCreditoAlDia(
           ? "Crédito sin capital — no aplica mora"
           : (opts.motivo ?? "Crédito se puso al día al validar pago"),
         dbClient: txm as unknown as typeof db,
+        propagarError: true,
       });
     });
 

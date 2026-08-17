@@ -23,6 +23,7 @@ const state: {
   inserts: Array<{ table: any; values: any }>;
   updateReturningQueue: SelectResult[];
   failNextUpdate: boolean;
+  failNextInsert: boolean;
 } = {
   selectQueue: [],
   selectCalls: 0,
@@ -30,6 +31,7 @@ const state: {
   inserts: [],
   updateReturningQueue: [],
   failNextUpdate: false,
+  failNextInsert: false,
 };
 
 const makeSelectChain = () => {
@@ -72,6 +74,10 @@ const fakeDb = {
   }),
   insert: (table: any) => ({
     values: (values: any) => {
+      if (state.failNextInsert) {
+        state.failNextInsert = false;
+        return Promise.reject(new Error("historial caído simulado"));
+      }
       state.inserts.push({ table, values });
       return Promise.resolve([]);
     },
@@ -132,6 +138,7 @@ beforeEach(() => {
   state.inserts = [];
   state.updateReturningQueue = [];
   state.failNextUpdate = false;
+  state.failNextInsert = false;
 });
 
 describe("desactivarMoraSiCreditoAlDia", () => {
@@ -220,6 +227,20 @@ describe("desactivarMoraSiCreditoAlDia", () => {
   it("nunca lanza: un error de db se reporta en el resultado sin romper la validación del pago", async () => {
     state.selectQueue = [[MORA_ACTIVA], [CREDITO_MOROSO], CUOTAS_AL_DIA];
     state.failNextUpdate = true;
+
+    const result = await correr(8685);
+
+    expect(result.desactivada).toBe(false);
+    expect(result.error).toBeDefined();
+  });
+
+  it("si el historial falla, la limpieza se revierte y NO se reporta éxito fantasma", async () => {
+    // Dentro de la tx real, un insert fallido aborta la transacción: el COMMIT
+    // se vuelve rollback. El helper debe reportar desactivada:false + error,
+    // nunca un éxito que no persistió.
+    state.selectQueue = [[MORA_ACTIVA], [CREDITO_MOROSO], CUOTAS_AL_DIA];
+    state.updateReturningQueue = [[{ mora_id: 95201 }]];
+    state.failNextInsert = true;
 
     const result = await correr(8685);
 

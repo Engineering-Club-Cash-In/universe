@@ -14,7 +14,10 @@ import {
 	resolveExistingLeadAssigneeFromDatabase,
 } from "../lib/lead-assignment";
 import { getPublicLeadExistingOpportunityUpdates } from "../lib/lead-helpers";
-import { getOpenOpportunityBySource } from "../lib/lead-opportunity";
+import {
+	getActiveOpportunity,
+	getOpenOpportunityBySource,
+} from "../lib/lead-opportunity";
 import { validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 
@@ -203,36 +206,48 @@ export async function createPublicLead(c: Context) {
 			// Se pasa el source que el lead traía de antes (`existingLead` es la fila
 			// leída antes del update de arriba): las oportunidades legacy sin source
 			// son del canal original del lead, no del que se acaba de pedir.
-			const existingOpportunity = await getOpenOpportunityBySource(
+			const sameSourceOpportunity = await getOpenOpportunityBySource(
 				existingLead.id,
 				source,
 				existingLead.source,
 			);
-			if (existingOpportunity) {
-				const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(
-					existingOpportunity,
-					{
-						campaign: body.campaign,
-						creditType,
-					},
-				);
 
-				if (Object.keys(opportunityUpdates).length > 0) {
-					await db
-						.update(opportunities)
-						.set({
-							...opportunityUpdates,
-							updatedAt: new Date(),
-						})
-						.where(eq(opportunities.id, existingOpportunity.id));
+			// Si no hay del mismo canal, igual se busca cualquier proceso vivo: un
+			// cliente que ya está siendo atendido no vuelve a la ruleta ni estrena
+			// oportunidad por entrar de nuevo por otro canal. Antes sí lo hacía, y
+			// eso le quitaba el lead al asesor cada vez que el dueño actual tenía
+			// `assign_leads = false`, aunque llevara días trabajando el caso.
+			const activeOpportunity =
+				sameSourceOpportunity ?? (await getActiveOpportunity(existingLead.id));
+
+			if (activeOpportunity) {
+				if (sameSourceOpportunity) {
+					const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(
+						sameSourceOpportunity,
+						{
+							campaign: body.campaign,
+							creditType,
+						},
+					);
+
+					if (Object.keys(opportunityUpdates).length > 0) {
+						await db
+							.update(opportunities)
+							.set({
+								...opportunityUpdates,
+								updatedAt: new Date(),
+							})
+							.where(eq(opportunities.id, sameSourceOpportunity.id));
+					}
 				}
 
 				return c.json(
 					{
 						success: true,
 						data: leadData,
-						message:
-							"Lead ya tiene una oportunidad abierta con el mismo source",
+						message: sameSourceOpportunity
+							? "Lead ya tiene una oportunidad abierta con el mismo source"
+							: "Lead ya tiene un proceso activo con su asesor; no se creó una oportunidad nueva",
 					},
 					200,
 				);

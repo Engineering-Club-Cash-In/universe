@@ -216,59 +216,65 @@ export async function desactivarMoraSiCreditoAlDia(
       return { desactivada: false };
     }
 
-    // Condicional sobre activa=true: si el cron u otra validación concurrente
-    // ya la apagó, no afecta filas y no se duplica el historial.
-    const apagadas = await dbi
-      .update(moras_credito)
-      .set({
-        monto_mora: "0",
-        cuotas_atrasadas: 0,
-        activa: false,
-        updated_at: new Date(),
-      })
-      .where(
-        and(
-          eq(moras_credito.mora_id, moraActiva.mora_id),
-          eq(moras_credito.activa, true),
-        ),
-      )
-      .returning({ mora_id: moras_credito.mora_id });
-
-    if (apagadas.length === 0) {
-      return { desactivada: false };
-    }
-
-    if (decision.bajarStatusAActivo) {
-      await dbi
-        .update(creditos)
-        .set({ statusCredit: "ACTIVO" })
+    // Los tres writes van JUNTOS en una transacción propia: si el status o el
+    // historial fallara a media limpieza, quedaría un MOROSO sin mora activa
+    // que ni el cron ni una segunda pasada corrigen (ambos parten de "hay
+    // mora activa"). El update sigue condicional sobre activa=true: si el
+    // cron u otra validación concurrente ya la apagó, no afecta filas, no se
+    // duplica historial y no se toca el status.
+    let apagada = false;
+    await dbi.transaction(async (txm) => {
+      const apagadas = await txm
+        .update(moras_credito)
+        .set({
+          monto_mora: "0",
+          cuotas_atrasadas: 0,
+          activa: false,
+          updated_at: new Date(),
+        })
         .where(
           and(
-            eq(creditos.credito_id, credito_id),
-            eq(creditos.statusCredit, "MOROSO"),
+            eq(moras_credito.mora_id, moraActiva.mora_id),
+            eq(moras_credito.activa, true),
           ),
-        );
-    }
+        )
+        .returning({ mora_id: moras_credito.mora_id });
 
-    await registrarHistorialMora({
-      credito_id,
-      mora_id: moraActiva.mora_id,
-      tipo_evento: "DESACTIVACION",
-      origen: "PROCESO_AUTO",
-      monto_anterior: moraActiva.monto_mora,
-      monto_nuevo: "0",
-      cuotas_atrasadas_anterior: moraActiva.cuotas_atrasadas,
-      cuotas_atrasadas_nuevas: 0,
-      porcentaje_mora: moraActiva.porcentaje_mora,
-      // "sin capital" solo cuando fue el factor decisivo (quedaban vencidas);
-      // si el crédito quedó al día, gana el motivo del caller.
-      motivo: decision.sinCapital && cuotasVencidas > 0
-        ? "Crédito sin capital — no aplica mora"
-        : (opts.motivo ?? "Crédito se puso al día al validar pago"),
-      dbClient: dbi,
+      if (apagadas.length === 0) return;
+      apagada = true;
+
+      if (decision.bajarStatusAActivo) {
+        await txm
+          .update(creditos)
+          .set({ statusCredit: "ACTIVO" })
+          .where(
+            and(
+              eq(creditos.credito_id, credito_id),
+              eq(creditos.statusCredit, "MOROSO"),
+            ),
+          );
+      }
+
+      await registrarHistorialMora({
+        credito_id,
+        mora_id: moraActiva.mora_id,
+        tipo_evento: "DESACTIVACION",
+        origen: "PROCESO_AUTO",
+        monto_anterior: moraActiva.monto_mora,
+        monto_nuevo: "0",
+        cuotas_atrasadas_anterior: moraActiva.cuotas_atrasadas,
+        cuotas_atrasadas_nuevas: 0,
+        porcentaje_mora: moraActiva.porcentaje_mora,
+        // "sin capital" solo cuando fue el factor decisivo (quedaban
+        // vencidas); si el crédito quedó al día, gana el motivo del caller.
+        motivo: decision.sinCapital && cuotasVencidas > 0
+          ? "Crédito sin capital — no aplica mora"
+          : (opts.motivo ?? "Crédito se puso al día al validar pago"),
+        dbClient: txm as unknown as typeof db,
+      });
     });
 
-    return { desactivada: true };
+    return { desactivada: apagada };
   } catch (error: any) {
     console.error(
       `[MORA] ⚠️  desactivarMoraSiCreditoAlDia(${credito_id}) falló (no rompe la validación del pago):`,

@@ -44,6 +44,9 @@ const makeSelectChain = () => {
 };
 
 const fakeDb = {
+  // El helper agrupa sus writes en una transacción; la fake la ejecuta
+  // inline sobre sí misma (suficiente para verificar orden y contenido).
+  transaction: async (cb: (txm: any) => Promise<void>) => cb(fakeDb),
   select: () => makeSelectChain(),
   update: (table: any) => ({
     set: (setValues: any) => ({

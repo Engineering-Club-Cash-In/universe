@@ -3608,7 +3608,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       inversionistaId,
       totalCreditosProcesados: procesados.length,
       totalCreditosFallidos: fallidos.length,
-      pagosGenerados: true,
+      pagosGenerados: procesados.length > 0,
       data: procesados,
       fallidos,
     };

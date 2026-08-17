@@ -108,7 +108,8 @@ export function getPendingReturnWarningMessage(error: unknown): string | null {
       .filter((item) => item?.code !== "CREDIT_PENDING_RETURN_AUTHORIZATION")
       .map((item) => item?.razon)
       .filter((razon): razon is string => typeof razon === "string" && razon.trim().length > 0)
-      .map((razon) => razon.trim()),
+      .map((razon) => razon.trim())
+      .filter((razon) => !esDetalleTecnicoCrudo(razon)),
   )];
 
   const base = MENSAJES_POR_CODIGO.CREDIT_PENDING_RETURN_AUTHORIZATION;

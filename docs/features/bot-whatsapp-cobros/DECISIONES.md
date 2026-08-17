@@ -514,6 +514,7 @@ NULL, porque el código se le manda al codeudor.
 ## D-21 · Modo simulado mientras el SMS no sale
 
 **Estado:** 🟢 **Cerrada · 2026-08-14 — temporal, solo dev**
+**Actualizada 2026-08-17:** el código ya no se consulta por API, se emite **fijo**.
 
 **Contexto.** Con el servicio 1 ya desplegado, ningún OTP llegaba: la llamada moría en
 timeout a los 60 s y devolvía `OTP_NO_ENVIADO`. La revisión de `cobros_send_logs` mostró que
@@ -532,27 +533,42 @@ va desde el servidor de producción, cuya IP sí está.
 **Decisión.** Se agrega la env **`BOT_COBROS_OTP_SIMULADO`**, solo para la instancia de dev.
 Prendida:
 
-1. El código se genera y se guarda **igual que siempre** (misma tabla, mismo vencimiento,
-   mismos límites de reenvío y de intentos). Lo único que se salta es la llamada al proveedor.
+1. El código se guarda **igual que siempre** (misma tabla, mismo vencimiento, mismos límites
+   de reenvío y de intentos). Lo único que se salta es la llamada al proveedor.
 2. El servicio 1 responde lo mismo de siempre más `otpSimulado: true`, así el bot no cambia
    su lógica.
-3. El código se consulta con `POST /api/bot/cobros/pruebas/otp`, simulando que llegó el SMS.
+3. El código es **siempre `4321`**, para cualquier cliente que se consulte.
 
 **Por qué no se cambió a WhatsApp** (lo que habría tocado [D-13](#d-13--canal-del-otp)):
 el canal no está roto, solo falta habilitar la IP. Cambiar de canal por un trámite pendiente
 habría sido rehacer el flujo para nada.
 
-**Dos candados**, porque revelar un código es dar acceso a los datos de crédito de esa
-persona — y la base de dev es una **copia de producción con clientes reales**:
+### Código quemado, no consulta por API (cambio del 2026-08-17)
 
-| Candado | Qué pasa si falta |
+La primera versión guardaba un código aleatorio y lo exponía en
+`POST /api/bot/cobros/pruebas/otp`. **SimpleTech pidió quemar el código**: con uno fijo el
+bot teclea siempre lo mismo y no tiene que meter una llamada extra —que además solo existe
+en dev— en medio de su flujo. Se cambió y **se borró ese endpoint**; no hubo que integrarlo.
+
+Se evaluó limitar el código quemado a los clientes ficticios sembrados (ids `b07…`), pero
+**se descartó**: las pruebas se hacen con créditos reales de la copia de producción —es la
+única forma de ver casos de verdad— y con ese filtro el `4321` no habría servido para
+ninguno. Decisión de Daniel: **vale para cualquier cliente**, sabiendo que la API key la
+tienen solo IT y SimpleTech.
+
+### 🚨 Lo que esto implica
+
+Con la env prendida, **el OTP deja de proteger nada**: quien tenga la API key puede pedir el
+DPI de cualquier persona y ver sus datos de crédito con `4321`. En la instancia de dev es un
+riesgo asumido y acotado a quien tiene la llave.
+
+| Ambiente | `BOT_COBROS_OTP_SIMULADO` |
 | --- | --- |
-| `BOT_COBROS_OTP_SIMULADO` apagada | El endpoint responde **404**, como si no existiera |
-| Solo clientes ficticios (ids `b07…`) | Con un cliente real responde **403 NO_ES_CLIENTE_DE_PRUEBA** |
+| Instancia de dev del bot | `true` — mientras el SMS no salga |
+| **Producción** | **Nunca.** Prendida, es regalar la cartera a quien se robe la llave |
 
-Además va detrás de la misma API key ([D-18](#d-18--autenticación-del-bot-api-key)).
+La única barrera que queda es la env, así que las pruebas de `elegirCodigo` cuidan
+justamente eso: **sin la env, siempre aleatorio**.
 
 **Cuándo se quita.** Cuando el proveedor habilite la IP de la instancia: se apaga la env
-—el endpoint deja de responder solo— y después se borran `esModoSimulado`,
-`obtenerCodigoDePrueba` y la ruta. En producción la env **nunca** se prende: prendida, el
-cliente no recibiría su código.
+—el código vuelve a ser aleatorio— y después se borran `esModoSimulado` y `elegirCodigo`.

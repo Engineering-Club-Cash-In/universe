@@ -1,14 +1,14 @@
 /**
- * Pruebas de los candados del modo simulado.
+ * Pruebas del modo simulado.
  *
  * El resto de `otp.ts` (envío, validación, intentos) necesita base de datos y se
- * prueba contra dev; acá van solo las dos funciones puras que deciden si se
- * puede revelar un código, porque de eso depende que nadie lea el OTP de un
- * cliente real de la copia de producción.
+ * prueba contra dev; acá va lo que decide si el código es el fijo de pruebas o
+ * uno aleatorio. Lo que se cuida es que **sin la env** siempre salga aleatorio:
+ * es lo único que separa a producción del código quemado.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { esDeDatosDePrueba, esModoSimulado } from "./otp";
+import { elegirCodigo, esModoSimulado } from "./otp";
 
 describe("esModoSimulado", () => {
 	const original = process.env.BOT_COBROS_OTP_SIMULADO;
@@ -42,30 +42,44 @@ describe("esModoSimulado", () => {
 	});
 });
 
-describe("esDeDatosDePrueba", () => {
-	const leadDePrueba = "b0710000-0000-4000-8000-000000000001";
-	const codeudorDePrueba = "b0740000-0000-4000-8000-000000000008";
-	const leadReal = "17c5e9f9-6cad-464a-8d00-902e0e335c1a";
+describe("elegirCodigo", () => {
+	const original = process.env.BOT_COBROS_OTP_SIMULADO;
 
-	test("acepta un lead sembrado", () => {
-		expect(esDeDatosDePrueba([leadDePrueba, null])).toBe(true);
+	afterEach(() => {
+		if (original === undefined) {
+			delete process.env.BOT_COBROS_OTP_SIMULADO;
+		} else {
+			process.env.BOT_COBROS_OTP_SIMULADO = original;
+		}
 	});
 
-	test("acepta un codeudor sembrado", () => {
-		expect(esDeDatosDePrueba([null, codeudorDePrueba])).toBe(true);
+	test("en modo simulado el código es fijo, para cualquier cliente", () => {
+		process.env.BOT_COBROS_OTP_SIMULADO = "true";
+		expect(elegirCodigo()).toEqual({ codigo: "4321", fijo: true });
 	});
 
-	test("rechaza a un cliente real", () => {
-		expect(esDeDatosDePrueba([leadReal, null])).toBe(false);
+	// Lo único que separa a producción del código quemado. Si esto se rompe, el
+	// OTP deja de proteger nada.
+	test("sin la env, SIEMPRE aleatorio", () => {
+		delete process.env.BOT_COBROS_OTP_SIMULADO;
+
+		const codigos = new Set<string>();
+
+		for (let i = 0; i < 200; i++) {
+			const { codigo, fijo } = elegirCodigo();
+
+			expect(fijo).toBe(false);
+			expect(codigo).toMatch(/^\d{4}$/);
+			codigos.add(codigo);
+		}
+
+		// Con 200 tiradas sobre 9,000 valores, repetirse tanto como para bajar de
+		// 100 distintos sería el generador atascado, no la casualidad.
+		expect(codigos.size).toBeGreaterThan(100);
 	});
 
-	// Hoy no se da (el servicio 1 llena uno u otro), pero si mañana se llenaran
-	// los dos, un codeudor ficticio no debe destapar el código de un lead real.
-	test("rechaza mezclas: basta un id real para negar", () => {
-		expect(esDeDatosDePrueba([leadReal, codeudorDePrueba])).toBe(false);
-	});
-
-	test("rechaza una fila sin ids", () => {
-		expect(esDeDatosDePrueba([null, null])).toBe(false);
+	test("un valor cualquiera en la env tampoco lo prende", () => {
+		process.env.BOT_COBROS_OTP_SIMULADO = "false";
+		expect(elegirCodigo().fijo).toBe(false);
 	});
 });

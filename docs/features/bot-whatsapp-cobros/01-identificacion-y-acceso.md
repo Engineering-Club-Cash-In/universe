@@ -104,7 +104,7 @@ Base: `POST /api/bot/cobros/...` · `Authorization: Bearer <BOT_COBROS_API_KEY>`
     "encontrado": true,
     "celEnCrm": true,                       // ¿el número del chat es uno de los suyos?
     "otpEnviado": true,
-    "otpSimulado": false,                   // true SOLO en dev: no salió SMS (§3.3)
+    "otpSimulado": false,                   // true SOLO en dev: no salió SMS, el código es 4321 (§3.3)
     "referencia": "c2287206-…",             // el bot la guarda para el servicio 2
     "otpEnviadoA": "****6376",              // enmascarado, para decirlo en el chat
     "otpExpiraEnSegundos": 300,
@@ -272,50 +272,28 @@ debe recibirlo y validarlo igual** contra la tabla `otps`: es una consulta que y
 marca el código como usado y evita que baste el token de la API para listar los créditos de
 cualquier persona. Ver [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta).
 
-### 3.3 Solo dev · Consultar el código sin recibir el SMS
-
-`POST /api/bot/cobros/pruebas/otp`
+### 3.3 Solo dev · El código está quemado: `4321`
 
 > ⏳ **Temporal.** El proveedor de SMS solo acepta peticiones desde **IPs en su whitelist** y
 > la de esta instancia no está, así que el envío muere en timeout y el flujo se queda trabado
-> en el servicio 1. Este endpoint lo destraba: devuelve el código para poder seguir, como si
-> el SMS hubiera llegado. Se elimina cuando la IP esté habilitada.
-> Ver [D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale).
+> en el servicio 1. Con `BOT_COBROS_OTP_SIMULADO=true` no se manda SMS y el código es siempre
+> el mismo, así el flujo se completa como si hubiera llegado. Se quita cuando la IP esté
+> habilitada. Ver [D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale).
 
-```jsonc
-// petición — la referencia es la que devolvió el servicio 1
-{ "referencia": "c2287206-…" }
-```
+En el servicio 2 se manda `"otp": "4321"` y listo — no hay que consultar nada. Sirve con
+**cualquier cliente**, no solo con los ficticios sembrados, para poder probar contra créditos
+reales de la copia de producción. El servicio 1 lo avisa con `otpSimulado: true`.
 
-```jsonc
-// respuesta
-{
-  "success": true,
-  "data": {
-    "otp": "6126",
-    "usado": false,             // ¿ya se canjeó en el servicio 2?
-    "intentosFallidos": 0,      // de 3
-    "expiraEnSegundos": 299
-  }
-}
-```
+El resto del flujo (vencimiento, 3 intentos, límites de reenvío, un solo uso) se comporta
+exactamente igual que en producción.
 
-Va detrás de **la misma API key** que los otros dos, y además:
+> 🚨 **Con la env prendida el OTP no protege nada:** con la API key se puede pedir el DPI de
+> cualquier persona y ver sus datos de crédito. Es un riesgo asumido en dev —la llave la
+> tienen IT y SimpleTech— y la razón por la que **esta env nunca va en producción**.
 
-| Situación | Respuesta |
-| --- | --- |
-| La instancia no tiene `BOT_COBROS_OTP_SIMULADO=true` (producción) | **404** `NO_ENCONTRADO` |
-| La referencia es de un **cliente real** | **403** `NO_ES_CLIENTE_DE_PRUEBA` |
-| La referencia no existe o no es un uuid | **404** `REFERENCIA_INVALIDA` |
-
-Solo funciona con los clientes ficticios sembrados para el equipo
-([pruebas-equipo-it.md](./pruebas-equipo-it.md)) porque la base de dev es una **copia de
-producción**: sin ese filtro, con la API key se podría pedir el DPI de un cliente real y
-leer su código.
-
-Mientras la env esté prendida, el servicio 1 devuelve `otpSimulado: true` y **no sale ningún
-SMS** — tampoco para clientes reales. El resto del flujo (vencimiento, 3 intentos, límites
-de reenvío, un solo uso) se comporta exactamente igual que en producción.
+> Antes de esto había un `POST /api/bot/cobros/pruebas/otp` que devolvía el código.
+> **Se eliminó** el 2026-08-17 al quemar el código; si aparece en algún apunte viejo, ya no
+> existe.
 
 ---
 
@@ -451,7 +429,7 @@ Ninguna bloquea la implementación de los dos servicios.
 | 8 | Servicio 2: validar código + listar créditos | ✅ `controllers/bot-cobros.ts` |
 | 9 | Colección Postman y entrega del contrato a SimpleTech | ⚪ Pendiente |
 | 10 | Rate limiting | ⚪ Pendiente |
-| 11 | Modo simulado + consulta del código (D-21) | ✅ `lib/bot-cobros/otp.ts` (8 pruebas) |
+| 11 | Modo simulado + código quemado `4321` (D-21) | ✅ `lib/bot-cobros/otp.ts` (6 pruebas) |
 
 ### Dónde quedó cada cosa
 
@@ -464,7 +442,7 @@ apps/crm/apps/server/src/
 │   ├── identificadores.test.ts            ← 26 pruebas con los formatos reales
 │   ├── buscar-cliente.ts                  ← búsqueda por DPI / NIT / placa
 │   ├── otp.ts                             ← MÓDULO AISLADO: envío y validación
-│   └── otp.test.ts                        ← candados del modo simulado (D-21)
+│   └── otp.test.ts                        ← modo simulado y código quemado (D-21)
 ├── db/schema/otp.ts                       ← + co_debtor_id, lead_id nullable
 ├── db/migrations/0033_bot_cobros_otp_codeudor.sql
 └── index.ts                               ← montaje de las rutas
@@ -510,16 +488,17 @@ listado de créditos no lo tocan y siguen funcionando igual.
 | Servicio 2 con código correcto | Devuelve los créditos con su etiqueta armada |
 | Reusar el mismo código | 401 `OTP_YA_USADO` |
 
-**Modo simulado (D-21), probado el 2026-08-14:**
+**Modo simulado (D-21), probado el 2026-08-14** — con la versión que consultaba el código
+por API, antes de quemarlo:
 
 | Caso | Resultado |
 | --- | --- |
-| Flujo completo con un cliente de prueba (servicio 1 → consultar código → servicio 2) | ✅ en **2 s**; antes moría a los 60 s con `OTP_NO_ENVIADO` |
-| Pedir el código de un **cliente real** de la copia de prod | 403 `NO_ES_CLIENTE_DE_PRUEBA` |
-| Pedir el código en una instancia **sin la env** (como producción) | 404 `NO_ENCONTRADO` |
+| Flujo completo con un cliente de prueba (servicio 1 → código → servicio 2) | ✅ en **2 s**; antes moría a los 60 s con `OTP_NO_ENVIADO` |
 | Pedir el código sin API key | 401 `NO_AUTORIZADO` |
-| Referencia que no es uuid | 404 `REFERENCIA_INVALIDA` |
-| Consultar un código ya canjeado | Responde con `usado: true` |
+
+**Código quemado (D-21, 2026-08-17):** `elegirCodigo` está cubierto por pruebas, con foco en
+que **sin la env el código siempre sea aleatorio** — es lo único que separa a producción del
+`4321`. Falta correrlo contra la instancia de dev una vez desplegado.
 | La misma búsqueda 5 veces seguidas | Siempre el mismo cliente (elección determinista) |
 | Tercer código equivocado | 429 `DEMASIADOS_INTENTOS` (no al cuarto) |
 | 10 validaciones **en paralelo** con código malo | Solo 2 cuentan como intento; el contador queda en 3, no en 1 |

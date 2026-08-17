@@ -14,7 +14,6 @@ import {
 import {
 	buscarClienteBotCobros,
 	listarCreditosBotCobros,
-	otpDePruebaBotCobros,
 } from "./controllers/bot-cobros";
 import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
@@ -990,11 +989,6 @@ app.post(
 	autenticarBotCobros,
 	listarCreditosBotCobros,
 );
-// Solo dev, mientras la IP de esta instancia no esté en la whitelist del
-// proveedor de SMS: devuelve el código para poder probar sin recibirlo. Sin
-// BOT_COBROS_OTP_SIMULADO=true responde 404, y aun con la env prendida solo
-// funciona con los clientes ficticios sembrados para pruebas.
-app.post("/api/bot/cobros/pruebas/otp", autenticarBotCobros, otpDePruebaBotCobros);
 
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);

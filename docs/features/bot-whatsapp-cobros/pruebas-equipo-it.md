@@ -9,27 +9,30 @@ clientes reales.
 
 ---
 
-## ⏳ Hoy el código NO llega por SMS
+## ⏳ Hoy el código NO llega por SMS: es siempre `4321`
 
 El proveedor solo acepta peticiones desde **IPs que estén en su whitelist** y la del servidor
 de dev no está, así que el mensaje nunca sale. Para no quedarnos parados, la instancia corre
-con `BOT_COBROS_OTP_SIMULADO=true`: el código se genera igual pero **no se manda**, y se
-consulta por API ([D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale)).
+con `BOT_COBROS_OTP_SIMULADO=true`: no se manda nada y el código es **siempre el mismo**
+([D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale)).
 
-En la práctica, el paso "esperar el SMS" se cambia por esto:
+En la práctica, el paso "esperar el SMS" desaparece: donde va el código se escribe **`4321`**.
 
 ```bash
 # La referencia sale en la respuesta del primer paso (servicio 1)
-curl -s -X POST https://crmapi-cobros.s2.devteamatcci.site/api/bot/cobros/pruebas/otp \
+curl -s -X POST https://crmapi-cobros.s2.devteamatcci.site/api/bot/cobros/creditos \
   -H "Authorization: Bearer $BOT_COBROS_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"referencia":"LA-REFERENCIA"}'
-# → { "otp": "6126", "usado": false, "intentosFallidos": 0, "expiraEnSegundos": 299 }
+  -d '{"referencia":"LA-REFERENCIA","otp":"4321"}'
 ```
 
-Todo lo demás se comporta igual que en producción: el código vence a los 5 minutos, sirve una
-sola vez y se bloquea a los 3 intentos fallidos. **Solo funciona con estos clientes de
-prueba**: con un cliente real responde `403`.
+Sirve con **cualquier cliente**, no solo con los ficticios de la tabla de abajo: así se puede
+probar contra créditos reales de la copia de producción, que es donde salen los casos de
+verdad. Lo demás se comporta igual que en producción: el código vence a los 5 minutos, sirve
+una sola vez y se bloquea a los 3 intentos fallidos.
+
+> 🔒 Por eso mismo, **la API key es sensible**: con ella y el `4321` se ven los datos de
+> crédito de cualquier persona de la base. No sale del equipo de IT y de SimpleTech.
 
 Cuando el proveedor habilite la IP del servidor, se apaga esa variable y el SMS llega sin
 tocar nada más.

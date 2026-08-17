@@ -48,47 +48,47 @@ const COOLDOWN_SEGUNDOS = 60;
 /** Envíos máximos a la misma persona por hora. */
 const MAX_ENVIOS_POR_HORA = 5;
 /**
- * Prefijo de los ids sembrados por `db/seeds/bot-cobros-pruebas.sql`.
+ * Código fijo que se emite en modo simulado.
  *
- * Los clientes ficticios del equipo de IT son `b071…` (leads) y `b074…`
- * (codeudores). Sirve para que el endpoint de pruebas solo pueda revelar el
- * código de esos registros y nunca el de un cliente real de la copia de prod.
+ * No es `1234` a propósito: ese es el bypass del OTP del bot de ventas
+ * (`controllers/otp.ts`) y tenerlos iguales invitaría a probarlo acá.
  */
-const PREFIJO_DATOS_DE_PRUEBA = "b07";
+const CODIGO_FIJO_DE_PRUEBA = "4321";
 
 /**
- * Modo simulado: se genera y guarda el código, pero NO se manda el SMS.
+ * Modo simulado: NO se manda el SMS y el código es siempre
+ * `CODIGO_FIJO_DE_PRUEBA`, para **cualquier** cliente.
  *
  * El proveedor solo acepta peticiones desde IPs en su whitelist y la de esta
  * instancia no está, así que el envío muere en timeout y el flujo nunca pasa
- * del servicio 1. Con `BOT_COBROS_OTP_SIMULADO=true` el código queda en la base
- * y se consulta con `obtenerCodigoDePrueba`, así se prueba el flujo completo
- * como si el SMS hubiera llegado.
+ * del servicio 1. Con `BOT_COBROS_OTP_SIMULADO=true` el bot completa el flujo
+ * tecleando siempre el mismo código, como si el SMS hubiera llegado.
  *
- * **Solo para la instancia de dev.** En producción va apagada: prendida, el
- * cliente nunca recibiría su código.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * 🚨 ESTA ENV **NUNCA** VA EN PRODUCCIÓN.
+ *
+ * Prendida, quien tenga la API key puede pedir el DPI de cualquier cliente,
+ * teclear el código fijo y ver sus datos de crédito: el OTP deja de proteger
+ * nada. En dev es aceptable —la llave la tienen IT y SimpleTech, y es la
+ * manera de probar mientras no salga el SMS—; en producción sería regalar la
+ * cartera a quien se robe la llave.
+ *
+ * Se apaga cuando el proveedor habilite la IP; ahí el código vuelve a ser
+ * aleatorio y esto se borra.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 export function esModoSimulado(): boolean {
 	const valor = process.env.BOT_COBROS_OTP_SIMULADO;
 	return valor === "true" || valor === "1";
 }
 
-/**
- * ¿La fila del OTP pertenece a un cliente sembrado para pruebas?
- *
- * Se exige que TODOS los ids presentes sean de prueba, no que alguno lo sea:
- * una fila mixta (codeudor ficticio de un lead real, o al revés) no debe
- * exponer nada.
- */
-export function esDeDatosDePrueba(
-	ids: Array<string | null>,
-): boolean {
-	const presentes = ids.filter((id): id is string => Boolean(id));
+/** Decide qué código se emite: el fijo de pruebas o uno aleatorio. */
+export function elegirCodigo(): { codigo: string; fijo: boolean } {
+	if (esModoSimulado()) {
+		return { codigo: CODIGO_FIJO_DE_PRUEBA, fijo: true };
+	}
 
-	return (
-		presentes.length > 0 &&
-		presentes.every((id) => id.startsWith(PREFIJO_DATOS_DE_PRUEBA))
-	);
+	return { codigo: generarCodigo(), fijo: false };
 }
 
 /**
@@ -122,7 +122,10 @@ export type ResultadoEnvio =
 			referencia: string;
 			enviadoA: string;
 			expiraEnSegundos: number;
-			/** true = no salió SMS; el código se consulta (ver `esModoSimulado`). */
+			/**
+			 * true = no salió SMS y el código es el fijo de pruebas.
+			 * Ver `esModoSimulado`. En producción siempre false.
+			 */
 			simulado: boolean;
 	  }
 	| { enviado: false; codigo: "ERROR_ENVIO" }
@@ -189,7 +192,7 @@ export async function enviarOtp(
 		if (limite) return limite;
 	}
 
-	const codigo = generarCodigo();
+	const { codigo } = elegirCodigo();
 	const expiraEn = new Date();
 	expiraEn.setMinutes(expiraEn.getMinutes() + VIGENCIA_MINUTOS);
 
@@ -229,11 +232,8 @@ export async function enviarOtp(
 		const simulado = esModoSimulado();
 
 		if (simulado) {
-			// El código ya quedó guardado; se consulta con `obtenerCodigoDePrueba`.
-			// No se escribe en el log: ahí sí quedaría a la vista de cualquiera con
-			// acceso a los logs del contenedor (D-16).
 			console.log(
-				`[BotCobros] BOT_COBROS_OTP_SIMULADO activo: no se envía SMS a ${enmascararTelefono(destinatario.telefono8)} (referencia ${fila.id})`,
+				`[BotCobros] BOT_COBROS_OTP_SIMULADO activo: no se envía SMS a ${enmascararTelefono(destinatario.telefono8)} (referencia ${fila.id}, código fijo de pruebas)`,
 			);
 		} else {
 			const smsClient = new SMSClient({
@@ -436,75 +436,5 @@ export async function validarOtp(
 			coDebtorId: otp.coDebtorId,
 			dpi: otp.dpi,
 		},
-	};
-}
-
-export type ResultadoCodigoDePrueba =
-	| {
-			disponible: true;
-			codigo: string;
-			usado: boolean;
-			intentosFallidos: number;
-			expiraEnSegundos: number;
-	  }
-	| {
-			disponible: false;
-			codigo: "PRUEBAS_NO_HABILITADAS" | "REFERENCIA_INVALIDA" | "NO_ES_CLIENTE_DE_PRUEBA";
-	  };
-
-/**
- * Devuelve el código de un OTP para poder probar sin recibir el SMS.
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * ESTO EXISTE SOLO PORQUE EL SMS NO SALE (ver `esModoSimulado`). Cuando la IP
- * de la instancia esté en la whitelist del proveedor, se apaga la env y este
- * endpoint deja de responder solo; después se borra junto con `esModoSimulado`.
- * ─────────────────────────────────────────────────────────────────────────────
- *
- * Dos candados, porque revelar un código es dar acceso a los datos de crédito
- * de esa persona:
- *   1. `BOT_COBROS_OTP_SIMULADO` apagada → no responde nada.
- *   2. Aunque esté prendida, solo devuelve el código de los clientes ficticios
- *      sembrados para pruebas. La base de dev es copia de producción: sin este
- *      filtro, con la API key se podría pedir el DPI de un cliente real y leer
- *      su código.
- */
-export async function obtenerCodigoDePrueba(
-	referencia: string,
-): Promise<ResultadoCodigoDePrueba> {
-	if (!esModoSimulado()) {
-		return { disponible: false, codigo: "PRUEBAS_NO_HABILITADAS" };
-	}
-
-	if (!esReferenciaValida(referencia)) {
-		return { disponible: false, codigo: "REFERENCIA_INVALIDA" };
-	}
-
-	const [otp] = await db
-		.select()
-		.from(otps)
-		.where(and(eq(otps.id, referencia), eq(otps.origen, ORIGEN)))
-		.limit(1);
-
-	if (!otp) {
-		return { disponible: false, codigo: "REFERENCIA_INVALIDA" };
-	}
-
-	if (!esDeDatosDePrueba([otp.leadId, otp.coDebtorId])) {
-		console.warn(
-			`[BotCobros] Se pidió el código de prueba de un cliente que no es de prueba (referencia ${referencia})`,
-		);
-		return { disponible: false, codigo: "NO_ES_CLIENTE_DE_PRUEBA" };
-	}
-
-	return {
-		disponible: true,
-		codigo: otp.code,
-		usado: otp.used,
-		intentosFallidos: otp.attempts,
-		expiraEnSegundos: Math.max(
-			0,
-			Math.floor((otp.expiresAt.getTime() - Date.now()) / 1000),
-		),
 	};
 }

@@ -116,6 +116,39 @@ describe("getApiErrorMessage", () => {
     );
   });
 
+  it("omite razones técnicas de liquidación masiva del warning de devolución", () => {
+    const error = new AxiosError(
+      "Request failed with status code 422",
+      "ERR_BAD_REQUEST",
+      undefined,
+      undefined,
+      {
+        status: 422,
+        statusText: "Unprocessable Content",
+        headers: {},
+        config: {} as never,
+        data: {
+          code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+          creditos_bloqueados: [
+            { numero_credito_sifco: "01010214119070" },
+          ],
+          errores: [
+            {
+              razon: "PostgresError: duplicate key violates unique constraint pagos_credito_inversionistas_espejo_pkey",
+            },
+            {
+              razon: "[CUADRE_CAPITAL] Crédito 01010101010101 inconsistente",
+            },
+          ],
+        },
+      },
+    );
+
+    expect(getPendingReturnWarningMessage(error)).toBe(
+      "Hay créditos pendientes de autorización para devolución a CUBE. Créditos: 01010214119070. Otras inconsistencias: [CUADRE_CAPITAL] Crédito 01010101010101 inconsistente.",
+    );
+  });
+
   it("extrae SIFCO y razón cuando todo lote de pagos espejo falla", () => {
     const error = new AxiosError(
       "Request failed with status code 500",

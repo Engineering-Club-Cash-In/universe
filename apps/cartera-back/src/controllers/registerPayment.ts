@@ -16,7 +16,7 @@ import {
 } from "../database/db";
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { updateMora } from "./latefee";
+import { desactivarMoraSiCreditoAlDia, updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
@@ -2617,11 +2617,18 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       };
     }
     if (pago.validationStatus === "capital") {
-      return applyCapitalPaymentAndBuildResponse(
+      const resultadoCapital = await applyCapitalPaymentAndBuildResponse(
         pago,
         pago_id,
         aplicarAbonoCapitalInversionistas
       );
+      // Un abono directo a capital puede dejar el crédito sin capital: la
+      // regla sinCapital debe apagar la mora aquí mismo (igual que haría el
+      // cron esa noche). Post-commit del abono; barato si no hay mora activa.
+      if (resultadoCapital?.success && pago.credito_id !== null) {
+        await desactivarMoraSiCreditoAlDia(pago.credito_id);
+      }
+      return resultadoCapital;
     }
     if (pago.validationStatus === "reset") {
       if (pago.credito_id === null) {
@@ -2671,9 +2678,22 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     // completo y el reintento parte de cero — sin capital doble-descontado ni
     // distribuciones a medias. Aquí adentro NO hay llamadas externas (la
     // facturación con SAT vive en otro endpoint), así que la tx es corta.
-    return await db.transaction(async (tx) =>
+    const resultado = await db.transaction(async (tx) =>
       aplicarPagoNormalEnTx(tx as unknown as AplicarPagoTx, pago, pago_id)
     );
+
+    // POST-COMMIT: si el pago dejó el crédito al día, apagar la mora que el
+    // cron pudo crear mientras la boleta esperaba validación (si no, queda
+    // activa y el crédito MOROSO hasta la corrida nocturna). Va FUERA de la
+    // transacción a propósito: el helper lee/escribe por el pool global (otra
+    // conexión), así que dentro de la tx leería el snapshot viejo (no-op) y
+    // su UPDATE a creditos chocaría con el row lock de la tx (bloqueo mutuo).
+    // Nunca lanza, así que no puede tirar una aplicación ya commiteada.
+    if (resultado?.success) {
+      await desactivarMoraSiCreditoAlDia(pago.credito_id);
+    }
+
+    return resultado;
   } catch (error) {
     console.error("❌ Error al aplicar pago al crédito:", error);
     throw error;

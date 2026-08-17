@@ -73,7 +73,7 @@ import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
-import { canSyncNitToOpportunities } from "../lib/lead-nit-sync";
+import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import { getStageVehicleRequirementError } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
@@ -1118,6 +1118,18 @@ export const crmRouter = {
 				});
 			}
 
+			// El NIT que el lead tenía ANTES de esta edición: es la referencia para
+			// distinguir las oportunidades que siguen con la copia de las que
+			// alguien corrigió a mano. Hay que leerlo antes del UPDATE.
+			const [leadAntesDelUpdate] =
+				updateData.nit !== undefined
+					? await db
+							.select({ nit: leads.nit })
+							.from(leads)
+							.where(eq(leads.id, id))
+							.limit(1)
+					: [];
+
 			const updatedLead = await db
 				.update(leads)
 				.set({
@@ -1139,23 +1151,35 @@ export const crmRouter = {
 			}
 
 			// Sync NIT to associated opportunities.
-			// Solo cuando no hay nada divergente que pisar: el NIT que viaja a
+			// Solo a las que siguen con la copia del NIT del lead: el que viaja a
 			// cartera es el de la oportunidad y se corrige por aparte en el detalle
 			// de crédito (40%) y al asignar inversión (50%). Ver `lead-nit-sync`.
 			if (updateData.nit !== undefined) {
 				const leadOpportunities = await db
-					.select({ nit: opportunities.nit })
+					.select({ id: opportunities.id, nit: opportunities.nit })
 					.from(opportunities)
 					.where(eq(opportunities.leadId, id));
 
-				if (canSyncNitToOpportunities(leadOpportunities.map((o) => o.nit))) {
+				const sincronizables = leadOpportunities.filter((o) =>
+					canSyncNitToOpportunity(o.nit, leadAntesDelUpdate?.nit),
+				);
+
+				if (sincronizables.length > 0) {
 					await db
 						.update(opportunities)
 						.set({ nit: updateData.nit || null, updatedAt: new Date() })
-						.where(eq(opportunities.leadId, id));
-				} else if (leadOpportunities.length > 0) {
+						.where(
+							inArray(
+								opportunities.id,
+								sincronizables.map((o) => o.id),
+							),
+						);
+				}
+
+				const conservadas = leadOpportunities.length - sincronizables.length;
+				if (conservadas > 0) {
 					console.log(
-						`[updateLead] NIT del lead ${id} actualizado sin propagar: sus ${leadOpportunities.length} oportunidades tienen NITs distintos entre sí`,
+						`[updateLead] NIT del lead ${id} actualizado: ${sincronizables.length} oportunidad(es) sincronizada(s), ${conservadas} conservada(s) por tener el NIT corregido a mano`,
 					);
 				}
 			}

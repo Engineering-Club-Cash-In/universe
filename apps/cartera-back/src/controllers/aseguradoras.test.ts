@@ -6,6 +6,7 @@ import { describe, expect, it, mock } from "bun:test";
 // module-level `db` import still triggers the connection check at load time.
 // ---------------------------------------------------------------------------
 mock.module("../database", () => ({
+  client: {},
   db: {
     select: () => ({ from: () => ({ orderBy: () => Promise.resolve([]) }) }),
     execute: () => Promise.resolve({ rows: [] }),

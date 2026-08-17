@@ -11,6 +11,7 @@ import {
   shouldRejectZeroAppliedNormalValidation,
 } from "./registerPaymentPolicy";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { desactivarMoraSiCreditoAlDia } from "./latefee";
 
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
@@ -227,6 +228,14 @@ export const revalidatePayment = async ({ body, set }: any) => {
       set.status = 400;
       return result;
     }
+
+    // Igual que en aplicarPagoAlCredito: si la revalidación dejó el crédito
+    // al día, apagar la mora nacida durante la ventana de validación. Va
+    // FUERA de la transacción: el helper lee con otra conexión y necesita
+    // ver la cuota ya commiteada como pagada.
+    await desactivarMoraSiCreditoAlDia(credito_id, {
+      motivo: "Crédito se puso al día al revalidar pago",
+    });
 
     set.status = 200;
     return {

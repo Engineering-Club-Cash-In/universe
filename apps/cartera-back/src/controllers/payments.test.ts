@@ -157,6 +157,7 @@ mock.module("../database/index", () => {
   // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
   // aunque estos tests no lo usen. Ver testMocks.ts.
   return {
+    client: {},
     db: mockDbInstance,
     lockPool: lockPoolMock,
   };

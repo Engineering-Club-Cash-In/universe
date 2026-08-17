@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { AxiosError } from "axios";
-import { getApiErrorMessage, getPendingReturnWarningMessage } from "./apiError";
+import {
+  getApiErrorMessage,
+  getBatchFailedCredits,
+  getPendingReturnWarningMessage,
+} from "./apiError";
 
 describe("getApiErrorMessage", () => {
   it("presenta en español el bloqueo por cancelación pendiente", () => {
@@ -110,5 +114,39 @@ describe("getApiErrorMessage", () => {
     expect(getPendingReturnWarningMessage(error)).toBe(
       "Hay créditos pendientes de autorización para devolución a CUBE. Créditos: 01010214119070. Otras inconsistencias: [CUADRE_CAPITAL] Crédito 01010101010101 inconsistente.",
     );
+  });
+
+  it("extrae SIFCO y razón cuando todo lote de pagos espejo falla", () => {
+    const error = new AxiosError(
+      "Request failed with status code 500",
+      "ERR_BAD_RESPONSE",
+      undefined,
+      undefined,
+      {
+        status: 500,
+        statusText: "Internal Server Error",
+        headers: {},
+        config: {} as never,
+        data: {
+          success: false,
+          error: "No se pudo generar ningún pago espejo del lote.",
+          fallidos: [
+            {
+              creditoId: 101,
+              numeroCreditoSifco: "01010214119070",
+              mensaje: "[CUADRE_CAPITAL] Crédito inconsistente",
+            },
+          ],
+        },
+      },
+    );
+
+    expect(getBatchFailedCredits(error)).toEqual([
+      {
+        creditoId: 101,
+        numeroCreditoSifco: "01010214119070",
+        mensaje: "[CUADRE_CAPITAL] Crédito inconsistente",
+      },
+    ]);
   });
 });

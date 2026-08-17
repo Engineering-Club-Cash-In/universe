@@ -32,6 +32,7 @@ const lockQuery = mock(() => Promise.resolve());
 const lockRelease = mock(() => {});
 
 mock.module("../database", () => ({
+  client: {},
   db: {
     transaction: mock(
       (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),

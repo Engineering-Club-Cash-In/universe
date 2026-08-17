@@ -1,7 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 
 // El controller importa ../database; lo mockeamos para poder importar los helpers puros.
-mock.module("../database", () => ({ db: {} }));
+mock.module("../database", () => ({ db: {}, client: {} }));
 
 const { esColumnaEditable, validarValores } = await import("./facturacionSnapshot");
 

@@ -63,9 +63,15 @@ async function registrarHistorialMora(params: {
   porcentaje_mora?: string | number | null;
   usuario_id?: number | null;
   motivo?: string | null;
+  dbClient?: typeof db;
+  // Dentro de una transacción el swallow es mentiroso: un insert fallido deja
+  // la tx abortada y el COMMIT se vuelve rollback silencioso, pero el caller
+  // seguiría creyendo que sus writes persistieron. Con esto el error se
+  // propaga y la tx puede reportar el fallo de verdad.
+  propagarError?: boolean;
 }) {
   try {
-    await db.insert(moras_historial).values({
+    await (params.dbClient ?? db).insert(moras_historial).values({
       credito_id: params.credito_id,
       mora_id: params.mora_id,
       tipo_evento: params.tipo_evento,
@@ -87,8 +93,204 @@ async function registrarHistorialMora(params: {
     });
   } catch (err) {
     console.error("[HISTORIAL] ⚠️  No se pudo registrar evento de mora:", err);
+    if (params.propagarError) throw err;
   }
 }
+
+/** Medianoche de hoy en hora Guatemala — el "hoy" canónico del módulo de mora. */
+function hoyGuatemala(): Date {
+  const hoy = toZonedTime(new Date(), "America/Guatemala");
+  hoy.setHours(0, 0, 0, 0);
+  return hoy;
+}
+
+/**
+ * Decisión pura de limpieza de mora al validar/aplicar un pago. Espejo del
+ * paso "se puso al día" de procesarMoras: la mora se desactiva si el crédito
+ * ya no tiene cuotas vencidas elegibles — o si quedó sin capital (mismo
+ * override del cron: sin capital no aplica mora) — y el status solo baja
+ * MOROSO→ACTIVO (nunca des-castiga INCOBRABLE/EN_CONVENIO/etc.).
+ */
+export function decidirLimpiezaMoraTrasAplicar(params: {
+  cuotasVencidasRestantes: number;
+  capitalCredito: string | number | null;
+  statusCredit: string | null;
+}): { desactivarMora: boolean; bajarStatusAActivo: boolean; sinCapital: boolean } {
+  let sinCapital = false;
+  if (params.capitalCredito !== null) {
+    try {
+      sinCapital = new Big(params.capitalCredito).lte(0);
+    } catch {
+      // Capital no numérico: no forzar la desactivación por esta vía.
+      sinCapital = false;
+    }
+  }
+  const desactivarMora = params.cuotasVencidasRestantes === 0 || sinCapital;
+  return {
+    desactivarMora,
+    bajarStatusAActivo: desactivarMora && params.statusCredit === "MOROSO",
+    sinCapital,
+  };
+}
+
+/**
+ * Apaga la mora activa de un crédito que quedó al día al validar un pago.
+ *
+ * Por qué: una boleta registrada queda `pending` hasta que contabilidad la
+ * valida; si esa ventana cruza la corrida nocturna de procesarMoras, el cron
+ * crea una mora (correcta bajo la regla "solo cuenta lo validado") que nadie
+ * apaga al validar — quedaba viva hasta el cron siguiente y el crédito se veía
+ * "0 atrasadas pero con mora y MOROSO" todo el día, forzando condonaciones
+ * manuales. Esta función es el espejo acotado-a-un-crédito del paso
+ * "se puso al día" del cron.
+ *
+ * Nunca lanza: la limpieza de mora no debe romper la aplicación del pago.
+ * El UPDATE es condicional sobre `activa=true`: si el cron u otra validación
+ * concurrente ya la apagó, no afecta filas y no se duplica el historial.
+ */
+export async function desactivarMoraSiCreditoAlDia(
+  credito_id: number,
+  opts: { motivo?: string; dbClient?: typeof db } = {},
+): Promise<{ desactivada: boolean; error?: string }> {
+  const dbi = opts.dbClient ?? db;
+  try {
+    // El índice único parcial moras_credito_uq_activa garantiza a lo sumo
+    // una mora activa por crédito.
+    const [moraActiva] = await dbi
+      .select({
+        mora_id: moras_credito.mora_id,
+        monto_mora: moras_credito.monto_mora,
+        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        porcentaje_mora: moras_credito.porcentaje_mora,
+      })
+      .from(moras_credito)
+      .where(
+        and(
+          eq(moras_credito.credito_id, credito_id),
+          eq(moras_credito.activa, true),
+        ),
+      );
+
+    if (!moraActiva) {
+      return { desactivada: false };
+    }
+
+    const [credito] = await dbi
+      .select({
+        statusCredit: creditos.statusCredit,
+        capital: creditos.capital,
+      })
+      .from(creditos)
+      .where(eq(creditos.credito_id, credito_id));
+
+    const hoy = hoyGuatemala();
+
+    // Mismo universo y criterio que procesarMoras, acotado a este crédito.
+    // El EXISTS replica el del cron, incluido COALESCE(monto_aplicado,0)>0:
+    // los pagos especiales (solo mora/otros/convenio) se cuelgan de la cuota
+    // con pagado=true y monto_aplicado=0 sin cubrirla de verdad.
+    const cuotas = await dbi
+      .select({
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        statusCredit: creditos.statusCredit,
+        hasPaidPayment: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM cartera.pagos_credito pc
+          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+            AND pc."paymentFalse" = false
+            AND pc.pagado = true
+            AND pc.validation_status IN ('validated', 'no_required')
+            AND COALESCE(pc.monto_aplicado, 0) > 0
+        )`,
+      })
+      .from(cuotas_credito)
+      .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))
+      .where(eq(cuotas_credito.credito_id, credito_id));
+
+    const cuotasVencidas = cuotas.filter((c) =>
+      isOverdueInstallmentForMora(c, hoy),
+    ).length;
+
+    const decision = decidirLimpiezaMoraTrasAplicar({
+      cuotasVencidasRestantes: cuotasVencidas,
+      capitalCredito: credito?.capital ?? null,
+      statusCredit: credito?.statusCredit ?? null,
+    });
+
+    if (!decision.desactivarMora) {
+      return { desactivada: false };
+    }
+
+    // Los tres writes van JUNTOS en una transacción propia: si el status o el
+    // historial fallara a media limpieza, quedaría un MOROSO sin mora activa
+    // que ni el cron ni una segunda pasada corrigen (ambos parten de "hay
+    // mora activa"). El update sigue condicional sobre activa=true: si el
+    // cron u otra validación concurrente ya la apagó, no afecta filas, no se
+    // duplica historial y no se toca el status.
+    let apagada = false;
+    await dbi.transaction(async (txm) => {
+      const apagadas = await txm
+        .update(moras_credito)
+        .set({
+          monto_mora: "0",
+          cuotas_atrasadas: 0,
+          activa: false,
+          updated_at: new Date(),
+        })
+        .where(
+          and(
+            eq(moras_credito.mora_id, moraActiva.mora_id),
+            eq(moras_credito.activa, true),
+          ),
+        )
+        .returning({ mora_id: moras_credito.mora_id });
+
+      if (apagadas.length === 0) return;
+      apagada = true;
+
+      if (decision.bajarStatusAActivo) {
+        await txm
+          .update(creditos)
+          .set({ statusCredit: "ACTIVO" })
+          .where(
+            and(
+              eq(creditos.credito_id, credito_id),
+              eq(creditos.statusCredit, "MOROSO"),
+            ),
+          );
+      }
+
+      await registrarHistorialMora({
+        credito_id,
+        mora_id: moraActiva.mora_id,
+        tipo_evento: "DESACTIVACION",
+        origen: "PROCESO_AUTO",
+        monto_anterior: moraActiva.monto_mora,
+        monto_nuevo: "0",
+        cuotas_atrasadas_anterior: moraActiva.cuotas_atrasadas,
+        cuotas_atrasadas_nuevas: 0,
+        porcentaje_mora: moraActiva.porcentaje_mora,
+        // "sin capital" solo cuando fue el factor decisivo (quedaban
+        // vencidas); si el crédito quedó al día, gana el motivo del caller.
+        motivo: decision.sinCapital && cuotasVencidas > 0
+          ? "Crédito sin capital — no aplica mora"
+          : (opts.motivo ?? "Crédito se puso al día al validar pago"),
+        dbClient: txm as unknown as typeof db,
+        propagarError: true,
+      });
+    });
+
+    return { desactivada: apagada };
+  } catch (error: any) {
+    console.error(
+      `[MORA] ⚠️  desactivarMoraSiCreditoAlDia(${credito_id}) falló (no rompe la validación del pago):`,
+      error,
+    );
+    return { desactivada: false, error: String(error?.message ?? error) };
+  }
+}
+
 /**
  * Create a new mora (penalty) for a credit.
  *
@@ -599,8 +801,6 @@ export async function updateMora({
 const PROCESAR_MORAS_LOCK_KEY = 728193;
 
 export async function procesarMoras() {
-  const zona = "America/Guatemala";
-
   // 🔒 Lock entre instancias: con varias réplicas del back, todas agendan el cron
   // (23:59 GT) y corrían EN PARALELO leyendo el mismo estado viejo → duplicaban
   // eventos en moras_historial y, peor, filas activa=true en moras_credito.
@@ -616,8 +816,7 @@ export async function procesarMoras() {
       return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0 };
     }
 
-    const hoy = toZonedTime(new Date(), zona);
-    hoy.setHours(0, 0, 0, 0);
+    const hoy = hoyGuatemala();
 
     console.log("[INFO] Current Guatemala date (midnight):", hoy.toISOString());
     console.log("\n╔════════════════════════════════════════════════════════════");

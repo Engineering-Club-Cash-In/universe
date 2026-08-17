@@ -13,6 +13,7 @@ let insertWasCalled = false;
 let lastUpdateData: Record<string, unknown> | undefined;
 
 mock.module("../database/index", () => ({
+  client: {},
   db: {
     select: () => ({
       from: () => ({

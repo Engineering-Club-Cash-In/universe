@@ -4,7 +4,7 @@ import Big from "big.js";
 // Evita que database/index.ts abra la conexión (y truene por falta de
 // SUPABASE_DB_URL) al importar el controller. registrarCancelacionEspejo no usa
 // el `db` del módulo: opera sobre el handle `tx` que recibe por parámetro.
-mock.module("../database", () => ({ db: {} }));
+mock.module("../database", () => ({ db: {}, client: {} }));
 
 // Compras pendientes por inversionista (config mutable por test). Simula el
 // helper canónico que resta del monto_aportado el capital aún no real.

@@ -4,7 +4,7 @@ import { getMoraRecoveryPeriod } from "../controllers/moraRecuperacion";
 
 const execute = mock(() => Promise.resolve({ rows: [] }));
 
-mock.module("../database", () => ({ db: { execute } }));
+mock.module("../database", () => ({ db: { execute }, client: {} }));
 
 const { reportesRouter } = await import("./reportes");
 

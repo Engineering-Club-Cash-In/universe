@@ -12,6 +12,11 @@ import {
 import { buildServerInsurancePersistence } from "../lib/insurance-selection";
 import { crmProcedure } from "../lib/orpc";
 import {
+	calculateQuotation,
+	generateAmortizationTable,
+	type AmortizationRow,
+} from "../lib/quotation-calculator";
+import {
 	canManageAnyQuotation,
 	canManageQuotations,
 } from "../lib/quotation-permissions";
@@ -56,92 +61,6 @@ const quotationClientSelect = {
 	companyName: companies.name,
 };
 
-/**
- * Calcula la cuota mensual usando la fórmula PMT de Excel
- * PMT = P * (r * (1 + r)^n) / ((1 + r)^n - 1)
- * Incluye IVA del 12% en la tasa de interés
- */
-function calculateMonthlyPayment(
-	principal: number,
-	monthlyRate: number,
-	termMonths: number,
-	insuranceCost: number,
-	gpsCost: number,
-): number {
-	// La tasa incluye IVA (12%)
-	const r = (monthlyRate / 100) * 1.12;
-
-	if (r === 0) return principal / termMonths;
-
-	const factor = (1 + r) ** termMonths;
-	const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
-
-	// Agregar seguro y GPS a la cuota mensual
-	return Math.round((baseMonthlyPayment + insuranceCost + gpsCost) * 100) / 100;
-}
-
-/**
- * Genera la tabla de amortización
- */
-export interface AmortizationRow {
-	period: number;
-	initialBalance: number;
-	interestPlusVAT: number;
-	principal: number;
-	finalBalance: number;
-}
-
-function generateAmortizationTable(
-	totalFinanced: number,
-	monthlyRate: number,
-	termMonths: number,
-	_insuranceCost: number,
-	_gpsCost: number,
-): AmortizationRow[] {
-	const table: AmortizationRow[] = [];
-	let balance = totalFinanced;
-	const r = monthlyRate / 100;
-	const VAT = 0.12; // 12% IVA
-
-	// Calcular la cuota base (sin seguro ni GPS)
-	const rWithVAT = r * (1 + VAT);
-	const factor = (1 + rWithVAT) ** termMonths;
-	const baseMonthlyPayment =
-		(totalFinanced * (rWithVAT * factor)) / (factor - 1);
-
-	// Período 0 (inicial)
-	const initialInterest = balance * r;
-	const initialInterestWithVAT = initialInterest * (1 + VAT);
-
-	table.push({
-		period: 0,
-		initialBalance: balance,
-		interestPlusVAT: initialInterestWithVAT,
-		principal: 0,
-		finalBalance: balance,
-	});
-
-	// Períodos 1 a termMonths
-	for (let i = 1; i <= termMonths; i++) {
-		const interest = balance * r;
-		const interestWithVAT = interest * (1 + VAT);
-		const principalPayment = baseMonthlyPayment - interestWithVAT;
-		const newBalance = balance - principalPayment;
-
-		table.push({
-			period: i,
-			initialBalance: balance,
-			interestPlusVAT: interestWithVAT,
-			principal: principalPayment,
-			finalBalance: newBalance > 0 ? newBalance : 0,
-		});
-
-		balance = newBalance;
-	}
-
-	return table;
-}
-
 export const quotationsRouter = {
 	// Crear nueva cotización
 	createQuotation: crmProcedure
@@ -178,14 +97,19 @@ export const quotationsRouter = {
 				downPayment: z.number().positive(),
 				termMonths: z.number().int().positive(),
 				interestRate: z.number().positive(),
+				// Usado como fallback si buildServerInsurancePersistence no tiene otro dato —
+				// ver TODO junto a customerInsuranceCost más abajo (pendiente de negocio).
 				insuranceCost: z.number().default(0),
 				gpsCost: z.number().default(0),
 				transferCost: z.number().default(0),
+				// Se acepta por compatibilidad con el payload del formulario, pero el servidor
+				// lo ignora: adminCost se recalcula siempre con calculateQuotation().
 				adminCost: z.number().default(0),
 				membershipCost: z.number().default(0),
 				// Gastos adicionales para detalle de crédito
 				freelanceCost: z.number().default(0),
 				freelancePercentage: z.number().optional(),
+				// Se acepta por compatibilidad, pero se ignora: se recalcula siempre.
 				royalty: z.number().default(0),
 				royaltyPercentage: z.number().default(4.0),
 				inspectionCost: z.number().default(0),
@@ -206,7 +130,11 @@ export const quotationsRouter = {
 				extraInsuranceCost: z.number().default(0),
 				extraMembershipCost: z.number().default(0),
 				extraAdminCost: z.number().default(600),
+				// Se acepta por compatibilidad, pero se ignora: se recalcula siempre.
 				interestCost: z.number().default(0),
+				// TODO(negocio): el servidor confía tal cual en el rcdpCost del cliente en vez
+				// de derivarlo de getInsuranceCost (que también lo devuelve). Mismo patrón que
+				// customerInsuranceCost — pendiente de decisión, no se toca en este trabajo.
 				rcdpCost: z.number().default(0),
 				vehicleTransferCost: z.number().default(0),
 				isInterno: z.boolean().default(false),
@@ -262,43 +190,34 @@ export const quotationsRouter = {
 						? serverInsurance.internalInsuranceCost
 						: null,
 				membershipCost: input.membershipCost,
+				// TODO(negocio): buildServerInsurancePersistence prioriza este valor del
+				// cliente sobre el que getInsuranceCost() ya calculó arriba (ver
+				// insurance-selection.ts:114-116). Es el mismo hallazgo del "doble cálculo
+				// de seguro" ya documentado — pendiente de decisión, no se toca aquí.
 				customerInsuranceCost: input.insuranceCost,
 			});
 
-			// Calcular valores
 			const isSobreVehiculo = input.creditType === "sobre_vehiculo";
 			const downPaymentPercentage = isSobreVehiculo
 				? 0
 				: (input.downPayment / input.vehicleValue) * 100;
-			// En sobre vehículo: downPayment = monto solicitado (es el principal directo)
-			// En autocompra: monto a financiar = valor del vehículo - enganche
-			const amountToFinance = isSobreVehiculo
-				? input.downPayment
-				: input.vehicleValue - input.downPayment;
 
-			// Calcular royalty si no se proporcionó: 4% del total financiado
-			const royalty =
-				input.royalty > 0
-					? input.royalty
-					: amountToFinance * (input.royaltyPercentage / 100);
-
-			// En sobre vehículo: total financiado = monto solicitado directo
-			// (los gastos se descuentan del desembolso al cliente, no se suman al financiamiento)
-			// En autocompra: se suman los costos financiados al monto a financiar
-			const financedCosts = isSobreVehiculo
-				? 0
-				: input.transferCost + input.adminCost;
-
-			const totalFinanced = amountToFinance + financedCosts;
-
-			// La cuota mensual incluye seguro y GPS aparte
-			const monthlyPayment = calculateMonthlyPayment(
-				totalFinanced,
-				input.interestRate,
-				input.termMonths,
-				Number(insurancePersistence.seguro),
-				input.gpsCost,
-			);
+			// El servidor recalcula todo desde los inputs crudos — no confía en
+			// adminCost/royalty/interestCost/rcdpCost que el cliente ya haya calculado.
+			// Es la misma función que usa el navegador para la simulación en vivo.
+			const quoteResult = calculateQuotation({
+				creditType: input.creditType,
+				vehicleValue: input.vehicleValue,
+				downPayment: input.downPayment,
+				interestRate: input.interestRate,
+				termMonths: input.termMonths,
+				insuranceCost: Number(insurancePersistence.seguro),
+				gpsCost: input.gpsCost,
+				transferCost: input.transferCost,
+				royaltyPercentage: input.royaltyPercentage,
+				rcdpCost: input.rcdpCost,
+				isInterno: input.isInterno,
+			});
 
 			// Crear cotización
 			const [quotation] = await db
@@ -323,7 +242,7 @@ export const quotationsRouter = {
 					insuranceCost: insurancePersistence.seguro,
 					gpsCost: input.gpsCost.toString(),
 					transferCost: input.transferCost.toString(),
-					adminCost: input.adminCost.toString(),
+					adminCost: quoteResult.adminCost.toString(),
 					membershipCost: insurancePersistence.membresiaPago,
 					insuranceProvider: insurancePersistence.insuranceProvider,
 					customerInsuranceCost: insurancePersistence.customerInsuranceCost,
@@ -333,7 +252,7 @@ export const quotationsRouter = {
 					// Gastos adicionales para detalle de crédito
 					freelanceCost: input.freelanceCost.toString(),
 					freelancePercentage: input.freelancePercentage?.toString() ?? null,
-					royalty: royalty.toString(),
+					royalty: quoteResult.calculatedRoyalty.toString(),
 					royaltyPercentage: input.royaltyPercentage.toString(),
 					inspectionCost: input.inspectionCost.toString(),
 					finesCost: input.finesCost.toString(),
@@ -353,13 +272,13 @@ export const quotationsRouter = {
 					extraInsuranceCost: input.extraInsuranceCost.toString(),
 					extraMembershipCost: input.extraMembershipCost.toString(),
 					extraAdminCost: input.extraAdminCost.toString(),
-					interestCost: input.interestCost.toString(),
-					rcdpCost: input.rcdpCost.toString(),
+					interestCost: quoteResult.calculatedInterest.toString(),
+					rcdpCost: quoteResult.rcdpCost.toString(),
 					vehicleTransferCost: input.vehicleTransferCost.toString(),
 					isInterno: input.isInterno,
-					amountToFinance: amountToFinance.toString(),
-					totalFinanced: totalFinanced.toString(),
-					monthlyPayment: monthlyPayment.toFixed(2),
+					amountToFinance: quoteResult.amountToFinance.toString(),
+					totalFinanced: quoteResult.totalFinanced.toString(),
+					monthlyPayment: quoteResult.monthlyPayment.toFixed(2),
 					notes: input.notes,
 				})
 				.returning();
@@ -438,8 +357,6 @@ export const quotationsRouter = {
 					Number(quotation.totalFinanced),
 					Number(quotation.interestRate),
 					quotation.termMonths,
-					Number(quotation.insuranceCost),
-					Number(quotation.gpsCost),
 				);
 
 				return {

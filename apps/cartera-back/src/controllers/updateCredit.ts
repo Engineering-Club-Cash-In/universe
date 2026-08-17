@@ -1338,22 +1338,11 @@ export const updateCredit = async ({ body, set, request }: any) => {
       ...fieldsToUpdate
     } = parseResult.data;
 
-    // 2. Buscar el crédito actual
+    // 2. Buscar el crédito actual (editable sin importar el status)
     const [current] = await db
       .select()
       .from(creditos)
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          inArray(creditos.statusCredit, [
-            "ACTIVO",
-            "MOROSO",
-            "PENDIENTE_CANCELACION",
-            "EN_CONVENIO",
-            "INCOBRABLE"
-          ]),
-        ),
-      )
+      .where(eq(creditos.credito_id, credito_id))
       .limit(1);
 
     if (!current) {
@@ -1361,9 +1350,45 @@ export const updateCredit = async ({ body, set, request }: any) => {
       return { message: "Credit not found" };
     }
 
+    // Estados de cierre: el crédito se puede editar, pero su calendario de
+    // pagos es historia congelada — la cancelación deja los pagos no pagados
+    // en paymentFalse=true con restantes en 0 (credits.ts) y el caído conserva
+    // solo el desembolso de cuota 0 (fallenCredits.ts), ancla de
+    // repararTotalRestante. Re-proyectarlos resucitaría deuda fantasma.
+    const esCreditoFinalizado =
+      current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
+
+    // 3.0. En un crédito finalizado no entran inversionistas nuevos: la compra
+    // o reinversión crearía una participación "viva" (con su fila en
+    // compras_credito_inversionista que facturación trata como vigente) sobre
+    // una deuda que ya no existe.
+    const traeInversionistasNuevos =
+      (inversionistas ?? []).some((inv) => inv.es_nuevo) ||
+      (inversionistas_espejo ?? []).some((inv) => inv.es_nuevo);
+    if (traeInversionistasNuevos && esCreditoFinalizado) {
+      set.status = 400;
+      return {
+        message: `No se pueden registrar inversionistas nuevos en un crédito ${current.statusCredit}`,
+      };
+    }
+
+    // En créditos finalizados la participación de inversionistas es historia
+    // congelada: las listas del payload se IGNORAN (el front las manda siempre
+    // al editar) — ni se validan ni se reconstruyen. La cancelación dejó esos
+    // saldos en 0 y el rebuild (delete+insert) los reviviría con el
+    // monto_aportado del body; investor.ts los suma sin filtrar status.
+    if (
+      esCreditoFinalizado &&
+      ((inversionistas?.length ?? 0) > 0 ||
+        (inversionistas_espejo?.length ?? 0) > 0)
+    ) {
+      console.log(
+        `⚠️ Crédito ${current.statusCredit}: inversionistas del payload ignorados (participación congelada)`,
+      );
+    }
 
     // 3. Validar inversionistas
-    if (inversionistas && inversionistas.length > 0) {
+    if (!esCreditoFinalizado && inversionistas && inversionistas.length > 0) {
       const percentagesValidation = validateInvestorsPercentages(
         inversionistas as any,
         set,
@@ -1374,7 +1399,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
     }
 
     // 3.1. Validar inversionistas espejo si existen
-    if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+    if (!esCreditoFinalizado && inversionistas_espejo && inversionistas_espejo.length > 0) {
       const mirrorValidation = validateInvestorsPercentages(
         inversionistas_espejo as any,
         set
@@ -1391,8 +1416,9 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // por esa lista.
     let inversionistasNuevos: InversionistaNuevoValidado[] = [];
     if (
-      (inversionistas && inversionistas.length > 0) ||
-      (inversionistas_espejo && inversionistas_espejo.length > 0)
+      !esCreditoFinalizado &&
+      ((inversionistas && inversionistas.length > 0) ||
+        (inversionistas_espejo && inversionistas_espejo.length > 0))
     ) {
       const nuevosValidation = await validarInversionistasNuevos(
         credito_id,
@@ -1559,8 +1585,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
 
 
-      // Actualizar "otros" en la cuota inicial si cambió
-      if (otrosModificado) {
+      // Actualizar "otros" en la cuota inicial si cambió.
+      // En créditos finalizados NO: la cuota 0 es historia congelada (en un
+      // CAIDO es el único pago que sobrevive, ancla de repararTotalRestante).
+      if (otrosModificado && !esCreditoFinalizado) {
         await updateInitialQuotaOtros(credito_id, fieldsToUpdate.otros);
       }
 
@@ -1602,7 +1630,15 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // 8.1 Si la cuota cambió, sincronizar cuotas pendientes y recalcular
     // cuotas de inversionistas (solo si NO vinieron en el body — si vinieron,
     // el bloque siguiente las maneja con la cuota nueva).
-    if (willChangeCuota) {
+    // En créditos finalizados NO se re-proyecta: updateInstallments selecciona
+    // pagado=false sin excluir paymentFalse=true, así que reescribiría los
+    // restantes que la cancelación dejó en 0 (o el desembolso del caído).
+    if (willChangeCuota && esCreditoFinalizado) {
+      console.log(
+        `⚠️ Crédito ${current.statusCredit}: cuota actualizada solo en el crédito, calendario congelado (no se re-proyectan pagos ni cuotas de inversionistas)`,
+      );
+    }
+    if (willChangeCuota && !esCreditoFinalizado) {
       const sifco = numero_credito_sifco ?? current.numero_credito_sifco;
       const cuotaNuevaNum = Number(updateFields.cuota);
 
@@ -1740,9 +1776,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
     };
 
     if (
-      (inversionistas && inversionistas.length > 0) ||
-      (inversionistas_espejo && inversionistas_espejo.length > 0) ||
-      inversionistasNuevos.length > 0
+      !esCreditoFinalizado &&
+      ((inversionistas && inversionistas.length > 0) ||
+        (inversionistas_espejo && inversionistas_espejo.length > 0) ||
+        inversionistasNuevos.length > 0)
     ) {
       try {
         // withAuditContext ya abre su propia transacción (setea

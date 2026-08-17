@@ -52,6 +52,7 @@ resultado final.
 | --- | --- |
 | Contenedor local | `cartera-postgres` (postgres:16, puerto 5433). Si está apagado: `docker start cartera-postgres` |
 | Conexión a prod | Está comentada en `apps/cartera-back/.env`. **Solo lectura** |
+| Conexión **directa** a Neon | El host **sin `-pooler`**. Obligatoria para el restore de la Fase 7 — por el pooler se tumba el CRM |
 | Espacio en Neon | El swap deja conviviendo el nuevo (~205 MB) y el backup (~161 MB) |
 | Código de COBROS-02 | Si estás en otra rama, `git worktree add` en vez de cambiar de rama |
 
@@ -250,8 +251,29 @@ ALTER SCHEMA cartera_cobros2 RENAME TO cartera_cobros2_bk_<fecha>;
 ```
 
 ```bash
-pg_restore -d "$NEON" --no-owner --no-privileges nuevo.dump
+# ⚠️ CONEXIÓN DIRECTA — el host SIN "-pooler". Ver el aviso de abajo.
+pg_restore -d "$NEON_DIRECTO" --no-owner --no-privileges nuevo.dump
 ```
+
+> 🚨 **El restore va por la conexión DIRECTA, nunca por el pooler.** Esto tumbó el CRM de dev
+> la primera vez que se ejecutó este runbook.
+>
+> `pg_restore` emite `SELECT pg_catalog.set_config('search_path', '', false)` — sin `LOCAL`,
+> o sea que **persiste en la sesión**. El pooler de Neon reparte los mismos backends entre
+> todas las conexiones de la base, así que ese `search_path` vacío se queda pegado y lo
+> hereda quien caiga después: el CRM empieza a responder
+> `relation "user" does not exist` en el login, y no se arregla solo.
+>
+> Los datos nunca están en riesgo —las tablas siguen ahí— pero el CRM queda inutilizable
+> hasta limpiarlo.
+>
+> **La cura**, si ya pasó: reconectar muchas veces (~60) ejecutando
+> `SET search_path TO DEFAULT;` hasta que `SHOW search_path` deje de venir vacío en
+> conexiones nuevas. Y después **reiniciar el server del CRM**: su pool de conexiones
+> conserva abiertas las que ya estaban envenenadas, y esas no se limpian solas.
+>
+> Lo mismo aplica a cualquier `psql -f` de un archivo generado por `pg_dump`: revisar que no
+> traiga un `set_config('search_path', …, false)` antes de mandarlo por el pooler.
 
 **Antes de restaurar**, confirmar que los tipos cruzados existen en el `public` de Neon
 (`payment_validation_status`, `estado_liquidacion`, `tipo_cuenta_enum`) y que `cartera` no
@@ -261,6 +283,7 @@ tiene FKs hacia fuera de su propio schema. Todo lo demás viaja adentro del dump
 
 - **Reiniciar cartera-back.** El swap es un rename: una conexión viva puede seguir hablándole
   al schema viejo, que ahora es el backup.
+- **Comprobar que el CRM sigue vivo** (entrar al login), por el tema del `search_path`.
 - El backup se borra **cuando se haya validado**, no antes.
 
 ## Rollback
@@ -330,3 +353,9 @@ capital 0 y 14 `EN_CONVENIO`. Los dos casos están explicados arriba.
 detrás cambiaron** entre junio y hoy (el `asesor_id` que en el sandbox era el asesor de
 prueba de B1 hoy corresponde a alguien real). Al refrescar, revisar el pool antes de correr
 el `02`: esas personas quedan como dueñas reales de la cartera.
+
+**Incidente:** el restore de la Fase 7 se mandó **por el pooler** y dejó el CRM de dev sin
+login (`relation "user" does not exist`) durante unos minutos. Causa y cura en el aviso de
+la [Fase 7](#fase-7--swap). Los datos nunca estuvieron en riesgo; se limpió reconectando 120
+veces con `SET search_path TO DEFAULT` y reiniciando el server del CRM. **Por eso el runbook
+ahora exige conexión directa para ese paso.**

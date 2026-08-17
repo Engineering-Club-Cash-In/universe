@@ -1350,6 +1350,27 @@ export const updateCredit = async ({ body, set, request }: any) => {
       return { message: "Credit not found" };
     }
 
+    // Estados de cierre: el crédito se puede editar, pero su calendario de
+    // pagos es historia congelada — la cancelación deja los pagos no pagados
+    // en paymentFalse=true con restantes en 0 (credits.ts) y el caído conserva
+    // solo el desembolso de cuota 0 (fallenCredits.ts), ancla de
+    // repararTotalRestante. Re-proyectarlos resucitaría deuda fantasma.
+    const esCreditoFinalizado =
+      current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
+
+    // 3.0. En un crédito finalizado no entran inversionistas nuevos: la compra
+    // o reinversión crearía una participación "viva" (con su fila en
+    // compras_credito_inversionista que facturación trata como vigente) sobre
+    // una deuda que ya no existe.
+    const traeInversionistasNuevos =
+      (inversionistas ?? []).some((inv) => inv.es_nuevo) ||
+      (inversionistas_espejo ?? []).some((inv) => inv.es_nuevo);
+    if (traeInversionistasNuevos && esCreditoFinalizado) {
+      set.status = 400;
+      return {
+        message: `No se pueden registrar inversionistas nuevos en un crédito ${current.statusCredit}`,
+      };
+    }
 
     // 3. Validar inversionistas
     if (inversionistas && inversionistas.length > 0) {
@@ -1591,7 +1612,15 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // 8.1 Si la cuota cambió, sincronizar cuotas pendientes y recalcular
     // cuotas de inversionistas (solo si NO vinieron en el body — si vinieron,
     // el bloque siguiente las maneja con la cuota nueva).
-    if (willChangeCuota) {
+    // En créditos finalizados NO se re-proyecta: updateInstallments selecciona
+    // pagado=false sin excluir paymentFalse=true, así que reescribiría los
+    // restantes que la cancelación dejó en 0 (o el desembolso del caído).
+    if (willChangeCuota && esCreditoFinalizado) {
+      console.log(
+        `⚠️ Crédito ${current.statusCredit}: cuota actualizada solo en el crédito, calendario congelado (no se re-proyectan pagos ni cuotas de inversionistas)`,
+      );
+    }
+    if (willChangeCuota && !esCreditoFinalizado) {
       const sifco = numero_credito_sifco ?? current.numero_credito_sifco;
       const cuotaNuevaNum = Number(updateFields.cuota);
 

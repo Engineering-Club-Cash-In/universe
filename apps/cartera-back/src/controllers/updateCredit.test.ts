@@ -7,8 +7,13 @@ import { PgDialect } from "drizzle-orm/pg-core";
 // termine ahí (early return) sin tocar nada más.
 const capturedWheres: any[] = [];
 const capturedCreditWheres: any[] = [];
+// Fixture completo: updateCredit lee estos campos con new Big(...) (que truena
+// con undefined) o los necesita para llegar al UPDATE final.
 const fakeCredito = {
   credito_id: 794,
+  numero_credito_sifco: "01010214120190",
+  usuario_id: 1,
+  statusCredit: "ACTIVO",
   capital: "18493.39",
   porcentaje_interes: "1.50",
   cuota_interes: "277.40",
@@ -16,14 +21,19 @@ const fakeCredito = {
   gps: "0.00",
   membresias_pago: "399.73",
   cuota: "2021.83",
+  plazo: 24,
+  otros: "0",
 };
+// Fila que devuelve el select del crédito; cada test puede reemplazarla (p. ej.
+// statusCredit CANCELADO) y beforeEach la regresa al fixture base.
+let creditoActual: any = fakeCredito;
 const dbMock = {
   select: () => ({
     from: () => ({
       // select del crédito: .where(cond).limit(1)
       where: (cond: any) => {
         capturedCreditWheres.push(cond);
-        return { limit: () => Promise.resolve([fakeCredito]) };
+        return { limit: () => Promise.resolve([creditoActual]) };
       },
       // select de pagos: .innerJoin().where(cond).orderBy()
       innerJoin: () => ({
@@ -31,6 +41,14 @@ const dbMock = {
           capturedWheres.push(cond);
           return { orderBy: () => Promise.resolve([]) };
         },
+      }),
+    }),
+  }),
+  // update del crédito: .set(vals).where().returning()
+  update: () => ({
+    set: (vals: any) => ({
+      where: () => ({
+        returning: () => Promise.resolve([{ ...creditoActual, ...vals }]),
       }),
     }),
   }),
@@ -47,6 +65,7 @@ const renderSql = (cond: any) => new PgDialect().sqlToQuery(cond);
 beforeEach(() => {
   capturedWheres.length = 0;
   capturedCreditWheres.length = 0;
+  creditoActual = fakeCredito;
 });
 
 describe("recalcularPagosCredito — exclusión de pagos de reset", () => {
@@ -98,23 +117,26 @@ describe("recalcularPagosCredito — exclusión de pagos de reset", () => {
   });
 });
 
-describe("updateCredit — lookup del crédito sin filtro de status", () => {
-  it("busca el crédito solo por credito_id (editable sin importar el status)", async () => {
-    const set: any = {};
-    await updateCredit({
-      body: {
-        credito_id: 794,
-        cuota: 2021.83,
-        plazo: 24,
-        capital: 18493.39,
-        porcentaje_interes: 1.5,
-        seguro_10_cuotas: 260.93,
-        membresias_pago: 399.73,
-        otros: 0,
-      },
-      set,
-      request: { headers: { get: () => null } },
-    });
+// Body espejo del fixture: sin cambios financieros, sin inversionistas.
+const baseBody = {
+  credito_id: 794,
+  cuota: 2021.83,
+  plazo: 24,
+  capital: 18493.39,
+  porcentaje_interes: 1.5,
+  seguro_10_cuotas: 260.93,
+  membresias_pago: 399.73,
+  otros: 0,
+};
+const makeCtx = () => ({
+  set: {} as any,
+  request: { headers: { get: () => null } } as any,
+});
+
+describe("updateCredit — editar sin importar el status", () => {
+  it("busca el crédito solo por credito_id y la edición llega al UPDATE (200)", async () => {
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({ body: { ...baseBody }, set, request });
 
     // Antes el lookup filtraba por statusCredit (ACTIVO, MOROSO, ...) y editar
     // un crédito CANCELADO/CAIDO devolvía "Credit not found" aunque existiera.
@@ -122,5 +144,89 @@ describe("updateCredit — lookup del crédito sin filtro de status", () => {
     const q = renderSql(capturedCreditWheres[0]);
     expect(q.sql).not.toContain("statusCredit");
     expect(q.params).toContain(794);
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+  });
+
+  it("edita un crédito CANCELADO de punta a punta (200)", async () => {
+    creditoActual = { ...fakeCredito, statusCredit: "CANCELADO" };
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({ body: { ...baseBody }, set, request });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+  });
+});
+
+describe("updateCredit — calendario congelado en créditos finalizados", () => {
+  // La cancelación deja los pagos no pagados en paymentFalse=true con
+  // restantes en 0 (credits.ts) y el caído conserva solo el desembolso
+  // (fallenCredits.ts). Si updateInstallments corriera aquí, reescribiría esas
+  // filas (deuda fantasma) o, sin filas, tronaría con 500 DESPUÉS de haber
+  // commiteado el UPDATE del crédito.
+  it("CANCELADO: cambiar la cuota actualiza el crédito pero NO re-proyecta pagos", async () => {
+    creditoActual = { ...fakeCredito, statusCredit: "CANCELADO" };
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, cuota: 2500 },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.cuota).toBe("2500");
+    // updateInstallments nunca consultó los pagos pendientes
+    expect(capturedWheres.length).toBe(0);
+  });
+
+  it("CAIDO: cambiar la cuota actualiza el crédito pero NO re-proyecta pagos", async () => {
+    creditoActual = { ...fakeCredito, statusCredit: "CAIDO" };
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, cuota: 2500 },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.cuota).toBe("2500");
+    expect(capturedWheres.length).toBe(0);
+  });
+
+  it("ACTIVO: cambiar la cuota SÍ intenta re-proyectar los pagos pendientes", async () => {
+    const { set, request } = makeCtx();
+    await updateCredit({ body: { ...baseBody, cuota: 2500 }, set, request });
+
+    // El guard no debe sobre-bloquear: en un crédito vivo updateInstallments
+    // sí consulta los pagos pendientes (el mock devuelve 0 filas y el flujo
+    // termina en el catch, pero la consulta debe haberse hecho).
+    expect(capturedWheres.length).toBe(1);
+  });
+
+  it("CANCELADO: rechaza registrar inversionistas nuevos (400)", async () => {
+    creditoActual = { ...fakeCredito, statusCredit: "CANCELADO" };
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        inversionistas: [
+          {
+            inversionista_id: 7,
+            monto_aportado: 1000,
+            porcentaje_cash_in: 50,
+            porcentaje_inversion: 50,
+            es_nuevo: true,
+            tipo_operacion: "compra_cartera",
+          },
+        ],
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.message).toBe(
+      "No se pueden registrar inversionistas nuevos en un crédito CANCELADO",
+    );
   });
 });

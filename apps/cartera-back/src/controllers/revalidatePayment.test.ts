@@ -49,6 +49,15 @@ mock.module("../database", () => ({
 
 mock.module("../utils/withAuditContext", () => ({
   setCapitalSource: mock(() => Promise.resolve()),
+  // El mock es global al proceso de bun test: sin estos exports, cualquier
+  // módulo cargado después que importe withAuditContext/withCapitalContext
+  // (p. ej. updateCredit.ts) no enlaza y su archivo de tests entero muere en
+  // la suite completa (mismo veneno de caché que el sweep de client:{}).
+  withAuditContext: mock((_userId: unknown, fn: (t: typeof tx) => unknown) => fn(tx)),
+  withCapitalContext: mock(
+    (_userId: unknown, _source: unknown, _motivo: unknown, fn: (t: typeof tx) => unknown) =>
+      fn(tx),
+  ),
 }));
 
 mock.module("./payments", () => ({

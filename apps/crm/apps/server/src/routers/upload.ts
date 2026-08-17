@@ -228,7 +228,10 @@ async function assertCanUploadToResource(params: {
 			// El recurso se organiza por oportunidad (leads) o por co-deudor,
 			// igual que "bank_statement" — una licencia se verifica por cada
 			// expediente de crédito, no una vez por persona.
-			if (!PERMISSIONS.canAccessClients(userRole)) {
+			// canAccessCRM (no canAccessClients): mismo scoping que crmOnlyProcedure
+			// en license-verification.ts — cobros/cobros_supervisor/accounting no
+			// deben poder pedir URLs de subida para este recurso.
+			if (!PERMISSIONS.canAccessCRM(userRole)) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "CRM access role required",
 				});

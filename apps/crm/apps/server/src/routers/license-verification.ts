@@ -1,12 +1,12 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, getTableColumns, or } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { runLicenseVerification } from "../lib/license-verification";
-import { crmProcedure } from "../lib/orpc";
+import { crmOnlyProcedure } from "../lib/orpc";
 import {
 	buildUploadPrefix,
 	getFileBuffer,
@@ -32,7 +32,7 @@ function buildLeadName(lead: {
 }
 
 export const licenseVerificationRouter = {
-	verifyLicenseQr: crmProcedure
+	verifyLicenseQr: crmOnlyProcedure
 		.input(
 			z
 				.object({
@@ -200,7 +200,7 @@ export const licenseVerificationRouter = {
 			return saved;
 		}),
 
-	listLicenseVerifications: crmProcedure
+	listLicenseVerifications: crmOnlyProcedure
 		.input(
 			z
 				.object({
@@ -253,7 +253,12 @@ export const licenseVerificationRouter = {
 					leadLastName: leads.lastName,
 					leadSecondLastName: leads.secondLastName,
 					coDebtorFullName: coDebtors.fullName,
-					opportunityTitle: opportunities.title,
+						// Para leads viene del join directo (opportunities); para
+					// co-deudores, licenseQrVerifications.opportunityId es null a
+					// propósito y la oportunidad solo existe vía el alias
+					// coDebtorOpportunities — sin el COALESCE, toda fila de
+					// co-deudor devolvía opportunityTitle null.
+					opportunityTitle: sql<string | null>`coalesce(${opportunities.title}, ${coDebtorOpportunities.title})`,
 				})
 				.from(licenseQrVerifications)
 				.leftJoin(leads, eq(licenseQrVerifications.leadId, leads.id))
@@ -287,7 +292,7 @@ export const licenseVerificationRouter = {
 			}));
 		}),
 
-	getLicenseVerificationById: crmProcedure
+	getLicenseVerificationById: crmOnlyProcedure
 		.input(z.object({ id: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			const conditions = [eq(licenseQrVerifications.id, input.id)];
@@ -308,7 +313,12 @@ export const licenseVerificationRouter = {
 					leadLastName: leads.lastName,
 					leadSecondLastName: leads.secondLastName,
 					coDebtorFullName: coDebtors.fullName,
-					opportunityTitle: opportunities.title,
+						// Para leads viene del join directo (opportunities); para
+					// co-deudores, licenseQrVerifications.opportunityId es null a
+					// propósito y la oportunidad solo existe vía el alias
+					// coDebtorOpportunities — sin el COALESCE, toda fila de
+					// co-deudor devolvía opportunityTitle null.
+					opportunityTitle: sql<string | null>`coalesce(${opportunities.title}, ${coDebtorOpportunities.title})`,
 				})
 				.from(licenseQrVerifications)
 				.leftJoin(leads, eq(licenseQrVerifications.leadId, leads.id))

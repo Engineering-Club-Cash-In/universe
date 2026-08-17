@@ -203,6 +203,60 @@ describe("updateCredit — calendario congelado en créditos finalizados", () =>
     expect(capturedWheres.length).toBe(1);
   });
 
+  it("CANCELADO: ignora los inversionistas existentes del payload (no rebuild, 200)", async () => {
+    creditoActual = { ...fakeCredito, statusCredit: "CANCELADO" };
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        // El front SIEMPRE manda las listas al editar; en un crédito
+        // finalizado deben ignorarse (participación congelada), no validarse
+        // ni disparar el delete+insert del rebuild.
+        inversionistas: [
+          {
+            inversionista_id: 7,
+            monto_aportado: 1000,
+            porcentaje_cash_in: 50,
+            porcentaje_inversion: 50,
+          },
+        ],
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+    // Solo el lookup del crédito consultó la DB: ni validarInversionistasNuevos
+    // ni el rebuild corrieron.
+    expect(capturedCreditWheres.length).toBe(1);
+  });
+
+  it("CANCELADO: cambiar 'otros' no reescribe la cuota inicial congelada", async () => {
+    creditoActual = { ...fakeCredito, statusCredit: "CANCELADO" };
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, otros: 50 },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+    // updateInitialQuotaOtros habría hecho un segundo select (cuota 0);
+    // congelado = solo el lookup inicial.
+    expect(capturedCreditWheres.length).toBe(1);
+  });
+
+  it("ACTIVO: cambiar 'otros' SÍ actualiza la cuota inicial", async () => {
+    const { set, request } = makeCtx();
+    await updateCredit({ body: { ...baseBody, otros: 50 }, set, request });
+
+    // El guard no debe sobre-bloquear: en un crédito vivo updateInitialQuotaOtros
+    // sí busca la cuota 0 (segundo select capturado).
+    expect(capturedCreditWheres.length).toBe(2);
+  });
+
   it("CANCELADO: rechaza registrar inversionistas nuevos (400)", async () => {
     creditoActual = { ...fakeCredito, statusCredit: "CANCELADO" };
     const { set, request } = makeCtx();

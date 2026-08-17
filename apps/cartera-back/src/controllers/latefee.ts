@@ -110,9 +110,15 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
   capitalCredito: string | number | null;
   statusCredit: string | null;
 }): { desactivarMora: boolean; bajarStatusAActivo: boolean; sinCapital: boolean } {
-  const sinCapital =
-    params.capitalCredito !== null &&
-    new Big(params.capitalCredito).lte(0);
+  let sinCapital = false;
+  if (params.capitalCredito !== null) {
+    try {
+      sinCapital = new Big(params.capitalCredito).lte(0);
+    } catch {
+      // Capital no numérico: no forzar la desactivación por esta vía.
+      sinCapital = false;
+    }
+  }
   const desactivarMora = params.cuotasVencidasRestantes === 0 || sinCapital;
   return {
     desactivarMora,
@@ -254,7 +260,9 @@ export async function desactivarMoraSiCreditoAlDia(
       cuotas_atrasadas_anterior: moraActiva.cuotas_atrasadas,
       cuotas_atrasadas_nuevas: 0,
       porcentaje_mora: moraActiva.porcentaje_mora,
-      motivo: decision.sinCapital
+      // "sin capital" solo cuando fue el factor decisivo (quedaban vencidas);
+      // si el crédito quedó al día, gana el motivo del caller.
+      motivo: decision.sinCapital && cuotasVencidas > 0
         ? "Crédito sin capital — no aplica mora"
         : (opts.motivo ?? "Crédito se puso al día al validar pago"),
       dbClient: dbi,

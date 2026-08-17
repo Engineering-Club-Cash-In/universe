@@ -42,6 +42,7 @@ mock.module("../../database/index", () => {
   };
 
   return {
+    client: {},
     db: {
       select: mockSelectChain
     },

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import Big from "big.js";
-import { lockPoolMock } from "../utils/testMocks";
 
 // Let's create simple test flags/mocks we can dynamically adjust per test case
 let mockCreditosInversionistaEspejo: any[] = [];
@@ -8,6 +7,11 @@ let mockCuotasCreditoWithPagos: any[] = [];
 let mockPagosPendientesEspejo: any[] = [];
 let mockHistoricoLiquidacionesEspejo: any[] = [];
 let mockLockedCreditRows: any[] | null = null;
+let mockCreditLockCalls = 0;
+let mockLockPoolConnectCalls = 0;
+let mockLockReleaseCalls = 0;
+let mockDbTransactionCalls = 0;
+let mockLockQueries: string[] = [];
 let mockInsertCalls = 0;
 
 // For compras_credito_inversionista mock
@@ -80,11 +84,6 @@ mock.module("../database/index", () => {
         if (fields && typeof fields === "object" && "inversionistaId" in fields) {
           isMainQuery = true;
         }
-        const isCreditLockQuery = Boolean(
-          fields && typeof fields === "object" &&
-          "estadoDevolucion" in fields && !("inversionistaId" in fields),
-        );
-
         // Check if query selects fields from compras_credito_inversionista
         let detectedTableName = "";
         if (fields) {
@@ -99,13 +98,6 @@ mock.module("../database/index", () => {
 
         return {
           from: (table: any) => {
-            if (isCreditLockQuery) {
-              return {
-                where: () => ({
-                  for: () => Promise.resolve(mockLockedCreditRows ?? []),
-                }),
-              };
-            }
             if (isMainQuery) {
               const innerJoin = (joinTable: any, cond: any) => {
                 const innerWhere = (whereCond: any) => {
@@ -137,7 +129,10 @@ mock.module("../database/index", () => {
       // de los abonos en una transacción, para que no puedan quedar sueltos.
       // El mock corre el callback con el mismo `db`: acá no se prueba el
       // rollback, solo que el flujo siga funcionando.
-      transaction: mock(async (cb: any) => cb(mockDbInstance)),
+      transaction: mock(async (cb: any) => {
+        mockDbTransactionCalls++;
+        return cb(mockDbInstance);
+      }),
       query: {
         creditos_inversionistas_espejo: {
           findMany: mock(() => Promise.resolve(
@@ -174,12 +169,35 @@ mock.module("../database/index", () => {
       }
   };
 
-  // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
-  // aunque estos tests no lo usen. Ver testMocks.ts.
+  const mockLockConnection = {
+    query: mock(async (queryText: string) => {
+      mockLockQueries.push(queryText);
+      if (queryText.includes("FOR UPDATE")) {
+        mockCreditLockCalls++;
+        return {
+          rows: mockLockedCreditRows ?? mockCreditosInversionistaEspejo.map((credito) => ({
+            creditoId: credito.creditoId,
+            numeroCreditoSifco: credito.numeroCreditoSifco,
+            estadoDevolucion: credito.estadoDevolucion,
+          })),
+        };
+      }
+      return { rows: [] };
+    }),
+    release: mock(() => {
+      mockLockReleaseCalls++;
+    }),
+  };
+
   return {
     client: {},
     db: mockDbInstance,
-    lockPool: lockPoolMock,
+    lockPool: {
+      connect: mock(async () => {
+        mockLockPoolConnectCalls++;
+        return mockLockConnection;
+      }),
+    },
   };
 });
 
@@ -220,7 +238,11 @@ mock.module("../utils/comprasAjuste", () => ({
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
 
-const { calcularYRegistrarPagosEspejo, armarInversionistasPago } = await import("./payments");
+const {
+  calcularYRegistrarPagosEspejo,
+  armarInversionistasPago,
+  insertPagosCreditoInversionistas,
+} = await import("./payments");
 
 describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
   beforeEach(() => {
@@ -234,6 +256,11 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     mockSumaComprasPendientes = new Big(0);
     mockSumaComprasCompletadasMesActual = new Big(0);
     mockLockedCreditRows = null;
+    mockCreditLockCalls = 0;
+    mockLockPoolConnectCalls = 0;
+    mockLockReleaseCalls = 0;
+    mockDbTransactionCalls = 0;
+    mockLockQueries = [];
     mockInsertCalls = 0;
   });
 
@@ -305,6 +332,19 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
         statusCredit: "ACTIVO",
         cuota: "1000.00",
       },
+      {
+        creditoId: 102,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "40.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-102",
+        estadoDevolucion: "NO_APLICA",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
     ];
     mockLockedCreditRows = [
       {
@@ -353,7 +393,48 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
       ],
       data: [],
     });
+    expect(mockCreditLockCalls).toBe(1);
+    expect(mockLockPoolConnectCalls).toBe(1);
+    expect(mockLockReleaseCalls).toBe(1);
+    expect(mockDbTransactionCalls).toBe(0);
+    expect(mockLockQueries).toEqual([
+      "BEGIN",
+      expect.stringMatching(/ORDER BY credito_id\s+FOR UPDATE/),
+      "ROLLBACK",
+    ]);
     expect(mockInsertCalls).toBe(0);
+  });
+
+  it("no aplica guard tardío al flujo legacy que actualiza balances", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "NO_APLICA",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+    ];
+    mockLockedCreditRows = [
+      {
+        creditoId: 101,
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "PENDIENTE_AUTORIZACION",
+      },
+    ];
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, true, 99);
+
+    expect(mockCreditLockCalls).toBe(0);
+    expect(mockLockPoolConnectCalls).toBe(0);
+    expect(mockDbTransactionCalls).toBe(1);
+    expect(mockInsertCalls).toBe(1);
   });
 
   it("1. Nuevo inversionista con compra de cartera en mes actual → sin pagos", async () => {
@@ -432,6 +513,13 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(1);
+    expect(mockLockPoolConnectCalls).toBe(1);
+    expect(mockLockReleaseCalls).toBe(1);
+    expect(mockLockQueries).toEqual([
+      "BEGIN",
+      expect.stringMatching(/ORDER BY credito_id\s+FOR UPDATE/),
+      "COMMIT",
+    ]);
   });
 
   it("3. Self-compra (compras pendientes) → paga sobre monto ajustado", async () => {

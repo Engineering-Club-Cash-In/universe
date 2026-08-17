@@ -63,9 +63,10 @@ async function registrarHistorialMora(params: {
   porcentaje_mora?: string | number | null;
   usuario_id?: number | null;
   motivo?: string | null;
+  dbClient?: typeof db;
 }) {
   try {
-    await db.insert(moras_historial).values({
+    await (params.dbClient ?? db).insert(moras_historial).values({
       credito_id: params.credito_id,
       mora_id: params.mora_id,
       tipo_evento: params.tipo_evento,
@@ -89,6 +90,167 @@ async function registrarHistorialMora(params: {
     console.error("[HISTORIAL] ⚠️  No se pudo registrar evento de mora:", err);
   }
 }
+
+/**
+ * Decisión pura de limpieza de mora al validar/aplicar un pago. Espejo del
+ * paso "se puso al día" de procesarMoras: la mora se desactiva solo si el
+ * crédito ya no tiene cuotas vencidas elegibles, y el status solo baja
+ * MOROSO→ACTIVO (nunca des-castiga INCOBRABLE/EN_CONVENIO/etc.).
+ */
+export function decidirLimpiezaMoraTrasAplicar(params: {
+  cuotasVencidasRestantes: number;
+  tieneMoraActiva: boolean;
+  statusCredit: string | null;
+}): { desactivarMora: boolean; bajarStatusAActivo: boolean } {
+  const desactivarMora =
+    params.tieneMoraActiva && params.cuotasVencidasRestantes === 0;
+  return {
+    desactivarMora,
+    bajarStatusAActivo: desactivarMora && params.statusCredit === "MOROSO",
+  };
+}
+
+/**
+ * Apaga la mora activa de un crédito que quedó al día al validar un pago.
+ *
+ * Por qué: una boleta registrada queda `pending` hasta que contabilidad la
+ * valida; si esa ventana cruza la corrida nocturna de procesarMoras, el cron
+ * crea una mora (correcta bajo la regla "solo cuenta lo validado") que nadie
+ * apaga al validar — quedaba viva hasta el cron siguiente y el crédito se veía
+ * "0 atrasadas pero con mora y MOROSO" todo el día, forzando condonaciones
+ * manuales. Esta función es el espejo acotado-a-un-crédito del paso
+ * "se puso al día" del cron.
+ *
+ * Nunca lanza: la limpieza de mora no debe romper la aplicación del pago.
+ * El UPDATE es condicional sobre `activa=true`: si el cron u otra validación
+ * concurrente ya la apagó, no afecta filas y no se duplica el historial.
+ */
+export async function desactivarMoraSiCreditoAlDia(
+  credito_id: number,
+  opts: { motivo?: string; dbClient?: typeof db } = {},
+): Promise<{ desactivada: boolean; cuotasVencidas?: number; error?: string }> {
+  const dbi = opts.dbClient ?? db;
+  const motivo = opts.motivo ?? "Crédito se puso al día al validar pago";
+  try {
+    const morasActivas = await dbi
+      .select({
+        mora_id: moras_credito.mora_id,
+        monto_mora: moras_credito.monto_mora,
+        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        porcentaje_mora: moras_credito.porcentaje_mora,
+      })
+      .from(moras_credito)
+      .where(
+        and(
+          eq(moras_credito.credito_id, credito_id),
+          eq(moras_credito.activa, true),
+        ),
+      );
+
+    if (morasActivas.length === 0) {
+      return { desactivada: false };
+    }
+
+    const [credito] = await dbi
+      .select({ statusCredit: creditos.statusCredit })
+      .from(creditos)
+      .where(eq(creditos.credito_id, credito_id));
+
+    const zona = "America/Guatemala";
+    const hoy = toZonedTime(new Date(), zona);
+    hoy.setHours(0, 0, 0, 0);
+
+    // Mismo universo y criterio que procesarMoras, acotado a este crédito.
+    const cuotas = await dbi
+      .select({
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        statusCredit: creditos.statusCredit,
+        hasPaidPayment: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM cartera.pagos_credito pc
+          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+            AND pc."paymentFalse" = false
+            AND pc.pagado = true
+            AND pc.validation_status IN ('validated', 'no_required')
+        )`,
+      })
+      .from(cuotas_credito)
+      .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))
+      .where(eq(cuotas_credito.credito_id, credito_id));
+
+    const cuotasVencidas = cuotas.filter((c) =>
+      isOverdueInstallmentForMora(c, hoy),
+    ).length;
+
+    const decision = decidirLimpiezaMoraTrasAplicar({
+      cuotasVencidasRestantes: cuotasVencidas,
+      tieneMoraActiva: true,
+      statusCredit: credito?.statusCredit ?? null,
+    });
+
+    if (!decision.desactivarMora) {
+      return { desactivada: false, cuotasVencidas };
+    }
+
+    let algunaApagada = false;
+    for (const mora of morasActivas) {
+      const apagadas = await dbi
+        .update(moras_credito)
+        .set({
+          monto_mora: "0",
+          cuotas_atrasadas: 0,
+          activa: false,
+          updated_at: new Date(),
+        })
+        .where(
+          and(
+            eq(moras_credito.mora_id, mora.mora_id),
+            eq(moras_credito.activa, true),
+          ),
+        )
+        .returning({ mora_id: moras_credito.mora_id });
+
+      if (apagadas.length === 0) continue;
+      algunaApagada = true;
+
+      await registrarHistorialMora({
+        credito_id,
+        mora_id: mora.mora_id,
+        tipo_evento: "DESACTIVACION",
+        origen: "PROCESO_AUTO",
+        monto_anterior: mora.monto_mora,
+        monto_nuevo: "0",
+        cuotas_atrasadas_anterior: mora.cuotas_atrasadas,
+        cuotas_atrasadas_nuevas: 0,
+        porcentaje_mora: mora.porcentaje_mora,
+        motivo,
+        dbClient: dbi,
+      });
+    }
+
+    if (algunaApagada && decision.bajarStatusAActivo) {
+      await dbi
+        .update(creditos)
+        .set({ statusCredit: "ACTIVO" })
+        .where(
+          and(
+            eq(creditos.credito_id, credito_id),
+            eq(creditos.statusCredit, "MOROSO"),
+          ),
+        );
+    }
+
+    return { desactivada: algunaApagada, cuotasVencidas };
+  } catch (error: any) {
+    console.error(
+      `[MORA] ⚠️  desactivarMoraSiCreditoAlDia(${credito_id}) falló (no rompe la validación del pago):`,
+      error,
+    );
+    return { desactivada: false, error: String(error?.message ?? error) };
+  }
+}
+
 /**
  * Create a new mora (penalty) for a credit.
  *

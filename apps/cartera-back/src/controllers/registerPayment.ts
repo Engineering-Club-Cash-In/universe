@@ -16,7 +16,7 @@ import {
 } from "../database/db";
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { updateMora } from "./latefee";
+import { desactivarMoraSiCreditoAlDia, updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
@@ -3025,6 +3025,12 @@ async function aplicarPagoNormalEnTx(
     }
 
     console.log("✅ Crédito actualizado, pago validado y cuota cerrada");
+
+    // La cuota cerró: si el crédito quedó al día, apagar de inmediato la mora
+    // que el cron pudo crear mientras la boleta esperaba validación. Sin esto
+    // la mora queda activa (y el crédito MOROSO) hasta la corrida nocturna de
+    // procesarMoras, aunque el cliente ya no deba nada.
+    await desactivarMoraSiCreditoAlDia(pago.credito_id!);
 
     // 8. Distribuir entre inversionistas — TODOS los pagos validated de la cuota
     //    que aún no tengan filas en pagos_credito_inversionistas.

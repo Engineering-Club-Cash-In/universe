@@ -2122,6 +2122,16 @@ export const inversionistasRouter = new Elysia()
         500: t.Object({
           success: t.Literal(false),
           error: t.String(),
+          inversionistaId: t.Optional(t.Number()),
+          totalCreditosProcesados: t.Optional(t.Number()),
+          totalCreditosFallidos: t.Optional(t.Number()),
+          pagosGenerados: t.Optional(t.Boolean()),
+          data: t.Optional(t.Array(t.Any())),
+          fallidos: t.Optional(t.Array(t.Object({
+            creditoId: t.Number(),
+            numeroCreditoSifco: t.String(),
+            mensaje: t.String(),
+          }))),
         }),
       },
     }

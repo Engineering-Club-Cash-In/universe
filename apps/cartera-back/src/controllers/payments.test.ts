@@ -467,6 +467,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(0);
+    expect(result.pagosGenerados).toBeFalse();
   });
 
   it("2. Inversionista existente con compra en mes anterior (ej. mayo) → genera pagos", async () => {

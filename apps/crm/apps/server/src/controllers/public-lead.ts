@@ -171,11 +171,23 @@ export async function createPublicLead(c: Context) {
 			? or(eq(leads.email, body.email), eqDpi(leads.dpi, body.dpi))
 			: eq(leads.email, body.email);
 
-		const [existingLead] = await db
+		// Se traen TODAS las filas que empataron, no una sola: mientras queden
+		// leads duplicados sin depurar, el proceso en curso puede estar colgado de
+		// cualquiera de ellas. Se trabaja sobre el lead que sostiene ese proceso y,
+		// si no hay ninguno, sobre el más antiguo, que arrastra el historial.
+		const matchingLeads = await db
 			.select()
 			.from(leads)
 			.where(whereClause)
-			.limit(1);
+			.orderBy(asc(leads.createdAt));
+
+		const activeOpportunity = await getActiveOpportunity(
+			matchingLeads.map((lead) => lead.id),
+		);
+
+		const existingLead =
+			matchingLeads.find((lead) => lead.id === activeOpportunity?.leadId) ??
+			matchingLeads[0];
 
 		// --- Lead existente ---
 		if (existingLead) {
@@ -190,37 +202,21 @@ export async function createPublicLead(c: Context) {
 				);
 			}
 
-			if (body.source || body.campaign) {
-				[leadData] = await db
-					.update(leads)
-					.set({
-						source,
-						campaign,
-						updatedAt: new Date(),
-					})
-					.where(eq(leads.id, existingLead.id))
-					.returning();
-			}
-
-			// Verificar si ya tiene una oportunidad abierta con el mismo source.
-			// Se pasa el source que el lead traía de antes (`existingLead` es la fila
-			// leída antes del update de arriba): las oportunidades legacy sin source
-			// son del canal original del lead, no del que se acaba de pedir.
-			const sameSourceOpportunity = await getOpenOpportunityBySource(
-				existingLead.id,
-				source,
-				existingLead.source,
-			);
-
-			// Si no hay del mismo canal, igual se busca cualquier proceso vivo: un
-			// cliente que ya está siendo atendido no vuelve a la ruleta ni estrena
-			// oportunidad por entrar de nuevo por otro canal. Antes sí lo hacía, y
-			// eso le quitaba el lead al asesor cada vez que el dueño actual tenía
-			// `assign_leads = false`, aunque llevara días trabajando el caso.
-			const activeOpportunity =
-				sameSourceOpportunity ?? (await getActiveOpportunity(existingLead.id));
-
+			// Un cliente que ya está siendo atendido no vuelve a la ruleta ni estrena
+			// oportunidad por entrar de nuevo. Antes esto solo se respetaba cuando la
+			// oportunidad abierta era del mismo canal, y por eso una re-entrada por
+			// otro canal le quitaba el lead al asesor cada vez que el dueño actual
+			// tenía `assign_leads = false`, aunque llevara días trabajando el caso.
 			if (activeOpportunity) {
+				// Verificar si la abierta es del mismo source. Se pasa el source que
+				// el lead traía de antes: las oportunidades legacy sin source son del
+				// canal original del lead, no del que se acaba de pedir.
+				const sameSourceOpportunity = await getOpenOpportunityBySource(
+					existingLead.id,
+					source,
+					existingLead.source,
+				);
+
 				if (sameSourceOpportunity) {
 					const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(
 						sameSourceOpportunity,
@@ -241,6 +237,10 @@ export async function createPublicLead(c: Context) {
 					}
 				}
 
+				// El lead no se toca: `leads.source` es lo que clasifica a las
+				// oportunidades legacy sin source, así que pisarlo con el canal de una
+				// re-entrada que se está rechazando haría que la próxima entrada por
+				// ese canal se lleve por delante el proceso de otro canal.
 				return c.json(
 					{
 						success: true,
@@ -251,6 +251,18 @@ export async function createPublicLead(c: Context) {
 					},
 					200,
 				);
+			}
+
+			if (body.source || body.campaign) {
+				[leadData] = await db
+					.update(leads)
+					.set({
+						source,
+						campaign,
+						updatedAt: new Date(),
+					})
+					.where(eq(leads.id, existingLead.id))
+					.returning();
 			}
 
 			const assignedTo = await resolveExistingLeadAssigneeFromDatabase(

@@ -39,19 +39,26 @@ export async function getOpenOpportunityBySource(
 }
 
 /**
- * Cualquier proceso vivo del lead, sin importar por qué canal se abrió.
+ * Cualquier proceso vivo del cliente, sin importar por qué canal se abrió.
  *
- * Es el mismo criterio que usa el bot de WhatsApp para respetar al asesor que
- * está atendiendo al cliente. Se devuelve el más reciente porque es el que
- * refleja lo que el cliente está pidiendo hoy.
+ * Recibe todas las filas de lead que empataron con el cliente, no una sola:
+ * mientras queden duplicados sin depurar, la oportunidad activa puede estar
+ * colgada de cualquiera de ellas, y mirar solo una haría pasar por inactivo a
+ * un cliente que otro asesor ya está atendiendo. Es el mismo criterio que usa
+ * el bot de WhatsApp. Se devuelve la más reciente porque es la que refleja lo
+ * que el cliente está pidiendo hoy.
  */
-export async function getActiveOpportunity(leadId: string) {
+export async function getActiveOpportunity(leadIds: string[]) {
+	if (leadIds.length === 0) {
+		return undefined;
+	}
+
 	const [existing] = await db
-		.select(activeOpportunityColumns)
+		.select({ ...activeOpportunityColumns, leadId: opportunities.leadId })
 		.from(opportunities)
 		.where(
 			and(
-				eq(opportunities.leadId, leadId),
+				inArray(opportunities.leadId, leadIds),
 				inArray(opportunities.status, ACTIVE_OPPORTUNITY_STATUSES),
 			),
 		)

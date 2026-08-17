@@ -53,6 +53,12 @@ import {
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
+import {
+  buildPendingReturnAuthorizationWarning,
+  PendingReturnAuthorizationError,
+  PENDING_RETURN_AUTHORIZATION_CODE,
+  type PendingReturnBlockedCredit,
+} from "../utils/pendingReturnGuard";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -3948,6 +3954,8 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
   const errores: Array<{
     inversionista_id: number;
     razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
   }> = [];
 
   for (const inv_id of inversionistasALiquidar) {
@@ -3986,8 +3994,14 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           credito_id: pagos_credito_inversionistas_espejo.credito_id,
           abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
           abono_capital_id: pagos_credito_inversionistas_espejo.abono_capital_id,
+          numero_credito_sifco: creditos.numero_credito_sifco,
+          estado_devolucion: creditos.estado_devolucion,
         })
         .from(pagos_credito_inversionistas_espejo)
+        .innerJoin(
+          creditos,
+          eq(pagos_credito_inversionistas_espejo.credito_id, creditos.credito_id),
+        )
         .where(
           and(
             eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
@@ -3998,6 +4012,28 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       if (pagosNoLiquidados.length === 0) {
         console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
         errores.push({ inversionista_id: inv_id, razon: "Sin pagos para liquidar" });
+        inversionistasSaltados++;
+        continue;
+      }
+
+      const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+        pagosNoLiquidados.map((pago) => ({
+          creditoId: pago.credito_id,
+          numeroCreditoSifco: pago.numero_credito_sifco,
+          estadoDevolucion: pago.estado_devolucion,
+        })),
+      );
+
+      if (pendingReturnWarning) {
+        console.warn(
+          `  ⚠️ Inversionista ${inv_id} no liquidado: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+        );
+        errores.push({
+          inversionista_id: inv_id,
+          razon: pendingReturnWarning.message,
+          code: pendingReturnWarning.code,
+          creditos_bloqueados: pendingReturnWarning.creditos_bloqueados,
+        });
         inversionistasSaltados++;
         continue;
       }
@@ -4018,6 +4054,24 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       // es atómico: si algo falla en el medio, se revierten todos los cambios y
       // el estado queda exactamente como estaba antes de empezar.
       const { liquidacion, updateResult, debeReinvertir, montoReinvertido } = await db.transaction(async (tx) => {
+        // Revalida bajo lock dentro de misma transacción que liquida. Esto evita
+        // cambio a PENDIENTE_AUTORIZACION después del pre-chequeo.
+        const creditoIdsPagos = [...new Set(pagosNoLiquidados.map((pago) => pago.credito_id))];
+        const creditosBloqueados = await tx
+          .select({
+            creditoId: creditos.credito_id,
+            numeroCreditoSifco: creditos.numero_credito_sifco,
+            estadoDevolucion: creditos.estado_devolucion,
+          })
+          .from(creditos)
+          .where(inArray(creditos.credito_id, creditoIdsPagos))
+          .for("update");
+
+        const warningActualizado = buildPendingReturnAuthorizationWarning(creditosBloqueados);
+        if (warningActualizado) {
+          throw new PendingReturnAuthorizationError(warningActualizado);
+        }
+
 
         // Paso 4a: Se crea el registro formal de liquidación con los totales calculados
         // (capital, interés, IVA, reinversión). Este registro es el comprobante oficial.
@@ -4705,10 +4759,19 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
       totalPagosLiquidados += updateResult.rowCount ?? 0;
       totalLiquidaciones++;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`  ❌ Error procesando inversionista ${inv_id}:`, error);
       const msg = error instanceof Error ? error.message : "Error desconocido";
-      errores.push({ inversionista_id: inv_id, razon: msg });
+      errores.push(
+        error?.code === PENDING_RETURN_AUTHORIZATION_CODE
+          ? {
+              inversionista_id: inv_id,
+              razon: msg,
+              code: error.code,
+              creditos_bloqueados: error.creditos_bloqueados,
+            }
+          : { inversionista_id: inv_id, razon: msg },
+      );
       inversionistasSaltados++;
     }
   }

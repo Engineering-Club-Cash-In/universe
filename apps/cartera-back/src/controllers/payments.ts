@@ -79,7 +79,7 @@ async function withPendingReturnCreditLocks<T>(
       FROM cartera.creditos
       WHERE credito_id = ANY($1::int[])
       ORDER BY credito_id
-      FOR UPDATE`,
+      FOR NO KEY UPDATE`,
       [creditoIds],
     );
 
@@ -3363,10 +3363,11 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
     // le ha sido pagada al inversionista. Se procesa una cuota a la vez para evitar
     // registrar pagos duplicados o fuera de orden.
     //
-    // El lock es del LOTE completo, no de cada insert. Si una devolución intenta
-    // cambiar de estado durante esta generación, espera hasta que termine el lote;
-    // si cambió antes de obtener los locks, esta revalidación bloquea todo antes
-    // de crear el primer pago espejo.
+    // El lock es del LOTE completo, no de cada insert. FOR NO KEY UPDATE bloquea
+    // cambios concurrentes al estado y serializa generaciones solapadas, pero es
+    // compatible con el KEY SHARE que toman los FK al insertar pagos espejo desde
+    // otra conexión. Si la devolución cambió antes del lock, esta revalidación
+    // bloquea todo antes de crear el primer pago.
     const creditoIds = [
       ...new Set(
         creditosInversionista.map((credito) => credito.creditoId),

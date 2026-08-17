@@ -3893,15 +3893,25 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
     );
 
     const falloTotal = fallidos.length > 0 && procesados.length === 0;
+    if (falloTotal) {
+      return {
+        success: false as const,
+        error: "No se pudo generar ningún pago espejo del lote.",
+        inversionistaId,
+        totalCreditosProcesados: procesados.length,
+        totalCreditosFallidos: fallidos.length,
+        pagosGenerados: false,
+        data: procesados,
+        fallidos,
+      };
+    }
+
     return {
-      success: !falloTotal,
-      ...(falloTotal
-        ? { error: "No se pudo generar ningún pago espejo del lote." }
-        : {}),
+      success: true as const,
       inversionistaId,
       totalCreditosProcesados: procesados.length,
       totalCreditosFallidos: fallidos.length,
-      pagosGenerados: procesados.length > 0,
+      pagosGenerados: true,
       data: procesados,
       fallidos,
     };
@@ -3918,7 +3928,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       };
     }
     return {
-      success: false,
+      success: false as const,
       error: error.message,
       data: [],
     };

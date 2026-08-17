@@ -29,6 +29,11 @@ import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciIntere
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
+import {
+  buildPendingReturnAuthorizationWarning,
+  PendingReturnAuthorizationError,
+  PENDING_RETURN_AUTHORIZATION_CODE,
+} from "../utils/pendingReturnGuard";
 
 export const crearResumenAbonosCuota = (input: Parameters<
   typeof calcularResumenAbonosCuota
@@ -1027,6 +1032,25 @@ export async function insertPagosCreditoInversionistas(
   //    Atados, si se rompe en el medio no queda foto tampoco y el cálculo se
   //    rehace limpio la próxima vez.
   await db.transaction(async (tx) => {
+    // Cierra ventana entre validación general y escritura: estado queda bloqueado
+    // hasta terminar inserción del espejo y enlace de abonos.
+    const [creditoBloqueado] = await tx
+      .select({
+        creditoId: creditos.credito_id,
+        numeroCreditoSifco: creditos.numero_credito_sifco,
+        estadoDevolucion: creditos.estado_devolucion,
+      })
+      .from(creditos)
+      .where(eq(creditos.credito_id, credito_id))
+      .for("update");
+
+    const warningActualizado = buildPendingReturnAuthorizationWarning(
+      creditoBloqueado ? [creditoBloqueado] : [],
+    );
+    if (warningActualizado) {
+      throw new PendingReturnAuthorizationError(warningActualizado);
+    }
+
     const filasInsertadas = await tx
       .insert(pagos_credito_inversionistas_espejo)
       .values(filas)
@@ -3259,6 +3283,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
         capital: creditos.capital,
         deudaTotal: creditos.deudatotal,
         statusCredit: creditos.statusCredit,
+        estadoDevolucion: creditos.estado_devolucion,
         cuota: creditos.cuota,
       })
       .from(creditos_inversionistas_espejo)
@@ -3283,6 +3308,21 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
     console.log(
       `📊 Créditos encontrados: ${creditosInversionista.length}`
     );
+
+    const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+      creditosInversionista.map((credito) => ({
+        creditoId: credito.creditoId,
+        numeroCreditoSifco: credito.numeroCreditoSifco,
+        estadoDevolucion: credito.estadoDevolucion,
+      })),
+    );
+
+    if (pendingReturnWarning) {
+      console.warn(
+        `⚠️ Generación bloqueada: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+      );
+      return { success: false as const, ...pendingReturnWarning, data: [] };
+    }
 
     // Paso 2: Por cada crédito encontrado, se busca la primera cuota que aún no
     // le ha sido pagada al inversionista. Se procesa una cuota a la vez para evitar
@@ -3488,6 +3528,13 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
             creditoId: credito.creditoId,
             numeroCreditoSifco: credito.numeroCreditoSifco,
             mensaje: err?.message ?? "Error desconocido",
+            ...(err?.code === "CREDIT_PENDING_RETURN_AUTHORIZATION"
+              ? {
+                  warning: true as const,
+                  code: err.code,
+                  creditos_bloqueados: err.creditos_bloqueados,
+                }
+              : {}),
           };
         }
       })
@@ -3495,6 +3542,20 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
 
     const procesados = resultados.filter((r) => r !== null && !("error" in r));
     const fallidos = resultados.filter((r) => r !== null && "error" in r);
+
+    const bloqueoConcurrente = fallidos.find(
+      (resultado: any) => resultado.code === PENDING_RETURN_AUTHORIZATION_CODE,
+    ) as any;
+    if (bloqueoConcurrente) {
+      return {
+        success: false as const,
+        warning: true as const,
+        code: PENDING_RETURN_AUTHORIZATION_CODE,
+        message: bloqueoConcurrente.mensaje,
+        creditos_bloqueados: bloqueoConcurrente.creditos_bloqueados,
+        data: [],
+      };
+    }
 
     console.log(
       `\n✅ [calcularYRegistrarPagosEspejo] Completado. Procesados: ${procesados.length}, Fallidos: ${fallidos.length}`

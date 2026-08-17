@@ -1043,6 +1043,12 @@ export async function getInvestorTotalsService(
 // ============================================================
 // calcularPagosEspejo — POST /calcularPagosEspejo
 // ============================================================
+export interface PendingReturnBlockedCredit {
+  credito_id: number;
+  numero_credito_sifco: string;
+  estado_devolucion: "PENDIENTE_AUTORIZACION";
+}
+
 export interface CalcularPagosEspejoResponse {
   success: boolean;
   message: string;
@@ -1247,9 +1253,18 @@ export interface LiquidateByInvestorRequest {
 export interface LiquidateByInvestorResponse {
   message: string;
   updatedCount: number;
+  success?: boolean;
+  warning?: boolean;
+  code?: string;
+  creditos_bloqueados?: PendingReturnBlockedCredit[];
   liquidaciones_creadas?: number;
   inversionistas_saltados?: number;
-  errores?: Array<{ inversionista_id: number; razon: string }>;
+  errores?: Array<{
+    inversionista_id: number;
+    razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
+  }>;
 }
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest

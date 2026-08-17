@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
-import { getApiErrorMessage } from "@/lib/apiError";
+import { getApiErrorMessage, getPendingReturnWarningMessage } from "@/lib/apiError";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -456,11 +456,15 @@ export function HistorialLiquidaciones() {
           }
         },
         onError: (err: any) => {
+          const warning = getPendingReturnWarningMessage(err);
           setResultadoModal({
             nombre,
             inversionistaId,
-            errorMsg: err?.message ?? "Error al generar los pagos",
+            errorMsg: warning ?? getApiErrorMessage(err, "Error al generar los pagos"),
           });
+          if (warning) {
+            toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
+          }
         },
         onSettled: () => setGenerandoId(null),
       });

@@ -588,6 +588,34 @@ export const inversionistasRouter = new Elysia()
           set.status = 200;
         }
 
+        const pendingReturnError = result.errores?.find(
+          (item: any) => item.code === "CREDIT_PENDING_RETURN_AUTHORIZATION",
+        );
+        const todosBloqueadosPorDevolucion =
+          hayErrores &&
+          result.errores!.every(
+            (item: any) => item.code === "CREDIT_PENDING_RETURN_AUTHORIZATION",
+          );
+        if (
+          pendingReturnError &&
+          !hayLiquidaciones &&
+          (Boolean(inversionista_id) || todosBloqueadosPorDevolucion)
+        ) {
+          const creditosBloqueados = new Map<number, any>();
+          for (const errorItem of result.errores ?? []) {
+            for (const credito of errorItem.creditos_bloqueados ?? []) {
+              creditosBloqueados.set(credito.credito_id, credito);
+            }
+          }
+          return {
+            ...result,
+            success: false,
+            warning: true,
+            code: pendingReturnError.code,
+            creditos_bloqueados: [...creditosBloqueados.values()],
+          };
+        }
+
         return result;
       } catch (error) {
         console.error("[liquidate-inversionista-pagos] Error:", error);
@@ -2038,6 +2066,10 @@ export const inversionistasRouter = new Elysia()
         const resultado = await calcularYRegistrarPagosEspejo(inversionistaId, fechaCalculoDate);
 
         if (!resultado.success) {
+          if ((resultado as any).code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+            set.status = 422;
+            return resultado;
+          }
           set.status = 500;
           return {
             success: false as const,
@@ -2094,6 +2126,18 @@ export const inversionistasRouter = new Elysia()
             numeroCreditoSifco: t.String(),
             mensaje: t.String(),
           })),
+        }),
+        422: t.Object({
+          success: t.Literal(false),
+          warning: t.Literal(true),
+          code: t.Literal("CREDIT_PENDING_RETURN_AUTHORIZATION"),
+          message: t.String(),
+          creditos_bloqueados: t.Array(t.Object({
+            credito_id: t.Number(),
+            numero_credito_sifco: t.String(),
+            estado_devolucion: t.Literal("PENDIENTE_AUTORIZACION"),
+          })),
+          data: t.Array(t.Any()),
         }),
         500: t.Object({
           success: t.Literal(false),

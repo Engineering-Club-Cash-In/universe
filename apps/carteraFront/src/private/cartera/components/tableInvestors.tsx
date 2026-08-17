@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { getApiErrorMessage, getPendingReturnWarningMessage } from "@/lib/apiError";
 import {
   Check,
   CheckCircle,
@@ -210,7 +211,12 @@ export function TableInvestors() {
         }
       },
       onError: (error) => {
-        alert(`❌ Error al calcular pagos: ${error.message}`);
+        const warning = getPendingReturnWarningMessage(error);
+        if (warning) {
+          toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
+        } else {
+          toast.error(getApiErrorMessage(error, "Error al calcular pagos"));
+        }
       },
     });
   };
@@ -250,9 +256,12 @@ export function TableInvestors() {
       },
       onError: (error) => {
         console.error("❌ Error al calcular pagos:", error);
-        alert(`Error al calcular pagos: ${error.message}`);
-        setCalcularModalTarget(undefined);
-        setSelectedInversionista(null);
+        const warning = getPendingReturnWarningMessage(error);
+        if (warning) {
+          toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
+        } else {
+          toast.error(getApiErrorMessage(error, "Error al calcular pagos"));
+        }
       },
     });
   };
@@ -272,7 +281,15 @@ export function TableInvestors() {
       {
         onSuccess: (data) => {
           if (data.errores && data.errores.length > 0) {
-            const lista = data.errores.map((e) => `• ${e.razon}`).join("\n");
+            const lista = data.errores.map((e) => {
+              if (e.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+                const sifcos = (e.creditos_bloqueados ?? [])
+                  .map((credito) => credito.numero_credito_sifco)
+                  .join(", ");
+                return `• Pendiente de autorización para devolución a CUBE${sifcos ? `: ${sifcos}` : ""}`;
+              }
+              return `• ${e.razon}`;
+            }).join("\n");
             if ((data.liquidaciones_creadas ?? 0) > 0) {
               toast.warning(
                 `Liquidación parcial. ${data.liquidaciones_creadas} liquidado(s). Créditos con inconsistencia:\n${lista}`,
@@ -292,12 +309,12 @@ export function TableInvestors() {
           refetchTotales();
         },
         onError: (error: any) => {
-          const detalle =
-            error?.response?.data?.error ||
-            error?.response?.data?.message ||
-            error?.message ||
-            "Error desconocido";
-          toast.error(`❌ Error al liquidar: ${detalle}`, { duration: 15000 });
+          const warning = getPendingReturnWarningMessage(error);
+          if (warning) {
+            toast.warning("Liquidación bloqueada", { description: warning, duration: 15000 });
+          } else {
+            toast.error(getApiErrorMessage(error, "Error al liquidar"), { duration: 15000 });
+          }
         },
       }
     );

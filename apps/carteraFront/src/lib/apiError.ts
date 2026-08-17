@@ -60,7 +60,27 @@ const MENSAJE_SIN_INFORMACION = /^internal server error$/i;
 const MENSAJES_POR_CODIGO: Record<string, string> = {
   CREDIT_PENDING_CANCELLATION:
     "No se puede registrar el pago porque el crédito está pendiente de cancelación.",
+  CREDIT_PENDING_RETURN_AUTHORIZATION:
+    "Hay créditos pendientes de autorización para devolución a CUBE.",
 };
+
+export function getPendingReturnWarningMessage(error: unknown): string | null {
+  if (!(error instanceof AxiosError)) return null;
+
+  const data = error.response?.data as {
+    code?: unknown;
+    creditos_bloqueados?: Array<{ numero_credito_sifco?: unknown }>;
+  } | undefined;
+
+  if (data?.code !== "CREDIT_PENDING_RETURN_AUTHORIZATION") return null;
+
+  const sifcos = (data.creditos_bloqueados ?? [])
+    .map((credit) => credit.numero_credito_sifco)
+    .filter((sifco): sifco is string => typeof sifco === "string" && sifco.length > 0);
+
+  const base = MENSAJES_POR_CODIGO.CREDIT_PENDING_RETURN_AUTHORIZATION;
+  return sifcos.length > 0 ? `${base} Créditos: ${sifcos.join(", ")}.` : base;
+}
 
 /**
  * Firmas de errores técnicos que nunca deben mostrarse al usuario.

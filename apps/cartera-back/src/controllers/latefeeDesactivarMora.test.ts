@@ -77,20 +77,13 @@ const fakeDb = {
 
 mock.module("../database", () => ({ db: {}, client: {} }));
 
-const latefee = await import("./latefee");
+const { desactivarMoraSiCreditoAlDia } = await import("./latefee");
 const { moras_credito, creditos, moras_historial } = await import(
   "../database/db/schema"
 );
 
-const getHelper = () => {
-  const fn = Reflect.get(latefee, "desactivarMoraSiCreditoAlDia");
-  expect(fn).toBeFunction();
-  return (credito_id: number) =>
-    (fn as any)(credito_id, { dbClient: fakeDb }) as Promise<{
-      desactivada: boolean;
-      error?: string;
-    }>;
-};
+const correr = (credito_id: number) =>
+  desactivarMoraSiCreditoAlDia(credito_id, { dbClient: fakeDb as any });
 
 const MORA_ACTIVA = {
   mora_id: 95201,
@@ -100,7 +93,7 @@ const MORA_ACTIVA = {
   porcentaje_mora: "1.12",
 };
 
-const CREDITO_MOROSO = { statusCredit: "MOROSO" };
+const CREDITO_MOROSO = { statusCredit: "MOROSO", capital: "114160.35" };
 
 // Cuota ya validada hoy (pagada) + resto de cuotas al día → 0 vencidas
 const CUOTAS_AL_DIA = [
@@ -143,7 +136,7 @@ describe("desactivarMoraSiCreditoAlDia", () => {
     state.selectQueue = [[MORA_ACTIVA], [CREDITO_MOROSO], CUOTAS_AL_DIA];
     state.updateReturningQueue = [[{ mora_id: 95201 }]];
 
-    const result = await getHelper()(8685);
+    const result = await correr(8685);
 
     expect(result.desactivada).toBe(true);
 
@@ -177,7 +170,7 @@ describe("desactivarMoraSiCreditoAlDia", () => {
   it("no toca nada cuando el crédito aún tiene cuotas vencidas sin validar", async () => {
     state.selectQueue = [[MORA_ACTIVA], [CREDITO_MOROSO], CUOTAS_CON_ATRASO];
 
-    const result = await getHelper()(8685);
+    const result = await correr(8685);
 
     expect(result.desactivada).toBe(false);
     expect(state.updates).toHaveLength(0);
@@ -187,7 +180,7 @@ describe("desactivarMoraSiCreditoAlDia", () => {
   it("sale temprano sin consultar cuotas cuando no hay mora activa", async () => {
     state.selectQueue = [[]];
 
-    const result = await getHelper()(8685);
+    const result = await correr(8685);
 
     expect(result.desactivada).toBe(false);
     expect(state.selectCalls).toBe(1);
@@ -198,13 +191,13 @@ describe("desactivarMoraSiCreditoAlDia", () => {
   it("no baja el status cuando el crédito no está MOROSO (p.ej. EN_CONVENIO)", async () => {
     state.selectQueue = [
       [MORA_ACTIVA],
-      [{ statusCredit: "EN_CONVENIO" }],
+      [{ statusCredit: "EN_CONVENIO", capital: "114160.35" }],
       // EN_CONVENIO está excluido de mora → sus cuotas no cuentan como vencidas
       CUOTAS_AL_DIA.map((c) => ({ ...c, statusCredit: "EN_CONVENIO" })),
     ];
     state.updateReturningQueue = [[{ mora_id: 95201 }]];
 
-    const result = await getHelper()(8685);
+    const result = await correr(8685);
 
     expect(result.desactivada).toBe(true);
     const statusUpdate = state.updates.find((u) => u.table === creditos);
@@ -215,7 +208,7 @@ describe("desactivarMoraSiCreditoAlDia", () => {
     state.selectQueue = [[MORA_ACTIVA], [CREDITO_MOROSO], CUOTAS_AL_DIA];
     state.updateReturningQueue = [[]]; // returning vacío: otra corrida ganó la carrera
 
-    const result = await getHelper()(8685);
+    const result = await correr(8685);
 
     expect(result.desactivada).toBe(false);
     expect(state.inserts).toHaveLength(0);
@@ -225,9 +218,29 @@ describe("desactivarMoraSiCreditoAlDia", () => {
     state.selectQueue = [[MORA_ACTIVA], [CREDITO_MOROSO], CUOTAS_AL_DIA];
     state.failNextUpdate = true;
 
-    const result = await getHelper()(8685);
+    const result = await correr(8685);
 
     expect(result.desactivada).toBe(false);
     expect(result.error).toBeDefined();
+  });
+
+  it("apaga la mora aunque queden vencidas si el capital llegó a 0 (espejo sinCapital del cron)", async () => {
+    state.selectQueue = [
+      [MORA_ACTIVA],
+      [{ statusCredit: "MOROSO", capital: "0.00" }],
+      CUOTAS_CON_ATRASO,
+    ];
+    state.updateReturningQueue = [[{ mora_id: 95201 }]];
+
+    const result = await correr(8685);
+
+    expect(result.desactivada).toBe(true);
+    const historial = state.inserts.find((i) => i.table === moras_historial);
+    expect(historial).toBeDefined();
+    expect(historial!.values).toMatchObject({
+      motivo: "Crédito sin capital — no aplica mora",
+    });
+    const statusUpdate = state.updates.find((u) => u.table === creditos);
+    expect(statusUpdate).toBeDefined();
   });
 });

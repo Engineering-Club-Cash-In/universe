@@ -233,7 +233,9 @@ export const revalidatePayment = async ({ body, set }: any) => {
     // al día, apagar la mora nacida durante la ventana de validación. Va
     // FUERA de la transacción: el helper lee con otra conexión y necesita
     // ver la cuota ya commiteada como pagada.
-    await desactivarMoraSiCreditoAlDia(credito_id);
+    await desactivarMoraSiCreditoAlDia(credito_id, {
+      motivo: "Crédito se puso al día al revalidar pago",
+    });
 
     set.status = 200;
     return {

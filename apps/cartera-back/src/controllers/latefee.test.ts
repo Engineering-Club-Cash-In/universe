@@ -5,8 +5,8 @@ mock.module("../database", () => ({
   client: {},
 }));
 
-const latefeeModule = await import("./latefee");
-const { isOverdueInstallmentForMora } = latefeeModule;
+const { isOverdueInstallmentForMora, decidirLimpiezaMoraTrasAplicar } =
+  await import("./latefee");
 
 describe("isOverdueInstallmentForMora", () => {
   it("no cuenta como vencida una cuota con pago asociado ya pagado", () => {
@@ -85,73 +85,101 @@ describe("isOverdueInstallmentForMora", () => {
 });
 
 describe("decidirLimpiezaMoraTrasAplicar", () => {
-  const decidir = () => {
-    const fn = Reflect.get(latefeeModule, "decidirLimpiezaMoraTrasAplicar");
-    expect(fn).toBeFunction();
-    return fn as (params: {
-      cuotasVencidasRestantes: number;
-      tieneMoraActiva: boolean;
-      statusCredit: string | null;
-    }) => { desactivarMora: boolean; bajarStatusAActivo: boolean };
-  };
-
   it("desactiva la mora y baja a ACTIVO cuando el crédito MOROSO queda al día", () => {
     expect(
-      decidir()({
+      decidirLimpiezaMoraTrasAplicar({
         cuotasVencidasRestantes: 0,
-        tieneMoraActiva: true,
+        capitalCredito: "114160.35",
         statusCredit: "MOROSO",
       }),
-    ).toEqual({ desactivarMora: true, bajarStatusAActivo: true });
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: true,
+      sinCapital: false,
+    });
   });
 
   it("desactiva la mora sin tocar el status si el crédito no está MOROSO", () => {
     expect(
-      decidir()({
+      decidirLimpiezaMoraTrasAplicar({
         cuotasVencidasRestantes: 0,
-        tieneMoraActiva: true,
+        capitalCredito: "114160.35",
         statusCredit: "ACTIVO",
       }),
-    ).toEqual({ desactivarMora: true, bajarStatusAActivo: false });
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
   });
 
   it("no des-castiga un crédito INCOBRABLE aunque le apague la mora", () => {
     expect(
-      decidir()({
+      decidirLimpiezaMoraTrasAplicar({
         cuotasVencidasRestantes: 0,
-        tieneMoraActiva: true,
+        capitalCredito: "114160.35",
         statusCredit: "INCOBRABLE",
       }),
-    ).toEqual({ desactivarMora: true, bajarStatusAActivo: false });
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
   });
 
   it("no toca nada si aún quedan cuotas vencidas sin validar", () => {
     expect(
-      decidir()({
+      decidirLimpiezaMoraTrasAplicar({
         cuotasVencidasRestantes: 1,
-        tieneMoraActiva: true,
+        capitalCredito: "114160.35",
         statusCredit: "MOROSO",
       }),
-    ).toEqual({ desactivarMora: false, bajarStatusAActivo: false });
+    ).toEqual({
+      desactivarMora: false,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
   });
 
-  it("no toca nada si el crédito no tiene mora activa (espejo del cron)", () => {
+  it("desactiva aunque queden vencidas si el capital llegó a 0 (espejo sinCapital del cron)", () => {
     expect(
-      decidir()({
-        cuotasVencidasRestantes: 0,
-        tieneMoraActiva: false,
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 2,
+        capitalCredito: "0.00",
         statusCredit: "MOROSO",
       }),
-    ).toEqual({ desactivarMora: false, bajarStatusAActivo: false });
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: true,
+      sinCapital: true,
+    });
+  });
+
+  it("capital desconocido (null) no cuenta como sinCapital", () => {
+    expect(
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 1,
+        capitalCredito: null,
+        statusCredit: "MOROSO",
+      }),
+    ).toEqual({
+      desactivarMora: false,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
   });
 
   it("desactiva sin bajar status cuando el status es null", () => {
     expect(
-      decidir()({
+      decidirLimpiezaMoraTrasAplicar({
         cuotasVencidasRestantes: 0,
-        tieneMoraActiva: true,
+        capitalCredito: "500.00",
         statusCredit: null,
       }),
-    ).toEqual({ desactivarMora: true, bajarStatusAActivo: false });
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
   });
 });

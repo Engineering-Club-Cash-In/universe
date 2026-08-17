@@ -2671,9 +2671,22 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     // completo y el reintento parte de cero — sin capital doble-descontado ni
     // distribuciones a medias. Aquí adentro NO hay llamadas externas (la
     // facturación con SAT vive en otro endpoint), así que la tx es corta.
-    return await db.transaction(async (tx) =>
+    const resultado = await db.transaction(async (tx) =>
       aplicarPagoNormalEnTx(tx as unknown as AplicarPagoTx, pago, pago_id)
     );
+
+    // POST-COMMIT: si el pago dejó el crédito al día, apagar la mora que el
+    // cron pudo crear mientras la boleta esperaba validación (si no, queda
+    // activa y el crédito MOROSO hasta la corrida nocturna). Va FUERA de la
+    // transacción a propósito: el helper lee/escribe por el pool global (otra
+    // conexión), así que dentro de la tx leería el snapshot viejo (no-op) y
+    // su UPDATE a creditos chocaría con el row lock de la tx (bloqueo mutuo).
+    // Nunca lanza, así que no puede tirar una aplicación ya commiteada.
+    if (resultado?.success) {
+      await desactivarMoraSiCreditoAlDia(pago.credito_id);
+    }
+
+    return resultado;
   } catch (error) {
     console.error("❌ Error al aplicar pago al crédito:", error);
     throw error;
@@ -3025,12 +3038,6 @@ async function aplicarPagoNormalEnTx(
     }
 
     console.log("✅ Crédito actualizado, pago validado y cuota cerrada");
-
-    // La cuota cerró: si el crédito quedó al día, apagar de inmediato la mora
-    // que el cron pudo crear mientras la boleta esperaba validación. Sin esto
-    // la mora queda activa (y el crédito MOROSO) hasta la corrida nocturna de
-    // procesarMoras, aunque el cliente ya no deba nada.
-    await desactivarMoraSiCreditoAlDia(pago.credito_id!);
 
     // 8. Distribuir entre inversionistas — TODOS los pagos validated de la cuota
     //    que aún no tengan filas en pagos_credito_inversionistas.

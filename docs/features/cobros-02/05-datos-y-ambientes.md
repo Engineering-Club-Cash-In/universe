@@ -143,9 +143,12 @@ Y una advertencia de diseño que conviene decidir **antes** de refrescar, no des
 > asesores cambian de cartera de un jalón. Los números salen correctos; la **historia**
 > queda inventada.
 >
-> Para un sandbox eso puede ser aceptable —incluso útil como prueba de estrés del motor—
+> Para un sandbox eso es aceptable —y sirve de prueba de estrés del motor a escala real—
 > pero **para la salida a producción no lo es**: ahí la carga inicial tiene que ser una
-> línea base limpia (`INICIAL` con el bucket correcto de ese día), no un recuento de dos
-> meses comprimido en una noche.
+> línea base limpia (`INICIAL` con el bucket correcto de ese día), no un recuento de meses
+> comprimido en una noche.
 
-El procedimiento concreto de refresco se documenta acá cuando se ejecute la primera vez.
+**El procedimiento completo, paso a paso, está en el
+[runbook de refresco](./RUNBOOK-refrescar-sandbox.md)**, con las trampas que aparecieron la
+primera vez (los tipos ENUM que viven en `public`, las extensiones que no vienen en el dump,
+el `transaction_timeout` entre versiones) y el registro de cada corrida.

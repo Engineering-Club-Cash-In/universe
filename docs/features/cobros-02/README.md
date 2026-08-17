@@ -34,6 +34,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 3 | [Recordatorios automáticos](./03-recordatorios-automaticos.md) | Premora D-5…D-0, recordatorios de convenio, reducción para quien paga bien (CB-010) |
 | 4 | [Operación diaria](./04-operacion-diaria.md) | Apertura, cola del día, SLA, agenda, alertas, promesas, reasignación manual |
 | 5 | [Datos y ambientes](./05-datos-y-ambientes.md) | Dónde vive cada base, el sandbox `cartera_cobros2`, migraciones, trampas conocidas |
+| — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:
 
@@ -114,7 +115,8 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Apertura / Cola del día / SLA / Agenda | ✅ Implementado |
 | Bot de WhatsApp | 🔵 Paso 1 (identificación) desplegado en dev; pasos 2-4 pendientes |
 | Convenio y promesa **por el bot** | 🔴 Bloqueado — falta aprobación de gerencia |
-| Carga inicial en producción | ⚪ Pendiente — ver [datos y ambientes](./05-datos-y-ambientes.md) |
+| Sandbox al día con producción | ✅ Refrescado el 2026-08-17 — ver el [runbook](./RUNBOOK-refrescar-sandbox.md) |
+| Carga inicial en producción | ⚪ Pendiente — mismo runbook, pero **sin replay**: línea base limpia |
 
 ---
 

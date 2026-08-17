@@ -1,4 +1,4 @@
-import { db } from "../database/index";
+import { db, lockPool } from "../database/index";
 import {
   creditos,
   pagos_credito,
@@ -51,6 +51,60 @@ export const crearResumenAbonosCuota = (input: Parameters<
 // Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
 // con assignCapital. Toda compra de cartera se le hace a Cube.
 const CUBE_ID = 86;
+
+type PendingReturnLockRow = {
+  creditoId: number;
+  numeroCreditoSifco: string;
+  estadoDevolucion: string | null;
+};
+
+async function withPendingReturnCreditLocks<T>(
+  creditoIds: number[],
+  callback: () => Promise<T>,
+): Promise<T> {
+  if (creditoIds.length === 0) return callback();
+
+  const connection = await lockPool.connect();
+  let transactionStarted = false;
+
+  try {
+    await connection.query("BEGIN");
+    transactionStarted = true;
+
+    const { rows: creditosRevalidados } = await connection.query<PendingReturnLockRow>(
+      `SELECT
+        credito_id AS "creditoId",
+        numero_credito_sifco AS "numeroCreditoSifco",
+        estado_devolucion AS "estadoDevolucion"
+      FROM cartera.creditos
+      WHERE credito_id = ANY($1::int[])
+      ORDER BY credito_id
+      FOR UPDATE`,
+      [creditoIds],
+    );
+
+    const warningRevalidado = buildPendingReturnAuthorizationWarning(creditosRevalidados);
+    if (warningRevalidado) {
+      throw new PendingReturnAuthorizationError(warningRevalidado);
+    }
+
+    const result = await callback();
+    await connection.query("COMMIT");
+    transactionStarted = false;
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await connection.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("❌ Error revirtiendo locks de devolución:", rollbackError);
+      }
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
 
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -1032,25 +1086,6 @@ export async function insertPagosCreditoInversionistas(
   //    Atados, si se rompe en el medio no queda foto tampoco y el cálculo se
   //    rehace limpio la próxima vez.
   await db.transaction(async (tx) => {
-    // Cierra ventana entre validación general y escritura: estado queda bloqueado
-    // hasta terminar inserción del espejo y enlace de abonos.
-    const [creditoBloqueado] = await tx
-      .select({
-        creditoId: creditos.credito_id,
-        numeroCreditoSifco: creditos.numero_credito_sifco,
-        estadoDevolucion: creditos.estado_devolucion,
-      })
-      .from(creditos)
-      .where(eq(creditos.credito_id, credito_id))
-      .for("update");
-
-    const warningActualizado = buildPendingReturnAuthorizationWarning(
-      creditoBloqueado ? [creditoBloqueado] : [],
-    );
-    if (warningActualizado) {
-      throw new PendingReturnAuthorizationError(warningActualizado);
-    }
-
     const filasInsertadas = await tx
       .insert(pagos_credito_inversionistas_espejo)
       .values(filas)
@@ -3630,11 +3665,23 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
     // Paso 2: Por cada crédito encontrado, se busca la primera cuota que aún no
     // le ha sido pagada al inversionista. Se procesa una cuota a la vez para evitar
     // registrar pagos duplicados o fuera de orden.
-    const resultados = await Promise.all(
-      creditosInversionista.map(async (credito) => {
-        console.log(
-          `\n🔍 Verificando crédito ${credito.creditoId}...`
-        );
+    //
+    // El lock es del LOTE completo, no de cada insert. Si una devolución intenta
+    // cambiar de estado durante esta generación, espera hasta que termine el lote;
+    // si cambió antes de obtener los locks, esta revalidación bloquea todo antes
+    // de crear el primer pago espejo.
+    const creditoIds = [
+      ...new Set(
+        creditosInversionista.map((credito) => credito.creditoId),
+      ),
+    ].sort((a, b) => a - b);
+    const resultados = await withPendingReturnCreditLocks(
+      creditoIds,
+      () => Promise.all(
+        creditosInversionista.map(async (credito) => {
+          console.log(
+            `\n🔍 Verificando crédito ${credito.creditoId}...`
+          );
 
         // Si ya existe un pago generado y pendiente de liquidar para este crédito,
         // se omite para no duplicarlo. Hay que liquidar primero antes de generar otro.
@@ -3831,34 +3878,14 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
             creditoId: credito.creditoId,
             numeroCreditoSifco: credito.numeroCreditoSifco,
             mensaje: err?.message ?? "Error desconocido",
-            ...(err?.code === "CREDIT_PENDING_RETURN_AUTHORIZATION"
-              ? {
-                  warning: true as const,
-                  code: err.code,
-                  creditos_bloqueados: err.creditos_bloqueados,
-                }
-              : {}),
           };
         }
-      })
+        }),
+      ),
     );
 
     const procesados = resultados.filter((r) => r !== null && !("error" in r));
     const fallidos = resultados.filter((r) => r !== null && "error" in r);
-
-    const bloqueoConcurrente = fallidos.find(
-      (resultado: any) => resultado.code === PENDING_RETURN_AUTHORIZATION_CODE,
-    ) as any;
-    if (bloqueoConcurrente) {
-      return {
-        success: false as const,
-        warning: true as const,
-        code: PENDING_RETURN_AUTHORIZATION_CODE,
-        message: bloqueoConcurrente.mensaje,
-        creditos_bloqueados: bloqueoConcurrente.creditos_bloqueados,
-        data: [],
-      };
-    }
 
     console.log(
       `\n✅ [calcularYRegistrarPagosEspejo] Completado. Procesados: ${procesados.length}, Fallidos: ${fallidos.length}`
@@ -3875,6 +3902,16 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
     };
   } catch (error: any) {
     console.error("❌ Error en calcularYRegistrarPagosEspejo:", error);
+    if (error?.code === PENDING_RETURN_AUTHORIZATION_CODE) {
+      return {
+        success: false as const,
+        warning: true as const,
+        code: PENDING_RETURN_AUTHORIZATION_CODE,
+        message: error.message,
+        creditos_bloqueados: error.creditos_bloqueados,
+        data: [],
+      };
+    }
     return {
       success: false,
       error: error.message,

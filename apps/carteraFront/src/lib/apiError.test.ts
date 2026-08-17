@@ -77,4 +77,38 @@ describe("getApiErrorMessage", () => {
       "No se pudo continuar: Hay créditos pendientes de autorización para devolución a CUBE. Créditos: 01010214119070, CRM-123.",
     );
   });
+
+  it("incluye fallas ajenas a devolución en una liquidación masiva bloqueada", () => {
+    const error = new AxiosError(
+      "Request failed with status code 422",
+      "ERR_BAD_REQUEST",
+      undefined,
+      undefined,
+      {
+        status: 422,
+        statusText: "Unprocessable Content",
+        headers: {},
+        config: {} as never,
+        data: {
+          code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+          creditos_bloqueados: [
+            { numero_credito_sifco: "01010214119070" },
+          ],
+          errores: [
+            {
+              code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+              razon: "Pendiente de autorización para devolución a CUBE",
+            },
+            {
+              razon: "[CUADRE_CAPITAL] Crédito 01010101010101 inconsistente",
+            },
+          ],
+        },
+      },
+    );
+
+    expect(getPendingReturnWarningMessage(error)).toBe(
+      "Hay créditos pendientes de autorización para devolución a CUBE. Créditos: 01010214119070. Otras inconsistencias: [CUADRE_CAPITAL] Crédito 01010101010101 inconsistente.",
+    );
+  });
 });

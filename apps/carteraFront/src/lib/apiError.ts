@@ -70,6 +70,7 @@ export function getPendingReturnWarningMessage(error: unknown): string | null {
   const data = error.response?.data as {
     code?: unknown;
     creditos_bloqueados?: Array<{ numero_credito_sifco?: unknown }>;
+    errores?: Array<{ code?: unknown; razon?: unknown }>;
   } | undefined;
 
   if (data?.code !== "CREDIT_PENDING_RETURN_AUTHORIZATION") return null;
@@ -78,8 +79,19 @@ export function getPendingReturnWarningMessage(error: unknown): string | null {
     .map((credit) => credit.numero_credito_sifco)
     .filter((sifco): sifco is string => typeof sifco === "string" && sifco.length > 0);
 
+  const otrasInconsistencias = [...new Set(
+    (data.errores ?? [])
+      .filter((item) => item?.code !== "CREDIT_PENDING_RETURN_AUTHORIZATION")
+      .map((item) => item?.razon)
+      .filter((razon): razon is string => typeof razon === "string" && razon.trim().length > 0)
+      .map((razon) => razon.trim()),
+  )];
+
   const base = MENSAJES_POR_CODIGO.CREDIT_PENDING_RETURN_AUTHORIZATION;
-  return sifcos.length > 0 ? `${base} Créditos: ${sifcos.join(", ")}.` : base;
+  const warning = sifcos.length > 0 ? `${base} Créditos: ${sifcos.join(", ")}.` : base;
+  return otrasInconsistencias.length > 0
+    ? `${warning} Otras inconsistencias: ${otrasInconsistencias.join("; ")}.`
+    : warning;
 }
 
 /**

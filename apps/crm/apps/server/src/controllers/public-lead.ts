@@ -213,16 +213,19 @@ export async function createPublicLead(c: Context) {
 				// con filas duplicadas el proceso del canal entrante puede estar
 				// colgado de otra. Y cada oportunidad legacy (sin source) se clasifica
 				// con el canal de SU lead, que es el que le corresponde.
-				const leadSourceById = new Map(
-					matchingLeads.map((lead) => [lead.id, lead.source]),
+				const leadById = new Map(
+					matchingLeads.map((lead) => [lead.id, lead] as const),
 				);
+
+				const leadOf = (opportunity: { leadId: string | null }) =>
+					(opportunity.leadId && leadById.get(opportunity.leadId)) ||
+					existingLead;
 
 				const sameSourceOpportunity = activeOpportunities.find((opportunity) =>
 					isOpportunityFromSource(
 						opportunity.source,
 						source,
-						(opportunity.leadId && leadSourceById.get(opportunity.leadId)) ||
-							existingLead.source,
+						leadOf(opportunity).source,
 					),
 				);
 
@@ -248,15 +251,23 @@ export async function createPublicLead(c: Context) {
 					// La campaña sí se sincroniza cuando la re-entrada es del mismo
 					// canal: es la atribución del proceso que ya está abierto, y
 					// `createOpportunity` la copia del lead cuando se crea una
-					// oportunidad sin campaña explícita. El `source` no se toca (ver
-					// abajo); si la re-entrada es de otro canal, la campaña tampoco,
-					// porque pertenece a un toque que no se está registrando.
-					if (body.campaign && body.campaign !== existingLead.campaign) {
-						[leadData] = await db
+					// oportunidad sin campaña explícita. Se escribe en el lead dueño de
+					// esa oportunidad, que con filas duplicadas no siempre es el que se
+					// eligió arriba. El `source` no se toca (ver abajo); si la re-entrada
+					// es de otro canal, la campaña tampoco, porque pertenece a un toque
+					// que no se está registrando.
+					const opportunityLead = leadOf(sameSourceOpportunity);
+
+					if (body.campaign && body.campaign !== opportunityLead.campaign) {
+						const [syncedLead] = await db
 							.update(leads)
 							.set({ campaign: body.campaign, updatedAt: new Date() })
-							.where(eq(leads.id, existingLead.id))
+							.where(eq(leads.id, opportunityLead.id))
 							.returning();
+
+						if (syncedLead?.id === existingLead.id) {
+							leadData = syncedLead;
+						}
 					}
 				}
 

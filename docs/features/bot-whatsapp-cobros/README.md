@@ -1,7 +1,11 @@
 # Bot de WhatsApp — Flujo de cobros
 
-**Estado global:** 🟡 En definición · **Nada de esto está implementado todavía**
-**Última actualización:** 2026-08-13
+> Parte de **[COBROS-02](../cobros-02/README.md)**, el rediseño de cobros. Este documento
+> cubre solo el bot; para el panorama completo (buckets, recordatorios automáticos,
+> operación diaria) empezar por ahí.
+
+**Estado global:** 🔵 Paso 1 implementado y desplegado en dev · pasos 2-4 en definición
+**Última actualización:** 2026-08-17
 **Proyecto Jira:** [CC2 — CRM Cobros 2](https://clubcashin.atlassian.net/browse/CC2)
 **Fuentes funcionales:** [`fuente/flujo-bot-whatsapp.pdf`](./fuente/flujo-bot-whatsapp.pdf)
 (presentación a gerencia, v1.0) · [`fuente/FlujoBotCobros.pdf`](./fuente/FlujoBotCobros.pdf)

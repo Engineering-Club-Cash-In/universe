@@ -21,7 +21,13 @@ a construir y *por qué*, **antes** de escribir código.
 
 | Feature | Estado | Doc |
 | --- | --- | --- |
-| Bot de WhatsApp — Flujo de cobros | 🟡 En definición (Paso 1 definido, sin implementar) | [`features/bot-whatsapp-cobros/`](./features/bot-whatsapp-cobros/README.md) |
+| **COBROS-02 — Rediseño de cobros** | 🔵 En desarrollo (rama `COBROS-02`, sale en meses) | [`features/cobros-02/`](./features/cobros-02/README.md) |
+| Bot de WhatsApp — Flujo de cobros | 🔵 Paso 1 desplegado en dev; pasos 2-4 pendientes | [`features/bot-whatsapp-cobros/`](./features/bot-whatsapp-cobros/README.md) |
+
+> El bot de WhatsApp es **parte de COBROS-02**, pero tiene carpeta propia porque su
+> definición (árbol de decisiones, contratos con SimpleTech) es mucho más extensa que el
+> resto. Empezar por [`features/cobros-02/`](./features/cobros-02/README.md) para el
+> panorama completo.
 
 ## Convenciones
 

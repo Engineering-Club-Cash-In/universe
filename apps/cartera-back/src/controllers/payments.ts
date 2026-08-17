@@ -3892,12 +3892,16 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       `\n✅ [calcularYRegistrarPagosEspejo] Completado. Procesados: ${procesados.length}, Fallidos: ${fallidos.length}`
     );
 
+    const falloTotal = fallidos.length > 0 && procesados.length === 0;
     return {
-      success: true,
+      success: !falloTotal,
+      ...(falloTotal
+        ? { error: "No se pudo generar ningún pago espejo del lote." }
+        : {}),
       inversionistaId,
       totalCreditosProcesados: procesados.length,
       totalCreditosFallidos: fallidos.length,
-      pagosGenerados: true,
+      pagosGenerados: procesados.length > 0,
       data: procesados,
       fallidos,
     };

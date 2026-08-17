@@ -3868,6 +3868,27 @@ export const liquidateByInvestorSchema = z.object({
   inversionista_id: z.number().optional(),
   fecha_liquidacion: z.string().datetime().optional(),
 });
+
+export const orderUniqueCreditIds = (creditoIds: number[]): number[] =>
+  [...new Set(creditoIds)].sort((a, b) => a - b);
+
+export async function lockPendingReturnCreditsForLiquidation(
+  tx: any,
+  creditoIds: number[],
+) {
+  const orderedCreditIds = orderUniqueCreditIds(creditoIds);
+  return tx
+    .select({
+      creditoId: creditos.credito_id,
+      numeroCreditoSifco: creditos.numero_credito_sifco,
+      estadoDevolucion: creditos.estado_devolucion,
+    })
+    .from(creditos)
+    .where(inArray(creditos.credito_id, orderedCreditIds))
+    .orderBy(creditos.credito_id)
+    .for("no key update");
+}
+
 export async function liquidateByInvestorId(inversionista_id?: number, fechaLiquidacion?: Date) {
   // Verificar si ya hay una liquidación en proceso para este inversionista (o masiva)
   const lockExistente = await db
@@ -4025,6 +4046,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       );
 
       if (pendingReturnWarning) {
+        // Deliberado: liquidación es todo-o-nada por inversionista. Un crédito
+        // bloqueado detiene sus demás pagos para no producir una liquidación
+        // parcial ni dejar totales/boleta representando solo parte del período.
         console.warn(
           `  ⚠️ Inversionista ${inv_id} no liquidado: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
         );
@@ -4056,16 +4080,11 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       const { liquidacion, updateResult, debeReinvertir, montoReinvertido } = await db.transaction(async (tx) => {
         // Revalida bajo lock dentro de misma transacción que liquida. Esto evita
         // cambio a PENDIENTE_AUTORIZACION después del pre-chequeo.
-        const creditoIdsPagos = [...new Set(pagosNoLiquidados.map((pago) => pago.credito_id))];
-        const creditosBloqueados = await tx
-          .select({
-            creditoId: creditos.credito_id,
-            numeroCreditoSifco: creditos.numero_credito_sifco,
-            estadoDevolucion: creditos.estado_devolucion,
-          })
-          .from(creditos)
-          .where(inArray(creditos.credito_id, creditoIdsPagos))
-          .for("update");
+        const creditoIdsPagos = pagosNoLiquidados.map((pago) => pago.credito_id);
+        const creditosBloqueados = await lockPendingReturnCreditsForLiquidation(
+          tx,
+          creditoIdsPagos,
+        );
 
         const warningActualizado = buildPendingReturnAuthorizationWarning(creditosBloqueados);
         if (warningActualizado) {

@@ -164,6 +164,11 @@ export function CrearBoletaInversionista({
                         Monto: Q{Number(b.boleta.monto_boleta).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                       </div>
                     )}
+                    {b.boleta.notas && (
+                      <div className="mt-1 text-xs text-red-700 whitespace-pre-line">
+                        {b.boleta.notas}
+                      </div>
+                    )}
                   </div>
 
                   <button

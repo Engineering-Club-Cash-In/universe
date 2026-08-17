@@ -46,6 +46,7 @@ import ExcelJS from "exceljs";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { guardDescuentaImpuestos } from "./investorGuards";
+import { buildPendingReturnAuthorizationWarningFromErrors } from "../utils/pendingReturnGuard";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
 
 
@@ -588,31 +589,13 @@ export const inversionistasRouter = new Elysia()
           set.status = 200;
         }
 
-        const pendingReturnError = result.errores?.find(
-          (item: any) => item.code === "CREDIT_PENDING_RETURN_AUTHORIZATION",
-        );
-        const todosBloqueadosPorDevolucion =
-          hayErrores &&
-          result.errores!.every(
-            (item: any) => item.code === "CREDIT_PENDING_RETURN_AUTHORIZATION",
-          );
-        if (
-          pendingReturnError &&
-          !hayLiquidaciones &&
-          (Boolean(inversionista_id) || todosBloqueadosPorDevolucion)
-        ) {
-          const creditosBloqueados = new Map<number, any>();
-          for (const errorItem of result.errores ?? []) {
-            for (const credito of errorItem.creditos_bloqueados ?? []) {
-              creditosBloqueados.set(credito.credito_id, credito);
-            }
-          }
+        const pendingReturnWarning =
+          buildPendingReturnAuthorizationWarningFromErrors(result.errores);
+        if (pendingReturnWarning && !hayLiquidaciones) {
           return {
             ...result,
             success: false,
-            warning: true,
-            code: pendingReturnError.code,
-            creditos_bloqueados: [...creditosBloqueados.values()],
+            ...pendingReturnWarning,
           };
         }
 
@@ -2071,10 +2054,7 @@ export const inversionistasRouter = new Elysia()
             return resultado;
           }
           set.status = 500;
-          return {
-            success: false as const,
-            error: (resultado as any).error ?? "Error desconocido",
-          };
+          return resultado;
         }
 
         set.status = 200;

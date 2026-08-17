@@ -2671,13 +2671,14 @@ export const crmRouter = {
 				});
 			}
 
-			// La reasignación arrastra al lead, así que si el lead sostiene más
-			// procesos vivos el cambio le movería el cliente por debajo a los otros
-			// asesores: sus oportunidades quedarían colgando de un lead ajeno y la
-			// siguiente entrada del cliente seguiría al nuevo dueño del lead. Se
-			// bloquea para que primero se depure lo que no corresponda.
+			// La reasignación arrastra al lead, así que si el lead sostiene procesos
+			// vivos de OTRO asesor el cambio se los movería por debajo: sus
+			// oportunidades quedarían colgando de un lead ajeno y la siguiente
+			// entrada del cliente seguiría al nuevo dueño del lead. Las que ya son
+			// del asesor destino no estorban — ahí la reasignación justamente alinea
+			// al cliente en vez de partirlo, que es como se reparan estos casos.
 			if (current.leadId) {
-				const otrasOportunidades = await db
+				const oportunidadesDeOtroAsesor = await db
 					.select({
 						title: opportunities.title,
 						asesor: user.name,
@@ -2688,18 +2689,19 @@ export const crmRouter = {
 						and(
 							eq(opportunities.leadId, current.leadId),
 							not(eq(opportunities.id, input.opportunityId)),
+							not(eq(opportunities.assignedTo, input.assignedTo)),
 							inArray(opportunities.status, ["open", "on_hold"]),
 						),
 					);
 
-				if (otrasOportunidades.length > 0) {
-					const detalle = otrasOportunidades
+				if (oportunidadesDeOtroAsesor.length > 0) {
+					const detalle = oportunidadesDeOtroAsesor
 						.map((o) => `"${o.title}" (${o.asesor ?? "sin asesor"})`)
 						.join(", ");
 
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							`No se puede reasignar: el lead tiene ${otrasOportunidades.length} oportunidad(es) activa(s) más — ${detalle}. ` +
+							`No se puede reasignar: el lead tiene ${oportunidadesDeOtroAsesor.length} oportunidad(es) activa(s) de otro asesor — ${detalle}. ` +
 							"Reasignar esta movería el lead y dejaría esas oportunidades con otro dueño. Depurá primero las que no correspondan.",
 					});
 				}

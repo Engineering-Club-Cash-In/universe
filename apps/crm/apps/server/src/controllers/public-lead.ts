@@ -235,6 +235,20 @@ export async function createPublicLead(c: Context) {
 							})
 							.where(eq(opportunities.id, sameSourceOpportunity.id));
 					}
+
+					// La campaña sí se sincroniza cuando la re-entrada es del mismo
+					// canal: es la atribución del proceso que ya está abierto, y
+					// `createOpportunity` la copia del lead cuando se crea una
+					// oportunidad sin campaña explícita. El `source` no se toca (ver
+					// abajo); si la re-entrada es de otro canal, la campaña tampoco,
+					// porque pertenece a un toque que no se está registrando.
+					if (body.campaign && body.campaign !== existingLead.campaign) {
+						[leadData] = await db
+							.update(leads)
+							.set({ campaign: body.campaign, updatedAt: new Date() })
+							.where(eq(leads.id, existingLead.id))
+							.returning();
+					}
 				}
 
 				// El lead no se toca: `leads.source` es lo que clasifica a las

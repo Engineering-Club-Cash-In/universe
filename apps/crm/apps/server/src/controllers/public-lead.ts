@@ -271,7 +271,22 @@ export async function createPublicLead(c: Context) {
 					}
 				}
 
-				// El lead no se toca: `leads.source` es lo que clasifica a las
+				// El correo sí se sincroniza aunque la re-entrada no cree oportunidad:
+				// es dato de contacto del cliente, no atribución ni asignación, y el
+				// bloque que lo hacía más abajo ya no se alcanza desde acá.
+				if (
+					hasDpi &&
+					existingLead.dpi === body.dpi &&
+					(!existingLead.email || existingLead.email.trim() === "")
+				) {
+					[leadData] = await db
+						.update(leads)
+						.set({ email: body.email, updatedAt: new Date() })
+						.where(eq(leads.id, existingLead.id))
+						.returning();
+				}
+
+				// De `leads` no se toca nada más: `source` es lo que clasifica a las
 				// oportunidades legacy sin source, así que pisarlo con el canal de una
 				// re-entrada que se está rechazando haría que la próxima entrada por
 				// ese canal se lleve por delante el proceso de otro canal.

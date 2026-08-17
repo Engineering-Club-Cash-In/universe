@@ -2671,6 +2671,40 @@ export const crmRouter = {
 				});
 			}
 
+			// La reasignación arrastra al lead, así que si el lead sostiene más
+			// procesos vivos el cambio le movería el cliente por debajo a los otros
+			// asesores: sus oportunidades quedarían colgando de un lead ajeno y la
+			// siguiente entrada del cliente seguiría al nuevo dueño del lead. Se
+			// bloquea para que primero se depure lo que no corresponda.
+			if (current.leadId) {
+				const otrasOportunidades = await db
+					.select({
+						title: opportunities.title,
+						asesor: user.name,
+					})
+					.from(opportunities)
+					.leftJoin(user, eq(opportunities.assignedTo, user.id))
+					.where(
+						and(
+							eq(opportunities.leadId, current.leadId),
+							not(eq(opportunities.id, input.opportunityId)),
+							inArray(opportunities.status, ["open", "on_hold"]),
+						),
+					);
+
+				if (otrasOportunidades.length > 0) {
+					const detalle = otrasOportunidades
+						.map((o) => `"${o.title}" (${o.asesor ?? "sin asesor"})`)
+						.join(", ");
+
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							`No se puede reasignar: el lead tiene ${otrasOportunidades.length} oportunidad(es) activa(s) más — ${detalle}. ` +
+							"Reasignar esta movería el lead y dejaría esas oportunidades con otro dueño. Depurá primero las que no correspondan.",
+					});
+				}
+			}
+
 			await db.transaction(async (tx) => {
 				await tx
 					.update(opportunities)

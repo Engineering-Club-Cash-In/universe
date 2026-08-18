@@ -376,6 +376,24 @@ function isExpired(dateStr: string | undefined): boolean | "unknown" {
 	return Date.now() >= expiresAtUtcMs;
 }
 
+// bloqueo>0, estadoLicencia===1 o estadoFol===3 = licencia bloqueada (confirmado en el JS del sitio oficial); valor desconocido o campo faltante = revisión manual, nunca válida por defecto.
+export function assessTransitoLicenseStatus(
+	data: Record<string, unknown>,
+): "active" | "blocked" | "unknown" {
+	const { bloqueo, estadoLicencia, estadoFol } = data;
+	if (
+		typeof bloqueo !== "number" ||
+		typeof estadoLicencia !== "number" ||
+		typeof estadoFol !== "number"
+	) {
+		return "unknown";
+	}
+	if (bloqueo > 0 || estadoLicencia === 1 || estadoFol === 3) {
+		return "blocked";
+	}
+	return "active";
+}
+
 // =============================================================================
 // Orquestador: decodifica, valida dominio, consulta Tránsito y compara nombre
 // =============================================================================
@@ -518,6 +536,24 @@ export async function runLicenseVerification(params: {
 		rawResponse: data,
 		identityMatchScore,
 	};
+
+	const licenseStatus = assessTransitoLicenseStatus(data);
+	if (licenseStatus === "blocked") {
+		return {
+			...base,
+			result: "invalida",
+			failureReason:
+				"Tránsito reporta la licencia como bloqueada, inactiva o con un folio inválido.",
+		};
+	}
+	if (licenseStatus === "unknown") {
+		return {
+			...base,
+			result: "revision_manual",
+			failureReason:
+				"No se pudo determinar el estado (bloqueo/estado de licencia/folio) que reportó Tránsito — requiere revisión manual.",
+		};
+	}
 
 	const expiryStatus = isExpired(licenseExpiresAt);
 	if (expiryStatus === "unknown") {

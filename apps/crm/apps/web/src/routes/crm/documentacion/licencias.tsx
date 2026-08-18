@@ -463,7 +463,8 @@ function NewVerificationDialog({
 	onDone: () => void;
 	onClose: () => void;
 }) {
-	
+	// Si llega con lead/oportunidad ya definidos (deep link desde "Detalles de
+	// la Oportunidad"), esos campos quedan fijos — no editables — y la
 	const isLocked = !!(initialLeadId && initialOpportunityId);
 	const [searchInput, setSearchInput] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");

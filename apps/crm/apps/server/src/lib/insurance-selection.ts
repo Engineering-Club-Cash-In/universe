@@ -62,7 +62,7 @@ function qualifiesForGyt(insuredAmount: number, vehicleType: string): boolean {
 	const normalizedType = normalizeVehicleType(vehicleType);
 
 	if (VEHICLE_GYT_TYPES.has(normalizedType)) {
-		return insuredAmount > GYT_MIN_INSURED_AMOUNT;
+		return insuredAmount >= GYT_MIN_INSURED_AMOUNT;
 	}
 
 	return false;

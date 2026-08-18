@@ -23,7 +23,10 @@ import {
 	elegirTelefonoParaOtp,
 	telefonoEstaRegistrado,
 } from "../lib/bot-cobros/identificadores";
-import { obtenerInfoCredito } from "../lib/bot-cobros/menu-credito";
+import {
+	obtenerEstadoDeCuenta,
+	obtenerInfoCredito,
+} from "../lib/bot-cobros/menu-credito";
 import { enviarOtp, validarOtp } from "../lib/bot-cobros/otp";
 
 type RespuestaError = {
@@ -238,6 +241,88 @@ export async function infoCreditoBotCobros(c: Context) {
 		return error(c, {
 			codigo: "ERROR_INTERNO",
 			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",
+			estado: 500,
+		});
+	}
+}
+
+/**
+ * Servicio 4 · Estado de cuenta del crédito (paso 2, menú).
+ *
+ * Solo hace de puente: el PDF lo genera cartera, el mismo que descarga el botón
+ * de carteraFront. Acá se comprueba que el crédito sea de quien lo pide.
+ */
+export async function estadoDeCuentaBotCobros(c: Context) {
+	try {
+		const body = await c.req.json<{
+			referencia?: unknown;
+			numeroSifco?: unknown;
+		}>();
+
+		const referencia = String(body.referencia ?? "").trim();
+		const numeroSifco = String(body.numeroSifco ?? "").trim();
+
+		if (!referencia || !numeroSifco) {
+			return error(c, {
+				codigo: "PARAMETROS_INVALIDOS",
+				mensaje: "Faltan datos para generar el estado de cuenta.",
+				estado: 400,
+			});
+		}
+
+		const resultado = await obtenerEstadoDeCuenta(referencia, numeroSifco);
+
+		if (!resultado.ok) {
+			switch (resultado.codigo) {
+				case "SESION_VENCIDA":
+					return error(c, {
+						codigo: "SESION_VENCIDA",
+						mensaje:
+							"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+						estado: 401,
+					});
+				case "CREDITO_NO_ES_DEL_CLIENTE":
+					return error(c, {
+						codigo: "CREDITO_NO_ENCONTRADO",
+						mensaje: "No encontramos ese crédito.",
+						estado: 404,
+					});
+				case "SIN_ESTADO_DE_CUENTA":
+					return error(c, {
+						codigo: "SIN_ESTADO_DE_CUENTA",
+						mensaje:
+							"Todavía no hay movimientos para generar tu estado de cuenta.",
+						estado: 404,
+					});
+				// Distinto del anterior: acá no es que no haya movimientos, es que
+				// no tenemos los datos del crédito. Al cliente se le manda a soporte
+				// en vez de decirle que su crédito está vacío.
+				case "CREDITO_SIN_DATOS":
+					return error(c, {
+						codigo: "CREDITO_SIN_DATOS",
+						mensaje:
+							"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+						estado: 404,
+					});
+				default:
+					return error(c, {
+						codigo: "REFERENCIA_INVALIDA",
+						mensaje: "No encontramos tu solicitud. Comienza de nuevo.",
+						estado: 401,
+					});
+			}
+		}
+
+		return c.json({
+			success: true,
+			data: { url: resultado.url, formato: "pdf" },
+		});
+	} catch (err) {
+		console.error("[BotCobros] estado-cuenta:", err);
+		return error(c, {
+			codigo: "ERROR_INTERNO",
+			mensaje:
+				"No pudimos generar tu estado de cuenta en este momento. Intenta de nuevo en unos minutos.",
 			estado: 500,
 		});
 	}

@@ -173,7 +173,10 @@ export const creditRouter = new Elysia()
 
       if (!resultado.encontrado) {
         set.status = 404;
-        return { message: "Crédito no encontrado" };
+        // El `codigo` permite a quien llama distinguir este 404 de negocio de
+        // uno de infraestructura (ruta inexistente, proxy). Ver el cliente del
+        // CRM en cartera-back-client.ts.
+        return { message: "Crédito no encontrado", codigo: "CREDITO_NO_ENCONTRADO" };
       }
 
       return resultado.resumen;

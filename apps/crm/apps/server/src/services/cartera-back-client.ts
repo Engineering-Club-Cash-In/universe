@@ -189,6 +189,13 @@ export class CarteraBackHttpError extends Error {
 			error?: string;
 			message?: string;
 			errores?: string[];
+			/**
+			 * Código de máquina, cuando cartera lo manda. Sirve para distinguir un
+			 * 404 de negocio ("este crédito no tiene movimientos") de uno de
+			 * infraestructura (ruta que todavía no existe en un deploy rodante,
+			 * base path mal, 404 de un proxy).
+			 */
+			codigo?: string;
 		} = {},
 	) {
 		super(message);
@@ -1027,8 +1034,85 @@ export class CarteraBackClient {
 				false,
 			);
 		} catch (error) {
-			// 404 = el crédito no está en cartera. No es una falla del servicio.
-			if (error instanceof Error && error.message.includes("404")) return null;
+			// Mismo criterio que `getEstadoCuentaUrl`: se exige el código, no basta
+			// el 404. Así un problema de despliegue o de ruteo no se disfraza de
+			// "este crédito no está en cartera".
+			if (
+				error instanceof CarteraBackHttpError &&
+				error.status === 404 &&
+				error.payload.codigo === "CREDITO_NO_ENCONTRADO"
+			) {
+				return null;
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * Genera el estado de cuenta del crédito y devuelve su URL.
+	 *
+	 * Es el mismo documento que descarga el botón "Descargar Estado de Cuenta"
+	 * de carteraFront: `/paymentByCredit?excel=true`.
+	 *
+	 * **Ojo con los nombres:** el parámetro se llama `excel` y el campo de la
+	 * respuesta `excelUrl`, pero lo que devuelve es un **PDF** — cartera lo
+	 * arma con Puppeteer y lo sube a R2 como `estado_cuenta_*.pdf` con
+	 * `ContentType: application/pdf`. Los nombres quedaron de cuando sí era una
+	 * hoja de cálculo.
+	 *
+	 * Genera el documento en cada llamada (Puppeteer + subida a R2), así que
+	 * **no se cachea del lado del CRM pero tampoco conviene llamarlo de más**.
+	 *
+	 * **Sin reintentos**, aunque sea un GET: cada intento arranca un Puppeteer y
+	 * sube un archivo nuevo con su timestamp. Un timeout después de que cartera
+	 * empezó a trabajar dejaría hasta cuatro PDF idénticos huérfanos en R2, con
+	 * su carga de navegador (Codex, PR #1328).
+	 *
+	 * Los dos motivos por los que puede no haber documento —el crédito no tiene
+	 * movimientos, o no está en cartera— se devuelven **por separado**: para el
+	 * cliente significan cosas opuestas y el bot les da mensajes distintos.
+	 */
+	async getEstadoCuentaUrl(
+		numeroSifco: string,
+	): Promise<
+		| { ok: true; url: string }
+		| { ok: false; motivo: "SIN_MOVIMIENTOS" | "CREDITO_NO_ESTA_EN_CARTERA" }
+	> {
+		try {
+			const response = await this.request<{ excelUrl?: string }>(
+				`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=true`,
+				{ method: "GET" },
+				false,
+				// Generar el PDF toma ~3.4 s medidos; el default del cliente se
+				// queda corto cuando cartera está cargada.
+				60000,
+				// No reintentar: ver arriba.
+				false,
+			);
+
+			// Sin `excelUrl` no hay nada que entregar, y cartera no dijo por qué:
+			// se trata como falta de datos y no como un documento vacío.
+			if (!response?.excelUrl) {
+				return { ok: false, motivo: "CREDITO_NO_ESTA_EN_CARTERA" };
+			}
+
+			return { ok: true, url: response.excelUrl };
+		} catch (error) {
+			// Solo los 404 que cartera MARCA con su código son casos de negocio. Un
+			// 404 pelado puede ser la ruta que todavía no existe en un deploy
+			// rodante o un proxy respondiendo por su cuenta: eso es una falla y
+			// debe subir, no convertirse en un "no tenés movimientos" que el
+			// cliente leería como cierto (Codex, PR #1328).
+			if (error instanceof CarteraBackHttpError && error.status === 404) {
+				if (error.payload.codigo === "SIN_MOVIMIENTOS") {
+					return { ok: false, motivo: "SIN_MOVIMIENTOS" };
+				}
+
+				if (error.payload.codigo === "CREDITO_NO_ENCONTRADO") {
+					return { ok: false, motivo: "CREDITO_NO_ESTA_EN_CARTERA" };
+				}
+			}
+
 			throw error;
 		}
 	}

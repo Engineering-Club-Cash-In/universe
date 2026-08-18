@@ -25,6 +25,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../database/index";
 import {
 	aseguradoras,
+	asesores,
 	convenios_pago,
 	creditos,
 	moras_credito,
@@ -101,6 +102,17 @@ export type ResumenCredito = {
 	/** Del catálogo `aseguradoras`; hoy solo existe el nombre. */
 	aseguradora: string | null;
 	numero_poliza: string | null;
+	/**
+	 * El asesor que lleva el crédito, para que el cliente sepa con quién hablar.
+	 *
+	 * `null` solo si el crédito no tiene `asesor_id` — hoy no pasa en ningún
+	 * crédito, pero la columna lo permite. El `telefono` puede venir vacío
+	 * aunque el asesor exista.
+	 */
+	asesor: {
+		nombre: string;
+		telefono: string | null;
+	} | null;
 };
 
 export type ResultadoResumen =
@@ -233,8 +245,14 @@ export async function obtenerResumenCredito(
 			statusCredit: creditos.statusCredit,
 			no_poliza: creditos.no_poliza,
 			aseguradora_id: creditos.aseguradora_id,
+			// LEFT y no INNER: un crédito sin asesor debe seguir respondiendo. El
+			// detalle grande (`getCreditoByNumero`) usa innerJoin y por eso ese
+			// crédito simplemente no aparecería.
+			asesor_nombre: asesores.nombre,
+			asesor_telefono: asesores.telefono,
 		})
 		.from(creditos)
+		.leftJoin(asesores, eq(asesores.asesor_id, creditos.asesor_id))
 		.where(eq(creditos.numero_credito_sifco, numeroCreditoSifco))
 		.limit(1);
 
@@ -346,6 +364,8 @@ export type InsumosResumen = {
 		plazo: number;
 		statusCredit: string;
 		no_poliza: string | null;
+		asesor_nombre?: string | null;
+		asesor_telefono?: string | null;
 	};
 	totalAbonos: string;
 	conteos: { atrasadas: number; pagadas: number };
@@ -476,5 +496,11 @@ export function armarResumen(insumos: InsumosResumen): ResumenCredito {
 			: null,
 		aseguradora: insumos.nombreAseguradora,
 		numero_poliza: credito.no_poliza || null,
+		asesor: credito.asesor_nombre
+			? {
+					nombre: credito.asesor_nombre,
+					telefono: credito.asesor_telefono || null,
+				}
+			: null,
 	};
 }

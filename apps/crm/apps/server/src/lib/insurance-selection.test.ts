@@ -20,10 +20,13 @@ describe("selectInsuranceProvider", () => {
 		expect(result.insuranceSavingsToMembership).toBe(0);
 	});
 
-	test("uses GyT for particular over Q257,000 when cheaper", () => {
+	test.each([
+		"particular",
+		"nuevo",
+	])("uses GyT for eligible type %s over Q257,000 when cheaper", (vehicleType) => {
 		const result = selectInsuranceProvider({
 			insuredAmount: 257000.01,
-			vehicleType: "particular",
+			vehicleType,
 			universalesCost: 585.86,
 			gytCost: 584.96,
 			membershipCost: 100,
@@ -37,7 +40,6 @@ describe("selectInsuranceProvider", () => {
 	});
 
 	test.each([
-		"nuevo",
 		"uber",
 		"pickup",
 		"microbus",

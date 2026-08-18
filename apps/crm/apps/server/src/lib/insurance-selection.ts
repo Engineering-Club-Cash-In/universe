@@ -36,7 +36,9 @@ export interface NormalizedInsuranceBreakdown {
 }
 
 const GYT_MIN_INSURED_AMOUNT = 257000;
-const VEHICLE_GYT_TYPES = new Set(["particular"]);
+// `nuevo` es una categoría legacy del cotizador para carros/camionetas nuevas.
+// Los tipos comerciales mantienen categorías propias y no entran en esta allowlist.
+const VEHICLE_GYT_TYPES = new Set(["particular", "nuevo"]);
 
 export function roundMoney(value: number): number {
 	return Math.round(value * 100) / 100;

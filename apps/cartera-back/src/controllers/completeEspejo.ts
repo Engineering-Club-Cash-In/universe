@@ -5,9 +5,10 @@ import {
   creditos_inversionistas,
   creditos,
   inversionistas,
+  liquidaciones,
   usuarios,
 } from "../database/db";
-import { eq, inArray, and, ne } from "drizzle-orm";
+import { eq, inArray, and, ne, desc } from "drizzle-orm";
 import z from "zod";
 import jwt from "jsonwebtoken";
 import { sendPlainEmail } from "@cci/email";
@@ -31,12 +32,69 @@ const completeEspejoSchema = z.object({
   aceptada_por_inversionista: z.boolean().optional(),
   // Fecha de inicio de participación (YYYY-MM-DD) elegida manualmente al
   // confirmar una compra de cartera. Si se omite, se usa la fecha de hoy.
-  // Solo afecta al camino de compra (idsOtros); la reinversión la ignora.
+  // Solo afecta al camino de compra (idsOtros): la compra es un flujo aparte,
+  // esporádico, que el operador fecha a mano. La reinversión la ignora porque
+  // deriva su fecha de la liquidación que la generó (obtenerFechaReinversion).
   fecha_participacion: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "fecha_participacion debe tener formato YYYY-MM-DD")
     .optional(),
 });
+
+// ========================================
+// FECHA DE LA REINVERSIÓN
+// ========================================
+
+/** Suma días a un YYYY-MM-DD sin pasar por zonas horarias. */
+function sumarDias(ymd: string, dias: number): string {
+  const [anio, mes, dia] = ymd.split("-").map(Number);
+  const base = new Date(Date.UTC(anio, mes - 1, dia));
+  base.setUTCDate(base.getUTCDate() + dias);
+  return base.toISOString().slice(0, 10);
+}
+
+/**
+ * Fecha con la que se sella una REINVERSIÓN al aceptarla.
+ *
+ * Una reinversión no es una operación suelta: la genera la liquidación (FASE 4
+ * de liquidateByInvestorId). Su lugar en la línea de tiempo es el día siguiente
+ * al de esa liquidación — se liquida el 10, el capital vuelve a trabajar el 11 —
+ * y eso vale igual liquidando al día que poniéndose al corriente meses atrás:
+ * si la liquidación se selló el 2026-04-10, la reinversión es del 2026-04-11
+ * aunque se acepte en agosto.
+ *
+ * Por eso NO se toma del reloj ni se pide en un modal: se deriva de la última
+ * liquidación del inversionista. Sin liquidaciones (reinversión creada a mano)
+ * devuelve null y el llamador cae al instante real.
+ *
+ * Las compras de cartera son otro flujo — esporádico, sin liquidación detrás —
+ * y siguen usando la fecha que el operador elige en el modal de confirmar.
+ */
+async function obtenerFechaReinversion(
+  tx: any,
+  inversionista_id: number,
+): Promise<Date | null> {
+  const [ultima] = await tx
+    .select({ fecha_liquidacion: liquidaciones.fecha_liquidacion })
+    .from(liquidaciones)
+    .where(eq(liquidaciones.inversionista_id, inversionista_id))
+    .orderBy(desc(liquidaciones.fecha_liquidacion))
+    .limit(1);
+
+  if (!ultima?.fecha_liquidacion) return null;
+
+  // El día se lee en UTC, no en hora GT: el front manda la fecha del modal como
+  // `new Date("YYYY-MM-DD").toISOString()`, o sea medianoche UTC del día elegido
+  // (tableInvestors.tsx → handleConfirmarLiquidar). Leerlo en GT (UTC-6) lo
+  // correría al día anterior. Es también como lo lee el resto del código, que
+  // filtra con `fecha_liquidacion::date` sobre una sesión en UTC.
+  const diaLiquidacion = new Date(ultima.fecha_liquidacion)
+    .toISOString()
+    .slice(0, 10);
+  const diaSiguiente = sumarDias(diaLiquidacion, 1);
+  // Mediodía UTC: la conversión a hora GT (UTC-6) no cruza la frontera del día.
+  return new Date(`${diaSiguiente}T12:00:00Z`);
+}
 
 // ========================================
 // CONTROLLER
@@ -68,6 +126,11 @@ export const completeEspejo = async ({ body, set, request }: any) => {
     const resultados: any[] = [];
 
     await db.transaction(async (tx) => {
+      // Fecha de reinversión por inversionista, cacheada entre créditos: el
+      // request suele traer decenas de créditos del mismo inversionista y la
+      // fecha (derivada de su última liquidación) es la misma para todos.
+      const fechasReinversion = new Map<number, Date | null>();
+
       for (const credito_id of creditoIds) {
         const whereConditions = inversionista_id
           ? and(
@@ -78,8 +141,8 @@ export const completeEspejo = async ({ body, set, request }: any) => {
 
         // Capturar status PREVIOS antes de hacer el update.
         // Lo usamos abajo para:
-        //   1) decidir la fecha_inicio_participacion por inversionista
-        //      (pendiente_reinversion → hoy - 2 meses, resto → hoy)
+        //   1) decidir la fecha de cada inversionista (pendiente_reinversion →
+        //      día siguiente a su última liquidación, resto → la del modal)
         //   2) decidir el asunto/encabezado del correo
         const previos = await tx
           .select({
@@ -89,18 +152,10 @@ export const completeEspejo = async ({ body, set, request }: any) => {
           .from(creditos_inversionistas_espejo)
           .where(whereConditions);
 
-        // ── Calcular las dos fechas posibles ──
-        // Para reinversión, la participación arranca 2 meses atrás (la operación
-        // se cierra hoy pero refleja capital que ya venía produciendo).
-        const hoy = new Date();
-        const fechaHoy = hoy.toISOString().split("T")[0];
-        const fechaDosMesesAtras = new Date(
-          hoy.getFullYear(),
-          hoy.getMonth() - 2,
-          hoy.getDate(),
-        )
-          .toISOString()
-          .split("T")[0];
+        // Instante real (UTC). La columna es timestamptz; la conversión a
+        // hora de Guatemala se hace al mostrar/consultar, no al guardar.
+        const ahora = new Date();
+        const fechaHoy = ahora.toISOString().split("T")[0];
 
         // Fecha de participación para el camino de compra (idsOtros): la que
         // el operador eligió manualmente en el modal de confirmar, o hoy si no
@@ -115,32 +170,43 @@ export const completeEspejo = async ({ body, set, request }: any) => {
           .filter((p) => p.status !== "pendiente_reinversion")
           .map((p) => p.inversionista_id);
 
+        // Resolver (una vez por inversionista) la fecha de su reinversión.
+        for (const invId of idsReinversion) {
+          if (!fechasReinversion.has(invId)) {
+            fechasReinversion.set(
+              invId,
+              await obtenerFechaReinversion(tx, invId),
+            );
+          }
+        }
+
         // ── Update espejo: split por status previo, fecha distinta cada uno ──
-        const updatedReinversion =
-          idsReinversion.length > 0
-            ? await tx
-                .update(creditos_inversionistas_espejo)
-                .set({
-                  status: "completado",
-                  updated_at: new Date(),
-                })
-                .where(
-                  and(
-                    eq(creditos_inversionistas_espejo.credito_id, credito_id),
-                    inArray(
-                      creditos_inversionistas_espejo.inversionista_id,
-                      idsReinversion,
-                    ),
-                  ),
-                )
-                .returning({
-                  id: creditos_inversionistas_espejo.id,
-                  credito_id: creditos_inversionistas_espejo.credito_id,
-                  inversionista_id:
-                    creditos_inversionistas_espejo.inversionista_id,
-                  status: creditos_inversionistas_espejo.status,
-                })
-            : [];
+        // La reinversión va inversionista por inversionista porque cada uno se
+        // sella con la fecha de SU última liquidación.
+        const updatedReinversion: any[] = [];
+        for (const invId of idsReinversion) {
+          const fechaReinv = fechasReinversion.get(invId) ?? ahora;
+          const filas = await tx
+            .update(creditos_inversionistas_espejo)
+            .set({
+              status: "completado",
+              updated_at: fechaReinv,
+            })
+            .where(
+              and(
+                eq(creditos_inversionistas_espejo.credito_id, credito_id),
+                eq(creditos_inversionistas_espejo.inversionista_id, invId),
+              ),
+            )
+            .returning({
+              id: creditos_inversionistas_espejo.id,
+              credito_id: creditos_inversionistas_espejo.credito_id,
+              inversionista_id:
+                creditos_inversionistas_espejo.inversionista_id,
+              status: creditos_inversionistas_espejo.status,
+            });
+          updatedReinversion.push(...filas);
+        }
 
         const updatedOtros =
           idsOtros.length > 0
@@ -209,10 +275,6 @@ export const completeEspejo = async ({ body, set, request }: any) => {
               ne(compras_credito_inversionista.status, "completado"),
             );
 
-        // Instante real (UTC). La columna es timestamptz; la conversión a
-        // hora de Guatemala se hace al mostrar/consultar, no al guardar.
-        const ahora = new Date();
-
         // fecha_completada de la COMPRA de cartera: se ancla a la misma fecha
         // que fecha_inicio_participacion (la elegida en el modal). Así ambos
         // campos caen en el mismo mes y los cálculos de liquidación que datan
@@ -220,7 +282,8 @@ export const completeEspejo = async ({ body, set, request }: any) => {
         // MesActual, calcularAjusteCompras) coinciden con el mes de participación.
         // Se ancla a mediodía para que la conversión a hora GT (UTC-6) no cruce
         // la frontera de día. Si no vino fecha del modal, cae al instante real.
-        // La reinversión NO manda fecha_participacion → mantiene `ahora`.
+        // La reinversión no usa esta fecha: deriva la suya de su liquidación
+        // (ver obtenerFechaReinversion).
         const fechaCompletadaCompra = fecha_participacion
           ? new Date(`${fecha_participacion}T12:00:00Z`)
           : ahora;
@@ -243,6 +306,40 @@ export const completeEspejo = async ({ body, set, request }: any) => {
             ),
           );
 
+        // La REINVERSIÓN se data con el día siguiente a la liquidación que la
+        // generó, no con el reloj: así el calcular pagos del mes siguiente la
+        // encuentra en su período real aunque el inversionista se esté poniendo
+        // al corriente meses después. Se sellan TODAS las columnas de fecha
+        // (created_at / fecha / fecha_completada / updated_at) con el mismo
+        // instante — created_at importa porque `montoRestarValidacion` decide
+        // por él si la reinversión ya está reflejada en el último histórico, y
+        // dejarlo en el reloj real reventaba el cuadre con [MONTO_ESPEJO_
+        // INCONSISTENTE] al calcular el segundo mes del catch-up.
+        for (const invId of idsReinversion) {
+          const fechaReinv = fechasReinversion.get(invId) ?? ahora;
+          await tx
+            .update(compras_credito_inversionista)
+            .set({
+              status: "completado",
+              created_at: fechaReinv,
+              fecha: fechaReinv,
+              fecha_completada: fechaReinv,
+              updated_at: fechaReinv,
+            })
+            .where(
+              and(
+                eq(compras_credito_inversionista.credito_id, credito_id),
+                eq(compras_credito_inversionista.inversionista_id, invId),
+                ne(compras_credito_inversionista.status, "completado"),
+                eq(compras_credito_inversionista.tipo_operacion, "reinversion"),
+              ),
+            );
+        }
+
+        // Barrida final: reinversiones cuyo espejo ya estaba en "completado"
+        // pero cuya compra quedó pendiente (estado inconsistente). No tienen
+        // liquidación de referencia en este request, así que se cierran con el
+        // instante real, como antes.
         await tx
           .update(compras_credito_inversionista)
           .set({

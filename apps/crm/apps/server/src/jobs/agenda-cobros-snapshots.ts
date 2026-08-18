@@ -105,6 +105,19 @@ export async function cerrarSnapshotsAgenda(
 		// D-0 y promesa_hoy simultáneos a un solo item con motivo 'D-0' (D-0
 		// gana prioridad). Filtrar por 'promesa_hoy' acá dejaba ese caso sin
 		// acreditar el pago aunque la promesa se cumpliera.
+		//
+		// Sin filtro por cc.realizado_por = s.asesor_id (a propósito, a
+		// diferencia del JOIN de `primeros` más abajo): si el crédito se
+		// reasigna de asesor DESPUÉS de registrada la promesa pero ANTES del
+		// cierre, el snapshot de hoy ya lo captura bajo el asesor NUEVO
+		// (obtenerAgendaTodosAsesores usa el pool actual), pero
+		// contactos_cobros.realizado_por sigue apuntando al asesor VIEJO que
+		// la registró. El pago es resultado del cliente, no de quién llamó
+		// (mismo criterio que promesa_cumplida en general, ver comentario de
+		// la migración 0036) — exigir mismo asesor acá dejaba ese pago sin
+		// acreditar en ningún snapshot. El match sigue acotado al MISMO
+		// crédito (caso_cobro_id o SIFCO), así que no puede acreditar el pago
+		// de un crédito ajeno al item (Codex PR #1330).
 		await client.query(
 			`WITH promesas_cumplidas AS (
 				SELECT DISTINCT ON (i.id)
@@ -114,8 +127,7 @@ export async function cerrarSnapshotsAgenda(
 				FROM agenda_cobros_snapshots s
 				JOIN agenda_cobros_snapshot_items i ON i.snapshot_id = s.id
 				JOIN contactos_cobros cc
-				  ON cc.realizado_por = s.asesor_id
-				 AND cc.estado_contacto = 'promesa_pago'
+				  ON cc.estado_contacto = 'promesa_pago'
 				 AND cc.estado_promesa = 'cumplida'
 				 AND cc.fecha_proximo_contacto >= ($1::date + interval '6 hours')
 				 AND cc.fecha_proximo_contacto < ($1::date + interval '1 day 6 hours')

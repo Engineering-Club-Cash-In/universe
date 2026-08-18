@@ -110,6 +110,21 @@ const fetchAgendaPageProduccion: FetchAgendaPage = (
 	perPage,
 ) => obtenerPaginaAgenda(dia, { asesorId, page, perPage });
 
+/**
+ * Limitación conocida (catch-up de boot tardío): `getCuotasProximasVencer`
+ * es un endpoint LIVE de cartera-back, sin cache — refleja pagos y ajustes
+ * de fecha al instante (ver el comentario en cartera-back-client.ts junto a
+ * esta llamada). Si el boot corre horas después de medianoche GT y una
+ * cuota D-0 ya se pagó ANTES de que el catch-up corra, esa cuota ya
+ * desapareció de "próximas a vencer" y este fetch nunca la ve — queda fuera
+ * del snapshot de "inicio de día" aunque SÍ estaba planificada para hoy. El
+ * `hoy` inyectado en obtenerColaOperacionAsesor (más abajo) NO corrige esto:
+ * solo fija la clasificación de contacto CRM, no recupera ítems D-0 que la
+ * fuente externa ya dejó de reportar. No hay fix limpio sin que cartera-back
+ * exponga un endpoint histórico/point-in-time, o que el CRM guarde su
+ * propio snapshot de "qué vence hoy" antes de las 00:00 (ninguno existe hoy)
+ * (Codex PR #1330).
+ */
 export async function obtenerAgendaAsesor(
 	asesor: AsesorAgenda,
 	buscarPagina: FetchAgendaPage = fetchAgendaPageProduccion,

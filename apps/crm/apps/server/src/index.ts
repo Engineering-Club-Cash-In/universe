@@ -1558,6 +1558,14 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// CB-020: también cierra el día evaluando TODAS las promesas de pago activas
 	// (pendiente/incumplida) sin depender de que alguien abra el caso — ver
 	// check-promesas-pago.ts.
+	//
+	// CB-128: el cierre de snapshots de agenda se dispara DESDE ACÁ, después de
+	// que checkPromesasPago() resuelve, en vez de un setTimeout independiente a
+	// las 00:05 GT — checkPromesasPago hace un getCredito secuencial por SIFCO
+	// contra cartera-back y puede tardar más de 5 minutos, y cerrarSnapshotsAgenda
+	// lee contactos_cobros.estado_promesa: si corriera en paralelo podría leer
+	// una promesa que YA se cumplió pero cuyo estado todavía no se actualizó,
+	// perdiendo ese pago para siempre en el snapshot del día (Codex PR #1330).
 	function scheduleAtMidnightGT() {
 		const now = new Date();
 		const next = new Date();
@@ -1566,6 +1574,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		setTimeout(async () => {
 			await procesarSeguimientosRecurrentes().catch(console.error);
 			await checkPromesasPago().catch(console.error);
+			await ejecutarAgendaCobrosDiaria().catch(console.error);
 			scheduleAtMidnightGT();
 		}, next.getTime() - now.getTime());
 	}
@@ -1656,26 +1665,19 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		}
 	}, 25_000);
 
-	// Snapshot de cumplimiento de Agenda: 00:05 GT (= 06:05 UTC). Primero
-	// cierra ayer completo y después congela D-0 de hoy (solo cuotas que
-	// vencen HOY, no D0-D5 — ver obtenerAgendaAsesor en agenda-cobros-source.ts).
-	// Advisory lock + constraints únicos hacen seguros timer, reinicio y
-	// múltiples instancias.
-	function scheduleAtAgendaCobrosGT() {
-		const now = new Date();
-		const next = new Date();
-		next.setUTCHours(6, 5, 0, 0);
-		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-		setTimeout(async () => {
-			await ejecutarAgendaCobrosDiaria().catch(console.error);
-			scheduleAtAgendaCobrosGT();
-		}, next.getTime() - now.getTime());
-	}
-	scheduleAtAgendaCobrosGT();
+	// Snapshot de cumplimiento de Agenda: se dispara desde scheduleAtMidnightGT
+	// (arriba), encadenado DESPUÉS de checkPromesasPago — no tiene timer propio
+	// a las 00:05 GT (ver comentario ahí sobre por qué el margen fijo no
+	// alcanza). Cierra ayer completo y después congela D-0 de hoy (solo cuotas
+	// que vencen HOY, no D0-D5 — ver obtenerAgendaAsesor en
+	// agenda-cobros-source.ts). Advisory lock + constraints únicos hacen
+	// seguros timer, reinicio y múltiples instancias.
 
 	// Catch-up del mismo día tras deploy/reinicio posterior a 00:05 GT. No hace
 	// backfill: solo reintenta cierre de ayer y captura de hoy; snapshots ya
-	// existentes permanecen congelados.
+	// existentes permanecen congelados. Es independiente del encadenado de
+	// arriba porque en un boot tardío scheduleAtMidnightGT nunca corrió en ESTA
+	// instancia del proceso.
 	setTimeout(() => {
 		const bootNow = new Date();
 		const horaGT = (bootNow.getUTCHours() + 18) % 24;

@@ -201,3 +201,48 @@ describe("aseguradora", () => {
     expect(r.numero_poliza).toBeNull();
   });
 });
+
+// Los conteos y la cuota actual salen de una consulta que canoniza las cuotas
+// (una fila por numero_cuota, la de cuota_id mayor) y descarta las que tienen
+// un pago esperando validación. Eso vive en SQL —`consultaDeCuotas`— y se
+// verificó contra el sandbox; acá se fija el CONTRATO que esa consulta debe
+// cumplir, para que un cambio futuro no lo rompa en silencio.
+describe("contrato de la consulta de cuotas (Codex PR #1326)", () => {
+  it("una cuota con pago en revisión no está atrasada NI es la actual", () => {
+    // Lo que la consulta devuelve cuando la única cuota vencida tiene boleta
+    // subida: no cuenta como atraso y tampoco se le pide pagarla.
+    const r = armarResumen({
+      ...base,
+      conteos: { atrasadas: 0, pagadas: 3 },
+      pendientes: {
+        numero_pendiente: 4,
+        fecha_pendiente: "2026-09-30",
+        proxima_futura: "2026-09-30",
+      },
+    });
+
+    expect(r.cuotas_atrasadas).toBe(0);
+    // Antes de este arreglo, acá salía la cuota 3 —la que el cliente acababa
+    // de pagar— mientras el conteo decía 0 atrasadas.
+    expect(r.cuota_actual?.numero).toBe(4);
+    expect(r.cuota_actual?.vencida).toBe(false);
+  });
+
+  it("las cuotas duplicadas cuentan una sola vez", () => {
+    // 78 grupos duplicados en 51 créditos del sandbox: mismo numero_cuota con
+    // dos cuota_id. Hoy ninguna pareja tiene ambas copias vencidas, pero si la
+    // tuviera, contar filas físicas le mostraría 2 atrasos por una sola cuota.
+    const r = armarResumen({
+      ...base,
+      conteos: { atrasadas: 1, pagadas: 0 },
+      pendientes: {
+        numero_pendiente: 17,
+        fecha_pendiente: "2026-07-30",
+        proxima_futura: "2026-08-30",
+      },
+    });
+
+    expect(r.cuotas_atrasadas).toBe(1);
+    expect(r.cuota_actual?.numero).toBe(17);
+  });
+});

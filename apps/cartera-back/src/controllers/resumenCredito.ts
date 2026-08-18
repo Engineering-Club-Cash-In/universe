@@ -21,13 +21,12 @@
  */
 
 import Big from "big.js";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../database/index";
 import {
 	aseguradoras,
 	convenios_pago,
 	creditos,
-	cuotas_credito,
 	moras_credito,
 	pagos_credito,
 	SQL_CARTERA_SCHEMA,
@@ -98,18 +97,63 @@ export type ResultadoResumen =
 	| { encontrado: false };
 
 /**
- * Cuotas atrasadas: vencidas, sin pagar y sin un pago esperando validación.
+ * Todo lo que se dice sobre las cuotas, en una sola consulta.
  *
- * Es la misma regla de `getCreditoByNumero`. Un pago subido y pendiente de
- * revisión NO cuenta como atraso: el cliente ya pagó, falta que cobranza lo
- * valide, y decirle "estás atrasado" sería mentirle.
+ * Dos cosas que no son obvias y que Codex marcó en el PR #1326:
+ *
+ * 1. **Se deduplica por `numero_cuota`, quedándose con el `cuota_id` mayor.**
+ *    Hay créditos con filas duplicadas en `cuotas_credito` —mismo número, id
+ *    distinto, artefacto del flujo viejo de abonos—: 78 grupos en 51 créditos
+ *    del sandbox. Hoy ninguna pareja tiene las dos copias vencidas a la vez, así
+ *    que el conteo por filas físicas todavía no se desvía; en cuanto pase, el
+ *    cliente vería una cuota atrasada de más. Es la misma canonicalización que
+ *    hace `registerPayment` (dedupe por número, gana la copia más reciente
+ *    porque es la que trae el recibo vigente), y conviene que las dos lecturas
+ *    del mismo dato no discrepen.
+ *
+ * 2. **Un pago esperando validación saca a la cuota de TODOS los cálculos**, no
+ *    solo del conteo de atrasos. Antes el filtro estaba únicamente en las
+ *    atrasadas, así que un cliente que subió su boleta podía recibir "0 cuotas
+ *    atrasadas" y, a la vez, "te toca pagar la cuota 8" — la que acababa de
+ *    pagar. El cliente ya pagó; falta que cobranza lo valide. (En el sandbox no
+ *    hay ninguna cuota en ese estado hoy, pero la contradicción aparecía sola en
+ *    cuanto alguien subiera una boleta.)
  */
-const SIN_PAGO_EN_REVISION = sql`NOT EXISTS (
-	SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p_pending
-	WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
-	  AND p_pending.validation_status = 'pending'
-	  AND p_pending.pagado = true
-)`;
+function consultaDeCuotas(creditoId: number, hoy: string) {
+	return sql`
+		WITH canonicas AS (
+			SELECT DISTINCT ON (q.numero_cuota)
+				q.cuota_id, q.numero_cuota, q.fecha_vencimiento, q.pagado
+			FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito q
+			WHERE q.credito_id = ${creditoId}
+			ORDER BY q.numero_cuota, q.cuota_id DESC
+		),
+		vigentes AS (
+			SELECT * FROM canonicas c
+			WHERE NOT EXISTS (
+				SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+				WHERE p.cuota_id = c.cuota_id
+					AND p.validation_status = 'pending'
+					AND p.pagado = true
+			)
+		)
+		SELECT
+			COUNT(*) FILTER (
+				WHERE NOT pagado AND fecha_vencimiento < ${hoy}
+			)::int AS atrasadas,
+			COUNT(*) FILTER (WHERE pagado)::int AS pagadas,
+			-- La cuota actual es la de menor NÚMERO sin pagar, y su fecha es la de
+			-- esa misma fila: tomar el MIN de cada columna por separado podría
+			-- mezclar dos cuotas distintas si las fechas no siguen el orden.
+			(SELECT numero_cuota FROM vigentes WHERE NOT pagado
+				ORDER BY numero_cuota LIMIT 1)::int AS numero_pendiente,
+			(SELECT fecha_vencimiento::text FROM vigentes WHERE NOT pagado
+				ORDER BY numero_cuota LIMIT 1) AS fecha_pendiente,
+			(SELECT MIN(fecha_vencimiento)::text FROM vigentes
+				WHERE NOT pagado AND fecha_vencimiento >= ${hoy}) AS proxima_futura
+		FROM vigentes
+	`;
+}
 
 export async function obtenerResumenCredito(
 	numeroCreditoSifco: string,
@@ -137,7 +181,7 @@ export async function obtenerResumenCredito(
 
 	// Todo lo que sigue es independiente entre sí: va en paralelo para no pagar
 	// la latencia de cada consulta una detrás de otra.
-	const [abonos, conteos, pendientes, mora, convenio, aseguradora] =
+	const [abonos, cuotas, mora, convenio, aseguradora] =
 		await Promise.all([
 			db
 				.select({
@@ -151,39 +195,13 @@ export async function obtenerResumenCredito(
 					),
 				),
 
-			db
-				.select({
-					atrasadas: sql<number>`COUNT(*) FILTER (
-						WHERE ${cuotas_credito.pagado} = false
-						  AND ${cuotas_credito.fecha_vencimiento} < ${hoy}
-					)::int`,
-					pagadas: sql<number>`COUNT(*) FILTER (WHERE ${cuotas_credito.pagado} = true)::int`,
-				})
-				.from(cuotas_credito)
-				.where(
-					and(eq(cuotas_credito.credito_id, creditoId), SIN_PAGO_EN_REVISION),
-				),
-
-			// La más vieja sin pagar y la primera que aún no vence, en una sola
-			// consulta: `MIN(...) FILTER` evita ir dos veces por lo mismo.
-			db
-				.select({
-					numero_pendiente: sql<
-						number | null
-					>`MIN(${cuotas_credito.numero_cuota})::int`,
-					fecha_pendiente: sql<
-						string | null
-					>`MIN(${cuotas_credito.fecha_vencimiento})`,
-					proxima_futura: sql<string | null>`MIN(${cuotas_credito.fecha_vencimiento})
-						FILTER (WHERE ${cuotas_credito.fecha_vencimiento} >= ${hoy})`,
-				})
-				.from(cuotas_credito)
-				.where(
-					and(
-						eq(cuotas_credito.credito_id, creditoId),
-						eq(cuotas_credito.pagado, false),
-					),
-				),
+			db.execute<{
+				atrasadas: number;
+				pagadas: number;
+				numero_pendiente: number | null;
+				fecha_pendiente: string | null;
+				proxima_futura: string | null;
+			}>(consultaDeCuotas(creditoId, hoy)),
 
 			db
 				.select({
@@ -230,13 +248,23 @@ export async function obtenerResumenCredito(
 						.limit(1),
 		]);
 
+	const [filaCuotas] = cuotas.rows as Array<{
+		atrasadas: number;
+		pagadas: number;
+		numero_pendiente: number | null;
+		fecha_pendiente: string | null;
+		proxima_futura: string | null;
+	}>;
+
 	return {
 		encontrado: true,
 		resumen: armarResumen({
 			credito,
 			totalAbonos: abonos[0]?.total ?? "0",
-			conteos: conteos[0] ?? { atrasadas: 0, pagadas: 0 },
-			pendientes: pendientes[0] ?? null,
+			conteos: filaCuotas
+				? { atrasadas: filaCuotas.atrasadas, pagadas: filaCuotas.pagadas }
+				: { atrasadas: 0, pagadas: 0 },
+			pendientes: filaCuotas,
 			mora: mora[0] ?? null,
 			convenio: convenio[0] ?? null,
 			nombreAseguradora: aseguradora[0]?.nombre ?? null,

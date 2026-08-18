@@ -1009,6 +1009,8 @@ export class CarteraBackClient {
 	 * en cartera— y el bot necesita siete datos. Este endpoint responde 421
 	 * bytes con las mismas reglas de negocio (capital activo, cuotas atrasadas)
 	 * calculadas del lado de cartera, que es donde viven.
+	 *
+	 * **No se cachea**: son cifras que cambian con cada pago. Ver abajo.
 	 */
 	async getResumenCredito(
 		numeroSifco: string,
@@ -1017,7 +1019,12 @@ export class CarteraBackClient {
 			return await this.request<ResumenCreditoResponse>(
 				`/credito/resumen?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
 				{ method: "GET" },
-				true, // cacheado: el cliente navega el menú, no cambia el saldo
+				// SIN caché, a diferencia de `getCredito`. Acá viajan saldo, mora,
+				// estado y convenio: si el cliente paga y vuelve a abrir el menú, el
+				// caché de 5 min le seguiría mostrando el saldo anterior y diciéndole
+				// que tiene cuotas atrasadas. Un pago hecho en cartera no invalida un
+				// caché que vive en el CRM (Codex, PR #1326).
+				false,
 			);
 		} catch (error) {
 			// 404 = el crédito no está en cartera. No es una falla del servicio.

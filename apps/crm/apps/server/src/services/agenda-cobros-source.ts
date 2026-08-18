@@ -228,15 +228,21 @@ export async function obtenerColaOperacionAsesor(
 	const casoIds = [...casoPorSifco.values()].map((caso) => caso.id);
 
 	const [promesas, ultimosContactos] = await Promise.all([
+		// `createdAt < hoy`: la promesa debe haber EXISTIDO al boundary
+		// 00:00 GT para contar como planificada ese día — una promesa que un
+		// asesor registra recién esta mañana (catch-up de boot tardío, antes
+		// de las 00:00 GT no existía) no debe entrar al universo aunque
+		// prometa pago para "hoy", o infla total_planificado con algo que
+		// nunca estuvo planificado al momento del corte.
+		//
 		// Además de pendiente/incumplida, se incluyen las YA cumplidas cuyo
 		// updatedAt (última escritura de sistema sobre la fila, ver el
 		// comentario de esa columna en db/schema/cobros.ts) cae DESPUÉS de
-		// `hoy` (el boundary 00:00 GT del día que se captura): en un catch-up
-		// de boot tardío, checkPromesasPago puede haber marcado la promesa
-		// cumplida horas después de medianoche pero antes de que este fetch
-		// corra — sin esto, la promesa desaparece del universo completo (no
-		// solo se reclasifica) y el crédito se pierde del snapshot si no
-		// calificaba por D-0/SLA (Codex PR #1330).
+		// `hoy`: en un catch-up de boot tardío, checkPromesasPago puede haber
+		// marcado la promesa cumplida horas después de medianoche pero antes
+		// de que este fetch corra — sin esto, la promesa desaparece del
+		// universo completo (no solo se reclasifica) y el crédito se pierde
+		// del snapshot si no calificaba por D-0/SLA (Codex PR #1330, #1331).
 		casoIds.length === 0
 			? Promise.resolve([])
 			: db
@@ -252,6 +258,7 @@ export async function obtenerColaOperacionAsesor(
 							inArray(contactosCobros.casoCobroId, casoIds),
 							eq(contactosCobros.estadoContacto, "promesa_pago"),
 							isNotNull(contactosCobros.fechaProximoContacto),
+							lt(contactosCobros.createdAt, hoy),
 							or(
 								eq(contactosCobros.estadoPromesa, "pendiente"),
 								eq(contactosCobros.estadoPromesa, "incumplida"),

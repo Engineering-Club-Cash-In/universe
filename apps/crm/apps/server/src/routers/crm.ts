@@ -51,6 +51,7 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
+import { licenseQrVerifications } from "../db/schema/license-verification";
 import { quotations } from "../db/schema/quotations";
 import {
 	carryForwardAnalysisChecklistVerificationState,
@@ -1940,6 +1941,33 @@ export const crmRouter = {
 						eq(opportunityStageHistory.opportunityId, input.opportunityId),
 					);
 
+				// Se necesita antes del snapshot (para archivar las verificaciones) y
+				// antes del delete de abajo (para no reventar la FK NO ACTION) — una
+				// sola consulta para ambos usos.
+				const opportunityCoDebtors = await tx
+					.select({ id: coDebtors.id })
+					.from(coDebtors)
+					.where(eq(coDebtors.opportunityId, input.opportunityId));
+
+				const licenseVerificationCondition = or(
+					eq(licenseQrVerifications.opportunityId, input.opportunityId),
+					opportunityCoDebtors.length > 0
+						? inArray(
+								licenseQrVerifications.coDebtorId,
+								opportunityCoDebtors.map((c) => c.id),
+							)
+						: undefined,
+				);
+
+				// Se archivan las filas completas ANTES de borrarlas — si no, borrar
+				// una oportunidad temprana destruye para siempre la trazabilidad
+				// (QR, respuesta de Tránsito, motivo de fallo) que este feature
+				// existe para conservar.
+				const licenseVerificationRows = await tx
+					.select()
+					.from(licenseQrVerifications)
+					.where(licenseVerificationCondition);
+
 				const snapshot = buildDeletedOpportunitySnapshot({
 					opportunity,
 					stage: opportunity.stage,
@@ -1958,6 +1986,25 @@ export const crmRouter = {
 							(financialStatementsCount?.count ?? 0),
 						stageHistory: stageHistoryCount?.count ?? 0,
 					},
+					licenseVerifications: licenseVerificationRows.map((row) => ({
+						id: row.id,
+						subjectType: row.leadId ? ("lead" as const) : ("coDebtor" as const),
+						subjectId: (row.leadId ?? row.coDebtorId)!,
+						result: row.result,
+						qrRawUrl: row.qrRawUrl,
+						qrDomainValid: row.qrDomainValid,
+						cardCode: row.cardCode,
+						apiResponseCode: row.apiResponseCode,
+						licenseHolderName: row.licenseHolderName,
+						licenseNumber: row.licenseNumber,
+						licenseExpiresAt: row.licenseExpiresAt,
+						identityMatchScore: row.identityMatchScore,
+						failureReason: row.failureReason,
+						documentKey: row.documentKey,
+						rawResponse: row.rawResponse,
+						createdAt: row.createdAt,
+						createdBy: row.createdBy,
+					})),
 				});
 
 				const leadName = snapshot.lead?.fullName ?? null;
@@ -1985,6 +2032,13 @@ export const crmRouter = {
 					.update(clients)
 					.set({ opportunityId: null })
 					.where(eq(clients.opportunityId, input.opportunityId));
+
+				// FK NO ACTION: sin este delete, el de abajo revienta si hay
+				// verificaciones asociadas. Ya se archivaron arriba (licenseVerificationRows)
+				// antes de llegar acá.
+				await tx
+					.delete(licenseQrVerifications)
+					.where(licenseVerificationCondition);
 
 				await tx
 					.delete(opportunities)
@@ -6935,6 +6989,11 @@ export const crmRouter = {
 			await db
 				.delete(creditAnalysis)
 				.where(eq(creditAnalysis.coDebtorId, input.id));
+
+			// Mismo motivo: FK NO ACTION, sin esto el borrado de abajo revienta.
+			await db
+				.delete(licenseQrVerifications)
+				.where(eq(licenseQrVerifications.coDebtorId, input.id));
 
 			const [deletedCoDebtor] = await db
 				.delete(coDebtors)

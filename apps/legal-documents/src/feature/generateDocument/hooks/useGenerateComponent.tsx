@@ -25,6 +25,8 @@ interface DocumentData {
   // Step 3 (firmante)
   dpi?: string;
   renapData?: RenapData;
+  /** Genero elegido a mano cuando RENAP no devolvio a la persona */
+  manualGender?: "M" | "F";
   documents?: Document[];
   fields?: Field[];
   // Step 4 (configuración)
@@ -115,6 +117,7 @@ export function useGenerateComponent() {
       ...prev,
       dpi: undefined,
       renapData: undefined,
+      manualGender: undefined,
       documents: undefined,
       fields: undefined,
       fieldValues: undefined,
@@ -134,7 +137,13 @@ export function useGenerateComponent() {
               formData.documentTypes && formData.documentTypes.length > 0
             );
           case 3:
-            return !!(formData.renapData && formData.dpi);
+            // Con RENAP basta con sus datos; sin RENAP se sigue con el genero
+            // elegido a mano, que es lo que define la plantilla.
+            return !!(
+              formData.dpi &&
+              (formData.renapData ||
+                (formData.manualGender && formData.documents?.length))
+            );
           case 4:
             return true;
           case 5:
@@ -151,6 +160,8 @@ export function useGenerateComponent() {
       formData.category,
       formData.documentTypes,
       formData.renapData,
+      formData.manualGender,
+      formData.documents,
       formData.dpi,
       step3Valid,
     ]
@@ -220,7 +231,10 @@ export function useGenerateComponent() {
           // Determinar el género: para "declaracion_vendedor" usar genderVendedor, sino usar el del cliente
           const isVendedorDoc = document.nombre_documento === "declaracion_vendedor";
           const vendedorGender = formData.fieldValues?.genderVendedor;
-          const genderSource = isVendedorDoc && vendedorGender ? vendedorGender : formData.renapData?.gender;
+          // Sin RENAP el genero viene del que se eligio a mano en el paso del
+          // DPI; sin esto todos los documentos salian en femenino por defecto.
+          const clienteGender = formData.renapData?.gender ?? formData.manualGender;
+          const genderSource = isVendedorDoc && vendedorGender ? vendedorGender : clienteGender;
           const gender = genderSource === "M" ? "male" : "female";
 
           const name = formData.fieldValues?.nombreCompleto || "" + "_";

@@ -60,7 +60,10 @@ import {
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
-import { checkPromesasPago } from "./services/check-promesas-pago";
+import {
+	type CheckPromesasResumen,
+	checkPromesasPago,
+} from "./services/check-promesas-pago";
 import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendConvenioReminders } from "./services/send-convenio-reminders";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
@@ -1438,6 +1441,26 @@ if (!TAREAS_PROGRAMADAS_ACTIVAS) {
 }
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
+	// checkPromesasPago traga sus propios errores de persistencia por SIFCO
+	// (todo-o-nada por lote, ver check-promesas-pago.ts) y siempre resuelve
+	// normalmente — nunca rechaza, así que un simple .catch() no detecta que
+	// algo falló. Si errores>0, el cierre de snapshot que sigue puede leer
+	// contactos_cobros.estado_promesa desactualizado para esos SIFCOs. No se
+	// aborta el cierre por esto (cartera-back con fallos intermitentes
+	// dejaría el snapshot sin cerrar indefinidamente, peor que un dato
+	// puntual stale) — solo se deja rastro explícito para investigar
+	// (Codex PR #1330).
+	function logSiErroresPromesas(resumen: {
+		errores: number;
+		evaluadas: number;
+	}): void {
+		if (resumen.errores > 0) {
+			console.error(
+				`[AgendaCobrosSnapshot] checkPromesasPago tuvo ${resumen.errores} error(es) de ${resumen.evaluadas} promesas evaluadas; el cierre de snapshot puede leer estado_promesa desactualizado para esos casos.`,
+			);
+		}
+	}
+
 	// Job periódico de notificaciones de cobros (cada hora)
 	setInterval(
 		async () => {
@@ -1450,11 +1473,16 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		60 * 60 * 1000,
 	);
 
-	// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista)
+	// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista).
+	// checkPromesasPago se guarda en una promesa module-level: el catch-up de
+	// agenda de cobros (más abajo) la espera antes de cerrar snapshots, mismo
+	// motivo que el encadenado del timer normal de medianoche (Codex PR #1330).
+	let checkPromesasPagoBoot: Promise<CheckPromesasResumen | void> =
+		Promise.resolve();
 	setTimeout(() => {
 		checkSeguimientosVencidos().catch(console.error);
 		procesarSeguimientosRecurrentes().catch(console.error);
-		checkPromesasPago().catch(console.error);
+		checkPromesasPagoBoot = checkPromesasPago().catch(console.error);
 	}, 10_000);
 
 	// Recordatorios Premora (CC2-11): diario a las 8:00 GT (= 14:00 UTC, GT no
@@ -1573,7 +1601,8 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
 		setTimeout(async () => {
 			await procesarSeguimientosRecurrentes().catch(console.error);
-			await checkPromesasPago().catch(console.error);
+			const resumenPromesas = await checkPromesasPago().catch(console.error);
+			if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
 			await ejecutarAgendaCobrosDiaria().catch(console.error);
 			scheduleAtMidnightGT();
 		}, next.getTime() - now.getTime());
@@ -1678,12 +1707,35 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// existentes permanecen congelados. Es independiente del encadenado de
 	// arriba porque en un boot tardío scheduleAtMidnightGT nunca corrió en ESTA
 	// instancia del proceso.
-	setTimeout(() => {
+	//
+	// Espera checkPromesasPagoBoot antes de correr: mismo race que el timer
+	// normal (checkPromesasPago puede tardar minutos con su loop secuencial
+	// contra cartera-back), pero acá el catch-up y el checkPromesasPago de
+	// boot tenían delays independientes (30s vs 10s) y podían solaparse
+	// (Codex PR #1330).
+	//
+	// Si el boot cae EXACTO entre 00:00 y 00:04:59 GT, scheduleAtMidnightGT ya
+	// movió su timer a mañana (next <= now) y este catch-up, sin más, se
+	// hubiera quedado callado hasta el próximo boot — perdiendo cierre de ayer
+	// Y captura de hoy por un día entero. En ese caso se agenda el resto exacto
+	// hasta las 00:05 GT en vez de omitir.
+	setTimeout(async () => {
 		const bootNow = new Date();
 		const horaGT = (bootNow.getUTCHours() + 18) % 24;
 		const minutoGT = bootNow.getUTCMinutes();
-		if (horaGT > 0 || (horaGT === 0 && minutoGT >= 5)) {
-			ejecutarAgendaCobrosDiaria().catch(console.error);
+		const yaPasaronLas0005GT = horaGT > 0 || minutoGT >= 5;
+		if (yaPasaronLas0005GT) {
+			const resumenPromesas = await checkPromesasPagoBoot;
+			if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
+			await ejecutarAgendaCobrosDiaria().catch(console.error);
+		} else {
+			const proximaVentana = new Date();
+			proximaVentana.setUTCHours(6, 5, 0, 0);
+			setTimeout(async () => {
+				const resumenPromesas = await checkPromesasPagoBoot;
+				if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
+				await ejecutarAgendaCobrosDiaria().catch(console.error);
+			}, proximaVentana.getTime() - bootNow.getTime());
 		}
 	}, 30_000);
 }

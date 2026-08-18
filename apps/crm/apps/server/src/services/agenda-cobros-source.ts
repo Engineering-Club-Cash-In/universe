@@ -341,11 +341,23 @@ export async function obtenerAgendaTodosAsesores(
 	);
 	const agendas: AgendaSnapshotItemFuente[] = [];
 	for (const asesor of asesores) {
-		const [vencenHoy, colaOperacion] = await Promise.all([
-			obtenerAgendaAsesor(asesor),
-			obtenerColaOperacionAsesor(asesor, hoy),
-		]);
-		agendas.push(...deduplicarAgenda([...vencenHoy, ...colaOperacion]));
+		// try/catch por asesor: un fallo transitorio de cartera-back para UNO
+		// no debe descartar lo ya acumulado de los demás. Sin esto, un solo
+		// asesor caído tumbaba el snapshot del EQUIPO COMPLETO ese día — y
+		// como el cierre solo revisita el día inmediatamente anterior, ese
+		// día quedaba sin captura para siempre (Codex PR #1330).
+		try {
+			const [vencenHoy, colaOperacion] = await Promise.all([
+				obtenerAgendaAsesor(asesor),
+				obtenerColaOperacionAsesor(asesor, hoy),
+			]);
+			agendas.push(...deduplicarAgenda([...vencenHoy, ...colaOperacion]));
+		} catch (error) {
+			console.error(
+				`[AgendaCobrosSnapshot] Falló la agenda de ${asesor.nombre} (${asesor.userId}); se omite del snapshot de hoy:`,
+				error,
+			);
+		}
 	}
 
 	const sifcos = [...new Set(agendas.map((item) => item.numeroCreditoSifco))];

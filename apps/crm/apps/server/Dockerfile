@@ -6,48 +6,30 @@ WORKDIR /usr/src/app
 # Etapa: compilar la app
 # =========================
 FROM base AS builder
-WORKDIR /usr/src/app
+WORKDIR /app
 
-# Copiamos los paquetes locales (infornet, sms, simpletech, email)
+# Manifiestos primero: install reproducible y cacheable por capa.
+# El bun.lock vive en apps/crm (raíz del workspace), así que se instala desde
+# ahí — igual que el Dockerfile de crm-web. Sin esto el build resolvía los
+# caret ranges a la última versión publicada en cada rebuild.
+COPY apps/crm/package.json apps/crm/bun.lock ./apps/crm/
+COPY apps/crm/apps/web/package.json ./apps/crm/apps/web/
+COPY apps/crm/apps/server/package.json ./apps/crm/apps/server/
+
+# Paquetes locales que el server referencia con file:../../../../packages/*
 COPY packages/infornet ./packages/infornet
 COPY packages/sms ./packages/sms
 COPY packages/simpletech ./packages/simpletech
 COPY packages/email ./packages/email
 
-# Instalamos dependencias del paquete infornet
-WORKDIR /usr/src/app/packages/infornet
-RUN bun install
+WORKDIR /app/apps/crm
+RUN bun install --frozen-lockfile
 
-# Instalamos dependencias del paquete sms
-WORKDIR /usr/src/app/packages/sms
-RUN bun install
-
-# Instalamos dependencias del paquete simpletech
-WORKDIR /usr/src/app/packages/simpletech
-RUN bun install
-
-# Instalamos dependencias del paquete email
-WORKDIR /usr/src/app/packages/email
-RUN bun install
-
-# Copiamos el código del server manteniendo la estructura de rutas
-WORKDIR /usr/src/app
-COPY apps/crm/apps/server ./apps/crm/apps/server
-
-# Instalamos dependencias desde el directorio del server
-WORKDIR /usr/src/app/apps/crm/apps/server
-RUN bun install
-
-# Reemplazar los symlinks de @repo/* y @cci/* con el contenido real
-RUN rm -rf node_modules/@repo/infornet node_modules/@repo/sms \
-           node_modules/@repo/simpletech node_modules/@cci/email && \
-    mkdir -p node_modules/@repo node_modules/@cci && \
-    cp -r /usr/src/app/packages/infornet node_modules/@repo/infornet && \
-    cp -r /usr/src/app/packages/sms node_modules/@repo/sms && \
-    cp -r /usr/src/app/packages/simpletech node_modules/@repo/simpletech && \
-    cp -r /usr/src/app/packages/email node_modules/@cci/email
+# El código va después del install para no invalidar la capa de dependencias
+COPY apps/crm/apps/server ./apps/server
 
 # Compilamos la app
+WORKDIR /app/apps/crm/apps/server
 RUN bun build \
     --compile \
     --minify-whitespace \
@@ -63,7 +45,7 @@ FROM base AS runner
 WORKDIR /usr/src/app
 
 # Copiamos solo el binario generado
-COPY --from=builder /usr/src/app/apps/crm/apps/server/server .
+COPY --from=builder /app/apps/crm/apps/server/server .
 
 EXPOSE 9000
 ENTRYPOINT ["./server"]

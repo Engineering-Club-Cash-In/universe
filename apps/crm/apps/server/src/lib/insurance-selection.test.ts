@@ -157,8 +157,7 @@ describe("buildServerInsurancePersistence", () => {
 		expect(result.customerInsuranceCost).toBe("585.86");
 		expect(result.internalInsuranceCost).toBe("584.96");
 		expect(result.insuranceSavingsToMembership).toBe("0.90");
-		// El server ya no re-suma el ahorro a la membresía (lo hace el front una vez).
-		expect(result.membresiaPago).toBe("100.00");
+		expect(result.membresiaPago).toBe("100.90");
 	});
 
 	test("uses visible quoter insurance as customer amount when provided", () => {
@@ -177,14 +176,13 @@ describe("buildServerInsurancePersistence", () => {
 		expect(result.internalInsuranceCost).toBe("540.00");
 		// ahorro limpio = universales - gyt = 550.10 - 540 = 10.10 (no del bundle)
 		expect(result.insuranceSavingsToMembership).toBe("10.10");
-		// membresía = la que mandó el front, sin re-sumar el ahorro
-		expect(result.membresiaPago).toBe("403.32");
+		// membresía efectiva = base server-side + ahorro GyT, una sola vez
+		expect(result.membresiaPago).toBe("413.42");
 	});
 
-	test("computes savings from insurance prices and does not re-add them to membership", () => {
-		// El front ya metió el ahorro GyT en membershipCost (162) y armó el bundle
-		// base + membresía en customerInsuranceCost (762). El server NO debe calcular
-		// el ahorro del bundle (762-580) ni volver a sumarlo a la membresía.
+	test("computes membership from the server base plus GyT savings", () => {
+		// customerInsuranceCost puede traer el bundle visible, pero el ahorro sale
+		// únicamente de Universales - GyT y se suma una vez a la membresía base.
 		const result = buildServerInsurancePersistence({
 			insuredAmount: 300000,
 			vehicleType: "particular",
@@ -195,9 +193,8 @@ describe("buildServerInsurancePersistence", () => {
 		});
 
 		expect(result.insuranceProvider).toBe("gyt");
-		// ahorro = universales - gyt = 20  (NO 762 - 580 = 182)
+		// ahorro = universales - gyt = 20 (NO 762 - 580 = 182)
 		expect(result.insuranceSavingsToMembership).toBe("20.00");
-		// membresía persistida = la que mandó el front, sin re-sumar el ahorro
-		expect(result.membresiaPago).toBe("162.00");
+		expect(result.membresiaPago).toBe("182.00");
 	});
 });

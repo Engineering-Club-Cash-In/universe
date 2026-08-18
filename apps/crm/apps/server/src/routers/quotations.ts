@@ -261,7 +261,8 @@ export const quotationsRouter = {
 					serverInsurance.provider === "gyt"
 						? serverInsurance.internalInsuranceCost
 						: null,
-				membershipCost: input.membershipCost,
+				// Fuente server-side: membresía base de la tabla + ahorro GyT una sola vez.
+				membershipCost: serverInsurance.membershipCost,
 				customerInsuranceCost: input.insuranceCost,
 			});
 
@@ -324,7 +325,9 @@ export const quotationsRouter = {
 					gpsCost: input.gpsCost.toString(),
 					transferCost: input.transferCost.toString(),
 					adminCost: input.adminCost.toString(),
-					membershipCost: insurancePersistence.membresiaPago,
+					membershipCost: input.isInterno
+						? "0.00"
+						: insurancePersistence.membresiaPago,
 					insuranceProvider: insurancePersistence.insuranceProvider,
 					customerInsuranceCost: insurancePersistence.customerInsuranceCost,
 					internalInsuranceCost: insurancePersistence.internalInsuranceCost,

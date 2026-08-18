@@ -127,9 +127,7 @@ export function buildServerInsurancePersistence(
 			// El ahorro sale de los precios de seguro (universales - gyt), NO del
 			// monto bundle del cotizador (que ya incluye la membresía).
 			insuranceSavingsToMembership: selection.insuranceSavingsToMembership,
-			// La membresía ya trae el ahorro incorporado desde el front
-			// (getInsuranceCost). No lo volvemos a sumar para no contarlo dos veces.
-			effectiveMembershipCost: roundMoney(input.membershipCost),
+			effectiveMembershipCost: selection.effectiveMembershipCost,
 		},
 	});
 }

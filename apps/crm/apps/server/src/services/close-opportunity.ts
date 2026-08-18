@@ -28,6 +28,7 @@ import {
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
 } from "./cartera-back-integration";
+import { resolveMembershipForCartera } from "./membership-cartera";
 
 // ============================================================================
 // CONSTANTS
@@ -139,6 +140,7 @@ interface CreateCreditParams {
 	numeroSifco: string;
 	userId: string;
 	cuotaMensual?: string;
+	membershipCost?: number;
 	isVehicleOwned?: boolean;
 	// Info del vehículo para el correo
 	vehiculo_marca?: string;
@@ -188,6 +190,8 @@ interface QuotationDataForBilling {
 	insuredAmount: string | null; // Monto asegurado (para correo)
 	value: string | null; // Valor del vehículo (para correo)
 	monthlyPayment: string | null; // Cuota mensual (para asegurar el valor que es)
+	membershipCost: string | null; // Membresía efectiva que debe viajar a cartera
+	isInterno: boolean; // Créditos internos no cobran membresía
 	insuranceProvider: string | null; // Aseguradora elegida (gyt | universales)
 }
 
@@ -476,6 +480,8 @@ async function getLatestApprovedQuotation(
 				insuredAmount: quotations.insuredAmount,
 				value: quotations.vehicleValue,
 				monthlyPayment: quotations.monthlyPayment,
+				membershipCost: quotations.membershipCost,
+				isInterno: quotations.isInterno,
 				insuranceProvider: quotations.insuranceProvider,
 			})
 			.from(quotations)
@@ -992,9 +998,9 @@ async function createCredit(
 		const reserva = opportunity.reserva
 			? Number.parseFloat(opportunity.reserva)
 			: undefined;
-		const membresiaPago = opportunity.membresiaPago
-			? Number.parseFloat(opportunity.membresiaPago)
-			: undefined;
+		const membresiaPago =
+			params.membershipCost ??
+			resolveMembershipForCartera(null, opportunity.membresiaPago);
 		const gastosAdministrativos = opportunity.gastosAdministrativos
 			? Number(opportunity.gastosAdministrativos)
 			: 0;
@@ -1441,6 +1447,11 @@ export async function closeOpportunity(
 			cuotaMensual: quotation?.monthlyPayment
 				? String(quotation.monthlyPayment)
 				: undefined,
+			membershipCost: resolveMembershipForCartera(
+				quotation?.membershipCost,
+				opportunity.membresiaPago,
+				quotation?.isInterno ?? false,
+			),
 			isVehicleOwned: vehicleData?.isOwned ?? false,
 			// Enviar info del vehículo para que llegue en el correo de cartera
 			vehiculo_marca: vehicleData?.make ?? undefined,

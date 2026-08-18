@@ -31,6 +31,7 @@ día; si no está escrito, no está decidido.
 | [D-21](#d-21--modo-simulado-mientras-el-sms-no-sale) | Modo simulado mientras el SMS no sale | 🟢 |
 | [D-22](#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error) | Todo lo que no termina en dato va con estado HTTP de error | 🟢 |
 | [D-23](#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria) | La documentación de la API es Swagger, y es obligatoria | 🟢 |
+| [D-24](#d-24--el-menú-hereda-la-identidad-del-paso-1) | El menú hereda la identidad del paso 1 | 🟢 |
 
 ---
 
@@ -675,3 +676,48 @@ Detrás de **`BOT_COBROS_DOCS=true`**, prendida solo en la instancia de dev del 
 criterio que el modo simulado. Las rutas van **sin API key**: no exponen datos, y exigirla
 impediría que la UI cargara el documento. Los ejemplos usan **datos reales de dev**, para que
 las llamadas de la página funcionen de verdad.
+
+---
+
+## D-24 · El menú hereda la identidad del paso 1
+
+**Estado:** 🟢 **Cerrada · 2026-08-18**
+
+**Contexto.** El paso 2 muestra saldos, mora y convenio: bastante más sensible que el paso 1,
+que solo dice qué créditos tiene alguien. Y [D-04](#d-04--dónde-vive-el-estado-de-identidad)
+decidió **no** tener sesiones. Entonces, ¿qué prueba que quien pregunta por un crédito es su
+dueño?
+
+La API key no sirve para eso: identifica a **SimpleTech**, no al cliente final. Con ella sola,
+cualquiera podría pedir el saldo de cualquier crédito.
+
+**Opciones.**
+- A) Confiar en la API key, como hace el servicio 2 después de validar el OTP.
+- **B) Reusar la `referencia` del paso 1 como prueba de identidad.**
+- C) Crear sesiones de verdad (tabla, token, TTL), revirtiendo D-04.
+
+**Decisión: B.** La fila del OTP ya guarda a qué lead o codeudor pertenece y cuándo se canjeó
+el código; eso alcanza sin montar sesiones. Se comprueban cuatro cosas:
+
+1. La referencia existe y es de un OTP de cobros.
+2. **Fue canjeada** (`used = true`): si el cliente nunca escribió su código, esa referencia no
+   prueba nada — se emite antes de verificar a nadie.
+3. Pasaron menos de **30 minutos** desde el canje.
+4. **El crédito es de esa persona**, con la misma consulta que arma el menú del paso 1.
+
+El punto 4 es el que importa: sin él, una referencia legítima serviría para preguntar por el
+crédito de un tercero.
+
+**Los 30 minutos.** El OTP vence a los 5, pero eso es para *canjearlo*. Una vez validado, el
+cliente se queda navegando el menú y pedirle otro código a los 5 minutos de conversación sería
+absurdo. Media hora alcanza para una consulta con calma y acota la ventana si alguien se
+hiciera de una referencia ajena. Se mide desde el **canje**, no desde la emisión: el reloj
+corre desde que probó su identidad.
+
+**Un crédito ajeno responde `404 CREDITO_NO_ENCONTRADO`**, el mismo error que si no existiera.
+Distinguirlos permitiría averiguar qué créditos hay probando números — el mismo criterio de
+[D-22](#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error) para el paso 1.
+
+**Cuándo habría que revisar esto.** Si aparece un flujo largo —subir una boleta, armar un
+convenio— donde 30 minutos se queden cortos, o si el bot necesita recordar al cliente entre
+conversaciones. Ahí sí toca la opción C y se revisa D-04.

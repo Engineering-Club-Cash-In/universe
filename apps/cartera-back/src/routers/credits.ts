@@ -1,5 +1,6 @@
 // routes/inversionistas.ts
 import { Elysia, t } from "elysia";
+import { obtenerResumenCredito } from "../controllers/resumenCredito";
 import {
   actualizarEstadoCredito,
   cancelCredit,
@@ -157,6 +158,31 @@ export const creditRouter = new Elysia()
   })
   .post("/updateCredit", updateCredit)
   .post("/calculate-investor-quotas", calculateInvestorQuotas)
+  // Resumen liviano del crédito (lo consume el bot de WhatsApp de cobros).
+  // Es aparte de /credito porque ese devuelve el calendario completo —14
+  // consultas, ~121 KB— y el bot necesita siete datos. Ver resumenCredito.ts.
+  .get("/credito/resumen", async ({ query, set }) => {
+    const { numero_credito_sifco } = query;
+    if (!numero_credito_sifco) {
+      set.status = 400;
+      return { message: "Falta el parámetro 'numero_credito_sifco'" };
+    }
+
+    try {
+      const resultado = await obtenerResumenCredito(numero_credito_sifco);
+
+      if (!resultado.encontrado) {
+        set.status = 404;
+        return { message: "Crédito no encontrado" };
+      }
+
+      return resultado.resumen;
+    } catch (error) {
+      console.error("[/credito/resumen] Error:", error);
+      set.status = 500;
+      return { message: "Error consultando el crédito", error: String(error) };
+    }
+  })
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {
     const { numero_credito_sifco } = query;

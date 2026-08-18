@@ -23,6 +23,7 @@ import {
 	elegirTelefonoParaOtp,
 	telefonoEstaRegistrado,
 } from "../lib/bot-cobros/identificadores";
+import { obtenerInfoCredito } from "../lib/bot-cobros/menu-credito";
 import { enviarOtp, validarOtp } from "../lib/bot-cobros/otp";
 
 type RespuestaError = {
@@ -163,6 +164,77 @@ export async function buscarClienteBotCobros(c: Context) {
 		});
 	} catch (err) {
 		console.error("[BotCobros] buscar-cliente:", err);
+		return error(c, {
+			codigo: "ERROR_INTERNO",
+			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",
+			estado: 500,
+		});
+	}
+}
+
+/**
+ * Servicio 3 · Info del crédito que el cliente eligió (paso 2, menú).
+ *
+ * Recibe la MISMA referencia del paso 1: es lo que prueba que quien pregunta ya
+ * validó su código y que el crédito es suyo. Ver `obtenerInfoCredito`, donde
+ * está el control de acceso.
+ */
+export async function infoCreditoBotCobros(c: Context) {
+	try {
+		const body = await c.req.json<{
+			referencia?: unknown;
+			numeroSifco?: unknown;
+		}>();
+
+		const referencia = String(body.referencia ?? "").trim();
+		const numeroSifco = String(body.numeroSifco ?? "").trim();
+
+		if (!referencia || !numeroSifco) {
+			return error(c, {
+				codigo: "PARAMETROS_INVALIDOS",
+				mensaje: "Faltan datos para consultar el crédito.",
+				estado: 400,
+			});
+		}
+
+		const resultado = await obtenerInfoCredito(referencia, numeroSifco);
+
+		if (!resultado.ok) {
+			switch (resultado.codigo) {
+				case "SESION_VENCIDA":
+					return error(c, {
+						codigo: "SESION_VENCIDA",
+						mensaje:
+							"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+						estado: 401,
+					});
+				// Mismo mensaje para "no es tuyo" y "no existe": distinguirlos
+				// permitiría averiguar qué créditos existen probando números.
+				case "CREDITO_NO_ES_DEL_CLIENTE":
+					return error(c, {
+						codigo: "CREDITO_NO_ENCONTRADO",
+						mensaje: "No encontramos ese crédito.",
+						estado: 404,
+					});
+				case "CREDITO_SIN_DATOS":
+					return error(c, {
+						codigo: "CREDITO_SIN_DATOS",
+						mensaje:
+							"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+						estado: 404,
+					});
+				default:
+					return error(c, {
+						codigo: "REFERENCIA_INVALIDA",
+						mensaje: "No encontramos tu solicitud. Comienza de nuevo.",
+						estado: 401,
+					});
+			}
+		}
+
+		return c.json({ success: true, data: { credito: resultado.info } });
+	} catch (err) {
+		console.error("[BotCobros] info-credito:", err);
 		return error(c, {
 			codigo: "ERROR_INTERNO",
 			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",

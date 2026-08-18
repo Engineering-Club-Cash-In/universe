@@ -97,7 +97,7 @@ async function fetchRenapInfo(dpi: string) {
 }
 
 /**
- * 🚻 Normaliza el género que manda el CRM (fallback cuando RENAP no responde)
+ * 🚻 Normaliza el género que manda quien consume la API (fallback de RENAP)
  */
 function normalizeGenero(value?: string | null): "hombre" | "mujer" | null {
   if (!value) return null;
@@ -111,9 +111,12 @@ function normalizeGenero(value?: string | null): "hombre" | "mujer" | null {
  * 🎯 Controller: Fetch RENAP info + documents + fields from DB by gender
  *
  * RENAP solo se usa para (a) saber el género y así elegir la plantilla y
- * (b) pre-llenar campos que el CRM no tenga. Si RENAP no tiene la persona
- * (pasa con DPIs válidos), seguimos con el género que manda el CRM y
- * devolvemos `renapData: null` — el wizard ya prioriza los datos del CRM.
+ * (b) pre-llenar campos que no vengan de otro lado. Si RENAP no tiene la
+ * persona (pasa con DPIs válidos), seguimos con el género que manda quien
+ * llama y devolvemos `renapData: null`.
+ *
+ * Lo consumen el CRM (manda el género del lead de la oportunidad) y la app
+ * legal-documents (lo elige la persona en pantalla).
  */
 export async function getDocumentsByDpiController(
   dpi: string,
@@ -135,7 +138,7 @@ export async function getDocumentsByDpiController(
       );
     }
 
-    // 2️⃣ Determine gender for filtering (RENAP manda; si no, el del CRM)
+    // 2️⃣ Determine gender for filtering (RENAP manda; si no, el que mandaron)
     const generoRenap = renapData?.gender
       ? renapData.gender.toLowerCase().startsWith("m")
         ? "hombre"
@@ -144,10 +147,13 @@ export async function getDocumentsByDpiController(
     const genero = generoRenap ?? normalizeGenero(generoFallback);
 
     if (!genero) {
+      // El motivo de RENAP va en el mensaje: "vencido" y "no encontrado" se
+      // resuelven distinto y quien atiende necesita saber cuál de los dos es.
+      const motivoRenap = renapError?.replace(/^RENAP:\s*/, "");
       return {
         success: false,
-        message: renapError
-          ? "No se pudo validar el DPI en RENAP y el cliente no tiene género registrado en el CRM. Verifique el DPI o complete el género del cliente."
+        message: motivoRenap
+          ? `No se pudo validar el DPI en RENAP: ${motivoRenap}. Verifique el DPI o indique el género del firmante para continuar sin RENAP.`
           : "Missing gender info",
         renapData,
         renapError,

@@ -58,6 +58,20 @@ export type InfoCreditoBot = {
 	/** La misma que el paso 1 mostró en el menú de selección. */
 	etiqueta: string;
 	estado: string;
+	/**
+	 * El capital del crédito, **el mismo número que la pantalla de cobros del CRM
+	 * rotula "Capital Activo"** (`creditos.capital`, vía `montoFinanciado`).
+	 *
+	 * Decisión de Daniel (2026-08-18): que el bot y la pantalla digan lo mismo.
+	 * Si un asesor abre el caso y ve Q190,846.74 mientras el cliente recibe otra
+	 * cifra por WhatsApp, el que queda mal parado es el asesor.
+	 *
+	 * Ojo con el nombre: **no es el saldo pendiente de capital.** Cartera también
+	 * devuelve `capital_activo` —`capital − SUM(abono_capital)`, la definición de
+	 * `assignCapital`—, que para el crédito 01010214108330 da Q188,942.11 contra
+	 * los Q190,846.74 de acá. Para mostrar el saldo real basta cambiar la línea
+	 * de abajo por `resumen.capital_activo`; el dato ya viene en la respuesta.
+	 */
 	capitalActivo: string;
 	cuotaMensual: string;
 	cuotasAtrasadas: number;
@@ -176,7 +190,9 @@ export async function obtenerInfoCredito(
 			numeroSifco: credito.numeroSifco,
 			etiqueta: credito.etiqueta,
 			estado: resumen.status_credito,
-			capitalActivo: resumen.capital_activo,
+			// El capital original, para cuadrar con la pantalla del CRM. El saldo
+			// calculado está en `resumen.capital_activo` — ver el tipo de arriba.
+			capitalActivo: resumen.capital,
 			cuotaMensual: resumen.cuota_mensual,
 			cuotasAtrasadas: resumen.cuotas_atrasadas,
 			cuotaActual: resumen.cuota_actual

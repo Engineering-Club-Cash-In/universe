@@ -325,3 +325,43 @@ describe("la mora no se cita si su foto quedó vieja (Codex PR #1326)", () => {
     expect(r.mora_por_confirmar).toBe(true);
   });
 });
+
+// La consulta canónica descarta la cuota 0 (el desembolso) y trata como pagada
+// la cuota que tiene un pago validado encima aunque su flag diga lo contrario.
+// Eso vive en SQL y se verificó contra el sandbox; acá se fija qué debe llegar.
+describe("contrato: cuota cero y flag desactualizado (Codex PR #1326)", () => {
+  it("un crédito recién creado reporta 0 cuotas pagadas, no 1", () => {
+    // createCredit inserta una cuota 0 ya pagada (el desembolso) en 1,743 de
+    // los 1,809 créditos del sandbox. Contándola, todos reportaban una de más.
+    const r = armarResumen({
+      ...base,
+      conteos: { atrasadas: 0, pagadas: 0 },
+      pendientes: {
+        numero_pendiente: 1,
+        fecha_pendiente: "2026-09-30",
+        proxima_futura: "2026-09-30",
+      },
+    });
+
+    expect(r.cuotas_pagadas).toBe(0);
+    expect(r.cuota_actual?.numero).toBe(1);
+  });
+
+  it("la cuota con pago validado cuenta como pagada aunque su flag diga false", () => {
+    // 149 cuotas en 136 créditos están así. Antes se le pedía al cliente pagar
+    // de nuevo una cuota que ya tenía su pago aplicado.
+    const r = armarResumen({
+      ...base,
+      conteos: { atrasadas: 0, pagadas: 6 },
+      pendientes: {
+        numero_pendiente: 7,
+        fecha_pendiente: "2026-08-30",
+        proxima_futura: "2026-08-30",
+      },
+    });
+
+    expect(r.cuotas_atrasadas).toBe(0);
+    expect(r.cuota_actual?.numero).toBe(7);
+    expect(r.cuota_actual?.vencida).toBe(false);
+  });
+});

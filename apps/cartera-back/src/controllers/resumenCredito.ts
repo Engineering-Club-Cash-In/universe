@@ -110,7 +110,7 @@ export type ResultadoResumen =
 /**
  * Todo lo que se dice sobre las cuotas, en una sola consulta.
  *
- * Dos cosas que no son obvias y que Codex marcó en el PR #1326:
+ * Cuatro cosas que no son obvias, todas señaladas por Codex en el PR #1326:
  *
  * 1. **Se deduplica por `numero_cuota`, quedándose con el `cuota_id` mayor.**
  *    Hay créditos con filas duplicadas en `cuotas_credito` —mismo número, id
@@ -129,6 +129,15 @@ export type ResultadoResumen =
  *    pagar. El cliente ya pagó; falta que cobranza lo valide. (En el sandbox no
  *    hay ninguna cuota en ese estado hoy, pero la contradicción aparecía sola en
  *    cuanto alguien subiera una boleta.)
+ *
+ * 3. **Una cuota cuenta como pagada si tiene un pago validado encima, aunque su
+ *    flag `pagado` diga lo contrario.** El flag se desactualiza: 149 cuotas en
+ *    136 créditos del sandbox están así. Sin esto se le pediría al cliente pagar
+ *    algo que ya pagó.
+ *
+ * 4. **La cuota 0 no cuenta.** Es la fila sintética del desembolso, que nace
+ *    marcada como pagada; incluirla inflaba `cuotas_pagadas` en 1,743 de los
+ *    1,809 créditos.
  */
 /**
  * Ya hay una boleta registrada para esta cuota que CONTA no ha validado.
@@ -142,6 +151,24 @@ export type ResultadoResumen =
  * `paymentFalse = false` descarta las filas anuladas y `monto_boleta > 0` exige
  * que haya una boleta de verdad, no un recibo sembrado en cero.
  */
+/**
+ * Fila de pago que realmente cubre una cuota.
+ *
+ * Espejo de `pagoCubriente` (cuotasProximas.ts) y de `procesarMoras`
+ * (latefee.ts) — **mantener alineados**. Existe porque `cuotas_credito.pagado`
+ * se queda desactualizado: hay 149 cuotas en 136 créditos del sandbox con el
+ * flag en `false` pese a tener un pago validado encima. Confiar solo en el flag
+ * le diría al cliente que pague de nuevo algo que ya pagó (Codex, PR #1326).
+ */
+const PAGO_CUBRIENTE = sql`
+	SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
+	WHERE pc.cuota_id = q.cuota_id
+		AND pc."paymentFalse" = false
+		AND pc.pagado = true
+		AND pc.validation_status IN ('validated', 'no_required')
+		AND COALESCE(pc.monto_aplicado, 0) > 0
+`;
+
 const BOLETA_EN_REVISION = sql`
 	SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
 	WHERE p.cuota_id = c.cuota_id
@@ -154,14 +181,24 @@ function consultaDeCuotas(creditoId: number, hoy: string) {
 	return sql`
 		WITH canonicas AS (
 			SELECT DISTINCT ON (q.numero_cuota)
-				q.cuota_id, q.numero_cuota, q.fecha_vencimiento, q.pagado
+				q.cuota_id,
+				q.numero_cuota,
+				q.fecha_vencimiento,
+				-- El flag de la cuota O un pago validado encima: ver PAGO_CUBRIENTE.
+				(q.pagado OR EXISTS (${PAGO_CUBRIENTE})) AS pagado
 			FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito q
-			WHERE q.credito_id = ${creditoId}
+			-- La cuota 0 es la fila sintética del DESEMBOLSO, que createCredit
+			-- inserta ya pagada: no es una cuota del plan de pagos. Sin este
+			-- filtro, 1,743 de los 1,809 créditos del sandbox reportarían una
+			-- cuota pagada de más — un crédito recién creado diría "1 pagada".
+			WHERE q.credito_id = ${creditoId} AND q.numero_cuota > 0
 			ORDER BY q.numero_cuota, q.cuota_id DESC
 		),
 		vigentes AS (
 			SELECT * FROM canonicas c
-			WHERE NOT EXISTS (${BOLETA_EN_REVISION})
+			-- Una cuota ya pagada se queda aunque tenga otra boleta en revisión:
+			-- lo que se descarta es la que sigue pendiente con su pago en trámite.
+			WHERE c.pagado OR NOT EXISTS (${BOLETA_EN_REVISION})
 		)
 		SELECT
 			COUNT(*) FILTER (

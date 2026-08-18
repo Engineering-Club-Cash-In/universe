@@ -568,7 +568,7 @@ export const especificacionBotCobros = {
 					"",
 					"| Campo | Nota |",
 					"| --- | --- |",
-					"| `capitalActivo` | Lo que queda por pagar de capital, no el monto original |",
+					"| `capitalActivo` | El capital del crédito — **el mismo número que la pantalla de cobros del CRM**, para que asesor y cliente vean lo mismo. Ojo: es el monto del crédito, no el saldo pendiente |",
 					"| `cuotaActual` | La más vieja **sin pagar**. Si hay atraso, su fecha ya pasó: por eso trae `vencida` |",
 					"| `proximaFechaPago` | La próxima cuota que **todavía no vence**. Con atraso NO es la misma que `cuotaActual` |",
 					"| `mora` | `null` si no tiene, **o si su monto no es confiable ahora mismo** — ver `moraPorConfirmar`. Un convenio activo la congela |",
@@ -616,7 +616,7 @@ export const especificacionBotCobros = {
 											numeroSifco: "01010214120240",
 											etiqueta: "MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT",
 											estado: "EN_CONVENIO",
-											capitalActivo: "192391.27",
+											capitalActivo: "198252.40",
 											cuotaMensual: "5891.15",
 											cuotasAtrasadas: 2,
 											cuotaActual: {

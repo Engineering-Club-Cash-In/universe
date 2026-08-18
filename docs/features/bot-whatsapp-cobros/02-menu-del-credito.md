@@ -94,7 +94,7 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
       "numeroSifco": "01010214124000",
       "etiqueta": "Toyota Corolla 2015 · P-319JJL",
       "estado": "MOROSO",
-      "capitalActivo": "48421.89",
+      "capitalActivo": "53439.10",
       "cuotaMensual": "2464.63",
       "cuotasAtrasadas": 1,
       "cuotaActual": { "numero": 1, "de": 48, "fechaVencimiento": "2026-02-28", "vencida": true },
@@ -112,7 +112,7 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
 
 | Dato | Fuente | Nota |
 | --- | --- | --- |
-| Capital activo | cartera | `capital − SUM(abono_capital)` de los pagos pagados |
+| Capital activo | cartera | `creditos.capital` — **el mismo número que muestra la pantalla de cobros del CRM** (ver abajo) |
 | Cuotas atrasadas | cartera | Vencidas, sin pagar y **sin un pago esperando validación** |
 | Cuota actual `3/60` | cartera | La más vieja sin pagar |
 | Mora | cartera | `null` si no tiene, **o si su monto no es confiable ahora** (ver abajo). Un convenio activo la congela |
@@ -128,6 +128,21 @@ su próxima fecha es el 30 de agosto.
 
 Mezclarlos daría un mensaje absurdo ("tu próxima fecha de pago fue en febrero"), así que van
 en campos distintos y `cuotaActual` trae `vencida` para que el bot sepa cuál mostrar.
+
+### Qué es el "capital activo" que ve el cliente
+
+Es **`creditos.capital`**: el mismo dato que la pantalla de cobros del CRM rotula "Capital
+Activo" (lo llena `montoFinanciado` en `routers/cobros.ts`). Decisión de Daniel el 2026-08-18:
+que el bot y la pantalla digan lo mismo. Si un asesor abre el caso y ve Q190,846.74 mientras
+el cliente recibe otra cifra por WhatsApp, el que queda mal parado es el asesor.
+
+**El nombre engaña en los dos lados:** ese número es el monto del crédito, no el saldo
+pendiente de capital. Cartera devuelve además `capital_activo` —`capital − SUM(abono_capital)`,
+la definición que usa `assignCapital`—, que para el crédito `01010214108330` da Q188,942.11
+contra los Q190,846.74 que se muestran.
+
+Queda pendiente decidir con Cobros cuál de los dos corresponde mostrarle al cliente. Cambiarlo
+es una línea en `menu-credito.ts`: el dato ya viaja en la respuesta.
 
 ### La mora tiene una ventana en la que no se puede citar
 

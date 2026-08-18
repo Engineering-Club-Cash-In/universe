@@ -452,9 +452,6 @@ function esTimeout(error: unknown): boolean {
 	);
 }
 
-/**
- * Obtiene la última cotización aprobada de una oportunidad
- */
 /** Mapea el provider interno (gyt | universales) a la etiqueta de aseguradora. */
 function aseguradoraLabel(
 	provider: string | null | undefined,
@@ -462,7 +459,8 @@ function aseguradoraLabel(
 	return provider === "gyt" ? "GyT" : "Universales";
 }
 
-async function getLatestApprovedQuotation(
+/** Obtiene la última cotización aceptada, con la más reciente como respaldo legacy. */
+export async function getLatestApprovedQuotation(
 	opportunityId: string,
 ): Promise<QuotationDataForBilling | null> {
 	try {
@@ -490,7 +488,10 @@ async function getLatestApprovedQuotation(
 					eq(quotations.opportunityId, opportunityId)
 				),
 			)
-			.orderBy(desc(quotations.createdAt))
+			.orderBy(
+				desc(eq(quotations.status, "accepted")),
+				desc(quotations.createdAt),
+			)
 			.limit(1);
 
 		return quotation || null;

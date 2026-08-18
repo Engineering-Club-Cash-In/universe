@@ -12,7 +12,7 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
+import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, SinMovimientosParaEstadoCuenta, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
@@ -95,6 +95,14 @@ export const paymentRouter = new Elysia()
       return pagos;
     }
   } catch (error) {
+    // Sin movimientos no hay documento que generar: es un 404, no una falla.
+    // Antes salía como 500 y quien llamaba no podía distinguirlo de un error
+    // real — el bot reintentaba y respondía "error interno" (Codex, PR #1328).
+    if (error instanceof SinMovimientosParaEstadoCuenta) {
+      set.status = 404;
+      return { message: error.message, codigo: "SIN_MOVIMIENTOS" };
+    }
+
     console.error("❌ Error en /paymentByCredit:", error);
     set.status = 500;
     return { message: "Error consultando pagos", error: String(error) };

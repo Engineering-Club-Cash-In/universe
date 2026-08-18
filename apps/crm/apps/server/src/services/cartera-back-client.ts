@@ -1028,7 +1028,11 @@ export class CarteraBackClient {
 			);
 		} catch (error) {
 			// 404 = el crédito no está en cartera. No es una falla del servicio.
-			if (error instanceof Error && error.message.includes("404")) return null;
+			// Se mira el status y no el texto: un mensaje que contenga "404" por
+			// casualidad no debe hacerse pasar por crédito inexistente.
+			if (error instanceof CarteraBackHttpError && error.status === 404) {
+				return null;
+			}
 			throw error;
 		}
 	}
@@ -1047,15 +1051,37 @@ export class CarteraBackClient {
 	 *
 	 * Genera el documento en cada llamada (Puppeteer + subida a R2), así que
 	 * **no se cachea del lado del CRM pero tampoco conviene llamarlo de más**.
+	 *
+	 * **Sin reintentos**, aunque sea un GET: cada intento arranca un Puppeteer y
+	 * sube un archivo nuevo con su timestamp. Un timeout después de que cartera
+	 * empezó a trabajar dejaría hasta cuatro PDF idénticos huérfanos en R2, con
+	 * su carga de navegador (Codex, PR #1328).
+	 *
+	 * Devuelve `null` cuando el crédito no tiene movimientos que reportar —
+	 * cartera responde 404 en ese caso, que no es una falla del servicio.
 	 */
 	async getEstadoCuentaUrl(numeroSifco: string): Promise<string | null> {
-		const response = await this.request<{ excelUrl?: string }>(
-			`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=true`,
-			{ method: "GET" },
-			false,
-		);
+		try {
+			const response = await this.request<{ excelUrl?: string }>(
+				`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=true`,
+				{ method: "GET" },
+				false,
+				// Generar el PDF toma ~3.4 s medidos; el default del cliente se
+				// queda corto cuando cartera está cargada.
+				60000,
+				// No reintentar: ver arriba.
+				false,
+			);
 
-		return response?.excelUrl ?? null;
+			return response?.excelUrl ?? null;
+		} catch (error) {
+			// 404 = el crédito no tiene pagos que reportar. Cualquier otra cosa sí
+			// es un problema y debe subir.
+			if (error instanceof CarteraBackHttpError && error.status === 404) {
+				return null;
+			}
+			throw error;
+		}
 	}
 
 	async getCredito(numeroSifco: string): Promise<CreditoDirectoResponse> {

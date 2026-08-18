@@ -504,11 +504,25 @@ export async function getCreditosWithUserByMesAnioExcel(
     excelUrl: url,
   };
 }
+/**
+ * El crédito no tiene movimientos que reportar: no hay documento que generar.
+ *
+ * Va como clase aparte para que el router pueda responder 404 y no 500. Un
+ * crédito recién desembolsado cae acá, y para quien consume el endpoint —el bot
+ * de WhatsApp incluido— eso NO es una falla del servicio (Codex, PR #1328).
+ */
+export class SinMovimientosParaEstadoCuenta extends Error {
+  constructor(creditoSifco: string) {
+    super(`No hay pagos para el crédito ${creditoSifco}`);
+    this.name = "SinMovimientosParaEstadoCuenta";
+  }
+}
+
 export async function exportPagosToExcel(credito_sifco: string) {
   // 1️⃣ Traer los pagos con su data
   const pagosData = await getAllPagosWithCreditAndInversionistas(credito_sifco);
   if (!pagosData.length) {
-    throw new Error(`No hay pagos para el crédito ${credito_sifco}`);
+    throw new SinMovimientosParaEstadoCuenta(credito_sifco);
   }
 
   // Incluye cuotas pagadas y abonos a capital ya validados aunque no cierren cuota.
@@ -517,7 +531,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
   );
 
   if (!pagosFiltrados.length) {
-    throw new Error(`No hay pagos pagados para el crédito ${credito_sifco}`);
+    throw new SinMovimientosParaEstadoCuenta(credito_sifco);
   }
 
   console.log(`📊 Generando PDF con ${pagosFiltrados.length} pagos pagados...`);

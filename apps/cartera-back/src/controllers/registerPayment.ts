@@ -675,47 +675,28 @@ export const insertPayment = async ({ body, set }: any) => {
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
-    // Boleta duplicada = MISMO comprobante recapturado, no sólo referencia
-    // repetida. Los bancos reciclan el número: BAC emite correlativos por
-    // cuenta (dos ACH reales con referencia 900437281, de clientes distintos y
-    // seis meses aparte) y G&T usa consecutivos cortos tipo `00000000166`. Con
-    // la llave vieja (referencia, banco) se rechazaron 79 pagos legítimos en
-    // producción, 27 de ellos contra el pago de OTRO crédito. Por eso la llave
-    // agrega fecha de boleta y monto, que juntos sí identifican el comprobante.
-    // A propósito NO se acota por `credito_id`: un cliente con varios créditos
-    // podría capturar la misma boleta en otro de sus créditos, y ese es
-    // justamente el duplicado que hay que atajar.
-    const boletasExistentes = numeroAutorizacion && banco_id
+    const boletasExistentes = numeroAutorizacion && banco_id 
       ? await db
         .select({
           numeroAutorizacion: pagos_credito.numeroAutorizacion,
-          credito_id: pagos_credito.credito_id,
         })
         .from(pagos_credito)
-        .where(and(
-          eq(pagos_credito.numeroAutorizacion, numeroAutorizacion),
-          eq(pagos_credito.banco_id, banco_id),
-          // `fecha_boleta` es timestamp y 680 filas traen hora distinta de
-          // medianoche, así que se compara por día. Las filas históricas sin
-          // fecha_boleta dan NULL y nunca matchean: dejan de bloquear.
-          sql`${pagos_credito.fecha_boleta}::date = ${fecha_boleta}::date`,
-          sql`${pagos_credito.monto_boleta} = ${monto_boleta}::numeric`,
-        ))
+        .where(and(eq(pagos_credito.numeroAutorizacion, numeroAutorizacion), eq(pagos_credito.banco_id, banco_id)))
       : [];
-
+      
       if (boletasExistentes.length > 0) {
         console.log(`❌ Se encontraron ${boletasExistentes.length} boletas duplicadas:`);
         boletasExistentes.forEach(b => {
-          console.log(`   - ${b.numeroAutorizacion} (crédito ${b.credito_id})`);
+          console.log(`   - ${b.numeroAutorizacion} `);
         });
-
+        
         set.status = 409; // Conflict
         return {
           success: false,
           message: "Una o más boletas ya fueron registradas previamente",
           boletas_duplicadas: boletasExistentes.map(b => ({
             numeroAutorizacion: b.numeroAutorizacion,
-            credito_id: b.credito_id,
+ 
           })),
         };
       }

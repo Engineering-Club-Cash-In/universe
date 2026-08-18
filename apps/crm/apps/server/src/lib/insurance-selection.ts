@@ -16,7 +16,13 @@ export interface InsuranceSelectionResult {
 	effectiveMembershipCost: number;
 }
 
-export interface InsurancePersistenceInput extends InsuranceSelectionInput {
+export interface InsurancePersistenceInput {
+	insuredAmount: number;
+	vehicleType: string;
+	universalesCost: number;
+	gytCost: number | null;
+	/** Effective adjusted membership amount to persist from the quotation flow. */
+	membershipCost: number;
 	customerInsuranceCost?: number;
 	clientBreakdown?: {
 		insuranceProvider?: string;
@@ -36,6 +42,8 @@ export interface NormalizedInsuranceBreakdown {
 }
 
 const GYT_MIN_INSURED_AMOUNT = 257000;
+// `nuevo` es una categoría legacy del cotizador para carros/camionetas nuevas.
+// Los tipos comerciales mantienen categorías propias y no entran en esta allowlist.
 const VEHICLE_GYT_TYPES = new Set(["particular", "nuevo"]);
 
 export function roundMoney(value: number): number {
@@ -123,10 +131,10 @@ export function buildServerInsurancePersistence(
 			customerInsuranceCost,
 			internalInsuranceCost: selection.internalInsuranceCost,
 			// El ahorro sale de los precios de seguro (universales - gyt), NO del
-			// monto bundle del cotizador (que ya incluye la membresía).
+			// monto bundle del cotizador (que ya incluye la membresía). La membresía
+			// recibida desde el cotizador ya es la membresía efectiva ajustada
+			// (incluido GyT una vez cuando aplica), así que no se vuelve a sumar aquí.
 			insuranceSavingsToMembership: selection.insuranceSavingsToMembership,
-			// La membresía ya trae el ahorro incorporado desde el front
-			// (getInsuranceCost). No lo volvemos a sumar para no contarlo dos veces.
 			effectiveMembershipCost: roundMoney(input.membershipCost),
 		},
 	});

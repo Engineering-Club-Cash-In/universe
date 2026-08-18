@@ -2671,6 +2671,42 @@ export const crmRouter = {
 				});
 			}
 
+			// La reasignación arrastra al lead, así que si el lead sostiene procesos
+			// vivos de OTRO asesor el cambio se los movería por debajo: sus
+			// oportunidades quedarían colgando de un lead ajeno y la siguiente
+			// entrada del cliente seguiría al nuevo dueño del lead. Las que ya son
+			// del asesor destino no estorban — ahí la reasignación justamente alinea
+			// al cliente en vez de partirlo, que es como se reparan estos casos.
+			if (current.leadId) {
+				const oportunidadesDeOtroAsesor = await db
+					.select({
+						title: opportunities.title,
+						asesor: user.name,
+					})
+					.from(opportunities)
+					.leftJoin(user, eq(opportunities.assignedTo, user.id))
+					.where(
+						and(
+							eq(opportunities.leadId, current.leadId),
+							not(eq(opportunities.id, input.opportunityId)),
+							not(eq(opportunities.assignedTo, input.assignedTo)),
+							inArray(opportunities.status, ["open", "on_hold"]),
+						),
+					);
+
+				if (oportunidadesDeOtroAsesor.length > 0) {
+					const detalle = oportunidadesDeOtroAsesor
+						.map((o) => `"${o.title}" (${o.asesor ?? "sin asesor"})`)
+						.join(", ");
+
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							`No se puede reasignar: el lead tiene ${oportunidadesDeOtroAsesor.length} oportunidad(es) activa(s) de otro asesor — ${detalle}. ` +
+							"Reasignar esta movería el lead y dejaría esas oportunidades con otro dueño. Depurá primero las que no correspondan.",
+					});
+				}
+			}
+
 			await db.transaction(async (tx) => {
 				await tx
 					.update(opportunities)

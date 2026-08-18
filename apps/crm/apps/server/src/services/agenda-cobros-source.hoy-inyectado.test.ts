@@ -7,11 +7,20 @@ import { describe, expect, mock, test } from "bun:test";
 const HOY_INYECTADO_STR = "2026-01-15";
 const FECHA_LIMITE_SLA = "2026-01-15";
 
+// where() sirve tanto para queries que se awaitean directo (casos, promesas)
+// como para la de ultimosContactos, que encadena .groupBy() antes de
+// resolver — el objeto retornado por where() es awaitable (thenable) Y
+// expone groupBy() como una promesa vacía, cubriendo ambos casos.
+function whereVacio() {
+	const promesaVacia = Promise.resolve([]);
+	return Object.assign(promesaVacia, { groupBy: () => Promise.resolve([]) });
+}
+
 mock.module("../db", () => ({
 	db: {
 		select: () => ({
 			from: () => ({
-				where: () => Promise.resolve([]),
+				where: whereVacio,
 			}),
 		}),
 	},

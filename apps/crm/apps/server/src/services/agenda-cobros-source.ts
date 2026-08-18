@@ -1,4 +1,14 @@
-import { and, eq, inArray, isNotNull, isNull, max, or } from "drizzle-orm";
+import {
+	and,
+	eq,
+	gte,
+	inArray,
+	isNotNull,
+	isNull,
+	lt,
+	max,
+	or,
+} from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
@@ -173,10 +183,17 @@ export async function obtenerAgendaAsesor(
  * `ejecutarAgendaCobrosDiaria`) SIEMPRE pasa el instante 00:00 GT del día que
  * se está capturando — no el momento real de ejecución. Si el job corre por
  * el schedule normal (00:05 GT) da igual; si corre por catch-up de boot horas
- * después (deploy tardío, `index.ts`), usar `new Date()` real haría que un
- * crédito ya contactado esa mañana (antes del catch-up) apareciera como
- * `contactadoHoy: true` y quedara AFUERA del snapshot — el "planificado" del
- * asesor saldría artificialmente bajo, inflando su % de cumplimiento.
+ * después (deploy tardío, `index.ts`), un crédito ya contactado esa mañana
+ * (antes del catch-up, pero después de `hoy`) NO debe aparecer como
+ * `contactadoHoy: true` — el "planificado" del asesor saldría
+ * artificialmente bajo, inflando su % de cumplimiento. Por eso las queries
+ * de `ultimosContactos`/`promesas` de abajo acotan explícitamente por `hoy`
+ * (vía `lt(fechaContacto, hoy)` y `gte(updatedAt, hoy)` respectivamente) —
+ * inyectar `hoy` solo para la comparación de fecha-calendario, sin acotar
+ * TAMBIÉN qué se trae de la DB, no alcanzaba: un contacto o cumplimiento de
+ * promesa de esta misma mañana caía en el mismo día GT que `hoy` de todos
+ * modos, y el crédito desaparecía del universo completo sin llegar siquiera
+ * a generar un item de snapshot (Codex PR #1330).
  */
 export async function obtenerColaOperacionAsesor(
 	asesor: AsesorAgenda,
@@ -211,6 +228,15 @@ export async function obtenerColaOperacionAsesor(
 	const casoIds = [...casoPorSifco.values()].map((caso) => caso.id);
 
 	const [promesas, ultimosContactos] = await Promise.all([
+		// Además de pendiente/incumplida, se incluyen las YA cumplidas cuyo
+		// updatedAt (última escritura de sistema sobre la fila, ver el
+		// comentario de esa columna en db/schema/cobros.ts) cae DESPUÉS de
+		// `hoy` (el boundary 00:00 GT del día que se captura): en un catch-up
+		// de boot tardío, checkPromesasPago puede haber marcado la promesa
+		// cumplida horas después de medianoche pero antes de que este fetch
+		// corra — sin esto, la promesa desaparece del universo completo (no
+		// solo se reclasifica) y el crédito se pierde del snapshot si no
+		// calificaba por D-0/SLA (Codex PR #1330).
 		casoIds.length === 0
 			? Promise.resolve([])
 			: db
@@ -230,9 +256,19 @@ export async function obtenerColaOperacionAsesor(
 								eq(contactosCobros.estadoPromesa, "pendiente"),
 								eq(contactosCobros.estadoPromesa, "incumplida"),
 								isNull(contactosCobros.estadoPromesa),
+								and(
+									eq(contactosCobros.estadoPromesa, "cumplida"),
+									gte(contactosCobros.updatedAt, hoy),
+								),
 							),
 						),
 					),
+		// Mismo boundary: un contacto registrado DESPUÉS de `hoy` (asesor ya
+		// contactó esta mañana, antes de que corra el catch-up tardío) no
+		// debe contar como "contactado hoy" para efectos de construir el
+		// universo de las 00:00 GT — eso suprimiría slaHoy y el crédito
+		// desaparecería del snapshot en vez de quedar capturado como
+		// pendiente al momento del corte (Codex PR #1330).
 		casoIds.length === 0
 			? Promise.resolve([])
 			: db
@@ -241,7 +277,12 @@ export async function obtenerColaOperacionAsesor(
 						ultimaFecha: max(contactosCobros.fechaContacto),
 					})
 					.from(contactosCobros)
-					.where(inArray(contactosCobros.casoCobroId, casoIds))
+					.where(
+						and(
+							inArray(contactosCobros.casoCobroId, casoIds),
+							lt(contactosCobros.fechaContacto, hoy),
+						),
+					)
 					.groupBy(contactosCobros.casoCobroId),
 	]);
 
@@ -254,8 +295,14 @@ export async function obtenerColaOperacionAsesor(
 		}>
 	>();
 	for (const promesa of promesas) {
-		const estadoPromesa = promesa.estadoPromesa ?? "pendiente";
-		if (estadoPromesa === "cumplida") continue;
+		// Una promesa que se marcó cumplida DESPUÉS de `hoy` (ya la query de
+		// arriba solo trae esas, además de pendiente/incumplida) todavía
+		// estaba pendiente AL MOMENTO del boundary de captura — se reconstruye
+		// como tal, no se descarta.
+		const estadoPromesa =
+			promesa.estadoPromesa === "cumplida"
+				? "pendiente"
+				: (promesa.estadoPromesa ?? "pendiente");
 		const lista = promesasPorCaso.get(promesa.casoCobroId) ?? [];
 		lista.push({
 			estadoPromesa,

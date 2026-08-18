@@ -189,6 +189,13 @@ export class CarteraBackHttpError extends Error {
 			error?: string;
 			message?: string;
 			errores?: string[];
+			/**
+			 * Código de máquina, cuando cartera lo manda. Sirve para distinguir un
+			 * 404 de negocio ("este crédito no tiene movimientos") de uno de
+			 * infraestructura (ruta que todavía no existe en un deploy rodante,
+			 * base path mal, 404 de un proxy).
+			 */
+			codigo?: string;
 		} = {},
 	) {
 		super(message);
@@ -1027,10 +1034,14 @@ export class CarteraBackClient {
 				false,
 			);
 		} catch (error) {
-			// 404 = el crédito no está en cartera. No es una falla del servicio.
-			// Se mira el status y no el texto: un mensaje que contenga "404" por
-			// casualidad no debe hacerse pasar por crédito inexistente.
-			if (error instanceof CarteraBackHttpError && error.status === 404) {
+			// Mismo criterio que `getEstadoCuentaUrl`: se exige el código, no basta
+			// el 404. Así un problema de despliegue o de ruteo no se disfraza de
+			// "este crédito no está en cartera".
+			if (
+				error instanceof CarteraBackHttpError &&
+				error.status === 404 &&
+				error.payload.codigo === "CREDITO_NO_ENCONTRADO"
+			) {
 				return null;
 			}
 			throw error;
@@ -1075,9 +1086,17 @@ export class CarteraBackClient {
 
 			return response?.excelUrl ?? null;
 		} catch (error) {
-			// 404 = el crédito no tiene pagos que reportar. Cualquier otra cosa sí
-			// es un problema y debe subir.
-			if (error instanceof CarteraBackHttpError && error.status === 404) {
+			// Solo el 404 que cartera marca como SIN_MOVIMIENTOS significa "este
+			// crédito no tiene nada que reportar". Un 404 pelado puede ser la ruta
+			// que todavía no existe en un deploy rodante o un proxy respondiendo
+			// por su cuenta: eso es una falla y debe subir, no convertirse en un
+			// "no tenés movimientos" que el cliente leería como cierto
+			// (Codex, PR #1328).
+			if (
+				error instanceof CarteraBackHttpError &&
+				error.status === 404 &&
+				error.payload.codigo === "SIN_MOVIMIENTOS"
+			) {
 				return null;
 			}
 			throw error;

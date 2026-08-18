@@ -69,6 +69,15 @@ export type InfoCreditoBot = {
 	} | null;
 	proximaFechaPago: string | null;
 	mora: { monto: string; cuotasAtrasadas: number } | null;
+	/**
+	 * true = tiene mora pero su monto no se puede citar todavía.
+	 *
+	 * `moras_credito` es una foto que refresca un job a las 23:59 GT: entre que
+	 * el cliente paga y esa corrida, el monto guardado no cuadra con las cuotas
+	 * atrasadas reales. Antes que decirle una cifra equivocada, cartera la calla
+	 * y levanta esta bandera para que el bot lo mande con su asesor.
+	 */
+	moraPorConfirmar: boolean;
 	convenio: {
 		cuotaMensual: string;
 		montoPendiente: string;
@@ -185,6 +194,7 @@ export async function obtenerInfoCredito(
 						cuotasAtrasadas: resumen.mora.cuotas_atrasadas,
 					}
 				: null,
+			moraPorConfirmar: resumen.mora_por_confirmar,
 			convenio: resumen.convenio
 				? {
 						cuotaMensual: resumen.convenio.cuota_mensual,

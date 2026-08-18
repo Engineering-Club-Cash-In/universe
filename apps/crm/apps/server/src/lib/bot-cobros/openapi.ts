@@ -571,7 +571,8 @@ export const especificacionBotCobros = {
 					"| `capitalActivo` | Lo que queda por pagar de capital, no el monto original |",
 					"| `cuotaActual` | La más vieja **sin pagar**. Si hay atraso, su fecha ya pasó: por eso trae `vencida` |",
 					"| `proximaFechaPago` | La próxima cuota que **todavía no vence**. Con atraso NO es la misma que `cuotaActual` |",
-					"| `mora` | `null` si no tiene. Un convenio activo congela la mora |",
+					"| `mora` | `null` si no tiene, **o si su monto no es confiable ahora mismo** — ver `moraPorConfirmar`. Un convenio activo la congela |",
+					"| `moraPorConfirmar` | `true` = tiene mora pero su monto no se puede citar. El saldo lo refresca un job a las 23:59: entre que el cliente paga y esa corrida, la cifra guardada no cuadra. Antes que decirle un número equivocado, no se manda ninguno — conviene ofrecerle hablar con su asesor |",
 					"| `convenio` | `null` si no tiene |",
 					"| `vehiculo` | `null` si el crédito no tiene vehículo registrado — se responde igual, no es error |",
 				].join("\n"),
@@ -626,6 +627,7 @@ export const especificacionBotCobros = {
 											},
 											proximaFechaPago: "2026-08-30",
 											mora: null,
+											moraPorConfirmar: false,
 											convenio: {
 												cuotaMensual: "981.86",
 												montoPendiente: "4909.29",

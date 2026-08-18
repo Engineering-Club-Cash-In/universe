@@ -139,6 +139,9 @@ describe("mora y convenio", () => {
   it("con mora, devuelve monto y cuotas", () => {
     const r = armarResumen({
       ...base,
+      // La foto tiene que coincidir con las cuotas atrasadas de este momento,
+      // si no se suprime (ver el describe de abajo).
+      conteos: { atrasadas: 36, pagadas: 0 },
       mora: {
         monto_mora: "27554.69",
         porcentaje_mora: "5.00",
@@ -151,6 +154,7 @@ describe("mora y convenio", () => {
       porcentaje: "5.00",
       cuotas_atrasadas: 36,
     });
+    expect(r.mora_por_confirmar).toBe(false);
   });
 
   // La columna es timestamp: sin normalizar sale "Sat Aug 01 2026 11:35:36
@@ -244,5 +248,80 @@ describe("contrato de la consulta de cuotas (Codex PR #1326)", () => {
 
     expect(r.cuotas_atrasadas).toBe(1);
     expect(r.cuota_actual?.numero).toBe(17);
+  });
+});
+
+// `moras_credito` es una FOTO que solo refresca `procesarMoras` a las 23:59 GT.
+// Entre que el cliente paga —o CONTA valida— y esa corrida, la fila sigue
+// diciendo las cuotas y el recargo viejos.
+describe("la mora no se cita si su foto quedó vieja (Codex PR #1326)", () => {
+  const MORA = {
+    monto_mora: "598.52",
+    porcentaje_mora: "5.00",
+    cuotas_atrasadas: 1,
+  };
+
+  it("coincide con el conteo vivo: se muestra", () => {
+    const r = armarResumen({
+      ...base,
+      conteos: { atrasadas: 1, pagadas: 5 },
+      mora: MORA,
+    });
+
+    expect(r.mora?.monto).toBe("598.52");
+    expect(r.mora_por_confirmar).toBe(false);
+  });
+
+  // El caso que motivó el arreglo: el cliente pagó su única cuota vencida, el
+  // conteo vivo ya dice 0, pero el job no ha corrido. Antes salía
+  // "cuotasAtrasadas: 0" junto a "mora: Q598.52".
+  it("pagó la última cuota vencida y el job no ha corrido: se suprime", () => {
+    const r = armarResumen({
+      ...base,
+      conteos: { atrasadas: 0, pagadas: 6 },
+      mora: MORA,
+    });
+
+    expect(r.mora).toBeNull();
+    // Pero se avisa que hay algo que confirmar: no se calla el tema.
+    expect(r.mora_por_confirmar).toBe(true);
+  });
+
+  it("se atrasó otra cuota y la foto se quedó corta: también se suprime", () => {
+    const r = armarResumen({
+      ...base,
+      conteos: { atrasadas: 2, pagadas: 4 },
+      mora: MORA,
+    });
+
+    expect(r.mora).toBeNull();
+    expect(r.mora_por_confirmar).toBe(true);
+  });
+
+  it("sin mora activa no hay nada que confirmar", () => {
+    const r = armarResumen({ ...base, conteos: { atrasadas: 3, pagadas: 0 } });
+
+    expect(r.mora).toBeNull();
+    expect(r.mora_por_confirmar).toBe(false);
+  });
+
+  // En convenio la mora se congela; cancelado/caído/incobrable no acumulan.
+  // Espejo de ESTADOS_SIN_MORA en cuotasProximas.ts.
+  it.each([
+    "EN_CONVENIO",
+    "INCOBRABLE",
+    "CANCELADO",
+    "PENDIENTE_CANCELACION",
+    "CAIDO",
+  ])("estado %s: no se cita mora aunque la foto cuadre", (estado) => {
+    const r = armarResumen({
+      ...base,
+      credito: { ...base.credito, statusCredit: estado },
+      conteos: { atrasadas: 1, pagadas: 5 },
+      mora: MORA,
+    });
+
+    expect(r.mora).toBeNull();
+    expect(r.mora_por_confirmar).toBe(true);
   });
 });

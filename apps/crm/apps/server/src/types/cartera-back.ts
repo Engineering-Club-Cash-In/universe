@@ -1418,11 +1418,14 @@ export interface ResumenCreditoResponse {
 	} | null;
 	/** La próxima que TODAVÍA no vence. Distinta de `cuota_actual` con atraso. */
 	proxima_fecha_pago: string | null;
+	/** `null` si no tiene, o si su foto quedó vieja (ver `mora_por_confirmar`). */
 	mora: {
 		monto: string;
 		porcentaje: string;
 		cuotas_atrasadas: number;
 	} | null;
+	/** true = tiene mora activa pero su monto no es confiable en este momento. */
+	mora_por_confirmar: boolean;
 	convenio: {
 		monto_total: string;
 		monto_pagado: string;

@@ -100,6 +100,7 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
       "cuotaActual": { "numero": 1, "de": 48, "fechaVencimiento": "2026-02-28", "vencida": true },
       "proximaFechaPago": "2026-08-30",
       "mora": { "monto": "598.52", "cuotasAtrasadas": 1 },
+      "moraPorConfirmar": false,
       "convenio": null,
       "vehiculo": { "placa": "P-319JJL", "marca": "Toyota", "modelo": "Corolla", "anio": 2015 }
     }
@@ -114,7 +115,7 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
 | Capital activo | cartera | `capital − SUM(abono_capital)` de los pagos pagados |
 | Cuotas atrasadas | cartera | Vencidas, sin pagar y **sin un pago esperando validación** |
 | Cuota actual `3/60` | cartera | La más vieja sin pagar |
-| Mora | cartera | `null` si no tiene. Un convenio activo la congela |
+| Mora | cartera | `null` si no tiene, **o si su monto no es confiable ahora** (ver abajo). Un convenio activo la congela |
 | Próxima fecha de pago | cartera | La próxima que **todavía no vence** |
 | Convenio | cartera | `null` si no tiene |
 | Vehículo | CRM (`vehicles`) | `null` si no tiene: **se responde igual** |
@@ -127,6 +128,24 @@ su próxima fecha es el 30 de agosto.
 
 Mezclarlos daría un mensaje absurdo ("tu próxima fecha de pago fue en febrero"), así que van
 en campos distintos y `cuotaActual` trae `vencida` para que el bot sepa cuál mostrar.
+
+### La mora tiene una ventana en la que no se puede citar
+
+`moras_credito` es una **foto** que solo refresca el job `procesarMoras` a las **23:59 GT**.
+Entre que el cliente paga —o CONTA valida su boleta— y esa corrida, la fila sigue guardando
+las cuotas y el recargo viejos.
+
+Sin cuidado, el bot podía responder **`cuotasAtrasadas: 0` junto a una mora de Q598**: *"ya no
+debés cuotas, pero pagá el recargo por atrasarte"*. En el sandbox eso pasa en **2 créditos
+ahora mismo**, por Q1,932.94 que se les cobrarían de más.
+
+Por eso el monto **solo se cita cuando la foto coincide** con las cuotas atrasadas que se
+están reportando en esa misma respuesta. Si no coinciden, `mora` va en `null` y se levanta
+**`moraPorConfirmar: true`** — no se calla el tema, se manda al cliente con su asesor antes que
+darle una cifra equivocada. Es el mismo criterio que ya aplica `cuotasProximas`.
+
+Tampoco se cita en los estados que no devengan mora: `EN_CONVENIO`, `INCOBRABLE`, `CANCELADO`,
+`PENDIENTE_CANCELACION` y `CAIDO`.
 
 ### 🔒 Quién puede ver qué
 

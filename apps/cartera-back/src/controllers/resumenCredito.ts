@@ -72,11 +72,22 @@ export type ResumenCredito = {
 	 * fue en junio no le sirve de nada. `null` si no queda ninguna futura.
 	 */
 	proxima_fecha_pago: string | null;
+	/**
+	 * `null` si no tiene mora activa **o si su foto quedó vieja** — ver
+	 * `moraConfiable`. Nunca se devuelve un monto que no cuadre con las cuotas
+	 * atrasadas que se están reportando.
+	 */
 	mora: {
 		monto: string;
 		porcentaje: string;
 		cuotas_atrasadas: number;
 	} | null;
+	/**
+	 * true = tiene una mora activa que NO se está mostrando porque su foto no
+	 * coincide con las cuotas atrasadas de este momento. El bot puede usarlo para
+	 * mandar al cliente con su asesor en vez de callar el tema.
+	 */
+	mora_por_confirmar: boolean;
 	convenio: {
 		monto_total: string;
 		monto_pagado: string;
@@ -111,7 +122,7 @@ export type ResultadoResumen =
  *    porque es la que trae el recibo vigente), y conviene que las dos lecturas
  *    del mismo dato no discrepen.
  *
- * 2. **Un pago esperando validación saca a la cuota de TODOS los cálculos**, no
+ * 2. **Una boleta esperando validación saca a la cuota de TODOS los cálculos**, no
  *    solo del conteo de atrasos. Antes el filtro estaba únicamente en las
  *    atrasadas, así que un cliente que subió su boleta podía recibir "0 cuotas
  *    atrasadas" y, a la vez, "te toca pagar la cuota 8" — la que acababa de
@@ -119,6 +130,26 @@ export type ResultadoResumen =
  *    hay ninguna cuota en ese estado hoy, pero la contradicción aparecía sola en
  *    cuanto alguien subiera una boleta.)
  */
+/**
+ * Ya hay una boleta registrada para esta cuota que CONTA no ha validado.
+ *
+ * Es el predicado de `cuotasProximas`, **no** el de `getCreditoByNumero**: aquel
+ * exige además `pagado = true` y así se le escapan los **pagos parciales**, que
+ * `registerPayment` guarda con `pagado: false` + `validationStatus: "pending"`.
+ * Con el predicado viejo, un cliente que abonó parte de su cuota vencida y subió
+ * la boleta seguía viendo esa cuota como enteramente pendiente (Codex, PR #1326).
+ *
+ * `paymentFalse = false` descarta las filas anuladas y `monto_boleta > 0` exige
+ * que haya una boleta de verdad, no un recibo sembrado en cero.
+ */
+const BOLETA_EN_REVISION = sql`
+	SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+	WHERE p.cuota_id = c.cuota_id
+		AND p."paymentFalse" = false
+		AND p.validation_status = 'pending'
+		AND COALESCE(p.monto_boleta, 0) > 0
+`;
+
 function consultaDeCuotas(creditoId: number, hoy: string) {
 	return sql`
 		WITH canonicas AS (
@@ -130,12 +161,7 @@ function consultaDeCuotas(creditoId: number, hoy: string) {
 		),
 		vigentes AS (
 			SELECT * FROM canonicas c
-			WHERE NOT EXISTS (
-				SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
-				WHERE p.cuota_id = c.cuota_id
-					AND p.validation_status = 'pending'
-					AND p.pagado = true
-			)
+			WHERE NOT EXISTS (${BOLETA_EN_REVISION})
 		)
 		SELECT
 			COUNT(*) FILTER (
@@ -314,8 +340,48 @@ export type InsumosResumen = {
  * Arma el resumen a partir de las filas. Separada de la consulta para poder
  * probar las reglas —capital activo, cuota vencida, próxima futura— sin base.
  */
+/**
+ * Estados que no devengan mora. Espejo de `ESTADOS_SIN_MORA` en
+ * `cuotasProximas.ts`: en convenio la mora se congela, y un crédito cancelado,
+ * caído o incobrable no sigue acumulando.
+ */
+const ESTADOS_SIN_MORA = new Set([
+	"EN_CONVENIO",
+	"INCOBRABLE",
+	"CANCELADO",
+	"PENDIENTE_CANCELACION",
+	"CAIDO",
+]);
+
+/**
+ * ¿Se puede citar el monto de la mora?
+ *
+ * `moras_credito` es una **foto** que solo se refresca cuando corre
+ * `procesarMoras` (23:59 GT). Entre que CONTA valida una cuota vencida —o el
+ * cliente sube su boleta— y la siguiente corrida del job, la fila sigue diciendo
+ * las cuotas y el recargo VIEJOS.
+ *
+ * Sin esta comprobación el bot podía responder `cuotasAtrasadas: 0` junto a una
+ * mora de Q598: "ya no debés cuotas, pero pagá el recargo por atrasarte". Es el
+ * mismo criterio que ya aplica `cuotasProximas`, que compara la foto contra el
+ * conteo vivo y solo cita números cuando cuadran (Codex, PR #1326).
+ */
+export function moraConfiable(
+	estado: string,
+	cuotasEnLaFoto: number,
+	cuotasAtrasadasHoy: number,
+): boolean {
+	if (ESTADOS_SIN_MORA.has(estado)) return false;
+
+	return cuotasEnLaFoto === cuotasAtrasadasHoy;
+}
+
 export function armarResumen(insumos: InsumosResumen): ResumenCredito {
 	const { credito, conteos, pendientes, mora, convenio, hoy } = insumos;
+
+	const moraAlDia =
+		mora !== null &&
+		moraConfiable(credito.statusCredit, mora.cuotas_atrasadas, conteos.atrasadas);
 
 	const capitalActivo = new Big(credito.capital ?? 0).minus(
 		new Big(insumos.totalAbonos ?? 0),
@@ -346,13 +412,15 @@ export function armarResumen(insumos: InsumosResumen): ResumenCredito {
 					}
 				: null,
 		proxima_fecha_pago: pendientes?.proxima_futura ?? null,
-		mora: mora
-			? {
-					monto: new Big(mora.monto_mora ?? 0).toFixed(2),
-					porcentaje: new Big(mora.porcentaje_mora ?? 0).toFixed(2),
-					cuotas_atrasadas: mora.cuotas_atrasadas,
-				}
-			: null,
+		mora:
+			mora && moraAlDia
+				? {
+						monto: new Big(mora.monto_mora ?? 0).toFixed(2),
+						porcentaje: new Big(mora.porcentaje_mora ?? 0).toFixed(2),
+						cuotas_atrasadas: mora.cuotas_atrasadas,
+					}
+				: null,
+		mora_por_confirmar: mora !== null && !moraAlDia,
 		convenio: convenio
 			? {
 					monto_total: new Big(convenio.monto_total_convenio ?? 0).toFixed(2),

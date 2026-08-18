@@ -4,7 +4,7 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	AlertCircle,
 	CheckCircle2,
@@ -13,6 +13,7 @@ import {
 	HelpCircle,
 	Loader2,
 	QrCode,
+	Search,
 	Upload,
 	XCircle,
 } from "lucide-react";
@@ -20,9 +21,11 @@ import {
 	type ComponentType,
 	type ReactNode,
 	useEffect,
+	useRef,
 	useState,
 } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +44,7 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -65,12 +69,22 @@ import { client, orpc } from "@/utils/orpc";
 // /crm/documentacion. Mismo patrón que apps/web/.../reportes/meta-colocacion.tsx.
 export const Route = createFileRoute("/crm/documentacion/licencias")({
 	component: RouteComponent,
+	validateSearch: z.object({
+		verificationId: z.string().uuid().optional(),
+		leadId: z.string().uuid().optional(),
+		opportunityId: z.string().uuid().optional(),
+	}).parse,
 });
 
 function RouteComponent() {
+	const search = Route.useSearch();
 	return (
 		<div className="container mx-auto p-6">
-			<LicenciasContent />
+			<LicenciasContent
+				initialVerificationId={search.verificationId}
+				initialLeadId={search.leadId}
+				initialOpportunityId={search.opportunityId}
+			/>
 		</div>
 	);
 }
@@ -120,18 +134,57 @@ function ResultBadge({ result }: { result: string }) {
 	);
 }
 
-export function LicenciasContent() {
-	const [isDialogOpen, setIsDialogOpen] = useState(false);
+export function LicenciasContent({
+	initialVerificationId,
+	initialLeadId,
+	initialOpportunityId,
+}: {
+	initialVerificationId?: string;
+	initialLeadId?: string;
+	initialOpportunityId?: string;
+} = {}) {
+	const navigate = useNavigate();
+	const [isDialogOpen, setIsDialogOpen] = useState(
+		!!(initialLeadId && initialOpportunityId),
+	);
+	const [newVerificationPrefill, setNewVerificationPrefill] = useState(
+		initialLeadId && initialOpportunityId
+			? { leadId: initialLeadId, opportunityId: initialOpportunityId }
+			: null,
+	);
 	const [selectedVerificationId, setSelectedVerificationId] = useState<
 		string | null
-	>(null);
+	>(initialVerificationId ?? null);
 	const [page, setPage] = useState(0);
 	const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+	const [nameSearchInput, setNameSearchInput] = useState("");
+	const [debouncedNameSearch, setDebouncedNameSearch] = useState("");
 	const queryClient = useQueryClient();
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: debounce intencional del texto de búsqueda
+	useEffect(() => {
+		const timeout = setTimeout(() => setDebouncedNameSearch(nameSearchInput), 300);
+		return () => clearTimeout(timeout);
+	}, [nameSearchInput]);
+
+	const cameFromDeepLinkRef = useRef(
+		!!(initialVerificationId || (initialLeadId && initialOpportunityId)),
+	);
+	useEffect(() => {
+		if (cameFromDeepLinkRef.current && !isDialogOpen && !selectedVerificationId) {
+			cameFromDeepLinkRef.current = false;
+			navigate({ to: "/crm/documentacion/licencias", search: {}, replace: true });
+		}
+	}, [isDialogOpen, selectedVerificationId, navigate]);
+
+	const trimmedNameSearch = debouncedNameSearch.trim();
 	const verificationsQuery = useQuery({
 		...orpc.listLicenseVerifications.queryOptions({
-			input: { limit: pageSize, offset: page * pageSize },
+			input: {
+				limit: pageSize,
+				offset: page * pageSize,
+				search: trimmedNameSearch || undefined,
+			},
 		}),
 		// Mantiene la página anterior visible mientras carga la siguiente, en
 		// vez de mostrar "Cargando..." de nuevo en cada cambio de página.
@@ -139,6 +192,11 @@ export function LicenciasContent() {
 	});
 	const rows = verificationsQuery.data ?? [];
 	const hasNextPage = rows.length === pageSize;
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: solo debe reaccionar al término de búsqueda
+	useEffect(() => {
+		setPage(0);
+	}, [trimmedNameSearch]);
 
 	// El listado no trae rawResponse (payload completo de Tránsito) — se pide
 	// aparte solo cuando se abre el detalle de una fila.
@@ -171,21 +229,35 @@ export function LicenciasContent() {
 					    con Esc/X/clic afuera y reaparece la próxima vez que se abre. */}
 					{isDialogOpen && (
 						<NewVerificationDialog
+							initialLeadId={newVerificationPrefill?.leadId}
+							initialOpportunityId={newVerificationPrefill?.opportunityId}
 							onDone={() => {
 								setPage(0);
 								queryClient.invalidateQueries({
 									queryKey: orpc.listLicenseVerifications.key(),
 								});
 							}}
-							onClose={() => setIsDialogOpen(false)}
+							onClose={() => {
+								setIsDialogOpen(false);
+								setNewVerificationPrefill(null);
+							}}
 						/>
 					)}
 				</Dialog>
 			</div>
 
 			<Card>
-				<CardHeader>
+				<CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<CardTitle>Historial de verificaciones</CardTitle>
+					<div className="relative w-full sm:w-64">
+						<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+						<Input
+							value={nameSearchInput}
+							onChange={(e) => setNameSearchInput(e.target.value)}
+							placeholder="Buscar por nombre..."
+							className="pl-8"
+						/>
+					</div>
 				</CardHeader>
 				<CardContent>
 					<Table>
@@ -219,9 +291,11 @@ export function LicenciasContent() {
 								rows.length === 0 && (
 									<TableRow>
 										<TableCell colSpan={6} className="text-center text-muted-foreground">
-											{page === 0
-												? "Todavía no hay verificaciones."
-												: "No hay más verificaciones."}
+											{trimmedNameSearch
+												? "Ninguna verificación coincide con esa búsqueda."
+												: page === 0
+													? "Todavía no hay verificaciones."
+													: "No hay más verificaciones."}
 										</TableCell>
 									</TableRow>
 								)}
@@ -379,16 +453,24 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function NewVerificationDialog({
+	initialLeadId,
+	initialOpportunityId,
 	onDone,
 	onClose,
 }: {
+	initialLeadId?: string;
+	initialOpportunityId?: string;
 	onDone: () => void;
 	onClose: () => void;
 }) {
+	
+	const isLocked = !!(initialLeadId && initialOpportunityId);
 	const [searchInput, setSearchInput] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
-	const [leadId, setLeadId] = useState<string | null>(null);
-	const [opportunityId, setOpportunityId] = useState<string | null>(null);
+	const [leadId, setLeadId] = useState<string | null>(initialLeadId ?? null);
+	const [opportunityId, setOpportunityId] = useState<string | null>(
+		initialOpportunityId ?? null,
+	);
 	const [file, setFile] = useState<File | null>(null);
 	const [result, setResult] = useState<VerificationRow | null>(null);
 
@@ -402,6 +484,7 @@ function NewVerificationDialog({
 		...orpc.getLeads.queryOptions({
 			input: { search: debouncedSearch || undefined, limit: 20 },
 		}),
+		enabled: !isLocked,
 	});
 
 	const leadOptions: ComboboxOption[] = (leadsQuery.data?.data ?? []).map(
@@ -418,6 +501,19 @@ function NewVerificationDialog({
 		enabled: !!leadId,
 	});
 	const opportunityOptions = opportunitiesQuery.data ?? [];
+	const lockedOpportunityTitle = opportunityOptions.find(
+		(o) => o.id === initialOpportunityId,
+	)?.title;
+
+	const lockedLeadQuery = useQuery({
+		...orpc.getLeadById.queryOptions({ input: { leadId: initialLeadId ?? "" } }),
+		enabled: isLocked,
+	});
+	const lockedLeadName = lockedLeadQuery.data
+		? [lockedLeadQuery.data.firstName, lockedLeadQuery.data.lastName]
+				.filter(Boolean)
+				.join(" ")
+		: null;
 
 	const verifyMutation = useMutation({
 		mutationFn: async () => {
@@ -468,48 +564,60 @@ function NewVerificationDialog({
 
 			{!result ? (
 				<div className="space-y-4">
-					<div className="space-y-2">
-						<Label>Lead</Label>
-						<Combobox
-							options={leadOptions}
-							value={leadId}
-							onChange={(value) => {
-								setLeadId(value);
-								setOpportunityId(null);
-							}}
-							onSearchChange={setSearchInput}
-							isLoading={leadsQuery.isFetching}
-							placeholder="Buscar lead por nombre..."
-							popOverWidth="full"
-							isInModal
-						/>
-					</div>
-
-					<div className="space-y-2">
-						<Label>Oportunidad</Label>
-						<Select
-							value={opportunityId ?? undefined}
-							onValueChange={setOpportunityId}
-							disabled={!leadId || opportunitiesQuery.isLoading}
-						>
-							<SelectTrigger>
-								<SelectValue
-									placeholder={
-										leadId
-											? "Selecciona la oportunidad..."
-											: "Primero selecciona un lead"
-									}
+					{isLocked ? (
+						<div className="rounded-md border bg-muted/40 p-3 text-sm">
+							<p className="text-muted-foreground text-xs">Verificando para</p>
+							<p className="font-medium">{lockedLeadName ?? "Cargando..."}</p>
+							<p className="text-muted-foreground">
+								{lockedOpportunityTitle ?? "Cargando..."}
+							</p>
+						</div>
+					) : (
+						<>
+							<div className="space-y-2">
+								<Label>Lead</Label>
+								<Combobox
+									options={leadOptions}
+									value={leadId}
+									onChange={(value) => {
+										setLeadId(value);
+										setOpportunityId(null);
+									}}
+									onSearchChange={setSearchInput}
+									isLoading={leadsQuery.isFetching}
+									placeholder="Buscar lead por nombre..."
+									popOverWidth="full"
+									isInModal
 								/>
-							</SelectTrigger>
-							<SelectContent>
-								{opportunityOptions.map((opportunity) => (
-									<SelectItem key={opportunity.id} value={opportunity.id}>
-										{opportunity.title}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</div>
+							</div>
+
+							<div className="space-y-2">
+								<Label>Oportunidad</Label>
+								<Select
+									value={opportunityId ?? undefined}
+									onValueChange={setOpportunityId}
+									disabled={!leadId || opportunitiesQuery.isLoading}
+								>
+									<SelectTrigger>
+										<SelectValue
+											placeholder={
+												leadId
+													? "Selecciona la oportunidad..."
+													: "Primero selecciona un lead"
+											}
+										/>
+									</SelectTrigger>
+									<SelectContent>
+										{opportunityOptions.map((opportunity) => (
+											<SelectItem key={opportunity.id} value={opportunity.id}>
+												{opportunity.title}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+						</>
+					)}
 
 					<div className="space-y-2">
 						<Label htmlFor="license-back-file">Foto del reverso de la licencia</Label>

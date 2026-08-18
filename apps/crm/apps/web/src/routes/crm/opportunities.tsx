@@ -4,14 +4,16 @@ import {
 } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
+	AlertCircle,
 	AlertTriangle,
 	Banknote,
 	Building,
 	Calculator,
 	Calendar,
 	Car,
+	CheckCircle2,
 	ChevronLeft,
 	ChevronRight,
 	Clock,
@@ -21,6 +23,7 @@ import {
 	FileSpreadsheet,
 	FileText,
 	Filter,
+	HelpCircle,
 	History,
 	Kanban,
 	List,
@@ -28,6 +31,7 @@ import {
 	Mail,
 	Phone,
 	Plus,
+	QrCode,
 	RefreshCw,
 	Search,
 	StickyNote,
@@ -2859,6 +2863,7 @@ function RouteComponent() {
 								<DocumentsManager
 									opportunityId={selectedOpportunity.id}
 									opportunityStatus={selectedOpportunity.status}
+									leadId={selectedOpportunity.lead?.id}
 								/>
 							</TabsContent>
 
@@ -3769,12 +3774,43 @@ function RouteComponent() {
 }
 
 // Documents Manager Component
+// Mismos 4 resultados que RESULT_META en documentacion/licencias.tsx —
+// duplicado a propósito (colores/textos pensados para la barra compacta de
+// esta página, no para el badge de esa), no se comparte entre ambas.
+const LICENSE_STATUS_META: Record<
+	"valida" | "invalida" | "ilegible" | "revision_manual",
+	{ label: string; rowClassName: string; Icon: typeof CheckCircle2 }
+> = {
+	valida: {
+		label: "Licencia válida",
+		rowClassName: "border-green-200 bg-green-50 text-green-800",
+		Icon: CheckCircle2,
+	},
+	invalida: {
+		label: "Licencia inválida",
+		rowClassName: "border-red-200 bg-red-50 text-red-800",
+		Icon: XCircle,
+	},
+	ilegible: {
+		label: "Licencia ilegible",
+		rowClassName: "border-amber-200 bg-amber-50 text-amber-800",
+		Icon: AlertCircle,
+	},
+	revision_manual: {
+		label: "Licencia: requiere revisión manual",
+		rowClassName: "border-blue-200 bg-blue-50 text-blue-800",
+		Icon: HelpCircle,
+	},
+};
+
 function DocumentsManager({
 	opportunityId,
 	opportunityStatus,
+	leadId,
 }: {
 	opportunityId: string;
 	opportunityStatus: string;
+	leadId?: string;
 }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
@@ -3804,6 +3840,15 @@ function DocumentsManager({
 		opportunityStatus === "won" &&
 		disbursementQuery.data &&
 		disbursementQuery.data.documents.length > 0;
+
+	
+	const licenseVerificationQuery = useQuery({
+		...orpc.listLicenseVerifications.queryOptions({
+			input: { leadId: leadId ?? "", opportunityId, limit: 1 },
+		}),
+		enabled: !!leadId,
+	});
+	const latestLicenseVerification = licenseVerificationQuery.data?.[0] ?? null;
 
 	// Upload a single document with a specific type
 	const uploadSingleDocument = async (docType: string) => {
@@ -4202,6 +4247,55 @@ function DocumentsManager({
 					)}
 				</CardContent>
 			</Card>
+
+			{leadId && !licenseVerificationQuery.isLoading && (
+				<div
+					className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-1.5 text-sm ${
+						latestLicenseVerification
+							? (LICENSE_STATUS_META[
+									latestLicenseVerification.result as keyof typeof LICENSE_STATUS_META
+								]?.rowClassName ?? "")
+							: "border-amber-200 bg-amber-50 text-amber-800"
+					}`}
+				>
+					<div className="flex items-center gap-2">
+						{latestLicenseVerification ? (
+							(() => {
+								const Icon =
+									LICENSE_STATUS_META[
+										latestLicenseVerification.result as keyof typeof LICENSE_STATUS_META
+									]?.Icon ?? QrCode;
+								return <Icon className="h-4 w-4 shrink-0" />;
+							})()
+						) : (
+							<QrCode className="h-4 w-4 shrink-0" />
+						)}
+						<span className="font-medium">
+							{latestLicenseVerification
+								? (LICENSE_STATUS_META[
+										latestLicenseVerification.result as keyof typeof LICENSE_STATUS_META
+									]?.label ?? "Licencia verificada")
+								: "Licencia sin verificar"}
+						</span>
+					</div>
+					<Button asChild size="sm" variant="ghost" className="h-6 px-2 text-xs">
+						{latestLicenseVerification ? (
+							<Link
+								to="/crm/documentacion/licencias"
+								search={{ verificationId: latestLicenseVerification.id }}
+							>
+								Ver detalle
+								<ExternalLink className="ml-1 h-3 w-3" />
+							</Link>
+						) : (
+							<Link to="/crm/documentacion/licencias" search={{ leadId, opportunityId }}>
+								Verificar ahora
+								<ExternalLink className="ml-1 h-3 w-3" />
+							</Link>
+						)}
+					</Button>
+				</div>
+			)}
 
 			{/* Upload Section */}
 			<Card>

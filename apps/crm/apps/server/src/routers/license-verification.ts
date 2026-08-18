@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, getTableColumns, or, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -207,6 +207,7 @@ export const licenseVerificationRouter = {
 					leadId: z.string().uuid().optional(),
 					opportunityId: z.string().uuid().optional(),
 					coDebtorId: z.string().uuid().optional(),
+					search: z.string().trim().min(1).max(100).optional(),
 					limit: z.number().int().min(1).max(100).default(20),
 					offset: z.number().int().min(0).default(0),
 				})
@@ -225,6 +226,16 @@ export const licenseVerificationRouter = {
 			}
 			if (input?.coDebtorId) {
 				conditions.push(eq(licenseQrVerifications.coDebtorId, input.coDebtorId));
+			}
+			if (input?.search) {
+				const pattern = `%${input.search}%`;
+				conditions.push(
+					or(
+						sql`concat_ws(' ', ${leads.firstName}, ${leads.middleName}, ${leads.lastName}, ${leads.secondLastName}) ILIKE ${pattern}`,
+						ilike(coDebtors.fullName, pattern),
+						ilike(licenseQrVerifications.licenseHolderName, pattern),
+					)!,
+				);
 			}
 
 			// Mismo criterio que getOpportunities: admin y sales_supervisor ven

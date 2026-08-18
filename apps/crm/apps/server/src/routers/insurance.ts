@@ -155,7 +155,7 @@ function getGytValues(
 	if (!result) return { gytCost: null, excelCurrentCost: null };
 
 	const normalizedType = vehicleType.toLowerCase();
-	if (["particular", "nuevo"].includes(normalizedType)) {
+	if (normalizedType === "particular") {
 		return {
 			gytCost:
 				result.automovilCamioneta == null

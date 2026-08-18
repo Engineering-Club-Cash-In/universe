@@ -36,7 +36,7 @@ export interface NormalizedInsuranceBreakdown {
 }
 
 const GYT_MIN_INSURED_AMOUNT = 257000;
-const VEHICLE_GYT_TYPES = new Set(["particular", "nuevo"]);
+const VEHICLE_GYT_TYPES = new Set(["particular"]);
 
 export function roundMoney(value: number): number {
 	return Math.round(value * 100) / 100;

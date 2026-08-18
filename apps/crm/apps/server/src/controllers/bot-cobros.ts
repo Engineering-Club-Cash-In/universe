@@ -75,9 +75,28 @@ export async function buscarClienteBotCobros(c: Context) {
 			});
 		}
 
-		// Respuesta genérica: no se revela si el dato existe pero no tiene crédito.
+		// Va como 404 y no como 200: el bot rutea los fallos por el estado HTTP, y
+		// con un 200 tenía que mirar además el cuerpo para darse cuenta de que no
+		// había cliente (lo pidió SimpleTech).
+		//
+		// El código es el MISMO tanto si el dato no existe como si existe pero no
+		// tiene crédito: distinguirlos convertiría el endpoint en un detector de
+		// clientes de Cash In para quien tenga la llave.
 		if (resultado.estado === "no_encontrado") {
-			return c.json({ success: true, data: { encontrado: false } });
+			return c.json(
+				{
+					success: false,
+					error: {
+						codigo: "CLIENTE_NO_ENCONTRADO",
+						mensaje:
+							"No encontramos un crédito con ese dato. Revisa tu NIT, DPI o número de placa.",
+					},
+					// Se mantiene del contrato original, para no romper si el bot ya lo
+					// leía.
+					data: { encontrado: false },
+				},
+				404,
+			);
 		}
 
 		const { cliente, tipoBusqueda } = resultado;
@@ -240,7 +259,22 @@ export async function listarCreditosBotCobros(c: Context) {
 			}
 		}
 
-		return c.json({ success: true, data: { creditos: creditos ?? [] } });
+		const lista = creditos ?? [];
+
+		// El código era bueno pero no hay nada que mostrar. Se responde error por lo
+		// mismo que arriba: que el bot no tenga que revisar si el arreglo vino
+		// vacío. Pasa poco —el servicio 1 solo encuentra a quien tiene crédito—,
+		// pero puede darse si el crédito cambia de estado entre una llamada y otra.
+		if (lista.length === 0) {
+			return error(c, {
+				codigo: "SIN_CREDITOS",
+				mensaje:
+					"No encontramos créditos activos a tu nombre. Por favor contacta a soporte.",
+				estado: 404,
+			});
+		}
+
+		return c.json({ success: true, data: { creditos: lista } });
 	} catch (err) {
 		console.error("[BotCobros] creditos:", err);
 		return error(c, {

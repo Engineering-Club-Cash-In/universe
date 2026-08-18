@@ -104,7 +104,7 @@ Base: `POST /api/bot/cobros/...` · `Authorization: Bearer <BOT_COBROS_API_KEY>`
     "encontrado": true,
     "celEnCrm": true,                       // ¿el número del chat es uno de los suyos?
     "otpEnviado": true,
-    "otpSimulado": false,                   // true SOLO en dev: no salió SMS, el código es 4321 (§3.3)
+    "otpSimulado": false,                   // true SOLO en dev: no salió SMS, el código es 4321 (§3.4)
     "referencia": "c2287206-…",             // el bot la guarda para el servicio 2
     "otpEnviadoA": "****6376",              // enmascarado, para decirlo en el chat
     "otpExpiraEnSegundos": 300,
@@ -115,12 +115,21 @@ Base: `POST /api/bot/cobros/...` · `Authorization: Bearer <BOT_COBROS_API_KEY>`
 ```
 
 ```jsonc
-// respuesta · no encontrado
+// respuesta · no encontrado — HTTP 404
 {
-  "success": true,
-  "data": { "encontrado": false }
+  "success": false,
+  "error": {
+    "codigo": "CLIENTE_NO_ENCONTRADO",
+    "mensaje": "No encontramos un crédito con ese dato. Revisa tu NIT, DPI o número de placa."
+  },
+  "data": { "encontrado": false }   // se mantiene del contrato original
 }
 ```
+
+> Antes esto era un **200** con `encontrado: false`. Se cambió a **404** el 2026-08-18 a
+> pedido de SimpleTech: así el bot rutea todos los fallos por el estado HTTP y no tiene que
+> mirar el cuerpo para darse cuenta de que no hubo cliente.
+> Ver [D-22](./DECISIONES.md#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error).
 
 ```jsonc
 // respuesta · pidió otro código demasiado pronto
@@ -227,8 +236,8 @@ créditos. Si no lo es, responde el error y no lista nada.
 ```
 
 Otros errores posibles: `OTP_VENCIDO`, `OTP_YA_USADO` (un código sirve una sola vez),
-`DEMASIADOS_INTENTOS` (llega en el **tercer** fallo, no en el cuarto) y
-`REFERENCIA_INVALIDA`.
+`DEMASIADOS_INTENTOS` (llega en el **tercer** fallo, no en el cuarto),
+`REFERENCIA_INVALIDA` y `SIN_CREDITOS` (el código era bueno pero no hay nada que listar).
 
 **Validación y listado van en una sola transacción**, con la fila del OTP bloqueada
 (`FOR UPDATE`): peticiones simultáneas no pueden pisarse el contador de intentos, y si el
@@ -272,7 +281,35 @@ debe recibirlo y validarlo igual** contra la tabla `otps`: es una consulta que y
 marca el código como usado y evita que baste el token de la API para listar los créditos de
 cualquier persona. Ver [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta).
 
-### 3.3 Solo dev · El código está quemado: `4321`
+### 3.3 Todos los errores, por estado HTTP
+
+**Solo un 200 significa que hay dato.** Cualquier otra cosa —no encontrado, dato ilegible,
+código malo— sale con estado de error y `success: false`, para que el bot rutee sin mirar el
+cuerpo ([D-22](./DECISIONES.md#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error)).
+
+| HTTP | `codigo` | Servicio | Cuándo |
+| --- | --- | --- | --- |
+| **200** | — | 1 y 2 | Único caso de éxito |
+| **400** | `PARAMETROS_INVALIDOS` | 1 y 2 | Falta `search`, o falta `referencia`/`otp` |
+| **400** | `BUSQUEDA_INVALIDA` | 1 | El dato no parece DPI, NIT ni placa (ej. `"hola"`) |
+| **400** | `PLACA_AMBIGUA` | 1 | La placa da con más de un vehículo |
+| **400** | `SIN_TELEFONO_REGISTRADO` | 1 | Es cliente, pero no tiene móvil al cual mandarle el código |
+| **401** | `NO_AUTORIZADO` | 1 y 2 | API key ausente o incorrecta (lo devuelve el middleware) |
+| **401** | `OTP_INVALIDO` | 2 | Código incorrecto — trae `data.intentosRestantes` |
+| **401** | `OTP_VENCIDO` | 2 | Pasaron los 5 minutos |
+| **401** | `OTP_YA_USADO` | 2 | Ese código ya se canjeó |
+| **401** | `REFERENCIA_INVALIDA` | 2 | La referencia no existe o no es un uuid |
+| **404** | `CLIENTE_NO_ENCONTRADO` | 1 | No hay cliente con ese dato, **o** lo hay pero sin crédito |
+| **404** | `SIN_CREDITOS` | 2 | El código validó pero no quedó ningún crédito que listar |
+| **429** | `DEMASIADOS_ENVIOS` | 1 | Menos de 60 s desde el último, o más de 5 en una hora — trae `data.reintentarEnSegundos` |
+| **429** | `DEMASIADOS_INTENTOS` | 2 | Tercer código fallido; hay que pedir uno nuevo |
+| **500** | `OTP_NO_ENVIADO` | 1 | El proveedor de SMS falló |
+| **500** | `ERROR_INTERNO` | 1 y 2 | Cualquier otra cosa |
+
+**Rutear por `codigo`, no por el mensaje ni por el HTTP a secas:** los textos cambian y hay
+estados que se repiten (el 401 lo comparten cuatro casos). El `codigo` es el contrato.
+
+### 3.4 Solo dev · El código está quemado: `4321`
 
 > ⏳ **Temporal.** El proveedor de SMS solo acepta peticiones desde **IPs en su whitelist** y
 > la de esta instancia no está, así que el envío muere en timeout y el flujo se queda trabado
@@ -480,7 +517,7 @@ listado de créditos no lo tocan y siguen funcionando igual.
 | NIT que está en el lead | Encuentra al titular |
 | NIT que solo está en la oportunidad | Encuentra al titular |
 | Placa `P-247JYT`, `P247JYT`, `p 247 jyt`, `247JYT` | Las cuatro llegan al mismo cliente |
-| DPI inexistente | `encontrado: false` |
+| DPI inexistente | 404 `CLIENTE_NO_ENCONTRADO` (era 200 `encontrado: false` hasta el 2026-08-18) |
 | `"hola"` | `BUSQUEDA_INVALIDA`, sin consultar la base |
 | Sin API key / con llave incorrecta | 401 `NO_AUTORIZADO` |
 | Servicio 2 con código incorrecto | 401 `OTP_INVALIDO` + `intentosRestantes: 2` |

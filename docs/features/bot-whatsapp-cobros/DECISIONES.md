@@ -12,7 +12,7 @@ día; si no está escrito, no está decidido.
 | [D-02](#d-02--quién-compara-el-teléfono-del-chat) | Quién compara el teléfono del chat | 🟢 |
 | [D-03](#d-03--segundo-factor-cuando-el-número-no-coincide) | Segundo factor | 🟢 |
 | [D-04](#d-04--dónde-vive-el-estado-de-identidad) | Dónde vive el estado de identidad | 🟢 |
-| [D-05](#d-05--cómo-se-reporta-no-encontrado) | Cómo se reporta "no encontrado" | 🟡 |
+| [D-05](#d-05--cómo-se-reporta-no-encontrado) | Cómo se reporta "no encontrado" | 🟢 (→ D-22) |
 | [D-06](#d-06--ttl-de-la-sesión-y-caducidad-de-la-verificación) | TTL de sesión y de la verificación | 🟢 (no aplica) |
 | [D-07](#d-07--otp-de-cobros-reuso-o-endpoints-nuevos) | OTP de cobros | 🟢 |
 | [D-08](#d-08--qué-es-un-crédito-activo-listable) | Qué es un "crédito activo" | 🔴 (se movió al Paso 2) |
@@ -29,6 +29,7 @@ día; si no está escrito, no está decidido.
 | [D-19](#d-19--a-qué-teléfono-se-manda-el-otp) | A qué teléfono se manda el OTP | 🟢 |
 | [D-20](#d-20--el-dpi-se-busca-también-en-codeudores) | ¿El DPI se busca en codeudores? | 🟢 |
 | [D-21](#d-21--modo-simulado-mientras-el-sms-no-sale) | Modo simulado mientras el SMS no sale | 🟢 |
+| [D-22](#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error) | Todo lo que no termina en dato va con estado HTTP de error | 🟢 |
 
 ---
 
@@ -131,16 +132,21 @@ aparecen flujos con varios pasos (pagos, boletas), se agrega la sesión entonces
 
 ## D-05 · Cómo se reporta "no encontrado"
 
-**Estado:** 🟡 Propuesta
+**Estado:** 🟢 **Cerrada · 2026-08-18 — se eligió B (404)**, ver
+[D-22](#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error)
 
 **Opciones.**
-- **A) HTTP 200 con `estado: "no_encontrado"`.**
-- B) HTTP 404.
+- A) HTTP 200 con `estado: "no_encontrado"`.
+- **B) HTTP 404.**
 
-**Recomendación de IT: A.** Que el cliente escriba mal su DPI no es una falla técnica; con
-404 los motores de bot suelen rutear a la rama de error genérico y el cliente pierde el
-hilo. Los 404 se reservan para rutas inexistentes. Los errores reales sí llevan su código
-HTTP (401, 429, 503).
+**Se implementó A** y se cambió a **B** cuando SimpleTech armó el bot: le resultaba más
+cómodo rutear por el estado HTTP que revisar el cuerpo de un 200 para ver si había cliente.
+
+La recomendación de IT había sido A, con este argumento: *que el cliente escriba mal su DPI
+no es una falla técnica; con 404 los motores de bot suelen rutear a la rama de error
+genérico y el cliente pierde el hilo.* **Se descartó** porque quien arma esas ramas es el
+mismo SimpleTech y prefiere manejarlo así — el `codigo` del cuerpo (`CLIENTE_NO_ENCONTRADO`)
+le permite distinguirlo de un error de verdad y darle su propio mensaje.
 
 ---
 
@@ -572,3 +578,43 @@ justamente eso: **sin la env, siempre aleatorio**.
 
 **Cuándo se quita.** Cuando el proveedor habilite la IP de la instancia: se apaga la env
 —el código vuelve a ser aleatorio— y después se borran `esModoSimulado` y `elegirCodigo`.
+
+---
+
+## D-22 · Todo lo que no termina en dato va con estado HTTP de error
+
+**Estado:** 🟢 **Cerrada · 2026-08-18**
+
+**Contexto.** Armando el bot, SimpleTech se topó con que el servicio 1 respondía **200** con
+`{"success": true, "data": {"encontrado": false}}` cuando el DPI, NIT o placa no daba con
+nadie. Para el bot eso es un fallo —no hay a quién mandarle el código— pero le llegaba como
+éxito, así que tenía que mirar dentro del cuerpo para darse cuenta. Pidió un **404** u otro
+estado de error para poder rutearlo como los demás.
+
+**Decisión.** **Un 200 significa que hay dato. Punto.** Cualquier camino que no termine en
+dato —no encontrado, dato ilegible, código malo, límite alcanzado— sale con estado HTTP de
+error y `success: false`.
+
+Dos respuestas cambiaron; el resto ya cumplía:
+
+| Caso | Antes | Ahora |
+| --- | --- | --- |
+| Servicio 1, `search` sin resultados | 200 `encontrado: false` | **404** `CLIENTE_NO_ENCONTRADO` |
+| Servicio 2, código válido pero sin créditos que listar | 200 `creditos: []` | **404** `SIN_CREDITOS` |
+
+El segundo pasa poco —el servicio 1 solo encuentra a quien tiene crédito— pero puede darse
+si el crédito cambia de estado entre una llamada y la otra, y dejarlo como 200 con arreglo
+vacío era volver a pedirle al bot que revisara el cuerpo.
+
+**Se conserva `data: { encontrado: false }`** dentro de la respuesta 404, por si el bot ya lo
+leía: el formato de error ya admite un `data` extra (`DEMASIADOS_ENVIOS` manda ahí su
+`reintentarEnSegundos`).
+
+**Lo que NO cambia: la respuesta sigue siendo genérica.** El mismo `CLIENTE_NO_ENCONTRADO`
+cubre "ese dato no existe" y "existe pero no tiene crédito" (ver §5 del paso 1).
+Distinguirlos convertiría el endpoint en un detector de clientes de Cash In para quien tenga
+la llave.
+
+**Cómo rutea el bot:** por el campo `codigo`, no por el estado a secas ni por el mensaje —
+los textos cambian y varios casos comparten estado. La tabla completa está en el
+[paso 1, §3.3](./01-identificacion-y-acceso.md#33-todos-los-errores-por-estado-http).

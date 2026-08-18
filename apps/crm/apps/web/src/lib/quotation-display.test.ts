@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
 	DISBURSEMENT_SALE_LABEL,
+	formatInsuranceProviderLabel,
 	formatQuotationClientName,
 	formatVehicleWithClient,
 } from "./quotation-display";
@@ -38,13 +37,13 @@ describe("quotation display helpers", () => {
 		expect(DISBURSEMENT_SALE_LABEL).toBe("Desembolso por venta");
 	});
 
-	test("does not render the GyT internal insurance detail in the quoter", () => {
-		const quoterSource = readFileSync(
-			join(import.meta.dir, "../routes/crm/quoter.tsx"),
-			"utf8",
-		);
+	test("hides the GyT provider label in the quoter", () => {
+		expect(formatInsuranceProviderLabel("gyt")).toBeNull();
+	});
 
-		expect(quoterSource).not.toContain("Seguro: GyT. Actual Excel");
-		expect(quoterSource).not.toContain("Diferencia a membresía");
+	test("keeps the Universales provider label in the quoter", () => {
+		expect(formatInsuranceProviderLabel("universales")).toBe(
+			"Seguro: Universales",
+		);
 	});
 });

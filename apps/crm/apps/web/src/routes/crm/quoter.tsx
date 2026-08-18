@@ -66,6 +66,7 @@ import {
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
 import {
+	formatInsuranceProviderLabel,
 	formatQuotationClientName,
 	formatVehicleWithClient,
 } from "@/lib/quotation-display";
@@ -2070,9 +2071,13 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
-									{quoterForm.state.values.insuranceProvider === "universales" ? (
+									{formatInsuranceProviderLabel(
+										quoterForm.state.values.insuranceProvider,
+									) ? (
 										<p className="text-muted-foreground text-xs">
-											Seguro: Universales
+											{formatInsuranceProviderLabel(
+												quoterForm.state.values.insuranceProvider,
+											)}
 										</p>
 									) : null}
 									{quoterForm.state.values.membershipAdjustmentCategory ? (

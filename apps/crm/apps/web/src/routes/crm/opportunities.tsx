@@ -4248,7 +4248,14 @@ function DocumentsManager({
 				</CardContent>
 			</Card>
 
-			{leadId && !licenseVerificationQuery.isLoading && (
+			{leadId && !licenseVerificationQuery.isLoading && licenseVerificationQuery.isError && (
+				<div className="flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-destructive text-sm">
+					<AlertCircle className="h-4 w-4 shrink-0" />
+					No se pudo cargar el estado de la licencia.
+				</div>
+			)}
+
+			{leadId && !licenseVerificationQuery.isLoading && !licenseVerificationQuery.isError && (
 				<div
 					className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-1.5 text-sm ${
 						latestLicenseVerification

@@ -161,6 +161,12 @@ export function LicenciasContent({
 	const [debouncedNameSearch, setDebouncedNameSearch] = useState("");
 	const queryClient = useQueryClient();
 
+	// Único punto de cierre (botón Cancelar y Esc/X/clic afuera) para limpiar siempre el prefill.
+	const handleNewVerificationOpenChange = (open: boolean) => {
+		setIsDialogOpen(open);
+		if (!open) setNewVerificationPrefill(null);
+	};
+
 	// biome-ignore lint/correctness/useExhaustiveDependencies: debounce intencional del texto de búsqueda
 	useEffect(() => {
 		const timeout = setTimeout(() => setDebouncedNameSearch(nameSearchInput), 300);
@@ -217,7 +223,7 @@ export function LicenciasContent({
 						oficial de Tránsito.
 					</p>
 				</div>
-				<Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+				<Dialog open={isDialogOpen} onOpenChange={handleNewVerificationOpenChange}>
 					<DialogTrigger asChild>
 						<Button>
 							<QrCode className="mr-2 h-4 w-4" />
@@ -237,10 +243,7 @@ export function LicenciasContent({
 									queryKey: orpc.listLicenseVerifications.key(),
 								});
 							}}
-							onClose={() => {
-								setIsDialogOpen(false);
-								setNewVerificationPrefill(null);
-							}}
+							onClose={() => handleNewVerificationOpenChange(false)}
 						/>
 					)}
 				</Dialog>

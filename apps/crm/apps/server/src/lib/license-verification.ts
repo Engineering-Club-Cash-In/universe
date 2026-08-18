@@ -376,7 +376,7 @@ function isExpired(dateStr: string | undefined): boolean | "unknown" {
 	return Date.now() >= expiresAtUtcMs;
 }
 
-// bloqueo>0, estadoLicencia===1 o estadoFol===3 = licencia bloqueada (confirmado en el JS del sitio oficial); valor desconocido o campo faltante = revisión manual, nunca válida por defecto.
+// Whitelist estricta (no denylist): solo bloqueo=0+estadoLicencia=2+estadoFol=4 es "active", el resto va a "unknown" (revisión manual).
 export function assessTransitoLicenseStatus(
 	data: Record<string, unknown>,
 ): "active" | "blocked" | "unknown" {
@@ -391,7 +391,10 @@ export function assessTransitoLicenseStatus(
 	if (bloqueo > 0 || estadoLicencia === 1 || estadoFol === 3) {
 		return "blocked";
 	}
-	return "active";
+	if (bloqueo === 0 && estadoLicencia === 2 && estadoFol === 4) {
+		return "active";
+	}
+	return "unknown";
 }
 
 // =============================================================================

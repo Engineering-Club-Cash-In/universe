@@ -86,8 +86,21 @@ export function ventanaDiaGuatemala(fechaGT: string): {
 	desde: Date;
 	hasta: Date;
 } {
+	// Date normaliza fechas de calendario inexistentes en vez de fallar (p.
+	// ej. "2026-02-30" se vuelve 2026-03-02) — Number.isNaN no lo detecta.
+	// Comparar contra los componentes parseados sí: si el mes/día se corrió,
+	// el round-trip ya no coincide con el string de entrada.
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaGT))
+		throw new Error(`Fecha GT inválida: ${fechaGT}`);
 	const desde = new Date(`${fechaGT}T06:00:00.000Z`);
 	if (Number.isNaN(desde.getTime()))
+		throw new Error(`Fecha GT inválida: ${fechaGT}`);
+	const [anio, mes, dia] = fechaGT.split("-").map(Number);
+	if (
+		desde.getUTCFullYear() !== anio ||
+		desde.getUTCMonth() + 1 !== mes ||
+		desde.getUTCDate() !== dia
+	)
 		throw new Error(`Fecha GT inválida: ${fechaGT}`);
 	const hasta = new Date(desde.getTime() + 24 * 60 * 60 * 1000);
 	return { desde, hasta };

@@ -194,3 +194,17 @@ describe("cerrarItemsAgenda", () => {
 test("fecha anterior Guatemala cruza mes correctamente", () => {
 	expect(fechaAnteriorGuatemala("2026-09-01")).toBe("2026-08-31");
 });
+
+describe("ventanaDiaGuatemala — fechas inválidas", () => {
+	test.each([
+		"2026-02-30", // febrero no tiene día 30: Date lo normaliza a marzo 2, no da NaN
+		"2026-13-01", // mes 13 no existe
+		"2026-04-31", // abril tiene 30 días
+		"basura",
+		"2026-08-1",
+	])("rechaza %s en vez de normalizarla en silencio", (fechaInvalida) => {
+		expect(() => ventanaDiaGuatemala(fechaInvalida)).toThrow(
+			`Fecha GT inválida: ${fechaInvalida}`,
+		);
+	});
+});

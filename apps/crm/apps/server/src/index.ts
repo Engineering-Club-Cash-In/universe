@@ -37,7 +37,7 @@ import {
 	getVehiclesBySifcoController,
 } from "./controllers/vehicles";
 import type { db } from "./db";
-import { otps } from "./db/schema/otp";
+import { ejecutarAgendaCobrosDiaria } from "./jobs/agenda-cobros-snapshots";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -1655,6 +1655,35 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			);
 		}
 	}, 25_000);
+
+	// Snapshot de cumplimiento de Agenda: 00:05 GT (= 06:05 UTC). Primero
+	// cierra ayer completo y después congela D-0 de hoy (solo cuotas que
+	// vencen HOY, no D0-D5 — ver obtenerAgendaAsesor en agenda-cobros-source.ts).
+	// Advisory lock + constraints únicos hacen seguros timer, reinicio y
+	// múltiples instancias.
+	function scheduleAtAgendaCobrosGT() {
+		const now = new Date();
+		const next = new Date();
+		next.setUTCHours(6, 5, 0, 0);
+		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+		setTimeout(async () => {
+			await ejecutarAgendaCobrosDiaria().catch(console.error);
+			scheduleAtAgendaCobrosGT();
+		}, next.getTime() - now.getTime());
+	}
+	scheduleAtAgendaCobrosGT();
+
+	// Catch-up del mismo día tras deploy/reinicio posterior a 00:05 GT. No hace
+	// backfill: solo reintenta cierre de ayer y captura de hoy; snapshots ya
+	// existentes permanecen congelados.
+	setTimeout(() => {
+		const bootNow = new Date();
+		const horaGT = (bootNow.getUTCHours() + 18) % 24;
+		const minutoGT = bootNow.getUTCMinutes();
+		if (horaGT > 0 || (horaGT === 0 && minutoGT >= 5)) {
+			ejecutarAgendaCobrosDiaria().catch(console.error);
+		}
+	}, 30_000);
 }
 
 export default {

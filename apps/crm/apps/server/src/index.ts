@@ -43,6 +43,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { autenticarBotCobros } from "./lib/bot-cobros/auth";
+import { docsBotCobros, openapiBotCobros } from "./lib/bot-cobros/docs";
 import { createContext } from "./lib/context";
 import { toDateStrGT } from "./lib/guatemala-month-window";
 import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
@@ -989,6 +990,13 @@ app.post(
 	autenticarBotCobros,
 	listarCreditosBotCobros,
 );
+
+// Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no
+// expone datos, y pedirla impediría que Swagger UI cargue el documento— pero
+// solo responde con BOT_COBROS_DOCS=true, que se prende únicamente en la
+// instancia de dev del bot.
+app.get("/api/bot/cobros/docs", docsBotCobros);
+app.get("/api/bot/cobros/openapi.json", openapiBotCobros);
 
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);

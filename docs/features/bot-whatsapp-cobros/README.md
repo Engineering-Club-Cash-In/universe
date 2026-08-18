@@ -45,6 +45,7 @@ decidido.
 | [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md) | **Paso 4**: subir comprobante, lectura de la boleta e ingreso manual. |
 | [`05-convenio-y-promesa.md`](./05-convenio-y-promesa.md) | **Paso 5**: congelado. Solo referencia hasta que gerencia apruebe. |
 | [`pruebas-equipo-it.md`](./pruebas-equipo-it.md) | Datos ficticios y mensajes para que el equipo de IT pruebe el bot en dev. |
+| **Swagger** (no es un archivo) | La referencia que usa SimpleTech: `GET /api/bot/cobros/docs` en la instancia de dev. Se genera del código y **se puede ejecutar** desde el navegador. Todo cambio en los endpoints va ahí en el mismo commit ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)). |
 | [`DECISIONES.md`](./DECISIONES.md) | Registro de decisiones: abiertas, cerradas y por qué. |
 | `fuente/` | Los PDF originales (gerencia + documento detallado). |
 

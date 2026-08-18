@@ -104,6 +104,18 @@ apps/
   - [`docs/features/bot-whatsapp-cobros/`](../../docs/features/bot-whatsapp-cobros/README.md)
     — Bot de WhatsApp de cobros (CRM ↔ cartera-back ↔ SimpleTech). En definición.
 
+### 🔒 Endpoints del bot de cobros: el Swagger es obligatorio
+
+Los endpoints `/api/bot/cobros/*` los consume un integrador externo (SimpleTech). **Todo
+cambio en ellos —una ruta nueva, un código de error nuevo, uno que cambia de nombre— se
+documenta en `apps/server/src/lib/bot-cobros/openapi.ts` en el MISMO commit.**
+
+No es una convención que dependa de acordarse: `lib/bot-cobros/openapi.test.ts` compara la
+spec contra lo que el código realmente devuelve, y el pipeline corre esas pruebas antes de
+construir la imagen. Sin documentar, **no despliega**.
+
+Ver [D-23](../../docs/features/bot-whatsapp-cobros/DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria).
+
 ## Utilities
 - Always use zsh as the default shell
 - All texts must be in spanish when facing client side

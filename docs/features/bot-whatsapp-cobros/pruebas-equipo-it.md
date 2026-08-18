@@ -39,6 +39,17 @@ tocar nada más.
 
 ---
 
+## La referencia de la API está en Swagger
+
+`https://tgmt4r4n8pjjqpi7rjqf5lfb.devteamatcci.site/api/bot/cobros/docs`
+
+Los dos endpoints con sus ejemplos y todos sus errores. Con el botón **Authorize** (pegando
+la API key) se pueden **ejecutar** las llamadas desde ahí mismo, sin armar curls.
+
+Es lo que reemplaza al PDF que se le mandaba a SimpleTech.
+
+---
+
 ## Antes de empezar
 
 | Requisito | Detalle |

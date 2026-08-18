@@ -30,6 +30,7 @@ día; si no está escrito, no está decidido.
 | [D-20](#d-20--el-dpi-se-busca-también-en-codeudores) | ¿El DPI se busca en codeudores? | 🟢 |
 | [D-21](#d-21--modo-simulado-mientras-el-sms-no-sale) | Modo simulado mientras el SMS no sale | 🟢 |
 | [D-22](#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error) | Todo lo que no termina en dato va con estado HTTP de error | 🟢 |
+| [D-23](#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria) | La documentación de la API es Swagger, y es obligatoria | 🟢 |
 
 ---
 
@@ -617,4 +618,60 @@ la llave.
 
 **Cómo rutea el bot:** por el campo `codigo`, no por el estado a secas ni por el mensaje —
 los textos cambian y varios casos comparten estado. La tabla completa está en el
-[paso 1, §3.3](./01-identificacion-y-acceso.md#33-todos-los-errores-por-estado-http).
+[paso 1, §3.4](./01-identificacion-y-acceso.md#34-todos-los-errores-por-estado-http).
+
+---
+
+## D-23 · La documentación de la API es Swagger, y es obligatoria
+
+**Estado:** 🟢 **Cerrada · 2026-08-18**
+
+**Contexto.** A SimpleTech se le pasaba un PDF con los contratos. No les estaba funcionando:
+se desactualiza en cuanto cambia algo, hay que reenviarlo por WhatsApp, y para probar
+igual tienen que armar los curls a mano. Y esto va a crecer — hoy son 2 endpoints, con la
+fase 2 vienen varios más.
+
+**Decisión.** La documentación de los endpoints del bot es **Swagger UI**, servida por el
+mismo binario en `GET /api/bot/cobros/docs`, con el documento OpenAPI en
+`/api/bot/cobros/openapi.json`.
+
+Gana tres cosas sobre el PDF: se actualiza sola con cada despliegue, se puede **ejecutar**
+desde el navegador (botón Authorize + Try it out) y se importa a Postman.
+
+**Alcance: solo los endpoints del bot**, por ahora. El CRM tiene 40 rutas REST más que
+podrían sumarse después; no era el momento de documentarlas todas.
+
+### Escrita a mano
+
+Lo natural sería generarla desde schemas con `@hono/zod-openapi`, y así no se puede
+desincronizar. **Se descartó** porque obligaba a reescribir cómo los handlers parsean el
+body, y con eso cambiaba el formato de los errores de validación — justo lo que SimpleTech
+ya tenía integrado. No se mueve el contrato bajo los pies del integrador por elegancia
+interna. Si algún día se rehace el parseo, vale la pena volver a evaluarlo.
+
+**Tampoco se agregó `@hono/swagger-ui`:** el Dockerfile del server corre `bun install` **sin
+lockfile**, así que cada dependencia nueva puede cambiar de versión sola entre builds (ya
+pasó con better-auth, que tumbó el login del CRM). El HTML que ese paquete genera son 20
+líneas; se escribieron a mano y los assets vienen del CDN con la versión **fija**.
+
+### 🔒 El candado
+
+Escribirla a mano tiene un costo: se desincroniza al primer descuido, y una documentación
+que miente es peor que no tener. Por eso **no depende de que alguien se acuerde**:
+
+`lib/bot-cobros/openapi.test.ts` compara contra el código real —los `codigo` que devuelven
+el controlador y el middleware, y las rutas montadas en `index.ts`— y el pipeline corre esas
+pruebas **antes** de construir la imagen (`desplegar` depende de `verificar`).
+
+**Todo cambio en los endpoints se documenta en el mismo commit. Si no, no despliega.**
+
+La misma prueba cuida que el **código del modo simulado no se publique**
+([D-21](#d-21--modo-simulado-mientras-el-sms-no-sale)): la documentación la ve el integrador
+y ese código lo tiene solo el equipo de IT.
+
+### Dónde se publica
+
+Detrás de **`BOT_COBROS_DOCS=true`**, prendida solo en la instancia de dev del bot — mismo
+criterio que el modo simulado. Las rutas van **sin API key**: no exponen datos, y exigirla
+impediría que la UI cargara el documento. Los ejemplos usan **datos reales de dev**, para que
+las llamadas de la página funcionen de verdad.

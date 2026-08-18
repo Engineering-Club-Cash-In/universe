@@ -104,7 +104,7 @@ Base: `POST /api/bot/cobros/...` · `Authorization: Bearer <BOT_COBROS_API_KEY>`
     "encontrado": true,
     "celEnCrm": true,                       // ¿el número del chat es uno de los suyos?
     "otpEnviado": true,
-    "otpSimulado": false,                   // true SOLO en dev: no salió SMS, el código es 4321 (§3.4)
+    "otpSimulado": false,                   // true SOLO en dev: no salió SMS, el código es 4321 (§3.5)
     "referencia": "c2287206-…",             // el bot la guarda para el servicio 2
     "otpEnviadoA": "****6376",              // enmascarado, para decirlo en el chat
     "otpExpiraEnSegundos": 300,
@@ -281,7 +281,39 @@ debe recibirlo y validarlo igual** contra la tabla `otps`: es una consulta que y
 marca el código como usado y evita que baste el token de la API para listar los créditos de
 cualquier persona. Ver [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta).
 
-### 3.3 Todos los errores, por estado HTTP
+### 3.3 La documentación viva: Swagger
+
+**`GET /api/bot/cobros/docs`** — la página con los dos endpoints, sus ejemplos y sus errores.
+Reemplaza al PDF, que se desactualizaba y había que reenviar.
+
+Lo que gana SimpleTech: el botón **Authorize** guarda la API key y desde ahí puede
+**ejecutar** las llamadas contra dev y ver respuestas reales, sin armar curls. El documento
+crudo está en `GET /api/bot/cobros/openapi.json`, por si lo quieren importar en Postman.
+
+Las dos rutas van **sin API key** —no exponen datos, y pedirla impediría que la UI cargara el
+documento— pero solo responden con **`BOT_COBROS_DOCS=true`**, que se prende únicamente en la
+instancia de dev del bot. En el CRM de producción corre el mismo binario y ahí no hay razón
+para publicar esto.
+
+> 🔒 **Regla: todo cambio en estos endpoints se documenta en el mismo commit.**
+>
+> No es una recomendación. `lib/bot-cobros/openapi.test.ts` compara los códigos de error y
+> las rutas de la spec contra lo que el código realmente hace; el pipeline corre esas pruebas
+> **antes** de construir la imagen (`desplegar` depende de `verificar`). Si agregás un error,
+> cambiás un código o sumás un endpoint sin documentarlo, **no despliega**.
+>
+> También cuida que el código del modo simulado no se publique: la documentación la ve el
+> integrador, y ese código lo tiene solo el equipo de IT.
+
+**Los ejemplos usan datos reales de dev** (la base es copia de producción), para que las
+llamadas de la página funcionen de verdad.
+
+**Está escrita a mano**, no generada desde schemas. Generarla con `@hono/zod-openapi` habría
+obligado a reescribir cómo los handlers parsean el body, y con eso habría cambiado el formato
+de los errores de validación — justo lo que SimpleTech ya integró. La prueba de arriba cubre
+el riesgo de que se desincronice.
+
+### 3.4 Todos los errores, por estado HTTP
 
 **Solo un 200 significa que hay dato.** Cualquier otra cosa —no encontrado, dato ilegible,
 código malo— sale con estado de error y `success: false`, para que el bot rutee sin mirar el
@@ -309,7 +341,7 @@ cuerpo ([D-22](./DECISIONES.md#d-22--todo-lo-que-no-termina-en-dato-va-con-estad
 **Rutear por `codigo`, no por el mensaje ni por el HTTP a secas:** los textos cambian y hay
 estados que se repiten (el 401 lo comparten cuatro casos). El `codigo` es el contrato.
 
-### 3.4 Solo dev · El código está quemado: `4321`
+### 3.5 Solo dev · El código está quemado: `4321`
 
 > ⏳ **Temporal.** El proveedor de SMS solo acepta peticiones desde **IPs en su whitelist** y
 > la de esta instancia no está, así que el envío muere en timeout y el flujo se queda trabado

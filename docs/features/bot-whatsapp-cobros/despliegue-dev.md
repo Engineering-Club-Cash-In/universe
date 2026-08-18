@@ -80,6 +80,7 @@ O dejar que el pipeline (§3) construya la primera y crear la app en Coolify des
    | `DISABLE_SCHEDULED_JOBS` | — | Ya no hace falta: en esta rama los jobs están apagados en el código. Ver la advertencia de abajo |
    | `TEST_MESSAGE` | `false` | Para que cada quien reciba su propio código |
    | `BOT_COBROS_OTP_SIMULADO` | `true` | **Necesaria hoy.** El SMS no sale: la IP de esta instancia no está en la whitelist del proveedor. Con esto el código es siempre `4321`. Ver abajo |
+   | `BOT_COBROS_DOCS` | `true` | Publica el Swagger en `/api/bot/cobros/docs`. **Solo acá**: en el CRM de producción corre el mismo binario y no hay razón para publicarlo |
    | `SMS_TOKEN`, `SMS_API_KEY` | las de siempre | Para cuando se apague la de arriba |
    | `CORS_ORIGIN` | el dominio de dev | |
 
@@ -116,6 +117,22 @@ clientes dejan de recibir sus recordatorios. El `FIXME(COBROS-02)` en `index.ts`
 línea exacta.
 
 Los jobs los sigue corriendo la instancia principal del CRM, que es la que debe hacerlo.
+
+### 📖 La documentación de la API se publica acá (`BOT_COBROS_DOCS=true`)
+
+`https://<dominio>/api/bot/cobros/docs` — Swagger UI con los endpoints del bot, sus ejemplos
+y sus errores. Es lo que se le pasa a SimpleTech en vez del PDF: se actualiza en cada
+despliegue y desde ahí pueden **ejecutar** las llamadas con el botón Authorize.
+
+El documento crudo está en `/api/bot/cobros/openapi.json`, para importarlo en Postman.
+
+Las dos rutas van sin API key (no exponen datos, y pedirla impediría que la UI cargara el
+documento), pero **solo responden con la env prendida**. Sin ella dan 404, que es lo que se
+quiere en producción.
+
+> 🔒 Cada cambio en los endpoints tiene que ir también al Swagger. Lo cuida
+> `lib/bot-cobros/openapi.test.ts`, que el pipeline corre **antes** de construir la imagen:
+> si un error o una ruta no está documentada, no despliega.
 
 ### ⏳ El OTP va en modo simulado (`BOT_COBROS_OTP_SIMULADO=true`)
 

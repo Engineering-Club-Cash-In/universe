@@ -89,6 +89,11 @@ export const especificacionBotCobros = {
 			description:
 				"Paso 1 del bot: identificar al cliente y darle acceso a sus créditos.",
 		},
+		{
+			name: "Menú del crédito",
+			description:
+				"Paso 2 del bot: la información del crédito que el cliente eligió.",
+		},
 	],
 	components: {
 		securitySchemes: {
@@ -511,6 +516,221 @@ export const especificacionBotCobros = {
 										codigo: "DEMASIADOS_INTENTOS",
 										mensaje:
 											"Alcanzaste el máximo de intentos. Solicita un código nuevo.",
+									},
+								},
+							},
+						},
+					},
+					"500": {
+						description: "Error inesperado.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ERROR_INTERNO",
+										mensaje:
+											"Ocurrió un error. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"503": {
+						description: "El servidor no tiene configurada la API key.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "SERVICIO_NO_DISPONIBLE",
+										mensaje: "El servicio no está disponible en este momento.",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/bot/cobros/credito/info": {
+			post: {
+				tags: ["Menú del crédito"],
+				summary: "Servicio 3 · Info del crédito elegido",
+				description: [
+					"La información que el bot muestra al entrar al menú de un crédito: capital activo, cuotas atrasadas, cuota actual, mora, próxima fecha de pago, vehículo y convenio.",
+					"",
+					"**Se manda la MISMA `referencia` del servicio 1.** Es lo que prueba que el cliente ya validó su código y que el crédito es suyo: con la API key sola se podría preguntar por el crédito de cualquiera. La referencia sirve **30 minutos** desde que se validó el código; después hay que volver a identificarse.",
+					"",
+					"**Qué esperar de cada campo:**",
+					"",
+					"| Campo | Nota |",
+					"| --- | --- |",
+					"| `capitalActivo` | Lo que queda por pagar de capital, no el monto original |",
+					"| `cuotaActual` | La más vieja **sin pagar**. Si hay atraso, su fecha ya pasó: por eso trae `vencida` |",
+					"| `proximaFechaPago` | La próxima cuota que **todavía no vence**. Con atraso NO es la misma que `cuotaActual` |",
+					"| `mora` | `null` si no tiene. Un convenio activo congela la mora |",
+					"| `convenio` | `null` si no tiene |",
+					"| `vehiculo` | `null` si el crédito no tiene vehículo registrado — se responde igual, no es error |",
+				].join("\n"),
+				operationId: "infoCredito",
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+								required: ["referencia", "numeroSifco"],
+								properties: {
+									referencia: {
+										type: "string",
+										format: "uuid",
+										description: "La que devolvió el servicio 1.",
+									},
+									numeroSifco: {
+										type: "string",
+										description:
+											"El crédito que eligió el cliente, tal como vino en el servicio 2.",
+									},
+								},
+							},
+							example: {
+								referencia: "3b530493-eff1-492d-8394-26adf5b5e211",
+								numeroSifco: "01010214120240",
+							},
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description: "La info del crédito.",
+						content: {
+							"application/json": {
+								example: {
+									success: true,
+									data: {
+										credito: {
+											numeroSifco: "01010214120240",
+											etiqueta: "MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT",
+											estado: "EN_CONVENIO",
+											capitalActivo: "192391.27",
+											cuotaMensual: "5891.15",
+											cuotasAtrasadas: 2,
+											cuotaActual: {
+												numero: 8,
+												de: 84,
+												fechaVencimiento: "2026-06-30",
+												vencida: true,
+											},
+											proximaFechaPago: "2026-08-30",
+											mora: null,
+											convenio: {
+												cuotaMensual: "981.86",
+												montoPendiente: "4909.29",
+												pagosRealizados: 1,
+												pagosPendientes: 5,
+												numeroMeses: 6,
+											},
+											vehiculo: {
+												placa: "P-247JYT",
+												marca: "MAZDA",
+												modelo: "CX-5 GRAND TOURING AWD",
+												anio: 2016,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description: "Falta la referencia o el número de crédito.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "PARAMETROS_INVALIDOS",
+										mensaje: "Faltan datos para consultar el crédito.",
+									},
+								},
+							},
+						},
+					},
+					"401": {
+						description:
+							"La referencia no sirve, o pasaron los 30 minutos. **Ruteá por `codigo`.**",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									SESION_VENCIDA: {
+										summary: "Pasaron 30 min desde que validó el código",
+										value: {
+											success: false,
+											error: {
+												codigo: "SESION_VENCIDA",
+												mensaje:
+													"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+											},
+										},
+									},
+									REFERENCIA_INVALIDA: {
+										summary: "No existe, o su código nunca se validó",
+										value: {
+											success: false,
+											error: {
+												codigo: "REFERENCIA_INVALIDA",
+												mensaje:
+													"No encontramos tu solicitud. Comienza de nuevo.",
+											},
+										},
+									},
+									NO_AUTORIZADO: {
+										summary: "API key ausente o incorrecta",
+										value: {
+											success: false,
+											error: {
+												codigo: "NO_AUTORIZADO",
+												mensaje: "No autorizado.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"404": {
+						description:
+							"El crédito no es de ese cliente, o cartera no tiene sus datos.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									CREDITO_NO_ENCONTRADO: {
+										summary:
+											"No es un crédito de esta persona (mismo mensaje que si no existiera, a propósito)",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_NO_ENCONTRADO",
+												mensaje: "No encontramos ese crédito.",
+											},
+										},
+									},
+									CREDITO_SIN_DATOS: {
+										summary: "Está en el CRM pero cartera no lo tiene",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_SIN_DATOS",
+												mensaje:
+													"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+											},
+										},
 									},
 								},
 							},

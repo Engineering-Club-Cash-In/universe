@@ -55,6 +55,7 @@ import type {
 	LiquidatePagosInversionistasInput,
 	PaginatedResponse,
 	PoolPorAsesorRow,
+	ResumenCreditoResponse,
 	ResumenGlobalInversionista,
 	ReversePagoInput,
 	UpdateCreditoInput,
@@ -1001,6 +1002,30 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
+	/**
+	 * Resumen liviano del crédito, para el bot de WhatsApp.
+	 *
+	 * `getCredito` devuelve el calendario completo —~56 KB medidos, 14 consultas
+	 * en cartera— y el bot necesita siete datos. Este endpoint responde 421
+	 * bytes con las mismas reglas de negocio (capital activo, cuotas atrasadas)
+	 * calculadas del lado de cartera, que es donde viven.
+	 */
+	async getResumenCredito(
+		numeroSifco: string,
+	): Promise<ResumenCreditoResponse | null> {
+		try {
+			return await this.request<ResumenCreditoResponse>(
+				`/credito/resumen?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+				{ method: "GET" },
+				true, // cacheado: el cliente navega el menú, no cambia el saldo
+			);
+		} catch (error) {
+			// 404 = el crédito no está en cartera. No es una falla del servicio.
+			if (error instanceof Error && error.message.includes("404")) return null;
+			throw error;
+		}
+	}
+
 	async getCredito(numeroSifco: string): Promise<CreditoDirectoResponse> {
 		// El endpoint /credito NO usa el wrapper CarteraBackApiResponse
 		// Retorna los datos directamente
@@ -1009,10 +1034,10 @@ export class CarteraBackClient {
 			{ method: "GET" },
 			true, // use cache
 		);
-		console.log(
-			`[CarteraBackClient] getCredito response for ${numeroSifco}:`,
-			JSON.stringify(response, null, 2),
-		);
+		// Antes acá se hacía JSON.stringify(response, null, 2) del response
+		// COMPLETO: ~120 KB indentados escritos al log en cada llamada no
+		// cacheada, solo para depurar. Se deja el número de crédito.
+		console.log(`[CarteraBackClient] getCredito OK: ${numeroSifco}`);
 		if (!response) throw new Error(`Crédito ${numeroSifco} not found`);
 		return response;
 	}

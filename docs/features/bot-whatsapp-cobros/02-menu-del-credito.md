@@ -1,6 +1,6 @@
 # Paso 2 · Menú del crédito
 
-**Estado:** 🟡 En definición — notas de reunión (2026-08-13) + documento detallado
+**Estado:** 🔵 **"Info del crédito" implementada (2026-08-18)** — el resto sigue en definición
 **Tickets:** [CC2-40 · CB-104](https://clubcashin.atlassian.net/browse/CC2-40)
 **Prerrequisito:** [Paso 1](./01-identificacion-y-acceso.md) (sin identidad verificada no se
 muestra nada de esto)
@@ -22,7 +22,7 @@ flowchart TD
 
 | Gestión | Estado |
 | --- | --- |
-| Info del crédito | 🟡 En definición (ver §2) |
+| Info del crédito | 🔵 **Implementada** (ver §2) |
 | Realizar un pago | 🟡 En definición → [Paso 3](./03-metodos-de-pago.md) |
 | Contactar con un agente | ⚪ Pendiente (ver §3) |
 | Solicitar estado de cuenta | ⚪ Pendiente (ver §4) |
@@ -70,14 +70,100 @@ flowchart TD
 Razón: el cliente que consulta su saldo es el que más cerca está de pagar; no tiene sentido
 obligarlo a volver al menú para hacerlo.
 
+### Se agregó el convenio
+
+No estaba en el árbol original. Si el crédito tiene un convenio activo, el bot muestra su
+cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en convenio.
+
+### El contrato
+
+`POST /api/bot/cobros/credito/info` — documentado y ejecutable en el
+[Swagger](./01-identificacion-y-acceso.md#33-la-documentación-viva-swagger).
+
+```jsonc
+// request — la referencia es la MISMA del paso 1
+{ "referencia": "3b530493-…", "numeroSifco": "01010214124000" }
+```
+
+```jsonc
+// respuesta
+{
+  "success": true,
+  "data": {
+    "credito": {
+      "numeroSifco": "01010214124000",
+      "etiqueta": "Toyota Corolla 2015 · P-319JJL",
+      "estado": "MOROSO",
+      "capitalActivo": "48421.89",
+      "cuotaMensual": "2464.63",
+      "cuotasAtrasadas": 1,
+      "cuotaActual": { "numero": 1, "de": 48, "fechaVencimiento": "2026-02-28", "vencida": true },
+      "proximaFechaPago": "2026-08-30",
+      "mora": { "monto": "598.52", "cuotasAtrasadas": 1 },
+      "convenio": null,
+      "vehiculo": { "placa": "P-319JJL", "marca": "Toyota", "modelo": "Corolla", "anio": 2015 }
+    }
+  }
+}
+```
+
+### De dónde sale cada dato
+
+| Dato | Fuente | Nota |
+| --- | --- | --- |
+| Capital activo | cartera | `capital − SUM(abono_capital)` de los pagos pagados |
+| Cuotas atrasadas | cartera | Vencidas, sin pagar y **sin un pago esperando validación** |
+| Cuota actual `3/60` | cartera | La más vieja sin pagar |
+| Mora | cartera | `null` si no tiene. Un convenio activo la congela |
+| Próxima fecha de pago | cartera | La próxima que **todavía no vence** |
+| Convenio | cartera | `null` si no tiene |
+| Vehículo | CRM (`vehicles`) | `null` si no tiene: **se responde igual** |
+
+### `cuotaActual` y `proximaFechaPago` no son lo mismo
+
+Con atraso, la cuota que el cliente **debe** venció hace meses, mientras que la próxima que
+le toca aún no llega. En el ejemplo de arriba: debe la cuota 1 —vencida el 28 de febrero— y
+su próxima fecha es el 30 de agosto.
+
+Mezclarlos daría un mensaje absurdo ("tu próxima fecha de pago fue en febrero"), así que van
+en campos distintos y `cuotaActual` trae `vencida` para que el bot sepa cuál mostrar.
+
+### 🔒 Quién puede ver qué
+
+**La API key identifica a SimpleTech, no al cliente final:** con ella sola se podría pedir el
+saldo de cualquier crédito. Por eso este servicio exige la **misma `referencia` del paso 1** y
+comprueba cuatro cosas ([D-24](./DECISIONES.md#d-24--el-menú-hereda-la-identidad-del-paso-1)):
+
+1. que la referencia exista y sea de un OTP de cobros,
+2. que el cliente **haya canjeado** su código (o sea, pasó el servicio 2),
+3. que no hayan pasado **30 minutos** desde ese canje,
+4. que el crédito consultado **sea de esa persona**.
+
+Pedir el crédito de un tercero responde `404 CREDITO_NO_ENCONTRADO` — el mismo error que si no
+existiera, para que no se pueda averiguar qué créditos hay probando números.
+
+### Por qué no se reusa `/credito` de cartera tal cual
+
+Ese endpoint devuelve el calendario completo: **14 consultas y ~56 KB medidos** para un
+crédito de 84 cuotas, con el desglose de cada pago, **el asesor asignado, el royalti, las
+membresías y las observaciones internas**. Nada de eso puede salir hacia un integrador
+externo, y el bot necesita siete datos.
+
+Se agregó `GET /credito/resumen` en cartera: **421 bytes y ~4x más rápido**, con las mismas
+reglas de negocio calculadas donde viven. Se hizo endpoint aparte y no un parámetro porque
+`getCreditoByNumero` tiene 473 líneas y lo usa la pantalla que cobranza ocupa a diario.
+
+> El capital activo **tiene** que calcularlo cartera: 441 pagos pagados no tienen `cuota_id`
+> (414 con abono a capital), así que sumarlos desde el calendario los dejaría fuera. En el
+> sandbox eso desviaba **24 créditos, uno por Q309,485** — le diríamos al cliente que debe de
+> más.
+
 ### Pendientes
 
-- **Qué datos de la aseguradora exactamente.** Hoy cartera-back solo guarda el **nombre**
-  (catálogo `aseguradoras`, enlazado por `creditos.aseguradora_id`, expuesto como
-  `aseguradora` en `getAllCredits`). Si se necesita **número de póliza, vigencia, cobertura o
-  teléfono de asistencia**, ese dato **no existe** y hay que definir de dónde sale antes de
-  prometerlo en el bot.
-- Qué se muestra si el crédito no tiene aseguradora asignada (`aseguradora_id` nulo).
+- **La aseguradora quedó fuera de esta entrega** (decisión de Daniel: hoy no es
+  indispensable). El endpoint **ya la devuelve** —nombre y `no_poliza`, que sí existe y está
+  llena en 1,110 de 1,809 créditos—, solo falta decidir si se muestra y cómo. Lo que **no**
+  existe es vigencia, cobertura ni teléfono de asistencia.
 - Formato del mensaje: es WhatsApp; definir si todo entra en un mensaje o se parte.
 
 ---

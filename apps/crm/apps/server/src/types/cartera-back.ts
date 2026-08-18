@@ -1388,3 +1388,51 @@ export class CarteraBackValidationError extends CarteraBackError {
 		this.name = "CarteraBackValidationError";
 	}
 }
+
+/**
+ * Resumen liviano de un crédito — `GET /credito/resumen` de cartera-back.
+ *
+ * Existe para el bot de WhatsApp: `CreditoDirectoResponse` trae el calendario
+ * completo (~56 KB) y el bot necesita siete datos. Las reglas de negocio
+ * —capital activo, cuotas atrasadas— se calculan en cartera, que es donde
+ * viven. Ver `apps/cartera-back/src/controllers/resumenCredito.ts`.
+ */
+export interface ResumenCreditoResponse {
+	numero_credito_sifco: string;
+	credito_id: number;
+	status_credito: string;
+	/** Capital original del crédito. */
+	capital: string;
+	/** `capital - SUM(abono_capital)` sobre los pagos pagados. */
+	capital_activo: string;
+	cuota_mensual: string;
+	plazo: number;
+	cuotas_atrasadas: number;
+	cuotas_pagadas: number;
+	/** La más vieja sin pagar; si hay atraso, su fecha ya pasó. */
+	cuota_actual: {
+		numero: number;
+		de: number;
+		fecha_vencimiento: string;
+		vencida: boolean;
+	} | null;
+	/** La próxima que TODAVÍA no vence. Distinta de `cuota_actual` con atraso. */
+	proxima_fecha_pago: string | null;
+	mora: {
+		monto: string;
+		porcentaje: string;
+		cuotas_atrasadas: number;
+	} | null;
+	convenio: {
+		monto_total: string;
+		monto_pagado: string;
+		monto_pendiente: string;
+		cuota_mensual: string;
+		numero_meses: number;
+		pagos_realizados: number;
+		pagos_pendientes: number;
+		fecha_convenio: string | null;
+	} | null;
+	aseguradora: string | null;
+	numero_poliza: string | null;
+}

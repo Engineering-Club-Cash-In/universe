@@ -13,6 +13,7 @@ import {
 } from "./controllers/bot";
 import {
 	buscarClienteBotCobros,
+	infoCreditoBotCobros,
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
 import { infornetController } from "./controllers/buro";
@@ -989,6 +990,12 @@ app.post(
 	"/api/bot/cobros/creditos",
 	autenticarBotCobros,
 	listarCreditosBotCobros,
+);
+// Paso 2 · info del crédito que el cliente eligió en el menú.
+app.post(
+	"/api/bot/cobros/credito/info",
+	autenticarBotCobros,
+	infoCreditoBotCobros,
 );
 
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no

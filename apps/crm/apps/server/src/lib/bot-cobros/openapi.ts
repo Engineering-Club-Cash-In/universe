@@ -917,6 +917,18 @@ export const especificacionBotCobros = {
 											},
 										},
 									},
+									CREDITO_SIN_DATOS: {
+										summary:
+											"El crédito está en el CRM pero no en cartera — NO es lo mismo que no tener movimientos",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_SIN_DATOS",
+												mensaje:
+													"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+											},
+										},
+									},
 								},
 							},
 						},

@@ -12,7 +12,7 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, SinMovimientosParaEstadoCuenta, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
+import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, SinMovimientosParaEstadoCuenta, CreditoNoEstaEnCartera, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
@@ -101,6 +101,13 @@ export const paymentRouter = new Elysia()
     if (error instanceof SinMovimientosParaEstadoCuenta) {
       set.status = 404;
       return { message: error.message, codigo: "SIN_MOVIMIENTOS" };
+    }
+
+    // Distinto de SIN_MOVIMIENTOS: acá el crédito ni siquiera está en cartera.
+    // Para quien pregunta significan cosas opuestas.
+    if (error instanceof CreditoNoEstaEnCartera) {
+      set.status = 404;
+      return { message: error.message, codigo: "CREDITO_NO_ENCONTRADO" };
     }
 
     console.error("❌ Error en /paymentByCredit:", error);

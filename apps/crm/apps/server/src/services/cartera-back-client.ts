@@ -1068,10 +1068,16 @@ export class CarteraBackClient {
 	 * empezó a trabajar dejaría hasta cuatro PDF idénticos huérfanos en R2, con
 	 * su carga de navegador (Codex, PR #1328).
 	 *
-	 * Devuelve `null` cuando el crédito no tiene movimientos que reportar —
-	 * cartera responde 404 en ese caso, que no es una falla del servicio.
+	 * Los dos motivos por los que puede no haber documento —el crédito no tiene
+	 * movimientos, o no está en cartera— se devuelven **por separado**: para el
+	 * cliente significan cosas opuestas y el bot les da mensajes distintos.
 	 */
-	async getEstadoCuentaUrl(numeroSifco: string): Promise<string | null> {
+	async getEstadoCuentaUrl(
+		numeroSifco: string,
+	): Promise<
+		| { ok: true; url: string }
+		| { ok: false; motivo: "SIN_MOVIMIENTOS" | "CREDITO_NO_ESTA_EN_CARTERA" }
+	> {
 		try {
 			const response = await this.request<{ excelUrl?: string }>(
 				`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=true`,
@@ -1084,21 +1090,29 @@ export class CarteraBackClient {
 				false,
 			);
 
-			return response?.excelUrl ?? null;
-		} catch (error) {
-			// Solo el 404 que cartera marca como SIN_MOVIMIENTOS significa "este
-			// crédito no tiene nada que reportar". Un 404 pelado puede ser la ruta
-			// que todavía no existe en un deploy rodante o un proxy respondiendo
-			// por su cuenta: eso es una falla y debe subir, no convertirse en un
-			// "no tenés movimientos" que el cliente leería como cierto
-			// (Codex, PR #1328).
-			if (
-				error instanceof CarteraBackHttpError &&
-				error.status === 404 &&
-				error.payload.codigo === "SIN_MOVIMIENTOS"
-			) {
-				return null;
+			// Sin `excelUrl` no hay nada que entregar, y cartera no dijo por qué:
+			// se trata como falta de datos y no como un documento vacío.
+			if (!response?.excelUrl) {
+				return { ok: false, motivo: "CREDITO_NO_ESTA_EN_CARTERA" };
 			}
+
+			return { ok: true, url: response.excelUrl };
+		} catch (error) {
+			// Solo los 404 que cartera MARCA con su código son casos de negocio. Un
+			// 404 pelado puede ser la ruta que todavía no existe en un deploy
+			// rodante o un proxy respondiendo por su cuenta: eso es una falla y
+			// debe subir, no convertirse en un "no tenés movimientos" que el
+			// cliente leería como cierto (Codex, PR #1328).
+			if (error instanceof CarteraBackHttpError && error.status === 404) {
+				if (error.payload.codigo === "SIN_MOVIMIENTOS") {
+					return { ok: false, motivo: "SIN_MOVIMIENTOS" };
+				}
+
+				if (error.payload.codigo === "CREDITO_NO_ENCONTRADO") {
+					return { ok: false, motivo: "CREDITO_NO_ESTA_EN_CARTERA" };
+				}
+			}
+
 			throw error;
 		}
 	}

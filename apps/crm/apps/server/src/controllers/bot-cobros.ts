@@ -294,6 +294,16 @@ export async function estadoDeCuentaBotCobros(c: Context) {
 							"Todavía no hay movimientos para generar tu estado de cuenta.",
 						estado: 404,
 					});
+				// Distinto del anterior: acá no es que no haya movimientos, es que
+				// no tenemos los datos del crédito. Al cliente se le manda a soporte
+				// en vez de decirle que su crédito está vacío.
+				case "CREDITO_SIN_DATOS":
+					return error(c, {
+						codigo: "CREDITO_SIN_DATOS",
+						mensaje:
+							"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+						estado: 404,
+					});
 				default:
 					return error(c, {
 						codigo: "REFERENCIA_INVALIDA",

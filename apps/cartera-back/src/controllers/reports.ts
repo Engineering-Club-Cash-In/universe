@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
+import { creditos, SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
 import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
@@ -8,7 +8,7 @@ import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import { launchBrowser } from "../utils/functions/browser";
 import { db } from "../database";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import Big from "big.js";
 import { STATUS_EXCLUIDOS_MORA } from "./latefee";
 
@@ -518,10 +518,37 @@ export class SinMovimientosParaEstadoCuenta extends Error {
   }
 }
 
+/**
+ * El crédito no existe en cartera.
+ *
+ * Se distingue de `SinMovimientosParaEstadoCuenta` porque significan cosas
+ * opuestas para quien pregunta: uno es "tu crédito está pero todavía no tiene
+ * movimientos" y el otro "no tenemos tu crédito". Sin la distinción, a los
+ * clientes de las 96 oportunidades ganadas del CRM que nunca llegaron a cartera
+ * se les respondería que no tienen movimientos, como si fuera cierto
+ * (Codex, PR #1328).
+ */
+export class CreditoNoEstaEnCartera extends Error {
+  constructor(creditoSifco: string) {
+    super(`El crédito ${creditoSifco} no existe en cartera`);
+    this.name = "CreditoNoEstaEnCartera";
+  }
+}
+
 export async function exportPagosToExcel(credito_sifco: string) {
   // 1️⃣ Traer los pagos con su data
   const pagosData = await getAllPagosWithCreditAndInversionistas(credito_sifco);
   if (!pagosData.length) {
+    // Un arreglo vacío no dice si el crédito no tiene pagos o si no existe: hay
+    // que preguntarlo para no confundir los dos casos.
+    const [existe] = await db
+      .select({ credito_id: creditos.credito_id })
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, credito_sifco))
+      .limit(1);
+
+    if (!existe) throw new CreditoNoEstaEnCartera(credito_sifco);
+
     throw new SinMovimientosParaEstadoCuenta(credito_sifco);
   }
 

@@ -126,7 +126,8 @@ export type ResultadoEstadoCuenta =
 				| "REFERENCIA_INVALIDA"
 				| "SESION_VENCIDA"
 				| "CREDITO_NO_ES_DEL_CLIENTE"
-				| "SIN_ESTADO_DE_CUENTA";
+				| "SIN_ESTADO_DE_CUENTA"
+				| "CREDITO_SIN_DATOS";
 	  };
 
 export type ResultadoInfoCredito =
@@ -298,11 +299,20 @@ export async function obtenerEstadoDeCuenta(
 
 	if (!acceso.ok) return { ok: false, codigo: acceso.codigo };
 
-	const url = await carteraBackClient.getEstadoCuentaUrl(numeroSifco);
+	const resultado = await carteraBackClient.getEstadoCuentaUrl(numeroSifco);
 
-	// Cartera lanza cuando el crédito no tiene ningún pago que reportar: no hay
-	// documento que generar, y no es una falla del servicio.
-	if (!url) return { ok: false, codigo: "SIN_ESTADO_DE_CUENTA" };
+	if (!resultado.ok) {
+		// Los dos motivos llevan mensajes distintos: "todavía no hay movimientos"
+		// es una respuesta normal; "no tenemos tu crédito" manda a soporte, y es
+		// lo que pasa con los créditos del CRM que nunca llegaron a cartera.
+		return {
+			ok: false,
+			codigo:
+				resultado.motivo === "SIN_MOVIMIENTOS"
+					? "SIN_ESTADO_DE_CUENTA"
+					: "CREDITO_SIN_DATOS",
+		};
+	}
 
-	return { ok: true, url };
+	return { ok: true, url: resultado.url };
 }

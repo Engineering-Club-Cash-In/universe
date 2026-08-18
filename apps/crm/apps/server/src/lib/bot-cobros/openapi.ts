@@ -574,6 +574,7 @@ export const especificacionBotCobros = {
 					"| `mora` | `null` si no tiene, **o si su monto no es confiable ahora mismo** — ver `moraPorConfirmar`. Un convenio activo la congela |",
 					"| `moraPorConfirmar` | `true` = tiene mora pero su monto no se puede citar. El saldo lo refresca un job a las 23:59: entre que el cliente paga y esa corrida, la cifra guardada no cuadra. Antes que decirle un número equivocado, no se manda ninguno — conviene ofrecerle hablar con su asesor |",
 					"| `convenio` | `null` si no tiene |",
+					"| `asesor` | Con quién puede hablar el cliente sobre este crédito. `telefono` puede venir vacío |",
 					"| `vehiculo` | `null` si el crédito no tiene vehículo registrado — se responde igual, no es error |",
 				].join("\n"),
 				operationId: "infoCredito",
@@ -634,6 +635,10 @@ export const especificacionBotCobros = {
 												pagosRealizados: 1,
 												pagosPendientes: 5,
 												numeroMeses: 6,
+											},
+											asesor: {
+												nombre: "Erik Rivas",
+												telefono: "50255551234",
 											},
 											vehiculo: {
 												placa: "P-247JYT",
@@ -749,6 +754,184 @@ export const especificacionBotCobros = {
 										codigo: "ERROR_INTERNO",
 										mensaje:
 											"Ocurrió un error. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"503": {
+						description: "El servidor no tiene configurada la API key.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "SERVICIO_NO_DISPONIBLE",
+										mensaje: "El servicio no está disponible en este momento.",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/bot/cobros/credito/estado-cuenta": {
+			post: {
+				tags: ["Menú del crédito"],
+				summary: "Servicio 4 · Estado de cuenta (PDF)",
+				description: [
+					"Genera el estado de cuenta del crédito y devuelve el **enlace al PDF**. Es el mismo documento que descarga el botón *Descargar Estado de Cuenta* del sistema interno.",
+					"",
+					"Pide la misma `referencia` del paso 1 y comprueba lo mismo que `/credito/info`: sin eso, con la API key se podría bajar el estado de cuenta de cualquiera.",
+					"",
+					"**El documento se genera en el momento de cada llamada** (no está pre-hecho), así que la respuesta tarda más que los otros servicios. Conviene llamarlo solo cuando el cliente lo pide, no al abrir el menú.",
+					"",
+					"El enlace apunta a un archivo público: **quien lo tenga puede abrirlo**. Es un dato del cliente, así que no debería reenviarse a nadie más.",
+				].join("\n"),
+				operationId: "estadoDeCuenta",
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+								required: ["referencia", "numeroSifco"],
+								properties: {
+									referencia: {
+										type: "string",
+										format: "uuid",
+										description: "La que devolvió el servicio 1.",
+									},
+									numeroSifco: {
+										type: "string",
+										description: "El crédito que eligió el cliente.",
+									},
+								},
+							},
+							example: {
+								referencia: "3b530493-eff1-492d-8394-26adf5b5e211",
+								numeroSifco: "01010214124000",
+							},
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description: "El enlace al PDF.",
+						content: {
+							"application/json": {
+								example: {
+									success: true,
+									data: {
+										url: "https://…/reportes/estado_cuenta_01010214124000_1755550000000.pdf",
+										formato: "pdf",
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description: "Falta la referencia o el número de crédito.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "PARAMETROS_INVALIDOS",
+										mensaje: "Faltan datos para generar el estado de cuenta.",
+									},
+								},
+							},
+						},
+					},
+					"401": {
+						description: "La referencia no sirve, o pasaron los 30 minutos.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									SESION_VENCIDA: {
+										summary: "Pasaron 30 min desde que validó el código",
+										value: {
+											success: false,
+											error: {
+												codigo: "SESION_VENCIDA",
+												mensaje:
+													"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+											},
+										},
+									},
+									REFERENCIA_INVALIDA: {
+										summary: "No existe, o su código nunca se validó",
+										value: {
+											success: false,
+											error: {
+												codigo: "REFERENCIA_INVALIDA",
+												mensaje:
+													"No encontramos tu solicitud. Comienza de nuevo.",
+											},
+										},
+									},
+									NO_AUTORIZADO: {
+										summary: "API key ausente o incorrecta",
+										value: {
+											success: false,
+											error: {
+												codigo: "NO_AUTORIZADO",
+												mensaje: "No autorizado.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"404": {
+						description:
+							"El crédito no es de ese cliente, o todavía no hay movimientos que reportar.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									CREDITO_NO_ENCONTRADO: {
+										summary: "No es un crédito de esta persona",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_NO_ENCONTRADO",
+												mensaje: "No encontramos ese crédito.",
+											},
+										},
+									},
+									SIN_ESTADO_DE_CUENTA: {
+										summary: "El crédito no tiene pagos que reportar todavía",
+										value: {
+											success: false,
+											error: {
+												codigo: "SIN_ESTADO_DE_CUENTA",
+												mensaje:
+													"Todavía no hay movimientos para generar tu estado de cuenta.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"500": {
+						description: "No se pudo generar el documento.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ERROR_INTERNO",
+										mensaje:
+											"No pudimos generar tu estado de cuenta en este momento. Intenta de nuevo en unos minutos.",
 									},
 								},
 							},

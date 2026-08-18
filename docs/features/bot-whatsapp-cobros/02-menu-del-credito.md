@@ -25,7 +25,7 @@ flowchart TD
 | Info del crédito | 🔵 **Implementada** (ver §2) |
 | Realizar un pago | 🟡 En definición → [Paso 3](./03-metodos-de-pago.md) |
 | Contactar con un agente | ⚪ Pendiente (ver §3) |
-| Solicitar estado de cuenta | ⚪ Pendiente (ver §4) |
+| Solicitar estado de cuenta | 🔵 **Implementada** (ver §4) |
 | Regresar al menú anterior | Siempre disponible |
 
 ### Convenio y promesa no son botones del menú
@@ -102,6 +102,7 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
       "mora": { "monto": "598.52", "cuotasAtrasadas": 1 },
       "moraPorConfirmar": false,
       "convenio": null,
+      "asesor": { "nombre": "Octavio Rosales", "telefono": "35111822" },
       "vehiculo": { "placa": "P-319JJL", "marca": "Toyota", "modelo": "Corolla", "anio": 2015 }
     }
   }
@@ -119,6 +120,7 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
 | Próxima fecha de pago | cartera | La próxima que **todavía no vence** |
 | Convenio | cartera | `null` si no tiene |
 | Vehículo | CRM (`vehicles`) | `null` si no tiene: **se responde igual** |
+| Asesor | cartera (`asesores`) | Nombre y teléfono, para que el cliente sepa con quién hablar |
 
 ### `cuotaActual` y `proximaFechaPago` no son lo mismo
 
@@ -214,8 +216,43 @@ Es la salida para **cancelación de crédito, convenio de pago y abono a capital
 
 ## 4. Solicitar estado de cuenta
 
-> ❓ **Pendiente:** qué documento se envía exactamente, quién lo genera (¿ya existe en
-> cartera?), en qué formato y si se manda por el chat o por correo.
+**Resuelto: el documento ya existe y es un PDF.** Es el mismo que descarga el botón
+*Descargar Estado de Cuenta* de carteraFront, generado por cartera con Puppeteer y subido a R2.
+
+`POST /api/bot/cobros/credito/estado-cuenta` — mismo request que `/credito/info`
+(`referencia` + `numeroSifco`) y **el mismo control de acceso** ([D-24](./DECISIONES.md#d-24--el-menú-hereda-la-identidad-del-paso-1)):
+sin eso, con la API key se podría bajar el estado de cuenta de cualquiera.
+
+```jsonc
+// respuesta
+{
+  "success": true,
+  "data": {
+    "url": "https://…/reportes/estado_cuenta_01010214124000_1787087819307.pdf",
+    "formato": "pdf"
+  }
+}
+```
+
+El CRM **solo hace de puente**: llama a `GET /paymentByCredit?excel=true` de cartera y
+devuelve la URL. No toca el documento.
+
+> ⚠️ **Los nombres engañan.** El parámetro se llama `excel` y el campo de la respuesta de
+> cartera `excelUrl`, pero lo que sale es un **PDF** (`ContentType: application/pdf`, archivo
+> `estado_cuenta_*.pdf`). Quedaron de cuando sí era una hoja de cálculo.
+
+**Dos cosas para SimpleTech:**
+
+- **El documento se genera en cada llamada** (Puppeteer + subida a R2): medido en **~3.4 s**
+  contra dev, bastante más que los otros servicios. Conviene pedirlo solo cuando el cliente
+  lo solicita, no al abrir el menú.
+- **El enlace es público para quien lo tenga.** Es un dato del cliente; no debería reenviarse.
+
+Si el crédito no tiene pagos que reportar, responde `404 SIN_ESTADO_DE_CUENTA` — no es un
+error del servicio.
+
+> ❓ **Queda por definir con Cobros:** si el bot manda el enlace en el chat o adjunta el
+> archivo, y si se ofrece también por correo.
 
 ---
 

@@ -22,7 +22,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { otps } from "../../db/schema/otp";
 import { carteraBackClient } from "../../services/cartera-back-client";
-import { listarCreditosDeCliente } from "./buscar-cliente";
+import { type CreditoBot, listarCreditosDeCliente } from "./buscar-cliente";
 
 /**
  * Cuánto vale la referencia del paso 1 para seguir consultando.
@@ -99,6 +99,16 @@ export type InfoCreditoBot = {
 		pagosPendientes: number;
 		numeroMeses: number;
 	} | null;
+	/**
+	 * Con quién puede hablar el cliente sobre este crédito.
+	 *
+	 * Es el asesor asignado en cartera. `null` si el crédito no tiene uno — hoy
+	 * no pasa, pero la columna lo permite; el bot debe poder seguir sin él.
+	 */
+	asesor: {
+		nombre: string;
+		telefono: string | null;
+	} | null;
 	/** `null` si el crédito no tiene vehículo registrado: se responde igual. */
 	vehiculo: {
 		placa: string | null;
@@ -107,6 +117,17 @@ export type InfoCreditoBot = {
 		anio: number;
 	} | null;
 };
+
+export type ResultadoEstadoCuenta =
+	| { ok: true; url: string }
+	| {
+			ok: false;
+			codigo:
+				| "REFERENCIA_INVALIDA"
+				| "SESION_VENCIDA"
+				| "CREDITO_NO_ES_DEL_CLIENTE"
+				| "SIN_ESTADO_DE_CUENTA";
+	  };
 
 export type ResultadoInfoCredito =
 	| { ok: true; info: InfoCreditoBot }
@@ -137,10 +158,27 @@ export type ResultadoInfoCredito =
  * el crédito de un tercero.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-export async function obtenerInfoCredito(
+type ResultadoAcceso =
+	| { ok: true; credito: CreditoBot }
+	| {
+			ok: false;
+			codigo:
+				| "REFERENCIA_INVALIDA"
+				| "SESION_VENCIDA"
+				| "CREDITO_NO_ES_DEL_CLIENTE";
+	  };
+
+/**
+ * Las cuatro comprobaciones de D-24, en un solo lugar.
+ *
+ * La usan TODAS las gestiones del menú (info del crédito, estado de cuenta y
+ * las que vengan). Si alguna se salta esto, la API key sola alcanzaría para
+ * pedir datos de cualquier crédito.
+ */
+async function verificarAcceso(
 	referencia: string,
 	numeroSifco: string,
-): Promise<ResultadoInfoCredito> {
+): Promise<ResultadoAcceso> {
 	// La referencia es el uuid de la fila; con otra cosa la consulta explota.
 	if (
 		!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -177,6 +215,19 @@ export async function obtenerInfoCredito(
 	const credito = creditos.find((c) => c.numeroSifco === numeroSifco);
 
 	if (!credito) return { ok: false, codigo: "CREDITO_NO_ES_DEL_CLIENTE" };
+
+	return { ok: true, credito };
+}
+
+export async function obtenerInfoCredito(
+	referencia: string,
+	numeroSifco: string,
+): Promise<ResultadoInfoCredito> {
+	const acceso = await verificarAcceso(referencia, numeroSifco);
+
+	if (!acceso.ok) return { ok: false, codigo: acceso.codigo };
+
+	const credito = acceso.credito;
 
 	const resumen = await carteraBackClient.getResumenCredito(numeroSifco);
 
@@ -220,7 +271,38 @@ export async function obtenerInfoCredito(
 						numeroMeses: resumen.convenio.numero_meses,
 					}
 				: null,
+			asesor: resumen.asesor,
 			vehiculo: credito.vehiculo,
 		},
 	};
+}
+
+/**
+ * Genera el estado de cuenta del crédito y devuelve el enlace al PDF.
+ *
+ * Es un **puente**: el documento lo arma cartera, el mismo que descarga el
+ * botón de carteraFront. Acá solo se comprueba que quien lo pide tenga derecho
+ * a ese crédito, con las mismas cuatro condiciones de `obtenerInfoCredito`
+ * (D-24) — sin eso, con la API key se podría bajar el estado de cuenta de
+ * cualquiera.
+ *
+ * El enlace apunta a R2 y es **público para quien lo tenga**: no se le manda al
+ * bot ningún dato del documento, solo la URL, y es el bot quien decide si se la
+ * pasa al cliente en el chat.
+ */
+export async function obtenerEstadoDeCuenta(
+	referencia: string,
+	numeroSifco: string,
+): Promise<ResultadoEstadoCuenta> {
+	const acceso = await verificarAcceso(referencia, numeroSifco);
+
+	if (!acceso.ok) return { ok: false, codigo: acceso.codigo };
+
+	const url = await carteraBackClient.getEstadoCuentaUrl(numeroSifco);
+
+	// Cartera lanza cuando el crédito no tiene ningún pago que reportar: no hay
+	// documento que generar, y no es una falla del servicio.
+	if (!url) return { ok: false, codigo: "SIN_ESTADO_DE_CUENTA" };
+
+	return { ok: true, url };
 }

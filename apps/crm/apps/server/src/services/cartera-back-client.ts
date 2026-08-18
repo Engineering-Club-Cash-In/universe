@@ -1033,6 +1033,31 @@ export class CarteraBackClient {
 		}
 	}
 
+	/**
+	 * Genera el estado de cuenta del crédito y devuelve su URL.
+	 *
+	 * Es el mismo documento que descarga el botón "Descargar Estado de Cuenta"
+	 * de carteraFront: `/paymentByCredit?excel=true`.
+	 *
+	 * **Ojo con los nombres:** el parámetro se llama `excel` y el campo de la
+	 * respuesta `excelUrl`, pero lo que devuelve es un **PDF** — cartera lo
+	 * arma con Puppeteer y lo sube a R2 como `estado_cuenta_*.pdf` con
+	 * `ContentType: application/pdf`. Los nombres quedaron de cuando sí era una
+	 * hoja de cálculo.
+	 *
+	 * Genera el documento en cada llamada (Puppeteer + subida a R2), así que
+	 * **no se cachea del lado del CRM pero tampoco conviene llamarlo de más**.
+	 */
+	async getEstadoCuentaUrl(numeroSifco: string): Promise<string | null> {
+		const response = await this.request<{ excelUrl?: string }>(
+			`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=true`,
+			{ method: "GET" },
+			false,
+		);
+
+		return response?.excelUrl ?? null;
+	}
+
 	async getCredito(numeroSifco: string): Promise<CreditoDirectoResponse> {
 		// El endpoint /credito NO usa el wrapper CarteraBackApiResponse
 		// Retorna los datos directamente

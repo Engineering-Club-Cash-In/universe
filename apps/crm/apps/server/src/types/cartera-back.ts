@@ -1438,4 +1438,6 @@ export interface ResumenCreditoResponse {
 	} | null;
 	aseguradora: string | null;
 	numero_poliza: string | null;
+	/** El asesor que lleva el crédito. `null` si no tiene asignado. */
+	asesor: { nombre: string; telefono: string | null } | null;
 }

@@ -13,6 +13,7 @@ import {
 } from "./controllers/bot";
 import {
 	buscarClienteBotCobros,
+	estadoDeCuentaBotCobros,
 	infoCreditoBotCobros,
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
@@ -996,6 +997,12 @@ app.post(
 	"/api/bot/cobros/credito/info",
 	autenticarBotCobros,
 	infoCreditoBotCobros,
+);
+// Paso 2 · estado de cuenta en PDF. Puente al documento que genera cartera.
+app.post(
+	"/api/bot/cobros/credito/estado-cuenta",
+	autenticarBotCobros,
+	estadoDeCuentaBotCobros,
 );
 
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no

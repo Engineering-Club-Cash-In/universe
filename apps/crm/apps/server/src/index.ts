@@ -1594,6 +1594,28 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// lee contactos_cobros.estado_promesa: si corriera en paralelo podría leer
 	// una promesa que YA se cumplió pero cuyo estado todavía no se actualizó,
 	// perdiendo ese pago para siempre en el snapshot del día (Codex PR #1330).
+	//
+	// Encadenar DESPUÉS de checkPromesasPago no basta como piso: si hay pocas
+	// promesas activas ese día, ese encadenado puede resolver en segundos,
+	// capturando bien antes de las 00:05 GT documentadas. `procesarMoras`
+	// (recalcula mora, buckets y reasignaciones) corre en cartera-back —
+	// proceso EXTERNO, sin endpoint de estado que este CRM pueda consultar —
+	// a las 23:59 GT (docs/features/cobros-02/02-motor-y-asignacion.md).
+	// Capturar mientras sigue corriendo congela una mezcla de datos viejos y
+	// nuevos, y el índice único (fecha_gt, asesor_id) con ON CONFLICT DO
+	// NOTHING deja ese snapshot corrupto sin forma de corregirlo después
+	// (Codex PR #1331). Sin handshake posible, se agrega un piso mínimo
+	// explícito hasta las 00:05 GT, ADEMÁS de esperar checkPromesasPago —
+	// no elimina el riesgo (sigue siendo heurístico), pero dejar de confiar
+	// en que el encadenado por sí solo tarde lo suficiente.
+	function esperarHasta0005GT(): Promise<void> {
+		const ahora = new Date();
+		const barrera = new Date();
+		barrera.setUTCHours(6, 5, 0, 0);
+		const faltante = barrera.getTime() - ahora.getTime();
+		if (faltante <= 0) return Promise.resolve();
+		return new Promise((resolve) => setTimeout(resolve, faltante));
+	}
 	function scheduleAtMidnightGT() {
 		const now = new Date();
 		const next = new Date();
@@ -1603,6 +1625,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			await procesarSeguimientosRecurrentes().catch(console.error);
 			const resumenPromesas = await checkPromesasPago().catch(console.error);
 			if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
+			await esperarHasta0005GT();
 			await ejecutarAgendaCobrosDiaria().catch(console.error);
 			scheduleAtMidnightGT();
 		}, next.getTime() - now.getTime());

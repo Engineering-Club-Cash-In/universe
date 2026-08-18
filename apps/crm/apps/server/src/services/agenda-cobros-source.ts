@@ -369,6 +369,29 @@ export async function obtenerColaOperacionAsesor(
 	);
 }
 
+/**
+ * Limitación conocida (catch-up de boot tardío + reasignación de crédito):
+ * cada llamada a cartera-back de abajo (obtenerAgendaAsesor,
+ * obtenerColaOperacionAsesor) filtra por el asesor DUEÑO ACTUAL del crédito
+ * (getPoolPorAsesor() en tiempo real), no por el dueño al boundary 00:00 GT.
+ * Si un supervisor reasigna un crédito (o el motor automático lo hace,
+ * `procesarMoras` 23:59 GT) entre medianoche y un catch-up tardío, el item
+ * completo (D-0/SLA/promesa) se atribuye al asesor NUEVO en el snapshot de
+ * "inicio de día", aunque a las 00:00 GT era del asesor VIEJO.
+ *
+ * `jobs/cierre-diario-asesores.ts` (resolverIdsDuenoManana) ya resuelve el
+ * mismo problema para su propio snapshot, cruzando `getAsesorHistorial`
+ * acotado al día contra los créditos con evento — mismo patrón replicable
+ * acá. No se replicó todavía: el pipeline actual arma la agenda POR ASESOR
+ * (cada llamada ya sale pre-filtrada por dueño actual), así que detectar el
+ * caso requiere reconstruir DESPUÉS de armar `agendas`, cruzando por SIFCO
+ * contra el historial de reasignaciones del día y resolviendo el
+ * `asesor_anterior_id` (numérico, cartera-back) de vuelta a un `userId` del
+ * CRM — trabajo del mismo orden que `resolverIdsDuenoManana`, no un fix
+ * puntual. Acotado en la práctica: solo importa en catch-up tardío (no en
+ * el camino diario normal) Y solo para créditos reasignados ese día
+ * específico (Codex PR #1331).
+ */
 export async function obtenerAgendaTodosAsesores(
 	asesorUserId?: string,
 	fechaHoyGT: string = toDateStrGT(new Date()),

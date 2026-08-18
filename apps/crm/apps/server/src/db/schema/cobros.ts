@@ -333,6 +333,78 @@ export const contactosCobros = pgTable(
 	],
 );
 
+export const agendaCobrosSnapshotEstadoEnum = pgEnum(
+	"agenda_cobros_snapshot_estado",
+	["abierto", "cerrado"],
+);
+
+export const agendaCobrosSnapshots = pgTable(
+	"agenda_cobros_snapshots",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		fechaGt: date("fecha_gt").notNull(),
+		asesorId: text("asesor_id")
+			.notNull()
+			.references(() => user.id),
+		capturadoEn: timestamp("capturado_en").notNull().defaultNow(),
+		cerradoEn: timestamp("cerrado_en"),
+		totalPlanificado: integer("total_planificado").notNull(),
+		totalAtendidos: integer("total_atendidos").notNull().default(0),
+		totalPendientes: integer("total_pendientes").notNull(),
+		estado: agendaCobrosSnapshotEstadoEnum("estado")
+			.notNull()
+			.default("abierto"),
+	},
+	(table) => [
+		uniqueIndex("idx_agenda_snapshots_fecha_asesor_unico").on(
+			table.fechaGt,
+			table.asesorId,
+		),
+	],
+);
+
+export const agendaCobrosSnapshotItems = pgTable(
+	"agenda_cobros_snapshot_items",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		snapshotId: uuid("snapshot_id")
+			.notNull()
+			.references(() => agendaCobrosSnapshots.id, { onDelete: "cascade" }),
+		casoCobroId: uuid("caso_cobro_id").references(() => casosCobros.id),
+		numeroCreditoSifco: text("numero_credito_sifco").notNull(),
+		bucketSnapshot: integer("bucket_snapshot"),
+		motivoAgenda: text("motivo_agenda"),
+		atendido: boolean("atendido").notNull().default(false),
+		contactoCobroId: uuid("contacto_cobro_id").references(
+			() => contactosCobros.id,
+			{ onDelete: "set null" },
+		),
+		atendidoEn: timestamp("atendido_en"),
+		resultadoContacto: estadoContactoEnum("resultado_contacto"),
+		realizadoPor: text("realizado_por").references(() => user.id),
+		promesaCumplida: boolean("promesa_cumplida").notNull().default(false),
+		promesaContactoCobroId: uuid("promesa_contacto_cobro_id").references(
+			() => contactosCobros.id,
+			{ onDelete: "set null" },
+		),
+		promesaCumplidaEn: timestamp("promesa_cumplida_en"),
+	},
+	(table) => [
+		uniqueIndex("idx_agenda_snapshot_items_credito_unico").on(
+			table.snapshotId,
+			table.numeroCreditoSifco,
+		),
+		index("idx_agenda_snapshot_items_estado").on(
+			table.snapshotId,
+			table.atendido,
+		),
+		index("idx_agenda_snapshot_items_sifco").on(table.numeroCreditoSifco),
+		index("idx_agenda_snapshot_items_promesa_cumplida")
+			.on(table.snapshotId, table.promesaCumplida)
+			.where(sql`${table.promesaCumplida}`),
+	],
+);
+
 // CB-128 — auditoría de escrituras sobre contactos_cobros (AC-6: "no se
 // eliminan ni alteran registros históricos sin auditoría").
 //

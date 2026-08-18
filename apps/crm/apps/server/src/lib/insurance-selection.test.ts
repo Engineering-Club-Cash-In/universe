@@ -137,13 +137,31 @@ describe("normalizeInsuranceBreakdown", () => {
 });
 
 describe("buildServerInsurancePersistence", () => {
-	test("ignores manipulated client breakdown and persists server-calculated values", () => {
+	test("preserves the web quoter's adjusted membership without adding GyT savings again", () => {
+		const result = buildServerInsurancePersistence({
+			insuredAmount: 300000,
+			vehicleType: "particular",
+			universalesCost: 600,
+			gytCost: 580,
+			// The web quoter already adjusted the base + GyT saving for the
+			// condition/origin/credit type, then subtracted GPS for the net
+			// membership that is shown and saved.
+			membershipCost: 691.8,
+			customerInsuranceCost: 1291.8,
+		});
+
+		expect(result.insuranceProvider).toBe("gyt");
+		expect(result.insuranceSavingsToMembership).toBe("20.00");
+		expect(result.membresiaPago).toBe("691.80");
+	});
+
+	test("ignores manipulated client breakdown while preserving submitted effective membership", () => {
 		const result = buildServerInsurancePersistence({
 			insuredAmount: 300000,
 			vehicleType: "particular",
 			universalesCost: 585.86,
 			gytCost: 584.96,
-			membershipCost: 100,
+			membershipCost: 100.9,
 			clientBreakdown: {
 				insuranceProvider: "universales",
 				customerInsuranceCost: 1,
@@ -176,13 +194,15 @@ describe("buildServerInsurancePersistence", () => {
 		expect(result.internalInsuranceCost).toBe("540.00");
 		// ahorro limpio = universales - gyt = 550.10 - 540 = 10.10 (no del bundle)
 		expect(result.insuranceSavingsToMembership).toBe("10.10");
-		// membresía efectiva = base server-side + ahorro GyT, una sola vez
-		expect(result.membresiaPago).toBe("413.42");
+		// membresía efectiva = la membresía visible/ajustada recibida, sin sumar
+		// nuevamente el ahorro GyT.
+		expect(result.membresiaPago).toBe("403.32");
 	});
 
-	test("computes membership from the server base plus GyT savings", () => {
+	test("does not derive membership from the customer insurance bundle", () => {
 		// customerInsuranceCost puede traer el bundle visible, pero el ahorro sale
-		// únicamente de Universales - GyT y se suma una vez a la membresía base.
+		// únicamente de Universales - GyT y la membresía se conserva desde el campo
+		// explícito del cotizador.
 		const result = buildServerInsurancePersistence({
 			insuredAmount: 300000,
 			vehicleType: "particular",
@@ -195,6 +215,6 @@ describe("buildServerInsurancePersistence", () => {
 		expect(result.insuranceProvider).toBe("gyt");
 		// ahorro = universales - gyt = 20 (NO 762 - 580 = 182)
 		expect(result.insuranceSavingsToMembership).toBe("20.00");
-		expect(result.membresiaPago).toBe("182.00");
+		expect(result.membresiaPago).toBe("162.00");
 	});
 });

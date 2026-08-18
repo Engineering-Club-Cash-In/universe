@@ -261,8 +261,10 @@ export const quotationsRouter = {
 					serverInsurance.provider === "gyt"
 						? serverInsurance.internalInsuranceCost
 						: null,
-				// Fuente server-side: membresía base de la tabla + ahorro GyT una sola vez.
-				membershipCost: serverInsurance.membershipCost,
+				// La membresía del cotizador ya viene ajustada por condición/origen/tipo
+				// de crédito y neta de GPS; el servidor recalcula seguro/proveedor, pero
+				// no debe reemplazarla con la base sin ajustar de la tabla.
+				membershipCost: input.membershipCost,
 				customerInsuranceCost: input.insuranceCost,
 			});
 

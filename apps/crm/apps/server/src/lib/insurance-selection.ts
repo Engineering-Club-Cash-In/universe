@@ -16,7 +16,13 @@ export interface InsuranceSelectionResult {
 	effectiveMembershipCost: number;
 }
 
-export interface InsurancePersistenceInput extends InsuranceSelectionInput {
+export interface InsurancePersistenceInput {
+	insuredAmount: number;
+	vehicleType: string;
+	universalesCost: number;
+	gytCost: number | null;
+	/** Effective adjusted membership amount to persist from the quotation flow. */
+	membershipCost: number;
 	customerInsuranceCost?: number;
 	clientBreakdown?: {
 		insuranceProvider?: string;
@@ -125,9 +131,11 @@ export function buildServerInsurancePersistence(
 			customerInsuranceCost,
 			internalInsuranceCost: selection.internalInsuranceCost,
 			// El ahorro sale de los precios de seguro (universales - gyt), NO del
-			// monto bundle del cotizador (que ya incluye la membresía).
+			// monto bundle del cotizador (que ya incluye la membresía). La membresía
+			// recibida desde el cotizador ya es la membresía efectiva ajustada
+			// (incluido GyT una vez cuando aplica), así que no se vuelve a sumar aquí.
 			insuranceSavingsToMembership: selection.insuranceSavingsToMembership,
-			effectiveMembershipCost: selection.effectiveMembershipCost,
+			effectiveMembershipCost: roundMoney(input.membershipCost),
 		},
 	});
 }

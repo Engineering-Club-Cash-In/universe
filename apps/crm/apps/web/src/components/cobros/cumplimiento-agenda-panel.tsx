@@ -2,12 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
 	CalendarCheck2,
-	ChevronDown,
 	CircleCheck,
 	CircleDashed,
 	Loader2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { GestionesDelDiaPanel } from "@/components/cobros/gestiones-del-dia-panel";
+import { aFechaISO_GT } from "@/components/cobros/historial/formato";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -45,6 +46,14 @@ type ResumenFila = {
 };
 
 type ResumenData = { fecha: string | null; items: ResumenFila[] };
+
+type UsuarioConGestiones = { id: string; name: string; role: string };
+
+type AsesorConAgenda = {
+	asesorId: string;
+	asesorNombre: string;
+	estado: "abierto" | "cerrado";
+};
 
 type DetalleItem = {
 	id: string;
@@ -250,8 +259,10 @@ export function CumplimientoAgendaPanel() {
 	const userRole = session?.user?.role;
 	const puedeConsultar = !!userRole && PERMISSIONS.canAssignCobros(userRole);
 	const [fecha, setFecha] = useState("");
-	const [asesorId, setAsesorId] = useState("todos");
-	const [abierto, setAbierto] = useState<string | null>(null);
+	// Elección EXPLÍCITA del usuario, no el valor efectivo — se deriva abajo.
+	// Guardar el valor efectivo directo y sembrarlo con un efecto producía
+	// thrash (ver `asesorId` derivado); acá no hace falta ningún efecto.
+	const [asesorElegido, setAsesorElegido] = useState<string | null>(null);
 	// biome-ignore lint/suspicious/noExplicitAny: contrato manual por TS7056 del router raíz.
 	const orpcAny = orpc as any;
 	const query = useQuery({
@@ -266,13 +277,92 @@ export function CumplimientoAgendaPanel() {
 		if (!fecha && datos?.fecha) setFecha(datos.fecha);
 	}, [datos?.fecha, fecha]);
 
-	const filas = useMemo(
-		() =>
-			(datos?.items ?? []).filter(
-				(fila) => asesorId === "todos" || fila.asesorId === asesorId,
-			),
-		[asesorId, datos?.items],
-	);
+	// Catálogo de "quién tiene snapshot ese día", SIN filtrar por estado —
+	// a propósito distinto de `datos.items` (arriba), que sí filtra
+	// `cerrado`: ese filtro es correcto para el RESUMEN (totalAtendidos/%
+	// solo los escribe el cierre nocturno, mostrarlos antes sería un dato
+	// engañoso), pero no debe aplicar al CATÁLOGO — un asesor con la agenda de
+	// HOY (siempre abierta hasta esa noche) tiene que poder elegirse igual,
+	// aunque su tarjeta de arriba todavía no muestre métricas (hallazgo de
+	// code review, Codex).
+	const asesoresConAgendaQuery = useQuery({
+		...orpcAny.getAsesoresConAgenda.queryOptions({
+			input: { fecha },
+		}),
+		enabled: !!session && puedeConsultar && !!fecha,
+	});
+	const asesoresConAgenda = (asesoresConAgendaQuery.data ??
+		[]) as AsesorConAgenda[];
+
+	// Asesores con gestiones registradas ese día — complementa
+	// `asesoresConAgenda`. Un asesor sin NINGÚN item planificado (0
+	// D-0/SLA/promesa) nunca genera fila en `agenda_cobros_snapshots`
+	// (`capturarSnapshots` solo persiste asesores presentes en la lista de
+	// items — `agenda-cobros-snapshot.ts`), así que si el selector se armara
+	// solo con el snapshot ese asesor sería imposible de elegir aunque haya
+	// trabajado gestiones fuera de agenda todo el día (hallazgo de code
+	// review, Codex).
+	const usuariosQuery = useQuery({
+		...orpcAny.getUsuariosConGestiones.queryOptions({
+			input: { desde: fecha || undefined, hasta: fecha || undefined },
+		}),
+		enabled: !!session && puedeConsultar && !!fecha,
+	});
+	const usuariosConGestiones = (usuariosQuery.data ??
+		[]) as UsuarioConGestiones[];
+
+	// Catálogo del selector: unión de "tiene snapshot ese día" (abierto o
+	// cerrado) y "tiene gestiones ese día". No se manda `asesorId` a la query
+	// de resumen: eso colapsaría `datos.items` a un solo asesor y el selector
+	// se quedaría sin opciones para cambiar.
+	const asesores = useMemo(() => {
+		const porId = new Map<string, { asesorId: string; asesorNombre: string }>();
+		for (const fila of asesoresConAgenda)
+			porId.set(fila.asesorId, {
+				asesorId: fila.asesorId,
+				asesorNombre: fila.asesorNombre,
+			});
+		for (const u of usuariosConGestiones)
+			if (!porId.has(u.id))
+				porId.set(u.id, { asesorId: u.id, asesorNombre: u.name });
+		// Alfabético: mismo criterio que ya trae el server (`asc(user.name)`),
+		// para que "el primero" del default sea estable.
+		return [...porId.values()].sort((a, b) =>
+			a.asesorNombre.localeCompare(b.asesorNombre, "es"),
+		);
+	}, [asesoresConAgenda, usuariosConGestiones]);
+	// Valor EFECTIVO: la elección del usuario si sigue existiendo en la lista
+	// del día actual, si no el primero. Cubre sin efectos: primera carga,
+	// cambio de fecha con el mismo asesor (se respeta), cambio de fecha donde
+	// desapareció (cae al primero), y lista vacía (null).
+	const asesorId =
+		asesorElegido && asesores.some((a) => a.asesorId === asesorElegido)
+			? asesorElegido
+			: (asesores[0]?.asesorId ?? null);
+	const asesorSeleccionado =
+		asesores.find((a) => a.asesorId === asesorId) ?? null;
+	// La fila del RESUMEN (con métricas): solo existe si el snapshot ya
+	// cerró. Puede no existir aunque `asesorId` sí (agenda de hoy, todavía
+	// abierta, o asesor sin snapshot en absoluto agregado por
+	// `usuariosConGestiones`) — la tarjeta distingue ambos casos con
+	// `snapshotAbierto`.
+	const filaSeleccionada =
+		datos?.items.find((a) => a.asesorId === asesorId) ?? null;
+	// true cuando SÍ hay snapshot para este asesor/día, está `abierto`, Y la
+	// fecha es HOY — las tres condiciones juntas, no solo `estado`: el job de
+	// cierre solo cierra la fecha inmediatamente anterior en cada corrida
+	// (`cerrarSnapshotsAgenda(..., ayer, ...)` en
+	// `jobs/agenda-cobros-snapshots.ts`), nunca vuelve a intentar un día
+	// viejo — así que un snapshot `abierto` de una fecha PASADA es un cierre
+	// que falló para siempre, no "en curso, se confirma esta noche" (esa
+	// noche ya pasó) (hallazgo de code review, Codex).
+	const esHoyGT = fecha === aFechaISO_GT(new Date());
+	const snapshotAbierto =
+		!filaSeleccionada &&
+		esHoyGT &&
+		asesoresConAgenda.some(
+			(a) => a.asesorId === asesorId && a.estado === "abierto",
+		);
 
 	if (sesionCargando) {
 		return (
@@ -296,7 +386,7 @@ export function CumplimientoAgendaPanel() {
 	}
 
 	return (
-		<div className="mx-auto max-w-6xl px-4 py-6">
+		<div className="mx-auto max-w-[1600px] px-4 py-6">
 			<div className="mb-6 flex flex-wrap items-center justify-between gap-4">
 				<div className="flex items-center gap-3">
 					<CalendarCheck2 className="h-7 w-7 text-indigo-500" />
@@ -310,21 +400,20 @@ export function CumplimientoAgendaPanel() {
 				<div className="flex flex-wrap items-center gap-2">
 					<input
 						className="rounded-md border px-2 py-1 text-sm dark:bg-gray-800"
-						onChange={(event) => {
-							setFecha(event.target.value);
-							setAbierto(null);
-							setAsesorId("todos");
-						}}
+						onChange={(event) => setFecha(event.target.value)}
 						type="date"
 						value={fecha}
 					/>
-					<Select value={asesorId} onValueChange={setAsesorId}>
+					<Select
+						value={asesorId ?? ""}
+						onValueChange={setAsesorElegido}
+						disabled={asesores.length === 0}
+					>
 						<SelectTrigger className="w-56">
-							<SelectValue placeholder="Todos los asesores" />
+							<SelectValue placeholder="Seleccioná un asesor" />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="todos">Todos los asesores</SelectItem>
-							{(datos?.items ?? []).map((fila) => (
+							{asesores.map((fila) => (
 								<SelectItem key={fila.asesorId} value={fila.asesorId}>
 									{fila.asesorNombre}
 								</SelectItem>
@@ -343,48 +432,107 @@ export function CumplimientoAgendaPanel() {
 					No se pudo cargar el cumplimiento de agenda. Reintentá en unos
 					segundos.
 				</Card>
-			) : filas.length === 0 ? (
+			) : usuariosQuery.isError || asesoresConAgendaQuery.isError ? (
+				// Sin esto, un fallo de `getUsuariosConGestiones` o
+				// `getAsesoresConAgenda` se disfrazaba de "sin resultados": ambos
+				// caen a `[]` con `?? []`, así que `asesores` se armaba con un
+				// catálogo incompleto en silencio — un asesor desaparecía del
+				// selector como si de verdad no hubiera trabajado, en vez de "no
+				// se pudo saber" (hallazgo de code review, Codex).
+				<Card className="p-8 text-center text-red-600">
+					No se pudo cargar el catálogo completo de asesores. Reintentá en unos
+					segundos.
+				</Card>
+			) : asesores.length === 0 ? (
 				<Card className="p-8 text-center text-gray-500">
-					Sin snapshots para fecha seleccionada.
+					No hay agenda cerrada ni gestiones registradas para esta fecha. La
+					agenda se congela a las 00:05 GT y se cierra al terminar el día — el
+					día de hoy aparece hasta el cierre nocturno.
 				</Card>
 			) : (
-				<div className="space-y-3">
-					{filas.map((fila) => {
-						const expandido = abierto === fila.snapshotId;
-						return (
-							<Card className="overflow-hidden" key={fila.snapshotId}>
-								<button
-									aria-expanded={expandido}
-									className="grid w-full grid-cols-[minmax(180px,1fr)_repeat(4,minmax(80px,auto))_24px] items-center gap-4 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50"
-									onClick={() => setAbierto(expandido ? null : fila.snapshotId)}
-									type="button"
-								>
-									<span className="font-medium">{fila.asesorNombre}</span>
-									<span className="text-center text-sm">
-										<b>{fila.planificados}</b> planificados
-									</span>
-									<span className="text-center text-emerald-600 text-sm">
-										<b>{fila.atendidos}</b> atendidos
-									</span>
-									<span className="text-center text-amber-600 text-sm">
-										<b>{fila.pendientes}</b> pendientes
-									</span>
-									<span className="text-center font-semibold">
-										{fila.porcentaje}%
-										<Badge className="ml-2" variant="outline">
-											{fila.estado}
-										</Badge>
-									</span>
-									<ChevronDown
-										className={`h-4 w-4 transition-transform ${expandido ? "rotate-180" : ""}`}
-									/>
-								</button>
-								{expandido && fecha && (
-									<DetalleAgenda asesorId={fila.asesorId} fecha={fecha} />
+				<div className="space-y-6">
+					<div>
+						<h2 className="mb-3 font-semibold text-gray-500 text-sm uppercase tracking-wide">
+							Agenda planificada
+						</h2>
+						{asesorSeleccionado && (
+							<Card className="overflow-hidden">
+								{filaSeleccionada ? (
+									<>
+										<div className="grid w-full grid-cols-[minmax(180px,1fr)_repeat(4,minmax(80px,auto))] items-center gap-4 px-4 py-3 text-left">
+											<span className="font-medium">
+												{filaSeleccionada.asesorNombre}
+											</span>
+											<span className="text-center text-sm">
+												<b>{filaSeleccionada.planificados}</b> planificados
+											</span>
+											<span className="text-center text-emerald-600 text-sm">
+												<b>{filaSeleccionada.atendidos}</b> atendidos
+											</span>
+											<span className="text-center text-amber-600 text-sm">
+												<b>{filaSeleccionada.pendientes}</b> pendientes
+											</span>
+											<span className="text-center font-semibold">
+												{filaSeleccionada.porcentaje}%
+												<Badge className="ml-2" variant="outline">
+													{filaSeleccionada.estado}
+												</Badge>
+											</span>
+										</div>
+										{fecha && (
+											<DetalleAgenda
+												// Resetea la paginación interna al cambiar de fecha o
+												// asesor: sin esto, la tarjeta queda siempre montada
+												// (ya no hay toggle de expandir/colapsar) y el `page`
+												// de un asesor anterior se arrastraba al nuevo, pidiendo
+												// una página que puede no existir (hallazgo de code
+												// review, Codex).
+												key={`${fecha}:${filaSeleccionada.asesorId}`}
+												asesorId={filaSeleccionada.asesorId}
+												fecha={fecha}
+											/>
+										)}
+									</>
+								) : snapshotAbierto ? (
+									// Agenda de HOY: existe snapshot pero sigue `abierto` (el
+									// job de cierre corre a medianoche). `totalAtendidos`/% no
+									// están disponibles todavía — mostrarlos en 0 sería un
+									// dato engañoso, no incompleto — así que se avisa en vez
+									// de afirmar "no tenía agenda" (hallazgo de code review,
+									// Codex).
+									<div className="px-4 py-6 text-center text-gray-500 text-sm">
+										Agenda de {asesorSeleccionado.asesorNombre} en curso — los
+										planificados/atendidos se confirman al cierre de esta noche.
+									</div>
+								) : (
+									// Sin snapshot CERRADO y sin poder afirmar "en curso"
+									// (`snapshotAbierto` ya descartó ese caso arriba): puede ser
+									// un asesor sin agenda planificada, o un snapshot `abierto`
+									// de una fecha PASADA cuyo cierre falló para siempre (el
+									// job solo reintenta AYER, nunca revisita días viejos — ver
+									// la nota en `snapshotAbierto`), o directamente sin fila. En
+									// los tres casos no hay forma de afirmar "no tenía agenda"
+									// sin arriesgarse a mentir sobre un fallo de captura/cierre
+									// silencioso — mismo criterio que `enAgenda: null` en el
+									// bloque de abajo (hallazgo de code review, Codex).
+									<div className="px-4 py-6 text-center text-gray-500 text-sm">
+										No se pudo evaluar la agenda planificada de{" "}
+										{asesorSeleccionado.asesorNombre} para este día.
+									</div>
 								)}
 							</Card>
-						);
-					})}
+						)}
+					</div>
+
+					{asesorSeleccionado && fecha && (
+						<GestionesDelDiaPanel
+							key={`${fecha}:${asesorSeleccionado.asesorId}`}
+							fecha={fecha}
+							asesorId={asesorSeleccionado.asesorId}
+							asesorNombre={asesorSeleccionado.asesorNombre}
+							esSupervisor={puedeConsultar}
+						/>
+					)}
 				</div>
 			)}
 		</div>

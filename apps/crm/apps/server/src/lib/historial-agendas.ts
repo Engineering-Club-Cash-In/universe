@@ -32,7 +32,11 @@ import {
 	type SQL,
 	sql,
 } from "drizzle-orm";
-import { casosCobros, contactosCobros } from "../db/schema/cobros";
+import {
+	agendaCobrosSnapshotItems,
+	casosCobros,
+	contactosCobros,
+} from "../db/schema/cobros";
 import {
 	PREFIJO_CONVENIO_AUTO,
 	PREFIJO_PREMORA_AUTO,
@@ -177,6 +181,51 @@ export function columnaOrigen(): SQL<OrigenGestion> {
 		WHEN ${contactosCobros.comentarios} LIKE ${`${PREFIJO_WSP_MASIVO}%`} THEN 'wsp_masivo'
 		ELSE 'manual'
 	END`;
+}
+
+/**
+ * Marca si el crédito de la gestión estaba en el snapshot de agenda del asesor.
+ *
+ * Compara por CRÉDITO (caso, con SIFCO de respaldo) y no por
+ * `contacto_cobro_id`: ese último solo nombra el contacto que CERRÓ el item
+ * del snapshot, así que una segunda gestión sobre el mismo crédito
+ * planificado saldría "fuera de agenda" siendo falso. `caso_cobro_id` del
+ * snapshot es nullable a propósito (los items D-0 nacen sin caso — ver
+ * `agenda-cobros-source.ts`), de ahí el SIFCO de respaldo. No se compara solo
+ * por SIFCO: `numero_credito_sifco` no es único en `casos_cobros` (un crédito
+ * puede tener varios casos por reaperturas/migraciones) y eso marcaría una
+ * gestión del caso B como "en agenda" porque el caso A sí lo estaba.
+ *
+ * Sin `snapshotId` (no se pidió `marcarEnAgenda`, o no hay snapshot ese
+ * asesor/fecha) → NULL, nunca FALSE. No hay ningún registro persistido de si
+ * la captura diaria corrió con éxito: `obtenerAgendaTodosAsesores` puede
+ * lanzar tras agotar reintentos y el job no deja rastro del fallo
+ * (`agenda-cobros-source.ts`), así que "sin snapshot" puede significar "no
+ * hubo agenda ese día" o "la captura se rompió" — no hay forma de
+ * distinguirlos, ni siquiera para hoy (hallazgo de code review, Codex, dos
+ * rondas: primero se intentó afirmar FALSE solo para días pasados, después
+ * solo para hoy salvo que la captura de esa madrugada hubiera fallado — en
+ * ambos casos seguía existiendo un escenario real donde se afirmaba "Fuera
+ * de agenda" siendo mentira). Más simple y siempre honesto: sin snapshot,
+ * sin afirmación.
+ */
+export function columnaEnAgenda(
+	snapshotId: string | null,
+): SQL<boolean | null> {
+	if (!snapshotId) {
+		return sql<boolean | null>`NULL::boolean`;
+	}
+	return sql<boolean | null>`EXISTS (
+		SELECT 1 FROM ${agendaCobrosSnapshotItems} ai
+		WHERE ai.snapshot_id = ${snapshotId}
+		  AND (
+		    ai.caso_cobro_id = ${contactosCobros.casoCobroId}
+		    OR (
+		      ai.caso_cobro_id IS NULL
+		      AND ai.numero_credito_sifco = ${casosCobros.numeroCreditoSifco}
+		    )
+		  )
+	)`;
 }
 
 /** Valores del enum `estado_contacto`, tomados del schema (no re-declarados). */

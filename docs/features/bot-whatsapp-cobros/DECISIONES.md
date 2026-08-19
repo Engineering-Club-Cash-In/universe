@@ -32,6 +32,18 @@ día; si no está escrito, no está decidido.
 | [D-22](#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error) | Todo lo que no termina en dato va con estado HTTP de error | 🟢 |
 | [D-23](#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria) | La documentación de la API es Swagger, y es obligatoria | 🟢 |
 | [D-24](#d-24--el-menú-hereda-la-identidad-del-paso-1) | El menú hereda la identidad del paso 1 | 🟢 |
+| [D-25](#d-25--la-boleta-la-lee-gemini-con-el-motor-que-ya-está-en-el-crm) | La boleta la lee Gemini, con el motor que ya está en el CRM | 🟢 |
+| [D-26](#d-26--el-monto-lo-dicta-la-boleta-no-el-cliente) | El monto lo dicta la boleta, no el cliente | 🟢 |
+| [D-27](#d-27--tres-intentos-por-sesión-y-los-cuenta-el-crm) | Tres intentos por sesión, y los cuenta el CRM | 🟢 |
+| [D-28](#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta) | El aviso a WhatsApp nunca rompe la acción de conta | 🟢 |
+| [D-29](#d-29--la-imagen-se-descarga-con-allowlist) | La imagen se descarga con allowlist | 🟢 |
+| [D-30](#d-30--subir-boleta-lo-puede-hacer-cualquier-cliente) | Subir boleta lo puede hacer cualquier cliente | 🟢 |
+| [D-31](#d-31--la-boleta-se-copia-a-nuestro-r2-al-leerla) | La boleta se copia a nuestro R2 al leerla | 🟢 |
+| [D-32](#d-32--registrar-una-boleta-ya-mueve-la-mora-y-por-eso-el-rechazo-es-revertir) | Registrar una boleta ya mueve la mora, y por eso el rechazo es Revertir | 🟢 |
+| [D-33](#d-33--una-boleta-son-varios-pagos-y-una-sola-notificación) | Una boleta son varios pagos, y una sola notificación | 🟢 |
+| [D-34](#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key) | La confirmación se protege con estado, no con idempotency key | 🟢 |
+| [D-35](#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza) | El webhook adelanta el aviso, el job lo garantiza | 🟢 |
+| [D-36](#d-36--simplificar-cartera-en-vez-de-compensarla) | Simplificar cartera en vez de compensarla | 🔴 |
 
 ---
 
@@ -721,3 +733,501 @@ Distinguirlos permitiría averiguar qué créditos hay probando números — el 
 **Cuándo habría que revisar esto.** Si aparece un flujo largo —subir una boleta, armar un
 convenio— donde 30 minutos se queden cortos, o si el bot necesita recordar al cliente entre
 conversaciones. Ahí sí toca la opción C y se revisa D-04.
+
+---
+
+## D-25 · La boleta la lee Gemini, con el motor que ya está en el CRM
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** El paso 4 necesita sacar cinco datos de la foto de un comprobante bancario:
+banco, monto, fecha, número de autorización y cuenta destino. En el monorepo ya hay **dos**
+lecturas automáticas de documentos funcionando: el análisis de estados de cuenta
+(`routers/bank-analysis.ts`, Gemini vía `@ai-sdk/google` + `generateObject`) y el OCR de la
+tarjeta de circulación que usa la app de inspecciones (`routers/vehicles.ts`, hoy con OpenAI).
+
+**Opciones.**
+- **A) Reusar el motor del análisis bancario: Gemini + `generateObject` con schema de Zod.**
+- B) Un OCR clásico (Tesseract, Textract) con reglas por banco.
+- C) Un proveedor nuevo especializado en comprobantes.
+
+**Decisión: A.** No agrega dependencia, ni cuenta, ni contrato: la misma cuenta de Gemini que
+ya lee estados de cuenta en producción. `generateObject` valida la salida contra el schema —
+si el modelo devuelve basura, revienta en el borde y no a mitad del insert. B se descartó
+porque las boletas de Guatemala no tienen un formato: cada banco imprime lo suyo, y las fotos
+son de celular, torcidas y con reflejos; mantener reglas por banco es trabajo permanente. C
+no se justifica cuando A ya está probado adentro.
+
+**Parámetros distintos a los del análisis bancario**, porque el problema es distinto:
+
+| | Análisis bancario | Boleta |
+| --- | --- | --- |
+| Entrada | hasta 9 PDF | 1 imagen |
+| Timeout | 120 s | **30 s** |
+| Reintentos | 2 intentos, contados en base | **0** — el reintento es otra foto del cliente |
+
+**Al modelo se le manda la imagen y nada más.** Nunca el monto esperado ni el nombre del
+cliente: si le decimos qué esperamos encontrar, lo encuentra. El cruce contra el crédito se
+hace después, con la respuesta ya en la mano.
+
+**El catálogo de bancos no se le delega al modelo.** `cartera.bancos` tiene 24 filas para
+unos 15 bancos reales —`Banrural` está dos veces, `BAM` tres, y hay un `test` con 92 pagos
+encima—, pero **la deduplicación ya existe**: la columna `id_banco_transferencia`, el id
+universal que el endpoint ya filtra con `GET /bancos?con_transferencia=true` y que deja
+exactamente 15 filas, una por banco.
+
+Esas 15 son el catálogo del bot. El nombre leído se mapea con **alias explícitos en el
+código** contra ellas; si no cae, se busca entre las 9 sin id universal (ahí están `Interbanco`
+y `PAGALO`, reales, excluyendo `test`/`test2`); si tampoco, `banco: null` y el cliente elige de
+la lista. **Nunca por parecido de texto**: adivinar el banco es adivinar en qué cuenta va a
+buscar conta el dinero.
+
+Único efecto colateral: el id universal de G&T lo tiene la fila `19`, no la `3` que es la que
+más usa contabilidad. Los pagos del bot caen en la 19 y cualquier reporte agrupado por
+`banco_id` los verá aparte. Unificar esas filas es decisión de conta, no del bot.
+
+---
+
+## D-26 · El monto lo dicta la boleta, no el cliente
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** Después de la lectura, el cliente confirma. ¿Qué pasa si dice que los datos
+están mal? El documento de gerencia contempla que **escriba** los datos a mano (banco de una
+lista, monto, fecha, autorización). El flujo acordado con SimpleTech es otro: que mande otra
+foto y se lea de nuevo.
+
+**Opciones.**
+- A) Ingreso manual completo: el cliente escribe monto, fecha y autorización.
+- **B) Solo otra foto. Lo único corregible a mano es el banco, y solo cuando la lectura no lo
+  reconoció.**
+- C) Ingreso manual pero marcado, con revisión obligatoria de conta.
+
+**Decisión: B para la v1.** El monto es el dato con el que se registra un pago en el sistema
+que mueve el dinero. Si viaja en el request, quien controle el chat —o la integración— puede
+declarar un pago de Q10,000 que nunca existió; quedaría `pending` y lo agarraría conta, pero
+mientras tanto el cliente ya vio "pago recibido" y el crédito muestra un pago que no entró.
+Con B, el monto sale del borrador que guardó el CRM al leer la imagen: para cambiarlo hay que
+cambiar la imagen.
+
+Por eso `/boleta/confirmar` recibe **solo** `boletaId` y, opcionalmente, `bancoId`. Nada más.
+
+**El banco es la excepción** porque su fuente no es la boleta sino nuestro catálogo sucio
+(D-25): que el cliente lo elija de una lista es más confiable que el alias que adivinemos, y
+elegir mal un banco no cambia cuánto dinero se registra.
+
+**Cuándo se revisa.** Si en producción se ve que muchos clientes no logran una foto legible en
+tres intentos, entra C: ingreso manual, marcado como tal en el pago, con revisión obligatoria
+de conta antes de aplicarlo. La v1 se hace sin eso para no abrir el hueco antes de saber si
+hace falta.
+
+---
+
+## D-27 · Tres intentos por sesión, y los cuenta el CRM
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** Cada lectura es una llamada a Gemini y cuesta. Un cliente con mala señal puede
+mandar la misma foto borrosa diez veces, y un integrador con un bug puede hacerlo mil.
+
+**Decisión.** **Tres intentos por sesión** (la sesión del paso 1, 30 minutos). Al cuarto,
+`429 DEMASIADOS_INTENTOS` y el bot lo manda con su asesor.
+
+**El número de intento no lo manda el bot: lo cuenta el CRM** sobre los borradores de esa
+sesión. Es dato nuestro; si viniera en el request, bastaría con mandar siempre `intento: 1`
+para que el tope no exista. Se devuelve en la respuesta (`intento`, `intentosRestantes`) para
+que el bot module el mensaje.
+
+**Los fallos nuestros no gastan intento.** Si Gemini está caído o se pasa del timeout, la
+respuesta es `503 LECTOR_NO_DISPONIBLE` y el contador no se mueve: el cliente no tiene por qué
+pagar nuestro problema con uno de sus tres tiros.
+
+**El borrador vive 15 minutos.** Es lo que dura la conversación de "esto entendimos,
+¿está bien?". Vencido, `410 BORRADOR_VENCIDO` y otra foto.
+
+---
+
+## D-28 · El aviso a WhatsApp nunca rompe la acción de conta
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** Cuando contabilidad valida (o rechaza) un pago que entró por el bot, hay que
+avisarle al cliente. La validación ocurre en cartera; el teléfono y el WhatsApp están en el
+CRM. Alguien tiene que cruzar la frontera.
+
+**Opciones.**
+- A) El CRM consulta cada tanto qué pagos cambiaron de estado (polling).
+- **B) Cartera avisa al CRM cuando el estado cambia.**
+- C) El bot pregunta cada vez que el cliente vuelve a escribir.
+
+**Decisión: B**, con el patrón que ya existe: `services/crm.service.ts` en cartera ya llama al
+CRM para las notificaciones de pago a inversionistas. A obligaría a recorrer pagos
+constantemente para un puñado de eventos; C llega tarde y solo si el cliente vuelve.
+
+**Tres reglas no negociables:**
+
+1. **El aviso sale después del commit**, nunca dentro de la transacción que valida el pago.
+2. **Se traga sus propios errores.** try/catch, log, y seguir — igual que `notifyPayInvestors`.
+   Si WhatsApp está caído, el pago se valida igual. Al revés sería inaceptable: un contador no
+   puede quedarse sin poder trabajar porque un proveedor de mensajería no responde.
+3. **Un pago que no vino del bot responde `200` con `notificado: false`**, no un 4xx. El 99%
+   de los pagos del sistema no son del bot; si eso fuera error, los logs de contabilidad
+   estarían siempre en rojo y nadie miraría los que sí importan.
+
+**Llave propia.** El endpoint de eventos usa `CARTERA_WEBHOOK_API_KEY`, distinta de la del
+bot: quien puede consultar créditos no tiene por qué poder disparar mensajes de WhatsApp a
+clientes.
+
+**Solo se notifican los pagos que entraron por el bot** (los que tienen fila en
+`bot_cobros_boletas`). Extenderlo a todos —que cualquier cliente reciba WhatsApp cuando conta
+valide su boleta— es una decisión de Cobros, no técnica: el circuito ya queda montado.
+
+---
+
+## D-29 · La imagen se descarga con allowlist
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** SimpleTech no manda el archivo: manda una **URL** y nosotros la descargamos. Un
+servidor que descarga cualquier URL que le pasen es un SSRF: sirve para pedirle a nuestra
+propia red lo que el atacante no alcanza desde afuera (metadatos del cloud, servicios
+internos, bases de datos sin puerto público).
+
+**Decisión.** La descarga pasa por cinco filtros, y falla cerrada:
+
+1. **Solo `https`.**
+2. **Dominio en allowlist** (`BOT_COBROS_DOMINIOS_IMAGEN`, coma-separado). Fuera de la lista →
+   `400 URL_NO_PERMITIDA`.
+3. **No se siguen redirecciones hacia IP privadas** (`10.*`, `172.16-31.*`, `192.168.*`,
+   `127.*`, `169.254.*`, IPv6 local).
+4. **Timeout de 15 s** y **tope de 8 MB**, cortando el stream al pasarse.
+5. **El content-type se verifica contra el contenido**, no contra la cabecera: JPG, PNG, WEBP
+   o PDF por sus magic bytes, igual que el análisis bancario valida el `%PDF`.
+
+**Alternativa descartada:** que SimpleTech suba el archivo en `multipart/form-data`. Es más
+seguro —no hay URL que descargar—, pero obliga a un cambio del lado de ellos que hoy no
+tienen; si la allowlist resulta incómoda de mantener, es a donde hay que volver.
+
+**Se descarga una sola vez**, en `/boleta/leer`, y de ahí la imagen pasa a nuestro R2
+([D-31](#d-31--la-boleta-se-copia-a-nuestro-r2-al-leerla)): confirmar ya no vuelve a salir a
+la red de ellos.
+
+---
+
+## D-30 · Subir boleta lo puede hacer cualquier cliente
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** El documento de gerencia describe el menú de pago como **dinámico**: la opción
+de subir comprobante se mostraría solo a algunos clientes, "según su perfil". Nunca se definió
+qué perfil, y esa marca no existe en ningún lado del sistema.
+
+**Opciones.**
+- A) Definir la regla (bucket de mora, historial de pagos, marca manual de Cobros) y filtrar.
+- **B) Mostrársela a todos.**
+
+**Decisión: B.** Quien llegó al menú ya pasó el paso 1: se identificó con NIT, DPI o placa y
+canjeó un código enviado al teléfono que el CRM tiene registrado. No hay razón para negarle a
+ese cliente que mande su boleta, cuando puede mandarla por correo o por el chat del asesor sin
+ningún filtro y termina en la misma cola de contabilidad.
+
+Además, la boleta **no acredita nada por sí sola**: entra como `pending` y la valida un
+contador. El control está en la validación, no en quién puede subirla.
+
+**Implicación práctica.** El bot no consulta ningún perfil: si tiene la API key y una sesión
+válida, la opción está. Lo que sí acota el uso es el tope de tres lecturas por sesión
+([D-27](#d-27--tres-intentos-por-sesión-y-los-cuenta-el-crm)).
+
+---
+
+## D-31 · La boleta se copia a nuestro R2 al leerla
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — pedido de Daniel
+
+**Contexto.** SimpleTech no manda el archivo, manda una **URL**. La boleta que respalda un
+pago tiene que terminar en R2 como cualquier otra: es el respaldo que abre un contador para
+validar, y el que se mira meses después cuando alguien pregunta de dónde salió ese pago. La
+pregunta es **cuándo** se copia: al leer o al confirmar.
+
+**Opciones.**
+- A) Guardar la URL de SimpleTech y descargar al confirmar.
+- **B) Descargar una sola vez al leer, subir a nuestro R2 ahí mismo, y que confirmar use
+  nuestra key.**
+
+**Decisión: B.** *"No podemos depender de la nube de ellos, solo es lectura y luego subimos a
+la nuestra."*
+
+Y hay una razón técnica que lo vuelve obligatorio: entre la lectura y la confirmación pasan
+minutos —el cliente lee el resumen, lo piensa, contesta— y **las URLs de medios de WhatsApp
+caducan a los pocos minutos**. Con A, el pago se caería *después* de que el cliente ya dijo
+que sí, que es el peor momento posible. Con B, para cuando confirma, la imagen ya es nuestra.
+
+**El orden dentro de `/boleta/leer` importa: la IA va antes que la subida.** Si el modelo dice
+que eso no es un comprobante, no se sube nada y el bucket no se llena de selfies.
+
+**Costo aceptado:** los intentos descartados dejan archivos que ningún pago referencia. Son
+fotos de celular; el borrador guarda su `r2_key`, así que se pueden barrer cuando estorben —
+cartera ya tiene `deleteDocumentoFromR2()`, solo falta exponerla en una ruta.
+
+**La URL original igual se guarda** (`imagen_origen_url`), pero solo para trazar de dónde
+vino. No se vuelve a usar.
+
+---
+
+## D-32 · Registrar una boleta ya mueve la mora, y por eso el rechazo es Revertir
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — hallazgo de la revisión del contrato
+
+**Contexto.** El contrato decía que el pago del bot "entra `pending` y ahí se queda hasta que
+contabilidad lo resuelva". **Es falso a medias.** `insertPayment` llama a `procesarPagoMora`
+antes de tocar cuota alguna, y eso ejecuta `updateMora` con `DECREMENTO`: la mora del cliente
+baja **en el momento del insert**, y si queda en cero el crédito pasa de `MOROSO` a `ACTIVO`.
+
+Lo que sí espera a la validación es el resto: el pago sigue `pending`, las cuotas del
+calendario no se cierran y los inversionistas no se procesan.
+
+**Esto no lo introduce el bot** — pasa idéntico cuando conta registra a mano una boleta que
+llegó por correo. Pero el bot lo hace más seguido y sin un humano filtrando antes del insert,
+así que hay que decidir qué pasa cuando esa boleta resulta no ser buena.
+
+**Opciones.**
+- A) Que el bot no use `newPayment`: una cola propia y el insert recién al validar.
+- **B) Usar `newPayment` como todos, y garantizar que el rechazo devuelva la mora.**
+- C) Arreglar `falsePayment` para que restaure la mora.
+
+**Decisión: B.** A significa reimplementar el reparto entre mora, cuotas, capital y
+excedentes — la lógica más delicada de cartera— para el único caso del bot; tarde o temprano
+las dos copias dirían cosas distintas. C toca un proceso financiero que usan otros flujos, y
+no es lo que se pidió.
+
+**Cómo se garantiza:** el rechazo de una boleta es **Revertir Pago** (`reversePayment`), que
+llama a `updateMora` con `INCREMENTO` y devuelve exactamente lo que el registro descontó.
+Funciona sobre un pago `pending`, así que sirve para una boleta que nunca llegó a validarse —
+y es lo que conta ya hace hoy en carteraFront.
+
+**`false-payment` no sirve para esto**: solo pone `pagado: false, paymentFalse: true` y deja
+la mora descontada. En la UI ni siquiera está cableado al flujo de boletas de cliente. Si aun
+así llega un evento `marcado_falso`, el CRM **no le escribe al cliente**: levanta una alerta
+al asesor avisando que ese crédito quedó con la mora descontada por una boleta descartada.
+
+**Cuándo habría que revisar esto.** Si se ve en producción que las boletas del bot se
+rechazan seguido, el descuento temporal de mora deja de ser aceptable y toca la opción A (o
+un `validation_status` nuevo que `procesarPagoMora` respete).
+
+---
+
+## D-33 · Una boleta son varios pagos, y una sola notificación
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — hallazgo de la revisión del contrato
+
+**Contexto.** El contrato asumía que una boleta = un pago, guardaba un `pago_id` y prometía
+devolverlo. Dos cosas lo desmienten:
+
+1. `newPayment` recorre las cuotas pendientes mientras le quede dinero y **crea o actualiza
+   una fila de `pagos_credito` por cuota**. Tres cuotas atrasadas pagadas con una boleta son
+   tres pagos.
+2. **La respuesta de `newPayment` no devuelve ningún `pago_id`**: devuelve un resumen con
+   cuántas cuotas se pagaron completas y cuántas parciales.
+
+Sin ids no hay circuito de vuelta: el evento de conta trae un `pago_id` que el CRM no sabría
+de quién es.
+
+**Decisión.**
+
+- **`newPayment` devuelve la lista de ids creados** (`pagos: [48213, 48214]`). Es aditivo —el
+  formulario de carteraFront ignora el campo— y no toca la lógica de aplicación.
+- La relación **boleta → pagos es 1:N** y vive en `bot_cobros_boleta_pagos`, con `pago_id`
+  único: así el evento entrante encuentra su boleta.
+- **Un mensaje por boleta, no por pago.** Se espera a que todos los pagos de esa boleta estén
+  resueltos y sale un solo mensaje: todos validados → "acreditado"; alguno revertido →
+  "necesitamos revisar tu pago". Tres WhatsApp por una boleta sería absurdo.
+- Si a las **24 h** la boleta quedó a medias (unos resueltos, otros no), se avisa **solo al
+  asesor**. Al cliente no se le manda una verdad parcial.
+
+**Reabrir el ciclo son dos campos.** Cuando un pago ya validado vuelve a `pending`
+(`revertPaymentToPending`), no alcanza con limpiar `notificado_cliente_at` en la boleta: hay
+que limpiar también el **`resuelto_en` de ese pago** en `bot_cobros_boleta_pagos`. Si quedara
+marcado como resuelto, el job de respaldo —que solo mira pagos sin resolver— nunca vería la
+revalidación posterior, y el cliente se quedaría con un "estamos revisando de nuevo tu pago"
+que no termina nunca.
+
+---
+
+## D-34 · La confirmación se protege con estado, no con idempotency key
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — hallazgo de la revisión del contrato
+
+**Contexto.** Si `newPayment` commitea y el CRM se cae antes de guardar los ids —timeout,
+corte de red—, un reintento del mismo `boletaId` vería el borrador sin confirmar y llamaría a
+cartera otra vez: **un segundo pago real** por la misma boleta.
+
+Y la red de cartera no alcanza: su chequeo de duplicados **solo corre cuando vienen
+`numeroAutorizacion` y `banco_id` a la vez**, y en este contrato la autorización es opcional
+(hay boletas que no la traen).
+
+**Opciones.**
+- A) Pasar una idempotency key (el `boletaId`) a `newPayment` y que cartera la respete.
+- **B) Máquina de estados en el CRM + reconciliación por la `r2_key`.**
+
+**Decisión: B.** A es lo que haría un libro de texto, pero `newPayment` mueve dinero y ya se
+decidió antes no meterle idempotencia (ver el caso de las facturas duplicadas y el de
+`aplicar-pago`). B consigue lo mismo sin tocar el camino de escritura:
+
+1. El borrador pasa a **`confirmando`** con un UPDATE condicional (`WHERE estado = 'leida'`)
+   **antes** de llamar a cartera. Dos peticiones simultáneas: solo una gana.
+2. Un reintento sobre un borrador en `confirmando` **no llama a cartera**: responde
+   `409 CONFIRMACION_EN_CURSO`.
+3. Un job revisa los que llevan más de 5 minutos ahí y le pregunta a cartera si esa boleta
+   existe, buscándola por la **`r2_key`** —que es única y quedó del lado de ellos en la tabla
+   `boletas`—: si no existe, el borrador vuelve a `leida`.
+
+Lo único que agrega del lado de cartera es un **endpoint de lectura**
+(`GET /pagos-por-boleta?url=…`), que no puede romper nada.
+
+**Encontrar filas no prueba que el registro quedó completo.** `insertPayment` **no es
+transaccional**: escribe `pagos_credito` y `boletas` una por una contra el `db` global, sin
+envolver el loop de cuotas. Si se cayó a mitad de repartir entre tres cuotas, quedaron filas
+commiteadas *y* un 500 de vuelta. Por eso, cuando el job encuentra filas:
+
+- **no** vuelve a llamar a `newPayment` (duplicaría lo ya escrito);
+- deja el borrador en **`confirmada_a_verificar`**, no en `confirmada`;
+- avisa a **contabilidad y al asesor** para que revisen si el monto quedó completo;
+- al cliente le manda un mensaje neutro (*"estamos procesando tu pago"*), nunca "recibido".
+
+Que `insertPayment` no sea atómico es un problema preexistente de cartera y excede este
+feature. Lo que se decide acá es que el bot no lo convierta en un pago a medias silencioso.
+
+---
+
+## D-35 · El webhook adelanta el aviso, el job lo garantiza
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — hallazgo de la revisión del contrato
+
+**Contexto.** [D-28](#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta) dice que
+cartera avisa al CRM con try/catch, log y seguir. Eso protege a contabilidad, pero deja un
+hueco: **si el CRM está caído justo en ese segundo, el evento se pierde para siempre**. Y el
+aviso no es un adorno — es el producto: un pago validado del que el cliente nunca se entera
+es peor que no tener circuito.
+
+Aparte, faltaba un emisor. **El botón "Validar Pago" de contabilidad no llama a
+`/revalidatePayment`**: llama a `pagosService.aplicarPago` → `GET /aplicar-pago?pago_id=…` →
+`aplicarPagoAlCredito`, que es quien mueve el pago de `pending` a `validated`.
+`/revalidatePayment` es la acción "Revalidar", reservada a ADMIN. Colgar el circuito solo de
+ahí habría perdido **el caso normal**.
+
+**Opciones.**
+- A) Outbox con reintentos del lado de cartera (tabla + job en la app que mueve el dinero).
+- **B) El CRM no depende del aviso: un job de respaldo consulta el estado.**
+- C) Solo webhook, asumiendo la pérdida.
+
+**Decisión: B**, más agregar `/aplicar-pago` a los emisores.
+
+| Camino | Qué es | Cuándo actúa |
+| --- | --- | --- |
+| **Rápido** | El webhook `/pagos/evento` | Siempre que salga bien: el cliente se entera en segundos. |
+| **Red de seguridad** | Un job del CRM revisa las boletas confirmadas con pagos sin resolver y le pregunta a cartera su `validation_status` | Cada hora. Si alguno dejó de estar `pending`, se procesa como si el evento hubiera llegado. |
+
+A se descartó por dónde vive: meter una tabla de outbox y un job de reintentos **dentro de
+cartera** es agregarle responsabilidad de mensajería a la app que mueve el dinero, para
+resolver un problema que es nuestro. El job del CRM usa el mismo endpoint de lectura que ya
+pide [D-34](#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key) y no le
+agrega nada al camino de escritura.
+
+**Efecto lateral bueno:** ese job también cubre el caso de que cartera ni siquiera llegue a
+intentar el aviso —un deploy en el medio, un proceso que muere— sin ninguna coordinación
+extra entre las dos apps.
+
+**El job pregunta por `pago_id`, nunca por la boleta.** `reversePayment` **borra las filas de
+`boletas`** del pago —y si era un parcial con hermanos en la misma cuota, borra el
+`pagos_credito` entero; si no, lo resetea a `no_required` con `numeroAutorizacion = ''` y
+`banco_id = NULL`—. Preguntar "¿qué pasó con la boleta tal?" devolvería silencio **justo en
+el caso que más urge avisar**: el rechazo.
+
+Como en cartera no hay tabla de reversiones ni log de la acción, el estado se **deduce de lo
+que la reversión deja atrás**, y por eso hay que preguntar por un `pago_id` puntual que
+sabemos que existió:
+
+| Lo que devuelve cartera | Interpretación |
+| --- | --- |
+| `validated` / `capital_validated` | validado |
+| `pending` | sigue esperando |
+| `payment_false = true` | marcado falso |
+| la fila **no existe** | **revertido** |
+| `no_required` + `numeroAutorizacion = ''` + `banco_id = NULL` | **revertido** (firma del reset) |
+
+Las dos últimas son el acta de defunción que cartera no escribe.
+
+**Y la misma trampa aplica a la reconciliación de D-34**, que sí busca por `r2_key`: "no hay
+filas" puede significar "no se registró" **o** "se registró y ya lo revirtieron". Por eso ese
+borrador nunca vuelve solo a `leida` — va a `revision_manual`. Devolverlo a `leida` sería
+dejar que el cliente reconfirme un pago que contabilidad acaba de rechazar.
+
+---
+
+## D-36 · Simplificar cartera en vez de compensarla
+
+**Estado:** 🔴 **Abierta** — planteada por Daniel el 2026-08-19, a decidir antes del PR C
+
+**Contexto.** Buena parte de la maquinaria de este contrato —el estado
+`confirmada_a_verificar`, el `revision_manual`, la inferencia del "acta de defunción", el job
+horario de respaldo— no existe porque el bot la necesite. Existe para **compensar** dos cosas
+de cartera:
+
+1. `insertPayment` **no es transaccional**: puede dejar filas a medias.
+2. `reversePayment` **borra sin dejar rastro**: no hay tabla de reversiones ni log.
+
+La pregunta de Daniel: ¿y si en vez de rodearlas, las arreglamos?
+
+**Primero, una corrección al planteo.** No son "los dos métodos no transaccionales":
+
+| | ¿Transaccional hoy? | Cuál es su problema |
+| --- | --- | --- |
+| `insertPayment` | **No.** 1,682 líneas, 8 escrituras directas y 5 helpers, todos contra el `db` global | Puede escribir 2 de 3 cuotas y devolver 500 |
+| `reversePayment` | **Sí**, ya corre dentro de `db.transaction` (línea 83) | No es atomicidad: **destruye evidencia** (borra las filas de `boletas`, y el `pagos_credito` si era parcial con hermanos) |
+
+O sea que a `reversePayment` hacerlo atómico no le cambia nada: ya lo es. Lo que le falta es
+**historial**.
+
+### Las tres opciones, de más barata a más cara
+
+**Opción 1 · Historial de reversiones** — *recomendada, y va más allá del bot.*
+Antes de borrar, insertar una fila en una tabla `pagos_reversiones` (pago, crédito, montos,
+motivo, usuario, fecha) **dentro de la transacción que ya existe**. Es un INSERT aditivo: no
+cambia el comportamiento de nadie.
+
+- **Mata del contrato:** la inferencia del tombstone (§6) y la ambigüedad que obliga al
+  `revision_manual` (§4.1). "¿Se revirtió?" pasa a ser una consulta, no una deducción.
+- **Riesgo:** bajo.
+- **Valor fuera del bot:** hoy **nadie puede saber qué pagos se revirtieron, ni quién**. Eso
+  es un hueco de auditoría propio, que el bot solo puso en evidencia.
+
+**Opción 2 · `insertPayment` transaccional** — *cara y riesgosa; no como prerrequisito.*
+Envolver las 1,682 líneas en una transacción implica pasar el `tx` por los 5 helpers en 4
+archivos y refactorizar **`updateMora`**, que abre su propia `db.transaction` y tiene **13
+llamadas desde 6 archivos**. Todos esos llamadores hay que tocarlos o dejarlos compatibles.
+
+- **Mata del contrato:** el estado `confirmada_a_verificar`.
+- **No mata:** el job de respaldo (existe porque el aviso se puede perder, no por atomicidad)
+  ni el reconciliador de 5 minutos (existe porque la respuesta se puede perder) — aunque su
+  resultado pasaría a ser binario y confiable.
+- **Riesgo:** alto. Es el camino de escritura de **todos** los pagos del sistema, y alarga la
+  duración de los locks de fila.
+
+**Opción 3 · Outbox en cartera** — *la única que mata el job horario.*
+Insertar el evento en la misma transacción que valida el pago, y un worker que reintenta
+entregarlo al CRM.
+
+- **Mata del contrato:** el job de respaldo de [D-35](#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza).
+- **Riesgo:** medio. Tabla y worker nuevos **dentro de la app que mueve el dinero**, que es
+  justo lo que D-35 evitó.
+
+### Recomendación de IT
+
+**Hacer la 1, no hacer la 2 ahora, dejar la 3 para cuando moleste.** La 1 cuesta poco, arregla
+un hueco de auditoría real y se lleva puestas las dos piezas más feas del contrato. La 2 es
+cirugía sobre el corazón de cartera para ahorrarse **un** estado; si algún día se hace, será
+por sus propios méritos —pagos a medias en producción— y no para simplificar el bot.
+
+**Mientras no se decida, el contrato queda como está**: funciona con cartera tal como es hoy.
+Si se hace la 1, se borran §6 (tabla de inferencia) y la mitad de §4.1, y este documento
+adelgaza en vez de crecer.

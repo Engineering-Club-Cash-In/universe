@@ -129,7 +129,7 @@ como 404, para que el bot no trate un dato equivocado del cliente como una falla
 > [Paso 1](./01-identificacion-y-acceso.md) son **sin estado**: el bot reenvía `search` +
 > `telefono` en cada llamada y el control de acceso es la validación del OTP
 > ([D-04](./DECISIONES.md#d-04--dónde-vive-el-estado-de-identidad),
-> [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta)). Lo de abajo queda como diseño
+> [D-16](./DECISIONES.md#d-16--quién-valida-el-otp)). Lo de abajo queda como diseño
 > de referencia para cuando aparezcan flujos de varios pasos (pagos, boletas), donde sí hará
 > falta.
 

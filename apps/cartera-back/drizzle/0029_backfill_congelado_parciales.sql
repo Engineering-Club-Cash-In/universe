@@ -28,7 +28,17 @@
 -- Idempotente: ON CONFLICT DO NOTHING. Reversible: DELETE de las filas insertadas.
 
 WITH candidatos AS (
-  SELECT p.pago_id, p.credito_id, p.fecha_aplicado,
+  -- `corte` = el instante en que se FACTURÓ, no en que se aplicó el pago. Entre
+  -- los dos puede haber días (medido en producción: hasta 4.4 días en 7 de estos
+  -- pagos), y una operación creada en ese hueco YA estaba en el roster cuando se
+  -- emitieron los DTEs — revertirla daría un reparto que nunca existió.
+  -- Se usa facturacion_desglose.created_at porque se escribe en el mismo request
+  -- que los DTEs y está en UTC, igual que compras_credito_inversionista.created_at
+  -- (facturas_electronicas.fecha_emision guarda hora de Guatemala). Al re-facturar
+  -- el desglose se reescribe, así que este corte sigue a las facturas vigentes.
+  SELECT p.pago_id, p.credito_id,
+         (SELECT MIN(d2.created_at) FROM cartera.facturacion_desglose d2
+          WHERE d2.pago_id = p.pago_id) AS corte,
          p.abono_interes::numeric AS interes,
          COALESCE(p.abono_iva_12, 0)::numeric AS iva,
          p.abono_interes::numeric + COALESCE(p.abono_iva_12, 0)::numeric AS bruto
@@ -53,7 +63,7 @@ roster AS (
                        FROM cartera.compras_credito_inversionista cc
                        WHERE cc.credito_id = ci.credito_id
                          AND cc.inversionista_id = ci.inversionista_id
-                         AND cc.created_at > c.fecha_aplicado), 0)
+                         AND cc.created_at > c.corte), 0)
            + CASE WHEN UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
                   THEN COALESCE((SELECT SUM(cc2.monto_aportado::numeric)
                                  FROM cartera.compras_credito_inversionista cc2
@@ -61,7 +71,7 @@ roster AS (
                                    ON i2.inversionista_id = cc2.inversionista_id
                                  WHERE cc2.credito_id = ci.credito_id
                                    AND UPPER(TRIM(i2.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
-                                   AND cc2.created_at > c.fecha_aplicado), 0)
+                                   AND cc2.created_at > c.corte), 0)
                   ELSE 0 END AS aporte_hist
   FROM candidatos c
   JOIN cartera.creditos_inversionistas ci ON ci.credito_id = c.credito_id

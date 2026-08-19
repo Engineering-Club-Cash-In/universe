@@ -15,6 +15,15 @@ NC='\033[0m' # No Color
 
 ECR_REGISTRY="public.ecr.aws/a6w8m2u2"
 REGION="us-east-1"
+SERVER_BUILD_INPUTS=(
+    ":(top)apps/crm/apps/server/"
+    ":(top)apps/crm/package.json"
+    ":(top)apps/crm/bun.lock"
+    ":(top)packages/infornet/"
+    ":(top)packages/sms/"
+    ":(top)packages/simpletech/"
+    ":(top)packages/email/"
+)
 
 # Default: check uncommitted changes, or compare with ref if provided
 COMPARE_MODE="${1:-uncommitted}"
@@ -28,9 +37,9 @@ if [ "$COMPARE_MODE" = "uncommitted" ]; then
         exit 1
     fi
 
-    # Check for changes in server (staged + unstaged)
+    # Check for changes in every input consumed by the server image
     SERVER_CHANGED=false
-    if git diff --quiet HEAD -- apps/server/ && git diff --quiet --cached -- apps/server/; then
+    if git diff --quiet HEAD -- "${SERVER_BUILD_INPUTS[@]}" && git diff --quiet --cached -- "${SERVER_BUILD_INPUTS[@]}"; then
         echo -e "${YELLOW}⏭️  No uncommitted changes in server${NC}"
     else
         echo -e "${GREEN}✓ Uncommitted changes detected in server${NC}"
@@ -57,9 +66,9 @@ else
     # Fetch latest changes from origin
     git fetch origin -q
 
-    # Check for changes in server
+    # Check for changes in every input consumed by the server image
     SERVER_CHANGED=false
-    if git diff --quiet $COMPARE_MODE HEAD -- apps/server/ 2>/dev/null; then
+    if git diff --quiet "$COMPARE_MODE" HEAD -- "${SERVER_BUILD_INPUTS[@]}" 2>/dev/null; then
         echo -e "${YELLOW}⏭️  No changes detected in server${NC}"
     else
         echo -e "${GREEN}✓ Changes detected in server${NC}"
@@ -108,7 +117,7 @@ fi
 # Build and push web if changed
 if [ "$WEB_CHANGED" = true ] || [ "$FORCE_DEPLOY" = "1" ]; then
     echo -e "${BLUE}🏗️  Building web image (no cache)...${NC}"
-    podman build --no-cache -t cci/crm-web .
+    podman build --no-cache -t cci/crm-web -f "$SCRIPT_DIR/Dockerfile" "$MONOREPO_ROOT"
     podman tag cci/crm-web:latest $ECR_REGISTRY/cci/crm-web:latest
     echo -e "${BLUE}📤 Pushing web image...${NC}"
     podman push $ECR_REGISTRY/cci/crm-web:latest

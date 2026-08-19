@@ -103,14 +103,39 @@ describe("CRM API production auth build", () => {
 		expect(crmLock).toContain('"better-auth": "1.4.18"');
 	});
 
-	it("uses the monorepo root context in the legacy CRM API deploy path", async () => {
+	it("uses the monorepo root context in every legacy CRM deploy build", async () => {
 		const deployScript = await readFile(deployScriptPath, "utf8");
 
 		expect(deployScript).toContain(
 			'podman build -t cci/crm-api -f "$SCRIPT_DIR/apps/server/Dockerfile" "$MONOREPO_ROOT"',
 		);
+		expect(deployScript).toContain(
+			'podman build --no-cache -t cci/crm-web -f "$SCRIPT_DIR/Dockerfile" "$MONOREPO_ROOT"',
+		);
 		expect(deployScript).not.toMatch(
 			/cd apps\/server\s*\n\s*podman build -t cci\/crm-api \./,
+		);
+	});
+
+	it("tracks every manifest and shared package consumed by the CRM API image", async () => {
+		const deployScript = await readFile(deployScriptPath, "utf8");
+
+		for (const input of [
+			":(top)apps/crm/apps/server/",
+			":(top)apps/crm/package.json",
+			":(top)apps/crm/bun.lock",
+			":(top)packages/infornet/",
+			":(top)packages/sms/",
+			":(top)packages/simpletech/",
+			":(top)packages/email/",
+		]) {
+			expect(deployScript).toContain(input);
+		}
+		expect(deployScript).toMatch(
+			/git diff --quiet HEAD -- "\$\{SERVER_BUILD_INPUTS\[@\]\}"/,
+		);
+		expect(deployScript).toMatch(
+			/git diff --quiet "\$COMPARE_MODE" HEAD -- "\$\{SERVER_BUILD_INPUTS\[@\]\}"/,
 		);
 	});
 

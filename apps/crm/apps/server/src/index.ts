@@ -37,7 +37,7 @@ import {
 	getVehiclesBySifcoController,
 } from "./controllers/vehicles";
 import type { db } from "./db";
-import { otps } from "./db/schema/otp";
+import { ejecutarAgendaCobrosDiaria } from "./jobs/agenda-cobros-snapshots";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -60,7 +60,10 @@ import {
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
-import { checkPromesasPago } from "./services/check-promesas-pago";
+import {
+	type CheckPromesasResumen,
+	checkPromesasPago,
+} from "./services/check-promesas-pago";
 import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendConvenioReminders } from "./services/send-convenio-reminders";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
@@ -1438,6 +1441,26 @@ if (!TAREAS_PROGRAMADAS_ACTIVAS) {
 }
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
+	// checkPromesasPago traga sus propios errores de persistencia por SIFCO
+	// (todo-o-nada por lote, ver check-promesas-pago.ts) y siempre resuelve
+	// normalmente — nunca rechaza, así que un simple .catch() no detecta que
+	// algo falló. Si errores>0, el cierre de snapshot que sigue puede leer
+	// contactos_cobros.estado_promesa desactualizado para esos SIFCOs. No se
+	// aborta el cierre por esto (cartera-back con fallos intermitentes
+	// dejaría el snapshot sin cerrar indefinidamente, peor que un dato
+	// puntual stale) — solo se deja rastro explícito para investigar
+	// (Codex PR #1330).
+	function logSiErroresPromesas(resumen: {
+		errores: number;
+		evaluadas: number;
+	}): void {
+		if (resumen.errores > 0) {
+			console.error(
+				`[AgendaCobrosSnapshot] checkPromesasPago tuvo ${resumen.errores} error(es) de ${resumen.evaluadas} promesas evaluadas; el cierre de snapshot puede leer estado_promesa desactualizado para esos casos.`,
+			);
+		}
+	}
+
 	// Job periódico de notificaciones de cobros (cada hora)
 	setInterval(
 		async () => {
@@ -1450,12 +1473,18 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		60 * 60 * 1000,
 	);
 
-	// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista)
-	setTimeout(() => {
-		checkSeguimientosVencidos().catch(console.error);
-		procesarSeguimientosRecurrentes().catch(console.error);
-		checkPromesasPago().catch(console.error);
-	}, 10_000);
+	// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista).
+	// checkPromesasPago se guarda en una promesa module-level: el catch-up de
+	// agenda de cobros (más abajo) la espera antes de cerrar snapshots, mismo
+	// motivo que el encadenado del timer normal de medianoche (Codex PR #1330).
+	const checkPromesasPagoBoot: Promise<CheckPromesasResumen | void> =
+		new Promise((resolve) => {
+			setTimeout(() => {
+				checkSeguimientosVencidos().catch(console.error);
+				procesarSeguimientosRecurrentes().catch(console.error);
+				resolve(checkPromesasPago().catch(console.error));
+			}, 10_000);
+		});
 
 	// Recordatorios Premora (CC2-11): diario a las 8:00 GT (= 14:00 UTC, GT no
 	// tiene DST). También corre al boot (abajo): la tabla recordatorios_premora
@@ -1558,6 +1587,36 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// CB-020: también cierra el día evaluando TODAS las promesas de pago activas
 	// (pendiente/incumplida) sin depender de que alguien abra el caso — ver
 	// check-promesas-pago.ts.
+	//
+	// CB-128: el cierre de snapshots de agenda se dispara DESDE ACÁ, después de
+	// que checkPromesasPago() resuelve, en vez de un setTimeout independiente a
+	// las 00:05 GT — checkPromesasPago hace un getCredito secuencial por SIFCO
+	// contra cartera-back y puede tardar más de 5 minutos, y cerrarSnapshotsAgenda
+	// lee contactos_cobros.estado_promesa: si corriera en paralelo podría leer
+	// una promesa que YA se cumplió pero cuyo estado todavía no se actualizó,
+	// perdiendo ese pago para siempre en el snapshot del día (Codex PR #1330).
+	//
+	// Encadenar DESPUÉS de checkPromesasPago no basta como piso: si hay pocas
+	// promesas activas ese día, ese encadenado puede resolver en segundos,
+	// capturando bien antes de las 00:05 GT documentadas. `procesarMoras`
+	// (recalcula mora, buckets y reasignaciones) corre en cartera-back —
+	// proceso EXTERNO, sin endpoint de estado que este CRM pueda consultar —
+	// a las 23:59 GT (docs/features/cobros-02/02-motor-y-asignacion.md).
+	// Capturar mientras sigue corriendo congela una mezcla de datos viejos y
+	// nuevos, y el índice único (fecha_gt, asesor_id) con ON CONFLICT DO
+	// NOTHING deja ese snapshot corrupto sin forma de corregirlo después
+	// (Codex PR #1331). Sin handshake posible, se agrega un piso mínimo
+	// explícito hasta las 00:05 GT, ADEMÁS de esperar checkPromesasPago —
+	// no elimina el riesgo (sigue siendo heurístico), pero dejar de confiar
+	// en que el encadenado por sí solo tarde lo suficiente.
+	function esperarHasta0005GT(): Promise<void> {
+		const ahora = new Date();
+		const barrera = new Date();
+		barrera.setUTCHours(6, 5, 0, 0);
+		const faltante = barrera.getTime() - ahora.getTime();
+		if (faltante <= 0) return Promise.resolve();
+		return new Promise((resolve) => setTimeout(resolve, faltante));
+	}
 	function scheduleAtMidnightGT() {
 		const now = new Date();
 		const next = new Date();
@@ -1565,7 +1624,10 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
 		setTimeout(async () => {
 			await procesarSeguimientosRecurrentes().catch(console.error);
-			await checkPromesasPago().catch(console.error);
+			const resumenPromesas = await checkPromesasPago().catch(console.error);
+			if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
+			await esperarHasta0005GT();
+			await ejecutarAgendaCobrosDiaria().catch(console.error);
 			scheduleAtMidnightGT();
 		}, next.getTime() - now.getTime());
 	}
@@ -1655,6 +1717,61 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			);
 		}
 	}, 25_000);
+
+	// Snapshot de cumplimiento de Agenda: se dispara desde scheduleAtMidnightGT
+	// (arriba), encadenado DESPUÉS de checkPromesasPago — no tiene timer propio
+	// a las 00:05 GT (ver comentario ahí sobre por qué el margen fijo no
+	// alcanza). Cierra ayer completo y después congela D-0 de hoy (solo cuotas
+	// que vencen HOY, no D0-D5 — ver obtenerAgendaAsesor en
+	// agenda-cobros-source.ts). Advisory lock + constraints únicos hacen
+	// seguros timer, reinicio y múltiples instancias.
+
+	// Catch-up del mismo día tras deploy/reinicio posterior a 00:05 GT. No hace
+	// backfill: solo reintenta cierre de ayer y captura de hoy; snapshots ya
+	// existentes permanecen congelados. Es independiente del encadenado de
+	// arriba porque en un boot tardío scheduleAtMidnightGT nunca corrió en ESTA
+	// instancia del proceso.
+	//
+	// Espera checkPromesasPagoBoot antes de correr: mismo race que el timer
+	// normal (checkPromesasPago puede tardar minutos con su loop secuencial
+	// contra cartera-back), pero acá el catch-up y el checkPromesasPago de
+	// boot tenían delays independientes (30s vs 10s) y podían solaparse
+	// (Codex PR #1330).
+	//
+	// Si el boot cae EXACTO entre 00:00 y 00:04:59 GT, scheduleAtMidnightGT ya
+	// movió su timer a mañana (next <= now) y este catch-up, sin más, se
+	// hubiera quedado callado hasta el próximo boot — perdiendo cierre de ayer
+	// Y captura de hoy por un día entero. Reusa esperarHasta0005GT() (mismo
+	// piso que el timer normal) en vez de una condición de hora manual: un
+	// boot en cualquier otro momento del día (p. ej. 23:00 GT, mientras
+	// procesarMoras todavía no corrió) NO debe capturar de inmediato — debe
+	// esperar a la próxima barrera de 00:05 GT como cualquier otra corrida.
+	//
+	// Si el boot ocurrió ANTES de medianoche GT, checkPromesasPagoBoot quedó
+	// resuelta horas antes del cierre (p. ej. boot 20:00 GT → promesa resuelta
+	// 20:00:10) y scheduleAtMidnightGT SÍ va a correr su propio
+	// checkPromesasPago() fresco a las 00:00 GT — pero ambos callbacks
+	// convergen cerca de las 00:05 GT y compiten por el mismo advisory lock en
+	// ejecutarAgendaCobrosDiaria; si este catch-up ganara el lock, cerraría el
+	// snapshot con la reconciliación stale del boot, perdiendo pagos/promesas
+	// resueltos entre el boot y medianoche (Codex PR #1331). Por eso, si el
+	// boot fue antes de medianoche, se descarta checkPromesasPagoBoot para el
+	// cierre y se corre un checkPromesasPago() nuevo DESPUÉS de la barrera.
+	const bootAntesDeMedianocheGT = (() => {
+		const ahora = new Date();
+		const proximaMedianocheGT = new Date();
+		proximaMedianocheGT.setUTCHours(6, 0, 0, 0);
+		return proximaMedianocheGT > ahora;
+	})();
+	setTimeout(async () => {
+		await checkPromesasPagoBoot;
+		await esperarHasta0005GT();
+		const resumenPromesas = bootAntesDeMedianocheGT
+			? await checkPromesasPago().catch(console.error)
+			: await checkPromesasPagoBoot;
+		if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
+		await ejecutarAgendaCobrosDiaria().catch(console.error);
+	}, 30_000);
 }
 
 export default {

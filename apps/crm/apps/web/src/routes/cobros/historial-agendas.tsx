@@ -1,37 +1,46 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import {
 	AlertTriangle,
 	CalendarClock,
 	FileSpreadsheet,
 	Loader2,
-	Mail,
-	MapPin,
-	MessageSquare,
-	Pencil,
-	Phone,
 	RotateCcw,
 	ScrollText,
-	Send,
-	Smartphone,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { CumplimientoAgendaPanel } from "@/components/cobros/cumplimiento-agenda-panel";
 import {
+	EncabezadoHistorial,
+	FilaHistorial,
+} from "@/components/cobros/historial/fila-historial";
+import {
+	aFechaISO,
+	aFechaISO_GT,
+	ESTADOS_CONTACTO,
+	etiquetaEstado,
+	etiquetaMetodo,
+	etiquetaRol,
+	fechaHora,
+	METODOS_CONTACTO,
+	ORIGEN_LABEL,
+	ROLES_FILTRABLES,
+	soloFecha,
+	sumarDiasLocal,
+} from "@/components/cobros/historial/formato";
+import type {
+	FilaHistorialData,
+	RespuestaHistorial,
+} from "@/components/cobros/historial/tipos";
+import {
 	type UsuarioCobros,
 	UsuarioCobrosMultiSelect,
 } from "@/components/cobros/usuario-cobros-multi-select";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "@/components/ui/popover";
 import {
 	Select,
 	SelectContent,
@@ -46,7 +55,6 @@ import { authClient } from "@/lib/auth-client";
 import {
 	type BucketsCatalogoQueryData,
 	bucketDeNumero,
-	estiloBucket,
 	labelBucketConCodigo,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
@@ -73,87 +81,16 @@ const PAGE_SIZE_EXPORT = 200;
  */
 const BUCKET_SIN_ASIGNAR = -1;
 
-const ESTADOS_CONTACTO = [
-	{ value: "contactado", label: "Contactado" },
-	{ value: "promesa_pago", label: "Promesa de pago" },
-	{ value: "acuerdo_parcial", label: "Acuerdo parcial" },
-	{ value: "rechaza_pagar", label: "Rechaza pagar" },
-	{ value: "no_contesta", label: "No contesta" },
-	{ value: "numero_equivocado", label: "Número equivocado" },
-] as const;
-
-const METODOS_CONTACTO = [
-	{ value: "llamada", label: "Llamada", icono: Phone },
-	{ value: "whatsapp", label: "WhatsApp", icono: MessageSquare },
-	{ value: "sms", label: "SMS", icono: Smartphone },
-	{ value: "email", label: "Email", icono: Mail },
-	{ value: "visita_domicilio", label: "Visita", icono: MapPin },
-	{ value: "carta_notarial", label: "Carta notarial", icono: Send },
-] as const;
-
-const ROLES_FILTRABLES = [
-	{ value: "cobros", label: "Asesor de Cobros" },
-	{ value: "cobros_supervisor", label: "Supervisor de Cobros" },
-	{ value: "admin", label: "Administrador" },
-] as const;
-
-const ORIGEN_LABEL: Record<string, string> = {
-	manual: "Manual",
-	premora: "Premora automático",
-	convenio: "Recordatorio de convenio",
-	wsp_masivo: "WhatsApp masivo",
-};
-
 /**
  * Contrato de `routers/historial-agendas.ts`, escrito a mano.
  *
  * Normalmente esto lo infiere oRPC de punta a punta, pero el tipo del cliente
- * está truncado por TS7056 (ver la nota dentro del componente). Estos tipos son
- * el reemplazo manual mientras eso siga así.
+ * está truncado por TS7056 (ver la nota dentro del componente). Este tipo es
+ * el reemplazo manual mientras eso siga así. `FilaHistorialData`,
+ * `RespuestaHistorial` y `EntradaAuditoria` viven en
+ * `@/components/cobros/historial/tipos` — compartidos con el bloque de
+ * gestiones del asesor en "Cumplimiento de agenda".
  */
-type FilaHistorialData = {
-	id: string;
-	fechaContacto: string | Date;
-	usuarioId: string;
-	usuarioNombre: string | null;
-	usuarioRol: string | null;
-	bucketSnapshot: number | null;
-	casoCobroId: string;
-	numeroCreditoSifco: string | null;
-	clienteNombre: string | null;
-	metodoContacto: string | null;
-	estadoContacto: string | null;
-	comentarios: string | null;
-	fechaProximoContacto: string | Date | null;
-	proximoPaso: string | null;
-	requiereSeguimiento: boolean | null;
-	estadoPromesa: string | null;
-	cuotaInicio: number | null;
-	cuotaFin: number | null;
-	incluyeMora: boolean | null;
-	montoComprometido: string | null;
-	fechaAlerta: string | Date | null;
-	/** Última escritura sobre la fila. NULL = nunca se tocó desde que se creó. */
-	updatedAt: string | Date | null;
-	origen: string;
-	fueEditadoManual: boolean;
-	ultimaEdicion: string | Date | null;
-	vecesEditado: number;
-};
-
-type RespuestaHistorial = {
-	items: FilaHistorialData[];
-	// `null` cuando se pidió con `incluirConteo: false` (el export): ahí el
-	// servidor no cuenta, y devolver un número lo dejaría plausible pero mal.
-	total: number | null;
-	totalEsAproximado: boolean;
-	page: number;
-	pageSize: number;
-	totalPaginas: number | null;
-	rangoAplicado: { desde: string; hasta: string; esDefault: boolean };
-	verTodos: boolean;
-};
-
 type ResumenHistorial = {
 	total: number;
 	efectivos: number;
@@ -163,124 +100,6 @@ type ResumenHistorial = {
 	editadas: number;
 	porBucket: { bucket: number | null; cantidad: number }[];
 };
-
-type EntradaAuditoria = {
-	id: string;
-	accion: string;
-	origen: string;
-	valoresAnteriores: unknown;
-	editadoPor: string | null;
-	editadoPorNombre: string | null;
-	editadoEn: string | Date;
-};
-
-function etiquetaEstado(valor: string | null): string {
-	return ESTADOS_CONTACTO.find((e) => e.value === valor)?.label ?? "—";
-}
-
-function etiquetaMetodo(valor: string | null): string {
-	return METODOS_CONTACTO.find((m) => m.value === valor)?.label ?? "—";
-}
-
-function IconoMetodo({ metodo }: { metodo: string | null }) {
-	const def = METODOS_CONTACTO.find((m) => m.value === metodo);
-	if (!def) return null;
-	const Icono = def.icono;
-	return <Icono className="h-3.5 w-3.5 shrink-0 text-gray-400" />;
-}
-
-function etiquetaRol(rol: string | null): string {
-	return ROLES_FILTRABLES.find((r) => r.value === rol)?.label ?? rol ?? "—";
-}
-
-/**
- * `Intl.DateTimeFormat` con zona horaria explícita GT, en vez de `date-fns`
- * puro: `format()` de `date-fns` usa siempre la zona LOCAL del navegador, y las
- * ventanas de este reporte se definen por día calendario de Guatemala en el
- * server. Para un supervisor con el navegador fuera de UTC-6, una gestión
- * cerca de medianoche se mostraba en un día u hora distinto al real GT —y esta
- * fecha alimenta la tabla, el popover de auditoría y el export XLSX, así que
- * podía contradecir el propio rango de fechas que el usuario seleccionó.
- */
-const MESES_CORTOS_ES = [
-	"ene",
-	"feb",
-	"mar",
-	"abr",
-	"may",
-	"jun",
-	"jul",
-	"ago",
-	"sep",
-	"oct",
-	"nov",
-	"dic",
-];
-
-/** Partes de un instante en el día calendario y hora de Guatemala. */
-function partesGT(fecha: Date) {
-	const partes = new Intl.DateTimeFormat("en-CA", {
-		timeZone: "America/Guatemala",
-		year: "numeric",
-		month: "2-digit",
-		day: "2-digit",
-		hour: "2-digit",
-		minute: "2-digit",
-		hour12: false,
-	}).formatToParts(fecha);
-	const get = (tipo: string) =>
-		partes.find((p) => p.type === tipo)?.value ?? "";
-	return {
-		dia: get("day"),
-		mes: MESES_CORTOS_ES[Number(get("month")) - 1] ?? "",
-		anio: get("year"),
-		hora: get("hour"),
-		minuto: get("minute"),
-	};
-}
-
-function fechaHora(valor: string | Date | null): string {
-	if (!valor) return "—";
-	const { dia, mes, anio, hora, minuto } = partesGT(new Date(valor));
-	return `${dia} ${mes} ${anio} ${hora}:${minuto}`;
-}
-
-function soloFecha(valor: string | Date | null): string {
-	if (!valor) return "—";
-	const { dia, mes, anio } = partesGT(new Date(valor));
-	return `${dia} ${mes} ${anio}`;
-}
-
-/** YYYY-MM-DD de un Date local, sin pasar por UTC (que correría el día). */
-function aFechaISO(fecha: Date): string {
-	const y = fecha.getFullYear();
-	const m = String(fecha.getMonth() + 1).padStart(2, "0");
-	const d = String(fecha.getDate()).padStart(2, "0");
-	return `${y}-${m}-${d}`;
-}
-
-/** Suma días a un Date en horario LOCAL (no UTC), preservando hora/minuto. */
-function sumarDiasLocal(fecha: Date, dias: number): Date {
-	const copia = new Date(fecha);
-	copia.setDate(copia.getDate() + dias);
-	return copia;
-}
-
-/**
- * YYYY-MM-DD de un instante, en el día calendario de GUATEMALA (no el del
- * navegador). Espejo client-side de `toDateStrGT` del server
- * (`lib/guatemala-month-window.ts`): mismo mecanismo (`Intl.DateTimeFormat`
- * `en-CA` da directo el formato ISO), duplicado porque este archivo no importa
- * del server (ver la nota de TS7056 más abajo). Necesario para convertir
- * `rangoAplicado.hasta` (instante UTC, exclusivo) al día calendario GT que
- * espera `z.string().date()` en el input — usar el día LOCAL del navegador acá
- * correría el día para cualquier usuario fuera de UTC-6.
- */
-function aFechaISO_GT(instante: Date): string {
-	return new Intl.DateTimeFormat("en-CA", {
-		timeZone: "America/Guatemala",
-	}).format(instante);
-}
 
 function HistorialAgendasPage() {
 	const { data: session, isPending: sesionCargando } = authClient.useSession();
@@ -1169,17 +988,7 @@ function HistorialAgendasContent() {
 							<div className="overflow-x-auto rounded-lg border dark:border-gray-700">
 								<table className="w-full text-sm">
 									<thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
-										<tr className="text-left text-gray-600 text-xs uppercase dark:text-gray-300">
-											<th className="px-3 py-2 font-medium">Fecha</th>
-											<th className="px-3 py-2 font-medium">Usuario</th>
-											<th className="px-3 py-2 font-medium">Bucket</th>
-											<th className="px-3 py-2 font-medium">Cuenta</th>
-											<th className="px-3 py-2 font-medium">Tipo</th>
-											<th className="px-3 py-2 font-medium">Resultado</th>
-											<th className="px-3 py-2 font-medium">Próxima acción</th>
-											<th className="px-3 py-2 font-medium">Promesa</th>
-											<th className="px-3 py-2 font-medium" />
-										</tr>
+										<EncabezadoHistorial />
 									</thead>
 									<tbody>
 										{items.map((fila) => (
@@ -1381,202 +1190,5 @@ function FiltroSelect({
 				))}
 			</SelectContent>
 		</Select>
-	);
-}
-
-function FilaHistorial({
-	fila,
-	catalogo,
-	esSupervisor,
-}: {
-	fila: FilaHistorialData;
-	catalogo: BucketsCatalogoQueryData | undefined;
-	esSupervisor: boolean;
-}) {
-	const bucket =
-		fila.bucketSnapshot != null
-			? bucketDeNumero(fila.bucketSnapshot, catalogo)
-			: null;
-
-	return (
-		<tr className="border-t hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800/50">
-			<td className="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-300">
-				{fechaHora(fila.fechaContacto)}
-				{/* AC-2: fecha de actualización. Se muestra solo si la fila cambió
-				    alguna vez. Dice "Act." y no "Editado" a propósito — la tocan
-				    también los recálculos de estado del sistema, y la marca de
-				    edición humana es el ícono de la última columna. */}
-				{fila.updatedAt && (
-					<div
-						className="text-gray-400 text-xs"
-						title="Última actualización del registro (incluye recálculos automáticos de estado)"
-					>
-						Act. {fechaHora(fila.updatedAt)}
-					</div>
-				)}
-			</td>
-			<td className="px-3 py-2">
-				<div className="font-medium">{fila.usuarioNombre ?? "—"}</div>
-				<div className="text-gray-400 text-xs">
-					{etiquetaRol(fila.usuarioRol)}
-				</div>
-			</td>
-			<td className="px-3 py-2">
-				{bucket ? (
-					<Badge variant="outline" style={estiloBucket(bucket.colorHex)}>
-						{labelBucketConCodigo(bucket)}
-					</Badge>
-				) : (
-					<span
-						className="text-gray-400"
-						/* Mismo texto que el chip "Sin bucket" del panel de filtros: el
-					   anterior nombraba una sola de las tres causas, y con el código
-					   del ticket adentro, que al usuario no le dice nada. */
-						title="Sin bucket registrado: gestión anterior a esta función, o crédito fuera del funnel (convenio, cancelado)"
-					>
-						—
-					</span>
-				)}
-			</td>
-			<td className="px-3 py-2">
-				<Link
-					to="/cobros/$id"
-					params={{ id: fila.casoCobroId }}
-					// contactos_cobros guarda el id del CASO, no el del crédito de
-					// cartera-back — por eso tipo="caso".
-					search={{ tipo: "caso" as const }}
-					className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
-				>
-					{fila.numeroCreditoSifco ?? "Sin SIFCO"}
-				</Link>
-				<div className="max-w-[180px] truncate text-gray-400 text-xs">
-					{fila.clienteNombre ?? "—"}
-				</div>
-			</td>
-			<td className="px-3 py-2">
-				<div className="flex items-center gap-1.5">
-					<IconoMetodo metodo={fila.metodoContacto} />
-					<span>{etiquetaMetodo(fila.metodoContacto)}</span>
-				</div>
-				{fila.origen !== "manual" && (
-					<span className="text-amber-600 text-xs dark:text-amber-400">
-						{ORIGEN_LABEL[fila.origen] ?? fila.origen}
-					</span>
-				)}
-			</td>
-			<td className="px-3 py-2">{etiquetaEstado(fila.estadoContacto)}</td>
-			<td className="px-3 py-2">
-				<div>{soloFecha(fila.fechaProximoContacto)}</div>
-				{fila.proximoPaso && (
-					<div className="max-w-[200px] truncate text-gray-400 text-xs">
-						{fila.proximoPaso}
-					</div>
-				)}
-			</td>
-			<td className="px-3 py-2">
-				{fila.estadoPromesa ? (
-					<div>
-						<span className="capitalize">{fila.estadoPromesa}</span>
-						{fila.cuotaInicio != null && fila.cuotaFin != null && (
-							<div className="text-gray-400 text-xs">
-								Cuotas {fila.cuotaInicio}–{fila.cuotaFin}
-							</div>
-						)}
-					</div>
-				) : (
-					<span className="text-gray-400">—</span>
-				)}
-			</td>
-			<td className="px-3 py-2">
-				{/* AC-6: la marca sale del audit con origen='manual', NO de updated_at
-				    — si no, toda promesa se vería "editada" cada vez que pasa el job. */}
-				{fila.fueEditadoManual && (
-					<AuditoriaPopover
-						contactoId={fila.id}
-						veces={fila.vecesEditado}
-						habilitado={esSupervisor}
-					/>
-				)}
-			</td>
-		</tr>
-	);
-}
-
-/**
- * AC-6 — qué se cambió, cuándo y quién. El detalle solo lo abre el supervisor
- * (el procedure está gateado); al asesor le queda el indicador visual.
- */
-function AuditoriaPopover({
-	contactoId,
-	veces,
-	habilitado,
-}: {
-	contactoId: string;
-	veces: number;
-	habilitado: boolean;
-}) {
-	const [abierto, setAbierto] = useState(false);
-	// TS7056 — ver la nota del componente principal.
-	// biome-ignore lint/suspicious/noExplicitAny: el tipo del cliente oRPC está truncado.
-	const orpcAny = orpc as any;
-	const auditoriaQuery = useQuery({
-		...orpcAny.getAuditoriaContacto.queryOptions({ input: { contactoId } }),
-		// Solo se pide al abrir: son N popovers por página.
-		enabled: abierto && habilitado,
-	});
-	const entradas = auditoriaQuery.data as EntradaAuditoria[] | undefined;
-
-	const insignia = (
-		<span
-			className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 text-xs dark:bg-amber-950/40 dark:text-amber-300"
-			title={`Editado ${veces} ${veces === 1 ? "vez" : "veces"}`}
-		>
-			<Pencil className="h-3 w-3" />
-			{veces}
-		</span>
-	);
-
-	if (!habilitado) return insignia;
-
-	return (
-		<Popover open={abierto} onOpenChange={setAbierto}>
-			<PopoverTrigger asChild>
-				<button type="button">{insignia}</button>
-			</PopoverTrigger>
-			<PopoverContent className="w-96" align="end">
-				<h4 className="mb-2 font-medium text-sm">Historial de cambios</h4>
-				{auditoriaQuery.isPending && (
-					<div className="flex items-center gap-2 py-3 text-gray-500 text-sm">
-						<Loader2 className="h-4 w-4 animate-spin" />
-						Cargando…
-					</div>
-				)}
-				{entradas?.length === 0 && (
-					<p className="py-2 text-gray-400 text-sm">Sin cambios registrados.</p>
-				)}
-				<div className="max-h-72 space-y-2 overflow-y-auto">
-					{entradas?.map((entrada) => (
-						<div
-							key={entrada.id}
-							className="rounded border p-2 text-xs dark:border-gray-700"
-						>
-							<div className="flex items-center justify-between gap-2">
-								<span className="font-medium">
-									{entrada.origen === "manual"
-										? (entrada.editadoPorNombre ?? "Usuario")
-										: "Sistema"}
-								</span>
-								<span className="text-gray-400">
-									{fechaHora(entrada.editadoEn)}
-								</span>
-							</div>
-							<pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words text-gray-500 dark:text-gray-400">
-								{JSON.stringify(entrada.valoresAnteriores, null, 1)}
-							</pre>
-						</div>
-					))}
-				</div>
-			</PopoverContent>
-		</Popover>
 	);
 }

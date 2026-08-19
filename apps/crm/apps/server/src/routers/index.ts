@@ -3,6 +3,7 @@ import { accountingRouter } from "./accounting";
 import { adminRouter } from "./admin";
 import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
+import { agendaCobrosRouter } from "./agenda-cobros";
 import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
@@ -202,6 +203,9 @@ export const cobrosAppRouter = {
 	getDescuentosCRM: cobrosRouter.getDescuentosCRM,
 	getCierreDiarioPorRango: cobrosRouter.getCierreDiarioPorRango,
 	getDetalleCierrePorAsesor: cobrosRouter.getDetalleCierrePorAsesor,
+	getCumplimientoAgendaResumen: agendaCobrosRouter.getCumplimientoAgendaResumen,
+	getCumplimientoAgendaDetalle: agendaCobrosRouter.getCumplimientoAgendaDetalle,
+	getMiAgendaHoy: agendaCobrosRouter.getMiAgendaHoy,
 
 	// CB-010: reducción de recordatorios premora (módulo del Gerente de Cobros)
 	getCreditosElegiblesReduccion:

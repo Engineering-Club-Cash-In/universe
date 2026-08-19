@@ -18,6 +18,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import { CumplimientoAgendaPanel } from "@/components/cobros/cumplimiento-agenda-panel";
 import {
 	type UsuarioCobros,
 	UsuarioCobrosMultiSelect,
@@ -38,6 +39,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
@@ -48,6 +50,7 @@ import {
 	labelBucketConCodigo,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import { tabsHistorialCobros } from "@/lib/cobros/historial-tabs";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -280,6 +283,56 @@ function aFechaISO_GT(instante: Date): string {
 }
 
 function HistorialAgendasPage() {
+	const { data: session, isPending: sesionCargando } = authClient.useSession();
+	// Esperar a que la sesión resuelva antes de decidir el árbol: userRole
+	// undefined durante la carga da tabs=["historial"] y monta
+	// HistorialAgendasContent standalone; si el usuario SÍ es
+	// supervisor/admin, al resolver pasaría a "cumplimiento" habilitado y el
+	// mismo componente cambiaría de posición (standalone → anidado en
+	// TabsContent), forzando un remount que pierde filtros y re-dispara
+	// queries. Mismo patrón ya corregido en c185579bc.
+	if (sesionCargando) {
+		return (
+			<div className="flex min-h-screen items-center justify-center text-gray-500">
+				<Loader2 className="mr-2 h-5 w-5 animate-spin" />
+				Cargando…
+			</div>
+		);
+	}
+	const tabs = tabsHistorialCobros(session?.user?.role);
+	if (!tabs.includes("cumplimiento")) return <HistorialAgendasContent />;
+
+	return (
+		<Tabs className="w-full" defaultValue="historial">
+			<div className="mx-auto max-w-[1600px] px-4 pt-6">
+				<TabsList>
+					<TabsTrigger value="historial">Historial de gestiones</TabsTrigger>
+					<TabsTrigger value="cumplimiento">Cumplimiento de agenda</TabsTrigger>
+				</TabsList>
+			</div>
+			{/* forceMount: sin esto Radix desmonta la tab inactiva al cambiar,
+			    perdiendo los useState de HistorialAgendasContent (búsqueda por
+			    SIFCO, página, pageSize) cada vez que el usuario visita la otra
+			    tab y vuelve. hidden con CSS en vez de desmontar. */}
+			<TabsContent
+				className="mt-0 data-[state=inactive]:hidden"
+				value="historial"
+				forceMount
+			>
+				<HistorialAgendasContent />
+			</TabsContent>
+			<TabsContent
+				className="mt-0 data-[state=inactive]:hidden"
+				value="cumplimiento"
+				forceMount
+			>
+				<CumplimientoAgendaPanel />
+			</TabsContent>
+		</Tabs>
+	);
+}
+
+function HistorialAgendasContent() {
 	const { data: session, isPending: sesionCargando } = authClient.useSession();
 	const userRole = session?.user?.role;
 	const esSupervisor = userRole

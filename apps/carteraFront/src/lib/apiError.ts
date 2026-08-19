@@ -84,7 +84,8 @@ export function getBatchFailedCredits(error: unknown): BatchFailedCredit[] {
     const row = fallido as Partial<BatchFailedCredit>;
     return typeof row.creditoId === "number"
       && typeof row.numeroCreditoSifco === "string"
-      && typeof row.mensaje === "string";
+      && typeof row.mensaje === "string"
+      && row.mensaje.trim().length > 0;
   });
 }
 
@@ -175,7 +176,7 @@ const DETALLE_TECNICO = [
   /fetch failed|socket|connection|timeout/i,
 ];
 
-function esDetalleTecnicoCrudo(detail: string): boolean {
+export function esDetalleTecnicoCrudo(detail: string): boolean {
   return DETALLE_TECNICO.some((patron) => patron.test(detail));
 }
 

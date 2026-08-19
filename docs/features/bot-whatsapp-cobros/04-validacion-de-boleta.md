@@ -876,6 +876,15 @@ en verde sin estar documentando nada.
 - **Qué cuentas de la empresa se le muestran** antes de pedirle la boleta. Es texto fijo que
   puede vivir en SimpleTech o salir de un endpoint; hay que decidirlo con Cobros.
 
+**Decisión de fondo, antes del PR C:**
+
+- **[D-36](./DECISIONES.md#d-36--simplificar-cartera-en-vez-de-compensarla) · ¿Arreglamos
+  cartera en vez de rodearla?** Media docena de piezas de este contrato existen solo para
+  compensar que `insertPayment` no es transaccional y que `reversePayment` borra sin dejar
+  rastro. La opción barata —darle historial a las reversiones— se lleva puestas las dos más
+  feas y arregla un hueco de auditoría que ya existía. Está planteada con las tres opciones y
+  su costo.
+
 **Se pueden trabajar después:**
 
 - **Ingreso manual de datos** (doc de gerencia §3): que el cliente escriba monto y fecha en

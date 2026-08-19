@@ -43,6 +43,7 @@ día; si no está escrito, no está decidido.
 | [D-33](#d-33--una-boleta-son-varios-pagos-y-una-sola-notificación) | Una boleta son varios pagos, y una sola notificación | 🟢 |
 | [D-34](#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key) | La confirmación se protege con estado, no con idempotency key | 🟢 |
 | [D-35](#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza) | El webhook adelanta el aviso, el job lo garantiza | 🟢 |
+| [D-36](#d-36--simplificar-cartera-en-vez-de-compensarla) | Simplificar cartera en vez de compensarla | 🔴 |
 
 ---
 
@@ -1160,3 +1161,73 @@ Las dos últimas son el acta de defunción que cartera no escribe.
 filas" puede significar "no se registró" **o** "se registró y ya lo revirtieron". Por eso ese
 borrador nunca vuelve solo a `leida` — va a `revision_manual`. Devolverlo a `leida` sería
 dejar que el cliente reconfirme un pago que contabilidad acaba de rechazar.
+
+---
+
+## D-36 · Simplificar cartera en vez de compensarla
+
+**Estado:** 🔴 **Abierta** — planteada por Daniel el 2026-08-19, a decidir antes del PR C
+
+**Contexto.** Buena parte de la maquinaria de este contrato —el estado
+`confirmada_a_verificar`, el `revision_manual`, la inferencia del "acta de defunción", el job
+horario de respaldo— no existe porque el bot la necesite. Existe para **compensar** dos cosas
+de cartera:
+
+1. `insertPayment` **no es transaccional**: puede dejar filas a medias.
+2. `reversePayment` **borra sin dejar rastro**: no hay tabla de reversiones ni log.
+
+La pregunta de Daniel: ¿y si en vez de rodearlas, las arreglamos?
+
+**Primero, una corrección al planteo.** No son "los dos métodos no transaccionales":
+
+| | ¿Transaccional hoy? | Cuál es su problema |
+| --- | --- | --- |
+| `insertPayment` | **No.** 1,682 líneas, 8 escrituras directas y 5 helpers, todos contra el `db` global | Puede escribir 2 de 3 cuotas y devolver 500 |
+| `reversePayment` | **Sí**, ya corre dentro de `db.transaction` (línea 83) | No es atomicidad: **destruye evidencia** (borra las filas de `boletas`, y el `pagos_credito` si era parcial con hermanos) |
+
+O sea que a `reversePayment` hacerlo atómico no le cambia nada: ya lo es. Lo que le falta es
+**historial**.
+
+### Las tres opciones, de más barata a más cara
+
+**Opción 1 · Historial de reversiones** — *recomendada, y va más allá del bot.*
+Antes de borrar, insertar una fila en una tabla `pagos_reversiones` (pago, crédito, montos,
+motivo, usuario, fecha) **dentro de la transacción que ya existe**. Es un INSERT aditivo: no
+cambia el comportamiento de nadie.
+
+- **Mata del contrato:** la inferencia del tombstone (§6) y la ambigüedad que obliga al
+  `revision_manual` (§4.1). "¿Se revirtió?" pasa a ser una consulta, no una deducción.
+- **Riesgo:** bajo.
+- **Valor fuera del bot:** hoy **nadie puede saber qué pagos se revirtieron, ni quién**. Eso
+  es un hueco de auditoría propio, que el bot solo puso en evidencia.
+
+**Opción 2 · `insertPayment` transaccional** — *cara y riesgosa; no como prerrequisito.*
+Envolver las 1,682 líneas en una transacción implica pasar el `tx` por los 5 helpers en 4
+archivos y refactorizar **`updateMora`**, que abre su propia `db.transaction` y tiene **13
+llamadas desde 6 archivos**. Todos esos llamadores hay que tocarlos o dejarlos compatibles.
+
+- **Mata del contrato:** el estado `confirmada_a_verificar`.
+- **No mata:** el job de respaldo (existe porque el aviso se puede perder, no por atomicidad)
+  ni el reconciliador de 5 minutos (existe porque la respuesta se puede perder) — aunque su
+  resultado pasaría a ser binario y confiable.
+- **Riesgo:** alto. Es el camino de escritura de **todos** los pagos del sistema, y alarga la
+  duración de los locks de fila.
+
+**Opción 3 · Outbox en cartera** — *la única que mata el job horario.*
+Insertar el evento en la misma transacción que valida el pago, y un worker que reintenta
+entregarlo al CRM.
+
+- **Mata del contrato:** el job de respaldo de [D-35](#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza).
+- **Riesgo:** medio. Tabla y worker nuevos **dentro de la app que mueve el dinero**, que es
+  justo lo que D-35 evitó.
+
+### Recomendación de IT
+
+**Hacer la 1, no hacer la 2 ahora, dejar la 3 para cuando moleste.** La 1 cuesta poco, arregla
+un hueco de auditoría real y se lleva puestas las dos piezas más feas del contrato. La 2 es
+cirugía sobre el corazón de cartera para ahorrarse **un** estado; si algún día se hace, será
+por sus propios méritos —pagos a medias en producción— y no para simplificar el bot.
+
+**Mientras no se decida, el contrato queda como está**: funciona con cartera tal como es hoy.
+Si se hace la 1, se borran §6 (tabla de inferencia) y la mitad de §4.1, y este documento
+adelgaza en vez de crecer.

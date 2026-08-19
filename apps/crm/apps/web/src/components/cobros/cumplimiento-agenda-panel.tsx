@@ -389,6 +389,13 @@ export function CumplimientoAgendaPanel() {
 								</div>
 								{fecha && (
 									<DetalleAgenda
+										// Resetea la paginación interna al cambiar de fecha o
+										// asesor: sin esto, la tarjeta queda siempre montada
+										// (ya no hay toggle de expandir/colapsar) y el `page`
+										// de un asesor anterior se arrastraba al nuevo, pidiendo
+										// una página que puede no existir (hallazgo de code
+										// review, Codex).
+										key={`${fecha}:${filaSeleccionada.asesorId}`}
 										asesorId={filaSeleccionada.asesorId}
 										fecha={fecha}
 									/>

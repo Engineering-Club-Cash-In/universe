@@ -39,4 +39,16 @@ describe("columnaEnAgenda", () => {
 
 		expect(sql).not.toContain("contacto_cobro_id");
 	});
+
+	// Guarda de regresión: el fallback por SIFCO solo debe aplicar cuando el
+	// item del snapshot NO tiene caso_cobro_id (los D-0, que nacen sin caso).
+	// Sin este `is null`, dos casos_cobros con el mismo SIFCO (reapertura o
+	// migración) hacían que una gestión sobre el caso B se marcara "en
+	// agenda" solo porque el caso A —un caso DISTINTO— sí estaba planificado
+	// (hallazgo de code review, Codex).
+	test("el fallback por SIFCO exige que el item no tenga caso_cobro_id", () => {
+		const { sql } = compilar(columnaEnAgenda("snap-123"));
+
+		expect(sql).toContain("ai.caso_cobro_id is null");
+	});
 });

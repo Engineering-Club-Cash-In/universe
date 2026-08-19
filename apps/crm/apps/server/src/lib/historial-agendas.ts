@@ -208,7 +208,10 @@ export function columnaEnAgenda(
 		WHERE ai.snapshot_id = ${snapshotId}
 		  AND (
 		    ai.caso_cobro_id = ${contactosCobros.casoCobroId}
-		    OR ai.numero_credito_sifco = ${casosCobros.numeroCreditoSifco}
+		    OR (
+		      ai.caso_cobro_id IS NULL
+		      AND ai.numero_credito_sifco = ${casosCobros.numeroCreditoSifco}
+		    )
 		  )
 	)`;
 }

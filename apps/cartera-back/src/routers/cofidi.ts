@@ -10,6 +10,7 @@ import {
   cuentaParaRubroInv,
   decidirRubroInteresInversionistas,
 } from "../cofidi/rubroInteresInversionistas";
+import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { db } from "../database";
 import {
   audit_logs,
@@ -23,6 +24,7 @@ import {
   inversionistas,
   pagos_credito,
   pagos_credito_inversionistas,
+  pagos_credito_inversionistas_facturado,
   usuarios,
 } from "../database/db";
 import { eq, desc, and, sql, gte, lte, inArray } from "drizzle-orm";
@@ -2064,6 +2066,133 @@ if (facturasExistentes.length > 0) {
         );
       }
 
+      // ============================================
+      // 🔒 CONGELAR EL REPARTO DE INTERÉS POR INVERSIONISTA
+      //    Best-effort: si falla, NO rompe la facturación (solo loguea).
+      //
+      //    Un pago PARCIAL no tiene filas en `pagos_credito_inversionistas` (pci):
+      //    el reparto real se escribe hasta que la cuota se COMPLETA. Hasta
+      //    entonces el reporte lo SIMULA y el cierre lo RECALCULA, los dos con el
+      //    roster VIVO de `creditos_inversionistas`. Si entre el parcial y el
+      //    cierre entra una reinversión o una compra de cartera, ese mismo pago
+      //    pasa a repartirse distinto — pero los DTEs que se acaban de emitir ya
+      //    no cambian (caso crédito 01010214118190: se facturó Q6.42 al
+      //    inversionista y el reporte pasó a mostrar Q9.24 tres días después).
+      //
+      //    Acá se sella el reparto tal como quedó HOY, con la MISMA función pura
+      //    que usan el reporte y el cierre, para que ambos lean el congelado en
+      //    vez de recalcular.
+      // ============================================
+      try {
+        const interesPago = new Big(pagoData.abono_interes || "0");
+        const ivaPago = new Big(pagoData.abono_iva_12 || "0");
+        const creditoIdPago = pagoData.credito_id;
+
+        // Solo se congela lo que se reparte con ESTA fórmula (participación sobre
+        // monto_aportado). Los demás flujos calculan distinto y no aplican.
+        const motivoNoCongelar = !interesFlujoOk
+          ? "el flujo de interés no se completó"
+          : esCancelacion
+          ? "es cancelación (reparte por cuota_inversionista, no por aportado)"
+          : interesPago.plus(ivaPago).lte(0)
+          ? "el pago no tiene interés"
+          : null;
+
+        if (motivoNoCongelar) {
+          console.log(`🔒 Reparto no congelado (pago ${pago_id}): ${motivoNoCongelar}`);
+        } else if (creditoIdPago == null) {
+          console.log(`🔒 Reparto no congelado (pago ${pago_id}): el pago no tiene crédito asociado`);
+        } else {
+          // Si ya existe el reparto real (cuota completa), ESE manda: no se congela.
+          const pciRes = await db.execute(sql`
+            SELECT COUNT(*)::int AS n
+            FROM cartera.pagos_credito_inversionistas
+            WHERE pago_id = ${pago_id}
+          `);
+          const hayPci = Number((pciRes as any).rows?.[0]?.n ?? 0) > 0;
+
+          // Con compra de cartera pendiente el interés se prorratea por días
+          // (calcularFactoresProrrateoInteresV2), no por monto_aportado.
+          const compraRes = await db.execute(sql`
+            SELECT COUNT(*)::int AS n
+            FROM cartera.compras_credito_inversionista
+            WHERE credito_id = ${creditoIdPago}
+              AND pendiente_facturar = true
+              AND tipo_operacion = 'compra_cartera'
+          `);
+          const hayCompraPendiente = Number((compraRes as any).rows?.[0]?.n ?? 0) > 0;
+
+          if (hayPci || hayCompraPendiente) {
+            console.log(
+              `🔒 Reparto no congelado (pago ${pago_id}): ${
+                hayPci ? "ya tiene reparto en pci" : "compra de cartera pendiente (prorrateo por días)"
+              }`
+            );
+          } else {
+            const split = calcularSplitInteresPci({
+              inversionistas: inversionistasDelPago.map((inv) => ({
+                inversionista_id: inv.inversionista_id,
+                nombre: inv.nombre,
+                porcentaje_participacion_inversionista: inv.porcentaje_participacion ?? 0,
+                porcentaje_cash_in: inv.porcentaje_cash_in ?? 0,
+                monto_aportado: inv.monto_aportado ?? 0,
+              })),
+              pagoAbonoInteres: interesPago,
+              pagoAbonoIva: ivaPago,
+            });
+            const splitPorInv = new Map(split.map((sp) => [sp.inversionista_id, sp]));
+
+            const filasCongeladas = inversionistasDelPago.map((inv) => {
+              const sp = splitPorInv.get(inv.inversionista_id);
+              return {
+                pago_id,
+                credito_id: creditoIdPago,
+                inversionista_id: inv.inversionista_id,
+                abono_interes: (sp?.abono_interes ?? new Big(0)).round(2).toFixed(2),
+                abono_iva_12: (sp?.abono_iva_12 ?? new Big(0)).round(2).toFixed(2),
+                monto_aportado: String(inv.monto_aportado ?? "0"),
+                porcentaje_participacion: String(inv.porcentaje_participacion ?? "0"),
+                porcentaje_cash_in: String(inv.porcentaje_cash_in ?? "0"),
+                // Mismo criterio que el PASO 1 del loop de intereses: su parte ya
+                // viaja dentro del rubro INTERES de CUBE.
+                redirigido_a_cube:
+                  pagoData.bandera_reinversion === true &&
+                  (inv.status_espejo === "pendiente_reinversion" ||
+                    inv.status_espejo === "pendiente_compra_cartera"),
+              };
+            });
+
+            if (filasCongeladas.length > 0) {
+              // REEMPLAZO, no "sellar una sola vez": llegar hasta acá significa que
+              // se acaban de emitir DTEs. El guard de facturas activas corta con 400
+              // antes, así que el único modo de volver a pasar es que TODAS las
+              // facturas del pago se hayan anulado y se esté re-facturando. En ese
+              // caso los DTEs nuevos se emitieron con el roster de HOY: conservar el
+              // congelado viejo haría que el reporte y el cierre repartieran según
+              // unas facturas que ya no existen (Codex P1, PR #1335).
+              // DELETE + INSERT (no upsert) para no dejar filas de inversionistas
+              // que ya no participan. Mismo patrón que facturacion_desglose.
+              await db.transaction(async (tx) => {
+                await tx.execute(
+                  sql`DELETE FROM cartera.pagos_credito_inversionistas_facturado WHERE pago_id = ${pago_id}`
+                );
+                await tx
+                  .insert(pagos_credito_inversionistas_facturado)
+                  .values(filasCongeladas);
+              });
+              console.log(
+                `🔒 Reparto congelado: ${filasCongeladas.length} inversionista(s) para pago ${pago_id}`
+              );
+            }
+          }
+        }
+      } catch (congelarError: any) {
+        console.error(
+          `⚠️ No se pudo congelar el reparto de interés del pago ${pago_id} (NO afecta la facturación):`,
+          congelarError?.message
+        );
+      }
+
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
       // El desglose ya quedó guardado arriba (capital de CUBE).
       if (facturasExitosas.length === 0) {
@@ -2570,6 +2699,31 @@ if (facturasExistentes.length > 0) {
         console.error(
           '⚠️ No se pudo limpiar el desglose genérico de la factura anulada (NO afecta la anulación):',
           (limpiezaError as Error).message
+        );
+      }
+
+      // 🔒 Si esta era la ÚLTIMA factura ACTIVA del pago, el reparto congelado deja
+      //    de tener respaldo: quedaría el reparto de unos DTEs que ya no existen, y
+      //    el reporte y el cierre repartirían con él. Se borra; si el pago se
+      //    re-factura, la facturación lo vuelve a sellar con el roster de ese día
+      //    (Codex P1, PR #1335). Mientras no haya congelado, el reporte cae al
+      //    comportamiento de siempre (simular). Best-effort: no rompe la anulación.
+      try {
+        if (facturaAnulada.pago_id != null) {
+          await db.execute(sql`
+            DELETE FROM cartera.pagos_credito_inversionistas_facturado
+            WHERE pago_id = ${facturaAnulada.pago_id}
+              AND NOT EXISTS (
+                SELECT 1 FROM cartera.facturas_electronicas fe
+                WHERE fe.pago_id = ${facturaAnulada.pago_id}
+                  AND fe.status = 'ACTIVA'
+              )
+          `);
+        }
+      } catch (limpiezaCongelado) {
+        console.error(
+          '⚠️ No se pudo limpiar el reparto congelado de la factura anulada (NO afecta la anulación):',
+          (limpiezaCongelado as Error).message
         );
       }
 

@@ -456,11 +456,23 @@ export const bankAnalysisRouter = {
 					maxVariableDebtRatio: input.maxVariableDebtRatio,
 				});
 
-				// 7. Actualizar con los resultados del análisis exitoso
+				// 7. Actualizar con los resultados del análisis exitoso.
+				// Se deja constancia de con qué archivos se hizo: el checklist solo
+				// tiene tres casillas, así que la lista de la ficha no alcanza para
+				// reconstruir qué leyó la IA cuando se suben más estados de cuenta.
+				const analyzedFiles = downloadedFiles.map((file) => ({
+					nombre: file.name,
+					tamano: file.size,
+					tipo: file.mimeType,
+				}));
+
 				await db
 					.update(creditAnalysis)
 					.set({
-						fullAnalysis: JSON.stringify(analysis),
+						fullAnalysis: JSON.stringify({
+							...analysis,
+							archivos_analizados: analyzedFiles,
+						}),
 						monthlyFixedIncome:
 							analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
 						monthlyVariableIncome:
@@ -483,6 +495,7 @@ export const bankAnalysisRouter = {
 				if (opportunityForDocuments) {
 					const savedDocuments: { id: string; documentType: string }[] = [];
 					const savedKeys: string[] = [];
+					let checklistDocumentsSaved = false;
 
 					try {
 						// Máximo un archivo por slot del checklist (3).
@@ -539,6 +552,8 @@ export const bankAnalysisRouter = {
 								);
 							}
 						}
+
+						checklistDocumentsSaved = true;
 					} catch (error) {
 						const cleanupResults = await Promise.allSettled([
 							...savedDocuments.map(({ id }) =>
@@ -570,6 +585,84 @@ export const bankAnalysisRouter = {
 							failedCleanups: failedCleanups.length,
 							error: error instanceof Error ? error.message : String(error),
 						});
+					}
+
+					// El checklist solo tiene tres casillas, pero el análisis acepta hasta
+					// nueve archivos y la IA los usa todos para el resultado. Los que
+					// sobran se adjuntan igual —fuera del checklist— para que la ficha
+					// muestre exactamente con qué se hizo el análisis; antes se
+					// descartaban en silencio y el original se borraba de R2.
+					//
+					// Va en su propio try con su propia limpieza: si falla adjuntando el
+					// cuarto archivo, los tres del checklist ya guardados se quedan donde
+					// están. Arrastrarlos al rollback dejaría el análisis sin ningún
+					// respaldo, que es peor que perder los sobrantes.
+					const extraFiles = downloadedFiles.slice(
+						BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length,
+					);
+
+					if (checklistDocumentsSaved && extraFiles.length > 0) {
+						const savedExtraDocumentIds: string[] = [];
+						const savedExtraKeys: string[] = [];
+
+						try {
+							for (const [index, file] of extraFiles.entries()) {
+								const position =
+									BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length + index + 1;
+
+								const uniqueFilename = generateUniqueFilename(file.name);
+								const { key } = await uploadFileToR2(
+									new Blob([new Uint8Array(file.buffer)], {
+										type: file.mimeType,
+									}),
+									uniqueFilename,
+									opportunityForDocuments.id,
+								);
+								savedExtraKeys.push(key);
+
+								const [newDocument] = await db
+									.insert(opportunityDocuments)
+									.values({
+										opportunityId: opportunityForDocuments.id,
+										filename: uniqueFilename,
+										originalName: file.name,
+										mimeType: file.mimeType,
+										size: file.size,
+										documentType: "other",
+										description: `Estado de cuenta ${position} de ${downloadedFiles.length}, guardado automáticamente desde análisis de capacidad de pago`,
+										uploadedBy: context.userId,
+										filePath: key,
+									})
+									.returning({ id: opportunityDocuments.id });
+
+								if (newDocument) {
+									savedExtraDocumentIds.push(newDocument.id);
+								}
+							}
+						} catch (error) {
+							const cleanupResults = await Promise.allSettled([
+								...savedExtraDocumentIds.map((id) =>
+									db
+										.delete(opportunityDocuments)
+										.where(eq(opportunityDocuments.id, id)),
+								),
+								...savedExtraKeys.map((key) => deleteFileFromR2(key)),
+							]);
+							const failedCleanups = cleanupResults.filter(
+								(result) => result.status === "rejected",
+							);
+
+							console.error(
+								"Failed to save extra bank statement opportunity documents",
+								{
+									opportunityId: opportunityForDocuments.id,
+									extraFiles: extraFiles.length,
+									savedExtraDocuments: savedExtraDocumentIds.length,
+									failedCleanups: failedCleanups.length,
+									error: error instanceof Error ? error.message : String(error),
+								},
+							);
+						}
 					}
 				}
 

@@ -173,32 +173,36 @@ export const historialAgendasRouter = {
 			// Snapshot de agenda contra el que se marca `enAgenda`. Se resuelve una
 			// sola vez (el índice único fecha+asesor garantiza a lo sumo una fila)
 			// para que el EXISTS de abajo compare contra una constante y no repita
-			// el lookup por fila. `null` = no se pidió, o no hay agenda cerrada ese
-			// día: `enAgenda` viaja en null y la UI muestra "—" en vez de afirmar
-			// "fuera de agenda" para todo.
+			// el lookup por fila.
 			//
 			// Gateado por el mismo scoping que el resto del historial: un asesor
 			// solo puede pedir SU propia agenda, nunca la de otro.
 			const puedeVerTodos = PERMISSIONS.canViewAllCasosCobros(
 				context.userRole ?? "",
 			);
-			const snapshotAgendaId =
-				marcarEnAgenda &&
-				(puedeVerTodos || marcarEnAgenda.asesorId === context.userId)
-					? ((
-							await db
-								.select({ id: agendaCobrosSnapshots.id })
-								.from(agendaCobrosSnapshots)
-								.where(
-									and(
-										eq(agendaCobrosSnapshots.fechaGt, marcarEnAgenda.fecha),
-										eq(agendaCobrosSnapshots.asesorId, marcarEnAgenda.asesorId),
-										eq(agendaCobrosSnapshots.estado, "cerrado"),
-									),
-								)
-								.limit(1)
-						)[0]?.id ?? null)
-					: null;
+			// Distingue "se buscó y no hay agenda" (→ FALSE con certeza en
+			// columnaEnAgenda) de "no se buscó" (permiso denegado o
+			// `marcarEnAgenda` no pedido, → NULL, no evaluado). Sin esta bandera,
+			// pasar solo `snapshotAgendaId` a `columnaEnAgenda` no alcanza para
+			// diferenciar los dos casos, porque ambos lo dejan en `null`.
+			const huboBusquedaDeSnapshot =
+				!!marcarEnAgenda &&
+				(puedeVerTodos || marcarEnAgenda.asesorId === context.userId);
+			let snapshotAgendaId: string | null = null;
+			if (huboBusquedaDeSnapshot && marcarEnAgenda) {
+				const fila = await db
+					.select({ id: agendaCobrosSnapshots.id })
+					.from(agendaCobrosSnapshots)
+					.where(
+						and(
+							eq(agendaCobrosSnapshots.fechaGt, marcarEnAgenda.fecha),
+							eq(agendaCobrosSnapshots.asesorId, marcarEnAgenda.asesorId),
+							eq(agendaCobrosSnapshots.estado, "cerrado"),
+						),
+					)
+					.limit(1);
+				snapshotAgendaId = fila[0]?.id ?? null;
+			}
 
 			const filas = await db
 				.select({
@@ -241,9 +245,10 @@ export const historialAgendasRouter = {
 					// Para que la UI explique por qué una fila 'contactado' no cuenta
 					// como gestión del asesor.
 					origen: columnaOrigen(),
-					// null cuando no se pidió `marcarEnAgenda` o no hay agenda cerrada
-					// ese día — ver `columnaEnAgenda`.
-					enAgenda: columnaEnAgenda(snapshotAgendaId),
+					// null solo cuando no se pidió `marcarEnAgenda` (o el permiso lo
+					// bloqueó); sin agenda cerrada pero CON búsqueda resuelve a FALSE
+					// (certeza), no a null — ver `columnaEnAgenda`.
+					enAgenda: columnaEnAgenda(snapshotAgendaId, huboBusquedaDeSnapshot),
 				})
 				.from(contactosCobros)
 				.innerJoin(user, eq(contactosCobros.realizadoPor, user.id))

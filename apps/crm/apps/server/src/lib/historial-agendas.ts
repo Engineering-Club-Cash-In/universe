@@ -196,13 +196,28 @@ export function columnaOrigen(): SQL<OrigenGestion> {
  * puede tener varios casos por reaperturas/migraciones) y eso marcaría una
  * gestión del caso B como "en agenda" porque el caso A sí lo estaba.
  *
- * `snapshotId` null → NULL, no false: sin agenda cerrada el dato no se puede
- * evaluar, y afirmar "fuera de agenda" para todo sería mentira.
+ * Tres resultados posibles, no dos:
+ *  - No se pidió `marcarEnAgenda` (`huboBusqueda=false`) → NULL: la pregunta
+ *    ni se hizo.
+ *  - Se pidió, hay agenda cerrada ese día (`snapshotId` presente) → el EXISTS
+ *    decide caso por caso.
+ *  - Se pidió, NO hay agenda cerrada para ese asesor/fecha (`huboBusqueda=true`,
+ *    `snapshotId=null`) → FALSE para todas las filas: sin ningún item
+ *    planificado, ninguna gestión de ese día pudo estar "en agenda" — no es
+ *    incertidumbre, es un hecho conocido (hallazgo de code review, Codex).
+ *    Antes esto también viajaba en NULL y el badge mostraba "—" para un
+ *    asesor sin agenda planificada, cuando la respuesta correcta es "Fuera de
+ *    agenda" con certeza.
  */
 export function columnaEnAgenda(
 	snapshotId: string | null,
+	huboBusqueda: boolean,
 ): SQL<boolean | null> {
-	if (!snapshotId) return sql<boolean | null>`NULL::boolean`;
+	if (!snapshotId) {
+		return huboBusqueda
+			? sql<boolean | null>`FALSE`
+			: sql<boolean | null>`NULL::boolean`;
+	}
 	return sql<boolean | null>`EXISTS (
 		SELECT 1 FROM ${agendaCobrosSnapshotItems} ai
 		WHERE ai.snapshot_id = ${snapshotId}

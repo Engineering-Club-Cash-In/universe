@@ -105,6 +105,7 @@ interface AgendaItem {
 interface AgendaResponse {
 	items: AgendaItem[];
 	total: number;
+	sinAsesor: boolean;
 }
 
 /** Fila de la cartera completa (getTodosLosCreditos), NO de la cola. */
@@ -546,6 +547,12 @@ function MiDiaPage() {
 	// vencimientos" aunque en realidad uno de los días nunca se pudo consultar
 	// (Codex PR #1334).
 	const errorAgenda = agendaQueries.some((query) => query.isError);
+	// getAgendaDia devuelve sinAsesor:true (con total:0) cuando el usuario
+	// cobros no tiene asesor de cartera vinculado por correo — un fallo de
+	// CONFIGURACIÓN, no de red, así que errorAgenda no lo detecta. Sin esto,
+	// "Próximos días" mostraba "no tenés vencimientos" en vez del mismo aviso
+	// que ya usa la cola principal para este caso (Codex PR #1334).
+	const sinAsesorAgenda = proximosDias.some(({ data }) => data?.sinAsesor);
 
 	const cartera = carteraQuery.data as
 		| { data: CarteraItem[]; total: number; totalPages: number }
@@ -709,6 +716,11 @@ function MiDiaPage() {
 									<Loader2 className="h-4 w-4 animate-spin" />
 									Cargando vencimientos…
 								</div>
+							) : sinAsesorAgenda ? (
+								<p className="text-muted-foreground text-sm">
+									Tu usuario no está vinculado a un asesor de cartera (por
+									correo). Pedile al supervisor que revise tu correo de asesor.
+								</p>
 							) : resumenProximosDias.total === 0 && !errorAgenda ? (
 								<p className="text-muted-foreground text-sm">
 									No tenés vencimientos durante próximos cinco días.

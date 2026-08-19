@@ -245,6 +245,36 @@ export const agendaCobrosRouter = {
 				}),
 			};
 		}),
+	/**
+	 * Catálogo liviano de "quién tiene agenda ese día", SIN filtrar por
+	 * estado — a diferencia de `getCumplimientoAgendaResumen`/`Detalle`, que sí
+	 * filtran `cerrado` a propósito: `totalAtendidos` y `atendido` por item
+	 * solo los escribe el job de cierre nocturno, así que un snapshot todavía
+	 * `abierto` (la agenda de HOY, que nunca se cierra hasta esa noche) sale
+	 * con 0 atendidos/0% aunque el asesor venga trabajando bien — mostrar eso
+	 * sería un dato ENGAÑOSO, no solo incompleto.
+	 *
+	 * Este procedure no expone esas métricas — solo si existe la fila y en qué
+	 * estado — así que sirve de catálogo para el selector de "Cumplimiento de
+	 * agenda" sin ese riesgo: un asesor con agenda de hoy (abierta) debe poder
+	 * elegirse igual, aunque el resumen no muestre su avance hasta el cierre
+	 * (hallazgo de code review, Codex).
+	 */
+	getAsesoresConAgenda: cobrosSupervisorProcedure
+		.input(z.object({ fecha: fechaSchema }))
+		.handler(async ({ input }) => {
+			return await db
+				.select({
+					asesorId: agendaCobrosSnapshots.asesorId,
+					asesorNombre: user.name,
+					estado: agendaCobrosSnapshots.estado,
+				})
+				.from(agendaCobrosSnapshots)
+				.innerJoin(user, eq(agendaCobrosSnapshots.asesorId, user.id))
+				.where(eq(agendaCobrosSnapshots.fechaGt, input.fecha))
+				.orderBy(asc(user.name));
+		}),
+
 	getCumplimientoAgendaResumen: cobrosSupervisorProcedure
 		.input(
 			z.object({

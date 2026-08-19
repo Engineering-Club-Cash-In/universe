@@ -48,6 +48,12 @@ type ResumenData = { fecha: string | null; items: ResumenFila[] };
 
 type UsuarioConGestiones = { id: string; name: string; role: string };
 
+type AsesorConAgenda = {
+	asesorId: string;
+	asesorNombre: string;
+	estado: "abierto" | "cerrado";
+};
+
 type DetalleItem = {
 	id: string;
 	numeroCreditoSifco: string;
@@ -270,12 +276,29 @@ export function CumplimientoAgendaPanel() {
 		if (!fecha && datos?.fecha) setFecha(datos.fecha);
 	}, [datos?.fecha, fecha]);
 
-	// Asesores con gestiones registradas ese día — complementa `datos.items`
-	// (asesores con snapshot). Un asesor sin NINGÚN item planificado (0
+	// Catálogo de "quién tiene snapshot ese día", SIN filtrar por estado —
+	// a propósito distinto de `datos.items` (arriba), que sí filtra
+	// `cerrado`: ese filtro es correcto para el RESUMEN (totalAtendidos/%
+	// solo los escribe el cierre nocturno, mostrarlos antes sería un dato
+	// engañoso), pero no debe aplicar al CATÁLOGO — un asesor con la agenda de
+	// HOY (siempre abierta hasta esa noche) tiene que poder elegirse igual,
+	// aunque su tarjeta de arriba todavía no muestre métricas (hallazgo de
+	// code review, Codex).
+	const asesoresConAgendaQuery = useQuery({
+		...orpcAny.getAsesoresConAgenda.queryOptions({
+			input: { fecha },
+		}),
+		enabled: !!session && puedeConsultar && !!fecha,
+	});
+	const asesoresConAgenda = (asesoresConAgendaQuery.data ??
+		[]) as AsesorConAgenda[];
+
+	// Asesores con gestiones registradas ese día — complementa
+	// `asesoresConAgenda`. Un asesor sin NINGÚN item planificado (0
 	// D-0/SLA/promesa) nunca genera fila en `agenda_cobros_snapshots`
 	// (`capturarSnapshots` solo persiste asesores presentes en la lista de
 	// items — `agenda-cobros-snapshot.ts`), así que si el selector se armara
-	// solo con `datos.items` ese asesor sería imposible de elegir aunque haya
+	// solo con el snapshot ese asesor sería imposible de elegir aunque haya
 	// trabajado gestiones fuera de agenda todo el día (hallazgo de code
 	// review, Codex).
 	const usuariosQuery = useQuery({
@@ -287,13 +310,13 @@ export function CumplimientoAgendaPanel() {
 	const usuariosConGestiones = (usuariosQuery.data ??
 		[]) as UsuarioConGestiones[];
 
-	// Catálogo del selector: unión de "tiene snapshot" y "tiene gestiones ese
-	// día", no solo `datos.items`. No se manda `asesorId` a la query de
-	// arriba: eso colapsaría `datos.items` a un solo asesor y el selector se
-	// quedaría sin opciones para cambiar.
+	// Catálogo del selector: unión de "tiene snapshot ese día" (abierto o
+	// cerrado) y "tiene gestiones ese día". No se manda `asesorId` a la query
+	// de resumen: eso colapsaría `datos.items` a un solo asesor y el selector
+	// se quedaría sin opciones para cambiar.
 	const asesores = useMemo(() => {
 		const porId = new Map<string, { asesorId: string; asesorNombre: string }>();
-		for (const fila of datos?.items ?? [])
+		for (const fila of asesoresConAgenda)
 			porId.set(fila.asesorId, {
 				asesorId: fila.asesorId,
 				asesorNombre: fila.asesorNombre,
@@ -301,12 +324,12 @@ export function CumplimientoAgendaPanel() {
 		for (const u of usuariosConGestiones)
 			if (!porId.has(u.id))
 				porId.set(u.id, { asesorId: u.id, asesorNombre: u.name });
-		// Alfabético: mismo criterio que ya trae `datos.items` del server
-		// (`asc(user.name)`), para que "el primero" del default sea estable.
+		// Alfabético: mismo criterio que ya trae el server (`asc(user.name)`),
+		// para que "el primero" del default sea estable.
 		return [...porId.values()].sort((a, b) =>
 			a.asesorNombre.localeCompare(b.asesorNombre, "es"),
 		);
-	}, [datos?.items, usuariosConGestiones]);
+	}, [asesoresConAgenda, usuariosConGestiones]);
 	// Valor EFECTIVO: la elección del usuario si sigue existiendo en la lista
 	// del día actual, si no el primero. Cubre sin efectos: primera carga,
 	// cambio de fecha con el mismo asesor (se respeta), cambio de fecha donde
@@ -317,12 +340,21 @@ export function CumplimientoAgendaPanel() {
 			: (asesores[0]?.asesorId ?? null);
 	const asesorSeleccionado =
 		asesores.find((a) => a.asesorId === asesorId) ?? null;
-	// La fila del snapshot: puede no existir aunque `asesorId` sí (asesor sin
-	// agenda planificada ese día, agregado por `usuariosConGestiones`) — la
-	// tarjeta de agenda planificada lo distingue de "sin snapshots en
-	// absoluto" (que usa `asesores.length === 0` más abajo).
+	// La fila del RESUMEN (con métricas): solo existe si el snapshot ya
+	// cerró. Puede no existir aunque `asesorId` sí (agenda de hoy, todavía
+	// abierta, o asesor sin snapshot en absoluto agregado por
+	// `usuariosConGestiones`) — la tarjeta distingue ambos casos con
+	// `snapshotAbierto`.
 	const filaSeleccionada =
 		datos?.items.find((a) => a.asesorId === asesorId) ?? null;
+	// true cuando SÍ hay snapshot para este asesor/día pero está `abierto`
+	// (agenda de hoy, sin cerrar todavía) — distinto de "no tiene agenda en
+	// absoluto".
+	const snapshotAbierto =
+		!filaSeleccionada &&
+		asesoresConAgenda.some(
+			(a) => a.asesorId === asesorId && a.estado === "abierto",
+		);
 
 	if (sesionCargando) {
 		return (
@@ -392,15 +424,13 @@ export function CumplimientoAgendaPanel() {
 					No se pudo cargar el cumplimiento de agenda. Reintentá en unos
 					segundos.
 				</Card>
-			) : usuariosQuery.isError ? (
-				// Sin esto, un fallo de `getUsuariosConGestiones` se disfrazaba de
-				// "sin resultados": `usuariosConGestiones` caía a `[]` con
-				// `?? []`, así que `asesores` se armaba SOLO con `datos.items` (los
-				// que tienen snapshot) y el catálogo quedaba incompleto en
-				// silencio — un asesor sin agenda planificada pero con gestiones
-				// ese día desaparecía del selector como si de verdad no hubiera
-				// trabajado, en vez de "no se pudo saber" (hallazgo de code
-				// review, Codex).
+			) : usuariosQuery.isError || asesoresConAgendaQuery.isError ? (
+				// Sin esto, un fallo de `getUsuariosConGestiones` o
+				// `getAsesoresConAgenda` se disfrazaba de "sin resultados": ambos
+				// caen a `[]` con `?? []`, así que `asesores` se armaba con un
+				// catálogo incompleto en silencio — un asesor desaparecía del
+				// selector como si de verdad no hubiera trabajado, en vez de "no
+				// se pudo saber" (hallazgo de code review, Codex).
 				<Card className="p-8 text-center text-red-600">
 					No se pudo cargar el catálogo completo de asesores. Reintentá en unos
 					segundos.
@@ -455,6 +485,17 @@ export function CumplimientoAgendaPanel() {
 											/>
 										)}
 									</>
+								) : snapshotAbierto ? (
+									// Agenda de HOY: existe snapshot pero sigue `abierto` (el
+									// job de cierre corre a medianoche). `totalAtendidos`/% no
+									// están disponibles todavía — mostrarlos en 0 sería un
+									// dato engañoso, no incompleto — así que se avisa en vez
+									// de afirmar "no tenía agenda" (hallazgo de code review,
+									// Codex).
+									<div className="px-4 py-6 text-center text-gray-500 text-sm">
+										Agenda de {asesorSeleccionado.asesorNombre} en curso — los
+										planificados/atendidos se confirman al cierre de esta noche.
+									</div>
 								) : (
 									// Asesor sin snapshot ese día (0 items planificados —
 									// `capturarSnapshots` no persiste una fila para él, ver la

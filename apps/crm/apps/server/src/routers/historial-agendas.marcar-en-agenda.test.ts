@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { columnaEnAgenda } from "../lib/historial-agendas";
+import {
+	certezaAusenciaAgenda,
+	columnaEnAgenda,
+} from "../lib/historial-agendas";
 
 /**
  * Compila el SQL del EXISTS de `columnaEnAgenda` sin tocar la DB — mismo
@@ -11,6 +14,30 @@ function compilar(sql: Parameters<PgDialect["sqlToQuery"]>[0]) {
 	const query = dialect.sqlToQuery(sql);
 	return { sql: query.sql.toLowerCase(), params: query.params };
 }
+
+describe("certezaAusenciaAgenda", () => {
+	const HOY = "2026-08-19";
+
+	test("hoy sin snapshot: certeza (se puede afirmar FALSE)", () => {
+		expect(certezaAusenciaAgenda(HOY, HOY, true)).toBe(true);
+	});
+
+	// El caso que reporta Codex: sin registro de captura fallida en la DB, un
+	// día pasado sin snapshot puede ser "no hubo agenda" o "la captura se
+	// cayó" — no se puede afirmar "Fuera de agenda" para gestiones de ese
+	// día sin arriesgarse a mentir sobre un fallo de captura silencioso.
+	test("fecha pasada sin snapshot: NO hay certeza, aunque hubo búsqueda", () => {
+		expect(certezaAusenciaAgenda("2026-08-18", HOY, true)).toBe(false);
+	});
+
+	test("sin búsqueda: NO hay certeza, aunque sea hoy", () => {
+		expect(certezaAusenciaAgenda(HOY, HOY, false)).toBe(false);
+	});
+
+	test("fecha futura: NO hay certeza (no debería pasar, pero no afirma nada)", () => {
+		expect(certezaAusenciaAgenda("2026-08-20", HOY, true)).toBe(false);
+	});
+});
 
 describe("columnaEnAgenda", () => {
 	test("con snapshotId compila un EXISTS que compara caso y SIFCO", () => {

@@ -184,6 +184,28 @@ export function columnaOrigen(): SQL<OrigenGestion> {
 }
 
 /**
+ * Decide si "no hay snapshot" se puede afirmar como FALSE con certeza, o si
+ * debe quedar en NULL (no evaluado).
+ *
+ * Solo es seguro afirmar `FALSE` cuando la ausencia de snapshot se puede
+ * confirmar EN VIVO: si la fecha pedida es HOY y no hay fila, es porque hoy
+ * no se planificó nada para ese asesor (si hubiera agenda, ya existiría como
+ * fila `abierta` desde la captura de esta madrugada). Para una fecha PASADA
+ * sin fila, no hay forma de distinguir "ese día no hubo agenda" de "la
+ * captura falló y no dejó registro": `obtenerAgendaTodosAsesores` puede
+ * lanzar tras agotar sus reintentos (`agenda-cobros-source.ts`) y el job no
+ * persiste ningún rastro del fallo — así que días pasados sin snapshot
+ * quedan en NULL, no en FALSE (hallazgo de code review, Codex).
+ */
+export function certezaAusenciaAgenda(
+	fecha: string,
+	hoyGT: string,
+	huboBusqueda: boolean,
+): boolean {
+	return huboBusqueda && fecha === hoyGT;
+}
+
+/**
  * Marca si el crédito de la gestión estaba en el snapshot de agenda del asesor.
  *
  * Compara por CRÉDITO (caso, con SIFCO de respaldo) y no por
@@ -197,17 +219,18 @@ export function columnaOrigen(): SQL<OrigenGestion> {
  * gestión del caso B como "en agenda" porque el caso A sí lo estaba.
  *
  * Tres resultados posibles, no dos:
- *  - No se pidió `marcarEnAgenda` (`huboBusqueda=false`) → NULL: la pregunta
- *    ni se hizo.
- *  - Se pidió, hay agenda cerrada ese día (`snapshotId` presente) → el EXISTS
- *    decide caso por caso.
- *  - Se pidió, NO hay agenda cerrada para ese asesor/fecha (`huboBusqueda=true`,
- *    `snapshotId=null`) → FALSE para todas las filas: sin ningún item
- *    planificado, ninguna gestión de ese día pudo estar "en agenda" — no es
- *    incertidumbre, es un hecho conocido (hallazgo de code review, Codex).
- *    Antes esto también viajaba en NULL y el badge mostraba "—" para un
- *    asesor sin agenda planificada, cuando la respuesta correcta es "Fuera de
- *    agenda" con certeza.
+ *  - No se pidió `marcarEnAgenda`, o la ausencia de snapshot no se puede
+ *    confirmar con certeza (`huboBusqueda=false` — ver `certezaAusenciaAgenda`)
+ *    → NULL: la pregunta ni se hizo, o no se puede responder con seguridad.
+ *  - Se pidió, hay snapshot ese día (`snapshotId` presente, abierto o cerrado)
+ *    → el EXISTS decide caso por caso.
+ *  - Se pidió, NO hay snapshot y se puede confirmar con certeza
+ *    (`huboBusqueda=true`, `snapshotId=null`) → FALSE para todas las filas: sin
+ *    ningún item planificado, ninguna gestión de ese día pudo estar "en
+ *    agenda" — no es incertidumbre, es un hecho conocido (hallazgo de code
+ *    review, Codex). Antes esto también viajaba en NULL y el badge mostraba
+ *    "—" para un asesor sin agenda planificada, cuando la respuesta correcta
+ *    es "Fuera de agenda" con certeza.
  */
 export function columnaEnAgenda(
 	snapshotId: string | null,

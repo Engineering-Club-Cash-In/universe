@@ -45,9 +45,11 @@ import {
 } from "../db/schema/cobros";
 import { clients } from "../db/schema/crm";
 import { condicionAuditManual } from "../lib/audit-contactos";
+import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	BUCKET_SIN_ASIGNAR,
 	calcularTotalPaginas,
+	certezaAusenciaAgenda,
 	columnaEnAgenda,
 	columnaOrigen,
 	esContactoEfectivo,
@@ -256,10 +258,20 @@ export const historialAgendasRouter = {
 					// Para que la UI explique por qué una fila 'contactado' no cuenta
 					// como gestión del asesor.
 					origen: columnaOrigen(),
-					// null solo cuando no se pidió `marcarEnAgenda` (o el permiso lo
-					// bloqueó); sin agenda cerrada pero CON búsqueda resuelve a FALSE
-					// (certeza), no a null — ver `columnaEnAgenda`.
-					enAgenda: columnaEnAgenda(snapshotAgendaId, huboBusquedaDeSnapshot),
+					// El segundo parámetro solo importa cuando `snapshotAgendaId` es
+					// null (si hay snapshot, columnaEnAgenda ya resuelve por EXISTS)
+					// — ver `certezaAusenciaAgenda` para cuándo es seguro afirmar
+					// FALSE en vez de NULL.
+					enAgenda: columnaEnAgenda(
+						snapshotAgendaId,
+						marcarEnAgenda
+							? certezaAusenciaAgenda(
+									marcarEnAgenda.fecha,
+									toDateStrGT(new Date()),
+									huboBusquedaDeSnapshot,
+								)
+							: false,
+					),
 				})
 				.from(contactosCobros)
 				.innerJoin(user, eq(contactosCobros.realizadoPor, user.id))

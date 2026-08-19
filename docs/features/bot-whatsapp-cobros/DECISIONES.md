@@ -38,6 +38,7 @@ día; si no está escrito, no está decidido.
 | [D-28](#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta) | El aviso a WhatsApp nunca rompe la acción de conta | 🟢 |
 | [D-29](#d-29--la-imagen-se-descarga-con-allowlist) | La imagen se descarga con allowlist | 🟢 |
 | [D-30](#d-30--subir-boleta-lo-puede-hacer-cualquier-cliente) | Subir boleta lo puede hacer cualquier cliente | 🟢 |
+| [D-31](#d-31--la-boleta-se-copia-a-nuestro-r2-al-leerla) | La boleta se copia a nuestro R2 al leerla | 🟢 |
 
 ---
 
@@ -902,6 +903,10 @@ internos, bases de datos sin puerto público).
 seguro —no hay URL que descargar—, pero obliga a un cambio del lado de ellos que hoy no
 tienen; si la allowlist resulta incómoda de mantener, es a donde hay que volver.
 
+**Se descarga una sola vez**, en `/boleta/leer`, y de ahí la imagen pasa a nuestro R2
+([D-31](#d-31--la-boleta-se-copia-a-nuestro-r2-al-leerla)): confirmar ya no vuelve a salir a
+la red de ellos.
+
 ---
 
 ## D-30 · Subir boleta lo puede hacer cualquier cliente
@@ -927,3 +932,37 @@ contador. El control está en la validación, no en quién puede subirla.
 **Implicación práctica.** El bot no consulta ningún perfil: si tiene la API key y una sesión
 válida, la opción está. Lo que sí acota el uso es el tope de tres lecturas por sesión
 ([D-27](#d-27--tres-intentos-por-sesión-y-los-cuenta-el-crm)).
+
+---
+
+## D-31 · La boleta se copia a nuestro R2 al leerla
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — pedido de Daniel
+
+**Contexto.** SimpleTech no manda el archivo, manda una **URL**. La boleta que respalda un
+pago tiene que terminar en R2 como cualquier otra: es el respaldo que abre un contador para
+validar, y el que se mira meses después cuando alguien pregunta de dónde salió ese pago. La
+pregunta es **cuándo** se copia: al leer o al confirmar.
+
+**Opciones.**
+- A) Guardar la URL de SimpleTech y descargar al confirmar.
+- **B) Descargar una sola vez al leer, subir a nuestro R2 ahí mismo, y que confirmar use
+  nuestra key.**
+
+**Decisión: B.** *"No podemos depender de la nube de ellos, solo es lectura y luego subimos a
+la nuestra."*
+
+Y hay una razón técnica que lo vuelve obligatorio: entre la lectura y la confirmación pasan
+minutos —el cliente lee el resumen, lo piensa, contesta— y **las URLs de medios de WhatsApp
+caducan a los pocos minutos**. Con A, el pago se caería *después* de que el cliente ya dijo
+que sí, que es el peor momento posible. Con B, para cuando confirma, la imagen ya es nuestra.
+
+**El orden dentro de `/boleta/leer` importa: la IA va antes que la subida.** Si el modelo dice
+que eso no es un comprobante, no se sube nada y el bucket no se llena de selfies.
+
+**Costo aceptado:** los intentos descartados dejan archivos que ningún pago referencia. Son
+fotos de celular; el borrador guarda su `r2_key`, así que se pueden barrer cuando estorben —
+cartera ya tiene `deleteDocumentoFromR2()`, solo falta exponerla en una ruta.
+
+**La URL original igual se guarda** (`imagen_origen_url`), pero solo para trazar de dónde
+vino. No se vuelve a usar.

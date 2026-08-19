@@ -35,16 +35,16 @@ sequenceDiagram
     C->>S: Envía foto de la boleta
     S->>CRM: POST /boleta/leer  {referencia, numeroSifco, imagenUrl}
     CRM->>CRM: verificarAcceso (D-24)
-    CRM->>S: (descarga la imagen)
+    CRM->>S: (descarga la imagen — única lectura de su nube)
     CRM->>IA: generateObject(imagen)
+    CRM->>CB: POST /upload  (la imagen a NUESTRO R2)
     CRM->>CB: GET /credito/resumen + /abonos-cuota
     CRM-->>S: {boletaId, lectura, aplicacion, mensajes}
     S-->>C: "Esto entendimos, ¿está bien?"
     alt Confirma
         C->>S: Sí
         S->>CRM: POST /boleta/confirmar {boletaId}
-        CRM->>CB: POST /upload  (la imagen a R2)
-        CRM->>CB: POST /newPayment
+        CRM->>CB: POST /newPayment  (con la key de R2 que ya tenemos)
         CB-->>CRM: pago_id (validation_status = pending)
         CRM-->>S: "Pago recibido, está en validación"
     else No
@@ -145,7 +145,7 @@ el árbol de gerencia:
 | `banco` | **Sí** | `banco: null` + `camposFaltantes: ["banco"]` + `bancosSugeridos` para que el cliente elija. |
 | `fechaBoleta` | No | Se usa **hoy** y se avisa en `camposFaltantes`. |
 | `numeroAutorizacion` | No | Va vacío. En cartera es opcional. |
-| `cuentaDestino` | No | Solo informativa: se guarda y se le muestra a conta. Hoy **no se valida** — ver §12. |
+| `cuentaDestino` | No | Solo informativa: se guarda y se le muestra a conta. Hoy **no se valida** — ver §13. |
 | `observaciones` | No | Lo que el modelo haya podido leer de más (concepto, referencia). |
 
 **`confianza`** resume la lectura para que el bot module el mensaje: `alta` (todo leído),
@@ -231,7 +231,7 @@ a `/boleta/leer`. Ese es el reintento.
 | 404 | `BORRADOR_NO_ENCONTRADO` | El `boletaId` no existe o es de otra sesión. |
 | 410 | `BORRADOR_VENCIDO` | Pasaron más de 15 minutos desde la lectura. Pedir la foto de nuevo. |
 | 409 | `BOLETA_YA_CONFIRMADA` | Ese borrador ya se registró. Va con el `pagoId` en `data` — **no se registra otro pago**. |
-| 409 | `BOLETA_DUPLICADA` | Misma autorización + banco ya registrada. Ver §8. |
+| 409 | `BOLETA_DUPLICADA` | Misma autorización + banco ya registrada. Ver §9. |
 | 502 | `PAGO_NO_REGISTRADO` | Cartera respondió error al insertar. |
 | 503 | `CARTERA_NO_DISPONIBLE` | Cartera no respondió. |
 | 500 | `ERROR_INTERNO` | Otra cosa. |
@@ -254,7 +254,7 @@ contabilidad**, sin ruta especial para el bot. Mapeo campo por campo:
 | `numeroAutorizacion` | `lectura.numeroAutorizacion` | Puede ir vacío. |
 | `origen_pago` | `"boleta"` | Es literalmente eso. |
 | `cuotaApagar` | `resumen.cuota_actual.numero` | La más vieja sin pagar. **El bot no elige cuota.** |
-| `url_boletas` | `[key]` del `POST /upload` de cartera | La imagen sube a R2 **solo al confirmar**. |
+| `url_boletas` | `[boleta.r2_key]` | La key de **nuestro** R2, guardada al leer. Ver §7. |
 | `registerBy` | `"bot-cobros@clubcashin.com"` | Identifica el pago en el historial y es el filtro del circuito de vuelta. |
 | `observaciones` | `"Boleta cargada por el cliente vía WhatsApp"` + lo que se haya leído | Para que conta sepa de dónde vino. |
 | `otros` | `0` | |
@@ -348,7 +348,39 @@ manda otro WhatsApp.
 
 ---
 
-## 7. La lectura con IA
+## 7. La imagen: de su nube a la nuestra
+
+**La URL de SimpleTech se lee una sola vez, en `/boleta/leer`.** Se descarga, se valida, se
+lee con IA y —si la lectura sirvió— **se sube a nuestro R2** por el `POST /upload` de cartera,
+el mismo que usa el formulario de contabilidad. La key queda guardada en el borrador.
+
+Para cuando el cliente confirma, la imagen **ya es nuestra**: `/boleta/confirmar` no vuelve a
+tocar la nube de ellos.
+
+```
+/boleta/leer      descarga (su nube) → valida → IA → sube a R2 → guarda la key
+/boleta/confirmar usa la key guardada → newPayment
+```
+
+**Por qué no se sube al confirmar.** Porque entre la lectura y la confirmación pasan minutos:
+el cliente lee el resumen, lo piensa, contesta. Las URLs de medios de WhatsApp **caducan a
+los pocos minutos**, así que subir al confirmar es apostar a que su enlace siga vivo justo
+cuando el cliente dice que sí — y si no lo está, el pago se cae después de que el cliente
+confirmó, que es el peor momento posible. Aparte, no queremos que la boleta que respalda un
+pago viva en la nube de un tercero
+([D-31](./DECISIONES.md#d-31--la-boleta-se-copia-a-nuestro-r2-al-leerla)).
+
+**El orden importa: la IA va antes que la subida.** Si el modelo dice que la foto no es un
+comprobante, no se sube nada. Así el bucket no se llena de selfies y fotos de la pantalla.
+
+**Huérfanos.** Un cliente que hace tres intentos deja tres archivos y confirma uno: los otros
+dos quedan sin pago que los referencie. Son fotos de celular, pesan poco, y el borrador
+guarda la key para saber cuáles son. Si algún día molesta, cartera ya tiene
+`deleteDocumentoFromR2()`; solo falta exponerla en una ruta.
+
+---
+
+## 8. La lectura con IA
 
 **Motor: Gemini**, el mismo que ya lee los estados de cuenta bancarios en el CRM
 (`routers/bank-analysis.ts`): `@ai-sdk/google` + `generateObject` con schema de Zod. No entra
@@ -425,7 +457,7 @@ el CRM para el análisis bancario; esto no agrega proveedor ni contrato nuevo.
 
 ---
 
-## 8. Duplicados
+## 9. Duplicados
 
 Hay **dos** controles, y son distintos:
 
@@ -452,10 +484,10 @@ aparte de este feature.
 
 ---
 
-## 9. Qué se guarda en el CRM
+## 10. Qué se guarda en el CRM
 
-Dos tablas nuevas. La imagen **no** se guarda en el CRM: vive en R2, subida por cartera, igual
-que cualquier otra boleta.
+Dos tablas nuevas. La imagen **no** se guarda en el CRM: vive en **nuestro** R2, subida al
+leerla (§7), igual que cualquier otra boleta del sistema. Del lado del CRM solo queda la key.
 
 ```sql
 CREATE TABLE bot_cobros_boletas (
@@ -464,8 +496,8 @@ CREATE TABLE bot_cobros_boletas (
   numero_sifco        text NOT NULL,
   credito_id          integer,
   intento             integer NOT NULL,
-  imagen_origen_url   text NOT NULL,
-  r2_key              text,
+  imagen_origen_url   text NOT NULL,          -- la de SimpleTech, solo para trazar
+  r2_key              text,                   -- la nuestra; se llena al leer, no al confirmar
   lectura             jsonb NOT NULL,          -- lo que devolvió el modelo, crudo
   banco_id            integer,
   monto               numeric(12,2),
@@ -504,11 +536,12 @@ se validó, el CRM sepa que ese pago vino del bot, de qué cliente y a qué tel�
 **Retención.** Los borradores sin confirmar se purgan a los **7 días** con el resto de la
 limpieza de PII ([D-14](./DECISIONES.md#d-14--retención-de-pii-y-logs)). Los confirmados se
 conservan mientras exista el pago: son la trazabilidad de por qué hay una boleta en cartera
-que nadie del equipo subió.
+que nadie del equipo subió. El archivo en R2 sigue la misma suerte que cualquier otra boleta
+—no se borra— salvo los huérfanos de §7, que quedan identificados por su `r2_key`.
 
 ---
 
-## 10. Mensajes al cliente
+## 11. Mensajes al cliente
 
 Cuatro momentos, cada uno con las **tres versiones** del paso 2 (`titulo`, `resumen`,
 `completo`), en `lib/bot-cobros/mensajes-boleta.ts`:
@@ -527,21 +560,22 @@ en párrafos.
 
 ---
 
-## 11. Seguridad
+## 12. Seguridad
 
 | Riesgo | Control |
 | --- | --- |
 | **SSRF** con `imagenUrl` | Solo `https`, dominio en allowlist (`BOT_COBROS_DOMINIOS_IMAGEN`), sin seguir redirecciones a IP privadas, timeout 15 s, tope de 8 MB. |
+| Depender de la nube de un tercero | La imagen se copia a nuestro R2 al leerla; confirmar ya no toca a SimpleTech (D-31). |
 | Pedir la boleta de otro crédito | `verificarAcceso` (D-24) en los dos endpoints, igual que el resto del menú. |
 | Que el cliente dicte el monto | El monto sale del borrador del CRM, no del request (D-26). |
 | Gasto descontrolado de IA | 3 intentos por sesión; el OTP ya tiene su propio rate limit aguas arriba. |
-| Basura en R2 | La imagen sube **solo al confirmar**. Las lecturas descartadas no dejan archivo. |
+| Basura en R2 | Solo sube lo que el modelo reconoció como comprobante; una selfie o una foto ilegible no llega a R2 (§7). |
 | Disparar WhatsApps desde afuera | El endpoint de eventos usa llave propia, distinta de la del bot. |
 | Boleta ajena / manipulada | Fuera de alcance del bot: lo resuelve la validación de contabilidad, igual que hoy con las boletas que entran por correo. |
 
 ---
 
-## 12. Reglas y validaciones antes de registrar
+## 13. Reglas y validaciones antes de registrar
 
 | Regla | Qué se hace |
 | --- | --- |
@@ -550,18 +584,18 @@ en párrafos.
 | `fechaBoleta` futura | Se usa **hoy** y se anota en observaciones. Una boleta no puede ser de mañana. |
 | `fechaBoleta` de más de 90 días | Se registra, pero la observación se lo dice a conta. |
 | Crédito `CANCELADO` / `INCOBRABLE` | No se acepta la boleta: al asesor. |
-| Cuenta destino | Se guarda y se muestra; **no se valida**. La lista de cuentas de Cash In no vive en el monorepo — ver §14. |
+| Cuenta destino | Se guarda y se muestra; **no se valida**. La lista de cuentas de Cash In no vive en el monorepo — ver §15. |
 | Sin cuota pendiente | `resumen.cuota_actual` en `null` → el crédito no tiene a qué aplicar. Al asesor. |
 
 ---
 
-## 13. Plan de implementación
+## 14. Plan de implementación
 
 Tres PR a `COBROS-02`, en este orden:
 
 | PR | Alcance | Se puede probar solo |
 | --- | --- | --- |
-| **A** | Tablas + `/boleta/leer` + lectura con IA + mapeo de bancos + Swagger | Sí: devuelve datos, no registra nada. |
+| **A** | Tablas + `/boleta/leer` + descarga con allowlist + lectura con IA + **copia a R2** + mapeo de bancos + Swagger | Sí: devuelve datos y deja el archivo, no registra pago. |
 | **B** | `/boleta/confirmar` + `usuario_id` en `/credito/resumen` (cartera) + insert | Sí, contra la instancia de dev de cartera. |
 | **C** | Endpoint de eventos + emisión desde los 4 controladores de cartera + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
 
@@ -572,7 +606,7 @@ en verde sin estar documentando nada.
 
 ---
 
-## 14. Pendientes
+## 15. Pendientes
 
 **Bloquean el arranque del bot, no el desarrollo:**
 

@@ -190,6 +190,18 @@ export const historialAgendasRouter = {
 				(puedeVerTodos || marcarEnAgenda.asesorId === context.userId);
 			let snapshotAgendaId: string | null = null;
 			if (huboBusquedaDeSnapshot && marcarEnAgenda) {
+				// Sin filtro de `estado`: el job nocturno solo cierra la agenda de
+				// AYER, nunca la de hoy (`ejecutarAgendaCobrosDiaria` en
+				// `jobs/agenda-cobros-snapshots.ts` corre siempre con la fecha
+				// anterior), así que la agenda de hoy vive siempre `abierta`.
+				// Filtrar por `cerrado` acá —como sí hace correctamente el resumen
+				// de cumplimiento, que solo muestra días YA evaluados— hacía que
+				// "hoy" resolviera como si no hubiera agenda en absoluto, y
+				// `columnaEnAgenda` terminaba devolviendo FALSE con falsa certeza
+				// para gestiones que sí estaban en la agenda del día, todavía
+				// abierta (hallazgo de code review, Codex). El índice único
+				// `(fecha_gt, asesor_id)` garantiza a lo sumo una fila sin importar
+				// el estado, así que no hay ambigüedad de cuál snapshot usar.
 				const fila = await db
 					.select({ id: agendaCobrosSnapshots.id })
 					.from(agendaCobrosSnapshots)
@@ -197,7 +209,6 @@ export const historialAgendasRouter = {
 						and(
 							eq(agendaCobrosSnapshots.fechaGt, marcarEnAgenda.fecha),
 							eq(agendaCobrosSnapshots.asesorId, marcarEnAgenda.asesorId),
-							eq(agendaCobrosSnapshots.estado, "cerrado"),
 						),
 					)
 					.limit(1);

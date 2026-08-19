@@ -336,7 +336,15 @@ export function TableInvestors() {
           }
           const razones = getLiquidationFailureReasons(error);
           if (razones.length > 0) {
-            const lista = razones.map((e) => `• ${e.razon}`).join("\n");
+            const lista = razones.map((e) => {
+              if (e.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+                const sifcos = (e.creditos_bloqueados ?? [])
+                  .map((credito) => credito.numero_credito_sifco)
+                  .join(", ");
+                return `• Pendiente de autorización para devolución a CUBE${sifcos ? `: ${sifcos}` : ""}`;
+              }
+              return `• ${e.razon}`;
+            }).join("\n");
             toast.error(`No se pudo liquidar. Créditos con inconsistencia:\n${lista}`, {
               duration: 15000,
             });
@@ -510,11 +518,6 @@ export function TableInvestors() {
       : investors.filter((inv) =>
           inv.nombre.toLowerCase().includes(query.toLowerCase())
         );
-
-  const tienePagosPendientes =
-    data?.inversionistas.some((inv) =>
-      (inv.creditos ?? []).some((cred) => (cred.pagos ?? []).length > 0)
-    ) ?? false;
 
   // 🆕 Efecto para activar Modo Borrador automático (Optimizado)
   // Se reducen las dependencias para evitar renders infinitos.

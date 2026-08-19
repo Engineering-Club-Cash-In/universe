@@ -88,6 +88,25 @@ export function getBatchFailedCredits(error: unknown): BatchFailedCredit[] {
   });
 }
 
+export type LiquidationFailureReason = {
+  inversionista_id?: number;
+  razon: string;
+  code?: string;
+  creditos_bloqueados?: Array<{ numero_credito_sifco?: string }>;
+};
+
+export function getLiquidationFailureReasons(error: unknown): LiquidationFailureReason[] {
+  if (!(error instanceof AxiosError)) return [];
+
+  const data = error.response?.data as { errores?: unknown } | undefined;
+  if (!Array.isArray(data?.errores)) return [];
+
+  return data.errores.filter((item): item is LiquidationFailureReason => {
+    if (!item || typeof item !== "object") return false;
+    return typeof (item as { razon?: unknown }).razon === "string";
+  });
+}
+
 export function getPendingReturnWarningMessage(error: unknown): string | null {
   if (!(error instanceof AxiosError)) return null;
 

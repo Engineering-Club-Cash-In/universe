@@ -2,6 +2,7 @@
 import {
   getApiErrorMessage,
   getBatchFailedCredits,
+  getLiquidationFailureReasons,
   getPendingReturnWarningMessage,
 } from "@/lib/apiError";
 import {
@@ -330,9 +331,17 @@ export function TableInvestors() {
           const warning = getPendingReturnWarningMessage(error);
           if (warning) {
             toast.warning("Liquidación bloqueada", { description: warning, duration: 15000 });
-          } else {
-            toast.error(getApiErrorMessage(error, "Error al liquidar"), { duration: 15000 });
+            return;
           }
+          const razones = getLiquidationFailureReasons(error);
+          if (razones.length > 0) {
+            const lista = razones.map((e) => `• ${e.razon}`).join("\n");
+            toast.error(`No se pudo liquidar. Créditos con inconsistencia:\n${lista}`, {
+              duration: 15000,
+            });
+            return;
+          }
+          toast.error(getApiErrorMessage(error, "Error al liquidar"), { duration: 15000 });
         },
       }
     );

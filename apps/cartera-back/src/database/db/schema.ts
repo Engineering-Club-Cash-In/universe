@@ -769,6 +769,74 @@
     })
   );
 
+  /**
+   * 🔒 Reparto de interés CONGELADO en el momento de facturar.
+   *
+   * Un pago PARCIAL no crea filas en `pagos_credito_inversionistas` (el reparto
+   * real se escribe hasta que la cuota se completa), así que tanto el reporte
+   * como el cierre lo derivan del roster VIVO de `creditos_inversionistas`. Si el
+   * roster cambia después de facturar (reinversión, compra de cartera), el mismo
+   * pago se reparte distinto — pero la factura ya emitida no cambia.
+   *
+   * Esta tabla guarda el reparto tal como se calculó el día de la facturación: el
+   * reporte lo muestra en vez de re-simular, y `insertPagosCreditoInversionistasV2`
+   * lo usa al cerrar la cuota en vez de recalcular. Incluye a CUBE para poder
+   * congelar el reparto completo.
+   */
+  export const pagos_credito_inversionistas_facturado = customSchema.table(
+    "pagos_credito_inversionistas_facturado",
+    {
+      id: serial("id").primaryKey(),
+      pago_id: integer("pago_id")
+        .notNull()
+        .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id),
+      inversionista_id: integer("inversionista_id")
+        .notNull()
+        .references(() => inversionistas.inversionista_id),
+
+      // Reparto congelado (lo que se facturó ese día)
+      abono_interes: numeric("abono_interes", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      abono_iva_12: numeric("abono_iva_12", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+
+      // Roster con el que se calculó, para auditar la fila sin adivinar
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 })
+        .notNull()
+        .default("0"),
+      porcentaje_participacion: numeric("porcentaje_participacion", {
+        precision: 18,
+        scale: 10,
+      })
+        .notNull()
+        .default("0"),
+      porcentaje_cash_in: numeric("porcentaje_cash_in", {
+        precision: 18,
+        scale: 10,
+      })
+        .notNull()
+        .default("0"),
+
+      // Su interés se redirigió a CUBE al facturar (bandera_reinversion + espejo
+      // pendiente) → el reporte NO debe mostrar su fila.
+      redirigido_a_cube: boolean("redirigido_a_cube").notNull().default(false),
+
+      created_at: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+      uniquePagoInversionista: unique("uq_pcif_pago_inversionista").on(
+        table.pago_id,
+        table.inversionista_id
+      ),
+      pagoIdx: index("ix_pcif_pago_id").on(table.pago_id),
+    })
+  );
+
   export const pagos_credito_inversionistas_espejo = customSchema.table(
     "pagos_credito_inversionistas_espejo",
     {

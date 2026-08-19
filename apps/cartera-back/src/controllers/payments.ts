@@ -1060,7 +1060,7 @@ export async function insertPagosCreditoInversionistas(
 
 type InvestorPaymentDb = Pick<
   typeof db,
-  "query" | "select" | "insert" | "update"
+  "query" | "select" | "insert" | "update" | "execute"
 >;
 
 export async function insertPagosCreditoInversionistasV2(
@@ -1237,6 +1237,37 @@ export async function insertPagosCreditoInversionistasV2(
     factorInteresPorInv,
   });
   const splitPorInv = new Map(splitInteres.map((s) => [s.inversionista_id, s]));
+
+  // 6b. 🔒 Reparto CONGELADO: si el pago ya se facturó siendo PARCIAL, su reparto
+  //     de interés quedó sellado ese día (cofidi → pagos_credito_inversionistas_facturado).
+  //     No se recalcula con el roster de hoy: entre el parcial y este cierre pudo
+  //     entrar una reinversión o una compra de cartera y el pci quedaría distinto
+  //     de los DTEs ya emitidos. El CAPITAL sí sigue repartiéndose con el roster
+  //     vivo (es lo correcto: se abona sobre la posición actual).
+  const congeladoRes = await txOrDb.execute(sql`
+    SELECT inversionista_id, abono_interes, abono_iva_12
+    FROM cartera.pagos_credito_inversionistas_facturado
+    WHERE pago_id = ${pago_id}
+  `);
+  const congeladoRows = ((congeladoRes as any).rows ?? []) as {
+    inversionista_id: number | string;
+    abono_interes: string | number;
+    abono_iva_12: string | number;
+  }[];
+  for (const row of congeladoRows) {
+    const invId = Number(row.inversionista_id);
+    if (!splitPorInv.has(invId)) continue; // ya no está en el crédito → se ignora
+    splitPorInv.set(invId, {
+      inversionista_id: invId,
+      abono_interes: new Big(row.abono_interes ?? 0),
+      abono_iva_12: new Big(row.abono_iva_12 ?? 0),
+    });
+  }
+  if (congeladoRows.length > 0) {
+    console.log(
+      `🔒 Pago ${pago_id}: interés tomado del reparto congelado al facturar (${congeladoRows.length} inversionista(s)), no del roster actual.`
+    );
+  }
 
   const inserts = [];
   for (const inv of inversionistasWithName) {
@@ -1882,6 +1913,62 @@ function simularInversionistasSinPci(args: {
     });
 }
 
+// Reparto congelado al facturar (pagos_credito_inversionistas_facturado). Existe
+// solo para pagos que se facturaron siendo PARCIAL; es la foto del reparto del día
+// de los DTEs, inmune a reinversiones/compras posteriores.
+export type ReportInvCongelado = {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura?: boolean | null;
+  abono_interes: string | number;
+  abono_iva_12: string | number;
+  monto_aportado: string | number | null;
+  porcentaje_participacion: string | number | null;
+  redirigido_a_cube?: boolean | null;
+};
+
+/**
+ * 🔒 Arma las filas no-CUBE de un pago PARCIAL desde el reparto CONGELADO al
+ * facturar, en vez de re-simularlo con el roster de hoy.
+ *
+ * Por qué: `simularInversionistasSinPci` reparte con `creditos_inversionistas`
+ * VIVO, así que una reinversión posterior cambia retroactivamente lo que el
+ * reporte muestra de un pago ya facturado (crédito 01010214118190: Q6.42
+ * facturado → Q9.24 en el reporte tres días después). El congelado no se mueve.
+ *
+ * Los redirigidos a CUBE se excluyen con la bandera sellada ese día, no con el
+ * estado actual del espejo — que también pudo cambiar.
+ */
+function filasDesdeCongelado(args: {
+  congelado: ReportInvCongelado[];
+  cubeId: number;
+  cuota?: string | number | null;
+}): ReportInvRow[] {
+  // ⚠️ NUMBERS (no strings): el modal del front les hace .toFixed().
+  return args.congelado
+    .filter(
+      (c) => c.inversionista_id !== args.cubeId && c.redirigido_a_cube !== true
+    )
+    .map((c) => {
+      const interes = new Big(c.abono_interes ?? 0);
+      return {
+        inversionistaId: c.inversionista_id,
+        nombreInversionista: c.nombre,
+        emiteFactura: c.emite_factura ?? false,
+        abonoCapital: 0,
+        abonoInteres: Number(interes.toFixed(2)),
+        abonoIva: Number(new Big(c.abono_iva_12 ?? 0).toFixed(2)),
+        isr: Number(interes.times("0.05").round(2).toFixed(2)),
+        cuotaPago: args.cuota != null ? Number(args.cuota) : 0,
+        montoAportado: c.monto_aportado != null ? Number(c.monto_aportado) : null,
+        porcentajeParticipacion:
+          c.porcentaje_participacion != null
+            ? Number(c.porcentaje_participacion)
+            : null,
+      };
+    });
+}
+
 /**
  * 🧮 Arma el array `inversionistas` de UN pago para el reporte JSON, reflejando
  * el interés facturado de CUBE leído del desglose:
@@ -1916,6 +2003,9 @@ export function armarInversionistasPago(args: {
   abonoIvaPago?: string | number | null;                // pagos_credito.abono_iva_12
   simularSinPci?: boolean;                              // el caller gatea: validated + !pendienteFacturar
   banderaReinversion?: boolean;                         // excluye SOLO a los redirigidos a CUBE (espejo pendiente)
+  // 🔒 Reparto congelado al facturar. Si existe, MANDA sobre la simulación: es el
+  //    reparto real del día de los DTEs y no se mueve con el roster.
+  congelado?: ReportInvCongelado[] | null;
 }): ReportInvRow[] {
   const rows = Array.isArray(args.pciRows) ? args.pciRows : [];
   let noCube = rows.filter((r) => r.inversionistaId !== args.cubeId);
@@ -1924,9 +2014,21 @@ export function armarInversionistasPago(args: {
   // Sin desglose → fallback: conservar el pci tal cual.
   if (!args.desgloseCubeInteres) return rows;
 
-  // 🆕 PARCIAL sin reparto (cuota aún abierta) ya facturado: simular los no-CUBE.
-  // Solo cuando NO hay filas pci — si el reparto real ya existe, ese manda.
-  if (
+  // 🆕 PARCIAL sin reparto (cuota aún abierta) ya facturado: los no-CUBE salen del
+  // congelado si existe, y si no se simulan. Solo cuando NO hay filas pci — si el
+  // reparto real ya existe, ese manda.
+  //
+  // Orden a propósito: congelado > simulación. El congelado es lo que se facturó;
+  // la simulación es una reconstrucción con el roster de hoy, que es justamente lo
+  // que se movía. Los pagos anteriores a este congelado no tienen filas → siguen
+  // simulándose igual que antes (sin regresión).
+  if (rows.length === 0 && (args.congelado?.length ?? 0) > 0) {
+    noCube = filasDesdeCongelado({
+      congelado: args.congelado!,
+      cubeId: args.cubeId,
+      cuota: args.cuota,
+    });
+  } else if (
     rows.length === 0 &&
     args.simularSinPci === true &&
     (args.creditoInvs?.length ?? 0) > 0
@@ -2425,6 +2527,43 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       }
     }
 
+    // 4) 🔒 Reparto CONGELADO al facturar, para los pagos de la página. Solo
+    //    existe en pagos que se facturaron siendo PARCIAL; cuando está, el reporte
+    //    lo muestra tal cual en vez de re-simular con el roster de hoy (que cambia
+    //    con cada reinversión y movía retroactivamente pagos ya facturados).
+    const congeladoByPago = new Map<number, ReportInvCongelado[]>();
+    if (pagoIds.length > 0) {
+      const cq = await db.execute(sql`
+        SELECT f.pago_id                 AS "pagoId",
+               f.inversionista_id        AS "inversionistaId",
+               i.nombre                  AS "nombre",
+               i.emite_factura           AS "emiteFactura",
+               f.abono_interes           AS "abonoInteres",
+               f.abono_iva_12            AS "abonoIva",
+               f.monto_aportado          AS "montoAportado",
+               f.porcentaje_participacion AS "porcentajeParticipacion",
+               f.redirigido_a_cube       AS "redirigidoACube"
+        FROM cartera.pagos_credito_inversionistas_facturado f
+        INNER JOIN cartera.inversionistas i ON i.inversionista_id = f.inversionista_id
+        WHERE f.pago_id = ANY(${"{" + pagoIds.join(",") + "}"}::bigint[])
+      `);
+      for (const row of cq.rows as any[]) {
+        const pid = Number(row.pagoId);
+        const arr = congeladoByPago.get(pid) ?? [];
+        arr.push({
+          inversionista_id: Number(row.inversionistaId),
+          nombre: row.nombre ?? "",
+          emite_factura: row.emiteFactura ?? false,
+          abono_interes: row.abonoInteres ?? 0,
+          abono_iva_12: row.abonoIva ?? 0,
+          monto_aportado: row.montoAportado ?? null,
+          porcentaje_participacion: row.porcentajeParticipacion ?? null,
+          redirigido_a_cube: row.redirigidoACube ?? false,
+        });
+        congeladoByPago.set(pid, arr);
+      }
+    }
+
     // Parser robusto del array de inversionistas (json_agg → array | string).
     const parseInvs = (raw: any): ReportInvRow[] =>
       Array.isArray(raw)
@@ -2475,6 +2614,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               (r as any).validation_status === "validated" &&
               !((r as any).pendienteFacturar ?? false),
             banderaReinversion: (r as any).banderaReinversion ?? false,
+            // 🔒 Si el pago se facturó siendo parcial, su reparto quedó sellado
+            //    ese día: manda sobre la simulación.
+            congelado: congeladoByPago.get(Number(r.pagoId)) ?? null,
           })
         : pciRows;
 
@@ -2669,27 +2811,59 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         FROM cartera.creditos_inversionistas ci
         WHERE ci.credito_id IN (SELECT DISTINCT credito_id FROM pf)
         GROUP BY ci.credito_id
+      ),
+      -- 🔒 Pagos que YA tienen su reparto congelado: el total sale de la tabla,
+      --    no de la fórmula. Es lo mismo que muestra el detalle (filasDesdeCongelado),
+      --    así el resumen no se despega de las filas listadas.
+      cong AS (
+        SELECT f.inversionista_id AS inv_id,
+               i.nombre AS nombre,
+               i.emite_factura AS emite_factura,
+               SUM(f.abono_interes::numeric) AS interes,
+               SUM(f.abono_iva_12::numeric) AS iva,
+               SUM(f.monto_aportado::numeric) AS aporte
+        FROM pf
+        JOIN cartera.pagos_credito_inversionistas_facturado f ON f.pago_id = pf.pago_id
+        JOIN cartera.inversionistas i ON i.inversionista_id = f.inversionista_id
+        WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+          AND f.redirigido_a_cube = false
+          ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND f.inversionista_id = '${inversionistaId}'` : "")}
+        GROUP BY f.inversionista_id, i.nombre, i.emite_factura
+      ),
+      -- Pagos SIN congelado (anteriores al sellado): fórmula de siempre.
+      sim AS (
+        SELECT ci.inversionista_id AS inv_id,
+               i.nombre AS nombre,
+               i.emite_factura AS emite_factura,
+               SUM(ROUND(pf.interes * (ci.monto_aportado::numeric / a.total)
+                   * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS interes,
+               SUM(ROUND(pf.iva * (ci.monto_aportado::numeric / a.total)
+                   * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS iva,
+               SUM(ci.monto_aportado::numeric) AS aporte
+        FROM pf
+        JOIN aportes a ON a.credito_id = pf.credito_id AND a.total > 0
+        JOIN cartera.creditos_inversionistas ci ON ci.credito_id = pf.credito_id
+        JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+        WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+          AND NOT EXISTS (
+                SELECT 1 FROM cartera.pagos_credito_inversionistas_facturado f2
+                WHERE f2.pago_id = pf.pago_id)
+          AND NOT (pf.bandera_reinversion = true AND EXISTS (
+                SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
+                WHERE esp.credito_id = pf.credito_id
+                  AND esp.inversionista_id = ci.inversionista_id
+                  AND esp.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
+          ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND ci.inversionista_id = '${inversionistaId}'` : "")}
+        GROUP BY ci.inversionista_id, i.nombre, i.emite_factura
       )
-      SELECT ci.inversionista_id AS "inversionistaId",
-             i.nombre AS "nombreInversionista",
-             i.emite_factura AS "emiteFactura",
-             SUM(ROUND(pf.interes * (ci.monto_aportado::numeric / a.total)
-                 * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS "interesSim",
-             SUM(ROUND(pf.iva * (ci.monto_aportado::numeric / a.total)
-                 * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS "ivaSim",
-             SUM(ci.monto_aportado::numeric) AS "aporteSim"
-      FROM pf
-      JOIN aportes a ON a.credito_id = pf.credito_id AND a.total > 0
-      JOIN cartera.creditos_inversionistas ci ON ci.credito_id = pf.credito_id
-      JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
-      WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
-        AND NOT (pf.bandera_reinversion = true AND EXISTS (
-              SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
-              WHERE esp.credito_id = pf.credito_id
-                AND esp.inversionista_id = ci.inversionista_id
-                AND esp.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
-        ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND ci.inversionista_id = '${inversionistaId}'` : "")}
-      GROUP BY ci.inversionista_id, i.nombre, i.emite_factura
+      SELECT t.inv_id AS "inversionistaId",
+             t.nombre AS "nombreInversionista",
+             t.emite_factura AS "emiteFactura",
+             SUM(t.interes) AS "interesSim",
+             SUM(t.iva) AS "ivaSim",
+             SUM(t.aporte) AS "aporteSim"
+      FROM (SELECT * FROM cong UNION ALL SELECT * FROM sim) t
+      GROUP BY t.inv_id, t.nombre, t.emite_factura
     `;
 
     const totalesSimResult = esFiltroCube

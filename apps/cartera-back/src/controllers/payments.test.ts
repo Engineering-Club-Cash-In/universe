@@ -908,4 +908,122 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
     expect(out).toHaveLength(1);
     expect(out[0].inversionistaId).toBe(86);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 🔒 Reparto CONGELADO al facturar (pagos_credito_inversionistas_facturado).
+  // Caso real: crédito 01010214118190, pago 152741 (parcial del 7-ago-2026).
+  // Se facturó Q6.42 al inversionista con monto_aportado 7,727.14. El 10-ago
+  // entró una reinversión de Q3,396.05 que lo subió a 11,123.19 → simular con el
+  // roster de hoy da Q9.24 para ese mismo pago ya facturado.
+  // ──────────────────────────────────────────────────────────────────────────
+  const creditoInvsRogelim = [
+    {
+      inversionista_id: 6,
+      nombre: "Andres Alejandro Salvatierra",
+      emite_factura: false,
+      porcentaje_participacion_inversionista: "80",
+      porcentaje_cash_in: "20",
+      monto_aportado: "11123.19439416", // roster de HOY (post-reinversión)
+    },
+    {
+      inversionista_id: 86,
+      nombre: "Cube Investments S.A.",
+      emite_factura: false,
+      porcentaje_participacion_inversionista: "0",
+      porcentaje_cash_in: "100",
+      monto_aportado: "41328.59560584",
+    },
+  ];
+
+  it("caso 12: sin congelado, el parcial se simula con el roster de HOY (deriva)", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("48.05"), iva: new Big("5.15") },
+      creditoInvs: creditoInvsRogelim,
+      abonoInteresPago: "54.47",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      cuota: "6105.81",
+    });
+
+    const inv = out.find((r) => r.inversionistaId === 6)!;
+    // 54.47 × 0.80 × (11123.19 / 52451.79) = 9.24 — pero se facturó 6.42.
+    expect(Number(inv.abonoInteres)).toBe(9.24);
+  });
+
+  it("caso 13: con congelado, se muestra lo FACTURADO y no lo simulado", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("48.05"), iva: new Big("5.15") },
+      creditoInvs: creditoInvsRogelim,
+      abonoInteresPago: "54.47",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      cuota: "6105.81",
+      congelado: [
+        {
+          inversionista_id: 6,
+          nombre: "Andres Alejandro Salvatierra",
+          emite_factura: false,
+          abono_interes: "6.42",
+          abono_iva_12: "0.00",
+          monto_aportado: "7727.14439400", // roster del día de la factura
+          porcentaje_participacion: "80",
+          redirigido_a_cube: false,
+        },
+        {
+          // CUBE viene en el congelado (para que el cierre lo use) pero el
+          // reporte arma su fila desde el desglose, no desde acá.
+          inversionista_id: 86,
+          nombre: "Cube Investments S.A.",
+          emite_factura: false,
+          abono_interes: "42.90",
+          abono_iva_12: "0.00",
+          monto_aportado: "44724.64560600",
+          porcentaje_participacion: "0",
+          redirigido_a_cube: false,
+        },
+      ],
+    });
+
+    const inv = out.find((r) => r.inversionistaId === 6)!;
+    expect(Number(inv.abonoInteres)).toBe(6.42); // lo facturado, no 9.24
+    expect(Number(inv.montoAportado)).toBe(7727.144394); // el aporte de ese día
+    expect(Number(inv.abonoCapital)).toBe(0); // el capital se reparte al cerrar
+
+    // CUBE sale del desglose (48.05 - 5.15 = 42.90), no del congelado duplicado.
+    const cube = out.find((r) => r.inversionistaId === 86)!;
+    expect(Number(cube.abonoInteres)).toBe(42.9);
+    expect(out).toHaveLength(2);
+  });
+
+  it("caso 14: congelado de un inversionista redirigido a CUBE → no se muestra", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("54.47"), iva: new Big("5.84") },
+      creditoInvs: creditoInvsRogelim,
+      abonoInteresPago: "54.47",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      congelado: [
+        {
+          inversionista_id: 6,
+          nombre: "Andres Alejandro Salvatierra",
+          emite_factura: false,
+          abono_interes: "6.42",
+          abono_iva_12: "0.00",
+          monto_aportado: "7727.14439400",
+          porcentaje_participacion: "80",
+          redirigido_a_cube: true, // su interés viajó dentro del rubro INTERES
+        },
+      ],
+    });
+
+    // Solo CUBE: la parte del redirigido ya está dentro del desglose de CUBE.
+    expect(out).toHaveLength(1);
+    expect(out[0].inversionistaId).toBe(86);
+  });
 });

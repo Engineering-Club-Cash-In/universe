@@ -239,16 +239,24 @@ COPY --from=builder /compiled /dest/
 		]);
 	});
 
-	it("detects untracked files inside a CRM build input", () => {
-		const probe = join(serverRoot, ".deploy-untracked-probe");
+	it("detects Git-ignored untracked files that remain in the Docker context", () => {
+		const probe = join(serverRoot, ".deploy-untracked-probe.log");
 		try {
 			writeFileSync(probe, "probe");
+			const ignoredByGit = Bun.spawnSync({
+				cmd: ["git", "check-ignore", probe],
+				cwd: crmRoot,
+				stderr: "pipe",
+				stdout: "pipe",
+			});
+			expect(ignoredByGit.exitCode).toBe(0);
+
 			const result = Bun.spawnSync({
 				cmd: [
 					"git",
 					"ls-files",
 					"--others",
-					"--exclude-standard",
+					`--exclude-from=${join(repoRoot, ".dockerignore")}`,
 					"--",
 					":(top)apps/crm/apps/server/",
 				],
@@ -258,7 +266,7 @@ COPY --from=builder /compiled /dest/
 			});
 			expect(result.exitCode).toBe(0);
 			expect(new TextDecoder().decode(result.stdout)).toContain(
-				"apps/server/.deploy-untracked-probe",
+				"apps/server/.deploy-untracked-probe.log",
 			);
 		} finally {
 			rmSync(probe, { force: true });
@@ -287,6 +295,10 @@ COPY --from=builder /compiled /dest/
 		]);
 		const serverInputs = readInputArray(deployScript, "SERVER_BUILD_INPUTS");
 		const webInputs = readInputArray(deployScript, "WEB_BUILD_INPUTS");
+
+		expect(deployScript).toContain(
+			'git ls-files --others --exclude-from="$MONOREPO_ROOT/.dockerignore" -- "$@"',
+		);
 
 		expectInputsCoverSources(serverInputs, [
 			...readDockerCopySources(serverDockerfile),

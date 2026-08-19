@@ -47,7 +47,7 @@ WEB_BUILD_INPUTS=(
 )
 
 has_untracked_inputs() {
-    [ -n "$(git ls-files --others --exclude-standard -- "$@")" ]
+    [ -n "$(git ls-files --others --exclude-from="$MONOREPO_ROOT/.dockerignore" -- "$@")" ]
 }
 
 # Default: check uncommitted changes, or compare with ref if provided

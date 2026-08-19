@@ -479,23 +479,45 @@ export async function obtenerAgendaTodosAsesores(
 		asesorUserId,
 	);
 	const agendas: AgendaSnapshotItemFuente[] = [];
-	for (const asesor of asesores) {
-		// try/catch por asesor: un fallo transitorio de cartera-back para UNO
-		// no debe descartar lo ya acumulado de los demás. Sin esto, un solo
-		// asesor caído tumbaba el snapshot del EQUIPO COMPLETO ese día — y
-		// como el cierre solo revisita el día inmediatamente anterior, ese
-		// día quedaba sin captura para siempre (Codex PR #1330).
+	const asesoresFallidos: AsesorAgenda[] = [];
+	// try/catch por asesor: un fallo transitorio de cartera-back para UNO no
+	// debe descartar lo ya acumulado de los demás. Sin esto, un solo asesor
+	// caído tumbaba el snapshot del EQUIPO COMPLETO ese día — y como el cierre
+	// solo revisita el día inmediatamente anterior, ese día quedaba sin
+	// captura para siempre (Codex PR #1330).
+	async function intentarAgendaAsesor(asesor: AsesorAgenda): Promise<boolean> {
 		try {
 			const [vencenHoy, colaOperacion] = await Promise.all([
 				obtenerAgendaAsesor(asesor),
 				obtenerColaOperacionAsesor(asesor, hoy),
 			]);
 			agendas.push(...deduplicarAgenda([...vencenHoy, ...colaOperacion]));
+			return true;
 		} catch (error) {
 			console.error(
-				`[AgendaCobrosSnapshot] Falló la agenda de ${asesor.nombre} (${asesor.userId}); se omite del snapshot de hoy:`,
+				`[AgendaCobrosSnapshot] Falló la agenda de ${asesor.nombre} (${asesor.userId}):`,
 				error,
 			);
+			return false;
+		}
+	}
+	for (const asesor of asesores) {
+		if (!(await intentarAgendaAsesor(asesor))) asesoresFallidos.push(asesor);
+	}
+	// Reintento same-day: cada llamada a cartera-back ya agota sus propios
+	// reintentos HTTP con backoff (cartera-back-client.ts) antes de llegar al
+	// catch de arriba, así que el fallo no es un blip de un solo request —
+	// pero puede ser una caída corta de cartera-back (deploy, reinicio) que ya
+	// terminó para cuando se procesó el resto de asesores. Sin este segundo
+	// intento, cualquier asesor que cayera en esa ventana quedaba omitido
+	// para siempre: el job solo corre una vez al día y el cierre solo
+	// revisita el día inmediatamente anterior (Codex PR #1331).
+	if (asesoresFallidos.length > 0) {
+		console.error(
+			`[AgendaCobrosSnapshot] Reintentando ${asesoresFallidos.length} asesor(es) con fallo transitorio: ${asesoresFallidos.map((a) => a.nombre).join(", ")}`,
+		);
+		for (const asesor of asesoresFallidos) {
+			await intentarAgendaAsesor(asesor);
 		}
 	}
 

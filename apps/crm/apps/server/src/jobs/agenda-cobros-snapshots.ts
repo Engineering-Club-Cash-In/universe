@@ -17,6 +17,12 @@ import { obtenerAgendaTodosAsesores } from "../services/agenda-cobros-source";
 // namespace=1 (jobs cobros), key=4 (snapshot de cumplimiento de agenda)
 const AGENDA_COBROS_LOCK = [1, 4] as const;
 
+// $1 fijo (snapshotId) + 4 params por item; Postgres limita a 65535 bind
+// params por statement. Con margen amplio para no rozar el límite (Codex PR
+// #1331): un asesor con 16k+ créditos planificados rompía el INSERT completo
+// y hacía ROLLBACK del snapshot entero.
+const CHUNK_SIZE_SNAPSHOT_ITEMS = 1000;
+
 interface RawClient {
 	query<T extends object = Record<string, unknown>>(
 		text: string,
@@ -50,24 +56,31 @@ class SqlAgendaSnapshotRepository implements AgendaSnapshotRepository {
 				return false;
 			}
 
-			const params: unknown[] = [snapshotId];
-			const values = items.map((item, index) => {
-				const base = index * 4 + 2;
-				params.push(
-					item.casoCobroId,
-					item.numeroCreditoSifco,
-					item.bucketSnapshot,
-					item.motivoAgenda,
+			for (
+				let inicio = 0;
+				inicio < items.length;
+				inicio += CHUNK_SIZE_SNAPSHOT_ITEMS
+			) {
+				const chunk = items.slice(inicio, inicio + CHUNK_SIZE_SNAPSHOT_ITEMS);
+				const params: unknown[] = [snapshotId];
+				const values = chunk.map((item, index) => {
+					const base = index * 4 + 2;
+					params.push(
+						item.casoCobroId,
+						item.numeroCreditoSifco,
+						item.bucketSnapshot,
+						item.motivoAgenda,
+					);
+					return `($1, $${base}, $${base + 1}, $${base + 2}, $${base + 3})`;
+				});
+				await this.client.query(
+					`INSERT INTO agenda_cobros_snapshot_items
+						(snapshot_id, caso_cobro_id, numero_credito_sifco,
+						 bucket_snapshot, motivo_agenda)
+					 VALUES ${values.join(", ")}`,
+					params,
 				);
-				return `($1, $${base}, $${base + 1}, $${base + 2}, $${base + 3})`;
-			});
-			await this.client.query(
-				`INSERT INTO agenda_cobros_snapshot_items
-					(snapshot_id, caso_cobro_id, numero_credito_sifco,
-					 bucket_snapshot, motivo_agenda)
-				 VALUES ${values.join(", ")}`,
-				params,
-			);
+			}
 			await this.client.query("COMMIT");
 			return true;
 		} catch (error) {

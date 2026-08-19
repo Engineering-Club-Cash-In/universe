@@ -1043,6 +1043,13 @@ de quién es.
 - Si a las **24 h** la boleta quedó a medias (unos resueltos, otros no), se avisa **solo al
   asesor**. Al cliente no se le manda una verdad parcial.
 
+**Reabrir el ciclo son dos campos.** Cuando un pago ya validado vuelve a `pending`
+(`revertPaymentToPending`), no alcanza con limpiar `notificado_cliente_at` en la boleta: hay
+que limpiar también el **`resuelto_en` de ese pago** en `bot_cobros_boleta_pagos`. Si quedara
+marcado como resuelto, el job de respaldo —que solo mira pagos sin resolver— nunca vería la
+revalidación posterior, y el cliente se quedaría con un "estamos revisando de nuevo tu pago"
+que no termina nunca.
+
 ---
 
 ## D-34 · La confirmación se protege con estado, no con idempotency key
@@ -1128,3 +1135,28 @@ agrega nada al camino de escritura.
 **Efecto lateral bueno:** ese job también cubre el caso de que cartera ni siquiera llegue a
 intentar el aviso —un deploy en el medio, un proceso que muere— sin ninguna coordinación
 extra entre las dos apps.
+
+**El job pregunta por `pago_id`, nunca por la boleta.** `reversePayment` **borra las filas de
+`boletas`** del pago —y si era un parcial con hermanos en la misma cuota, borra el
+`pagos_credito` entero; si no, lo resetea a `no_required` con `numeroAutorizacion = ''` y
+`banco_id = NULL`—. Preguntar "¿qué pasó con la boleta tal?" devolvería silencio **justo en
+el caso que más urge avisar**: el rechazo.
+
+Como en cartera no hay tabla de reversiones ni log de la acción, el estado se **deduce de lo
+que la reversión deja atrás**, y por eso hay que preguntar por un `pago_id` puntual que
+sabemos que existió:
+
+| Lo que devuelve cartera | Interpretación |
+| --- | --- |
+| `validated` / `capital_validated` | validado |
+| `pending` | sigue esperando |
+| `payment_false = true` | marcado falso |
+| la fila **no existe** | **revertido** |
+| `no_required` + `numeroAutorizacion = ''` + `banco_id = NULL` | **revertido** (firma del reset) |
+
+Las dos últimas son el acta de defunción que cartera no escribe.
+
+**Y la misma trampa aplica a la reconciliación de D-34**, que sí busca por `r2_key`: "no hay
+filas" puede significar "no se registró" **o** "se registró y ya lo revirtieron". Por eso ese
+borrador nunca vuelve solo a `leida` — va a `revision_manual`. Devolverlo a `leida` sería
+dejar que el cliente reconfirme un pago que contabilidad acaba de rechazar.

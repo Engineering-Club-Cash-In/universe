@@ -257,9 +257,9 @@ Un reintento sobre un borrador en `confirmando` **no vuelve a llamar a cartera**
 de 5 minutos en `confirmando` y le pregunta a cartera si esa boleta existe — la busca por la
 `r2_key`, que es única y quedó en la tabla `boletas` de cartera:
 
-- **no existe** → el borrador vuelve a `leida` y el cliente puede confirmar de nuevo;
 - **existe** → se guardan los `pago_id` encontrados y el borrador pasa a
-  **`confirmada_a_verificar`**, no a `confirmada`.
+  **`confirmada_a_verificar`**, no a `confirmada`;
+- **no existe** → el borrador pasa a **`revision_manual`**. **No vuelve a `leida`.**
 
 **Por qué "a verificar" y no "lista".** `insertPayment` **no es transaccional**: escribe las
 filas de `pagos_credito` y de `boletas` una por una contra el `db` global, sin envolver el
@@ -273,6 +273,22 @@ escrito— y tampoco le dice al cliente "pago recibido". Lo que hace es:
 - dejar el borrador en `confirmada_a_verificar` con los ids que sí encontró;
 - **notificar a contabilidad y al asesor** para que revisen si el monto quedó completo;
 - al cliente, un mensaje neutro: *"estamos procesando tu pago, te avisamos"*.
+
+**Y por qué "no existe" tampoco significa "reintentá".** `reversePayment` **borra las filas de
+`boletas`** del pago, y si era un parcial con hermanos en la misma cuota borra también la fila
+de `pagos_credito`; en el otro caso la resetea a `no_required` con `numeroAutorizacion = ''` y
+`banco_id = NULL`. O sea que buscar por `r2_key` y no encontrar nada tiene **dos** lecturas
+posibles: que no se registró, o que se registró y conta ya lo revirtió.
+
+Devolver el borrador a `leida` en esa ambigüedad significa dejar que el cliente vuelva a
+confirmar **un pago que contabilidad acaba de rechazar**. Por eso el borrador pasa a
+`revision_manual` con aviso a conta y al asesor: equivocarse hacia "que lo mire un humano"
+cuesta un minuto de alguien; equivocarse hacia "reintentá" mete plata que no existe.
+
+> El único camino que sí libera el borrador es el normal: si **cartera respondió con error**,
+> el CRM lo sabe en el mismo request, responde `PAGO_NO_REGISTRADO` y deja el borrador en
+> `leida`. La reconciliación solo actúa cuando **no hubo respuesta**, que es justo el caso en
+> que no se puede saber.
 
 Que `insertPayment` no sea atómico es un problema de cartera que ya existía y excede este
 feature; acá solo se evita que el bot lo convierta en un pago a medias silencioso
@@ -431,9 +447,14 @@ disparar mensajes de WhatsApp.
 > justamente para devolver a pendiente un pago **ya validado**. Si al cliente ya se le mandó
 > el "tu pago fue acreditado" (`bot_cobros_boletas.notificado_cliente_at` con valor), callarse
 > lo deja creyendo algo que dejó de ser cierto: se le vuelve a escribir —*"estamos revisando
-> de nuevo tu pago"*— y el ciclo de notificación de esa boleta se **reabre**
-> (`notificado_cliente_at` vuelve a `NULL`). Si nunca se le dijo nada, entonces sí: solo al
-> asesor, porque para el cliente no cambió nada.
+> de nuevo tu pago"*— y el ciclo de notificación de esa boleta se **reabre**. Si nunca se le
+> dijo nada, entonces sí: solo al asesor, porque para el cliente no cambió nada.
+>
+> **Reabrir son dos campos, no uno.** Además de `notificado_cliente_at` en la boleta, hay que
+> limpiar el **`resuelto_en` de ese pago** en `bot_cobros_boleta_pagos`. Si quedara marcado
+> como resuelto, el job de respaldo —que solo mira pagos *sin resolver*— nunca vería la
+> revalidación posterior, y el ciclo que acabamos de reabrir se quedaría sin desenlace: el
+> cliente con un "estamos revisando de nuevo" que no termina nunca.
 
 > **Rechazar una boleta es "Revertir Pago", no "marcar falso".** Es lo que hace conta hoy en
 > carteraFront, y es el único camino que **devuelve la mora** que el registro descontó (§5.1):
@@ -477,8 +498,28 @@ app que mueve el dinero—, el CRM **se encarga de no depender del aviso**:
 | **Rápido** | El webhook `/pagos/evento` | Siempre que salga bien: el cliente se entera en segundos. |
 | **Red de seguridad** | Un job del CRM revisa las boletas confirmadas que tienen pagos sin resolver y le **pregunta a cartera** en qué `validation_status` están | Cada hora. Si alguno ya no está `pending`, se procesa como si el evento hubiera llegado. |
 
-El job reusa el mismo endpoint de lectura del §4.1 (`GET /pagos-por-boleta`, que devuelve el
-`validation_status` de cada fila). Nada se pierde: el webhook adelanta el aviso, el job
+**El job pregunta por `pago_id`, no por la boleta.** Es una distinción que importa: una
+reversión **borra la fila de `boletas`** en cartera (y a veces el `pagos_credito` entero), así
+que preguntar "¿qué pasó con la boleta tal?" devolvería silencio justo en el caso que más
+necesitamos avisar. Los `pago_id` ya los tenemos en `bot_cobros_boleta_pagos`, y con ellos la
+respuesta es inequívoca:
+
+| Lo que devuelve cartera para ese `pago_id` | Cómo se interpreta |
+| --- | --- |
+| `validated` / `capital_validated` | **validado** |
+| `pending` | sigue esperando, no se hace nada |
+| `payment_false = true` | **marcado falso** |
+| **la fila no existe** | **revertido** — `reversePayment` la borró |
+| `no_required` con `numeroAutorizacion = ''` y `banco_id = NULL` | **revertido** — es la firma exacta que deja el reset de `reversePayment` |
+
+Las dos últimas filas son el **acta de defunción** que cartera no guarda en ningún lado: no
+hay tabla de reversiones ni log, así que el estado se deduce de lo que la reversión deja
+atrás. Funciona porque preguntamos por un `pago_id` puntual que sabemos que existió.
+
+Eso pide un endpoint de lectura más: `GET /pagos/estado?ids=48213,48214`, que devuelve por
+cada id `{ existe, validation_status, payment_false, banco_id, numero_autorizacion }`.
+
+Nada se pierde: el webhook adelanta el aviso, el job
 garantiza que ocurra ([D-35](./DECISIONES.md#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza)).
 
 ### A quién se le avisa
@@ -627,9 +668,21 @@ el CRM para el análisis bancario; esto no agrega proveedor ni contrato nuevo.
 
 Hay **dos** controles, y son distintos:
 
-**1. El nuestro, antes de llamar a cartera.** Si esta misma sesión ya confirmó una boleta con
-el mismo banco, monto y autorización en las últimas 24 h → `409 BOLETA_DUPLICADA` sin tocar
-cartera. Es el caso común: el cliente manda la boleta dos veces porque no vio la respuesta.
+**1. El nuestro, antes de llamar a cartera.** El caso común es que el cliente mande la boleta
+dos veces porque no vio la respuesta. Se detecta así, en este orden:
+
+| Señal | Cuándo se usa | Qué pasa |
+| --- | --- | --- |
+| **Hash de la imagen** (`sha256` del archivo) | Siempre | Si esta sesión ya confirmó una boleta con el mismo hash → `409 BOLETA_DUPLICADA`. Es **la misma foto**: no hay falso positivo posible. |
+| Banco + monto + autorización | **Solo si la autorización no viene vacía** | Cubre al cliente que sacó dos fotos distintas del mismo comprobante. |
+
+**El segundo control no corre sin autorización, y es a propósito.** Dos depósitos legítimos
+del mismo banco por el mismo monto —pagar dos cuotas en la misma sesión, algo perfectamente
+normal— tienen banco y monto idénticos; si además ninguno trae número de autorización, esos
+campos vacíos también "coinciden" y el segundo pago quedaría rechazado por duplicado siendo
+válido. Comparar `NULL` con `NULL` no es evidencia de nada.
+
+El hash sí cubre ese caso sin equivocarse: dos depósitos distintos son dos fotos distintas.
 
 **2. El de cartera, que tiene un falso positivo conocido — y un agujero.** `newPayment`
 rechaza con 409 si existe cualquier pago con la misma `(numeroAutorizacion, banco_id)` **en
@@ -670,6 +723,7 @@ CREATE TABLE bot_cobros_boletas (
   intento             integer NOT NULL,
   imagen_origen_url   text NOT NULL,          -- la de SimpleTech, solo para trazar
   r2_key              text,                   -- la nuestra; se llena al leer, no al confirmar
+  hash_imagen         text,                   -- sha256 del archivo; detecta la misma foto (§9)
   lectura             jsonb NOT NULL,          -- lo que devolvió el modelo, crudo
   banco_id            integer,
   monto               numeric(12,2),
@@ -678,7 +732,8 @@ CREATE TABLE bot_cobros_boletas (
   cuenta_destino      text,
   confianza           text,
   estado              text NOT NULL,           -- leida | confirmando | confirmada |
-                                               -- confirmada_a_verificar | descartada | fallida
+                                               -- confirmada_a_verificar | revision_manual |
+                                               -- descartada | fallida
   motivo_fallo        text,
   confirmando_desde   timestamptz,             -- para el job de reconciliación (§4.1)
   notificado_cliente_at timestamptz,           -- un mensaje por boleta, no por pago (§6)
@@ -801,11 +856,11 @@ Tres PR a `COBROS-02`, en este orden:
 | PR | Alcance | Se puede probar solo |
 | --- | --- | --- |
 | **A** | Tablas + `/boleta/leer` + descarga con allowlist + lectura con IA + **copia a R2** + mapeo de bancos + Swagger | Sí: devuelve datos y deja el archivo, no registra pago. |
-| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment` y `GET /pagos-por-boleta` | Sí, contra la instancia de dev de cartera. |
+| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment`, `GET /pagos-por-boleta` y `GET /pagos/estado?ids=…` | Sí, contra la instancia de dev de cartera. |
 | **C** | Endpoint de eventos + emisión desde `aplicar-pago`, `revalidatePayment`, `reversePayment`, `revertPaymentToPending` y `false-payment` + job de respaldo (§6) + agrupación por boleta + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
 
-**Los tres cambios en cartera del PR B son aditivos**: dos campos nuevos en respuestas que ya
-existen y un endpoint de lectura. Ninguno toca el camino de escritura de un pago.
+**Los cuatro cambios en cartera del PR B son aditivos**: un campo nuevo en dos respuestas que
+ya existen y dos endpoints de lectura. Ninguno toca el camino de escritura de un pago.
 
 Cada PR lleva su parte del Swagger en el mismo commit
 ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)) y suma

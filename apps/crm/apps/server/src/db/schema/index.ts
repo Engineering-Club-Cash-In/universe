@@ -13,6 +13,7 @@ export * from "./insurance";
 export * from "./investments";
 export * from "./juridico-dashboard";
 export * from "./legal-contracts";
+export * from "./license-verification";
 export * from "./locations";
 export * from "./metas";
 export * from "./miniagent-credentials";

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
 	Select,
@@ -67,8 +68,14 @@ type DetalleItem = {
 type DetalleData = {
 	fecha: string;
 	asesorId: string;
+	page: number;
+	perPage: number;
+	total: number;
+	totalPages: number;
 	items: DetalleItem[];
 };
+
+const PER_PAGE_DETALLE = 50;
 
 const RESULTADO_LABEL: Record<string, string> = {
 	contactado: "Contactado",
@@ -95,9 +102,13 @@ function DetalleAgenda({
 }) {
 	// biome-ignore lint/suspicious/noExplicitAny: contrato manual por TS7056 del router raíz.
 	const orpcAny = orpc as any;
+	// Paginado server-side: un asesor puede tener 16k+ créditos planificados
+	// en el snapshot — traer todo de una vez congelaba el navegador al
+	// expandir la fila (Codex PR #1332).
+	const [page, setPage] = useState(1);
 	const query = useQuery({
 		...orpcAny.getCumplimientoAgendaDetalle.queryOptions({
-			input: { fecha, asesorId },
+			input: { fecha, asesorId, page, perPage: PER_PAGE_DETALLE },
 		}),
 	});
 	const datos = query.data as DetalleData | undefined;
@@ -207,6 +218,29 @@ function DetalleAgenda({
 					))}
 				</TableBody>
 			</Table>
+			{datos && datos.totalPages > 1 && (
+				<div className="flex items-center justify-end gap-3 border-t px-4 py-2 text-sm">
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={page <= 1}
+						onClick={() => setPage((p) => Math.max(1, p - 1))}
+					>
+						Anterior
+					</Button>
+					<span className="text-gray-500">
+						Página {datos.page} de {datos.totalPages} ({datos.total} créditos)
+					</span>
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={page >= datos.totalPages}
+						onClick={() => setPage((p) => p + 1)}
+					>
+						Siguiente
+					</Button>
+				</div>
+			)}
 		</div>
 	);
 }

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lt, max } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lt, max } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -31,6 +31,21 @@ async function resolverFecha(fecha?: string): Promise<string | null> {
 }
 
 export const agendaCobrosRouter = {
+	/**
+	 * Limitación conocida: `promesaCumplida`/`promesaCumplidaEn` (abajo) solo
+	 * las escribe `cerrarSnapshotsAgenda` (job de medianoche) — a diferencia
+	 * de `atendido` (recalculado en vivo abajo con `cerrarItemsAgenda`, que es
+	 * puro y solo lee `contactos_cobros` propio). Un pago que llega DURANTE
+	 * el día sigue mostrándose como pendiente en esta vista hasta el cierre
+	 * nocturno, porque confirmar el pago requiere evaluarPromesa() contra
+	 * cartera-back (llamada de red por SIFCO, ver getEstadoPromesasPago en
+	 * routers/cobros.ts) — evaluarlo acá convertiría este endpoint de
+	 * solo-DB en uno con N llamadas HTTP en cada carga de "Mi agenda de
+	 * hoy". No corrompe métricas del supervisor: el cierre nocturno (que sí
+	 * cuenta promesa_cumplida como atendido, ver jobs/agenda-cobros-snapshots.ts)
+	 * ya lo resuelve correctamente para el ranking de cumplimiento — este
+	 * gap es solo la vista personal del asesor durante el día (Codex PR #1332).
+	 */
 	getMiAgendaHoy: cobrosProcedure.handler(async ({ context }) => {
 		const asesorId = context.session?.user?.id;
 		if (!asesorId) return { fecha: toDateStrGT(new Date()), items: [] };
@@ -179,9 +194,28 @@ export const agendaCobrosRouter = {
 			z.object({
 				fecha: fechaSchema,
 				asesorId: z.string().min(1),
+				page: z.number().int().positive().default(1),
+				perPage: z.number().int().min(1).max(200).default(50),
 			}),
 		)
 		.handler(async ({ input }) => {
+			// Paginado server-side: un asesor puede tener 16k+ créditos
+			// planificados en el snapshot (ver CHUNK_SIZE_SNAPSHOT_ITEMS en
+			// jobs/agenda-cobros-snapshots.ts) — traer todo de una vez congelaba
+			// el navegador del supervisor al expandir la fila (Codex PR #1332).
+			const where = and(
+				eq(agendaCobrosSnapshots.fechaGt, input.fecha),
+				eq(agendaCobrosSnapshots.asesorId, input.asesorId),
+				eq(agendaCobrosSnapshots.estado, "cerrado"),
+			);
+			const [{ total }] = await db
+				.select({ total: count() })
+				.from(agendaCobrosSnapshotItems)
+				.innerJoin(
+					agendaCobrosSnapshots,
+					eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
+				)
+				.where(where);
 			const items = await db
 				.select({
 					id: agendaCobrosSnapshotItems.id,
@@ -210,18 +244,14 @@ export const agendaCobrosRouter = {
 					contactosCobros,
 					eq(agendaCobrosSnapshotItems.contactoCobroId, contactosCobros.id),
 				)
-				.where(
-					and(
-						eq(agendaCobrosSnapshots.fechaGt, input.fecha),
-						eq(agendaCobrosSnapshots.asesorId, input.asesorId),
-						eq(agendaCobrosSnapshots.estado, "cerrado"),
-					),
-				)
+				.where(where)
 				.orderBy(
 					asc(agendaCobrosSnapshotItems.atendido),
 					desc(agendaCobrosSnapshotItems.motivoAgenda),
 					asc(agendaCobrosSnapshotItems.numeroCreditoSifco),
-				);
+				)
+				.limit(input.perPage)
+				.offset((input.page - 1) * input.perPage);
 
 			// Resolver el cliente por SIFCO, no solo por casoCobroId: un item D-0
 			// siempre nace con casoCobroId=null en agenda-cobros-source.ts, así
@@ -268,6 +298,10 @@ export const agendaCobrosRouter = {
 			return {
 				fecha: input.fecha,
 				asesorId: input.asesorId,
+				page: input.page,
+				perPage: input.perPage,
+				total,
+				totalPages: Math.max(1, Math.ceil(total / input.perPage)),
 				items: items.map((item) => {
 					const contratoId = casoPorSifco.get(
 						item.numeroCreditoSifco,

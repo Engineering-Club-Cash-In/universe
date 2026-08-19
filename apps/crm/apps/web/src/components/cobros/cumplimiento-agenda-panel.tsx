@@ -392,6 +392,19 @@ export function CumplimientoAgendaPanel() {
 					No se pudo cargar el cumplimiento de agenda. Reintentá en unos
 					segundos.
 				</Card>
+			) : usuariosQuery.isError ? (
+				// Sin esto, un fallo de `getUsuariosConGestiones` se disfrazaba de
+				// "sin resultados": `usuariosConGestiones` caía a `[]` con
+				// `?? []`, así que `asesores` se armaba SOLO con `datos.items` (los
+				// que tienen snapshot) y el catálogo quedaba incompleto en
+				// silencio — un asesor sin agenda planificada pero con gestiones
+				// ese día desaparecía del selector como si de verdad no hubiera
+				// trabajado, en vez de "no se pudo saber" (hallazgo de code
+				// review, Codex).
+				<Card className="p-8 text-center text-red-600">
+					No se pudo cargar el catálogo completo de asesores. Reintentá en unos
+					segundos.
+				</Card>
 			) : asesores.length === 0 ? (
 				<Card className="p-8 text-center text-gray-500">
 					No hay agenda cerrada ni gestiones registradas para esta fecha. La

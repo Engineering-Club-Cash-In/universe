@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
-import {
-	certezaAusenciaAgenda,
-	columnaEnAgenda,
-} from "../lib/historial-agendas";
+import { columnaEnAgenda } from "../lib/historial-agendas";
 
 /**
  * Compila el SQL del EXISTS de `columnaEnAgenda` sin tocar la DB — mismo
@@ -15,33 +12,9 @@ function compilar(sql: Parameters<PgDialect["sqlToQuery"]>[0]) {
 	return { sql: query.sql.toLowerCase(), params: query.params };
 }
 
-describe("certezaAusenciaAgenda", () => {
-	const HOY = "2026-08-19";
-
-	test("hoy sin snapshot: certeza (se puede afirmar FALSE)", () => {
-		expect(certezaAusenciaAgenda(HOY, HOY, true)).toBe(true);
-	});
-
-	// El caso que reporta Codex: sin registro de captura fallida en la DB, un
-	// día pasado sin snapshot puede ser "no hubo agenda" o "la captura se
-	// cayó" — no se puede afirmar "Fuera de agenda" para gestiones de ese
-	// día sin arriesgarse a mentir sobre un fallo de captura silencioso.
-	test("fecha pasada sin snapshot: NO hay certeza, aunque hubo búsqueda", () => {
-		expect(certezaAusenciaAgenda("2026-08-18", HOY, true)).toBe(false);
-	});
-
-	test("sin búsqueda: NO hay certeza, aunque sea hoy", () => {
-		expect(certezaAusenciaAgenda(HOY, HOY, false)).toBe(false);
-	});
-
-	test("fecha futura: NO hay certeza (no debería pasar, pero no afirma nada)", () => {
-		expect(certezaAusenciaAgenda("2026-08-20", HOY, true)).toBe(false);
-	});
-});
-
 describe("columnaEnAgenda", () => {
 	test("con snapshotId compila un EXISTS que compara caso y SIFCO", () => {
-		const { sql, params } = compilar(columnaEnAgenda("snap-123", true));
+		const { sql, params } = compilar(columnaEnAgenda("snap-123"));
 
 		expect(sql).toContain("exists");
 		expect(sql).toContain("caso_cobro_id");
@@ -49,25 +22,21 @@ describe("columnaEnAgenda", () => {
 		expect(params).toContain("snap-123");
 	});
 
-	test("sin snapshotId y sin búsqueda compila a NULL, sin EXISTS", () => {
-		const { sql, params } = compilar(columnaEnAgenda(null, false));
+	// Sin snapshotId, SIEMPRE NULL — nunca FALSE. No hay ningún registro
+	// persistido de si la captura diaria corrió con éxito
+	// (`obtenerAgendaTodosAsesores` puede lanzar tras agotar reintentos y el
+	// job no deja rastro del fallo), así que "sin snapshot" puede significar
+	// "no hubo agenda ese día" o "la captura se rompió" — no hay forma de
+	// distinguirlos, ni para fechas pasadas ni para hoy. Dos rondas de code
+	// review (Codex) intentaron acotar cuándo era "seguro" afirmar FALSE
+	// (primero solo días pasados, después solo si hoy no había fallado la
+	// captura) y en ambas quedaba un escenario real donde igual mentía —
+	// más simple y siempre honesto: sin snapshot, sin afirmación.
+	test("sin snapshotId compila a NULL, sin EXISTS", () => {
+		const { sql, params } = compilar(columnaEnAgenda(null));
 
 		expect(sql).not.toContain("exists");
 		expect(sql).toContain("null");
-		expect(params).toEqual([]);
-	});
-
-	// Un asesor sin NINGÚN item planificado (0 D-0/SLA/promesa) no genera fila
-	// en agenda_cobros_snapshots — no es que no se pueda saber si sus
-	// gestiones estaban en agenda, es que sabemos con CERTEZA que no lo
-	// estaban. `huboBusqueda=true` con `snapshotId=null` distingue ese caso
-	// de "no se pidió marcarEnAgenda" (hallazgo de code review, Codex).
-	test("sin snapshot pero CON búsqueda compila a FALSE, no a NULL", () => {
-		const { sql, params } = compilar(columnaEnAgenda(null, true));
-
-		expect(sql).not.toContain("exists");
-		expect(sql).toContain("false");
-		expect(sql).not.toContain("null");
 		expect(params).toEqual([]);
 	});
 
@@ -76,7 +45,7 @@ describe("columnaEnAgenda", () => {
 	// comparar contacto_cobro_id — ver la nota en columnaEnAgenda sobre por
 	// qué eso marca mal una segunda gestión sobre un crédito planificado.
 	test("no compara por contacto_cobro_id", () => {
-		const { sql } = compilar(columnaEnAgenda("snap-123", true));
+		const { sql } = compilar(columnaEnAgenda("snap-123"));
 
 		expect(sql).not.toContain("contacto_cobro_id");
 	});
@@ -88,7 +57,7 @@ describe("columnaEnAgenda", () => {
 	// agenda" solo porque el caso A —un caso DISTINTO— sí estaba planificado
 	// (hallazgo de code review, Codex).
 	test("el fallback por SIFCO exige que el item no tenga caso_cobro_id", () => {
-		const { sql } = compilar(columnaEnAgenda("snap-123", true));
+		const { sql } = compilar(columnaEnAgenda("snap-123"));
 
 		expect(sql).toContain("ai.caso_cobro_id is null");
 	});

@@ -206,6 +206,7 @@ export const cobrosAppRouter = {
 	getCumplimientoAgendaResumen: agendaCobrosRouter.getCumplimientoAgendaResumen,
 	getCumplimientoAgendaDetalle: agendaCobrosRouter.getCumplimientoAgendaDetalle,
 	getMiAgendaHoy: agendaCobrosRouter.getMiAgendaHoy,
+	getAsesoresConAgenda: agendaCobrosRouter.getAsesoresConAgenda,
 
 	// CB-010: reducción de recordatorios premora (módulo del Gerente de Cobros)
 	getCreditosElegiblesReduccion:

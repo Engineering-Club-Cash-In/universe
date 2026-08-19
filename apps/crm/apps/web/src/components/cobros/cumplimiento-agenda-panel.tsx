@@ -500,8 +500,10 @@ export function CumplimientoAgendaPanel() {
 									// Asesor sin snapshot ese día (0 items planificados —
 									// `capturarSnapshots` no persiste una fila para él, ver la
 									// nota en `usuariosConGestiones` más arriba), pero SÍ con
-									// gestiones registradas: el bloque de abajo las muestra
-									// todas como "Fuera de agenda".
+									// gestiones registradas: el bloque de abajo las muestra sin
+									// badge de certeza ("—", no "Fuera de agenda") — sin
+									// snapshot no se puede distinguir "no hubo agenda" de "la
+									// captura falló" (ver `columnaEnAgenda` en el server).
 									<div className="px-4 py-6 text-center text-gray-500 text-sm">
 										{asesorSeleccionado.asesorNombre} no tenía agenda
 										planificada ese día.

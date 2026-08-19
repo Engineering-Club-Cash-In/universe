@@ -45,11 +45,9 @@ import {
 } from "../db/schema/cobros";
 import { clients } from "../db/schema/crm";
 import { condicionAuditManual } from "../lib/audit-contactos";
-import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	BUCKET_SIN_ASIGNAR,
 	calcularTotalPaginas,
-	certezaAusenciaAgenda,
 	columnaEnAgenda,
 	columnaOrigen,
 	esContactoEfectivo,
@@ -182,11 +180,10 @@ export const historialAgendasRouter = {
 			const puedeVerTodos = PERMISSIONS.canViewAllCasosCobros(
 				context.userRole ?? "",
 			);
-			// Distingue "se buscó y no hay agenda" (→ FALSE con certeza en
-			// columnaEnAgenda) de "no se buscó" (permiso denegado o
-			// `marcarEnAgenda` no pedido, → NULL, no evaluado). Sin esta bandera,
-			// pasar solo `snapshotAgendaId` a `columnaEnAgenda` no alcanza para
-			// diferenciar los dos casos, porque ambos lo dejan en `null`.
+			// Si no hay permiso para ver la agenda de ese asesor, ni se busca el
+			// snapshot: `snapshotAgendaId` queda en `null` y `columnaEnAgenda`
+			// resuelve a NULL (no evaluado), igual que cuando no se pidió
+			// `marcarEnAgenda`.
 			const huboBusquedaDeSnapshot =
 				!!marcarEnAgenda &&
 				(puedeVerTodos || marcarEnAgenda.asesorId === context.userId);
@@ -258,20 +255,7 @@ export const historialAgendasRouter = {
 					// Para que la UI explique por qué una fila 'contactado' no cuenta
 					// como gestión del asesor.
 					origen: columnaOrigen(),
-					// El segundo parámetro solo importa cuando `snapshotAgendaId` es
-					// null (si hay snapshot, columnaEnAgenda ya resuelve por EXISTS)
-					// — ver `certezaAusenciaAgenda` para cuándo es seguro afirmar
-					// FALSE en vez de NULL.
-					enAgenda: columnaEnAgenda(
-						snapshotAgendaId,
-						marcarEnAgenda
-							? certezaAusenciaAgenda(
-									marcarEnAgenda.fecha,
-									toDateStrGT(new Date()),
-									huboBusquedaDeSnapshot,
-								)
-							: false,
-					),
+					enAgenda: columnaEnAgenda(snapshotAgendaId),
 				})
 				.from(contactosCobros)
 				.innerJoin(user, eq(contactosCobros.realizadoPor, user.id))

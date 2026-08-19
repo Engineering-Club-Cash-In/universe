@@ -50,8 +50,12 @@ const RESPUESTA_ERROR = {
 		data: {
 			type: "object",
 			description:
-				"Algunos errores traen datos extra (ver los ejemplos de cada uno).",
+				"**Viene siempre**, también en los errores: trae `mensaje` (el mismo texto de `error.mensaje`, listo para el chat) y `codigo`. Algunos errores agregan datos extra — ver los ejemplos de cada uno.",
 			additionalProperties: true,
+			properties: {
+				mensaje: { type: "string" },
+				codigo: { type: "string" },
+			},
 		},
 	},
 } as const;
@@ -76,6 +80,7 @@ export const especificacionBotCobros = {
 			"## Reglas del contrato",
 			"",
 			"- **Un `200` significa que hay dato.** Cualquier otra cosa —no encontrado, dato ilegible, código malo— sale con estado HTTP de error y `success: false`.",
+			"- **`data` viene siempre, también en los errores**, con un `mensaje` listo para mostrarle al cliente. Así el bot puede leer `data.mensaje` sin ramificar por `success`.",
 			"- **Ruteá por el campo `codigo`**, no por el estado HTTP a secas: cuatro casos distintos comparten el 401.",
 			"- El código del OTP **nunca viaja** en la respuesta: se valida en el servicio 2.",
 			"",
@@ -575,6 +580,7 @@ export const especificacionBotCobros = {
 					"| `moraPorConfirmar` | `true` = tiene mora pero su monto no se puede citar. El saldo lo refresca un job a las 23:59: entre que el cliente paga y esa corrida, la cifra guardada no cuadra. Antes que decirle un número equivocado, no se manda ninguno — conviene ofrecerle hablar con su asesor |",
 					"| `convenio` | `null` si no tiene |",
 					"| `asesor` | Con quién puede hablar el cliente sobre este crédito. `telefono` puede venir vacío |",
+					"| `mensajes` | **Los mismos datos ya escritos para el chat**, en tres formatos: `titulo` (una línea), `resumen` (lo accionable) y `completo` (todo). Se pueden pegar tal cual — traen emojis y negrita de WhatsApp (`*así*`). Los campos de arriba siguen estando para lo que necesites ramificar |",
 					"| `vehiculo` | `null` si el crédito no tiene vehículo registrado — se responde igual, no es error |",
 				].join("\n"),
 				operationId: "infoCredito",
@@ -645,6 +651,14 @@ export const especificacionBotCobros = {
 												marca: "MAZDA",
 												modelo: "CX-5 GRAND TOURING AWD",
 												anio: 2016,
+											},
+											mensajes: {
+												titulo:
+													"⚠️ *MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*",
+												resumen:
+													"⚠️ *MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*\n📄 Cuota 8 de 84 · Q5,891.15\n⚠️ Tenés 2 cuotas atrasadas\n📅 Próximo pago: 30 de agosto de 2026",
+												completo:
+													"⚠️ *MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*\n\n💵 Monto del crédito: Q198,252.40\n📄 Cuota mensual: Q5,891.15\n🔢 Vas en la cuota 8 de 84\n⚠️ Tenés *2 cuotas atrasadas*\n📅 Próxima fecha de pago: 30 de agosto de 2026\n\n🤝 *Tu convenio de pago*\n   Cuota del convenio: Q981.86\n   Llevás 1 de 6 pagos\n   Te falta: Q4,909.29\n\n🚙 Vehículo: MAZDA CX-5 GRAND TOURING AWD 2016\n   Placa: P-247JYT\n\n👤 Tu asesor: Erik Rivas\n   📞 35111822",
 											},
 										},
 									},

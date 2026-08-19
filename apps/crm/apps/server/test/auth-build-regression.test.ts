@@ -13,6 +13,7 @@ const serverRoot = fileURLToPath(new URL("..", import.meta.url));
 const crmRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 const dockerfilePath = new URL("../Dockerfile", import.meta.url);
+const webDockerfilePath = new URL("../../../Dockerfile", import.meta.url);
 const deployScriptPath = new URL("../../../deploy.sh", import.meta.url);
 const crmPackagePath = new URL("../../../package.json", import.meta.url);
 const serverPackagePath = new URL("../package.json", import.meta.url);
@@ -22,6 +23,41 @@ const harnessPath = new URL("./compiled-auth-sql-harness.ts", import.meta.url);
 function copyIntoFixture(source: string, destination: string) {
 	mkdirSync(dirname(destination), { recursive: true });
 	cpSync(source, destination, { recursive: true });
+}
+
+function readInputArray(script: string, name: string) {
+	const block = script.match(new RegExp(`${name}=\\(([\\s\\S]*?)\\n\\)`));
+	expect(block, `${name} must be declared`).not.toBeNull();
+	return [...(block?.[1].matchAll(/"([^"]+)"/g) ?? [])].map(
+		(match) => match[1],
+	);
+}
+
+function readDockerCopySources(dockerfile: string) {
+	return dockerfile.split("\n").flatMap((line) => {
+		const tokens = line.trim().split(/\s+/);
+		if (tokens[0] !== "COPY" || tokens[1]?.startsWith("--from=")) {
+			return [];
+		}
+		return tokens.slice(1, -1);
+	});
+}
+
+function pathspecCovers(pathspec: string, source: string) {
+	const normalized = pathspec.replace(/^:\(top\)/, "");
+	if (!normalized.endsWith("/")) {
+		return source === normalized;
+	}
+	return source === normalized.slice(0, -1) || source.startsWith(normalized);
+}
+
+function expectInputsCoverSources(inputs: string[], sources: string[]) {
+	for (const source of sources) {
+		expect(
+			inputs.some((pathspec) => pathspecCovers(pathspec, source)),
+			`missing deploy input for ${source}`,
+		).toBe(true);
+	}
 }
 
 function createLockedCrmFixture(tempDir: string) {
@@ -118,26 +154,37 @@ describe("CRM API production auth build", () => {
 		);
 	});
 
-	it("tracks every manifest and shared package consumed by the CRM API image", async () => {
-		const deployScript = await readFile(deployScriptPath, "utf8");
+	it("tracks every build-context input consumed by the CRM images", async () => {
+		const [deployScript, serverDockerfile, webDockerfile] = await Promise.all([
+			readFile(deployScriptPath, "utf8"),
+			readFile(dockerfilePath, "utf8"),
+			readFile(webDockerfilePath, "utf8"),
+		]);
+		const serverInputs = readInputArray(deployScript, "SERVER_BUILD_INPUTS");
+		const webInputs = readInputArray(deployScript, "WEB_BUILD_INPUTS");
 
-		for (const input of [
-			":(top)apps/crm/apps/server/",
-			":(top)apps/crm/package.json",
-			":(top)apps/crm/bun.lock",
-			":(top)packages/infornet/",
-			":(top)packages/sms/",
-			":(top)packages/simpletech/",
-			":(top)packages/email/",
-		]) {
-			expect(deployScript).toContain(input);
+		expectInputsCoverSources(serverInputs, [
+			...readDockerCopySources(serverDockerfile),
+			"apps/crm/apps/server/Dockerfile",
+			".dockerignore",
+		]);
+		expectInputsCoverSources(webInputs, [
+			...readDockerCopySources(webDockerfile),
+			"apps/crm/Dockerfile",
+			".dockerignore",
+		]);
+
+		for (const name of ["SERVER_BUILD_INPUTS", "WEB_BUILD_INPUTS"]) {
+			expect(deployScript).toContain(
+				`git diff --quiet HEAD -- "\${${name}[@]}"`,
+			);
+			expect(deployScript).toContain(
+				`git diff --quiet --cached -- "\${${name}[@]}"`,
+			);
+			expect(deployScript).toContain(
+				`git diff --quiet "$COMPARE_MODE" HEAD -- "\${${name}[@]}"`,
+			);
 		}
-		expect(deployScript).toMatch(
-			/git diff --quiet HEAD -- "\$\{SERVER_BUILD_INPUTS\[@\]\}"/,
-		);
-		expect(deployScript).toMatch(
-			/git diff --quiet "\$COMPARE_MODE" HEAD -- "\$\{SERVER_BUILD_INPUTS\[@\]\}"/,
-		);
 	});
 
 	it("gates the production server image on the compiled auth SQL smoke during docker build", async () => {

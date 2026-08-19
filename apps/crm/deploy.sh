@@ -16,9 +16,27 @@ NC='\033[0m' # No Color
 ECR_REGISTRY="public.ecr.aws/a6w8m2u2"
 REGION="us-east-1"
 SERVER_BUILD_INPUTS=(
+    ":(top).dockerignore"
     ":(top)apps/crm/apps/server/"
+    ":(top)apps/crm/apps/web/package.json"
     ":(top)apps/crm/package.json"
     ":(top)apps/crm/bun.lock"
+    ":(top)packages/infornet/"
+    ":(top)packages/sms/"
+    ":(top)packages/simpletech/"
+    ":(top)packages/email/"
+)
+WEB_BUILD_INPUTS=(
+    ":(top).dockerignore"
+    ":(top)apps/crm/Dockerfile"
+    ":(top)apps/crm/nginx.conf"
+    ":(top)apps/crm/package.json"
+    ":(top)apps/crm/bun.lock"
+    ":(top)apps/crm/apps/web/"
+    ":(top)apps/crm/apps/server/package.json"
+    ":(top)apps/crm/apps/server/tsconfig.json"
+    ":(top)apps/crm/apps/server/src/lib/"
+    ":(top)apps/crm/apps/server/src/db/schema/"
     ":(top)packages/infornet/"
     ":(top)packages/sms/"
     ":(top)packages/simpletech/"
@@ -46,9 +64,9 @@ if [ "$COMPARE_MODE" = "uncommitted" ]; then
         SERVER_CHANGED=true
     fi
 
-    # Check for changes in web (both root Dockerfile and apps/web/)
+    # Check for changes in every input consumed by the web image
     WEB_CHANGED=false
-    if git diff --quiet HEAD -- apps/web/ Dockerfile && git diff --quiet --cached -- apps/web/ Dockerfile; then
+    if git diff --quiet HEAD -- "${WEB_BUILD_INPUTS[@]}" && git diff --quiet --cached -- "${WEB_BUILD_INPUTS[@]}"; then
         echo -e "${YELLOW}⏭️  No uncommitted changes in web${NC}"
     else
         echo -e "${GREEN}✓ Uncommitted changes detected in web${NC}"
@@ -75,9 +93,9 @@ else
         SERVER_CHANGED=true
     fi
 
-    # Check for changes in web (both root Dockerfile and apps/web/)
+    # Check for changes in every input consumed by the web image
     WEB_CHANGED=false
-    if git diff --quiet $COMPARE_MODE HEAD -- apps/web/ Dockerfile 2>/dev/null; then
+    if git diff --quiet "$COMPARE_MODE" HEAD -- "${WEB_BUILD_INPUTS[@]}" 2>/dev/null; then
         echo -e "${YELLOW}⏭️  No changes detected in web${NC}"
     else
         echo -e "${GREEN}✓ Changes detected in web${NC}"

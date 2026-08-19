@@ -42,6 +42,7 @@ día; si no está escrito, no está decidido.
 | [D-32](#d-32--registrar-una-boleta-ya-mueve-la-mora-y-por-eso-el-rechazo-es-revertir) | Registrar una boleta ya mueve la mora, y por eso el rechazo es Revertir | 🟢 |
 | [D-33](#d-33--una-boleta-son-varios-pagos-y-una-sola-notificación) | Una boleta son varios pagos, y una sola notificación | 🟢 |
 | [D-34](#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key) | La confirmación se protege con estado, no con idempotency key | 🟢 |
+| [D-35](#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza) | El webhook adelanta el aviso, el job lo garantiza | 🟢 |
 
 ---
 
@@ -1070,7 +1071,60 @@ decidió antes no meterle idempotencia (ver el caso de las facturas duplicadas y
    `409 CONFIRMACION_EN_CURSO`.
 3. Un job revisa los que llevan más de 5 minutos ahí y le pregunta a cartera si esa boleta
    existe, buscándola por la **`r2_key`** —que es única y quedó del lado de ellos en la tabla
-   `boletas`—: si existe, se completan los ids; si no, el borrador vuelve a `leida`.
+   `boletas`—: si no existe, el borrador vuelve a `leida`.
 
 Lo único que agrega del lado de cartera es un **endpoint de lectura**
 (`GET /pagos-por-boleta?url=…`), que no puede romper nada.
+
+**Encontrar filas no prueba que el registro quedó completo.** `insertPayment` **no es
+transaccional**: escribe `pagos_credito` y `boletas` una por una contra el `db` global, sin
+envolver el loop de cuotas. Si se cayó a mitad de repartir entre tres cuotas, quedaron filas
+commiteadas *y* un 500 de vuelta. Por eso, cuando el job encuentra filas:
+
+- **no** vuelve a llamar a `newPayment` (duplicaría lo ya escrito);
+- deja el borrador en **`confirmada_a_verificar`**, no en `confirmada`;
+- avisa a **contabilidad y al asesor** para que revisen si el monto quedó completo;
+- al cliente le manda un mensaje neutro (*"estamos procesando tu pago"*), nunca "recibido".
+
+Que `insertPayment` no sea atómico es un problema preexistente de cartera y excede este
+feature. Lo que se decide acá es que el bot no lo convierta en un pago a medias silencioso.
+
+---
+
+## D-35 · El webhook adelanta el aviso, el job lo garantiza
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — hallazgo de la revisión del contrato
+
+**Contexto.** [D-28](#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta) dice que
+cartera avisa al CRM con try/catch, log y seguir. Eso protege a contabilidad, pero deja un
+hueco: **si el CRM está caído justo en ese segundo, el evento se pierde para siempre**. Y el
+aviso no es un adorno — es el producto: un pago validado del que el cliente nunca se entera
+es peor que no tener circuito.
+
+Aparte, faltaba un emisor. **El botón "Validar Pago" de contabilidad no llama a
+`/revalidatePayment`**: llama a `pagosService.aplicarPago` → `GET /aplicar-pago?pago_id=…` →
+`aplicarPagoAlCredito`, que es quien mueve el pago de `pending` a `validated`.
+`/revalidatePayment` es la acción "Revalidar", reservada a ADMIN. Colgar el circuito solo de
+ahí habría perdido **el caso normal**.
+
+**Opciones.**
+- A) Outbox con reintentos del lado de cartera (tabla + job en la app que mueve el dinero).
+- **B) El CRM no depende del aviso: un job de respaldo consulta el estado.**
+- C) Solo webhook, asumiendo la pérdida.
+
+**Decisión: B**, más agregar `/aplicar-pago` a los emisores.
+
+| Camino | Qué es | Cuándo actúa |
+| --- | --- | --- |
+| **Rápido** | El webhook `/pagos/evento` | Siempre que salga bien: el cliente se entera en segundos. |
+| **Red de seguridad** | Un job del CRM revisa las boletas confirmadas con pagos sin resolver y le pregunta a cartera su `validation_status` | Cada hora. Si alguno dejó de estar `pending`, se procesa como si el evento hubiera llegado. |
+
+A se descartó por dónde vive: meter una tabla de outbox y un job de reintentos **dentro de
+cartera** es agregarle responsabilidad de mensajería a la app que mueve el dinero, para
+resolver un problema que es nuestro. El job del CRM usa el mismo endpoint de lectura que ya
+pide [D-34](#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key) y no le
+agrega nada al camino de escritura.
+
+**Efecto lateral bueno:** ese job también cubre el caso de que cartera ni siquiera llegue a
+intentar el aviso —un deploy en el medio, un proceso que muere— sin ninguna coordinación
+extra entre las dos apps.

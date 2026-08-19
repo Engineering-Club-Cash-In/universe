@@ -257,9 +257,26 @@ Un reintento sobre un borrador en `confirmando` **no vuelve a llamar a cartera**
 de 5 minutos en `confirmando` y le pregunta a cartera si esa boleta existe — la busca por la
 `r2_key`, que es única y quedó en la tabla `boletas` de cartera:
 
-- **existe** → se completan los `pago_id`, el borrador pasa a `confirmada` y recién ahí se le
-  avisa al cliente;
-- **no existe** → vuelve a `leida` y el cliente puede confirmar de nuevo.
+- **no existe** → el borrador vuelve a `leida` y el cliente puede confirmar de nuevo;
+- **existe** → se guardan los `pago_id` encontrados y el borrador pasa a
+  **`confirmada_a_verificar`**, no a `confirmada`.
+
+**Por qué "a verificar" y no "lista".** `insertPayment` **no es transaccional**: escribe las
+filas de `pagos_credito` y de `boletas` una por una contra el `db` global, sin envolver el
+loop. Si se cayó a mitad de repartir entre tres cuotas, quedaron una o dos filas commiteadas
+y un 500 de vuelta. Encontrar filas con esa `r2_key` prueba que **algo** se escribió, no que
+se escribió **todo**.
+
+Por eso el job nunca vuelve a llamar a `newPayment` cuando encuentra filas —duplicaría lo ya
+escrito— y tampoco le dice al cliente "pago recibido". Lo que hace es:
+
+- dejar el borrador en `confirmada_a_verificar` con los ids que sí encontró;
+- **notificar a contabilidad y al asesor** para que revisen si el monto quedó completo;
+- al cliente, un mensaje neutro: *"estamos procesando tu pago, te avisamos"*.
+
+Que `insertPayment` no sea atómico es un problema de cartera que ya existía y excede este
+feature; acá solo se evita que el bot lo convierta en un pago a medias silencioso
+([D-34](./DECISIONES.md#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key)).
 
 Eso necesita un endpoint de lectura en cartera (`GET /pagos-por-boleta?url=…`), que es
 aditivo y no toca el camino de escritura. **No se mete una idempotency key en `newPayment`**:
@@ -397,10 +414,26 @@ disparar mensajes de WhatsApp.
 
 | `evento` | Qué pasó en cartera | Qué hace el CRM |
 | --- | --- | --- |
-| `validado` | `POST /revalidatePayment` | WhatsApp al **cliente**: pago acreditado. |
+| `validado` | `GET /aplicar-pago` — **el botón "Validar Pago" de conta** | WhatsApp al **cliente**: pago acreditado. |
+| `validado` | `POST /revalidatePayment` — "Revalidar", solo ADMIN | Lo mismo. |
 | `revertido` | `POST /reversePayment` | **Este es el rechazo.** WhatsApp al cliente + notificación al asesor. |
-| `regresado_a_pendiente` | `POST /revertPaymentToPending` | Notificación al asesor. **Al cliente no se le escribe**: para él no cambió nada, sigue en validación. |
+| `regresado_a_pendiente` | `POST /revertPaymentToPending` | Depende de si al cliente ya se le dijo que estaba acreditado — ver abajo. |
 | `marcado_falso` | `POST /false-payment` | Solo notificación al asesor, **marcada como alerta**: ver el recuadro. |
+
+> **La validación normal es `/aplicar-pago`, no `/revalidatePayment`.** El botón "Validar
+> Pago" de `paymentsTable.tsx` llama a `pagosService.aplicarPago(pagoId)`, que pega en
+> `GET /aplicar-pago?pago_id=…` y de ahí a `aplicarPagoAlCredito`, que es quien mueve el pago
+> de `pending` a `validated`. `/revalidatePayment` es otra acción ("Revalidar", reservada a
+> ADMIN). Si el circuito colgara solo de `/revalidatePayment`, **el caso normal —conta valida
+> la boleta y el cliente nunca se entera— se perdería entero.**
+
+> **`regresado_a_pendiente` no siempre es silencio.** `revertPaymentToPending` sirve
+> justamente para devolver a pendiente un pago **ya validado**. Si al cliente ya se le mandó
+> el "tu pago fue acreditado" (`bot_cobros_boletas.notificado_cliente_at` con valor), callarse
+> lo deja creyendo algo que dejó de ser cierto: se le vuelve a escribir —*"estamos revisando
+> de nuevo tu pago"*— y el ciclo de notificación de esa boleta se **reabre**
+> (`notificado_cliente_at` vuelve a `NULL`). Si nunca se le dijo nada, entonces sí: solo al
+> asesor, porque para el cliente no cambió nada.
 
 > **Rechazar una boleta es "Revertir Pago", no "marcar falso".** Es lo que hace conta hoy en
 > carteraFront, y es el único camino que **devuelve la mora** que el registro descontó (§5.1):
@@ -425,10 +458,28 @@ llenaría los logs de contabilidad de rojo.
 
 ### Del lado de cartera
 
-Los cuatro controladores emiten el aviso **después de que la transacción hizo commit**, con
-el patrón que ya existe en `services/crm.service.ts` (`notifyPayInvestors`): try/catch propio,
+Los controladores emiten el aviso **después de que la transacción hizo commit**, con el
+patrón que ya existe en `services/crm.service.ts` (`notifyPayInvestors`): try/catch propio,
 log y seguir. Un WhatsApp caído no puede tumbar la validación de un pago
 ([D-28](./DECISIONES.md#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta)).
+
+### El aviso se puede perder, y por eso hay un segundo camino
+
+"Try/catch, log y seguir" tiene un costo: si el CRM está caído justo en ese segundo, **ese
+evento no vuelve nunca**. Y no es un detalle cosmético — el aviso *es* el producto: un pago
+validado del que el cliente jamás se entera es peor que no tener circuito.
+
+En vez de montar un outbox con reintentos del lado de cartera —tabla nueva, job nuevo, en la
+app que mueve el dinero—, el CRM **se encarga de no depender del aviso**:
+
+| Camino | Qué es | Cuándo actúa |
+| --- | --- | --- |
+| **Rápido** | El webhook `/pagos/evento` | Siempre que salga bien: el cliente se entera en segundos. |
+| **Red de seguridad** | Un job del CRM revisa las boletas confirmadas que tienen pagos sin resolver y le **pregunta a cartera** en qué `validation_status` están | Cada hora. Si alguno ya no está `pending`, se procesa como si el evento hubiera llegado. |
+
+El job reusa el mismo endpoint de lectura del §4.1 (`GET /pagos-por-boleta`, que devuelve el
+`validation_status` de cada fila). Nada se pierde: el webhook adelanta el aviso, el job
+garantiza que ocurra ([D-35](./DECISIONES.md#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza)).
 
 ### A quién se le avisa
 
@@ -609,7 +660,11 @@ leerla (§7), igual que cualquier otra boleta del sistema. Del lado del CRM solo
 ```sql
 CREATE TABLE bot_cobros_boletas (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  otp_id              uuid NOT NULL REFERENCES otps(id) ON DELETE CASCADE,
+  -- SET NULL, no CASCADE: ver el recuadro de abajo.
+  otp_id              uuid REFERENCES otps(id) ON DELETE SET NULL,
+  -- Identidad propia, para sobrevivir a la purga del OTP.
+  lead_id             uuid REFERENCES leads(id) ON DELETE SET NULL,
+  co_debtor_id        uuid REFERENCES co_debtors(id) ON DELETE SET NULL,
   numero_sifco        text NOT NULL,
   credito_id          integer,
   intento             integer NOT NULL,
@@ -622,7 +677,8 @@ CREATE TABLE bot_cobros_boletas (
   numero_autorizacion text,
   cuenta_destino      text,
   confianza           text,
-  estado              text NOT NULL,           -- leida | confirmando | confirmada | descartada | fallida
+  estado              text NOT NULL,           -- leida | confirmando | confirmada |
+                                               -- confirmada_a_verificar | descartada | fallida
   motivo_fallo        text,
   confirmando_desde   timestamptz,             -- para el job de reconciliación (§4.1)
   notificado_cliente_at timestamptz,           -- un mensaje por boleta, no por pago (§6)
@@ -667,8 +723,23 @@ antes de mandar el mensaje (§6).
 reconciliación (§4.1) busca en cartera por esa key: es única y quedó guardada del lado de
 ellos en la tabla `boletas`.
 
-**Retención.** Los borradores sin confirmar se purgan a los **7 días** con el resto de la
-limpieza de PII ([D-14](./DECISIONES.md#d-14--retención-de-pii-y-logs)). Los confirmados se
+> **La boleta confirmada no puede colgar del OTP.** Con `ON DELETE CASCADE`, purgar un OTP
+> vencido —o borrar el lead, que cascadea hacia `otps`— se llevaría también la boleta ya
+> confirmada. Y ahí se rompe todo lo demás: el evento de conta llegaría con un `pago_id` que
+> ya no tiene fila, el CRM lo leería como `PAGO_NO_ES_DEL_BOT` y **el cliente nunca sabría que
+> su pago se acreditó**, aunque el pago exista en cartera.
+>
+> Por eso `otp_id` es `ON DELETE SET NULL` y la boleta guarda su propia identidad (`lead_id` /
+> `co_debtor_id`). Si al momento del evento no se puede resolver un teléfono —porque el lead
+> también se borró—, se notifica **solo al asesor** en vez de perder el hecho.
+>
+> La purga de §10 aplica a los borradores **sin confirmar**. Una boleta confirmada vive
+> mientras viva su pago; es la única prueba de por qué hay una boleta en cartera que nadie del
+> equipo subió.
+
+**Retención.** Los borradores **sin confirmar** se purgan a los **7 días** con el resto de la
+limpieza de PII ([D-14](./DECISIONES.md#d-14--retención-de-pii-y-logs)) — y esa purga no puede
+llegarles por cascada desde `otps` (recuadro de arriba). Los confirmados se
 conservan mientras exista el pago: son la trazabilidad de por qué hay una boleta en cartera
 que nadie del equipo subió. El archivo en R2 sigue la misma suerte que cualquier otra boleta
 —no se borra— salvo los huérfanos de §7, que quedan identificados por su `r2_key`.
@@ -731,7 +802,7 @@ Tres PR a `COBROS-02`, en este orden:
 | --- | --- | --- |
 | **A** | Tablas + `/boleta/leer` + descarga con allowlist + lectura con IA + **copia a R2** + mapeo de bancos + Swagger | Sí: devuelve datos y deja el archivo, no registra pago. |
 | **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment` y `GET /pagos-por-boleta` | Sí, contra la instancia de dev de cartera. |
-| **C** | Endpoint de eventos + emisión desde los controladores de cartera + agrupación por boleta + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
+| **C** | Endpoint de eventos + emisión desde `aplicar-pago`, `revalidatePayment`, `reversePayment`, `revertPaymentToPending` y `false-payment` + job de respaldo (§6) + agrupación por boleta + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
 
 **Los tres cambios en cartera del PR B son aditivos**: dos campos nuevos en respuestas que ya
 existen y un endpoint de lectura. Ninguno toca el camino de escritura de un pago.

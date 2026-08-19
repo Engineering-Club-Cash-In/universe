@@ -6,9 +6,9 @@ import {
 } from "./insurance-selection";
 
 describe("selectInsuranceProvider", () => {
-	test("keeps Universales for eligible vehicle at Q257,000 or below", () => {
+	test("keeps Universales for eligible vehicle below Q257,000", () => {
 		const result = selectInsuranceProvider({
-			insuredAmount: 257000,
+			insuredAmount: 256999.99,
 			vehicleType: "particular",
 			universalesCost: 582.76,
 			gytCost: 500,
@@ -23,9 +23,9 @@ describe("selectInsuranceProvider", () => {
 	test.each([
 		"particular",
 		"nuevo",
-	])("uses GyT for eligible type %s over Q257,000 when cheaper", (vehicleType) => {
+	])("uses GyT for eligible type %s at Q257,000 when cheaper", (vehicleType) => {
 		const result = selectInsuranceProvider({
-			insuredAmount: 257000.01,
+			insuredAmount: 257000,
 			vehicleType,
 			universalesCost: 585.86,
 			gytCost: 584.96,
@@ -37,6 +37,25 @@ describe("selectInsuranceProvider", () => {
 		expect(result.internalInsuranceCost).toBe(584.96);
 		expect(result.insuranceSavingsToMembership).toBeCloseTo(0.9, 2);
 		expect(result.effectiveMembershipCost).toBeCloseTo(100.9, 2);
+	});
+
+	test("calculates the Q257,000 used/agencia seam values when GyT is cheaper", () => {
+		const result = selectInsuranceProvider({
+			insuredAmount: 257000,
+			vehicleType: "particular",
+			universalesCost: 715.28,
+			gytCost: 714.37,
+			membershipCost: 1036.19,
+		});
+
+		expect(result.provider).toBe("gyt");
+		expect(result.customerInsuranceCost).toBe(715.28);
+		expect(result.internalInsuranceCost).toBe(714.37);
+		expect(result.insuranceSavingsToMembership).toBe(0.91);
+		expect(result.effectiveMembershipCost).toBe(1037.1);
+		expect(
+			result.customerInsuranceCost + result.effectiveMembershipCost,
+		).toBeCloseTo(1752.38, 2);
 	});
 
 	test.each([
@@ -73,6 +92,8 @@ describe("selectInsuranceProvider", () => {
 	test.each([
 		"panel",
 		"camion",
+		"bus",
+		"buses",
 		"otro",
 	])("keeps Universales for non-approved type %s", (vehicleType) => {
 		const result = selectInsuranceProvider({

@@ -123,6 +123,10 @@ import {
 	sendWhatsappTemplate,
 	sendWhatsappTemplateBatch,
 } from "../lib/simpletech";
+import {
+	buscarAsesorCarteraPorEmail,
+	obtenerPaginaAgenda,
+} from "../services/agenda-cobros-source";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
@@ -2463,9 +2467,7 @@ export const cobrosRouter = {
 					// Mismo patrón ya corregido en getConveniosListado /
 					// getCierreDiarioPorRango.
 					const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
-					const propio = asesoresConBuckets.find(
-						(a) => a.email_cash_in?.trim().toLowerCase() === email,
-					);
+					const propio = buscarAsesorCarteraPorEmail(asesoresConBuckets, email);
 					if (!propio) {
 						// Usuario cobros sin asesor de cartera vinculado por correo:
 						// agenda vacía con aviso (nunca la de otros).
@@ -2495,10 +2497,11 @@ export const cobrosRouter = {
 				// WhatsApp (premora) siguen siendo solo B0. Filtro de asesor +
 				// paginación EN EL SQL: el día pesado llega de a perPage y el LIMIT
 				// aplica sobre las filas del asesor, no sobre el universo.
-				const respuesta = await carteraBackClient.getCuotasProximasVencer(
-					[input.dia],
-					{ soloAlDia: false, asesorId: asesorIdFiltro, page, perPage },
-				);
+				const respuesta = await obtenerPaginaAgenda(input.dia, {
+					asesorId: asesorIdFiltro,
+					page,
+					perPage,
+				});
 				const cuotas = respuesta.data ?? [];
 				const total = respuesta.total ?? cuotas.length;
 				const totalPages = respuesta.totalPages ?? 1;
@@ -3008,19 +3011,70 @@ export const cobrosRouter = {
 				// paralelo) en vez de forzar un perPage gigante en una sola
 				// llamada — mismo patrón que obtenerTodasLasPaginasCreditos, arriba
 				// en este archivo.
-				const universoData = await fetchAllPages(
-					async (page) => {
-						const resp = await carteraBackClient.getColaDiaSLA({
-							asesorId: asesorIdFiltro,
-							buckets: input.buckets,
-							page,
-							perPage: 100,
-						});
-						return { data: resp.data, totalPages: resp.totalPages ?? 0 };
-					},
-					{ maxPages: 200 }, // 200 * 100 = 20k créditos, muy por encima de la cartera real
-				);
+				// Cuotas que vencen HOY (D-0) — fuente independiente de SLA
+				// (getCuotasProximasVencer, no getColaDiaSLA), mismo helper que usa
+				// getAgendaDia. En paralelo con el universo SLA: no dependen entre sí.
+				//
+				// Sin asesorId acá A PROPÓSITO: getColaDiaSLA filtra por el POOL del
+				// bucket del asesor (asesor_bucket — un asesor puede cubrir créditos
+				// de OTRO asesor por el pool, ver docs/features/cobros-02/
+				// 04-operacion-diaria.md), pero getCuotasProximasVencer filtra
+				// asesor_id por el DUEÑO directo del crédito (creditos.asesor_id) —
+				// mismo parámetro, distinto eje en cartera-back. Filtrar D-0 acá con
+				// asesorIdFiltro dejaba fuera de venceHoySet los créditos que un
+				// asesor cubre solo por pool (Codex PR #1334). Sin filtro de asesor,
+				// la intersección real ocurre más abajo: venceHoySet solo se
+				// consulta para SIFCOs que ya están en `universo` (el pool SLA), así
+				// que el scoping correcto lo sigue dando el universo, no esta query.
+				const [universoData, cuotasHoyData] = await Promise.all([
+					fetchAllPages(
+						async (page) => {
+							const resp = await carteraBackClient.getColaDiaSLA({
+								asesorId: asesorIdFiltro,
+								buckets: input.buckets,
+								page,
+								perPage: 100,
+							});
+							return { data: resp.data, totalPages: resp.totalPages ?? 0 };
+						},
+						{ maxPages: 200 }, // 200 * 100 = 20k créditos, muy por encima de la cartera real
+					),
+					fetchAllPages(
+						async (page) => {
+							const resp = await obtenerPaginaAgenda(0, {
+								page,
+								perPage: 200,
+							});
+							return {
+								data: resp.data ?? [],
+								totalPages: resp.totalPages ?? 0,
+							};
+						},
+						{ maxPages: 200 },
+					),
+				]);
 				const universo = { data: universoData };
+				// venceHoy solo se marca sobre créditos que ya están en el pool SLA
+				// (getColaDiaSLA excluye B0 — "Cartera Sana" no tiene SLA). Un
+				// crédito B0 con cuota venciendo hoy no entra a esta cola; mismo
+				// hueco que ya tenía la tarjeta "Vencen hoy" original. La
+				// intersección real contra el universo (pool) ocurre acá: aunque
+				// cuotasHoyData trae D-0 de TODA la cartera (sin filtro de asesor),
+				// venceHoySet.has() abajo solo se consulta para SIFCOs que ya
+				// pasaron el filtro de pool del universo SLA.
+				const venceHoySet = new Set(
+					cuotasHoyData.map((c) => c.numero_credito_sifco),
+				);
+				const montoCuotaHoyPorSifco = new Map<string, string>();
+				for (const cuota of cuotasHoyData) {
+					// Primera cuota gana si un crédito tiene más de una vencer hoy.
+					if (!montoCuotaHoyPorSifco.has(cuota.numero_credito_sifco)) {
+						montoCuotaHoyPorSifco.set(
+							cuota.numero_credito_sifco,
+							cuota.monto_cuota,
+						);
+					}
+				}
 
 				if (universo.data.length === 0) {
 					return {
@@ -3193,6 +3247,7 @@ export const cobrosRouter = {
 							{
 								fechaLimiteSla: credito.fecha_limite_sla,
 								contactadoHoy: caso ? contactadoHoyPorCaso.has(caso.id) : false,
+								venceHoy: venceHoySet.has(credito.numero_credito_sifco),
 								promesas: promesasCredito,
 								diasSinContacto,
 							},
@@ -3252,6 +3307,9 @@ export const cobrosRouter = {
 							vehiculoPlaca: caso?.vehiculoPlaca ?? null,
 							slaHoy: clasificacion.slaHoy,
 							promesaHoy: clasificacion.promesaHoy,
+							venceHoy: clasificacion.venceHoy,
+							montoCuotaHoy:
+								montoCuotaHoyPorSifco.get(credito.numero_credito_sifco) ?? null,
 							incumplida: clasificacion.incumplida,
 							promesaProxima: clasificacion.promesaProxima,
 							// CB-030: vigencia real, NO derivable de los otros flags —
@@ -3273,6 +3331,7 @@ export const cobrosRouter = {
 							{
 								fechaLimiteSla: credito.fecha_limite_sla,
 								contactadoHoy: caso ? contactadoHoyPorCaso.has(caso.id) : false,
+								venceHoy: venceHoySet.has(credito.numero_credito_sifco),
 								promesas: caso ? (promesasPorCaso.get(caso.id) ?? []) : [],
 								diasSinContacto: caso
 									? (diasSinContactoPorCaso.get(caso.id) ?? null)

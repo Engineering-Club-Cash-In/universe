@@ -411,6 +411,9 @@ export async function obtenerColaOperacionAsesor(
 				{
 					fechaLimiteSla: credito.fecha_limite_sla,
 					contactadoHoy: caso ? contactadoHoy.has(caso.id) : false,
+					// D-0 lo maneja aparte obtenerAgendaAsesor — este pipeline solo
+					// conserva sla_hoy/promesa_hoy, nunca lee clasificacion.venceHoy.
+					venceHoy: false,
 					promesas: caso ? (promesasPorCaso.get(caso.id) ?? []) : [],
 					diasSinContacto: caso ? (diasSinContacto.get(caso.id) ?? null) : null,
 				},

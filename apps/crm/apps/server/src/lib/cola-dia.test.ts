@@ -20,6 +20,7 @@ function creditoBase(
 	return {
 		fechaLimiteSla: null,
 		contactadoHoy: false,
+		venceHoy: false,
 		promesas: [],
 		diasSinContacto: null,
 		...overrides,
@@ -37,6 +38,7 @@ function clasificacionBase(
 	return {
 		slaHoy: false,
 		promesaHoy: false,
+		venceHoy: false,
 		incumplida: false,
 		promesaProxima: false,
 		sinContacto: false,
@@ -124,6 +126,36 @@ describe("clasificarCreditoColaDia — promesa de pago", () => {
 	});
 });
 
+describe("clasificarCreditoColaDia — vence hoy (cuota)", () => {
+	test("venceHoy true en el input → venceHoy true en la clasificación", () => {
+		const c = clasificarCreditoColaDia(creditoBase({ venceHoy: true }), HOY);
+		expect(c.venceHoy).toBe(true);
+	});
+
+	test("venceHoy false en el input → venceHoy false, sin importar SLA/promesa", () => {
+		const c = clasificarCreditoColaDia(
+			creditoBase({
+				venceHoy: false,
+				fechaLimiteSla: "2026-07-23",
+				promesas: [{ estadoPromesa: "pendiente", fechaPrometida: HOY }],
+			}),
+			HOY,
+		);
+		expect(c.venceHoy).toBe(false);
+		expect(c.slaHoy).toBe(true);
+		expect(c.promesaHoy).toBe(true);
+	});
+
+	test("venceHoy y slaHoy pueden ser true a la vez — fuentes independientes", () => {
+		const c = clasificarCreditoColaDia(
+			creditoBase({ venceHoy: true, fechaLimiteSla: "2026-07-23" }),
+			HOY,
+		);
+		expect(c.venceHoy).toBe(true);
+		expect(c.slaHoy).toBe(true);
+	});
+});
+
 describe("clasificarCreditoColaDia — días sin contacto", () => {
 	test("6 días sin contacto (> umbral de 5) → sinContacto", () => {
 		const c = clasificarCreditoColaDia(
@@ -159,10 +191,11 @@ describe("clasificarCreditoColaDia — días sin contacto", () => {
 });
 
 describe("clasificarCreditoColaDia — solapes", () => {
-	test("un crédito puede calificar en las 4 categorías a la vez", () => {
+	test("un crédito puede calificar en todas las categorías a la vez", () => {
 		const c = clasificarCreditoColaDia(
 			creditoBase({
 				fechaLimiteSla: "2026-07-23",
+				venceHoy: true,
 				promesas: [
 					{ estadoPromesa: "pendiente", fechaPrometida: HOY },
 					{ estadoPromesa: "incumplida", fechaPrometida: AYER },
@@ -174,6 +207,7 @@ describe("clasificarCreditoColaDia — solapes", () => {
 		expect(c).toEqual({
 			slaHoy: true,
 			promesaHoy: true,
+			venceHoy: true,
 			incumplida: true,
 			promesaProxima: false,
 			sinContacto: true,
@@ -257,8 +291,15 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 		const c = clasificacionBase({ slaHoy: true });
 		expect(calificaParaFiltro(c, "sla_hoy")).toBe(true);
 		expect(calificaParaFiltro(c, "promesa_hoy")).toBe(false);
+		expect(calificaParaFiltro(c, "vence_hoy")).toBe(false);
 		expect(calificaParaFiltro(c, "incumplida")).toBe(false);
 		expect(calificaParaFiltro(c, "sin_contacto")).toBe(false);
+	});
+
+	test("calificaParaFiltro('vence_hoy') solo mira venceHoy", () => {
+		const c = clasificacionBase({ venceHoy: true });
+		expect(calificaParaFiltro(c, "vence_hoy")).toBe(true);
+		expect(calificaParaFiltro(c, "sla_hoy")).toBe(false);
 	});
 
 	test("calificaParaFiltro('sin_contacto') solo mira sinContacto", () => {
@@ -272,12 +313,13 @@ describe("calificaParaColaDia / calificaParaFiltro", () => {
 });
 
 describe("ordenColaDia", () => {
-	test("prioriza slaHoy sobre promesaHoy sobre incumplida sobre sinContacto", () => {
+	test("prioriza slaHoy > promesaHoy > venceHoy > incumplida > promesaProxima > sinContacto", () => {
 		expect(
 			ordenColaDia(
 				clasificacionBase({
 					slaHoy: true,
 					promesaHoy: true,
+					venceHoy: true,
 					incumplida: true,
 					sinContacto: true,
 				}),
@@ -287,21 +329,31 @@ describe("ordenColaDia", () => {
 			ordenColaDia(
 				clasificacionBase({
 					promesaHoy: true,
+					venceHoy: true,
 					incumplida: true,
 					sinContacto: true,
 				}),
 			),
 		).toBe(1);
 		expect(
-			ordenColaDia(clasificacionBase({ incumplida: true, sinContacto: true })),
+			ordenColaDia(
+				clasificacionBase({
+					venceHoy: true,
+					incumplida: true,
+					sinContacto: true,
+				}),
+			),
 		).toBe(2);
-		// CB-029: promesa proxima va debajo de las urgentes (3), arriba de sin contacto (4).
+		expect(
+			ordenColaDia(clasificacionBase({ incumplida: true, sinContacto: true })),
+		).toBe(3);
+		// CB-029: promesa proxima va debajo de las urgentes (4), arriba de sin contacto (5).
 		expect(
 			ordenColaDia(
 				clasificacionBase({ promesaProxima: true, sinContacto: true }),
 			),
-		).toBe(3);
-		expect(ordenColaDia(clasificacionBase({ sinContacto: true }))).toBe(4);
+		).toBe(4);
+		expect(ordenColaDia(clasificacionBase({ sinContacto: true }))).toBe(5);
 	});
 });
 
@@ -313,6 +365,7 @@ describe("clasificarCreditoColaDia - promesa proxima (CB-029)", () => {
 			{
 				fechaLimiteSla: null,
 				contactadoHoy: false,
+				venceHoy: false,
 				promesas: [
 					{
 						estadoPromesa: "pendiente",
@@ -336,6 +389,7 @@ describe("clasificarCreditoColaDia - promesa proxima (CB-029)", () => {
 			{
 				fechaLimiteSla: null,
 				contactadoHoy: false,
+				venceHoy: false,
 				promesas: [
 					{ estadoPromesa: "pendiente", fechaPrometida: EN_TRES_DIAS },
 				],

@@ -1552,6 +1552,10 @@ export const inversionistasRouter = new Elysia()
         );
 
         if (!resultado.success) {
+          if ((resultado as any).code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+            set.status = 422;
+            return resultado;
+          }
           set.status = 500;
           return {
             success: false,
@@ -1602,6 +1606,18 @@ export const inversionistasRouter = new Elysia()
           inversionistaId: t.Number(),
           totalCreditosConPagos: t.Number(),
           pagosGenerados: t.Boolean(),
+          data: t.Array(t.Any()),
+        }),
+        422: t.Object({
+          success: t.Literal(false),
+          warning: t.Literal(true),
+          code: t.Literal("CREDIT_PENDING_RETURN_AUTHORIZATION"),
+          message: t.String(),
+          creditos_bloqueados: t.Array(t.Object({
+            credito_id: t.Number(),
+            numero_credito_sifco: t.String(),
+            estado_devolucion: t.Literal("PENDIENTE_AUTORIZACION"),
+          })),
           data: t.Array(t.Any()),
         }),
         500: t.Object({

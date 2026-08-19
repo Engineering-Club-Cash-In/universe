@@ -14,6 +14,10 @@ const crmRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 const dockerfilePath = new URL("../Dockerfile", import.meta.url);
 const webDockerfilePath = new URL("../../../Dockerfile", import.meta.url);
+const deployWorkflowPath = new URL(
+	"../../../../../.github/workflows/deploy-prod.yaml",
+	import.meta.url,
+);
 const deployScriptPath = new URL("../../../deploy.sh", import.meta.url);
 const crmPackagePath = new URL("../../../package.json", import.meta.url);
 const serverPackagePath = new URL("../package.json", import.meta.url);
@@ -56,6 +60,33 @@ function expectInputsCoverSources(inputs: string[], sources: string[]) {
 		expect(
 			inputs.some((pathspec) => pathspecCovers(pathspec, source)),
 			`missing deploy input for ${source}`,
+		).toBe(true);
+	}
+}
+
+function readWorkflowFilter(workflow: string, name: string) {
+	const block = workflow.match(
+		new RegExp(`^ {12}${name}:\\n((?: {14}- '[^']+'\\n)+)`, "m"),
+	);
+	expect(block, `${name} workflow filter must be declared`).not.toBeNull();
+	return [...(block?.[1].matchAll(/- '([^']+)'/g) ?? [])].map(
+		(match) => match[1],
+	);
+}
+
+function workflowFilterCovers(filter: string, source: string) {
+	if (!filter.endsWith("/**")) {
+		return filter === source;
+	}
+	const directory = filter.slice(0, -3);
+	return source === directory || source.startsWith(`${directory}/`);
+}
+
+function expectWorkflowFilterCovers(filters: string[], sources: string[]) {
+	for (const source of sources) {
+		expect(
+			filters.some((filter) => workflowFilterCovers(filter, source)),
+			`missing workflow filter for ${source}`,
 		).toBe(true);
 	}
 }
@@ -185,6 +216,27 @@ describe("CRM API production auth build", () => {
 				`git diff --quiet "$COMPARE_MODE" HEAD -- "\${${name}[@]}"`,
 			);
 		}
+	});
+
+	it("keeps production workflow filters aligned with both CRM Dockerfiles", async () => {
+		const [workflow, serverDockerfile, webDockerfile] = await Promise.all([
+			readFile(deployWorkflowPath, "utf8"),
+			readFile(dockerfilePath, "utf8"),
+			readFile(webDockerfilePath, "utf8"),
+		]);
+		const serverFilter = readWorkflowFilter(workflow, "crm-api");
+		const webFilter = readWorkflowFilter(workflow, "crm-web");
+
+		expectWorkflowFilterCovers(serverFilter, [
+			...readDockerCopySources(serverDockerfile),
+			"apps/crm/apps/server/Dockerfile",
+			".dockerignore",
+		]);
+		expectWorkflowFilterCovers(webFilter, [
+			...readDockerCopySources(webDockerfile),
+			"apps/crm/Dockerfile",
+			".dockerignore",
+		]);
 	});
 
 	it("gates the production server image on the compiled auth SQL smoke during docker build", async () => {

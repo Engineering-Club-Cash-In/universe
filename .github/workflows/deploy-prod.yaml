@@ -79,7 +79,9 @@ jobs:
             cartera-front:
               - 'apps/carteraFront/**'
             crm-api:
+              - '.dockerignore'
               - 'apps/crm/apps/server/**'
+              - 'apps/crm/apps/web/package.json'
               - 'apps/crm/package.json'
               - 'apps/crm/bun.lock'
               - 'packages/infornet/**'
@@ -87,6 +89,7 @@ jobs:
               - 'packages/simpletech/**'
               - 'packages/email/**'
             crm-web:
+              - '.dockerignore'
               - 'apps/crm/**'
               - 'packages/infornet/**'
               - 'packages/sms/**'

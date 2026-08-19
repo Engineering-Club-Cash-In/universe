@@ -2163,12 +2163,23 @@ if (facturasExistentes.length > 0) {
             });
 
             if (filasCongeladas.length > 0) {
-              // DO NOTHING: se sella UNA vez. Re-facturar no vuelve a congelar —
-              // lo que se preserva es el reparto del día en que salieron los DTEs.
-              await db
-                .insert(pagos_credito_inversionistas_facturado)
-                .values(filasCongeladas)
-                .onConflictDoNothing();
+              // REEMPLAZO, no "sellar una sola vez": llegar hasta acá significa que
+              // se acaban de emitir DTEs. El guard de facturas activas corta con 400
+              // antes, así que el único modo de volver a pasar es que TODAS las
+              // facturas del pago se hayan anulado y se esté re-facturando. En ese
+              // caso los DTEs nuevos se emitieron con el roster de HOY: conservar el
+              // congelado viejo haría que el reporte y el cierre repartieran según
+              // unas facturas que ya no existen (Codex P1, PR #1335).
+              // DELETE + INSERT (no upsert) para no dejar filas de inversionistas
+              // que ya no participan. Mismo patrón que facturacion_desglose.
+              await db.transaction(async (tx) => {
+                await tx.execute(
+                  sql`DELETE FROM cartera.pagos_credito_inversionistas_facturado WHERE pago_id = ${pago_id}`
+                );
+                await tx
+                  .insert(pagos_credito_inversionistas_facturado)
+                  .values(filasCongeladas);
+              });
               console.log(
                 `🔒 Reparto congelado: ${filasCongeladas.length} inversionista(s) para pago ${pago_id}`
               );
@@ -2688,6 +2699,31 @@ if (facturasExistentes.length > 0) {
         console.error(
           '⚠️ No se pudo limpiar el desglose genérico de la factura anulada (NO afecta la anulación):',
           (limpiezaError as Error).message
+        );
+      }
+
+      // 🔒 Si esta era la ÚLTIMA factura ACTIVA del pago, el reparto congelado deja
+      //    de tener respaldo: quedaría el reparto de unos DTEs que ya no existen, y
+      //    el reporte y el cierre repartirían con él. Se borra; si el pago se
+      //    re-factura, la facturación lo vuelve a sellar con el roster de ese día
+      //    (Codex P1, PR #1335). Mientras no haya congelado, el reporte cae al
+      //    comportamiento de siempre (simular). Best-effort: no rompe la anulación.
+      try {
+        if (facturaAnulada.pago_id != null) {
+          await db.execute(sql`
+            DELETE FROM cartera.pagos_credito_inversionistas_facturado
+            WHERE pago_id = ${facturaAnulada.pago_id}
+              AND NOT EXISTS (
+                SELECT 1 FROM cartera.facturas_electronicas fe
+                WHERE fe.pago_id = ${facturaAnulada.pago_id}
+                  AND fe.status = 'ACTIVA'
+              )
+          `);
+        }
+      } catch (limpiezaCongelado) {
+        console.error(
+          '⚠️ No se pudo limpiar el reparto congelado de la factura anulada (NO afecta la anulación):',
+          (limpiezaCongelado as Error).message
         );
       }
 

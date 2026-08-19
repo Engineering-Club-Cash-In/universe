@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { differenceInDays } from "date-fns";
 import {
@@ -13,7 +13,7 @@ import {
 	PhoneOff,
 	TriangleAlert,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ import {
 	labelBucketConCodigo,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import { resumirVencimientosAgenda } from "@/lib/cobros/mi-agenda";
 import { parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
@@ -45,6 +46,7 @@ export const Route = createFileRoute("/cobros/mi-dia")({
 type Categoria =
 	| "sla_hoy"
 	| "promesa_hoy"
+	| "vence_hoy"
 	| "incumplida"
 	| "promesa_proxima"
 	| "sin_contacto";
@@ -71,6 +73,8 @@ interface ColaItem {
 	vehiculoPlaca: string | null;
 	slaHoy: boolean;
 	promesaHoy: boolean;
+	venceHoy: boolean;
+	montoCuotaHoy: string | null;
 	incumplida: boolean;
 	promesaProxima: boolean;
 	sinContacto: boolean;
@@ -87,6 +91,20 @@ interface ColaResponse {
 	perPage: number;
 	totalPages: number;
 	conteos?: Record<Categoria, number>;
+}
+
+interface AgendaItem {
+	cuotaId: number;
+	creditoId: number;
+	numeroCreditoSifco: string;
+	cliente: string | null;
+	bucket: number | null;
+	montoCuota: string;
+}
+
+interface AgendaResponse {
+	items: AgendaItem[];
+	total: number;
 }
 
 /** Fila de la cartera completa (getTodosLosCreditos), NO de la cola. */
@@ -148,6 +166,14 @@ interface FilaCaso {
 }
 
 const PER_PAGE = 25;
+// D-0 ya no se pide acá: "vence hoy" viene fusionado en getColaDia (conteos.vence_hoy).
+const DIAS_AGENDA = [1, 2, 3, 4, 5] as const;
+const PER_PAGE_AGENDA = 200;
+
+function etiquetaDiaProximo(dia: number) {
+	if (dia === 1) return "Mañana";
+	return `En ${dia} días`;
+}
 
 /** Bucket numérico del motor (0-5) → key de estadoMora del catálogo de UI. */
 const KEY_POR_NUMERO = [
@@ -170,7 +196,7 @@ const CHIPS: Array<{
 }> = [
 	{
 		key: "sla_hoy",
-		label: "Por gestionar hoy",
+		label: "SLA por gestionar hoy",
 		icon: Phone,
 		activo:
 			"border-rose-300 bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200",
@@ -181,6 +207,13 @@ const CHIPS: Array<{
 		icon: CalendarClock,
 		activo:
 			"border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
+	},
+	{
+		key: "vence_hoy",
+		label: "Cuota vence hoy",
+		icon: CalendarClock,
+		activo:
+			"border-orange-300 bg-orange-50 text-orange-800 dark:bg-orange-950/40 dark:text-orange-200",
 	},
 	{
 		key: "incumplida",
@@ -350,6 +383,14 @@ function CategoriaBadges({ item }: { item: ColaItem }) {
 					Promesa hoy
 				</Badge>
 			)}
+			{item.venceHoy && (
+				<Badge
+					variant="outline"
+					className="border-transparent bg-orange-100 text-[10px] text-orange-800 dark:bg-orange-900/40 dark:text-orange-300"
+				>
+					Cuota vence hoy
+				</Badge>
+			)}
 			{item.incumplida && (
 				<Badge
 					variant="outline"
@@ -388,24 +429,37 @@ function MiDiaPage() {
 
 	const [filtro, setFiltro] = useState<Categoria | null>(null);
 	const [page, setPage] = useState(1);
-	const [agendaAbierta, setAgendaAbierta] = useState(false);
+	const [proximosDiasAbiertos, setProximosDiasAbiertos] = useState(false);
 	const [detalle, setDetalle] = useState<FilaCaso | null>(null);
+	const tablaRef = useRef<HTMLDivElement>(null);
 	// null = automático (prioritarios si hay algo urgente, si no toda la
 	// cartera); al tocar el toggle manda la elección del asesor.
 	const [alcanceManual, setAlcanceManual] = useState<Alcance | null>(null);
 
+	// "Mi día" es la agenda PERSONAL del asesor logueado. Un rol que puede ver
+	// todos (admin/supervisor, canAssignCobros) no manda asesorId acá — el
+	// servidor entonces no filtra por asesor y devolvería la cartera de TODOS
+	// los asesores mezclada, bajo un copy en primera persona ("tu cartera").
+	// Se corta antes de disparar esas queries: esta pantalla no es para elegir
+	// un asesor a mirar (para eso está /cobros/cola).
+	const esVistaPersonal = !!userRole && !PERMISSIONS.canAssignCobros(userRole);
+
 	const colaQuery = useQuery({
 		...orpc.getColaDia.queryOptions({
 			input: {
-				filtro: filtro ?? undefined,
+				// Cast puntual: con exactamente 6 miembros el union local `Categoria`
+				// iguala en forma al del servidor y dispara el problema de ORPC
+				// descrito en utils/orpc.ts ("exceeds the maximum length problem") —
+				// colapsa a `unique symbol` en vez de resolver. Con 5 o menos
+				// miembros (subconjunto) no ocurre; ver cola.tsx.
+				filtro: (filtro ?? undefined) as never,
 				page,
 				perPage: PER_PAGE,
 			},
 		}),
-		enabled: !!session,
+		enabled: !!session && esVistaPersonal,
 		placeholderData: keepPreviousData,
 	});
-
 	// Cartera COMPLETA del asesor. La cola sale del pool de buckets y excluye
 	// B0 (Cartera Sana no tiene SLA), así que un asesor con toda su cartera al
 	// día veía la pantalla vacía. Esta query es la del dashboard (filtra por
@@ -418,8 +472,18 @@ function MiDiaPage() {
 				emailCobrador: session?.user?.email,
 			},
 		}),
-		enabled: !!session,
+		enabled: !!session && esVistaPersonal,
 		placeholderData: keepPreviousData,
+	});
+
+	const agendaQueries = useQueries({
+		queries: DIAS_AGENDA.map((dia) => ({
+			...orpc.getAgendaDia.queryOptions({
+				input: { dia, page: 1, perPage: PER_PAGE_AGENDA },
+			}),
+			enabled: !!session && esVistaPersonal,
+			placeholderData: keepPreviousData,
+		})),
 	});
 
 	if (userRole && !PERMISSIONS.canAccessCobros(userRole)) {
@@ -437,13 +501,45 @@ function MiDiaPage() {
 		);
 	}
 
+	if (userRole && !esVistaPersonal) {
+		return (
+			<div className="flex min-h-screen items-center justify-center">
+				<div className="max-w-md text-center">
+					<h1 className="mb-4 font-bold text-2xl text-gray-800">
+						Esta pantalla es personal
+					</h1>
+					<p className="text-gray-600">
+						"Mi día" muestra la agenda de un asesor específico y tu rol puede
+						ver la cartera de todos, así que no aplica. Para revisar la cola de
+						un asesor puntual, usá{" "}
+						<button
+							type="button"
+							className="text-indigo-600 underline hover:text-indigo-700"
+							onClick={() => navigate({ to: "/cobros/cola" })}
+						>
+							Cola del día
+						</button>
+						.
+					</p>
+				</div>
+			</div>
+		);
+	}
+
 	const data = colaQuery.data as ColaResponse | undefined;
 	const items = data?.items ?? [];
 	const total = data?.total ?? 0;
 	const totalPages = data?.totalPages ?? 1;
 	const sinAsesor = !!data?.sinAsesor;
 	const conteos = data?.conteos;
-	const top3 = items.slice(0, 3);
+	const proximosDias = DIAS_AGENDA.map((dia, index) => ({
+		dia,
+		data: agendaQueries[index]?.data as AgendaResponse | undefined,
+	}));
+	const resumenProximosDias = resumirVencimientosAgenda(
+		proximosDias.map(({ dia, data }) => ({ dia, total: data?.total ?? 0 })),
+	);
+	const cargandoAgenda = agendaQueries.some((query) => query.isPending);
 
 	const cartera = carteraQuery.data as
 		| { data: CarteraItem[]; total: number; totalPages: number }
@@ -464,6 +560,7 @@ function MiDiaPage() {
 		setFiltro((prev) => (prev === cat ? null : cat));
 		setAlcanceManual("prioritarios");
 		setPage(1);
+		tablaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 	};
 
 	const cambiarAlcance = (a: Alcance) => {
@@ -489,14 +586,6 @@ function MiDiaPage() {
 		cola: null,
 	});
 
-	const _abrirFicha360 = (fila: FilaCaso) => {
-		navigate({
-			to: "/cobros/$id",
-			params: { id: fila.numeroCreditoSifco },
-			search: { tipo: "caso" },
-		});
-	};
-
 	return (
 		<div className="container mx-auto space-y-5 p-4 lg:p-6">
 			{/* Header */}
@@ -513,7 +602,8 @@ function MiDiaPage() {
 				</p>
 			</div>
 
-			{/* Agenda de hoy */}
+			{/* Agenda de hoy — resumen en vivo; click en un chip filtra y lleva a
+			    la tabla "Casos que requieren atención hoy" más abajo. */}
 			<Card className="border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/40 dark:bg-emerald-950/20">
 				<CardContent className="p-4">
 					<div className="mb-3 flex items-center gap-2">
@@ -564,45 +654,103 @@ function MiDiaPage() {
 							</span>
 						))}
 					</div>
+				</CardContent>
+			</Card>
 
-					{/* Expandir → primeros 3 casos */}
-					{total > 0 && (
-						<div className="mt-3 border-emerald-200/60 border-t pt-2 dark:border-emerald-900/40">
-							<button
-								type="button"
-								onClick={() => setAgendaAbierta((v) => !v)}
-								className="inline-flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground"
-							>
-								<ChevronDown
-									className={`h-3.5 w-3.5 transition-transform ${agendaAbierta ? "rotate-180" : ""}`}
-								/>
-								{agendaAbierta
-									? "Ocultar primeros casos"
-									: `Ver los primeros ${top3.length} casos`}
-							</button>
-							{agendaAbierta && (
-								<div className="mt-2 space-y-1.5">
-									{top3.map((item) => (
-										<button
-											key={item.creditoId}
-											type="button"
-											onClick={() => setDetalle(filaDeCola(item))}
-											className="flex w-full items-center justify-between gap-3 rounded-lg border bg-background p-2.5 text-left transition-colors hover:bg-muted/50"
-										>
-											<div className="flex min-w-0 items-center gap-2">
-												<BucketBadge
-													estadoKey={KEY_POR_NUMERO[item.bucket] ?? "al_dia"}
-													catalogo={catalogo}
-												/>
-												<span className="truncate font-medium text-sm">
-													{item.cliente}
-												</span>
-												<CategoriaBadges item={item} />
-											</div>
-											<ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-										</button>
-									))}
+			<Card className="border-sky-200 bg-sky-50/30 dark:border-sky-900/40 dark:bg-sky-950/20">
+				<CardContent className="p-4">
+					<button
+						type="button"
+						onClick={() => setProximosDiasAbiertos((v) => !v)}
+						className="flex w-full items-center justify-between gap-3 text-left"
+					>
+						<div className="flex items-center gap-2">
+							<CalendarClock className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+							<div>
+								<div className="font-semibold text-sm">Próximos días</div>
+								<p className="text-muted-foreground text-xs">
+									Vencimientos de mañana a D-5.
+								</p>
+							</div>
+							{cargandoAgenda && (
+								<Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+							)}
+						</div>
+						<div className="flex items-center gap-2">
+							<Badge variant="secondary" className="tabular-nums">
+								{resumenProximosDias.total}
+							</Badge>
+							<ChevronDown
+								className={`h-4 w-4 transition-transform ${proximosDiasAbiertos ? "rotate-180" : ""}`}
+							/>
+						</div>
+					</button>
+
+					{proximosDiasAbiertos && (
+						<div className="mt-4 space-y-3 border-sky-200/60 border-t pt-3 dark:border-sky-900/40">
+							{cargandoAgenda ? (
+								<div className="flex items-center gap-2 text-muted-foreground text-sm">
+									<Loader2 className="h-4 w-4 animate-spin" />
+									Cargando vencimientos…
 								</div>
+							) : resumenProximosDias.total === 0 ? (
+								<p className="text-muted-foreground text-sm">
+									No tenés vencimientos durante próximos cinco días.
+								</p>
+							) : (
+								proximosDias
+									.filter(({ data }) => (data?.total ?? 0) > 0)
+									.map(({ dia, data }) => (
+										<div key={dia} className="space-y-1.5">
+											<div className="flex items-center justify-between text-sm">
+												<span className="font-medium">
+													{etiquetaDiaProximo(dia)}
+												</span>
+												<span className="text-muted-foreground text-xs">
+													{data?.total} crédito{data?.total === 1 ? "" : "s"}
+												</span>
+											</div>
+											{data?.items.map((item) => (
+												<button
+													key={item.cuotaId}
+													type="button"
+													onClick={() =>
+														navigate({
+															to: "/cobros/$id",
+															params: { id: item.numeroCreditoSifco },
+															search: { tipo: "caso" },
+														})
+													}
+													className="flex w-full items-center justify-between gap-3 rounded-lg border bg-background p-2.5 text-left transition-colors hover:bg-muted/50"
+												>
+													<div className="flex min-w-0 items-center gap-2">
+														<BucketBadge
+															estadoKey={
+																KEY_POR_NUMERO[item.bucket ?? 0] ?? "al_dia"
+															}
+															catalogo={catalogo}
+														/>
+														<div className="min-w-0">
+															<div className="truncate font-medium text-sm">
+																{item.cliente ?? "Cliente sin nombre"}
+															</div>
+															<div className="text-muted-foreground text-xs">
+																SIFCO {item.numeroCreditoSifco} ·{" "}
+																{montoQ(item.montoCuota)}
+															</div>
+														</div>
+													</div>
+													<ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+												</button>
+											))}
+											{(data?.total ?? 0) > (data?.items.length ?? 0) && (
+												<p className="text-muted-foreground text-xs">
+													Mostrando primeros {data?.items.length} de{" "}
+													{data?.total} créditos.
+												</p>
+											)}
+										</div>
+									))
 							)}
 						</div>
 					)}
@@ -610,7 +758,7 @@ function MiDiaPage() {
 			</Card>
 
 			{/* Una sola lista, dos alcances */}
-			<Card>
+			<Card ref={tablaRef}>
 				<CardContent className="pt-6">
 					<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 						<div>

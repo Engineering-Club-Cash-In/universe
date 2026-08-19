@@ -279,7 +279,7 @@ el CRM para que el bot no tenga que decidir nada.
 **Validación del OTP.** SimpleTech puede validar el código de su lado, pero **el servicio 2
 debe recibirlo y validarlo igual** contra la tabla `otps`: es una consulta que ya existe,
 marca el código como usado y evita que baste el token de la API para listar los créditos de
-cualquier persona. Ver [D-16](./DECISIONES.md#d-16--el-otp-viaja-en-la-respuesta).
+cualquier persona. Ver [D-16](./DECISIONES.md#d-16--quién-valida-el-otp).
 
 ### 3.3 La documentación viva: Swagger
 

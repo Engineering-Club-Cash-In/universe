@@ -1,85 +1,597 @@
-# Paso 4 · Subir comprobante y validación de boleta
+# Paso 4 · Pago con boleta
 
-**Estado:** 🟡 En definición — según documento detallado
+**Estado:** 🟢 **Contrato cerrado · sin implementar** (2026-08-19)
 **Tickets:** [CC2-43 · CB-107](https://clubcashin.atlassian.net/browse/CC2-43) (cargar
 comprobante), [CC2-44 · CB-108](https://clubcashin.atlassian.net/browse/CC2-44) (pendiente de
 conciliación), [CC2-45 · CB-109](https://clubcashin.atlassian.net/browse/CC2-45)
 (conciliación)
-**Prerrequisito:** [Paso 3](./03-metodos-de-pago.md) — opción visible solo para algunos perfiles
+**Prerrequisito:** [Paso 1](./01-identificacion-y-acceso.md) (identidad) y
+[Paso 2](./02-menu-del-credito.md) (crédito seleccionado)
+
+> **Por qué es su propia sección.** Funcionalmente cuelga del menú del crédito —se llega
+> desde ahí—, pero detrás hay lectura con IA, un borrador con estado, un insert en el sistema
+> que mueve el dinero y un circuito de vuelta desde contabilidad. Es el paso con más lógica
+> del bot, así que lleva su propio tag en Swagger (**Pago con boleta**), sus propias tablas y
+> sus propios PR.
 
 ---
 
-## 1. Flujo
+## 1. Qué hace
 
-Antes de pedir la boleta se le muestra la **información de las cuentas de la empresa**.
+El cliente manda la foto de su boleta por WhatsApp. Nosotros la leemos con IA, le mostramos
+lo que entendimos **para que confirme**, y solo si confirma registramos el pago en cartera —
+por el mismo endpoint que usa el formulario de contabilidad, y en el mismo estado: pendiente
+de validación. Cuando conta lo resuelve, cartera nos avisa y el CRM le escribe al cliente.
 
 ```mermaid
-flowchart TD
-    I[Info de las cuentas de la empresa] --> C[« Carga tu boleta »]
-    C --> O[Lectura de la boleta<br/>banco, monto, fecha, autorización, cuenta destino]
-    O --> AP[Mensaje de cómo se va a aplicar:<br/>si cubre la cuota o paga otra<br/>+ info del crédito que está pagando]
-    AP --> Q{¿Toda la información es correcta?}
-    Q -- Sí --> OK[Pago ingresado exitosamente<br/>« los fondos deben validarse, serás notificado »]
-    OK --> S1[Realizar otra gestión con el mismo crédito]
-    OK --> S2[Terminar el proceso]
-    Q -- No --> F[Cargar otra foto]
-    Q -- No --> MAN[Ingresar la información manualmente]
-    F --> O
-    MAN --> AP
+sequenceDiagram
+    participant C as Cliente (WhatsApp)
+    participant S as SimpleTech
+    participant CRM as CRM
+    participant IA as Gemini
+    participant CB as cartera-back
+    participant K as Contabilidad
+
+    C->>S: Envía foto de la boleta
+    S->>CRM: POST /boleta/leer  {referencia, numeroSifco, imagenUrl}
+    CRM->>CRM: verificarAcceso (D-24)
+    CRM->>S: (descarga la imagen)
+    CRM->>IA: generateObject(imagen)
+    CRM->>CB: GET /credito/resumen + /abonos-cuota
+    CRM-->>S: {boletaId, lectura, aplicacion, mensajes}
+    S-->>C: "Esto entendimos, ¿está bien?"
+    alt Confirma
+        C->>S: Sí
+        S->>CRM: POST /boleta/confirmar {boletaId}
+        CRM->>CB: POST /upload  (la imagen a R2)
+        CRM->>CB: POST /newPayment
+        CB-->>CRM: pago_id (validation_status = pending)
+        CRM-->>S: "Pago recibido, está en validación"
+    else No
+        C->>S: No
+        S-->>C: "Mandame otra foto"
+        Note over S,CRM: Vuelve a /boleta/leer — es el intento 2
+    end
+
+    K->>CB: Valida (o rechaza) el pago
+    CB->>CRM: POST /pagos/evento  {pagoId, evento}
+    CRM->>C: WhatsApp con el resultado
+    CRM->>CRM: Si no fue validado: notificación al asesor
 ```
 
-## 2. Datos que se extraen de la boleta
+---
 
-| Campo | Origen |
+## 2. Los tres endpoints
+
+| # | Endpoint | Quién llama | Para qué |
+| --- | --- | --- | --- |
+| 5 | `POST /api/bot/cobros/boleta/leer` | SimpleTech | Lee la boleta y devuelve los datos para confirmar. **No registra nada.** |
+| 6 | `POST /api/bot/cobros/boleta/confirmar` | SimpleTech | Registra el pago en cartera. |
+| — | `POST /api/bot/cobros/pagos/evento` | **cartera-back** | Avisa que conta resolvió el pago. **No va en el Swagger del bot**: no es de SimpleTech. |
+
+Los dos primeros llevan la API key del bot ([D-18](./DECISIONES.md#d-18--autenticación-del-bot-api-key))
+y la `referencia` del paso 1 ([D-24](./DECISIONES.md#d-24--el-menú-hereda-la-identidad-del-paso-1)).
+El tercero lleva **otra** llave, propia de cartera — ver §6.
+
+---
+
+## 3. Servicio 5 · `POST /api/bot/cobros/boleta/leer`
+
+### Request
+
+```json
+{
+  "referencia": "9f8c3b2a-1d4e-4f6a-9b7c-2e5d8a1f0c33",
+  "numeroSifco": "01010214108330",
+  "imagenUrl": "https://cdn.simpletech.gt/media/abc123.jpg"
+}
+```
+
+| Campo | Tipo | Obligatorio | Nota |
+| --- | --- | --- | --- |
+| `referencia` | uuid | Sí | La del paso 1, ya canjeada. |
+| `numeroSifco` | string | Sí | El crédito elegido en el paso 2. |
+| `imagenUrl` | url https | Sí | Dominio dentro de la allowlist ([D-29](./DECISIONES.md#d-29--la-imagen-se-descarga-con-allowlist)). |
+
+**El número de intento no lo manda el bot.** Lo cuenta el CRM sobre los borradores de esa
+sesión: es dato nuestro, y si lo mandara el bot se podría reiniciar para saltarse el tope
+([D-27](./DECISIONES.md#d-27--tres-intentos-por-sesión-y-los-cuenta-el-crm)).
+
+### Response 200
+
+```json
+{
+  "success": true,
+  "data": {
+    "boletaId": "b3d1f0a4-77c2-4c19-9a56-0f2b8e4d1a90",
+    "intento": 1,
+    "intentosRestantes": 2,
+    "expiraEn": "2026-08-19T21:15:00.000Z",
+    "lectura": {
+      "banco": { "id": 1, "nombre": "Banco Industrial", "leido": "BANCO INDUSTRIAL, S.A." },
+      "monto": "6264.10",
+      "fechaBoleta": "2026-08-18",
+      "numeroAutorizacion": "123456789",
+      "cuentaDestino": "***4587",
+      "observaciones": null
+    },
+    "camposFaltantes": [],
+    "confianza": "alta",
+    "aplicacion": {
+      "estimado": true,
+      "cuota": { "numero": 3, "de": 60, "fechaVencimiento": "2026-08-18" },
+      "saldoCuota": "6264.10",
+      "mora": "59849.54",
+      "orden": ["mora", "cuota_3"],
+      "cubreMora": false,
+      "cubreCuota": false,
+      "excedente": "0.00"
+    },
+    "mensajes": {
+      "titulo": "🧾 *Boleta recibida · Q6,264.10*",
+      "resumen": "…",
+      "completo": "…"
+    }
+  }
+}
+```
+
+**Campos de la lectura.** Los cinco del formulario de cartera, más la cuenta destino que pide
+el árbol de gerencia:
+
+| Campo | Obligatorio para poder confirmar | Si no se lee |
+| --- | --- | --- |
+| `monto` | **Sí** | `422 BOLETA_ILEGIBLE`. Sin monto no hay pago. |
+| `banco` | **Sí** | `banco: null` + `camposFaltantes: ["banco"]` + `bancosSugeridos` para que el cliente elija. |
+| `fechaBoleta` | No | Se usa **hoy** y se avisa en `camposFaltantes`. |
+| `numeroAutorizacion` | No | Va vacío. En cartera es opcional. |
+| `cuentaDestino` | No | Solo informativa: se guarda y se le muestra a conta. Hoy **no se valida** — ver §12. |
+| `observaciones` | No | Lo que el modelo haya podido leer de más (concepto, referencia). |
+
+**`confianza`** resume la lectura para que el bot module el mensaje: `alta` (todo leído),
+`media` (faltó algo opcional), `baja` (faltó el banco o la fecha). El bot no ramifica por
+esto — es para el texto.
+
+**`aplicacion` es una estimación y lo dice.** Cartera aplica el dinero en un orden fijo: la
+mora primero y después las cuotas, de la más vieja a la más nueva. Con eso, el resumen del
+crédito y los abonos parciales de la cuota actual alcanzan para decirle al cliente a dónde va
+su dinero, pero **la aplicación real la hace cartera al validar** el pago. Por eso viaja
+`estimado: true` y el mensaje dice "se aplicará", no "se aplicó".
+
+### Errores
+
+| HTTP | `codigo` | Cuándo |
+| --- | --- | --- |
+| 400 | `PARAMETROS_INVALIDOS` | Falta `referencia`, `numeroSifco` o `imagenUrl`. |
+| 400 | `URL_NO_PERMITIDA` | La URL no es https o el dominio no está en la allowlist. |
+| 401 | `REFERENCIA_INVALIDA` | No existe, no es de cobros, o nunca se canjeó. |
+| 401 | `SESION_VENCIDA` | Pasaron más de 30 minutos desde el canje. |
+| 404 | `CREDITO_NO_ENCONTRADO` | El crédito no es de esa persona (mismo error que si no existiera). |
+| 404 | `CREDITO_SIN_DATOS` | El crédito existe en el CRM pero cartera no lo tiene. |
+| 413 | `ARCHIVO_MUY_GRANDE` | Más de 8 MB. |
+| 422 | `ARCHIVO_NO_SOPORTADO` | No es JPG, PNG, WEBP ni PDF. |
+| 422 | `BOLETA_ILEGIBLE` | El modelo no sacó ni el monto. Foto borrosa, recortada, o no es una boleta. |
+| 429 | `DEMASIADOS_INTENTOS` | Tercer intento agotado en esta sesión. |
+| 502 | `IMAGEN_NO_DESCARGABLE` | La URL respondió error, tardó más de 15 s o cortó. |
+| 503 | `LECTOR_NO_DISPONIBLE` | Gemini caído o timeout de 30 s. **Se puede reintentar**, no cuenta intento. |
+| 500 | `ERROR_INTERNO` | Cualquier otra cosa. |
+
+Todos con `data.mensaje` listo para el chat, igual que el resto del bot
+([D-22](./DECISIONES.md#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error)).
+
+---
+
+## 4. Servicio 6 · `POST /api/bot/cobros/boleta/confirmar`
+
+### Request
+
+```json
+{
+  "referencia": "9f8c3b2a-1d4e-4f6a-9b7c-2e5d8a1f0c33",
+  "numeroSifco": "01010214108330",
+  "boletaId": "b3d1f0a4-77c2-4c19-9a56-0f2b8e4d1a90",
+  "bancoId": 1
+}
+```
+
+**Lo único que el bot puede mandar además del `boletaId` es `bancoId`**, y solo cuando la
+lectura no lo reconoció o el cliente lo corrigió. El monto, la fecha y la autorización **no
+se aceptan por el request**: salen del borrador que guardó el CRM. Es la diferencia entre que
+el monto lo dicte la boleta y que lo dicte quien está del otro lado del chat
+([D-26](./DECISIONES.md#d-26--el-monto-lo-dicta-la-boleta-no-el-cliente)).
+
+Si el cliente dice que los datos están mal, el bot **no corrige**: le pide otra foto y vuelve
+a `/boleta/leer`. Ese es el reintento.
+
+### Response 200
+
+```json
+{
+  "success": true,
+  "data": {
+    "pagoId": 48213,
+    "estado": "en_validacion",
+    "monto": "6264.10",
+    "banco": "Banco Industrial",
+    "fechaBoleta": "2026-08-18",
+    "numeroAutorizacion": "123456789",
+    "mensajes": { "titulo": "…", "resumen": "…", "completo": "…" }
+  }
+}
+```
+
+### Errores
+
+| HTTP | `codigo` | Cuándo |
+| --- | --- | --- |
+| 400 | `PARAMETROS_INVALIDOS` | Falta `boletaId`. |
+| 400 | `BANCO_REQUERIDO` | La lectura no reconoció el banco y no vino `bancoId`. |
+| 400 | `BANCO_INVALIDO` | El `bancoId` no está en el catálogo activo. |
+| 401 | `REFERENCIA_INVALIDA` / `SESION_VENCIDA` | Igual que arriba. |
+| 404 | `BORRADOR_NO_ENCONTRADO` | El `boletaId` no existe o es de otra sesión. |
+| 410 | `BORRADOR_VENCIDO` | Pasaron más de 15 minutos desde la lectura. Pedir la foto de nuevo. |
+| 409 | `BOLETA_YA_CONFIRMADA` | Ese borrador ya se registró. Va con el `pagoId` en `data` — **no se registra otro pago**. |
+| 409 | `BOLETA_DUPLICADA` | Misma autorización + banco ya registrada. Ver §8. |
+| 502 | `PAGO_NO_REGISTRADO` | Cartera respondió error al insertar. |
+| 503 | `CARTERA_NO_DISPONIBLE` | Cartera no respondió. |
+| 500 | `ERROR_INTERNO` | Otra cosa. |
+
+---
+
+## 5. Qué se le manda a cartera
+
+El insert es `POST /newPayment` de cartera-back — **el mismo que usa el formulario de
+contabilidad**, sin ruta especial para el bot. Mapeo campo por campo:
+
+| Campo de `newPayment` | De dónde sale | Nota |
+| --- | --- | --- |
+| `credito_id` | `resumen.credito_id` | Del `/credito/resumen` del paso 2. |
+| `usuario_id` | `creditos.usuario_id` — **falta exponerlo** | Es el **cliente dueño del crédito** en `cartera.usuarios`, no el asesor ni un usuario del CRM. Ver el recuadro de abajo. |
+| `monto_boleta` | `lectura.monto` | Lo leído de la boleta. |
+| `fecha_pago` | **hoy** (GT) | Igual que el formulario. |
+| `fecha_boleta` | `lectura.fechaBoleta` | La de la boleta; si no se leyó, hoy. |
+| `banco_id` | `lectura.banco.id` o el `bancoId` del request | |
+| `numeroAutorizacion` | `lectura.numeroAutorizacion` | Puede ir vacío. |
+| `origen_pago` | `"boleta"` | Es literalmente eso. |
+| `cuotaApagar` | `resumen.cuota_actual.numero` | La más vieja sin pagar. **El bot no elige cuota.** |
+| `url_boletas` | `[key]` del `POST /upload` de cartera | La imagen sube a R2 **solo al confirmar**. |
+| `registerBy` | `"bot-cobros@clubcashin.com"` | Identifica el pago en el historial y es el filtro del circuito de vuelta. |
+| `observaciones` | `"Boleta cargada por el cliente vía WhatsApp"` + lo que se haya leído | Para que conta sepa de dónde vino. |
+| `otros` | `0` | |
+| `abono_directo_capital` | `0` | El bot nunca abona a capital. |
+
+**Lo que el bot no hace.** No decide excedentes, no reparte entre cuotas, no toca la mora:
+todo eso ya lo hace `newPayment` —mora primero, luego cuotas de la más vieja a la más nueva—
+exactamente igual que cuando conta registra el pago a mano. El pago entra con
+`validation_status = 'pending'` y ahí se queda hasta que contabilidad lo resuelva.
+
+> **`usuario_id` no es quién registra el pago.** Es el cliente del crédito: para el
+> `01010214108330` vale `1049` → *Raul Alberto Zeledon Burgalin*, con su NIT. El asesor de ese
+> crédito es otra columna (`asesor_id` → `asesores`, *Erik Rivas*), y no entra en el pago.
+> Quien registra viaja en `registerBy`, que es texto libre — ahí va
+> `bot-cobros@clubcashin.com`.
+>
+> O sea que **no hay nada que emparejar con el CRM**: el id viene con el crédito. Lo único que
+> falta es que `/credito/resumen` lo devuelva, que es agregar una columna al `select` que ya
+> existe.
+
+**La regla de los Q25 ya está adentro.** El árbol de gerencia pide que un excedente mayor a
+Q25 se aplique a la siguiente cuota y uno menor se registre como otros ingresos
+([`03-metodos-de-pago.md`](./03-metodos-de-pago.md#5-reglas-transversales-de-pago)). Eso es
+exactamente lo que hace `registerPayment.ts` hoy con cualquier pago: sigue repartiendo entre
+cuotas mientras sobre más de Q25, y lo que queda por debajo lo suma a `otros`. **El bot no
+reimplementa nada de esto** — si lo hiciera, habría dos fuentes de la misma regla y algún día
+dirían cosas distintas.
+
+---
+
+## 6. Circuito de vuelta · cartera → CRM
+
+### Endpoint (en el CRM)
+
+`POST /api/bot/cobros/pagos/evento`, autenticado con `x-api-key: $CARTERA_WEBHOOK_API_KEY`
+— **una llave distinta a la del bot**: quien puede consultar créditos no tiene por qué poder
+disparar mensajes de WhatsApp.
+
+```json
+{
+  "pagoId": 48213,
+  "creditoId": 987,
+  "numeroSifco": "01010214108330",
+  "evento": "validado",
+  "motivo": null,
+  "usuario": "conta@clubcashin.com",
+  "ocurridoEn": "2026-08-19T20:03:00.000Z"
+}
+```
+
+| `evento` | Qué pasó en cartera | Qué hace el CRM |
+| --- | --- | --- |
+| `validado` | `POST /revalidatePayment` | WhatsApp al **cliente**: pago acreditado. |
+| `rechazado` | `POST /false-payment` | WhatsApp al cliente + **notificación al asesor**. |
+| `revertido` | `POST /reversePayment` | WhatsApp al cliente + notificación al asesor. |
+| `regresado_a_pendiente` | `POST /revertPaymentToPending` | Notificación al asesor. **Al cliente no se le escribe**: para él no cambió nada, sigue en validación. |
+
+Respuesta siempre `200`, aunque no se haya notificado:
+
+```json
+{ "success": true, "data": { "notificado": true, "motivo": null } }
+```
+
+`motivo: "PAGO_NO_ES_DEL_BOT"` cuando el pago no salió del bot — que es el caso del 99% de
+los pagos. **No es un error**: si respondiéramos 4xx, cartera lo trataría como fallo y
+llenaría los logs de contabilidad de rojo.
+
+### Del lado de cartera
+
+Los cuatro controladores emiten el aviso **después de que la transacción hizo commit**, con
+el patrón que ya existe en `services/crm.service.ts` (`notifyPayInvestors`): try/catch propio,
+log y seguir. Un WhatsApp caído no puede tumbar la validación de un pago
+([D-28](./DECISIONES.md#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta)).
+
+### A quién se le avisa
+
+- **Cliente:** al teléfono del CRM (el mismo criterio del OTP), con plantilla aprobada de
+  SimpleTech vía `sendWhatsappTemplate` — la infraestructura que ya usan los mensajes de
+  cobros y el de bienvenida. Es obligatorio que sea plantilla: pueden haber pasado más de
+  24 h desde el último mensaje del cliente.
+- **Asesor:** notificación del CRM (`createNotification`), asignada al `responsable` del caso
+  de cobros de ese crédito. Si el crédito no tiene caso o el caso no tiene responsable, la
+  notificación va **al rol `cobros`** en vez de perderse.
+
+### Idempotencia
+
+Un pago se puede revertir y volver a validar; conta puede repetir una acción. Cada aviso se
+guarda en `bot_cobros_pago_eventos` con **unique `(pago_id, evento, ocurrido_en)`**: si el
+mismo evento llega dos veces con el mismo timestamp, se responde `notificado: false` y no se
+manda otro WhatsApp.
+
+---
+
+## 7. La lectura con IA
+
+**Motor: Gemini**, el mismo que ya lee los estados de cuenta bancarios en el CRM
+(`routers/bank-analysis.ts`): `@ai-sdk/google` + `generateObject` con schema de Zod. No entra
+dependencia nueva ni cuenta nueva — [D-25](./DECISIONES.md#d-25--la-boleta-la-lee-gemini-con-el-motor-que-ya-está-en-el-crm).
+
+| Parámetro | Valor | Por qué |
+| --- | --- | --- |
+| Modelo | `gemini-3-flash-preview` | El mismo del análisis bancario. |
+| Timeout | **30 s** | Una foto, no nueve PDF. El análisis bancario usa 120 s porque procesa estados de cuenta completos. |
+| Reintentos internos | **0** | Si falla, el cliente manda otra foto ([D-27](./DECISIONES.md#d-27--tres-intentos-por-sesión-y-los-cuenta-el-crm)). Reintentar solo duplica el costo con la misma imagen mala. |
+| Tamaño máximo | 8 MB | WhatsApp comprime; arriba de eso es un PDF pesado. |
+| Formatos | JPG, PNG, WEBP, PDF | El PDF entra porque muchos bancos mandan el comprobante así. |
+
+**Al modelo se le manda la imagen y nada más.** Ni el nombre del cliente, ni el monto
+esperado, ni el crédito: si le decimos cuánto esperamos, lo va a "leer". El cruce contra el
+crédito se hace después, con la respuesta ya en la mano.
+
+### Schema de extracción
+
+```ts
+export const boletaPagoSchema = z.object({
+  banco: z.string().optional().describe("Banco emisor tal como aparece impreso"),
+  monto: z.string().optional().describe("Monto total en quetzales, solo dígitos y punto"),
+  fechaBoleta: z.string().optional().describe("Fecha de la operación en formato YYYY-MM-DD"),
+  numeroAutorizacion: z.string().optional().describe("No. de autorización, documento o referencia"),
+  cuentaDestino: z.string().optional().describe("Cuenta que recibe, últimos 4 dígitos"),
+  tipoOperacion: z.string().optional().describe("depósito, transferencia, cheque…"),
+  observaciones: z.string().optional().describe("Concepto o descripción si aparece"),
+  esBoletaDePago: z.boolean().describe("false si la imagen no es un comprobante bancario"),
+  extraccionExitosa: z.boolean(),
+  camposNoLeidos: z.array(z.string()),
+});
+```
+
+`esBoletaDePago: false` → `422 BOLETA_ILEGIBLE`, con mensaje de que mande la foto del
+comprobante. Sin eso, una selfie devuelve campos vacíos y el cliente no entiende qué pasó.
+
+### Mapeo del banco
+
+`cartera.bancos` tiene 24 filas para unos 15 bancos reales: `Banrural` está dos veces
+(también como `Banco de Desarrollo Rural`), `BAM` tres, y hay un `test` con 92 pagos encima.
+Usarlo tal cual sería mandar al cliente una lista con bancos repetidos y filas de prueba.
+
+**La deduplicación ya existe y es la columna `id_banco_transferencia`**, un id universal que
+el endpoint de cartera ya sabe filtrar:
+
+```
+GET /bancos?con_transferencia=true   →  15 filas, una por banco real
+```
+
+Esas 15 son el catálogo del bot. No hay duplicados, no hay `test`, y cada una trae su id
+universal.
+
+| Paso | Qué se hace |
 | --- | --- |
-| Banco | Lectura automática |
-| Monto | Lectura automática |
-| Fecha de la boleta | Lectura automática |
-| Número de autorización | Lectura automática |
-| Cuenta destino | Lectura automática |
+| 1 | El nombre leído se busca contra las **15 con `id_banco_transferencia`**, por tabla de alias explícita. |
+| 2 | Si no cae ahí, se busca entre las **9 que no tienen ese id** — ahí viven `Interbanco` (27) y `PAGALO` (28), que son bancos reales sin id universal todavía. Se excluyen `test` y `test2`. |
+| 3 | Si tampoco, `banco: null` + `bancosSugeridos` con las 15 para que el cliente elija. |
 
-Además del listado de datos, se le muestra **cómo se va a aplicar el pago**: si cubre la
-cuota, si paga otra, y la información del crédito que está pagando. Eso obliga a que el
-cálculo de aplicación exista **antes** de confirmar, no después.
+**Nunca por parecido de texto.** Adivinar el banco es adivinar en qué cuenta va a buscar conta
+el dinero; que el cliente lo elija cuesta un mensaje más y no se equivoca.
 
-## 3. Ingreso manual
+> **Ojo con G&T.** El id universal lo tiene la fila `19` (G&T Continental, 100 pagos), no la
+> `3` (Banco G&T Continental, 659 pagos), que es la que más usa contabilidad. Los pagos del
+> bot van a quedar en la 19 mientras los de conta siguen en la 3. No rompe nada —las dos son
+> G&T— pero cualquier reporte que agrupe por `banco_id` los va a ver separados. Si molesta,
+> se unifican las filas en cartera; es una decisión de conta, no del bot.
 
-Cuando el cliente dice que los datos no están bien, puede cargar otra foto o escribirlos:
+### Costo
 
-| Campo | Tipo |
+Una llamada por intento, tope de 3 intentos por sesión, una imagen por llamada. Es el gasto
+más chico que puede tener este flujo con IA. La cuenta de Gemini ya está aprobada y en uso en
+el CRM para el análisis bancario; esto no agrega proveedor ni contrato nuevo.
+
+---
+
+## 8. Duplicados
+
+Hay **dos** controles, y son distintos:
+
+**1. El nuestro, antes de llamar a cartera.** Si esta misma sesión ya confirmó una boleta con
+el mismo banco, monto y autorización en las últimas 24 h → `409 BOLETA_DUPLICADA` sin tocar
+cartera. Es el caso común: el cliente manda la boleta dos veces porque no vio la respuesta.
+
+**2. El de cartera, que tiene un falso positivo conocido.** `newPayment` rechaza con 409 si
+existe cualquier pago con la misma `(numeroAutorizacion, banco_id)` **en todo el sistema**,
+sin mirar el crédito. Las referencias de BAC y G&T se repiten entre clientes distintos: en
+prod hay 79 bloqueos por esto, 27 de ellos contra el crédito de otra persona.
+
+Con el formulario eso lo resuelve un contador que ve el error y lo escala. Con el bot, el
+cliente recibiría "esa boleta ya fue registrada" **siendo mentira**. Por eso, un 409 de
+cartera se traduce así:
+
+- Al cliente: *"Necesitamos revisar tu boleta antes de aplicarla. Tu asesor te va a contactar."*
+- Al asesor: **notificación en el CRM**, con el crédito, el monto y la referencia.
+- En el CRM: el borrador queda en estado `fallida` con el motivo, para poder contarlos.
+
+**No se le dice al cliente que su boleta está duplicada** mientras el chequeo siga siendo
+global. El arreglo de fondo —acotar la búsqueda al crédito— está propuesto y no aplicado; va
+aparte de este feature.
+
+---
+
+## 9. Qué se guarda en el CRM
+
+Dos tablas nuevas. La imagen **no** se guarda en el CRM: vive en R2, subida por cartera, igual
+que cualquier otra boleta.
+
+```sql
+CREATE TABLE bot_cobros_boletas (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  otp_id              uuid NOT NULL REFERENCES otps(id) ON DELETE CASCADE,
+  numero_sifco        text NOT NULL,
+  credito_id          integer,
+  intento             integer NOT NULL,
+  imagen_origen_url   text NOT NULL,
+  r2_key              text,
+  lectura             jsonb NOT NULL,          -- lo que devolvió el modelo, crudo
+  banco_id            integer,
+  monto               numeric(12,2),
+  fecha_boleta        date,
+  numero_autorizacion text,
+  cuenta_destino      text,
+  confianza           text,
+  estado              text NOT NULL,           -- leida | confirmada | descartada | fallida
+  motivo_fallo        text,
+  pago_id             integer,
+  expira_en           timestamptz NOT NULL,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX ON bot_cobros_boletas (pago_id) WHERE pago_id IS NOT NULL;
+CREATE INDEX ON bot_cobros_boletas (otp_id);
+
+CREATE TABLE bot_cobros_pago_eventos (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  boleta_id             uuid REFERENCES bot_cobros_boletas(id) ON DELETE SET NULL,
+  pago_id               integer NOT NULL,
+  evento                text NOT NULL,
+  ocurrido_en           timestamptz NOT NULL,
+  payload               jsonb,
+  notificado_cliente_at timestamptz,
+  notificado_asesor_at  timestamptz,
+  error                 text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (pago_id, evento, ocurrido_en)
+);
+```
+
+**El `pago_id` es el puente.** Es lo que permite que, cuando cartera avise que el pago 48213
+se validó, el CRM sepa que ese pago vino del bot, de qué cliente y a qué teléfono escribirle.
+
+**Retención.** Los borradores sin confirmar se purgan a los **7 días** con el resto de la
+limpieza de PII ([D-14](./DECISIONES.md#d-14--retención-de-pii-y-logs)). Los confirmados se
+conservan mientras exista el pago: son la trazabilidad de por qué hay una boleta en cartera
+que nadie del equipo subió.
+
+---
+
+## 10. Mensajes al cliente
+
+Cuatro momentos, cada uno con las **tres versiones** del paso 2 (`titulo`, `resumen`,
+`completo`), en `lib/bot-cobros/mensajes-boleta.ts`:
+
+| Momento | Qué dice |
 | --- | --- |
-| Banco | **Lista** de opciones (no texto libre) |
-| Monto | Número |
-| Fecha de la boleta | Fecha |
-| Número de autorización | Texto — **opcional** |
-| Boleta | Adjunto |
+| `boleta-leida` | Lo que entendimos + cómo se va a aplicar + "¿está correcto?" |
+| `pago-en-validacion` | "Recibimos tu pago. Está en validación; te avisamos cuando se acredite." |
+| `pago-validado` | "Tu pago de Q… fue acreditado", con cómo quedó su cuota y su mora. |
+| `pago-rechazado` | "No pudimos acreditar tu pago", sin detalle técnico, con el asesor como salida. |
 
-Después del ingreso manual se repite el mismo mensaje de cómo se va a aplicar y la
-confirmación.
+Los textos son **borrador de IT**; marketing los corrige después, tocando solo ese archivo.
+Los del circuito de vuelta viajan además por plantilla aprobada de Meta, así que el texto
+final depende de qué plantillas haya: hoy son `mensaje{1..4}parametro` y el mensaje se parte
+en párrafos.
 
-## 4. Resultado
+---
 
-- **Confirmado:** *"Pago ingresado exitosamente"*, con mensaje aclaratorio de que **los
-  fondos deben ser validados** y que se le notificará. El cliente puede hacer otra gestión
-  con el mismo crédito o terminar.
-- **Pago aceptado (ya validado):** se manda comprobante por SMS o WhatsApp indicando que su
-  pago fue acreditado y **cómo quedó su capital, su mora si aplica, y si quedó algo pendiente
-  de su cuota o si abonó a una cuota siguiente**.
-- **Pago rechazado:** también se le avisa.
+## 11. Seguridad
 
-## 5. Pendientes
+| Riesgo | Control |
+| --- | --- |
+| **SSRF** con `imagenUrl` | Solo `https`, dominio en allowlist (`BOT_COBROS_DOMINIOS_IMAGEN`), sin seguir redirecciones a IP privadas, timeout 15 s, tope de 8 MB. |
+| Pedir la boleta de otro crédito | `verificarAcceso` (D-24) en los dos endpoints, igual que el resto del menú. |
+| Que el cliente dicte el monto | El monto sale del borrador del CRM, no del request (D-26). |
+| Gasto descontrolado de IA | 3 intentos por sesión; el OTP ya tiene su propio rate limit aguas arriba. |
+| Basura en R2 | La imagen sube **solo al confirmar**. Las lecturas descartadas no dejan archivo. |
+| Disparar WhatsApps desde afuera | El endpoint de eventos usa llave propia, distinta de la del bot. |
+| Boleta ajena / manipulada | Fuera de alcance del bot: lo resuelve la validación de contabilidad, igual que hoy con las boletas que entran por correo. |
 
-- **Motor de lectura de la boleta (OCR).** Qué se usa, qué precisión se espera y qué pasa
-  cuando no logra leer nada. Hoy no existe nada de esto en el monorepo.
-- **Estado "pendiente de conciliación"** (CB-108): dónde vive: ¿en cartera como pago no
-  aplicado, o en una cola propia del CRM? Debe verse tanto en la cola de conciliación como en
-  el historial del crédito.
-- **Quién valida los fondos** y en cuánto tiempo. Hay un SLA implícito en "serás notificado".
-- **Conciliación automática** (CB-109): sin API bancaria, el documento del backlog propone
-  carga de estado de cuenta. Definir.
-- **Duplicados:** el cliente sube dos veces la misma boleta, o sube una boleta ya conciliada.
-  Detectar por número de autorización + banco + monto + fecha.
-- **Boleta que no corresponde** (de otro crédito, monto distinto al esperado, cuenta destino
-  que no es nuestra): qué se le dice.
-- **Almacenamiento y retención** de las imágenes (R2, como el resto de adjuntos) y por
-  cuánto tiempo.
+---
+
+## 12. Reglas y validaciones antes de registrar
+
+| Regla | Qué se hace |
+| --- | --- |
+| `monto <= 0` | `422 BOLETA_ILEGIBLE`. |
+| `monto > Q1,000,000` | No se registra: al asesor. Es un error de lectura mucho más probable que un pago real. |
+| `fechaBoleta` futura | Se usa **hoy** y se anota en observaciones. Una boleta no puede ser de mañana. |
+| `fechaBoleta` de más de 90 días | Se registra, pero la observación se lo dice a conta. |
+| Crédito `CANCELADO` / `INCOBRABLE` | No se acepta la boleta: al asesor. |
+| Cuenta destino | Se guarda y se muestra; **no se valida**. La lista de cuentas de Cash In no vive en el monorepo — ver §14. |
+| Sin cuota pendiente | `resumen.cuota_actual` en `null` → el crédito no tiene a qué aplicar. Al asesor. |
+
+---
+
+## 13. Plan de implementación
+
+Tres PR a `COBROS-02`, en este orden:
+
+| PR | Alcance | Se puede probar solo |
+| --- | --- | --- |
+| **A** | Tablas + `/boleta/leer` + lectura con IA + mapeo de bancos + Swagger | Sí: devuelve datos, no registra nada. |
+| **B** | `/boleta/confirmar` + `usuario_id` en `/credito/resumen` (cartera) + insert | Sí, contra la instancia de dev de cartera. |
+| **C** | Endpoint de eventos + emisión desde los 4 controladores de cartera + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
+
+Cada PR lleva su parte del Swagger en el mismo commit
+([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)) y suma
+`bot-cobros-boleta.ts` a las `FUENTES` del candado (`openapi.test.ts`), o la prueba pasará
+en verde sin estar documentando nada.
+
+---
+
+## 14. Pendientes
+
+**Bloquean el arranque del bot, no el desarrollo:**
+
+- **Qué cuentas de la empresa se le muestran** antes de pedirle la boleta. Es texto fijo que
+  puede vivir en SimpleTech o salir de un endpoint; hay que decidirlo con Cobros.
+
+**Se pueden trabajar después:**
+
+- **Ingreso manual de datos** (doc de gerencia §3): que el cliente escriba monto y fecha en
+  vez de mandar otra foto. Queda fuera de v1 a propósito (D-26). Si entra, es un `origen:
+  "manual"` en `/confirmar` y una revisión obligatoria de conta.
+- **Validar la cuenta destino** contra las cuentas de Cash In, para detectar boletas que
+  pagaron a otra empresa antes de que un contador las abra.
+- **¿Notificamos solo los pagos del bot?** v1 sí: solo esos. Extenderlo a todos los pagos
+  (que cualquier cliente reciba WhatsApp cuando conta valide su boleta) es una decisión de
+  Cobros, no técnica — el circuito ya quedaría montado.
+- **SLA de validación.** "Te avisamos cuando se acredite" es una promesa sin plazo. Si conta
+  tarda dos días, el bot debería poder decirlo.
+- **Los 30 minutos de sesión.** [D-24](./DECISIONES.md#d-24--el-menú-hereda-la-identidad-del-paso-1)
+  ya avisó que este es el flujo que los puede quedar cortos: leer, mirar, confirmar. Se
+  arranca con 30 y se mide; si aparecen `SESION_VENCIDA` en el medio del flujo, toca sesiones
+  de verdad.

@@ -4,8 +4,8 @@
 > cubre solo el bot; para el panorama completo (buckets, recordatorios automáticos,
 > operación diaria) empezar por ahí.
 
-**Estado global:** 🔵 Paso 1 implementado y desplegado en dev · pasos 2-4 en definición
-**Última actualización:** 2026-08-17
+**Estado global:** 🔵 Pasos 1 y 2 implementados y desplegados en dev · paso 4 con contrato cerrado, sin implementar
+**Última actualización:** 2026-08-19
 **Proyecto Jira:** [CC2 — CRM Cobros 2](https://clubcashin.atlassian.net/browse/CC2)
 **Fuentes funcionales:** [`fuente/flujo-bot-whatsapp.pdf`](./fuente/flujo-bot-whatsapp.pdf)
 (presentación a gerencia, v1.0) · [`fuente/FlujoBotCobros.pdf`](./fuente/FlujoBotCobros.pdf)
@@ -42,7 +42,7 @@ decidido.
 | [`01-identificacion-y-acceso.md`](./01-identificacion-y-acceso.md) | **Paso 1**: identificación, validación de identidad y selección de crédito. |
 | [`02-menu-del-credito.md`](./02-menu-del-credito.md) | **Paso 2**: info del crédito y las gestiones disponibles. |
 | [`03-metodos-de-pago.md`](./03-metodos-de-pago.md) | **Paso 3**: link de Pagalo, Nexa y el menú de pago. |
-| [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md) | **Paso 4**: subir comprobante, lectura de la boleta e ingreso manual. |
+| [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md) | **Paso 4**: pago con boleta. Contrato cerrado: lectura con IA, confirmación, insert en cartera y el aviso de vuelta cuando conta valida. |
 | [`05-convenio-y-promesa.md`](./05-convenio-y-promesa.md) | **Paso 5**: congelado. Solo referencia hasta que gerencia apruebe. |
 | [`pruebas-equipo-it.md`](./pruebas-equipo-it.md) | Datos ficticios y mensajes para que el equipo de IT pruebe el bot en dev. |
 | **Swagger** (no es un archivo) | La referencia que usa SimpleTech: `GET /api/bot/cobros/docs` en la instancia de dev. Se genera del código y **se puede ejecutar** desde el navegador. Todo cambio en los endpoints va ahí en el mismo commit ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)). |
@@ -56,7 +56,7 @@ decidido.
 | 1 | Identificación y acceso | 2 servicios en el CRM: buscar cliente + OTP por SMS, y validar código + listar créditos | 🔵 **Los dos servicios implementados y desplegados en dev.** El SMS no sale hasta que el proveedor habilite la IP del servidor; mientras tanto se prueba en modo simulado ([D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale)) | [`01-…`](./01-identificacion-y-acceso.md) |
 | 2 | Menú del crédito | Info del crédito, y el ruteo a las 6 gestiones | 🟡 **En definición** (notas de reunión 2026-08-13) | [`02-…`](./02-menu-del-credito.md) |
 | 3 | Realizar un pago | Link de Pagalo, Nexa, menú dinámico de pago | 🟡 **En definición** | [`03-…`](./03-metodos-de-pago.md) |
-| 4 | Validación de boleta | Lectura de boleta, ingreso manual, pendiente de conciliación | 🟡 **En definición** | [`04-…`](./04-validacion-de-boleta.md) |
+| 4 | Pago con boleta | Lectura de la boleta con IA, confirmación, registro en cartera y notificación del resultado | 🟢 **Contrato cerrado, sin implementar** (2026-08-19) | [`04-…`](./04-validacion-de-boleta.md) |
 | 5 | Convenio y promesa de pago | Selección de rubros, plazo, documento | 🔴 **Bloqueado** — requiere aprobación de gerencia (2026-08-13) | [`05-…`](./05-convenio-y-promesa.md) · [D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados) |
 | 6 | Reglas transversales | Excedentes, notificaciones, escalamiento a agente | 🟡 Documentadas, sin implementar | [`00-…`](./00-arbol-de-decisiones.md#06--reglas-transversales) |
 | — | A futuro | Que el cliente actualice correo y teléfono desde el bot | ⚪ Fuera de alcance | [`00-…`](./00-arbol-de-decisiones.md#07--a-futuro-fuera-del-alcance-actual) |

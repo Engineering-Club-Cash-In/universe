@@ -32,6 +32,12 @@ día; si no está escrito, no está decidido.
 | [D-22](#d-22--todo-lo-que-no-termina-en-dato-va-con-estado-http-de-error) | Todo lo que no termina en dato va con estado HTTP de error | 🟢 |
 | [D-23](#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria) | La documentación de la API es Swagger, y es obligatoria | 🟢 |
 | [D-24](#d-24--el-menú-hereda-la-identidad-del-paso-1) | El menú hereda la identidad del paso 1 | 🟢 |
+| [D-25](#d-25--la-boleta-la-lee-gemini-con-el-motor-que-ya-está-en-el-crm) | La boleta la lee Gemini, con el motor que ya está en el CRM | 🟢 |
+| [D-26](#d-26--el-monto-lo-dicta-la-boleta-no-el-cliente) | El monto lo dicta la boleta, no el cliente | 🟢 |
+| [D-27](#d-27--tres-intentos-por-sesión-y-los-cuenta-el-crm) | Tres intentos por sesión, y los cuenta el CRM | 🟢 |
+| [D-28](#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta) | El aviso a WhatsApp nunca rompe la acción de conta | 🟢 |
+| [D-29](#d-29--la-imagen-se-descarga-con-allowlist) | La imagen se descarga con allowlist | 🟢 |
+| [D-30](#d-30--subir-boleta-lo-puede-hacer-cualquier-cliente) | Subir boleta lo puede hacer cualquier cliente | 🟢 |
 
 ---
 
@@ -721,3 +727,203 @@ Distinguirlos permitiría averiguar qué créditos hay probando números — el 
 **Cuándo habría que revisar esto.** Si aparece un flujo largo —subir una boleta, armar un
 convenio— donde 30 minutos se queden cortos, o si el bot necesita recordar al cliente entre
 conversaciones. Ahí sí toca la opción C y se revisa D-04.
+
+---
+
+## D-25 · La boleta la lee Gemini, con el motor que ya está en el CRM
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** El paso 4 necesita sacar cinco datos de la foto de un comprobante bancario:
+banco, monto, fecha, número de autorización y cuenta destino. En el monorepo ya hay **dos**
+lecturas automáticas de documentos funcionando: el análisis de estados de cuenta
+(`routers/bank-analysis.ts`, Gemini vía `@ai-sdk/google` + `generateObject`) y el OCR de la
+tarjeta de circulación que usa la app de inspecciones (`routers/vehicles.ts`, hoy con OpenAI).
+
+**Opciones.**
+- **A) Reusar el motor del análisis bancario: Gemini + `generateObject` con schema de Zod.**
+- B) Un OCR clásico (Tesseract, Textract) con reglas por banco.
+- C) Un proveedor nuevo especializado en comprobantes.
+
+**Decisión: A.** No agrega dependencia, ni cuenta, ni contrato: la misma cuenta de Gemini que
+ya lee estados de cuenta en producción. `generateObject` valida la salida contra el schema —
+si el modelo devuelve basura, revienta en el borde y no a mitad del insert. B se descartó
+porque las boletas de Guatemala no tienen un formato: cada banco imprime lo suyo, y las fotos
+son de celular, torcidas y con reflejos; mantener reglas por banco es trabajo permanente. C
+no se justifica cuando A ya está probado adentro.
+
+**Parámetros distintos a los del análisis bancario**, porque el problema es distinto:
+
+| | Análisis bancario | Boleta |
+| --- | --- | --- |
+| Entrada | hasta 9 PDF | 1 imagen |
+| Timeout | 120 s | **30 s** |
+| Reintentos | 2 intentos, contados en base | **0** — el reintento es otra foto del cliente |
+
+**Al modelo se le manda la imagen y nada más.** Nunca el monto esperado ni el nombre del
+cliente: si le decimos qué esperamos encontrar, lo encuentra. El cruce contra el crédito se
+hace después, con la respuesta ya en la mano.
+
+**El catálogo de bancos no se le delega al modelo.** `cartera.bancos` tiene 24 filas para
+unos 15 bancos reales —`Banrural` está dos veces, `BAM` tres, y hay un `test` con 92 pagos
+encima—, pero **la deduplicación ya existe**: la columna `id_banco_transferencia`, el id
+universal que el endpoint ya filtra con `GET /bancos?con_transferencia=true` y que deja
+exactamente 15 filas, una por banco.
+
+Esas 15 son el catálogo del bot. El nombre leído se mapea con **alias explícitos en el
+código** contra ellas; si no cae, se busca entre las 9 sin id universal (ahí están `Interbanco`
+y `PAGALO`, reales, excluyendo `test`/`test2`); si tampoco, `banco: null` y el cliente elige de
+la lista. **Nunca por parecido de texto**: adivinar el banco es adivinar en qué cuenta va a
+buscar conta el dinero.
+
+Único efecto colateral: el id universal de G&T lo tiene la fila `19`, no la `3` que es la que
+más usa contabilidad. Los pagos del bot caen en la 19 y cualquier reporte agrupado por
+`banco_id` los verá aparte. Unificar esas filas es decisión de conta, no del bot.
+
+---
+
+## D-26 · El monto lo dicta la boleta, no el cliente
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** Después de la lectura, el cliente confirma. ¿Qué pasa si dice que los datos
+están mal? El documento de gerencia contempla que **escriba** los datos a mano (banco de una
+lista, monto, fecha, autorización). El flujo acordado con SimpleTech es otro: que mande otra
+foto y se lea de nuevo.
+
+**Opciones.**
+- A) Ingreso manual completo: el cliente escribe monto, fecha y autorización.
+- **B) Solo otra foto. Lo único corregible a mano es el banco, y solo cuando la lectura no lo
+  reconoció.**
+- C) Ingreso manual pero marcado, con revisión obligatoria de conta.
+
+**Decisión: B para la v1.** El monto es el dato con el que se registra un pago en el sistema
+que mueve el dinero. Si viaja en el request, quien controle el chat —o la integración— puede
+declarar un pago de Q10,000 que nunca existió; quedaría `pending` y lo agarraría conta, pero
+mientras tanto el cliente ya vio "pago recibido" y el crédito muestra un pago que no entró.
+Con B, el monto sale del borrador que guardó el CRM al leer la imagen: para cambiarlo hay que
+cambiar la imagen.
+
+Por eso `/boleta/confirmar` recibe **solo** `boletaId` y, opcionalmente, `bancoId`. Nada más.
+
+**El banco es la excepción** porque su fuente no es la boleta sino nuestro catálogo sucio
+(D-25): que el cliente lo elija de una lista es más confiable que el alias que adivinemos, y
+elegir mal un banco no cambia cuánto dinero se registra.
+
+**Cuándo se revisa.** Si en producción se ve que muchos clientes no logran una foto legible en
+tres intentos, entra C: ingreso manual, marcado como tal en el pago, con revisión obligatoria
+de conta antes de aplicarlo. La v1 se hace sin eso para no abrir el hueco antes de saber si
+hace falta.
+
+---
+
+## D-27 · Tres intentos por sesión, y los cuenta el CRM
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** Cada lectura es una llamada a Gemini y cuesta. Un cliente con mala señal puede
+mandar la misma foto borrosa diez veces, y un integrador con un bug puede hacerlo mil.
+
+**Decisión.** **Tres intentos por sesión** (la sesión del paso 1, 30 minutos). Al cuarto,
+`429 DEMASIADOS_INTENTOS` y el bot lo manda con su asesor.
+
+**El número de intento no lo manda el bot: lo cuenta el CRM** sobre los borradores de esa
+sesión. Es dato nuestro; si viniera en el request, bastaría con mandar siempre `intento: 1`
+para que el tope no exista. Se devuelve en la respuesta (`intento`, `intentosRestantes`) para
+que el bot module el mensaje.
+
+**Los fallos nuestros no gastan intento.** Si Gemini está caído o se pasa del timeout, la
+respuesta es `503 LECTOR_NO_DISPONIBLE` y el contador no se mueve: el cliente no tiene por qué
+pagar nuestro problema con uno de sus tres tiros.
+
+**El borrador vive 15 minutos.** Es lo que dura la conversación de "esto entendimos,
+¿está bien?". Vencido, `410 BORRADOR_VENCIDO` y otra foto.
+
+---
+
+## D-28 · El aviso a WhatsApp nunca rompe la acción de conta
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** Cuando contabilidad valida (o rechaza) un pago que entró por el bot, hay que
+avisarle al cliente. La validación ocurre en cartera; el teléfono y el WhatsApp están en el
+CRM. Alguien tiene que cruzar la frontera.
+
+**Opciones.**
+- A) El CRM consulta cada tanto qué pagos cambiaron de estado (polling).
+- **B) Cartera avisa al CRM cuando el estado cambia.**
+- C) El bot pregunta cada vez que el cliente vuelve a escribir.
+
+**Decisión: B**, con el patrón que ya existe: `services/crm.service.ts` en cartera ya llama al
+CRM para las notificaciones de pago a inversionistas. A obligaría a recorrer pagos
+constantemente para un puñado de eventos; C llega tarde y solo si el cliente vuelve.
+
+**Tres reglas no negociables:**
+
+1. **El aviso sale después del commit**, nunca dentro de la transacción que valida el pago.
+2. **Se traga sus propios errores.** try/catch, log, y seguir — igual que `notifyPayInvestors`.
+   Si WhatsApp está caído, el pago se valida igual. Al revés sería inaceptable: un contador no
+   puede quedarse sin poder trabajar porque un proveedor de mensajería no responde.
+3. **Un pago que no vino del bot responde `200` con `notificado: false`**, no un 4xx. El 99%
+   de los pagos del sistema no son del bot; si eso fuera error, los logs de contabilidad
+   estarían siempre en rojo y nadie miraría los que sí importan.
+
+**Llave propia.** El endpoint de eventos usa `CARTERA_WEBHOOK_API_KEY`, distinta de la del
+bot: quien puede consultar créditos no tiene por qué poder disparar mensajes de WhatsApp a
+clientes.
+
+**Solo se notifican los pagos que entraron por el bot** (los que tienen fila en
+`bot_cobros_boletas`). Extenderlo a todos —que cualquier cliente reciba WhatsApp cuando conta
+valide su boleta— es una decisión de Cobros, no técnica: el circuito ya queda montado.
+
+---
+
+## D-29 · La imagen se descarga con allowlist
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** SimpleTech no manda el archivo: manda una **URL** y nosotros la descargamos. Un
+servidor que descarga cualquier URL que le pasen es un SSRF: sirve para pedirle a nuestra
+propia red lo que el atacante no alcanza desde afuera (metadatos del cloud, servicios
+internos, bases de datos sin puerto público).
+
+**Decisión.** La descarga pasa por cinco filtros, y falla cerrada:
+
+1. **Solo `https`.**
+2. **Dominio en allowlist** (`BOT_COBROS_DOMINIOS_IMAGEN`, coma-separado). Fuera de la lista →
+   `400 URL_NO_PERMITIDA`.
+3. **No se siguen redirecciones hacia IP privadas** (`10.*`, `172.16-31.*`, `192.168.*`,
+   `127.*`, `169.254.*`, IPv6 local).
+4. **Timeout de 15 s** y **tope de 8 MB**, cortando el stream al pasarse.
+5. **El content-type se verifica contra el contenido**, no contra la cabecera: JPG, PNG, WEBP
+   o PDF por sus magic bytes, igual que el análisis bancario valida el `%PDF`.
+
+**Alternativa descartada:** que SimpleTech suba el archivo en `multipart/form-data`. Es más
+seguro —no hay URL que descargar—, pero obliga a un cambio del lado de ellos que hoy no
+tienen; si la allowlist resulta incómoda de mantener, es a donde hay que volver.
+
+---
+
+## D-30 · Subir boleta lo puede hacer cualquier cliente
+
+**Estado:** 🟢 **Cerrada · 2026-08-19**
+
+**Contexto.** El documento de gerencia describe el menú de pago como **dinámico**: la opción
+de subir comprobante se mostraría solo a algunos clientes, "según su perfil". Nunca se definió
+qué perfil, y esa marca no existe en ningún lado del sistema.
+
+**Opciones.**
+- A) Definir la regla (bucket de mora, historial de pagos, marca manual de Cobros) y filtrar.
+- **B) Mostrársela a todos.**
+
+**Decisión: B.** Quien llegó al menú ya pasó el paso 1: se identificó con NIT, DPI o placa y
+canjeó un código enviado al teléfono que el CRM tiene registrado. No hay razón para negarle a
+ese cliente que mande su boleta, cuando puede mandarla por correo o por el chat del asesor sin
+ningún filtro y termina en la misma cola de contabilidad.
+
+Además, la boleta **no acredita nada por sí sola**: entra como `pending` y la valida un
+contador. El control está en la validación, no en quién puede subirla.
+
+**Implicación práctica.** El bot no consulta ningún perfil: si tiene la API key y una sesión
+válida, la opción está. Lo que sí acota el uso es el tope de tres lecturas por sesión
+([D-27](#d-27--tres-intentos-por-sesión-y-los-cuenta-el-crm)).

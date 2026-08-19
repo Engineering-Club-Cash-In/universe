@@ -20,11 +20,11 @@ flowchart TD
     RP --> M[Regresar al menú anterior]
 ```
 
-**El menú es dinámico:** la opción de **subir comprobante** solo se muestra a algunos
-clientes, según su perfil.
-
-> ❓ **Pendiente:** qué define ese perfil. ¿Bucket de mora? ¿Historial de pagos? ¿Una marca
-> manual que pone Cobros? Es una regla de negocio que hoy no existe en el sistema.
+**Subir comprobante lo ve cualquier cliente.** El documento de gerencia decía que la opción
+se mostrara solo a algunos perfiles; se descartó
+([D-30](./DECISIONES.md#d-30--subir-boleta-lo-puede-hacer-cualquier-cliente)). Quien llegó al
+menú ya probó su identidad, y la boleta entra igual a la cola de contabilidad que si la
+mandara por correo.
 
 ---
 
@@ -115,7 +115,8 @@ mora y su cuota (pendiente o abono a la siguiente).
 
 ## 4. Subir comprobante de pago
 
-Flujo completo en [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md).
+Flujo completo y **contrato cerrado** en [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md):
+lectura con IA, confirmación, registro en cartera y el aviso de vuelta cuando conta valida.
 
 ---
 
@@ -123,7 +124,7 @@ Flujo completo en [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md).
 
 | Regla | Definición |
 | --- | --- |
-| **Excedentes** | Aplica a **Nexa y boleta**. Excedente **mayor a Q25** → se aplica directo a la siguiente cuota. **Menor a Q25** → se registra como otros ingresos. |
+| **Excedentes** | Aplica a **Nexa y boleta**. Excedente **mayor a Q25** → se aplica directo a la siguiente cuota. **Menor a Q25** → se registra como otros ingresos. **Ya implementado** en `registerPayment.ts` de cartera para todo pago; no se reimplementa en el bot. |
 | **Notificación de resultado** | Todo pago acreditado genera mensaje con recibo y detalle de capital, mora y cuota. Si se rechaza, también se le avisa. |
 | **Escalamiento** | Falta de respuesta tras enviar el link de pago → agente humano. |
 
@@ -145,4 +146,3 @@ Flujo completo en [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md).
 - **Integración con Pagalo.** ¿API o generación manual? ¿Webhook de confirmación? ¿Quién
   aplica el pago en cartera y en qué momento?
 - **Timeout del "no contestó".** Después de cuánto tiempo se transborda a un agente.
-- **Perfil que habilita subir boleta** (§1).

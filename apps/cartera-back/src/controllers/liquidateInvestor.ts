@@ -1495,13 +1495,18 @@ export async function createBoleta(
         if (!warning) return;
 
         const blockingNote = formatPendingReturnAuthorizationNote(warning);
-        const originalNotes = nuevaBoleta.notas?.trim();
+        // Append atómico contra el valor actual en DB, no el snapshot en memoria
+        // de cuando se creó la boleta: si alguien edita `notas` vía PATCH
+        // /boletas/:id mientras esta liquidación en background sigue corriendo,
+        // un SET con el snapshot viejo pisaría esa edición concurrente.
         await db
           .update(boletasPagoInversionista)
           .set({
-            notas: originalNotes
-              ? `${originalNotes}\n\n${blockingNote}`
-              : blockingNote,
+            notas: sql`CASE
+              WHEN ${boletasPagoInversionista.notas} IS NULL OR trim(${boletasPagoInversionista.notas}) = ''
+                THEN ${blockingNote}
+              ELSE trim(${boletasPagoInversionista.notas}) || ${`\n\n${blockingNote}`}
+            END`,
           })
           .where(eq(boletasPagoInversionista.boleta_id, nuevaBoleta.boleta_id));
 

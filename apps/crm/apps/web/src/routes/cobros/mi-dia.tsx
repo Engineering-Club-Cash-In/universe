@@ -540,6 +540,12 @@ function MiDiaPage() {
 		proximosDias.map(({ dia, data }) => ({ dia, total: data?.total ?? 0 })),
 	);
 	const cargandoAgenda = agendaQueries.some((query) => query.isPending);
+	// Si una query D-1..D-5 falla (no solo está pending), su `data` queda
+	// undefined y el fallback `?? 0` de arriba la convierte silenciosamente en
+	// "0 vencimientos ese día" — el resumen puede mostrar "no tenés
+	// vencimientos" aunque en realidad uno de los días nunca se pudo consultar
+	// (Codex PR #1334).
+	const errorAgenda = agendaQueries.some((query) => query.isError);
 
 	const cartera = carteraQuery.data as
 		| { data: CarteraItem[]; total: number; totalPages: number }
@@ -675,6 +681,9 @@ function MiDiaPage() {
 							{cargandoAgenda && (
 								<Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
 							)}
+							{!cargandoAgenda && errorAgenda && (
+								<TriangleAlert className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+							)}
 						</div>
 						<div className="flex items-center gap-2">
 							<Badge variant="secondary" className="tabular-nums">
@@ -688,12 +697,19 @@ function MiDiaPage() {
 
 					{proximosDiasAbiertos && (
 						<div className="mt-4 space-y-3 border-sky-200/60 border-t pt-3 dark:border-sky-900/40">
+							{errorAgenda && (
+								<p className="flex items-center gap-1.5 text-amber-600 text-sm dark:text-amber-400">
+									<TriangleAlert className="h-4 w-4 shrink-0" />
+									No se pudieron cargar todos los días — el total puede estar
+									incompleto.
+								</p>
+							)}
 							{cargandoAgenda ? (
 								<div className="flex items-center gap-2 text-muted-foreground text-sm">
 									<Loader2 className="h-4 w-4 animate-spin" />
 									Cargando vencimientos…
 								</div>
-							) : resumenProximosDias.total === 0 ? (
+							) : resumenProximosDias.total === 0 && !errorAgenda ? (
 								<p className="text-muted-foreground text-sm">
 									No tenés vencimientos durante próximos cinco días.
 								</p>

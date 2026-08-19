@@ -3014,6 +3014,18 @@ export const cobrosRouter = {
 				// Cuotas que vencen HOY (D-0) — fuente independiente de SLA
 				// (getCuotasProximasVencer, no getColaDiaSLA), mismo helper que usa
 				// getAgendaDia. En paralelo con el universo SLA: no dependen entre sí.
+				//
+				// Sin asesorId acá A PROPÓSITO: getColaDiaSLA filtra por el POOL del
+				// bucket del asesor (asesor_bucket — un asesor puede cubrir créditos
+				// de OTRO asesor por el pool, ver docs/features/cobros-02/
+				// 04-operacion-diaria.md), pero getCuotasProximasVencer filtra
+				// asesor_id por el DUEÑO directo del crédito (creditos.asesor_id) —
+				// mismo parámetro, distinto eje en cartera-back. Filtrar D-0 acá con
+				// asesorIdFiltro dejaba fuera de venceHoySet los créditos que un
+				// asesor cubre solo por pool (Codex PR #1334). Sin filtro de asesor,
+				// la intersección real ocurre más abajo: venceHoySet solo se
+				// consulta para SIFCOs que ya están en `universo` (el pool SLA), así
+				// que el scoping correcto lo sigue dando el universo, no esta query.
 				const [universoData, cuotasHoyData] = await Promise.all([
 					fetchAllPages(
 						async (page) => {
@@ -3030,7 +3042,6 @@ export const cobrosRouter = {
 					fetchAllPages(
 						async (page) => {
 							const resp = await obtenerPaginaAgenda(0, {
-								asesorId: asesorIdFiltro,
 								page,
 								perPage: 200,
 							});
@@ -3046,7 +3057,11 @@ export const cobrosRouter = {
 				// venceHoy solo se marca sobre créditos que ya están en el pool SLA
 				// (getColaDiaSLA excluye B0 — "Cartera Sana" no tiene SLA). Un
 				// crédito B0 con cuota venciendo hoy no entra a esta cola; mismo
-				// hueco que ya tenía la tarjeta "Vencen hoy" original.
+				// hueco que ya tenía la tarjeta "Vencen hoy" original. La
+				// intersección real contra el universo (pool) ocurre acá: aunque
+				// cuotasHoyData trae D-0 de TODA la cartera (sin filtro de asesor),
+				// venceHoySet.has() abajo solo se consulta para SIFCOs que ya
+				// pasaron el filtro de pool del universo SLA.
 				const venceHoySet = new Set(
 					cuotasHoyData.map((c) => c.numero_credito_sifco),
 				);

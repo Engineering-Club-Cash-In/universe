@@ -6,7 +6,7 @@ import {
 	CircleDashed,
 	Loader2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GestionesDelDiaPanel } from "@/components/cobros/gestiones-del-dia-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,8 @@ type ResumenFila = {
 };
 
 type ResumenData = { fecha: string | null; items: ResumenFila[] };
+
+type UsuarioConGestiones = { id: string; name: string; role: string };
 
 type DetalleItem = {
 	id: string;
@@ -268,11 +270,43 @@ export function CumplimientoAgendaPanel() {
 		if (!fecha && datos?.fecha) setFecha(datos.fecha);
 	}, [datos?.fecha, fecha]);
 
-	// Catálogo de asesores del día, ya `asc(user.name)` desde el server — de ahí
-	// sale "el primero" del default. No se manda `asesorId` a la query de
+	// Asesores con gestiones registradas ese día — complementa `datos.items`
+	// (asesores con snapshot). Un asesor sin NINGÚN item planificado (0
+	// D-0/SLA/promesa) nunca genera fila en `agenda_cobros_snapshots`
+	// (`capturarSnapshots` solo persiste asesores presentes en la lista de
+	// items — `agenda-cobros-snapshot.ts`), así que si el selector se armara
+	// solo con `datos.items` ese asesor sería imposible de elegir aunque haya
+	// trabajado gestiones fuera de agenda todo el día (hallazgo de code
+	// review, Codex).
+	const usuariosQuery = useQuery({
+		...orpcAny.getUsuariosConGestiones.queryOptions({
+			input: { desde: fecha || undefined, hasta: fecha || undefined },
+		}),
+		enabled: !!session && puedeConsultar && !!fecha,
+	});
+	const usuariosConGestiones = (usuariosQuery.data ??
+		[]) as UsuarioConGestiones[];
+
+	// Catálogo del selector: unión de "tiene snapshot" y "tiene gestiones ese
+	// día", no solo `datos.items`. No se manda `asesorId` a la query de
 	// arriba: eso colapsaría `datos.items` a un solo asesor y el selector se
 	// quedaría sin opciones para cambiar.
-	const asesores = datos?.items ?? [];
+	const asesores = useMemo(() => {
+		const porId = new Map<string, { asesorId: string; asesorNombre: string }>();
+		for (const fila of datos?.items ?? [])
+			porId.set(fila.asesorId, {
+				asesorId: fila.asesorId,
+				asesorNombre: fila.asesorNombre,
+			});
+		for (const u of usuariosConGestiones)
+			if (!porId.has(u.id))
+				porId.set(u.id, { asesorId: u.id, asesorNombre: u.name });
+		// Alfabético: mismo criterio que ya trae `datos.items` del server
+		// (`asc(user.name)`), para que "el primero" del default sea estable.
+		return [...porId.values()].sort((a, b) =>
+			a.asesorNombre.localeCompare(b.asesorNombre, "es"),
+		);
+	}, [datos?.items, usuariosConGestiones]);
 	// Valor EFECTIVO: la elección del usuario si sigue existiendo en la lista
 	// del día actual, si no el primero. Cubre sin efectos: primera carga,
 	// cambio de fecha con el mismo asesor (se respeta), cambio de fecha donde
@@ -281,8 +315,14 @@ export function CumplimientoAgendaPanel() {
 		asesorElegido && asesores.some((a) => a.asesorId === asesorElegido)
 			? asesorElegido
 			: (asesores[0]?.asesorId ?? null);
-	const filaSeleccionada =
+	const asesorSeleccionado =
 		asesores.find((a) => a.asesorId === asesorId) ?? null;
+	// La fila del snapshot: puede no existir aunque `asesorId` sí (asesor sin
+	// agenda planificada ese día, agregado por `usuariosConGestiones`) — la
+	// tarjeta de agenda planificada lo distingue de "sin snapshots en
+	// absoluto" (que usa `asesores.length === 0` más abajo).
+	const filaSeleccionada =
+		datos?.items.find((a) => a.asesorId === asesorId) ?? null;
 
 	if (sesionCargando) {
 		return (
@@ -354,10 +394,9 @@ export function CumplimientoAgendaPanel() {
 				</Card>
 			) : asesores.length === 0 ? (
 				<Card className="p-8 text-center text-gray-500">
-					No hay agenda cerrada para esta fecha. La agenda se congela a las
-					00:05 GT y se cierra al terminar el día — el día de hoy aparece hasta
-					el cierre nocturno. Sin agenda cerrada no se puede comparar la gestión
-					contra lo planificado.
+					No hay agenda cerrada ni gestiones registradas para esta fecha. La
+					agenda se congela a las 00:05 GT y se cierra al terminar el día — el
+					día de hoy aparece hasta el cierre nocturno.
 				</Card>
 			) : (
 				<div className="space-y-6">
@@ -365,51 +404,65 @@ export function CumplimientoAgendaPanel() {
 						<h2 className="mb-3 font-semibold text-gray-500 text-sm uppercase tracking-wide">
 							Agenda planificada
 						</h2>
-						{filaSeleccionada && (
+						{asesorSeleccionado && (
 							<Card className="overflow-hidden">
-								<div className="grid w-full grid-cols-[minmax(180px,1fr)_repeat(4,minmax(80px,auto))] items-center gap-4 px-4 py-3 text-left">
-									<span className="font-medium">
-										{filaSeleccionada.asesorNombre}
-									</span>
-									<span className="text-center text-sm">
-										<b>{filaSeleccionada.planificados}</b> planificados
-									</span>
-									<span className="text-center text-emerald-600 text-sm">
-										<b>{filaSeleccionada.atendidos}</b> atendidos
-									</span>
-									<span className="text-center text-amber-600 text-sm">
-										<b>{filaSeleccionada.pendientes}</b> pendientes
-									</span>
-									<span className="text-center font-semibold">
-										{filaSeleccionada.porcentaje}%
-										<Badge className="ml-2" variant="outline">
-											{filaSeleccionada.estado}
-										</Badge>
-									</span>
-								</div>
-								{fecha && (
-									<DetalleAgenda
-										// Resetea la paginación interna al cambiar de fecha o
-										// asesor: sin esto, la tarjeta queda siempre montada
-										// (ya no hay toggle de expandir/colapsar) y el `page`
-										// de un asesor anterior se arrastraba al nuevo, pidiendo
-										// una página que puede no existir (hallazgo de code
-										// review, Codex).
-										key={`${fecha}:${filaSeleccionada.asesorId}`}
-										asesorId={filaSeleccionada.asesorId}
-										fecha={fecha}
-									/>
+								{filaSeleccionada ? (
+									<>
+										<div className="grid w-full grid-cols-[minmax(180px,1fr)_repeat(4,minmax(80px,auto))] items-center gap-4 px-4 py-3 text-left">
+											<span className="font-medium">
+												{filaSeleccionada.asesorNombre}
+											</span>
+											<span className="text-center text-sm">
+												<b>{filaSeleccionada.planificados}</b> planificados
+											</span>
+											<span className="text-center text-emerald-600 text-sm">
+												<b>{filaSeleccionada.atendidos}</b> atendidos
+											</span>
+											<span className="text-center text-amber-600 text-sm">
+												<b>{filaSeleccionada.pendientes}</b> pendientes
+											</span>
+											<span className="text-center font-semibold">
+												{filaSeleccionada.porcentaje}%
+												<Badge className="ml-2" variant="outline">
+													{filaSeleccionada.estado}
+												</Badge>
+											</span>
+										</div>
+										{fecha && (
+											<DetalleAgenda
+												// Resetea la paginación interna al cambiar de fecha o
+												// asesor: sin esto, la tarjeta queda siempre montada
+												// (ya no hay toggle de expandir/colapsar) y el `page`
+												// de un asesor anterior se arrastraba al nuevo, pidiendo
+												// una página que puede no existir (hallazgo de code
+												// review, Codex).
+												key={`${fecha}:${filaSeleccionada.asesorId}`}
+												asesorId={filaSeleccionada.asesorId}
+												fecha={fecha}
+											/>
+										)}
+									</>
+								) : (
+									// Asesor sin snapshot ese día (0 items planificados —
+									// `capturarSnapshots` no persiste una fila para él, ver la
+									// nota en `usuariosConGestiones` más arriba), pero SÍ con
+									// gestiones registradas: el bloque de abajo las muestra
+									// todas como "Fuera de agenda".
+									<div className="px-4 py-6 text-center text-gray-500 text-sm">
+										{asesorSeleccionado.asesorNombre} no tenía agenda
+										planificada ese día.
+									</div>
 								)}
 							</Card>
 						)}
 					</div>
 
-					{filaSeleccionada && fecha && (
+					{asesorSeleccionado && fecha && (
 						<GestionesDelDiaPanel
-							key={`${fecha}:${filaSeleccionada.asesorId}`}
+							key={`${fecha}:${asesorSeleccionado.asesorId}`}
 							fecha={fecha}
-							asesorId={filaSeleccionada.asesorId}
-							asesorNombre={filaSeleccionada.asesorNombre}
+							asesorId={asesorSeleccionado.asesorId}
+							asesorNombre={asesorSeleccionado.asesorNombre}
 							esSupervisor={puedeConsultar}
 						/>
 					)}

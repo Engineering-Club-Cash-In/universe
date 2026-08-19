@@ -101,6 +101,7 @@ describe("CRM API production auth build", () => {
 			serverPackage.dependencies?.["@better-auth/drizzle-adapter"],
 		).toBeUndefined();
 		expect(crmLock).toContain('"better-auth": "1.4.18"');
+		expect(crmLock).not.toContain('"@better-auth/drizzle-adapter"');
 	});
 
 	it("uses the monorepo root context in every legacy CRM deploy build", async () => {

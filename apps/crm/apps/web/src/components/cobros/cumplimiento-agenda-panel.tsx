@@ -2,12 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
 	CalendarCheck2,
-	ChevronDown,
 	CircleCheck,
 	CircleDashed,
 	Loader2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { GestionesDelDiaPanel } from "@/components/cobros/gestiones-del-dia-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -250,8 +250,10 @@ export function CumplimientoAgendaPanel() {
 	const userRole = session?.user?.role;
 	const puedeConsultar = !!userRole && PERMISSIONS.canAssignCobros(userRole);
 	const [fecha, setFecha] = useState("");
-	const [asesorId, setAsesorId] = useState("todos");
-	const [abierto, setAbierto] = useState<string | null>(null);
+	// Elección EXPLÍCITA del usuario, no el valor efectivo — se deriva abajo.
+	// Guardar el valor efectivo directo y sembrarlo con un efecto producía
+	// thrash (ver `asesorId` derivado); acá no hace falta ningún efecto.
+	const [asesorElegido, setAsesorElegido] = useState<string | null>(null);
 	// biome-ignore lint/suspicious/noExplicitAny: contrato manual por TS7056 del router raíz.
 	const orpcAny = orpc as any;
 	const query = useQuery({
@@ -266,13 +268,21 @@ export function CumplimientoAgendaPanel() {
 		if (!fecha && datos?.fecha) setFecha(datos.fecha);
 	}, [datos?.fecha, fecha]);
 
-	const filas = useMemo(
-		() =>
-			(datos?.items ?? []).filter(
-				(fila) => asesorId === "todos" || fila.asesorId === asesorId,
-			),
-		[asesorId, datos?.items],
-	);
+	// Catálogo de asesores del día, ya `asc(user.name)` desde el server — de ahí
+	// sale "el primero" del default. No se manda `asesorId` a la query de
+	// arriba: eso colapsaría `datos.items` a un solo asesor y el selector se
+	// quedaría sin opciones para cambiar.
+	const asesores = datos?.items ?? [];
+	// Valor EFECTIVO: la elección del usuario si sigue existiendo en la lista
+	// del día actual, si no el primero. Cubre sin efectos: primera carga,
+	// cambio de fecha con el mismo asesor (se respeta), cambio de fecha donde
+	// desapareció (cae al primero), y lista vacía (null).
+	const asesorId =
+		asesorElegido && asesores.some((a) => a.asesorId === asesorElegido)
+			? asesorElegido
+			: (asesores[0]?.asesorId ?? null);
+	const filaSeleccionada =
+		asesores.find((a) => a.asesorId === asesorId) ?? null;
 
 	if (sesionCargando) {
 		return (
@@ -296,7 +306,7 @@ export function CumplimientoAgendaPanel() {
 	}
 
 	return (
-		<div className="mx-auto max-w-6xl px-4 py-6">
+		<div className="mx-auto max-w-[1600px] px-4 py-6">
 			<div className="mb-6 flex flex-wrap items-center justify-between gap-4">
 				<div className="flex items-center gap-3">
 					<CalendarCheck2 className="h-7 w-7 text-indigo-500" />
@@ -310,21 +320,20 @@ export function CumplimientoAgendaPanel() {
 				<div className="flex flex-wrap items-center gap-2">
 					<input
 						className="rounded-md border px-2 py-1 text-sm dark:bg-gray-800"
-						onChange={(event) => {
-							setFecha(event.target.value);
-							setAbierto(null);
-							setAsesorId("todos");
-						}}
+						onChange={(event) => setFecha(event.target.value)}
 						type="date"
 						value={fecha}
 					/>
-					<Select value={asesorId} onValueChange={setAsesorId}>
+					<Select
+						value={asesorId ?? ""}
+						onValueChange={setAsesorElegido}
+						disabled={asesores.length === 0}
+					>
 						<SelectTrigger className="w-56">
-							<SelectValue placeholder="Todos los asesores" />
+							<SelectValue placeholder="Seleccioná un asesor" />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="todos">Todos los asesores</SelectItem>
-							{(datos?.items ?? []).map((fila) => (
+							{asesores.map((fila) => (
 								<SelectItem key={fila.asesorId} value={fila.asesorId}>
 									{fila.asesorNombre}
 								</SelectItem>
@@ -343,48 +352,60 @@ export function CumplimientoAgendaPanel() {
 					No se pudo cargar el cumplimiento de agenda. Reintentá en unos
 					segundos.
 				</Card>
-			) : filas.length === 0 ? (
+			) : asesores.length === 0 ? (
 				<Card className="p-8 text-center text-gray-500">
-					Sin snapshots para fecha seleccionada.
+					No hay agenda cerrada para esta fecha. La agenda se congela a las
+					00:05 GT y se cierra al terminar el día — el día de hoy aparece hasta
+					el cierre nocturno. Sin agenda cerrada no se puede comparar la gestión
+					contra lo planificado.
 				</Card>
 			) : (
-				<div className="space-y-3">
-					{filas.map((fila) => {
-						const expandido = abierto === fila.snapshotId;
-						return (
-							<Card className="overflow-hidden" key={fila.snapshotId}>
-								<button
-									aria-expanded={expandido}
-									className="grid w-full grid-cols-[minmax(180px,1fr)_repeat(4,minmax(80px,auto))_24px] items-center gap-4 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50"
-									onClick={() => setAbierto(expandido ? null : fila.snapshotId)}
-									type="button"
-								>
-									<span className="font-medium">{fila.asesorNombre}</span>
+				<div className="space-y-6">
+					<div>
+						<h2 className="mb-3 font-semibold text-gray-500 text-sm uppercase tracking-wide">
+							Agenda planificada
+						</h2>
+						{filaSeleccionada && (
+							<Card className="overflow-hidden">
+								<div className="grid w-full grid-cols-[minmax(180px,1fr)_repeat(4,minmax(80px,auto))] items-center gap-4 px-4 py-3 text-left">
+									<span className="font-medium">
+										{filaSeleccionada.asesorNombre}
+									</span>
 									<span className="text-center text-sm">
-										<b>{fila.planificados}</b> planificados
+										<b>{filaSeleccionada.planificados}</b> planificados
 									</span>
 									<span className="text-center text-emerald-600 text-sm">
-										<b>{fila.atendidos}</b> atendidos
+										<b>{filaSeleccionada.atendidos}</b> atendidos
 									</span>
 									<span className="text-center text-amber-600 text-sm">
-										<b>{fila.pendientes}</b> pendientes
+										<b>{filaSeleccionada.pendientes}</b> pendientes
 									</span>
 									<span className="text-center font-semibold">
-										{fila.porcentaje}%
+										{filaSeleccionada.porcentaje}%
 										<Badge className="ml-2" variant="outline">
-											{fila.estado}
+											{filaSeleccionada.estado}
 										</Badge>
 									</span>
-									<ChevronDown
-										className={`h-4 w-4 transition-transform ${expandido ? "rotate-180" : ""}`}
+								</div>
+								{fecha && (
+									<DetalleAgenda
+										asesorId={filaSeleccionada.asesorId}
+										fecha={fecha}
 									/>
-								</button>
-								{expandido && fecha && (
-									<DetalleAgenda asesorId={fila.asesorId} fecha={fecha} />
 								)}
 							</Card>
-						);
-					})}
+						)}
+					</div>
+
+					{filaSeleccionada && fecha && (
+						<GestionesDelDiaPanel
+							key={`${fecha}:${filaSeleccionada.asesorId}`}
+							fecha={fecha}
+							asesorId={filaSeleccionada.asesorId}
+							asesorNombre={filaSeleccionada.asesorNombre}
+							esSupervisor={puedeConsultar}
+						/>
+					)}
 				</div>
 			)}
 		</div>

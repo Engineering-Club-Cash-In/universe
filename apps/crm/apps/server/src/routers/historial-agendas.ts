@@ -37,6 +37,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
+	agendaCobrosSnapshots,
 	casosCobros,
 	contactosCobros,
 	contactosCobrosAudit,
@@ -47,6 +48,7 @@ import { condicionAuditManual } from "../lib/audit-contactos";
 import {
 	BUCKET_SIN_ASIGNAR,
 	calcularTotalPaginas,
+	columnaEnAgenda,
 	columnaOrigen,
 	esContactoEfectivo,
 	esSinContacto,
@@ -123,6 +125,20 @@ const listadoSchema = filtrosSchema.extend({
 	 * procedure público.
 	 */
 	incluirConteo: z.boolean().default(true),
+	/**
+	 * Marca cada fila con `enAgenda`: si el crédito de esa gestión estaba en el
+	 * snapshot de agenda del asesor ese día. Opcional y apagado por defecto —
+	 * el tab de historial no lo pide y no paga el EXISTS.
+	 *
+	 * Se compara por CRÉDITO y no por `contacto_cobro_id`: ver
+	 * `columnaEnAgenda` en `lib/historial-agendas.ts`.
+	 */
+	marcarEnAgenda: z
+		.object({
+			fecha: z.string().date(),
+			asesorId: z.string().min(1),
+		})
+		.optional(),
 });
 
 /** Contexto de scoping a partir del rol de la sesión. */
@@ -144,7 +160,8 @@ export const historialAgendasRouter = {
 	getHistorialAgendas: cobrosProcedure
 		.input(listadoSchema)
 		.handler(async ({ input, context }) => {
-			const { page, pageSize, incluirConteo, ...filtros } = input;
+			const { page, pageSize, incluirConteo, marcarEnAgenda, ...filtros } =
+				input;
 			const { where, rango } = whereHistorial(filtros, scopingDe(context));
 
 			// El filtro por rol se aplica sobre el join a `user`; va aparte del
@@ -152,6 +169,36 @@ export const historialAgendasRouter = {
 			const condicionesConRol = filtros.roles?.length
 				? and(where, inArray(user.role, filtros.roles))
 				: where;
+
+			// Snapshot de agenda contra el que se marca `enAgenda`. Se resuelve una
+			// sola vez (el índice único fecha+asesor garantiza a lo sumo una fila)
+			// para que el EXISTS de abajo compare contra una constante y no repita
+			// el lookup por fila. `null` = no se pidió, o no hay agenda cerrada ese
+			// día: `enAgenda` viaja en null y la UI muestra "—" en vez de afirmar
+			// "fuera de agenda" para todo.
+			//
+			// Gateado por el mismo scoping que el resto del historial: un asesor
+			// solo puede pedir SU propia agenda, nunca la de otro.
+			const puedeVerTodos = PERMISSIONS.canViewAllCasosCobros(
+				context.userRole ?? "",
+			);
+			const snapshotAgendaId =
+				marcarEnAgenda &&
+				(puedeVerTodos || marcarEnAgenda.asesorId === context.userId)
+					? ((
+							await db
+								.select({ id: agendaCobrosSnapshots.id })
+								.from(agendaCobrosSnapshots)
+								.where(
+									and(
+										eq(agendaCobrosSnapshots.fechaGt, marcarEnAgenda.fecha),
+										eq(agendaCobrosSnapshots.asesorId, marcarEnAgenda.asesorId),
+										eq(agendaCobrosSnapshots.estado, "cerrado"),
+									),
+								)
+								.limit(1)
+						)[0]?.id ?? null)
+					: null;
 
 			const filas = await db
 				.select({
@@ -194,6 +241,9 @@ export const historialAgendasRouter = {
 					// Para que la UI explique por qué una fila 'contactado' no cuenta
 					// como gestión del asesor.
 					origen: columnaOrigen(),
+					// null cuando no se pidió `marcarEnAgenda` o no hay agenda cerrada
+					// ese día — ver `columnaEnAgenda`.
+					enAgenda: columnaEnAgenda(snapshotAgendaId),
 				})
 				.from(contactosCobros)
 				.innerJoin(user, eq(contactosCobros.realizadoPor, user.id))

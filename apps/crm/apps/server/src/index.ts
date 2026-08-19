@@ -37,7 +37,7 @@ import {
 	getVehiclesBySifcoController,
 } from "./controllers/vehicles";
 import type { db } from "./db";
-import { ejecutarAgendaCobrosDiaria } from "./jobs/agenda-cobros-snapshots";
+import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -1627,7 +1627,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			const resumenPromesas = await checkPromesasPago().catch(console.error);
 			if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
 			await esperarHasta0005GT();
-			await ejecutarAgendaCobrosDiaria().catch(console.error);
+			await ejecutarAgendaCobrosDiariaConReintentos().catch(console.error);
 			scheduleAtMidnightGT();
 		}, next.getTime() - now.getTime());
 	}
@@ -1770,7 +1770,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			? await checkPromesasPago().catch(console.error)
 			: await checkPromesasPagoBoot;
 		if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
-		await ejecutarAgendaCobrosDiaria().catch(console.error);
+		await ejecutarAgendaCobrosDiariaConReintentos().catch(console.error);
 	}, 30_000);
 }
 

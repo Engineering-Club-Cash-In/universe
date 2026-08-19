@@ -33,6 +33,7 @@ describe("buildMoraDisplayRows", () => {
 					mora_30: { cantidad: 1, sumaCapital: "10.00", sumaMora: "20.00" },
 					mora_60: { cantidad: 1, sumaCapital: "30.00", sumaMora: "40.00" },
 					mora_90: { cantidad: 0, sumaCapital: "0.00", sumaMora: "0.00" },
+					mora_120: { cantidad: 1, sumaCapital: "5.00", sumaMora: "10.00" },
 					mora_120_plus: { cantidad: 0, sumaCapital: "0.00", sumaMora: "0.00" },
 				},
 			],
@@ -63,6 +64,7 @@ describe("buildMoraDisplayRows", () => {
 				asesorId: 7,
 				mora_30: { cantidad: 1, sumaCapital: "10.00", sumaMora: "20.00" },
 				mora_60: { cantidad: 1, sumaCapital: "30.00", sumaMora: "40.00" },
+				mora_120: { cantidad: 1, sumaCapital: "5.00", sumaMora: "10.00" },
 				pendiente: "30.00",
 			}),
 			expect.objectContaining({

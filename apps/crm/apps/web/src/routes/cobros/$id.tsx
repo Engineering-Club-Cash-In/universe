@@ -3284,7 +3284,9 @@ function RouteComponent() {
 																<span>Cuota #{cuota.numeroCuota}</span>
 																<span className="text-muted-foreground">
 																	Vence:{" "}
-																	{formatFechaLocal(cuota.fechaVencimiento)}
+																	{cuota.fechaVencimiento
+																		? formatFechaLocal(cuota.fechaVencimiento)
+																		: "Sin fecha"}
 																</span>
 																<Badge
 																	className={

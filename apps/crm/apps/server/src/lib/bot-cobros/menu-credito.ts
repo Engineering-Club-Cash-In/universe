@@ -23,6 +23,7 @@ import { db } from "../../db";
 import { otps } from "../../db/schema/otp";
 import { carteraBackClient } from "../../services/cartera-back-client";
 import { type CreditoBot, listarCreditosDeCliente } from "./buscar-cliente";
+import { armarMensajes, type MensajesCredito } from "./mensajes-credito";
 
 /**
  * Cuánto vale la referencia del paso 1 para seguir consultando.
@@ -116,6 +117,14 @@ export type InfoCreditoBot = {
 		modelo: string;
 		anio: number;
 	} | null;
+	/**
+	 * Los mismos datos, ya escritos para mandar al chat.
+	 *
+	 * Se agregan porque armar el párrafo del lado del bot obliga a iterar el
+	 * JSON en una herramienta que no da para eso. Los campos de arriba siguen
+	 * ahí para lo que el bot necesite ramificar. Ver `mensajes-credito.ts`.
+	 */
+	mensajes: MensajesCredito;
 };
 
 export type ResultadoEstadoCuenta =
@@ -236,7 +245,7 @@ export async function obtenerInfoCredito(
 	// nunca se migraron. No es un error del servicio.
 	if (!resumen) return { ok: false, codigo: "CREDITO_SIN_DATOS" };
 
-	return {
+	const respuesta: { ok: true; info: InfoCreditoBot } = {
 		ok: true,
 		info: {
 			numeroSifco: credito.numeroSifco,
@@ -274,8 +283,14 @@ export async function obtenerInfoCredito(
 				: null,
 			asesor: resumen.asesor,
 			vehiculo: credito.vehiculo,
+			// Se rellena abajo: necesita el objeto completo.
+			mensajes: { titulo: "", resumen: "", completo: "" },
 		},
 	};
+
+	respuesta.info.mensajes = armarMensajes(respuesta.info);
+
+	return respuesta;
 }
 
 /**

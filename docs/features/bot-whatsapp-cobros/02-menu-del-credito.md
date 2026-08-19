@@ -103,6 +103,7 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
       "moraPorConfirmar": false,
       "convenio": null,
       "asesor": { "nombre": "Octavio Rosales", "telefono": "35111822" },
+      "mensajes": { "titulo": "…", "resumen": "…", "completo": "…" },
       "vehiculo": { "placa": "P-319JJL", "marca": "Toyota", "modelo": "Corolla", "anio": 2015 }
     }
   }
@@ -130,6 +131,64 @@ su próxima fecha es el 30 de agosto.
 
 Mezclarlos daría un mensaje absurdo ("tu próxima fecha de pago fue en febrero"), así que van
 en campos distintos y `cuotaActual` trae `vencida` para que el bot sepa cuál mostrar.
+
+### Los mensajes ya armados
+
+Además de los campos sueltos, la respuesta trae **el texto listo para el chat** en tres
+formatos. Lo pidió SimpleTech: armar el párrafo del lado del bot obliga a iterar el JSON y
+concatenar variables en una herramienta que no da para eso.
+
+| Formato | Para qué |
+| --- | --- |
+| `titulo` | Una línea. Encabezar una lista o un menú |
+| `resumen` | Lo accionable: en qué cuota va, si debe, cuándo paga |
+| `completo` | Todo el detalle, incluido convenio, vehículo y asesor |
+
+Traen emojis y **negrita de WhatsApp** (`*así*`, con un solo asterisco — dos se ven
+literales). Ejemplo real:
+
+```
+⚠️ *HONDA CR-V 1.5T AWD EXL AT 2017 · P-946GSL*
+
+💵 Monto del crédito: Q190,846.74
+📄 Cuota mensual: Q6,264.10
+🔢 Vas en la cuota 3 de 60
+⚠️ Tenés *28 cuotas atrasadas*
+💰 Monto en mora: *Q59,849.54*
+📅 Próxima fecha de pago: 18 de septiembre de 2026
+
+🚙 Vehículo: HONDA CR-V 1.5T AWD EXL AT 2017
+   Placa: P-946GSL
+
+👤 Tu asesor: Erik Rivas
+   📞 35111822
+```
+
+**Los campos estructurados no desaparecen:** el bot sigue recibiendo `cuotasAtrasadas`,
+`mora` y los demás para ramificar. Los mensajes son un extra.
+
+> ✍️ **El texto es borrador de IT.** Se escribió para desbloquear la integración; **marketing
+> tiene que corregirlo** antes de que le hable a un cliente real. Vive todo en
+> `lib/bot-cobros/mensajes-credito.ts` y cambiarlo no toca nada más.
+
+**Por qué se arma en el CRM y no en el bot:** si mañana Cobros quiere cambiar el texto, se
+cambia acá y se despliega, sin depender de que SimpleTech toque su flujo.
+
+### `data` viene también en los errores
+
+El motor de SimpleTech lee siempre una variable `$data`; cuando la respuesta no la traía, se
+quedaba sin nada que mostrarle al cliente. Ahora **todos** los errores incluyen:
+
+```jsonc
+{
+  "success": false,
+  "error": { "codigo": "OTP_VENCIDO", "mensaje": "Tu código venció. Solicita uno nuevo." },
+  "data":  { "mensaje": "Tu código venció. Solicita uno nuevo.", "codigo": "OTP_VENCIDO" }
+}
+```
+
+El texto va duplicado a propósito. Los errores que ya mandaban datos extra
+(`reintentarEnSegundos`, `intentosRestantes`) los conservan.
 
 ### Qué es el "capital activo" que ve el cliente
 

@@ -35,8 +35,31 @@ type RespuestaError = {
 	estado: 400 | 401 | 404 | 429 | 500 | 503;
 };
 
-function error(c: Context, { codigo, mensaje, estado }: RespuestaError) {
-	return c.json({ success: false, error: { codigo, mensaje } }, estado);
+/**
+ * Respuesta de error.
+ *
+ * El mensaje va **dos veces**: en `error.mensaje` y dentro de `data`. No es
+ * redundancia por descuido — el motor de SimpleTech lee siempre una variable
+ * `$data`, y cuando la respuesta no la trae se queda sin nada que mostrarle al
+ * cliente. Con esto, cualquier error tiene un texto listo para el chat sin que
+ * el bot tenga que ramificar por `success`.
+ *
+ * `data` extra (por ejemplo `reintentarEnSegundos`) se pasa en `datos` y se
+ * mezcla; el `mensaje` siempre está.
+ */
+function error(
+	c: Context,
+	{ codigo, mensaje, estado }: RespuestaError,
+	datos: Record<string, unknown> = {},
+) {
+	return c.json(
+		{
+			success: false,
+			error: { codigo, mensaje },
+			data: { mensaje, codigo, ...datos },
+		},
+		estado,
+	);
 }
 
 /**
@@ -87,19 +110,17 @@ export async function buscarClienteBotCobros(c: Context) {
 		// tiene crédito: distinguirlos convertiría el endpoint en un detector de
 		// clientes de Cash In para quien tenga la llave.
 		if (resultado.estado === "no_encontrado") {
-			return c.json(
+			return error(
+				c,
 				{
-					success: false,
-					error: {
-						codigo: "CLIENTE_NO_ENCONTRADO",
-						mensaje:
-							"No encontramos un crédito con ese dato. Revisa tu NIT, DPI o número de placa.",
-					},
-					// Se mantiene del contrato original, para no romper si el bot ya lo
-					// leía.
-					data: { encontrado: false },
+					codigo: "CLIENTE_NO_ENCONTRADO",
+					mensaje:
+						"No encontramos un crédito con ese dato. Revisa tu NIT, DPI o número de placa.",
+					estado: 404,
 				},
-				404,
+				// `encontrado` se mantiene del contrato original, para no romper si el
+				// bot ya lo leía.
+				{ encontrado: false },
 			);
 		}
 
@@ -125,17 +146,15 @@ export async function buscarClienteBotCobros(c: Context) {
 
 		if (!envio.enviado) {
 			if (envio.codigo === "DEMASIADOS_ENVIOS") {
-				return c.json(
+				return error(
+					c,
 					{
-						success: false,
-						error: {
-							codigo: "DEMASIADOS_ENVIOS",
-							mensaje:
-								"Ya te enviamos un código hace poco. Espera un momento antes de pedir otro.",
-						},
-						data: { reintentarEnSegundos: envio.reintentarEnSegundos },
+						codigo: "DEMASIADOS_ENVIOS",
+						mensaje:
+							"Ya te enviamos un código hace poco. Espera un momento antes de pedir otro.",
+						estado: 429,
 					},
-					429,
+					{ reintentarEnSegundos: envio.reintentarEnSegundos },
 				);
 			}
 
@@ -402,16 +421,14 @@ export async function listarCreditosBotCobros(c: Context) {
 						estado: 401,
 					});
 				default:
-					return c.json(
+					return error(
+						c,
 						{
-							success: false,
-							error: {
-								codigo: "OTP_INVALIDO",
-								mensaje: "El código no es correcto.",
-							},
-							data: { intentosRestantes: validacion.intentosRestantes },
+							codigo: "OTP_INVALIDO",
+							mensaje: "El código no es correcto.",
+							estado: 401,
 						},
-						401,
+						{ intentosRestantes: validacion.intentosRestantes },
 					);
 			}
 		}

@@ -44,13 +44,15 @@ export async function autenticarBotCobros(
 		console.error(
 			"[BotCobros] BOT_COBROS_API_KEY no está configurada; se rechaza la petición",
 		);
+		const mensaje = "El servicio no está disponible en este momento.";
+
+		// `data` va también en los errores: el motor del bot lee siempre esa
+		// variable y sin ella se queda sin nada que mostrarle al cliente.
 		return c.json(
 			{
 				success: false,
-				error: {
-					codigo: "SERVICIO_NO_DISPONIBLE",
-					mensaje: "El servicio no está disponible en este momento.",
-				},
+				error: { codigo: "SERVICIO_NO_DISPONIBLE", mensaje },
+				data: { mensaje, codigo: "SERVICIO_NO_DISPONIBLE" },
 			},
 			503,
 		);
@@ -71,13 +73,13 @@ export async function autenticarBotCobros(
 				"desconocida",
 		});
 
+		const mensaje = "No autorizado.";
+
 		return c.json(
 			{
 				success: false,
-				error: {
-					codigo: "NO_AUTORIZADO",
-					mensaje: "No autorizado.",
-				},
+				error: { codigo: "NO_AUTORIZADO", mensaje },
+				data: { mensaje, codigo: "NO_AUTORIZADO" },
 			},
 			401,
 		);

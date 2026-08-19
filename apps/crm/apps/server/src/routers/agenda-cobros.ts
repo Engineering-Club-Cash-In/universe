@@ -46,143 +46,205 @@ export const agendaCobrosRouter = {
 	 * ya lo resuelve correctamente para el ranking de cumplimiento — este
 	 * gap es solo la vista personal del asesor durante el día (Codex PR #1332).
 	 */
-	getMiAgendaHoy: cobrosProcedure.handler(async ({ context }) => {
-		const asesorId = context.session?.user?.id;
-		if (!asesorId) return { fecha: toDateStrGT(new Date()), items: [] };
-		const fecha = toDateStrGT(new Date());
-		const items = await db
-			.select({
-				id: agendaCobrosSnapshotItems.id,
-				numeroCreditoSifco: agendaCobrosSnapshotItems.numeroCreditoSifco,
-				casoCobroId: agendaCobrosSnapshotItems.casoCobroId,
-				motivoAgenda: agendaCobrosSnapshotItems.motivoAgenda,
-				bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
-				promesaCumplida: agendaCobrosSnapshotItems.promesaCumplida,
-				promesaCumplidaEn: agendaCobrosSnapshotItems.promesaCumplidaEn,
-			})
-			.from(agendaCobrosSnapshotItems)
-			.innerJoin(
-				agendaCobrosSnapshots,
-				eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
-			)
-			.where(
-				and(
-					eq(agendaCobrosSnapshots.fechaGt, fecha),
-					eq(agendaCobrosSnapshots.asesorId, asesorId),
-				),
-			);
-		if (items.length === 0) return { fecha, items: [] };
-
-		// Resolver el cliente por SIFCO, no solo por casoCobroId: un item D-0
-		// siempre nace con casoCobroId=null en agenda-cobros-source.ts, así
-		// que un join directo por casoCobroId deja el nombre en null para TODO
-		// item D-0 (y para cualquier crédito donde D-0 ganó la deduplicación)
-		// aunque el crédito sí tenga caso CRM vinculado — mismo fallback por
-		// SIFCO que ya usa getCumplimientoAgendaDetalle (Codex, PR #1332).
-		const sifcosClientes = [
-			...new Set(items.map((item) => item.numeroCreditoSifco)),
-		];
-		const casosParaCliente = sifcosClientes.length
-			? await db
-					.select({
-						id: casosCobros.id,
-						numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-						contratoId: casosCobros.contratoId,
-						activo: casosCobros.activo,
-						updatedAt: casosCobros.updatedAt,
-					})
-					.from(casosCobros)
-					.where(inArray(casosCobros.numeroCreditoSifco, sifcosClientes))
-			: [];
-		const casoPorSifcoCliente = agruparCasosVigentesPorSifco(casosParaCliente);
-		const contratoIdsCliente = [
-			...new Set(
-				[...casoPorSifcoCliente.values()]
-					.map((caso) => caso.contratoId)
-					.filter((id): id is string => id !== null),
-			),
-		];
-		const contratosCliente = contratoIdsCliente.length
-			? await db
-					.select({
-						id: contratosFinanciamiento.id,
-						clienteNombre: clients.contactPerson,
-					})
-					.from(contratosFinanciamiento)
-					.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
-					.where(inArray(contratosFinanciamiento.id, contratoIdsCliente))
-			: [];
-		const clienteNombrePorContratoAgenda = new Map(
-			contratosCliente.map((c) => [c.id, c.clienteNombre]),
-		);
-		const clienteNombrePorSifco = new Map(
-			[...casoPorSifcoCliente.entries()].map(([sifco, caso]) => [
-				sifco,
-				caso.contratoId
-					? (clienteNombrePorContratoAgenda.get(caso.contratoId) ?? null)
-					: null,
-			]),
-		);
-
-		// Ventana de fecha empujada al SQL (no en JS): con miles de contactos
-		// históricos por caso, traer todo y filtrar en memoria no escala.
-		const { desde, hasta } = ventanaDiaGuatemala(fecha);
-		// numeroCreditoSifco del caso: mismo fallback de matching que usa el
-		// cierre nocturno (contactoPerteneceAlItem) — un item con
-		// casoCobroId=null (sin caso CRM vinculado) solo puede matchear por
-		// SIFCO, nunca por caso.
-		const contactos = await db
-			.select({
-				id: contactosCobros.id,
-				casoCobroId: contactosCobros.casoCobroId,
-				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-				realizadoPor: contactosCobros.realizadoPor,
-				fechaContacto: contactosCobros.fechaContacto,
-				estadoContacto: contactosCobros.estadoContacto,
-				comentarios: contactosCobros.comentarios,
-			})
-			.from(contactosCobros)
-			.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
-			.where(
-				and(
-					eq(contactosCobros.realizadoPor, asesorId),
-					gte(contactosCobros.fechaContacto, desde),
-					lt(contactosCobros.fechaContacto, hasta),
-				),
-			);
-
-		const cerrados = cerrarItemsAgenda(
-			fecha,
-			items.map((item) => ({
-				asesorId,
-				asesorNombre: "",
-				numeroCreditoSifco: item.numeroCreditoSifco,
-				casoCobroId: item.casoCobroId,
-				bucketSnapshot: item.bucketSnapshot,
-				motivoAgenda: item.motivoAgenda as MotivoAgenda,
-			})),
-			contactos,
-		);
-		const cerradoPorSifco = new Map(
-			cerrados.map((c) => [c.numeroCreditoSifco, c]),
-		);
-
-		return {
-			fecha,
-			items: items.map((item) => {
-				const cerrado = cerradoPorSifco.get(item.numeroCreditoSifco);
-				return {
-					...item,
-					clienteNombre:
-						clienteNombrePorSifco.get(item.numeroCreditoSifco) ?? null,
-					atendido: cerrado?.atendido ?? false,
-					atendidoEn: cerrado?.atendidoEn ?? null,
-					resultadoContacto: cerrado?.resultadoContacto ?? null,
-					contactoCobroId: cerrado?.contactoCobroId ?? null,
-				};
+	getMiAgendaHoy: cobrosProcedure
+		.input(
+			z.object({
+				page: z.number().int().positive().default(1),
+				perPage: z.number().int().min(1).max(200).default(50),
 			}),
-		};
-	}),
+		)
+		.handler(async ({ context, input }) => {
+			const asesorId = context.session?.user?.id;
+			if (!asesorId) {
+				return {
+					fecha: toDateStrGT(new Date()),
+					page: input.page,
+					perPage: input.perPage,
+					total: 0,
+					totalPages: 1,
+					items: [],
+				};
+			}
+			const fecha = toDateStrGT(new Date());
+			const where = and(
+				eq(agendaCobrosSnapshots.fechaGt, fecha),
+				eq(agendaCobrosSnapshots.asesorId, asesorId),
+			);
+			// Paginado server-side: un asesor puede tener 16k+ créditos
+			// planificados en el mismo snapshot (ver CHUNK_SIZE_SNAPSHOT_ITEMS en
+			// jobs/agenda-cobros-snapshots.ts) — traer todo de una vez, correr
+			// cerrarItemsAgenda sobre el total y devolverlo entero puede colgar
+			// al cliente eventual de este endpoint (Codex PR #1332).
+			const [{ total }] = await db
+				.select({ total: count() })
+				.from(agendaCobrosSnapshotItems)
+				.innerJoin(
+					agendaCobrosSnapshots,
+					eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
+				)
+				.where(where);
+			const items = await db
+				.select({
+					id: agendaCobrosSnapshotItems.id,
+					numeroCreditoSifco: agendaCobrosSnapshotItems.numeroCreditoSifco,
+					casoCobroId: agendaCobrosSnapshotItems.casoCobroId,
+					motivoAgenda: agendaCobrosSnapshotItems.motivoAgenda,
+					bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
+					promesaCumplida: agendaCobrosSnapshotItems.promesaCumplida,
+					promesaCumplidaEn: agendaCobrosSnapshotItems.promesaCumplidaEn,
+				})
+				.from(agendaCobrosSnapshotItems)
+				.innerJoin(
+					agendaCobrosSnapshots,
+					eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
+				)
+				.where(where)
+				.orderBy(asc(agendaCobrosSnapshotItems.numeroCreditoSifco))
+				.limit(input.perPage)
+				.offset((input.page - 1) * input.perPage);
+			const base = {
+				fecha,
+				page: input.page,
+				perPage: input.perPage,
+				total,
+				totalPages: Math.max(1, Math.ceil(total / input.perPage)),
+			};
+			if (items.length === 0) return { ...base, items: [] };
+
+			// Resolver el contratoId PRIMERO por el casoCobroId que el snapshot
+			// ya congeló (item.casoCobroId), NO por el caso vigente actual del
+			// SIFCO: numero_credito_sifco no tiene índice único, un mismo
+			// crédito puede tener varios casos_cobros (reaperturas,
+			// migraciones, altas manuales — ver caso-vigente.ts). SIFCO solo
+			// entra como fallback para item.casoCobroId=null (item D-0, que
+			// siempre nace sin caso — ver agenda-cobros-source.ts) — mismo
+			// criterio que getCumplimientoAgendaDetalle (Codex, PR #1332).
+			const casoCobroIdsDirectos = [
+				...new Set(
+					items
+						.map((item) => item.casoCobroId)
+						.filter((id): id is string => id !== null),
+				),
+			];
+			const casosDirectos = casoCobroIdsDirectos.length
+				? await db
+						.select({
+							id: casosCobros.id,
+							contratoId: casosCobros.contratoId,
+						})
+						.from(casosCobros)
+						.where(inArray(casosCobros.id, casoCobroIdsDirectos))
+				: [];
+			const contratoIdPorCasoCobroId = new Map(
+				casosDirectos.map((c) => [c.id, c.contratoId]),
+			);
+
+			const sifcosSinCaso = [
+				...new Set(
+					items
+						.filter((item) => item.casoCobroId === null)
+						.map((item) => item.numeroCreditoSifco),
+				),
+			];
+			const casosPorSifco = sifcosSinCaso.length
+				? await db
+						.select({
+							id: casosCobros.id,
+							numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+							contratoId: casosCobros.contratoId,
+							activo: casosCobros.activo,
+							updatedAt: casosCobros.updatedAt,
+						})
+						.from(casosCobros)
+						.where(inArray(casosCobros.numeroCreditoSifco, sifcosSinCaso))
+				: [];
+			const casoPorSifco = agruparCasosVigentesPorSifco(casosPorSifco);
+
+			const contratoIdsCliente = [
+				...new Set(
+					[
+						...contratoIdPorCasoCobroId.values(),
+						...[...casoPorSifco.values()].map((caso) => caso.contratoId),
+					].filter((id): id is string => id !== null),
+				),
+			];
+			const contratosCliente = contratoIdsCliente.length
+				? await db
+						.select({
+							id: contratosFinanciamiento.id,
+							clienteNombre: clients.contactPerson,
+						})
+						.from(contratosFinanciamiento)
+						.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+						.where(inArray(contratosFinanciamiento.id, contratoIdsCliente))
+				: [];
+			const clienteNombrePorContratoAgenda = new Map(
+				contratosCliente.map((c) => [c.id, c.clienteNombre]),
+			);
+
+			// Ventana de fecha empujada al SQL (no en JS): con miles de contactos
+			// históricos por caso, traer todo y filtrar en memoria no escala.
+			const { desde, hasta } = ventanaDiaGuatemala(fecha);
+			// numeroCreditoSifco del caso: mismo fallback de matching que usa el
+			// cierre nocturno (contactoPerteneceAlItem) — un item con
+			// casoCobroId=null (sin caso CRM vinculado) solo puede matchear por
+			// SIFCO, nunca por caso.
+			const contactos = await db
+				.select({
+					id: contactosCobros.id,
+					casoCobroId: contactosCobros.casoCobroId,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+					realizadoPor: contactosCobros.realizadoPor,
+					fechaContacto: contactosCobros.fechaContacto,
+					estadoContacto: contactosCobros.estadoContacto,
+					comentarios: contactosCobros.comentarios,
+				})
+				.from(contactosCobros)
+				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
+				.where(
+					and(
+						eq(contactosCobros.realizadoPor, asesorId),
+						gte(contactosCobros.fechaContacto, desde),
+						lt(contactosCobros.fechaContacto, hasta),
+					),
+				);
+
+			const cerrados = cerrarItemsAgenda(
+				fecha,
+				items.map((item) => ({
+					asesorId,
+					asesorNombre: "",
+					numeroCreditoSifco: item.numeroCreditoSifco,
+					casoCobroId: item.casoCobroId,
+					bucketSnapshot: item.bucketSnapshot,
+					motivoAgenda: item.motivoAgenda as MotivoAgenda,
+				})),
+				contactos,
+			);
+			const cerradoPorSifco = new Map(
+				cerrados.map((c) => [c.numeroCreditoSifco, c]),
+			);
+
+			return {
+				...base,
+				items: items.map((item) => {
+					const cerrado = cerradoPorSifco.get(item.numeroCreditoSifco);
+					const contratoId = item.casoCobroId
+						? contratoIdPorCasoCobroId.get(item.casoCobroId)
+						: casoPorSifco.get(item.numeroCreditoSifco)?.contratoId;
+					return {
+						...item,
+						clienteNombre: contratoId
+							? (clienteNombrePorContratoAgenda.get(contratoId) ?? null)
+							: null,
+						atendido: cerrado?.atendido ?? false,
+						atendidoEn: cerrado?.atendidoEn ?? null,
+						resultadoContacto: cerrado?.resultadoContacto ?? null,
+						contactoCobroId: cerrado?.contactoCobroId ?? null,
+					};
+				}),
+			};
+		}),
 	getCumplimientoAgendaResumen: cobrosSupervisorProcedure
 		.input(
 			z.object({
@@ -296,15 +358,45 @@ export const agendaCobrosRouter = {
 				.limit(input.perPage)
 				.offset((input.page - 1) * input.perPage);
 
-			// Resolver el cliente por SIFCO, no solo por casoCobroId: un item D-0
-			// siempre nace con casoCobroId=null en agenda-cobros-source.ts, así
-			// que un join directo por casoCobroId deja el nombre en null para
-			// TODO item D-0 (y para cualquier crédito donde D-0 ganó la
-			// deduplicación) aunque el crédito sí tenga caso CRM vinculado —
-			// mismo fallback por SIFCO que ya usa cerrarItemsAgenda arriba
-			// (Codex, PR #1332).
-			const sifcos = [...new Set(items.map((item) => item.numeroCreditoSifco))];
-			const casos = sifcos.length
+			// Resolver el contratoId PRIMERO por el casoCobroId que el snapshot
+			// ya congeló (item.casoCobroId), NO por el caso vigente actual del
+			// SIFCO: numero_credito_sifco no tiene índice único, un mismo
+			// crédito puede tener varios casos_cobros (reaperturas,
+			// migraciones, altas manuales — ver caso-vigente.ts). Si se
+			// resolviera solo por SIFCO, un item viejo enlazado (link del
+			// front) a un caso A mostraría el clienteNombre del caso B si B es
+			// el vigente ahora — nombre y link señalando a casos distintos.
+			// SIFCO solo entra como fallback para los item.casoCobroId=null
+			// (item D-0, que siempre nace sin caso — ver
+			// agenda-cobros-source.ts) (Codex, PR #1332).
+			const casoCobroIdsDirectos = [
+				...new Set(
+					items
+						.map((item) => item.casoCobroId)
+						.filter((id): id is string => id !== null),
+				),
+			];
+			const casosDirectos = casoCobroIdsDirectos.length
+				? await db
+						.select({
+							id: casosCobros.id,
+							contratoId: casosCobros.contratoId,
+						})
+						.from(casosCobros)
+						.where(inArray(casosCobros.id, casoCobroIdsDirectos))
+				: [];
+			const contratoIdPorCasoCobroId = new Map(
+				casosDirectos.map((c) => [c.id, c.contratoId]),
+			);
+
+			const sifcosSinCaso = [
+				...new Set(
+					items
+						.filter((item) => item.casoCobroId === null)
+						.map((item) => item.numeroCreditoSifco),
+				),
+			];
+			const casosPorSifco = sifcosSinCaso.length
 				? await db
 						.select({
 							id: casosCobros.id,
@@ -314,14 +406,16 @@ export const agendaCobrosRouter = {
 							updatedAt: casosCobros.updatedAt,
 						})
 						.from(casosCobros)
-						.where(inArray(casosCobros.numeroCreditoSifco, sifcos))
+						.where(inArray(casosCobros.numeroCreditoSifco, sifcosSinCaso))
 				: [];
-			const casoPorSifco = agruparCasosVigentesPorSifco(casos);
+			const casoPorSifco = agruparCasosVigentesPorSifco(casosPorSifco);
+
 			const contratoIds = [
 				...new Set(
-					[...casoPorSifco.values()]
-						.map((caso) => caso.contratoId)
-						.filter((id): id is string => id !== null),
+					[
+						...contratoIdPorCasoCobroId.values(),
+						...[...casoPorSifco.values()].map((caso) => caso.contratoId),
+					].filter((id): id is string => id !== null),
 				),
 			];
 			const contratos = contratoIds.length
@@ -346,9 +440,9 @@ export const agendaCobrosRouter = {
 				total,
 				totalPages: Math.max(1, Math.ceil(total / input.perPage)),
 				items: items.map((item) => {
-					const contratoId = casoPorSifco.get(
-						item.numeroCreditoSifco,
-					)?.contratoId;
+					const contratoId = item.casoCobroId
+						? contratoIdPorCasoCobroId.get(item.casoCobroId)
+						: casoPorSifco.get(item.numeroCreditoSifco)?.contratoId;
 					return {
 						...item,
 						clienteNombre: contratoId

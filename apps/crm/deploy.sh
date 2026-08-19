@@ -2,6 +2,10 @@
 
 set -e  # Exit on error
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+MONOREPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$SCRIPT_DIR"
+
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -94,13 +98,11 @@ echo -e "${GREEN}✅ Authentication successful${NC}\n"
 # Build and push server if changed
 if [ "$SERVER_CHANGED" = true ] || [ "$FORCE_DEPLOY" = "1" ]; then
     echo -e "${BLUE}🏗️  Building server image...${NC}"
-    cd apps/server
-    podman build -t cci/crm-api .
+    podman build -t cci/crm-api -f "$SCRIPT_DIR/apps/server/Dockerfile" "$MONOREPO_ROOT"
     podman tag cci/crm-api:latest $ECR_REGISTRY/cci/crm-api:latest
     echo -e "${BLUE}📤 Pushing server image...${NC}"
     podman push $ECR_REGISTRY/cci/crm-api:latest
     echo -e "${GREEN}✅ Server image pushed successfully${NC}\n"
-    cd ../..
 fi
 
 # Build and push web if changed

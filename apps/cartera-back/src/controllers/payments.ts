@@ -3246,6 +3246,7 @@ export async function obtenerCreditosConPagosPendientes(
         capital: creditos.capital,
         deudaTotal: creditos.deudatotal,
         statusCredit: creditos.statusCredit,
+        estadoDevolucion: creditos.estado_devolucion,
         usuarioId: creditos.usuario_id,
         cuota: creditos.cuota,
         interes: creditos.cuota_interes,
@@ -3272,8 +3273,32 @@ export async function obtenerCreditosConPagosPendientes(
       creditosInversionista.length
     );
 
+    // Igual que calcularYRegistrarPagosEspejo: si vamos a generar pagos, un crédito
+    // con devolución a CUBE pendiente de autorización bloquea todo el lote. Sin esto,
+    // este endpoint podía generar pagos y descontar capital al inversionista mientras
+    // la devolución seguía sin resolver (bypass del guard agregado en el flujo normal).
+    if (generateFalsePayment) {
+      const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+        creditosInversionista.map((credito) => ({
+          creditoId: credito.creditoId,
+          numeroCreditoSifco: credito.numeroCreditoSifco,
+          estadoDevolucion: credito.estadoDevolucion,
+        })),
+      );
+
+      if (pendingReturnWarning) {
+        console.warn(
+          `⚠️ Generación bloqueada: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+        );
+        return { success: false as const, ...pendingReturnWarning, data: [] };
+      }
+    }
+
     // 2️⃣ PASO 2: Por cada crédito, buscar la PRIMERA cuota NO LIQUIDADA
-    const creditosConPagos = await Promise.all(
+    const creditoIds = [
+      ...new Set(creditosInversionista.map((credito) => credito.creditoId)),
+    ].sort((a, b) => a - b);
+    const procesarCreditos = () => Promise.all(
       creditosInversionista.map(async (credito) => {
 
         // 🆕 PASO 0: Verificar si ESTE CRÉDITO tiene pagos pendientes de liquidar
@@ -3517,6 +3542,14 @@ export async function obtenerCreditosConPagosPendientes(
       })
     );
 
+    // La generación real (generateFalsePayment=true) revalida bajo lock transaccional,
+    // igual que calcularYRegistrarPagosEspejo: si la devolución cambió entre la lectura
+    // de arriba y este punto, se bloquea todo antes de crear el primer pago. La lectura
+    // simple (generateFalsePayment=false) no necesita el lock.
+    const creditosConPagos = generateFalsePayment
+      ? await withPendingReturnCreditLocks(creditoIds, procesarCreditos)
+      : await procesarCreditos();
+
     // 6️⃣ PASO 6: Filtrar nulls
     const creditosConCuotasPendientes = creditosConPagos.filter(
       (c) => c !== null
@@ -3536,6 +3569,16 @@ export async function obtenerCreditosConPagosPendientes(
     };
   } catch (error: any) {
     console.error("❌ Error en obtenerCreditosConPagosPendientes:", error);
+    if (error?.code === PENDING_RETURN_AUTHORIZATION_CODE) {
+      return {
+        success: false as const,
+        warning: true as const,
+        code: PENDING_RETURN_AUTHORIZATION_CODE,
+        message: error.message,
+        creditos_bloqueados: error.creditos_bloqueados,
+        data: [],
+      };
+    }
     return {
       success: false,
       error: error.message,

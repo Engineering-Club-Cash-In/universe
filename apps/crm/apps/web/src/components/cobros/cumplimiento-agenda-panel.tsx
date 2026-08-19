@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { GestionesDelDiaPanel } from "@/components/cobros/gestiones-del-dia-panel";
+import { aFechaISO_GT } from "@/components/cobros/historial/formato";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -347,11 +348,18 @@ export function CumplimientoAgendaPanel() {
 	// `snapshotAbierto`.
 	const filaSeleccionada =
 		datos?.items.find((a) => a.asesorId === asesorId) ?? null;
-	// true cuando SÍ hay snapshot para este asesor/día pero está `abierto`
-	// (agenda de hoy, sin cerrar todavía) — distinto de "no tiene agenda en
-	// absoluto".
+	// true cuando SÍ hay snapshot para este asesor/día, está `abierto`, Y la
+	// fecha es HOY — las tres condiciones juntas, no solo `estado`: el job de
+	// cierre solo cierra la fecha inmediatamente anterior en cada corrida
+	// (`cerrarSnapshotsAgenda(..., ayer, ...)` en
+	// `jobs/agenda-cobros-snapshots.ts`), nunca vuelve a intentar un día
+	// viejo — así que un snapshot `abierto` de una fecha PASADA es un cierre
+	// que falló para siempre, no "en curso, se confirma esta noche" (esa
+	// noche ya pasó) (hallazgo de code review, Codex).
+	const esHoyGT = fecha === aFechaISO_GT(new Date());
 	const snapshotAbierto =
 		!filaSeleccionada &&
+		esHoyGT &&
 		asesoresConAgenda.some(
 			(a) => a.asesorId === asesorId && a.estado === "abierto",
 		);
@@ -497,16 +505,19 @@ export function CumplimientoAgendaPanel() {
 										planificados/atendidos se confirman al cierre de esta noche.
 									</div>
 								) : (
-									// Asesor sin snapshot ese día (0 items planificados —
-									// `capturarSnapshots` no persiste una fila para él, ver la
-									// nota en `usuariosConGestiones` más arriba), pero SÍ con
-									// gestiones registradas: el bloque de abajo las muestra sin
-									// badge de certeza ("—", no "Fuera de agenda") — sin
-									// snapshot no se puede distinguir "no hubo agenda" de "la
-									// captura falló" (ver `columnaEnAgenda` en el server).
+									// Sin snapshot CERRADO y sin poder afirmar "en curso"
+									// (`snapshotAbierto` ya descartó ese caso arriba): puede ser
+									// un asesor sin agenda planificada, o un snapshot `abierto`
+									// de una fecha PASADA cuyo cierre falló para siempre (el
+									// job solo reintenta AYER, nunca revisita días viejos — ver
+									// la nota en `snapshotAbierto`), o directamente sin fila. En
+									// los tres casos no hay forma de afirmar "no tenía agenda"
+									// sin arriesgarse a mentir sobre un fallo de captura/cierre
+									// silencioso — mismo criterio que `enAgenda: null` en el
+									// bloque de abajo (hallazgo de code review, Codex).
 									<div className="px-4 py-6 text-center text-gray-500 text-sm">
-										{asesorSeleccionado.asesorNombre} no tenía agenda
-										planificada ese día.
+										No se pudo evaluar la agenda planificada de{" "}
+										{asesorSeleccionado.asesorNombre} para este día.
 									</div>
 								)}
 							</Card>

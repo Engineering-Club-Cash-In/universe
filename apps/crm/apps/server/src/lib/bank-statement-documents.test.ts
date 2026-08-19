@@ -131,10 +131,32 @@ describe("bank statement opportunity documents", () => {
 
 		// El análisis acepta hasta 9 archivos y la IA los usa todos, así que los
 		// que no caben en las 3 casillas se adjuntan igual, fuera del checklist.
-		expect(source).toContain(
-			"const extraFiles = downloadedFiles.slice(\n\t\t\t\t\t\t\tBANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length,\n\t\t\t\t\t\t);",
-		);
+		expect(source).toContain("const extraFiles = downloadedFiles.slice(");
 		expect(source).toContain("savedExtraDocumentIds.push(newDocument.id)");
+	});
+
+	test("does not roll back the checklist documents when an extra file fails", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+
+		// Los sobrantes van después del catch del checklist y con su propia
+		// limpieza: si falla el cuarto archivo, los tres ya guardados se quedan.
+		const checklistCleanupIndex = source.indexOf(
+			"...savedDocuments.map(({ id }) =>",
+		);
+		const extraFilesIndex = source.indexOf(
+			"const extraFiles = downloadedFiles.slice(",
+		);
+		const extraCleanupIndex = source.indexOf(
+			"...savedExtraDocumentIds.map((id) =>",
+		);
+
+		expect(checklistCleanupIndex).toBeGreaterThan(-1);
+		expect(extraFilesIndex).toBeGreaterThan(checklistCleanupIndex);
+		expect(extraCleanupIndex).toBeGreaterThan(extraFilesIndex);
+		expect(source).toContain("checklistDocumentsSaved && extraFiles.length > 0");
 	});
 
 	test("records which files the analysis actually read", () => {

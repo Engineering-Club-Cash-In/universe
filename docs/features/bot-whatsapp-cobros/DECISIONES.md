@@ -39,6 +39,9 @@ día; si no está escrito, no está decidido.
 | [D-29](#d-29--la-imagen-se-descarga-con-allowlist) | La imagen se descarga con allowlist | 🟢 |
 | [D-30](#d-30--subir-boleta-lo-puede-hacer-cualquier-cliente) | Subir boleta lo puede hacer cualquier cliente | 🟢 |
 | [D-31](#d-31--la-boleta-se-copia-a-nuestro-r2-al-leerla) | La boleta se copia a nuestro R2 al leerla | 🟢 |
+| [D-32](#d-32--registrar-una-boleta-ya-mueve-la-mora-y-por-eso-el-rechazo-es-revertir) | Registrar una boleta ya mueve la mora, y por eso el rechazo es Revertir | 🟢 |
+| [D-33](#d-33--una-boleta-son-varios-pagos-y-una-sola-notificación) | Una boleta son varios pagos, y una sola notificación | 🟢 |
+| [D-34](#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key) | La confirmación se protege con estado, no con idempotency key | 🟢 |
 
 ---
 
@@ -966,3 +969,108 @@ cartera ya tiene `deleteDocumentoFromR2()`, solo falta exponerla en una ruta.
 
 **La URL original igual se guarda** (`imagen_origen_url`), pero solo para trazar de dónde
 vino. No se vuelve a usar.
+
+---
+
+## D-32 · Registrar una boleta ya mueve la mora, y por eso el rechazo es Revertir
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — hallazgo de la revisión del contrato
+
+**Contexto.** El contrato decía que el pago del bot "entra `pending` y ahí se queda hasta que
+contabilidad lo resuelva". **Es falso a medias.** `insertPayment` llama a `procesarPagoMora`
+antes de tocar cuota alguna, y eso ejecuta `updateMora` con `DECREMENTO`: la mora del cliente
+baja **en el momento del insert**, y si queda en cero el crédito pasa de `MOROSO` a `ACTIVO`.
+
+Lo que sí espera a la validación es el resto: el pago sigue `pending`, las cuotas del
+calendario no se cierran y los inversionistas no se procesan.
+
+**Esto no lo introduce el bot** — pasa idéntico cuando conta registra a mano una boleta que
+llegó por correo. Pero el bot lo hace más seguido y sin un humano filtrando antes del insert,
+así que hay que decidir qué pasa cuando esa boleta resulta no ser buena.
+
+**Opciones.**
+- A) Que el bot no use `newPayment`: una cola propia y el insert recién al validar.
+- **B) Usar `newPayment` como todos, y garantizar que el rechazo devuelva la mora.**
+- C) Arreglar `falsePayment` para que restaure la mora.
+
+**Decisión: B.** A significa reimplementar el reparto entre mora, cuotas, capital y
+excedentes — la lógica más delicada de cartera— para el único caso del bot; tarde o temprano
+las dos copias dirían cosas distintas. C toca un proceso financiero que usan otros flujos, y
+no es lo que se pidió.
+
+**Cómo se garantiza:** el rechazo de una boleta es **Revertir Pago** (`reversePayment`), que
+llama a `updateMora` con `INCREMENTO` y devuelve exactamente lo que el registro descontó.
+Funciona sobre un pago `pending`, así que sirve para una boleta que nunca llegó a validarse —
+y es lo que conta ya hace hoy en carteraFront.
+
+**`false-payment` no sirve para esto**: solo pone `pagado: false, paymentFalse: true` y deja
+la mora descontada. En la UI ni siquiera está cableado al flujo de boletas de cliente. Si aun
+así llega un evento `marcado_falso`, el CRM **no le escribe al cliente**: levanta una alerta
+al asesor avisando que ese crédito quedó con la mora descontada por una boleta descartada.
+
+**Cuándo habría que revisar esto.** Si se ve en producción que las boletas del bot se
+rechazan seguido, el descuento temporal de mora deja de ser aceptable y toca la opción A (o
+un `validation_status` nuevo que `procesarPagoMora` respete).
+
+---
+
+## D-33 · Una boleta son varios pagos, y una sola notificación
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — hallazgo de la revisión del contrato
+
+**Contexto.** El contrato asumía que una boleta = un pago, guardaba un `pago_id` y prometía
+devolverlo. Dos cosas lo desmienten:
+
+1. `newPayment` recorre las cuotas pendientes mientras le quede dinero y **crea o actualiza
+   una fila de `pagos_credito` por cuota**. Tres cuotas atrasadas pagadas con una boleta son
+   tres pagos.
+2. **La respuesta de `newPayment` no devuelve ningún `pago_id`**: devuelve un resumen con
+   cuántas cuotas se pagaron completas y cuántas parciales.
+
+Sin ids no hay circuito de vuelta: el evento de conta trae un `pago_id` que el CRM no sabría
+de quién es.
+
+**Decisión.**
+
+- **`newPayment` devuelve la lista de ids creados** (`pagos: [48213, 48214]`). Es aditivo —el
+  formulario de carteraFront ignora el campo— y no toca la lógica de aplicación.
+- La relación **boleta → pagos es 1:N** y vive en `bot_cobros_boleta_pagos`, con `pago_id`
+  único: así el evento entrante encuentra su boleta.
+- **Un mensaje por boleta, no por pago.** Se espera a que todos los pagos de esa boleta estén
+  resueltos y sale un solo mensaje: todos validados → "acreditado"; alguno revertido →
+  "necesitamos revisar tu pago". Tres WhatsApp por una boleta sería absurdo.
+- Si a las **24 h** la boleta quedó a medias (unos resueltos, otros no), se avisa **solo al
+  asesor**. Al cliente no se le manda una verdad parcial.
+
+---
+
+## D-34 · La confirmación se protege con estado, no con idempotency key
+
+**Estado:** 🟢 **Cerrada · 2026-08-19** — hallazgo de la revisión del contrato
+
+**Contexto.** Si `newPayment` commitea y el CRM se cae antes de guardar los ids —timeout,
+corte de red—, un reintento del mismo `boletaId` vería el borrador sin confirmar y llamaría a
+cartera otra vez: **un segundo pago real** por la misma boleta.
+
+Y la red de cartera no alcanza: su chequeo de duplicados **solo corre cuando vienen
+`numeroAutorizacion` y `banco_id` a la vez**, y en este contrato la autorización es opcional
+(hay boletas que no la traen).
+
+**Opciones.**
+- A) Pasar una idempotency key (el `boletaId`) a `newPayment` y que cartera la respete.
+- **B) Máquina de estados en el CRM + reconciliación por la `r2_key`.**
+
+**Decisión: B.** A es lo que haría un libro de texto, pero `newPayment` mueve dinero y ya se
+decidió antes no meterle idempotencia (ver el caso de las facturas duplicadas y el de
+`aplicar-pago`). B consigue lo mismo sin tocar el camino de escritura:
+
+1. El borrador pasa a **`confirmando`** con un UPDATE condicional (`WHERE estado = 'leida'`)
+   **antes** de llamar a cartera. Dos peticiones simultáneas: solo una gana.
+2. Un reintento sobre un borrador en `confirmando` **no llama a cartera**: responde
+   `409 CONFIRMACION_EN_CURSO`.
+3. Un job revisa los que llevan más de 5 minutos ahí y le pregunta a cartera si esa boleta
+   existe, buscándola por la **`r2_key`** —que es única y quedó del lado de ellos en la tabla
+   `boletas`—: si existe, se completan los ids; si no, el borrador vuelve a `leida`.
+
+Lo único que agrega del lado de cartera es un **endpoint de lectura**
+(`GET /pagos-por-boleta?url=…`), que no puede romper nada.

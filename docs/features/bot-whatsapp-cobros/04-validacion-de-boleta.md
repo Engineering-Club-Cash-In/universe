@@ -209,9 +209,10 @@ a `/boleta/leer`. Ese es el reintento.
 {
   "success": true,
   "data": {
-    "pagoId": 48213,
+    "pagoIds": [48213, 48214],
+    "cuotasCubiertas": [3, 4],
     "estado": "en_validacion",
-    "monto": "6264.10",
+    "monto": "12528.20",
     "banco": "Banco Industrial",
     "fechaBoleta": "2026-08-18",
     "numeroAutorizacion": "123456789",
@@ -219,6 +220,51 @@ a `/boleta/leer`. Ese es el reintento.
   }
 }
 ```
+
+**`pagoIds` es una lista, no un id.** Una boleta que cubre dos cuotas crea dos pagos en
+cartera (§5.2). El bot no necesita usarlos —son para el circuito de vuelta y para soporte—
+pero devolver un solo id sería mentir sobre lo que quedó registrado.
+
+### 4.1 Qué pasa si el bot reintenta el mismo `boletaId`
+
+El caso feo no es que el cliente confirme dos veces: es que **cartera registre el pago y
+nosotros no nos enteremos** —timeout, corte de red, el proceso se cae entre el `newPayment` y
+el guardado—. Si un reintento viera el borrador todavía sin confirmar, volvería a llamar a
+cartera y crearía un **segundo pago real**.
+
+Y la protección de cartera no alcanza: su chequeo de duplicados **solo corre cuando vienen
+`numeroAutorizacion` y `banco_id` a la vez**, y en este contrato la autorización es opcional
+(hay boletas que no la traen). Sin autorización, no hay red.
+
+Por eso el borrador tiene un **estado intermedio** y la confirmación es una máquina de tres
+pasos:
+
+```
+leida  ──(se marca)──►  confirmando  ──(cartera respondió)──►  confirmada
+                             │
+                             └──(no respondió)──►  se queda en confirmando
+```
+
+1. **Antes** de llamar a cartera, el borrador pasa a `confirmando` con un UPDATE condicional
+   (`WHERE estado = 'leida'`). Dos peticiones simultáneas: solo una gana.
+2. Se llama a `newPayment`.
+3. Con la respuesta, se guardan los `pago_id` y el borrador pasa a `confirmada`.
+
+Un reintento sobre un borrador en `confirmando` **no vuelve a llamar a cartera**: responde
+`409 CONFIRMACION_EN_CURSO`.
+
+**Y para no dejarlo colgado**, un job de reconciliación revisa los borradores que llevan más
+de 5 minutos en `confirmando` y le pregunta a cartera si esa boleta existe — la busca por la
+`r2_key`, que es única y quedó en la tabla `boletas` de cartera:
+
+- **existe** → se completan los `pago_id`, el borrador pasa a `confirmada` y recién ahí se le
+  avisa al cliente;
+- **no existe** → vuelve a `leida` y el cliente puede confirmar de nuevo.
+
+Eso necesita un endpoint de lectura en cartera (`GET /pagos-por-boleta?url=…`), que es
+aditivo y no toca el camino de escritura. **No se mete una idempotency key en `newPayment`**:
+ese endpoint mueve dinero y ya fue decisión no meterle idempotencia
+([D-34](./DECISIONES.md#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key)).
 
 ### Errores
 
@@ -230,7 +276,8 @@ a `/boleta/leer`. Ese es el reintento.
 | 401 | `REFERENCIA_INVALIDA` / `SESION_VENCIDA` | Igual que arriba. |
 | 404 | `BORRADOR_NO_ENCONTRADO` | El `boletaId` no existe o es de otra sesión. |
 | 410 | `BORRADOR_VENCIDO` | Pasaron más de 15 minutos desde la lectura. Pedir la foto de nuevo. |
-| 409 | `BOLETA_YA_CONFIRMADA` | Ese borrador ya se registró. Va con el `pagoId` en `data` — **no se registra otro pago**. |
+| 409 | `BOLETA_YA_CONFIRMADA` | Ese borrador ya se registró. Va con los `pagoIds` en `data` — **no se registra otro pago**. |
+| 409 | `CONFIRMACION_EN_CURSO` | Hay una confirmación a medias de este mismo borrador (§4.1). Se responde sin volver a llamar a cartera. |
 | 409 | `BOLETA_DUPLICADA` | Misma autorización + banco ya registrada. Ver §9. |
 | 502 | `PAGO_NO_REGISTRADO` | Cartera respondió error al insertar. |
 | 503 | `CARTERA_NO_DISPONIBLE` | Cartera no respondió. |
@@ -262,8 +309,51 @@ contabilidad**, sin ruta especial para el bot. Mapeo campo por campo:
 
 **Lo que el bot no hace.** No decide excedentes, no reparte entre cuotas, no toca la mora:
 todo eso ya lo hace `newPayment` —mora primero, luego cuotas de la más vieja a la más nueva—
-exactamente igual que cuando conta registra el pago a mano. El pago entra con
-`validation_status = 'pending'` y ahí se queda hasta que contabilidad lo resuelva.
+exactamente igual que cuando conta registra el pago a mano.
+
+### 5.1 Registrar no es inerte
+
+Decir "queda pendiente hasta que conta lo valide" es **falso a medias**, y conviene tenerlo
+claro antes de exponer esto a clientes:
+
+| Al **registrar** (pending) | Espera a la **validación** |
+| --- | --- |
+| `procesarPagoMora` corre dentro de `newPayment` y **descuenta la mora en el acto** (`updateMora` con `DECREMENTO`) | El pago sigue en `validation_status = 'pending'` |
+| Si la mora queda en 0, el crédito **pasa de `MOROSO` a `ACTIVO`** | Las cuotas del calendario **no** se cierran (`cuotas_credito.pagado` no se toca) |
+| Se crean las filas de `pagos_credito` con la boleta adjunta | Los inversionistas **no** se procesan hasta `revalidatePayment` |
+
+O sea: entre que el cliente sube la boleta y conta la mira, **su mora ya bajó**. Y el bot
+mismo no se lo va a mostrar mal —`/credito/resumen` solo cuenta como pagada una cuota con
+pago `validated`— pero el número de mora sí cambia.
+
+**Esto no lo introduce el bot.** Pasa idéntico cuando conta registra a mano una boleta que
+llegó por correo: es cómo funciona `registerPayment` desde siempre. Lo que cambia es la
+frecuencia y que ya no hay un humano filtrando antes del insert.
+
+**La consecuencia de diseño está en el rechazo:** tiene que ser la acción que **devuelve** la
+mora. Ver §6 y [D-32](./DECISIONES.md#d-32--registrar-una-boleta-ya-mueve-la-mora-y-por-eso-el-rechazo-es-revertir).
+
+### 5.2 Una boleta puede crear varios pagos
+
+`newPayment` recorre las cuotas pendientes mientras le quede dinero, y **crea o actualiza una
+fila de `pagos_credito` por cuota**. Un cliente con tres cuotas atrasadas que paga las tres
+con una sola boleta genera **tres pagos**, cada uno con su `pago_id` y todos apuntando a la
+misma imagen en la tabla `boletas`.
+
+Además, **la respuesta de `newPayment` hoy no devuelve ningún `pago_id`** — devuelve un
+resumen (`cuotas_pagadas_completas`, `cuotas_pagadas_parciales`, `monto_aplicado`).
+
+Sin esos ids no hay circuito de vuelta: cuando conta valide, el evento traerá un `pago_id` que
+el CRM no sabría de quién es. Por eso el PR B agrega a la respuesta de `newPayment` la lista de
+ids creados:
+
+```json
+{ "success": true, "pagos": [48213, 48214, 48215], "detalle": { … } }
+```
+
+Es **aditivo** —el formulario de carteraFront ignora el campo— y no toca la lógica de
+aplicación. Del lado del CRM, la relación boleta→pagos es 1:N y vive en su propia tabla
+([D-33](./DECISIONES.md#d-33--una-boleta-son-varios-pagos-y-una-sola-notificación)).
 
 > **`usuario_id` no es quién registra el pago.** Es el cliente del crédito: para el
 > `01010214108330` vale `1049` → *Raul Alberto Zeledon Burgalin*, con su NIT. El asesor de ese
@@ -308,9 +398,20 @@ disparar mensajes de WhatsApp.
 | `evento` | Qué pasó en cartera | Qué hace el CRM |
 | --- | --- | --- |
 | `validado` | `POST /revalidatePayment` | WhatsApp al **cliente**: pago acreditado. |
-| `rechazado` | `POST /false-payment` | WhatsApp al cliente + **notificación al asesor**. |
-| `revertido` | `POST /reversePayment` | WhatsApp al cliente + notificación al asesor. |
+| `revertido` | `POST /reversePayment` | **Este es el rechazo.** WhatsApp al cliente + notificación al asesor. |
 | `regresado_a_pendiente` | `POST /revertPaymentToPending` | Notificación al asesor. **Al cliente no se le escribe**: para él no cambió nada, sigue en validación. |
+| `marcado_falso` | `POST /false-payment` | Solo notificación al asesor, **marcada como alerta**: ver el recuadro. |
+
+> **Rechazar una boleta es "Revertir Pago", no "marcar falso".** Es lo que hace conta hoy en
+> carteraFront, y es el único camino que **devuelve la mora** que el registro descontó (§5.1):
+> `reversePayment` llama a `updateMora` con `INCREMENTO`. Funciona igual sobre un pago
+> `pending`, así que sirve para una boleta que nunca se validó.
+>
+> `false-payment` **no restaura la mora** — solo pone `pagado: false, paymentFalse: true`. En
+> la UI ni siquiera está cableado a un botón del flujo de boletas de cliente. Si aun así llega
+> un evento `marcado_falso`, el CRM no le escribe al cliente: levanta una alerta al asesor
+> diciendo que ese crédito quedó con la mora descontada por una boleta que se descartó.
+> Ver [D-32](./DECISIONES.md#d-32--registrar-una-boleta-ya-mueve-la-mora-y-por-eso-el-rechazo-es-revertir).
 
 Respuesta siempre `200`, aunque no se haya notificado:
 
@@ -339,12 +440,26 @@ log y seguir. Un WhatsApp caído no puede tumbar la validación de un pago
   de cobros de ese crédito. Si el crédito no tiene caso o el caso no tiene responsable, la
   notificación va **al rol `cobros`** en vez de perderse.
 
-### Idempotencia
+### Idempotencia y agrupación
 
 Un pago se puede revertir y volver a validar; conta puede repetir una acción. Cada aviso se
 guarda en `bot_cobros_pago_eventos` con **unique `(pago_id, evento, ocurrido_en)`**: si el
 mismo evento llega dos veces con el mismo timestamp, se responde `notificado: false` y no se
 manda otro WhatsApp.
+
+**Y una boleta puede tener varios pagos (§5.2), así que llegarán varios eventos.** Conta
+valida las tres cuotas una por una: son tres eventos para una sola boleta. Mandarle tres
+WhatsApp al cliente por un solo pago sería ridículo.
+
+La regla es **un mensaje por boleta, cuando ya no falte ninguno**:
+
+1. Llega un evento → se registra y se marca ese pago como resuelto.
+2. Si **quedan pagos de la misma boleta sin resolver**, no se escribe nada todavía.
+3. Cuando **todos** están resueltos, sale **un** mensaje que refleja el conjunto:
+   - todos `validado` → *"tu pago fue acreditado"*;
+   - alguno `revertido` o `marcado_falso` → *"necesitamos revisar tu pago"* + asesor.
+4. Si a las **24 h** la boleta sigue con pagos resueltos y pagos sin resolver, se notifica
+   **solo al asesor** (nunca al cliente): algo quedó a medias en la validación.
 
 ---
 
@@ -465,10 +580,12 @@ Hay **dos** controles, y son distintos:
 el mismo banco, monto y autorización en las últimas 24 h → `409 BOLETA_DUPLICADA` sin tocar
 cartera. Es el caso común: el cliente manda la boleta dos veces porque no vio la respuesta.
 
-**2. El de cartera, que tiene un falso positivo conocido.** `newPayment` rechaza con 409 si
-existe cualquier pago con la misma `(numeroAutorizacion, banco_id)` **en todo el sistema**,
-sin mirar el crédito. Las referencias de BAC y G&T se repiten entre clientes distintos: en
-prod hay 79 bloqueos por esto, 27 de ellos contra el crédito de otra persona.
+**2. El de cartera, que tiene un falso positivo conocido — y un agujero.** `newPayment`
+rechaza con 409 si existe cualquier pago con la misma `(numeroAutorizacion, banco_id)` **en
+todo el sistema**, sin mirar el crédito. Y **solo corre si vienen los dos campos**: una boleta
+sin número de autorización no pasa por ningún chequeo (por eso §4.1). Y las referencias de
+BAC y G&T se repiten entre clientes distintos: en prod hay 79 bloqueos por esto, 27 de ellos
+contra el crédito de otra persona.
 
 Con el formulario eso lo resuelve un contador que ve el error y lo escala. Con el bot, el
 cliente recibiría "esa boleta ya fue registrada" **siendo mentira**. Por eso, un 409 de
@@ -505,15 +622,26 @@ CREATE TABLE bot_cobros_boletas (
   numero_autorizacion text,
   cuenta_destino      text,
   confianza           text,
-  estado              text NOT NULL,           -- leida | confirmada | descartada | fallida
+  estado              text NOT NULL,           -- leida | confirmando | confirmada | descartada | fallida
   motivo_fallo        text,
-  pago_id             integer,
+  confirmando_desde   timestamptz,             -- para el job de reconciliación (§4.1)
+  notificado_cliente_at timestamptz,           -- un mensaje por boleta, no por pago (§6)
   expira_en           timestamptz NOT NULL,
   created_at          timestamptz NOT NULL DEFAULT now(),
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX ON bot_cobros_boletas (pago_id) WHERE pago_id IS NOT NULL;
 CREATE INDEX ON bot_cobros_boletas (otp_id);
+CREATE INDEX ON bot_cobros_boletas (estado) WHERE estado = 'confirmando';
+
+-- Una boleta puede haber creado varios pagos en cartera (§5.2).
+CREATE TABLE bot_cobros_boleta_pagos (
+  boleta_id  uuid NOT NULL REFERENCES bot_cobros_boletas(id) ON DELETE CASCADE,
+  pago_id    integer NOT NULL,
+  numero_cuota integer,
+  resuelto_en timestamptz,                     -- cuando conta lo validó o revirtió
+  PRIMARY KEY (boleta_id, pago_id)
+);
+CREATE UNIQUE INDEX ON bot_cobros_boleta_pagos (pago_id);
 
 CREATE TABLE bot_cobros_pago_eventos (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -530,8 +658,14 @@ CREATE TABLE bot_cobros_pago_eventos (
 );
 ```
 
-**El `pago_id` es el puente.** Es lo que permite que, cuando cartera avise que el pago 48213
-se validó, el CRM sepa que ese pago vino del bot, de qué cliente y a qué teléfono escribirle.
+**`bot_cobros_boleta_pagos` es el puente.** El unique sobre `pago_id` es lo que permite que,
+cuando cartera avise que el pago 48213 se validó, el CRM sepa **de qué boleta** era, de qué
+cliente y a qué teléfono escribirle — y también cuántos pagos hermanos faltan por resolver
+antes de mandar el mensaje (§6).
+
+**La `r2_key` es el puente de emergencia.** Si una confirmación se cae a mitad, el job de
+reconciliación (§4.1) busca en cartera por esa key: es única y quedó guardada del lado de
+ellos en la tabla `boletas`.
 
 **Retención.** Los borradores sin confirmar se purgan a los **7 días** con el resto de la
 limpieza de PII ([D-14](./DECISIONES.md#d-14--retención-de-pii-y-logs)). Los confirmados se
@@ -596,8 +730,11 @@ Tres PR a `COBROS-02`, en este orden:
 | PR | Alcance | Se puede probar solo |
 | --- | --- | --- |
 | **A** | Tablas + `/boleta/leer` + descarga con allowlist + lectura con IA + **copia a R2** + mapeo de bancos + Swagger | Sí: devuelve datos y deja el archivo, no registra pago. |
-| **B** | `/boleta/confirmar` + `usuario_id` en `/credito/resumen` (cartera) + insert | Sí, contra la instancia de dev de cartera. |
-| **C** | Endpoint de eventos + emisión desde los 4 controladores de cartera + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
+| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment` y `GET /pagos-por-boleta` | Sí, contra la instancia de dev de cartera. |
+| **C** | Endpoint de eventos + emisión desde los controladores de cartera + agrupación por boleta + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
+
+**Los tres cambios en cartera del PR B son aditivos**: dos campos nuevos en respuestas que ya
+existen y un endpoint de lectura. Ninguno toca el camino de escritura de un pago.
 
 Cada PR lleva su parte del Swagger en el mismo commit
 ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)) y suma
